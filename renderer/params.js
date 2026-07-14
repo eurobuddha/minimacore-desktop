@@ -49,16 +49,6 @@
       { flag: "megaprunetokens",  type: "bool",  label: "Prune tokens (-megaprunetokens)", help: "Prune all tokens; keep only Minima coins.", def: false },
       { flag: "clean",            type: "bool",  label: "Wipe data at startup (-clean) ⚠", help: "DANGER: wipes the data folder at startup.", def: false }
     ]},
-    { group: "MDS (MiniDapps)", items: [
-      { flag: "mdsenable",        type: "bool",  label: "Enable MDS (-mdsenable)",         help: "Enable the MiniDapp System. (minimaCore ships without MDS.)", def: false },
-      { flag: "mdspassword",      type: "secret", label: "MDS password (-mdspassword)",    help: "MDS password (stored in the macOS Keychain).", def: "" },
-      { flag: "mdsinit",          type: "value", label: "MiniDapps folder (-mdsinit)",     help: "A folder of MiniDapps to install.", def: "" },
-      { flag: "mdswrite",         type: "bool",  label: "MDS write access (-mdswrite)",    help: "Grant an initial MiniDapp WRITE access.", def: false },
-      { flag: "nodefaultminidapps", type: "bool", label: "No default MiniDapps (-nodefaultminidapps)", help: "Do NOT install the default MiniDapps.", def: false },
-      { flag: "publicmds",        type: "bool",  label: "Public MDS (-publicmds)",         help: "Enable the Public MDS system.", def: false },
-      { flag: "publicmdsuid",     type: "value", label: "Public MDS UID (-publicmdsuid)",  help: "Session ID for Public MDS (enables it).", def: "" },
-      { flag: "nosslmds",         type: "bool",  label: "Disable MDS SSL (-nosslmds)",     help: "No self-signed SSL for MDS (use your own proxy).", def: false }
-    ]},
     { group: "Security & database", items: [
       { flag: "dbpassword",       type: "secret", label: "Wallet DB password (-dbpassword) ⚠", help: "Main wallet / SQL AES password. MUST be set on first launch and CANNOT be changed later. Stored in the Keychain.", def: "" },
       { flag: "nossl",            type: "bool",  label: "No SSL cert (-nossl)",            help: "Don't generate an SSL certificate at startup.", def: false },

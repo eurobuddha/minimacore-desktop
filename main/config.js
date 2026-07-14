@@ -43,8 +43,12 @@ function load() {
   let j = {};
   try { j = JSON.parse(fs.readFileSync(configPath(), "utf8")); } catch (e) { /* first run */ }
   const merged = Object.assign({}, DEFAULTS, j);
-  // params: start from the full manifest defaults so a stale/partial config gains any new flags.
-  merged.params = Object.assign({}, PARAMS.defaultParams(), j.params || {});
+  // params: keep ONLY flags in the current manifest — a saved value wins, otherwise the default. This adds
+  // any newly-supported flag and DROPS ones we've removed (e.g. the MDS flags minimaCore has no layer for),
+  // so a stale config can never resurrect a flag we no longer expose.
+  const defs = PARAMS.defaultParams(), sp = j.params || {}, params = {};
+  for (const k of Object.keys(defs)) params[k] = (k in sp) ? sp[k] : defs[k];
+  merged.params = params;
   return merged;
 }
 
