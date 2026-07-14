@@ -26,6 +26,13 @@ let TERM_CMDS = null;        // command names for Tab-completion (lazy from `hel
 
 function labelFor(addr) { return (CFG && CFG.labels && CFG.labels[addr]) || ""; }
 
+// Input validation — these values are interpolated into node command strings, so a stray space would let a
+// pasted "address" inject extra params (address:/burn:/multi:) into a fund-moving `send`. Reject anything that
+// isn't a clean address / amount / tokenid before building any command.
+function validAddr(a) { return /^(0x|Mx)[0-9A-Za-z]+$/.test(a); }
+function validAmt(a) { return /^[0-9]+(\.[0-9]+)?$/.test(a) && parseFloat(a) > 0; }
+function validTok(t) { return t === "" || t === MINIMA || /^0x[0-9A-Fa-f]+$/.test(t); }
+
 // ---- node command (throws on transport error OR status:false) --------------
 async function cmd(command) {
   const j = await api.cmd(command);
@@ -227,6 +234,8 @@ function showSetup() {
       const keyuses = parseInt(el("rKeyuses").value, 10);
       host = el("rHost").value.trim() || CFG.megammrHost;
       if (!seed) { toast("Enter your seed phrase."); return; }
+      if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
+      if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
       if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
       RESTORE = { seed, keyuses, host };
     }
@@ -349,6 +358,8 @@ function showRestoreOverlay() {
     const keyuses = parseInt(el("orKeyuses").value, 10);
     const host = el("orHost").value.trim() || CFG.megammrHost;
     if (!seed) { toast("Enter your seed phrase."); return; }
+    if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
+    if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
     if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
@@ -374,6 +385,7 @@ function renderActive() {
   else if (activeView === "send") renderSend();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
+  else if (activeView === "logs") renderLogs();
   else if (activeView === "settings") renderSettings();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
@@ -392,6 +404,7 @@ async function renderBalances() {
   host.innerHTML = bal.map(balCardHtml).join("");
   host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async () => {
     const tid = btn.dataset.tokenid;
+    if (!validTok(tid)) return;
     btn.disabled = true; btn.textContent = "Consolidating…";
     try { await cmd(`consolidate tokenid:${tid}`); toast("Consolidation submitted ✓ — coins merge over the next blocks.", "ok"); }
     catch (e) { toast("Consolidate failed: " + e.message, "err"); btn.disabled = false; }
@@ -434,17 +447,25 @@ function balCardHtml(b) {
 // After paint: swap in real icons (inline data → now; http/ipfs → SSRF-guarded main fetch) + validation badge
 // (node `tokenvalidate`). Per-tokenid cache means the 15s refresh does zero network work for seen tokens.
 async function enhanceTokenIcons(root) {
+  const pending = [];
   for (const w of root.querySelectorAll(".tok-wrap[data-tokenid]")) {
-    const tid = w.dataset.tokenid;
-    let entry = ICON_CACHE.get(tid);
-    if (entry) { applyIcon(w, entry); continue; }
-    entry = { icon: null, valid: null };
-    if (w.dataset.iconData) entry.icon = w.dataset.iconData;
-    else if (w.dataset.iconRemote) { try { entry.icon = await api.tokenIcon(w.dataset.iconRemote); } catch (e) {} }
-    if (w.dataset.webv) { try { const r = await cmd(`tokenvalidate tokenid:${tid}`); entry.valid = !!(r && r.web && r.web.valid); } catch (e) { entry.valid = false; } }
-    ICON_CACHE.set(tid, entry);
-    applyIcon(w, entry);
+    const cached = ICON_CACHE.get(w.dataset.tokenid);
+    if (cached) applyIcon(w, cached); else pending.push(w);
   }
+  let i = 0;   // small concurrency cap: each uncached token may trigger a server-side tokenvalidate GET
+  const worker = async () => {
+    while (i < pending.length) {
+      const w = pending[i++], tid = w.dataset.tokenid;
+      if (ICON_CACHE.has(tid)) { applyIcon(w, ICON_CACHE.get(tid)); continue; }
+      const entry = { icon: null, valid: null };
+      if (w.dataset.iconData) entry.icon = w.dataset.iconData;
+      else if (w.dataset.iconRemote) { try { entry.icon = await api.tokenIcon(w.dataset.iconRemote); } catch (e) {} }
+      if (w.dataset.webv && validTok(tid)) { try { const r = await cmd(`tokenvalidate tokenid:${tid}`); entry.valid = !!(r && r.web && r.web.valid); } catch (e) { entry.valid = false; } }
+      ICON_CACHE.set(tid, entry);
+      applyIcon(w, entry);
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
 }
 function applyIcon(w, e) {
   if (e.icon) { const img = w.querySelector("img"); if (img) { img.onerror = () => { img.onerror = null; img.src = w.dataset.identicon; }; img.src = e.icon; } }
@@ -538,7 +559,7 @@ function showHistoryDetail(r, tip) {
   const timeStr = r.time ? new Date(r.time).toLocaleString() : "—";
   const lbl = labelFor(r.counterparty);
   const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "—";
-  const deltas = Object.keys(r.difference || {}).map(t => `${TOK.shortId(t)}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "—";
+  const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "—";
   const bd = (list) => (list && list.length ? list.map(c => `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${esc(short(c.address, 16))}`).join("<br>") : "—");
   const kind = r.kind !== "normal" ? (r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
@@ -576,8 +597,9 @@ function absCmp(a, b) {   // compare |decimal string a| vs |b| without float rou
   const an = (as[0] || "0").replace(/^0+/, "") || "0", bn = (bs[0] || "0").replace(/^0+/, "") || "0";
   if (an.length !== bn.length) return an.length - bn.length;
   if (an !== bn) return an < bn ? -1 : 1;
-  const af = as[1] || "", bf = bs[1] || "";
-  return af === bf ? 0 : (af < bf ? -1 : 1);
+  const af = (as[1] || "").replace(/0+$/, ""), bf = (bs[1] || "").replace(/0+$/, "");
+  const L = Math.max(af.length, bf.length), ap = af.padEnd(L, "0"), bp = bf.padEnd(L, "0");
+  return ap === bp ? 0 : (ap < bp ? -1 : 1);
 }
 function decAdd(a, b) {   // non-negative decimal string addition (BigInt-scaled)
   a = String(a); b = String(b);
@@ -724,12 +746,19 @@ async function renderSettings() {
   const pct = ku.cap ? Math.min(100, Math.round(ku.used / ku.cap * 100)) : 0;
   const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
+  const fullAddr = (addr && (addr.miniaddress || addr.address)) || "—";
   host.innerHTML = `
     <div class="card"><div class="card__title">Wallet</div>
-      <div class="kv"><span class="kv__k">Address</span><span class="kv__v">${esc(short((addr && (addr.miniaddress || addr.address)) || "—", 22))}</span></div>
+      <div class="field__label">Your address</div>
+      <div class="addrbox addrbox__addr" id="setAddr" title="Click to copy" style="margin-top:0">${esc(fullAddr)}</div>
       <button class="btn btn--outline btn--full" id="setReveal" style="margin-top:8px">Reveal seed phrase</button>
       <div class="addrbox" id="setSeed" style="display:none;white-space:normal;line-height:1.6"></div>
       <button class="btn btn--outline btn--full" id="setRestore">Restore from a different seed…</button>
+    </div>
+    <div class="card"><div class="card__title">Resync chain</div>
+      <div class="view__desc">Re-fetch the chain and your coins from a MegaMMR host (seconds). Use if the node is stuck or behind — your seed, keys and key-uses are left untouched.</div>
+      <div class="field"><div class="field__label">MegaMMR host (ip:port)</div><input class="field__input" id="setResyncHost" value="${esc(CFG.megammrHost)}" /></div>
+      <button class="btn btn--outline btn--full" id="setResync">Resync now</button>
     </div>
     <div class="card"><div class="card__title">Signing keys (WOTS safety)</div>
       <div class="view__desc">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically — this shows your headroom.</div>
@@ -757,8 +786,18 @@ async function renderSettings() {
     <div class="card"><div class="card__title">Appearance</div>
       <button class="btn btn--outline btn--full" id="setTheme">Theme: ${esc(CFG.theme)}</button>
     </div>`;
+  el("setAddr").onclick = () => copy(fullAddr);
   el("setReveal").onclick = async () => { const v = await tryCmd("vault"); const p = seedFrom(v); if (!p) { toast("Couldn't read the seed.", "err"); return; } el("setSeed").style.display = ""; el("setSeed").textContent = p; };
   el("setRestore").onclick = () => showRestoreOverlay();
+  el("setResync").onclick = async () => {
+    const rhost = el("setResyncHost").value.trim();
+    if (!/^[\w.\-]+:\d+$/.test(rhost)) { toast("Host must be ip:port.", "err"); return; }
+    if (!confirm("Resync the chain from " + rhost + "?\n\nThis re-fetches the chain and your coins. Your seed, keys and key-uses are NOT changed.")) return;
+    const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
+    try { await cmd(`megammrsync action:resync host:${rhost}`); CFG = await api.saveConfig({ megammrHost: rhost }); toast("Resync complete ✓", "ok"); renderBalances(); }
+    catch (e) { toast("Resync failed: " + e.message, "err"); }
+    btn.disabled = false; btn.textContent = "Resync now";
+  };
   el("setBackup").onclick = async () => {
     const pw = el("bkPw").value.trim();
     if (!pw) { toast("Enter a backup password."); return; }
@@ -812,10 +851,16 @@ function sendForm(mode) {
       <button class="btn btn--primary btn--full" id="sGo">Send</button>`;
     el("sGo").onclick = async () => {
       const to = el("sTo").value.trim(), amt = el("sAmt").value.trim(), tok = el("sTok").value.trim();
-      if (!to || !amt) { toast("Enter an address and amount."); return; }
+      if (!validAddr(to)) { toast("That doesn't look like a valid Mx… / 0x… address.", "err"); return; }
+      if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
+      if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
       el("sGo").disabled = true; el("sGo").textContent = "Sending…";
-      try { const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = ""; }
-      catch (e) { toast(e.message, "err"); }
+      try {
+        const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
+        if (!chk) { toast("Address failed validation — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
+        const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
+        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = "";
+      } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send";
     };
   } else if (mode === "split") {
@@ -827,7 +872,9 @@ function sendForm(mode) {
       <button class="btn btn--primary btn--full" id="spGo">Split</button>`;
     el("spGo").onclick = async () => {
       const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0, tok = el("spTok").value.trim();
-      if (!amt || n < 2 || n > 20) { toast("Enter an amount and 2–20 coins."); return; }
+      if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
+      if (n < 2 || n > 20) { toast("Split into 2–20 coins."); return; }
+      if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
       el("spGo").disabled = true;
       try { const a = await cmd("getaddress"); const addr = a.miniaddress || a.address;
         await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Split ✓", "ok"); }
@@ -841,6 +888,7 @@ function sendForm(mode) {
       <button class="btn btn--primary btn--full" id="coGo">Consolidate</button>`;
     el("coGo").onclick = async () => {
       const tok = el("coTok").value.trim() || MINIMA;
+      if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
       el("coGo").disabled = true;
       try { await cmd(`consolidate tokenid:${tok}`); toast("Consolidated ✓", "ok"); }
       catch (e) { toast(e.message, "err"); }
@@ -881,9 +929,23 @@ function renderNode(s) {
 }
 
 let logLines = [];
+const LOG_MAX = 2000;
 async function initLogs() { logLines = await api.nodeLogs(); paintLogs(); }
-function appendLog(line) { if (!line) return; logLines.push(line); if (logLines.length > 300) logLines.shift(); paintLogs(); }
-function paintLogs() { const b = el("logbox"); if (b) { b.textContent = logLines.join("\n"); b.scrollTop = b.scrollHeight; } }
+function appendLog(line) { if (!line) return; logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX); paintLogs(); }
+function paintLogs() {
+  const text = logLines.join("\n");
+  const nodeBox = el("logbox"); if (nodeBox) { nodeBox.textContent = text; nodeBox.scrollTop = nodeBox.scrollHeight; }
+  const logsBox = el("logsBox");
+  if (logsBox) { logsBox.textContent = text; const follow = el("logsFollow"); if (!follow || follow.checked) logsBox.scrollTop = logsBox.scrollHeight; }
+}
+// ---- Logs tab (full live node output) ----
+async function renderLogs() {
+  logLines = await api.nodeLogs();
+  paintLogs();
+  const box = el("logsBox"); if (box) box.scrollTop = box.scrollHeight;
+  el("logsCopy").onclick = () => copy(logLines.join("\n"));
+  el("logsClear").onclick = () => { logLines = []; paintLogs(); };
+}
 
 boot();
 initLogs();

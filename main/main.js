@@ -24,7 +24,7 @@ app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 460, height: 780, minWidth: 380, minHeight: 620,
+    width: 540, height: 840, minWidth: 440, minHeight: 640,
     title: "minimaCore",
     backgroundColor: "#0A0A0F",
     titleBarStyle: "hiddenInset",
@@ -84,7 +84,7 @@ ipcMain.handle("mcd:nodeStatus", () => node.snapshot());
 ipcMain.handle("mcd:nodeStart", () => { node.start(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
-ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-300));
+ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 
 ipcMain.handle("mcd:checkJarUpdate", () => updater.checkForUpdate());
 ipcMain.handle("mcd:applyJarUpdate", async (_e, rel) => { const r = await updater.applyUpdate(rel); await node.restart(); return r; });

@@ -17,8 +17,76 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 
 .logbox { max-height: 240px; overflow-y: auto; font-family: var(--mono); font-size: 11px;
   color: var(--dim); white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; }
-.termout { max-height: 46vh; min-height: 220px; user-select: text; color: var(--text); }
 .kv .tok-icon { width: 24px; height: 24px; }   /* balance rows: slightly smaller inline token icon */
+
+/* ============================================================================
+   Polish pass — depth, rhythm, and the reported UX fixes. app.css loads after
+   style.css, so these override the shared tokens/components.
+   ========================================================================== */
+* { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* thin, unobtrusive scrollbars; the tab strip scrolls with no visible bar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.20); background-clip: padding-box; }
+.tabs { scrollbar-width: none; }
+.tabs::-webkit-scrollbar { height: 0; width: 0; display: none; }
+
+/* Header — give the chrome weight + a hairline */
+.hdr { align-items: center; padding-top: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0)); }
+.hdr__logo { font-size: 15px; letter-spacing: .2px; }
+
+/* Tabs — flush, animated active underline, comfortable hit area */
+.tabs { margin: 0; padding: 2px 10px 0; border-bottom: 1px solid var(--border); }
+.tab { padding: 12px 13px; font-size: 11px; letter-spacing: .7px; border-bottom-width: 2px; }
+.tab:hover { color: var(--text); }
+
+/* Layout rhythm */
+.main { padding: 18px 16px 26px; }
+.view__title { font-size: 22px; letter-spacing: -.3px; margin-bottom: 12px; }
+
+/* Cards — soft elevation + hover, rounder */
+.card { border-radius: 12px; padding: 15px 16px;
+  box-shadow: 0 1px 1px rgba(0,0,0,.30), 0 10px 26px -16px rgba(0,0,0,.65);
+  transition: border-color .15s, transform .12s ease, box-shadow .15s; }
+.card:hover { border-color: var(--border-light); }
+.card__title { font-size: 13px; text-transform: uppercase; letter-spacing: .9px; color: var(--dim); margin-bottom: 10px; }
+
+/* Balance rows — bigger amount, aligned icon */
+#balList .card .kv:first-child { align-items: center; }
+#balList .card .kv:first-child .kv__k { display: flex; align-items: center; font-size: 15px; font-weight: 600; color: var(--heading); }
+#balList .card .kv:first-child .kv__v { font-size: 17px; font-weight: 700; color: var(--heading); }
+.kv .tok-icon { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 2px 6px -2px rgba(0,0,0,.6); }
+.consolidate-btn { letter-spacing: .4px; }
+
+/* History rows — hover affordance, roomier */
+.row { padding: 12px 6px; border-radius: 8px; transition: background .12s; }
+.row:hover { background: rgba(255,255,255,.03); }
+.row__glyph { font-size: 18px; }
+.row__l1 { font-size: 14.5px; }
+
+/* Buttons — subtle depth + press feedback */
+.btn { border-radius: 9px; transition: all .13s ease; }
+.btn:active { transform: translateY(1px); }
+.btn--primary { box-shadow: 0 4px 14px -6px var(--accent); }
+
+/* Copyable address / seed — never overflow */
+.addrbox { border-radius: 10px; }
+#recvAddr, #setAddr, #setSeed { font-family: var(--mono); font-size: 13px; color: var(--accent);
+  word-break: break-all; overflow-wrap: anywhere; cursor: pointer; line-height: 1.5; }
+#recvAddr:hover, #setAddr:hover { border-color: var(--accent); }
+
+/* Terminal + Logs — fill the available height */
+#view-terminal.view--active, #view-logs.view--active { display: flex; flex-direction: column; height: 100%; }
+.termout, .logsout { flex: 1 1 auto; max-height: none; min-height: 200px; user-select: text; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 13px; margin: 0; }
+#view-terminal .field__input { margin-top: 8px; flex: 0 0 auto; }
+#view-terminal .seg, #view-logs .seg { flex: 0 0 auto; }
+
+/* toast — lift it */
+.toast { border-radius: 10px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.7); }
 
 .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 50;
   background: var(--surface2); color: var(--text); border: 1px solid var(--border);

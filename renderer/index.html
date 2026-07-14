@@ -22,6 +22,7 @@
       <button class="tab" data-view="send">Send</button>
       <button class="tab" data-view="history">History</button>
       <button class="tab" data-view="terminal">Terminal</button>
+      <button class="tab" data-view="logs">Logs</button>
       <button class="tab" data-view="settings">Settings</button>
       <button class="tab" data-view="node">Node</button>
     </nav>
@@ -62,6 +63,17 @@
         <div class="seg" style="margin-top:8px">
           <button class="btn btn--sm btn--outline" id="termClear">Clear</button>
           <button class="btn btn--sm btn--outline" id="termCopy">Copy output</button>
+        </div>
+      </section>
+
+      <section class="view" id="view-logs">
+        <div class="view__title">Logs</div>
+        <div class="view__desc">Live node output — watch what happens after a Terminal command.</div>
+        <pre class="logbox logsout" id="logsBox"></pre>
+        <div class="seg" style="margin-top:8px">
+          <label class="chip" id="logsFollowChip" style="cursor:pointer"><input type="checkbox" id="logsFollow" checked style="vertical-align:middle;margin-right:5px">Follow</label>
+          <button class="btn btn--sm btn--outline" id="logsCopy">Copy</button>
+          <button class="btn btn--sm btn--outline" id="logsClear">Clear view</button>
         </div>
       </section>
 

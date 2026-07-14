@@ -38,7 +38,7 @@ function persistSoon() {
       const dir = app.getPath("userData");
       fs.mkdirSync(dir, { recursive: true });
       const tmp = path.join(dir, "history.json.tmp");
-      const payload = JSON.stringify({ version: 1, rows: mem, updatedAt: 0 });
+      const payload = JSON.stringify({ version: 1, rows: mem });
       fs.writeFileSync(tmp, payload);
       fs.renameSync(tmp, filePath());   // atomic swap
     } catch (e) { /* best-effort; retried on the next merge */ }
