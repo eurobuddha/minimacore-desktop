@@ -94,7 +94,11 @@ node.on("log", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:
 app.whenReady().then(() => {
   createWindow();
   setupTray();
-  if (config.load().setupDone) node.start();   // returning user → boot the node immediately
+  // Only auto-boot for a FULLY onboarded user. If either the node wizard or the wallet step is unfinished
+  // (incl. a stale pre-0.1.1 config with setupDone but no wallet step), the renderer runs onboarding and
+  // calls nodeStart when the user finishes — otherwise the node would silently start before any choice.
+  const c = config.load();
+  if (c.setupDone && c.walletDone) node.start();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

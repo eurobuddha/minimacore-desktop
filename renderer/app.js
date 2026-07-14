@@ -54,7 +54,9 @@ async function boot() {
   api.onStatus(onStatus);
   api.onLog(appendLog);
 
-  if (!CFG.setupDone) { showSetup(); return; }
+  // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
+  // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
+  if (!CFG.setupDone || !CFG.walletDone) { showSetup(); return; }
   waitingForNode = true;
   const s = await api.nodeStatus();
   onStatus(s);
@@ -125,20 +127,23 @@ function showSetup() {
 
     <button class="btn btn--primary btn--full" id="startNode" style="margin-top:12px">Start node</button>`;
 
-  let net = "mainnet", wmode = "new";
+  let net = CFG.network || "mainnet", wmode = "new";
   const walletSec = el("walletSec");
-  box.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => {
-    box.querySelectorAll(".opt[data-net]").forEach(x => x.classList.remove("sel"));
-    o.classList.add("sel"); net = o.dataset.net;
-    el("customPeer").style.display = net === "custom" ? "" : "none";
-    // solo runs its own local seed — the new/restore choice doesn't apply.
-    walletSec.style.display = net === "solo" ? "none" : "";
-  });
-  box.querySelectorAll(".opt[data-w]").forEach(o => o.onclick = () => {
-    box.querySelectorAll(".opt[data-w]").forEach(x => x.classList.remove("sel"));
-    o.classList.add("sel"); wmode = o.dataset.w;
-    el("restoreFields").style.display = wmode === "restore" ? "" : "none";
-  });
+  const selectNet = (n) => {
+    net = n;
+    box.querySelectorAll(".opt[data-net]").forEach(x => x.classList.toggle("sel", x.dataset.net === n));
+    el("customPeer").style.display = n === "custom" ? "" : "none";
+    walletSec.style.display = n === "solo" ? "none" : "";   // solo runs its own local seed
+  };
+  const selectW = (w) => {
+    wmode = w;
+    box.querySelectorAll(".opt[data-w]").forEach(x => x.classList.toggle("sel", x.dataset.w === w));
+    el("restoreFields").style.display = w === "restore" ? "" : "none";
+  };
+  box.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => selectNet(o.dataset.net));
+  box.querySelectorAll(".opt[data-w]").forEach(o => o.onclick = () => selectW(o.dataset.w));
+  if (CFG.customConnect) el("customPeer").value = CFG.customConnect;
+  selectNet(net); selectW("new");   // apply the initial (current-config) selection + section visibility
   el("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) el("dataFolder").value = f; };
 
   el("startNode").onclick = async () => {
@@ -158,19 +163,22 @@ function showSetup() {
       RESTORE = { seed, keyuses, host };
     }
 
+    // walletDone: solo needs no ceremony; a restore must (re)run the resync; a fresh new wallet needs the seed
+    // backup step; an already-onboarded user just changing network keeps their wallet (stays done).
+    const walletDone = solo ? true : (walletMode === "restore" ? false : !!CFG.walletDone);
     const patch = {
-      setupDone: true, network: net, basePort, walletMode,
+      setupDone: true, network: net, basePort, walletMode, walletDone,
       dataFolder: el("dataFolder").value || "",
       megammr: el("megammr").querySelector("input").checked,
       customConnect: net === "custom" ? el("customPeer").value.trim() : "",
-      megammrHost: host,
-      // solo needs no seed ceremony; mainnet/custom finish the wallet step after boot.
-      walletDone: solo
+      megammrHost: host
     };
     CFG = await api.saveConfig(patch);
     waitingForNode = true;
+    postBootStarted = false;      // let the post-boot wallet step run for this (re)start
     showStarting();
-    await api.nodeStart();
+    // reconfiguring a live node needs a restart to apply new args; first run just starts.
+    if (running) await api.nodeRestart(); else await api.nodeStart();
   };
   el("setup").style.display = "";
 }
@@ -462,7 +470,9 @@ function renderNode(s) {
     <div class="seg" style="margin-top:10px">
       <button class="btn btn--sm btn--outline" id="nRestart">Restart node</button>
       <button class="btn btn--sm btn--outline" id="nUpdate">Check for update</button>
-    </div>`;
+    </div>
+    <button class="btn btn--outline btn--full" id="nReconfig" style="margin-top:8px">Reconfigure node (network · new/restore · startup params)…</button>`;
+  el("nReconfig").onclick = () => showSetup();
   el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
   el("nUpdate").onclick = async () => {
     toast("Checking for a node update…");
