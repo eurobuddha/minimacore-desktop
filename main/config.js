@@ -137,4 +137,23 @@ function keychainDelete(account = KEYCHAIN_ACCOUNT) {
   } catch (e) { /* not present */ }
 }
 
-module.exports = { load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams };
+// ---- generic named secret store (Keychain first, 0600-file fallback) -------
+function secretFileFor(account) { return path.join(app.getPath("userData"), "sec-" + String(account).replace(/[^a-z0-9-]/gi, "_") + ".dat"); }
+/** Read a named secret (e.g. the derived mail identity). */
+function getSecret(account) {
+  const k = keychainGet(account);
+  if (k) return k;
+  try { const s = fs.readFileSync(secretFileFor(account), "utf8").trim(); if (s) return s; } catch (e) { /* not there */ }
+  return null;
+}
+/** Store a named secret. */
+function setSecret(value, account) {
+  if (!keychainSet(value, account)) {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(secretFileFor(account), value, { mode: 0o600 });
+  }
+}
+/** Remove a named secret (both Keychain + file fallback). */
+function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }
+
+module.exports = { load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

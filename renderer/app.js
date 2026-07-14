@@ -75,6 +75,7 @@ async function boot() {
 
   api.onStatus(onStatus);
   api.onLog(appendLog);
+  api.onMail(() => { refreshMailBadge(); if (activeView === "mail" && MAIL_ID) renderMailCurrent(); });
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -102,6 +103,7 @@ function onStatus(s) {
   if (running && (waitingForNode || !wasRunning)) {
     waitingForNode = false;
     startRefresh();
+    refreshMailBadge();
     if (CFG.walletDone) { hideSetup(); renderActive(); }
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
@@ -333,6 +335,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
+    try { await api.mailInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -371,6 +374,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
+      try { await api.mailInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -390,6 +394,7 @@ function renderActive() {
   if (activeView === "balances") renderBalances();
   else if (activeView === "receive") renderReceive();
   else if (activeView === "send") renderSend();
+  else if (activeView === "mail") renderMail();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -513,6 +518,237 @@ function drawQR(text) {
   if (!text || text.indexOf("0x") === 0 && text.length < 5 || typeof qrcode === "undefined") return;
   try { const qr = qrcode(0, "M"); qr.addData(text); qr.make(); host.innerHTML = qr.createImgTag(5, 6); }
   catch (e) { /* address too long for one QR — the copyable text still works */ }
+}
+
+// ---- minimaMail (on-chain encrypted messaging) -----------------------------
+let MAIL_ID = null;         // { publicId, name, payaddr }
+let MAIL_CONTACTS = [];
+let mailView = "inbox";     // inbox | thread | new | contacts | identity
+let mailPeer = null;        // other party's publicId
+let mailUnsub = null;
+const MAIL_EMOJIS = ["😀","😂","😍","👍","🙏","🔥","🎉","❤️","😎","🤝","💰","🚀","✅","👀","😅","🤔","💬","📩","⚡","🌍","🍺","☕","👋","💯"];
+
+function mailAvatar(publicId) { return TOK.identiconDataUri(String(publicId || "0x0").slice(0, 18)); }
+function mailShort(id) { id = String(id || ""); return id.length > 16 ? id.slice(0, 8) + "…" + id.slice(-4) : id; }
+function mailName(id) {
+  if (MAIL_ID && id === MAIL_ID.publicId) return "You";
+  const c = MAIL_CONTACTS.find(x => x.publicId === id);
+  return (c && c.username) || mailShort(id);
+}
+async function refreshMailBadge() {
+  try { const th = await api.mailThreads(); const n = th.reduce((s, t) => s + (t.unread || 0), 0);
+    const b = el("mailBadge"); if (b) { b.textContent = n > 99 ? "99+" : String(n); b.hidden = n === 0; } } catch (e) {}
+}
+async function renderMail() {
+  const host = el("mailBody");
+  if (!running) { host.innerHTML = `<div class="view__title">minimaMail</div><div class="spin">Waiting for the node…</div>`; return; }
+  if (!MAIL_ID) {
+    host.innerHTML = `<div class="view__title">minimaMail</div><div class="spin">Setting up your encrypted mail identity…</div>`;
+    try { MAIL_ID = await api.mailInit(); }
+    catch (e) { host.innerHTML = `<div class="view__title">minimaMail</div><div class="card"><div class="view__desc">Couldn't set up mail: ${esc(e.message)}. Make sure the wallet is unlocked, then reopen this tab.</div></div>`; return; }
+  }
+  MAIL_CONTACTS = await api.mailContacts().catch(() => []);
+  renderMailCurrent();
+}
+function renderMailCurrent() {
+  if (mailView === "thread") return renderMailThread();
+  if (mailView === "new") return renderMailNew();
+  if (mailView === "contacts") return renderMailContacts();
+  if (mailView === "identity") return renderMailIdentity();
+  return renderMailInbox();
+}
+function mailHeader(title, backTo) {
+  return `<div class="mail-top">
+    ${backTo != null ? `<button class="btn btn--sm btn--outline" id="mailBack">‹ Back</button>` : ""}
+    <div class="mail-top__title">${esc(title)}</div><div class="hdr__spacer"></div>
+    ${backTo == null ? `<button class="btn btn--sm btn--outline" id="mailNew">New</button>
+      <button class="btn btn--sm btn--outline" id="mailContactsBtn">Contacts</button>
+      <button class="btn btn--sm btn--outline" id="mailIdBtn">Identity</button>` : ""}</div>`;
+}
+function wireMailHeader(backTo) {
+  if (el("mailBack")) el("mailBack").onclick = () => { mailView = backTo; renderMailCurrent(); };
+  if (el("mailNew")) el("mailNew").onclick = () => { mailView = "new"; mailPeer = null; renderMailCurrent(); };
+  if (el("mailContactsBtn")) el("mailContactsBtn").onclick = () => { mailView = "contacts"; renderMailCurrent(); };
+  if (el("mailIdBtn")) el("mailIdBtn").onclick = () => { mailView = "identity"; renderMailCurrent(); };
+}
+async function renderMailInbox() {
+  const host = el("mailBody");
+  const th = await api.mailThreads().catch(() => []);
+  host.innerHTML = `<div class="view__title">minimaMail</div>${mailHeader("Inbox", null)}
+    <div id="mailList">${th.length ? th.map(mailThreadRowHtml).join("") : `<div class="empty">No messages yet. Tap <b>New</b> to start a conversation — share your Identity so others can message you.</div>`}</div>`;
+  wireMailHeader(null);
+  host.querySelectorAll(".mail-thread[data-peer]").forEach(node => node.onclick = () => { mailPeer = node.dataset.peer; mailView = "thread"; renderMailCurrent(); });
+  refreshMailBadge();
+}
+function mailThreadRowHtml(t) {
+  const m = t.last || {};
+  const peer = t.other || (m.incoming ? m.frompublickey : m.topublickey);
+  const preview = (m.incoming ? "" : "You: ") + (m.type === "image" ? "📷 Image" : m.type === "payment" ? ("💰 " + TOK.tidyAmount(m.amount || "") + " " + (m.tokenname || "Minima")) : (m.message || ""));
+  return `<div class="row mail-thread" data-peer="${esc(peer)}" style="cursor:pointer">
+    <img class="mail-av" src="${esc(mailAvatar(peer))}" alt="">
+    <div class="row__mid"><div class="row__l1">${esc(mailName(peer))}${t.unread ? ` <span class="mail-dot"></span>` : ""}</div>
+      <div class="row__l2">${esc(short(preview, 48))}</div></div>
+    <div class="row__r">${esc(relTime(m.date))}</div></div>`;
+}
+async function renderMailThread() {
+  const host = el("mailBody");
+  const msgs = await api.mailThreadWith(mailPeer).catch(() => []);
+  const peerPay = (msgs.find(m => m.incoming && m.payaddr) || {}).payaddr || "";
+  host.innerHTML = `${mailHeader(mailName(mailPeer), "inbox")}
+    <div class="mail-conv" id="mailConv">${msgs.length ? msgs.map(mailBubbleHtml).join("") : `<div class="empty">No messages yet — say hi.</div>`}</div>
+    <div class="mail-compose">
+      <button class="btn btn--sm btn--outline" id="mailEmoji" title="Emoji">😊</button>
+      <button class="btn btn--sm btn--outline" id="mailImg" title="Send image">📷</button>
+      ${peerPay ? `<button class="btn btn--sm btn--outline" id="mailPay" title="Send Minima">💰</button>` : ""}
+      <input class="field__input" id="mailText" placeholder="Message…" autocomplete="off" />
+      <button class="btn btn--primary btn--sm" id="mailSendBtn">Send</button>
+    </div>
+    <input type="file" id="mailFile" accept="image/*" hidden />`;
+  wireMailHeader("inbox");
+  const conv = el("mailConv"); conv.scrollTop = conv.scrollHeight;
+  const sendText = async () => {
+    const t = el("mailText").value.trim(); if (!t) return;
+    el("mailText").value = ""; el("mailSendBtn").disabled = true;
+    try { await api.mailSend(mailPeer, { type: "text", message: t }); await renderMailThread(); }
+    catch (e) { toast("Send failed: " + e.message, "err"); el("mailSendBtn").disabled = false; }
+  };
+  el("mailSendBtn").onclick = sendText;
+  el("mailText").onkeydown = (e) => { if (e.key === "Enter") sendText(); };
+  el("mailEmoji").onclick = () => showEmojiPicker(el("mailText"));
+  el("mailImg").onclick = () => el("mailFile").click();
+  el("mailFile").onchange = () => sendMailImage(el("mailFile").files[0]);
+  if (el("mailPay")) el("mailPay").onclick = () => showMailPay(mailPeer, peerPay);
+  el("mailText").focus();
+}
+function mailBubbleHtml(m) {
+  const mine = !m.incoming;
+  let inner;
+  if (m.type === "image" && m.image) inner = `<img class="mail-img" src="data:image/jpeg;base64,${esc(m.image)}" alt="">`;
+  else if (m.type === "payment") inner = `<div class="mail-pay">💰 ${esc(TOK.tidyAmount(m.amount || ""))} ${esc(m.tokenname || "Minima")}${m.message ? "<br>" + esc(m.message) : ""}</div>`;
+  else inner = esc(m.message || "");
+  const status = mine ? `<span class="mail-status">${m.status === "confirmed" ? "✓✓" : "✓"}</span>` : "";
+  return `<div class="mail-bubble ${mine ? "mail-bubble--me" : ""}"><div class="mail-bubble__body">${inner}</div>
+    <div class="mail-bubble__meta">${esc(relTime(m.date))} ${status}</div></div>`;
+}
+async function renderMailNew() {
+  const host = el("mailBody");
+  const opts = MAIL_CONTACTS.map(c => `<option value="${esc(c.publicId)}">${esc(c.username || mailShort(c.publicId))}</option>`).join("");
+  host.innerHTML = `${mailHeader("New message", "inbox")}
+    <div class="card">
+      ${MAIL_CONTACTS.length ? `<div class="field"><div class="field__label">To a contact</div><select class="field__input" id="mailToSel"><option value="">— choose —</option>${opts}</select></div>` : ""}
+      <div class="field"><div class="field__label">…or paste a mail id (0x… , optionally id|Mx…payaddr)</div>
+        <textarea class="field__input" id="mailToId" rows="2" placeholder="0x… 128 hex"></textarea></div>
+      <div class="field"><div class="field__label">Message</div><input class="field__input" id="mailNewText" placeholder="Say hi…" /></div>
+      <button class="btn btn--primary btn--full" id="mailNewSend">Send</button>
+    </div>`;
+  wireMailHeader("inbox");
+  if (el("mailToSel")) el("mailToSel").onchange = () => { if (el("mailToSel").value) el("mailToId").value = el("mailToSel").value; };
+  el("mailNewSend").onclick = async () => {
+    let to = el("mailToId").value.trim().split("|")[0].trim();
+    const text = el("mailNewText").value.trim();
+    if (!/^0x[0-9a-fA-F]{128}$/.test(to)) { toast("Enter a valid mail id (0x + 128 hex).", "err"); return; }
+    if (!text) { toast("Enter a message."); return; }
+    el("mailNewSend").disabled = true;
+    try {
+      // if they pasted an id|payaddr share, register it as a contact so the payaddr is stored
+      if (el("mailToId").value.includes("|")) { try { await api.mailAddContact(el("mailToId").value.trim(), ""); MAIL_CONTACTS = await api.mailContacts(); } catch (e) {} }
+      await api.mailSend(to, { type: "text", message: text });
+      mailPeer = to; mailView = "thread"; renderMailCurrent();
+    } catch (e) { toast("Send failed: " + e.message, "err"); el("mailNewSend").disabled = false; }
+  };
+}
+async function renderMailContacts() {
+  const host = el("mailBody");
+  MAIL_CONTACTS = await api.mailContacts().catch(() => []);
+  host.innerHTML = `${mailHeader("Contacts", "inbox")}
+    <div class="card"><div class="card__title">Add a contact</div>
+      <div class="field"><div class="field__label">Name (optional)</div><input class="field__input" id="ctName" placeholder="Alice" /></div>
+      <div class="field"><div class="field__label">Mail id (0x… , or id|Mx…payaddr)</div><textarea class="field__input" id="ctId" rows="2" placeholder="0x… 128 hex"></textarea></div>
+      <button class="btn btn--outline btn--full" id="ctAdd">Add contact</button></div>
+    <div id="ctList">${MAIL_CONTACTS.length ? MAIL_CONTACTS.map(c => `<div class="row" style="cursor:pointer" data-peer="${esc(c.publicId)}">
+      <img class="mail-av" src="${esc(mailAvatar(c.publicId))}" alt="">
+      <div class="row__mid"><div class="row__l1">${esc(c.username || mailShort(c.publicId))}</div><div class="row__l2">${esc(mailShort(c.publicId))}</div></div>
+      <div class="row__r">›</div></div>`).join("") : `<div class="empty">No contacts yet.</div>`}</div>`;
+  wireMailHeader("inbox");
+  el("ctAdd").onclick = async () => {
+    const share = el("ctId").value.trim(), name = el("ctName").value.trim();
+    try { await api.mailAddContact(share, name); MAIL_CONTACTS = await api.mailContacts(); renderMailContacts(); toast("Contact added ✓", "ok"); }
+    catch (e) { toast(e.message, "err"); }
+  };
+  host.querySelectorAll("#ctList .row[data-peer]").forEach(n => n.onclick = () => { mailPeer = n.dataset.peer; mailView = "thread"; renderMailCurrent(); });
+}
+async function renderMailIdentity() {
+  const host = el("mailBody");
+  const share = await api.mailShare().catch(() => MAIL_ID.publicId);
+  host.innerHTML = `${mailHeader("Your identity", "inbox")}
+    <div class="card" style="text-align:center">
+      <img class="mail-av mail-av--lg" src="${esc(mailAvatar(MAIL_ID.publicId))}" alt="">
+      <div class="field" style="margin-top:10px"><div class="field__label">Display name</div>
+        <div class="seg"><input class="field__input" id="idName" value="${esc(MAIL_ID.name || "")}" placeholder="Your name" /><button class="btn btn--outline btn--sm" id="idNameSave">Save</button></div></div>
+      <div class="field__label" style="margin-top:8px">Your mail id — share it so others can message you</div>
+      <div class="addrbox addrbox__addr" id="idShare" title="Click to copy">${esc(share)}</div>
+      <div class="qrbox" id="idQr"></div>
+      <div class="view__desc">Others add this id as a contact to send you encrypted mail. Your pay address is included so they can also send you Minima.</div>
+    </div>`;
+  wireMailHeader("inbox");
+  el("idShare").onclick = () => copy(share);
+  el("idNameSave").onclick = async () => { MAIL_ID = await api.mailSetName(el("idName").value.trim()); toast("Name saved ✓", "ok"); };
+  try { if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(share); qr.make(); el("idQr").innerHTML = qr.createImgTag(4, 8); } } catch (e) {}
+}
+function showEmojiPicker(input) {
+  const html = `<div class="overlay" id="emojiOv"><div class="modal" style="max-width:320px">
+    <div class="modal__title">Emoji</div><div class="emoji-grid">${MAIL_EMOJIS.map(e => `<button class="emoji-btn">${e}</button>`).join("")}</div>
+    <button class="btn btn--outline btn--full" id="emojiClose">Close</button></div></div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  const close = () => { const o = el("emojiOv"); if (o) o.remove(); };
+  el("emojiOv").querySelectorAll(".emoji-btn").forEach(b => b.onclick = () => { input.value += b.textContent; close(); input.focus(); });
+  el("emojiClose").onclick = close;
+  el("emojiOv").onclick = (e) => { if (e.target.id === "emojiOv") close(); };
+}
+async function sendMailImage(file) {
+  if (!file) return;
+  toast("Compressing image…");
+  try {
+    const b64 = await compressImage(file);
+    await api.mailSend(mailPeer, { type: "image", message: "", image: b64 });
+    renderMailThread();
+  } catch (e) { toast("Image failed: " + (e.message || e), "err"); }
+}
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const draw = (dim, q) => { let w = img.width, h = img.height; const s = Math.min(1, dim / Math.max(w, h)); w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s)); const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h); return c.toDataURL("image/jpeg", q); };
+      let dim = 400, q = 0.7, data = draw(dim, q);
+      while (data.length > 11000 && (q > 0.25 || dim > 160)) { if (q > 0.3) q -= 0.12; else { dim -= 60; q = 0.6; } data = draw(dim, q); }
+      if (data.length > 11500) return reject(new Error("image too large to fit one on-chain message"));
+      resolve(data.split(",")[1]);
+    };
+    img.onerror = () => reject(new Error("couldn't read image"));
+    const r = new FileReader(); r.onload = () => (img.src = r.result); r.onerror = () => reject(new Error("couldn't read file")); r.readAsDataURL(file);
+  });
+}
+async function showMailPay(peer, payaddr) {
+  const bal = await tryCmd("balance") || [];
+  const toks = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid) }));
+  if (!toks.some(t => t.tokenid === MINIMA)) toks.unshift({ tokenid: MINIMA, name: "Minima" });
+  const opts = toks.map(t => `<option value="${esc(t.tokenid)}" data-name="${esc(t.name)}">${esc(t.name)}</option>`).join("");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="payOv"><div class="modal">
+    <div class="modal__title">Send Minima to ${esc(mailName(peer))}</div>
+    <div class="view__desc">To their pay address ${esc(short(payaddr, 20))}.</div>
+    <div class="field"><div class="field__label">Token</div><select class="field__input" id="payTok">${opts}</select></div>
+    <div class="field"><div class="field__label">Amount</div><input class="field__input" id="payAmt" placeholder="0.0" /></div>
+    <div class="seg"><button class="btn btn--outline btn--full" id="payCancel">Cancel</button><button class="btn btn--primary btn--full" id="payGo">Send</button></div></div></div>`);
+  const close = () => { const o = el("payOv"); if (o) o.remove(); };
+  el("payCancel").onclick = close;
+  el("payOv").onclick = (e) => { if (e.target.id === "payOv") close(); };
+  el("payGo").onclick = async () => {
+    const amt = el("payAmt").value.trim(), sel = el("payTok"), tid = sel.value, tname = sel.options[sel.selectedIndex].dataset.name;
+    if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { toast("Enter a valid amount.", "err"); return; }
+    el("payGo").disabled = true;
+    try { await api.mailPay(peer, payaddr, amt, tid, tname); close(); renderMailThread(); toast("Payment sent ✓", "ok"); }
+    catch (e) { toast("Payment failed: " + e.message, "err"); el("payGo").disabled = false; }
+  };
 }
 
 // ---- History ---------------------------------------------------------------
@@ -762,6 +998,14 @@ async function renderSettings() {
       <div class="addrbox" id="setSeed" style="display:none;white-space:normal;line-height:1.6"></div>
       <button class="btn btn--outline btn--full" id="setRestore">Restore from a different seed…</button>
     </div>
+    <div class="card"><div class="card__title">Faucet — get free Minima</div>
+      <div class="view__desc">Request a tiny amount of Minima to your address — enough to get started and send minimaMail.</div>
+      <div class="field"><div class="field__label">Your address</div>
+        <div class="seg"><input class="field__input" id="faucetAddr" placeholder="Mx… or 0x…" value="${esc(fullAddr === "—" ? "" : fullAddr)}" />
+          <button class="btn btn--outline btn--sm" id="faucetMine">My address</button></div></div>
+      <button class="btn btn--outline btn--full" id="faucetGo">Request Minima</button>
+      <div class="status" id="faucetStatus"></div>
+    </div>
     <div class="card"><div class="card__title">Resync chain</div>
       <div class="view__desc">Re-fetch the chain and your coins from a MegaMMR host (seconds). Use if the node is stuck or behind — with just a host, your seed, keys and key-uses are left untouched.</div>
       <div class="field"><div class="field__label">MegaMMR host (ip:port)</div><input class="field__input" id="setResyncHost" value="${esc(CFG.megammrHost)}" /></div>
@@ -804,6 +1048,16 @@ async function renderSettings() {
       <button class="btn btn--outline btn--full" id="setTheme">Theme: ${esc(CFG.theme)}</button>
     </div>`;
   el("setAddr").onclick = () => copy(fullAddr);
+  el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
+  el("faucetGo").onclick = async () => {
+    const addr = el("faucetAddr").value.trim();
+    if (!validAddr(addr)) { toast("Enter a valid Mx… / 0x… address.", "err"); return; }
+    const btn = el("faucetGo"), st = el("faucetStatus");
+    btn.disabled = true; btn.textContent = "Requesting…"; st.textContent = "Contacting the faucet…"; st.className = "status status--dim";
+    try { const r = await api.faucet(addr); st.textContent = r.message; st.className = "status " + (r.status ? "status--ok" : "status--err"); toast(r.message, r.status ? "ok" : "err"); }
+    catch (e) { st.textContent = "Faucet error."; st.className = "status status--err"; }
+    btn.disabled = false; btn.textContent = "Request Minima";
+  };
   el("setReveal").onclick = async () => { const v = await tryCmd("vault"); const p = seedFrom(v); if (!p) { toast("Couldn't read the seed.", "err"); return; } el("setSeed").style.display = ""; el("setSeed").textContent = p; };
   el("setRestore").onclick = () => showRestoreOverlay();
   el("setResyncAdv").onclick = () => { el("setResyncAdvBox").style.display = el("setResyncAdv").checked ? "" : "none"; };

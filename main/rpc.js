@@ -40,7 +40,10 @@ function rpcCall(port, secret, command) {
       // Minima's lightweight Java RPC server emits response headers that Node's strict llhttp parser rejects
       // ("Invalid header value char"), so every call would fail to parse. Parse leniently, like curl. Safe:
       // localhost-only loopback to our own child process.
-      insecureHTTPParser: true
+      insecureHTTPParser: true,
+      // The node closes each connection, so a pooled keep-alive socket gives intermittent ECONNRESET on reuse
+      // (seen under rapid calls e.g. the mail scan loop). A fresh socket per request avoids it.
+      agent: false
     };
     const req = http.request(options, res => {
       let body = "";

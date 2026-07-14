@@ -94,6 +94,32 @@ select.field__input { appearance: none; -webkit-appearance: none; cursor: pointe
   background-repeat: no-repeat; background-position: right 13px center; }
 select.field__input option { background: var(--surface2); color: var(--text); }
 
+/* ---- minimaMail ---- */
+.tab-badge { display: inline-block; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 8px;
+  background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; vertical-align: middle; }
+#view-mail.view--active { display: flex; flex-direction: column; height: 100%; }
+#view-mail #mailBody { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.mail-top { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex: 0 0 auto; }
+.mail-top__title { font-size: 20px; font-weight: 700; color: var(--heading); }
+.mail-av { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: var(--surface2); box-shadow: 0 2px 6px -2px rgba(0,0,0,.6); flex: 0 0 auto; }
+.mail-av--lg { width: 72px; height: 72px; margin: 0 auto; }
+.mail-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; }
+#mailList { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.mail-conv { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px 10px; }
+.mail-bubble { max-width: 74%; align-self: flex-start; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 8px 11px; }
+.mail-bubble--me { align-self: flex-end; background: var(--accent-bg); border-color: var(--accent); }
+.mail-bubble__body { color: var(--text); font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+.mail-bubble__meta { font-size: 10px; color: var(--dim); text-align: right; margin-top: 3px; }
+.mail-status { color: var(--green); }
+.mail-img { max-width: 240px; max-height: 240px; border-radius: 8px; display: block; }
+.mail-pay { font-weight: 700; color: var(--accent); }
+.mail-compose { display: flex; gap: 6px; align-items: center; padding-top: 8px; flex: 0 0 auto; border-top: 1px solid var(--border); }
+.mail-compose .field__input { flex: 1 1 auto; }
+.mail-compose .btn { flex: 0 0 auto; }
+.emoji-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 8px 0; }
+.emoji-btn { font-size: 22px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 6px; cursor: pointer; }
+.emoji-btn:hover { border-color: var(--accent); }
+
 /* toast — lift it */
 .toast { border-radius: 10px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.7); }
 

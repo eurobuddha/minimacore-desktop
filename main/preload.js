@@ -39,6 +39,25 @@ contextBridge.exposeInMainWorld("mcd", {
   // save a CSV via a native save dialog → written path or null
   exportCsv: (text, name) => ipcRenderer.invoke("mcd:exportCsv", text, name),
 
+  // faucet requester (main-process HTTPS GET → { status, message })
+  faucet: (address) => ipcRenderer.invoke("mcd:faucet", address),
+
+  // minimaMail (on-chain encrypted messaging; keys stay in main)
+  mailInit: () => ipcRenderer.invoke("mcd:mailInit"),
+  mailIdentity: () => ipcRenderer.invoke("mcd:mailIdentity"),
+  mailSetName: (n) => ipcRenderer.invoke("mcd:mailSetName", n),
+  mailShare: () => ipcRenderer.invoke("mcd:mailShare"),
+  mailThreads: () => ipcRenderer.invoke("mcd:mailThreads"),
+  mailThread: (h) => ipcRenderer.invoke("mcd:mailThread", h),
+  mailThreadWith: (peer) => ipcRenderer.invoke("mcd:mailThreadWith", peer),
+  mailSend: (to, base) => ipcRenderer.invoke("mcd:mailSend", to, base),
+  mailPay: (to, payaddr, amount, tokenid, tokenname) => ipcRenderer.invoke("mcd:mailPay", to, payaddr, amount, tokenid, tokenname),
+  mailContacts: () => ipcRenderer.invoke("mcd:mailContacts"),
+  mailAddContact: (share, name) => ipcRenderer.invoke("mcd:mailAddContact", share, name),
+  mailScan: () => ipcRenderer.invoke("mcd:mailScan"),
+  mailInvalidate: () => ipcRenderer.invoke("mcd:mailInvalidate"),
+  onMail: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:mail", h); return () => ipcRenderer.removeListener("mcd:mail", h); },
+
   // pushes
   onStatus: (fn) => { const h = (_e, s) => fn(s); ipcRenderer.on("mcd:status", h); return () => ipcRenderer.removeListener("mcd:status", h); },
   onLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:log", h); return () => ipcRenderer.removeListener("mcd:log", h); }

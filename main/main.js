@@ -14,6 +14,8 @@ const rpc = require("./rpc");
 const updater = require("./updater");
 const netfetch = require("./netfetch");
 const histStore = require("./history-store");
+const faucet = require("./faucet");
+const mail = require("./mail");
 
 let win = null;
 let tray = null;
@@ -91,6 +93,27 @@ ipcMain.handle("mcd:applyJarUpdate", async (_e, rel) => { const r = await update
 
 // token icons + history store + CSV export (no requireRunning — these render off the local store / cache)
 ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
+ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
+
+// minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
+ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });
+ipcMain.handle("mcd:mailIdentity", () => mail.myIdentity());
+ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });
+ipcMain.handle("mcd:mailShare", () => mail.shareString());
+ipcMain.handle("mcd:mailThreads", () => mail.threads());
+ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));
+ipcMain.handle("mcd:mailThreadWith", (_e, peer) => mail.threadWith(peer));
+ipcMain.handle("mcd:mailSend", (_e, to, base) => mail.sendMessage(to, base || {}));
+ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname) => mail.pay(to, payaddr, amount, tokenid, tokenname));
+ipcMain.handle("mcd:mailContacts", () => mail.contacts());
+ipcMain.handle("mcd:mailAddContact", (_e, share, name) => mail.addContact(share, name));
+ipcMain.handle("mcd:mailScan", () => mail.scan());
+ipcMain.handle("mcd:mailInvalidate", () => { mail.invalidateIdentity(); return true; });
+
+// forward mail updates to the window; start the scan loop once the node is running
+mail.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:mail"); });
+let mailStarted = false;
+node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); } });
 ipcMain.handle("mcd:histGet", () => histStore.all());
 ipcMain.handle("mcd:histAdd", (_e, rows) => histStore.merge(Array.isArray(rows) ? rows : []));
 ipcMain.handle("mcd:histClear", () => { histStore.clear(); return true; });
