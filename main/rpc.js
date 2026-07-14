@@ -36,7 +36,11 @@ function rpcCall(port, secret, command) {
       method: usePost ? "POST" : "GET",
       path: usePost ? "/" : "/" + encodeURIComponent(command),
       headers: { Authorization: auth },
-      timeout: timeoutFor(command)
+      timeout: timeoutFor(command),
+      // Minima's lightweight Java RPC server emits response headers that Node's strict llhttp parser rejects
+      // ("Invalid header value char"), so every call would fail to parse. Parse leniently, like curl. Safe:
+      // localhost-only loopback to our own child process.
+      insecureHTTPParser: true
     };
     const req = http.request(options, res => {
       let body = "";

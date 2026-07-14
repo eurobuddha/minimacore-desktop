@@ -36,3 +36,16 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 .spin { color: var(--dim); font-size: 13px; text-align: center; padding: 16px; }
 .seg { display: flex; gap: 6px; margin: 8px 0 4px; }
 .seg .btn { flex: 1; }
+
+/* upfront wizard: visible sections (no buried "Advanced") */
+.setup-sec { margin: 14px 0; }
+.setup-sec__h { color: var(--heading); font-size: 12px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; margin-bottom: 4px; }
+
+/* starting / restoring progress overlay */
+.setup-progress { text-align: center; padding: 22px 6px 10px; }
+.setup-progress__title { color: var(--heading); font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
+.setup-progress__stat { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-top: 12px; }
+.spin--lg { width: 34px; height: 34px; margin: 0 auto; padding: 0; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%; animation: mcd-spin .9s linear infinite; }
+@keyframes mcd-spin { to { transform: rotate(360deg); } }

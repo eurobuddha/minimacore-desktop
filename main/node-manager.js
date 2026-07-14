@@ -61,9 +61,21 @@ class NodeManager extends EventEmitter {
       "-rpcenable", "true",
       "-rpcpassword", config.rpcSecret(),
       "-daemon", "true"];
-    if (cfg.network === "solo") args.push("-solo");
-    else if (cfg.network === "custom" && cfg.customConnect) args.push("-connect", cfg.customConnect);
-    else if (cfg.network === "mainnet" && cfg.peers) args.push("-p2pnodes", cfg.peers);
+    if (cfg.network === "solo") {
+      args.push("-solo");
+    } else {
+      // Light client: come up in seconds and just follow the tip — no heavy full IBD (mirrors
+      // minima-core-android MinimaService). Without -nosyncibd, connecting to mainnet triggers a full
+      // block/archive sync that never yields a usable tip → the "stuck at starting" hang.
+      args.push("-isclient", "true", "-mobile", "true", "-limitbandwidth", "true",
+        "-nosyncibd", "true", "-allowallip", "true");
+      if (cfg.network === "custom" && cfg.customConnect) {
+        args.push("-connect", cfg.customConnect);
+      } else {
+        // Bootstrap peers from the canonical list URL (mainnet DEFAULT_NODE_LIST is empty).
+        args.push("-p2pnodes", cfg.peersUrl || config.DEFAULTS.peersUrl);
+      }
+    }
     if (cfg.megammr) args.push("-megammr");
     return args;
   }

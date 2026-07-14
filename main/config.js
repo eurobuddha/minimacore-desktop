@@ -20,11 +20,12 @@ function secretFilePath() { return path.join(app.getPath("userData"), "rpc.secre
 const DEFAULTS = {
   setupDone: false,          // node wizard completed
   walletDone: false,         // seed onboarding (new/restore) completed
+  walletMode: "new",         // "new" (boot+connect) | "restore" (post-boot megammrsync). Seed is NEVER persisted.
   dataFolder: "",            // -data (empty → default under userData)
   network: "mainnet",        // mainnet | solo | custom
   customConnect: "",         // host:port for network=custom
-  peers: "",                 // -p2pnodes value for mainnet ("" → bundled default list)
-  megammrHost: "31.125.188.214:9001",  // a -megammr node for fast seed/chain resync (megammrsync host)
+  peersUrl: "https://spartacusrex.com/minimapeers.txt",  // -p2pnodes bootstrap (canonical mainnet peer list)
+  megammrHost: "31.125.188.214:9001",  // a -megammr node for fast seed/chain resync (megammrsync host, restore only)
   basePort: 12001,           // -port (RPC = +4). 12001 avoids 9001 jar / 11001 android / 14001 classic / 16001 desktop
   megammr: false,            // -megammr full history
   theme: "current"           // current | original-light | original-dark
