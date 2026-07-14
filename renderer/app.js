@@ -108,10 +108,11 @@ function showSetup() {
 
     <div class="setup-sec" id="walletSec"><div class="setup-sec__h">Wallet</div>
       <label class="opt sel" data-w="new"><b>New wallet</b><span>Generate a fresh seed on this node. You'll back up the 24 words next.</span></label>
-      <label class="opt" data-w="restore"><b>Restore from seed</b><span>Import an existing 24-word seed and fast-sync via MegaMMR.</span></label>
+      <label class="opt" data-w="restore"><b>Restore from seed</b><span>Import an existing seed — 24 BIP39 words or your own passphrase — and fast-sync via MegaMMR.</span></label>
       <div id="restoreFields" style="display:none">
-        <div class="field" style="margin-top:6px"><div class="field__label">Your 24-word seed phrase</div>
-          <textarea class="field__input" id="rSeed" rows="3" placeholder="word1 word2 …"></textarea></div>
+        <div class="field" style="margin-top:6px"><div class="field__label">Your seed phrase</div>
+          <textarea class="field__input" id="rSeed" rows="3" placeholder="24 BIP39 words, or any passphrase"></textarea>
+          <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as it was created — it is case- and spacing-sensitive.</div></div>
         <div class="field"><div class="field__label">Signatures already used (key-uses)</div>
           <input class="field__input" id="rKeyuses" value="0" inputmode="numeric" /></div>
         <div class="view__desc" style="color:var(--amber)">⚠ Key-uses must be at least the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds — if unsure, set it higher.</div>
@@ -209,10 +210,13 @@ function showSetup() {
 
     // A restore holds the seed + key-uses in memory only — applied by megammrsync after the node is up.
     if (walletMode === "restore") {
-      const seed = el("rSeed").value.trim().replace(/\s+/g, " ");
+      // anyphrase:true → the node hashes the phrase VERBATIM (seed = SHA(raw bytes)), so pass it faithfully:
+      // strip only leading/trailing whitespace (the textarea's stray newline), never collapse internal spacing
+      // or change case — that would derive a DIFFERENT seed. Any non-empty phrase/length is valid.
+      const seed = el("rSeed").value.trim();
       const keyuses = parseInt(el("rKeyuses").value, 10);
       host = el("rHost").value.trim() || CFG.megammrHost;
-      if (seed.split(" ").length < 12) { toast("Enter your full 24-word seed phrase."); return; }
+      if (!seed) { toast("Enter your seed phrase."); return; }
       if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
       RESTORE = { seed, keyuses, host };
     }
@@ -318,9 +322,10 @@ async function postBootRestore() {
 function showRestoreOverlay() {
   el("shell").style.filter = "blur(2px)";
   el("setupBody").innerHTML = `
-    <div class="view__desc">Restore a different 24-word seed on this node. The current wallet will be replaced by the restored one.</div>
-    <div class="field"><div class="field__label">Your 24-word seed phrase</div>
-      <textarea class="field__input" id="orSeed" rows="3" placeholder="word1 word2 …"></textarea></div>
+    <div class="view__desc">Restore a different seed on this node — 24 BIP39 words or your own passphrase. The current wallet will be replaced by the restored one.</div>
+    <div class="field"><div class="field__label">Your seed phrase</div>
+      <textarea class="field__input" id="orSeed" rows="3" placeholder="24 BIP39 words, or any passphrase"></textarea>
+      <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as created — case- and spacing-sensitive.</div></div>
     <div class="field"><div class="field__label">Signatures already used (key-uses)</div>
       <input class="field__input" id="orKeyuses" value="0" inputmode="numeric" /></div>
     <div class="view__desc" style="color:var(--amber)">⚠ Key-uses must be at least the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds — if unsure, set it higher.</div>
@@ -330,10 +335,10 @@ function showRestoreOverlay() {
       <button class="btn btn--primary btn--full" id="orGo">Restore + sync</button></div>`;
   el("orCancel").onclick = () => { hideSetup(); };
   el("orGo").onclick = async () => {
-    const seed = el("orSeed").value.trim().replace(/\s+/g, " ");
+    const seed = el("orSeed").value.trim();   // anyphrase: pass verbatim (see restore in showSetup)
     const keyuses = parseInt(el("orKeyuses").value, 10);
     const host = el("orHost").value.trim() || CFG.megammrHost;
-    if (seed.split(" ").length < 12) { toast("Enter your full seed phrase."); return; }
+    if (!seed) { toast("Enter your seed phrase."); return; }
     if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
