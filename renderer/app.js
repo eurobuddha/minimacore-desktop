@@ -86,19 +86,24 @@ function onStatus(s) {
   if (activeView === "node") renderNode(s);
 }
 
-// ---- first-run wizard: ONE upfront screen — network + new/restore + options ----
+// ---- first-run wizard: network + wallet presets + the FULL startup-parameter editor ----
+// P is the working copy of every non-managed minima.jar flag; the presets and the advanced editor both write
+// into it, and it is saved verbatim as config.params. MINIMA_PARAMS is the shared manifest (params.js).
 function showSetup() {
   el("shell").style.filter = "blur(2px)";
   const box = el("setupBody");
+  const P = Object.assign({}, MINIMA_PARAMS.defaultParams(), CFG.params || {});
   const def = CFG.dataFolder || "";
+
   box.innerHTML = `
-    <div class="view__desc">Set up your node. Nothing here leaves this Mac.</div>
+    <div class="view__desc">Set up your node. Nothing here leaves this Mac. Every minima.jar startup parameter is editable below.</div>
 
     <div class="setup-sec"><div class="setup-sec__h">Network</div>
-      <label class="opt sel" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network — syncs to the tip in seconds.</span></label>
+      <label class="opt" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network — light client, syncs to the tip in seconds.</span></label>
       <label class="opt" data-net="solo"><b>Solo / test</b><span>A private local chain that auto-mines — safe for trying things out.</span></label>
       <label class="opt" data-net="custom"><b>Custom peer</b><span>Connect to a specific host:port you provide.</span></label>
       <input class="field__input" id="customPeer" placeholder="host:port" style="display:none;margin-top:4px" />
+      <div class="view__desc" style="font-size:11px;margin-top:4px">A network is a preset — it fills the parameters below; tweak anything you like.</div>
     </div>
 
     <div class="setup-sec" id="walletSec"><div class="setup-sec__h">Wallet</div>
@@ -115,39 +120,88 @@ function showSetup() {
       </div>
     </div>
 
-    <div class="setup-sec"><div class="setup-sec__h">Options</div>
-      <div class="field"><div class="field__label">Data folder</div>
+    <div class="setup-sec"><div class="setup-sec__h">Core</div>
+      <div class="field"><div class="field__label">Data folder (-data / -basefolder)</div>
         <div class="seg"><input class="field__input" id="dataFolder" placeholder="(default app folder)" value="${esc(def)}" readonly />
         <button class="btn btn--outline btn--sm" id="pickFolder">Choose…</button></div></div>
-      <div class="field"><div class="field__label">Base port (RPC = +4)</div>
-        <input class="field__input" id="basePort" value="${esc(CFG.basePort)}" /></div>
-      <label class="opt" id="megammr" style="display:flex;align-items:center;gap:8px">
-        <input type="checkbox" ${CFG.megammr ? "checked" : ""}/> <span style="margin:0;color:var(--text)">Keep full history (megammr) — bigger, slower initial sync</span></label>
+      <div class="field"><div class="field__label">Minima port (-port)</div>
+        <input class="field__input" id="basePort" value="${esc(CFG.basePort)}" inputmode="numeric" /></div>
+      <div class="field"><div class="field__label">RPC port (-rpc)</div>
+        <input class="field__input" id="rpcPort" value="${esc(CFG.rpcPortManual || "")}" placeholder="(auto: Minima port + 4)" inputmode="numeric" /></div>
+    </div>
+
+    <div class="setup-sec"><div class="setup-sec__h">All startup parameters</div>
+      <div id="advParams"></div>
+      <div class="setup-sec__sub" style="margin-top:10px">Additional raw arguments</div>
+      <textarea class="field__input" id="extraArgs" rows="2" placeholder="e.g. -myextra value">${esc(CFG.extraArgs || "")}</textarea>
+      <div class="prow__h">Appended verbatim. Quotes are respected.</div>
+      <div class="setup-sec__sub" style="margin-top:12px">Managed by the app</div>
+      ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${esc(m.note)}</span></div>`).join("")}
     </div>
 
     <button class="btn btn--primary btn--full" id="startNode" style="margin-top:12px">Start node</button>`;
 
+  // ---- advanced params editor (rebuilt from P so presets show through) ----
+  function renderAdvanced() {
+    el("advParams").innerHTML = MINIMA_PARAMS.GROUPS.map(g => `
+      <div class="adv-group"><div class="adv-group__h">${esc(g.group)}</div>
+      ${g.items.map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
+    el("advParams").querySelectorAll("[data-flag]").forEach(inp => {
+      const f = inp.dataset.flag;
+      if (inp.type === "checkbox") inp.onchange = () => { P[f] = inp.checked; };
+      else inp.onchange = () => { P[f] = inp.value; };
+    });
+  }
+  function paramControl(it, val) {
+    const id = "p_" + it.flag;
+    if (it.type === "bool") {
+      return `<label class="prow"><input type="checkbox" id="${id}" data-flag="${esc(it.flag)}" ${val === true ? "checked" : ""}/>
+        <span class="prow__l">${esc(it.label)}</span><span class="prow__h">${esc(it.help)}</span></label>`;
+    }
+    const isSecret = it.type === "secret";
+    const shown = isSecret ? "" : (val === true || val == null ? "" : val);
+    const ph = isSecret && val === true ? "•••••••• (stored — leave blank to keep)" : "";
+    const type = isSecret ? "password" : (it.type === "int" ? "text" : "text");
+    return `<div class="field prow"><label class="prow__l" for="${id}">${esc(it.label)}</label>
+      <input class="field__input" id="${id}" type="${type}" data-flag="${esc(it.flag)}" ${isSecret ? 'data-secret="1"' : ''} ${isSecret && val === true ? 'data-set="1"' : ''} value="${esc(shown)}" placeholder="${esc(ph)}" ${it.type === "int" ? 'inputmode="numeric"' : ''}/>
+      <div class="prow__h">${esc(it.help)}</div></div>`;
+  }
+
+  // ---- network preset fills the network-related params in P ----
   let net = CFG.network || "mainnet", wmode = "new";
   const walletSec = el("walletSec");
-  const selectNet = (n) => {
+  const applyNet = (n) => {
     net = n;
+    if (n === "solo") {
+      Object.assign(P, { solo: true, isclient: false, mobile: false, nosyncibd: false, limitbandwidth: false,
+        allowallip: false, p2pnodes: "", connect: "" });
+    } else {
+      Object.assign(P, { solo: false, test: false, genesis: false, isclient: true, mobile: true,
+        limitbandwidth: true, nosyncibd: true, allowallip: true });
+      if (n === "custom") { P.connect = el("customPeer").value.trim(); P.p2pnodes = ""; }
+      else { P.p2pnodes = CFG.peersUrl || MINIMA_PARAMS.defaultParams().p2pnodes; P.connect = ""; }
+    }
     box.querySelectorAll(".opt[data-net]").forEach(x => x.classList.toggle("sel", x.dataset.net === n));
     el("customPeer").style.display = n === "custom" ? "" : "none";
-    walletSec.style.display = n === "solo" ? "none" : "";   // solo runs its own local seed
+    walletSec.style.display = n === "solo" ? "none" : "";
+    renderAdvanced();
   };
   const selectW = (w) => {
     wmode = w;
     box.querySelectorAll(".opt[data-w]").forEach(x => x.classList.toggle("sel", x.dataset.w === w));
     el("restoreFields").style.display = w === "restore" ? "" : "none";
   };
-  box.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => selectNet(o.dataset.net));
+  box.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => applyNet(o.dataset.net));
   box.querySelectorAll(".opt[data-w]").forEach(o => o.onclick = () => selectW(o.dataset.w));
   if (CFG.customConnect) el("customPeer").value = CFG.customConnect;
-  selectNet(net); selectW("new");   // apply the initial (current-config) selection + section visibility
+  el("customPeer").oninput = () => { if (net === "custom") P.connect = el("customPeer").value.trim(); };
   el("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) el("dataFolder").value = f; };
+  renderAdvanced();
+  applyNet(net); selectW("new");   // seed P from the current network preset + show it in the editor
 
   el("startNode").onclick = async () => {
     const basePort = parseInt(el("basePort").value, 10) || CFG.basePort;
+    const rpcPortManual = el("rpcPort").value.trim();
     if (net === "custom" && !el("customPeer").value.trim()) { toast("Enter a host:port for the custom peer."); return; }
     const solo = net === "solo";
     const walletMode = solo ? "new" : wmode;
@@ -163,22 +217,27 @@ function showSetup() {
       RESTORE = { seed, keyuses, host };
     }
 
-    // walletDone: solo needs no ceremony; a restore must (re)run the resync; a fresh new wallet needs the seed
-    // backup step; an already-onboarded user just changing network keeps their wallet (stays done).
+    // collect every advanced control into P (secret: blank + previously-set → keep marker)
+    el("advParams").querySelectorAll("[data-flag]").forEach(inp => {
+      const f = inp.dataset.flag;
+      if (inp.type === "checkbox") { P[f] = inp.checked; return; }
+      const v = inp.value.trim();
+      if (inp.dataset.secret) P[f] = v ? v : (inp.dataset.set ? true : "");
+      else P[f] = v;
+    });
+
     const walletDone = solo ? true : (walletMode === "restore" ? false : !!CFG.walletDone);
     const patch = {
-      setupDone: true, network: net, basePort, walletMode, walletDone,
+      setupDone: true, network: net, basePort, rpcPortManual, walletMode, walletDone,
       dataFolder: el("dataFolder").value || "",
-      megammr: el("megammr").querySelector("input").checked,
       customConnect: net === "custom" ? el("customPeer").value.trim() : "",
-      megammrHost: host
+      megammrHost: host, params: P, extraArgs: el("extraArgs").value.trim()
     };
     CFG = await api.saveConfig(patch);
     waitingForNode = true;
     postBootStarted = false;      // let the post-boot wallet step run for this (re)start
     showStarting();
-    // reconfiguring a live node needs a restart to apply new args; first run just starts.
-    if (running) await api.nodeRestart(); else await api.nodeStart();
+    if (running) await api.nodeRestart(); else await api.nodeStart();   // reconfigure = restart to apply
   };
   el("setup").style.display = "";
 }

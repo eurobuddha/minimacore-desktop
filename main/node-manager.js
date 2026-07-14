@@ -19,6 +19,14 @@ const { rpcCall } = require("./rpc");
 const LOG_MAX_LINES = 800;
 const HEALTH_EVERY_MS = 10_000;
 
+/** Split a raw-args string into argv tokens, honoring single/double quotes. */
+function tokenizeArgs(s) {
+  if (!s || typeof s !== "string") return [];
+  const out = []; const re = /"([^"]*)"|'([^']*)'|(\S+)/g; let m;
+  while ((m = re.exec(s))) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+}
+
 class NodeManager extends EventEmitter {
   constructor() {
     super();
@@ -48,12 +56,16 @@ class NodeManager extends EventEmitter {
     return fs.existsSync(bundled) ? bundled : "java";
   }
 
-  rpcPort() { return config.load().basePort + 4; }
+  rpcPort() {
+    const c = config.load();
+    return parseInt(c.rpcPortManual, 10) || (c.basePort + 4);
+  }
 
   buildArgs() {
     const cfg = config.load();
     const dataDir = cfg.dataFolder || config.defaultDataFolder();
     fs.mkdirSync(dataDir, { recursive: true });
+    // App-managed base: the app depends on these, so it sets them itself (they're excluded from params).
     const args = ["-jar", this.jarPath(),
       "-data", dataDir,
       "-basefolder", dataDir,
@@ -61,22 +73,20 @@ class NodeManager extends EventEmitter {
       "-rpcenable", "true",
       "-rpcpassword", config.rpcSecret(),
       "-daemon", "true"];
-    if (cfg.network === "solo") {
-      args.push("-solo");
-    } else {
-      // Light client: come up in seconds and just follow the tip — no heavy full IBD (mirrors
-      // minima-core-android MinimaService). Without -nosyncibd, connecting to mainnet triggers a full
-      // block/archive sync that never yields a usable tip → the "stuck at starting" hang.
-      args.push("-isclient", "true", "-mobile", "true", "-limitbandwidth", "true",
-        "-nosyncibd", "true", "-allowallip", "true");
-      if (cfg.network === "custom" && cfg.customConnect) {
-        args.push("-connect", cfg.customConnect);
-      } else {
-        // Bootstrap peers from the canonical list URL (mainnet DEFAULT_NODE_LIST is empty).
-        args.push("-p2pnodes", cfg.peersUrl || config.DEFAULTS.peersUrl);
-      }
+    if (cfg.rpcPortManual) args.push("-rpc", String(this.rpcPort()));   // else the node uses -port + 4
+
+    // Every other minima.jar startup flag comes from the user-configured params (bool → `-flag`,
+    // value/int/secret → `-flag <value>`). This is the single source of truth — the wizard fills it from
+    // the Network/Wallet presets AND the full advanced editor.
+    const params = config.effectiveParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === true) args.push("-" + k);
+      else if (v === false || v === "" || v == null) continue;
+      else args.push("-" + k, String(v));
     }
-    if (cfg.megammr) args.push("-megammr");
+
+    // Additional raw args, appended verbatim (quote-aware split).
+    for (const tok of tokenizeArgs(cfg.extraArgs)) args.push(tok);
     return args;
   }
 

@@ -41,6 +41,23 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 .setup-sec { margin: 14px 0; }
 .setup-sec__h { color: var(--heading); font-size: 12px; font-weight: 600; letter-spacing: .06em;
   text-transform: uppercase; margin-bottom: 4px; }
+.setup-sec__sub { color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; margin: 4px 0; }
+
+/* full startup-parameter editor */
+.adv-group { margin: 10px 0; border-top: 1px solid var(--border); padding-top: 8px; }
+.adv-group__h { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .04em; margin-bottom: 6px; }
+.prow { display: block; margin: 8px 0; }
+label.prow { cursor: pointer; }
+label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline; }
+.prow__l { color: var(--text); font-size: 13px; }
+.prow__h { color: var(--dim); font-size: 11px; line-height: 1.35; margin: 2px 0 0 22px; }
+.field.prow .prow__l { display: block; margin-bottom: 3px; }
+.field.prow .prow__h { margin-left: 0; }
+.prow--managed { display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+  font-size: 12px; color: var(--dim); padding: 3px 0; }
+.prow--managed .prow__l { font-family: var(--mono); color: var(--text2, var(--text)); }
+.prow__note { color: var(--dim); font-size: 11px; text-align: right; }
 
 /* starting / restoring progress overlay */
 .setup-progress { text-align: center; padding: 22px 6px 10px; }
