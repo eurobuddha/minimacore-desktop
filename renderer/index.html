@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en" data-theme="current">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; font-src 'self';" />
+  <title>minimaCore</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="shell" id="shell">
+    <header class="hdr" id="hdr">
+      <div class="hdr__logo">minima<b>Core</b></div>
+      <div class="hdr__spacer"></div>
+      <button class="statuschip" id="nodePill" title="Node status">starting…</button>
+      <button class="hdr__style" id="themeBtn" title="Theme">◐</button>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab tab--active" data-view="balances">Balances</button>
+      <button class="tab" data-view="receive">Receive</button>
+      <button class="tab" data-view="send">Send</button>
+      <button class="tab" data-view="settings">Settings</button>
+      <button class="tab" data-view="node">Node</button>
+    </nav>
+
+    <main class="main" id="main">
+      <section class="view view--active" id="view-balances">
+        <div class="view__title">Balances</div>
+        <div id="balList"></div>
+      </section>
+
+      <section class="view" id="view-receive">
+        <div class="view__title">Receive</div>
+        <div class="card">
+          <div class="view__desc">Your address — share it to receive MINIMA or tokens.</div>
+          <div id="qr" class="qrbox"></div>
+          <div class="addrbox" id="recvAddr" title="Click to copy">…</div>
+          <button class="btn btn--outline btn--full" id="newAddrBtn">New address</button>
+        </div>
+      </section>
+
+      <section class="view" id="view-send">
+        <div class="view__title">Send</div>
+        <div class="card" id="sendCard"></div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="view__title">Settings</div>
+        <div id="settingsBody"></div>
+      </section>
+
+      <section class="view" id="view-node">
+        <div class="view__title">Node</div>
+        <div class="card" id="nodeCard"></div>
+        <div class="card">
+          <div class="card__title">Log</div>
+          <pre class="logbox" id="logbox"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- first-run node setup wizard -->
+  <div class="overlay" id="setup" style="display:none">
+    <div class="modal setup">
+      <div class="modal__title">Set up your node</div>
+      <div id="setupBody"></div>
+    </div>
+  </div>
+
+  <!-- generic status toast -->
+  <div class="toast" id="toast" style="display:none"></div>
+
+  <script src="qrcode.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

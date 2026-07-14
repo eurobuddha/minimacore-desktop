@@ -1,0 +1,5 @@
+node_modules/
+dist/
+resources/jre/
+*.log
+.DS_Store
