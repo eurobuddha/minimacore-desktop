@@ -23,6 +23,11 @@ let TERM_OUT = "";
 const TERM_HIST = [];
 let termIdx = -1;
 let TERM_CMDS = null;        // command names for Tab-completion (lazy from `help`)
+let SEND_TOKENS = [];        // [{tokenid, name}] for the Send/Split/Consolidate token dropdowns
+
+function tokenOptions() {
+  return SEND_TOKENS.map(t => `<option value="${esc(t.tokenid)}">${esc(t.name)}${t.tokenid !== MINIMA ? " · " + short(t.tokenid, 12) : ""}</option>`).join("");
+}
 
 function labelFor(addr) { return (CFG && CFG.labels && CFG.labels[addr]) || ""; }
 
@@ -758,8 +763,18 @@ async function renderSettings() {
       <button class="btn btn--outline btn--full" id="setRestore">Restore from a different seed…</button>
     </div>
     <div class="card"><div class="card__title">Resync chain</div>
-      <div class="view__desc">Re-fetch the chain and your coins from a MegaMMR host (seconds). Use if the node is stuck or behind — your seed, keys and key-uses are left untouched.</div>
+      <div class="view__desc">Re-fetch the chain and your coins from a MegaMMR host (seconds). Use if the node is stuck or behind — with just a host, your seed, keys and key-uses are left untouched.</div>
       <div class="field"><div class="field__label">MegaMMR host (ip:port)</div><input class="field__input" id="setResyncHost" value="${esc(CFG.megammrHost)}" /></div>
+      <label class="prow" style="margin-top:4px"><input type="checkbox" id="setResyncAdv"><span class="prow__l">Advanced parameters (full megammrsync)</span></label>
+      <div id="setResyncAdvBox" style="display:none">
+        <div class="view__desc" style="color:var(--amber)">⚠ Providing a seed phrase performs a FULL WALLET RESET to that seed (regenerates keys, sets key-uses) — not a plain resync. Leave the phrase blank for the safe chain-only resync.</div>
+        <div class="field"><div class="field__label">Seed phrase (optional — resets the wallet)</div><textarea class="field__input" id="setResyncPhrase" rows="2" placeholder="blank = plain resync"></textarea></div>
+        <label class="prow"><input type="checkbox" id="setResyncAnyphrase"><span class="prow__l">anyphrase (seed is any text, not BIP39 words)</span></label>
+        <div class="field"><div class="field__label">Key-uses (signatures this seed has ever made; required with a seed)</div><input class="field__input" id="setResyncKeyuses" placeholder="0 if brand new" inputmode="numeric" /></div>
+        <div class="field"><div class="field__label">Keys to generate (default 64)</div><input class="field__input" id="setResyncKeys" placeholder="64" inputmode="numeric" /></div>
+        <div class="field"><div class="field__label">Restore from backup file (optional)</div><input class="field__input" id="setResyncFile" placeholder="path to a .bak file" /></div>
+        <div class="field"><div class="field__label">Backup password (optional)</div><input class="field__input" id="setResyncPassword" type="password" /></div>
+      </div>
       <button class="btn btn--outline btn--full" id="setResync">Resync now</button>
     </div>
     <div class="card"><div class="card__title">Signing keys (WOTS safety)</div>
@@ -791,12 +806,31 @@ async function renderSettings() {
   el("setAddr").onclick = () => copy(fullAddr);
   el("setReveal").onclick = async () => { const v = await tryCmd("vault"); const p = seedFrom(v); if (!p) { toast("Couldn't read the seed.", "err"); return; } el("setSeed").style.display = ""; el("setSeed").textContent = p; };
   el("setRestore").onclick = () => showRestoreOverlay();
+  el("setResyncAdv").onclick = () => { el("setResyncAdvBox").style.display = el("setResyncAdv").checked ? "" : "none"; };
   el("setResync").onclick = async () => {
     const rhost = el("setResyncHost").value.trim();
     if (!/^[\w.\-]+:\d+$/.test(rhost)) { toast("Host must be ip:port.", "err"); return; }
-    if (!confirm("Resync the chain from " + rhost + "?\n\nThis re-fetches the chain and your coins. Your seed, keys and key-uses are NOT changed.")) return;
+    let cmdStr = `megammrsync action:resync host:${rhost}`, resetsWallet = false;
+    if (el("setResyncAdv").checked) {
+      const phrase = el("setResyncPhrase").value.trim(), keyuses = el("setResyncKeyuses").value.trim();
+      const keys = el("setResyncKeys").value.trim(), file = el("setResyncFile").value.trim(), password = el("setResyncPassword").value;
+      if (phrase) {
+        if (/["\\\n\r\t]/.test(phrase)) { toast("Seed phrase has a \", \\ or line break the command can't carry.", "err"); return; }
+        if (!/^\d+$/.test(keyuses)) { toast("Enter key-uses when providing a seed (0 if brand new) — reusing WOTS keys can lose funds.", "err"); return; }
+        cmdStr += ` phrase:"${phrase}"` + (el("setResyncAnyphrase").checked ? " anyphrase:true" : "");
+        resetsWallet = true;
+      }
+      if (keyuses) { if (!/^\d+$/.test(keyuses)) { toast("Key-uses must be a whole number.", "err"); return; } cmdStr += ` keyuses:${keyuses}`; }
+      if (keys) { if (!/^\d+$/.test(keys)) { toast("Keys must be a whole number.", "err"); return; } cmdStr += ` keys:${keys}`; }
+      if (file) { if (/[\s"\\]/.test(file)) { toast("File path can't contain spaces or quotes.", "err"); return; } cmdStr += ` file:${file}`; }
+      if (password) { if (/[\s"\\]/.test(password)) { toast("Password can't contain spaces or quotes.", "err"); return; } cmdStr += ` password:${password}`; }
+    }
+    const warn = resetsWallet
+      ? "⚠ This RESETS your wallet to the entered seed (regenerates keys, sets key-uses). Continue?"
+      : "Re-fetches the chain and your coins. Your seed, keys and key-uses are NOT changed. Continue?";
+    if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
-    try { await cmd(`megammrsync action:resync host:${rhost}`); CFG = await api.saveConfig({ megammrHost: rhost }); toast("Resync complete ✓", "ok"); renderBalances(); }
+    try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost }); toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";
   };
@@ -827,6 +861,11 @@ function keysInfo(keys) {
 async function renderSend() {
   const card = el("sendCard");
   if (!running) { card.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
+  // token dropdown source — the wallet's held coins/tokens (MINIMA first). No raw token-id typing.
+  const bal = await tryCmd("balance") || [];
+  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid) }));
+  if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima" });
+  SEND_TOKENS.sort((a, b) => (a.tokenid === MINIMA ? -1 : b.tokenid === MINIMA ? 1 : 0));
   card.innerHTML = `
     <div class="seg" id="sendModes">
       <button class="btn btn--sm btn--primary" data-mode="send">Send</button>
@@ -849,10 +888,10 @@ function sendForm(mode) {
     f.innerHTML = `
       <div class="field"><div class="field__label">To address</div><input class="field__input" id="sTo" placeholder="Mx… or 0x…" /></div>
       <div class="field"><div class="field__label">Amount</div><input class="field__input" id="sAmt" placeholder="0.0" /></div>
-      <div class="field"><div class="field__label">Token id (blank = MINIMA)</div><input class="field__input" id="sTok" placeholder="0x00" /></div>
+      <div class="field"><div class="field__label">Token</div><select class="field__input" id="sTok">${tokenOptions()}</select></div>
       <button class="btn btn--primary btn--full" id="sGo">Send</button>`;
     el("sGo").onclick = async () => {
-      const to = el("sTo").value.trim(), amt = el("sAmt").value.trim(), tok = el("sTok").value.trim();
+      const to = el("sTo").value.trim(), amt = el("sAmt").value.trim(), tok = el("sTok").value;
       if (!validAddr(to)) { toast("That doesn't look like a valid Mx… / 0x… address.", "err"); return; }
       if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
       if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
@@ -861,19 +900,19 @@ function sendForm(mode) {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
         if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
-        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = el("sTok").value = "";
+        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = "";
       } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send";
     };
   } else if (mode === "split") {
     f.innerHTML = `
       <div class="view__desc">Split your own coins into equal pieces (useful for parallel sends).</div>
-      <div class="field"><div class="field__label">Token id (blank = MINIMA)</div><input class="field__input" id="spTok" placeholder="0x00" /></div>
+      <div class="field"><div class="field__label">Token</div><select class="field__input" id="spTok">${tokenOptions()}</select></div>
       <div class="field"><div class="field__label">Amount to split</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
       <div class="field"><div class="field__label">Into how many coins (2–20)</div><input class="field__input" id="spN" value="10" /></div>
       <button class="btn btn--primary btn--full" id="spGo">Split</button>`;
     el("spGo").onclick = async () => {
-      const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0, tok = el("spTok").value.trim();
+      const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0, tok = el("spTok").value;
       if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
       if (n < 2 || n > 20) { toast("Split into 2–20 coins."); return; }
       if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
@@ -886,10 +925,10 @@ function sendForm(mode) {
   } else {
     f.innerHTML = `
       <div class="view__desc">Merge many small coins of one token into fewer, larger coins.</div>
-      <div class="field"><div class="field__label">Token id (blank = MINIMA)</div><input class="field__input" id="coTok" placeholder="0x00" /></div>
+      <div class="field"><div class="field__label">Token</div><select class="field__input" id="coTok">${tokenOptions()}</select></div>
       <button class="btn btn--primary btn--full" id="coGo">Consolidate</button>`;
     el("coGo").onclick = async () => {
-      const tok = el("coTok").value.trim() || MINIMA;
+      const tok = el("coTok").value || MINIMA;
       if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
       el("coGo").disabled = true;
       try { await cmd(`consolidate tokenid:${tok}`); toast("Consolidated ✓", "ok"); }

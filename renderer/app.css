@@ -1,8 +1,11 @@
 /* app.css — a few desktop-only additions on top of the reused pandapools style.css (same tokens). */
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
-.shell { height: 100vh; display: flex; flex-direction: column; }
-.main { flex: 1 1 auto; overflow-y: auto; padding: 12px 14px 20px; }
+/* Desktop shell: full-window flex column. Overrides the leftover PandaPools centering
+   (style.css `.shell { max-width:640px; margin:0 auto; padding:16px }`) so the app fills the window. */
+.shell { height: 100vh; display: flex; flex-direction: column; max-width: none; margin: 0; padding: 0; }
+/* min-height:0 lets .main scroll INTERNALLY instead of expanding and pushing the header/tabs off-screen. */
+.main { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; }
 .hdr { -webkit-app-region: drag; padding-left: 78px; }        /* clear the mac traffic lights */
 .hdr button { -webkit-app-region: no-drag; }
 .hdr__spacer { flex: 1 1 auto; }
@@ -84,6 +87,12 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 13px; margin: 0; }
 #view-terminal .field__input { margin-top: 8px; flex: 0 0 auto; }
 #view-terminal .seg, #view-logs .seg { flex: 0 0 auto; }
+
+/* token dropdown — match the dark fields, custom chevron */
+select.field__input { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%239A9AA8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 13px center; }
+select.field__input option { background: var(--surface2); color: var(--text); }
 
 /* toast — lift it */
 .toast { border-radius: 10px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.7); }
