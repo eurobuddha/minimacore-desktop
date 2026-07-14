@@ -7,10 +7,13 @@
  */
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const config = require("./config");
 const node = require("./node-manager");
 const rpc = require("./rpc");
 const updater = require("./updater");
+const netfetch = require("./netfetch");
+const histStore = require("./history-store");
 
 let win = null;
 let tray = null;
@@ -85,6 +88,21 @@ ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-300));
 
 ipcMain.handle("mcd:checkJarUpdate", () => updater.checkForUpdate());
 ipcMain.handle("mcd:applyJarUpdate", async (_e, rel) => { const r = await updater.applyUpdate(rel); await node.restart(); return r; });
+
+// token icons + history store + CSV export (no requireRunning — these render off the local store / cache)
+ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
+ipcMain.handle("mcd:histGet", () => histStore.all());
+ipcMain.handle("mcd:histAdd", (_e, rows) => histStore.merge(Array.isArray(rows) ? rows : []));
+ipcMain.handle("mcd:histClear", () => { histStore.clear(); return true; });
+ipcMain.handle("mcd:exportCsv", async (_e, text, name) => {
+  const r = await dialog.showSaveDialog(win, {
+    defaultPath: name || "minima-history.csv",
+    filters: [{ name: "CSV", extensions: ["csv"] }]
+  });
+  if (r.canceled || !r.filePath) return null;
+  fs.writeFileSync(r.filePath, String(text == null ? "" : text), "utf8");
+  return r.filePath;
+});
 
 // forward node events to the window + tray
 node.on("status", pushStatus);

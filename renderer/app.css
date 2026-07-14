@@ -17,6 +17,8 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 
 .logbox { max-height: 240px; overflow-y: auto; font-family: var(--mono); font-size: 11px;
   color: var(--dim); white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; }
+.termout { max-height: 46vh; min-height: 220px; user-select: text; color: var(--text); }
+.kv .tok-icon { width: 24px; height: 24px; }   /* balance rows: slightly smaller inline token icon */
 
 .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 50;
   background: var(--surface2); color: var(--text); border: 1px solid var(--border);

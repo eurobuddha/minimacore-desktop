@@ -36,6 +36,7 @@ const DEFAULTS = {
   rpcPortManual: "",         // -rpc override; blank → basePort + 4
   params: PARAMS.defaultParams(),   // EVERY other minima.jar startup flag, user-editable at first run
   extraArgs: "",             // any additional raw args, appended verbatim
+  labels: {},                // address → friendly name (shown in Receive / History / CSV)
   theme: "current"           // current | original-light | original-dark
 };
 

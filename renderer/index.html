@@ -20,6 +20,8 @@
       <button class="tab tab--active" data-view="balances">Balances</button>
       <button class="tab" data-view="receive">Receive</button>
       <button class="tab" data-view="send">Send</button>
+      <button class="tab" data-view="history">History</button>
+      <button class="tab" data-view="terminal">Terminal</button>
       <button class="tab" data-view="settings">Settings</button>
       <button class="tab" data-view="node">Node</button>
     </nav>
@@ -43,6 +45,24 @@
       <section class="view" id="view-send">
         <div class="view__title">Send</div>
         <div class="card" id="sendCard"></div>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="view__title">History</div>
+        <div class="seg" id="histActions"></div>
+        <div id="histList"></div>
+        <div id="histMore"></div>
+      </section>
+
+      <section class="view" id="view-terminal">
+        <div class="view__title">Terminal</div>
+        <div class="view__desc" style="color:var(--amber)">Commands run against your live node immediately — there is no confirmation guard.</div>
+        <pre class="logbox termout" id="termOut"></pre>
+        <input class="field__input" id="termIn" placeholder="a node command, e.g. status  ·  ↑/↓ history · Tab completes" autocomplete="off" spellcheck="false" style="margin-top:8px" />
+        <div class="seg" style="margin-top:8px">
+          <button class="btn btn--sm btn--outline" id="termClear">Clear</button>
+          <button class="btn btn--sm btn--outline" id="termCopy">Copy output</button>
+        </div>
       </section>
 
       <section class="view" id="view-settings">
@@ -74,6 +94,7 @@
 
   <script src="qrcode.js"></script>
   <script src="params.js"></script>
+  <script src="tokenicons.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

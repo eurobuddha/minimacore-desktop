@@ -15,6 +15,16 @@ let activeView = "balances";
 let refreshTimer = null;
 let RESTORE = null;          // {seed, keyuses, host} held in memory for a pending restore — NEVER persisted
 let postBootStarted = false; // guard: run the post-boot wallet step (new backup / restore resync) once
+const ICON_CACHE = new Map();// tokenid → { icon: dataURI|null, valid: bool|null } — survives the 15s refresh
+let HIST_SYNCING = false;    // guard against overlapping history syncs
+let histOldestOffset = 0;    // how deep "Load older" has paged
+// terminal state
+let TERM_OUT = "";
+const TERM_HIST = [];
+let termIdx = -1;
+let TERM_CMDS = null;        // command names for Tab-completion (lazy from `help`)
+
+function labelFor(addr) { return (CFG && CFG.labels && CFG.labels[addr]) || ""; }
 
 // ---- node command (throws on transport error OR status:false) --------------
 async function cmd(command) {
@@ -362,6 +372,8 @@ function renderActive() {
   if (activeView === "balances") renderBalances();
   else if (activeView === "receive") renderReceive();
   else if (activeView === "send") renderSend();
+  else if (activeView === "history") renderHistory();
+  else if (activeView === "terminal") renderTerminal();
   else if (activeView === "settings") renderSettings();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
@@ -377,15 +389,66 @@ async function renderBalances() {
   if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
   const bal = await tryCmd("balance");
   if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
-  host.innerHTML = bal.map(b => {
-    const t = b.token && typeof b.token === "object" ? (b.token.name && (b.token.name.name || b.token.name) || "") : (b.token || "");
-    const name = b.tokenid === MINIMA ? "MINIMA" : (t || short(b.tokenid, 10));
-    return `<div class="card">
-      <div class="kv"><span class="kv__k">${esc(name)}</span><span class="kv__v">${esc(b.confirmed)}</span></div>
-      <div class="kv"><span class="kv__k">sendable</span><span class="kv__v kv__v--green">${esc(b.sendable)}</span></div>
-      ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">pending</span><span class="kv__v kv__v--amber">${esc(b.unconfirmed)}</span></div>` : ""}
-    </div>`;
-  }).join("");
+  host.innerHTML = bal.map(balCardHtml).join("");
+  host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async () => {
+    const tid = btn.dataset.tokenid;
+    btn.disabled = true; btn.textContent = "Consolidating…";
+    try { await cmd(`consolidate tokenid:${tid}`); toast("Consolidation submitted ✓ — coins merge over the next blocks.", "ok"); }
+    catch (e) { toast("Consolidate failed: " + e.message, "err"); btn.disabled = false; }
+  });
+  enhanceTokenIcons(host);
+}
+
+// One balance card: token icon (identicon → real icon over) + name + amounts + coin count + consolidate nudge.
+function balCardHtml(b) {
+  const isNative = b.tokenid === MINIMA || !b.tokenid;
+  const name = TOK.tokenName(b.token, b.tokenid);
+  const coins = parseInt(b.coins, 10) || 0;
+  const cached = ICON_CACHE.get(b.tokenid);
+  let iconCell;
+  if (isNative) {
+    iconCell = `<span class="tok-wrap"><img class="tok-icon tok-icon--native" src="minima-mark.svg" alt=""><span class="tok-badge">✓</span></span>`;
+  } else {
+    const identicon = TOK.identiconDataUri(b.tokenid);
+    const res = TOK.resolveIcon(TOK.pickIconField(b.token));
+    const src = (cached && cached.icon) || res.data || identicon;
+    const showBadge = cached && cached.valid;
+    iconCell = `<span class="tok-wrap" data-tokenid="${esc(b.tokenid)}" data-identicon="${esc(identicon)}"`
+      + (res.data ? ` data-icon-data="${esc(res.data)}"` : "")
+      + (res.remote ? ` data-icon-remote="${esc(res.remote)}"` : "")
+      + (TOK.webvalidateUrl(b.token) ? ` data-webv="1"` : "")
+      + `><img class="tok-icon" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
+  }
+  const nudge = coins >= 10
+    ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" style="margin-top:8px;width:100%">Consolidate ▸ ${coins} coins into fewer</button>`
+    : "";
+  return `<div class="card">
+    <div class="kv"><span class="kv__k">${iconCell}${esc(name)}</span><span class="kv__v">${esc(b.confirmed)}</span></div>
+    <div class="kv"><span class="kv__k">sendable</span><span class="kv__v kv__v--green">${esc(b.sendable)}</span></div>
+    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">pending</span><span class="kv__v kv__v--amber">${esc(b.unconfirmed)}</span></div>` : ""}
+    ${coins ? `<div class="kv"><span class="kv__k">coins</span><span class="kv__v">${coins}</span></div>` : ""}
+    ${nudge}
+  </div>`;
+}
+
+// After paint: swap in real icons (inline data → now; http/ipfs → SSRF-guarded main fetch) + validation badge
+// (node `tokenvalidate`). Per-tokenid cache means the 15s refresh does zero network work for seen tokens.
+async function enhanceTokenIcons(root) {
+  for (const w of root.querySelectorAll(".tok-wrap[data-tokenid]")) {
+    const tid = w.dataset.tokenid;
+    let entry = ICON_CACHE.get(tid);
+    if (entry) { applyIcon(w, entry); continue; }
+    entry = { icon: null, valid: null };
+    if (w.dataset.iconData) entry.icon = w.dataset.iconData;
+    else if (w.dataset.iconRemote) { try { entry.icon = await api.tokenIcon(w.dataset.iconRemote); } catch (e) {} }
+    if (w.dataset.webv) { try { const r = await cmd(`tokenvalidate tokenid:${tid}`); entry.valid = !!(r && r.web && r.web.valid); } catch (e) { entry.valid = false; } }
+    ICON_CACHE.set(tid, entry);
+    applyIcon(w, entry);
+  }
+}
+function applyIcon(w, e) {
+  if (e.icon) { const img = w.querySelector("img"); if (img) { img.onerror = () => { img.onerror = null; img.src = w.dataset.identicon; }; img.src = e.icon; } }
+  if (e.valid) { const badge = w.querySelector(".tok-badge"); if (badge) badge.hidden = false; }
 }
 
 // ---- Receive ---------------------------------------------------------------
@@ -400,6 +463,22 @@ function setRecv(addr) {
   const addrEl = el("recvAddr");
   addrEl.textContent = addr; addrEl.onclick = () => copy(addr);
   drawQR(addr);
+  renderRecvLabel(addr);
+}
+function renderRecvLabel(addr) {
+  const btn = el("newAddrBtn");
+  let box = el("recvLabelBox");
+  if (!box) { box = document.createElement("div"); box.id = "recvLabelBox"; box.style.marginTop = "10px"; btn.parentNode.insertBefore(box, btn); }
+  box.innerHTML = `<div class="field__label">Label this address (optional)</div>
+    <div class="seg"><input class="field__input" id="recvLabelIn" placeholder="e.g. Savings" value="${esc(labelFor(addr))}" />
+      <button class="btn btn--outline btn--sm" id="recvLabelSave">Save</button></div>`;
+  el("recvLabelSave").onclick = async () => {
+    const name = el("recvLabelIn").value.trim();
+    const labels = Object.assign({}, CFG.labels);
+    if (name) labels[addr] = name; else delete labels[addr];
+    CFG = await api.saveConfig({ labels });
+    toast(name ? "Label saved ✓" : "Label removed", "ok");
+  };
 }
 function drawQR(text) {
   const host = el("qr"); host.innerHTML = "";
@@ -408,24 +487,267 @@ function drawQR(text) {
   catch (e) { /* address too long for one QR — the copyable text still works */ }
 }
 
+// ---- History ---------------------------------------------------------------
+async function renderHistory() {
+  ensureHistActions();
+  await renderHistoryList();
+  if (running) syncHistory({ older: false });
+}
+function ensureHistActions() {
+  el("histActions").innerHTML =
+    `<button class="btn btn--sm btn--outline" id="histRefresh">Refresh</button>
+     <button class="btn btn--sm btn--outline" id="histCopy">Copy</button>
+     <button class="btn btn--sm btn--outline" id="histCsv">Export CSV</button>`;
+  el("histRefresh").onclick = () => { if (running) syncHistory({ older: false }); };
+  el("histCopy").onclick = () => copyHistory();
+  el("histCsv").onclick = () => exportHistory();
+}
+async function renderHistoryList() {
+  const host = el("histList");
+  const rows = await api.histGet();
+  if (!rows || !rows.length) {
+    host.innerHTML = `<div class="empty">No transactions yet.${running ? "" : " Waiting for the node…"}</div>`;
+    el("histMore").innerHTML = ""; return;
+  }
+  let tip = 0; try { const b = await tryCmd("block"); tip = parseInt((b && (b.block != null ? b.block : b)), 10) || 0; } catch (e) {}
+  host.innerHTML = rows.map(histRowHtml).join("");
+  host.querySelectorAll(".row[data-txid]").forEach(node => node.onclick = () => {
+    const row = rows.find(x => x.txpowid === node.dataset.txid); if (row) showHistoryDetail(row, tip);
+  });
+  el("histMore").innerHTML = running ? `<button class="btn btn--outline btn--full" id="histOlder">Load older</button>` : "";
+  if (el("histOlder")) el("histOlder").onclick = () => syncHistory({ older: true });
+}
+function histRowHtml(r) {
+  const glyph = r.direction === "in" ? "↓" : r.direction === "out" ? "↑" : "⟲";
+  const cls = r.direction === "in" ? "row__l1--green" : r.direction === "out" ? "row__l1--red" : "";
+  let l1;
+  if (r.kind === "split" || r.kind === "consolidation")
+    l1 = (r.kind === "split" ? "Split · " + r.outCount : "Consolidation · " + r.inCount) + " coins";
+  else {
+    const sign = r.direction === "in" ? "+" : r.direction === "out" ? "−" : "";
+    l1 = sign + TOK.tidyAmount(r.amount) + "  " + r.tokenName;
+  }
+  const who = labelFor(r.counterparty) || short(r.counterparty, 20);
+  return `<div class="row" data-txid="${esc(r.txpowid)}" style="cursor:pointer">
+    <div class="row__glyph ${cls}">${glyph}</div>
+    <div class="row__mid"><div class="row__l1 ${cls}">${esc(l1)}</div><div class="row__l2">${esc(who)} · ${esc(relTime(r.time))}</div></div>
+    <div class="row__r">#${esc(r.block)}</div></div>`;
+}
+function showHistoryDetail(r, tip) {
+  const conf = (tip && r.block) ? (tip - r.block + 1) : "";
+  const timeStr = r.time ? new Date(r.time).toLocaleString() : "—";
+  const lbl = labelFor(r.counterparty);
+  const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "—";
+  const deltas = Object.keys(r.difference || {}).map(t => `${TOK.shortId(t)}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "—";
+  const bd = (list) => (list && list.length ? list.map(c => `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${esc(short(c.address, 16))}`).join("<br>") : "—");
+  const kind = r.kind !== "normal" ? (r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
+    <div class="modal__title">Transaction</div>
+    <div class="kv"><span class="kv__k">Type</span><span class="kv__v">${esc(kind)}</span></div>
+    <div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${esc(TOK.tidyAmount(r.amount))} ${esc(r.tokenName)}</span></div>
+    <div class="kv"><span class="kv__k">Block</span><span class="kv__v">#${esc(r.block)}${conf !== "" ? " · " + conf + " conf" : ""}</span></div>
+    <div class="kv"><span class="kv__k">Time</span><span class="kv__v">${esc(timeStr)}</span></div>
+    <div class="kv"><span class="kv__k">Txpow id</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(short(r.txpowid, 22))}</span></div>
+    <div class="kv"><span class="kv__k">${r.direction === "in" ? "From" : "To"}</span><span class="kv__v">${esc(who)}</span></div>
+    <div class="view__sub">Per-token effect</div><div class="kv__v" style="text-align:left">${deltas}</div>
+    <div class="view__sub">Inputs (${r.inCount})</div><div class="kv__v" style="text-align:left">${bd(r.inputs)}</div>
+    <div class="view__sub">Outputs (${r.outCount})</div><div class="kv__v" style="text-align:left">${bd(r.outputs)}</div>
+    <button class="btn btn--outline btn--full" id="histClose">Close</button></div></div>`);
+  el("histTxid").onclick = () => copy(r.txpowid);
+  const close = () => { const o = el("histDetail"); if (o) o.remove(); };
+  el("histClose").onclick = close;
+  el("histDetail").onclick = (e) => { if (e.target.id === "histDetail") close(); };
+}
+function relTime(ms) {
+  if (!ms) return "";
+  const d = Date.now() - ms, m = Math.floor(d / 60000), h = Math.floor(d / 3600000), days = Math.floor(d / 86400000);
+  if (d < 60000) return "just now";
+  if (m < 60) return m + "m ago";
+  if (h < 24) return h + "h ago";
+  if (days < 30) return days + "d ago";
+  return new Date(ms).toLocaleDateString();
+}
+
+// coin/txpow → normalized row (ported from the native history apps' difference→direction + split/consol rules)
+function coinLite(c) { return { address: c.miniaddress || c.address || "", amount: c.amount || c.tokenamount || "0", tokenid: c.tokenid || MINIMA, token: c.token }; }
+function absCmp(a, b) {   // compare |decimal string a| vs |b| without float rounding
+  a = String(a).replace(/^-/, ""); b = String(b).replace(/^-/, "");
+  const as = a.split("."), bs = b.split(".");
+  const an = (as[0] || "0").replace(/^0+/, "") || "0", bn = (bs[0] || "0").replace(/^0+/, "") || "0";
+  if (an.length !== bn.length) return an.length - bn.length;
+  if (an !== bn) return an < bn ? -1 : 1;
+  const af = as[1] || "", bf = bs[1] || "";
+  return af === bf ? 0 : (af < bf ? -1 : 1);
+}
+function decAdd(a, b) {   // non-negative decimal string addition (BigInt-scaled)
+  a = String(a); b = String(b);
+  const as = a.split("."), bs = b.split(".");
+  const af = as[1] || "", bf = bs[1] || "", scale = Math.max(af.length, bf.length);
+  const ax = BigInt((as[0] || "0") + af.padEnd(scale, "0"));
+  const bx = BigInt((bs[0] || "0") + bf.padEnd(scale, "0"));
+  let s = (ax + bx).toString();
+  if (scale === 0) return s;
+  s = s.padStart(scale + 1, "0");
+  return s.slice(0, -scale) + "." + s.slice(-scale);
+}
+function normalize(txpow, detail) {
+  detail = detail || {};
+  const hdr = txpow.header || {}, txn = (txpow.body && txpow.body.txn) || {};
+  const inputs = (txn.inputs || []).map(coinLite), outputs = (txn.outputs || []).map(coinLite);
+  const diff = detail.difference || {};
+  let primTok = MINIMA, primAmt = "0";
+  for (const tid of Object.keys(diff)) if (absCmp(diff[tid], primAmt) > 0) { primTok = tid; primAmt = diff[tid]; }
+  const signed = String(primAmt), neg = signed.startsWith("-");
+  const isZero = /^-?0*\.?0*$/.test(signed);
+  let direction = isZero ? "self" : (neg ? "out" : "in");
+  const inCount = inputs.length, outCount = outputs.length;
+  let kind = "normal";
+  if (direction === "self") {
+    if (outCount > inCount && outCount > 1) kind = "split";
+    else if (inCount > outCount && inCount > 1) kind = "consolidation";
+  }
+  let amount = signed.replace(/^-/, "");
+  if (kind === "split" || kind === "consolidation") {
+    const totals = {};
+    for (const o of outputs) totals[o.tokenid] = decAdd(totals[o.tokenid] || "0", o.amount || "0");
+    let domTok = MINIMA, domAmt = "0";
+    for (const tid of Object.keys(totals)) if (absCmp(totals[tid], domAmt) > 0) { domTok = tid; domAmt = totals[tid]; }
+    primTok = domTok; amount = domAmt;
+  }
+  const coinForTok = inputs.concat(outputs).find(c => c.tokenid === primTok);
+  const tokenName = TOK.tokenName(coinForTok && coinForTok.token, primTok);
+  const counterparty = (direction === "in" ? (inputs[0] && inputs[0].address) : (outputs[0] && outputs[0].address)) || "";
+  return { txpowid: txpow.txpowid, block: parseInt(hdr.block, 10) || 0, time: parseInt(hdr.timemilli, 10) || 0,
+    istransaction: !!txpow.istransaction, direction, kind, tokenid: primTok, tokenName, amount: String(amount),
+    counterparty, inCount, outCount, difference: diff, inputs, outputs };
+}
+// adaptive pager (256KB cap → halve; skip oversized) + incremental stop at first known txpowid + persist + render
+async function syncHistory(opts) {
+  opts = opts || {};
+  if (HIST_SYNCING) return; HIST_SYNCING = true;
+  try {
+    const known = new Set((await api.histGet()).map(r => r.txpowid));
+    let offset = opts.older ? histOldestOffset : 0, max = 8, skips = 0, pages = 0, hitKnown = false;
+    const fresh = [];
+    for (;;) {
+      let page;
+      try {
+        const j = await api.cmd(`history relevant:true max:${max} offset:${offset}`);
+        page = (!j || j.status !== true || !j.response) ? { over: true } : { txpows: j.response.txpows || [], details: j.response.details || [] };
+      } catch (e) { page = { over: true }; }
+      if (page.over) { if (max > 1) { max = Math.floor(max / 2); continue; } if (skips < 3) { skips++; offset += 1; max = 8; continue; } break; }
+      if (!page.txpows.length) break;
+      for (let i = 0; i < page.txpows.length; i++) {
+        const row = normalize(page.txpows[i], page.details[i]);
+        if (!row.txpowid) continue;
+        if (!opts.older && known.has(row.txpowid)) { hitKnown = true; break; }
+        fresh.push(row);
+      }
+      if (hitKnown) break;
+      offset += page.txpows.length; max = 8; skips = 0;
+      if (opts.older && ++pages >= 4) break;
+    }
+    if (fresh.length) await api.histAdd(fresh);
+    histOldestOffset = opts.older ? offset : Math.max(histOldestOffset, offset);
+    await renderHistoryList();
+  } finally { HIST_SYNCING = false; }
+}
+function histType(r) { return r.kind !== "normal" ? r.kind : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self"); }
+function histDate(ms) { return ms ? new Date(ms).toISOString().slice(0, 19).replace("T", " ") : ""; }
+async function copyHistory() {
+  const rows = await api.histGet();
+  const lines = rows.map(r => [histDate(r.time), histType(r), TOK.tidyAmount(r.amount), r.tokenName, labelFor(r.counterparty) || r.counterparty, r.txpowid, r.block].join("\t"));
+  copy(["date\ttype\tamount\ttoken\tcounterparty\ttxpowid\tblock", ...lines].join("\n"));
+}
+async function exportHistory() {
+  const rows = await api.histGet();
+  const q = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  const lines = rows.map(r => [histDate(r.time), histType(r), TOK.tidyAmount(r.amount), r.tokenName, labelFor(r.counterparty) || r.counterparty, r.txpowid, r.block].map(q).join(","));
+  const csv = ["date,type,amount,token,counterparty,txpowid,block", ...lines].join("\r\n");
+  const p = await api.exportCsv(csv, "minima-history.csv");
+  toast(p ? "Saved CSV ✓" : "Export cancelled", p ? "ok" : "");
+}
+
+// ---- Terminal (full node console — runs commands immediately, no guard) ----
+const FALLBACK_CMDS = ["balance", "coins", "send", "consolidate", "tokens", "tokencreate", "status", "block", "history",
+  "getaddress", "newaddress", "keys", "vault", "backup", "tokenvalidate", "checkaddress", "scripts", "help", "txncreate",
+  "txninput", "txnoutput", "txnsign", "txnpost", "txndelete", "megammrsync", "peers", "network", "quit", "coinexport",
+  "coinimport", "cointrack", "newscript", "sendpoll", "runscript", "hash", "random", "convert", "maths", "mmrcreate"];
+function parseHelpNames(h) {
+  const out = new Set();
+  const arr = Array.isArray(h) ? h : (h && (h.commands || h.response)) || [];
+  if (Array.isArray(arr)) for (const c of arr) { if (typeof c === "string") out.add(c.split(/\s/)[0]); else if (c && c.command) out.add(String(c.command).split(/\s/)[0]); }
+  else if (typeof h === "string") { (h.match(/\b[a-z][a-z0-9]{2,}\b/g) || []).forEach(w => out.add(w)); }
+  return out.size ? [...out].sort() : FALLBACK_CMDS.slice();
+}
+function appendTerm(s) {
+  TERM_OUT += (TERM_OUT ? "\n" : "") + s;
+  if (TERM_OUT.length > 20000) TERM_OUT = TERM_OUT.slice(TERM_OUT.length - 20000);
+  const out = el("termOut"); if (out) { out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight; }
+}
+async function renderTerminal() {
+  const out = el("termOut"), inp = el("termIn");
+  out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight;
+  if (!TERM_CMDS && running) { const h = await tryCmd("help"); TERM_CMDS = parseHelpNames(h); }
+  el("termClear").onclick = () => { TERM_OUT = ""; out.textContent = ""; };
+  el("termCopy").onclick = () => copy(TERM_OUT);
+  inp.onkeydown = async (e) => {
+    if (e.key === "Enter") {
+      const c = inp.value.trim(); if (!c) return;
+      inp.value = ""; TERM_HIST.push(c); termIdx = TERM_HIST.length;
+      appendTerm("> " + c);
+      try { const r = await api.cmd(c); appendTerm(JSON.stringify(r, null, 2)); }
+      catch (err) { appendTerm("error: " + (err && err.message || err)); }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault(); if (!TERM_HIST.length) return;
+      termIdx = Math.max(0, termIdx - 1); inp.value = TERM_HIST[termIdx] || "";
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault(); if (!TERM_HIST.length) return;
+      termIdx = Math.min(TERM_HIST.length, termIdx + 1); inp.value = TERM_HIST[termIdx] || "";
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      const parts = inp.value.split(" "), frag = parts[0];
+      if (!frag || !TERM_CMDS) return;
+      const matches = TERM_CMDS.filter(c => c.startsWith(frag));
+      if (matches.length) { const i = matches.indexOf(frag); parts[0] = matches[(i + 1) % matches.length]; inp.value = parts.join(" "); }
+    }
+  };
+  inp.focus();
+}
+
 // ---- Settings --------------------------------------------------------------
 async function renderSettings() {
   const host = el("settingsBody");
   if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
   const [addr, keys] = await Promise.all([tryCmd("getaddress"), tryCmd("keys action:list")]);
-  const uses = keysMaxUses(keys);
+  const ku = keysInfo(keys);
+  const pct = ku.cap ? Math.min(100, Math.round(ku.used / ku.cap * 100)) : 0;
+  const warn = pct >= 80;
+  const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
   host.innerHTML = `
     <div class="card"><div class="card__title">Wallet</div>
       <div class="kv"><span class="kv__k">Address</span><span class="kv__v">${esc(short((addr && (addr.miniaddress || addr.address)) || "—", 22))}</span></div>
-      <div class="kv"><span class="kv__k">Signatures used</span><span class="kv__v">${esc(uses)}</span></div>
       <button class="btn btn--outline btn--full" id="setReveal" style="margin-top:8px">Reveal seed phrase</button>
       <div class="addrbox" id="setSeed" style="display:none;white-space:normal;line-height:1.6"></div>
       <button class="btn btn--outline btn--full" id="setRestore">Restore from a different seed…</button>
+    </div>
+    <div class="card"><div class="card__title">Signing keys (WOTS safety)</div>
+      <div class="view__desc">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically — this shows your headroom.</div>
+      <div class="health"><div class="health__row"><span>Most-used key</span><span>${esc(ku.used)} / ${esc(ku.cap)} sigs${ku.count ? " · " + ku.count + " keys" : ""}</span></div>
+        <div class="health__track"><div class="health__fill${warn ? " health__fill--warn" : ""}" style="width:${pct}%"></div></div></div>
+      ${warn ? `<div class="status status--warn">⚠ A signing key is ${pct}% used — generate fresh keys or restore with the correct key-uses before it exhausts.</div>` : ""}
     </div>
     <div class="card"><div class="card__title">Backup</div>
       <div class="view__desc">Writes an encrypted recovery backup into the node's data folder. Your seed phrase (above) is the ultimate backup.</div>
       <div class="field"><input class="field__input" id="bkPw" type="password" placeholder="backup password" /></div>
       <button class="btn btn--outline btn--full" id="setBackup">Create encrypted backup</button>
+    </div>
+    <div class="card"><div class="card__title">Address labels</div>
+      ${labelKeys.length ? labelKeys.map(a => `<div class="kv"><span class="kv__k" style="word-break:break-all">${esc(labels[a])} <span style="color:var(--dim2);font-size:11px">${esc(short(a, 24))}</span></span><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("") : `<div class="view__desc">No labels yet. Name an address in the Receive tab.</div>`}
+    </div>
+    <div class="card"><div class="card__title">History</div>
+      <div class="view__desc">Your transaction history is stored locally (the node prunes old data). Clear it if you switch wallets.</div>
+      <button class="btn btn--outline btn--full" id="setClearHist">Clear local history</button>
     </div>
     <div class="card"><div class="card__title">Diagnostics</div>
       <div class="field"><input class="field__input" id="diagCmd" placeholder="a node command, e.g. status" /></div>
@@ -443,12 +765,21 @@ async function renderSettings() {
     try { await cmd(`backup password:"${pw}"`); toast("Encrypted backup written to the node data folder ✓", "ok"); }
     catch (e) { toast("Backup failed: " + e.message, "err"); }
   };
+  host.querySelectorAll(".lbl-del").forEach(btn => btn.onclick = async () => {
+    const nl = Object.assign({}, CFG.labels); delete nl[btn.dataset.addr];
+    CFG = await api.saveConfig({ labels: nl }); toast("Label removed", "ok"); renderSettings();
+  });
+  el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
   el("diagGo").onclick = async () => { const c = el("diagCmd").value.trim(); if (!c) return; try { const r = await api.cmd(c); el("diagOut").textContent = JSON.stringify(r, null, 2); } catch (e) { el("diagOut").textContent = e.message; } };
   el("setTheme").onclick = () => { cycleTheme(); renderSettings(); };
 }
-function keysMaxUses(keys) {
-  try { const arr = Array.isArray(keys) ? keys : (keys && keys.keys) || []; let m = 0; for (const k of arr) m = Math.max(m, parseInt(k.uses, 10) || 0); return m; }
-  catch (e) { return "—"; }
+function keysInfo(keys) {
+  try {
+    const arr = Array.isArray(keys) ? keys : (keys && keys.keys) || [];
+    let used = 0, cap = 0;
+    for (const k of arr) { used = Math.max(used, parseInt(k.uses, 10) || 0); cap = Math.max(cap, parseInt(k.maxuses, 10) || 0); }
+    return { used, cap: cap || 262144, count: arr.length };
+  } catch (e) { return { used: 0, cap: 262144, count: 0 }; }
 }
 
 // ---- Send ------------------------------------------------------------------
