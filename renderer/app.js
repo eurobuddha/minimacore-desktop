@@ -30,7 +30,7 @@ function labelFor(addr) { return (CFG && CFG.labels && CFG.labels[addr]) || ""; 
 // pasted "address" inject extra params (address:/burn:/multi:) into a fund-moving `send`. Reject anything that
 // isn't a clean address / amount / tokenid before building any command.
 function validAddr(a) { return /^(0x|Mx)[0-9A-Za-z]+$/.test(a); }
-function validAmt(a) { return /^[0-9]+(\.[0-9]+)?$/.test(a) && parseFloat(a) > 0; }
+function validAmt(a) { return /^[0-9]*\.?[0-9]+$/.test(a) && parseFloat(a) > 0; }
 function validTok(t) { return t === "" || t === MINIMA || /^0x[0-9A-Fa-f]+$/.test(t); }
 
 // ---- node command (throws on transport error OR status:false) --------------
@@ -235,6 +235,7 @@ function showSetup() {
       host = el("rHost").value.trim() || CFG.megammrHost;
       if (!seed) { toast("Enter your seed phrase."); return; }
       if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
+      if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
       if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
       if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
       RESTORE = { seed, keyuses, host };
@@ -359,6 +360,7 @@ function showRestoreOverlay() {
     const host = el("orHost").value.trim() || CFG.megammrHost;
     if (!seed) { toast("Enter your seed phrase."); return; }
     if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
+    if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
     if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
     if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
@@ -857,9 +859,9 @@ function sendForm(mode) {
       el("sGo").disabled = true; el("sGo").textContent = "Sending…";
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
-        if (!chk) { toast("Address failed validation — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
+        if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
-        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = "";
+        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = el("sTok").value = "";
       } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send";
     };
@@ -926,17 +928,19 @@ function renderNode(s) {
     try { await api.applyJarUpdate(u); toast("Node updated to " + u.version + " ✓ — restarting", "ok"); }
     catch (e) { toast("Update failed: " + e.message, "err"); }
   };
+  paintLogs();   // refresh the Node-tab log pane now that this view is active
 }
 
 let logLines = [];
 const LOG_MAX = 2000;
 async function initLogs() { logLines = await api.nodeLogs(); paintLogs(); }
 function appendLog(line) { if (!line) return; logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX); paintLogs(); }
+function viewActive(v) { const s = document.getElementById("view-" + v); return !!(s && s.classList.contains("view--active")); }
 function paintLogs() {
   const text = logLines.join("\n");
-  const nodeBox = el("logbox"); if (nodeBox) { nodeBox.textContent = text; nodeBox.scrollTop = nodeBox.scrollHeight; }
+  const nodeBox = el("logbox"); if (nodeBox && viewActive("node")) { nodeBox.textContent = text; nodeBox.scrollTop = nodeBox.scrollHeight; }
   const logsBox = el("logsBox");
-  if (logsBox) { logsBox.textContent = text; const follow = el("logsFollow"); if (!follow || follow.checked) logsBox.scrollTop = logsBox.scrollHeight; }
+  if (logsBox && viewActive("logs")) { logsBox.textContent = text; const follow = el("logsFollow"); if (!follow || follow.checked) logsBox.scrollTop = logsBox.scrollHeight; }
 }
 // ---- Logs tab (full live node output) ----
 async function renderLogs() {
