@@ -75,7 +75,7 @@ async function boot() {
 
   api.onStatus(onStatus);
   api.onLog(appendLog);
-  api.onMail(() => { refreshMailBadge(); if (activeView === "mail" && MAIL_ID) renderMailCurrent(); });
+  api.onMail(onMailUpdate);
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -335,7 +335,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
+    try { await api.mailInvalidate(); } catch (e) {} resetMailState();   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -374,7 +374,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
+      try { await api.mailInvalidate(); } catch (e) {} resetMailState();   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -525,8 +525,13 @@ let MAIL_ID = null;         // { publicId, name, payaddr }
 let MAIL_CONTACTS = [];
 let mailView = "inbox";     // inbox | thread | new | contacts | identity
 let mailPeer = null;        // other party's publicId
-let mailUnsub = null;
 const MAIL_EMOJIS = ["😀","😂","😍","👍","🙏","🔥","🎉","❤️","😎","🤝","💰","🚀","✅","👀","😅","🤔","💬","📩","⚡","🌍","🍺","☕","👋","💯"];
+
+// After a seed restore/resync the main-process mail identity is invalidated (api.mailInvalidate). The renderer must
+// drop its cached identity too, or renderMail() (gated on !MAIL_ID) keeps showing the OLD seed's id + pay address —
+// a correspondent could then pay an address the restored wallet no longer controls. Call this alongside every
+// api.mailInvalidate().
+function resetMailState() { MAIL_ID = null; MAIL_CONTACTS = []; mailView = "inbox"; mailPeer = null; }
 
 function mailAvatar(publicId) { return TOK.identiconDataUri(String(publicId || "0x0").slice(0, 18)); }
 function mailShort(id) { id = String(id || ""); return id.length > 16 ? id.slice(0, 8) + "…" + id.slice(-4) : id; }
@@ -556,6 +561,42 @@ function renderMailCurrent() {
   if (mailView === "contacts") return renderMailContacts();
   if (mailView === "identity") return renderMailIdentity();
   return renderMailInbox();
+}
+// Live scan-loop updates arrive as a stream of `mail:update` pushes. NEVER rebuild the active sub-view from one:
+// that would wipe the compose input / add-contact form the user is typing into and steal focus every ~10s (the
+// "frozen tab" bug). Coalesce bursts, always refresh the badge, and only patch PASSIVE lists in place — the inbox
+// list and an open thread's bubbles. The New / Contacts / Identity forms are left completely untouched.
+let mailUpdateTimer = null;
+function onMailUpdate() {
+  if (mailUpdateTimer) return;
+  mailUpdateTimer = setTimeout(() => { mailUpdateTimer = null; applyMailUpdate(); }, 350);
+}
+function applyMailUpdate() {
+  refreshMailBadge();
+  if (activeView !== "mail" || !MAIL_ID) return;
+  if (mailView === "inbox") refreshMailInboxList().catch(() => {});
+  else if (mailView === "thread") refreshMailConv().catch(() => {});
+  // new | contacts | identity: form left intact — never re-render out from under the user.
+}
+async function refreshMailInboxList() {
+  if (!el("mailList")) return;                        // not on the inbox layout → nothing to patch
+  const th = await api.mailThreads().catch(() => []);
+  const list = el("mailList"); if (!list) return;     // re-fetch after the await — the view may have changed under us
+  const sy = list.scrollTop;                          // preserve scroll — a live update shouldn't yank the reader to the top
+  list.innerHTML = th.length ? th.map(mailThreadRowHtml).join("")
+    : `<div class="empty">No messages yet. Tap <b>New</b> to start a conversation — share your Identity so others can message you.</div>`;
+  list.querySelectorAll(".mail-thread[data-peer]").forEach(node => node.onclick = () => { mailPeer = node.dataset.peer; mailView = "thread"; renderMailCurrent(); });
+  list.scrollTop = sy;
+}
+async function refreshMailConv() {
+  if (!el("mailConv") || !mailPeer) return;                      // not on a thread → nothing to patch
+  const msgs = await api.mailThreadWith(mailPeer).catch(() => null);
+  const conv = el("mailConv");                                   // re-fetch after the await
+  if (!msgs || !conv) return;
+  const atBottom = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 60;
+  const sy = conv.scrollTop;                                     // preserve scroll unless the reader is already at the end
+  conv.innerHTML = msgs.length ? msgs.map(mailBubbleHtml).join("") : `<div class="empty">No messages yet — say hi.</div>`;
+  conv.scrollTop = atBottom ? conv.scrollHeight : sy;
 }
 function mailHeader(title, backTo) {
   return `<div class="mail-top">
@@ -1084,7 +1125,9 @@ async function renderSettings() {
       : "Re-fetches the chain and your coins. Your seed, keys and key-uses are NOT changed. Continue?";
     if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
-    try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost }); toast("Resync complete ✓", "ok"); renderBalances(); }
+    try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
+      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); }   // seed reset → re-derive the mail identity
+      toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";
   };

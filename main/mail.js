@@ -22,6 +22,7 @@ const POLL_DEPTH = 32;      // steady-state recent window
 const BACKFILL_MAX_DEPTH = 256;
 
 const emitter = new EventEmitter();
+const seenCoins = new Set();   // coinids already trial-decrypted this session (skip re-opening on every poll)
 let identity = null;        // {boxPk,boxSk,signPk,signSk,publicId}
 let mypayaddr = "";
 let scanTimer = null;
@@ -52,8 +53,13 @@ async function init() {
   if (!store.metaGet("coinnotify")) { try { await nodeCmd("coinnotify action:add address:" + CHAINMAIL); store.metaSet("coinnotify", true); } catch (e) {} }
   return identity;
 }
-/** On wallet restore the seed changed → drop the cached identity so it re-derives. */
-function invalidateIdentity() { config.deleteSecret(MAIL_KEY_ACCOUNT); identity = null; backfilled = false; }
+/** On wallet restore the seed changed → drop the cached identity AND the old seed's local inbox/contacts/payaddr,
+ *  so the restored (different) identity doesn't show the previous wallet's conversations. Called only on seed change. */
+function invalidateIdentity() {
+  config.deleteSecret(MAIL_KEY_ACCOUNT);
+  identity = null; backfilled = false; seenCoins.clear(); mypayaddr = "";
+  try { store.clear(); } catch (e) { /* best effort */ }
+}
 
 function threadKey(a, b, subject) { return crypto.createHash("sha256").update([a, b].sort().join("") + (subject || ""), "utf8").digest("hex"); }
 function randomId() { return crypto.randomBytes(32).toString("hex"); }
@@ -100,8 +106,23 @@ async function pay(toPublicId, payaddr, amount, tokenid, tokenname) {
   if (!/^0x[0-9A-Fa-f]+$/.test(tokenid) && tokenid !== "0x00") throw new Error("Invalid token.");
   const r = await nodeCmd(`send amount:${amount} address:${payaddr} tokenid:${tokenid}`);
   if (!r || (r.status !== true && r.pending !== true)) throw new Error((r && r.error) || "payment failed");
+  // The payment is committed here. A receipt-message failure MUST NOT surface as a payment failure —
+  // otherwise the user re-pays (double spend). Post the on-chain receipt best-effort.
   const txpowid = (r.response && r.response.txpowid) || "";
-  return sendMessage(toPublicId, { type: "payment", message: "", amount: String(amount), tokenid, tokenname: tokenname || "", txpowid });
+  try { return await sendMessage(toPublicId, { type: "payment", message: "", amount: String(amount), tokenid, tokenname: tokenname || "", txpowid }); }
+  catch (e) {
+    // Receipt-to-peer failed, but the PAYMENT already went through above. Persist a local ledger entry regardless,
+    // so the spend is visible in the thread/history after a restart — otherwise a receipt failure hides real funds leaving.
+    try {
+      const block = await currentBlock();   // the payment IS on-chain — record the block so it can confirm normally
+      store.addMessage({ hashref: threadKey(identity.publicId, toPublicId, ""), fromname: store.metaGet("myname") || "",
+        frompublickey: identity.publicId, topublickey: toPublicId, subject: "", message: "", randomid: randomId(),
+        incoming: false, read: true, date: Date.now(), status: "sent", sentblock: block, type: "payment",
+        amount: String(amount), tokenid, tokenname: tokenname || "", txpowid, image: "", payaddr: mypayaddr });
+    } catch (e2) { /* best effort */ }
+    emitter.emit("update");
+    return { status: "sent", type: "payment", amount: String(amount), tokenid, tokenname: tokenname || "", txpowid, receiptFailed: true };
+  }
 }
 
 // ---- scan ----
@@ -129,6 +150,10 @@ async function scanOnce(deep) {
   for (const coin of coins) {
     const blob = statePort99(coin);
     if (!blob) continue;
+    const seenKey = coin.coinid || ("b:" + blob);                  // fall back to the blob when a coin lacks a coinid
+    if (seenCoins.has(seenKey)) continue;                          // already trial-decrypted this session
+    if (seenCoins.size > 40000) seenCoins.clear();
+    seenCoins.add(seenKey);
     let o; try { o = await mc.open(identity, blob); } catch (e) { o = null; }
     if (!o || !o.valid) continue;
     let m; try { m = JSON.parse(Buffer.from(o.plaintext).toString("utf8")); } catch (e) { continue; }
@@ -163,8 +188,10 @@ function shareString() { const id = identity && identity.publicId; const pa = st
 function setName(name) { store.metaSet("myname", String(name || "")); emitter.emit("update"); }
 function threads() { return store.threads().map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
 function otherOf(m) { if (!m || !identity) return ""; return m.incoming ? m.frompublickey : m.topublickey; }
-function thread(hashref) { store.markThreadRead(hashref); emitter.emit("update"); return store.thread(hashref); }
-function threadWith(peer) { if (!identity) return []; const h = threadKey(identity.publicId, peer, ""); store.markThreadRead(h); emitter.emit("update"); return store.thread(h); }
+// NOTE: emit ONLY when marking-read actually changed something. The renderer's live-update handler calls these
+// to refresh an open thread; emitting unconditionally would re-trigger that handler forever (a self-feeding loop).
+function thread(hashref) { if (store.markThreadRead(hashref)) emitter.emit("update"); return store.thread(hashref); }
+function threadWith(peer) { if (!identity) return []; const h = threadKey(identity.publicId, peer, ""); if (store.markThreadRead(h)) emitter.emit("update"); return store.thread(h); }
 function contacts() { return store.contacts(); }
 function addContact(share, name) {
   const parts = String(share || "").split("|");

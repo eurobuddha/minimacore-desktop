@@ -5,7 +5,7 @@
  * NOT kept in that JSON: it goes in the macOS Keychain (via the `security` CLI) with a 0600 file fallback,
  * and is only ever read by the MAIN process (the renderer never sees it — it talks through the RPC proxy).
  */
-const { app } = require("electron");
+const { app, safeStorage } = require("electron");
 const { execFileSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -22,6 +22,22 @@ const MANAGED = new Set(PARAMS.MANAGED);
 
 function configPath() { return path.join(app.getPath("userData"), "config.json"); }
 function secretFilePath() { return path.join(app.getPath("userData"), "rpc.secret"); }
+
+// --- on-disk secret fallback (only used when the Keychain is unavailable) ---
+// Never write secrets as plaintext: encrypt with Electron safeStorage (OS-key backed) when available. Reads accept a
+// legacy plaintext file for backward compatibility so existing installs aren't stranded.
+function encAvailable() { try { return !!(safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable()); } catch (e) { return false; } }
+function writeSecretFile(p, value) {
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  const data = encAvailable() ? safeStorage.encryptString(String(value)) : Buffer.from(String(value), "utf8");
+  fs.writeFileSync(p, data, { mode: 0o600 });
+  try { fs.chmodSync(p, 0o600); } catch (e) {}   // enforce 0600 even if the file pre-existed looser
+}
+function readSecretFile(p) {
+  let buf; try { buf = fs.readFileSync(p); } catch (e) { return null; }
+  if (encAvailable()) { try { const s = safeStorage.decryptString(buf); if (s) return s.trim(); } catch (e) { /* legacy plaintext → fall through */ } }
+  const s = buf.toString("utf8").trim(); return s || null;
+}
 
 const DEFAULTS = {
   setupDone: false,          // node wizard completed
@@ -101,15 +117,10 @@ function defaultDataFolder() { return path.join(app.getPath("userData"), "node-d
 function rpcSecret() {
   const fromKeychain = keychainGet();
   if (fromKeychain) return fromKeychain;
-  try {
-    const s = fs.readFileSync(secretFilePath(), "utf8").trim();
-    if (s) return s;
-  } catch (e) { /* not there yet */ }
+  const existing = readSecretFile(secretFilePath());
+  if (existing) return existing;
   const secret = crypto.randomBytes(24).toString("base64url");
-  if (!keychainSet(secret)) {
-    fs.mkdirSync(app.getPath("userData"), { recursive: true });
-    fs.writeFileSync(secretFilePath(), secret, { mode: 0o600 });
-  }
+  if (!keychainSet(secret)) writeSecretFile(secretFilePath(), secret);
   return secret;
 }
 
@@ -143,15 +154,11 @@ function secretFileFor(account) { return path.join(app.getPath("userData"), "sec
 function getSecret(account) {
   const k = keychainGet(account);
   if (k) return k;
-  try { const s = fs.readFileSync(secretFileFor(account), "utf8").trim(); if (s) return s; } catch (e) { /* not there */ }
-  return null;
+  return readSecretFile(secretFileFor(account));
 }
 /** Store a named secret. */
 function setSecret(value, account) {
-  if (!keychainSet(value, account)) {
-    fs.mkdirSync(app.getPath("userData"), { recursive: true });
-    fs.writeFileSync(secretFileFor(account), value, { mode: 0o600 });
-  }
+  if (!keychainSet(value, account)) writeSecretFile(secretFileFor(account), value);
 }
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }

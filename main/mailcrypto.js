@@ -28,7 +28,14 @@ function hkdf32(ikm, info) {
 /** vault seed string -> IKM bytes: raw hex if it starts 0x, else UTF-8 bytes (matches the native app). */
 function ikmFromSeed(seedStr) {
   const s = String(seedStr || "");
-  return /^0x/i.test(s) ? Buffer.from(s.slice(2), "hex") : Buffer.from(s, "utf8");
+  if (/^0x/i.test(s)) {
+    const hex = s.slice(2);
+    // Fail loudly on a malformed hex seed rather than letting Buffer.from silently truncate a trailing nibble —
+    // a silent truncation would derive a DIFFERENT identity than a strict native decoder, breaking interop invisibly.
+    if (hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) throw new Error("node seed is not valid hex");
+    return Buffer.from(hex, "hex");
+  }
+  return Buffer.from(s, "utf8");
 }
 
 /** Derive the messaging identity. Returns { boxPk,boxSk,signPk,signSk (Uint8Array), publicId ("0x"+128hex) }. */
@@ -42,7 +49,13 @@ async function deriveIdentity(seedStr) {
 }
 
 // --- publicId helpers (64 raw bytes = boxPk[32] || signPk[32]) ---
-function idBytes(publicId) { return _sodium.from_hex(String(publicId).replace(/^0x/i, "")); }
+// Decode with Buffer (strict-validated first) rather than _sodium.from_hex, so isValidPublicId/boxPkOf/signPkOf work
+// even before libsodium's async ready() has resolved (e.g. addContact called at startup) and reject malformed hex.
+function idBytes(publicId) {
+  const hex = String(publicId).replace(/^0x/i, "");
+  if (hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) throw new Error("bad publicId hex");
+  return new Uint8Array(Buffer.from(hex, "hex"));
+}
 function boxPkOf(publicId) { return idBytes(publicId).slice(0, 32); }
 function signPkOf(publicId) { return idBytes(publicId).slice(32, 64); }
 function isValidPublicId(publicId) { try { return idBytes(publicId).length === 64; } catch (e) { return false; } }

@@ -17,10 +17,17 @@ function filePath() { return path.join(app.getPath("userData"), "mail.json"); }
 function ensureLoaded() {
   if (mem) return;
   mem = { messages: {}, contacts: {}, meta: {} };
+  let raw = null;
+  try { raw = fs.readFileSync(filePath(), "utf8"); }
+  catch (e) { return; }   // ENOENT → genuine first run; leave the empty store
   try {
-    const j = JSON.parse(fs.readFileSync(filePath(), "utf8"));
+    const j = JSON.parse(raw);
     if (j) { mem.messages = j.messages || {}; mem.contacts = j.contacts || {}; mem.meta = j.meta || {}; }
-  } catch (e) { /* first run */ }
+  } catch (e) {
+    // The file EXISTS but is unparseable. This store is the source of truth (the node prunes coins), so we must NOT
+    // silently reset and let the next write clobber it. Preserve the bad file aside for recovery, then start fresh.
+    try { fs.renameSync(filePath(), filePath() + ".corrupt-" + Date.now()); } catch (e2) { /* best effort */ }
+  }
 }
 function persistSoon() {
   if (writeTimer) return;
@@ -65,7 +72,7 @@ function threads() {
   return Object.values(byRef).sort((a, b) => ((b.last && b.last.date) || 0) - ((a.last && a.last.date) || 0));
 }
 function thread(hashref) { ensureLoaded(); return Object.values(mem.messages).filter(m => m.hashref === hashref).sort((a, b) => (a.date || 0) - (b.date || 0)); }
-function markThreadRead(hashref) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (m.hashref === hashref && m.incoming && !m.read) { m.read = true; ch = true; } if (ch) persistSoon(); }
+function markThreadRead(hashref) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (m.hashref === hashref && m.incoming && !m.read) { m.read = true; ch = true; } if (ch) persistSoon(); return ch; }
 function unreadCount() { ensureLoaded(); return Object.values(mem.messages).filter(m => m.incoming && !m.read).length; }
 function markConfirmed(block) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (!m.incoming && m.status === "sent" && m.sentblock && block >= m.sentblock) { m.status = "confirmed"; ch = true; } if (ch) persistSoon(); }
 

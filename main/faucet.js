@@ -9,12 +9,18 @@ const https = require("https");
 const { URL } = require("url");
 
 const FAUCET_API = "https://eurobuddha.com/faucet/api/request";
+const FAUCET_HOST = "eurobuddha.com";
 const TIMEOUT_MS = 20000;
 const MAX_BYTES = 65536;
 
 function getJson(urlStr, redirectsLeft, resolve) {
   let u;
   try { u = new URL(urlStr); } catch (e) { return resolve({ status: false, message: "Bad faucet URL." }); }
+  // Only ever talk to the faucet host over TLS. A redirect to any other host (or to http) is refused — otherwise a
+  // misconfigured/compromised faucet could point us at 127.0.0.1 / 169.254.169.254 (SSRF) and reflect the response.
+  if (u.protocol !== "https:" || u.hostname !== FAUCET_HOST) {
+    return resolve({ status: false, message: "Faucet redirected off-host — refused." });
+  }
   const req = https.get(u, { headers: { "User-Agent": "minimaCore-Desktop", Accept: "application/json" }, timeout: TIMEOUT_MS }, res => {
     if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
       res.resume();

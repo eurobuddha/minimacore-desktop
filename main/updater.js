@@ -76,19 +76,27 @@ async function checkForUpdate() {
            notes: (rel.body || "").slice(0, 400), repo: repo(), reason: available ? "" : "You're on the latest node.", ...info };
 }
 
-async function applyUpdate(rel) {
-  if (!rel || !rel.url) throw new Error("no download URL");
-  const buf = await download(rel.url);
-  if (rel.sha256) {
+// SECURITY: the download URL + hash are ALWAYS re-derived here from a fresh checkForUpdate() (the trusted GitHub
+// API over TLS) — never taken from the caller. The renderer only triggers "install the latest"; it cannot point us
+// at an arbitrary jar. Any renderer-supplied argument is used solely as an optional version sanity-check and is
+// otherwise ignored, so a compromised renderer cannot install (and then execute, on node restart) a hostile jar.
+async function applyUpdate(expect) {
+  const fresh = await checkForUpdate();
+  if (!fresh || !fresh.url) throw new Error("no node update available to install");
+  if (expect && expect.version && fresh.version && expect.version !== fresh.version) {
+    throw new Error("update changed since you checked — re-check and try again");
+  }
+  const buf = await download(fresh.url);
+  if (fresh.sha256) {
     const got = crypto.createHash("sha256").update(buf).digest("hex");
-    if (got.toLowerCase() !== rel.sha256.toLowerCase()) throw new Error("sha256 mismatch — refusing to install");
+    if (got.toLowerCase() !== fresh.sha256.toLowerCase()) throw new Error("sha256 mismatch — refusing to install");
   }
   const jarDir = path.join(app.getPath("userData"), "jar");
   fs.mkdirSync(jarDir, { recursive: true });
   const tmp = path.join(jarDir, "minima.jar.download");
   fs.writeFileSync(tmp, buf);
   fs.renameSync(tmp, path.join(jarDir, "minima.jar"));   // atomic swap
-  return { installed: true, version: rel.version, sha256verified: !!rel.sha256 };
+  return { installed: true, version: fresh.version, sha256verified: !!fresh.sha256 };
 }
 
 module.exports = { checkForUpdate, applyUpdate };
