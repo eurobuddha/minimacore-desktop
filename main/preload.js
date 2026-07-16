@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppDeposit: (addr, addM, addT) => ipcRenderer.invoke("mcd:ppDeposit", addr, addM, addT),
   ppClose: (addr) => ipcRenderer.invoke("mcd:ppClose", addr),
   ppMigrate: (addr, x0, y0) => ipcRenderer.invoke("mcd:ppMigrate", addr, x0, y0),
+  ppCollect: () => ipcRenderer.invoke("mcd:ppCollect"),
   onPandapools: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:pandapools", h); return () => ipcRenderer.removeListener("mcd:pandapools", h); },
 
   // pushes

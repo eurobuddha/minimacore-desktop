@@ -181,6 +181,7 @@ ipcMain.handle("mcd:ppCreate", (_e, tok, dec, x0, y0) => pandapools.createPool(t
 ipcMain.handle("mcd:ppDeposit", (_e, addr, addM, addT) => pandapools.deposit(addr, addM, addT));
 ipcMain.handle("mcd:ppClose", (_e, addr) => pandapools.close(addr));
 ipcMain.handle("mcd:ppMigrate", (_e, addr, x0, y0) => pandapools.migrate(addr, x0, y0));
+ipcMain.handle("mcd:ppCollect", () => pandapools.collectToWallet());
 pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
 let ppStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); } });

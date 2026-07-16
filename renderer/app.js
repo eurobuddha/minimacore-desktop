@@ -1118,6 +1118,7 @@ function showPayResult(ok, message, txid, ambiguous) {
 // ---- PandaPools (AMM) — Swap / Pools / My LP / Activity. ----
 let ppView = "swap";            // swap | pools | mylp | activity
 let PP_POOLS = [];
+let PP_MINE = [];               // my owned pools (for the LP-management sheets)
 let PP_SWAP_TOKS = [];          // [{tok,name}] pairs available to trade
 let ppSwapMinToTok = true;      // true = pay MINIMA get token; false = pay token get MINIMA
 
@@ -1234,8 +1235,14 @@ async function doPpSwap() {
 function ppMineHtml(mine) {
   return mine.length ? mine.map(p => `<div class="card"><div class="card__title">MINIMA / ${esc(p.tokName || TOK.shortId(p.tok))}</div>
       <div class="kv"><span>Reserves</span><span>${esc(TOK.tidyAmount(p.reserveM))} MINIMA · ${esc(TOK.tidyAmount(p.reserveT))} ${esc(p.tokName || "")}</span></div>
-      <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div></div>`).join("")
-    : `<div class="empty">You don't own any pools yet. Pool creation arrives in a later build.</div>`;
+      <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div>
+      <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div></div>`).join("")
+    : `<div class="empty">You don't own any pools yet. Create one with the button above.</div>`;
+}
+function wirePpMineActions(root) {
+  root.querySelectorAll("[data-ppadd]").forEach(b => b.onclick = () => showPpDeposit(b.dataset.ppadd));
+  root.querySelectorAll("[data-ppmig]").forEach(b => b.onclick = () => showPpMigrate(b.dataset.ppmig));
+  root.querySelectorAll("[data-ppwd]").forEach(b => b.onclick = () => confirmPpWithdraw(b.dataset.ppwd));
 }
 function ppActsHtml(acts) {
   return acts.length ? acts.map(a => `<div class="row"><div class="row__mid">
@@ -1265,11 +1272,106 @@ async function renderPpPools() {
 }
 async function renderPpMyLP() {
   const host = el("ppBody");
-  const mine = await api.ppMyPools().catch(() => []);
+  PP_MINE = await api.ppMyPools().catch(() => []);
   host.innerHTML = `${ppHeader("mylp")}
     <div class="view__desc">Pools you created on this device. Keep-fresh maintains their reserves automatically — <b>leave this app running</b> so your pools stay live for everyone.</div>
-    <div id="ppMine">${ppMineHtml(mine)}</div>`;
-  wirePpHeader(); wirePpCopy(el("ppMine"));
+    <div class="seg"><button class="btn btn--primary btn--full" id="ppCreateBtn">＋ Create a pool</button><button class="btn btn--outline btn--full" id="ppCollectBtn">Collect to wallet</button></div>
+    <div id="ppMine" style="margin-top:12px">${ppMineHtml(PP_MINE)}</div>`;
+  wirePpHeader(); wirePpCopy(el("ppMine")); wirePpMineActions(el("ppMine"));
+  el("ppCreateBtn").onclick = showPpCreate;
+  el("ppCollectBtn").onclick = doPpCollect;
+}
+let ppCollectBusy = false;
+async function doPpCollect() {
+  if (ppCollectBusy) return;                                     // block a double-click (two concurrent sweeps + stacked overlays)
+  ppCollectBusy = true;
+  const prog = showProgress("Collecting…", "Moving any withdrawn reserves from your owner addresses into your default wallet…");
+  try {
+    const r = await api.ppCollect();
+    prog.close();
+    toast(r && r.coins ? "Collected " + r.coins + " coin(s) to your wallet ✓" : "Nothing to collect right now.", "ok");
+    renderPandapools();
+  } catch (e) { prog.close(); toast("Collect failed: " + e.message, "err"); }
+  finally { ppCollectBusy = false; }
+}
+// ---- LP management sheets (create / add / migrate / withdraw) ----
+async function showPpCreate() {
+  const bal = await tryCmd("balance") || [];
+  const toks = bal.filter(b => b.tokenid && b.tokenid !== MINIMA && parseFloat(b.confirmed) > 0)
+    .map(b => ({ tokenid: b.tokenid, name: TOK.tokenName(b.token, b.tokenid), dec: (b.token && b.token.decimals != null) ? b.token.decimals : 8, bal: b.confirmed }));
+  if (!toks.length) { toast("You need a token (besides MINIMA) in your wallet to pair with MINIMA.", "err"); return; }
+  const opts = toks.map((t, i) => `<option value="${i}">${esc(t.name)} — ${esc(t.bal)}</option>`).join("");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppcOv"><div class="modal">
+    <div class="modal__title">Create a pool</div>
+    <div class="view__desc">A MINIMA / token constant-product pool. You seed both reserves; the 0.5% swap fee accrues to you as the LP. You can withdraw them later as the owner.</div>
+    <div class="field"><div class="field__label">Token</div><select class="field__input" id="ppcTok">${opts}</select></div>
+    <div class="field"><div class="field__label">MINIMA reserve</div><input class="field__input" id="ppcX" placeholder="0.0" autocomplete="off" /></div>
+    <div class="field"><div class="field__label">Token reserve</div><input class="field__input" id="ppcY" placeholder="0.0" autocomplete="off" /></div>
+    <div class="seg" style="margin-top:10px"><button class="btn btn--outline btn--full" id="ppcCancel">Cancel</button><button class="btn btn--primary btn--full" id="ppcGo">Create</button></div></div></div>`);
+  const ov = el("ppcOv"); const close = () => { if (ov) ov.remove(); };
+  el("ppcCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcOv") close(); };
+  let busy = false;
+  el("ppcGo").onclick = async () => {
+    if (busy) return;
+    const t = toks[el("ppcTok").value | 0]; if (!t) return;
+    const x0 = el("ppcX").value.trim(), y0 = el("ppcY").value.trim();
+    if (!/^[0-9]*\.?[0-9]+$/.test(x0) || parseFloat(x0) <= 0 || !/^[0-9]*\.?[0-9]+$/.test(y0) || parseFloat(y0) <= 0) { toast("Enter both reserves (positive).", "err"); return; }
+    busy = true;
+    const okc = await showConfirm("Create MINIMA / " + t.name + " pool?", "Seed " + x0 + " MINIMA and " + y0 + " " + t.name + " as the pool's reserves.\n\nOn-chain; withdrawable later as the owner.", "Create");
+    if (!okc) { busy = false; return; }
+    close();
+    const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
+    try { await api.ppCreate(t.tokenid, t.dec, x0, y0); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); }
+    catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
+    finally { busy = false; }
+  };
+}
+function ppTwoAmountSheet(title, desc, lblA, lblB, okLabel, onGo) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="pp2Ov"><div class="modal">
+    <div class="modal__title">${esc(title)}</div><div class="view__desc">${esc(desc)}</div>
+    <div class="field"><div class="field__label">${esc(lblA)}</div><input class="field__input" id="pp2A" placeholder="0.0" autocomplete="off" /></div>
+    <div class="field"><div class="field__label">${esc(lblB)}</div><input class="field__input" id="pp2B" placeholder="0.0" autocomplete="off" /></div>
+    <div class="seg" style="margin-top:10px"><button class="btn btn--outline btn--full" id="pp2Cancel">Cancel</button><button class="btn btn--primary btn--full" id="pp2Go">${esc(okLabel)}</button></div></div></div>`);
+  const ov = el("pp2Ov"); const close = () => { if (ov) ov.remove(); };
+  el("pp2Cancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "pp2Ov") close(); };
+  let busy = false;
+  el("pp2Go").onclick = async () => { if (busy) return; busy = true; try { await onGo(el("pp2A").value.trim(), el("pp2B").value.trim(), close); } finally { busy = false; } };
+}
+async function showPpDeposit(addr) {
+  const p = PP_MINE.find(x => x.address === addr); if (!p) { toast("Pool not found.", "err"); return; }
+  ppTwoAmountSheet("Add liquidity", "Grow MINIMA / " + (p.tokName || "token") + " in place (capped at 2× the floor — beyond that, use Migrate).",
+    "Add MINIMA", "Add " + (p.tokName || "token"), "Add", async (a, b, close) => {
+      const numOk = (v) => v === "" || /^[0-9]*\.?[0-9]+$/.test(v);
+      if (!numOk(a) || !numOk(b) || ((parseFloat(a) || 0) <= 0 && (parseFloat(b) || 0) <= 0)) { toast("Enter an amount to add.", "err"); return; }
+      const okc = await showConfirm("Add liquidity?", "Add " + (a || "0") + " MINIMA and " + (b || "0") + " " + (p.tokName || "token") + " to the pool. On-chain and irreversible.", "Add");
+      if (!okc) return;
+      close();
+      const prog = showProgress("Adding liquidity…", "Posting to the chain…");
+      try { await api.ppDeposit(addr, a || "0", b || "0"); prog.close(); toast("Liquidity added ✓", "ok"); renderPandapools(); }
+      catch (e) { prog.close(); toast("Add failed: " + e.message, "err"); }
+    });
+}
+async function showPpMigrate(addr) {
+  const p = PP_MINE.find(x => x.address === addr); if (!p) { toast("Pool not found.", "err"); return; }
+  ppTwoAmountSheet("Migrate pool", "Reset the pool to new reserves at a fresh address (resets the KMIN floor). The old reserves go to your owner address — use “Collect to wallet” to move them into your default wallet.",
+    "New MINIMA reserve", "New " + (p.tokName || "token") + " reserve", "Migrate", async (a, b, close) => {
+      if (!/^[0-9]*\.?[0-9]+$/.test(a) || parseFloat(a) <= 0 || !/^[0-9]*\.?[0-9]+$/.test(b) || parseFloat(b) <= 0) { toast("Enter both new reserves.", "err"); return; }
+      const okc = await showConfirm("Migrate this pool?", "Old reserves go to your owner address (collect them with “Collect to wallet”); a new pool opens with " + a + " MINIMA / " + b + " " + (p.tokName || "token") + ".", "Migrate");
+      if (!okc) return;
+      close();
+      const prog = showProgress("Migrating…", "Posting to the chain…");
+      try { await api.ppMigrate(addr, a, b); prog.close(); toast("Migrated ✓", "ok"); renderPandapools(); }
+      catch (e) { prog.close(); toast("Migrate failed: " + e.message, "err"); }
+    });
+}
+async function confirmPpWithdraw(addr) {
+  const p = PP_MINE.find(x => x.address === addr);
+  const ok = await showConfirm("Withdraw this pool?",
+    "Sweep the reserves" + (p ? " (" + TOK.tidyAmount(p.reserveM) + " MINIMA · " + TOK.tidyAmount(p.reserveT) + " " + (p.tokName || "") + ")" : "") + " to your owner address (spendable on this node). The pool closes. Then use “Collect to wallet” to move them into your default wallet — do that before restoring your seed on another node.", "Withdraw", true);
+  if (!ok) return;
+  const prog = showProgress("Withdrawing…", "Posting to the chain…");
+  try { await api.ppClose(addr); prog.close(); toast("Withdrawn ✓ — at your owner address; use “Collect to wallet” to move it to your wallet", "ok"); renderPandapools(); }
+  catch (e) { prog.close(); toast("Withdraw failed: " + e.message, "err"); }
 }
 async function renderPpActivity() {
   const host = el("ppBody");
@@ -1300,8 +1402,8 @@ async function refreshPpActive() {
     const c = el("ppList"); if (c) { c.innerHTML = ppPairRows(PP_POOLS); wirePpPoolRows(c); }
   } else if (ppView === "mylp") {
     if (!el("ppMine")) return;
-    const mine = await api.ppMyPools().catch(() => []);
-    const c = el("ppMine"); if (c) { c.innerHTML = ppMineHtml(mine); wirePpCopy(c); }
+    PP_MINE = await api.ppMyPools().catch(() => []);
+    const c = el("ppMine"); if (c) { c.innerHTML = ppMineHtml(PP_MINE); wirePpCopy(c); wirePpMineActions(c); }
   } else if (ppView === "activity") {
     if (!el("ppActs")) return;
     const [acts, feed] = await Promise.all([api.ppActivity().catch(() => []), api.ppFeed().catch(() => [])]);

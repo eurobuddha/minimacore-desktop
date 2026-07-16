@@ -180,7 +180,7 @@ async function swap(tok, minimaToToken, amountIn, minQuote) {
 
 async function createPool(tokenid, tokDecimals, x0, y0) {
   await init();
-  return new Promise(function (resolve, reject) {
+  return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.createPool(tokenid, tokDecimals, x0, y0, {
       created: function (p, txpowid) {
         ctx.Store.ownRecord(p);                                         // recovery recipe (Layer 1)
@@ -190,22 +190,40 @@ async function createPool(tokenid, tokDecimals, x0, y0) {
       },
       fail: function (msg) { reject(new Error(msg)); },
     });
-  });
+  }), 200000, "Creating the pool timed out — check Activity and your balance before retrying.");
 }
 
-function actionOnPool(addr, fn, label) {
+function actionOnPool(addr, fn, label, summary) {
   return init().then(function () {
     var p = poolByAddress(addr);
     if (!p) return Promise.reject(new Error("Pool not found in the current scan — try again in a moment."));
-    return new Promise(function (resolve, reject) { fn(p, { ok: function (txpowid) { ctx.Store.actRecord(label, label + " on a pool", txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); }, fail: function (m) { reject(new Error(m)); } }); });
+    return withTimeout(new Promise(function (resolve, reject) { fn(p, { ok: function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); }, fail: function (m) { reject(new Error(m)); } }); }),
+      200000, label + " timed out — check Activity and your balance before retrying.");
   });
 }
-function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, d); }, "ADD"); }
-function closePool(addr) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.close(p, d); }, "WITHDRAW"); }
+function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, d); }, "ADD", "Added liquidity"); }
+function closePool(addr) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.close(p, d); }, "WITHDRAW", "Withdrew a pool's reserves"); }
 async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
-  return new Promise(function (resolve, reject) { ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } }); });
+  return withTimeout(new Promise(function (resolve, reject) { ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } }); }),
+    200000, "Migrate timed out — check Activity and your balance before retrying.");
+}
+
+/** Forward funds sitting at MY pools' owner addresses ($OADR) onward to the default-64 wallet — so withdrawn
+ *  reserves aren't stranded at a newaddress a seed-only restore won't reproduce. Reuses PoolMgr.sweepOwnerFunds. */
+async function collectToWallet() {
+  await init();
+  return withTimeout(new Promise(function (resolve) {
+    ctx.Store.ownAll(function (recipes) {
+      var oadrs = (recipes || []).map(function (r) { return r.oadr; }).filter(Boolean);
+      if (!oadrs.length) { resolve({ addresses: 0, coins: 0 }); return; }
+      ctx.PoolMgr.sweepOwnerFunds(oadrs, { swept: function (addresses, coins) {
+        if (coins) { ctx.Store.actRecord("COLLECT", "Collected " + coins + " coin(s) to your wallet", "", lastTip, ""); emitter.emit("update"); }
+        resolve({ addresses: addresses, coins: coins });
+      } });
+    });
+  }), 240000, "Collecting timed out — check your balance; you can retry from My LP.");
 }
 
 async function scanNow() { await init(); return new Promise(function (r) { ctx.Book.scan(function (ps) { POOLS = ps || []; emitter.emit("update"); r(pools()); }); }); }
@@ -213,6 +231,6 @@ async function scanNow() { await init(); return new Promise(function (r) { ctx.B
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush,
   pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false, notReady: !ready }; },
-  swap, createPool, deposit, close: closePool, migrate,
+  swap, createPool, deposit, close: closePool, migrate, collectToWallet,
   _setRunner, _setDataDir,
 };
