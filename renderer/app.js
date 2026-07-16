@@ -91,7 +91,8 @@ function onStatus(s) {
   const pill = el("nodePill");
   pill.dataset.state = s.state;
   let label = s.state;
-  if (s.state === "running" && s.health) label = "● " + (s.health.connections || 0) + " peers · #" + (s.health.block || 0);
+  if (s.state === "running" && s.health) label = "● " + (s.health.connections || 0) + " peers"
+    + (s.contribute && s.health.incoming ? " · " + s.health.incoming + " in" : "") + " · #" + (s.health.block || 0);
   else if (s.state === "starting") label = "starting…";
   else if (s.state === "error") label = "error";
   pill.textContent = label;
@@ -136,6 +137,11 @@ function showSetup() {
       <label class="opt" data-net="custom"><b>Custom peer</b><span>Connect to a specific host:port you provide.</span></label>
       <input class="field__input" id="customPeer" placeholder="host:port" style="display:none;margin-top:4px" />
       <div class="view__desc" style="font-size:11px;margin-top:4px">A network is a preset — it fills the parameters below; tweak anything you like.</div>
+    </div>
+
+    <div class="setup-sec" id="roleSec"><div class="setup-sec__h">Network role</div>
+      <label class="opt" data-role="light"><b>Light wallet — recommended</b><span>Connects out only. Fast start, minimal bandwidth.</span></label>
+      <label class="opt" data-role="contribute"><b>Contribute to the network</b><span>Your node also accepts connections and helps other nodes sync. Asks your router to open your Minima port (UPnP) and keeps ~50 days of block history — a one-time extra download. Many home routers refuse or silently ignore the request, so this isn't guaranteed; you can always forward the port yourself.</span></label>
     </div>
 
     <div class="setup-sec" id="walletSec"><div class="setup-sec__h">Wallet</div>
@@ -205,7 +211,7 @@ function showSetup() {
   }
 
   // ---- network preset fills the network-related params in P ----
-  let net = CFG.network || "mainnet", wmode = "new";
+  let net = CFG.network || "mainnet", wmode = "new", role = CFG.contribute ? "contribute" : "light";
   const walletSec = el("walletSec");
   const applyNet = (n) => {
     net = n;
@@ -213,15 +219,26 @@ function showSetup() {
       Object.assign(P, { solo: true, isclient: false, mobile: false, nosyncibd: false, limitbandwidth: false,
         allowallip: false, p2pnodes: "", connect: "" });
     } else {
-      Object.assign(P, { solo: false, test: false, genesis: false, isclient: true, mobile: true,
-        limitbandwidth: true, nosyncibd: true, allowallip: true });
+      Object.assign(P, { solo: false, test: false, genesis: false, allowallip: true });
+      // The network-role preset owns the client/server flags (see params.js) — apply it after the network
+      // preset so switching network keeps the chosen role.
+      Object.assign(P, role === "contribute" ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
       if (n === "custom") { P.connect = el("customPeer").value.trim(); P.p2pnodes = ""; }
       else { P.p2pnodes = CFG.peersUrl || MINIMA_PARAMS.defaultParams().p2pnodes; P.connect = ""; }
     }
     box.querySelectorAll(".opt[data-net]").forEach(x => x.classList.toggle("sel", x.dataset.net === n));
     el("customPeer").style.display = n === "custom" ? "" : "none";
     walletSec.style.display = n === "solo" ? "none" : "";
+    el("roleSec").style.display = n === "solo" ? "none" : "";
     renderAdvanced();
+  };
+  const applyRole = (r) => {
+    role = r;
+    box.querySelectorAll(".opt[data-role]").forEach(x => x.classList.toggle("sel", x.dataset.role === r));
+    if (net !== "solo") {
+      Object.assign(P, r === "contribute" ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
+      renderAdvanced();
+    }
   };
   const selectW = (w) => {
     wmode = w;
@@ -229,6 +246,7 @@ function showSetup() {
     el("restoreFields").style.display = w === "restore" ? "" : "none";
   };
   box.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => applyNet(o.dataset.net));
+  box.querySelectorAll(".opt[data-role]").forEach(o => o.onclick = () => applyRole(o.dataset.role));
   box.querySelectorAll(".opt[data-w]").forEach(o => o.onclick = () => selectW(o.dataset.w));
   if (CFG.customConnect) el("customPeer").value = CFG.customConnect;
   el("customPeer").oninput = () => { if (net === "custom") P.connect = el("customPeer").value.trim(); };
@@ -238,7 +256,7 @@ function showSetup() {
   const setupCancel = el("setupCancel");
   if (setupCancel) setupCancel.onclick = () => hideSetup();
   renderAdvanced();
-  applyNet(net); selectW("new");   // seed P from the current network preset + show it in the editor
+  applyNet(net); applyRole(role); selectW("new");   // seed P from the network + role presets, show in editor
 
   el("startNode").onclick = async () => {
     const basePort = parseInt(el("basePort").value, 10) || CFG.basePort;
@@ -276,6 +294,7 @@ function showSetup() {
     const walletDone = solo ? true : (walletMode === "restore" ? false : !!CFG.walletDone);
     const patch = {
       setupDone: true, network: net, basePort, rpcPortManual, walletMode, walletDone,
+      contribute: role === "contribute" && !solo,
       dataFolder: el("dataFolder").value || "",
       customConnect: net === "custom" ? el("customPeer").value.trim() : "",
       megammrHost: host, params: P, extraArgs: el("extraArgs").value.trim()
@@ -2131,15 +2150,51 @@ function sendForm(mode) {
 }
 
 // ---- Node (status / config / update / logs) --------------------------------
+
+/**
+ * The "Network help" line for a contributing node.
+ *
+ * Only ONE thing proves inbound works: a real incoming peer. A router accepting the port mapping proves
+ * nothing — verified on a Plusnet Hub Two, which stores the mapping with Enabled=1 and still leaves the
+ * port shut. So the mapped copy says "asked your router", never "the port is open", and after the jar's
+ * ~1h reachability self-check has failed we say so plainly and point at the manual fix.
+ */
+function contribHelp(s, h, pm) {
+  const port = CFG.basePort;
+  if ((h.incoming || 0) > 0)
+    return { color: "var(--green)", text: "● Reachable — " + h.incoming + " incoming peer" + (h.incoming === 1 ? "" : "s") };
+  if (pm.state === "double_nat")
+    return { color: "var(--amber)", text: "Your router is behind another one (carrier-grade NAT), so other nodes can't dial in. You still help by relaying blocks and transactions." };
+  if (pm.state === "mapped") {
+    if ((s.uptimeMs || 0) > 70 * 60_000 && h.acceptingInLinks === false)
+      return { color: "var(--amber)", text: "Your router accepted the request but nothing is getting through — some routers report success without actually opening the port. Forward TCP " + port + " to this Mac in your router settings to fix it. You're still helping by relaying." };
+    return { color: "", text: "Asked your router to open port " + port + " — not confirmed yet. Waiting for the first incoming peer (this can take an hour or more)." };
+  }
+  if (pm.state === "searching") return { color: "", text: "Asking your router to open port " + port + "…" };
+  if (pm.state === "no_gateway")
+    return { color: "var(--amber)", text: "Your router didn't answer — automatic port opening (UPnP/NAT-PMP) is off or blocked. Forward TCP " + port + " manually, or keep helping as an outbound node." };
+  if (pm.state === "mapping_refused")
+    return { color: "var(--amber)", text: "Your router refused to open port " + port + " — UPnP may be disabled, or that port is already forwarded to another device. Try a different Minima port in Reconfigure, or forward TCP " + port + " manually." };
+  if (pm.state === "error") return { color: "var(--amber)", text: "Port mapping error — retrying automatically." };
+  return { color: "", text: "starting…" };
+}
+
 function renderNode(s) {
   s = s || { state: "?", health: null };
   const c = el("nodeCard");
   const h = s.health || {};
+  const pm = s.portmap || {};
+  const contributing = !!s.contribute;
+  const help = contributing ? contribHelp(s, h, pm) : null;
+  const addrOk = h.p2pAddress && pm.externalIp && h.p2pAddress.indexOf(pm.externalIp) === 0;
   c.innerHTML = `
     <div class="kv"><span class="kv__k">State</span><span class="kv__v">${esc(s.state)}</span></div>
     <div class="kv"><span class="kv__k">Version</span><span class="kv__v">${esc(h.version || "—")}</span></div>
     <div class="kv"><span class="kv__k">Block</span><span class="kv__v">${esc(h.block ?? "—")}</span></div>
     <div class="kv"><span class="kv__k">Peers</span><span class="kv__v">${esc(h.connections ?? "—")}</span></div>
+    <div class="kv"><span class="kv__k">Role</span><span class="kv__v">${contributing ? "Contributing (server)" : "Light wallet"}</span></div>
+    ${help ? `<div class="kv"><span class="kv__k">Network help</span><span class="kv__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
+    ${contributing && h.p2pAddress ? `<div class="kv"><span class="kv__k">Public address</span><span class="kv__v">${esc(h.p2pAddress)}${addrOk ? " ✓" : ""}</span></div>` : ""}
     <div class="kv"><span class="kv__k">Network</span><span class="kv__v">${esc(CFG.network)}</span></div>
     <div class="kv"><span class="kv__k">RPC port</span><span class="kv__v">${esc(s.rpcPort || CFG.basePort + 4)}</span></div>
     ${s.lastError ? `<div class="kv"><span class="kv__k">Error</span><span class="kv__v kv__v--red">${esc(s.lastError)}</span></div>` : ""}
@@ -2147,7 +2202,20 @@ function renderNode(s) {
       <button class="btn btn--sm btn--outline" id="nRestart">Restart node</button>
       <button class="btn btn--sm btn--outline" id="nUpdate">Check for update</button>
     </div>
+    ${CFG.network !== "solo" ? `<button class="btn btn--outline btn--full" id="nContrib" style="margin-top:8px">Contribute to the network: ${contributing ? "On — turn off" : "Off — turn on"}</button>` : ""}
     <button class="btn btn--outline btn--full" id="nReconfig" style="margin-top:8px">Reconfigure node (network · new/restore · startup params)…</button>`;
+  const nContrib = el("nContrib");
+  if (nContrib) nContrib.onclick = async () => {
+    const turnOn = !contributing;
+    const msg = turnOn
+      ? "Contribute to the network?\n\nYour node will accept incoming connections and help other nodes sync. This asks your router to open TCP " + CFG.basePort + " (UPnP), keeps ~50 days of block history (a one-time extra download), and restarts the node now.\n\nNot all routers allow this — if yours doesn't, you'll still help by relaying."
+      : "Stop contributing?\n\nYour node goes back to a light wallet (outbound connections only), the router port is closed, and the node restarts now.";
+    if (!confirm(msg)) return;
+    const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
+    CFG = await api.saveConfig({ contribute: turnOn, params });
+    toast(turnOn ? "Contributing — restarting node…" : "Back to light wallet — restarting node…");
+    api.nodeRestart();
+  };
   el("nReconfig").onclick = () => showSetup();
   el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
   el("nUpdate").onclick = async () => {

@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 const config = require("./config");
 const node = require("./node-manager");
+const portmap = require("./portmap");
 const rpc = require("./rpc");
 const updater = require("./updater");
 const netfetch = require("./netfetch");
@@ -105,6 +106,7 @@ ipcMain.handle("mcd:nodeStart", () => { node.start(); return node.snapshot(); })
 ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
+ipcMain.handle("mcd:portmapStatus", () => portmap.status());
 
 ipcMain.handle("mcd:checkJarUpdate", () => updater.checkForUpdate());
 ipcMain.handle("mcd:applyJarUpdate", async (_e, rel) => { const r = await updater.applyUpdate(rel); await node.restart(); return r; });

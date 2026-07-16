@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeStop: () => ipcRenderer.invoke("mcd:nodeStop"),
   nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
+  portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
 
   // jar updater
   checkJarUpdate: () => ipcRenderer.invoke("mcd:checkJarUpdate"),

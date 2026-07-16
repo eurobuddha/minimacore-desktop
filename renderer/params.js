@@ -101,7 +101,16 @@
     return out;
   }
 
-  var API = { GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams };
+  // Network-role presets (the wizard's "Network role" choice + the Node-tab toggle). One source of truth:
+  // contribute emits ONLY `-server` (bool flags emit only when true) — never alongside -isclient/-mobile,
+  // whose ordering in the jar's ParamConfigurer is a HashMap accident, so passing both races. nosyncibd:false
+  // so the node keeps a real archive and can serve syncing peers; limitbandwidth stays on (it caps only
+  // archive-serving at 50MB/day, not gossip).
+  var ROLE_CONTRIBUTE = { server: true,  isclient: false, mobile: false, desktop: false, nosyncibd: false, limitbandwidth: true };
+  var ROLE_LIGHT      = { server: false, isclient: true,  mobile: true,  desktop: false, nosyncibd: true,  limitbandwidth: true };
+
+  var API = { GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+              ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;
 })(typeof window !== "undefined" ? window : null);

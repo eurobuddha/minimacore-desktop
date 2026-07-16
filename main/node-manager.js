@@ -14,6 +14,7 @@ const EventEmitter = require("events");
 const fs = require("fs");
 const path = require("path");
 const config = require("./config");
+const portmap = require("./portmap");
 const { rpcCall } = require("./rpc");
 
 const LOG_MAX_LINES = 800;
@@ -34,8 +35,22 @@ class NodeManager extends EventEmitter {
     this.state = "stopped";       // stopped | starting | running | stopping | error
     this.lastError = null;
     this.logs = [];
-    this.health = null;           // { block, version, connections } from the last good status poll
+    this.health = null;           // { block, version, connections, incoming, acceptingInLinks, p2pAddress }
     this.healthTimer = null;
+    this.healthTick = 0;
+    this.startedTs = 0;
+    portmap.setLogger(line => this.log(line));
+    portmap.on("status", st => {
+      // Late mapping recovery: after ~1h with no in-links the jar flips isAcceptingInLinks=false and
+      // leaves it off until its network layer restarts. If the mapping only comes good after that, restart
+      // just the network layer so the node starts advertising itself again.
+      if (st.state === "mapped" && this.proc && this.startedTs && Date.now() - this.startedTs > 70 * 60_000 &&
+          this.health && this.health.acceptingInLinks === false) {
+        this.log("[app] port mapped late — restarting the node's network layer to re-enable inbound");
+        rpcCall(this.rpcPort(), config.rpcSecret(), "network action:restart").catch(e => {});
+      }
+      this.emit("status", this.snapshot());
+    });
   }
 
   /** The jar to run: the updater-managed copy in userData wins; the bundled resource is the fallback. */
@@ -106,6 +121,9 @@ class NodeManager extends EventEmitter {
       return;
     }
     this.proc = p;
+    this.startedTs = Date.now();
+    const cfg = config.load();
+    if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries
     p.stdout.on("data", d => this.log(String(d)));
     p.stderr.on("data", d => this.log(String(d)));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
@@ -121,6 +139,7 @@ class NodeManager extends EventEmitter {
 
   /** Graceful stop: RPC quit (clean db close) → SIGTERM fallback. Resolves when the process is gone. */
   async stop() {
+    await portmap.stop();                               // bounded (<~3s); re-mapped on the next start()
     if (!this.proc) { this.setState("stopped"); return; }
     this.setState("stopping");
     this.stopHealth();
@@ -145,12 +164,32 @@ class NodeManager extends EventEmitter {
       try {
         const j = await rpcCall(this.rpcPort(), config.rpcSecret(), "status");
         const r = (j && j.response) || {};
+        const prev = this.health || {};
         this.health = {
           version: r.version || "",
           block: (r.chain && r.chain.block) || 0,
           connections: (r.network && r.network.connected) || 0,
-          locked: !!r.locked
+          locked: !!r.locked,
+          // direction-aware fields come from the `network` poll below — carry the last known values
+          incoming: prev.incoming ?? 0,
+          acceptingInLinks: prev.acceptingInLinks ?? null,
+          p2pAddress: prev.p2pAddress || ""
         };
+        // `status` reports no connection DIRECTIONS, so when contributing also poll `network` (every 3rd
+        // tick) for the incoming count and the node's own reachability verdict — the only honest signal
+        // that inbound actually works, since routers can accept a port mapping and still not open it.
+        if (config.load().contribute && this.healthTick++ % 3 === 0) {
+          try {
+            const n = await rpcCall(this.rpcPort(), config.rpcSecret(), "network");
+            const nr = (n && n.response) || {};
+            const p2p = (nr.details && nr.details.p2p) || {};
+            const conns = Array.isArray(nr.connections) ? nr.connections : [];
+            this.health.incoming = typeof p2p.nio_inbound === "number"
+              ? p2p.nio_inbound : conns.filter(c => c && c.incoming).length;
+            this.health.acceptingInLinks = typeof p2p.isAcceptingInLinks === "boolean" ? p2p.isAcceptingInLinks : null;
+            this.health.p2pAddress = p2p.address || "";
+          } catch (e) { /* keep the carried values */ }
+        }
         if (this.state !== "running") this.setState("running");
         else this.emit("status", this.snapshot());
       } catch (e) { /* still booting or busy — keep the current state */ }
@@ -164,7 +203,9 @@ class NodeManager extends EventEmitter {
   setState(s) { this.state = s; this.emit("status", this.snapshot()); }
   snapshot() {
     return { state: this.state, health: this.health, lastError: this.lastError,
-             jar: this.jarPath(), rpcPort: this.rpcPort() };
+             jar: this.jarPath(), rpcPort: this.rpcPort(),
+             contribute: !!config.load().contribute, portmap: portmap.status(),
+             uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
   }
   log(line) {
     for (const l of String(line).split("\n")) {

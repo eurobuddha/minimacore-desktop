@@ -49,6 +49,7 @@ const DEFAULTS = {
   peersUrl: "https://spartacusrex.com/minimapeers.txt",  // default -p2pnodes bootstrap list
   megammrHost: "31.125.188.214:9001",  // megammrsync host for a seed RESTORE (app concept, not a jar param)
   basePort: 12001,           // -port. 12001 avoids 9001 jar / 11001 android / 14001 classic / 16001 desktop
+  contribute: false,         // "Contribute to the network": -server role + UPnP/NAT-PMP port mapping
   rpcPortManual: "",         // -rpc override; blank → basePort + 4
   params: PARAMS.defaultParams(),   // EVERY other minima.jar startup flag, user-editable at first run
   extraArgs: "",             // any additional raw args, appended verbatim
