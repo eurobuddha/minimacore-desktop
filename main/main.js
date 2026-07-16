@@ -182,6 +182,20 @@ ipcMain.handle("mcd:ppDeposit", (_e, addr, addM, addT) => pandapools.deposit(add
 ipcMain.handle("mcd:ppClose", (_e, addr) => pandapools.close(addr));
 ipcMain.handle("mcd:ppMigrate", (_e, addr, x0, y0) => pandapools.migrate(addr, x0, y0));
 ipcMain.handle("mcd:ppCollect", () => pandapools.collectToWallet());
+ipcMain.handle("mcd:ppBackup", () => pandapools.backup());
+ipcMain.handle("mcd:ppRestore", (_e, json) => pandapools.restore(json));
+ipcMain.handle("mcd:ppSaveBackup", async (_e, json) => {
+  const r = await dialog.showSaveDialog(win, { defaultPath: "pandapools-backup.json", filters: [{ name: "PandaPools backup", extensions: ["json"] }] });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  fs.writeFileSync(r.filePath, String(json || ""), "utf8");
+  return { canceled: false, path: r.filePath };
+});
+ipcMain.handle("mcd:ppLoadBackup", async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "PandaPools backup", extensions: ["json"] }] });
+  if (r.canceled || !r.filePaths.length) return { canceled: true };
+  try { if (fs.statSync(r.filePaths[0]).size > 8 * 1024 * 1024) throw new Error("That file is too large to be a PandaPools backup."); } catch (e) { return { canceled: false, error: e.message }; }
+  return { canceled: false, json: fs.readFileSync(r.filePaths[0], "utf8") };
+});
 pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
 let ppStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); } });

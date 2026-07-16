@@ -228,9 +228,71 @@ async function collectToWallet() {
 
 async function scanNow() { await init(); return new Promise(function (r) { ctx.Book.scan(function (ps) { POOLS = ps || []; emitter.emit("update"); r(pools()); }); }); }
 
+// ---- Recovery (Layer 3): backup + restore. Byte-compatible with native/MDS ({pandapools_backup:1, pools:[…]}),
+//      public data only (recipe params + a fresh coinexport of each reserve coin) — no seed, cannot move funds.
+async function backup() {
+  await init();
+  await scanNow();                                                 // freshen POOLS so we can coinexport the current reserve coins
+  return withTimeout(new Promise(function (resolve) {
+    ctx.Store.ownAll(function (recipes) {
+      recipes = recipes || [];
+      if (!recipes.length) { resolve({ empty: true, json: "" }); return; }
+      var funded = {};
+      POOLS.forEach(function (p) { if (p && p.address && ctx.Curve.funded(p)) funded[p.address.toLowerCase()] = p; });
+      var pools = [], pending = recipes.length;
+      function fin() { if (--pending === 0) resolve({ json: JSON.stringify({ pandapools_backup: 1, pools: pools }, null, 2) }); }
+      recipes.forEach(function (r) {
+        var e = { addr: r.address || "", mx: r.mxaddress || "", opk: r.opk || "", oadr: r.oadr || "",
+          tok: r.tok || "", dec: (r.tokDecimals == null ? 8 : r.tokDecimals), kmin: r.kmin || "0", script: r.script || "" };
+        pools.push(e);
+        var f = funded[(r.address || "").toLowerCase()];
+        if (f && f.coinidM && f.coinidT) {
+          nodeCmd("coinexport coinid:" + f.coinidM).then(function (jm) {
+            var rm = jm && jm.response; if (rm && rm.data) e.cm = rm.data;
+            nodeCmd("coinexport coinid:" + f.coinidT).then(function (jt) { var rt = jt && jt.response; if (rt && rt.data) e.ct = rt.data; fin(); }).catch(fin);
+          }).catch(fin);
+        } else fin();
+      });
+    });
+  }), 120000, "Backup timed out — try again.");
+}
+async function restore(json) {
+  await init();
+  var root; try { root = JSON.parse(json); } catch (e) { throw new Error("That doesn't look like a PandaPools backup (invalid JSON)."); }
+  var pools = root && root.pools;
+  if (!root || !root.pandapools_backup || !Array.isArray(pools) || !pools.length) throw new Error("No PandaPools pools found in that backup.");
+  return withTimeout(new Promise(function (resolve) {
+    var total = pools.length, fin = 0, ok = 0;
+    pools.forEach(function (e) {
+      restoreOne(e, function (good) {
+        if (good) ok++;
+        if (++fin === total) {
+          // Regenerate any missing $OPK owner keys — a seed-only restore only brings back the 64 defaults, so a
+          // newaddress owner key must be re-issued in order for restored pools to be closeable/collectable.
+          var opks = pools.map(function (x) { return x && x.opk; }).filter(Boolean);
+          ctx.PoolMgr.ensureOwnerKeys(opks, function (regen) { emitter.emit("update"); scanNow().catch(function () {}); resolve({ restored: ok, total: total, regen: regen }); });
+        }
+      });
+    });
+  }), 240000, "Restore timed out — check My LP; some pools may have been re-tracked.");
+}
+function restoreOne(e, cbRaw) {
+  var done = false; function cb(v) { if (done) return; done = true; cbRaw(v); }   // fire once, whatever the .then/.catch does
+  if (!e || !e.addr) { cb(false); return; }
+  ctx.Store.ownRecord({ address: e.addr, mxaddress: e.mx || "", opk: e.opk || "", oadr: e.oadr || "",
+    tok: e.tok || "", tokDecimals: (e.dec == null ? 8 : e.dec), kmin: e.kmin || "0", covenantScript: e.script || "" });
+  ctx.Store.knownAddrsAdd([e.addr, e.mx]);
+  var script = (e.script && e.script.length) ? e.script : (e.opk && e.oadr && e.tok && e.kmin ? ctx.Covenant.script(e.opk, e.oadr, e.tok, e.kmin) : "");
+  if (!script) { cb(true); return; }                              // recipe persisted; no script to re-track
+  nodeCmd("newscript trackall:true script:" + ctx.Covenant.scriptArg(script)).then(function () {
+    importCoin(e.cm, function () { importCoin(e.ct, function () { cb(true); }); });
+  }).catch(function () { cb(true); });
+}
+function importCoin(data, next) { if (!data) { next(); return; } nodeCmd("coinimport track:true data:" + data).then(function () { next(); }).catch(function () { next(); }); }
+
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush,
   pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false, notReady: !ready }; },
-  swap, createPool, deposit, close: closePool, migrate, collectToWallet,
+  swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
   _setRunner, _setDataDir,
 };

@@ -1276,10 +1276,79 @@ async function renderPpMyLP() {
   host.innerHTML = `${ppHeader("mylp")}
     <div class="view__desc">Pools you created on this device. Keep-fresh maintains their reserves automatically — <b>leave this app running</b> so your pools stay live for everyone.</div>
     <div class="seg"><button class="btn btn--primary btn--full" id="ppCreateBtn">＋ Create a pool</button><button class="btn btn--outline btn--full" id="ppCollectBtn">Collect to wallet</button></div>
-    <div id="ppMine" style="margin-top:12px">${ppMineHtml(PP_MINE)}</div>`;
+    <div id="ppMine" style="margin-top:12px">${ppMineHtml(PP_MINE)}</div>
+    <div class="card" style="margin-top:12px"><div class="card__title">Recovery</div>
+      <div class="view__desc">Back up your pools (covenant params + a snapshot of the reserve coins — no seed) so you can re-track and withdraw them on any node. Cross-compatible with the phone app and the MDS MiniDapp.</div>
+      <div class="seg"><button class="btn btn--outline btn--full" id="ppBackupBtn">Back up</button><button class="btn btn--outline btn--full" id="ppRestoreBtn">Restore</button><button class="btn btn--outline btn--full" id="ppGuideBtn">How it works</button></div></div>`;
   wirePpHeader(); wirePpCopy(el("ppMine")); wirePpMineActions(el("ppMine"));
   el("ppCreateBtn").onclick = showPpCreate;
   el("ppCollectBtn").onclick = doPpCollect;
+  el("ppBackupBtn").onclick = showPpBackup;
+  el("ppRestoreBtn").onclick = showPpRestore;
+  el("ppGuideBtn").onclick = showPpGuide;
+}
+let ppBackupBusy = false;
+async function showPpBackup() {
+  if (ppBackupBusy) return;                                        // async fetch → guard against a double-click stacking modals
+  ppBackupBusy = true;
+  toast("Preparing backup…");
+  let r; try { r = await api.ppBackup(); } catch (e) { ppBackupBusy = false; toast("Backup failed: " + e.message, "err"); return; }
+  ppBackupBusy = false;
+  if (r && r.empty) { toast("No pools to back up yet — create one first.", "err"); return; }
+  const json = (r && r.json) || "";
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppbOv"><div class="modal">
+    <div class="modal__title">Your pool backup</div>
+    <div class="view__desc">Save this somewhere safe. To restore later, paste it into Restore on any device. Public data only — no seed.</div>
+    <textarea class="field__input" id="ppbTa" readonly style="min-height:150px;font-family:monospace;font-size:11px">${esc(json)}</textarea>
+    <div class="seg" style="margin-top:10px"><button class="btn btn--outline btn--full" id="ppbCopy">Copy</button><button class="btn btn--primary btn--full" id="ppbSave">Save file</button></div>
+    <button class="btn btn--outline btn--full" id="ppbClose" style="margin-top:8px">Done</button></div></div>`);
+  const ov = el("ppbOv"); const close = () => { if (ov) ov.remove(); };
+  el("ppbClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppbOv") close(); };
+  el("ppbCopy").onclick = () => { copy(json); toast("Copied ✓", "ok"); };
+  el("ppbSave").onclick = async () => { try { const s = await api.ppSaveBackup(json); if (s && !s.canceled) toast("Saved ✓", "ok"); } catch (e) { toast("Save failed: " + e.message, "err"); } };
+}
+async function showPpRestore() {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="pprOv"><div class="modal">
+    <div class="modal__title">Restore pools</div>
+    <div class="view__desc">Paste a PandaPools backup (or load a file). This re-tracks your pools on THIS node and re-imports the reserve coins so you can withdraw again — even on a brand-new node. Only restore backups you trust.</div>
+    <textarea class="field__input" id="pprTa" placeholder="…paste backup JSON here" style="min-height:130px;font-family:monospace;font-size:11px"></textarea>
+    <div class="view__desc" id="pprStatus" style="margin-top:6px"></div>
+    <div class="seg" style="margin-top:8px"><button class="btn btn--outline btn--full" id="pprFile">Load file</button><button class="btn btn--primary btn--full" id="pprGo">Restore</button></div>
+    <button class="btn btn--outline btn--full" id="pprCancel" style="margin-top:8px">Cancel</button></div></div>`);
+  const ov = el("pprOv"); const close = () => { if (ov) ov.remove(); };
+  el("pprCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "pprOv") close(); };
+  el("pprFile").onclick = async () => { try { const f = await api.ppLoadBackup(); if (f && f.error) { toast(f.error, "err"); return; } if (f && !f.canceled && el("pprTa")) el("pprTa").value = f.json || ""; } catch (e) {} };
+  let busy = false;
+  el("pprGo").onclick = async () => {
+    if (busy) return;
+    const json = (el("pprTa") && el("pprTa").value || "").trim();
+    if (!json) { toast("Paste a backup, or load a file.", "err"); return; }
+    busy = true;
+    if (el("pprStatus")) el("pprStatus").textContent = "Restoring…";
+    try {
+      const r = await api.ppRestore(json);
+      if (el("pprStatus")) el("pprStatus").textContent = "Re-tracked " + r.restored + " of " + r.total + " pool" + (r.total === 1 ? "" : "s") + (r.regen ? " (regenerated " + r.regen + " owner key" + (r.regen === 1 ? "" : "s") + ")" : "") + " — rescanning…";
+      toast("Restored ✓", "ok");
+      setTimeout(() => { close(); renderPandapools(); }, 1600);
+    } catch (e) { if (el("pprStatus")) el("pprStatus").textContent = e.message; toast("Restore failed: " + e.message, "err"); }
+    finally { busy = false; }
+  };
+}
+function showPpGuide() {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppgOv"><div class="modal">
+    <div class="modal__title">How pool recovery works</div>
+    <div class="view__desc" style="white-space:pre-wrap">Your pools are recoverable at several levels:
+
+• RECIPE — this app keeps a recipe (covenant + params) for every pool you own, so it can always re-derive and re-track them.
+• RE-TRACK — on launch it re-registers any owned covenant a resynced/wiped node lost, so discovery finds them again.
+• BACKUP — “Back up” exports those recipes plus a fresh snapshot of each reserve coin (public data only, no seed). “Restore” re-tracks + re-imports them on ANY node — even a brand-new one — and regenerates your owner keys so the pools are withdrawable.
+• KEEP-FRESH — while this app is open, it recreates your pools' reserves before they age out, so every light node keeps seeing and trading them.
+• GOSSIP — it re-posts faded discovery beacons for pools it knows, so they stay findable even while their creator is offline.
+
+Last resort: your seed + a MegaMMR resync restores the coins; the recipe re-tracks the pools.</div>
+    <button class="btn btn--outline btn--full" id="ppgClose" style="margin-top:10px">Close</button></div></div>`);
+  const ov = el("ppgOv"); const close = () => { if (ov) ov.remove(); };
+  el("ppgClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppgOv") close(); };
 }
 let ppCollectBusy = false;
 async function doPpCollect() {
