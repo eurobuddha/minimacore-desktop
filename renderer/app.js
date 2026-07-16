@@ -2165,6 +2165,12 @@ function sendForm(mode) {
  */
 const CONTRIB_HINT_MS = 15 * 60_000;
 
+/** RFC1918 + CGNAT + link-local + loopback — i.e. not an address the outside world can reach. */
+function isPrivateAddr(a) {
+  return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|127\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/
+    .test(String(a || ""));
+}
+
 function contribHelp(s, h, pm) {
   const port = CFG.basePort;
   if ((h.incoming || 0) > 0)
@@ -2218,7 +2224,11 @@ function renderNode(s) {
   const pm = s.portmap || {};
   const contributing = !!s.contribute;
   const help = contributing ? contribHelp(s, h, pm) : null;
-  const addrOk = h.p2pAddress && pm.externalIp && h.p2pAddress.indexOf(pm.externalIp) === 0;
+  // The jar seeds its advertised address from a LAN guess and only learns the real one from the peer
+  // req_ip/res_ip exchange, so for the first minutes p2pAddress is a private IP — never label that "public".
+  const p2pIp = String(h.p2pAddress || "").split(":")[0];
+  const showAddr = !!p2pIp && !isPrivateAddr(p2pIp);
+  const addrOk = showAddr && !!pm.externalIp && p2pIp === pm.externalIp;
   c.innerHTML = `
     <div class="kv"><span class="kv__k">State</span><span class="kv__v">${esc(s.state)}</span></div>
     <div class="kv"><span class="kv__k">Version</span><span class="kv__v">${esc(h.version || "—")}</span></div>
@@ -2227,7 +2237,7 @@ function renderNode(s) {
     <div class="kv"><span class="kv__k">Role</span><span class="kv__v">${contributing ? "Contributing (server)" : "Light wallet"}</span></div>
     ${help ? `<div class="kv"><span class="kv__k">Network help</span><span class="kv__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
     ${help && help.howto ? forwardHowTo(pm) : ""}
-    ${contributing && h.p2pAddress ? `<div class="kv"><span class="kv__k">Public address</span><span class="kv__v">${esc(h.p2pAddress)}${addrOk ? " ✓" : ""}</span></div>` : ""}
+    ${contributing && showAddr ? `<div class="kv"><span class="kv__k">Public address</span><span class="kv__v">${esc(h.p2pAddress)}${addrOk ? " ✓" : ""}</span></div>` : ""}
     <div class="kv"><span class="kv__k">Network</span><span class="kv__v">${esc(CFG.network)}</span></div>
     <div class="kv"><span class="kv__k">RPC port</span><span class="kv__v">${esc(s.rpcPort || CFG.basePort + 4)}</span></div>
     ${s.lastError ? `<div class="kv"><span class="kv__k">Error</span><span class="kv__v kv__v--red">${esc(s.lastError)}</span></div>` : ""}

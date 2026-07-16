@@ -19,6 +19,7 @@ const { rpcCall } = require("./rpc");
 
 const LOG_MAX_LINES = 800;
 const HEALTH_EVERY_MS = 10_000;
+const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
 
 /** Split a raw-args string into argv tokens, honoring single/double quotes. */
 function tokenizeArgs(s) {
@@ -39,13 +40,25 @@ class NodeManager extends EventEmitter {
     this.healthTimer = null;
     this.healthTick = 0;
     this.startedTs = 0;
+    this.wasMapped = false;
+    this.lastNetRestart = 0;
     portmap.setLogger(line => this.log(line));
     portmap.on("status", st => {
       // Late mapping recovery: after ~1h with no in-links the jar flips isAcceptingInLinks=false and
       // leaves it off until its network layer restarts. If the mapping only comes good after that, restart
       // just the network layer so the node starts advertising itself again.
-      if (st.state === "mapped" && this.proc && this.startedTs && Date.now() - this.startedTs > 70 * 60_000 &&
-          this.health && this.health.acceptingInLinks === false) {
+      //
+      // Fire on the TRANSITION into mapped, not on any event that happens to carry state==="mapped":
+      // portmap emits on every setStatus AND from discoverHostInfo, so a single cycle can emit "mapped"
+      // more than once. `acceptingInLinks` also only refreshes every ~30s, so it stays stale-false right
+      // after a restart — without the cooldown we'd tear the peer connections down repeatedly.
+      const nowMapped = st.state === "mapped";
+      const becameMapped = nowMapped && !this.wasMapped;
+      this.wasMapped = nowMapped;
+      if (becameMapped && this.proc && this.startedTs && Date.now() - this.startedTs > 70 * 60_000 &&
+          this.health && this.health.acceptingInLinks === false &&
+          Date.now() - this.lastNetRestart > NET_RESTART_COOLDOWN_MS) {
+        this.lastNetRestart = Date.now();
         this.log("[app] port mapped late — restarting the node's network layer to re-enable inbound");
         rpcCall(this.rpcPort(), config.rpcSecret(), "network action:restart").catch(e => {});
       }
@@ -131,8 +144,14 @@ class NodeManager extends EventEmitter {
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       this.stopHealth();
-      if (this.state !== "stopping") { this.lastError = "node exited unexpectedly (" + (code ?? sig) + ")"; this.setState("error"); }
-      else this.setState("stopped");
+      if (this.state !== "stopping") {
+        this.lastError = "node exited unexpectedly (" + (code ?? sig) + ")";
+        this.setState("error");
+        // The node died on its own — release the router port rather than leave it forwarding to nothing,
+        // and stop the retry/watchdog timers. Only on UNEXPECTED exit: a planned stop() already released
+        // it, and doing it here too would race the remap that restart()'s start() kicks off.
+        portmap.stop().catch(e => {});
+      } else this.setState("stopped");
     });
     this.startHealth();
   }

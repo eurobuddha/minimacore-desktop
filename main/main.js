@@ -241,7 +241,9 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 let quitting = false;
 app.on("before-quit", async (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
-  if (quitting || !node.proc) return;
+  if (quitting) return;
+  // Always go through node.stop(), even with no node process: it also releases the router port mapping,
+  // which can outlive the node (e.g. the node died on its own). Both halves are bounded, so quit stays fast.
   e.preventDefault(); quitting = true;
   try { await node.stop(); } catch (err) {}
   app.quit();

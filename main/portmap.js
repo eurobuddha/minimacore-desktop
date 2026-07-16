@@ -26,13 +26,13 @@ const STOP_TIMEOUT_MS = 3_000;
 const WATCHDOG_MS = 15 * 60_000;
 const RETRY_MS = [60_000, 300_000, 1_800_000];   // 1m, 5m, then every 30m — networks change on wake
 
-/** RFC1918 + CGNAT (100.64/10) + link-local: an "external" IP in these ranges means double NAT. */
+/** RFC1918 + CGNAT (100.64/10) + link-local + loopback: an "external" IP here means double NAT. */
 function isPrivateIp(ip) {
   const m = /^(\d+)\.(\d+)\./.exec(String(ip || ""));
   if (!m) return false;
   const a = +m[1], b = +m[2];
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-         (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254);
+         (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || a === 127;
 }
 
 function withTimeout(p, ms, msg) {
@@ -65,31 +65,54 @@ function lanIp(iface) {
  * The router's friendly name via SSDP + its description XML (e.g. "Plusnet Hub Two"). Only used to make
  * the manual port-forward help concrete — knowing the model is what lets someone look up their own router.
  * Best-effort: null if the router doesn't answer.
+ *
+ * The LOCATION we get back is HOSTILE INPUT: anything on the LAN can answer our multicast and name any URL
+ * it likes. So we only fetch a descriptor that the responder serves for ITSELF, over plain HTTP, on a
+ * private address — never following redirects, and capping the read. A rootDesc is a few KB; this is a
+ * cosmetic label, and it must not become a way to make the app fetch arbitrary URLs or swallow a huge body.
  */
+const ROOTDESC_MAX_BYTES = 256 * 1024;
+const ROOTDESC_TIMEOUT_MS = 4000;
+const SSDP_WAIT_MS = 5000;
+
 function routerModel() {
   return new Promise(resolve => {
     const sock = dgram.createSocket("udp4");
-    let done = false;
-    const finish = v => { if (done) return; done = true; try { sock.close(); } catch (e) {} resolve(v); };
+    let done = false, guard = null;
+    const finish = v => {
+      if (done) return;
+      done = true;
+      if (guard) clearTimeout(guard);
+      try { sock.close(); } catch (e) {}
+      resolve(v);
+    };
     sock.on("error", () => finish(null));
-    sock.on("message", async msg => {
+    sock.on("message", async (msg, rinfo) => {
+      if (done) return;
       const loc = /LOCATION:\s*(\S+)/i.exec(String(msg));
-      if (!loc || done) return;
+      if (!loc) return;
+      let u;
+      try { u = new URL(loc[1]); } catch (e) { return; }
+      // Must be the responder describing itself, on the LAN, over http — otherwise ignore it entirely.
+      if (u.protocol !== "http:" || u.hostname !== rinfo.address || !isPrivateIp(u.hostname)) return;
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), ROOTDESC_TIMEOUT_MS);
       try {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 4000);
-        const xml = await (await fetch(loc[1], { signal: ctl.signal })).text();
-        clearTimeout(timer);
-        const n = /<friendlyName>([^<]+)<\/friendlyName>/.exec(xml);
+        const res = await fetch(u, { signal: ctl.signal, redirect: "error" });
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength > ROOTDESC_MAX_BYTES) return finish(null);
+        const n = /<friendlyName>([^<]{1,120})<\/friendlyName>/.exec(Buffer.from(buf).toString("utf8"));
         finish(n ? n[1].trim() : null);
       } catch (e) { finish(null); }
+      finally { clearTimeout(timer); }
     });
     for (const st of ["urn:schemas-upnp-org:device:InternetGatewayDevice:1",
                       "urn:schemas-upnp-org:device:InternetGatewayDevice:2"]) {
       const m = Buffer.from(`M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\nST: ${st}\r\n\r\n`);
       try { sock.send(m, 1900, "239.255.255.250"); } catch (e) {}
     }
-    setTimeout(() => finish(null), 5000);
+    guard = setTimeout(() => finish(null), SSDP_WAIT_MS);
+    if (guard.unref) guard.unref();
   });
 }
 
