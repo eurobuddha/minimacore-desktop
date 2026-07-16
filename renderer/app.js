@@ -119,9 +119,16 @@ function showSetup() {
   const box = el("setupBody");
   const P = Object.assign({}, MINIMA_PARAMS.defaultParams(), CFG.params || {});
   const def = CFG.dataFolder || "";
+  // Reopened from the Node tab to look at / tweak an already-working setup → offer a way out. On first run
+  // there is nothing to go back TO (boot() forces this wizard until both are done), so no Cancel there.
+  const canCancel = !!(CFG.setupDone && CFG.walletDone);
+  const title = document.querySelector("#setup .modal__title");
+  if (title) title.textContent = canCancel ? "Node settings" : "Set up your node";
 
   box.innerHTML = `
-    <div class="view__desc">Set up your node. Nothing here leaves this Mac. Every minima.jar startup parameter is editable below.</div>
+    <div class="view__desc">${canCancel
+      ? "Change how your node starts. Nothing is applied until you press Apply — Cancel discards everything."
+      : "Set up your node. Nothing here leaves this Mac. Every minima.jar startup parameter is editable below."}</div>
 
     <div class="setup-sec"><div class="setup-sec__h">Network</div>
       <label class="opt" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network — light client, syncs to the tip in seconds.</span></label>
@@ -165,7 +172,11 @@ function showSetup() {
       ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${esc(m.note)}</span></div>`).join("")}
     </div>
 
-    <button class="btn btn--primary btn--full" id="startNode" style="margin-top:12px">Start node</button>`;
+    ${canCancel
+      ? `<div class="seg" style="margin-top:12px">
+           <button class="btn btn--outline btn--full" id="setupCancel">Cancel</button>
+           <button class="btn btn--primary btn--full" id="startNode">Apply &amp; restart node</button></div>`
+      : `<button class="btn btn--primary btn--full" id="startNode" style="margin-top:12px">Start node</button>`}`;
 
   // ---- advanced params editor (rebuilt from P so presets show through) ----
   function renderAdvanced() {
@@ -222,6 +233,10 @@ function showSetup() {
   if (CFG.customConnect) el("customPeer").value = CFG.customConnect;
   el("customPeer").oninput = () => { if (net === "custom") P.connect = el("customPeer").value.trim(); };
   el("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) el("dataFolder").value = f; };
+  // Cancel is a pure discard: P is a local working copy and nothing is written outside startNode's handler,
+  // so closing the overlay leaves the config and the running node untouched.
+  const setupCancel = el("setupCancel");
+  if (setupCancel) setupCancel.onclick = () => hideSetup();
   renderAdvanced();
   applyNet(net); selectW("new");   // seed P from the current network preset + show it in the editor
 
