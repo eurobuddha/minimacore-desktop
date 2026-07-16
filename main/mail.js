@@ -265,7 +265,11 @@ function resolvePayaddr(peer) { return store.metaGet("pa:" + peer) || ""; }     
 function myReceivingAddress() { return store.metaGet("mypayaddr") || mypayaddr || ""; }
 function shareString() { const id = identity && identity.publicId; const pa = store.metaGet("mypayaddr") || mypayaddr; return pa ? id + "|" + pa : id; }
 function setName(name) { store.metaSet("myname", String(name || "")); emitter.emit("update"); }
-function threads() { return store.threads().map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
+// A thread belongs to the CURRENT identity iff I'm one of its two parties (a thread's key pins both, so the last
+// message's from/to is definitive). This hides threads orphaned by an identity change — e.g. a seed restore gives a
+// new mail identity, and the old conversation, keyed with the previous publicId, would otherwise linger as a duplicate.
+function mineThread(t) { const me = identity && identity.publicId; return !!(me && t.last && (t.last.frompublickey === me || t.last.topublickey === me)); }
+function threads() { return store.threads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
 function otherOf(m) { if (!m || !identity) return ""; return m.incoming ? m.frompublickey : m.topublickey; }
 // NOTE: emit ONLY when marking-read actually changed something. The renderer's live-update handler calls these
 // to refresh an open thread; emitting unconditionally would re-trigger that handler forever (a self-feeding loop).
@@ -290,7 +294,7 @@ function renameContact(peer, name) {
 }
 function removeContact(peer) { store.removeContact(peer); emitter.emit("update"); return true; }
 function deleteThread(hashref) { store.deleteThread(hashref); emitter.emit("update"); return true; }
-function archivedThreads() { return store.archivedThreads().map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
+function archivedThreads() { return store.archivedThreads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
 function setArchived(hashref, on) { store.setArchived(hashref, !!on); emitter.emit("update"); return true; }
 
 // ---- passphrase-encrypted backup (identity + name + contacts + messages), byte-compatible with the native app ----
