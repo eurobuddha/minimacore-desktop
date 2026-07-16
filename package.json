@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "macOS wrapper for the minimaCore node — runs and updates minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -21,6 +21,12 @@
       "category": "public.app-category.finance",
       "icon": "build/icon.icns",
       "identity": null,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "minimaMail uses the camera only to scan a contact's QR code."
+      },
       "target": [
         {
           "target": "dmg",

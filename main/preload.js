@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld("mcd", {
   // save a CSV via a native save dialog → written path or null
   exportCsv: (text, name) => ipcRenderer.invoke("mcd:exportCsv", text, name),
 
+  appVersion: () => ipcRenderer.invoke("mcd:appVersion"),
+
   // faucet requester (main-process HTTPS GET → { status, message })
   faucet: (address) => ipcRenderer.invoke("mcd:faucet", address),
 
@@ -51,9 +53,19 @@ contextBridge.exposeInMainWorld("mcd", {
   mailThread: (h) => ipcRenderer.invoke("mcd:mailThread", h),
   mailThreadWith: (peer) => ipcRenderer.invoke("mcd:mailThreadWith", peer),
   mailSend: (to, base) => ipcRenderer.invoke("mcd:mailSend", to, base),
-  mailPay: (to, payaddr, amount, tokenid, tokenname) => ipcRenderer.invoke("mcd:mailPay", to, payaddr, amount, tokenid, tokenname),
+  mailPay: (to, payaddr, amount, tokenid, tokenname, memo) => ipcRenderer.invoke("mcd:mailPay", to, payaddr, amount, tokenid, tokenname, memo),
+  mailRequestPayaddr: (peer) => ipcRenderer.invoke("mcd:mailRequestPayaddr", peer),
+  mailResolvePayaddr: (peer) => ipcRenderer.invoke("mcd:mailResolvePayaddr", peer),
+  mailReceivingAddr: () => ipcRenderer.invoke("mcd:mailReceivingAddr"),
   mailContacts: () => ipcRenderer.invoke("mcd:mailContacts"),
   mailAddContact: (share, name) => ipcRenderer.invoke("mcd:mailAddContact", share, name),
+  mailRenameContact: (peer, name) => ipcRenderer.invoke("mcd:mailRenameContact", peer, name),
+  mailRemoveContact: (peer) => ipcRenderer.invoke("mcd:mailRemoveContact", peer),
+  mailDeleteThread: (hashref) => ipcRenderer.invoke("mcd:mailDeleteThread", hashref),
+  mailArchivedThreads: () => ipcRenderer.invoke("mcd:mailArchivedThreads"),
+  mailSetArchived: (hashref, on) => ipcRenderer.invoke("mcd:mailSetArchived", hashref, on),
+  mailExportBackup: (passphrase) => ipcRenderer.invoke("mcd:mailExportBackup", passphrase),
+  mailImportBackup: (passphrase) => ipcRenderer.invoke("mcd:mailImportBackup", passphrase),
   mailScan: () => ipcRenderer.invoke("mcd:mailScan"),
   mailInvalidate: () => ipcRenderer.invoke("mcd:mailInvalidate"),
   onMail: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:mail", h); return () => ipcRenderer.removeListener("mcd:mail", h); },

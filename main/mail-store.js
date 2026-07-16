@@ -59,8 +59,8 @@ function addMessage(m) {
 }
 function all() { ensureLoaded(); return Object.values(mem.messages); }
 
-/** One row per thread (latest message + unread count), newest first. */
-function threads() {
+/** All threads, one row each (latest message + unread count), newest first — archived and not. */
+function allThreadRows() {
   ensureLoaded();
   const byRef = {};
   for (const m of Object.values(mem.messages)) {
@@ -71,7 +71,21 @@ function threads() {
   }
   return Object.values(byRef).sort((a, b) => ((b.last && b.last.date) || 0) - ((a.last && a.last.date) || 0));
 }
+/** Inbox = non-archived threads. */
+function threads() { const arch = archivedSet(); return allThreadRows().filter(t => !arch.has(t.hashref)); }
+/** The Archived view = archived threads only. */
+function archivedThreads() { const arch = archivedSet(); return allThreadRows().filter(t => arch.has(t.hashref)); }
 function thread(hashref) { ensureLoaded(); return Object.values(mem.messages).filter(m => m.hashref === hashref).sort((a, b) => (a.date || 0) - (b.date || 0)); }
+/** Delete every message in a thread (and drop its archived flag). */
+function deleteThread(hashref) {
+  ensureLoaded(); let ch = false;
+  for (const k of Object.keys(mem.messages)) if (mem.messages[k].hashref === hashref) { delete mem.messages[k]; ch = true; }
+  if (mem.meta["arch:" + hashref]) { delete mem.meta["arch:" + hashref]; ch = true; }
+  if (ch) persistSoon();
+}
+// archive state lives in meta under `arch:<hashref>`
+function archivedSet() { ensureLoaded(); const s = new Set(); for (const k in mem.meta) if (k.indexOf("arch:") === 0 && mem.meta[k]) s.add(k.slice(5)); return s; }
+function setArchived(hashref, on) { ensureLoaded(); if (on) mem.meta["arch:" + hashref] = true; else delete mem.meta["arch:" + hashref]; persistSoon(); }
 function markThreadRead(hashref) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (m.hashref === hashref && m.incoming && !m.read) { m.read = true; ch = true; } if (ch) persistSoon(); return ch; }
 function unreadCount() { ensureLoaded(); return Object.values(mem.messages).filter(m => m.incoming && !m.read).length; }
 function markConfirmed(block) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (!m.incoming && m.status === "sent" && m.sentblock && block >= m.sentblock) { m.status = "confirmed"; ch = true; } if (ch) persistSoon(); }
@@ -79,6 +93,8 @@ function markConfirmed(block) { ensureLoaded(); let ch = false; for (const m of 
 // contacts
 function contacts() { ensureLoaded(); return Object.values(mem.contacts); }
 function addContact(publicId, username) { ensureLoaded(); mem.contacts[publicId] = { publicId, username: username || "" }; persistSoon(); }
+/** Rename (or name) a contact, creating the row if this peer wasn't a saved contact yet. */
+function renameContact(publicId, username) { ensureLoaded(); const c = mem.contacts[publicId] || { publicId }; c.username = username || ""; mem.contacts[publicId] = c; persistSoon(); }
 function getContact(publicId) { ensureLoaded(); return mem.contacts[publicId] || null; }
 function removeContact(publicId) { ensureLoaded(); delete mem.contacts[publicId]; persistSoon(); }
 
@@ -89,5 +105,6 @@ function metaSet(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
 function exportAll() { ensureLoaded(); return { messages: mem.messages, contacts: mem.contacts, meta: mem.meta }; }
 
-module.exports = { addMessage, all, threads, thread, markThreadRead, unreadCount, markConfirmed,
-  contacts, addContact, getContact, removeContact, metaGet, metaSet, clear, exportAll };
+module.exports = { addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
+  markThreadRead, unreadCount, markConfirmed,
+  contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, exportAll };

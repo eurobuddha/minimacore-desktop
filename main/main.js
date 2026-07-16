@@ -5,7 +5,7 @@
  * the IPC handlers here, which proxy to the local RPC using the main-held secret. On launch we start the
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, Notification, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const config = require("./config");
@@ -38,7 +38,23 @@ function createWindow() {
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));   // no child windows inherit camera/etc
   win.on("closed", () => { win = null; });
+}
+
+// Camera permission for the QR scanner: allow ONLY the `media` permission and ONLY for our own bundled
+// file:// renderer (there is no other origin — the CSP blocks remote content). Everything else is denied.
+function setupPermissions() {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((wc, permission, cb) => {
+    const url = (wc && wc.getURL && wc.getURL()) || "";
+    cb(permission === "media" && url.startsWith("file://"));
+  });
+  // Mirror the request handler exactly (derive from the webContents, don't trust a null origin).
+  ses.setPermissionCheckHandler((wc, permission) => {
+    const url = (wc && wc.getURL && wc.getURL()) || "";
+    return permission === "media" && url.startsWith("file://");
+  });
 }
 
 function pushStatus() { if (win && !win.isDestroyed()) win.webContents.send("mcd:status", node.snapshot()); }
@@ -74,6 +90,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   return rpc.rpcCall(node.rpcPort(), config.rpcSecret(), command);
 });
 
+ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => config.save(patch || {}));
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
@@ -104,14 +121,50 @@ ipcMain.handle("mcd:mailThreads", () => mail.threads());
 ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));
 ipcMain.handle("mcd:mailThreadWith", (_e, peer) => mail.threadWith(peer));
 ipcMain.handle("mcd:mailSend", (_e, to, base) => mail.sendMessage(to, base || {}));
-ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname) => mail.pay(to, payaddr, amount, tokenid, tokenname));
+ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo));
+ipcMain.handle("mcd:mailRequestPayaddr", (_e, peer) => mail.requestPayaddr(peer));
+ipcMain.handle("mcd:mailResolvePayaddr", (_e, peer) => mail.resolvePayaddr(peer));
+ipcMain.handle("mcd:mailReceivingAddr", () => mail.myReceivingAddress());
 ipcMain.handle("mcd:mailContacts", () => mail.contacts());
 ipcMain.handle("mcd:mailAddContact", (_e, share, name) => mail.addContact(share, name));
+ipcMain.handle("mcd:mailRenameContact", (_e, peer, name) => mail.renameContact(peer, name));
+ipcMain.handle("mcd:mailRemoveContact", (_e, peer) => mail.removeContact(peer));
+ipcMain.handle("mcd:mailDeleteThread", (_e, hashref) => mail.deleteThread(hashref));
+ipcMain.handle("mcd:mailArchivedThreads", () => mail.archivedThreads());
+ipcMain.handle("mcd:mailSetArchived", (_e, hashref, on) => mail.setArchived(hashref, on));
 ipcMain.handle("mcd:mailScan", () => mail.scan());
 ipcMain.handle("mcd:mailInvalidate", () => { mail.invalidateIdentity(); return true; });
+// backup: keys stay in main; the renderer only supplies the passphrase and triggers the file dialog.
+ipcMain.handle("mcd:mailExportBackup", async (_e, passphrase) => {
+  if (typeof passphrase !== "string" || passphrase.length < 8) throw new Error("Use a passphrase of at least 8 characters.");
+  const enc = await mail.exportBackup(passphrase);   // throws before any dialog if the identity isn't ready
+  const r = await dialog.showSaveDialog(win, { defaultPath: "minimamail-backup.json", filters: [{ name: "minimaMail backup", extensions: ["json"] }] });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  fs.writeFileSync(r.filePath, enc, "utf8");
+  return { canceled: false, path: r.filePath };
+});
+ipcMain.handle("mcd:mailImportBackup", async (_e, passphrase) => {
+  if (typeof passphrase !== "string" || passphrase.length < 1) throw new Error("Enter the backup passphrase.");
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "minimaMail backup", extensions: ["json"] }] });
+  if (r.canceled || !r.filePaths.length) return { canceled: true };
+  const json = fs.readFileSync(r.filePaths[0], "utf8");
+  const id = await mail.importBackup(passphrase, json);   // throws on wrong passphrase / bad file
+  return { canceled: false, identity: id };
+});
 
 // forward mail updates to the window; start the scan loop once the node is running
 mail.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:mail"); });
+// OS notification on a fresh incoming message when the window isn't focused (mirrors the native "New mail")
+mail.emitter.on("incoming", (info) => {
+  try {
+    if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
+    const who = info.name || "New mail";
+    const body = info.count > 1 ? info.count + " new messages" : (info.preview || "New message");
+    const n = new Notification({ title: info.count > 1 ? "minimaMail" : who, body, silent: false });
+    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+    n.show();
+  } catch (e) { /* notifications are best-effort */ }
+});
 let mailStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); } });
 ipcMain.handle("mcd:histGet", () => histStore.all());
@@ -132,6 +185,7 @@ node.on("status", pushStatus);
 node.on("log", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:log", node.logs.slice(-1)[0]); });
 
 app.whenReady().then(() => {
+  setupPermissions();
   createWindow();
   setupTray();
   // Only auto-boot for a FULLY onboarded user. If either the node wizard or the wallet step is unfinished

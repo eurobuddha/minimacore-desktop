@@ -107,5 +107,15 @@ function loadIdentity(json) {
   return { publicId: o.publicId, boxPk: _sodium.from_hex(o.boxPk), boxSk: _sodium.from_hex(o.boxSk),
     signPk: _sodium.from_hex(o.signPk), signSk: _sodium.from_hex(o.signSk) };
 }
+/** True iff the public halves actually derive from the secret halves — rejects a corrupt/tampered backup whose
+ *  keys don't form a real keypair (otherwise we'd swap in a dead identity that can't open its own inbox). Needs ready(). */
+function keypairConsistent(id) {
+  try {
+    const bpk = _sodium.crypto_scalarmult_base(id.boxSk);                 // X25519 pub = scalarmult_base(sec)
+    const spk = id.signSk.slice(32, 64);                                  // Ed25519 64-byte sk = seed‖pub → pub is the tail
+    return id.boxPk && id.signPk && id.boxSk && id.signSk.length === 64 &&
+      _sodium.to_hex(bpk) === _sodium.to_hex(id.boxPk) && _sodium.to_hex(spk) === _sodium.to_hex(id.signPk);
+  } catch (e) { return false; }
+}
 
-module.exports = { ready, deriveIdentity, seal, open, serializeIdentity, loadIdentity, isValidPublicId, boxPkOf, signPkOf };
+module.exports = { ready, deriveIdentity, seal, open, serializeIdentity, loadIdentity, keypairConsistent, isValidPublicId, boxPkOf, signPkOf };
