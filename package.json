@@ -56,6 +56,7 @@
   },
   "dependencies": {
     "libsodium-wrappers": "^0.7.15",
-    "qrcode-generator": "^2.0.4"
+    "qrcode-generator": "^2.0.4",
+    "sql.js": "^1.13.0"
   }
 }
