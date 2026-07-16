@@ -67,7 +67,7 @@ function acquire() {
 function release() { active--; const next = queue.shift(); if (next) { active++; next(); } }
 
 // ---- capped GET (follows redirects, re-guarding each hop) -------------------
-function getCapped(urlStr, redirectsLeft) {
+function getCapped(urlStr, redirectsLeft, accept) {
   return new Promise((resolve) => {
     let u;
     try { u = new URL(urlStr); } catch (e) { return resolve(null); }
@@ -75,12 +75,12 @@ function getCapped(urlStr, redirectsLeft) {
     isBlockedHost(u.hostname).then(blocked => {
       if (blocked) return resolve(null);
       const lib = u.protocol === "https:" ? https : http;
-      const req = lib.request(u, { method: "GET", headers: { "User-Agent": "minimaCore-Desktop", Accept: "image/*" } }, res => {
+      const req = lib.request(u, { method: "GET", headers: { "User-Agent": "minimaCore-Desktop", Accept: accept || "image/*" } }, res => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
           if (redirectsLeft <= 0) return resolve(null);
           const next = new URL(res.headers.location, u).toString();
-          return resolve(getCapped(next, redirectsLeft - 1));
+          return resolve(getCapped(next, redirectsLeft - 1, accept));
         }
         if (res.statusCode !== 200) { res.resume(); return resolve(null); }
         const ctype = String(res.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
@@ -131,4 +131,16 @@ async function tokenIcon(url) {
   } finally { release(); }
 }
 
-module.exports = { tokenIcon, isBlockedHost };
+/** Fetch a JSON API (e.g. the MEXC MINIMA/USDT ticker) → parsed object, or null. Same SSRF guard + byte cap +
+ *  bounded pool as icon fetches; read-only public market data; NEVER throws to the caller. */
+async function fetchJson(url) {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
+  await acquire();
+  try {
+    const r = await getCapped(url.trim(), MAX_REDIRECTS, "application/json");
+    if (!r || !r.buf || !r.buf.length) return null;
+    try { return JSON.parse(r.buf.toString("utf8")); } catch (e) { return null; }
+  } finally { release(); }
+}
+
+module.exports = { tokenIcon, fetchJson, isBlockedHost };

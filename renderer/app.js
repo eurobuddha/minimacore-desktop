@@ -1156,6 +1156,7 @@ function ppPairRows(pools) {
   }).join("");
 }
 let PP_BAL_MIN = "0", PP_BAL_TOK = "0";
+let PP_USDT_ID = null;          // cached market-fed token id (mxUSDT) for the swap-page MEXC line
 async function renderPpSwap() {
   const host = el("ppBody");
   const pools = await api.ppPools().catch(() => []);
@@ -1171,6 +1172,7 @@ async function renderPpSwap() {
     <div class="card">
       <div class="field"><div class="field__label">Pool</div><select class="field__input" id="ppSwapTok">${opts}</select></div>
       <div class="view__desc" id="ppPoolLine">—</div>
+      <div class="view__desc" id="ppSwapMarket" style="display:none;color:var(--dim)"></div>
       <div class="kv"><span>You hold</span><span id="ppHoldings">—</span></div>
       <div class="seg"><button class="btn btn--full" id="ppDirBuy">Buy with MINIMA</button><button class="btn btn--full" id="ppDirSell">Sell for MINIMA</button></div>
       <div class="field"><div class="field__label" id="ppSwapInLbl">You pay (MINIMA)</div><input class="field__input" id="ppSwapAmt" placeholder="0.0" autocomplete="off" /><div class="view__desc" id="ppFromBal" style="margin-top:4px"></div></div>
@@ -1198,6 +1200,28 @@ async function refreshPpSwapMeta() {
   const bt = bal.find(b => b.tokenid && b.tokenid.toLowerCase() === t.tok.toLowerCase()); PP_BAL_TOK = bt ? bt.confirmed : "0";
   if (el("ppHoldings")) el("ppHoldings").textContent = TOK.tidyAmount(PP_BAL_MIN) + " MINIMA · " + TOK.tidyAmount(PP_BAL_TOK) + " " + t.name;
   if (el("ppFromBal")) { const payTok = ppSwapMinToTok ? "MINIMA" : t.name; el("ppFromBal").textContent = "Balance " + TOK.tidyAmount(ppSwapMinToTok ? PP_BAL_MIN : PP_BAL_TOK) + " " + payTok; }
+  ppRenderSwapMarket(t);   // MEXC market-comparison line (USDT pairs only) — passive, safe on a block tick
+}
+// The donor's renderSwapMarket: for a MINIMA/USDT pool, show the live MEXC mid + how the blended pool spot compares.
+async function ppRenderSwapMarket(t) {
+  const host = el("ppSwapMarket"); if (!host || !t) return;
+  if (PP_USDT_ID === null) { try { const mt = await api.ppMarketToken(); PP_USDT_ID = ((mt && mt.usdt) || "").toLowerCase(); } catch (e) { PP_USDT_ID = ""; } }
+  const isUsdt = PP_USDT_ID && t.tok && t.tok.toLowerCase() === PP_USDT_ID;
+  if (!isUsdt) { host.style.display = "none"; host.textContent = ""; return; }
+  host.style.display = "";
+  let m = null; try { m = await api.ppMarket(); } catch (e) {}
+  if (!el("ppSwapMarket")) return;                                  // view changed during the await
+  if (!m || !m.fresh || !m.mid) { host.textContent = "Market price unavailable (MEXC)"; return; }
+  let line = "Market ≈ " + TOK.tidyAmount(m.mid) + " USDT/MINIMA (MEXC)";
+  let sm = 0, st = 0;
+  (PP_POOLS || []).forEach(p => { if (p.tok && p.tok.toLowerCase() === t.tok.toLowerCase()) { sm += parseFloat(p.reserveM) || 0; st += parseFloat(p.reserveT) || 0; } });
+  const mid = parseFloat(m.mid);
+  if (sm > 0 && mid > 0) {
+    const spot = st / sm, pct = (spot - mid) / mid * 100;
+    const word = Math.abs(pct) < 0.1 ? "at market" : (Math.abs(pct).toFixed(1) + "% " + (pct > 0 ? "above market" : "below market"));
+    line += "  ·  Pool " + spot.toFixed(6) + "  ·  " + word;
+  }
+  host.textContent = line;
 }
 function applyPpDir() {
   if (!el("ppDirBuy")) return;
@@ -1411,18 +1435,116 @@ async function doPpCollect() {
   finally { ppCollectBusy = false; }
 }
 // ---- LP management sheets (create / add / migrate / withdraw) ----
+// Token-leg decimals, defensively parsed + clamped (a wrong value → token-grain rejection at createPool).
+function ppSafeDec(token) { const d = parseInt(token && token.decimals, 10); return Number.isFinite(d) && d >= 0 && d <= 18 ? d : 8; }
+// Create is USDT-only + price-anchored, mirroring the MDS dapp (0.6.6): a pool always opens at the true
+// MINIMA/USDT rate (MEXC market → live-pool spot). Free-ratio manual create is the tier-3 fallback for the
+// very first pool only. openCreate → dispatchCreate → createFormPriced (enter USDT) | createFormManual.
 async function showPpCreate() {
   const bal = await tryCmd("balance") || [];
-  const toks = bal.filter(b => b.tokenid && b.tokenid !== MINIMA && parseFloat(b.confirmed) > 0)
-    .map(b => ({ tokenid: b.tokenid, name: TOK.tokenName(b.token, b.tokenid), dec: (b.token && b.token.decimals != null) ? b.token.decimals : 8, bal: b.confirmed }));
-  if (!toks.length) { toast("You need a token (besides MINIMA) in your wallet to pair with MINIMA.", "err"); return; }
-  const opts = toks.map((t, i) => `<option value="${i}">${esc(t.name)} — ${esc(t.bal)}</option>`).join("");
+  let usdtId = "";
+  try { const mt = await api.ppMarketToken(); usdtId = (mt && mt.usdt) || ""; } catch (e) {}
+  const isFed = (tid) => !!tid && !!usdtId && tid.toLowerCase() === usdtId.toLowerCase();
+  let minimaAvail = 0;
+  const toks = [];
+  bal.forEach(b => {
+    const tid = b.tokenid || "";
+    if (tid === MINIMA || tid === "0x00") { minimaAvail = parseFloat(b.sendable) || 0; return; }   // MINIMA is the other leg
+    const sendable = parseFloat(b.sendable) || 0;
+    if (!tid || sendable <= 0 || !isFed(tid)) return;   // ONLY market-fed pairs (mxUSDT) — no mispriceable pools
+    toks.push({ tokenid: tid, name: TOK.tokenName(b.token, tid), dec: ppSafeDec(b.token), avail: sendable });
+  });
+  if (!toks.length) {
+    await showConfirm("Get mxUSDT first",
+      "PandaPools creates MINIMA / USDT pools — the pair with a live market price, so a pool always opens at the true rate. Your wallet holds no mxUSDT; receive some first, then create a pool.", "OK");
+    return;
+  }
+  if (toks.length === 1) { ppDispatchCreate(toks[0], minimaAvail); return; }
+  const opts = toks.map((t, i) => `<option value="${i}">${esc(t.name)} — ${esc(String(t.avail))} avail</option>`).join("");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppcPickOv"><div class="modal">
+    <div class="modal__title">Pool MINIMA with…</div>
+    <div class="field"><select class="field__input" id="ppcPick">${opts}</select></div>
+    <div class="seg" style="margin-top:6px"><button class="btn btn--outline btn--full" id="ppcPickCancel">Cancel</button><button class="btn btn--primary btn--full" id="ppcPickGo">Next</button></div></div></div>`);
+  const ov = el("ppcPickOv"); const close = () => { if (ov) ov.remove(); };
+  el("ppcPickCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcPickOv") close(); };
+  el("ppcPickGo").onclick = () => { const t = toks[el("ppcPick").value | 0]; close(); if (t) ppDispatchCreate(t, minimaAvail); };
+}
+
+async function ppDispatchCreate(t, minimaAvail) {
+  let a = null;
+  try { a = await api.ppCreateAnchor(); } catch (e) {}
+  if (a && a.price) ppCreateFormPriced(t, minimaAvail, a.price, a.source || "market");
+  else ppCreateFormManual(t);   // tier-3: no MEXC AND no live pool — user sets the first price
+}
+
+// Tier 1/2 ANCHORED priced form: enter USDT only; MINIMA is DERIVED from the anchor (no free ratio).
+function ppCreateFormPriced(t, minimaAvail, initPrice, initSource) {
+  let price = initPrice, source = initSource;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppcOv"><div class="modal">
-    <div class="modal__title">Create a pool</div>
-    <div class="view__desc" style="color:var(--red)">No market price is checked for you — YOU set the opening price. Set the ratio to the true market rate, or arbitrageurs will correct it at your expense. The 0.5% swap fee then accrues to you as the LP; you can withdraw as the owner.</div>
-    <div class="field"><div class="field__label">Token</div><select class="field__input" id="ppcTok">${opts}</select></div>
-    <div class="field"><div class="field__label">MINIMA reserve</div><input class="field__input" id="ppcX" placeholder="0.0" autocomplete="off" /></div>
-    <div class="field"><div class="field__label">Token reserve</div><input class="field__input" id="ppcY" placeholder="0.0" autocomplete="off" /></div>
+    <div class="modal__title">Create MINIMA / ${esc(t.name)} pool</div>
+    <div class="field"><div class="field__label">${esc(t.name)} to provide</div><input class="field__input" id="ppcU" placeholder="e.g. 1.90" autocomplete="off" /></div>
+    <div class="view__desc" id="ppcInfo" style="white-space:pre-wrap"></div>
+    <div class="seg" style="margin-top:6px"><button class="btn btn--outline btn--full" id="ppcCancel">Cancel</button><button class="btn btn--outline btn--full" id="ppcRefresh">↻ Price</button><button class="btn btn--primary btn--full" id="ppcGo">Create</button></div></div></div>`);
+  const ov = el("ppcOv"); const close = () => { if (ov) ov.remove(); };
+  el("ppcCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcOv") close(); };
+  const info = () => el("ppcInfo");
+  const derive = (u, p) => Math.ceil((u / p) * 1e6) / 1e6;   // MINIMA = USDT ÷ price, rounded UP to the 6dp grain
+  const numOk = (v) => /^[0-9]*\.?[0-9]+$/.test(v) && parseFloat(v) > 0;   // strict — reject "1.5abc" before it reaches createPool
+  function update() {
+    if (!info()) return;
+    const p = parseFloat(price);
+    if (!(p > 0)) { info().textContent = "Fetching MINIMA/USDT market price…"; return; }
+    let cap = minimaAvail * p; if (t.avail < cap) cap = t.avail;
+    let str = "Price: " + TOK.tidyAmount(price) + " USDT/MINIMA (" + source + ")\n";
+    str += "You have: " + TOK.tidyAmount(String(minimaAvail)) + " MINIMA · " + TOK.tidyAmount(String(t.avail)) + " " + t.name + "\n";
+    const uRaw = (el("ppcU") && el("ppcU").value || "").trim();
+    if (!numOk(uRaw)) { str += "Enter the " + t.name + " amount to provide (max ≈ " + TOK.tidyAmount(String(cap)) + ")."; }
+    else {
+      const u = parseFloat(uRaw);
+      const minima = derive(u, p);
+      str += "MINIMA required:  " + TOK.tidyAmount(String(minima)) + "\nTotal pool value:  ≈ US$ " + TOK.tidyAmount(String(u * 2));
+      if (minima > minimaAvail) str += "\n⚠ Not enough MINIMA — reduce " + t.name + " to ≤ " + TOK.tidyAmount(String(cap)) + ".";
+      if (u > t.avail) str += "\n⚠ You only have " + TOK.tidyAmount(String(t.avail)) + " " + t.name + ".";
+    }
+    info().textContent = str;
+  }
+  el("ppcU").oninput = update;
+  el("ppcRefresh").onclick = async () => {
+    if (info()) info().textContent = "Refreshing price…";
+    try { const m = await api.ppMarket(); if (m && m.mid) { price = m.mid; source = "MEXC market"; } } catch (e) {}
+    update();
+  };
+  let busy = false;
+  el("ppcGo").onclick = async () => {
+    if (busy) return;
+    const p = parseFloat(price);
+    if (!(p > 0)) { if (info()) info().textContent = "No price yet — tap ↻ Price and retry."; return; }
+    const uStr = (el("ppcU").value || "").trim();
+    if (!numOk(uStr)) { if (info()) info().textContent = "Enter the " + t.name + " amount (a positive number)."; return; }
+    const u = parseFloat(uStr);
+    const minima = derive(u, p);
+    if (minima > minimaAvail || u > t.avail) { if (info()) info().textContent = "Not enough balance for that amount."; return; }
+    busy = true;
+    const okc = await showConfirm("Create this pool?",
+      "MINIMA / " + t.name + " pool\n\n" + TOK.tidyAmount(String(minima)) + " MINIMA  +  " + uStr + " " + t.name + "\nOpens at " + TOK.tidyAmount(price) + " USDT/MINIMA  (matches " + source + " ✓)\n\nThe 0.5% swap fee goes to liquidity providers.", "Create");
+    if (!okc) { busy = false; return; }
+    close();
+    const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
+    try { await api.ppCreate(t.tokenid, t.dec, String(minima), uStr); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); }
+    catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
+    finally { busy = false; }
+  };
+  update();
+}
+
+// Tier 3 BOOTSTRAP: reached ONLY when no MEXC price AND no live MINIMA/USDT pool (the first pool). Creator sets
+// the opening price; gated behind an explicit acknowledgement + the confirm step.
+function ppCreateFormManual(t) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppcOv"><div class="modal">
+    <div class="modal__title">Create MINIMA / ${esc(t.name)} pool</div>
+    <div class="view__desc" style="color:var(--red)">No market price is available (MEXC is unreachable and there are no live MINIMA / ${esc(t.name)} pools to match). You are setting the OPENING PRICE yourself — set it to the true market rate, or arbitrageurs will correct it at your expense.</div>
+    <div class="field"><div class="field__label">MINIMA to deposit</div><input class="field__input" id="ppcX" placeholder="e.g. 100" autocomplete="off" /></div>
+    <div class="field"><div class="field__label">${esc(t.name)} to deposit</div><input class="field__input" id="ppcY" placeholder="e.g. 0.56" autocomplete="off" /></div>
     <div class="view__desc" id="ppcPreview" style="white-space:pre-wrap">Enter both amounts to see the opening price.</div>
     <label style="display:block;margin:6px 0;font-size:12px"><input type="checkbox" id="ppcAck" style="margin-right:6px" />I understand I'm setting the opening price with no market to check it against.</label>
     <div class="seg" style="margin-top:6px"><button class="btn btn--outline btn--full" id="ppcCancel">Cancel</button><button class="btn btn--primary btn--full" id="ppcGo">Create</button></div></div></div>`);
@@ -1430,7 +1552,6 @@ async function showPpCreate() {
   el("ppcCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcOv") close(); };
   const numOk = (v) => /^[0-9]*\.?[0-9]+$/.test(v) && parseFloat(v) > 0;
   const updatePreview = async () => {
-    const t = toks[el("ppcTok") && el("ppcTok").value | 0]; if (!t) return;
     const x = (el("ppcX") && el("ppcX").value || "").trim(), y = (el("ppcY") && el("ppcY").value || "").trim();
     if (!numOk(x) || !numOk(y)) { if (el("ppcPreview")) el("ppcPreview").textContent = "Enter both amounts to see the opening price."; return; }
     const pv = await api.ppCreatePreview(t.dec, x, y).catch(() => ({ ok: false }));
@@ -1438,19 +1559,18 @@ async function showPpCreate() {
       ? "Opening price:  " + TOK.tidyAmount(pv.price) + " " + t.name + " / MINIMA\nProduct floor (KMIN):  " + pv.kmin
       : ((pv && pv.msg) || "Enter both amounts.");
   };
-  el("ppcX").oninput = updatePreview; el("ppcY").oninput = updatePreview; el("ppcTok").onchange = updatePreview;
+  el("ppcX").oninput = updatePreview; el("ppcY").oninput = updatePreview;
   let busy = false;
   el("ppcGo").onclick = async () => {
     if (busy) return;
-    const t = toks[el("ppcTok").value | 0]; if (!t) return;
     const x0 = el("ppcX").value.trim(), y0 = el("ppcY").value.trim();
     if (!numOk(x0) || !numOk(y0)) { toast("Enter both reserves (positive).", "err"); return; }
     if (!el("ppcAck").checked) { toast("Tick the box to confirm you're setting the opening price.", "err"); return; }
     busy = true;
     const pv = await api.ppCreatePreview(t.dec, x0, y0).catch(() => ({ ok: false }));
-    const priceLine = pv && pv.ok ? "Opening price " + TOK.tidyAmount(pv.price) + " " + t.name + " / MINIMA — you set this, no market check.\n" : "";
+    const priceLine = pv && pv.ok ? "⚠ No market price available — YOU are setting the opening price at " + TOK.tidyAmount(pv.price) + " " + t.name + " / MINIMA.\n" : "";
     const okc = await showConfirm("Create MINIMA / " + t.name + " pool?",
-      "Seed " + x0 + " MINIMA and " + y0 + " " + t.name + " as the reserves.\n" + priceLine + "\n⚠ Set the ratio to the real market rate or it will be arbitraged. On-chain; withdrawable later as the owner.", "Create");
+      x0 + " MINIMA  +  " + y0 + " " + t.name + "\n" + priceLine + "\nThe 0.5% swap fee goes to liquidity providers. On-chain; withdrawable later as the owner.", "Create");
     if (!okc) { busy = false; return; }
     close();
     const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
@@ -1458,6 +1578,7 @@ async function showPpCreate() {
     catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
     finally { busy = false; }
   };
+  updatePreview();
 }
 function ppTwoAmountSheet(title, desc, lblA, lblB, okLabel, onGo) {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="pp2Ov"><div class="modal">

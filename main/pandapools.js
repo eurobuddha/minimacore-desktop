@@ -20,9 +20,20 @@ const node = require("./node-manager");
 const { rpcCall } = require("./rpc");
 const { createContext, ALL_FILES } = require("./pandapools/loader");
 const { makeSqlShim } = require("./pandapools/sqlshim");
+const { fetchJson } = require("./netfetch");
 
 const SCAN_EVERY_MS = 12000;          // poll cadence; work only runs when the tip block advances
 const VERIFY_FAIL_BLOCKS = 12;        // a CREATE whose reserves never land within this is marked failed (parity)
+
+// ---- external market price (MEXC MINIMA/USDT) — the create-flow price anchor (parity with the MDS dapp) ----
+// PandaPools only creates MINIMA / USDT pools (the pair with a live market feed), so a pool always opens at the
+// true rate. USDT_TOKENID is the on-chain mxUSDT id; ONLY this token is poolable (no mispriceable pools).
+const USDT_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+const MKT_DEPTH = "https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20";
+const MKT_BOOK = "https://api.mexc.com/api/v3/ticker/bookTicker?symbol=MINIMAUSDT";
+const MKT_MIN_USDT = 25, MKT_FRESH_MS = 5 * 60000, MKT_GAP_MS = 30000;
+let mktMid = 0, mktAt = 0, mktLastTry = 0, mktFetching = false;
+function isMarketFed(tid) { return !!tid && String(tid).toLowerCase() === USDT_TOKENID.toLowerCase(); }
 
 const emitter = new EventEmitter();
 let ctx = null;                        // the vm context holding the reused globals (Book, PoolMgr, Store, Curve, Router, PP)
@@ -244,7 +255,60 @@ async function swap(quoteId) {
   }), 200000, "The swap timed out — check Activity and your balance before retrying.");
 }
 
-/** Opening-price + KMIN preview for the create form (donor's manual-bootstrap preview) — pure, no spend. */
+// ---- MEXC market price (create-flow anchor) — mirrors the MDS dapp refreshMarket / resolveAnchor ----
+function marketFresh() { return mktMid > 0 && (Date.now() - mktAt) <= MKT_FRESH_MS; }
+function effLevel(side) {            // price where cumulative price*qty first reaches MKT_MIN_USDT (dust-proof)
+  if (!Array.isArray(side)) return 0;
+  var cum = 0;
+  for (var i = 0; i < side.length; i++) {
+    var px = parseFloat(side[i][0]), qty = parseFloat(side[i][1]);
+    if (!(px > 0) || !(qty > 0)) return 0;
+    cum += px * qty;
+    if (cum >= MKT_MIN_USDT) return px;
+  }
+  return 0;
+}
+function acceptMid(b, a) {
+  if (!(b > 0) || !(a > 0) || b > a) return;
+  if ((a - b) / a >= 0.2) return;    // book too thin/wide to quote
+  var m = (a + b) / 2;
+  if (m > 0 && isFinite(m)) { mktMid = m; mktAt = Date.now(); }
+}
+/** Best-effort MEXC refresh (rate-limited to MKT_GAP_MS). Depth book first (dust-proof mid), then bookTicker. */
+async function refreshMarket() {
+  var now = Date.now();
+  if (mktFetching || now - mktLastTry < MKT_GAP_MS) return;   // rate-limited → keep the cached mid
+  mktFetching = true; mktLastTry = now;
+  try {
+    var j = await fetchJson(MKT_DEPTH);
+    if (j && (j.bids || j.asks)) { acceptMid(effLevel(j.bids), effLevel(j.asks)); return; }
+    var k = await fetchJson(MKT_BOOK);
+    if (k) acceptMid(parseFloat(k.bidPrice), parseFloat(k.askPrice));
+  } catch (e) { /* market data is optional — the create flow falls back to live-pool spot, then manual */ }
+  finally { mktFetching = false; }
+}
+function fmtMid() { return String(parseFloat(mktMid.toPrecision(12))); }   // trim float-division noise; keep real precision
+/** Read-only market snapshot for the swap-page market line + the create ↻ Price button. Refreshes if stale.
+ *  Pure MEXC — does NOT require the node/ctx, so it works before/independent of init(). */
+async function market() {
+  if (!marketFresh()) await refreshMarket();
+  return { mid: marketFresh() ? fmtMid() : null, fresh: marketFresh(), at: mktAt };
+}
+/** Opening-price anchor for create, best-first: (1) fresh MEXC mid; (2) aggregate spot of live USDT pools; else null.
+ *  MEXC (tier 1) needs no node; only the tier-2 live-pool fallback needs ctx/POOLS. */
+async function createAnchor() {
+  if (!marketFresh()) await refreshMarket();
+  if (marketFresh() && mktMid > 0) return { price: fmtMid(), source: "MEXC market" };
+  try { await init(); } catch (e) { return { price: null, source: "" }; }
+  var live = POOLS.filter(function (p) { return p && isMarketFed(p.tok); });
+  var agg = ctx && ctx.Curve.aggregatePrice(live);
+  if (agg && agg.gt(0)) return { price: s(agg), source: "live pools" };
+  return { price: null, source: "" };
+}
+/** The single market-fed token id (mxUSDT) — the renderer gates create to this, mirroring the dapp. */
+function marketToken() { return { usdt: USDT_TOKENID }; }
+
+/** Opening-price + KMIN preview for the manual-bootstrap create form (tier-3) — pure, no spend. */
 function createPreview(tokDecimals, x0, y0) {
   if (!ctx) return { ok: false, msg: "Starting up…" };
   try {
@@ -376,6 +440,7 @@ function importCoin(data, next) {
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, quoteSwap: quoteAndStash, pairInfo, createPreview,
+  market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
   _setRunner, _setDataDir,
 };
