@@ -2156,9 +2156,15 @@ function sendForm(mode) {
  *
  * Only ONE thing proves inbound works: a real incoming peer. A router accepting the port mapping proves
  * nothing — verified on a Plusnet Hub Two, which stores the mapping with Enabled=1 and still leaves the
- * port shut. So the mapped copy says "asked your router", never "the port is open", and after the jar's
- * ~1h reachability self-check has failed we say so plainly and point at the manual fix.
+ * port shut. So the mapped copy says "asked your router", never "the port is open".
+ *
+ * We need no reachability service of our own: the Minima network IS the dial-back. A peer that learns our
+ * address queues the connect-back immediately (P2PPeersChecker posts PEERS_CHECKPEERS as a Message, not a
+ * timer), so a working setup shows incoming peers within seconds-to-minutes. That makes silence meaningful:
+ * we hint at HINT_MS, and state it firmly once the jar's own hourly check has flipped isAcceptingInLinks off.
  */
+const CONTRIB_HINT_MS = 15 * 60_000;
+
 function contribHelp(s, h, pm) {
   const port = CFG.basePort;
   if ((h.incoming || 0) > 0)
@@ -2166,9 +2172,12 @@ function contribHelp(s, h, pm) {
   if (pm.state === "double_nat")
     return { color: "var(--amber)", text: "Your router is behind another one (carrier-grade NAT), so other nodes can't dial in. You still help by relaying blocks and transactions." };
   if (pm.state === "mapped") {
-    if ((s.uptimeMs || 0) > 70 * 60_000 && h.acceptingInLinks === false)
+    const up = s.uptimeMs || 0;
+    if (h.acceptingInLinks === false && up > 70 * 60_000)
       return { color: "var(--amber)", text: "Your router accepted the request but nothing is getting through — some routers report success without actually opening the port. Forward TCP " + port + " to this Mac in your router settings to fix it. You're still helping by relaying." };
-    return { color: "", text: "Asked your router to open port " + port + " — not confirmed yet. Waiting for the first incoming peer (this can take an hour or more)." };
+    if (up > CONTRIB_HINT_MS)
+      return { color: "var(--amber)", text: "No incoming peers yet. Other nodes normally dial back within minutes, so your router may have accepted the request without really opening the port — if this sticks, forward TCP " + port + " to this Mac manually." };
+    return { color: "", text: "Asked your router to open port " + port + " — not confirmed yet. Waiting for the first incoming peer." };
   }
   if (pm.state === "searching") return { color: "", text: "Asking your router to open port " + port + "…" };
   if (pm.state === "no_gateway")
