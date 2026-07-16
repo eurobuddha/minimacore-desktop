@@ -15,6 +15,9 @@
  * allows no network access.
  */
 const EventEmitter = require("events");
+const os = require("os");
+const dgram = require("dgram");
+const { execFile } = require("child_process");
 
 const MAP_TTL_S = 3600;                          // 1h lease; the lib re-maps 10 min before expiry
 const IP_TIMEOUT_MS = 12_000;
@@ -36,6 +39,60 @@ function withTimeout(p, ms, msg) {
   return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 }
 
+/** macOS default route → { gateway, iface }. */
+function defaultRoute() {
+  return new Promise(resolve => {
+    execFile("route", ["-n", "get", "default"], { timeout: 5000 }, (err, out) => {
+      if (err) return resolve(null);
+      const gw = /gateway:\s*([0-9.]+)/.exec(out);
+      const ifc = /interface:\s*(\S+)/.exec(out);
+      resolve(gw ? { gateway: gw[1], iface: ifc ? ifc[1] : null } : null);
+    });
+  });
+}
+
+/** This machine's IPv4 on the default-route interface (fallback: first external IPv4). */
+function lanIp(iface) {
+  const nets = os.networkInterfaces();
+  const pick = list => (list || []).find(n => n.family === "IPv4" && !n.internal);
+  const hit = iface && pick(nets[iface]);
+  if (hit) return hit.address;
+  for (const list of Object.values(nets)) { const n = pick(list); if (n) return n.address; }
+  return null;
+}
+
+/**
+ * The router's friendly name via SSDP + its description XML (e.g. "Plusnet Hub Two"). Only used to make
+ * the manual port-forward help concrete — knowing the model is what lets someone look up their own router.
+ * Best-effort: null if the router doesn't answer.
+ */
+function routerModel() {
+  return new Promise(resolve => {
+    const sock = dgram.createSocket("udp4");
+    let done = false;
+    const finish = v => { if (done) return; done = true; try { sock.close(); } catch (e) {} resolve(v); };
+    sock.on("error", () => finish(null));
+    sock.on("message", async msg => {
+      const loc = /LOCATION:\s*(\S+)/i.exec(String(msg));
+      if (!loc || done) return;
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 4000);
+        const xml = await (await fetch(loc[1], { signal: ctl.signal })).text();
+        clearTimeout(timer);
+        const n = /<friendlyName>([^<]+)<\/friendlyName>/.exec(xml);
+        finish(n ? n[1].trim() : null);
+      } catch (e) { finish(null); }
+    });
+    for (const st of ["urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+                      "urn:schemas-upnp-org:device:InternetGatewayDevice:2"]) {
+      const m = Buffer.from(`M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\nST: ${st}\r\n\r\n`);
+      try { sock.send(m, 1900, "239.255.255.250"); } catch (e) {}
+    }
+    setTimeout(() => finish(null), 5000);
+  });
+}
+
 class PortMapper extends EventEmitter {
   constructor() {
     super();
@@ -51,6 +108,9 @@ class PortMapper extends EventEmitter {
     this.detail = "";
     this.since = 0;
     this.logger = null;
+    this.lanIp = null;             // for the manual-forward help — this Mac, the router, and its model
+    this.gatewayIp = null;
+    this.routerName = null;
   }
 
   setLogger(fn) { this.logger = fn; }
@@ -59,7 +119,21 @@ class PortMapper extends EventEmitter {
   status() {
     const mapped = this.state === "mapped" || this.state === "double_nat";
     return { state: this.state, externalIp: this.externalIp, externalPort: mapped ? this.port : null,
-             detail: this.detail, since: this.since };
+             detail: this.detail, since: this.since, port: this.port,
+             // Everything needed to forward the port BY HAND, discovered rather than guessed — on plenty
+             // of routers (BT/Plusnet Hub 2 and friends) manual is the only thing that actually works.
+             lanIp: this.lanIp, gatewayIp: this.gatewayIp, routerName: this.routerName };
+  }
+
+  /** Discover this Mac's LAN IP, the router's address and model, for the manual-forward instructions. */
+  async discoverHostInfo() {
+    try {
+      const route = await defaultRoute();
+      this.gatewayIp = (route && route.gateway) || null;
+      this.lanIp = lanIp(route && route.iface);
+      if (!this.routerName) this.routerName = await routerModel();
+      this.emit("status", this.status());
+    } catch (e) { /* help text degrades to generic wording */ }
   }
 
   setStatus(state, detail) {
@@ -86,6 +160,7 @@ class PortMapper extends EventEmitter {
     await this.teardown();                                   // drop any prior client/mapping first
     if (!this.enabled || gen !== this.gen) return;
     this.setStatus("searching");
+    this.discoverHostInfo();          // parallel, best-effort: powers the manual-forward instructions
     try {
       const { default: NatAPI } = await import("@silentbot1/nat-api");
       if (!this.enabled || gen !== this.gen) return;

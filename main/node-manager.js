@@ -184,8 +184,16 @@ class NodeManager extends EventEmitter {
             const nr = (n && n.response) || {};
             const p2p = (nr.details && nr.details.p2p) || {};
             const conns = Array.isArray(nr.connections) ? nr.connections : [];
-            this.health.incoming = typeof p2p.nio_inbound === "number"
-              ? p2p.nio_inbound : conns.filter(c => c && c.incoming).length;
+            // Count only INCOMING connections from OTHER hosts. Once the node knows its own public address
+            // it feeds it to the peers-checker like any other peer, and with -allowallip it isn't filtered
+            // out — so the node dials itself, hairpins back through the router, and that shows up as an
+            // inbound peer. Counting it would let us claim "reachable" on the strength of talking to
+            // ourselves. Verified live: nio_inbound 3 was really 2 external + 1 self.
+            const selfIp = String(p2p.address || "").split(":")[0];
+            const inbound = conns.filter(c => c && c.incoming);
+            this.health.incoming = conns.length
+              ? (selfIp ? inbound.filter(c => String(c.host || "") !== selfIp).length : inbound.length)
+              : (typeof p2p.nio_inbound === "number" ? p2p.nio_inbound : 0);
             this.health.acceptingInLinks = typeof p2p.isAcceptingInLinks === "boolean" ? p2p.isAcceptingInLinks : null;
             this.health.p2pAddress = p2p.address || "";
           } catch (e) { /* keep the carried values */ }

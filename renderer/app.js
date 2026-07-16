@@ -2174,18 +2174,41 @@ function contribHelp(s, h, pm) {
   if (pm.state === "mapped") {
     const up = s.uptimeMs || 0;
     if (h.acceptingInLinks === false && up > 70 * 60_000)
-      return { color: "var(--amber)", text: "Your router accepted the request but nothing is getting through — some routers report success without actually opening the port. Forward TCP " + port + " to this Mac in your router settings to fix it. You're still helping by relaying." };
+      return { color: "var(--amber)", text: "Your router accepted the request but nothing is getting through — some routers report success without actually opening the port. You'll need to forward it yourself. You're still helping by relaying meanwhile.", howto: true };
     if (up > CONTRIB_HINT_MS)
-      return { color: "var(--amber)", text: "No incoming peers yet. Other nodes normally dial back within minutes, so your router may have accepted the request without really opening the port — if this sticks, forward TCP " + port + " to this Mac manually." };
+      return { color: "var(--amber)", text: "No incoming peers yet. Other nodes normally dial back within minutes, so your router may have accepted the request without really opening the port — if this sticks, forward it yourself.", howto: true };
     return { color: "", text: "Asked your router to open port " + port + " — not confirmed yet. Waiting for the first incoming peer." };
   }
   if (pm.state === "searching") return { color: "", text: "Asking your router to open port " + port + "…" };
   if (pm.state === "no_gateway")
-    return { color: "var(--amber)", text: "Your router didn't answer — automatic port opening (UPnP/NAT-PMP) is off or blocked. Forward TCP " + port + " manually, or keep helping as an outbound node." };
+    return { color: "var(--amber)", text: "Your router didn't answer — automatic port opening (UPnP/NAT-PMP) is off or blocked. You can forward the port yourself, or keep helping as an outbound node.", howto: true };
   if (pm.state === "mapping_refused")
-    return { color: "var(--amber)", text: "Your router refused to open port " + port + " — UPnP may be disabled, or that port is already forwarded to another device. Try a different Minima port in Reconfigure, or forward TCP " + port + " manually." };
+    return { color: "var(--amber)", text: "Your router refused to open port " + port + " — UPnP may be disabled, or that port is already forwarded to another device.", howto: true };
   if (pm.state === "error") return { color: "var(--amber)", text: "Port mapping error — retrying automatically." };
   return { color: "", text: "starting…" };
+}
+
+/**
+ * The manual port-forward instructions. Automatic opening fails on a lot of home routers — silently, in
+ * the Hub-2 case — so "forward it yourself" has to be a real answer, not a brush-off. Everything here is
+ * discovered from the machine and the router (portmap.discoverHostInfo), so the user gets their own
+ * numbers to copy rather than a generic doc telling them to go find them.
+ */
+function forwardHowTo(pm) {
+  const port = CFG.basePort;
+  const lan = pm.lanIp || "this Mac's IP address";
+  const router = pm.routerName ? esc(pm.routerName) : "your router";
+  const admin = pm.gatewayIp ? `<a href="http://${esc(pm.gatewayIp)}" target="_blank">http://${esc(pm.gatewayIp)}</a>` : "your router's admin page";
+  return `<div class="howto">
+    <div class="howto__h">How to open port ${esc(port)} yourself</div>
+    <div class="howto__b">In ${router}'s settings (${admin}), find <b>Port forwarding</b> and add:</div>
+    <div class="kv"><span class="kv__k">Protocol</span><span class="kv__v">TCP</span></div>
+    <div class="kv"><span class="kv__k">External port</span><span class="kv__v">${esc(port)}</span></div>
+    <div class="kv"><span class="kv__k">Internal port</span><span class="kv__v">${esc(port)}</span></div>
+    <div class="kv"><span class="kv__k">Send to</span><span class="kv__v">${esc(lan)} (this Mac)</span></div>
+    <div class="howto__b">Also reserve <b>${esc(lan)}</b> for this Mac in your router's DHCP settings — otherwise the
+      address can change and the forward will quietly stop working.${pm.routerName ? ` Searching for “${router} port forwarding” will show the exact screens.` : ""}</div>
+  </div>`;
 }
 
 function renderNode(s) {
@@ -2203,6 +2226,7 @@ function renderNode(s) {
     <div class="kv"><span class="kv__k">Peers</span><span class="kv__v">${esc(h.connections ?? "—")}</span></div>
     <div class="kv"><span class="kv__k">Role</span><span class="kv__v">${contributing ? "Contributing (server)" : "Light wallet"}</span></div>
     ${help ? `<div class="kv"><span class="kv__k">Network help</span><span class="kv__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
+    ${help && help.howto ? forwardHowTo(pm) : ""}
     ${contributing && h.p2pAddress ? `<div class="kv"><span class="kv__k">Public address</span><span class="kv__v">${esc(h.p2pAddress)}${addrOk ? " ✓" : ""}</span></div>` : ""}
     <div class="kv"><span class="kv__k">Network</span><span class="kv__v">${esc(CFG.network)}</span></div>
     <div class="kv"><span class="kv__k">RPC port</span><span class="kv__v">${esc(s.rpcPort || CFG.basePort + 4)}</span></div>

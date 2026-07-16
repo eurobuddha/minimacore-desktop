@@ -182,3 +182,11 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .spin--lg { width: 34px; height: 34px; margin: 0 auto; padding: 0; border: 3px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: mcd-spin .9s linear infinite; }
 @keyframes mcd-spin { to { transform: rotate(360deg); } }
+
+/* manual port-forward instructions (shown when the router won't open the port for us) */
+.howto { margin: 8px 0 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); }
+.howto__h { font-weight: 600; margin-bottom: 6px; }
+.howto__b { font-size: 12px; color: var(--muted); margin: 6px 0; line-height: 1.5; }
+.howto .kv { padding: 3px 0; }
+.howto a { color: var(--accent); }
