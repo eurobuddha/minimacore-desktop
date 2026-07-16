@@ -70,6 +70,20 @@ contextBridge.exposeInMainWorld("mcd", {
   mailInvalidate: () => ipcRenderer.invoke("mcd:mailInvalidate"),
   onMail: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:mail", h); return () => ipcRenderer.removeListener("mcd:mail", h); },
 
+  // PandaPools (AMM)
+  ppPools: () => ipcRenderer.invoke("mcd:ppPools"),
+  ppMyPools: () => ipcRenderer.invoke("mcd:ppMyPools"),
+  ppActivity: () => ipcRenderer.invoke("mcd:ppActivity"),
+  ppFeed: () => ipcRenderer.invoke("mcd:ppFeed"),
+  ppScan: () => ipcRenderer.invoke("mcd:ppScan"),
+  ppQuote: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppQuote", tok, minimaToToken, amount),
+  ppSwap: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppSwap", tok, minimaToToken, amount),
+  ppCreate: (tok, dec, x0, y0) => ipcRenderer.invoke("mcd:ppCreate", tok, dec, x0, y0),
+  ppDeposit: (addr, addM, addT) => ipcRenderer.invoke("mcd:ppDeposit", addr, addM, addT),
+  ppClose: (addr) => ipcRenderer.invoke("mcd:ppClose", addr),
+  ppMigrate: (addr, x0, y0) => ipcRenderer.invoke("mcd:ppMigrate", addr, x0, y0),
+  onPandapools: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:pandapools", h); return () => ipcRenderer.removeListener("mcd:pandapools", h); },
+
   // pushes
   onStatus: (fn) => { const h = (_e, s) => fn(s); ipcRenderer.on("mcd:status", h); return () => ipcRenderer.removeListener("mcd:status", h); },
   onLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:log", h); return () => ipcRenderer.removeListener("mcd:log", h); }

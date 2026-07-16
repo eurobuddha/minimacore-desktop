@@ -127,6 +127,10 @@ select.field__input option { background: var(--surface2); color: var(--text); }
 .btn--danger { background: none; color: var(--red); border-color: var(--red); }
 .btn--danger:hover { filter: brightness(1.12); }
 
+/* ---- PandaPools ---- */
+#view-pandapools.view--active { display: flex; flex-direction: column; height: 100%; }
+#view-pandapools #ppBody { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+
 /* toast — lift it */
 .toast { border-radius: 10px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.7); }
 

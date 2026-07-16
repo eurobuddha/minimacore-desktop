@@ -22,14 +22,10 @@ const ALL_FILES = ["decimal.js", "covenant.js", "curve.js", "router.js", "book.j
  * `ctx.Router`, `ctx.PP` to drive the reused code.
  */
 function createContext(mds, files) {
-  const sandbox = {
-    MDS: mds,
-    console: console,
-    // decimal.js + the reused modules only touch pure JS built-ins; expose the ones a vm context lacks by default.
-    Math: Math, JSON: JSON, Date: Date, parseInt: parseInt, parseFloat: parseFloat,
-    isNaN: isNaN, isFinite: isFinite, Array: Array, Object: Object, String: String, Number: Number,
-    Boolean: Boolean, Error: Error, RegExp: RegExp, setTimeout: setTimeout, clearTimeout: clearTimeout,
-  };
+  // A vm context already provides EVERY ECMAScript intrinsic (Object/Array/Math/JSON/Date/RegExp/BigInt/Promise/…)
+  // as the CHILD realm's own — injecting the parent realm's would be redundant and would break `x instanceof Array`
+  // inside the vm. Only inject the genuinely-missing Node globals the reused files touch (console) plus timers, and MDS.
+  const sandbox = { MDS: mds, console: console, setTimeout: setTimeout, clearTimeout: clearTimeout };
   sandbox.global = sandbox;
   const ctx = vm.createContext(sandbox);
   (files || ALL_FILES).forEach((f) => {

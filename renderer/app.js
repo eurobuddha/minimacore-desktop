@@ -76,6 +76,7 @@ async function boot() {
   api.onStatus(onStatus);
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
+  api.onPandapools(onPandapoolsUpdate);
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -395,6 +396,7 @@ function renderActive() {
   else if (activeView === "receive") renderReceive();
   else if (activeView === "send") renderSend();
   else if (activeView === "mail") renderMail();
+  else if (activeView === "pandapools") renderPandapools();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -1111,6 +1113,118 @@ function showPayResult(ok, message, txid, ambiguous) {
   const ov = el("prOv"); const close = () => { if (ov) ov.remove(); };
   el("prOk").onclick = close; ov.onclick = (e) => { if (e.target.id === "prOv") close(); };
   if (el("prCopy")) el("prCopy").onclick = () => { copy(txid); toast("Copied.", "ok"); };
+}
+
+// ---- PandaPools (AMM) — read views (Pools / My LP / Activity). Swap + LP management added in later steps. ----
+let ppView = "pools";           // pools | mylp | activity
+let PP_POOLS = [];
+
+function ppHeader(active) {
+  const tab = (id, label) => `<button class="btn btn--sm ${active === id ? "btn--primary" : "btn--outline"}" data-ppview="${id}">${label}</button>`;
+  return `<div class="view__title">PandaPools</div>
+    <div class="seg" style="margin-bottom:12px">${tab("pools", "Pools")}${tab("mylp", "My LP")}${tab("activity", "Activity")}</div>`;
+}
+function wirePpHeader() {
+  document.querySelectorAll("#ppBody [data-ppview]").forEach(b => b.onclick = () => { ppView = b.dataset.ppview; renderPandapools(); });
+}
+async function renderPandapools() {
+  const host = el("ppBody");
+  if (!running) { host.innerHTML = `<div class="view__title">PandaPools</div><div class="spin">Waiting for the node…</div>`; return; }
+  if (ppView === "mylp") return renderPpMyLP();
+  if (ppView === "activity") return renderPpActivity();
+  return renderPpPools();
+}
+function ppPairRows(pools) {
+  // group discovered pools by token (each group = one MINIMA/token pair)
+  const groups = {};
+  pools.forEach(p => { (groups[p.tok] = groups[p.tok] || []).push(p); });
+  const keys = Object.keys(groups);
+  if (!keys.length) return `<div class="empty">No pools discovered yet. They appear as the node scans the shared registry — give it a moment after the node reaches the tip.</div>`;
+  return keys.map(tok => {
+    const g = groups[tok];
+    const name = esc(g[0].tokName || TOK.shortId(tok));
+    const rows = g.map(p => `<div class="row" style="cursor:pointer" data-pool="${esc(p.address)}" title="Right-click to copy the pool address">
+        <div class="row__mid"><div class="row__l1">${esc(TOK.tidyAmount(p.reserveM))} MINIMA · ${esc(TOK.tidyAmount(p.reserveT))} ${name}</div>
+          <div class="row__l2">price ${esc(TOK.tidyAmount(p.spot))} ${name}/MINIMA · ${esc(short(p.address, 18))}</div></div>
+        <div class="row__r">›</div></div>`).join("");
+    return `<div class="card"><div class="card__title">MINIMA / ${name} <span class="mail-ver">${g.length} pool${g.length > 1 ? "s" : ""}</span></div>${rows}</div>`;
+  }).join("");
+}
+// HTML builders (reused by the initial render AND the live-update patch) + wiring helpers.
+function ppMineHtml(mine) {
+  return mine.length ? mine.map(p => `<div class="card"><div class="card__title">MINIMA / ${esc(p.tokName || TOK.shortId(p.tok))}</div>
+      <div class="kv"><span>Reserves</span><span>${esc(TOK.tidyAmount(p.reserveM))} MINIMA · ${esc(TOK.tidyAmount(p.reserveT))} ${esc(p.tokName || "")}</span></div>
+      <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div></div>`).join("")
+    : `<div class="empty">You don't own any pools yet. Pool creation arrives in a later build.</div>`;
+}
+function ppActsHtml(acts) {
+  return acts.length ? acts.map(a => `<div class="row"><div class="row__mid">
+      <div class="row__l1">${esc(a.type)} ${a.failed ? "· <span style=\"color:var(--red)\">Failed</span>" : a.confirmed ? "· <span style=\"color:var(--green)\">Confirmed</span>" : "· Confirming…"}</div>
+      <div class="row__l2">${esc(short(a.summary, 52))}</div></div><div class="row__r">${esc(relTime(a.ts))}</div></div>`).join("")
+    : `<div class="empty">No activity yet.</div>`;
+}
+function ppFeedHtml(feed) {
+  return feed.length ? feed.map(f => `<div class="row"><div class="row__mid">
+      <div class="row__l1">${esc(f.kind)} · ${esc(f.tokenLabel)}</div>
+      <div class="row__l2">${esc(TOK.tidyAmount(f.minimaAmt))} MINIMA ${f.minimaIn ? "→" : "←"} ${esc(TOK.tidyAmount(f.tokenAmt))}</div></div>
+      <div class="row__r">${esc(relTime(f.ts))}</div></div>`).join("")
+    : `<div class="empty">No swaps seen yet.</div>`;
+}
+function wirePpPoolRows(root) {
+  root.querySelectorAll(".row[data-pool]").forEach(n => n.oncontextmenu = (e) => { e.preventDefault(); copy(n.dataset.pool); toast("Pool address copied", "ok"); });
+}
+function wirePpCopy(root) { root.querySelectorAll("[data-copy]").forEach(n => n.onclick = () => { copy(n.dataset.copy); toast("Copied", "ok"); }); }
+
+async function renderPpPools() {
+  const host = el("ppBody");
+  PP_POOLS = await api.ppPools().catch(() => []);
+  host.innerHTML = `${ppHeader("pools")}
+    <div class="view__desc">Live constant-product pools on the shared mainnet registry — the same pools the phone app and the MDS MiniDapp trade.</div>
+    <div id="ppList">${ppPairRows(PP_POOLS)}</div>`;
+  wirePpHeader(); wirePpPoolRows(el("ppList"));
+}
+async function renderPpMyLP() {
+  const host = el("ppBody");
+  const mine = await api.ppMyPools().catch(() => []);
+  host.innerHTML = `${ppHeader("mylp")}
+    <div class="view__desc">Pools you created on this device. Keep-fresh maintains their reserves automatically — <b>leave this app running</b> so your pools stay live for everyone.</div>
+    <div id="ppMine">${ppMineHtml(mine)}</div>`;
+  wirePpHeader(); wirePpCopy(el("ppMine"));
+}
+async function renderPpActivity() {
+  const host = el("ppBody");
+  const [acts, feed] = await Promise.all([api.ppActivity().catch(() => []), api.ppFeed().catch(() => [])]);
+  host.innerHTML = `${ppHeader("activity")}
+    <div class="card" id="ppActs"><div class="card__title">Your activity</div>${ppActsHtml(acts)}</div>
+    <div class="card" id="ppFeed"><div class="card__title">Market feed <span class="mail-ver">all pools</span></div>${ppFeedHtml(feed)}</div>`;
+  wirePpHeader();
+}
+// Live scan updates: patch ONLY the passive list container of the active sub-view IN PLACE (preserve scroll); never
+// rebuild the header or any form (the "frozen tab" rule — matters once swap/create inputs land in later steps).
+let ppUpdateTimer = null;
+function onPandapoolsUpdate() {
+  if (ppUpdateTimer) return;
+  ppUpdateTimer = setTimeout(() => { ppUpdateTimer = null; refreshPpActive().catch(() => {}); }, 400);
+}
+async function refreshPpActive() {
+  const body = el("ppBody");
+  if (!body || activeView !== "pandapools") return;
+  const sy = body.scrollTop;
+  if (ppView === "pools") {
+    if (!el("ppList")) return;
+    PP_POOLS = await api.ppPools().catch(() => []);
+    const c = el("ppList"); if (c) { c.innerHTML = ppPairRows(PP_POOLS); wirePpPoolRows(c); }
+  } else if (ppView === "mylp") {
+    if (!el("ppMine")) return;
+    const mine = await api.ppMyPools().catch(() => []);
+    const c = el("ppMine"); if (c) { c.innerHTML = ppMineHtml(mine); wirePpCopy(c); }
+  } else if (ppView === "activity") {
+    if (!el("ppActs")) return;
+    const [acts, feed] = await Promise.all([api.ppActivity().catch(() => []), api.ppFeed().catch(() => [])]);
+    if (el("ppActs")) el("ppActs").innerHTML = `<div class="card__title">Your activity</div>${ppActsHtml(acts)}`;
+    if (el("ppFeed")) el("ppFeed").innerHTML = `<div class="card__title">Market feed <span class="mail-ver">all pools</span></div>${ppFeedHtml(feed)}`;
+  }
+  if (el("ppBody")) el("ppBody").scrollTop = sy;
 }
 
 // ---- History ---------------------------------------------------------------

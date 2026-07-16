@@ -41,7 +41,9 @@
       "renderer/**",
       "package.json",
       "node_modules/libsodium-wrappers/**",
-      "node_modules/libsodium/**"
+      "node_modules/libsodium/**",
+      "node_modules/sql.js/dist/sql-wasm.wasm",
+      "node_modules/sql.js/**"
     ],
     "extraResources": [
       {

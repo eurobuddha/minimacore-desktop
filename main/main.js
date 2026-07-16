@@ -16,6 +16,7 @@ const netfetch = require("./netfetch");
 const histStore = require("./history-store");
 const faucet = require("./faucet");
 const mail = require("./mail");
+const pandapools = require("./pandapools");
 
 let win = null;
 let tray = null;
@@ -167,6 +168,22 @@ mail.emitter.on("incoming", (info) => {
 });
 let mailStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); } });
+
+// PandaPools (AMM) — read model + actions; the AMM logic is the reused MDS core (main/pandapools/*).
+ipcMain.handle("mcd:ppPools", () => pandapools.pools());
+ipcMain.handle("mcd:ppMyPools", () => pandapools.myPools());
+ipcMain.handle("mcd:ppActivity", () => pandapools.activity());
+ipcMain.handle("mcd:ppFeed", () => pandapools.feed());
+ipcMain.handle("mcd:ppScan", () => pandapools.scanNow());
+ipcMain.handle("mcd:ppQuote", (_e, tok, minimaToToken, amount) => pandapools.quoteSwap(tok, minimaToToken, amount));
+ipcMain.handle("mcd:ppSwap", (_e, tok, minimaToToken, amount) => pandapools.swap(tok, minimaToToken, amount));
+ipcMain.handle("mcd:ppCreate", (_e, tok, dec, x0, y0) => pandapools.createPool(tok, dec, x0, y0));
+ipcMain.handle("mcd:ppDeposit", (_e, addr, addM, addT) => pandapools.deposit(addr, addM, addT));
+ipcMain.handle("mcd:ppClose", (_e, addr) => pandapools.close(addr));
+ipcMain.handle("mcd:ppMigrate", (_e, addr, x0, y0) => pandapools.migrate(addr, x0, y0));
+pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
+let ppStarted = false;
+node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); } });
 ipcMain.handle("mcd:histGet", () => histStore.all());
 ipcMain.handle("mcd:histAdd", (_e, rows) => histStore.merge(Array.isArray(rows) ? rows : []));
 ipcMain.handle("mcd:histClear", () => { histStore.clear(); return true; });
@@ -200,6 +217,7 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 
 let quitting = false;
 app.on("before-quit", async (e) => {
+  try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   if (quitting || !node.proc) return;
   e.preventDefault(); quitting = true;
   try { await node.stop(); } catch (err) {}

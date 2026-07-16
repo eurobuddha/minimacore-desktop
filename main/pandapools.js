@@ -28,7 +28,7 @@ let ctx = null;                        // the vm context holding the reused glob
 let sqlShim = null;
 let serviceHandler = null;            // service.js's MDS.init callback (we fire inited/NEWBLOCK into it)
 let ready = false, initPromise = null;
-let scanTimer = null, lastTip = 0, scanning = false;
+let scanTimer = null, lastTip = 0, scanning = false, scanStartTs = 0;
 let POOLS = [];                        // latest funded pools from Book.scan (Decimal reserves)
 let dataDir = null;
 
@@ -40,7 +40,9 @@ function nodeCmd(cmd) { return runner(cmd); }
 
 function buildMds() {
   return {
-    cmd: function (command, cb) { runner(command).then(function (r) { if (cb) cb(r); }).catch(function () { if (cb) cb({ status: false }); }); },
+    // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
+    // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
+    cmd: function (command, cb) { runner(command).then(function (r) { if (cb) cb(r); }, function () { if (cb) cb({ status: false }); }); },
     sql: sqlShim.sql,
     log: function () { /* console.log.apply(console, arguments); */ },
     init: function (cb) { serviceHandler = cb; },                    // capture — we drive the events ourselves
@@ -58,9 +60,10 @@ async function init() {
     await new Promise(function (r) { ctx.Store.init(function () { r(); }); });
     if (serviceHandler) serviceHandler({ event: "inited" });         // boot service.js (coinnotify cleanup + retrackOwn + first scan)
     ready = true;
-  })();
+  })().catch(function (e) { initPromise = null; throw e; });         // don't cache a rejection → a transient init failure can retry
   return initPromise;
 }
+function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best effort */ } }
 
 // ---- helpers ----
 function currentBlock() {
@@ -99,18 +102,19 @@ function startLoop() {
 function stopLoop() { if (scanTimer) { clearInterval(scanTimer); scanTimer = null; } }
 
 function runCycle(tip) {
-  if (scanning) return; scanning = true;
+  if (scanning && (Date.now() - scanStartTs) < 120000) return;   // one cycle at a time, with a 2-min stuck-guard
+  scanning = true; scanStartTs = Date.now();
   // 1) UI discovery — Book.scan gives the funded pool list the renderer trades on.
-  ctx.Book.scan(function (pools) {
+  try { ctx.Book.scan(function (pools) {
     POOLS = pools || [];
+    scanning = false;                 // reset BEFORE emitting, so a throwing update-listener can't leave it wedged
     emitter.emit("update");
-    scanning = false;
     // 2) background engine — service.js does its own discovery snapshot + feed + keep-fresh + re-announce.
     try { if (serviceHandler) serviceHandler({ event: "NEWBLOCK" }); } catch (e) {}
     // 3) resume any pending signature (harmless on a full-RPC node), then verify pending CREATEs.
     try { ctx.PoolMgr.onNewBlock(); } catch (e) {}
     verifyPendingActivity(tip);
-  });
+  }); } catch (e) { scanning = false; }   // a synchronous throw must not wedge the cycle (the 2-min guard also recovers)
 }
 
 /** Mark a CREATE activity 'confirmed' once its covenant reserves land, or 'failed' after VERIFY_FAIL_BLOCKS. */
@@ -146,6 +150,7 @@ function feed() { return new Promise(function (resolve) { ctx.Store.feedList(100
 function poolByAddress(addr) { for (var i = 0; i < POOLS.length; i++) if (POOLS[i].address && POOLS[i].address.toLowerCase() === String(addr || "").toLowerCase()) return POOLS[i]; return null; }
 
 function quoteSwap(tok, minimaToToken, amountIn) {
+  if (!ready || !ctx) return { ok: false };                        // may be called over IPC before init() completes
   var pair = POOLS.filter(function (p) { return p.tok && p.tok.toLowerCase() === String(tok).toLowerCase(); });
   var route = ctx.Router.route(pair, minimaToToken, amountIn);
   return route;
@@ -199,7 +204,7 @@ async function migrate(addr, newX, newY) {
 async function scanNow() { await init(); return new Promise(function (r) { ctx.Book.scan(function (ps) { POOLS = ps || []; emitter.emit("update"); r(pools()); }); }); }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, scanNow,
+  emitter, init, startLoop, stopLoop, scanNow, flush,
   pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false }; },
   swap, createPool, deposit, close: closePool, migrate,
   _setRunner, _setDataDir,
