@@ -13,6 +13,7 @@
  */
 const EventEmitter = require("events");
 const path = require("path");
+const fs = require("fs");
 const { app } = require("electron");
 const config = require("./config");
 const node = require("./node-manager");
@@ -64,6 +65,18 @@ async function init() {
   return initPromise;
 }
 function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best effort */ } }
+/** On a wallet seed restore the identity changed. Drop the loaded context + cached pools and wipe the local store,
+ *  so the background keep-fresh worker stops churning on the previous seed's (now unspendable) pools and My LP clears.
+ *  Recovery recipes are for the previous wallet and are re-importable from a PandaPools backup. Mirrors mail's invalidate. */
+function invalidate() {
+  try { stopLoop(); } catch (e) {}
+  try { if (sqlShim) sqlShim.flush(); } catch (e) {}
+  try { fs.unlinkSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}   // fresh store next init
+  ctx = null; serviceHandler = null; sqlShim = null; ready = false; initPromise = null;
+  POOLS = []; lastTip = 0; scanning = false; scanStartTs = 0;
+  emitter.emit("update");
+  startLoop();                                                    // re-init under the new seed on the next tick
+}
 
 // ---- helpers ----
 function currentBlock() {
@@ -121,6 +134,7 @@ function runCycle(tip) {
 
 /** Mark a CREATE activity 'confirmed' once its covenant reserves land, or 'failed' after VERIFY_FAIL_BLOCKS. */
 function verifyPendingActivity(tip) {
+  if (!ctx) return;                                              // an invalidate() may have nulled ctx while this cycle was in flight
   ctx.Store.actList(120, function (acts) {
     acts.forEach(function (a) {
       if (a.type !== "CREATE" || !a.refaddr || !a.txpowid || a.confirmedOnchain || a.failed) return;
@@ -135,9 +149,10 @@ function verifyPendingActivity(tip) {
 }
 
 // ---- read model (JSON-safe) ----
-function pools() { return POOLS.map(serializePool).filter(Boolean); }
+function pools() { if (!ctx) return []; return POOLS.map(serializePool).filter(Boolean); }
 function myPools() {
   // A pool is "mine" if we hold a recovery recipe for it (created here) — cross-referenced with the live scan.
+  if (!ctx) return Promise.resolve([]);
   return new Promise(function (resolve) {
     ctx.Store.ownAll(function (recipes) {
       var mine = {}; recipes.forEach(function (r) { if (r.address) mine[r.address.toLowerCase()] = true; });
@@ -145,8 +160,8 @@ function myPools() {
     });
   });
 }
-function activity() { return new Promise(function (resolve) { ctx.Store.actList(120, function (a) { resolve((a || []).map(function (e) { return { type: e.type, summary: e.summary, txpowid: e.txpowid, ts: e.ts, failed: e.failed, failMsg: e.failMsg, confirmed: e.confirmedOnchain, submitBlock: e.submitBlock }; })); }); }); }
-function feed() { return new Promise(function (resolve) { ctx.Store.feedList(100, function (f) { resolve((f || []).map(function (e) { return { pool: e.pool, tokenLabel: e.tokenLabel, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), price: s(e.price), ts: e.ts }; })); }); }); }
+function activity() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.actList(120, function (a) { resolve((a || []).map(function (e) { return { type: e.type, summary: e.summary, txpowid: e.txpowid, ts: e.ts, failed: e.failed, failMsg: e.failMsg, confirmed: e.confirmedOnchain, submitBlock: e.submitBlock }; })); }); }); }
+function feed() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.feedList(100, function (f) { resolve((f || []).map(function (e) { return { pool: e.pool, tokenLabel: e.tokenLabel, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), price: s(e.price), ts: e.ts }; })); }); }); }
 
 // ---- actions (promise wrappers over PoolMgr's {ok,fail} callbacks) ----
 function poolByAddress(addr) { for (var i = 0; i < POOLS.length; i++) if (POOLS[i].address && POOLS[i].address.toLowerCase() === String(addr || "").toLowerCase()) return POOLS[i]; return null; }
@@ -288,10 +303,14 @@ function restoreOne(e, cbRaw) {
     importCoin(e.cm, function () { importCoin(e.ct, function () { cb(true); }); });
   }).catch(function () { cb(true); });
 }
-function importCoin(data, next) { if (!data) { next(); return; } nodeCmd("coinimport track:true data:" + data).then(function () { next(); }).catch(function () { next(); }); }
+function importCoin(data, next) {
+  var d = String(data || "");
+  if (!d || /\s/.test(d)) { next(); return; }                    // coinexport blobs are a single space-free token; reject anything else (a hostile backup can't smuggle extra command params)
+  nodeCmd("coinimport track:true data:" + d).then(function () { next(); }, function () { next(); });
+}
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, scanNow, flush,
+  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false, notReady: !ready }; },
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
   _setRunner, _setDataDir,

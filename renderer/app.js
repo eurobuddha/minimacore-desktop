@@ -336,7 +336,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {} resetMailState();   // seed changed → re-derive the mail identity
+    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState();   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -375,7 +375,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {} resetMailState();   // seed changed → re-derive the mail identity
+      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState();   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -535,6 +535,7 @@ const MAIL_EMOJIS = ["😀","😃","😄","😁","😆","😅","🤣","😂","�
 // a correspondent could then pay an address the restored wallet no longer controls. Call this alongside every
 // api.mailInvalidate().
 function resetMailState() { MAIL_ID = null; MAIL_CONTACTS = []; mailView = "inbox"; mailPeer = null; }
+function resetPpState() { ppView = "swap"; PP_POOLS = []; PP_MINE = []; PP_SWAP_TOKS = []; ppSwapMinToTok = true; }
 
 function mailAvatar(publicId) { return TOK.identiconDataUri(String(publicId || "0x0").slice(0, 18)); }
 function mailShort(id) { id = String(id || ""); return id.length > 16 ? id.slice(0, 8) + "…" + id.slice(-4) : id; }
@@ -1291,8 +1292,9 @@ let ppBackupBusy = false;
 async function showPpBackup() {
   if (ppBackupBusy) return;                                        // async fetch → guard against a double-click stacking modals
   ppBackupBusy = true;
-  toast("Preparing backup…");
-  let r; try { r = await api.ppBackup(); } catch (e) { ppBackupBusy = false; toast("Backup failed: " + e.message, "err"); return; }
+  const prog = showProgress("Preparing backup…", "Snapshotting your pools' current reserve coins…");
+  let r; try { r = await api.ppBackup(); } catch (e) { prog.close(); ppBackupBusy = false; toast("Backup failed: " + e.message, "err"); return; }
+  prog.close();
   ppBackupBusy = false;
   if (r && r.empty) { toast("No pools to back up yet — create one first.", "err"); return; }
   const json = (r && r.json) || "";
@@ -1354,6 +1356,8 @@ let ppCollectBusy = false;
 async function doPpCollect() {
   if (ppCollectBusy) return;                                     // block a double-click (two concurrent sweeps + stacked overlays)
   ppCollectBusy = true;
+  const okc = await showConfirm("Collect to wallet?", "Move any withdrawn/migrated reserves from your pool owner addresses into your default wallet.", "Collect");
+  if (!okc) { ppCollectBusy = false; return; }
   const prog = showProgress("Collecting…", "Moving any withdrawn reserves from your owner addresses into your default wallet…");
   try {
     const r = await api.ppCollect();
@@ -1433,14 +1437,19 @@ async function showPpMigrate(addr) {
       catch (e) { prog.close(); toast("Migrate failed: " + e.message, "err"); }
     });
 }
+let ppWithdrawBusy = false;
 async function confirmPpWithdraw(addr) {
-  const p = PP_MINE.find(x => x.address === addr);
-  const ok = await showConfirm("Withdraw this pool?",
-    "Sweep the reserves" + (p ? " (" + TOK.tidyAmount(p.reserveM) + " MINIMA · " + TOK.tidyAmount(p.reserveT) + " " + (p.tokName || "") + ")" : "") + " to your owner address (spendable on this node). The pool closes. Then use “Collect to wallet” to move them into your default wallet — do that before restoring your seed on another node.", "Withdraw", true);
-  if (!ok) return;
-  const prog = showProgress("Withdrawing…", "Posting to the chain…");
-  try { await api.ppClose(addr); prog.close(); toast("Withdrawn ✓ — at your owner address; use “Collect to wallet” to move it to your wallet", "ok"); renderPandapools(); }
-  catch (e) { prog.close(); toast("Withdraw failed: " + e.message, "err"); }
+  if (ppWithdrawBusy) return;
+  ppWithdrawBusy = true;
+  try {
+    const p = PP_MINE.find(x => x.address === addr);
+    const ok = await showConfirm("Withdraw this pool?",
+      "Sweep the reserves" + (p ? " (" + TOK.tidyAmount(p.reserveM) + " MINIMA · " + TOK.tidyAmount(p.reserveT) + " " + (p.tokName || "") + ")" : "") + " to your owner address (spendable on this node). The pool closes. Then use “Collect to wallet” to move them into your default wallet — do that before restoring your seed on another node.", "Withdraw", true);
+    if (!ok) return;
+    const prog = showProgress("Withdrawing…", "Posting to the chain…");
+    try { await api.ppClose(addr); prog.close(); toast("Withdrawn ✓ — at your owner address; use “Collect to wallet” to move it to your wallet", "ok"); renderPandapools(); }
+    catch (e) { prog.close(); toast("Withdraw failed: " + e.message, "err"); }
+  } finally { ppWithdrawBusy = false; }
 }
 async function renderPpActivity() {
   const host = el("ppBody");
@@ -1816,7 +1825,7 @@ async function renderSettings() {
     if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
     try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
-      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); }   // seed reset → re-derive the mail identity
+      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); }   // seed reset → re-derive the mail identity
       toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";

@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppClose: (addr) => ipcRenderer.invoke("mcd:ppClose", addr),
   ppMigrate: (addr, x0, y0) => ipcRenderer.invoke("mcd:ppMigrate", addr, x0, y0),
   ppCollect: () => ipcRenderer.invoke("mcd:ppCollect"),
+  ppInvalidate: () => ipcRenderer.invoke("mcd:ppInvalidate"),
   ppBackup: () => ipcRenderer.invoke("mcd:ppBackup"),
   ppRestore: (json) => ipcRenderer.invoke("mcd:ppRestore", json),
   ppSaveBackup: (json) => ipcRenderer.invoke("mcd:ppSaveBackup", json),
