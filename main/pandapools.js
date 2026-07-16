@@ -74,6 +74,8 @@ function currentBlock() {
 }
 function D(x) { return ctx.PP.dec(x); }
 function s(d) { try { return ctx.PP.plain(d); } catch (e) { return "0"; } }
+/** Reject a fund action that never settles (a dropped PoolMgr callback / a node command that never returns). */
+function withTimeout(p, ms, msg) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(msg)); }, ms); })]); }
 
 /** A Book pool (Decimal reserves) → a JSON-safe object for the renderer. */
 function serializePool(p) {
@@ -156,11 +158,16 @@ function quoteSwap(tok, minimaToToken, amountIn) {
   return route;
 }
 
-async function swap(tok, minimaToToken, amountIn) {
+async function swap(tok, minimaToToken, amountIn, minQuote) {
   await init();
   var route = quoteSwap(tok, minimaToToken, amountIn);
   if (!route.ok) throw new Error("No route — the trade is too small for the available pools.");
-  return new Promise(function (resolve, reject) {
+  // Slippage floor: the confirmed quote was `minQuote`; if reserves moved between confirm and execute so the fresh
+  // route yields materially less (>3%), abort rather than fill worse than the user agreed to. (The tx itself is
+  // always covenant-valid — it spends the exact scanned coins — so staleness normally fails closed; this guards the
+  // narrow window where POOLS refreshed to a worse price between the confirm and the post.)
+  if (minQuote) { var floor = D(minQuote).times("0.97"); if (D(route.totalOut).lt(floor)) throw new Error("The price moved beyond your quote — nothing was swapped. Re-check the quote and try again."); }
+  return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.swap(route, minimaToToken, {
       ok: function (txpowid) {
         ctx.Store.actRecord("SWAP", (minimaToToken ? "Bought " : "Sold ") + s(route.totalOut) + " for " + s(route.totalIn), txpowid, lastTip, "");
@@ -168,7 +175,7 @@ async function swap(tok, minimaToToken, amountIn) {
       },
       fail: function (msg) { reject(new Error(msg)); },
     });
-  });
+  }), 200000, "The swap timed out — check Activity and your balance before retrying.");
 }
 
 async function createPool(tokenid, tokDecimals, x0, y0) {
@@ -205,7 +212,7 @@ async function scanNow() { await init(); return new Promise(function (r) { ctx.B
 
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush,
-  pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false }; },
+  pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false, notReady: !ready }; },
   swap, createPool, deposit, close: closePool, migrate,
   _setRunner, _setDataDir,
 };

@@ -77,7 +77,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppFeed: () => ipcRenderer.invoke("mcd:ppFeed"),
   ppScan: () => ipcRenderer.invoke("mcd:ppScan"),
   ppQuote: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppQuote", tok, minimaToToken, amount),
-  ppSwap: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppSwap", tok, minimaToToken, amount),
+  ppSwap: (tok, minimaToToken, amount, minQuote) => ipcRenderer.invoke("mcd:ppSwap", tok, minimaToToken, amount, minQuote),
   ppCreate: (tok, dec, x0, y0) => ipcRenderer.invoke("mcd:ppCreate", tok, dec, x0, y0),
   ppDeposit: (addr, addM, addT) => ipcRenderer.invoke("mcd:ppDeposit", addr, addM, addT),
   ppClose: (addr) => ipcRenderer.invoke("mcd:ppClose", addr),
