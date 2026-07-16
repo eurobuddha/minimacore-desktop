@@ -1150,11 +1150,12 @@ function ppPairRows(pools) {
     const name = esc(g[0].tokName || TOK.shortId(tok));
     const rows = g.map(p => `<div class="row" style="cursor:pointer" data-pool="${esc(p.address)}" title="Right-click to copy the pool address">
         <div class="row__mid"><div class="row__l1">${esc(TOK.tidyAmount(p.reserveM))} MINIMA · ${esc(TOK.tidyAmount(p.reserveT))} ${name}</div>
-          <div class="row__l2">price ${esc(TOK.tidyAmount(p.spot))} ${name}/MINIMA · ${esc(short(p.address, 18))}</div></div>
+          <div class="row__l2">price ${esc(TOK.tidyAmount(p.spot))} ${name}/MINIMA · fees ${esc(TOK.tidyAmount(p.feeGrowthPct))}% · ${esc(short(p.address, 18))}</div></div>
         <div class="row__r">›</div></div>`).join("");
     return `<div class="card"><div class="card__title">MINIMA / ${name} <span class="mail-ver">${g.length} pool${g.length > 1 ? "s" : ""}</span></div>${rows}</div>`;
   }).join("");
 }
+let PP_BAL_MIN = "0", PP_BAL_TOK = "0";
 async function renderPpSwap() {
   const host = el("ppBody");
   const pools = await api.ppPools().catch(() => []);
@@ -1162,83 +1163,123 @@ async function renderPpSwap() {
   const seen = {}; PP_SWAP_TOKS = [];
   pools.forEach(p => { if (p.tok && !seen[p.tok]) { seen[p.tok] = true; PP_SWAP_TOKS.push({ tok: p.tok, name: p.tokName || TOK.shortId(p.tok) }); } });
   if (!PP_SWAP_TOKS.length) {
-    host.innerHTML = `${ppHeader("swap")}<div class="empty">No pools to trade yet — they appear here once the node scans the shared registry.</div>`;
+    host.innerHTML = `${ppHeader("swap")}<div class="empty">No live pools yet — create one in the My LP tab to seed liquidity.</div>`;
     wirePpHeader(); return;
   }
-  const opts = PP_SWAP_TOKS.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join("");
+  const opts = PP_SWAP_TOKS.map((t, i) => `<option value="${i}">MINIMA / ${esc(t.name)}</option>`).join("");
   host.innerHTML = `${ppHeader("swap")}
     <div class="card">
-      <div class="field"><div class="field__label">Token</div><select class="field__input" id="ppSwapTok">${opts}</select></div>
+      <div class="field"><div class="field__label">Pool</div><select class="field__input" id="ppSwapTok">${opts}</select></div>
+      <div class="view__desc" id="ppPoolLine">—</div>
+      <div class="kv"><span>You hold</span><span id="ppHoldings">—</span></div>
       <div class="seg"><button class="btn btn--full" id="ppDirBuy">Buy with MINIMA</button><button class="btn btn--full" id="ppDirSell">Sell for MINIMA</button></div>
-      <div class="field"><div class="field__label" id="ppSwapInLbl">You pay (MINIMA)</div><input class="field__input" id="ppSwapAmt" placeholder="0.0" autocomplete="off" /></div>
-      <div class="view__desc" id="ppQuote">Enter an amount for a live quote.</div>
+      <div class="field"><div class="field__label" id="ppSwapInLbl">You pay (MINIMA)</div><input class="field__input" id="ppSwapAmt" placeholder="0.0" autocomplete="off" /><div class="view__desc" id="ppFromBal" style="margin-top:4px"></div></div>
+      <div id="ppQuote"></div>
       <button class="btn btn--primary btn--full" id="ppSwapGo">Review swap</button>
     </div>`;
   wirePpHeader();
   ppSwapMinToTok = true;
+  await refreshPpSwapMeta();
   applyPpDir();
   el("ppDirBuy").onclick = () => { ppSwapMinToTok = true; applyPpDir(); };
   el("ppDirSell").onclick = () => { ppSwapMinToTok = false; applyPpDir(); };
-  el("ppSwapTok").onchange = () => applyPpDir();
+  el("ppSwapTok").onchange = () => { refreshPpSwapMeta().then(applyPpDir); };
   el("ppSwapAmt").oninput = () => ppUpdateQuote();
   el("ppSwapGo").onclick = () => doPpSwap();
+}
+// Pool line (count + aggregate depth) + your holdings for both legs — the liquidity/price context the donor shows.
+async function refreshPpSwapMeta() {
+  const sel = el("ppSwapTok"); if (!sel) return;
+  const t = PP_SWAP_TOKS[sel.value | 0]; if (!t) return;
+  const info = await api.ppPairInfo(t.tok).catch(() => ({ pools: 0, depth: "0" }));
+  if (el("ppPoolLine")) el("ppPoolLine").textContent = "MINIMA / " + t.name + " · " + info.pools + (Number(info.pools) === 1 ? " pool" : " pools") + " · depth " + TOK.tidyAmount(info.depth) + " MINIMA";
+  const bal = await tryCmd("balance") || [];
+  const bm = bal.find(b => b.tokenid === MINIMA); PP_BAL_MIN = bm ? bm.confirmed : "0";
+  const bt = bal.find(b => b.tokenid && b.tokenid.toLowerCase() === t.tok.toLowerCase()); PP_BAL_TOK = bt ? bt.confirmed : "0";
+  if (el("ppHoldings")) el("ppHoldings").textContent = TOK.tidyAmount(PP_BAL_MIN) + " MINIMA · " + TOK.tidyAmount(PP_BAL_TOK) + " " + t.name;
+  if (el("ppFromBal")) { const payTok = ppSwapMinToTok ? "MINIMA" : t.name; el("ppFromBal").textContent = "Balance " + TOK.tidyAmount(ppSwapMinToTok ? PP_BAL_MIN : PP_BAL_TOK) + " " + payTok; }
 }
 function applyPpDir() {
   if (!el("ppDirBuy")) return;
   el("ppDirBuy").className = "btn btn--full " + (ppSwapMinToTok ? "btn--primary" : "btn--outline");
   el("ppDirSell").className = "btn btn--full " + (ppSwapMinToTok ? "btn--outline" : "btn--primary");
   const t = PP_SWAP_TOKS[(el("ppSwapTok") && el("ppSwapTok").value | 0) || 0];
-  if (el("ppSwapInLbl")) el("ppSwapInLbl").textContent = "You pay (" + (ppSwapMinToTok ? "MINIMA" : (t ? t.name : "token")) + ")";
+  const payTok = ppSwapMinToTok ? "MINIMA" : (t ? t.name : "token");
+  if (el("ppSwapInLbl")) el("ppSwapInLbl").textContent = "You pay (" + payTok + ")";
+  if (el("ppFromBal")) el("ppFromBal").textContent = "Balance " + TOK.tidyAmount(ppSwapMinToTok ? PP_BAL_MIN : PP_BAL_TOK) + " " + payTok;
   ppUpdateQuote();
 }
+function ppKv(k, vHtml, green) { return `<div class="kv"><span>${esc(k)}</span><span${green ? ' style="color:var(--green)"' : ""}>${vHtml}</span></div>`; }
 let ppQuoteSeq = 0;
 async function ppUpdateQuote() {
   const disp = el("ppQuote"); if (!disp) return;
   const sel = el("ppSwapTok"), amtEl = el("ppSwapAmt"); if (!sel || !amtEl) return;
   const t = PP_SWAP_TOKS[sel.value | 0]; if (!t) return;
   const amt = amtEl.value.trim();
-  if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { disp.textContent = "Enter an amount for a live quote."; return; }
+  if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { disp.innerHTML = `<div class="view__desc">Enter an amount for a live quote.</div>`; return; }
   const seq = ++ppQuoteSeq;                                       // last-write-wins: a newer quote supersedes this one
   const q = await api.ppQuote(t.tok, ppSwapMinToTok, amt).catch(() => ({ ok: false }));
   if (seq !== ppQuoteSeq) return;                                 // a later keystroke already fired a fresher quote
   const d = el("ppQuote"); if (!d) return;                        // view may have changed during the await
-  d.innerHTML = q && q.ok
-    ? `You get about <b>${esc(TOK.tidyAmount(q.totalOut))} ${ppSwapMinToTok ? esc(t.name) : "MINIMA"}</b> · effective price ${esc(TOK.tidyAmount(q.effPrice))} · routed over ${Number(q.poolsUsed) || 0}/${Number(q.poolsAvailable) || 0} pool${(Number(q.poolsAvailable) || 0) > 1 ? "s" : ""}`
-    : (q && q.notReady ? "Starting up — one moment…" : "No route for that amount — try a smaller amount.");
+  if (!q || !q.ok) { d.innerHTML = `<div class="view__desc">${q && q.notReady ? "Starting up — one moment…" : "This trade is too large for the pools' depth — try a smaller amount."}</div>`; return; }
+  const recvTok = ppSwapMinToTok ? esc(t.name) : "MINIMA";
+  let html = "";
+  html += ppKv("Rate", "≈ " + esc(TOK.tidyAmount(q.effPrice)) + " " + esc(t.name) + " / MINIMA");
+  html += ppKv("Price impact", esc(q.priceImpact) + " %");
+  if (Number(q.poolsAvailable) > 1) html += ppKv("Routed across", (Number(q.poolsUsed) || 0) + " of " + (Number(q.poolsAvailable) || 0) + " pools" + (q.capped ? " (top " + (Number(q.maxPools) || 6) + ")" : ""));
+  html += ppKv("Pool fee (0.50%)", "kept by LPs");
+  html += ppKv("You receive", "≈ " + esc(TOK.tidyAmount(q.totalOut)) + " " + recvTok, true);
+  d.innerHTML = html;
 }
 let ppSwapBusy = false;
 async function doPpSwap() {
   if (ppSwapBusy) return;                                         // block a double-submit during the pre-confirm quote await
   const sel = el("ppSwapTok"); if (!sel) return;
-  const t = PP_SWAP_TOKS[sel.value | 0]; if (!t) { toast("Pick a token first.", "err"); return; }
+  const t = PP_SWAP_TOKS[sel.value | 0]; if (!t) { toast("Pick a pool first.", "err"); return; }
   const amt = (el("ppSwapAmt") && el("ppSwapAmt").value || "").trim();
-  if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { toast("Enter a valid amount.", "err"); return; }
+  if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { toast("Enter an amount.", "err"); return; }
   ppSwapBusy = true;
   try {
+    // A FRESH quote at confirm time = the exact route we'll post (frozen-quote, like the donor's confirmSwap→doSwap).
     const q = await api.ppQuote(t.tok, ppSwapMinToTok, amt).catch(() => ({ ok: false }));
-    if (!q || !q.ok) { toast("No route for that amount.", "err"); return; }
+    if (!q || !q.ok || !q.quoteId) { toast(q && q.notReady ? "Starting up — try again in a moment." : "That trade is too large for these pools.", "err"); return; }
     const payLbl = ppSwapMinToTok ? "MINIMA" : t.name, getLbl = ppSwapMinToTok ? t.name : "MINIMA";
-    const okc = await showConfirm("Swap " + amt + " " + payLbl + "?",
-      "You'll receive about " + TOK.tidyAmount(q.totalOut) + " " + getLbl + ".\n\nThe price can move: if the fill would be more than ~3% below this quote, the swap is cancelled (not filled). On-chain and cannot be undone.", "Swap");
+    const routed = Number(q.poolsUsed) > 1 ? "\nRouted across " + q.poolsUsed + " pools in one transaction." : "";
+    const okc = await showConfirm("Confirm swap",
+      "Pay  " + amt + " " + payLbl + "\nReceive  ≈ " + TOK.tidyAmount(q.totalOut) + " " + getLbl +
+      "\nRate  ≈ " + TOK.tidyAmount(q.effPrice) + " " + t.name + " / MINIMA\n\nPrice impact " + q.priceImpact + "%." + routed +
+      "\n\nThis posts a real on-chain transaction — if a pool moves before it confirms, the swap is rejected and you keep your funds.", "Swap");
     if (!okc) return;
     const prog = showProgress("Swapping " + amt + " " + payLbl, "Posting to the chain — this can take a few seconds…");
     try {
-      const r = await api.ppSwap(t.tok, ppSwapMinToTok, amt, q.totalOut);   // q.totalOut = the confirmed quote → slippage floor
+      const r = await api.ppSwap(q.quoteId);                       // posts the EXACT confirmed route (frozen)
       prog.close();
       toast("Swapped ✓ — received " + TOK.tidyAmount(r.totalOut) + " " + getLbl, "ok");
       if (el("ppSwapAmt")) el("ppSwapAmt").value = "";
-      ppUpdateQuote();
+      ppUpdateQuote(); refreshPpSwapMeta();
     } catch (e) { prog.close(); toast("Swap failed: " + e.message, "err"); }
   } finally { ppSwapBusy = false; }
 }
 
 // HTML builders (reused by the initial render AND the live-update patch) + wiring helpers.
+function ppNum(n) { n = Number(n); if (!isFinite(n)) return "0"; return (n.toFixed(4).replace(/\.?0+$/, "")) || "0"; }   // display-only float format
 function ppMineHtml(mine) {
-  return mine.length ? mine.map(p => `<div class="card"><div class="card__title">MINIMA / ${esc(p.tokName || TOK.shortId(p.tok))}</div>
-      <div class="kv"><span>Reserves</span><span>${esc(TOK.tidyAmount(p.reserveM))} MINIMA · ${esc(TOK.tidyAmount(p.reserveT))} ${esc(p.tokName || "")}</span></div>
+  if (!mine.length) return `<div class="empty">You don't own any pools yet. Create one with the button above.</div>`;
+  return mine.map(p => {
+    const nm = esc(p.tokName || TOK.shortId(p.tok));
+    let rows = `<div class="kv"><span>Your liquidity</span><span>${esc(TOK.tidyAmount(p.reserveM))} MINIMA + ${esc(TOK.tidyAmount(p.reserveT))} ${nm}</span></div>`
+      + `<div class="kv"><span>Value now</span><span>≈ ${esc(TOK.tidyAmount(p.value))} MINIMA</span></div>`
+      + `<div class="kv"><span>Pool price</span><span>${esc(TOK.tidyAmount(p.poolPrice))} ${nm} / MINIMA</span></div>`
+      + `<div class="kv"><span>Fees earned</span><span style="color:var(--green)">≈ ${esc(ppNum(p.feesMinima))} MINIMA (+${esc(ppNum(p.feesPct))}%)</span></div>`;
+    if (p.priceMove != null) {
+      rows += `<div class="kv"><span>Price since open</span><span>${p.priceMove >= 0 ? "+" : ""}${esc(ppNum(p.priceMove))}%</span></div>`
+        + `<div class="kv"><span>Impermanent loss</span><span${p.il < -0.01 ? ' style="color:var(--red)"' : ""}>${esc(ppNum(p.il))}% vs holding</span></div>`;
+      if (p.ageBlocks > 0) rows += `<div class="kv"><span>Age</span><span>${Number(p.ageBlocks) || 0} blocks (~${esc(ppNum(p.ageBlocks * 50 / 3600))} h)</span></div>`;
+    }
+    return `<div class="card"><div class="card__title">MINIMA / ${nm}</div>${rows}
       <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div>
-      <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div></div>`).join("")
-    : `<div class="empty">You don't own any pools yet. Create one with the button above.</div>`;
+      <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div></div>`;
+  }).join("");
 }
 function wirePpMineActions(root) {
   root.querySelectorAll("[data-ppadd]").forEach(b => b.onclick = () => showPpDeposit(b.dataset.ppadd));
@@ -1266,8 +1307,10 @@ function wirePpCopy(root) { root.querySelectorAll("[data-copy]").forEach(n => n.
 async function renderPpPools() {
   const host = el("ppBody");
   PP_POOLS = await api.ppPools().catch(() => []);
+  const depth = PP_POOLS.reduce((sum, p) => sum + (parseFloat(p.reserveM) || 0), 0);
+  const summary = PP_POOLS.length ? `${PP_POOLS.length} pool${PP_POOLS.length === 1 ? "" : "s"} · ~${ppNum(depth)} MINIMA aggregate depth` : "";
   host.innerHTML = `${ppHeader("pools")}
-    <div class="view__desc">Live constant-product pools on the shared mainnet registry — the same pools the phone app and the MDS MiniDapp trade.</div>
+    <div class="view__desc">Live constant-product pools on the shared mainnet registry — the same pools the phone app and the MDS MiniDapp trade.${summary ? " " + esc(summary) + "." : ""}</div>
     <div id="ppList">${ppPairRows(PP_POOLS)}</div>`;
   wirePpHeader(); wirePpPoolRows(el("ppList"));
 }
@@ -1376,21 +1419,38 @@ async function showPpCreate() {
   const opts = toks.map((t, i) => `<option value="${i}">${esc(t.name)} — ${esc(t.bal)}</option>`).join("");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppcOv"><div class="modal">
     <div class="modal__title">Create a pool</div>
-    <div class="view__desc">A MINIMA / token constant-product pool. You seed both reserves; the 0.5% swap fee accrues to you as the LP. You can withdraw them later as the owner.</div>
+    <div class="view__desc" style="color:var(--red)">No market price is checked for you — YOU set the opening price. Set the ratio to the true market rate, or arbitrageurs will correct it at your expense. The 0.5% swap fee then accrues to you as the LP; you can withdraw as the owner.</div>
     <div class="field"><div class="field__label">Token</div><select class="field__input" id="ppcTok">${opts}</select></div>
     <div class="field"><div class="field__label">MINIMA reserve</div><input class="field__input" id="ppcX" placeholder="0.0" autocomplete="off" /></div>
     <div class="field"><div class="field__label">Token reserve</div><input class="field__input" id="ppcY" placeholder="0.0" autocomplete="off" /></div>
-    <div class="seg" style="margin-top:10px"><button class="btn btn--outline btn--full" id="ppcCancel">Cancel</button><button class="btn btn--primary btn--full" id="ppcGo">Create</button></div></div></div>`);
+    <div class="view__desc" id="ppcPreview" style="white-space:pre-wrap">Enter both amounts to see the opening price.</div>
+    <label style="display:block;margin:6px 0;font-size:12px"><input type="checkbox" id="ppcAck" style="margin-right:6px" />I understand I'm setting the opening price with no market to check it against.</label>
+    <div class="seg" style="margin-top:6px"><button class="btn btn--outline btn--full" id="ppcCancel">Cancel</button><button class="btn btn--primary btn--full" id="ppcGo">Create</button></div></div></div>`);
   const ov = el("ppcOv"); const close = () => { if (ov) ov.remove(); };
   el("ppcCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcOv") close(); };
+  const numOk = (v) => /^[0-9]*\.?[0-9]+$/.test(v) && parseFloat(v) > 0;
+  const updatePreview = async () => {
+    const t = toks[el("ppcTok") && el("ppcTok").value | 0]; if (!t) return;
+    const x = (el("ppcX") && el("ppcX").value || "").trim(), y = (el("ppcY") && el("ppcY").value || "").trim();
+    if (!numOk(x) || !numOk(y)) { if (el("ppcPreview")) el("ppcPreview").textContent = "Enter both amounts to see the opening price."; return; }
+    const pv = await api.ppCreatePreview(t.dec, x, y).catch(() => ({ ok: false }));
+    if (el("ppcPreview")) el("ppcPreview").textContent = pv && pv.ok
+      ? "Opening price:  " + TOK.tidyAmount(pv.price) + " " + t.name + " / MINIMA\nProduct floor (KMIN):  " + pv.kmin
+      : ((pv && pv.msg) || "Enter both amounts.");
+  };
+  el("ppcX").oninput = updatePreview; el("ppcY").oninput = updatePreview; el("ppcTok").onchange = updatePreview;
   let busy = false;
   el("ppcGo").onclick = async () => {
     if (busy) return;
     const t = toks[el("ppcTok").value | 0]; if (!t) return;
     const x0 = el("ppcX").value.trim(), y0 = el("ppcY").value.trim();
-    if (!/^[0-9]*\.?[0-9]+$/.test(x0) || parseFloat(x0) <= 0 || !/^[0-9]*\.?[0-9]+$/.test(y0) || parseFloat(y0) <= 0) { toast("Enter both reserves (positive).", "err"); return; }
+    if (!numOk(x0) || !numOk(y0)) { toast("Enter both reserves (positive).", "err"); return; }
+    if (!el("ppcAck").checked) { toast("Tick the box to confirm you're setting the opening price.", "err"); return; }
     busy = true;
-    const okc = await showConfirm("Create MINIMA / " + t.name + " pool?", "Seed " + x0 + " MINIMA and " + y0 + " " + t.name + " as the pool's reserves.\n\nOn-chain; withdrawable later as the owner.", "Create");
+    const pv = await api.ppCreatePreview(t.dec, x0, y0).catch(() => ({ ok: false }));
+    const priceLine = pv && pv.ok ? "Opening price " + TOK.tidyAmount(pv.price) + " " + t.name + " / MINIMA — you set this, no market check.\n" : "";
+    const okc = await showConfirm("Create MINIMA / " + t.name + " pool?",
+      "Seed " + x0 + " MINIMA and " + y0 + " " + t.name + " as the reserves.\n" + priceLine + "\n⚠ Set the ratio to the real market rate or it will be arbitraged. On-chain; withdrawable later as the owner.", "Create");
     if (!okc) { busy = false; return; }
     close();
     const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
@@ -1471,7 +1531,7 @@ async function refreshPpActive() {
   if (!body || activeView !== "pandapools") return;
   const sy = body.scrollTop;
   if (ppView === "swap") {
-    ppUpdateQuote();                 // re-quote against fresh reserves; patches only #ppQuote, never the input/form
+    ppUpdateQuote(); refreshPpSwapMeta();   // refresh quote + pool line + balances (passive regions only; never the input/form)
     return;
   }
   if (ppView === "pools") {

@@ -73,7 +73,7 @@ function invalidate() {
   try { if (sqlShim) sqlShim.flush(); } catch (e) {}
   try { fs.unlinkSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}   // fresh store next init
   ctx = null; serviceHandler = null; sqlShim = null; ready = false; initPromise = null;
-  POOLS = []; lastTip = 0; scanning = false; scanStartTs = 0;
+  POOLS = []; lastTip = 0; scanning = false; scanStartTs = 0; lastQuotes = {};   // stale routes reference the old seed's pools
   emitter.emit("update");
   startLoop();                                                    // re-init under the new seed on the next tick
 }
@@ -93,14 +93,39 @@ function withTimeout(p, ms, msg) { return Promise.race([p, new Promise(function 
 /** A Book pool (Decimal reserves) → a JSON-safe object for the renderer. */
 function serializePool(p) {
   if (!p) return null;
-  var spot = ctx.Curve.funded(p) ? ctx.Curve.spotPrice(p) : D(0);   // token per MINIMA
-  var kv = ctx.Curve.funded(p) ? ctx.Curve.k(p) : D(0);
+  var funded = ctx.Curve.funded(p);
+  var spot = funded ? ctx.Curve.spotPrice(p) : D(0);               // token per MINIMA
+  var kv = funded ? ctx.Curve.k(p) : D(0);
   return {
     address: p.address, mxaddress: p.mxaddress || "", opk: p.opk, oadr: p.oadr, tok: p.tok, kmin: String(p.kmin),
     tokName: p.tokName || ctx.PP.tokenLabel({ tok: p.tok, tokName: p.tokName }), tokDecimals: p.tokDecimals || 8,
     reserveM: s(p.reserveM), reserveT: s(p.reserveT), coinidM: p.coinidM || "", coinidT: p.coinidT || "",
     reserveBlock: p.reserveBlock || 0, spot: s(spot), k: s(kv),
+    feeGrowthPct: funded ? s(ctx.Curve.feeGrowth(p).times(100)) : "0",   // fees accrued (K/KMIN − 1), % — the donor's "fees accrued"
   };
+}
+/** My-LP economics, ported from the donor lpCard: value, pool price, fees earned, price move, IL, age, health. */
+function serializeMyPool(p, snap) {
+  var value = D(p.reserveM).times(2);                             // both legs ≈ 2× the MINIMA reserve
+  var feeBase = (snap && snap.feeBaseK && snap.feeBaseK.gt(0)) ? snap.feeBaseK : D(p.kmin || 0);
+  var k = ctx.Curve.k(p);
+  var growth = feeBase.gt(0) ? Math.max(0, Number(k.div(feeBase)) - 1) : 0;
+  var feeMult = Math.sqrt(1 + growth);
+  var feesMinima = Number(value) * (1 - 1 / feeMult);
+  var kmin = D(p.kmin || 0);
+  var out = {
+    address: p.address, tok: p.tok, tokName: p.tokName || ctx.PP.tokenLabel({ tok: p.tok, tokName: p.tokName }),
+    tokDecimals: p.tokDecimals || 8, reserveM: s(p.reserveM), reserveT: s(p.reserveT),
+    value: s(value), poolPrice: s(ctx.Curve.spotPrice(p)), feesMinima: feesMinima, feesPct: growth * 100,
+    kratio: kmin.gt(0) ? Number(k.div(kmin)) : 1,
+  };
+  if (snap && snap.initPrice && snap.initPrice.gt(0) && ctx.Curve.spotPrice(p).gt(0)) {
+    var ratio = Number(ctx.Curve.spotPrice(p)) / Number(snap.initPrice);
+    out.priceMove = (ratio - 1) * 100;
+    out.il = (2 * Math.sqrt(ratio) / (1 + ratio) - 1) * 100;      // vs holding
+    out.ageBlocks = (lastTip && snap.block) ? Math.max(0, lastTip - snap.block) : 0;
+  }
+  return out;
 }
 
 // ---- the block-poll loop (mirrors mail.js startLoop) ----
@@ -156,7 +181,12 @@ function myPools() {
   return new Promise(function (resolve) {
     ctx.Store.ownAll(function (recipes) {
       var mine = {}; recipes.forEach(function (r) { if (r.address) mine[r.address.toLowerCase()] = true; });
-      resolve(POOLS.filter(function (p) { return p.address && mine[p.address.toLowerCase()]; }).map(serializePool));
+      var owned = POOLS.filter(function (p) { return p.address && mine[p.address.toLowerCase()]; });
+      if (!owned.length) { resolve([]); return; }
+      var pending = owned.length, out = [];
+      owned.forEach(function (p) {                                 // fetch each pool's LP baseline (feeBaseK/initPrice/block) for the economics
+        ctx.Store.lpGet(p.address, function (snap) { out.push(serializeMyPool(p, snap)); if (--pending === 0) resolve(out); });
+      });
     });
   });
 }
@@ -166,31 +196,65 @@ function feed() { if (!ctx) return Promise.resolve([]); return new Promise(funct
 // ---- actions (promise wrappers over PoolMgr's {ok,fail} callbacks) ----
 function poolByAddress(addr) { for (var i = 0; i < POOLS.length; i++) if (POOLS[i].address && POOLS[i].address.toLowerCase() === String(addr || "").toLowerCase()) return POOLS[i]; return null; }
 
-function quoteSwap(tok, minimaToToken, amountIn) {
-  if (!ready || !ctx) return { ok: false };                        // may be called over IPC before init() completes
-  var pair = POOLS.filter(function (p) { return p.tok && p.tok.toLowerCase() === String(tok).toLowerCase(); });
-  var route = ctx.Router.route(pair, minimaToToken, amountIn);
-  return route;
+var lastQuotes = {}, quoteCounter = 0;   // quoteId → {route, minimaToToken} — the EXACT confirmed route (frozen-quote, like the donor)
+function pairPoolsFor(tok) { return POOLS.filter(function (p) { return p.tok && p.tok.toLowerCase() === String(tok).toLowerCase(); }); }
+/** Price impact %, exactly the donor's impact(r): |effPrice − spotBefore| / spotBefore × 100. */
+function priceImpactOf(route) {
+  var sb = route.spotBefore;
+  if (!sb || sb.isZero()) return "0.00";
+  return route.effPrice.minus(sb).abs().div(sb).times(100).toDP(2, ctx.PP.D.ROUND_HALF_UP).toString();
+}
+/** Pair summary for the swap page's pool line (shown before an amount is entered): pool count + aggregate MINIMA depth. */
+function pairInfo(tok) {
+  if (!ctx) return { pools: 0, depth: "0" };
+  var pair = pairPoolsFor(tok);
+  return { pools: pair.length, depth: s(ctx.Router.aggregateDepth(pair)) };
+}
+/** Quote a swap AND STASH the exact route under a quoteId — the renderer confirms this quote, then swap(quoteId)
+ *  posts THAT route verbatim (frozen-quote; no re-quote, no slippage floor — matches native/MDS confirmSwap→doSwap). */
+function quoteAndStash(tok, minimaToToken, amountIn) {
+  if (!ready || !ctx) return { ok: false, notReady: !ready };
+  var route = ctx.Router.route(pairPoolsFor(tok), minimaToToken, amountIn);
+  if (!route.ok) return { ok: false };
+  var qid = ++quoteCounter;
+  lastQuotes[qid] = { route: route, minimaToToken: minimaToToken };
+  var ids = Object.keys(lastQuotes);
+  if (ids.length > 40) ids.sort(function (a, b) { return a - b; }).slice(0, ids.length - 30).forEach(function (k) { delete lastQuotes[k]; });  // keep the recent ~30
+  return { ok: true, totalIn: s(route.totalIn), totalOut: s(route.totalOut), effPrice: s(route.effPrice),
+    priceImpact: priceImpactOf(route), poolsUsed: route.poolsUsed, poolsAvailable: route.poolsAvailable,
+    capped: !!route.capped, maxPools: ctx.Router.MAX_POOLS, quoteId: qid };
 }
 
-async function swap(tok, minimaToToken, amountIn, minQuote) {
+// Post the EXACT confirmed route (frozen-quote). If the pool moved since the quote, the covenant/txncheck rejects it
+// (fail-closed) and the user keeps their funds — the donor's "no slippage surprise" guarantee. No re-quote, no floor.
+async function swap(quoteId) {
   await init();
-  var route = quoteSwap(tok, minimaToToken, amountIn);
-  if (!route.ok) throw new Error("No route — the trade is too small for the available pools.");
-  // Slippage floor: the confirmed quote was `minQuote`; if reserves moved between confirm and execute so the fresh
-  // route yields materially less (>3%), abort rather than fill worse than the user agreed to. (The tx itself is
-  // always covenant-valid — it spends the exact scanned coins — so staleness normally fails closed; this guards the
-  // narrow window where POOLS refreshed to a worse price between the confirm and the post.)
-  if (minQuote) { var floor = D(minQuote).times("0.97"); if (D(route.totalOut).lt(floor)) throw new Error("The price moved beyond your quote — nothing was swapped. Re-check the quote and try again."); }
+  var q = lastQuotes[quoteId];
+  if (!q || !q.route || !q.route.ok) throw new Error("This quote expired — re-enter the amount to get a fresh quote.");
+  var route = q.route, minimaToToken = q.minimaToToken;
   return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.swap(route, minimaToToken, {
       ok: function (txpowid) {
         ctx.Store.actRecord("SWAP", (minimaToToken ? "Bought " : "Sold ") + s(route.totalOut) + " for " + s(route.totalIn), txpowid, lastTip, "");
+        delete lastQuotes[quoteId];
         emitter.emit("update"); resolve({ txpowid: txpowid, totalIn: s(route.totalIn), totalOut: s(route.totalOut) });
       },
       fail: function (msg) { reject(new Error(msg)); },
     });
   }), 200000, "The swap timed out — check Activity and your balance before retrying.");
+}
+
+/** Opening-price + KMIN preview for the create form (donor's manual-bootstrap preview) — pure, no spend. */
+function createPreview(tokDecimals, x0, y0) {
+  if (!ctx) return { ok: false, msg: "Starting up…" };
+  try {
+    var x = D(x0), y = D(y0);
+    if (x.lte(0) || y.lte(0)) return { ok: false, msg: "Enter both amounts." };
+    if (!ctx.Covenant.sizeOk(x, y)) return { ok: false, msg: "Amounts too large (x × y must be < 2^64)." };
+    var yc = y.toDP(parseInt(tokDecimals, 10) || 8, ctx.PP.D.ROUND_DOWN);
+    if (yc.lte(0)) return { ok: false, msg: "Token amount is below the token's smallest unit." };
+    return { ok: true, price: s(yc.div(x)), kmin: ctx.Covenant.kmin(x, yc) };   // token per MINIMA + the product floor
+  } catch (e) { return { ok: false, msg: e.message }; }
 }
 
 async function createPool(tokenid, tokDecimals, x0, y0) {
@@ -311,7 +375,7 @@ function importCoin(data, next) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
-  pools, myPools, activity, feed, quoteSwap: function (tok, m, a) { var r = quoteSwap(tok, m, a); return r.ok ? { ok: true, totalIn: s(r.totalIn), totalOut: s(r.totalOut), effPrice: s(r.effPrice), poolsUsed: r.poolsUsed, poolsAvailable: r.poolsAvailable } : { ok: false, notReady: !ready }; },
+  pools, myPools, activity, feed, quoteSwap: quoteAndStash, pairInfo, createPreview,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
   _setRunner, _setDataDir,
 };
