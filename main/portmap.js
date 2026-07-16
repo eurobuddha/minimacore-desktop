@@ -99,9 +99,21 @@ function routerModel() {
       const timer = setTimeout(() => ctl.abort(), ROOTDESC_TIMEOUT_MS);
       try {
         const res = await fetch(u, { signal: ctl.signal, redirect: "error" });
-        const buf = await res.arrayBuffer();
-        if (buf.byteLength > ROOTDESC_MAX_BYTES) return finish(null);
-        const n = /<friendlyName>([^<]{1,120})<\/friendlyName>/.exec(Buffer.from(buf).toString("utf8"));
+        if (!res.body) return finish(null);
+        // Read with a HARD ceiling. res.arrayBuffer() would buffer the entire body before we could
+        // check its size, so a hostile responder could exhaust memory despite a post-hoc cap (measured:
+        // a 50MB body grew RSS ~198MB). Stream instead, and abort the moment we pass the limit.
+        const reader = res.body.getReader();
+        const chunks = [];
+        let total = 0;
+        for (;;) {
+          const { done: eof, value } = await reader.read();
+          if (eof) break;
+          total += value.length;
+          if (total > ROOTDESC_MAX_BYTES) { ctl.abort(); return finish(null); }
+          chunks.push(value);
+        }
+        const n = /<friendlyName>([^<]{1,120})<\/friendlyName>/.exec(Buffer.concat(chunks).toString("utf8"));
         finish(n ? n[1].trim() : null);
       } catch (e) { finish(null); }
       finally { clearTimeout(timer); }
