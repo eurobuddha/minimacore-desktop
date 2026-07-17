@@ -190,3 +190,36 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .howto__b { font-size: 12px; color: var(--muted); margin: 6px 0; line-height: 1.5; }
 .howto .kv { padding: 3px 0; }
 .howto a { color: var(--accent); }
+
+/* ---- Wallet redesign: spendable-first cards + rich token-detail modal ---- */
+.card--token { cursor: pointer; transition: border-color .12s; }
+.card--token:hover { border-color: var(--accent); }
+.bal-sub .kv__k { color: var(--dim); font-size: 12px; font-weight: 500; }
+.bal-sub .kv__v { color: var(--dim); font-size: 12px; }
+.bal-meta { color: var(--dim); font-size: 12px; margin-top: 2px; }
+.field__hint { color: var(--dim); font-size: 12px; margin-top: 4px; }
+/* keep the Send "Max" button compact next to the amount input (the base .seg .btn is flex:1) */
+#sendForm .seg #sMax { flex: 0 0 auto; padding: 0 14px; }
+
+.modal--token { max-width: 440px; }
+.tokd-hero { text-align: center; margin-bottom: 14px; }
+.tok-wrap--lg { display: inline-block; position: relative; }
+.tok-icon--lg { width: 84px; height: 84px; border-radius: 16px; box-shadow: 0 4px 14px -4px rgba(0,0,0,.6); object-fit: cover; }
+.tok-wrap--lg .tok-badge { position: absolute; right: -4px; bottom: -4px; width: 22px; height: 22px; font-size: 13px; }
+.tokd-name { font-size: 18px; font-weight: 700; color: var(--heading); margin-top: 10px; }
+.tokd-desc { color: var(--dim); font-size: 13px; margin-top: 4px; line-height: 1.5; }
+.tokd-id { font-family: var(--mono, monospace); font-size: 12px; word-break: break-all; cursor: pointer; color: var(--text); }
+.tokd-id:hover { color: var(--accent); }
+.tokd-wrap { word-break: break-word; text-align: right; }
+.tokd-link { color: var(--accent); text-decoration: none; }
+.tokd-link:hover { text-decoration: underline; }
+.tokd-coins-hdr { cursor: pointer; user-select: none; }
+.tokd-coins-hdr:hover { color: var(--accent); }
+.coin-row { padding: 8px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.coin-row:last-child { border-bottom: none; }
+.coin-row__top { display: flex; justify-content: space-between; align-items: center; }
+.coin-amt { font-family: var(--mono, monospace); font-size: 13px; color: var(--heading); }
+.coin-row__sub { font-family: var(--mono, monospace); font-size: 11px; color: var(--dim); margin-top: 2px; word-break: break-all; }
+.chip--spend { background: var(--green-bg, rgba(46,204,113,.15)); color: var(--green); border-color: var(--green); padding: 2px 8px; font-size: 10px; }
+.chip--lock { background: var(--surface2); color: var(--dim); padding: 2px 8px; font-size: 10px; }
+.spin--sm { font-size: 12px; color: var(--dim); padding: 8px 0; }

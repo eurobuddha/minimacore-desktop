@@ -23,7 +23,7 @@ let TERM_OUT = "";
 const TERM_HIST = [];
 let termIdx = -1;
 let TERM_CMDS = null;        // command names for Tab-completion (lazy from `help`)
-let SEND_TOKENS = [];        // [{tokenid, name}] for the Send/Split/Consolidate token dropdowns
+let SEND_TOKENS = [];        // [{tokenid, name, sendable}] for the Send/Split/Consolidate token dropdowns
 
 function tokenOptions() {
   return SEND_TOKENS.map(t => `<option value="${esc(t.tokenid)}">${esc(t.name)}${t.tokenid !== MINIMA ? " · " + short(t.tokenid, 12) : ""}</option>`).join("");
@@ -449,15 +449,30 @@ async function renderBalances() {
   if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
   const bal = await tryCmd("balance");
   if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
+  BAL_BY_TID = {};
+  for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
   host.innerHTML = bal.map(balCardHtml).join("");
-  host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async () => {
+  host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async (e) => {
+    e.stopPropagation();                                 // don't also open the detail modal
     const tid = btn.dataset.tokenid;
     if (!validTok(tid)) return;
     btn.disabled = true; btn.textContent = "Consolidating…";
     try { await cmd(`consolidate tokenid:${tid}`); toast("Consolidation submitted ✓ — coins merge over the next blocks.", "ok"); }
-    catch (e) { toast("Consolidate failed: " + e.message, "err"); btn.disabled = false; }
+    catch (e2) { toast("Consolidate failed: " + e2.message, "err"); btn.disabled = false; }
+  });
+  // Whole card opens the rich token-detail modal (the consolidate button stops propagation above).
+  host.querySelectorAll(".card[data-tokenid]").forEach(card => card.onclick = () => {
+    const b = BAL_BY_TID[card.dataset.tokenid];
+    if (b) showTokenDetail(b);
   });
   enhanceTokenIcons(host);
+}
+let BAL_BY_TID = {};   // tokenid → last balance row, so a card click can open the modal without refetching
+
+/** Is this balance row a 1-of-1 NFT? (non-Minima, total supply 1, no fractional decimals) */
+function isNftBal(b) {
+  return b.tokenid && b.tokenid !== MINIMA && String(b.total) === "1"
+    && (!b.token || !b.token.decimals || String(b.token.decimals) === "0");
 }
 
 // One balance card: token icon (identicon → real icon over) + name + amounts + coin count + consolidate nudge.
@@ -483,11 +498,21 @@ function balCardHtml(b) {
   const nudge = coins >= 10
     ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" style="margin-top:8px;width:100%">Consolidate ▸ ${coins} coins into fewer</button>`
     : "";
-  return `<div class="card">
-    <div class="kv"><span class="kv__k">${iconCell}${esc(name)}</span><span class="kv__v">${esc(b.confirmed)}</span></div>
-    <div class="kv"><span class="kv__k">sendable</span><span class="kv__v kv__v--green">${esc(b.sendable)}</span></div>
-    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">pending</span><span class="kv__v kv__v--amber">${esc(b.unconfirmed)}</span></div>` : ""}
-    ${coins ? `<div class="kv"><span class="kv__k">coins</span><span class="kv__v">${coins}</span></div>` : ""}
+  // Headline = SENDABLE — what the user can actually spend. `confirmed` (total incl. coins locked in
+  // scripts/pools) was misleading: it made a $2-spendable wallet read as $600. Locked = confirmed − sendable,
+  // shown as a small muted line only when there is a locked portion.
+  const sendable = b.sendable || "0", confirmed = b.confirmed || "0";   // balance.java always emits both; guard so a malformed row can't blank the whole list
+  const locked = decSub(confirmed, sendable);
+  const nft = isNftBal(b);
+  const sub = nft ? "Spendable · NFT" : "Spendable";
+  const meta = [];
+  if (locked !== "0") meta.push(`🔒 ${esc(TOK.tidyAmount(locked))} locked`);
+  if (coins) meta.push(`${coins} coin${coins === 1 ? "" : "s"}`);
+  return `<div class="card card--token" data-tokenid="${esc(b.tokenid || MINIMA)}">
+    <div class="kv"><span class="kv__k">${iconCell}${esc(name)}</span><span class="kv__v">${esc(TOK.tidyAmount(sendable))}</span></div>
+    <div class="kv bal-sub"><span class="kv__k">${sub}</span><span class="kv__v">${esc(TOK.ticker(b.token) || "")}</span></div>
+    ${meta.length ? `<div class="bal-meta">${meta.join(" · ")}</div>` : ""}
+    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">pending</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
     ${nudge}
   </div>`;
 }
@@ -518,6 +543,159 @@ async function enhanceTokenIcons(root) {
 function applyIcon(w, e) {
   if (e.icon) { const img = w.querySelector("img"); if (img) { img.onerror = () => { img.onerror = null; img.src = w.dataset.identicon; }; img.src = e.icon; } }
   if (e.valid) { const badge = w.querySelector(".tok-badge"); if (badge) badge.hidden = false; }
+}
+
+// ---- Token detail modal (rich, mirrors the official/utxoWallet token view) --
+let SEND_PRESELECT = null;   // tokenid to preselect in the Send tab (set by the modal's Send action)
+
+/** Group the integer part of a decimal string with thousands separators (display only). */
+function groupThousands(s) {
+  s = String(s == null ? "" : s);
+  const [int, frac] = s.split(".");
+  const g = (int || "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac ? g + "." + frac : g;
+}
+/** Hostname for a link label; returns "" if it doesn't parse as http(s). */
+function hostOf(url) {
+  try { const u = new URL(String(url)); return (u.protocol === "http:" || u.protocol === "https:") ? u.host : ""; }
+  catch (e) { return ""; }
+}
+/** Only render an http(s) link; anything else is shown as inert text (no javascript:/data: hrefs). */
+function safeLinkRow(label, url) {
+  const host = hostOf(url);
+  if (!host) return url ? `<div class="kv"><span class="kv__k">${esc(label)}</span><span class="kv__v tokd-wrap">${esc(url)}</span></div>` : "";
+  return `<div class="kv"><span class="kv__k">${esc(label)}</span><a class="kv__v tokd-link" href="${esc(url)}" target="_blank" rel="noreferrer">${esc(host)} ↗</a></div>`;
+}
+
+async function showTokenDetail(b) {
+  const tid = b.tokenid || MINIMA;
+  const isNative = tid === MINIMA;
+  const name = TOK.tokenName(b.token, tid);
+  const nft = isNftBal(b);
+  const sendable = b.sendable || "0";
+  const locked = decSub(b.confirmed || "0", sendable);
+  const tick = isNative ? "MINIMA" : (TOK.ticker(b.token) || "");
+  const desc = isNative ? "The native coin of the Minima blockchain." : TOK.metaField(b.token, "description");
+  const owner = isNative ? "" : TOK.metaField(b.token, "owner");
+  const website = isNative ? "" : TOK.metaField(b.token, "external_url");
+  const webv = TOK.webvalidateUrl(b.token);
+  const supply = isNative ? "1,000,000,000" : groupThousands(b.total);
+  const coins = parseInt(b.coins, 10) || 0;
+
+  // Large icon reuses the exact resolve/cache/validate path as the balance list.
+  const cached = ICON_CACHE.get(tid);
+  let heroIcon;
+  if (isNative) {
+    heroIcon = `<span class="tok-wrap tok-wrap--lg"><img class="tok-icon tok-icon--lg tok-icon--native" src="minima-mark.svg" alt=""><span class="tok-badge">✓</span></span>`;
+  } else {
+    const identicon = TOK.identiconDataUri(tid);
+    const res = TOK.resolveIcon(TOK.pickIconField(b.token));
+    const src = (cached && cached.icon) || res.data || identicon;
+    const showBadge = cached && cached.valid;
+    heroIcon = `<span class="tok-wrap tok-wrap--lg" data-tokenid="${esc(tid)}" data-identicon="${esc(identicon)}"`
+      + (res.data ? ` data-icon-data="${esc(res.data)}"` : "")
+      + (res.remote ? ` data-icon-remote="${esc(res.remote)}"` : "")
+      + (webv ? ` data-webv="1"` : "")
+      + `><img class="tok-icon tok-icon--lg" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
+  }
+
+  // extraMetadata: every custom key on the token (or its nested name-object) that isn't one of the known
+  // fields — mirrors the official wallet, so arbitrary token attributes are still surfaced.
+  const KNOWN = new Set(["name", "url", "icon", "description", "owner", "external_url", "webvalidate", "ticker", "decimals"]);
+  const tokObj = (b.token && typeof b.token === "object") ? (b.token.name && typeof b.token.name === "object" ? b.token.name : b.token) : null;
+  let extraRows = "";
+  if (tokObj) for (const [k, v] of Object.entries(tokObj)) {
+    if (KNOWN.has(k) || v == null || typeof v === "object") continue;
+    extraRows += `<div class="kv"><span class="kv__k">${esc(k)}</span><span class="kv__v tokd-wrap">${esc(String(v))}</span></div>`;
+  }
+
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="tokDetail"><div class="modal modal--token">
+    <div class="tokd-hero">
+      ${heroIcon}
+      <div class="tokd-name">${esc(name)}${nft ? " · NFT" : (isNative ? "" : " · token")}</div>
+      ${desc ? `<div class="tokd-desc">${esc(desc)}</div>` : ""}
+    </div>
+    <div class="kv"><span class="kv__k">Spendable</span><span class="kv__v kv__v--green">${esc(TOK.tidyAmount(sendable))}${tick ? " " + esc(tick) : ""}</span></div>
+    ${locked !== "0" ? `<div class="kv"><span class="kv__k">🔒 Locked</span><span class="kv__v">${esc(TOK.tidyAmount(locked))}</span></div>` : ""}
+    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">Pending</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
+    <div class="kv"><span class="kv__k">Coins</span><span class="kv__v">${coins}</span></div>
+    <div class="kv"><span class="kv__k">Supply</span><span class="kv__v">${esc(supply)}</span></div>
+    <div class="kv" id="tokdDec" hidden><span class="kv__k">Decimals</span><span class="kv__v"></span></div>
+    ${owner ? `<div class="kv"><span class="kv__k">Owner</span><span class="kv__v tokd-wrap">${esc(owner)}</span></div>` : ""}
+    <div class="view__sub">Token ID</div>
+    <div class="kv__v tokd-id" id="tokdId" title="click to copy">${esc(tid)}</div>
+    ${safeLinkRow("Website", website)}
+    ${safeLinkRow("Validation", webv)}
+    ${extraRows}
+    ${coins ? `<div class="view__sub tokd-coins-hdr" id="tokdCoinsHdr">▸ Coins (${coins})</div><div id="tokdCoins" hidden></div>` : ""}
+    <div class="seg" style="margin-top:12px">
+      <button class="btn btn--outline btn--full" id="tokdReceive">Receive</button>
+      <button class="btn btn--primary btn--full" id="tokdSend">Send ${esc(tick || name)}</button>
+    </div>
+    <button class="btn btn--outline btn--full" id="tokdClose" style="margin-top:8px">Close</button>
+  </div></div>`);
+
+  const close = () => { const o = el("tokDetail"); if (o) o.remove(); };
+  el("tokdClose").onclick = close;
+  el("tokDetail").onclick = (e) => { if (e.target.id === "tokDetail") close(); };
+  el("tokdId").onclick = () => copy(tid);
+  el("tokdReceive").onclick = () => { close(); selectTab("receive"); };
+  el("tokdSend").onclick = () => { close(); SEND_PRESELECT = tid; selectTab("send"); };
+  enhanceTokenIcons(el("tokDetail"));   // swap in the real icon + validated badge (reused path)
+
+  // Decimals (tokens only) — best-effort background enrich, never blocks the modal.
+  if (!isNative && validTok(tid)) {
+    cmd(`balance tokendetails:true tokenid:${tid}`).then(r => {
+      const row = Array.isArray(r) ? r[0] : r;
+      const dec = row && row.details && row.details.decimals;
+      const box = el("tokdDec");
+      if (box && dec != null && dec !== "") { box.querySelector(".kv__v").textContent = String(dec); box.hidden = false; }
+    }).catch(() => {});
+  }
+
+  // Per-coin list — lazy on first expand (coins has no count-cap; keep the modal light).
+  if (coins) {
+    let loaded = false;
+    el("tokdCoinsHdr").onclick = async () => {
+      const box = el("tokdCoins"), hdr = el("tokdCoinsHdr");
+      const open = box.hidden;
+      box.hidden = !open;
+      hdr.textContent = (open ? "▾" : "▸") + ` Coins (${coins})`;
+      if (open && !loaded) { loaded = true; await loadCoinList(tid, isNative, box); }
+    };
+  }
+}
+
+const COIN_LIST_CAP = 50;   // most coins shown in the modal; more get a "+N more" footer
+
+async function loadCoinList(tid, isNative, box) {
+  if (!validTok(tid)) { box.innerHTML = `<div class="view__desc">Invalid token id.</div>`; return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
+  box.innerHTML = `<div class="spin spin--sm">Loading coins…</div>`;
+  try {
+    const all = await cmd(`coins relevant:true tokenid:${tid} order:desc`) || [];
+    // Which coinids are spendable — the node's own sendable gate (isAddressSimple + RETURN TRUE).
+    let sendableIds = new Set();
+    try { const s = await cmd(`coins relevant:true sendable:true tokenid:${tid}`) || []; for (const c of s) sendableIds.add(c.coinid); } catch (e) {}
+    if (!all.length) { box.innerHTML = `<div class="view__desc">No coins.</div>`; return; }
+    const shown = all.slice(0, COIN_LIST_CAP);
+    box.innerHTML = shown.map(c => {
+      const amt = TOK.tidyAmount(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
+      const spend = sendableIds.has(c.coinid);
+      const cid = String(c.coinid || "");
+      const tail = cid.length > 14 ? "…" + cid.slice(-12) : cid;
+      const bits = [];
+      if (c.created) bits.push("block " + esc(String(c.created)));
+      if (c.age != null) bits.push("age " + esc(String(c.age)));
+      return `<div class="coin-row" data-cid="${esc(cid)}" title="click to copy coin id">
+        <div class="coin-row__top"><span class="coin-amt">${esc(amt)}</span>
+          <span class="chip ${spend ? "chip--spend" : "chip--lock"}">${spend ? "spendable" : "🔒 locked"}</span></div>
+        <div class="coin-row__sub">${esc(tail)}${bits.length ? " · " + bits.join(" · ") : ""}</div>
+      </div>`;
+    }).join("") + (all.length > shown.length ? `<div class="view__desc">+ ${all.length - shown.length} more coin${all.length - shown.length === 1 ? "" : "s"} not shown</div>` : "");
+    box.querySelectorAll(".coin-row[data-cid]").forEach(r => r.onclick = () => copy(r.dataset.cid));
+  } catch (e) {
+    box.innerHTML = `<div class="view__desc">Couldn't load coins: ${esc(e.message || String(e))}</div>`;
+  }
 }
 
 // ---- Receive ---------------------------------------------------------------
@@ -1810,6 +1988,19 @@ function decAdd(a, b) {   // non-negative decimal string addition (BigInt-scaled
   s = s.padStart(scale + 1, "0");
   return s.slice(0, -scale) + "." + s.slice(-scale);
 }
+function decSub(a, b) {   // non-negative decimal string subtraction a-b, clamped at 0 (BigInt-scaled)
+  a = String(a); b = String(b);
+  const as = a.split("."), bs = b.split(".");
+  const af = as[1] || "", bf = bs[1] || "", scale = Math.max(af.length, bf.length);
+  const ax = BigInt((as[0] || "0") + af.padEnd(scale, "0"));
+  const bx = BigInt((bs[0] || "0") + bf.padEnd(scale, "0"));
+  const d = ax - bx;
+  if (d <= 0n) return "0";                        // never show a negative "locked"
+  let s = d.toString();
+  if (scale === 0) return s;
+  s = s.padStart(scale + 1, "0");
+  return (s.slice(0, -scale) + "." + s.slice(-scale)).replace(/\.?0+$/, "");   // trim trailing zeros
+}
 function normalize(txpow, detail) {
   detail = detail || {};
   const hdr = txpow.header || {}, txn = (txpow.body && txpow.body.txn) || {};
@@ -2074,8 +2265,9 @@ async function renderSend() {
   if (!running) { card.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
   // token dropdown source — the wallet's held coins/tokens (MINIMA first). No raw token-id typing.
   const bal = await tryCmd("balance") || [];
-  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid) }));
-  if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima" });
+  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid), sendable: b.sendable || "0",
+    ticker: (b.tokenid || MINIMA) === MINIMA ? "MINIMA" : (TOK.ticker(b.token) || "") }));
+  if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima", sendable: "0", ticker: "MINIMA" });
   SEND_TOKENS.sort((a, b) => (a.tokenid === MINIMA ? -1 : b.tokenid === MINIMA ? 1 : 0));
   card.innerHTML = `
     <div class="seg" id="sendModes">
@@ -2096,22 +2288,38 @@ async function renderSend() {
 function sendForm(mode) {
   const f = el("sendForm");
   if (mode === "send") {
+    // Preselect the token if we arrived from a token-detail modal's "Send" action.
+    const preselect = SEND_PRESELECT; SEND_PRESELECT = null;
     f.innerHTML = `
       <div class="field"><div class="field__label">To address</div><input class="field__input" id="sTo" placeholder="Mx… or 0x…" /></div>
-      <div class="field"><div class="field__label">Amount</div><input class="field__input" id="sAmt" placeholder="0.0" /></div>
+      <div class="field"><div class="field__label">Amount</div>
+        <div class="seg"><input class="field__input" id="sAmt" placeholder="0.0" /><button class="btn btn--outline btn--sm" id="sMax" type="button">Max</button></div>
+        <div class="field__hint" id="sAvail"></div></div>
       <div class="field"><div class="field__label">Token</div><select class="field__input" id="sTok">${tokenOptions()}</select></div>
       <button class="btn btn--primary btn--full" id="sGo">Send</button>`;
+    if (preselect) el("sTok").value = preselect;
+    const tokOf = (tid) => SEND_TOKENS.find(x => x.tokenid === tid) || {};
+    const sendableOf = (tid) => tokOf(tid).sendable || "0";
+    const refreshAvail = () => {
+      const t = tokOf(el("sTok").value);
+      el("sAvail").textContent = "Available: " + TOK.tidyAmount(t.sendable || "0") + (t.ticker ? " " + t.ticker : "");
+    };
+    el("sTok").onchange = refreshAvail;
+    el("sMax").onclick = () => { el("sAmt").value = TOK.tidyAmount(sendableOf(el("sTok").value)); };
+    refreshAvail();
     el("sGo").onclick = async () => {
       const to = el("sTo").value.trim(), amt = el("sAmt").value.trim(), tok = el("sTok").value;
       if (!validAddr(to)) { toast("That doesn't look like a valid Mx… / 0x… address.", "err"); return; }
       if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
       if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
+      const avail = sendableOf(tok);
+      if (absCmp(amt, avail) > 0) { toast("Amount exceeds your spendable balance (" + TOK.tidyAmount(avail) + "). The rest is locked in scripts/pools.", "err"); return; }
       el("sGo").disabled = true; el("sGo").textContent = "Sending…";
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
         if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
-        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = "";
+        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = ""; refreshAvail();
       } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send";
     };

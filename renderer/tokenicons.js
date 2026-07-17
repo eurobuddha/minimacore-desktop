@@ -33,6 +33,13 @@
     var m = meta(token);
     return first(m && m.webvalidate, token.webvalidate);
   }
+  // A metadata field that may live either on the token object or inside its nested name-object.
+  function metaField(token, key) {
+    if (!token || typeof token !== "object") return "";
+    var m = meta(token);
+    return first(m && m[key], token[key]);
+  }
+  function ticker(token) { return metaField(token, "ticker"); }
 
   /** IconResolver.resolve → { data: dataURI|null, remote: httpUrl|null }. */
   function resolveIcon(raw) {
@@ -109,6 +116,8 @@
     MINIMA: MINIMA,
     pickIconField: pickIconField,
     webvalidateUrl: webvalidateUrl,
+    metaField: metaField,
+    ticker: ticker,
     resolveIcon: resolveIcon,
     identiconDataUri: identiconDataUri,
     tokenName: tokenName,
