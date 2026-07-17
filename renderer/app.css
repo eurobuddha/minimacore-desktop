@@ -46,6 +46,28 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 .tab { padding: 12px 13px; font-size: 11px; letter-spacing: .7px; border-bottom-width: 2px; }
 .tab:hover { color: var(--text); }
 
+/* When the window is too narrow for all tabs, the row scrolls horizontally. Fades + arrow chips make the
+   off-screen tabs discoverable (the scrollbar is hidden), and selectTab() scrolls the active tab into view. */
+.tabs-wrap { position: relative; }
+.tabs-wrap::before, .tabs-wrap::after {
+  content: ""; position: absolute; top: 0; bottom: 1px; width: 34px; pointer-events: none; z-index: 2;
+  opacity: 0; transition: opacity .15s;
+}
+.tabs-wrap::before { left: 0; background: linear-gradient(90deg, var(--bg) 30%, transparent); }
+.tabs-wrap::after { right: 0; background: linear-gradient(270deg, var(--bg) 30%, transparent); }
+.tabs-wrap.can-l::before { opacity: 1; }
+.tabs-wrap.can-r::after { opacity: 1; }
+.tabs-arrow {
+  position: absolute; top: 0; bottom: 1px; width: 26px; z-index: 3; display: none;
+  align-items: center; justify-content: center; padding: 0 0 2px;
+  border: none; background: var(--bg); color: var(--dim); font-size: 20px; line-height: 1; cursor: pointer;
+}
+.tabs-arrow:hover { color: var(--accent); }
+.tabs-arrow--l { left: 0; }
+.tabs-arrow--r { right: 0; }
+.tabs-wrap.can-l .tabs-arrow--l { display: flex; }
+.tabs-wrap.can-r .tabs-arrow--r { display: flex; }
+
 /* Layout rhythm */
 .main { padding: 18px 16px 26px; }
 .view__title { font-size: 22px; letter-spacing: -.3px; margin-bottom: 12px; }

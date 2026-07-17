@@ -16,18 +16,22 @@
       <button class="hdr__style" id="themeBtn" title="Theme">◐</button>
     </header>
 
-    <nav class="tabs" id="tabs">
-      <button class="tab tab--active" data-view="balances">Balances</button>
-      <button class="tab" data-view="receive">Receive</button>
-      <button class="tab" data-view="send">Send</button>
-      <button class="tab" data-view="mail">Mail<span class="tab-badge" id="mailBadge" hidden></span></button>
-      <button class="tab" data-view="pandapools">Pools</button>
-      <button class="tab" data-view="history">History</button>
-      <button class="tab" data-view="terminal">Terminal</button>
-      <button class="tab" data-view="logs">Logs</button>
-      <button class="tab" data-view="settings">Settings</button>
-      <button class="tab" data-view="node">Node</button>
-    </nav>
+    <div class="tabs-wrap" id="tabsWrap">
+      <button class="tabs-arrow tabs-arrow--l" id="tabsArrowL" tabindex="-1" aria-label="Scroll tabs left" hidden>‹</button>
+      <nav class="tabs" id="tabs">
+        <button class="tab tab--active" data-view="balances">Balances</button>
+        <button class="tab" data-view="receive">Receive</button>
+        <button class="tab" data-view="send">Send</button>
+        <button class="tab" data-view="mail">Mail<span class="tab-badge" id="mailBadge" hidden></span></button>
+        <button class="tab" data-view="pandapools">Pools</button>
+        <button class="tab" data-view="history">History</button>
+        <button class="tab" data-view="terminal">Terminal</button>
+        <button class="tab" data-view="logs">Logs</button>
+        <button class="tab" data-view="settings">Settings</button>
+        <button class="tab" data-view="node">Node</button>
+      </nav>
+      <button class="tabs-arrow tabs-arrow--r" id="tabsArrowR" tabindex="-1" aria-label="Scroll tabs right" hidden>›</button>
+    </div>
 
     <main class="main" id="main">
       <section class="view view--active" id="view-balances">

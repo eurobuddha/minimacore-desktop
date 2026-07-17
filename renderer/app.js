@@ -72,6 +72,7 @@ async function boot() {
   el("themeBtn").onclick = cycleTheme;
   el("nodePill").onclick = () => selectTab("node");
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => selectTab(b.dataset.view));
+  initTabScroll();
 
   api.onStatus(onStatus);
   api.onLog(appendLog);
@@ -420,9 +421,39 @@ function showRestoreOverlay() {
 // ---- tabs / refresh --------------------------------------------------------
 function selectTab(view) {
   activeView = view;
+  const active = document.querySelector('.tab[data-view="' + view + '"]');
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab--active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("view--active", v.id === "view-" + view));
+  // Bring the active tab into view when the row is scrolled (block:nearest so the page never scrolls).
+  if (active) { try { active.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" }); } catch (e) { active.scrollIntoView(); } setTimeout(updateTabScroll, 250); }
   renderActive();
+}
+
+// ---- narrow-width tab scrolling: fades + arrow chips + wheel, since all 10 tabs can overflow at 440px ----
+function updateTabScroll() {
+  const tabs = el("tabs"), wrap = el("tabsWrap");
+  if (!tabs || !wrap) return;
+  const max = tabs.scrollWidth - tabs.clientWidth;
+  wrap.classList.toggle("can-l", tabs.scrollLeft > 1);
+  wrap.classList.toggle("can-r", tabs.scrollLeft < max - 1);
+  el("tabsArrowL").hidden = !wrap.classList.contains("can-l");
+  el("tabsArrowR").hidden = !wrap.classList.contains("can-r");
+}
+function initTabScroll() {
+  const tabs = el("tabs");
+  if (!tabs) return;
+  const by = () => Math.max(120, Math.round(tabs.clientWidth * 0.7));
+  el("tabsArrowL").onclick = () => tabs.scrollBy({ left: -by(), behavior: "smooth" });
+  el("tabsArrowR").onclick = () => tabs.scrollBy({ left: by(), behavior: "smooth" });
+  // Vertical mouse-wheel → horizontal scroll (trackpads already scroll sideways; this covers a plain wheel).
+  tabs.addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && tabs.scrollWidth > tabs.clientWidth) {
+      tabs.scrollLeft += e.deltaY; e.preventDefault();
+    }
+  }, { passive: false });
+  tabs.addEventListener("scroll", updateTabScroll, { passive: true });
+  window.addEventListener("resize", updateTabScroll);
+  updateTabScroll();
 }
 function renderActive() {
   if (!running && activeView !== "node") { /* wallet views need the node */ }
