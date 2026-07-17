@@ -451,6 +451,14 @@ async function renderBalances() {
   if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
   BAL_BY_TID = {};
   for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
+  // Consolidate only merges SPENDABLE coins (a send-to-self of signable coins) — locked/watch-only UTXOs
+  // can't be touched. balance.coins counts them all, so gate the nudge on the sendable count instead: one
+  // query, grouped by token. (Minima e.g. can show 14 total coins but only 5 spendable.)
+  SENDABLE_COUNT = {};
+  try {
+    const sc = await tryCmd("coins relevant:true sendable:true") || [];
+    for (const c of sc) { const t = c.tokenid || MINIMA; SENDABLE_COUNT[t] = (SENDABLE_COUNT[t] || 0) + 1; }
+  } catch (e) { /* nudge just won't show if we can't count — safe default */ }
   host.innerHTML = bal.map(balCardHtml).join("");
   host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async (e) => {
     e.stopPropagation();                                 // don't also open the detail modal
@@ -467,7 +475,8 @@ async function renderBalances() {
   });
   enhanceTokenIcons(host);
 }
-let BAL_BY_TID = {};   // tokenid → last balance row, so a card click can open the modal without refetching
+let BAL_BY_TID = {};       // tokenid → last balance row, so a card click can open the modal without refetching
+let SENDABLE_COUNT = {};   // tokenid → count of SPENDABLE coins (what consolidate can actually merge)
 
 /** Is this balance row a 1-of-1 NFT? (non-Minima, total supply 1, no fractional decimals) */
 function isNftBal(b) {
@@ -495,8 +504,11 @@ function balCardHtml(b) {
       + (TOK.webvalidateUrl(b.token) ? ` data-webv="1"` : "")
       + `><img class="tok-icon" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
   }
-  const nudge = coins >= 10
-    ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" style="margin-top:8px;width:100%">Consolidate ▸ ${coins} coins into fewer</button>`
+  // Nudge on SPENDABLE coins only — consolidate can't merge locked ones, so counting them would offer to
+  // consolidate coins that can't be touched (e.g. 14 total but 5 spendable → no useful consolidation).
+  const spendCoins = SENDABLE_COUNT[b.tokenid || MINIMA] || 0;
+  const nudge = spendCoins >= 10
+    ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" style="margin-top:8px;width:100%">Consolidate ▸ ${spendCoins} spendable coins into fewer</button>`
     : "";
   // Headline = SENDABLE — what the user can actually spend. `confirmed` (total incl. coins locked in
   // scripts/pools) was misleading: it made a $2-spendable wallet read as $600. Locked = confirmed − sendable,
