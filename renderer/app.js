@@ -1451,8 +1451,10 @@ async function refreshPpSwapMeta() {
   const info = await api.ppPairInfo(t.tok).catch(() => ({ pools: 0, depth: "0" }));
   if (el("ppPoolLine")) el("ppPoolLine").textContent = "MINIMA / " + t.name + " · " + info.pools + (Number(info.pools) === 1 ? " pool" : " pools") + " · depth " + TOK.tidyAmount(info.depth) + " MINIMA";
   const bal = await tryCmd("balance") || [];
-  const bm = bal.find(b => b.tokenid === MINIMA); PP_BAL_MIN = bm ? bm.confirmed : "0";
-  const bt = bal.find(b => b.tokenid && b.tokenid.toLowerCase() === t.tok.toLowerCase()); PP_BAL_TOK = bt ? bt.confirmed : "0";
+  // SENDABLE, not confirmed — confirmed counts coins locked in pools/scripts, so it overstated what you can
+  // actually trade (same bug fixed in the wallet). The CREATE flow already uses sendable.
+  const bm = bal.find(b => b.tokenid === MINIMA); PP_BAL_MIN = bm ? (bm.sendable || "0") : "0";
+  const bt = bal.find(b => b.tokenid && b.tokenid.toLowerCase() === t.tok.toLowerCase()); PP_BAL_TOK = bt ? (bt.sendable || "0") : "0";
   if (el("ppHoldings")) el("ppHoldings").textContent = TOK.tidyAmount(PP_BAL_MIN) + " MINIMA · " + TOK.tidyAmount(PP_BAL_TOK) + " " + t.name;
   if (el("ppFromBal")) { const payTok = ppSwapMinToTok ? "MINIMA" : t.name; el("ppFromBal").textContent = "Balance " + TOK.tidyAmount(ppSwapMinToTok ? PP_BAL_MIN : PP_BAL_TOK) + " " + payTok; }
   ppRenderSwapMarket(t);   // MEXC market-comparison line (USDT pairs only) — passive, safe on a block tick
