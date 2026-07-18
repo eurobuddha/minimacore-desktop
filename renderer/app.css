@@ -245,3 +245,113 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .chip--spend { background: var(--green-bg, rgba(46,204,113,.15)); color: var(--green); border-color: var(--green); padding: 2px 8px; font-size: 10px; }
 .chip--lock { background: var(--surface2); color: var(--dim); padding: 2px 8px; font-size: 10px; }
 .spin--sm { font-size: 12px; color: var(--dim); padding: 8px 0; }
+
+/* ============================================================================
+   TERMINAL OVERHAUL (loads last → wins). Black/white/orange · Manrope + mono ·
+   hairline-precise, dense, sharp 4px radius. Outline-M cornerstone.
+   ========================================================================== */
+body { font-family: var(--sans); }
+.view__title, .card__title, .mail-top__title, .setup-sec__h, .modal__title, .tokd-name,
+.setup-progress__title { font-family: var(--sans); }
+.kv__v, .kv__k, .row__l2, .row__r, .bamt, .coin-amt, .coin-row__sub, .tokd-id, .mid,
+.field__input, .prow--managed .prow__l, .status, .hdr__status, .logbox, .termout, .logsout,
+.addrbox__addr, #recvAddr, #setAddr, #setSeed { font-family: var(--mono); }
+
+/* Header — thin, brand mark + wordmark in Manrope, hairline rule, node pulse */
+.hdr { background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+  padding-top: 10px; padding-bottom: 10px; }
+.hdr__logo { display: flex; align-items: center; gap: 9px; font-family: var(--sans);
+  font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--heading); }
+.hdr__logo b { font-weight: 700; }
+.hdr__logo .omark { width: 20px; height: 18px; color: var(--logo-ink); display: block; flex: 0 0 auto; }
+.hdr__style { color: var(--dim); }
+.hdr__style:hover { color: var(--accent); }
+.statuschip { font-family: var(--mono); font-size: 11px; letter-spacing: .02em; border: 1px solid var(--border);
+  border-radius: 100px; padding: 4px 11px; background: var(--surface); display: inline-flex; align-items: center; gap: 7px; }
+.statuschip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 0 8px currentColor; animation: mcd-pulse 2.6s infinite; }
+@keyframes mcd-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+/* Tabs — tight tracked mono, orange active underline with glow */
+.tabs { padding: 2px 10px 0; }
+.tab { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; padding: 12px 12px 13px; border-bottom-width: 2px; }
+.tab--active { color: var(--accent); border-bottom-color: var(--accent); box-shadow: 0 2px 10px -3px var(--accent); }
+.tabs-arrow:hover { color: var(--accent); }
+
+/* Views — Manrope titles, tighter rhythm */
+.main { padding: 16px 16px 24px; position: relative; }
+.view__title { font-size: 20px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 12px; }
+.view__desc { font-size: 12.5px; }
+.view__sub { font-size: 10px; letter-spacing: .16em; color: var(--dim2); }
+
+/* Cards / panels — flat hairline with a whisper of top-highlight, sharp radius */
+.card, .swapbox { border-radius: var(--radius); padding: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03); transition: border-color .13s; }
+.card:hover { border-color: var(--border-light); transform: none; }
+.card--accent { border-left: 2px solid var(--accent); }
+.card__title { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim2); font-weight: 600; margin-bottom: 10px; }
+
+/* Buttons — no more solid orange slabs. Primary = hairline orange + soft fill, fills on hover. */
+.btn { border-radius: var(--radius); font-family: var(--mono); font-size: 12px; letter-spacing: .12em; font-weight: 600;
+  padding: 11px 16px; transition: all .13s ease; box-shadow: none; }
+.btn:active { transform: translateY(1px); }
+.btn--primary { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent);
+  box-shadow: none; }
+.btn--primary:hover { background: var(--accent); color: var(--on-accent); filter: none;
+  box-shadow: 0 0 22px -6px var(--accent); }
+.btn--outline { background: none; color: var(--accent); border-color: var(--accent); }
+.btn--full { padding: 13px; }
+
+/* KV rows / fields / chips / inputs — hairline + orange focus */
+.kv { font-size: 12.5px; }
+.field__input { border-radius: var(--radius); font-size: 14px; }
+.field__input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.field__label { font-size: 10px; letter-spacing: .16em; }
+.chip { border-radius: var(--radius); }
+.chip--active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.statuschip[data-state="running"] { color: var(--green); }
+
+/* Modals — sharp, hairline, Manrope title */
+.modal, .modal.setup { border-radius: var(--radius); }
+.modal__title { font-size: 16px; letter-spacing: -.01em; }
+.opt { border-radius: var(--radius); } .opt.sel { border-color: var(--accent); }
+.token-pick { border-radius: var(--radius); font-family: var(--mono); }
+
+/* Rows — hover tick */
+.row:hover { background: var(--surface); }
+.row:hover .row__glyph { color: var(--accent); }
+
+/* Balances — keep spendable-first sizing, tabular numerals, tighter icon radius */
+#balList .card .kv:first-child .kv__v { font-size: 17px; font-weight: 700; font-family: var(--mono); }
+.kv .tok-icon { border-radius: 6px; box-shadow: none; }
+.tok-icon { border-radius: 6px; }
+.card--token:hover { border-color: var(--accent); }
+
+/* Token detail — sharp large icon */
+.tok-icon--lg { border-radius: 12px; }
+.chip--spend { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+.chip--lock { background: var(--surface2); color: var(--dim); }
+
+/* Address / seed — orange mono */
+#recvAddr, #setAddr, #setSeed, .addrbox__addr { color: var(--accent); }
+
+/* Outline-M watermark — the cornerstone motif, bleeding off the top-right of every view */
+.main::before {
+  content: ""; position: absolute; top: 4px; right: -60px; width: 300px; height: 270px; z-index: 0;
+  pointer-events: none; opacity: .045; background: var(--dim);
+  -webkit-mask: url("minima-outline.svg") no-repeat center / contain;
+          mask: url("minima-outline.svg") no-repeat center / contain;
+  transform: rotate(-2deg);
+}
+.main > * { position: relative; z-index: 1; }
+
+/* Empty / loading — outline mark, slowly turning */
+.spin, .empty { font-family: var(--sans); }
+.omark-load { width: 84px; height: 76px; color: var(--accent); display: block; margin: 0 auto 12px;
+  animation: mcd-spin 9s linear infinite; opacity: .9; }
+
+/* Scrollbar thumb adapts to light theme */
+:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(22,24,28,.18); background-clip: padding-box; }
+
+/* Manrope for the Minima coin glyph fallback tile stays; outline mark injected in JS */
+.tok-omark { color: var(--logo-ink); }

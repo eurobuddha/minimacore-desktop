@@ -1,48 +1,63 @@
-/* PandaPools — mirrors the native app's Design.java. CURRENT (dark-orange) is the default; the two
-   ORIGINAL brutalist-monospace skins are swapped in by the ◐ STYLE toggle. Tokens = Design.java:65-92. */
+/* ============================================================================
+   minimaCore — TERMINAL identity. Official Minima Brand Guidelines 2022 palette,
+   pared to BLACK / WHITE / ORANGE. Manrope (brand face) + Geist Mono (numerals).
+   The outline logo mark is the cornerstone motif. Dark is default; light is the toggle.
+   ========================================================================== */
+@font-face{font-family:"Manrope";font-style:normal;font-weight:200 800;font-display:swap;
+  src:url("fonts/Manrope-variable.woff2") format("woff2");}
+@font-face{font-family:"Geist Mono";font-style:normal;font-weight:100 900;font-display:swap;
+  src:url("fonts/GeistMono-variable.woff2") format("woff2");}
 
 :root {
-    /* CURRENT — the shipped native look: accent #F7931A, rounded, sans prose + mono numbers */
-    --bg: #0A0A0F;
-    --surface: #15151F;
-    --surface2: #1F1F2B;
-    --border: #2A2A38;
-    --border-light: #2A2A38;
-    --text: #FFFFFF;
+    /* TERMINAL · Dark (default) — Minima dark black ground, orange signal */
+    --bg: #0D0E10;            /* Minima "dark black" */
+    --surface: #16181C;       /* Minima "core black" */
+    --surface2: #1E2126;      /* toward "contrast black" #363A3F */
+    --border: rgba(145,145,157,.16);      /* hairlines in Minima core grey */
+    --border-light: rgba(145,145,157,.30);
+    --text: #F4F4F5;
     --heading: #FFFFFF;
-    --dim: #9A9AA8;
-    --dim2: #6A6A78;
-    --green: #2ECC71;
-    --green-bg: rgba(46,204,113,.18);
-    --red: #E74C3C;
-    --red-bg: rgba(231,76,60,.18);
-    --amber: #E6A23C;
-    --amber-bg: rgba(230,162,60,.18);
-    --accent: #F7931A;
-    --accent-bg: rgba(247,147,26,.20);
-    --on-accent: #000000;
-    --radius: 10px;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
+    --dim: #91919D;           /* Minima core grey */
+    --dim2: #5A5E66;
+    --muted: #91919D;
+    --green: #46D28A; --green-bg: rgba(70,210,138,.14);
+    --red: #F0616D;   --red-bg: rgba(240,97,109,.14);
+    --amber: #E0B24A; --amber-bg: rgba(224,178,74,.14);
+    --accent: #FF7358;                    /* Minima core orange 80% tint (UI-sanctioned) */
+    --accent-strong: #FF512F;             /* core orange (logo colour) */
+    --accent-hover: #D63110;              /* dark orange — rollover on orange buttons */
+    --accent-bg: rgba(255,115,88,.14);
+    --on-accent: #160B06;
+    --logo-ink: #FFFFFF;                  /* the outline mark's ink stroke on dark */
+    --grain: .04;
+    --radius: 4px;
+    --sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "Geist Mono", ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
     --chrome-font: var(--sans);
 }
 
-/* ORIGINAL · Light — brutalist monospace, hard edges (native Mode.ORIGINAL_LIGHT) */
-:root[data-theme="original-light"] {
-    --bg: #FFFFFF; --surface: #F4F4F2; --surface2: #E8E8E5; --border: #0A0A0A; --border-light: #C9C9C6;
-    --text: #1C1C1C; --heading: #0A0A0A; --dim: #5F5F5F; --dim2: #8A8A8A;
-    --green: #FF5A1F; --green-bg: #FFE9E0; --red: #CC0000; --red-bg: #FFE5E5; --amber: #9A6B00; --amber-bg: #FBF0D6;
-    --accent: #FF5A1F; --accent-bg: #FFE9E0; --on-accent: #000000;
-    --radius: 0px; --chrome-font: var(--mono);
-}
-
-/* ORIGINAL · Dark — photo-negative brutalist (native Mode.ORIGINAL_DARK) */
-:root[data-theme="original-dark"] {
-    --bg: #000000; --surface: #0D0D0F; --surface2: #18181B; --border: #F0F0F0; --border-light: #383840;
-    --text: #D6D6D6; --heading: #F5F5F5; --dim: #8E8E8E; --dim2: #5A5A5A;
-    --green: #FF5A1F; --green-bg: #2E1408; --red: #FF5B5B; --red-bg: #2A0D0D; --amber: #E0A93A; --amber-bg: #2A2008;
-    --accent: #FF5A1F; --accent-bg: #2E1408; --on-accent: #000000;
-    --radius: 0px; --chrome-font: var(--mono);
+/* TERMINAL · Light — Minima paper (core grey 10% tint / white), orange darkened for contrast */
+:root[data-theme="light"] {
+    --bg: #F4F4F5;            /* Minima core grey 10% tint */
+    --surface: #FFFFFF;
+    --surface2: #F9F9FA;
+    --border: rgba(22,24,28,.13);
+    --border-light: rgba(22,24,28,.26);
+    --text: #16181C;
+    --heading: #0D0E10;
+    --dim: #6F6F7A;
+    --dim2: #A7A7B0;
+    --muted: #6F6F7A;
+    --green: #17A05C; --green-bg: rgba(23,160,92,.12);
+    --red: #D6323F;   --red-bg: rgba(214,50,63,.10);
+    --amber: #A87B1E; --amber-bg: rgba(168,123,30,.12);
+    --accent: #D63110;                    /* dark orange reads on light */
+    --accent-strong: #FF512F;
+    --accent-hover: #B0270C;
+    --accent-bg: rgba(214,49,16,.09);
+    --on-accent: #FFFFFF;
+    --logo-ink: #16181C;
+    --grain: .02;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -51,10 +66,16 @@ body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--sans);
-    font-size: 15px;
-    line-height: 1.55;
+    font-size: 14px;
+    line-height: 1.5;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+}
+/* fixed grain overlay — kills banding on the near-black ground + adds terminal texture */
+body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none; opacity: var(--grain, .04);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .shell { max-width: 640px; margin: 0 auto; padding: 16px; }

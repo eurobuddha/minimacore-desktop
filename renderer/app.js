@@ -57,11 +57,13 @@ function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ 
 function short(s, n) { s = String(s || ""); return s.length > (n || 18) ? s.slice(0, (n || 18)) + "…" : s; }
 
 // ---- theme -----------------------------------------------------------------
-const THEMES = ["current", "original-light", "original-dark"];
-function applyTheme(t) { document.documentElement.setAttribute("data-theme", t); }
+// TERMINAL identity: dark default + light toggle. Legacy stored themes (current/original-*) → dark.
+const THEMES = ["dark", "light"];
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+}
 function cycleTheme() {
-  const i = THEMES.indexOf(CFG.theme || "current");
-  CFG.theme = THEMES[(i + 1) % THEMES.length];
+  CFG.theme = (CFG.theme === "light") ? "dark" : "light";
   applyTheme(CFG.theme); api.saveConfig({ theme: CFG.theme });
 }
 
