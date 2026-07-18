@@ -24,7 +24,9 @@ let shim = null, db = null, readyP = null;
 
 function dbPath() { return path.join(app.getPath("userData"), "history.sqlite"); }
 
-function ensureReady() { if (!readyP) readyP = init(); return readyP; }
+// Memoize init, but on failure clear the cache so a later call can retry (a transient WASM/fs error must not
+// permanently disable history for the session). The rejection still propagates to this caller.
+function ensureReady() { if (!readyP) readyP = init().catch(e => { readyP = null; throw e; }); return readyP; }
 
 async function init() {
   shim = await makeSqlShim(dbPath());
@@ -58,7 +60,9 @@ function migrateFromJson() {
   catch (e) { return; }   // no legacy file / unreadable
   try {
     const list = rows && rows.rows && typeof rows.rows === "object" ? Object.values(rows.rows) : [];
-    if (list.length) { insertBatch(list); shim.persist(); }   // schedule the whole-image save so the migration is durable
+    // Flush SYNCHRONOUSLY (not the debounced persist) so history.sqlite is on disk BEFORE we rename the JSON
+    // aside — otherwise a hard-kill in the ~400ms debounce window would orphan the rows (json already renamed).
+    if (list.length) { insertBatch(list); shim.flush(); }
     fs.renameSync(legacy, legacy + ".migrated");
   } catch (e) { /* best-effort; leave the JSON in place if the rename fails */ }
 }
@@ -142,7 +146,8 @@ function selectRows(where, params, limit, offset) {
   let sql = `SELECT * FROM tx`;
   if (where) sql += ` WHERE ${where}`;
   sql += ` ORDER BY block DESC, time DESC`;
-  if (limit != null) sql += ` LIMIT ${parseInt(limit, 10) || 0}`;
+  const lim = parseInt(limit, 10);
+  if (Number.isFinite(lim) && lim > 0) sql += ` LIMIT ${lim}`;   // >0 only; 0/NaN ⇒ no limit (not empty result)
   if (offset) sql += ` OFFSET ${parseInt(offset, 10) || 0}`;
   const stmt = db.prepare(sql);
   if (params && params.length) stmt.bind(params);

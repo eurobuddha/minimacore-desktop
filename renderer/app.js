@@ -2175,8 +2175,9 @@ async function syncHistory(opts) {
   if (HIST_SYNCING) return; HIST_SYNCING = true;
   try {
     const known = new Set((await api.histGet()).map(r => r.txpowid));
-    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false;
-    const fresh = [];
+    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false, fetched = 0;
+    let batch = [];
+    const flushBatch = async () => { if (batch.length) { await api.histAdd(batch); batch = []; } };
     for (;;) {
       let page;
       try {
@@ -2189,13 +2190,14 @@ async function syncHistory(opts) {
         const row = normalize(page.txpows[i], page.details[i]);
         if (!row.txpowid) continue;
         if (!opts.older && known.has(row.txpowid)) { hitKnown = true; break; }
-        fresh.push(row);
+        batch.push(row); fetched++;
       }
       if (hitKnown) break;
       offset += page.txpows.length; max = HIST_PAGE; skips = 0;
-      if (opts.older && fresh.length >= HIST_OLDER_BUDGET) break;
+      if (batch.length >= 500) await flushBatch();          // bound memory/IPC on a deep first sync
+      if (opts.older && fetched >= HIST_OLDER_BUDGET) break;
     }
-    if (fresh.length) await api.histAdd(fresh);
+    await flushBatch();
     histOldestOffset = opts.older ? offset : Math.max(histOldestOffset, offset);
     await renderHistoryList();
   } finally { HIST_SYNCING = false; }
