@@ -1958,8 +1958,19 @@ async function refreshPpActive() {
 }
 
 // ---- History ---------------------------------------------------------------
+// History filter/paging state. The list renders from the local DB via api.histQuery (paged); the filter bar is
+// built ONCE per tab-enter (never on a list re-render) so a background sync can't steal focus mid-search.
+let HIST_FILTER = { search: "", token: "", direction: "" };
+let HIST_DISPLAY = 300;
+const HIST_STEP = 300;
+let HIST_ROWS = [];
+let histSearchTimer = null;
+function histFilterActive() { return !!(HIST_FILTER.search || HIST_FILTER.token || HIST_FILTER.direction); }
+function histQueryArgs() { return { search: HIST_FILTER.search, token: HIST_FILTER.token, direction: HIST_FILTER.direction }; }
+
 async function renderHistory() {
   ensureHistActions();
+  await ensureHistFilter();
   await renderHistoryList();
   if (running) syncHistory({ older: false });
 }
@@ -1972,20 +1983,50 @@ function ensureHistActions() {
   el("histCopy").onclick = () => copyHistory();
   el("histCsv").onclick = () => exportHistory();
 }
+async function ensureHistFilter() {
+  const host = el("histFilter"); if (!host) return;
+  const toks = await api.histTokens().catch(() => []);
+  const tokOpts = [`<option value="">All tokens</option>`].concat(
+    (toks || []).map(t => `<option value="${esc(t.tokenid)}"${t.tokenid === HIST_FILTER.token ? " selected" : ""}>${esc(t.name || TOK.shortId(t.tokenid))}</option>`)
+  ).join("");
+  const dirs = [["", "All"], ["in", "In"], ["out", "Out"], ["self", "Self"], ["split", "Split"], ["consolidation", "Consol."]];
+  host.innerHTML = `
+    <div class="hist-filter">
+      <input id="histSearch" class="field__input hist-search" placeholder="Search address, token or txid…" value="${esc(HIST_FILTER.search)}" autocomplete="off" spellcheck="false" />
+      <select id="histToken" class="field__input hist-tokensel">${tokOpts}</select>
+    </div>
+    <div class="seg hist-dirs" id="histDir">${dirs.map(([v, l]) => `<button class="btn btn--sm ${HIST_FILTER.direction === v ? "chip--active" : ""}" data-dir="${v}">${l}</button>`).join("")}</div>`;
+  el("histSearch").oninput = (e) => { HIST_FILTER.search = e.target.value.trim(); HIST_DISPLAY = HIST_STEP; clearTimeout(histSearchTimer); histSearchTimer = setTimeout(renderHistoryList, 200); };
+  el("histToken").onchange = (e) => { HIST_FILTER.token = e.target.value; HIST_DISPLAY = HIST_STEP; renderHistoryList(); };
+  el("histDir").querySelectorAll("[data-dir]").forEach(b => b.onclick = () => {
+    HIST_FILTER.direction = b.dataset.dir; HIST_DISPLAY = HIST_STEP;
+    el("histDir").querySelectorAll("[data-dir]").forEach(x => x.classList.toggle("chip--active", x.dataset.dir === HIST_FILTER.direction));
+    renderHistoryList();
+  });
+}
 async function renderHistoryList() {
   const host = el("histList");
-  const rows = await api.histGet();
-  if (!rows || !rows.length) {
-    host.innerHTML = `<div class="empty">No transactions yet.${running ? "" : " Waiting for the node…"}</div>`;
+  const rows = await api.histQuery(Object.assign(histQueryArgs(), { limit: HIST_DISPLAY, offset: 0 }));
+  HIST_ROWS = rows || [];
+  if (!HIST_ROWS.length) {
+    host.innerHTML = `<div class="empty">${histFilterActive() ? "No matching transactions." : (running ? "No transactions yet." : "Waiting for the node…")}</div>`;
     el("histMore").innerHTML = ""; return;
   }
   let tip = 0; try { const b = await tryCmd("block"); tip = parseInt((b && (b.block != null ? b.block : b)), 10) || 0; } catch (e) {}
-  host.innerHTML = rows.map(histRowHtml).join("");
+  host.innerHTML = HIST_ROWS.map(histRowHtml).join("");
   host.querySelectorAll(".row[data-txid]").forEach(node => node.onclick = () => {
-    const row = rows.find(x => x.txpowid === node.dataset.txid); if (row) showHistoryDetail(row, tip);
+    const row = HIST_ROWS.find(x => x.txpowid === node.dataset.txid); if (row) showHistoryDetail(row, tip);
   });
-  el("histMore").innerHTML = running ? `<button class="btn btn--outline btn--full" id="histOlder">Load older</button>` : "";
-  if (el("histOlder")) el("histOlder").onclick = () => syncHistory({ older: true });
+  // Pager: more matching rows in the DB → "Show more"; else, unfiltered + running → fetch older from the node.
+  if (HIST_ROWS.length >= HIST_DISPLAY) {
+    el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histMoreBtn">Show more</button>`;
+    el("histMoreBtn").onclick = () => { HIST_DISPLAY += HIST_STEP; renderHistoryList(); };
+  } else if (running && !histFilterActive()) {
+    el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histOlder">Fetch older from node</button>`;
+    el("histOlder").onclick = () => syncHistory({ older: true });
+  } else {
+    el("histMore").innerHTML = "";
+  }
 }
 function histRowHtml(r) {
   const glyph = r.direction === "in" ? "↓" : r.direction === "out" ? "↑" : "⟲";
@@ -2009,17 +2050,33 @@ function showHistoryDetail(r, tip) {
   const lbl = labelFor(r.counterparty);
   const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "—";
   const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "—";
-  const bd = (list) => (list && list.length ? list.map(c => `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${esc(short(c.address, 16))}`).join("<br>") : "—");
+  // Each coin: amount + token → address, with the coinid and any state variables when present.
+  const bd = (list) => (list && list.length ? list.map(c => {
+    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${esc(short(c.address, 16))}`;
+    if (c.coinid) line += ` <span class="hist-dim">${esc(short(c.coinid, 12))}</span>`;
+    if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(short(String(s.data), 40))}</span>`).join("");
+    return line;
+  }).join("<br>") : "—");
   const kind = r.kind !== "normal" ? (r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self");
+  const burnStr = (r.burn != null && r.burn !== "" && !/^0*\.?0*$/.test(String(r.burn))) ? esc(TOK.tidyAmount(r.burn)) + " MINIMA" : "0";
+  const feeRow = r.burn != null ? `<div class="kv"><span class="kv__k">Fee (burn)</span><span class="kv__v">${burnStr}</span></div>` : "";
+  const sizeRow = r.size ? `<div class="kv"><span class="kv__k">Size</span><span class="kv__v">${esc(r.size)} bytes</span></div>` : "";
+  const txState = (r.state && r.state.length) ? `<div class="view__sub">Transaction state</div><div class="kv__v" style="text-align:left">${r.state.map(s => `[${esc(String(s.port))}] ${esc(short(String(s.data), 60))}`).join("<br>")}</div>` : "";
+  // Optional block-explorer link — off unless the user sets CFG.explorerBase; the local DB is the source of truth.
+  const explorer = (CFG && CFG.explorerBase && r.txpowid) ? safeLinkRow("Explorer", String(CFG.explorerBase) + encodeURIComponent(r.txpowid)) : "";
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
     <div class="modal__title">Transaction</div>
     <div class="kv"><span class="kv__k">Type</span><span class="kv__v">${esc(kind)}</span></div>
     <div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${esc(TOK.tidyAmount(r.amount))} ${esc(r.tokenName)}</span></div>
+    ${feeRow}
     <div class="kv"><span class="kv__k">Block</span><span class="kv__v">#${esc(r.block)}${conf !== "" ? " · " + conf + " conf" : ""}</span></div>
     <div class="kv"><span class="kv__k">Time</span><span class="kv__v">${esc(timeStr)}</span></div>
+    ${sizeRow}
     <div class="kv"><span class="kv__k">Txpow id</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(short(r.txpowid, 22))}</span></div>
     <div class="kv"><span class="kv__k">${r.direction === "in" ? "From" : "To"}</span><span class="kv__v">${esc(who)}</span></div>
+    ${explorer}
     <div class="view__sub">Per-token effect</div><div class="kv__v" style="text-align:left">${deltas}</div>
+    ${txState}
     <div class="view__sub">Inputs (${r.inCount})</div><div class="kv__v" style="text-align:left">${bd(r.inputs)}</div>
     <div class="view__sub">Outputs (${r.outCount})</div><div class="kv__v" style="text-align:left">${bd(r.outputs)}</div>
     <button class="btn btn--outline btn--full" id="histClose">Close</button></div></div>`);
@@ -2039,7 +2096,7 @@ function relTime(ms) {
 }
 
 // coin/txpow → normalized row (ported from the native history apps' difference→direction + split/consol rules)
-function coinLite(c) { return { address: c.miniaddress || c.address || "", amount: c.amount || c.tokenamount || "0", tokenid: c.tokenid || MINIMA, token: c.token }; }
+function coinLite(c) { return { address: c.miniaddress || c.address || "", amount: c.amount || c.tokenamount || "0", tokenid: c.tokenid || MINIMA, token: c.token, coinid: c.coinid || "", state: c.state || [] }; }
 function absCmp(a, b) {   // compare |decimal string a| vs |b| without float rounding
   a = String(a).replace(/^-/, ""); b = String(b).replace(/^-/, "");
   const as = a.split("."), bs = b.split(".");
@@ -2102,52 +2159,73 @@ function normalize(txpow, detail) {
   const tokenName = TOK.tokenName(coinForTok && coinForTok.token, primTok);
   const counterparty = (direction === "in" ? (inputs[0] && inputs[0].address) : (outputs[0] && outputs[0].address)) || "";
   return { txpowid: txpow.txpowid, block: parseInt(hdr.block, 10) || 0, time: parseInt(hdr.timemilli, 10) || 0,
-    istransaction: !!txpow.istransaction, direction, kind, tokenid: primTok, tokenName, amount: String(amount),
-    counterparty, inCount, outCount, difference: diff, inputs, outputs };
+    istransaction: !!txpow.istransaction, isblock: !!txpow.isblock, size: parseInt(txpow.size, 10) || 0,
+    burn: String(txpow.burn != null ? txpow.burn : "0"),
+    direction, kind, tokenid: primTok, tokenName, amount: String(amount),
+    counterparty, inCount, outCount, difference: diff, inputs, outputs, state: txn.state || [] };
 }
-// adaptive pager (256KB cap → halve; skip oversized) + incremental stop at first known txpowid + persist + render
+// Pager: fetch history in pages and persist into the local DB. Over HTTP RPC there is NO 256KB response cap
+// (that is an Android-Binder limit — we are a jar over loopback HTTP), so we page at the node's own default of
+// 100. The halve-on-"over" below is only a safety fallback if a single page errors; incremental sync stops at
+// the first already-stored txpowid, and a "Load older" pull runs to an empty page or a generous row budget.
+const HIST_PAGE = 100;          // node default (was 8 — a native-Binder holdover)
+const HIST_OLDER_BUDGET = 2000; // rows fetched per "Load older" click
 async function syncHistory(opts) {
   opts = opts || {};
   if (HIST_SYNCING) return; HIST_SYNCING = true;
   try {
     const known = new Set((await api.histGet()).map(r => r.txpowid));
-    let offset = opts.older ? histOldestOffset : 0, max = 8, skips = 0, pages = 0, hitKnown = false;
-    const fresh = [];
+    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false, fetched = 0;
+    let batch = [];
+    const flushBatch = async () => { if (batch.length) { await api.histAdd(batch); batch = []; } };
     for (;;) {
       let page;
       try {
         const j = await api.cmd(`history relevant:true max:${max} offset:${offset}`);
         page = (!j || j.status !== true || !j.response) ? { over: true } : { txpows: j.response.txpows || [], details: j.response.details || [] };
       } catch (e) { page = { over: true }; }
-      if (page.over) { if (max > 1) { max = Math.floor(max / 2); continue; } if (skips < 3) { skips++; offset += 1; max = 8; continue; } break; }
+      if (page.over) { if (max > 1) { max = Math.floor(max / 2); continue; } if (skips < 3) { skips++; offset += 1; max = HIST_PAGE; continue; } break; }
       if (!page.txpows.length) break;
       for (let i = 0; i < page.txpows.length; i++) {
         const row = normalize(page.txpows[i], page.details[i]);
         if (!row.txpowid) continue;
         if (!opts.older && known.has(row.txpowid)) { hitKnown = true; break; }
-        fresh.push(row);
+        batch.push(row); fetched++;
       }
       if (hitKnown) break;
-      offset += page.txpows.length; max = 8; skips = 0;
-      if (opts.older && ++pages >= 4) break;
+      offset += page.txpows.length; max = HIST_PAGE; skips = 0;
+      if (batch.length >= 500) await flushBatch();          // bound memory/IPC on a deep first sync
+      if (opts.older && fetched >= HIST_OLDER_BUDGET) break;
     }
-    if (fresh.length) await api.histAdd(fresh);
+    await flushBatch();
     histOldestOffset = opts.older ? offset : Math.max(histOldestOffset, offset);
     await renderHistoryList();
   } finally { HIST_SYNCING = false; }
 }
 function histType(r) { return r.kind !== "normal" ? r.kind : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self"); }
 function histDate(ms) { return ms ? new Date(ms).toISOString().slice(0, 19).replace("T", " ") : ""; }
+// Copy/CSV export the CURRENTLY FILTERED set (not just what's on screen), with the richer columns.
+const HIST_COLS = ["date", "type", "direction", "amount", "token", "fee", "counterparty", "txpowid", "block", "inputs", "outputs", "deltas"];
+function histCells(r) {
+  const deltas = Object.keys(r.difference || {}).map(t => `${TOK.shortId(t)}:${TOK.tidyAmount(r.difference[t])}`).join(" ");
+  return [histDate(r.time), histType(r), r.direction || "", TOK.tidyAmount(r.amount), r.tokenName,
+    (r.burn != null ? TOK.tidyAmount(r.burn) : ""), labelFor(r.counterparty) || r.counterparty || "", r.txpowid, r.block,
+    r.inCount != null ? r.inCount : "", r.outCount != null ? r.outCount : "", deltas];
+}
+async function histExportRows() {
+  return (await api.histQuery(Object.assign(histQueryArgs(), { limit: 1000000, offset: 0 }))) || [];
+}
 async function copyHistory() {
-  const rows = await api.histGet();
-  const lines = rows.map(r => [histDate(r.time), histType(r), TOK.tidyAmount(r.amount), r.tokenName, labelFor(r.counterparty) || r.counterparty, r.txpowid, r.block].join("\t"));
-  copy(["date\ttype\tamount\ttoken\tcounterparty\ttxpowid\tblock", ...lines].join("\n"));
+  const rows = await histExportRows();
+  const lines = rows.map(r => histCells(r).join("\t"));
+  copy([HIST_COLS.join("\t"), ...lines].join("\n"));
+  toast(`Copied ${rows.length} rows ✓`, "ok");
 }
 async function exportHistory() {
-  const rows = await api.histGet();
+  const rows = await histExportRows();
   const q = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
-  const lines = rows.map(r => [histDate(r.time), histType(r), TOK.tidyAmount(r.amount), r.tokenName, labelFor(r.counterparty) || r.counterparty, r.txpowid, r.block].map(q).join(","));
-  const csv = ["date,type,amount,token,counterparty,txpowid,block", ...lines].join("\r\n");
+  const lines = rows.map(r => histCells(r).map(q).join(","));
+  const csv = [HIST_COLS.join(","), ...lines].join("\r\n");
   const p = await api.exportCsv(csv, "minima-history.csv");
   toast(p ? "Saved CSV ✓" : "Export cancelled", p ? "ok" : "");
 }

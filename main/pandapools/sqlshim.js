@@ -71,7 +71,10 @@ async function makeSqlShim(filePath) {
     return res;
   }
 
-  return { sql: sqlCmd, flush: () => { if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; } try { fs.writeFileSync(filePath, Buffer.from(db.export())); } catch (e) {} }, _db: db };
+  // `persist` exposes the debounced whole-image save for callers that write via `_db` directly (e.g. history-db.js
+  // uses prepared statements + bound params on `_db` for speed/safety, then schedules a save with this). Additive —
+  // the reused pandapools code keeps using `sql`/`flush` exactly as before.
+  return { sql: sqlCmd, persist: persistSoon, flush: () => { if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; } try { fs.writeFileSync(filePath, Buffer.from(db.export())); } catch (e) {} }, _db: db };
 }
 
 module.exports = { makeSqlShim };

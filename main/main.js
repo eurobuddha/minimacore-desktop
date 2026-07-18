@@ -14,7 +14,7 @@ const portmap = require("./portmap");
 const rpc = require("./rpc");
 const updater = require("./updater");
 const netfetch = require("./netfetch");
-const histStore = require("./history-store");
+const histDb = require("./history-db");
 const faucet = require("./faucet");
 const mail = require("./mail");
 const pandapools = require("./pandapools");
@@ -207,9 +207,12 @@ ipcMain.handle("mcd:ppLoadBackup", async () => {
 pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
 let ppStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); } });
-ipcMain.handle("mcd:histGet", () => histStore.all());
-ipcMain.handle("mcd:histAdd", (_e, rows) => histStore.merge(Array.isArray(rows) ? rows : []));
-ipcMain.handle("mcd:histClear", () => { histStore.clear(); return true; });
+ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));
+ipcMain.handle("mcd:histAdd", (_e, rows) => histDb.merge(Array.isArray(rows) ? rows : []));
+ipcMain.handle("mcd:histClear", async () => { await histDb.clear(); return true; });
+ipcMain.handle("mcd:histQuery", (_e, filters) => histDb.query(filters || {}));
+ipcMain.handle("mcd:histTokens", () => histDb.tokens());
+ipcMain.handle("mcd:histStats", () => histDb.stats());
 ipcMain.handle("mcd:exportCsv", async (_e, text, name) => {
   const r = await dialog.showSaveDialog(win, {
     defaultPath: name || "minima-history.csv",
@@ -241,6 +244,7 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 let quitting = false;
 app.on("before-quit", async (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
+  try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;
   // Always go through node.stop(), even with no node process: it also releases the router port mapping,
   // which can outlive the node (e.g. the node died on its own). Both halves are bounded, so quit stays fast.

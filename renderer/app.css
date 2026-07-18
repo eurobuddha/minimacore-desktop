@@ -367,6 +367,16 @@ body { font-family: var(--sans); }
 /* Manrope for the Minima coin glyph fallback tile stays; outline mark injected in JS */
 .tok-omark { color: var(--logo-ink); }
 
+/* history detail: dimmed coinids / state variables under each input/output line */
+.hist-dim { color: var(--dim); font-size: 10px; font-family: var(--mono); word-break: break-all; }
+
+/* history search + filter bar */
+.hist-filter { display: flex; gap: 8px; margin: 6px 0 8px; }
+.hist-search { flex: 1 1 auto; }
+.hist-tokensel { flex: 0 0 auto; max-width: 44%; }
+.hist-dirs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.hist-dirs .btn { border-radius: 100px; padding: 5px 12px; }
+
 /* Balances → dense terminal rows: list with hairline dividers, not boxed cards */
 #balList .card, #balList .card--token { background: transparent; border: none; border-radius: 0;
   box-shadow: none; border-bottom: 1px solid var(--border); padding: 13px 8px; margin: 0; }
