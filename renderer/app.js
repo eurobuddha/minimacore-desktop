@@ -75,6 +75,7 @@ async function boot() {
   el("nodePill").onclick = () => selectTab("node");
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => selectTab(b.dataset.view));
   initTabScroll();
+  api.appVersion().then(v => { const e = el("hdrVer"); if (e && v) e.textContent = "v" + v; }).catch(() => {});
 
   api.onStatus(onStatus);
   api.onLog(appendLog);
@@ -426,6 +427,7 @@ function selectTab(view) {
   const active = document.querySelector('.tab[data-view="' + view + '"]');
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab--active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("view--active", v.id === "view-" + view));
+  positionTabInk();
   // Bring the active tab into view when the row is scrolled (block:nearest so the page never scrolls).
   if (active) { try { active.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" }); } catch (e) { active.scrollIntoView(); } setTimeout(updateTabScroll, 250); }
   renderActive();
@@ -440,10 +442,32 @@ function updateTabScroll() {
   wrap.classList.toggle("can-r", tabs.scrollLeft < max - 1);
   el("tabsArrowL").hidden = !wrap.classList.contains("can-l");
   el("tabsArrowR").hidden = !wrap.classList.contains("can-r");
+  positionTabInk();
+}
+// Sliding orange underline that tracks the active tab in the horizontal strip. In the wide
+// nav-rail (>=900px) the active marker is a CSS inset-shadow bar instead, so the ink hides.
+function positionTabInk() {
+  const tabs = el("tabs");
+  if (!tabs) return;
+  const ink = tabs.querySelector(".tab-ink");
+  if (!ink) return;
+  const active = tabs.querySelector(".tab--active");
+  if (!active || (window.matchMedia && window.matchMedia("(min-width: 900px)").matches)) {
+    ink.style.opacity = "0";
+    return;
+  }
+  ink.style.opacity = "1";
+  ink.style.width = active.offsetWidth + "px";
+  ink.style.transform = "translateX(" + active.offsetLeft + "px)";
 }
 function initTabScroll() {
   const tabs = el("tabs");
   if (!tabs) return;
+  if (!tabs.querySelector(".tab-ink")) {
+    const ink = document.createElement("div");
+    ink.className = "tab-ink";
+    tabs.appendChild(ink);
+  }
   const by = () => Math.max(120, Math.round(tabs.clientWidth * 0.7));
   el("tabsArrowL").onclick = () => tabs.scrollBy({ left: -by(), behavior: "smooth" });
   el("tabsArrowR").onclick = () => tabs.scrollBy({ left: by(), behavior: "smooth" });
@@ -456,6 +480,8 @@ function initTabScroll() {
   tabs.addEventListener("scroll", updateTabScroll, { passive: true });
   window.addEventListener("resize", updateTabScroll);
   updateTabScroll();
+  // Manrope/Geist load async → tab widths change after first paint; reposition the ink once they settle.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionTabInk);
 }
 function renderActive() {
   if (!running && activeView !== "node") { /* wallet views need the node */ }

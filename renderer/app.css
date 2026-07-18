@@ -40,11 +40,22 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 .hdr { align-items: center; padding-top: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0)); }
 .hdr__logo { font-size: 15px; letter-spacing: .2px; }
+.hdr__ver { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; color: var(--dim);
+  margin-left: 9px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 100px;
+  align-self: center; -webkit-app-region: no-drag; user-select: text; }
 
 /* Tabs — flush, animated active underline, comfortable hit area */
-.tabs { margin: 0; padding: 2px 10px 0; border-bottom: 1px solid var(--border); }
+.tabs { position: relative; margin: 0; padding: 2px 10px 0; border-bottom: 1px solid var(--border); }
 .tab { padding: 12px 13px; font-size: 11px; letter-spacing: .7px; border-bottom-width: 2px; }
 .tab:hover { color: var(--text); }
+
+/* Sliding active-tab underline (horizontal strip). JS sets width + translateX; CSS animates the slide.
+   Lives inside .tabs so it scrolls with the strip. Hidden in the wide nav-rail (see @media below). */
+.tab-ink { position: absolute; left: 0; bottom: 0; width: 0; height: 2px; background: var(--accent);
+  border-radius: 2px 2px 0 0; box-shadow: 0 0 9px -1px var(--accent); opacity: 0; pointer-events: none;
+  transition: transform .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1), opacity .15s;
+  will-change: transform, width; }
+@media (prefers-reduced-motion: reduce) { .tab-ink { transition: opacity .15s; } }
 
 /* When the window is too narrow for all tabs, the row scrolls horizontally. Fades + arrow chips make the
    off-screen tabs discoverable (the scrollbar is hidden), and selectTab() scrolls the active tab into view. */
@@ -275,7 +286,7 @@ body { font-family: var(--sans); }
 /* Tabs — tight tracked mono, orange active underline with glow */
 .tabs { padding: 2px 10px 0; }
 .tab { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; padding: 12px 12px 13px; border-bottom-width: 2px; }
-.tab--active { color: var(--accent); border-bottom-color: var(--accent); box-shadow: 0 2px 10px -3px var(--accent); }
+.tab--active { color: var(--accent); border-bottom-color: transparent; box-shadow: none; }
 .tabs-arrow:hover { color: var(--accent); }
 
 /* Views — Manrope titles, tighter rhythm */
@@ -368,3 +379,38 @@ body { font-family: var(--sans); }
 #balList .card--token { position: relative; }
 #balList .card--token:hover::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px;
   width: 2px; background: var(--accent); border-radius: 2px; }
+
+/* ============================================================================
+   Adaptive wide layout — at >=900px the top tab strip becomes a left nav rail.
+   The header spans the top; rail + main sit side by side beneath it. No markup
+   change: CSS grid re-places the existing .hdr / .tabs-wrap / .main by area.
+   ========================================================================== */
+@media (min-width: 900px) {
+  .shell {
+    display: grid;
+    grid-template-columns: 212px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "hdr hdr" "rail main";
+  }
+  .hdr  { grid-area: hdr; }
+  .main { grid-area: main; min-height: 0; }
+  .tabs-wrap { grid-area: rail; min-height: 0; border-right: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent); }
+
+  /* the horizontal tab row → a vertical rail */
+  .tabs { flex-direction: column; align-items: stretch; gap: 1px; height: 100%;
+    overflow-y: auto; overflow-x: hidden; padding: 12px 10px; border-bottom: none; }
+  .tab { width: 100%; display: flex; align-items: center; justify-content: flex-start;
+    text-align: left; padding: 11px 12px; border-bottom-width: 0; border-radius: var(--radius); }
+  .tab:hover { background: var(--surface); color: var(--text); }
+  .tab--active { color: var(--accent); background: var(--accent-bg);
+    border-bottom-color: transparent; box-shadow: inset 2px 0 0 var(--accent); }
+
+  /* horizontal-scroll chrome + the sliding underline don't apply in rail mode */
+  .tab-ink,
+  .tabs-arrow,
+  .tabs-wrap::before,
+  .tabs-wrap::after { display: none !important; }
+
+  :root[data-theme="light"] .tabs-wrap { background: linear-gradient(180deg, rgba(22,24,28,.02), transparent); }
+}
