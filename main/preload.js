@@ -32,10 +32,13 @@ contextBridge.exposeInMainWorld("mcd", {
   // token icons (SSRF-guarded main-process fetch → data: URI) — CSP blocks remote fetch in the renderer
   tokenIcon: (url) => ipcRenderer.invoke("mcd:tokenIcon", url),
 
-  // persistent transaction-history store (survives node pruning + restarts)
-  histGet: () => ipcRenderer.invoke("mcd:histGet"),
+  // local transaction-history DB (SQLite; our own source of truth — survives node pruning + restarts)
+  histGet: (limit) => ipcRenderer.invoke("mcd:histGet", limit),
   histAdd: (rows) => ipcRenderer.invoke("mcd:histAdd", rows),
   histClear: () => ipcRenderer.invoke("mcd:histClear"),
+  histQuery: (filters) => ipcRenderer.invoke("mcd:histQuery", filters),
+  histTokens: () => ipcRenderer.invoke("mcd:histTokens"),
+  histStats: () => ipcRenderer.invoke("mcd:histStats"),
 
   // save a CSV via a native save dialog → written path or null
   exportCsv: (text, name) => ipcRenderer.invoke("mcd:exportCsv", text, name),
