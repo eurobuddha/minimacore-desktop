@@ -335,14 +335,14 @@ body { font-family: var(--sans); }
 /* Address / seed — orange mono */
 #recvAddr, #setAddr, #setSeed, .addrbox__addr { color: var(--accent); }
 
-/* Outline-M watermark — the cornerstone motif, bleeding off the top-right of every view */
+/* Outline-M watermark — the cornerstone motif, TILED as a subtle background texture */
 .main::before {
-  content: ""; position: absolute; top: 4px; right: -60px; width: 300px; height: 270px; z-index: 0;
-  pointer-events: none; opacity: .045; background: var(--dim);
-  -webkit-mask: url("minima-outline.svg") no-repeat center / contain;
-          mask: url("minima-outline.svg") no-repeat center / contain;
-  transform: rotate(-2deg);
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  opacity: var(--wm-opacity, .05); background: var(--dim);
+  -webkit-mask: url("minima-tile.svg") repeat; mask: url("minima-tile.svg") repeat;
+  -webkit-mask-size: 66px 66px; mask-size: 66px 66px;
 }
+:root[data-theme="light"] { --wm-opacity: .06; }
 .main > * { position: relative; z-index: 1; }
 
 /* Empty / loading — outline mark, slowly turning */
