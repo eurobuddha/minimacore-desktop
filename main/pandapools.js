@@ -201,7 +201,11 @@ function myPools() {
     });
   });
 }
-function activity() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.actList(120, function (a) { resolve((a || []).map(function (e) { return { type: e.type, summary: e.summary, txpowid: e.txpowid, ts: e.ts, failed: e.failed, failMsg: e.failMsg, confirmed: e.confirmedOnchain, submitBlock: e.submitBlock }; })); }); }); }
+// `confirmed` must use the shared Store.confirmed() (block-count fallback for swaps), NOT the raw
+// confirmedOnchain flag — the on-chain verifier only ever confirms CREATE rows (they have a covenant address
+// to check), so reading the flag alone left SWAP/DEPOSIT/etc. stuck on "Confirming…" forever. lastTip is the
+// live chain tip (updated every block by the scan cycle).
+function activity() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.actList(120, function (a) { resolve((a || []).map(function (e) { return { type: e.type, summary: e.summary, txpowid: e.txpowid, ts: e.ts, failed: e.failed, failMsg: e.failMsg, confirmed: ctx.Store.confirmed(e, lastTip), submitBlock: e.submitBlock }; })); }); }); }
 function feed() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.feedList(100, function (f) { resolve((f || []).map(function (e) { return { pool: e.pool, tokenLabel: e.tokenLabel, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), price: s(e.price), ts: e.ts }; })); }); }); }
 
 // ---- actions (promise wrappers over PoolMgr's {ok,fail} callbacks) ----
