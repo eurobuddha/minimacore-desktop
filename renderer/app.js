@@ -2953,10 +2953,12 @@ let axLastBook = null;
 let axMakerCfgCache = null;             // last maker read-model {cfg,manual,state,lastPublishMs} — for editor re-render on toggle
 let axPegMode = null;                   // maker editor peg/manual toggle (null = defer to saved cfg.pegEnable)
 let axEditing = false;                  // Market tab: editing your own order? (donor S.editing) — false shows Edit/Publish buttons
-let axMkrPreviewTimer = null;           // debounce for the live maker-ladder preview
+let axEnaMode = null;                   // maker editor "Enabled" switch (null = defer to saved state.withdrawn)
+let axOracleMid = 0;                    // last live oracle mid (peg) — drives the ladder generator while pegged
+let axPegPollTimer = null;              // interval polling the oracle price while the peg switch is on
 let axUpdateTimer = null;
 
-function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; }
+function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; axEnaMode = null; axStopPegPoll(); }
 
 function axHeader(active) {
   const st = axStatusCache;
@@ -3195,6 +3197,7 @@ function axShort(pk) { pk = String(pk || ""); return pk.length < 14 ? pk : pk.sl
 // ---- Market (donor marketTab: order book · your market editor/actions · market history) ----
 async function renderAxMarket() {
   const host = el("axBody");
+  axStopPegPoll();
   const [b, mh, mc] = await Promise.all([api.axBook().catch(() => null), api.axMarketHistory().catch(() => ({ chart: [], recent: [] })), api.axMakerCfg().catch(() => null)]);
   axLastBook = b; axMakerCfgCache = mc;
   const ccy = b ? b.label : "mxUSDT";
@@ -3305,82 +3308,123 @@ function axAgo(ms) {
 // donor editRow/editInput/toggle → label-left / input-right rows, an On/Off pill, exact donor labels.
 function axEditRow(label, right) { return `<div class="ax-editrow"><span class="ax-editlabel">${label}</span>${right}</div>`; }
 function axEditInput(id, val) { return `<input class="ax-editinput mono" id="${id}" inputmode="decimal" placeholder="0" value="${esc(val)}" autocomplete="off" />`; }
-/** The maker editor (donor orderEditor) — transcribed field-for-field. Rendered inside the "Your market" card. */
+function axSwitch(id, on) { return `<button class="ax-switch${on ? " on" : ""}" id="${id}" role="switch" aria-checked="${on}"><span class="knob"></span></button>`; }
+function axGenField(id, val, ph) { return `<input class="ax-genfield mono" id="${id}" inputmode="decimal" placeholder="${esc(ph || "")}" value="${esc(val == null ? "" : val)}" autocomplete="off" />`; }
+/** One editable ladder level: tag (A1/B1…) + price + size. cls = "ask" | "bid". */
+function axLevelRow(tag, idP, idA, pv, av, cls) {
+  return `<div class="ax-lvl ${cls}"><span class="ax-lvl-tag">${tag}</span>`
+    + `<input class="ax-lvl-p mono" id="${idP}" inputmode="decimal" placeholder="price" value="${esc(pv == null ? "" : pv)}" autocomplete="off" />`
+    + `<input class="ax-lvl-a mono" id="${idA}" inputmode="decimal" placeholder="size" value="${esc(av == null ? "" : av)}" autocomplete="off" /></div>`;
+}
+function axStartPegPoll(fn) { axStopPegPoll(); fn(); axPegPollTimer = setInterval(() => { if (activeView === "atomix" && axView === "market" && axEditing) fn(); else axStopPegPoll(); }, 2500); }
+function axStopPegPoll() { if (axPegPollTimer) { clearInterval(axPegPollTimer); axPegPollTimer = null; } }
+/** The FULL maker editor — transcribed from the native "My market / ladder": Enabled + Peg switches, live oracle
+ *  price, skew/reprice, a mid·step·size·levels generator that auto-fills 6 ASK + 6 BID editable rows, min, preview. */
 function axMakerEditor(mc, ccy, b) {
-  const c = (mc && mc.cfg) || {};
-  const peg = axPegMode != null ? axPegMode : (c.pegEnable !== false);
+  const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || { bids: [], asks: [] };
   const parity = b ? !!b.pricingParity : (axStatusCache.currency === "mxusdt");
-  let fields;
-  if (peg) {
-    fields = axEditRow("Spread step %", axEditInput("axStep", c.step != null ? c.step : 1))
-      + axEditRow("Size per level (" + esc(ccy) + ")", axEditInput("axSize", c.size != null ? c.size : ""))
-      + axEditRow("Levels each side (1–6)", axEditInput("axLevels", c.levels != null ? c.levels : 1))
-      + axEditRow("Skew % (± mid)", axEditInput("axBias", c.bias != null ? c.bias : 0))
-      + axEditRow("Reprice when moved %", axEditInput("axReprice", c.reprice != null ? c.reprice : 1));
-  } else {
-    const man = (mc && mc.manual) || {}, b0 = (man.bids && man.bids[0]) || {}, a0 = (man.asks && man.asks[0]) || {};
-    fields = axEditRow("Bid (USDT/" + esc(ccy) + ")", axEditInput("axBid", b0.p != null ? b0.p : ""))
-      + axEditRow("Ask (USDT/" + esc(ccy) + ")", axEditInput("axAsk", a0.p != null ? a0.p : ""))
-      + axEditRow("Size (" + esc(ccy) + ")", axEditInput("axMSize", b0.a != null ? b0.a : (a0.a != null ? a0.a : "")));
-  }
-  return `<div class="ax-prev-label">Preview — the market you'll publish</div><div class="ax-prev" id="axMkrPreview"><div class="empty">Calculating…</div></div>`
-    + axEditRow("Auto-price (peg to " + (parity ? "parity" : "MEXC") + ")",
-        `<button class="ax-toggle-pill${peg ? " on" : ""}" id="axPegToggle">${peg ? "On" : "Off"}</button>`)
-    + fields
-    + axEditRow("Min trade (" + esc(ccy) + ")", axEditInput("axMin", c.min != null ? c.min : ""))
+  const src = parity ? "Parity" : "MEXC";
+  const enabled = axEnaMode != null ? axEnaMode : !st.withdrawn;
+  const peg = axPegMode != null ? axPegMode : (!!c.pegEnable && c.step > 0 && c.size > 0);
+  const asks = (man.asks || []).slice().sort((x, y) => x.p - y.p);   // ascending → index 0 = A1 (best/lowest ask)
+  const bids = (man.bids || []).slice().sort((x, y) => y.p - x.p);   // descending → index 0 = B1 (best/highest bid)
+  let askRows = "", bidRows = "";
+  for (let i = 5; i >= 0; i--) { const l = asks[i] || {}; askRows += axLevelRow("A" + (i + 1), "axAskP" + i, "axAskA" + i, l.p, l.a, "ask"); }   // A6 top … A1 bottom (by the spread)
+  for (let i = 0; i < 6; i++) { const l = bids[i] || {}; bidRows += axLevelRow("B" + (i + 1), "axBidP" + i, "axBidA" + i, l.p, l.a, "bid"); }
+  return `<div class="ax-mkr-hint">Your depth ladder for ${esc(ccy)} / USDT (price = USDT per ${esc(ccy)}):<br>`
+      + `•&nbsp; ASKS — where YOU SELL ${esc(ccy)} (higher). BIDS — where YOU BUY (lower).<br>`
+      + `•&nbsp; Each level's amount is a per-take cap. Leave rows blank to skip them.<br>`
+      + `•&nbsp; Tip: make your best level your largest.</div>`
+    + axEditRow("Enabled", axSwitch("axEnabled", enabled))
+    + `<div class="ax-seclabel">AUTO MARKET-MAKE — PEG TO ${src.toUpperCase()}</div>`
+    + axEditRow("Peg ladder to " + src + " (auto-reprice)", axSwitch("axPegToggle", peg))
+    + `<div class="ax-oracle mono" id="axOracle">${peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off")}</div>`
+    + `<div class="ax-mkr-hint2">While pegged, the ladder regenerates around the ${src} mid (± step %, your size per level) at every publish, and re-publishes when the market moves ≥ your threshold. If the feed goes down your order is withdrawn for safety, then restored when it recovers.</div>`
+    + `<div class="ax-genrow">${axGenField("axBias", c.bias != null ? c.bias : "", "skew ±%")}${axGenField("axReprice", c.reprice != null ? c.reprice : "1", "reprice ≥ %")}</div>`
+    + `<div class="ax-seclabel">LADDER (mid · step % · size · levels — fills the rows as you type)</div>`
+    + `<div class="ax-genrow">${axGenField("axMid", "", "mid")}${axGenField("axStep", c.step != null ? c.step : "", "step %")}${axGenField("axSize", c.size != null ? c.size : "", "size")}${axGenField("axLevels", c.levels != null ? c.levels : "1", "levels")}</div>`
+    + `<div class="ax-side-hdr ask">ASKS — you SELL ${esc(ccy)} (higher price)</div>${askRows}`
+    + `<div class="ax-side-hdr bid">BIDS — you BUY ${esc(ccy)} (lower price)</div>${bidRows}`
+    + axEditRow("min " + esc(ccy) + " / trade", axEditInput("axMin", c.min != null ? c.min : ""))
+    + `<div class="ax-prev-label">Preview</div><div class="ax-prev" id="axMkrPreview"><div class="empty">—</div></div>`
     + `<button class="btn btn--primary btn--full" id="axSave" style="margin-top:12px">Save &amp; publish</button>`
     + `<div class="ax-mkr-actions" style="margin-top:8px"><button class="btn btn--outline btn--full" id="axWithdraw">Withdraw market</button><button class="btn btn--outline btn--full" id="axCancel">Cancel</button></div>`;
 }
-/** The LIVE preview ladder — the bid/ask levels the current config WOULD publish (engine applyPeg at the live mid).
- *  This is the point of the maker section: compose your market and watch the ladder update, then Save & publish. */
-function axMakerPreviewLadder(pv) {
-  if (!pv || !pv.ok) return `<div class="empty">Preview unavailable — is the node ready?</div>`;
-  const bids = pv.bids || [], asks = pv.asks || [];
-  if (!bids.length && !asks.length)
-    return `<div class="empty">${esc(pv.source === "manual" ? "Enter a bid, ask and size to preview your market."
-      : (pv.mid > 0 ? "Enter a size and spread step to build your ladder." : "Waiting for a live " + (pv.source || "market") + " price…"))}</div>`;
-  let out = `<div class="ax-prev-head mono">${pv.source === "manual" ? "manual order" : "mid " + fmtPx(pv.mid) + (pv.source ? " · " + esc(pv.source) : "")}${pv.wide ? " · WIDE (stale feed)" : ""}  ·  ${bids.length + asks.length} level${bids.length + asks.length === 1 ? "" : "s"}</div>`;
-  out += `<div class="ax-legend"><span class="sell">YOUR BIDS</span><span class="buy">YOUR ASKS</span></div>`;
-  const n = Math.max(bids.length, asks.length);
-  for (let i = 0; i < n; i++) out += axPrevRow(bids[i], asks[i]);
-  return out;
-}
-function axPrevHalf(l, isBid) {
-  if (!l) return `<div class="ax-half${isBid ? " bid" : ""}"><span class="ax-sz">—</span></div>`;
-  return `<div class="ax-half${isBid ? " bid" : ""}"><span class="top"><span class="ax-px ${isBid ? "bidpx" : "askpx"}">${fmtPx(l.p)}</span><span class="ax-sz">${fmtAbbrev(l.a)}</span></span></div>`;
-}
-function axPrevRow(bid, ask) { return `<div class="ax-depth">${axPrevHalf(bid, true)}<span class="divider">│</span>${axPrevHalf(ask, false)}</div>`; }
-function axSchedMakerPreview(readCfg, readManual) {
-  if (axMkrPreviewTimer) clearTimeout(axMkrPreviewTimer);
-  axMkrPreviewTimer = setTimeout(() => axRefreshMakerPreview(readCfg, readManual), 300);
-}
-async function axRefreshMakerPreview(readCfg, readManual) {
-  if (!el("axMkrPreview")) return;
-  const pv = await api.axMakerPreview(readCfg(), readManual()).catch(() => null);
-  const host = el("axMkrPreview"); if (!host) return;   // editor closed while awaiting
-  host.innerHTML = axMakerPreviewLadder(pv);
-}
 function axWireMakerEditor(ccy) {
   const num = id => { const e = el(id); return e ? (Number(e.value) || 0) : 0; };
-  const pegNow = () => { const c = (axMakerCfgCache && axMakerCfgCache.cfg) || {}; return axPegMode != null ? axPegMode : (c.pegEnable !== false); };
-  const tog = el("axPegToggle");
-  if (tog) tog.onclick = () => { axPegMode = !pegNow(); el("axMktHost").innerHTML = axMakerEditor(axMakerCfgCache, ccy, axLastBook); axWireMakerEditor(ccy); };
-  const readCfg = () => pegNow()
-    ? { pegEnable: true, step: num("axStep"), size: num("axSize"), levels: num("axLevels") || 1, bias: num("axBias"), reprice: num("axReprice") || 1, min: num("axMin") }
-    : { pegEnable: false, min: num("axMin") };
-  const readManual = () => {
-    if (pegNow()) return { bids: [], asks: [] };
-    const bid = num("axBid"), ask = num("axAsk"), sz = num("axMSize"), m = { bids: [], asks: [] };
-    if (bid > 0 && sz > 0) m.bids.push({ p: bid, a: sz });
-    if (ask > 0 && sz > 0) m.asks.push({ p: ask, a: sz });
-    return m;
+  const pegOn = () => { const e = el("axPegToggle"); return !!(e && e.classList.contains("on")); };
+  const enaOn = () => { const e = el("axEnabled"); return !!(e && e.classList.contains("on")); };
+  const getRows = pfx => { const out = []; for (let i = 0; i < 6; i++) out.push({ p: num(pfx + "P" + i), a: num(pfx + "A" + i) }); return out; };
+  const collect = () => ({ asks: getRows("axAsk").filter(l => l.p > 0 && l.a > 0), bids: getRows("axBid").filter(l => l.p > 0 && l.a > 0) });
+  let filling = false;
+  // live preview summary from the rows (native updateLadderPreview): level counts, best prices, side totals, crossed
+  const updPreview = () => {
+    const host = el("axMkrPreview"); if (!host) return;
+    const { asks, bids } = collect();
+    if (asks.length && bids.length) {
+      const bestAsk = Math.min(...asks.map(l => l.p)), bestBid = Math.max(...bids.map(l => l.p));
+      if (bestBid >= bestAsk) { host.innerHTML = `<div class="ax-prev-cross">⚠ Crossed — best bid ${fmtPx(bestBid)} ≥ best ask ${fmtPx(bestAsk)}: you'd sell cheaper than you buy</div>`; return; }
+    }
+    const sum = arr => arr.reduce((s, l) => s + l.a, 0);
+    const bidS = bids.length ? `${bids.length} lvl · best ${fmtPx(Math.max(...bids.map(l => l.p)))} · ${fmtAbbrev(sum(bids))} ${esc(ccy)}` : "none";
+    const askS = asks.length ? `${asks.length} lvl · best ${fmtPx(Math.min(...asks.map(l => l.p)))} · ${fmtAbbrev(sum(asks))} ${esc(ccy)}` : "none";
+    host.innerHTML = `<div class="ax-prev-sum mono"><div><span class="bidpx">BIDS</span>&nbsp; ${bidS}</div><div><span class="askpx">ASKS</span>&nbsp; ${askS}</div></div>`;
   };
-  el("axSave").onclick = async () => { const btn = el("axSave"); btn.disabled = true; btn.textContent = "Saving…"; const r = await api.axMakerSave(readCfg(), readManual()).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); axEditing = false; axPegMode = null; renderAxMarket(); };
-  el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", "ok"); axEditing = false; axPegMode = null; renderAxMarket(); };
-  el("axCancel").onclick = () => { axEditing = false; axPegMode = null; renderAxMarket(); };
-  // LIVE preview: every field edit recomputes the ladder this config would publish (never re-renders the inputs).
-  ["axStep", "axSize", "axLevels", "axBias", "axReprice", "axMin", "axBid", "axAsk", "axMSize"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => axSchedMakerPreview(readCfg, readManual)); });
-  axRefreshMakerPreview(readCfg, readManual);   // initial paint on open / toggle
+  // fill the 6+6 rows from mid·step·size·levels(+skew) — native genManual/fillFromPeg. mid = oracle when pegged.
+  const genLadder = midOverride => {
+    const step = num("axStep"), size = num("axSize"), m = midOverride != null ? midOverride : num("axMid");
+    if (!(m > 0) || !(step > 0) || !(size > 0)) { updPreview(); return; }
+    const levels = Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1));
+    const quoted = m * (1 + Math.max(-20, Math.min(20, num("axBias"))) / 100);
+    filling = true;
+    try {
+      for (let i = 0; i < 6; i++) {
+        const on = i < levels, ap = el("axAskP" + i), aa = el("axAskA" + i), bp = el("axBidP" + i), ba = el("axBidA" + i);
+        if (ap) ap.value = on ? fmtPx(quoted * (1 + (i + 1) * step / 100)) : "";
+        if (aa) aa.value = on ? fmtPx(size) : "";
+        if (bp) bp.value = on ? fmtPx(quoted * (1 - (i + 1) * step / 100)) : "";
+        if (ba) ba.value = on ? fmtPx(size) : "";
+      }
+    } finally { filling = false; }
+    updPreview();
+  };
+  // pegged: pull the live oracle mid from the engine, set the oracle line + mid field, regenerate the rows
+  const refreshPeg = async () => {
+    const pv = await api.axMakerPreview({ pegEnable: true, step: num("axStep"), size: num("axSize"), bias: num("axBias"), levels: num("axLevels") || 1, reprice: num("axReprice") || 1, min: num("axMin") }, {}).catch(() => null);
+    if (!pv) return;
+    axOracleMid = pv.mid || 0;
+    const ol = el("axOracle"); if (ol) ol.textContent = pv.mid > 0 ? (esc(pv.source || ccy) + " · mid " + fmtPx(pv.mid) + (pv.fresh ? "" : " (stale)") + (pv.wide ? " · WIDE" : "")) : ("waiting for " + esc(pv.source || "market") + " price…");
+    const midE = el("axMid"); if (midE && pegOn()) midE.value = pv.mid > 0 ? fmtPx(pv.mid) : "";
+    if (pv.mid > 0 && pegOn()) genLadder(pv.mid);
+  };
+  const pegModeUi = () => { const on = pegOn(), midE = el("axMid"); if (midE) { midE.disabled = on; midE.style.opacity = on ? "0.5" : "1"; } };
+
+  const swEna = el("axEnabled"); if (swEna) swEna.onclick = () => { swEna.classList.toggle("on"); const on = swEna.classList.contains("on"); swEna.setAttribute("aria-checked", on); axEnaMode = on; };
+  const swPeg = el("axPegToggle"); if (swPeg) swPeg.onclick = () => {
+    swPeg.classList.toggle("on"); const on = swPeg.classList.contains("on"); swPeg.setAttribute("aria-checked", on); axPegMode = on; pegModeUi();
+    if (on) axStartPegPoll(refreshPeg); else { axStopPegPoll(); const ol = el("axOracle"); if (ol) ol.textContent = "peg off"; genLadder(); }
+  };
+  ["axMid", "axStep", "axSize", "axLevels", "axBias"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => { if (filling) return; if (pegOn()) { if (axOracleMid > 0) genLadder(axOracleMid); } else genLadder(); }); });
+  for (let i = 0; i < 6; i++) ["axAskP", "axAskA", "axBidP", "axBidA"].forEach(pfx => { const e = el(pfx + i); if (e) e.addEventListener("input", () => { if (!filling) updPreview(); }); });
+  const minE = el("axMin"); if (minE) minE.addEventListener("input", updPreview);
+
+  const finish = () => { axEditing = false; axPegMode = null; axEnaMode = null; axStopPegPoll(); renderAxMarket(); };
+  el("axSave").onclick = async () => {
+    const btn = el("axSave"); btn.disabled = true; btn.textContent = "Saving…";
+    if (!enaOn()) {   // Enabled OFF → withdraw (tombstone), like the native disable
+      const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) }));
+      toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); return;
+    }
+    const step = num("axStep"), size = num("axSize");
+    const cfg = { pegEnable: pegOn() && step > 0 && size > 0, step, size, bias: num("axBias"), reprice: num("axReprice") || 1, levels: Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1)), min: num("axMin") };
+    const r = await api.axMakerSave(cfg, collect()).catch(e => ({ err: String(e.message || e) }));
+    toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); finish();
+  };
+  el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); };
+  el("axCancel").onclick = finish;
+
+  pegModeUi(); updPreview();
+  if (pegOn()) axStartPegPoll(refreshPeg);
 }
 
 // ---- Activity ----
