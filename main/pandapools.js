@@ -229,10 +229,12 @@ function pairInfo(tok) {
  *  posts THAT route verbatim (frozen-quote; no re-quote, no slippage floor — matches native/MDS confirmSwap→doSwap). */
 function quoteAndStash(tok, minimaToToken, amountIn) {
   if (!ready || !ctx) return { ok: false, notReady: !ready };
-  var route = ctx.Router.route(pairPoolsFor(tok), minimaToToken, amountIn);
+  var pl = pairPoolsFor(tok);
+  var route = ctx.Router.route(pl, minimaToToken, amountIn);
   if (!route.ok) return { ok: false };
   var qid = ++quoteCounter;
-  lastQuotes[qid] = { route: route, minimaToToken: minimaToToken };
+  var tokenLabel = ctx.PP.tokenLabel({ tok: tok, tokName: pl[0] && pl[0].tokName }) || "token";
+  lastQuotes[qid] = { route: route, minimaToToken: minimaToToken, tokenLabel: tokenLabel };
   var ids = Object.keys(lastQuotes);
   if (ids.length > 40) ids.sort(function (a, b) { return a - b; }).slice(0, ids.length - 30).forEach(function (k) { delete lastQuotes[k]; });  // keep the recent ~30
   return { ok: true, totalIn: s(route.totalIn), totalOut: s(route.totalOut), effPrice: s(route.effPrice),
@@ -250,7 +252,11 @@ async function swap(quoteId) {
   return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.swap(route, minimaToToken, {
       ok: function (txpowid) {
-        ctx.Store.actRecord("SWAP", (minimaToToken ? "Bought " : "Sold ") + s(route.totalOut) + " for " + s(route.totalIn), txpowid, lastTip, "");
+        // Always frame from MINIMA's side: paying MINIMA to get the token = SOLD MINIMA; paying the token to get
+        // MINIMA = BOUGHT MINIMA. (minimaToToken → totalIn is the MINIMA leg; else totalOut is the MINIMA leg.)
+        var minimaAmt = minimaToToken ? route.totalIn : route.totalOut;
+        var tokenAmt = minimaToToken ? route.totalOut : route.totalIn;
+        ctx.Store.actRecord("SWAP", (minimaToToken ? "Sold " : "Bought ") + s(minimaAmt) + " MINIMA for " + s(tokenAmt) + " " + (q.tokenLabel || "token"), txpowid, lastTip, "");
         delete lastQuotes[quoteId];
         emitter.emit("update"); resolve({ txpowid: txpowid, totalIn: s(route.totalIn), totalOut: s(route.totalOut) });
       },

@@ -1595,17 +1595,33 @@ function wirePpMineActions(root) {
   root.querySelectorAll("[data-ppmig]").forEach(b => b.onclick = () => showPpMigrate(b.dataset.ppmig));
   root.querySelectorAll("[data-ppwd]").forEach(b => b.onclick = () => confirmPpWithdraw(b.dataset.ppwd));
 }
+// Normalize a SWAP summary to the consistent "Bought/Sold N MINIMA for M <token>" framing. New swaps are already
+// recorded this way; older rows were stored from the token's side ("Bought <token> for <minima>") — reframe those.
+function ppSwapSummary(a) {
+  const s = a.summary || "";
+  if (a.type !== "SWAP" || /MINIMA/.test(s)) return s;          // non-swap, or already new-format
+  let m = /^Bought (\S+) for (\S+)$/.exec(s);                   // old: bought <token> for <minima> ⇒ sold MINIMA
+  if (m) return "Sold " + m[2] + " MINIMA for " + m[1];
+  m = /^Sold (\S+) for (\S+)$/.exec(s);                         // old: sold <minima> for <token> ⇒ bought MINIMA
+  if (m) return "Bought " + m[1] + " MINIMA for " + m[2];
+  return s;
+}
 function ppActsHtml(acts) {
   return acts.length ? acts.map(a => `<div class="row"><div class="row__mid">
       <div class="row__l1">${esc(a.type)} ${a.failed ? "· <span style=\"color:var(--red)\">Failed</span>" : a.confirmed ? "· <span style=\"color:var(--green)\">Confirmed</span>" : "· Confirming…"}</div>
-      <div class="row__l2">${esc(short(a.summary, 52))}</div></div><div class="row__r">${esc(relTime(a.ts))}</div></div>`).join("")
+      <div class="row__l2">${esc(short(ppSwapSummary(a), 58))}</div></div><div class="row__r">${esc(relTime(a.ts))}</div></div>`).join("")
     : `<div class="empty">No activity yet.</div>`;
 }
 function ppFeedHtml(feed) {
-  return feed.length ? feed.map(f => `<div class="row"><div class="row__mid">
-      <div class="row__l1">${esc(f.kind)} · ${esc(f.tokenLabel)}</div>
-      <div class="row__l2">${esc(TOK.tidyAmount(f.minimaAmt))} MINIMA ${f.minimaIn ? "→" : "←"} ${esc(TOK.tidyAmount(f.tokenAmt))}</div></div>
-      <div class="row__r">${esc(relTime(f.ts))}</div></div>`).join("")
+  // Always framed from MINIMA's side: MINIMA into the pool = someone SOLD MINIMA; MINIMA out = someone BOUGHT it.
+  return feed.length ? feed.map(f => {
+    const verb = f.minimaIn ? "Sold" : "Bought";
+    const cls = f.minimaIn ? "row__l1--red" : "row__l1--green";
+    return `<div class="row"><div class="row__mid">
+      <div class="row__l1 ${cls}">${verb} ${esc(TOK.tidyAmount(f.minimaAmt))} MINIMA</div>
+      <div class="row__l2">for ${esc(TOK.tidyAmount(f.tokenAmt))} ${esc(f.tokenLabel)}</div></div>
+      <div class="row__r">${esc(relTime(f.ts))}</div></div>`;
+  }).join("")
     : `<div class="empty">No swaps seen yet.</div>`;
 }
 function wirePpPoolRows(root) {
@@ -2032,7 +2048,10 @@ function histRowHtml(r) {
   const glyph = r.direction === "in" ? "↓" : r.direction === "out" ? "↑" : "⟲";
   const cls = r.direction === "in" ? "row__l1--green" : r.direction === "out" ? "row__l1--red" : "";
   let l1;
-  if (r.kind === "split" || r.kind === "consolidation")
+  if (r.kind === "buy" || r.kind === "sell") {
+    const c = tradeCounter(r);
+    l1 = (r.kind === "buy" ? "Bought " : "Sold ") + TOK.tidyAmount(r.amount) + " MINIMA" + (c ? " for " + TOK.tidyAmount(c.amt) + " " + c.name : "");
+  } else if (r.kind === "split" || r.kind === "consolidation")
     l1 = (r.kind === "split" ? "Split · " + r.outCount : "Consolidation · " + r.inCount) + " coins";
   else {
     const sign = r.direction === "in" ? "+" : r.direction === "out" ? "−" : "";
@@ -2043,6 +2062,14 @@ function histRowHtml(r) {
     <div class="row__glyph ${cls}">${glyph}</div>
     <div class="row__mid"><div class="row__l1 ${cls}">${esc(l1)}</div><div class="row__l2">${esc(who)} · ${esc(relTime(r.time))}</div></div>
     <div class="row__r">#${esc(r.block)}</div></div>`;
+}
+// The counter (token) leg of a buy/sell row, read from the persisted difference map → {amt, name}.
+function tradeCounter(r) {
+  const d = r.difference || {};
+  const tid = Object.keys(d).find(t => t !== MINIMA && !/^-?0*\.?0*$/.test(String(d[t])));
+  if (!tid) return null;
+  const coin = (r.inputs || []).concat(r.outputs || []).find(c => c.tokenid === tid);
+  return { amt: String(d[tid]).replace(/^-/, ""), name: TOK.tokenName(coin && coin.token, tid) };
 }
 function showHistoryDetail(r, tip) {
   const conf = (tip && r.block) ? (tip - r.block + 1) : "";
@@ -2057,7 +2084,11 @@ function showHistoryDetail(r, tip) {
     if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(short(String(s.data), 40))}</span>`).join("");
     return line;
   }).join("<br>") : "—");
-  const kind = r.kind !== "normal" ? (r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self");
+  const isTrade = r.kind === "buy" || r.kind === "sell";
+  const tc = isTrade ? tradeCounter(r) : null;
+  const kind = isTrade ? (r.kind === "buy" ? "Bought MINIMA" : "Sold MINIMA")
+    : (r.kind !== "normal" ? (r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self"));
+  const amtStr = (isTrade && tc) ? `${esc(TOK.tidyAmount(r.amount))} MINIMA for ${esc(TOK.tidyAmount(tc.amt))} ${esc(tc.name)}` : `${esc(TOK.tidyAmount(r.amount))} ${esc(r.tokenName)}`;
   const burnStr = (r.burn != null && r.burn !== "" && !/^0*\.?0*$/.test(String(r.burn))) ? esc(TOK.tidyAmount(r.burn)) + " MINIMA" : "0";
   const feeRow = r.burn != null ? `<div class="kv"><span class="kv__k">Fee (burn)</span><span class="kv__v">${burnStr}</span></div>` : "";
   const sizeRow = r.size ? `<div class="kv"><span class="kv__k">Size</span><span class="kv__v">${esc(r.size)} bytes</span></div>` : "";
@@ -2067,7 +2098,7 @@ function showHistoryDetail(r, tip) {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
     <div class="modal__title">Transaction</div>
     <div class="kv"><span class="kv__k">Type</span><span class="kv__v">${esc(kind)}</span></div>
-    <div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${esc(TOK.tidyAmount(r.amount))} ${esc(r.tokenName)}</span></div>
+    <div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${amtStr}</span></div>
     ${feeRow}
     <div class="kv"><span class="kv__k">Block</span><span class="kv__v">#${esc(r.block)}${conf !== "" ? " · " + conf + " conf" : ""}</span></div>
     <div class="kv"><span class="kv__k">Time</span><span class="kv__v">${esc(timeStr)}</span></div>
@@ -2154,6 +2185,19 @@ function normalize(txpow, detail) {
     let domTok = MINIMA, domAmt = "0";
     for (const tid of Object.keys(totals)) if (absCmp(totals[tid], domAmt) > 0) { domTok = tid; domAmt = totals[tid]; }
     primTok = domTok; amount = domAmt;
+  }
+  // Trade (pool swap / OTC): the net effect is MINIMA moving one way and exactly one token the other way. Reframe
+  // it as BUYING or SELLING MINIMA against the token leg — otherwise a swap looks like a plain receive/send (or a
+  // split) and hides what it cost. The counter (token) leg is read back from `difference` at render time.
+  const nzToks = Object.keys(diff).filter(t => !/^-?0*\.?0*$/.test(String(diff[t])));
+  if (nzToks.length === 2 && nzToks.indexOf(MINIMA) >= 0) {
+    const other = nzToks.find(t => t !== MINIMA);
+    const minNeg = String(diff[MINIMA]).startsWith("-");
+    if (minNeg !== String(diff[other]).startsWith("-")) {
+      kind = minNeg ? "sell" : "buy";                 // gave MINIMA = sold; received MINIMA = bought
+      direction = minNeg ? "out" : "in";
+      primTok = MINIMA; amount = String(diff[MINIMA]).replace(/^-/, "");
+    }
   }
   const coinForTok = inputs.concat(outputs).find(c => c.tokenid === primTok);
   const tokenName = TOK.tokenName(coinForTok && coinForTok.token, primTok);
@@ -2281,8 +2325,9 @@ async function renderTerminal() {
 async function renderSettings() {
   const host = el("settingsBody");
   if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
-  const [addr, keys] = await Promise.all([tryCmd("getaddress"), tryCmd("keys action:list")]);
+  const [addr, keys, scripts] = await Promise.all([tryCmd("getaddress"), tryCmd("keys action:list"), tryCmd("scripts")]);
   const ku = keysInfo(keys);
+  const kuRows = keyUsesRows(keys, scripts);
   const pct = ku.cap ? Math.min(100, Math.round(ku.used / ku.cap * 100)) : 0;
   const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
@@ -2323,6 +2368,13 @@ async function renderSettings() {
       <div class="health"><div class="health__row"><span>Most-used key</span><span>${esc(ku.used)} / ${esc(ku.cap)} sigs${ku.count ? " · " + ku.count + " keys" : ""}</span></div>
         <div class="health__track"><div class="health__fill${warn ? " health__fill--warn" : ""}" style="width:${pct}%"></div></div></div>
       ${warn ? `<div class="status status--warn">⚠ A signing key is ${pct}% used — generate fresh keys or restore with the correct key-uses before it exhausts.</div>` : ""}
+    </div>
+    <div class="card"><div class="card__title">Address key-uses</div>
+      <div class="view__desc">Every signing key can sign up to 262,144 times before it exhausts, and a one-time key that signs the same leaf twice is unsafe. This lists each key's address and how many signatures it has used. "Deep reuse audit" cross-checks the chain via your KeyUses service — the node's own counter can under-report.</div>
+      <div id="kuList" class="ku-list">${kuRows.length ? kuRows.map(kuRowHtml).join("") : `<div class="view__desc">No keys reported.</div>`}</div>
+      <button class="btn btn--outline btn--full" id="kuAudit" style="margin-top:10px">Deep reuse audit</button>
+      <div class="status" id="kuAuditStatus"></div>
+      <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse — automatically when you open this panel, and when you tap the button. Nothing else leaves your node.</div>
     </div>
     <div class="card"><div class="card__title">Backup</div>
       <div class="view__desc">Writes an encrypted recovery backup into the node's data folder. Your seed phrase (above) is the ultimate backup.</div>
@@ -2400,6 +2452,10 @@ async function renderSettings() {
   el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
   el("diagGo").onclick = async () => { const c = el("diagCmd").value.trim(); if (!c) return; try { const r = await api.cmd(c); el("diagOut").textContent = JSON.stringify(r, null, 2); } catch (e) { el("diagOut").textContent = e.message; } };
   el("setTheme").onclick = () => { cycleTheme(); renderSettings(); };
+  // key-uses panel: copy an address on click, run the deep audit on demand, and auto-run it once on open (rate-limited).
+  if (el("kuList")) el("kuList").onclick = (e) => { const row = e.target.closest(".ku-row"); if (row && e.target.classList.contains("ku-addr") && row.dataset.addr) copy(row.dataset.addr); };
+  if (el("kuAudit")) el("kuAudit").onclick = () => runKeyAudit(true);
+  runKeyAudit(false);
 }
 function keysInfo(keys) {
   try {
@@ -2408,6 +2464,89 @@ function keysInfo(keys) {
     for (const k of arr) { used = Math.max(used, parseInt(k.uses, 10) || 0); cap = Math.max(cap, parseInt(k.maxuses, 10) || 0); }
     return { used, cap: cap || 262144, count: arr.length };
   } catch (e) { return { used: 0, cap: 262144, count: 0 }; }
+}
+// keys action:list has no address, so join each key to its default single-sig address via `scripts`
+// (the `simple && default` row whose script is `RETURN SIGNEDBY(<pk>)`). Keyed on uppercased public key.
+function keyAddrMap(scripts) {
+  const arr = Array.isArray(scripts) ? scripts : (scripts && scripts.scripts) || [];
+  const m = {};
+  for (const s of arr) { if (s && s.publickey && s.simple && s.default) { const pk = String(s.publickey).toUpperCase(); if (!m[pk]) m[pk] = { address: s.address, miniaddress: s.miniaddress }; } }
+  for (const s of arr) { if (s && s.publickey) { const pk = String(s.publickey).toUpperCase(); if (!m[pk]) m[pk] = { address: s.address, miniaddress: s.miniaddress }; } } // fallback: any script row
+  return m;
+}
+function keyUsesRows(keys, scripts) {
+  const arr = Array.isArray(keys) ? keys : (keys && keys.keys) || [];
+  const map = keyAddrMap(scripts);
+  return arr.map((k, i) => {
+    const a = map[String(k.publickey || "").toUpperCase()] || {};
+    return { i, publickey: k.publickey || "", address: a.address || "", miniaddress: a.miniaddress || "",
+      uses: parseInt(k.uses, 10) || 0, cap: parseInt(k.maxuses, 10) || 262144 };
+  }).sort((x, y) => y.uses - x.uses);   // most-used (riskiest) first
+}
+function kuRowHtml(r) {
+  const pct = r.cap ? Math.min(100, Math.round(r.uses / r.cap * 100)) : 0;
+  const near = pct >= 95 ? " ku-uses--red" : pct >= 80 ? " ku-uses--warn" : "";
+  const who = r.miniaddress || r.address || ("key #" + (r.i + 1));   // full address; CSS ellipsizes only if too narrow
+  return `<div class="row ku-row" data-pk="${esc(r.publickey)}" data-uses="${esc(r.uses)}" data-addr="${esc(r.miniaddress || r.address || "")}">
+    <div class="row__mid"><div class="row__l1 ku-addr" title="Click to copy">${esc(who)}</div><div class="row__l2"><span class="ku-verdict"></span></div></div>
+    <div class="row__r"><span class="ku-uses${near}">${esc(r.uses)}</span><span class="ku-cap"> / ${esc(r.cap)}</span></div></div>`;
+}
+// Deep reuse audit: send the node's public keys to the KeyUses service, join spend_blocks + reuse DB, classify
+// each key (risk = reused OR on-chain sigs > local uses — the node counter can under-report). Patches rows in
+// place (never rebuilds the panel). Graceful: an unreachable service leaves the local counts and says so.
+let KU_AUDIT_AT = 0, KU_AUDITING = false;
+const KU_AUDIT_GAP = 60000;
+async function runKeyAudit(force) {
+  const status = el("kuAuditStatus"); if (!status || KU_AUDITING) return;   // one audit at a time (button can't stack fetches)
+  if (!force && KU_AUDIT_AT && (Date.now() - KU_AUDIT_AT) < KU_AUDIT_GAP) return;
+  // Source public keys + local use-counts from the already-rendered rows (no redundant, race-prone re-fetch).
+  const rows = Array.from(document.querySelectorAll("#kuList .ku-row"));
+  const pubs = rows.map(r => r.dataset.pk).filter(Boolean);
+  if (!pubs.length) return;
+  KU_AUDIT_AT = Date.now(); KU_AUDITING = true;
+  const btn = el("kuAudit"); if (btn) btn.disabled = true;
+  const usesByPk = {}; rows.forEach(r => { if (r.dataset.pk) usesByPk[String(r.dataset.pk).toUpperCase()] = parseInt(r.dataset.uses, 10) || 0; });
+  status.className = "status status--dim"; status.textContent = "Auditing your keys against the chain…";
+  try {
+  const audit = await api.keyAudit(pubs).catch(() => null);
+  if (!audit || !audit.keys) {
+    KU_AUDIT_AT = 0;   // transient failure → let the next panel-open retry instead of blocking for the whole window
+    status.className = "status status--warn";
+    status.textContent = "⚠ Reuse audit unavailable (KeyUses service unreachable) — showing local key-use counts only. Try again later.";
+    return;
+  }
+  const byPk = {}; audit.keys.forEach(u => { if (u && u.publickey) byPk[String(u.publickey).toUpperCase()] = u; });
+  const addrs = audit.keys.map(u => u && u.address).filter(Boolean);
+  const reuse = await api.keyReuse(addrs).catch(() => null);
+  const full = !!(reuse && reuse.results);
+  const reuseByAddr = {}; if (full) reuse.results.forEach(r => { if (r && r.address) reuseByAddr[String(r.address).toUpperCase()] = r; });
+  let anyRisk = false, maxReuse = 0, recommended = 0;
+  document.querySelectorAll("#kuList .ku-row").forEach(node => {
+    const pk = String(node.dataset.pk || "").toUpperCase();
+    const u = byPk[pk] || {};
+    const local = usesByPk[pk] || 0;
+    const sigs = Number(u.spend_blocks || 0);
+    const rinfo = u.address ? reuseByAddr[String(u.address).toUpperCase()] : null;
+    const reused = !!(rinfo && rinfo.reused);
+    const reuseCount = rinfo ? (Number(rinfo.reuse_count) || 0) : 0;
+    const countRisk = sigs > local;
+    if (reused || countRisk) anyRisk = true;
+    if (reuseCount > maxReuse) maxReuse = reuseCount;
+    recommended = Math.max(recommended, Math.max(sigs, local));
+    const v = node.querySelector(".ku-verdict"); if (!v) return;
+    if (reused) { v.className = "ku-verdict ku-v--" + (reuseCount > 3 ? "risk" : "warn"); v.textContent = "RE-USED ×" + reuseCount; }
+    else if (countRisk) { v.className = "ku-verdict ku-v--risk"; v.textContent = "AT RISK · chain " + sigs + " > node " + local; }
+    else { v.className = "ku-verdict ku-v--ok"; v.textContent = "OK · " + sigs + " on-chain"; }
+  });
+  const reco = recommended + 256;
+  const cls = anyRisk ? (maxReuse > 3 ? "status--err" : "status--warn") : "status--ok";
+  status.className = "status " + cls;
+  status.textContent = (anyRisk
+      ? (maxReuse > 3 ? "⚠ Key reuse detected — move funds off the flagged addresses to fresh ones. " : "⚠ Some keys are at risk (chain shows more signatures than the node counter). ")
+      : "✓ No reuse detected. ")
+    + (full ? "" : "(reuse DB partial — treat as unverified.) ")
+    + "Recommended key-uses for your next resync: " + reco + ".";
+  } finally { KU_AUDITING = false; const b = el("kuAudit"); if (b) b.disabled = false; }
 }
 
 // ---- Send ------------------------------------------------------------------

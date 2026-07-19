@@ -115,6 +115,23 @@ ipcMain.handle("mcd:applyJarUpdate", async (_e, rel) => { const r = await update
 ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
 ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
 
+// KeyUses reuse audit — the ONLY user-initiated external call. Host is HARD-PINNED to eurobuddha.com (no
+// user-controlled host → no SSRF surface); pubkeys/addrs are hex-validated before they reach the query string.
+// netfetch.fetchJson is capped + never throws, so an unreachable service just returns null (graceful degrade).
+const KEYUSES_BASE = "https://eurobuddha.com";
+const HEX_KEY = /^0x[0-9a-fA-F]{64}$/;         // 32-byte WOTS public key
+const HEX_ADDR = /^0x[0-9a-fA-F]{2,80}$/;      // Minima address — 0x + hex, generously bounded (hex-only, no metachars)
+ipcMain.handle("mcd:keyAudit", (_e, pubkeys) => {
+  const list = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(k => HEX_KEY.test(k));
+  if (!list.length) return null;
+  return netfetch.fetchJson(KEYUSES_BASE + "/keyaudit?keys=" + encodeURIComponent(list.join(",")));
+});
+ipcMain.handle("mcd:keyReuse", (_e, addrs) => {
+  const list = (Array.isArray(addrs) ? addrs : []).map(String).filter(a => HEX_ADDR.test(a));
+  if (!list.length) return null;
+  return netfetch.fetchJson(KEYUSES_BASE + "/reuse?addrs=" + encodeURIComponent(list.join(",")));
+});
+
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
 ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailIdentity", () => mail.myIdentity());
