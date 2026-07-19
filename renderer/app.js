@@ -1984,9 +1984,32 @@ let histSearchTimer = null;
 function histFilterActive() { return !!(HIST_FILTER.search || HIST_FILTER.token || HIST_FILTER.direction); }
 function histQueryArgs() { return { search: HIST_FILTER.search, token: HIST_FILTER.token, direction: HIST_FILTER.direction }; }
 
+// The node's OWN signature addresses (simple RETURN SIGNEDBY(mykey) scripts). Coins at any OTHER address — e.g. an
+// anyone-can-spend PandaPools covenant this node imported for pool discovery — are foreign, and must NOT count toward
+// the wallet's net effect. A plain node never imports those covenants, so its `history` difference already reflects
+// only own coins; this set lets us reproduce that view even though our node tracks the covenants. Mx + 0x forms.
+let HIST_OWN = null;
+const HIST_NORM_VER = 3;   // bump when normalize()'s classification changes → re-normalizes already-stored rows once
+async function loadOwnAddresses() {
+  try {
+    const j = await api.cmd("scripts");
+    let arr = j && j.response;
+    arr = Array.isArray(arr) ? arr : (arr && arr.scripts) || [];
+    const set = new Set();
+    for (const s of arr) {
+      if (!s || s.simple !== true) continue;   // own signable address; covenants (anyone-can-spend) are simple:false
+      if (s.miniaddress) set.add(String(s.miniaddress));
+      if (s.address) set.add(String(s.address).toLowerCase());
+    }
+    if (set.size) HIST_OWN = set;
+  } catch (e) { /* leave HIST_OWN null → normalize falls back to the node's own difference */ }
+  return HIST_OWN;
+}
+
 async function renderHistory() {
   ensureHistActions();
   await ensureHistFilter();
+  if (running) { if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses(); await renormalizeStored(); }
   await renderHistoryList();
   if (running) syncHistory({ older: false });
 }
@@ -2162,17 +2185,74 @@ function decSub(a, b) {   // non-negative decimal string subtraction a-b, clampe
   s = s.padStart(scale + 1, "0");
   return (s.slice(0, -scale) + "." + s.slice(-scale)).replace(/\.?0+$/, "");   // trim trailing zeros
 }
-function normalize(txpow, detail) {
-  detail = detail || {};
-  const hdr = txpow.header || {}, txn = (txpow.body && txpow.body.txn) || {};
-  const inputs = (txn.inputs || []).map(coinLite), outputs = (txn.outputs || []).map(coinLite);
-  const diff = detail.difference || {};
+// Is this coin at one of the node's OWN signature addresses? (false when HIST_OWN is unknown → caller falls back.)
+function ownAddr(c) {
+  const a = c && (c.address || c.miniaddress);
+  if (!HIST_OWN || !HIST_OWN.size || !a) return false;
+  return HIST_OWN.has(String(a)) || HIST_OWN.has(String(a).toLowerCase());
+}
+// Signed per-token net = Σ(outputs) − Σ(inputs) over the given coins, at arbitrary precision (BigInt-scaled per
+// token, so 44-dp token dust never rounds). Returns { tokenid: signedDecimalString } with zero-nets dropped to "0".
+function signedNet(inputs, outputs) {
+  const scale = {}, acc = {};
+  const scan = (list) => { for (const c of list) { const t = c.tokenid || MINIMA, f = (String(c.amount || "0").split(".")[1] || "").length; if (f > (scale[t] || 0)) scale[t] = f; } };
+  scan(inputs); scan(outputs);
+  const add = (list, sign) => { for (const c of list) { const t = c.tokenid || MINIMA, sc = scale[t] || 0, p = String(c.amount || "0").split("."); acc[t] = (acc[t] || 0n) + BigInt(sign) * BigInt((p[0].replace(/^-/, "") || "0") + (p[1] || "").padEnd(sc, "0")); } };
+  add(inputs, -1); add(outputs, 1);
+  const out = {};
+  for (const t of Object.keys(acc)) {
+    let v = acc[t]; const sc = scale[t] || 0, neg = v < 0n; if (neg) v = -v;
+    let s = v.toString();
+    if (sc > 0) { s = s.padStart(sc + 1, "0"); s = (s.slice(0, -sc) + "." + s.slice(-sc)).replace(/0+$/, "").replace(/\.$/, ""); }
+    s = s || "0";   // strip FRACTIONAL trailing zeros only — never touch an integer's trailing zeros ("60" must stay "60")
+    out[t] = (neg && s !== "0" ? "-" : "") + s;
+  }
+  return out;
+}
+// A token's on-chain grain (decimal places), read from its coin metadata. MINIMA → -1 (never quantize; it legitimately
+// moves in tiny amounts). Unknown token → 18 (a safe ceiling that keeps any real amount but zeros covenant dust).
+function tokDec(tid, inputs, outputs) {
+  if (tid === MINIMA) return -1;
+  const c = inputs.concat(outputs).find(x => x.tokenid === tid && x.token && x.token.decimals != null);
+  const d = c ? parseInt(c.token.decimals, 10) : NaN;
+  return Number.isFinite(d) ? d : 18;
+}
+// Floor |amount| to `dec` decimals (keep sign). On-chain token amounts are always multiples of the grain, so this is
+// lossless for real balances — but a PandaPools covenant encodes reserves in a SUB-grain token fraction (e.g. 2.8e-37
+// USDT), which this correctly collapses to "0" so it is never mistaken for a swap's counter leg.
+function quantTok(amountStr, dec) {
+  if (dec < 0) return String(amountStr);
+  const neg = String(amountStr).startsWith("-");
+  const parts = String(amountStr).replace(/^-/, "").split(".");
+  const ip = (parts[0] || "0").replace(/^0+(?=\d)/, ""), fp = (parts[1] || "").slice(0, dec);
+  let s = ip + (fp ? "." + fp : "");
+  if (fp) s = s.replace(/0+$/, "").replace(/\.$/, "");   // fractional trailing zeros only — keep an integer's ("100")
+  s = s || "0";
+  return (neg && s !== "0" ? "-" : "") + s;
+}
+// Classify a transaction from its coins + the node's own `difference`. Shared by fresh normalize() and the one-time
+// re-normalize of stored rows. When a foreign (covenant) coin is present, `nodeDiff` counts it and a pool swap nets
+// to ~0 → it would show as split/self; we instead take the wallet's TRUE net over OWN coins (what a plain node
+// reports) so swaps read as Bought/Sold MINIMA. With no own-address info, or no covenant coin, we use `nodeDiff`.
+function classify(inputs, outputs, nodeDiff) {
+  nodeDiff = nodeDiff || {};
+  const inCount = inputs.length, outCount = outputs.length;
+  const hasForeign = inputs.some(c => !ownAddr(c)) || outputs.some(c => !ownAddr(c));
+  const ownIn = inputs.filter(ownAddr), ownOut = outputs.filter(ownAddr);
+  let diff = (HIST_OWN && HIST_OWN.size && hasForeign && (ownIn.length || ownOut.length))
+    ? signedNet(ownIn, ownOut) : nodeDiff;
+  // Quantize each token leg to its grain so covenant reserve-dust drops out (a pool deposit/withdraw is then a plain
+  // MINIMA Sent/Received, not a spurious "Sold N MINIMA for 0.0000…"). No-op for already-grain node differences.
+  if (HIST_OWN && HIST_OWN.size) {
+    const cleaned = {};
+    for (const t of Object.keys(diff)) cleaned[t] = quantTok(diff[t], tokDec(t, inputs, outputs));
+    diff = cleaned;
+  }
   let primTok = MINIMA, primAmt = "0";
   for (const tid of Object.keys(diff)) if (absCmp(diff[tid], primAmt) > 0) { primTok = tid; primAmt = diff[tid]; }
   const signed = String(primAmt), neg = signed.startsWith("-");
   const isZero = /^-?0*\.?0*$/.test(signed);
   let direction = isZero ? "self" : (neg ? "out" : "in");
-  const inCount = inputs.length, outCount = outputs.length;
   let kind = "normal";
   if (direction === "self") {
     if (outCount > inCount && outCount > 1) kind = "split";
@@ -2187,8 +2267,8 @@ function normalize(txpow, detail) {
     primTok = domTok; amount = domAmt;
   }
   // Trade (pool swap / OTC): the net effect is MINIMA moving one way and exactly one token the other way. Reframe
-  // it as BUYING or SELLING MINIMA against the token leg — otherwise a swap looks like a plain receive/send (or a
-  // split) and hides what it cost. The counter (token) leg is read back from `difference` at render time.
+  // it as BUYING or SELLING MINIMA against the token leg — the counter (token) leg is read back from `difference`
+  // at render time.
   const nzToks = Object.keys(diff).filter(t => !/^-?0*\.?0*$/.test(String(diff[t])));
   if (nzToks.length === 2 && nzToks.indexOf(MINIMA) >= 0) {
     const other = nzToks.find(t => t !== MINIMA);
@@ -2202,11 +2282,39 @@ function normalize(txpow, detail) {
   const coinForTok = inputs.concat(outputs).find(c => c.tokenid === primTok);
   const tokenName = TOK.tokenName(coinForTok && coinForTok.token, primTok);
   const counterparty = (direction === "in" ? (inputs[0] && inputs[0].address) : (outputs[0] && outputs[0].address)) || "";
+  return { direction, kind, tokenid: primTok, tokenName, amount: String(amount), difference: diff, counterparty, inCount, outCount };
+}
+function normalize(txpow, detail) {
+  detail = detail || {};
+  const hdr = txpow.header || {}, txn = (txpow.body && txpow.body.txn) || {};
+  const inputs = (txn.inputs || []).map(coinLite), outputs = (txn.outputs || []).map(coinLite);
+  const c = classify(inputs, outputs, detail.difference || {});
   return { txpowid: txpow.txpowid, block: parseInt(hdr.block, 10) || 0, time: parseInt(hdr.timemilli, 10) || 0,
     istransaction: !!txpow.istransaction, isblock: !!txpow.isblock, size: parseInt(txpow.size, 10) || 0,
     burn: String(txpow.burn != null ? txpow.burn : "0"),
-    direction, kind, tokenid: primTok, tokenName, amount: String(amount),
-    counterparty, inCount, outCount, difference: diff, inputs, outputs, state: txn.state || [] };
+    direction: c.direction, kind: c.kind, tokenid: c.tokenid, tokenName: c.tokenName, amount: c.amount,
+    counterparty: c.counterparty, inCount: c.inCount, outCount: c.outCount,
+    difference: c.difference, inputs, outputs, state: txn.state || [] };
+}
+// One-time re-classification of already-stored rows after a normalize() logic change (gated by HIST_NORM_VER). Only
+// runs once own-address info is available; recomputes from each row's stored coins and upserts the ones that change.
+async function renormalizeStored() {
+  if (!HIST_OWN || !HIST_OWN.size) return;                              // no own-address info → leave stored rows as-is
+  if (localStorage.getItem("histNormVer") === String(HIST_NORM_VER)) return;
+  try {
+    const rows = await api.histGet();                                    // every stored row (coins included)
+    const out = [];
+    for (const r of rows) {
+      const inputs = r.inputs || [], outputs = r.outputs || [];
+      if (!inputs.length && !outputs.length) continue;                   // nothing to reclassify from
+      const c = classify(inputs, outputs, r.difference || {});
+      if (c.kind === r.kind && c.direction === r.direction && c.amount === String(r.amount)) continue;
+      out.push(Object.assign({}, r, { direction: c.direction, kind: c.kind, tokenid: c.tokenid,
+        tokenName: c.tokenName, amount: c.amount, difference: c.difference, counterparty: c.counterparty }));
+    }
+    for (let i = 0; i < out.length; i += 500) await api.histAdd(out.slice(i, i + 500));
+    localStorage.setItem("histNormVer", String(HIST_NORM_VER));
+  } catch (e) { /* transient; retried next session (version marker only set on success) */ }
 }
 // Pager: fetch history in pages and persist into the local DB. Over HTTP RPC there is NO 256KB response cap
 // (that is an Android-Binder limit — we are a jar over loopback HTTP), so we page at the node's own default of
@@ -2218,6 +2326,7 @@ async function syncHistory(opts) {
   opts = opts || {};
   if (HIST_SYNCING) return; HIST_SYNCING = true;
   try {
+    if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();   // classify new rows over own coins (native's view)
     const known = new Set((await api.histGet()).map(r => r.txpowid));
     let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false, fetched = 0;
     let batch = [];
