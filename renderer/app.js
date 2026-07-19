@@ -2956,7 +2956,7 @@ function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatus
 
 function axHeader(active) {
   const st = axStatusCache;
-  const ccy = st.currency === "minima" ? "MINIMA" : "mxUSDT";
+  const ccy = st.currency === "minima" ? "MINIMA" : (st.currency === "mxusdt" ? "mxUSDT" : "…");
   const dot = st.ready ? '<span style="color:var(--green)">●</span> ' : '<span style="color:var(--amber)">●</span> ';
   const tabs = [["swap", "Swap"], ["market", "Market"], ["activity", "Activity"], ["otc", "OTC"], ["wallet", "Wallet"]]
     .map(([v, l]) => `<button class="btn btn--sm ${active === v ? "btn--primary" : "btn--outline"}" data-axview="${v}">${l}</button>`).join("");
@@ -3000,8 +3000,7 @@ async function renderAxSwap() {
       ${axSell ? "" : `<div class="kv"><span>Max slippage</span><span>${[2, 4.2].map(s => `<button class="btn btn--sm ${axSlip === s ? "btn--primary" : "btn--outline"}" data-axslip="${s}">${s}%</button>`).join("")}<button class="btn btn--sm ${axSlip !== 2 && axSlip !== 4.2 ? "btn--primary" : "btn--outline"}" id="axSlipCustom">${axSlip !== 2 && axSlip !== 4.2 ? axSlip + "%" : "Custom"}</button></span></div>`}
       <div class="view__desc" id="axQuoteLine">${axBookLine(b)}</div>
       <button class="btn btn--primary btn--full" id="axReview">Review swap</button>
-    </div>
-    <div id="axStages"></div>`;
+    </div>`;
   wireAxHeader();
   el("axDirSell").onclick = () => { axSell = true; renderAxSwap(); };
   el("axDirBuy").onclick = () => { axSell = false; renderAxSwap(); };
@@ -3038,7 +3037,7 @@ async function axDoReview() {
   const r = await api.axSwap(q.quoteId).catch(e => ({ err: String(e.message || e) }));
   if (r && r.err) { toast(r.err, "warn"); }
   else if (r) { toast(`✓ ${r.ok}/${r.of} leg${r.of === 1 ? "" : "s"} locked — watching for the counterparty.${r.stopped ? " " + r.stopped : ""}`, "ok"); if (el("axAmt")) el("axAmt").value = ""; }
-  renderAxSwap();
+  if (activeView === "atomix" && axView === "swap") renderAxSwap();
 }
 
 // ---- Market (book + maker editor + history chart) ----
@@ -3110,17 +3109,17 @@ function axMakerEditor(mc, ccy) {
   const c = (mc && mc.cfg) || {};
   return `<div class="card"><div class="card__title">Your market (maker)</div>
     <div class="view__desc">Publish a pegged ladder; the node keeps it live and auto-responds to takers.</div>
-    <div class="field"><div class="field__label">Peg to market</div><select class="field__input" id="axPeg"><option value="1"${c.pegEnable ? " selected" : ""}>On (auto-price)</option><option value="0"${c.pegEnable ? "" : " selected"}>Off</option></select></div>
-    <div class="row"><div class="field" style="flex:1"><div class="field__label">Spread step %</div><input class="field__input" id="axStep" value="${c.step != null ? c.step : 1}" /></div>
-      <div class="field" style="flex:1"><div class="field__label">Size / level (${esc(ccy)})</div><input class="field__input" id="axSize" value="${c.size != null ? c.size : ""}" /></div></div>
-    <div class="row"><div class="field" style="flex:1"><div class="field__label">Levels (1–6)</div><input class="field__input" id="axLevels" value="${c.levels != null ? c.levels : 1}" /></div>
-      <div class="field" style="flex:1"><div class="field__label">Skew ±%</div><input class="field__input" id="axBias" value="${c.bias != null ? c.bias : 0}" /></div></div>
-    <div class="field"><div class="field__label">Min trade (${esc(ccy)})</div><input class="field__input" id="axMin" value="${c.min != null ? c.min : ""}" /></div>
+    <div class="view__desc">Auto-priced ladder pegged to the market. (A manual ladder editor is a later addition; use Withdraw to go offline.)</div>
+    <div class="row"><div class="field" style="flex:1"><div class="field__label">Spread step %</div><input class="field__input" id="axStep" value="${esc(c.step != null ? c.step : 1)}" /></div>
+      <div class="field" style="flex:1"><div class="field__label">Size / level (${esc(ccy)})</div><input class="field__input" id="axSize" value="${esc(c.size != null ? c.size : "")}" /></div></div>
+    <div class="row"><div class="field" style="flex:1"><div class="field__label">Levels (1–6)</div><input class="field__input" id="axLevels" value="${esc(c.levels != null ? c.levels : 1)}" /></div>
+      <div class="field" style="flex:1"><div class="field__label">Skew ±%</div><input class="field__input" id="axBias" value="${esc(c.bias != null ? c.bias : 0)}" /></div></div>
+    <div class="field"><div class="field__label">Min trade (${esc(ccy)})</div><input class="field__input" id="axMin" value="${esc(c.min != null ? c.min : "")}" /></div>
     <div class="seg"><button class="btn btn--primary btn--full" id="axSave">Save & publish</button><button class="btn btn--outline btn--full" id="axPublish">Republish</button><button class="btn btn--danger btn--full" id="axWithdraw">Withdraw</button></div>
   </div>`;
 }
 function axWireMakerEditor() {
-  const rd = () => ({ pegEnable: el("axPeg").value === "1", step: Number(el("axStep").value) || 0, size: Number(el("axSize").value) || 0, levels: Number(el("axLevels").value) || 1, bias: Number(el("axBias").value) || 0, min: Number(el("axMin").value) || 0, reprice: 1 });
+  const rd = () => ({ pegEnable: true, step: Number(el("axStep").value) || 0, size: Number(el("axSize").value) || 0, levels: Number(el("axLevels").value) || 1, bias: Number(el("axBias").value) || 0, min: Number(el("axMin").value) || 0, reprice: 1 });
   el("axSave").onclick = async () => { el("axSave").disabled = true; const r = await api.axMakerSave(rd(), { bids: [], asks: [] }).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); renderAxMarket(); };
   el("axPublish").onclick = async () => { const r = await api.axMakerPublish().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Republished", r && r.err ? "warn" : "ok"); };
   el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", "ok"); renderAxMarket(); };
@@ -3167,7 +3166,7 @@ async function renderAxOtc() {
       <div class="row"><div class="field" style="flex:1"><div class="field__label">Max to SELL</div><input class="field__input" id="axOtcSell" value="${o.myOffer && o.myOffer.sellSize || ""}" /></div>
         <div class="field" style="flex:1"><div class="field__label">Max to BUY</div><input class="field__input" id="axOtcBuy" value="${o.myOffer && o.myOffer.buySize || ""}" /></div></div>
       <div class="seg"><button class="btn btn--primary btn--full" id="axOtcLive">Go live</button><button class="btn btn--outline btn--full" id="axOtcWithdraw">Withdraw</button></div></div>
-    <div class="card"><div class="card__title">LP board</div>${o.board.length ? o.board.map((lp, i) => `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(TOK.shortId(lp.cid))}</span><span>sell ${lp.sell} · buy ${lp.buy}</span><button class="btn btn--sm btn--outline" data-axlp="${i}">Propose</button></div>`).join("") : '<div class="empty">No LPs live right now.</div>'}</div>
+    <div class="card"><div class="card__title">LP board</div>${o.board.length ? o.board.map((lp, i) => `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(TOK.shortId(lp.cid))}</span><span>sell ${esc(lp.sell)} · buy ${esc(lp.buy)}</span><button class="btn btn--sm btn--outline" data-axlp="${i}">Propose</button></div>`).join("") : '<div class="empty">No LPs live right now.</div>'}</div>
     <div class="card"><div class="card__title">Your deals</div>${o.deals.length ? o.deals.map(d => axDealRow(d)).join("") : '<div class="empty">No active deals.</div>'}</div>`;
   wireAxHeader();
   el("axOtcLive").onclick = async () => { const r = await api.axOtcGoLive(el("axOtcSell").value, el("axOtcBuy").value).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Availability published", r && r.err ? "warn" : "ok"); };
@@ -3178,15 +3177,17 @@ async function renderAxOtc() {
 }
 function axDealRow(d) {
   const canAct = d.whoseTurn === "ME" && (d.status === "PROPOSED" || d.status === "COUNTERED");
-  return `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${d.side} ${d.amount} @ ${d.price}</span><span class="mail-ver">${esc(String(d.status).toLowerCase())}</span>${canAct ? `<span><button class="btn btn--sm btn--primary" data-axaccept="${esc(d.ref)}">Accept</button> <button class="btn btn--sm btn--danger" data-axreject="${esc(d.ref)}">Reject</button></span>` : ""}</div>`;
+  return `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(d.side)} ${esc(d.amount)} @ ${esc(d.price)}</span><span class="mail-ver">${esc(String(d.status).toLowerCase())}</span>${canAct ? `<span><button class="btn btn--sm btn--primary" data-axaccept="${esc(d.ref)}">Accept</button> <button class="btn btn--sm btn--danger" data-axreject="${esc(d.ref)}">Reject</button></span>` : ""}</div>`;
 }
 async function axOtcPropose(lp) {
   if (!lp) return;
-  const side = await showPrompt("Deal side", "SELL", "SELL or BUY", { message: "SELL = you buy their " + (axStatusCache.currency === "minima" ? "MINIMA" : "mxUSDT") + "; BUY = you sell yours." });
-  if (!side) return;
+  const sideRaw = await showPrompt("Deal side", "SELL", "SELL or BUY", { message: "SELL = you buy their " + (axStatusCache.currency === "minima" ? "MINIMA" : "mxUSDT") + "; BUY = you sell yours." });
+  if (!sideRaw) return;
+  const side = String(sideRaw).trim().toUpperCase();
+  if (side !== "SELL" && side !== "BUY") { toast("Side must be SELL or BUY", "warn"); return; }
   const amount = await showPrompt("Amount", "", "0.0"); if (!amount) return;
   const price = await showPrompt("Price (USDT each)", "", "1.0"); if (!price) return;
-  const r = await api.axOtcPropose({ cid: lp.cid, mpk: lp.mpk, eth: lp.eth }, side.toUpperCase(), amount, price).catch(e => ({ err: String(e.message || e) }));
+  const r = await api.axOtcPropose({ cid: lp.cid, mpk: lp.mpk, eth: lp.eth }, side, amount, price).catch(e => ({ err: String(e.message || e) }));
   toast(r && r.err ? r.err : "✓ Proposed — waiting on the LP", r && r.err ? "warn" : "ok"); renderAxOtc();
 }
 
@@ -3287,9 +3288,11 @@ function onAtomixUpdate() {
 }
 async function refreshAxActive() {
   if (activeView !== "atomix" || !el("axBody")) return;
-  // Swap/OTC/Wallet hold live-typed inputs → only refresh the passive quote/book line; Market/Activity are
-  // safe to re-render (no persistent input focus on their lists).
-  if (axView === "market") return renderAxMarket();
+  // NEVER rebuild a view while the user is typing in one of its inputs (the Mail frozen-tab rule). The Market
+  // maker editor + OTC availability + Swap amount all hold live inputs.
+  const focusInBody = document.activeElement && el("axBody").contains(document.activeElement) && document.activeElement.tagName === "INPUT";
   if (axView === "activity") return renderAxActivity();
+  if (axView === "market") { if (!focusInBody) return renderAxMarket(); return; }   // skip while configuring the market
   if (axView === "swap") { const b = await api.axBook().catch(() => null); axLastBook = b; const ln = el("axQuoteLine"); if (ln) ln.textContent = axBookLine(b); }
+  // OTC/Wallet: leave the form alone; the user re-enters or taps Refresh (an OS notification flags OTC activity).
 }

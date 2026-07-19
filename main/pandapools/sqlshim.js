@@ -85,7 +85,19 @@ async function makeSqlShim(filePath) {
   // `persist` exposes the debounced whole-image save for callers that write via `_db` directly (e.g. history-db.js
   // uses prepared statements + bound params on `_db` for speed/safety, then schedules a save with this). Additive —
   // the reused pandapools code keeps using `sql`/`flush` exactly as before.
-  return { sql: sqlCmd, persist: persistSoon, flush: () => { if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; } try { fs.writeFileSync(filePath, Buffer.from(db.export())); } catch (e) {} }, _db: db };
+  // flush(): synchronous, ATOMIC (tmp+rename) — the AtomiX glue routes every HTLC-secret write through this for
+  // crash-safety, so a torn write here would be worse than the debounce it replaces. Same tmp+rename as persistSoon.
+  return {
+    sql: sqlCmd, persist: persistSoon, _db: db,
+    flush: () => {
+      if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+      try {
+        const tmp = filePath + ".tmp";
+        fs.writeFileSync(tmp, Buffer.from(db.export()));
+        fs.renameSync(tmp, filePath);
+      } catch (e) { /* image left as-is; next write retries */ }
+    }
+  };
 }
 
 module.exports = { makeSqlShim };

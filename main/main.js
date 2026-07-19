@@ -252,6 +252,14 @@ ipcMain.handle("mcd:axOtcPropose", (_e, lp, side, amount, price) => atomix.otcPr
 ipcMain.handle("mcd:axOtcDeal", (_e, ref, action, amount, price) => atomix.otcDealAction(ref, action, amount, price));
 ipcMain.handle("mcd:axInvalidate", () => { atomix.invalidate(); return true; });
 atomix.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:atomix"); });
+atomix.emitter.on("notify", (msg) => {   // settlement/OTC milestones — OS notification when the app isn't focused
+  try {
+    if (win && !win.isDestroyed() && win.isFocused()) return;
+    const n = new Notification({ title: "AtomiX", body: String(msg), silent: false });
+    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+    n.show();
+  } catch (e) { /* best-effort */ }
+});
 let axStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted = true; atomix.startLoop(); } });
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));

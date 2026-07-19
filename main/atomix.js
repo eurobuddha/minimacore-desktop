@@ -39,6 +39,7 @@ let serviceHandler = null;    // captured by MDS.init — WE fire the events
 let ready = false;            // orchestrator init done (engine boot is async + self-healing inside the vm)
 let initPromise = null;
 let pollTimer = null, minuteTimer = null, lastTip = null;
+let generation = 0;           // bumped on invalidate — a stale in-flight init from an old seed must not resurrect
 let dataDir = null;
 let runner = (cmd) => {
   const config = require("./config"), node = require("./node-manager");
@@ -106,12 +107,16 @@ function toVm(obj) {
 async function init() {
   if (ready) return;
   if (initPromise) return initPromise;
+  const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   initPromise = (async () => {
-    sqlShim = await makeSqlShim(path.join(dir(), "atomix.sqlite"));
+    const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"));
+    if (gen !== generation) { try { shim.flush(); } catch (e) {} return; }   // invalidated mid-init → drop it
+    sqlShim = shim;
     ctx = createContext(buildMds());
+    if (gen !== generation) { ctx = null; sqlShim = null; return; }           // invalidated during context build
     ready = true;
     fire("inited");            // service.js tryBoot: trust preflight → vault/seedrandom → engines → poll.
-  })().catch(e => { initPromise = null; ready = false; log("init failed: " + e.message); throw e; });
+  })().catch(e => { if (gen === generation) { initPromise = null; ready = false; } log("init failed: " + e.message); throw e; });
   return initPromise;
 }
 
@@ -137,6 +142,7 @@ function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
 /** Wallet/seed restore: the engine identity + swap DB belong to the OLD seed — wipe and re-init (mirrors
  *  pandapools.invalidate / mailInvalidate). */
 function invalidate() {
+  generation++;              // disown any in-flight init (old seed) BEFORE we tear down
   stopLoop();
   flush();
   try { fs.unlinkSync(path.join(dir(), "atomix.sqlite")); } catch (e) {}
@@ -280,15 +286,17 @@ function pollConfirm(A, hash, sellLeg) {
 async function swapExecute(quoteId) {
   const A = AX();
   const stash = lastQuotes[quoteId];
-  if (!stash) throw new Error("That quote has expired — review the swap again.");
+  if (!stash || Date.now() - stash.at > 120000) { if (stash) delete lastQuotes[quoteId]; throw new Error("That quote has expired — review the swap again."); }
   delete lastQuotes[quoteId];                       // single-use (consumed even on failure, donor pattern)
   const fresh = await withTimeout(bookScan(), 30000, "book scan");   // makerLive re-checks against CURRENT book
   const m = stash.model;
+  // NO timeout on a leg lock (donor has none): withTimeout only REJECTS — the engine's startLeg keeps going and
+  // can still lock the coin / broadcast, so a "timed out" retry would DOUBLE-lock. Let the leg run to its real
+  // callback; the engine's own record-before-broadcast + F1 make a slow leg safe.
   const startLeg = (signerPk, sellMinima, minima, usdt) => {
     const maker = makerObj(stash.book, signerPk);   // the FROZEN maker record (mpk/eth/cid from review time)
     if (!maker) return Promise.reject(new Error("maker vanished from the reviewed book"));
-    return withTimeout(p(cb => A.engine.startLeg(maker, "USDT", sellMinima, minima, usdt,
-      legHooks(A, signerPk, sellMinima, fresh), cb)), 200000, "swap leg");
+    return p(cb => A.engine.startLeg(maker, "USDT", sellMinima, minima, usdt, legHooks(A, signerPk, sellMinima, fresh), cb));
   };
   if (m.mode === "single") {
     const hash = await startLeg(m.maker, true, m.minima, m.usdt);
@@ -298,9 +306,12 @@ async function swapExecute(quoteId) {
   const legs = m.plan.legs;
   const hashes = [];
   if (m.sell) {
-    // donor startSweepSell: SEQUENTIAL, each next leg gated on the previous confirming (unpinned-coin race)
+    // donor startSweepSell: SEQUENTIAL, each next leg gated on the previous confirming (unpinned-coin race). A
+    // failed leg does NOT discard progress — report how many locked (donor "Sweep stopped at part N").
     for (let i = 0; i < legs.length; i++) {
-      const hash = await startLeg(legs[i].maker.signerPk, true, legs[i].minima, legs[i].usdt);
+      let hash;
+      try { hash = await startLeg(legs[i].maker.signerPk, true, legs[i].minima, legs[i].usdt); }
+      catch (e) { emitter.emit("update"); return { ok: hashes.length, of: legs.length, hashes, stopped: "Sweep stopped at part " + (i + 1) + ": " + (e.message || e) }; }
       hashes.push(hash);
       if (i < legs.length - 1) {
         const confirmed = await pollConfirm(A, hash, true);
@@ -394,7 +405,9 @@ async function sendReview(asset, to, amt) {
 async function sendExecute(asset, to, amt) {
   const A = AX();
   const send = asset === "eth" ? A.wallet.sendEth : A.wallet.sendUsdt;
-  const tx = await withTimeout(p(cb => send(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address, to, amt, cb)), 200000, "send");
+  // NO timeout: a rejected-but-still-broadcasting send would prompt a retry → a SECOND transfer (fresh nonce via
+  // F1 → both land). Let it run to the real broadcast callback (the engine's per-address nonce serializer bounds it).
+  const tx = await p(cb => send(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address, to, amt, cb));
   emitter.emit("update");
   return { tx };
 }
@@ -455,7 +468,8 @@ async function otc() {
   const deals = await p(cb => A.otc.allDeals(cb)).catch(() => []);
   return jclone({
     board: (board || []).map(o => ({ cid: o.commsPublicId, mpk: o.minimaPublicKey, eth: o.ethAddress, sell: o.sellSize, buy: o.buySize, ts: o.ts })),
-    deals: (deals || []).filter(d => d.status !== "EXPIRED" && d.status !== "REJECTED" && d.status !== "COMPLETE"),
+    // drop deals with a malformed side (defense-in-depth vs a hostile peer's PROPOSE — the renderer also esc()s):
+    deals: (deals || []).filter(d => d.status !== "EXPIRED" && d.status !== "REJECTED" && d.status !== "COMPLETE" && (d.side === "SELL" || d.side === "BUY")),
     myOffer: A.otc.myOffer()
   });
 }
@@ -473,6 +487,8 @@ async function otcWithdraw() {
 }
 async function otcPropose(lp, side, amount, price) {
   const A = AX();
+  side = String(side || "").trim().toUpperCase();
+  if (side !== "SELL" && side !== "BUY") throw new Error("Deal side must be SELL or BUY.");   // never lock the wrong asset
   const lpVm = jvm({ commsPublicId: lp.cid, minimaPublicKey: lp.mpk, ethAddress: lp.eth });
   await p(cb => A.otc.propose(lpVm, side, String(amount), String(price), e => cb(e)));
   emitter.emit("update"); return { ok: true };
