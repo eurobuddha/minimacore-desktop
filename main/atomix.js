@@ -56,6 +56,29 @@ function log(line) {
   console.log("[atomix]", line);
 }
 
+// The order book publishes / tombstones by SENDing a 1-nano MINIMA coin that carries the signed order in state.
+// On a SHARED node the wallet also holds anyone-can-spend sentinel/beacon dust (e.g. PandaPools 1-nano coins at
+// 0x50414E…="PANDAPOOLS") that has NO private key. The node's `send` auto-selects the SMALLEST coin first → it
+// grabs that beacon dust → txnsign NPEs ("KeyRow.getPrivateKey() null") and the publish/withdraw fails. Fix:
+// pin these sends to the smallest SIMPLE (wallet-signable) MINIMA coin via `fromaddress:` so an unsignable coin
+// can never be selected. checkaddress → {simple:true} is the reliable signable test (beacon addrs return {}).
+const AX_PUBLISH_SEND = /^send\s+.*\bamount:0\.000000001\b.*\btokenid:0x00\b.*\bstate:/;
+async function pinPublishSend(command) {
+  if (!AX_PUBLISH_SEND.test(command) || /\bfromaddress:/.test(command)) return command;
+  try {
+    const coinsR = await runner("coins relevant:true tokenid:0x00");
+    const coins = ((coinsR && coinsR.response) || []).filter(c => Number(c.amount) > 0)
+      .sort((a, b) => Number(a.amount) - Number(b.amount));   // smallest first → funds from disposable dust, never the reserve/main coin
+    for (const c of coins) {
+      const addr = String(c.address || "");
+      if (addr.length < 42) continue;                          // short = sentinel/beacon (anyone-can-spend, no key)
+      const chk = await runner("checkaddress address:" + addr);
+      if (chk && chk.response && chk.response.simple) return command + " fromaddress:" + addr;
+    }
+  } catch (e) { log("publish-send pin failed: " + (e && e.message)); }
+  return command;   // best-effort: fall back to the unmodified send
+}
+
 function buildMds() {
   return {
     minidappuid: "",
@@ -65,7 +88,9 @@ function buildMds() {
       // main-realm array is NOT instanceof the VM realm's Array, so every cmd response is marshalled INTO the
       // vm realm (JSON round-trip via the vm's own parser). Without this the book always reads empty. (sql
       // rows are consumed by realm-independent ops — Array.isArray/.map/index — so they need no marshalling.)
-      runner(String(command)).then(r => cb(toVm(r)), () => cb(toVm({ status: false })));
+      const c = String(command);
+      if (AX_PUBLISH_SEND.test(c)) { pinPublishSend(c).then(p => runner(p)).then(r => cb(toVm(r)), () => cb(toVm({ status: false }))); return; }
+      runner(c).then(r => cb(toVm(r)), () => cb(toVm({ status: false })));
     },
     sql(query, cb) {
       sqlShim.sql(query, cb);
