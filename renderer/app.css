@@ -500,8 +500,19 @@ body { font-family: var(--sans); }
 #view-atomix .ax-mkr-status.live { color:var(--green); }
 #view-atomix .ax-mkr-status.live .dot { background:var(--green); box-shadow:0 0 8px -1px var(--green); }
 #view-atomix .ax-mkr-status.off { color:var(--dim); }
-#view-atomix .ax-mkr-toggle { display:flex; align-items:center; justify-content:space-between; margin:8px 0 10px; }
-#view-atomix .ax-switch { position:relative; width:42px; height:24px; border-radius:12px; border:1px solid var(--border); background:var(--surface2); cursor:pointer; padding:0; flex:0 0 auto; transition:background .15s; }
-#view-atomix .ax-switch.on { background:var(--accent); border-color:var(--accent); }
-#view-atomix .ax-switch .knob { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:var(--text); transition:left .15s; }
-#view-atomix .ax-switch.on .knob { left:20px; background:var(--on-accent); }
+/* "your market" — own live levels + the [Edit my order][Publish] actions */
+#view-atomix .ax-mymkt { display:flex; flex-direction:column; gap:4px; margin:4px 0 2px; }
+#view-atomix .ax-mymkt-row { display:flex; justify-content:space-between; font-family:var(--mono); font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:5px 10px; }
+#view-atomix .ax-mymkt-row .bidpx { color:var(--green); font-weight:700; }
+#view-atomix .ax-mymkt-row .askpx { color:var(--accent); font-weight:700; }
+#view-atomix .ax-mymkt-row .ax-sz { color:var(--dim); }
+#view-atomix .ax-mkr-actions { display:flex; gap:8px; margin-top:10px; }
+
+/* maker editor rows (donor editRow/editInput/toggle) — label left, right-aligned input */
+#view-atomix .ax-editrow { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); }
+#view-atomix .ax-editrow:last-of-type { border-bottom:0; }
+#view-atomix .ax-editlabel { font-size:13px; color:var(--dim); }
+#view-atomix .ax-editinput { flex:0 0 auto; width:130px; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:16px; text-align:right; padding:6px 10px; outline:0; }
+#view-atomix .ax-editinput:focus { border-color:var(--accent); }
+#view-atomix .ax-toggle-pill { flex:0 0 auto; min-width:54px; background:var(--surface2); border:1px solid var(--border); color:var(--dim); border-radius:999px; font-size:13px; font-weight:700; padding:5px 14px; cursor:pointer; }
+#view-atomix .ax-toggle-pill.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }

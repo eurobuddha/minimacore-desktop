@@ -2952,9 +2952,10 @@ let axStatusCache = { ready: false };
 let axLastBook = null;
 let axMakerCfgCache = null;             // last maker read-model {cfg,manual,state,lastPublishMs} — for editor re-render on toggle
 let axPegMode = null;                   // maker editor peg/manual toggle (null = defer to saved cfg.pegEnable)
+let axEditing = false;                  // Market tab: editing your own order? (donor S.editing) — false shows Edit/Publish buttons
 let axUpdateTimer = null;
 
-function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; }
+function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; }
 
 function axHeader(active) {
   const st = axStatusCache;
@@ -3190,7 +3191,7 @@ async function axDoReview() {
 }
 function axShort(pk) { pk = String(pk || ""); return pk.length < 14 ? pk : pk.slice(0, 8) + "…" + pk.slice(-6); }
 
-// ---- Market (book + maker editor + history chart) ----
+// ---- Market (donor marketTab: order book · your market editor/actions · market history) ----
 async function renderAxMarket() {
   const host = el("axBody");
   const [b, mh, mc] = await Promise.all([api.axBook().catch(() => null), api.axMarketHistory().catch(() => ({ chart: [], recent: [] })), api.axMakerCfg().catch(() => null)]);
@@ -3198,23 +3199,48 @@ async function renderAxMarket() {
   const ccy = b ? b.label : "mxUSDT";
   const count = b ? (b.scanned || 0) : 0;
   const others = b && b.makers > 0 && b.makers !== count ? ` · ${b.makers} other` : "";
+  // "your market" — status line (LIVE / offline) + either the [Edit my order][Publish] actions or the editor.
+  const yourMkt = axEditing
+    ? axMakerEditor(mc, ccy, b)
+    : `${axYourMarketStatus(mc, b)}<div class="ax-mkr-actions"><button class="btn btn--outline btn--full" id="axEdit">Edit my order</button><button class="btn btn--primary btn--full" id="axPublish">Publish</button></div>`;
   host.innerHTML = `${axHeader("market")}
     <div class="card"><div class="card__title">Order book · ${count} live${others}</div>
-      <div class="view__desc">The live order book. Tap a price to trade it, or publish your own offer below.</div>
+      <div class="view__desc">The live order book. Tap a price to trade, or publish your own offer.</div>
       <div class="ax-ladder">${axLadder(b, ccy)}</div>
       <button class="btn btn--outline btn--sm" id="axBookRefresh" style="margin-top:8px">Refresh</button>
     </div>
-    <div class="card"><div class="card__title">Market history <span class="mail-ver">price only</span></div>
+    <div class="card"><div class="card__title">Your market · ${esc(ccy)} ⇄ USDT</div><div id="axMktHost">${yourMkt}</div></div>
+    ${axEditing ? "" : `<div class="card"><div class="card__title">Market history <span class="mail-ver">price only</span></div>
       <canvas id="axChart" width="640" height="160" style="width:100%;height:160px"></canvas>
       <div class="view__desc">${axHistLine(mh)}</div>${axHistRows(mh)}
-    </div>
-    <div id="axMakerHost">${axMakerEditor(mc, ccy, b)}</div>`;
+    </div>`}`;
   wireAxHeader();
   el("axBookRefresh").onclick = renderAxMarket;
   // tap-to-trade: clicking a takeable level prefills the swap on the correct side (bid → you sell, ask → you buy)
   host.querySelectorAll(".ax-depth .ax-half[data-take]").forEach(h => h.onclick = () => { axSell = h.getAttribute("data-take") === "bid"; axView = "swap"; renderAtomix(); });
-  setTimeout(() => { try { axDrawChart(el("axChart"), mh.chart); } catch (e) {} }, 0);
-  axWireMakerEditor(ccy);
+  if (axEditing) {
+    axWireMakerEditor(ccy);
+  } else {
+    el("axEdit").onclick = () => { axEditing = true; axPegMode = null; renderAxMarket(); };
+    el("axPublish").onclick = async () => { const btn = el("axPublish"); btn.disabled = true; btn.textContent = "Publishing…"; const r = await api.axMakerPublish().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market published", r && r.err ? "warn" : "ok"); renderAxMarket(); };
+    setTimeout(() => { try { axDrawChart(el("axChart"), mh.chart); } catch (e) {} }, 0);
+  }
+}
+/** "Your market" status: LIVE (own levels on the book, peg mid, last publish) or offline — so you can SEE your market. */
+function axYourMarketStatus(mc, b) {
+  const st = (mc && mc.state) || {};
+  let mine = 0, mineRows = "";
+  if (b) {
+    (b.bids || []).forEach(r => { if (r.mine) { mine++; mineRows += `<div class="ax-mymkt-row"><span class="bidpx">BID ${fmtPx(r.p)}</span><span class="ax-sz">${fmtAbbrev(r.cap)}</span></div>`; } });
+    (b.asks || []).forEach(r => { if (r.mine) { mine++; mineRows += `<div class="ax-mymkt-row"><span class="askpx">ASK ${fmtPx(r.p)}</span><span class="ax-sz">${fmtAbbrev(r.cap)}</span></div>`; } });
+  }
+  const live = mine > 0 && !st.withdrawn;
+  const mid = st.lastMid || st.lastPrice;
+  const txt = live
+    ? `LIVE · ${mine} level${mine === 1 ? "" : "s"} on the book` + (mid ? ` · mid ${fmtPx(mid)}` : "") + (mc && mc.lastPublishMs ? ` · published ${axAgo(mc.lastPublishMs)}` : "")
+    : (st.withdrawn ? "Offline · market withdrawn" : "Offline · you have no live order");
+  return `<div class="ax-mkr-status ${live ? "live" : "off"}"><span class="dot"></span>${esc(txt)}</div>`
+    + (live ? `<div class="ax-mymkt">${mineRows}</div>` : "");
 }
 /** The live depth ladder (donor marketTab): spread line + legend + up to 12 paired bid│ask rows. */
 function axLadder(b, ccy) {
@@ -3275,45 +3301,39 @@ function axAgo(ms) {
   if (s < 60) return s + "s ago"; if (s < 3600) return Math.round(s / 60) + "m ago";
   if (s < 86400) return Math.round(s / 3600) + "h ago"; return Math.round(s / 86400) + "d ago";
 }
-function axFld(label, id, val) { return `<div class="field" style="flex:1"><div class="field__label">${label}</div><input class="field__input" id="${id}" inputmode="decimal" value="${esc(val)}" autocomplete="off" /></div>`; }
+// donor editRow/editInput/toggle → label-left / input-right rows, an On/Off pill, exact donor labels.
+function axEditRow(label, right) { return `<div class="ax-editrow"><span class="ax-editlabel">${label}</span>${right}</div>`; }
+function axEditInput(id, val) { return `<input class="ax-editinput mono" id="${id}" inputmode="decimal" placeholder="0" value="${esc(val)}" autocomplete="off" />`; }
+/** The maker editor (donor orderEditor) — transcribed field-for-field. Rendered inside the "Your market" card. */
 function axMakerEditor(mc, ccy, b) {
-  const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {};
+  const c = (mc && mc.cfg) || {};
   const peg = axPegMode != null ? axPegMode : (c.pegEnable !== false);
-  // live status — count OUR own levels on the book (now that the ladder includes them) + peg mid + last publish
-  let mine = 0; if (b) { (b.bids || []).forEach(r => { if (r.mine) mine++; }); (b.asks || []).forEach(r => { if (r.mine) mine++; }); }
-  const live = mine > 0 && !st.withdrawn;
-  const mid = st.lastMid || st.lastPrice;
-  const statusTxt = live
-    ? `LIVE · ${mine} level${mine === 1 ? "" : "s"} on the book` + (mid ? ` · mid ${fmtPx(mid)}` : "") + (mc && mc.lastPublishMs ? ` · published ${axAgo(mc.lastPublishMs)}` : "")
-    : (st.withdrawn ? "Offline · market withdrawn" : "Offline · not quoting");
-  const status = `<div class="ax-mkr-status ${live ? "live" : "off"}"><span class="dot"></span>${esc(statusTxt)}</div>`;
-  const toggle = `<div class="ax-mkr-toggle"><span class="field__label" style="margin:0">Auto-price (peg to market)</span>`
-    + `<button class="ax-switch ${peg ? "on" : ""}" id="axPegToggle" role="switch" aria-checked="${peg}"><span class="knob"></span></button></div>`;
-  let fields, desc;
+  const parity = b ? !!b.pricingParity : (axStatusCache.currency === "mxusdt");
+  let fields;
   if (peg) {
-    desc = "Auto-priced ladder pegged to the market — the node keeps it live and auto-responds to takers.";
-    fields = `<div class="row">${axFld("Spread step %", "axStep", c.step != null ? c.step : 1)}${axFld("Size / level (" + esc(ccy) + ")", "axSize", c.size != null ? c.size : "")}</div>
-      <div class="row">${axFld("Levels (1–6)", "axLevels", c.levels != null ? c.levels : 1)}${axFld("Skew ±%", "axBias", c.bias != null ? c.bias : 0)}</div>
-      <div class="row">${axFld("Reprice when moved %", "axReprice", c.reprice != null ? c.reprice : 1)}${axFld("Min trade (" + esc(ccy) + ")", "axMin", c.min != null ? c.min : "")}</div>`;
+    fields = axEditRow("Spread step %", axEditInput("axStep", c.step != null ? c.step : 1))
+      + axEditRow("Size per level (" + esc(ccy) + ")", axEditInput("axSize", c.size != null ? c.size : ""))
+      + axEditRow("Levels each side (1–6)", axEditInput("axLevels", c.levels != null ? c.levels : 1))
+      + axEditRow("Skew % (± mid)", axEditInput("axBias", c.bias != null ? c.bias : 0))
+      + axEditRow("Reprice when moved %", axEditInput("axReprice", c.reprice != null ? c.reprice : 1));
   } else {
     const man = (mc && mc.manual) || {}, b0 = (man.bids && man.bids[0]) || {}, a0 = (man.asks && man.asks[0]) || {};
-    desc = "Set your own bid & ask. The node holds them live until you change or withdraw.";
-    fields = `<div class="row">${axFld("Bid (USDT/" + esc(ccy) + ")", "axBid", b0.p != null ? b0.p : "")}${axFld("Ask (USDT/" + esc(ccy) + ")", "axAsk", a0.p != null ? a0.p : "")}</div>
-      <div class="row">${axFld("Size (" + esc(ccy) + ")", "axMSize", b0.a != null ? b0.a : (a0.a != null ? a0.a : ""))}${axFld("Min trade (" + esc(ccy) + ")", "axMin", c.min != null ? c.min : "")}</div>`;
+    fields = axEditRow("Bid (USDT/" + esc(ccy) + ")", axEditInput("axBid", b0.p != null ? b0.p : ""))
+      + axEditRow("Ask (USDT/" + esc(ccy) + ")", axEditInput("axAsk", a0.p != null ? a0.p : ""))
+      + axEditRow("Size (" + esc(ccy) + ")", axEditInput("axMSize", b0.a != null ? b0.a : (a0.a != null ? a0.a : "")));
   }
-  return `<div class="card"><div class="card__title">Your market (maker)</div>
-    ${status}
-    <div class="view__desc">${desc}</div>
-    ${toggle}
-    ${fields}
-    <div class="seg"><button class="btn btn--primary btn--full" id="axSave">Save & publish</button><button class="btn btn--outline btn--full" id="axPublish">Republish</button><button class="btn btn--danger btn--full" id="axWithdraw">Withdraw</button></div>
-  </div>`;
+  return axEditRow("Auto-price (peg to " + (parity ? "parity" : "MEXC") + ")",
+        `<button class="ax-toggle-pill${peg ? " on" : ""}" id="axPegToggle">${peg ? "On" : "Off"}</button>`)
+    + fields
+    + axEditRow("Min trade (" + esc(ccy) + ")", axEditInput("axMin", c.min != null ? c.min : ""))
+    + `<button class="btn btn--primary btn--full" id="axSave" style="margin-top:12px">Save &amp; publish</button>`
+    + `<div class="ax-mkr-actions" style="margin-top:8px"><button class="btn btn--outline btn--full" id="axWithdraw">Withdraw market</button><button class="btn btn--outline btn--full" id="axCancel">Cancel</button></div>`;
 }
 function axWireMakerEditor(ccy) {
   const num = id => { const e = el(id); return e ? (Number(e.value) || 0) : 0; };
   const pegNow = () => { const c = (axMakerCfgCache && axMakerCfgCache.cfg) || {}; return axPegMode != null ? axPegMode : (c.pegEnable !== false); };
   const tog = el("axPegToggle");
-  if (tog) tog.onclick = () => { axPegMode = !pegNow(); el("axMakerHost").innerHTML = axMakerEditor(axMakerCfgCache, ccy, axLastBook); axWireMakerEditor(ccy); };
+  if (tog) tog.onclick = () => { axPegMode = !pegNow(); el("axMktHost").innerHTML = axMakerEditor(axMakerCfgCache, ccy, axLastBook); axWireMakerEditor(ccy); };
   const readCfg = () => pegNow()
     ? { pegEnable: true, step: num("axStep"), size: num("axSize"), levels: num("axLevels") || 1, bias: num("axBias"), reprice: num("axReprice") || 1, min: num("axMin") }
     : { pegEnable: false, min: num("axMin") };
@@ -3324,9 +3344,9 @@ function axWireMakerEditor(ccy) {
     if (ask > 0 && sz > 0) m.asks.push({ p: ask, a: sz });
     return m;
   };
-  el("axSave").onclick = async () => { el("axSave").disabled = true; const r = await api.axMakerSave(readCfg(), readManual()).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); axPegMode = null; renderAxMarket(); };
-  el("axPublish").onclick = async () => { const r = await api.axMakerPublish().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Republished", r && r.err ? "warn" : "ok"); renderAxMarket(); };
-  el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", "ok"); axPegMode = null; renderAxMarket(); };
+  el("axSave").onclick = async () => { const btn = el("axSave"); btn.disabled = true; btn.textContent = "Saving…"; const r = await api.axMakerSave(readCfg(), readManual()).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); axEditing = false; axPegMode = null; renderAxMarket(); };
+  el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", "ok"); axEditing = false; axPegMode = null; renderAxMarket(); };
+  el("axCancel").onclick = () => { axEditing = false; axPegMode = null; renderAxMarket(); };
 }
 
 // ---- Activity ----

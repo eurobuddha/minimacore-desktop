@@ -214,7 +214,7 @@ async function book() {
     // like the donor's `aggSide(book, sell, null)`. bestMakers above still excludes own (you can't take yourself).
     bids: A.book.aggSide(b, true, null).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, true), mine: A.book.isMine(r.maker, myId()) })),
     asks: A.book.aggSide(b, false, null).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, false), mine: A.book.isMine(r.maker, myId()) })),
-    currency: A.trading.active().key, label: A.trading.active().coinLabel
+    currency: A.trading.active().key, label: A.trading.active().coinLabel, pricingParity: !!A.trading.active().pricingParity
   });
 }
 
