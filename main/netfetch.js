@@ -143,4 +143,42 @@ async function fetchJson(url) {
   } finally { release(); }
 }
 
-module.exports = { tokenIcon, fetchJson, isBlockedHost };
+/** POST a small JSON body → raw response TEXT, or null on any failure/guard. Built for the AtomiX module's
+ *  Ethereum JSON-RPC calls (the caller pins the host allowlist — same division of duty as fetchJson/MEXC and
+ *  the keyAudit handler). Same SSRF guard + byte cap + bounded pool as GETs. POSTs never follow redirects
+ *  (a redirected RPC POST is suspect; the pinned endpoints don't redirect). NEVER throws. */
+async function postText(url, body) {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
+  if (typeof body !== "string" || body.length > 64 * 1024) return null;   // RPC payloads are tiny
+  await acquire();
+  try {
+    return await new Promise((resolve) => {
+      let u;
+      try { u = new URL(url.trim()); } catch (e) { return resolve(null); }
+      if (u.protocol !== "http:" && u.protocol !== "https:") return resolve(null);
+      isBlockedHost(u.hostname).then(blocked => {
+        if (blocked) return resolve(null);
+        const lib = u.protocol === "https:" ? https : http;
+        const req = lib.request(u, { method: "POST", headers: {
+          "User-Agent": "minimaCore-Desktop", "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body), Accept: "application/json"
+        } }, res => {
+          if (res.statusCode < 200 || res.statusCode >= 300) { res.resume(); return resolve(null); }
+          const chunks = []; let total = 0;
+          res.on("data", d => {
+            total += d.length;
+            if (total > MAX_BYTES) { req.destroy(); return resolve(null); }
+            chunks.push(d);
+          });
+          res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+          res.on("error", () => resolve(null));
+        });
+        req.setTimeout(READ_TIMEOUT_MS, () => { req.destroy(); resolve(null); });
+        req.on("error", () => resolve(null));
+        req.end(body);
+      });
+    });
+  } finally { release(); }
+}
+
+module.exports = { tokenIcon, fetchJson, postText, isBlockedHost };

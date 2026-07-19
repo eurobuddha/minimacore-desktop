@@ -1,14 +1,16 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "description": "macOS wrapper for the minimaCore node — runs and updates minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac --universal"
+    "dist": "electron-builder --mac --universal",
+    "test:atomix": "bash scripts/atomix-parity-check.sh && node scripts/atomix-unit.js",
+    "gate:atomix": "node scripts/atomix-boot-gate.js && node scripts/atomix-s2-gate.js"
   },
   "devDependencies": {
     "electron": "^33.0.0",

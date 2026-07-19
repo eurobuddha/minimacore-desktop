@@ -103,6 +103,33 @@ contextBridge.exposeInMainWorld("mcd", {
   ppLoadBackup: () => ipcRenderer.invoke("mcd:ppLoadBackup"),
   onPandapools: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:pandapools", h); return () => ipcRenderer.removeListener("mcd:pandapools", h); },
 
+  // AtomiX (atomic swaps)
+  axStatus: () => ipcRenderer.invoke("mcd:axStatus"),
+  axBook: () => ipcRenderer.invoke("mcd:axBook"),
+  axQuote: (sell, amount, slip) => ipcRenderer.invoke("mcd:axQuote", sell, amount, slip),
+  axSwap: (quoteId) => ipcRenderer.invoke("mcd:axSwap", quoteId),
+  axSwaps: () => ipcRenderer.invoke("mcd:axSwaps"),
+  axInspect: (hash) => ipcRenderer.invoke("mcd:axInspect", hash),
+  axMarketHistory: () => ipcRenderer.invoke("mcd:axMarketHistory"),
+  axWallet: () => ipcRenderer.invoke("mcd:axWallet"),
+  axExportKey: () => ipcRenderer.invoke("mcd:axExportKey"),
+  axCoins: () => ipcRenderer.invoke("mcd:axCoins"),
+  axSendMax: (asset) => ipcRenderer.invoke("mcd:axSendMax", asset),
+  axSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:axSendReview", asset, to, amt),
+  axSend: (asset, to, amt) => ipcRenderer.invoke("mcd:axSend", asset, to, amt),
+  axMakerCfg: () => ipcRenderer.invoke("mcd:axMakerCfg"),
+  axMakerSave: (cfg, manual) => ipcRenderer.invoke("mcd:axMakerSave", cfg, manual),
+  axMakerPublish: () => ipcRenderer.invoke("mcd:axMakerPublish"),
+  axMakerWithdraw: () => ipcRenderer.invoke("mcd:axMakerWithdraw"),
+  axSwitchCurrency: (key) => ipcRenderer.invoke("mcd:axSwitchCurrency", key),
+  axOtc: () => ipcRenderer.invoke("mcd:axOtc"),
+  axOtcGoLive: (sell, buy) => ipcRenderer.invoke("mcd:axOtcGoLive", sell, buy),
+  axOtcWithdraw: () => ipcRenderer.invoke("mcd:axOtcWithdraw"),
+  axOtcPropose: (lp, side, amount, price) => ipcRenderer.invoke("mcd:axOtcPropose", lp, side, amount, price),
+  axOtcDeal: (ref, action, amount, price) => ipcRenderer.invoke("mcd:axOtcDeal", ref, action, amount, price),
+  axInvalidate: () => ipcRenderer.invoke("mcd:axInvalidate"),
+  onAtomix: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:atomix", h); return () => ipcRenderer.removeListener("mcd:atomix", h); },
+
   // pushes
   onStatus: (fn) => { const h = (_e, s) => fn(s); ipcRenderer.on("mcd:status", h); return () => ipcRenderer.removeListener("mcd:status", h); },
   onLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:log", h); return () => ipcRenderer.removeListener("mcd:log", h); }

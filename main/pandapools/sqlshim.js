@@ -38,10 +38,21 @@ async function makeSqlShim(filePath) {
     }, 400);
   }
 
-  // Minimal H2→SQLite dialect fix: only the auto-increment id columns need rewriting; varchar/text/int/bigint all
-  // have valid SQLite type affinity, backticks are accepted, IF NOT EXISTS / ALTER / LIMIT / OFFSET are identical.
+  // Minimal H2→SQLite dialect fixes. varchar/text/int/bigint/double all have valid SQLite type affinity,
+  // backticks are accepted, IF NOT EXISTS / ALTER / LIMIT / OFFSET are identical. Beyond the original
+  // auto-increment rewrite, the AtomiX engine (main/atomix — same donor-reuse pattern) needs two more,
+  // both additive and inert for SQL that doesn't use the construct:
+  //   • H2 `MERGE INTO t (cols) KEY(`k`) VALUES (…)` upsert → SQLite `INSERT OR REPLACE INTO t (cols) VALUES (…)`
+  //     (every donor MERGE keys on the table's PRIMARY KEY, so REPLACE-on-PK is semantically identical).
+  //   • the donor writes `id bigint auto_increment PRIMARY KEY` — after the auto-increment rewrite that would
+  //     leave a duplicate "PRIMARY KEY"; collapse it.
   function translate(q) {
-    return q.replace(/`?\bid`?\s+bigint\s+auto_increment/gi, "`id` INTEGER PRIMARY KEY AUTOINCREMENT");
+    q = q.replace(/`?\bid`?\s+bigint\s+auto_increment/gi, "`id` INTEGER PRIMARY KEY AUTOINCREMENT")
+         .replace(/INTEGER PRIMARY KEY AUTOINCREMENT\s+PRIMARY KEY/gi, "INTEGER PRIMARY KEY AUTOINCREMENT");
+    if (/^\s*MERGE\s+INTO/i.test(q)) {
+      q = q.replace(/^\s*MERGE\s+INTO/i, "INSERT OR REPLACE INTO").replace(/\s+KEY\s*\([^)]*\)\s*/i, " ");
+    }
+    return q;
   }
 
   function sqlCmd(query, cb) {
@@ -74,7 +85,19 @@ async function makeSqlShim(filePath) {
   // `persist` exposes the debounced whole-image save for callers that write via `_db` directly (e.g. history-db.js
   // uses prepared statements + bound params on `_db` for speed/safety, then schedules a save with this). Additive —
   // the reused pandapools code keeps using `sql`/`flush` exactly as before.
-  return { sql: sqlCmd, persist: persistSoon, flush: () => { if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; } try { fs.writeFileSync(filePath, Buffer.from(db.export())); } catch (e) {} }, _db: db };
+  // flush(): synchronous, ATOMIC (tmp+rename) — the AtomiX glue routes every HTLC-secret write through this for
+  // crash-safety, so a torn write here would be worse than the debounce it replaces. Same tmp+rename as persistSoon.
+  return {
+    sql: sqlCmd, persist: persistSoon, _db: db,
+    flush: () => {
+      if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+      try {
+        const tmp = filePath + ".tmp";
+        fs.writeFileSync(tmp, Buffer.from(db.export()));
+        fs.renameSync(tmp, filePath);
+      } catch (e) { /* image left as-is; next write retries */ }
+    }
+  };
 }
 
 module.exports = { makeSqlShim };
