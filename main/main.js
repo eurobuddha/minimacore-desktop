@@ -242,6 +242,7 @@ ipcMain.handle("mcd:axSendMax", (_e, asset) => atomix.sendMax(asset));
 ipcMain.handle("mcd:axSendReview", (_e, asset, to, amt) => atomix.sendReview(asset, to, amt));
 ipcMain.handle("mcd:axSend", (_e, asset, to, amt) => atomix.sendExecute(asset, to, amt));
 ipcMain.handle("mcd:axMakerCfg", () => atomix.makerCfg());
+ipcMain.handle("mcd:axMakerPreview", (_e, cfg, manual) => atomix.makerPreview(cfg, manual));
 ipcMain.handle("mcd:axMakerSave", (_e, cfg, manual) => atomix.makerSave(cfg, manual));
 ipcMain.handle("mcd:axMakerPublish", () => atomix.makerPublish());
 ipcMain.handle("mcd:axMakerWithdraw", () => atomix.makerWithdraw());

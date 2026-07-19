@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld("mcd", {
   axSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:axSendReview", asset, to, amt),
   axSend: (asset, to, amt) => ipcRenderer.invoke("mcd:axSend", asset, to, amt),
   axMakerCfg: () => ipcRenderer.invoke("mcd:axMakerCfg"),
+  axMakerPreview: (cfg, manual) => ipcRenderer.invoke("mcd:axMakerPreview", cfg, manual),
   axMakerSave: (cfg, manual) => ipcRenderer.invoke("mcd:axMakerSave", cfg, manual),
   axMakerPublish: () => ipcRenderer.invoke("mcd:axMakerPublish"),
   axMakerWithdraw: () => ipcRenderer.invoke("mcd:axMakerWithdraw"),

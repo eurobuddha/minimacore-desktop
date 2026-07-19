@@ -446,6 +446,30 @@ async function makerCfg() {
   await p(cb => A.maker.loadConfig(() => cb(null)));
   return jclone(A.maker._state());
 }
+/** Preview the ladder a maker config WOULD publish — runs the engine's real applyPeg on a scratch order at the
+ *  live mid, so the preview is byte-identical to what publish() posts. Returns { ok, mid, source, result, wide,
+ *  bids:[{p,a}], asks:[{p,a}] }. Manual mode just echoes the entered levels (best-first). No state is persisted. */
+async function makerPreview(cfg, manual) {
+  const A = AX();
+  const SYM = A.order.SYM || "USDT";
+  cfg = cfg || {};
+  if (cfg.pegEnable) {
+    await p(cb => A.maker.refreshPeg(() => cb(null)));                 // fresh mid for the active currency
+    const o = A.order.make();
+    o.pairs[SYM] = A.order.pair(true, 0, 0, Number(cfg.min) || 0);     // enabled pair applyPeg will fill
+    const pc = jvm({ enable: true, step: Number(cfg.step) || 0, size: Number(cfg.size) || 0, bias: Number(cfg.bias) || 0,
+      reprice: Number(cfg.reprice) || 1, levels: Number(cfg.levels) || 1, min: Number(cfg.min) || 0 });
+    const r = A.peg.applyPeg(o, pc);
+    const pair = o.pairs[SYM] || { bids: [], asks: [] };
+    const st = A.peg.state ? A.peg.state() : {};
+    return jclone({ ok: true, result: r.result, mid: r.mid || st.price || 0, wide: !!r.wide,
+      source: A.peg.source ? A.peg.source() : "", fresh: !!st.fresh,
+      bids: (pair.bids || []).map(l => ({ p: l.p, a: l.a })), asks: (pair.asks || []).map(l => ({ p: l.p, a: l.a })) });
+  }
+  const m = manual || { bids: [], asks: [] };
+  const lv = arr => (arr || []).map(l => ({ p: Number(l.p), a: Number(l.a) })).filter(l => l.p > 0 && l.a > 0);
+  return jclone({ ok: true, result: "MANUAL", mid: 0, source: "manual", bids: lv(m.bids), asks: lv(m.asks) });
+}
 async function makerSave(cfg, manual) {
   const A = AX();
   await p(cb => A.maker.saveConfig(jvm(cfg), jvm(manual), () => cb(null)));
@@ -535,7 +559,7 @@ module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
   book, quote, swapPreview, swapExecute, swaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute,
-  makerCfg, makerSave, makerPublish, makerWithdraw, switchCurrency,
+  makerCfg, makerPreview, makerSave, makerPublish, makerWithdraw, switchCurrency,
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
   _ctx: () => ctx, _fire: fire

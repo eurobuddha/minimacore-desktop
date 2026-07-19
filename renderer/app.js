@@ -2953,6 +2953,7 @@ let axLastBook = null;
 let axMakerCfgCache = null;             // last maker read-model {cfg,manual,state,lastPublishMs} — for editor re-render on toggle
 let axPegMode = null;                   // maker editor peg/manual toggle (null = defer to saved cfg.pegEnable)
 let axEditing = false;                  // Market tab: editing your own order? (donor S.editing) — false shows Edit/Publish buttons
+let axMkrPreviewTimer = null;           // debounce for the live maker-ladder preview
 let axUpdateTimer = null;
 
 function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; }
@@ -3322,12 +3323,42 @@ function axMakerEditor(mc, ccy, b) {
       + axEditRow("Ask (USDT/" + esc(ccy) + ")", axEditInput("axAsk", a0.p != null ? a0.p : ""))
       + axEditRow("Size (" + esc(ccy) + ")", axEditInput("axMSize", b0.a != null ? b0.a : (a0.a != null ? a0.a : "")));
   }
-  return axEditRow("Auto-price (peg to " + (parity ? "parity" : "MEXC") + ")",
+  return `<div class="ax-prev-label">Preview — the market you'll publish</div><div class="ax-prev" id="axMkrPreview"><div class="empty">Calculating…</div></div>`
+    + axEditRow("Auto-price (peg to " + (parity ? "parity" : "MEXC") + ")",
         `<button class="ax-toggle-pill${peg ? " on" : ""}" id="axPegToggle">${peg ? "On" : "Off"}</button>`)
     + fields
     + axEditRow("Min trade (" + esc(ccy) + ")", axEditInput("axMin", c.min != null ? c.min : ""))
     + `<button class="btn btn--primary btn--full" id="axSave" style="margin-top:12px">Save &amp; publish</button>`
     + `<div class="ax-mkr-actions" style="margin-top:8px"><button class="btn btn--outline btn--full" id="axWithdraw">Withdraw market</button><button class="btn btn--outline btn--full" id="axCancel">Cancel</button></div>`;
+}
+/** The LIVE preview ladder — the bid/ask levels the current config WOULD publish (engine applyPeg at the live mid).
+ *  This is the point of the maker section: compose your market and watch the ladder update, then Save & publish. */
+function axMakerPreviewLadder(pv) {
+  if (!pv || !pv.ok) return `<div class="empty">Preview unavailable — is the node ready?</div>`;
+  const bids = pv.bids || [], asks = pv.asks || [];
+  if (!bids.length && !asks.length)
+    return `<div class="empty">${esc(pv.source === "manual" ? "Enter a bid, ask and size to preview your market."
+      : (pv.mid > 0 ? "Enter a size and spread step to build your ladder." : "Waiting for a live " + (pv.source || "market") + " price…"))}</div>`;
+  let out = `<div class="ax-prev-head mono">${pv.source === "manual" ? "manual order" : "mid " + fmtPx(pv.mid) + (pv.source ? " · " + esc(pv.source) : "")}${pv.wide ? " · WIDE (stale feed)" : ""}  ·  ${bids.length + asks.length} level${bids.length + asks.length === 1 ? "" : "s"}</div>`;
+  out += `<div class="ax-legend"><span class="sell">YOUR BIDS</span><span class="buy">YOUR ASKS</span></div>`;
+  const n = Math.max(bids.length, asks.length);
+  for (let i = 0; i < n; i++) out += axPrevRow(bids[i], asks[i]);
+  return out;
+}
+function axPrevHalf(l, isBid) {
+  if (!l) return `<div class="ax-half${isBid ? " bid" : ""}"><span class="ax-sz">—</span></div>`;
+  return `<div class="ax-half${isBid ? " bid" : ""}"><span class="top"><span class="ax-px ${isBid ? "bidpx" : "askpx"}">${fmtPx(l.p)}</span><span class="ax-sz">${fmtAbbrev(l.a)}</span></span></div>`;
+}
+function axPrevRow(bid, ask) { return `<div class="ax-depth">${axPrevHalf(bid, true)}<span class="divider">│</span>${axPrevHalf(ask, false)}</div>`; }
+function axSchedMakerPreview(readCfg, readManual) {
+  if (axMkrPreviewTimer) clearTimeout(axMkrPreviewTimer);
+  axMkrPreviewTimer = setTimeout(() => axRefreshMakerPreview(readCfg, readManual), 300);
+}
+async function axRefreshMakerPreview(readCfg, readManual) {
+  if (!el("axMkrPreview")) return;
+  const pv = await api.axMakerPreview(readCfg(), readManual()).catch(() => null);
+  const host = el("axMkrPreview"); if (!host) return;   // editor closed while awaiting
+  host.innerHTML = axMakerPreviewLadder(pv);
 }
 function axWireMakerEditor(ccy) {
   const num = id => { const e = el(id); return e ? (Number(e.value) || 0) : 0; };
@@ -3347,6 +3378,9 @@ function axWireMakerEditor(ccy) {
   el("axSave").onclick = async () => { const btn = el("axSave"); btn.disabled = true; btn.textContent = "Saving…"; const r = await api.axMakerSave(readCfg(), readManual()).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); axEditing = false; axPegMode = null; renderAxMarket(); };
   el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", "ok"); axEditing = false; axPegMode = null; renderAxMarket(); };
   el("axCancel").onclick = () => { axEditing = false; axPegMode = null; renderAxMarket(); };
+  // LIVE preview: every field edit recomputes the ladder this config would publish (never re-renders the inputs).
+  ["axStep", "axSize", "axLevels", "axBias", "axReprice", "axMin", "axBid", "axAsk", "axMSize"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => axSchedMakerPreview(readCfg, readManual)); });
+  axRefreshMakerPreview(readCfg, readManual);   // initial paint on open / toggle
 }
 
 // ---- Activity ----

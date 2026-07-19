@@ -508,6 +508,12 @@ body { font-family: var(--sans); }
 #view-atomix .ax-mymkt-row .ax-sz { color:var(--dim); }
 #view-atomix .ax-mkr-actions { display:flex; gap:8px; margin-top:10px; }
 
+/* LIVE maker preview ladder — the market your config will publish, updated as you type */
+#view-atomix .ax-prev-label { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin:2px 0 6px; }
+#view-atomix .ax-prev { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:8px 10px; margin-bottom:12px; min-height:56px; }
+#view-atomix .ax-prev-head { font-size:11px; color:var(--dim); padding:0 2px 4px; }
+#view-atomix .ax-prev .ax-depth { background:transparent; }
+
 /* maker editor rows (donor editRow/editInput/toggle) — label left, right-aligned input */
 #view-atomix .ax-editrow { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); }
 #view-atomix .ax-editrow:last-of-type { border-bottom:0; }
