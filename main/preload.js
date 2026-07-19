@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld("mcd", {
   // token icons (SSRF-guarded main-process fetch → data: URI) — CSP blocks remote fetch in the renderer
   tokenIcon: (url) => ipcRenderer.invoke("mcd:tokenIcon", url),
 
+  // KeyUses reuse audit (host-pinned eurobuddha.com main-process fetch; null if unreachable)
+  keyAudit: (pubkeys) => ipcRenderer.invoke("mcd:keyAudit", pubkeys),
+  keyReuse: (addrs) => ipcRenderer.invoke("mcd:keyReuse", addrs),
+
   // local transaction-history DB (SQLite; our own source of truth — survives node pruning + restarts)
   histGet: (limit) => ipcRenderer.invoke("mcd:histGet", limit),
   histAdd: (rows) => ipcRenderer.invoke("mcd:histAdd", rows),

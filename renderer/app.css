@@ -370,6 +370,22 @@ body { font-family: var(--sans); }
 /* history detail: dimmed coinids / state variables under each input/output line */
 .hist-dim { color: var(--dim); font-size: 10px; font-family: var(--mono); word-break: break-all; }
 
+/* Address key-uses panel */
+.ku-list { max-height: 340px; overflow-y: auto; margin-top: 4px; }
+.ku-row { padding: 8px 2px; }
+.ku-row .row__mid { min-width: 0; }   /* let the address ellipsize inside the flex row instead of overflowing */
+.ku-addr { font-family: var(--mono); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ku-addr:hover { color: var(--accent); }
+.ku-uses { font-family: var(--mono); font-weight: 600; }
+.ku-uses--warn { color: var(--amber); }
+.ku-uses--red { color: var(--red); }
+.ku-cap { font-family: var(--mono); color: var(--dim); font-size: 11px; }
+.ku-verdict { display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: .04em; margin-top: 2px; }
+.ku-verdict:empty { display: none; }
+.ku-v--ok { color: var(--green); }
+.ku-v--warn { color: var(--amber); }
+.ku-v--risk { color: var(--red); font-weight: 700; }
+
 /* history search + filter bar */
 .hist-filter { display: flex; gap: 8px; margin: 6px 0 8px; }
 .hist-search { flex: 1 1 auto; }
