@@ -3030,10 +3030,10 @@ async function renderAxSwap() {
   const usdtEst = have ? ax6(Number(axAmt) * price) : "";
   const dual = have ? `<div class="card">
       <div class="field__label">YOU SEND</div>
-      <div class="ax-amtrow">${axChip(sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "Ccy" : "Usdt"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? axAmt : usdtEst)}" autocomplete="off" /></div>
+      <div class="ax-amtrow">${axChip(sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "InCcy" : "InUsdt"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? axAmt : usdtEst)}" autocomplete="off" /></div>
       <div class="ax-flip"><button class="btn btn--sm btn--outline" id="axFlip" title="Flip direction">⇅</button></div>
       <div class="field__label">YOU RECEIVE (estimate)</div>
-      <div class="ax-amtrow">${axChip(!sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "Usdt" : "Ccy"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? usdtEst : axAmt)}" autocomplete="off" /></div>
+      <div class="ax-amtrow">${axChip(!sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "InUsdt" : "InCcy"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? usdtEst : axAmt)}" autocomplete="off" /></div>
       ${axSell ? "" : axSlipRow()}
       <div class="view__desc" id="axBestLine">${axBestLine(price, cap, ccy)}</div>
       <button class="btn btn--primary btn--full" id="axReview">Review swap</button>
@@ -3064,16 +3064,18 @@ function axChip(isCcy, ccy, bals) {
 /** Bidirectional wiring: typing one field updates the OTHER (never the focused one) + refreshes the best-price
  *  line via a debounced exact engine preview. No re-render → the edited field keeps focus (donor rule). */
 function wireAxSwapInputs(price, ccy) {
-  const ccyIn = el("axCcy"), usdtIn = el("axUsdt");
+  const ccyIn = el("axInCcy"), usdtIn = el("axInUsdt");
   if (!ccyIn || !usdtIn) return;
+  // strict numeric-only: keep at most one dot; sanitize the FIELD (not just axAmt) so text can't be entered.
+  const sanitize = (inp) => { const c = axCleanNum(inp.value); if (c !== inp.value) { const at = inp.selectionStart; inp.value = c; try { inp.setSelectionRange(at - 1 < 0 ? 0 : at, at - 1 < 0 ? 0 : at); } catch (e) {} } return c; };
   ccyIn.addEventListener("input", () => {
-    axAmt = axCleanNum(ccyIn.value);
-    if (document.activeElement !== usdtIn) usdtIn.value = price > 0 ? ax6(Number(axAmt) * price) : "";
+    axAmt = sanitize(ccyIn);
+    if (document.activeElement !== usdtIn) usdtIn.value = price > 0 && Number(axAmt) > 0 ? ax6(Number(axAmt) * price) : "";
     axSchedulePreview();
   });
   usdtIn.addEventListener("input", () => {
-    const u = axCleanNum(usdtIn.value);
-    axAmt = price > 0 ? ax6(Number(u) / price) : "";
+    const u = sanitize(usdtIn);
+    axAmt = price > 0 && Number(u) > 0 ? ax6(Number(u) / price) : "";
     if (document.activeElement !== ccyIn) ccyIn.value = axAmt;
     axSchedulePreview();
   });
@@ -3091,7 +3093,7 @@ function axSchedulePreview() {
     const m = pv.meta || {};
     if (bl) bl.textContent = axBestLine(m.bestPrice, m.bestCap, m.label, m.depth);
     // refine the RECEIVE field with exact engine math (not the local float), but never the focused input
-    const recv = axSell ? el("axUsdt") : el("axCcy");
+    const recv = axSell ? el("axInUsdt") : el("axInCcy");
     if (recv && document.activeElement !== recv) {
       const val = pv.single ? (axSell ? pv.single.usdt : pv.single.minima) : (axSell ? String(pv.plan.totalUsdt) : String(pv.plan.filledMinima));
       if (val != null) recv.value = val;
