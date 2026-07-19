@@ -2952,7 +2952,7 @@ let axStatusCache = { ready: false };
 let axLastBook = null;
 let axUpdateTimer = null;
 
-function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; }
+function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; }
 
 function axHeader(active) {
   const st = axStatusCache;
@@ -2976,6 +2976,8 @@ async function renderAtomix() {
   if (!host) return;
   if (!running) { host.innerHTML = `<div class="empty">Start your node to use AtomiX.</div>`; return; }
   axStatusCache = await api.axStatus().catch(() => ({ ready: false }));
+  // currency accent: mxUSDT = Tether green, MINIMA = orange (donor trading.js) — scoped to #view-atomix.
+  const vroot = el("view-atomix"); if (vroot) vroot.setAttribute("data-axccy", axStatusCache.currency === "minima" ? "minima" : "mxusdt");
   if (!axStatusCache.ready) {
     host.innerHTML = `${axHeader(axView)}<div class="empty">AtomiX is starting on your node — deriving your swap identity and registering the covenant. This clears on its own in a few seconds.</div>`;
     wireAxHeader(); return;
@@ -2988,57 +2990,192 @@ async function renderAtomix() {
 }
 
 // ---- Swap ----
+// donor swapplan (6dp grain) reproduced client-side for the LIVE typing estimate (labelled an estimate; the
+// engine's exact BigDecimal math is used on Review/execute). computeUsdt=floor6(ccy×price); computeMinima=floor6(usdt÷price).
+function ax6(x) { return isFinite(x) && x > 0 ? String(Math.floor(x * 1e6) / 1e6) : ""; }
+function axCleanNum(v) { return String(v).replace(/[^0-9.]/g, ""); }
+let axAmt = "";              // canonical ccy (mxUSDT/MINIMA) amount — bidirectional card keeps this
+let axPreviewTimer = null, axQuoteMeta = null;
+let axBalsCache = null;      // last wallet balances — instant paint; ETH reads are slow so we refresh async
+
 async function renderAxSwap() {
   const host = el("axBody");
-  const b = await api.axBook().catch(() => null);
+  const [b, swaps] = await Promise.all([api.axBook().catch(() => null), api.axSwaps().catch(() => [])]);
   axLastBook = b;
-  const ccy = b ? b.label : "mxUSDT";
-  host.innerHTML = `${axHeader("swap")}
-    <div class="card">
-      <div class="seg"><button class="btn btn--full ${axSell ? "btn--primary" : "btn--outline"}" id="axDirSell">Sell ${esc(ccy)}</button><button class="btn btn--full ${axSell ? "btn--outline" : "btn--primary"}" id="axDirBuy">Buy ${esc(ccy)}</button></div>
-      <div class="field"><div class="field__label" id="axAmtLbl">${axSell ? "Sell" : "Buy"} amount (${esc(ccy)})</div><input class="field__input" id="axAmt" placeholder="0.00" autocomplete="off" /></div>
-      ${axSell ? "" : `<div class="kv"><span>Max slippage</span><span>${[2, 4.2].map(s => `<button class="btn btn--sm ${axSlip === s ? "btn--primary" : "btn--outline"}" data-axslip="${s}">${s}%</button>`).join("")}<button class="btn btn--sm ${axSlip !== 2 && axSlip !== 4.2 ? "btn--primary" : "btn--outline"}" id="axSlipCustom">${axSlip !== 2 && axSlip !== 4.2 ? axSlip + "%" : "Custom"}</button></span></div>`}
-      <div class="view__desc" id="axQuoteLine">${axBookLine(b)}</div>
+  const ccy = (b && b.label) || "mxUSDT";
+  const bals = axBalsCache || { minima: "0", usdt: "0", eth: "0" };
+  // refresh balances in the background (slow ETH reads) → patch the chips + stages without a full re-render
+  api.axWallet().then(w => {
+    if (!w || activeView !== "atomix" || axView !== "swap") return;
+    axBalsCache = w.bals;
+    const chips = el("axBody").querySelectorAll(".ax-chip .ax-avail");
+    // send chip is index 0, receive chip index 1; send=ccy in SELL, USDT in BUY
+    if (chips[0]) chips[0].textContent = "avail " + (axSell ? w.bals.minima : w.bals.usdt);
+    if (chips[1]) chips[1].textContent = "avail " + (axSell ? w.bals.usdt : w.bals.minima);
+    const st = el("axBody").querySelector(".ax-stages"); if (st) st.innerHTML = axStagesRows(swaps, w.bals, ccy);
+  }).catch(() => {});
+  const q = b || {};
+  const have = axSell ? (q.bestBid > 0) : (q.bestAsk > 0);
+  const price = axSell ? q.bestBid : q.bestAsk;
+  const cap = axSell ? q.bidCap : q.askCap;
+  axQuoteMeta = { price, cap, ccy };
+
+  const noQuote = !have ? `<div class="card">
+      <div style="font-weight:600">No one is quoting a ${axSell ? "buy" : "sell"} price right now.</div>
+      <div class="empty" style="margin-top:6px">Check back soon, or open Market to place your own order and wait for a match.</div>
+      <button class="btn btn--outline btn--sm" id="axOpenMarket" style="margin-top:8px">Open Market</button>
+    </div>` : "";
+
+  const sendCcy = axSell;   // SELL → you send ccy; BUY → you send USDT
+  const usdtEst = have ? ax6(Number(axAmt) * price) : "";
+  const dual = have ? `<div class="card">
+      <div class="field__label">YOU SEND</div>
+      <div class="ax-amtrow">${axChip(sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "Ccy" : "Usdt"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? axAmt : usdtEst)}" autocomplete="off" /></div>
+      <div class="ax-flip"><button class="btn btn--sm btn--outline" id="axFlip" title="Flip direction">⇅</button></div>
+      <div class="field__label">YOU RECEIVE (estimate)</div>
+      <div class="ax-amtrow">${axChip(!sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "Usdt" : "Ccy"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? usdtEst : axAmt)}" autocomplete="off" /></div>
+      ${axSell ? "" : axSlipRow()}
+      <div class="view__desc" id="axBestLine">${axBestLine(price, cap, ccy)}</div>
       <button class="btn btn--primary btn--full" id="axReview">Review swap</button>
-    </div>`;
+      <div id="axStatusLine"></div>
+    </div>` : "";
+
+  host.innerHTML = `${axHeader("swap")}
+    <div class="view__title" style="border:0;padding-bottom:2px">Swap ${esc(ccy)} ⇄ USDT</div>
+    <div class="view__desc" style="margin-top:0">Enter an amount — see exactly what you'll get at the best price.</div>
+    <div class="seg"><button class="btn btn--full ${axSell ? "btn--primary" : "btn--outline"}" id="axDirSell">Sell ${esc(ccy)}</button><button class="btn btn--full ${axSell ? "btn--outline" : "btn--primary"}" id="axDirBuy">Buy ${esc(ccy)}</button></div>
+    ${noQuote}${dual}
+    ${axStages(swaps, bals, ccy)}`;
   wireAxHeader();
   el("axDirSell").onclick = () => { axSell = true; renderAxSwap(); };
   el("axDirBuy").onclick = () => { axSell = false; renderAxSwap(); };
+  const om = el("axOpenMarket"); if (om) om.onclick = () => { axView = "market"; renderAtomix(); };
+  const fl = el("axFlip"); if (fl) fl.onclick = () => { axSell = !axSell; renderAxSwap(); };
+  wireAxSlipRow();
+  const rv = el("axReview"); if (rv) rv.onclick = axDoReview;
+  wireAxSwapInputs(price, ccy);
+}
+
+/** Coin chip with the live available balance (donor coinChip): disc badge + label + "avail X". */
+function axChip(isCcy, ccy, bals) {
+  const avail = isCcy ? bals.minima : bals.usdt;
+  return `<div class="ax-chip"><span class="ax-disc${isCcy ? "" : " usdt"}">${isCcy ? "M" : "$"}</span><span class="ax-tick">${esc(isCcy ? ccy : "USDT")}</span><span class="ax-avail">avail ${esc(avail)}</span></div>`;
+}
+/** Bidirectional wiring: typing one field updates the OTHER (never the focused one) + refreshes the best-price
+ *  line via a debounced exact engine preview. No re-render → the edited field keeps focus (donor rule). */
+function wireAxSwapInputs(price, ccy) {
+  const ccyIn = el("axCcy"), usdtIn = el("axUsdt");
+  if (!ccyIn || !usdtIn) return;
+  ccyIn.addEventListener("input", () => {
+    axAmt = axCleanNum(ccyIn.value);
+    if (document.activeElement !== usdtIn) usdtIn.value = price > 0 ? ax6(Number(axAmt) * price) : "";
+    axSchedulePreview();
+  });
+  usdtIn.addEventListener("input", () => {
+    const u = axCleanNum(usdtIn.value);
+    axAmt = price > 0 ? ax6(Number(u) / price) : "";
+    if (document.activeElement !== ccyIn) ccyIn.value = axAmt;
+    axSchedulePreview();
+  });
+}
+/** Debounced exact preview: refines the receive estimate + best-price line with the engine's real numbers
+ *  (sweep avg differs from the single best price once the amount exceeds the best level's cap). */
+function axSchedulePreview() {
+  if (axPreviewTimer) clearTimeout(axPreviewTimer);
+  axPreviewTimer = setTimeout(async () => {
+    if (activeView !== "atomix" || axView !== "swap" || !axAmt) return;
+    const pv = await api.axSwapPreview(axSell, axAmt, axSlip).catch(() => null);
+    if (!pv || activeView !== "atomix" || axView !== "swap") return;
+    const bl = el("axBestLine");
+    if (pv.err) { if (bl) bl.textContent = pv.err; return; }
+    const m = pv.meta || {};
+    if (bl) bl.textContent = axBestLine(m.bestPrice, m.bestCap, m.label, m.depth);
+    // refine the RECEIVE field with exact engine math (not the local float), but never the focused input
+    const recv = axSell ? el("axUsdt") : el("axCcy");
+    if (recv && document.activeElement !== recv) {
+      const val = pv.single ? (axSell ? pv.single.usdt : pv.single.minima) : (axSell ? String(pv.plan.totalUsdt) : String(pv.plan.filledMinima));
+      if (val != null) recv.value = val;
+    }
+  }, 250);
+}
+function axBestLine(price, cap, ccy, depth) {
+  if (!(price > 0)) return "No live makers on the book right now.";
+  let s = `Best price ${fmtPx(price)} USDT/${ccy}  ·  up to ~${fmtAbbrev(cap)} at best`;
+  if (depth != null && depth > cap + 1e-9) s += `, ~${fmtAbbrev(depth)} across the book`;
+  if (!axSell) s += "  ·  ETH gas per part";
+  return s;
+}
+function axSlipRow() {
+  return `<div class="kv"><span>Max slippage</span><span>${[2, 4.2].map(s => `<button class="btn btn--sm ${axSlip === s ? "btn--primary" : "btn--outline"}" data-axslip="${s}">${s}%</button>`).join("")}<button class="btn btn--sm ${axSlip !== 2 && axSlip !== 4.2 ? "btn--primary" : "btn--outline"}" id="axSlipCustom">${axSlip !== 2 && axSlip !== 4.2 ? axSlip + "%" : "Custom"}</button></span></div>`;
+}
+function wireAxSlipRow() {
   document.querySelectorAll("#axBody [data-axslip]").forEach(x => x.onclick = () => { axSlip = Number(x.dataset.axslip); renderAxSwap(); });
   const sc = el("axSlipCustom"); if (sc) sc.onclick = async () => {
-    const v = await showPrompt("Custom max slippage", "", "e.g. 1.5", { message: "Percent (0.1 – 50). A BUY sweep won't take levels priced beyond this above the best ask." });
-    const n = parseFloat(v); if (isFinite(n) && n >= 0.1 && n <= 50) { axSlip = Math.round(n * 10) / 10; renderAxSwap(); } else if (v != null) toast("Enter 0.1–50", "warn");
+    const v = await showPrompt("Custom max slippage", "", "e.g. 1.5", { message: "Percent (0.1 – 50). A BUY sweep will not take levels priced beyond this above the best ask." });
+    const n = parseFloat(v); if (isFinite(n) && n >= 0.1 && n <= 50) { axSlip = Math.round(n * 10) / 10; renderAxSwap(); } else if (v != null) toast("Enter a percent between 0.1 and 50", "warn");
   };
-  el("axReview").onclick = axDoReview;
-}
-function axBookLine(b) {
-  if (!b || !b.makers) return "No live makers on the book right now.";
-  return `Best bid ${fmtPx(b.bestBid)} · best ask ${fmtPx(b.bestAsk)} USDT/${esc(b.label)} · ${b.makers} maker${b.makers === 1 ? "" : "s"}`;
 }
 function fmtPx(p) { p = Number(p) || 0; return p < 1 ? (Math.round(p * 1e5) / 1e5) : (Math.round(p * 100) / 100); }
 
+/** The "YOUR SWAP" stages tracker (donor stages()): node/balance readiness + the in-flight swap's 4 legs. */
+function axStages(swaps, bals, ccy) {
+  return `<div class="field__label" style="margin-top:16px">YOUR SWAP</div><div class="ax-stages">${axStagesRows(swaps, bals, ccy)}</div>`;
+}
+function axStagesRows(swaps, bals, ccy) {
+  const gt = v => parseFloat(v) > 0;
+  const rows = [];
+  rows.push(axStageRow(axStatusCache.ready ? "done" : "warn", "Node ready"));
+  if (axSell) rows.push(axStageRow(gt(bals.minima) ? "done" : "pending", ccy + " ready to sell"));
+  else { rows.push(axStageRow(gt(bals.usdt) ? "done" : "pending", "USDT ready to spend")); rows.push(axStageRow(gt(bals.eth) ? "done" : "pending", "ETH for gas")); }
+  const sw = (swaps || []).find(s => s.status !== "COMPLETE" && s.status !== "REFUNDED" && s.status !== "ERROR");
+  if (sw) {
+    rows.push(`<div class="ax-swapline mono">${esc(sw.sellamount)} ${esc(axTok(sw.selltoken))} → ${esc(sw.buyamount)} ${esc(axTok(sw.buytoken))} · ${esc(String(sw.role).toLowerCase())}</div>`);
+    rows.push(axStageRow(axLegDone(sw, 1), "Locked your " + esc(sw.sellamount) + " " + esc(axTok(sw.selltoken))));
+    rows.push(axStageRow(axLegDone(sw, 2), "Counterparty locks their side"));
+    rows.push(axStageRow(axLegDone(sw, 3), "Claim your " + esc(sw.buyamount) + " " + esc(axTok(sw.buytoken))));
+    rows.push(axStageRow(axLegDone(sw, 4), "Swap complete"));
+  } else rows.push(axStageRow("pending", "Enter an amount and tap Review to begin"));
+  return rows.join("");
+}
+function axStageRow(state, text) { return `<div class="ax-stage ${state}"><span class="sdot"></span><span>${text}</span></div>`; }
+function axLegDone(sw, n) {
+  const s = sw.status;
+  if (s === "COMPLETE") return "done";
+  if (s === "REFUNDED") return n === 1 ? "warn" : "pending";
+  if (n === 1) return "done";
+  if (n === 2) return (s === "LOCKED" || s === "CLAIMING") ? "active" : "pending";
+  if (n === 3) return s === "CLAIMING" ? "active" : "pending";
+  return "pending";
+}
+
 async function axDoReview() {
-  const amt = (el("axAmt") && el("axAmt").value || "").trim();
-  if (!amt) { toast("Enter an amount", "warn"); return; }
-  const q = await api.axQuote(axSell, amt, axSlip).catch(e => ({ err: String(e.message || e) }));
+  if (!axAmt) { toast("Enter how much " + (axQuoteMeta ? axQuoteMeta.ccy : "mxUSDT") + " to " + (axSell ? "sell" : "buy"), "warn"); return; }
+  const q = await api.axQuote(axSell, axAmt, axSlip).catch(e => ({ err: String(e.message || e) }));
   if (q.err) { toast(q.err, "warn"); return; }
-  const ccy = q.label;
-  let msg;
+  const ccy = q.label, sh = s => { const n = Number(s); return isFinite(n) ? String(Math.round(n * 1e6) / 1e6) : s; };
+  let title, msg;
   if (q.single) {
-    msg = `Sell  ${q.single.minima} ${ccy}\nReceive  ≈ ${q.single.usdt} USDT\n\nBest price ${fmtPx(q.single.price)} USDT/${ccy}\nThis locks your ${ccy} on-chain.`;
+    title = "Review — Sell " + ccy;
+    msg = `Sell  ${q.single.minima} ${ccy}\nReceive  ≈ ${q.single.usdt} USDT\n\nBest price ${fmtPx(q.single.price)} USDT/${ccy}\nCounterparty  ${axShort(q.single.maker)}\nThis locks your ${ccy} on-chain.`;
   } else {
-    const p = q.plan;
-    const parts = p.legs.map((l, i) => `  Part ${i + 1}: ${l.minima} ${ccy} @ ${fmtPx(l.price)} → ${l.usdt} USDT`).join("\n");
-    msg = `${axSell ? "Sell" : "Buy"} ${p.filledMinima} ${ccy} in ${p.legs.length} part${p.legs.length === 1 ? "" : "s"}\nAvg ${fmtPx(p.avgPrice)} · worst ${fmtPx(p.worstPrice)} USDT/${ccy}\n\n${parts}\n\nTotal: ${axSell ? "receive ≈ " + p.totalUsdt + " USDT" : "pay ≈ " + p.totalUsdt + " USDT"}${p.partial ? "\n\n⚠ Only fills " + p.filledMinima + " of " + p.target + " — the rest isn't available right now." : ""}${axSell ? "" : "\n\nEach part is a separate Ethereum transaction (ETH gas per part)."}`;
+    const p = q.plan, n = p.legs.length;
+    const head = `Avg ${fmtPx(p.avgPrice)}  ·  worst ${fmtPx(p.worstPrice)} USDT/${ccy}${!axSell && p.slippagePct > 0 ? "  ·  within " + sh(p.slippagePct) + "% slippage" : ""}`;
+    const parts = p.legs.map((l, i) => `Part ${i + 1} · ${l.minima} ${ccy} @ ${fmtPx(l.price)} → ${l.usdt} USDT · ${axShort(l.maker)}`).join("\n");
+    const total = axSell ? `Total: sell ${sh(p.filledMinima)} ${ccy} · receive ≈ ${sh(p.totalUsdt)} USDT` : `Total: pay ≈ ${sh(p.totalUsdt)} USDT · receive ≈ ${sh(p.filledMinima)} ${ccy}`;
+    const partial = p.partial ? `\n\nFills ${fmtAbbrev(p.filledMinima)} of ${fmtAbbrev(p.target)} ${ccy} — ${(!axSell && p.stopReason === "slippage") ? "the rest is priced beyond your " + sh(p.slippagePct) + "% slippage." : "the rest isn't available in the book right now."}` : "";
+    const gas = !axSell ? `\n\nEach part is a separate Ethereum transaction — you pay ETH gas ${n} ${n === 1 ? "time." : "times."}` : "";
+    title = axSell ? `Sell ${fmtAbbrev(p.filledMinima)} ${ccy} in ${n} ${n === 1 ? "part" : "parts"}` : `Buy ≈ ${fmtAbbrev(p.filledMinima)} ${ccy} for ≈ ${sh(p.totalUsdt)} USDT in ${n} ${n === 1 ? "part" : "parts"}`;
+    msg = `${head}\n\n${parts}\n\n${total}${partial}${gas}`;
   }
-  const go = await showConfirm(q.single ? "Review — Sell " + ccy : (axSell ? "Sell " + ccy : "Buy " + ccy), msg, q.plan && q.plan.legs.length > 1 ? "Start sweep" : "Start swap");
+  const go = await showConfirm(title, msg, q.plan && q.plan.legs.length > 1 ? "Start sweep" : "Start swap");
   if (!go) return;
-  el("axReview").disabled = true;
+  const rv = el("axReview"); if (rv) rv.disabled = true;
   const r = await api.axSwap(q.quoteId).catch(e => ({ err: String(e.message || e) }));
   if (r && r.err) { toast(r.err, "warn"); }
-  else if (r) { toast(`✓ ${r.ok}/${r.of} leg${r.of === 1 ? "" : "s"} locked — watching for the counterparty.${r.stopped ? " " + r.stopped : ""}`, "ok"); if (el("axAmt")) el("axAmt").value = ""; }
+  else if (r) { toast(`✓ ${r.ok}/${r.of} leg${r.of === 1 ? "" : "s"} locked — watching for the counterparty.${r.stopped ? " " + r.stopped : ""}`, "ok"); axAmt = ""; }
   if (activeView === "atomix" && axView === "swap") renderAxSwap();
 }
+function axShort(pk) { pk = String(pk || ""); return pk.length < 14 ? pk : pk.slice(0, 8) + "…" + pk.slice(-6); }
 
 // ---- Market (book + maker editor + history chart) ----
 async function renderAxMarket() {
@@ -3293,6 +3430,14 @@ async function refreshAxActive() {
   const focusInBody = document.activeElement && el("axBody").contains(document.activeElement) && document.activeElement.tagName === "INPUT";
   if (axView === "activity") return renderAxActivity();
   if (axView === "market") { if (!focusInBody) return renderAxMarket(); return; }   // skip while configuring the market
-  if (axView === "swap") { const b = await api.axBook().catch(() => null); axLastBook = b; const ln = el("axQuoteLine"); if (ln) ln.textContent = axBookLine(b); }
+  if (axView === "swap") {
+    // if the user isn't typing an amount, a full re-render refreshes the book/best-price/stages; otherwise
+    // only refresh the stages tracker in place (never touch the amount inputs).
+    if (!focusInBody) return renderAxSwap();
+    const swaps = await api.axSwaps().catch(() => []); const w = await api.axWallet().catch(() => null);
+    const bals = (w && w.bals) || { minima: "0", usdt: "0", eth: "0" };
+    const stagesEl = el("axBody").querySelector(".ax-stages");
+    if (stagesEl) stagesEl.innerHTML = axStagesRows(swaps, bals, axQuoteMeta ? axQuoteMeta.ccy : "mxUSDT");
+  }
   // OTC/Wallet: leave the form alone; the user re-enters or taps Refresh (an OS notification flags OTC activity).
 }

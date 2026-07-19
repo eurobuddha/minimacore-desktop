@@ -440,3 +440,28 @@ body { font-family: var(--sans); }
 
   :root[data-theme="light"] .tabs-wrap { background: linear-gradient(180deg, rgba(22,24,28,.02), transparent); }
 }
+
+/* ---- AtomiX currency accent: mxUSDT = Tether green, MINIMA = Minima orange (donor trading.js parity).
+   Scoped to the AtomiX tab so the rest of the app keeps the TERMINAL orange. Custom-property re-cascade. ---- */
+#view-atomix[data-axccy="mxusdt"] { --accent: #26A17B; --accent-hover: #1E8A68; --on-accent: #FFFFFF; --accent-bg: rgba(38,161,123,.14); }
+#view-atomix[data-axccy="minima"] { --accent: #F7931A; --accent-hover: #D63110; --on-accent: #160B06; --accent-bg: rgba(247,147,26,.14); }
+
+/* ---- AtomiX swap card + stages (donor ui.js parity) ---- */
+#view-atomix .ax-amtrow { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; margin:4px 0 2px; }
+#view-atomix .ax-amt { flex:1; background:transparent; border:0; outline:0; color:var(--text); font-size:24px; text-align:right; min-width:0; }
+#view-atomix .ax-chip { display:flex; flex-direction:column; align-items:flex-start; gap:1px; min-width:78px; }
+#view-atomix .ax-chip .ax-disc { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--accent); color:var(--on-accent); font-weight:700; font-size:12px; }
+#view-atomix .ax-chip .ax-disc.usdt { background:#26A69A; color:#fff; }
+#view-atomix .ax-chip .ax-tick { font-size:12px; font-weight:600; color:var(--text); margin-top:2px; }
+#view-atomix .ax-chip .ax-avail { font-size:10.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
+#view-atomix .ax-flip { text-align:center; margin:2px 0; }
+#view-atomix .ax-stages { display:flex; flex-direction:column; gap:7px; margin-top:6px; }
+#view-atomix .ax-stage { display:flex; align-items:center; gap:9px; font-size:13px; color:var(--dim); }
+#view-atomix .ax-stage .sdot { width:9px; height:9px; border-radius:50%; background:var(--dim2, #6F7583); flex:0 0 auto; }
+#view-atomix .ax-stage.done { color:var(--text); }
+#view-atomix .ax-stage.done .sdot { background:var(--green); }
+#view-atomix .ax-stage.active { color:var(--text); }
+#view-atomix .ax-stage.active .sdot { background:var(--accent); box-shadow:0 0 0 3px var(--accent-bg, rgba(38,161,123,.2)); }
+#view-atomix .ax-stage.warn .sdot { background:#E6A23C; }
+#view-atomix .ax-stage.pending .sdot { background:var(--dim2, #6F7583); }
+#view-atomix .ax-swapline { font-size:12px; color:var(--dim); padding:2px 0 2px 18px; }

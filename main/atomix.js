@@ -216,48 +216,73 @@ async function book() {
   });
 }
 
-async function quote(sell, amountStr, slipPct) {
-  const A = AX(), SP = A.swapplan;
-  const bals = await balances();
-  const b = await withTimeout(bookScan(), 30000, "book scan");
+// Shared quote computation (donor onReview): single within the best level, else best-price-first sweep. Returns
+// {err} or {model, meta}. meta carries the fields the swap card shows live (donor parity): best price, sweep
+// depth, per-side available balance. NOTHING is stashed here — quote() stashes for execution, swapPreview() doesn't.
+function computeQuote(A, SP, sell, amountStr, slipPct, b, bals) {
   const q = A.book.bestMakers(b, myId());
   const want = Number(amountStr);
   const ccy = A.trading.active().coinLabel;
-  if (!(want > 0)) return { err: "Enter a valid " + ccy + " amount." };
-  const bestMaker = sell ? q.bidMaker : q.askMaker, bestPrice = sell ? q.bestBid : q.bestAsk, bestCap = sell ? q.bidCap : q.askCap;
-  if (!bestMaker || bestPrice <= 0) return { err: "No quote available right now." };
+  const depth = SP.sweepDepthMinima(b, sell, myId(), (Number(slipPct) || 0) / 100);
+  const meta = { bestBid: q.bestBid, bestAsk: q.bestAsk, bestPrice: sell ? q.bestBid : q.bestAsk,
+    bestCap: sell ? q.bidCap : q.askCap, depth: depth, avail: sell ? bals.minima : bals.usdt,
+    availToken: sell ? ccy : "USDT", label: ccy };
+  if (!(want > 0)) return { err: "Enter a valid " + ccy + " amount.", meta };
+  const bestMaker = sell ? q.bidMaker : q.askMaker, bestPrice = meta.bestPrice, bestCap = meta.bestCap;
+  if (!bestMaker || bestPrice <= 0) return { err: "No quote available right now.", meta };
   let model;
   if (sell) {
-    if (want > Number(bals.minima) + 1e-9) return { err: "You only have " + bals.minima + " " + ccy + " to sell." };
+    if (want > Number(bals.minima) + 1e-9) return { err: "You only have " + bals.minima + " " + ccy + " to sell.", meta };
     if (want <= bestCap + 1e-9) {
       const minima = SP.legMinima(want), usdt = SP.computeUsdt(minima, bestPrice);
-      if (!minima || !usdt) return { err: "Enter a valid amount" };
+      if (!minima || !usdt) return { err: "Enter a valid amount", meta };
       model = { mode: "single", sell: true, minima, usdt, price: bestPrice, maker: bestMaker.signerPk };
     } else {
       const plan = SP.buildSweepPlan(b, true, amountStr, 0, myId());
-      if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now." };
+      if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now.", meta };
       model = { mode: "sweep", sell: true, plan };
     }
   } else {
     const slip = (Number(slipPct) || 0) / 100;
     const plan = SP.buildSweepPlan(b, false, amountStr, slip, myId());
-    if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now." };
-    if (plan.totalUsdt > Number(bals.usdt) + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + "." };
+    if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now.", meta };
+    if (plan.totalUsdt > Number(bals.usdt) + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + " USDT.", meta };
     model = { mode: "sweep", sell: false, plan };
   }
-  // FREEZE the quote (752264c rule): execution replays exactly this, against a fresh makerLive check.
-  const qid = "q" + (++quoteSeq);
-  lastQuotes[qid] = { model, book: b, at: Date.now() };
-  const keys = Object.keys(lastQuotes); if (keys.length > 30) delete lastQuotes[keys[0]];
-  const out = jclone({ quoteId: qid, mode: model.mode, sell, single: model.mode === "single"
-    ? { minima: model.minima, usdt: model.usdt, price: model.price, maker: model.maker }
-    : null,
+  return { model, meta };
+}
+function shapeQuote(model, ccy, sell, meta, quoteId) {
+  return jclone({ quoteId: quoteId || null, mode: model.mode, sell,
+    single: model.mode === "single" ? { minima: model.minima, usdt: model.usdt, price: model.price, maker: model.maker } : null,
     plan: model.plan ? { legs: model.plan.legs.map(l => ({ maker: l.maker.signerPk, price: l.price, minima: l.minima, usdt: l.usdt })),
       filledMinima: model.plan.filledMinima, totalUsdt: model.plan.totalUsdt, avgPrice: model.plan.avgPrice,
       worstPrice: model.plan.worstPrice, target: model.plan.target, partial: model.plan.partial,
       stopReason: model.plan.stopReason, slippagePct: model.plan.slippagePct } : null,
-    label: ccy });
-  return out;
+    label: ccy, meta });
+}
+
+/** Non-consuming preview for the swap card's live reciprocal + best-price + depth + available balance (donor
+ *  shows all of these as you type). Returns {err, meta} OR {mode, single|plan, meta} — never a quoteId. */
+async function swapPreview(sell, amountStr, slipPct) {
+  const A = AX(), SP = A.swapplan;
+  const bals = await balances();
+  const b = await withTimeout(bookScan(), 30000, "book scan");
+  const r = computeQuote(A, SP, sell, amountStr, slipPct, b, bals);
+  if (r.err) return jclone({ err: r.err, meta: r.meta });
+  return shapeQuote(r.model, A.trading.active().coinLabel, sell, r.meta, null);
+}
+
+async function quote(sell, amountStr, slipPct) {
+  const A = AX(), SP = A.swapplan;
+  const bals = await balances();
+  const b = await withTimeout(bookScan(), 30000, "book scan");
+  const r = computeQuote(A, SP, sell, amountStr, slipPct, b, bals);
+  if (r.err) return jclone({ err: r.err, meta: r.meta });
+  // FREEZE the quote (752264c rule): execution replays exactly this, against a fresh makerLive check.
+  const qid = "q" + (++quoteSeq);
+  lastQuotes[qid] = { model: r.model, book: b, at: Date.now() };
+  const keys = Object.keys(lastQuotes); if (keys.length > 30) delete lastQuotes[keys[0]];
+  return shapeQuote(r.model, A.trading.active().coinLabel, sell, r.meta, qid);
 }
 
 function legHooks(A, signerPk, sellMinima, freshBook) {
@@ -506,7 +531,7 @@ async function otcDealAction(ref, action, amount, price) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
-  book, quote, swapExecute, swaps, inspect, marketHistory, wallet, exportKey, coins,
+  book, quote, swapPreview, swapExecute, swaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute,
   makerCfg, makerSave, makerPublish, makerWithdraw, switchCurrency,
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,

@@ -230,6 +230,7 @@ node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted 
 ipcMain.handle("mcd:axStatus", () => atomix.status());
 ipcMain.handle("mcd:axBook", () => atomix.book());
 ipcMain.handle("mcd:axQuote", (_e, sell, amount, slip) => atomix.quote(sell, amount, slip));
+ipcMain.handle("mcd:axSwapPreview", (_e, sell, amount, slip) => atomix.swapPreview(sell, amount, slip));
 ipcMain.handle("mcd:axSwap", (_e, quoteId) => atomix.swapExecute(quoteId));
 ipcMain.handle("mcd:axSwaps", () => atomix.swaps());
 ipcMain.handle("mcd:axInspect", (_e, hash) => atomix.inspect(hash));

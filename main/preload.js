@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld("mcd", {
   axStatus: () => ipcRenderer.invoke("mcd:axStatus"),
   axBook: () => ipcRenderer.invoke("mcd:axBook"),
   axQuote: (sell, amount, slip) => ipcRenderer.invoke("mcd:axQuote", sell, amount, slip),
+  axSwapPreview: (sell, amount, slip) => ipcRenderer.invoke("mcd:axSwapPreview", sell, amount, slip),
   axSwap: (quoteId) => ipcRenderer.invoke("mcd:axSwap", quoteId),
   axSwaps: () => ipcRenderer.invoke("mcd:axSwaps"),
   axInspect: (hash) => ipcRenderer.invoke("mcd:axInspect", hash),
