@@ -2009,7 +2009,11 @@ async function loadOwnAddresses() {
 async function renderHistory() {
   ensureHistActions();
   await ensureHistFilter();
-  if (running) { if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses(); await renormalizeStored(); }
+  if (running) {
+    if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();
+    const rebuilt = await maybeRebuildHistory();   // one-time re-fetch to backfill real token amounts (tokenamount)
+    if (!rebuilt) await renormalizeStored();        // otherwise reclassify stored rows in place
+  }
   await renderHistoryList();
   if (running) syncHistory({ older: false });
 }
@@ -2150,7 +2154,15 @@ function relTime(ms) {
 }
 
 // coin/txpow → normalized row (ported from the native history apps' difference→direction + split/consol rules)
-function coinLite(c) { return { address: c.miniaddress || c.address || "", amount: c.amount || c.tokenamount || "0", tokenid: c.tokenid || MINIMA, token: c.token, coinid: c.coinid || "", state: c.state || [] }; }
+// Store the coin's REAL display amount. For a token coin the on-chain `amount` is a raw sub-grain value (e.g. a pool
+// coin's mxUSDT shows as 2.8e-37); the node's decoded real value is `tokenamount`. MINIMA (0x00) has no tokenamount —
+// its `amount` is already real. Getting this right is what lets a pool swap's mxUSDT leg be recovered (it settles into
+// the wallet as a dust-encoded token coin whose tokenamount is the true amount). Mirrors the balances read at :753.
+function coinLite(c) {
+  const tid = c.tokenid || MINIMA;
+  const amount = tid === MINIMA ? (c.amount || "0") : (c.tokenamount != null ? c.tokenamount : (c.amount || "0"));
+  return { address: c.miniaddress || c.address || "", amount: String(amount), tokenid: tid, token: c.token, coinid: c.coinid || "", state: c.state || [] };
+}
 function absCmp(a, b) {   // compare |decimal string a| vs |b| without float rounding
   a = String(a).replace(/^-/, ""); b = String(b).replace(/^-/, "");
   const as = a.split("."), bs = b.split(".");
@@ -2322,46 +2334,68 @@ async function renormalizeStored() {
 // the first already-stored txpowid, and a "Load older" pull runs to an empty page or a generous row budget.
 const HIST_PAGE = 100;          // node default (was 8 — a native-Binder holdover)
 const HIST_OLDER_BUDGET = 2000; // rows fetched per "Load older" click
+// Returns { fetched, reachable }. `reachable` = the node served at least one page (so a caller like the one-time
+// rebuild can tell "node down, retry later" apart from "nothing new"). opts.rebuild re-fetches from offset 0 and
+// UPSERTS every row (no stop-at-known) so a coinLite/normalize change re-writes the whole stored history.
 async function syncHistory(opts) {
   opts = opts || {};
-  if (HIST_SYNCING) return; HIST_SYNCING = true;
+  if (HIST_SYNCING) return { fetched: 0, reachable: false, completed: false }; HIST_SYNCING = true;
+  let reachable = false, fetched = 0, completed = false;   // completed = the loop reached a clean end (empty page / all-known), not a node error
   try {
     if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();   // classify new rows over own coins (native's view)
-    const known = new Set((await api.histGet()).map(r => r.txpowid));
-    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false, fetched = 0;
+    const upsertAll = !!(opts.older || opts.rebuild);            // don't stop at the first already-stored txpowid
+    const known = upsertAll ? null : new Set((await api.histGet()).map(r => r.txpowid));
+    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false;
     let batch = [];
     const flushBatch = async () => { if (batch.length) { await api.histAdd(batch); batch = []; } };
     for (;;) {
       let page;
       try {
         const j = await api.cmd(`history relevant:true max:${max} offset:${offset}`);
-        page = (!j || j.status !== true || !j.response) ? { over: true } : { txpows: j.response.txpows || [], details: j.response.details || [] };
+        if (j && j.status === true && j.response) { reachable = true; page = { txpows: j.response.txpows || [], details: j.response.details || [] }; }
+        else page = { over: true };
       } catch (e) { page = { over: true }; }
       if (page.over) { if (max > 1) { max = Math.floor(max / 2); continue; } if (skips < 3) { skips++; offset += 1; max = HIST_PAGE; continue; } break; }
-      if (!page.txpows.length) break;
+      if (!page.txpows.length) { completed = true; break; }   // natural end of history
       for (let i = 0; i < page.txpows.length; i++) {
         const row = normalize(page.txpows[i], page.details[i]);
         if (!row.txpowid) continue;
-        if (!opts.older && known.has(row.txpowid)) { hitKnown = true; break; }
+        if (!upsertAll && known.has(row.txpowid)) { hitKnown = true; break; }
         batch.push(row); fetched++;
       }
-      if (hitKnown) break;
+      if (hitKnown) { completed = true; break; }
       offset += page.txpows.length; max = HIST_PAGE; skips = 0;
       if (batch.length >= 500) await flushBatch();          // bound memory/IPC on a deep first sync
       if (opts.older && fetched >= HIST_OLDER_BUDGET) break;
     }
     await flushBatch();
+    // rebuild reaches the end, so it advances the "oldest" watermark too (Math.max branch) — no redundant re-scan later.
     histOldestOffset = opts.older ? offset : Math.max(histOldestOffset, offset);
     await renderHistoryList();
   } finally { HIST_SYNCING = false; }
+  return { fetched, reachable, completed };
+}
+// One-time re-fetch of the whole stored history after a capture/normalize change that needs FRESH node data (the
+// stored coins can't be re-decoded in place — e.g. capturing `tokenamount`, dropped by older coinLite). Gated by
+// HIST_REBUILD_VER; the marker is set ONLY once the rebuild reached the natural END of history (reachable AND
+// completed) — a node-down or mid-stream-truncated launch leaves the marker unset and retries next session, so no
+// older rows are left permanently stale with the pre-tokenamount amounts.
+const HIST_REBUILD_VER = 1;
+async function maybeRebuildHistory() {
+  if (localStorage.getItem("histRebuildVer") === String(HIST_REBUILD_VER)) return false;
+  const r = await syncHistory({ rebuild: true });
+  if (r && r.reachable && r.completed) { localStorage.setItem("histRebuildVer", String(HIST_REBUILD_VER)); return true; }
+  return r && r.reachable;   // reached the node (rows updated) but not the end → don't mark done; still skip renormalize this render
 }
 function histType(r) { return r.kind !== "normal" ? r.kind : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self"); }
 function histDate(ms) { return ms ? new Date(ms).toISOString().slice(0, 19).replace("T", " ") : ""; }
 // Copy/CSV export the CURRENTLY FILTERED set (not just what's on screen), with the richer columns.
-const HIST_COLS = ["date", "type", "direction", "amount", "token", "fee", "counterparty", "txpowid", "block", "inputs", "outputs", "deltas"];
+const HIST_COLS = ["date", "type", "direction", "amount", "token", "counter_amount", "counter_token", "fee", "counterparty", "txpowid", "block", "inputs", "outputs", "deltas"];
 function histCells(r) {
   const deltas = Object.keys(r.difference || {}).map(t => `${TOK.shortId(t)}:${TOK.tidyAmount(r.difference[t])}`).join(" ");
+  const tc = (r.kind === "buy" || r.kind === "sell") ? tradeCounter(r) : null;   // the mxUSDT (token) leg of a swap
   return [histDate(r.time), histType(r), r.direction || "", TOK.tidyAmount(r.amount), r.tokenName,
+    tc ? TOK.tidyAmount(tc.amt) : "", tc ? tc.name : "",
     (r.burn != null ? TOK.tidyAmount(r.burn) : ""), labelFor(r.counterparty) || r.counterparty || "", r.txpowid, r.block,
     r.inCount != null ? r.inCount : "", r.outCount != null ? r.outCount : "", deltas];
 }
@@ -2376,7 +2410,9 @@ async function copyHistory() {
 }
 async function exportHistory() {
   const rows = await histExportRows();
-  const q = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  // Quote for CSV; neutralize spreadsheet formula-injection (a token name like "=HYPERLINK(...)" is attacker-set) by
+  // prefixing a single quote when a cell leads with a formula trigger — Excel/Sheets evaluate those even when quoted.
+  const q = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
   const lines = rows.map(r => histCells(r).map(q).join(","));
   const csv = [HIST_COLS.join(","), ...lines].join("\r\n");
   const p = await api.exportCsv(csv, "minima-history.csv");
