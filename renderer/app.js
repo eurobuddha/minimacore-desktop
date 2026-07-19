@@ -2374,7 +2374,7 @@ async function renderSettings() {
       <div id="kuList" class="ku-list">${kuRows.length ? kuRows.map(kuRowHtml).join("") : `<div class="view__desc">No keys reported.</div>`}</div>
       <button class="btn btn--outline btn--full" id="kuAudit" style="margin-top:10px">Deep reuse audit</button>
       <div class="status" id="kuAuditStatus"></div>
-      <div class="view__desc" style="font-size:11px;margin-top:2px">Deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse. Nothing is sent otherwise.</div>
+      <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse — automatically when you open this panel, and when you tap the button. Nothing else leaves your node.</div>
     </div>
     <div class="card"><div class="card__title">Backup</div>
       <div class="view__desc">Writes an encrypted recovery backup into the node's data folder. Your seed phrase (above) is the ultimate backup.</div>
@@ -2494,18 +2494,20 @@ function kuRowHtml(r) {
 // Deep reuse audit: send the node's public keys to the KeyUses service, join spend_blocks + reuse DB, classify
 // each key (risk = reused OR on-chain sigs > local uses — the node counter can under-report). Patches rows in
 // place (never rebuilds the panel). Graceful: an unreachable service leaves the local counts and says so.
-let KU_AUDIT_AT = 0;
+let KU_AUDIT_AT = 0, KU_AUDITING = false;
 const KU_AUDIT_GAP = 60000;
 async function runKeyAudit(force) {
-  const status = el("kuAuditStatus"); if (!status) return;
+  const status = el("kuAuditStatus"); if (!status || KU_AUDITING) return;   // one audit at a time (button can't stack fetches)
   if (!force && KU_AUDIT_AT && (Date.now() - KU_AUDIT_AT) < KU_AUDIT_GAP) return;
   // Source public keys + local use-counts from the already-rendered rows (no redundant, race-prone re-fetch).
   const rows = Array.from(document.querySelectorAll("#kuList .ku-row"));
   const pubs = rows.map(r => r.dataset.pk).filter(Boolean);
   if (!pubs.length) return;
-  KU_AUDIT_AT = Date.now();
+  KU_AUDIT_AT = Date.now(); KU_AUDITING = true;
+  const btn = el("kuAudit"); if (btn) btn.disabled = true;
   const usesByPk = {}; rows.forEach(r => { if (r.dataset.pk) usesByPk[String(r.dataset.pk).toUpperCase()] = parseInt(r.dataset.uses, 10) || 0; });
   status.className = "status status--dim"; status.textContent = "Auditing your keys against the chain…";
+  try {
   const audit = await api.keyAudit(pubs).catch(() => null);
   if (!audit || !audit.keys) {
     KU_AUDIT_AT = 0;   // transient failure → let the next panel-open retry instead of blocking for the whole window
@@ -2544,6 +2546,7 @@ async function runKeyAudit(force) {
       : "✓ No reuse detected. ")
     + (full ? "" : "(reuse DB partial — treat as unverified.) ")
     + "Recommended key-uses for your next resync: " + reco + ".";
+  } finally { KU_AUDITING = false; const b = el("kuAudit"); if (b) b.disabled = false; }
 }
 
 // ---- Send ------------------------------------------------------------------

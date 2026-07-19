@@ -120,7 +120,7 @@ ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
 // netfetch.fetchJson is capped + never throws, so an unreachable service just returns null (graceful degrade).
 const KEYUSES_BASE = "https://eurobuddha.com";
 const HEX_KEY = /^0x[0-9a-fA-F]{64}$/;         // 32-byte WOTS public key
-const HEX_ADDR = /^0x[0-9a-fA-F]{2,80}$/;      // Minima address (0x + up to 64 hex)
+const HEX_ADDR = /^0x[0-9a-fA-F]{2,80}$/;      // Minima address — 0x + hex, generously bounded (hex-only, no metachars)
 ipcMain.handle("mcd:keyAudit", (_e, pubkeys) => {
   const list = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(k => HEX_KEY.test(k));
   if (!list.length) return null;
