@@ -66,8 +66,9 @@
         var p = order.pairs[SYM];
         if (!p || !p.en) return { result: PEG_OFF };
         var step = num(cfg.step, 0), size = num(cfg.size, 0);
+        var askSize = num(cfg.askSize, size), bidSize = num(cfg.bidSize, size);   // independent per-side sizes (fallback to legacy `size`); a side with size 0 is not published → single-sided market
         var bias = Math.max(-20, Math.min(20, num(cfg.bias, 0)));
-        if (!(step > 0) || !(size > 0)) return { result: PEG_OFF };   // unconfigured → manual ladder
+        if (!(step > 0) || !(askSize > 0 || bidSize > 0)) return { result: PEG_OFF };   // need a step + at least ONE side sized
         var m = price, age = ageMs();
         if (!(m > 0)) return { result: PEG_STALE };                   // never fetched / none persisted → don't publish
         if (age > HARD_STALE_MS) return { result: PEG_STALE };        // down past the hard ceiling → let withdraw stand
@@ -78,8 +79,8 @@
         if (levels < 1) levels = 1; else if (levels > O.MAX_LEVELS) levels = O.MAX_LEVELS;
         p.bids = []; p.asks = [];
         for (var i = 1; i <= levels; i++) {
-            p.asks.push(O.level(quoted * (1 + i * effStep / 100.0), size));
-            p.bids.push(O.level(quoted * (1 - i * effStep / 100.0), size));
+            if (askSize > 0) p.asks.push(O.level(quoted * (1 + i * effStep / 100.0), askSize));
+            if (bidSize > 0) p.bids.push(O.level(quoted * (1 - i * effStep / 100.0), bidSize));
         }
         p.buy = 0; p.sell = 0;                                        // re-derived from the fresh levels
         O.sanitizePair(p);                                           // drops any bid a huge step pushed ≤ 0

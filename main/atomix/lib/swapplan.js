@@ -13,7 +13,7 @@
     'use strict';
     var AX = g.AX = g.AX || {};
     var D = AX.dec, O = AX.order, B = AX.book;   // the order-book module attaches to AX.book
-    var SYM = 'USDT', EPS = 1e-9;
+    var SYM = 'USDT', EPS = 1e-9, GRAIN = 1e-6;
 
     function pstr(price) { return String(price); }   // double→string; BigDecimal 6dp floor/ceil absorbs float tails
     function num(s) { var n = Number(s); return isFinite(n) ? n : 0; }
@@ -57,7 +57,7 @@
         var dust = Math.max(EPS, target * 1e-4);
 
         var remUsdt = {}, remMinima = {};                 // per-maker remaining balances, keyed by signerPk
-        var remaining = target, bestPrice = 0;
+        var remaining = target, bestPrice = 0, skippedForMin = false;
 
         var rows = B.aggSide(book, sell, myPublicId);
         for (var r = 0; r < rows.length; r++) {
@@ -83,10 +83,10 @@
 
             var takeMinima = Math.min(capMinima, remaining);
             if (takeMinima <= EPS) continue;
-            if (mn > 0 && takeMinima < mn - EPS) {                 // never emit a sub-min leg (maker auto-declines)
-                if (remaining < mn - EPS) { plan.stopReason = 'below-min'; plan.partial = true; break; }
-                continue;                                          // this level can't honor its own min → try deeper
-            }
+            if (mn > 0 && takeMinima < mn - GRAIN) {               // this maker's min can't be met here → skip only IT,
+                skippedForMin = true;                              // NEVER break the sweep: rows are best-price-first, so
+                continue;                                          // a front maker with a big min must not veto deeper,
+            }                                                      // lower-min makers who'd happily fill the taker.
 
             var minimaStr = legMinima(takeMinima), m = num(minimaStr);
             if (m <= EPS) continue;
@@ -94,7 +94,7 @@
             if (usdtStr == null) continue;
             var minimaD = num(minimaStr), usdtD = num(usdtStr);
             if (minimaD <= EPS || usdtD <= EPS) continue;
-            if (mn > 0 && minimaD < mn - EPS) continue;            // rounding slipped it below min — skip
+            if (mn > 0 && minimaD < mn - EPS) { skippedForMin = true; continue; }   // grain floor slipped below min — skip (strict: never emit a leg the maker auto-declines)
 
             if (bestPrice <= 0) bestPrice = price;                 // anchor slippage on the FIRST leg taken
             plan.legs.push({ maker: maker, price: price, minima: minimaStr, usdt: usdtStr, minimaD: minimaD, usdtD: usdtD });
@@ -107,6 +107,7 @@
         }
 
         if (remaining > dust) plan.partial = true;
+        if (plan.legs.length === 0 && skippedForMin && plan.stopReason === 'filled') plan.stopReason = 'below-min';   // nothing filled ONLY because every maker's min exceeded the amount
         if (plan.partial && plan.stopReason === 'filled') plan.stopReason = 'book-exhausted';
         plan.avgPrice = plan.filledMinima > 0 ? plan.totalUsdt / plan.filledMinima : 0;
         return plan;

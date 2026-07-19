@@ -3341,8 +3341,9 @@ function axMakerEditor(mc, ccy, b) {
     + `<div class="ax-oracle mono" id="axOracle">${peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off")}</div>`
     + `<div class="ax-mkr-hint2">While pegged, the ladder regenerates around the ${src} mid (± step %, your size per level) at every publish, and re-publishes when the market moves ≥ your threshold. If the feed goes down your order is withdrawn for safety, then restored when it recovers.</div>`
     + `<div class="ax-genrow">${axGenField("axBias", c.bias != null ? c.bias : "", "skew ±%")}${axGenField("axReprice", c.reprice != null ? c.reprice : "1", "reprice ≥ %")}</div>`
-    + `<div class="ax-seclabel">LADDER (mid · step % · size · levels — fills the rows as you type)</div>`
-    + `<div class="ax-genrow">${axGenField("axMid", "", "mid")}${axGenField("axStep", c.step != null ? c.step : "", "step %")}${axGenField("axSize", c.size != null ? c.size : "", "size")}${axGenField("axLevels", c.levels != null ? c.levels : "1", "levels")}</div>`
+    + `<div class="ax-seclabel">AUTO-FILL (mid · step % · levels, then ask/bid size — seeds the rungs as you type; edit any rung after)</div>`
+    + `<div class="ax-genrow">${axGenField("axMid", "", "mid")}${axGenField("axStep", c.step != null ? c.step : "", "step %")}${axGenField("axLevels", c.levels != null ? c.levels : "1", "levels")}</div>`
+    + `<div class="ax-genrow">${axGenField("axAskSize", c.askSize != null ? c.askSize : (c.size != null ? c.size : ""), "ask size")}${axGenField("axBidSize", c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ""), "bid size")}</div>`
     + `<div class="ax-side-hdr ask">ASKS — you SELL ${esc(ccy)} (higher price)</div>${askRows}`
     + `<div class="ax-side-hdr bid">BIDS — you BUY ${esc(ccy)} (lower price)</div>${bidRows}`
     + axEditRow("min " + esc(ccy) + " / trade", axEditInput("axMin", c.min != null ? c.min : ""))
@@ -3372,25 +3373,26 @@ function axWireMakerEditor(ccy) {
   };
   // fill the 6+6 rows from mid·step·size·levels(+skew) — native genManual/fillFromPeg. mid = oracle when pegged.
   const genLadder = midOverride => {
-    const step = num("axStep"), size = num("axSize"), m = midOverride != null ? midOverride : num("axMid");
-    if (!(m > 0) || !(step > 0) || !(size > 0)) { updPreview(); return; }
+    const step = num("axStep"), askSize = num("axAskSize"), bidSize = num("axBidSize"), m = midOverride != null ? midOverride : num("axMid");
+    if (!(m > 0) || !(step > 0) || !(askSize > 0 || bidSize > 0)) { updPreview(); return; }   // need a step + at least ONE side sized
     const levels = Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1));
     const quoted = m * (1 + Math.max(-20, Math.min(20, num("axBias"))) / 100);
     filling = true;
     try {
       for (let i = 0; i < 6; i++) {
         const on = i < levels, ap = el("axAskP" + i), aa = el("axAskA" + i), bp = el("axBidP" + i), ba = el("axBidA" + i);
-        if (ap) ap.value = on ? fmtPx(quoted * (1 + (i + 1) * step / 100)) : "";
-        if (aa) aa.value = on ? fmtPx(size) : "";
-        if (bp) bp.value = on ? fmtPx(quoted * (1 - (i + 1) * step / 100)) : "";
-        if (ba) ba.value = on ? fmtPx(size) : "";
+        const askOn = on && askSize > 0, bidOn = on && bidSize > 0;   // blank a side whose size is 0 → single-sided seed
+        if (ap) ap.value = askOn ? fmtPx(quoted * (1 + (i + 1) * step / 100)) : "";
+        if (aa) aa.value = askOn ? fmtPx(askSize) : "";
+        if (bp) bp.value = bidOn ? fmtPx(quoted * (1 - (i + 1) * step / 100)) : "";
+        if (ba) ba.value = bidOn ? fmtPx(bidSize) : "";
       }
     } finally { filling = false; }
     updPreview();
   };
   // pegged: pull the live oracle mid from the engine, set the oracle line + mid field, regenerate the rows
   const refreshPeg = async () => {
-    const pv = await api.axMakerPreview({ pegEnable: true, step: num("axStep"), size: num("axSize"), bias: num("axBias"), levels: num("axLevels") || 1, reprice: num("axReprice") || 1, min: num("axMin") }, {}).catch(() => null);
+    const pv = await api.axMakerPreview({ pegEnable: true, step: num("axStep"), askSize: num("axAskSize"), bidSize: num("axBidSize"), bias: num("axBias"), levels: num("axLevels") || 1, reprice: num("axReprice") || 1, min: num("axMin") }, {}).catch(() => null);
     if (!pv) return;
     axOracleMid = pv.mid || 0;
     const ol = el("axOracle"); if (ol) ol.textContent = pv.mid > 0 ? (esc(pv.source || ccy) + " · mid " + fmtPx(pv.mid) + (pv.fresh ? "" : " (stale)") + (pv.wide ? " · WIDE" : "")) : ("waiting for " + esc(pv.source || "market") + " price…");
@@ -3404,7 +3406,7 @@ function axWireMakerEditor(ccy) {
     swPeg.classList.toggle("on"); const on = swPeg.classList.contains("on"); swPeg.setAttribute("aria-checked", on); axPegMode = on; pegModeUi();
     if (on) axStartPegPoll(refreshPeg); else { axStopPegPoll(); const ol = el("axOracle"); if (ol) ol.textContent = "peg off"; genLadder(); }
   };
-  ["axMid", "axStep", "axSize", "axLevels", "axBias"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => { if (filling) return; if (pegOn()) { if (axOracleMid > 0) genLadder(axOracleMid); } else genLadder(); }); });
+  ["axMid", "axStep", "axAskSize", "axBidSize", "axLevels", "axBias"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => { if (filling) return; if (pegOn()) { if (axOracleMid > 0) genLadder(axOracleMid); } else genLadder(); }); });
   for (let i = 0; i < 6; i++) ["axAskP", "axAskA", "axBidP", "axBidA"].forEach(pfx => { const e = el(pfx + i); if (e) e.addEventListener("input", () => { if (!filling) updPreview(); }); });
   const minE = el("axMin"); if (minE) minE.addEventListener("input", updPreview);
 
@@ -3415,8 +3417,8 @@ function axWireMakerEditor(ccy) {
       const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) }));
       toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); return;
     }
-    const step = num("axStep"), size = num("axSize");
-    const cfg = { pegEnable: pegOn() && step > 0 && size > 0, step, size, bias: num("axBias"), reprice: num("axReprice") || 1, levels: Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1)), min: num("axMin") };
+    const step = num("axStep"), askSize = num("axAskSize"), bidSize = num("axBidSize");
+    const cfg = { pegEnable: pegOn() && step > 0 && (askSize > 0 || bidSize > 0), step, size: Math.max(askSize, bidSize), askSize, bidSize, bias: num("axBias"), reprice: num("axReprice") || 1, levels: Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1)), min: num("axMin") };
     const r = await api.axMakerSave(cfg, collect()).catch(e => ({ err: String(e.message || e) }));
     toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); finish();
   };

@@ -74,8 +74,9 @@
     function saveState(cb) { M.kvSet(kvKey('peg_state'), JSON.stringify(stateCache || {}), function () { cb && cb(); }); }
     function pegCfg() {   // the object peg.applyPeg/shouldReprice read (config + runtime state merged)
         var c = cfgCache || {}, s = stateCache || {};
-        return { enable: !!c.pegEnable, step: num(c.step, 0), size: num(c.size, 0), bias: num(c.bias, 0),
-            reprice: num(c.reprice, 1), levels: num(c.levels, 1), min: num(c.min, 0),
+        return { enable: !!c.pegEnable, step: num(c.step, 0), size: num(c.size, 0),
+            askSize: num(c.askSize, num(c.size, 0)), bidSize: num(c.bidSize, num(c.size, 0)),   // independent per-side sizes (0 = don't publish that side)
+            bias: num(c.bias, 0), reprice: num(c.reprice, 1), levels: num(c.levels, 1), min: num(c.min, 0),
             lastMid: s.lastMid, withdrawn: !!s.withdrawn, wide: !!s.wide };
     }
 

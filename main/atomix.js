@@ -260,7 +260,8 @@ function computeQuote(A, SP, sell, amountStr, slipPct, b, bals) {
   let model;
   if (sell) {
     if (want > Number(bals.minima) + 1e-9) return { err: "You only have " + bals.minima + " " + ccy + " to sell.", meta };
-    if (want <= bestCap + 1e-9) {
+    const bmin = (bestMaker.pairs.USDT && bestMaker.pairs.USDT.min) || 0;   // a sub-min single SELL would lock then be declined on-chain →
+    if (want <= bestCap + 1e-9 && !(bmin > 0 && want < bmin - 1e-6)) {      // route below-best-min to the sweep planner (skips best, fills deeper/lower-min, or reports below-min)
       const minima = SP.legMinima(want), usdt = SP.computeUsdt(minima, bestPrice);
       if (!minima || !usdt) return { err: "Enter a valid amount", meta };
       model = { mode: "single", sell: true, minima, usdt, price: bestPrice, maker: bestMaker.signerPk };
@@ -482,8 +483,10 @@ async function makerPreview(cfg, manual) {
     await p(cb => A.maker.refreshPeg(() => cb(null)));                 // fresh mid for the active currency
     const o = A.order.make();
     o.pairs[SYM] = A.order.pair(true, 0, 0, Number(cfg.min) || 0);     // enabled pair applyPeg will fill
-    const pc = jvm({ enable: true, step: Number(cfg.step) || 0, size: Number(cfg.size) || 0, bias: Number(cfg.bias) || 0,
-      reprice: Number(cfg.reprice) || 1, levels: Number(cfg.levels) || 1, min: Number(cfg.min) || 0 });
+    const size0 = Number(cfg.size) || 0;
+    const pc = jvm({ enable: true, step: Number(cfg.step) || 0, size: size0,
+      askSize: cfg.askSize != null ? (Number(cfg.askSize) || 0) : size0, bidSize: cfg.bidSize != null ? (Number(cfg.bidSize) || 0) : size0,
+      bias: Number(cfg.bias) || 0, reprice: Number(cfg.reprice) || 1, levels: Number(cfg.levels) || 1, min: Number(cfg.min) || 0 });
     const r = A.peg.applyPeg(o, pc);
     const pair = o.pairs[SYM] || { bids: [], asks: [] };
     const st = A.peg.state ? A.peg.state() : {};
