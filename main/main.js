@@ -18,6 +18,7 @@ const histDb = require("./history-db");
 const faucet = require("./faucet");
 const mail = require("./mail");
 const pandapools = require("./pandapools");
+const atomix = require("./atomix");
 
 let win = null;
 let tray = null;
@@ -224,6 +225,35 @@ ipcMain.handle("mcd:ppLoadBackup", async () => {
 pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
 let ppStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); } });
+
+// AtomiX (atomic swaps) — the reused MDS engine (main/atomix/*) in a vm; read model + actions.
+ipcMain.handle("mcd:axStatus", () => atomix.status());
+ipcMain.handle("mcd:axBook", () => atomix.book());
+ipcMain.handle("mcd:axQuote", (_e, sell, amount, slip) => atomix.quote(sell, amount, slip));
+ipcMain.handle("mcd:axSwap", (_e, quoteId) => atomix.swapExecute(quoteId));
+ipcMain.handle("mcd:axSwaps", () => atomix.swaps());
+ipcMain.handle("mcd:axInspect", (_e, hash) => atomix.inspect(hash));
+ipcMain.handle("mcd:axMarketHistory", () => atomix.marketHistory());
+ipcMain.handle("mcd:axWallet", () => atomix.wallet());
+ipcMain.handle("mcd:axExportKey", () => atomix.exportKey());
+ipcMain.handle("mcd:axCoins", () => atomix.coins());
+ipcMain.handle("mcd:axSendMax", (_e, asset) => atomix.sendMax(asset));
+ipcMain.handle("mcd:axSendReview", (_e, asset, to, amt) => atomix.sendReview(asset, to, amt));
+ipcMain.handle("mcd:axSend", (_e, asset, to, amt) => atomix.sendExecute(asset, to, amt));
+ipcMain.handle("mcd:axMakerCfg", () => atomix.makerCfg());
+ipcMain.handle("mcd:axMakerSave", (_e, cfg, manual) => atomix.makerSave(cfg, manual));
+ipcMain.handle("mcd:axMakerPublish", () => atomix.makerPublish());
+ipcMain.handle("mcd:axMakerWithdraw", () => atomix.makerWithdraw());
+ipcMain.handle("mcd:axSwitchCurrency", (_e, key) => atomix.switchCurrency(key));
+ipcMain.handle("mcd:axOtc", () => atomix.otc());
+ipcMain.handle("mcd:axOtcGoLive", (_e, sell, buy) => atomix.otcGoLive(sell, buy));
+ipcMain.handle("mcd:axOtcWithdraw", () => atomix.otcWithdraw());
+ipcMain.handle("mcd:axOtcPropose", (_e, lp, side, amount, price) => atomix.otcPropose(lp, side, amount, price));
+ipcMain.handle("mcd:axOtcDeal", (_e, ref, action, amount, price) => atomix.otcDealAction(ref, action, amount, price));
+ipcMain.handle("mcd:axInvalidate", () => { atomix.invalidate(); return true; });
+atomix.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:atomix"); });
+let axStarted = false;
+node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted = true; atomix.startLoop(); } });
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));
 ipcMain.handle("mcd:histAdd", (_e, rows) => histDb.merge(Array.isArray(rows) ? rows : []));
 ipcMain.handle("mcd:histClear", async () => { await histDb.clear(); return true; });
@@ -261,6 +291,7 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 let quitting = false;
 app.on("before-quit", async (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
+  try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
   try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;
   // Always go through node.stop(), even with no node process: it also releases the router port mapping,

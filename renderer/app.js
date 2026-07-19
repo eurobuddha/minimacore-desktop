@@ -81,6 +81,7 @@ async function boot() {
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
   api.onPandapools(onPandapoolsUpdate);
+  api.onAtomix(onAtomixUpdate);
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -374,7 +375,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState();   // seed changed → re-derive the mail identity
+    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState();   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -413,7 +414,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState();   // seed changed → re-derive the mail identity
+      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState();   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -490,6 +491,7 @@ function renderActive() {
   else if (activeView === "send") renderSend();
   else if (activeView === "mail") renderMail();
   else if (activeView === "pandapools") renderPandapools();
+  else if (activeView === "atomix") renderAtomix();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -2579,7 +2581,7 @@ async function renderSettings() {
     if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
     try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
-      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); }   // seed reset → re-derive the mail identity
+      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); }   // seed reset → re-derive the mail identity
       toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";
@@ -2938,3 +2940,356 @@ async function renderLogs() {
 
 boot();
 initLogs();
+
+// ============================ AtomiX (atomic swaps) ============================
+// The reused MDS engine runs in the main process (main/atomix/*); this renderer is a faithful transcription
+// of the donor lib/ui.js flows into the desktop TERMINAL design system. Live updates patch PASSIVE regions
+// only — never rebuild a form the user is typing into (the Mail frozen-tab rule).
+let axView = "swap";                    // swap | market | activity | otc | wallet
+let axSell = true;                      // swap direction
+let axSlip = 4.2;                       // buy-sweep max slippage %
+let axStatusCache = { ready: false };
+let axLastBook = null;
+let axUpdateTimer = null;
+
+function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; }
+
+function axHeader(active) {
+  const st = axStatusCache;
+  const ccy = st.currency === "minima" ? "MINIMA" : "mxUSDT";
+  const dot = st.ready ? '<span style="color:var(--green)">●</span> ' : '<span style="color:var(--amber)">●</span> ';
+  const tabs = [["swap", "Swap"], ["market", "Market"], ["activity", "Activity"], ["otc", "OTC"], ["wallet", "Wallet"]]
+    .map(([v, l]) => `<button class="btn btn--sm ${active === v ? "btn--primary" : "btn--outline"}" data-axview="${v}">${l}</button>`).join("");
+  return `<div class="view__title">AtomiX <span class="mail-ver">${dot}${st.ready ? "live" : "starting…"} · ${esc(ccy)}</span>
+      <button class="btn btn--sm btn--outline" id="axCcy" style="float:right">Switch to ${st.currency === "minima" ? "mxUSDT" : "MINIMA"}</button>
+      <button class="btn btn--sm btn--outline" id="axHelp" style="float:right;margin-right:6px">?</button></div>
+    <div class="seg" style="flex-wrap:wrap">${tabs}</div>`;
+}
+function wireAxHeader() {
+  document.querySelectorAll("#axBody [data-axview]").forEach(b => b.onclick = () => { axView = b.dataset.axview; renderAtomix(); });
+  const c = el("axCcy"); if (c) c.onclick = axSwitchCurrency;
+  const h = el("axHelp"); if (h) h.onclick = axWelcome;
+}
+
+async function renderAtomix() {
+  const host = el("axBody");
+  if (!host) return;
+  if (!running) { host.innerHTML = `<div class="empty">Start your node to use AtomiX.</div>`; return; }
+  axStatusCache = await api.axStatus().catch(() => ({ ready: false }));
+  if (!axStatusCache.ready) {
+    host.innerHTML = `${axHeader(axView)}<div class="empty">AtomiX is starting on your node — deriving your swap identity and registering the covenant. This clears on its own in a few seconds.</div>`;
+    wireAxHeader(); return;
+  }
+  if (axView === "swap") return renderAxSwap();
+  if (axView === "market") return renderAxMarket();
+  if (axView === "activity") return renderAxActivity();
+  if (axView === "otc") return renderAxOtc();
+  if (axView === "wallet") return renderAxWallet();
+}
+
+// ---- Swap ----
+async function renderAxSwap() {
+  const host = el("axBody");
+  const b = await api.axBook().catch(() => null);
+  axLastBook = b;
+  const ccy = b ? b.label : "mxUSDT";
+  host.innerHTML = `${axHeader("swap")}
+    <div class="card">
+      <div class="seg"><button class="btn btn--full ${axSell ? "btn--primary" : "btn--outline"}" id="axDirSell">Sell ${esc(ccy)}</button><button class="btn btn--full ${axSell ? "btn--outline" : "btn--primary"}" id="axDirBuy">Buy ${esc(ccy)}</button></div>
+      <div class="field"><div class="field__label" id="axAmtLbl">${axSell ? "Sell" : "Buy"} amount (${esc(ccy)})</div><input class="field__input" id="axAmt" placeholder="0.00" autocomplete="off" /></div>
+      ${axSell ? "" : `<div class="kv"><span>Max slippage</span><span>${[2, 4.2].map(s => `<button class="btn btn--sm ${axSlip === s ? "btn--primary" : "btn--outline"}" data-axslip="${s}">${s}%</button>`).join("")}<button class="btn btn--sm ${axSlip !== 2 && axSlip !== 4.2 ? "btn--primary" : "btn--outline"}" id="axSlipCustom">${axSlip !== 2 && axSlip !== 4.2 ? axSlip + "%" : "Custom"}</button></span></div>`}
+      <div class="view__desc" id="axQuoteLine">${axBookLine(b)}</div>
+      <button class="btn btn--primary btn--full" id="axReview">Review swap</button>
+    </div>
+    <div id="axStages"></div>`;
+  wireAxHeader();
+  el("axDirSell").onclick = () => { axSell = true; renderAxSwap(); };
+  el("axDirBuy").onclick = () => { axSell = false; renderAxSwap(); };
+  document.querySelectorAll("#axBody [data-axslip]").forEach(x => x.onclick = () => { axSlip = Number(x.dataset.axslip); renderAxSwap(); });
+  const sc = el("axSlipCustom"); if (sc) sc.onclick = async () => {
+    const v = await showPrompt("Custom max slippage", "", "e.g. 1.5", { message: "Percent (0.1 – 50). A BUY sweep won't take levels priced beyond this above the best ask." });
+    const n = parseFloat(v); if (isFinite(n) && n >= 0.1 && n <= 50) { axSlip = Math.round(n * 10) / 10; renderAxSwap(); } else if (v != null) toast("Enter 0.1–50", "warn");
+  };
+  el("axReview").onclick = axDoReview;
+}
+function axBookLine(b) {
+  if (!b || !b.makers) return "No live makers on the book right now.";
+  return `Best bid ${fmtPx(b.bestBid)} · best ask ${fmtPx(b.bestAsk)} USDT/${esc(b.label)} · ${b.makers} maker${b.makers === 1 ? "" : "s"}`;
+}
+function fmtPx(p) { p = Number(p) || 0; return p < 1 ? (Math.round(p * 1e5) / 1e5) : (Math.round(p * 100) / 100); }
+
+async function axDoReview() {
+  const amt = (el("axAmt") && el("axAmt").value || "").trim();
+  if (!amt) { toast("Enter an amount", "warn"); return; }
+  const q = await api.axQuote(axSell, amt, axSlip).catch(e => ({ err: String(e.message || e) }));
+  if (q.err) { toast(q.err, "warn"); return; }
+  const ccy = q.label;
+  let msg;
+  if (q.single) {
+    msg = `Sell  ${q.single.minima} ${ccy}\nReceive  ≈ ${q.single.usdt} USDT\n\nBest price ${fmtPx(q.single.price)} USDT/${ccy}\nThis locks your ${ccy} on-chain.`;
+  } else {
+    const p = q.plan;
+    const parts = p.legs.map((l, i) => `  Part ${i + 1}: ${l.minima} ${ccy} @ ${fmtPx(l.price)} → ${l.usdt} USDT`).join("\n");
+    msg = `${axSell ? "Sell" : "Buy"} ${p.filledMinima} ${ccy} in ${p.legs.length} part${p.legs.length === 1 ? "" : "s"}\nAvg ${fmtPx(p.avgPrice)} · worst ${fmtPx(p.worstPrice)} USDT/${ccy}\n\n${parts}\n\nTotal: ${axSell ? "receive ≈ " + p.totalUsdt + " USDT" : "pay ≈ " + p.totalUsdt + " USDT"}${p.partial ? "\n\n⚠ Only fills " + p.filledMinima + " of " + p.target + " — the rest isn't available right now." : ""}${axSell ? "" : "\n\nEach part is a separate Ethereum transaction (ETH gas per part)."}`;
+  }
+  const go = await showConfirm(q.single ? "Review — Sell " + ccy : (axSell ? "Sell " + ccy : "Buy " + ccy), msg, q.plan && q.plan.legs.length > 1 ? "Start sweep" : "Start swap");
+  if (!go) return;
+  el("axReview").disabled = true;
+  const r = await api.axSwap(q.quoteId).catch(e => ({ err: String(e.message || e) }));
+  if (r && r.err) { toast(r.err, "warn"); }
+  else if (r) { toast(`✓ ${r.ok}/${r.of} leg${r.of === 1 ? "" : "s"} locked — watching for the counterparty.${r.stopped ? " " + r.stopped : ""}`, "ok"); if (el("axAmt")) el("axAmt").value = ""; }
+  renderAxSwap();
+}
+
+// ---- Market (book + maker editor + history chart) ----
+async function renderAxMarket() {
+  const host = el("axBody");
+  const [b, mh, mc] = await Promise.all([api.axBook().catch(() => null), api.axMarketHistory().catch(() => ({ chart: [], recent: [] })), api.axMakerCfg().catch(() => null)]);
+  axLastBook = b;
+  const ccy = b ? b.label : "mxUSDT";
+  const rows = axDepthRows(b);
+  host.innerHTML = `${axHeader("market")}
+    <div class="card"><div class="card__title">Order book · ${b ? b.makers : 0} live</div>
+      <div class="view__desc">${b && b.bestBid && b.bestAsk ? "spread " + fmtPx(b.bestAsk - b.bestBid) + " · USDT per " + esc(ccy) : "no two-sided market"}</div>
+      <div class="mono" style="font-size:12px">${rows || '<div class="empty">No live orders. Publish one below, or wait for a counterparty.</div>'}</div>
+      <button class="btn btn--outline btn--sm" id="axBookRefresh" style="margin-top:6px">Refresh</button>
+    </div>
+    <div class="card"><div class="card__title">Market history <span class="mail-ver">price only</span></div>
+      <canvas id="axChart" width="640" height="160" style="width:100%;height:160px"></canvas>
+      <div class="view__desc">${axHistLine(mh)}</div>${axHistRows(mh)}
+    </div>
+    ${axMakerEditor(mc, ccy)}`;
+  wireAxHeader();
+  el("axBookRefresh").onclick = renderAxMarket;
+  setTimeout(() => { try { axDrawChart(el("axChart"), mh.chart); } catch (e) {} }, 0);
+  axWireMakerEditor();
+}
+function axDepthRows(b) {
+  if (!b) return "";
+  const n = Math.min(Math.max(b.bids.length, b.asks.length), 12);
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    const bid = b.bids[i], ask = b.asks[i];
+    out += `<div class="row" style="justify-content:space-between"><span style="color:var(--green)">${bid ? fmtPx(bid.p) + " · " + fmtAbbrev(bid.cap) : ""}</span><span style="color:var(--accent)">${ask ? fmtPx(ask.p) + " · " + fmtAbbrev(ask.cap) : ""}</span></div>`;
+  }
+  return out;
+}
+function fmtAbbrev(n) { n = Number(n) || 0; if (n >= 1e6) return (n / 1e6).toFixed(2) + "M"; if (n >= 1e3) return (n / 1e3).toFixed(1) + "k"; return (Math.round(n * 100) / 100).toString(); }
+function axHistLine(mh) {
+  const last = mh.chart.length ? fmtPx(mh.chart[mh.chart.length - 1].price) : "—";
+  let ex = 0, op = 0; (mh.recent || []).forEach(t => { if (t.status === "EXECUTED") ex++; else if (t.status === "OPEN") op++; });
+  return `last ${last} · ${ex} filled · ${op} open`;
+}
+function axHistRows(mh) {
+  if (!(mh.recent || []).length) return `<div class="empty">No trades observed yet — AtomiX records swaps network-wide as they happen (no backfill).</div>`;
+  return mh.recent.map(t => {
+    const cls = t.status === "EXECUTED" ? "var(--green)" : t.status === "REFUNDED" ? "var(--red)" : "var(--dim)";
+    const lbl = t.status === "EXECUTED" ? "filled" : t.status === "REFUNDED" ? "cancelled" : "open";
+    return `<div class="row" style="justify-content:space-between"><span class="mono">${fmtPx(t.price)}</span><span class="mono" style="color:var(--dim)">${fmtAbbrev(Number(t.sizeMinima))} M</span><span class="mail-ver" style="color:${cls}">${lbl}</span></div>`;
+  }).join("");
+}
+function axDrawChart(canvas, data) {
+  const cv = canvas && canvas.getContext && canvas.getContext("2d"); if (!cv) return;
+  const w = canvas.width, h = canvas.height, padL = 46, padR = 8, padT = 8, padB = 16;
+  const css = getComputedStyle(document.documentElement);
+  const ACC = (css.getPropertyValue("--accent") || "#FF7358").trim(), DIM = (css.getPropertyValue("--dim") || "#888").trim();
+  cv.clearRect(0, 0, w, h); cv.font = "11px monospace"; cv.fillStyle = DIM;
+  if (!data || data.length < 2) { cv.fillText(!data || !data.length ? "Collecting market data…" : "need 2+ trades to chart", padL, h / 2); return; }
+  let minP = Infinity, maxP = -Infinity, minB = Infinity, maxB = -Infinity;
+  data.forEach(t => { minP = Math.min(minP, t.price); maxP = Math.max(maxP, t.price); minB = Math.min(minB, t.createdBlock); maxB = Math.max(maxB, t.createdBlock); });
+  if (maxP <= minP) maxP = minP + Math.max(minP * 0.001, 1e-9); if (maxB <= minB) maxB = minB + 1;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const px = bk => padL + ((bk - minB) / (maxB - minB)) * plotW, py = v => padT + (1 - (v - minP) / (maxP - minP)) * plotH;
+  cv.strokeStyle = DIM; cv.lineWidth = 1; cv.beginPath(); cv.moveTo(padL, padT); cv.lineTo(padL, h - padB); cv.lineTo(w - padR, h - padB); cv.stroke();
+  cv.fillText(String(fmtPx(maxP)), 2, padT + 9); cv.fillText(String(fmtPx(minP)), 2, h - padB);
+  cv.strokeStyle = ACC; cv.lineWidth = 2; cv.beginPath();
+  data.forEach((t, i) => { const x = px(t.createdBlock), y = py(t.price); if (i === 0) cv.moveTo(x, y); else cv.lineTo(x, y); }); cv.stroke();
+  cv.fillStyle = ACC; data.forEach(t => { cv.beginPath(); cv.arc(px(t.createdBlock), py(t.price), 2.5, 0, Math.PI * 2); cv.fill(); });
+}
+function axMakerEditor(mc, ccy) {
+  const c = (mc && mc.cfg) || {};
+  return `<div class="card"><div class="card__title">Your market (maker)</div>
+    <div class="view__desc">Publish a pegged ladder; the node keeps it live and auto-responds to takers.</div>
+    <div class="field"><div class="field__label">Peg to market</div><select class="field__input" id="axPeg"><option value="1"${c.pegEnable ? " selected" : ""}>On (auto-price)</option><option value="0"${c.pegEnable ? "" : " selected"}>Off</option></select></div>
+    <div class="row"><div class="field" style="flex:1"><div class="field__label">Spread step %</div><input class="field__input" id="axStep" value="${c.step != null ? c.step : 1}" /></div>
+      <div class="field" style="flex:1"><div class="field__label">Size / level (${esc(ccy)})</div><input class="field__input" id="axSize" value="${c.size != null ? c.size : ""}" /></div></div>
+    <div class="row"><div class="field" style="flex:1"><div class="field__label">Levels (1–6)</div><input class="field__input" id="axLevels" value="${c.levels != null ? c.levels : 1}" /></div>
+      <div class="field" style="flex:1"><div class="field__label">Skew ±%</div><input class="field__input" id="axBias" value="${c.bias != null ? c.bias : 0}" /></div></div>
+    <div class="field"><div class="field__label">Min trade (${esc(ccy)})</div><input class="field__input" id="axMin" value="${c.min != null ? c.min : ""}" /></div>
+    <div class="seg"><button class="btn btn--primary btn--full" id="axSave">Save & publish</button><button class="btn btn--outline btn--full" id="axPublish">Republish</button><button class="btn btn--danger btn--full" id="axWithdraw">Withdraw</button></div>
+  </div>`;
+}
+function axWireMakerEditor() {
+  const rd = () => ({ pegEnable: el("axPeg").value === "1", step: Number(el("axStep").value) || 0, size: Number(el("axSize").value) || 0, levels: Number(el("axLevels").value) || 1, bias: Number(el("axBias").value) || 0, min: Number(el("axMin").value) || 0, reprice: 1 });
+  el("axSave").onclick = async () => { el("axSave").disabled = true; const r = await api.axMakerSave(rd(), { bids: [], asks: [] }).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); renderAxMarket(); };
+  el("axPublish").onclick = async () => { const r = await api.axMakerPublish().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Republished", r && r.err ? "warn" : "ok"); };
+  el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", "ok"); renderAxMarket(); };
+}
+
+// ---- Activity ----
+async function renderAxActivity() {
+  const host = el("axBody");
+  const swaps = await api.axSwaps().catch(() => []);
+  host.innerHTML = `${axHeader("activity")}<div class="card"><div class="card__title">Your swaps</div>${swaps.length ? "" : '<div class="empty">No swaps yet — your completed and refunded swaps appear here.</div>'}<div id="axSwapList">${axSwapRows(swaps)}</div></div>`;
+  wireAxHeader();
+  wireAxSwapRows();
+}
+function axSwapRows(swaps) {
+  return swaps.map(s => `<div class="row" style="justify-content:space-between;cursor:pointer" data-axhash="${esc(s.hash)}">
+    <span class="mono" style="font-size:13px">${esc(s.sellamount)} ${esc(axTok(s.selltoken))} → ${esc(s.buyamount)} ${esc(axTok(s.buytoken))}</span>
+    <span class="mail-ver">${esc(String(s.status).toLowerCase())}</span></div>`).join("");
+}
+function axTok(t) { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = String(t).toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "mxUSDT"; } return t; }
+function wireAxSwapRows() {
+  document.querySelectorAll("#axBody [data-axhash]").forEach(r => r.onclick = async () => {
+    toast("Checking…");
+    const lines = await api.axInspect(r.dataset.axhash).catch(e => ["Check failed: " + (e.message || e)]);
+    showAxReport(r.dataset.axhash, lines);
+  });
+}
+function showAxReport(hash, lines) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axRepOv"><div class="modal">
+    <div class="modal__title">Swap status</div><div class="view__desc" style="white-space:pre-wrap">${esc(lines.join("\n"))}</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axRepClose">Close</button><button class="btn btn--primary btn--full" id="axRepAgain">Check again</button></div></div></div>`);
+  const ov = el("axRepOv"); const close = () => ov && ov.remove();
+  el("axRepClose").onclick = close;
+  el("axRepAgain").onclick = async () => { close(); const l = await api.axInspect(hash).catch(e => ["Check failed"]); showAxReport(hash, l); };
+  ov.onclick = e => { if (e.target.id === "axRepOv") close(); };
+}
+
+// ---- OTC ----
+async function renderAxOtc() {
+  const host = el("axBody");
+  const o = await api.axOtc().catch(() => ({ board: [], deals: [], myOffer: {} }));
+  const ccy = axStatusCache.currency === "minima" ? "MINIMA" : "mxUSDT";
+  host.innerHTML = `${axHeader("otc")}
+    <div class="card"><div class="card__title">Your availability (${esc(ccy)})</div>
+      <div class="row"><div class="field" style="flex:1"><div class="field__label">Max to SELL</div><input class="field__input" id="axOtcSell" value="${o.myOffer && o.myOffer.sellSize || ""}" /></div>
+        <div class="field" style="flex:1"><div class="field__label">Max to BUY</div><input class="field__input" id="axOtcBuy" value="${o.myOffer && o.myOffer.buySize || ""}" /></div></div>
+      <div class="seg"><button class="btn btn--primary btn--full" id="axOtcLive">Go live</button><button class="btn btn--outline btn--full" id="axOtcWithdraw">Withdraw</button></div></div>
+    <div class="card"><div class="card__title">LP board</div>${o.board.length ? o.board.map((lp, i) => `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(TOK.shortId(lp.cid))}</span><span>sell ${lp.sell} · buy ${lp.buy}</span><button class="btn btn--sm btn--outline" data-axlp="${i}">Propose</button></div>`).join("") : '<div class="empty">No LPs live right now.</div>'}</div>
+    <div class="card"><div class="card__title">Your deals</div>${o.deals.length ? o.deals.map(d => axDealRow(d)).join("") : '<div class="empty">No active deals.</div>'}</div>`;
+  wireAxHeader();
+  el("axOtcLive").onclick = async () => { const r = await api.axOtcGoLive(el("axOtcSell").value, el("axOtcBuy").value).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Availability published", r && r.err ? "warn" : "ok"); };
+  el("axOtcWithdraw").onclick = async () => { await api.axOtcWithdraw().catch(() => {}); toast("Availability withdrawn"); };
+  document.querySelectorAll("#axBody [data-axlp]").forEach(btn => btn.onclick = () => axOtcPropose(o.board[Number(btn.dataset.axlp)]));
+  document.querySelectorAll("#axBody [data-axaccept]").forEach(btn => btn.onclick = async () => { await api.axOtcDeal(btn.dataset.axaccept, "accept").catch(e => toast(e.message || e, "warn")); renderAxOtc(); });
+  document.querySelectorAll("#axBody [data-axreject]").forEach(btn => btn.onclick = async () => { await api.axOtcDeal(btn.dataset.axreject, "reject").catch(() => {}); renderAxOtc(); });
+}
+function axDealRow(d) {
+  const canAct = d.whoseTurn === "ME" && (d.status === "PROPOSED" || d.status === "COUNTERED");
+  return `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${d.side} ${d.amount} @ ${d.price}</span><span class="mail-ver">${esc(String(d.status).toLowerCase())}</span>${canAct ? `<span><button class="btn btn--sm btn--primary" data-axaccept="${esc(d.ref)}">Accept</button> <button class="btn btn--sm btn--danger" data-axreject="${esc(d.ref)}">Reject</button></span>` : ""}</div>`;
+}
+async function axOtcPropose(lp) {
+  if (!lp) return;
+  const side = await showPrompt("Deal side", "SELL", "SELL or BUY", { message: "SELL = you buy their " + (axStatusCache.currency === "minima" ? "MINIMA" : "mxUSDT") + "; BUY = you sell yours." });
+  if (!side) return;
+  const amount = await showPrompt("Amount", "", "0.0"); if (!amount) return;
+  const price = await showPrompt("Price (USDT each)", "", "1.0"); if (!price) return;
+  const r = await api.axOtcPropose({ cid: lp.cid, mpk: lp.mpk, eth: lp.eth }, side.toUpperCase(), amount, price).catch(e => ({ err: String(e.message || e) }));
+  toast(r && r.err ? r.err : "✓ Proposed — waiting on the LP", r && r.err ? "warn" : "ok"); renderAxOtc();
+}
+
+// ---- Wallet (ETH) ----
+async function renderAxWallet() {
+  const host = el("axBody");
+  const w = await api.axWallet().catch(() => null);
+  if (!w) { host.innerHTML = `${axHeader("wallet")}<div class="empty">Wallet not ready.</div>`; wireAxHeader(); return; }
+  const b = w.bals, m = b.meta;
+  const locked = m ? Math.max(0, (Number(m.confirmed) || 0) - (Number(m.sendable) || 0)) : 0;
+  host.innerHTML = `${axHeader("wallet")}
+    <div class="card" id="axMinCard" style="cursor:pointer"><div class="card__title">${esc(w.label)} · available to swap</div>
+      <div class="mono" style="font-size:22px;color:var(--accent)">${esc(b.minima)} ${esc(w.label)}</div>
+      <div class="view__desc">${m ? `confirmed ${m.confirmed} · locked ≈ ${Math.round(locked * 1e6) / 1e6} · unconfirmed ${m.unconfirmed} · ${m.coins} coins · tap for coins` : ""}</div></div>
+    <div class="card" id="axEthCard" style="cursor:pointer"><div class="card__title">Ethereum</div>
+      <div class="mono" style="font-size:22px">${esc(b.eth)} ETH</div><div class="view__desc mono">${esc(w.shortAddr)}</div></div>
+    <div class="card"><div class="card__title">USDT · Ethereum</div><div class="mono" style="font-size:22px">${esc(b.usdt)} USDT</div></div>
+    <div class="seg" style="flex-wrap:wrap"><button class="btn btn--outline btn--sm" id="axRefreshBal">Refresh</button><button class="btn btn--outline btn--sm" id="axFund">Fund / QR</button><button class="btn btn--outline btn--sm" id="axSend">Send</button><button class="btn btn--outline btn--sm" id="axExport">Export key</button></div>`;
+  wireAxHeader();
+  el("axMinCard").onclick = axCoinDump;
+  el("axEthCard").onclick = () => axReceive(w.addr);
+  el("axRefreshBal").onclick = renderAxWallet;
+  el("axFund").onclick = () => axReceive(w.addr);
+  el("axSend").onclick = () => axSendDialog(w);
+  el("axExport").onclick = axExportKey;
+}
+function axReceive(addr) {
+  let qrHtml = "";
+  if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(addr); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:10px auto">${qr.createImgTag(5, 6)}</div>`; }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axRxOv"><div class="modal">
+    <div class="modal__title">Receive / Fund · Ethereum</div>
+    <div class="mono" style="user-select:all;word-break:break-all;text-align:center;font-size:13px">${esc(addr)}</div>${qrHtml}
+    <div class="view__desc">Same address on all EVM networks — fund it with Ethereum ETH and tokens.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axRxClose">Close</button><button class="btn btn--primary btn--full" id="axRxCopy">Copy address</button></div></div></div>`);
+  const ov = el("axRxOv"); const close = () => ov && ov.remove();
+  el("axRxClose").onclick = close; el("axRxCopy").onclick = () => { copy(addr); };
+  ov.onclick = e => { if (e.target.id === "axRxOv") close(); };
+}
+async function axExportKey() {
+  if (!await showConfirm("Export ETH private key", "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.", "Reveal key", true)) return;
+  const pk = await api.axExportKey().catch(() => null);
+  if (!pk) { toast("Wallet not ready", "warn"); return; }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axPkOv"><div class="modal">
+    <div class="modal__title">ETH private key</div><div class="view__desc" style="color:var(--red)">⚠ Keep this secret.</div>
+    <div class="mono" style="user-select:all;word-break:break-all;font-size:12px">${esc(pk)}</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axPkClose">Close</button><button class="btn btn--primary btn--full" id="axPkCopy">Copy key</button></div></div></div>`);
+  const ov = el("axPkOv"); const close = () => ov && ov.remove();
+  el("axPkClose").onclick = close; el("axPkCopy").onclick = () => copy(pk);
+  ov.onclick = e => { if (e.target.id === "axPkOv") close(); };
+}
+async function axCoinDump() {
+  const rows = await api.axCoins().catch(() => []);
+  const body = rows.length ? rows.map(c => `<div class="row mono" style="font-size:12px"><span>${esc(c.amount)}</span><span style="color:var(--dim)">${esc(TOK.shortId(c.coinid))}</span></div>`).join("") : '<div class="empty">No sendable coins right now.</div>';
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axCoinOv"><div class="modal"><div class="modal__title">Your coins</div>${body}<div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axCoinClose">Close</button></div></div></div>`);
+  const ov = el("axCoinOv"); el("axCoinClose").onclick = () => ov.remove(); ov.onclick = e => { if (e.target.id === "axCoinOv") ov.remove(); };
+}
+async function axSendDialog(w) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axSendOv"><div class="modal">
+    <div class="modal__title">Send from this wallet</div>
+    <div class="seg"><button class="btn btn--primary btn--full" id="axSendEth" data-asset="eth">ETH</button><button class="btn btn--outline btn--full" id="axSendUsdt" data-asset="usdt">USDT</button></div>
+    <div class="field"><div class="field__label">To</div><input class="field__input mono" id="axSendTo" placeholder="0x… recipient" autocomplete="off" /></div>
+    <div class="field"><div class="field__label">Amount <button class="btn btn--sm btn--outline" id="axSendMax" style="float:right">Max</button></div><input class="field__input mono" id="axSendAmt" placeholder="0.00" autocomplete="off" /></div>
+    <div class="view__desc">Sends are irreversible. Double-check the address.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axSendCancel">Cancel</button><button class="btn btn--primary btn--full" id="axSendReview">Review</button></div></div></div>`);
+  const ov = el("axSendOv"); let asset = "eth"; const close = () => ov && ov.remove();
+  const setAsset = a => { asset = a; el("axSendEth").className = "btn btn--full " + (a === "eth" ? "btn--primary" : "btn--outline"); el("axSendUsdt").className = "btn btn--full " + (a === "usdt" ? "btn--primary" : "btn--outline"); };
+  el("axSendEth").onclick = () => setAsset("eth"); el("axSendUsdt").onclick = () => setAsset("usdt");
+  el("axSendMax").onclick = async () => { const m = await api.axSendMax(asset).catch(() => null); if (m != null) el("axSendAmt").value = m; };
+  el("axSendCancel").onclick = close;
+  ov.onclick = e => { if (e.target.id === "axSendOv") close(); };
+  el("axSendReview").onclick = async () => {
+    const to = el("axSendTo").value.trim(), amt = el("axSendAmt").value.trim();
+    const r = await api.axSendReview(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
+    if (r.err) { toast(r.err, "warn"); return; }
+    close();
+    if (!await showConfirm("Review — Send " + (asset === "eth" ? "ETH" : "USDT"), `Send  ${amt} ${asset === "eth" ? "ETH" : "USDT"}\nTo  ${to}\n\nNetwork fee ≈ ${r.fee} ETH\nThis cannot be undone.`, "Send now", true)) return;
+    const s = await api.axSend(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
+    toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok");
+    if (activeView === "atomix" && axView === "wallet") renderAxWallet();
+  };
+}
+
+async function axSwitchCurrency() {
+  const to = axStatusCache.currency === "minima" ? "mxUSDT" : "MINIMA";
+  if (!await showConfirm("Switch to " + to + "?", "Your live market on the current book is withdrawn first, then AtomiX moves to the " + to + " book. Any in-flight swap still settles.", "Switch")) return;
+  const r = await api.axSwitchCurrency(axStatusCache.currency === "minima" ? "mxusdt" : "minima").catch(e => ({ err: String(e.message || e) }));
+  if (r && r.err) toast(r.err, "warn");
+  renderAtomix();
+}
+function axWelcome() {
+  showConfirm("Welcome to AtomiX", "Swap MINIMA or mxUSDT ⇄ Ethereum USDT trustlessly across chains — no middleman ever holds your funds.\n\nYour keys are derived from this node's seed, so it's the same wallet and identity on any device running AtomiX.\n\nTabs: Swap (quick trade) · Market (full order book + your maker order) · Activity (your swaps) · OTC (private negotiated deals) · Wallet (your ETH).\n\nInteroperates on the SAME on-chain books as the AtomiX phone app and MiniDapp.", "Get started");
+}
+
+// live push: patch passive regions only; never rebuild a form the user is typing into
+function onAtomixUpdate() {
+  if (axUpdateTimer) return;
+  axUpdateTimer = setTimeout(() => { axUpdateTimer = null; refreshAxActive().catch(() => {}); }, 400);
+}
+async function refreshAxActive() {
+  if (activeView !== "atomix" || !el("axBody")) return;
+  // Swap/OTC/Wallet hold live-typed inputs → only refresh the passive quote/book line; Market/Activity are
+  // safe to re-render (no persistent input focus on their lists).
+  if (axView === "market") return renderAxMarket();
+  if (axView === "activity") return renderAxActivity();
+  if (axView === "swap") { const b = await api.axBook().catch(() => null); axLastBook = b; const ln = el("axQuoteLine"); if (ln) ln.textContent = axBookLine(b); }
+}
