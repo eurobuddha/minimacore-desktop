@@ -59,8 +59,12 @@ function buildMds() {
   return {
     minidappuid: "",
     cmd(command, cb) {
-      // two-arg then (pandapools pattern): a throw inside the success cb must not double-fire the cb
-      runner(String(command)).then(r => cb(r), () => cb({ status: false }));
+      // two-arg then (pandapools pattern): a throw inside the success cb must not double-fire the cb.
+      // CROSS-REALM: the engine tests `r.response instanceof Array` (orderbook/otc/responder book scans) — a
+      // main-realm array is NOT instanceof the VM realm's Array, so every cmd response is marshalled INTO the
+      // vm realm (JSON round-trip via the vm's own parser). Without this the book always reads empty. (sql
+      // rows are consumed by realm-independent ops — Array.isArray/.map/index — so they need no marshalling.)
+      runner(String(command)).then(r => cb(toVm(r)), () => cb(toVm({ status: false })));
     },
     sql(query, cb) {
       sqlShim.sql(query, cb);
@@ -87,6 +91,17 @@ function buildMds() {
 }
 
 function fire(event) { if (serviceHandler) { try { serviceHandler({ event }); } catch (e) { log("handler error: " + e.message); } } }
+
+// Marshal a main-realm value INTO the vm realm (so `instanceof Array` etc. use the vm's intrinsics). Lazy —
+// ctx exists by the time any cmd response is marshalled. Falls back to identity before the ctx is built.
+let vmJsonParse = null;
+function toVm(obj) {
+  try {
+    if (!ctx) return obj;
+    if (!vmJsonParse) vmJsonParse = require("vm").runInContext("JSON.parse", ctx);
+    return vmJsonParse(JSON.stringify(obj));
+  } catch (e) { return obj; }
+}
 
 async function init() {
   if (ready) return;
@@ -126,6 +141,7 @@ function invalidate() {
   flush();
   try { fs.unlinkSync(path.join(dir(), "atomix.sqlite")); } catch (e) {}
   ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null;
+  vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
   emitter.emit("update");
   startLoop();
 }
@@ -143,8 +159,341 @@ function status() {
   };
 }
 
+// ============================ read-model + actions (S2) ============================
+// Every flow below is a 1:1 transcription of the donor's lib/app.js — the engine does the thinking, this
+// file only sequences it. Frozen quotes (pandapools quoteAndStash pattern): execute EXACTLY what was reviewed.
+
+function AX() { if (!ctx || !ctx.READY) throw new Error("AtomiX engine not booted yet"); return ctx.AX; }
+function vmCtx() { return ctx.CTX; }
+function withTimeout(promise, ms, what) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(what + " timed out")), ms))]);
+}
+function p(fn) { return new Promise((res, rej) => { try { fn((err, val) => err ? rej(err instanceof Error ? err : new Error(String(err))) : res(val)); } catch (e) { rej(e); } }); }
+function jclone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
+
+// ---- balances (donor refreshBalances/refreshEthBalances: display + RAW — raw gates every fund check) ----
+async function balances() {
+  const A = AX();
+  const out = { minima: "0", meta: null, eth: "0", ethWei: "0", usdt: "0", usdtRaw: "0" };
+  const bal = await runner("balance tokenid:" + A.trading.active().tokenId).catch(() => null);
+  const r0 = bal && bal.response && bal.response[0];
+  // node returns response:[] for a token the wallet holds none of → a zeroed breakdown (consistent UI card).
+  out.minima = r0 ? String(r0.sendable) : "0";
+  out.meta = r0
+    ? { confirmed: r0.confirmed, unconfirmed: r0.unconfirmed, sendable: r0.sendable, coins: r0.coins, at: Date.now() }
+    : { confirmed: "0", unconfirmed: "0", sendable: "0", coins: 0, at: Date.now() };
+  const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
+  await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb)).then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); }).catch(() => {});
+  await p(cb => ops.balanceOf(A.ethops.NET.usdt, cb)).then(raw => { out.usdtRaw = raw.toString(); out.usdt = A.dec.formatUnits(raw, 6); }).catch(() => {});
+  return out;
+}
+
+// ---- book + quote (donor onReview: single within the best level, else best-price-first sweep) ----
+let lastQuotes = {}, quoteSeq = 0;
+function myId() { const A = AX(); return A.boot.activeIdentity(vmCtx()).publicId(); }
+async function bookScan() { const A = AX(); return p(cb => A.book.scan((e, book) => cb(e, book))); }
+
+async function book() {
+  const A = AX();
+  const b = await withTimeout(bookScan(), 30000, "book scan");
+  const q = A.book.bestMakers(b, myId());
+  // `scanned` = orders the engine READ+VERIFIED on-chain (Ed25519 + parse); `makers` = EXTERNAL makers after
+  // excluding our own identity's orders (0 is correct on a node whose own maker published the whole book).
+  const mine = A.boot.activeIdentity(vmCtx()).publicId();
+  const external = Object.keys(b).filter(pk => !A.book.isMine(b[pk], mine)).length;
+  return jclone({
+    scanned: Object.keys(b).length, makers: external,
+    bestBid: q.bestBid, bestAsk: q.bestAsk, bidCap: q.bidCap, askCap: q.askCap,
+    bids: A.book.aggSide(b, true, myId()).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, true) })),
+    asks: A.book.aggSide(b, false, myId()).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, false) })),
+    currency: A.trading.active().key, label: A.trading.active().coinLabel
+  });
+}
+
+async function quote(sell, amountStr, slipPct) {
+  const A = AX(), SP = A.swapplan;
+  const bals = await balances();
+  const b = await withTimeout(bookScan(), 30000, "book scan");
+  const q = A.book.bestMakers(b, myId());
+  const want = Number(amountStr);
+  const ccy = A.trading.active().coinLabel;
+  if (!(want > 0)) return { err: "Enter a valid " + ccy + " amount." };
+  const bestMaker = sell ? q.bidMaker : q.askMaker, bestPrice = sell ? q.bestBid : q.bestAsk, bestCap = sell ? q.bidCap : q.askCap;
+  if (!bestMaker || bestPrice <= 0) return { err: "No quote available right now." };
+  let model;
+  if (sell) {
+    if (want > Number(bals.minima) + 1e-9) return { err: "You only have " + bals.minima + " " + ccy + " to sell." };
+    if (want <= bestCap + 1e-9) {
+      const minima = SP.legMinima(want), usdt = SP.computeUsdt(minima, bestPrice);
+      if (!minima || !usdt) return { err: "Enter a valid amount" };
+      model = { mode: "single", sell: true, minima, usdt, price: bestPrice, maker: bestMaker.signerPk };
+    } else {
+      const plan = SP.buildSweepPlan(b, true, amountStr, 0, myId());
+      if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now." };
+      model = { mode: "sweep", sell: true, plan };
+    }
+  } else {
+    const slip = (Number(slipPct) || 0) / 100;
+    const plan = SP.buildSweepPlan(b, false, amountStr, slip, myId());
+    if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now." };
+    if (plan.totalUsdt > Number(bals.usdt) + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + "." };
+    model = { mode: "sweep", sell: false, plan };
+  }
+  // FREEZE the quote (752264c rule): execution replays exactly this, against a fresh makerLive check.
+  const qid = "q" + (++quoteSeq);
+  lastQuotes[qid] = { model, book: b, at: Date.now() };
+  const keys = Object.keys(lastQuotes); if (keys.length > 30) delete lastQuotes[keys[0]];
+  const out = jclone({ quoteId: qid, mode: model.mode, sell, single: model.mode === "single"
+    ? { minima: model.minima, usdt: model.usdt, price: model.price, maker: model.maker }
+    : null,
+    plan: model.plan ? { legs: model.plan.legs.map(l => ({ maker: l.maker.signerPk, price: l.price, minima: l.minima, usdt: l.usdt })),
+      filledMinima: model.plan.filledMinima, totalUsdt: model.plan.totalUsdt, avgPrice: model.plan.avgPrice,
+      worstPrice: model.plan.worstPrice, target: model.plan.target, partial: model.plan.partial,
+      stopReason: model.plan.stopReason, slippagePct: model.plan.slippagePct } : null,
+    label: ccy });
+  return out;
+}
+
+function legHooks(A, signerPk, sellMinima, freshBook) {
+  return {
+    makerLive: () => A.book.makerLive(freshBook[signerPk], sellMinima),
+    me: A.boot.activeIdentity(vmCtx()),
+    myPublicId: myId(),
+    onWithdrawn: () => {}, onNote: (tag) => log("swap note: " + tag)
+  };
+}
+function makerObj(book, signerPk) { return book[signerPk] || null; }
+function pollConfirm(A, hash, sellLeg) {
+  // donor pollConfirm: gate the NEXT unpinned-coin leg on THIS one confirming (5s × 24)
+  return new Promise(resolve => {
+    let tries = 0;
+    (function loop() {
+      p(cb => { A.engine.confirmMyLock(hash, sellLeg, found => cb(null, found)); }).then(found => {
+        if (found) return resolve(true);
+        if (++tries > 24) return resolve(false);
+        setTimeout(loop, 5000);
+      }).catch(() => resolve(false));
+    })();
+  });
+}
+
+async function swapExecute(quoteId) {
+  const A = AX();
+  const stash = lastQuotes[quoteId];
+  if (!stash) throw new Error("That quote has expired — review the swap again.");
+  delete lastQuotes[quoteId];                       // single-use (consumed even on failure, donor pattern)
+  const fresh = await withTimeout(bookScan(), 30000, "book scan");   // makerLive re-checks against CURRENT book
+  const m = stash.model;
+  const startLeg = (signerPk, sellMinima, minima, usdt) => {
+    const maker = makerObj(stash.book, signerPk);   // the FROZEN maker record (mpk/eth/cid from review time)
+    if (!maker) return Promise.reject(new Error("maker vanished from the reviewed book"));
+    return withTimeout(p(cb => A.engine.startLeg(maker, "USDT", sellMinima, minima, usdt,
+      legHooks(A, signerPk, sellMinima, fresh), cb)), 200000, "swap leg");
+  };
+  if (m.mode === "single") {
+    const hash = await startLeg(m.maker, true, m.minima, m.usdt);
+    emitter.emit("update");
+    return { ok: 1, of: 1, hashes: [hash] };
+  }
+  const legs = m.plan.legs;
+  const hashes = [];
+  if (m.sell) {
+    // donor startSweepSell: SEQUENTIAL, each next leg gated on the previous confirming (unpinned-coin race)
+    for (let i = 0; i < legs.length; i++) {
+      const hash = await startLeg(legs[i].maker.signerPk, true, legs[i].minima, legs[i].usdt);
+      hashes.push(hash);
+      if (i < legs.length - 1) {
+        const confirmed = await pollConfirm(A, hash, true);
+        if (!confirmed) { emitter.emit("update"); return { ok: hashes.length, of: legs.length, hashes, stopped: "part " + (i + 1) + " is still confirming — remaining parts not sent. Try again shortly." }; }
+      }
+    }
+  } else {
+    // donor startSweepBuy: buy legs fire back-to-back (nonce-serialized by ethtx)
+    const results = await Promise.allSettled(legs.map(l => startLeg(l.maker.signerPk, false, l.minima, l.usdt)));
+    for (const r of results) if (r.status === "fulfilled") hashes.push(r.value);
+    emitter.emit("update");
+    return { ok: hashes.length, of: legs.length, hashes };
+  }
+  emitter.emit("update");
+  return { ok: hashes.length, of: legs.length, hashes };
+}
+
+// ---- swaps / inspect (donor refreshSwaps + onSwapDetail) ----
+async function swaps() {
+  const A = AX();
+  const all = await p(cb => A.swapdb.allSwaps(cb));
+  return jclone(all.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
+    sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status, updated: s.updated })));
+}
+async function inspect(hash) {
+  const A = AX(), DB = A.swapdb, H = A.htlc, EO = A.ethops;
+  const s = await p(cb => DB.getSwap(hash, cb));
+  if (!s) return ["No record of this swap."];
+  const block = await p(cb => H.currentBlock(cb)).catch(() => -1);
+  const coins = await p(cb => H.scanByHash(hash, 2, 256, cb)).catch(() => []);
+  let myMin = null, cpMin = null;
+  const myPk = vmCtx().htlc.publickey;
+  for (const c of coins || []) {
+    if (!c || H.normKey(H.stateAt(c, 5) || "") !== H.normKey(hash)) continue;
+    if (H.normKey(H.stateAt(c, 0) || "") === H.normKey(myPk)) myMin = c;
+    if (H.normKey(H.stateAt(c, 4) || "") === H.normKey(myPk)) cpMin = c;
+  }
+  const secret = await p(cb => DB.getSecret(hash, cb)).catch(() => null);
+  const events = await p(cb => DB.getEvents(hash, cb)).catch(() => []);
+  const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
+  const facts = { swap: s, block, secretKnown: !!secret, myMin, cpMin, gc: null, gcAmountHuman: "", myEthStillLocked: null, events: events || [] };
+  if (s.direction === "MINIMA_TO_ERC20") {
+    const gc = await p(cb => ops.getContract(EO.contractId(hash), cb)).catch(() => null);
+    if (gc) { facts.gc = gc; facts.gcAmountHuman = A.dec.formatUnits(gc.amount, String(gc.tokenContract).toLowerCase() === EO.NET.usdt.toLowerCase() ? EO.NET.usdtDecimals : 18); }
+  } else {
+    facts.myEthStillLocked = await p(cb => ops.canCollect(s.contractId, cb)).catch(() => false);
+  }
+  return jclone(A.inspect.buildReport(facts));
+}
+
+// ---- market history / wallet / coins ----
+async function marketHistory() {
+  const A = AX();
+  const chart = await p(cb => A.swapdb.executedTrades(200, cb)).catch(() => []);
+  const recent = await p(cb => A.swapdb.recentTrades(50, cb)).catch(() => []);
+  return jclone({ chart, recent });
+}
+async function wallet() {
+  const A = AX();
+  const b = await balances();
+  return jclone({ addr: vmCtx().eth.address, shortAddr: A.wallet.shortAddr(vmCtx().eth.address), bals: b,
+    currency: A.trading.active().key, label: A.trading.active().coinLabel });
+}
+function exportKey() { AX(); return vmCtx().eth.privKey; }   // renderer shows the 2-step native warning flow
+async function coins() {
+  const A = AX();
+  const r = await runner("coins relevant:true sendable:true tokenid:" + A.trading.active().tokenId + " coinage:1").catch(() => null);
+  const rows = (r && Array.isArray(r.response)) ? r.response.map(c => ({ amount: A.htlc.coinAmount(c), coinid: c.coinid || "" })) : [];
+  rows.sort((a, b2) => Number(b2.amount) - Number(a.amount));
+  return jclone(rows.slice(0, 50));
+}
+
+// ---- wallet send (donor onSendMax/onSendReview/doSend — raw balances, gas reserve, review-then-broadcast) ----
+async function sendMax(asset) {
+  const A = AX();
+  const b = await balances();
+  if (asset === "usdt") return A.dec.formatUnits(BigInt(b.usdtRaw), 6);
+  const gp = await p(cb => ctx.RPC.gasPrice(cb));
+  return A.dec.formatUnits(A.wallet.maxEthSendWei(BigInt(b.ethWei), gp), 18);
+}
+async function sendReview(asset, to, amt) {
+  const A = AX();
+  const b = await balances();
+  const gp = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => null);
+  if (gp == null) return { err: "Could not read gas price — try again" };
+  const chk = A.wallet.checkSend(asset, to, amt, BigInt(b.ethWei), BigInt(b.usdtRaw), gp);
+  if (!chk.ok) return { err: chk.err };
+  const gasLimit = asset === "eth" ? A.wallet.GAS_ETH : A.wallet.GAS_ERC20;
+  return { fee: A.dec.formatUnits(A.wallet.gasReserveWei(gp, gasLimit), 18) };
+}
+async function sendExecute(asset, to, amt) {
+  const A = AX();
+  const send = asset === "eth" ? A.wallet.sendEth : A.wallet.sendUsdt;
+  const tx = await withTimeout(p(cb => send(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address, to, amt, cb)), 200000, "send");
+  emitter.emit("update");
+  return { tx };
+}
+
+// ---- maker (donor onSaveOrder/onPublish/onWithdraw; the vm service keep-alives whatever is saved) ----
+async function makerAvail() { const b = await balances(); return { minima: Number(b.minima) || 0, usdt: Number(b.usdt) || 0 }; }
+async function makerCfg() {
+  const A = AX();
+  await p(cb => A.maker.loadConfig(() => cb(null)));
+  return jclone(A.maker._state());
+}
+async function makerSave(cfg, manual) {
+  const A = AX();
+  await p(cb => A.maker.saveConfig(jvm(cfg), jvm(manual), () => cb(null)));
+  await p(cb => A.maker.refreshPeg(() => cb(null)));
+  const avail = await makerAvail();
+  await withTimeout(p(cb => A.maker.publish(jvm(avail), e => cb(e))), 60000, "publish");
+  emitter.emit("update");
+  return { ok: true };
+}
+async function makerPublish() {
+  const A = AX();
+  await p(cb => A.maker.refreshPeg(() => cb(null)));
+  const avail = await makerAvail();
+  await withTimeout(p(cb => A.maker.publish(jvm(avail), e => cb(e))), 60000, "publish");
+  emitter.emit("update");
+  return { ok: true };
+}
+async function makerWithdraw() {
+  const A = AX();
+  const avail = await makerAvail();
+  await withTimeout(p(cb => A.maker.tombstone(jvm(avail), e => cb(e))), 60000, "withdraw");
+  emitter.emit("update");
+  return { ok: true };
+}
+// cross-realm safety: hand the vm engine COPIES built in its own realm (so it never sees a foreign object).
+function jvm(obj) { return toVm(obj); }
+
+// ---- currency switch (donor switchCurrency: tombstone under the OLD identity, then flip the kv — the vm
+// service's reloadShared detects it next poll and reconfigures every engine itself) ----
+async function switchCurrency(key) {
+  const A = AX();
+  if (key !== "minima" && key !== "mxusdt") throw new Error("bad currency");
+  if (A.trading.active().key === key) return { ok: true };
+  const avail = await makerAvail();
+  await withTimeout(p(cb => A.maker.onCurrencySwitch(jvm(avail), () => cb(null))), 60000, "switch");
+  await p(cb => A.mds.kvSet("trading_currency", key, () => cb(null)));
+  fire("MDS_TIMER_60SECONDS");   // nudge reloadShared now instead of waiting for the next block
+  emitter.emit("update");
+  return { ok: true };
+}
+
+// ---- OTC (donor refreshOtc + onOtc*) ----
+async function otc() {
+  const A = AX();
+  const board = await p(cb => A.otc.scanBoard(cb)).catch(() => []);
+  await p(cb => A.otc.scanChat(() => cb(null))).catch(() => {});
+  const deals = await p(cb => A.otc.allDeals(cb)).catch(() => []);
+  return jclone({
+    board: (board || []).map(o => ({ cid: o.commsPublicId, mpk: o.minimaPublicKey, eth: o.ethAddress, sell: o.sellSize, buy: o.buySize, ts: o.ts })),
+    deals: (deals || []).filter(d => d.status !== "EXPIRED" && d.status !== "REJECTED" && d.status !== "COMPLETE"),
+    myOffer: A.otc.myOffer()
+  });
+}
+async function otcGoLive(sellSize, buySize) {
+  const A = AX();
+  A.otc.setMyOffer(true, Number(sellSize) || 0, Number(buySize) || 0);
+  await p(cb => A.otc.publishOffer(e => cb(e)));
+  emitter.emit("update"); return { ok: true };
+}
+async function otcWithdraw() {
+  const A = AX();
+  A.otc.setMyOffer(false, 0, 0);
+  await p(cb => A.otc.publishOffer(e => cb(e)));
+  emitter.emit("update"); return { ok: true };
+}
+async function otcPropose(lp, side, amount, price) {
+  const A = AX();
+  const lpVm = jvm({ commsPublicId: lp.cid, minimaPublicKey: lp.mpk, ethAddress: lp.eth });
+  await p(cb => A.otc.propose(lpVm, side, String(amount), String(price), e => cb(e)));
+  emitter.emit("update"); return { ok: true };
+}
+async function otcDealAction(ref, action, amount, price) {
+  const A = AX();
+  const d = await p(cb => A.otc.getDeal(ref, cb));
+  if (!d) throw new Error("deal not found");
+  if (action === "accept") await p(cb => A.otc.accept(d, e => cb(e)));
+  else if (action === "reject") await p(cb => A.otc.reject(d, e => cb(e)));
+  else if (action === "counter") await p(cb => A.otc.counter(d, String(amount), String(price), e => cb(e)));
+  else throw new Error("bad action");
+  emitter.emit("update"); return { ok: true };
+}
+
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
+  book, quote, swapExecute, swaps, inspect, marketHistory, wallet, exportKey, coins,
+  sendMax, sendReview, sendExecute,
+  makerCfg, makerSave, makerPublish, makerWithdraw, switchCurrency,
+  otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
   _ctx: () => ctx, _fire: fire
 };

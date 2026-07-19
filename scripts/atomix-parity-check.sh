@@ -12,7 +12,7 @@ DONOR="${ATOMIX_DONOR:-$HOME/Projects/atomix-mds}"
 FAIL=0
 # The manifest = service.js's own MDS.load list + service.js itself (the engine, complete).
 FILES=$(grep -oE "MDS.load\('[^']+'\)" main/atomix/service.js | sed "s/MDS.load('//;s/')//")
-FILES="$FILES service.js"
+FILES="$FILES service.js lib/wallet.js lib/inspect.js"
 N=0
 for f in $FILES; do
   N=$((N+1))

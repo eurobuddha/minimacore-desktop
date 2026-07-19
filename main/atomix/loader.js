@@ -31,6 +31,10 @@ function createContext(mds) {
   };
 
   vm.runInContext(fs.readFileSync(path.join(BASE, "service.js"), "utf8"), ctx, { filename: "atomix/service.js" });
+  // Two donor modules the BROWSER loads that service.js doesn't (they're UI-side there): the wallet send core
+  // and the swap-status report builder. The desktop orchestrator needs both — load them into the same context.
+  mds.load("lib/wallet.js");
+  mds.load("lib/inspect.js");
   return ctx;   // ctx.AX = the full engine; the captured MDS.init handler drives it
 }
 
