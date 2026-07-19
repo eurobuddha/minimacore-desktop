@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const config = require("./config");
 const node = require("./node-manager");
 const { rpcCall } = require("./rpc");
+const { pinMinimaSend } = require("./sendpin");
 const mc = require("./mailcrypto");
 const store = require("./mail-store");
 const backup = require("./mailbackup");
@@ -95,7 +96,9 @@ async function currentBlock() { try { const b = await nodeCmd("block"); return p
 // ---- send ----
 async function sendBlob(blobHex) {
   const cmd = `send amount:${MSG_AMOUNT} address:${CHAINMAIL} tokenid:0x00 state:${JSON.stringify({ "99": "0x" + blobHex })}`;
-  const r = await nodeCmd(cmd);
+  // shared-node fund-safety: pin the 1-nano send to a signable coin so the node can't grab anyone-can-spend
+  // beacon dust (PandaPools etc.) as the input → KeyRow.getPrivateKey() null. See main/sendpin.js.
+  const r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd));
   if (!r || (r.status !== true && r.pending !== true)) throw new Error((r && r.error) || "message send failed");
   return r;
 }
@@ -131,7 +134,9 @@ async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
   if (!chk || chk.status === false) throw new Error("Couldn't validate the recipient address — not sending.");
   const memoStr = String(memo || "");
   let r;
-  try { r = await nodeCmd(`send amount:${amount} address:${payaddr} tokenid:${tokenid}`); }
+  // pin a MINIMA (0x00) payment to a signable coin that covers the amount (token payments are untouched — beacon
+  // dust is 0x00 only). Best-effort: a payment too big for any single signable coin sends unpinned.
+  try { r = await nodeCmd(await pinMinimaSend(nodeCmd, `send amount:${amount} address:${payaddr} tokenid:${tokenid}`)); }
   catch (e) {
     // The send may have been ACCEPTED and posted even though the RPC call timed out / the socket reset. Do NOT
     // report a clean failure — that invites a re-pay (double spend). Tell the caller the status is uncertain.

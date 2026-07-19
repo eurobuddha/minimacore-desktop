@@ -12,6 +12,7 @@ const config = require("./config");
 const node = require("./node-manager");
 const portmap = require("./portmap");
 const rpc = require("./rpc");
+const { pinMinimaSend } = require("./sendpin");
 const updater = require("./updater");
 const netfetch = require("./netfetch");
 const histDb = require("./history-db");
@@ -90,7 +91,11 @@ function requireRunning() {
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   requireRunning();
-  return rpc.rpcCall(node.rpcPort(), config.rpcSecret(), command);
+  const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
+  // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
+  // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
+  const pinned = /^send\s/.test(command) ? await pinMinimaSend(run, command) : command;
+  return run(pinned);
 });
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
