@@ -465,3 +465,43 @@ body { font-family: var(--sans); }
 #view-atomix .ax-stage.warn .sdot { background:#E6A23C; }
 #view-atomix .ax-stage.pending .sdot { background:var(--dim2, #6F7583); }
 #view-atomix .ax-swapline { font-size:12px; color:var(--dim); padding:2px 0 2px 18px; }
+
+/* swap-page market context line */
+#view-atomix .ax-mktctx { font-family:var(--mono); font-size:11px; color:var(--dim); margin:2px 0 8px; }
+#view-atomix .ax-mktctx b { color:var(--text); font-weight:700; }
+
+/* live depth ladder (Market) */
+#view-atomix .ax-ladder { margin-top:2px; }
+#view-atomix .ax-spread { font-family:var(--mono); font-size:11px; color:var(--dim); padding:2px 2px 4px; }
+#view-atomix .ax-legend { display:flex; padding:2px 6px 3px; }
+#view-atomix .ax-legend span { flex:1; font-size:10.5px; font-weight:700; letter-spacing:.04em; }
+#view-atomix .ax-legend .sell { color:var(--green); }
+#view-atomix .ax-legend .buy { text-align:right; color:var(--accent); }
+#view-atomix .ax-depth { display:flex; align-items:center; gap:8px; border:1px solid var(--border); border-radius:12px; padding:5px 10px; margin-top:5px; background:var(--surface); }
+#view-atomix .ax-depth.best { background:var(--surface2); }
+#view-atomix .ax-depth .ax-half { flex:1; display:flex; flex-direction:column; gap:1px; }
+#view-atomix .ax-depth .ax-half.bid { text-align:right; align-items:flex-end; }
+#view-atomix .ax-depth .ax-half .top { display:flex; align-items:baseline; gap:6px; }
+#view-atomix .ax-depth .ax-half.bid .top { flex-direction:row-reverse; }
+#view-atomix .ax-depth .divider { color:var(--dim); flex:0 0 auto; }
+#view-atomix .ax-depth .ax-px { font-family:var(--mono); font-weight:700; font-size:15px; }
+#view-atomix .ax-depth.best .ax-px { font-size:18px; }
+#view-atomix .ax-depth .bidpx { color:var(--green); }
+#view-atomix .ax-depth .askpx { color:var(--accent); }
+#view-atomix .ax-depth .ax-sz { color:var(--dim); font-family:var(--mono); font-size:12px; }
+#view-atomix .ax-depth .ax-tag { font-size:9.5px; color:var(--dim); }
+#view-atomix .ax-depth .ax-tag.you { color:var(--accent); font-weight:700; }
+#view-atomix .ax-depth .ax-half.takeable { cursor:pointer; }
+#view-atomix .ax-depth .ax-half.takeable:hover .ax-px { text-decoration:underline; }
+
+/* maker editor: live status + auto/manual switch */
+#view-atomix .ax-mkr-status { display:flex; align-items:center; gap:7px; font-family:var(--mono); font-size:12px; margin-bottom:8px; }
+#view-atomix .ax-mkr-status .dot { width:8px; height:8px; border-radius:50%; background:var(--dim); flex:0 0 auto; }
+#view-atomix .ax-mkr-status.live { color:var(--green); }
+#view-atomix .ax-mkr-status.live .dot { background:var(--green); box-shadow:0 0 8px -1px var(--green); }
+#view-atomix .ax-mkr-status.off { color:var(--dim); }
+#view-atomix .ax-mkr-toggle { display:flex; align-items:center; justify-content:space-between; margin:8px 0 10px; }
+#view-atomix .ax-switch { position:relative; width:42px; height:24px; border-radius:12px; border:1px solid var(--border); background:var(--surface2); cursor:pointer; padding:0; flex:0 0 auto; transition:background .15s; }
+#view-atomix .ax-switch.on { background:var(--accent); border-color:var(--accent); }
+#view-atomix .ax-switch .knob { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:var(--text); transition:left .15s; }
+#view-atomix .ax-switch.on .knob { left:20px; background:var(--on-accent); }

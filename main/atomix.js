@@ -210,8 +210,10 @@ async function book() {
   return jclone({
     scanned: Object.keys(b).length, makers: external,
     bestBid: q.bestBid, bestAsk: q.bestAsk, bidCap: q.bidCap, askCap: q.askCap,
-    bids: A.book.aggSide(b, true, myId()).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, true) })),
-    asks: A.book.aggSide(b, false, myId()).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, false) })),
+    // Pass null (not myId) so aggSide INCLUDES our own levels — the ladder must show them (tagged `mine`), exactly
+    // like the donor's `aggSide(book, sell, null)`. bestMakers above still excludes own (you can't take yourself).
+    bids: A.book.aggSide(b, true, null).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, true), mine: A.book.isMine(r.maker, myId()) })),
+    asks: A.book.aggSide(b, false, null).slice(0, 12).map(r => ({ signer: r.maker.signerPk, p: r.level.p, cap: A.book.levelCap(r.maker, r.level, false), mine: A.book.isMine(r.maker, myId()) })),
     currency: A.trading.active().key, label: A.trading.active().coinLabel
   });
 }
