@@ -355,11 +355,22 @@ function actionOnPool(addr, fn, label, summary) {
   });
 }
 function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, d); }, "ADD", "Added liquidity"); }
-function closePool(addr) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.close(p, d); }, "WITHDRAW", "Withdrew a pool's reserves"); }
+
+/** Self-heal the owner key before an owner-signed spend (WITHDRAW / MIGRATE): $OPK is a newaddress key
+ *  (index ≥ 64) the node re-derives lazily; a restore regenerates it ASYNCHRONOUSLY, so a spend attempted too
+ *  soon fails with "Public Key not found". Re-issue newaddress until it reappears (a no-op if already held; can
+ *  only succeed under the pool's creating seed). cb() always — a failed hunt lets the sign surface the real error. */
+function ensureOwnerKey(opk, cb) {
+  if (!opk || !ctx || !ctx.PoolMgr || !ctx.PoolMgr.ensureOwnerKeys) return cb();
+  try { ctx.PoolMgr.ensureOwnerKeys([opk], function () { cb(); }); } catch (e) { cb(); }
+}
+function closePool(addr) {
+  return actionOnPool(addr, function (p, d) { ensureOwnerKey(p.opk, function () { ctx.PoolMgr.close(p, d); }); }, "WITHDRAW", "Withdrew a pool's reserves");
+}
 async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
-  return withTimeout(new Promise(function (resolve, reject) { ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } }); }),
+  return withTimeout(new Promise(function (resolve, reject) { ensureOwnerKey(p.opk, function () { ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } }); }); }),
     200000, "Migrate timed out — check Activity and your balance before retrying.");
 }
 
@@ -371,10 +382,14 @@ async function collectToWallet() {
     ctx.Store.ownAll(function (recipes) {
       var oadrs = (recipes || []).map(function (r) { return r.oadr; }).filter(Boolean);
       if (!oadrs.length) { resolve({ addresses: 0, coins: 0 }); return; }
-      ctx.PoolMgr.sweepOwnerFunds(oadrs, { swept: function (addresses, coins) {
-        if (coins) { ctx.Store.actRecord("COLLECT", "Collected " + coins + " coin(s) to your wallet", "", lastTip, ""); emitter.emit("update"); }
-        resolve({ addresses: addresses, coins: coins });
-      } });
+      var opks = (recipes || []).map(function (r) { return r.opk; }).filter(Boolean);
+      // regenerate every owner key first ($OADR returns SIGNEDBY($OPK)) — self-heal the post-restore race.
+      ctx.PoolMgr.ensureOwnerKeys(opks, function () {
+        ctx.PoolMgr.sweepOwnerFunds(oadrs, { swept: function (addresses, coins) {
+          if (coins) { ctx.Store.actRecord("COLLECT", "Collected " + coins + " coin(s) to your wallet", "", lastTip, ""); emitter.emit("update"); }
+          resolve({ addresses: addresses, coins: coins });
+        } });
+      });
     });
   }), 240000, "Collecting timed out — check your balance; you can retry from My LP.");
 }
