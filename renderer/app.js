@@ -3902,10 +3902,40 @@ let casinoUpdateTimer = null;
 let casinoPick = {};            // coinid → chosen outcome index (PLAY)
 let casinoStatusCache = null;   // last casinoStatus()
 
+const CASINO_PRESETS = {
+  flip: { name: "Coin Flip", icon: "✦", range: 2, payout: 2, labels: ["Heads", "Tails"] },
+  dice: { name: "Dice", icon: "⚀", range: 6, payout: 6, labels: ["1", "2", "3", "4", "5", "6"] },
+  roulette: { name: "Roulette", icon: "◉", range: 36, payout: 36, labels: null }
+};
+let casinoHousePreset = "flip";
+let casinoBusy = {};            // coinid/action → true while a txn is in flight (disable buttons)
+const casinoFlashed = {};      // coinid → true once its win/lose flash has shown (session)
+
+function casinoGame(range) { return range == 2 ? CASINO_PRESETS.flip : range == 6 ? CASINO_PRESETS.dice : range == 36 ? CASINO_PRESETS.roulette : { name: "Custom (" + range + ")", icon: "✳", range: range, payout: range }; }
+function casinoPickLabel(range, pick) { return range == 2 ? (parseInt(pick) === 0 ? "Heads" : "Tails") : "" + (parseInt(pick) + 1); }
+function casinoFmt(v) { const n = parseFloat(v); return (isNaN(n) ? 0 : n).toLocaleString(undefined, { maximumFractionDigits: 4 }); }
+
+// --- pure Web-Audio SFX (CSP-safe: no files, no network) ---
+const casinoSfx = (() => {
+  let ac = null;
+  function ctx() { try { if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)(); return ac; } catch (e) { return null; } }
+  function tone(freq, dur, type, vol, when) { const a = ctx(); if (!a) return; const t = a.currentTime + (when || 0); const o = a.createOscillator(), g = a.createGain(); o.type = type || "sine"; o.frequency.value = freq; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol || 0.14, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur); }
+  const on = () => { try { return localStorage.getItem("casino_mute") !== "1"; } catch (e) { return true; } };
+  return {
+    chip() { if (!on()) return; tone(180, 0.06, "square", 0.08); tone(240, 0.05, "square", 0.06, 0.045); },
+    deal() { if (!on()) return; tone(330, 0.06, "triangle", 0.09); },
+    spin() { if (!on()) return; tone(440, 0.05, "sawtooth", 0.05); tone(520, 0.05, "sawtooth", 0.05, 0.1); },
+    win() { if (!on()) return; [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, "sine", 0.13, i * 0.09)); },
+    lose() { if (!on()) return; tone(210, 0.35, "sawtooth", 0.1); tone(150, 0.45, "sawtooth", 0.09, 0.08); },
+    chime() { if (!on()) return; tone(880, 0.12, "sine", 0.1); tone(1174, 0.14, "sine", 0.09, 0.08); }
+  };
+})();
+
 function onCasinoUpdate() {
   if (casinoUpdateTimer) clearTimeout(casinoUpdateTimer);
-  casinoUpdateTimer = setTimeout(() => {
+  casinoUpdateTimer = setTimeout(async () => {
     refreshCasinoBadge();
+    await casinoWatchResults();
     if (activeView !== "casino") return;
     if (el("casinoBody") && el("casinoBody").querySelector("input:focus")) return;   // never stomp a form
     renderCasino();
@@ -3914,7 +3944,248 @@ function onCasinoUpdate() {
 async function refreshCasinoBadge() {
   try { const n = await api.casinoNewCount(); const b = el("casinoBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; } catch (e) {}
 }
+// A background reveal/resolve (service.js) records to casino_history — surface the newest fresh win/lose as a flash.
+async function casinoWatchResults() {
+  let hist = []; try { hist = await api.casinoHistory(); } catch (e) { return; }
+  const now = Date.now();
+  const fresh = (hist || []).filter(h => h && h.coinid && !casinoFlashed[h.coinid] && (now - (Number(h.time) || 0)) < 180000);
+  if (!fresh.length) { (hist || []).forEach(h => { if (h && h.coinid) casinoFlashed[h.coinid] = true; }); return; }
+  (hist || []).forEach(h => { if (h && h.coinid) casinoFlashed[h.coinid] = true; });   // mark all seen so only the newest flashes
+  const h = fresh[0];   // history is newest-first
+  casinoFlash(!!h.won, h.game, h.profit, h.pickLabel, h.resultLabel, h.range);
+}
+
 async function renderCasino() {
   const host = el("casinoBody"); if (!host) return;
-  host.innerHTML = '<div class="view__title">Casino</div><div class="card"><div class="view__desc">Zero Edge Casino — loading…</div></div>';
+  let st = null, bal = "0";
+  try { st = await api.casinoStatus(); } catch (e) {}
+  try { bal = await api.casinoBalance(); } catch (e) {}
+  casinoStatusCache = st;
+  api.casinoSeen().catch(() => {}); refreshCasinoBadge();   // viewing the tab clears the unseen-result badge
+  const ready = st && st.ready;
+  const sub = (v, label) => `<button class="btn btn--sm ${casinoView === v ? "btn--primary" : "btn--outline"}" data-cv="${v}">${label}</button>`;
+  host.innerHTML =
+    `<div class="view__title" style="display:flex;align-items:center;gap:10px">Casino
+       <span style="font:600 11px/1 var(--mono);color:var(--dim);letter-spacing:0">ZERO EDGE · 0% HOUSE</span>
+       <span style="flex:1"></span>
+       <button class="btn btn--sm btn--outline" id="casinoMute" title="Sound">${(() => { try { return localStorage.getItem("casino_mute") === "1" ? "🔇" : "🔊"; } catch (e) { return "🔊"; } })()}</button>
+     </div>
+     <div class="casino-hdr">
+       <div><span class="casino-hdr__k">Balance</span><span class="casino-hdr__v">${casinoFmt(bal)} <small>MINIMA</small></span></div>
+       <div><span class="casino-hdr__k">Block</span><span class="casino-hdr__v">${st && st.block ? "#" + st.block : "—"}</span></div>
+       <div><span class="casino-hdr__k">Engine</span><span class="casino-hdr__v" style="color:${ready ? "var(--green)" : "var(--amber)"}">${ready ? "ready" : "starting…"}</span></div>
+     </div>
+     <div class="seg" style="margin:10px 0 12px">${sub("play", "Play")}${sub("house", "Be the House")}${sub("mybets", "My Bets")}${sub("history", "History")}</div>
+     <div id="casinoSub"></div>`;
+  host.querySelectorAll("[data-cv]").forEach(b => b.addEventListener("click", () => { casinoView = b.dataset.cv; renderCasino(); }));
+  const mute = el("casinoMute");
+  if (mute) mute.addEventListener("click", () => { try { const m = localStorage.getItem("casino_mute") === "1"; localStorage.setItem("casino_mute", m ? "0" : "1"); } catch (e) {} renderCasino(); });
+  renderCasinoSub();
+}
+
+function renderCasinoSub() {
+  if (casinoView === "play") return renderCasinoPlay();
+  if (casinoView === "house") return renderCasinoHouse();
+  if (casinoView === "mybets") return renderCasinoMyBets();
+  if (casinoView === "history") return renderCasinoHistory();
+}
+
+// ---------------- PLAY: take other players' open bets ----------------
+async function renderCasinoPlay() {
+  const host = el("casinoSub"); if (!host) return;
+  let bets = []; try { bets = await api.casinoOpenBets(); } catch (e) {}
+  if (el("casinoSub") !== host) return;   // view changed while awaiting
+  if (!bets.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No open bets right now. Switch to <b>Be the House</b> to offer one, or check back — bets from the native app & MiniDapp appear here too.</div></div>`; return; }
+  host.innerHTML = bets.map(b => {
+    const g = casinoGame(b.range), odds = (b.payout - 1);
+    const win = casinoFmt(parseFloat(b.bet) * b.payout);
+    const pick = casinoPick[b.coinid];
+    const picker = casinoPicker(b.range, b.coinid, pick);
+    const canTake = pick !== undefined && pick !== null && pick !== "";
+    return `<div class="card casino-bet">
+      <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span>
+        <span class="casino-bet__name">${esc(g.name)}</span>
+        <span class="casino-bet__odds">${odds}:1</span></div>
+      <div class="casino-bet__row"><span>Bet</span><b>${casinoFmt(b.bet)} MINIMA</b></div>
+      <div class="casino-bet__row"><span>You win</span><b style="color:var(--green)">${win} MINIMA</b></div>
+      <div class="casino-pickwrap">${picker}</div>
+      <button class="btn btn--primary btn--full casino-take" data-coin="${b.coinid}" ${canTake && !casinoBusy[b.coinid] ? "" : "disabled"}>${casinoBusy[b.coinid] ? "Taking…" : (canTake ? "TAKE BET — pick " + esc(casinoPickLabel(b.range, pick)) : "Choose your pick")}</button>
+    </div>`;
+  }).join("");
+  // pick controls
+  host.querySelectorAll("[data-pick]").forEach(elm => elm.addEventListener("click", () => { casinoPick[elm.dataset.coin] = parseInt(elm.dataset.pick); renderCasinoPlay(); }));
+  host.querySelectorAll("input[data-picknum]").forEach(inp => inp.addEventListener("input", () => { const v = parseInt(inp.value); casinoPick[inp.dataset.picknum] = (v >= 1 && v <= 36) ? v - 1 : ""; const btn = host.querySelector(`.casino-take[data-coin="${inp.dataset.picknum}"]`); if (btn) { const ok = casinoPick[inp.dataset.picknum] !== "" && casinoPick[inp.dataset.picknum] != null; btn.disabled = !ok; btn.textContent = ok ? "TAKE BET — pick " + (casinoPick[inp.dataset.picknum] + 1) : "Choose your pick"; } }));
+  host.querySelectorAll(".casino-take").forEach(btn => btn.addEventListener("click", () => casinoDoTake(btn.dataset.coin)));
+}
+
+function casinoPicker(range, coinid, pick) {
+  if (range == 2) return ["Heads", "Tails"].map((l, i) => `<button class="btn btn--sm ${pick === i ? "btn--primary" : "btn--outline"}" data-pick="${i}" data-coin="${coinid}">${l}</button>`).join("");
+  if (range == 6) return [0, 1, 2, 3, 4, 5].map(i => `<button class="btn btn--sm ${pick === i ? "btn--primary" : "btn--outline"}" data-pick="${i}" data-coin="${coinid}" style="min-width:38px">${i + 1}</button>`).join("");
+  return `<input class="field__input" type="number" min="1" max="36" placeholder="Pick a number 1–36" data-picknum="${coinid}" value="${pick != null && pick !== "" ? pick + 1 : ""}" style="max-width:220px">`;
+}
+
+async function casinoDoTake(coinid) {
+  if (casinoBusy[coinid]) return;
+  const pick = casinoPick[coinid];
+  if (pick === undefined || pick === null || pick === "") { toast("Choose your pick first", "warn"); return; }
+  casinoBusy[coinid] = true; renderCasinoPlay(); casinoSfx.deal();
+  try {
+    const r = await api.casinoTake(coinid, pick);
+    delete casinoBusy[coinid]; delete casinoPick[coinid];
+    toast((r && r.game ? r.game : "Bet") + " taken — picked " + (r && r.pickLabel ? r.pickLabel : "") + " ✓", "ok");
+    casinoView = "mybets"; renderCasino();
+  } catch (e) {
+    delete casinoBusy[coinid];
+    toast("Take failed: " + (e && e.message ? e.message : e), "err");
+    renderCasinoPlay();
+  }
+}
+
+// ---------------- HOUSE: create a bet + manage your open offers ----------------
+async function renderCasinoHouse() {
+  const host = el("casinoSub"); if (!host) return;
+  const p = CASINO_PRESETS[casinoHousePreset];
+  const betInput = el("casinoBetAmt");
+  const curBet = betInput ? betInput.value : "";
+  let mine = []; try { mine = await api.casinoMyBets(); } catch (e) {}
+  const open = (mine || []).filter(b => b.phase === 0 && b.amHouse);
+  const card = (id, g) => `<button class="btn btn--sm ${casinoHousePreset === id ? "btn--primary" : "btn--outline"}" data-preset="${id}" style="flex-direction:column;gap:2px;padding:10px 6px"><span style="font-size:18px">${g.icon}</span><span>${g.name}</span><span style="font:600 10px/1 var(--mono);opacity:.7">${g.payout - 1}:1</span></button>`;
+  host.innerHTML =
+    `<div class="card">
+      <div class="casino-presets">${card("flip", CASINO_PRESETS.flip)}${card("dice", CASINO_PRESETS.dice)}${card("roulette", CASINO_PRESETS.roulette)}</div>
+      <label class="casino-lbl">Player's bet (MINIMA)</label>
+      <input class="field__input" id="casinoBetAmt" type="number" min="0" step="0.01" placeholder="e.g. 10" value="${esc(curBet)}">
+      <div id="casinoHouseSummary" class="casino-summary"></div>
+      <button class="btn btn--primary btn--full" id="casinoCreateBtn" ${casinoBusy.create ? "disabled" : ""}>${casinoBusy.create ? "Creating…" : "CREATE BET"}</button>
+      <div class="casino-note">You stake the amount you could lose; the player adds their bet and picks an outcome. When they take it, your node auto-reveals — zero house edge, the whole pot is paid out.</div>
+    </div>
+    ${open.length ? `<div class="casino-subttl">Your open offers</div>` + open.map(b => `<div class="card casino-bet"><div class="casino-bet__top"><span class="casino-ico">${casinoGame(b.range).icon}</span><span class="casino-bet__name">${esc(casinoGame(b.range).name)}</span><span class="casino-bet__odds">${b.payout - 1}:1</span></div><div class="casino-bet__row"><span>Locked</span><b>${casinoFmt(b.amount)} MINIMA</b></div><div class="casino-bet__row"><span>Status</span><b style="color:var(--amber)">Waiting for a taker</b></div><button class="btn btn--sm btn--outline casino-cancel" data-coin="${b.coinid}" ${casinoBusy[b.coinid] ? "disabled" : ""}>${casinoBusy[b.coinid] ? "Cancelling…" : "Cancel & reclaim"}</button></div>`).join("") : ""}`;
+  host.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => { casinoHousePreset = b.dataset.preset; renderCasinoHouse(); }));
+  const amt = el("casinoBetAmt");
+  if (amt) amt.addEventListener("input", casinoUpdateHouseSummary);
+  casinoUpdateHouseSummary();
+  const cb = el("casinoCreateBtn");
+  if (cb) cb.addEventListener("click", casinoDoCreate);
+  host.querySelectorAll(".casino-cancel").forEach(btn => btn.addEventListener("click", () => casinoDoCancel(btn.dataset.coin)));
+}
+
+function casinoUpdateHouseSummary() {
+  const box = el("casinoHouseSummary"); if (!box) return;
+  const p = CASINO_PRESETS[casinoHousePreset];
+  const bet = parseFloat((el("casinoBetAmt") || {}).value) || 0;
+  let stake = parseFloat((bet * (p.payout - 1)).toFixed(8)); if (stake <= 0) stake = bet;
+  box.innerHTML = `<div class="casino-summary__row"><span>You lock</span><b>${casinoFmt(stake)} MINIMA</b></div>
+    <div class="casino-summary__row"><span>If the player wins</span><b style="color:var(--red)">−${casinoFmt(stake)}</b></div>
+    <div class="casino-summary__row"><span>If the player loses</span><b style="color:var(--green)">+${casinoFmt(bet)}</b></div>
+    <div class="casino-summary__row"><span>Odds</span><b>${p.payout - 1}:1 (fair)</b></div>`;
+  const cb = el("casinoCreateBtn"); if (cb && !casinoBusy.create) cb.textContent = stake > 0 ? "CREATE BET — LOCK " + casinoFmt(stake) : "CREATE BET";
+}
+
+async function casinoDoCreate() {
+  if (casinoBusy.create) return;
+  const bet = parseFloat((el("casinoBetAmt") || {}).value);
+  if (!bet || bet <= 0 || isNaN(bet)) { toast("Enter a valid bet amount", "warn"); return; }
+  casinoBusy.create = true; renderCasinoHouse(); casinoSfx.chip();
+  try {
+    const r = await api.casinoCreate(casinoHousePreset, String(bet));
+    delete casinoBusy.create;
+    toast((r && r.game ? r.game : "Bet") + " created — " + casinoFmt(r && r.stake) + " MINIMA locked ✓", "ok");
+    casinoView = "mybets"; renderCasino();
+  } catch (e) {
+    delete casinoBusy.create;
+    toast("Create failed: " + (e && e.message ? e.message : e), "err");
+    renderCasinoHouse();
+  }
+}
+
+async function casinoDoCancel(coinid) {
+  if (casinoBusy[coinid]) return;
+  casinoBusy[coinid] = true; renderCasinoHouse();
+  try { const r = await api.casinoCancel(coinid); delete casinoBusy[coinid]; toast("Cancelled — " + casinoFmt(r && r.amount) + " MINIMA returned ✓", "ok"); renderCasino(); }
+  catch (e) { delete casinoBusy[coinid]; toast("Cancel failed: " + (e && e.message ? e.message : e), "err"); renderCasinoHouse(); }
+}
+
+// ---------------- MY BETS: active bets in flight ----------------
+async function renderCasinoMyBets() {
+  const host = el("casinoSub"); if (!host) return;
+  let bets = []; try { bets = await api.casinoMyBets(); } catch (e) {}
+  if (el("casinoSub") !== host) return;
+  const active = (bets || []).filter(b => b.phase !== 0 || b.amHouse);   // include my open offers too
+  if (!active.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No bets in flight. Take one in <b>Play</b> or offer one in <b>Be the House</b>.</div></div>`; return; }
+  host.innerHTML = active.map(b => {
+    const g = casinoGame(b.range);
+    let statusTxt = "", statusCol = "var(--amber)", extra = "";
+    const canTimeout = b.expired;
+    if (b.phase === 0) { statusTxt = "Open — waiting for a taker"; extra = `<button class="btn btn--sm btn--outline casino-cancel" data-coin="${b.coinid}">Cancel & reclaim</button>`; }
+    else if (b.phase === 1 && b.amHouse) { statusTxt = "Taken — auto-revealing…"; extra = b.age > 10 ? `<button class="btn btn--sm btn--outline casino-reveal" data-coin="${b.coinid}">Force reveal</button>` : ""; }
+    else if (b.phase === 1) { statusTxt = "Waiting for house to reveal…"; }
+    else if (b.phase === 2 && b.amPlayer) { statusTxt = "Revealing — auto-resolving…"; statusCol = "var(--green)"; extra = b.age > 10 ? `<button class="btn btn--sm btn--outline casino-resolve" data-coin="${b.coinid}">Force resolve</button>` : ""; }
+    else if (b.phase === 2) { statusTxt = "Waiting for player to resolve…"; }
+    if (canTimeout) extra = `<button class="btn btn--sm btn--outline casino-timeout" data-coin="${b.coinid}" style="color:var(--red);border-color:var(--red)">Claim timeout</button>`;
+    const pickTxt = (b.pick !== "" && b.pick != null && b.amPlayer) ? " · picked " + casinoPickLabel(b.range, b.pick) : "";
+    return `<div class="card casino-bet">
+      <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span><span class="casino-bet__name">${esc(g.name)}</span>
+        <span class="casino-bet__role">${esc(b.role)}${pickTxt}</span></div>
+      <div class="casino-bet__row"><span>Pot</span><b>${casinoFmt(b.amount)} MINIMA</b></div>
+      <div class="casino-bet__row"><span>Status</span><b style="color:${statusCol}">${statusTxt}</b></div>
+      ${b.timeout ? `<div class="casino-bet__row"><span>Age</span><b>${b.age}/${b.timeout} blocks</b></div>` : ""}
+      ${casinoBusy[b.coinid] ? `<div class="casino-note">Working…</div>` : extra}
+    </div>`;
+  }).join("");
+  host.querySelectorAll(".casino-cancel").forEach(btn => btn.addEventListener("click", () => casinoDoCancel(btn.dataset.coin)));
+  host.querySelectorAll(".casino-reveal").forEach(btn => btn.addEventListener("click", () => casinoDoFallback(btn.dataset.coin, "reveal")));
+  host.querySelectorAll(".casino-resolve").forEach(btn => btn.addEventListener("click", () => casinoDoFallback(btn.dataset.coin, "resolve")));
+  host.querySelectorAll(".casino-timeout").forEach(btn => btn.addEventListener("click", () => casinoDoFallback(btn.dataset.coin, "timeout")));
+}
+
+async function casinoDoFallback(coinid, kind) {
+  if (casinoBusy[coinid]) return;
+  casinoBusy[coinid] = true; renderCasinoMyBets();
+  const fn = kind === "reveal" ? api.casinoReveal : kind === "resolve" ? api.casinoResolve : api.casinoClaimTimeout;
+  try {
+    const r = await fn(coinid);
+    delete casinoBusy[coinid];
+    if (kind === "resolve" && r) { casinoFlashed[coinid] = true; casinoFlash(r.isHouse ? !r.playerWins : r.playerWins, casinoGame(r.range).name, null, casinoPickLabel(r.range, r.pick), casinoPickLabel(r.range, r.result), r.range); }
+    else toast(kind === "timeout" ? "Timeout claimed — " + casinoFmt(r && r.amount) + " MINIMA returned ✓" : "Done ✓", "ok");
+    renderCasino();
+  } catch (e) { delete casinoBusy[coinid]; toast("Failed: " + (e && e.message ? e.message : e), "err"); renderCasinoMyBets(); }
+}
+
+// ---------------- HISTORY ----------------
+async function renderCasinoHistory() {
+  const host = el("casinoSub"); if (!host) return;
+  let hist = []; try { hist = await api.casinoHistory(); } catch (e) {}
+  if (el("casinoSub") !== host) return;
+  if (!hist.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No completed bets yet.</div></div>`; return; }
+  host.innerHTML = `<div class="card" style="padding:0;overflow:hidden">` + hist.map(rb => {
+    const won = !!rb.won, col = won ? "var(--green)" : "var(--red)", sign = won ? "+" : "−";
+    const pk = (rb.pickLabel && rb.pickLabel !== "—") ? `<div class="casino-hist__sub">Picked ${esc(rb.pickLabel)} → Result ${esc(rb.resultLabel)}</div>` : "";
+    return `<div class="casino-hist"><span class="casino-ico" style="font-size:17px">${casinoGame(rb.range).icon}</span>
+      <div style="flex:1"><div class="casino-hist__ttl">${esc(rb.game)} <span style="color:var(--dim);font-weight:400">as ${esc(rb.role)}</span></div>${pk}</div>
+      <div style="font:800 14px/1 var(--mono);color:${col}">${sign}${casinoFmt(rb.profit)}</div></div>`;
+  }).join("") + `</div>`;
+}
+
+// ---------------- win/lose flash (full-screen, body-appended; TERMINAL palette) ----------------
+function casinoFlash(won, game, amount, pickLabel, resultLabel, range) {
+  won ? casinoSfx.win() : casinoSfx.lose();
+  const g = casinoGame(range || 2);
+  const ov = document.createElement("div");
+  ov.className = "casino-flash-ov";
+  const detail = (pickLabel && resultLabel && pickLabel !== "—") ? `<div class="casino-flash__detail">Result <b>${esc(resultLabel)}</b> · you picked <b>${esc(pickLabel)}</b></div>` : "";
+  const amt = (amount != null && amount !== "") ? `<div class="casino-flash__amt" style="color:${won ? "var(--green)" : "var(--red)"}">${won ? "+" : "−"}${casinoFmt(amount)} MINIMA</div>` : "";
+  ov.innerHTML = `<div class="casino-flash ${won ? "is-win" : "is-lose"}">
+      <div class="casino-flash__spin casino-spin-${g.range}"><span>${g.icon}</span></div>
+      <div class="casino-flash__ttl" style="color:${won ? "var(--green)" : "var(--red)"}">${won ? "YOU WIN" : "YOU LOSE"}</div>
+      ${detail}${amt}
+      <div class="casino-flash__game">${esc(g.name)}</div>
+      <button class="btn btn--primary casino-flash__go">CONTINUE</button>
+    </div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); };
+  ov.addEventListener("click", e => { if (e.target === ov) close(); });
+  ov.querySelector(".casino-flash__go").addEventListener("click", close);
+  const onKey = e => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); } };
+  document.addEventListener("keydown", onKey);
+  if (activeView === "casino") setTimeout(() => { if (document.body.contains(ov)) renderCasino(); }, 400);
 }
