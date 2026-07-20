@@ -22,6 +22,7 @@ const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const shop = require("./shop");
 const casino = require("./casino");
+const vestr = require("./vestr");
 
 let win = null;
 let tray = null;
@@ -325,6 +326,18 @@ casino.emitter.on("notify", (msg) => {   // reveal/resolve milestones — OS not
 });
 let casinoStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !casinoStarted) { casinoStarted = true; casino.startLoop(); } });
+
+// Vestr (token vesting)
+ipcMain.handle("mcd:vestrStatus", () => vestr.status());
+ipcMain.handle("mcd:vestrList", () => vestr.list());
+ipcMain.handle("mcd:vestrTokens", () => vestr.tokens());
+ipcMain.handle("mcd:vestrMyAddress", () => vestr.myAddress());
+ipcMain.handle("mcd:vestrCreate", (_e, opts) => vestr.create(opts));
+ipcMain.handle("mcd:vestrCollect", (_e, coinid, burn) => vestr.collect(coinid, burn));
+ipcMain.handle("mcd:vestrCalculate", (_e, amount, startMs, endMs, graceHours) => vestr.calculate(amount, startMs, endMs, graceHours));
+vestr.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:vestr"); });
+let vestrStarted = false;
+node.on("status", (s) => { if (s.state === "running" && !vestrStarted) { vestrStarted = true; vestr.startLoop(); } });
 
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));
 ipcMain.handle("mcd:histAdd", (_e, rows) => histDb.merge(Array.isArray(rows) ? rows : []));

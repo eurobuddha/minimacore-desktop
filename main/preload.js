@@ -168,6 +168,16 @@ contextBridge.exposeInMainWorld("mcd", {
   casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),
   onCasino: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casino", h); return () => ipcRenderer.removeListener("mcd:casino", h); },
 
+  // Vestr (token vesting)
+  vestrStatus: () => ipcRenderer.invoke("mcd:vestrStatus"),
+  vestrList: () => ipcRenderer.invoke("mcd:vestrList"),
+  vestrTokens: () => ipcRenderer.invoke("mcd:vestrTokens"),
+  vestrMyAddress: () => ipcRenderer.invoke("mcd:vestrMyAddress"),
+  vestrCreate: (opts) => ipcRenderer.invoke("mcd:vestrCreate", opts),
+  vestrCollect: (coinid, burn) => ipcRenderer.invoke("mcd:vestrCollect", coinid, burn),
+  vestrCalculate: (amount, startMs, endMs, graceHours) => ipcRenderer.invoke("mcd:vestrCalculate", amount, startMs, endMs, graceHours),
+  onVestr: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:vestr", h); return () => ipcRenderer.removeListener("mcd:vestr", h); },
+
   // pushes
   onStatus: (fn) => { const h = (_e, s) => fn(s); ipcRenderer.on("mcd:status", h); return () => ipcRenderer.removeListener("mcd:status", h); },
   onLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:log", h); return () => ipcRenderer.removeListener("mcd:log", h); }

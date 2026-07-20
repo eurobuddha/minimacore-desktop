@@ -84,6 +84,7 @@ async function boot() {
   api.onAtomix(onAtomixUpdate);
   api.onShop(onShopUpdate);
   api.onCasino(onCasinoUpdate);
+  api.onVestr(onVestrUpdate);
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -496,6 +497,7 @@ function renderActive() {
   else if (activeView === "atomix") renderAtomix();
   else if (activeView === "minimall") renderMiniMall();
   else if (activeView === "casino") renderCasino();
+  else if (activeView === "vestr") renderVestr();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -4229,4 +4231,156 @@ function casinoFlash(won, game, amount, pickLabel, resultLabel, range) {
   const onKey = e => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); } };
   document.addEventListener("keydown", onKey);
   if (activeView === "casino") setTimeout(() => { if (document.body.contains(ov)) renderCasino(); }, 400);
+}
+
+// ============================ Vestr (token vesting — shared covenant 0x3C43…) ============================
+// Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,
+// collectable per grace cadence. Node computes the exact collectable (main/vestr.js runscript). Merged layout.
+let vestrView = "list";          // list | create | calc
+let vestrUpdateTimer = null;
+let vestrTokMap = null;          // tokenid → name
+let vestrBusy = {};
+const VESTR_GRACE = [["None (continuous)", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
+
+function vFmt(v) { const n = Number(v); return isNaN(n) ? "0" : n.toLocaleString(undefined, { maximumFractionDigits: 8 }); }
+function vTok(tid) { if (tid === "0x00") return "MINIMA"; return (vestrTokMap && vestrTokMap[tid]) || (String(tid).slice(0, 8) + "…"); }
+function vShort(a) { a = String(a || ""); return a.length > 16 ? a.slice(0, 8) + "…" + a.slice(-4) : a; }
+
+function onVestrUpdate() {
+  if (vestrUpdateTimer) clearTimeout(vestrUpdateTimer);
+  vestrUpdateTimer = setTimeout(() => {
+    if (activeView !== "vestr") return;
+    if (el("vestrBody") && el("vestrBody").querySelector("input:focus, select:focus")) return;   // never stomp a form
+    if (vestrView === "list") renderVestrSub();
+  }, 350);
+}
+
+async function renderVestr() {
+  const host = el("vestrBody"); if (!host) return;
+  if (!vestrTokMap) { try { const t = await api.vestrTokens(); vestrTokMap = {}; (t || []).forEach(x => vestrTokMap[x.tokenid] = x.name); } catch (e) {} }
+  const tab = (v, label) => `<button class="btn btn--sm ${vestrView === v ? "btn--primary" : "btn--outline"}" data-vv="${v}">${label}</button>`;
+  host.innerHTML = `<div class="view__title" style="display:flex;align-items:center;gap:10px">Vestr <span style="font:600 11px/1 var(--mono);color:var(--dim)">TOKEN VESTING · shared covenant</span></div>`
+    + `<div class="seg" style="margin:8px 0 12px">${tab("list", "My Contracts")}${tab("create", "Create")}${tab("calc", "Calculate")}</div>`
+    + `<div id="vestrSub"></div>`;
+  host.querySelectorAll("[data-vv]").forEach(b => b.addEventListener("click", () => { vestrView = b.dataset.vv; renderVestr(); }));
+  renderVestrSub();
+}
+function renderVestrSub() {
+  if (vestrView === "list") return renderVestrList();
+  if (vestrView === "create") return renderVestrCreate();
+  if (vestrView === "calc") return renderVestrCalc();
+}
+
+// ---- My Contracts ----
+async function renderVestrList() {
+  const host = el("vestrSub"); if (!host) return;
+  let vs = []; try { vs = await api.vestrList(); } catch (e) {}
+  if (el("vestrSub") !== host) return;
+  if (!vs.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">You have no vesting contracts yet. <b>Create</b> one, or ask someone to vest to your address — contracts from the native app & web dapp appear here too.</div></div>`; return; }
+  host.innerHTML = vs.map(v => {
+    const badge = v.expired ? `<span class="v-badge done">fully vested</span>` : v.cliffed ? `<span class="v-badge cliff">not started</span>` : `<span class="v-badge">${v.pctVested}% vested</span>`;
+    const availCol = v.canCollectNow ? "var(--green)" : "var(--dim)";
+    let action;
+    if (v.canCollectNow) action = `<div class="v-collect"><div class="v-fee"><span class="v-flabel">Fee (burn)</span><input class="field__input" id="vburn_${v.coinid}" value="0"></div><button class="btn btn--primary v-cbtn" data-coin="${v.coinid}" ${vestrBusy[v.coinid] ? "disabled" : ""}>${vestrBusy[v.coinid] ? "Collecting…" : "Collect " + vFmt(v.cancollect) + " " + vTok(v.tokenid)}</button></div>`;
+    else if (v.cliffed) action = `<div class="v-note">Vesting hasn't started — nothing collectable until block ${v.startBlock.toLocaleString()}.</div>`;
+    else if (v.mustwait) action = `<div class="v-note">Grace period — collect again in ~${Number(v.mustwaitblocks).toLocaleString()} blocks.</div>`;
+    else action = `<div class="v-note">Nothing available to collect right now.</div>`;
+    return `<div class="card v-card">
+      <div class="v-top"><span class="v-amt">${vFmt(v.amount)} <small>${esc(vTok(v.tokenid))}</small> <span style="color:var(--dim);font-weight:400">locked</span></span>${badge}</div>
+      <div class="v-to mono">→ ${esc(vShort(v.beneficiary))}</div>
+      <div class="v-bar"><i style="width:${v.pctVested}%;${v.expired ? "background:var(--green)" : ""}"></i></div>
+      <div class="v-sub mono"><span>start · block ${v.startBlock.toLocaleString()}</span><span>end · block ${v.endBlock.toLocaleString()}</span></div>
+      <div class="v-avail"><span class="k">Available to collect now</span><span class="val" style="color:${availCol}">${vFmt(v.cancollect)}</span></div>
+      <div class="v-stats">
+        <div><span>Collected</span><b>${vFmt(v.collected)}</b></div><div><span>Total locked</span><b>${vFmt(v.total)}</b></div>
+        <div><span>Remaining</span><b>${vFmt(v.amount)}</b></div><div><span>Collect every</span><b>${esc(v.graceLabel)}</b></div>
+      </div>
+      ${action}
+    </div>`;
+  }).join("");
+  host.querySelectorAll(".v-cbtn").forEach(btn => btn.addEventListener("click", () => {
+    const coin = btn.dataset.coin, fee = (el("vburn_" + coin) || {}).value || "0";
+    vestrDoCollect(coin, fee);
+  }));
+}
+async function vestrDoCollect(coinid, burn) {
+  if (vestrBusy[coinid]) return;
+  vestrBusy[coinid] = true; renderVestrList();
+  try { const r = await api.vestrCollect(coinid, burn); delete vestrBusy[coinid]; toast("Collected " + vFmt(r && r.collected) + " " + vTok(r && r.tokenid) + " ✓", "ok"); renderVestrList(); }
+  catch (e) { delete vestrBusy[coinid]; toast("Collect failed: " + (e && e.message ? e.message : e), "err"); renderVestrList(); }
+}
+
+// ---- Create ----
+async function renderVestrCreate() {
+  const host = el("vestrSub"); if (!host) return;
+  let toks = []; try { toks = await api.vestrTokens(); } catch (e) {}
+  let myAddr = ""; try { myAddr = await api.vestrMyAddress(); } catch (e) {}
+  if (el("vestrSub") !== host) return;
+  const now = new Date(), toLocal = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const startDef = toLocal(now), endDef = toLocal(new Date(now.getTime() + 90 * 24 * 3600 * 1000));
+  host.innerHTML = `<div class="card">
+    <label class="v-flabel">Token</label>
+    <select class="field__input" id="vcTok">${toks.map(t => `<option value="${t.tokenid}">${esc(t.name)} — ${vFmt(t.sendable)} available</option>`).join("") || '<option value="0x00">MINIMA</option>'}</select>
+    <label class="v-flabel">Amount to lock</label>
+    <input class="field__input" id="vcAmt" inputmode="decimal" placeholder="e.g. 1000">
+    <label class="v-flabel">Beneficiary (withdrawal) address</label>
+    <div class="v-row"><input class="field__input" id="vcAddr" placeholder="0x… / Mx…" style="flex:1"><button class="btn btn--outline" id="vcMine" style="flex:0 0 auto">My address</button></div>
+    <div class="v-row">
+      <div style="flex:1"><label class="v-flabel">Start</label><input class="field__input" id="vcStart" type="datetime-local" value="${startDef}"></div>
+      <div style="flex:1"><label class="v-flabel">End</label><input class="field__input" id="vcEnd" type="datetime-local" value="${endDef}"></div>
+    </div>
+    <label class="v-flabel">Release cadence (grace)</label>
+    <select class="field__input" id="vcGrace">${VESTR_GRACE.map(([l, h], i) => `<option value="${h}" ${l === "Weekly" ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <div class="v-row">
+      <div style="flex:1"><label class="v-flabel">Network fee (burn) · optional</label><input class="field__input" id="vcBurn" value="0"></div>
+      <div style="flex:1"><label class="v-flabel">Vault password · optional</label><input class="field__input" id="vcPw" type="password" placeholder="if node locked"></div>
+    </div>
+    <button class="btn btn--primary btn--full" id="vcCreate">Review &amp; create</button>
+    <div class="v-note" style="margin-top:9px">Funds lock into the shared vesting covenant and release linearly from Start to End; the beneficiary collects the vested-so-far amount, no more often than the grace cadence. <b>There is no cancel</b> — locked funds only ever flow to the beneficiary (which can be your own address).</div>
+  </div>`;
+  el("vcMine").addEventListener("click", () => { el("vcAddr").value = myAddr; });
+  el("vcCreate").addEventListener("click", vestrDoCreate);
+}
+async function vestrDoCreate() {
+  const btn = el("vcCreate"); if (!btn || btn.disabled) return;
+  const opts = {
+    tokenid: el("vcTok").value, amount: (el("vcAmt").value || "").trim(), beneficiary: (el("vcAddr").value || "").trim(),
+    startMs: new Date(el("vcStart").value).getTime(), endMs: new Date(el("vcEnd").value).getTime(),
+    graceHours: Number(el("vcGrace").value) || 0, burn: (el("vcBurn").value || "0").trim(), password: (el("vcPw").value || "")
+  };
+  if (!(Number(opts.amount) > 0)) { toast("Enter a valid amount", "warn"); return; }
+  if (!opts.beneficiary) { toast("Enter a beneficiary address", "warn"); return; }
+  const ok = await showConfirm("Create vesting contract?", `Lock ${vFmt(opts.amount)} ${vTok(opts.tokenid)} to ${vShort(opts.beneficiary)}, released ${VESTR_GRACE.find(g => g[1] === opts.graceHours)?.[0] || ""} from start to end. This cannot be cancelled.`, "Lock funds", false);
+  if (!ok) return;
+  btn.disabled = true; btn.textContent = "Locking…";
+  try { const r = await api.vestrCreate(opts); toast("Vesting contract created ✓", "ok"); vestrView = "list"; renderVestr(); }
+  catch (e) { btn.disabled = false; btn.textContent = "Review & create"; toast("Create failed: " + (e && e.message ? e.message : e), "err"); }
+}
+
+// ---- Calculate (offline preview) ----
+async function renderVestrCalc() {
+  const host = el("vestrSub"); if (!host) return;
+  host.innerHTML = `<div class="card">
+    <div class="v-note" style="margin-top:0">Preview a schedule without locking anything.</div>
+    <div class="v-row" style="margin-top:10px">
+      <div style="flex:1"><label class="v-flabel">Amount</label><input class="field__input" id="vkAmt" value="1000"></div>
+      <div style="flex:1"><label class="v-flabel">Grace</label><select class="field__input" id="vkGrace">${VESTR_GRACE.map(([l, h]) => `<option value="${h}" ${l === "Weekly" ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    </div>
+    <div class="v-row">
+      <div style="flex:1"><label class="v-flabel">Start</label><input class="field__input" id="vkStart" type="date"></div>
+      <div style="flex:1"><label class="v-flabel">End</label><input class="field__input" id="vkEnd" type="date"></div>
+    </div>
+    <div id="vkOut"></div>
+  </div>`;
+  const rerun = async () => {
+    const s = el("vkStart").value ? new Date(el("vkStart").value).getTime() : Date.now();
+    const e = el("vkEnd").value ? new Date(el("vkEnd").value).getTime() : Date.now() + 90 * 24 * 3600 * 1000;
+    const r = await api.vestrCalculate(el("vkAmt").value || "0", s, e, Number(el("vkGrace").value) || 0).catch(() => null);
+    const out = el("vkOut"); if (!out || !r) return;
+    const label = VESTR_GRACE.find(g => g[1] === (Number(el("vkGrace").value) || 0))?.[0] || "period";
+    out.innerHTML = `<div class="v-avail" style="border-top:0;margin-top:14px"><span class="k">Released per ${esc(label.toLowerCase())}</span><span class="val" style="color:var(--accent)">≈ ${vFmt(r.perPeriod.toFixed(6))}</span></div>
+      <div class="v-stats"><div><span>Duration</span><b>${r.durBlocks.toLocaleString()} blocks · ~${r.weeks.toFixed(1)} wks</b></div><div><span>Per-block</span><b>${vFmt(r.perBlock.toFixed(8))}</b></div></div>`;
+  };
+  ["vkAmt", "vkGrace", "vkStart", "vkEnd"].forEach(id => el(id).addEventListener("input", rerun));
+  rerun();
 }
