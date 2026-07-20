@@ -33,6 +33,32 @@ function getState(coin, port) {
   return "";
 }
 function miniNum(v) { return parseFloat(parseFloat(v).toFixed(8)); }
+// EXACT decimal math (BigInt, no float/round) for on-chain amounts. Minima coins carry FULL precision (up to 44dp),
+// so a txn output must equal the exact remainder — rounding the change UP makes outputs exceed inputs and the node
+// rejects it (validamounts:false). Never miniNum() an amount that has to balance against a real coin.
+function _split(s) { var p = String(s == null ? "0" : s).split("."); return [p[0] || "0", p[1] || ""]; }
+function decAdd(a, b) {
+  var A = _split(a), B = _split(b), dp = Math.max(A[1].length, B[1].length), out;
+  try { out = BigInt(A[0] + A[1].padEnd(dp, "0")) + BigInt(B[0] + B[1].padEnd(dp, "0")); } catch (e) { return String(parseFloat(a) + parseFloat(b)); }
+  return _fmt(out.toString(), dp);
+}
+function decSub(a, b) {   // a - b, clamped at 0 (change is never negative)
+  var A = _split(a), B = _split(b), dp = Math.max(A[1].length, B[1].length), out;
+  try { out = BigInt(A[0] + A[1].padEnd(dp, "0")) - BigInt(B[0] + B[1].padEnd(dp, "0")); } catch (e) { return String(Math.max(0, parseFloat(a) - parseFloat(b))); }
+  if (out < 0n) out = 0n;
+  return _fmt(out.toString(), dp);
+}
+function decCmp(a, b) {   // -1 / 0 / 1
+  var A = _split(a), B = _split(b), dp = Math.max(A[1].length, B[1].length), X, Y;
+  try { X = BigInt(A[0] + A[1].padEnd(dp, "0")); Y = BigInt(B[0] + B[1].padEnd(dp, "0")); } catch (e) { var d = parseFloat(a) - parseFloat(b); return d < 0 ? -1 : d > 0 ? 1 : 0; }
+  return X < Y ? -1 : X > Y ? 1 : 0;
+}
+function _fmt(digits, dp) {
+  if (dp === 0) return digits;
+  digits = digits.padStart(dp + 1, "0");
+  var out = (digits.slice(0, -dp) + "." + digits.slice(-dp)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  return out === "" ? "0" : out;
+}
 function isMyKey(pubkey) { return MY_KEYS[pubkey] === true; }
 function extractResponse(res) {
   if (!res || !res.response) return null;
@@ -240,7 +266,7 @@ function takeBet(coinid, pick, cb) {
       var coin = coins.find(function (c) { return c.coinid === coinid; });
       if (!coin) { cb("Bet not found (already taken?)"); return; }
       if ((parseInt(getState(coin, 6)) || 0) !== 0) { cb("Bet no longer open"); return; }
-      var bet = getState(coin, 5), total = miniNum(parseFloat(coin.amount) + parseFloat(bet));
+      var bet = getState(coin, 5), total = decAdd(coin.amount, bet);   // exact pot = contract coin + bet (full precision)
       var range = parseInt(getState(coin, 3)) || 2;
       pick = parseInt(pick) || 0; if (pick < 0 || pick >= range) { cb("Invalid pick"); return; }
       var txid = "take_" + tag();
@@ -260,7 +286,10 @@ function takeBet(coinid, pick, cb) {
                     if (!ok) { MDS.cmd("txndelete id:" + txid); cb("fund input failed"); return; }
                     MDS.cmd("txnoutput id:" + txid + " amount:" + total + " address:" + SCRIPT_ADDR + " storestate:true", function (r3) {
                       if (!r3.status) { MDS.cmd("txndelete id:" + txid); cb("output failed"); return; }
-                      var change = miniNum(result.total - parseFloat(bet));
+                      // exact change = (funding coins summed) − bet, at FULL precision — NEVER rounded (a rounded-up
+                      // change makes outputs exceed inputs → node rejects: validamounts:false, the take-fails bug).
+                      var fundTotal = result.coins.reduce(function (acc, fc) { return decAdd(acc, fc.amount); }, "0");
+                      var change = decSub(fundTotal, bet);
                       var afterChange = function () {
                         var states = [[0, getState(coin, 0)], [1, getState(coin, 1)], [2, getState(coin, 2)], [3, getState(coin, 3)], [4, getState(coin, 4)], [5, getState(coin, 5)], [6, "1"], [7, getState(coin, 7)], [8, MY_PUBKEY], [9, MY_HEX_ADDR], [10, commit], [11, "" + pick]];
                         setStates(txid, states, 0, function () {
@@ -274,7 +303,7 @@ function takeBet(coinid, pick, cb) {
                           });
                         });
                       };
-                      if (change > 0.000001) { MDS.cmd("txnoutput id:" + txid + " amount:" + change + " address:" + MY_HEX_ADDR + " storestate:false", function (rc) { if (!rc.status) { MDS.cmd("txndelete id:" + txid); cb("change output failed"); return; } afterChange(); }); }
+                      if (decCmp(change, "0.000001") > 0) { MDS.cmd("txnoutput id:" + txid + " amount:" + change + " address:" + MY_HEX_ADDR + " storestate:false", function (rc) { if (!rc.status) { MDS.cmd("txndelete id:" + txid); cb("change output failed"); return; } afterChange(); }); }
                       else { afterChange(); }
                     });
                   });

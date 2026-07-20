@@ -40,7 +40,7 @@ casino._setRunner(async (cmd) => {
   if (/^coins relevant:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [{ amount: "500", address: WALLET_ADDR, coinid: "0xFUND1" }] };
   if (/^coins relevant:true sendable:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [
     { amount: "1", address: BEACON_ADDR, coinid: "0xDUST", state: [] },      // must be skipped (short addr)
-    { amount: "500", address: WALLET_ADDR, coinid: "0xFUND1", state: [] }
+    { amount: "19.84626467552", address: WALLET_ADDR, coinid: "0xFUND1", state: [] }   // 11-dp coin: change must NOT round up
   ] };
   if (/^checkaddress\b/.test(cmd)) return { status: true, response: { simple: /address:0x[0-9A-Fa-f]{64}\b/.test(cmd) } };
   if (/^coins address:/.test(cmd)) return { status: true, response: [OPEN_BET] };
@@ -91,6 +91,7 @@ const has = (re) => sent.some(c => re.test(c));
   assert(has(/^txninput id:take_.* coinid:0xBET1/), "take inputs the contract bet coin");
   assert(has(/^txninput id:take_.* coinid:0xFUND1/) && !has(/coinid:0xDUST/), "take funds from the signable coin, NOT beacon dust");
   assert(has(/^txnoutput id:take_.* amount:2 address:0xD65ADBBB.* storestate:true/), "take pot output = amount+bet back to contract, storestate:true");
+  assert(has(/^txnoutput id:take_.* amount:18\.84626467552 address:0xAB.* storestate:false/), "take change is EXACT (18.84626467552), NOT rounded up to 18.84626468 → balances, node accepts");
   assert(has(/^txnstate id:take_.* port:6 value:1/), "take sets phase → 1");
   assert(has(/^txnstate id:take_.* port:8 value:0xMYPK/), "take writes player pubkey (port 8)");
   assert(has(/^txnstate id:take_.* port:11 value:1/), "take writes pick (port 11)");
