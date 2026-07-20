@@ -536,6 +536,10 @@ body { font-family: var(--sans); }
 #view-atomix .ax-genfield { flex:1; min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:14px; text-align:right; padding:7px 9px; outline:0; }
 #view-atomix .ax-genfield:focus { border-color:var(--accent); }
 #view-atomix .ax-genfield:disabled { opacity:.5; }
+/* generator field inside a captioned label-left row → fixed width + sizing that matches .ax-editinput */
+#view-atomix .ax-editrow .ax-genfield { flex:0 0 auto; width:130px; font-size:16px; padding:6px 10px; }
+/* per-side unit key above the ladder rungs (price · USDT/ccy · size · ccy) */
+#view-atomix .ax-lvl-hdr { font:500 11px/1.3 var(--mono); color:var(--dim); margin:0 0 5px; }
 #view-atomix .ax-side-hdr { font-size:12px; font-weight:700; letter-spacing:.03em; margin:12px 0 3px; }
 #view-atomix .ax-side-hdr.ask { color:var(--accent); }
 #view-atomix .ax-side-hdr.bid { color:var(--green); }

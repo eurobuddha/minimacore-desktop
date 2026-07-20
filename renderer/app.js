@@ -3315,6 +3315,9 @@ function axEditRow(label, right) { return `<div class="ax-editrow"><span class="
 function axEditInput(id, val) { return `<input class="ax-editinput mono" id="${id}" inputmode="decimal" placeholder="0" value="${esc(val)}" autocomplete="off" />`; }
 function axSwitch(id, on) { return `<button class="ax-switch${on ? " on" : ""}" id="${id}" role="switch" aria-checked="${on}"><span class="knob"></span></button>`; }
 function axGenField(id, val, ph) { return `<input class="ax-genfield mono" id="${id}" inputmode="decimal" placeholder="${esc(ph || "")}" value="${esc(val == null ? "" : val)}" autocomplete="off" />`; }
+// Generator field with a PERSISTENT "Name · unit" caption (label-left, reuses the .ax-editrow pattern) so the field
+// is identifiable even with a value typed — placeholders alone vanish on input. Same id → wiring is unchanged.
+function axGenRow(label, id, val) { return `<div class="ax-editrow"><span class="ax-editlabel">${label}</span>${axGenField(id, val, "0")}</div>`; }
 /** One editable ladder level: tag (A1/B1…) + price + size. cls = "ask" | "bid". */
 function axLevelRow(tag, idP, idA, pv, av, cls) {
   return `<div class="ax-lvl ${cls}"><span class="ax-lvl-tag">${tag}</span>`
@@ -3345,13 +3348,17 @@ function axMakerEditor(mc, ccy, b) {
     + axEditRow("Peg ladder to " + src + " (auto-reprice)", axSwitch("axPegToggle", peg))
     + `<div class="ax-oracle mono" id="axOracle">${peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off")}</div>`
     + `<div class="ax-mkr-hint2">While pegged, the ladder regenerates around the ${src} mid (± step %, your size per level) at every publish, and re-publishes when the market moves ≥ your threshold. If the feed goes down your order is withdrawn for safety, then restored when it recovers.</div>`
-    + `<div class="ax-genrow">${axGenField("axBias", c.bias != null ? c.bias : "", "skew ±%")}${axGenField("axReprice", c.reprice != null ? c.reprice : "1", "reprice ≥ %")}</div>`
+    + axGenRow("Skew · %", "axBias", c.bias != null ? c.bias : "")
+    + axGenRow("Reprice move · %", "axReprice", c.reprice != null ? c.reprice : "1")
     + `<div class="ax-seclabel">AUTO-FILL (mid · step % · levels, then ask/bid size — seeds the rungs as you type; edit any rung after)</div>`
-    + `<div class="ax-genrow">${axGenField("axMid", "", "mid")}${axGenField("axStep", c.step != null ? c.step : "", "step %")}${axGenField("axLevels", c.levels != null ? c.levels : "1", "levels")}</div>`
-    + `<div class="ax-genrow">${axGenField("axAskSize", c.askSize != null ? c.askSize : (c.size != null ? c.size : ""), "ask size")}${axGenField("axBidSize", c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ""), "bid size")}</div>`
-    + `<div class="ax-side-hdr ask">ASKS — you SELL ${esc(ccy)} (higher price)</div>${askRows}`
-    + `<div class="ax-side-hdr bid">BIDS — you BUY ${esc(ccy)} (lower price)</div>${bidRows}`
-    + axEditRow("min " + esc(ccy) + " / trade", axEditInput("axMin", c.min != null ? c.min : ""))
+    + axGenRow("Mid price · USDT/" + esc(ccy), "axMid", "")
+    + axGenRow("Rung spacing · %", "axStep", c.step != null ? c.step : "")
+    + axGenRow("Levels · per side", "axLevels", c.levels != null ? c.levels : "1")
+    + axGenRow("Ask size · " + esc(ccy), "axAskSize", c.askSize != null ? c.askSize : (c.size != null ? c.size : ""))
+    + axGenRow("Bid size · " + esc(ccy), "axBidSize", c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ""))
+    + `<div class="ax-side-hdr ask">ASKS — you SELL ${esc(ccy)} (higher price)</div><div class="ax-lvl-hdr">price · USDT/${esc(ccy)} &nbsp;·&nbsp; size · ${esc(ccy)}</div>${askRows}`
+    + `<div class="ax-side-hdr bid">BIDS — you BUY ${esc(ccy)} (lower price)</div><div class="ax-lvl-hdr">price · USDT/${esc(ccy)} &nbsp;·&nbsp; size · ${esc(ccy)}</div>${bidRows}`
+    + axEditRow("Min trade · " + esc(ccy), axEditInput("axMin", c.min != null ? c.min : ""))
     + `<div class="ax-prev-label">Preview</div><div class="ax-prev" id="axMkrPreview"><div class="empty">—</div></div>`
     + `<button class="btn btn--primary btn--full" id="axSave" style="margin-top:12px">Save &amp; publish</button>`
     + `<div class="ax-mkr-actions" style="margin-top:8px"><button class="btn btn--outline btn--full" id="axWithdraw">Withdraw market</button><button class="btn btn--outline btn--full" id="axCancel">Cancel</button></div>`;
