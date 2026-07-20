@@ -157,9 +157,11 @@ function getSecret(account) {
   if (k) return k;
   return readSecretFile(secretFileFor(account));
 }
-/** Store a named secret. */
+/** Store a named secret durably. Returns true iff it was written (Keychain, or the encrypted 0600 file fallback).
+ *  Callers that gate fund-critical commitments on durability (e.g. casino commit preimages) MUST check the return. */
 function setSecret(value, account) {
-  if (!keychainSet(value, account)) writeSecretFile(secretFileFor(account), value);
+  if (keychainSet(value, account)) return true;
+  try { writeSecretFile(secretFileFor(account), value); return true; } catch (e) { return false; }
 }
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }

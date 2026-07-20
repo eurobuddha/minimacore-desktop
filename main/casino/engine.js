@@ -58,33 +58,49 @@ function pickLabel(range, pick) {
   return "" + (parseInt(pick) + 1);
 }
 
-// ---- secrets (in-memory cache + keychain-backed MDS.keypair; MDS.keypair.set is sync-durable on desktop) ----
+// ---- secrets (in-memory cache + keychain-backed MDS.keypair) ----
+// FUND-SAFETY (C1): the commit preimage MUST be durably persisted BEFORE the on-chain send that commits to it — a
+// lost preimage strands the pot to the counterparty's 1500-block timeout claim. So we don't just fire-and-forget:
+// we require MDS.keypair.set to report success AND read the value back from durable storage before proceeding. On
+// any failure cb(err) so createBet/takeBet ABORT before sending. cb(null) only when the secret is provably stored.
 var SECRET_CACHE = {};
 function saveSecret(key, value, cb) {
   SECRET_CACHE[key] = value;
-  MDS.keypair.set(key, value, function () { if (cb) cb(); });   // durable BEFORE the on-chain send goes out
+  MDS.keypair.set(key, value, function (r) {
+    if (!r || r.status !== true) { cb("could not save the bet secret — aborting to protect your funds"); return; }
+    MDS.keypair.get(key, function (g) {
+      if (g && g.value === value) cb(null);
+      else cb("bet secret did not persist — aborting to protect your funds");
+    });
+  });
 }
 function getSecret(key, cb) {
   if (SECRET_CACHE[key]) { cb({ value: SECRET_CACHE[key] }); return; }
   MDS.keypair.get(key, function (r) { if (r && r.value) { SECRET_CACHE[key] = r.value; cb({ value: r.value }); } else { cb({ value: null }); } });
 }
 
-// ---- funding-coin selection (donor findCoins) — desktop guard: skip short sentinel/beacon addresses (shared-node
-// anyone-can-spend dust has no key → would strand txnsign). Wallet key-addresses are 0x+64hex (66 chars). ----
+// ---- funding-coin selection (donor findCoins) — desktop guard: on a shared node the wallet can hold anyone-can-spend
+// beacon dust (no key → strands txnsign:auto with a KeyRow NPE). A cheap length prefilter drops short sentinels, then
+// each candidate is verified wallet-SIGNABLE via `checkaddress → {simple:true}` (the same reliable test sendpin uses)
+// before it is selected — a 66-char anyone-can-spend coin passes the length filter but must never be a funding input. ----
 function findCoins(tokenid, minAmount, excludeCoinid, callback) {
   if (typeof excludeCoinid === "function") { callback = excludeCoinid; excludeCoinid = null; }
   MDS.cmd("coins relevant:true sendable:true tokenid:" + tokenid, function (res) {
     if (!res.status || !res.response || res.response.length === 0) { callback(null); return; }
-    var available = res.response.filter(function (c) { return !c.state || c.state.length === 0; });
-    available = available.filter(function (c) { return String(c.address || "").length >= 60; });   // exclude sentinel/beacon dust
-    if (excludeCoinid) available = available.filter(function (c) { return c.coinid !== excludeCoinid; });
-    if (available.length === 0) { callback(null); return; }
-    var needed = parseFloat(minAmount);
-    var sorted = available.slice().sort(function (a, b) { return parseFloat(b.amount) - parseFloat(a.amount); });
-    if (parseFloat(sorted[0].amount) >= needed) { callback({ coins: [sorted[0]], total: parseFloat(sorted[0].amount) }); return; }
-    var selected = [], sum = 0;
-    for (var i = 0; i < sorted.length; i++) { selected.push(sorted[i]); sum += parseFloat(sorted[i].amount); if (sum >= needed) { callback({ coins: selected, total: sum }); return; } }
-    callback(null);
+    var pool = res.response.filter(function (c) { return !c.state || c.state.length === 0; });
+    pool = pool.filter(function (c) { return String(c.address || "").length >= 60; });   // cheap prefilter: drop short sentinels
+    if (excludeCoinid) pool = pool.filter(function (c) { return c.coinid !== excludeCoinid; });
+    pool.sort(function (a, b) { return parseFloat(b.amount) - parseFloat(a.amount); });   // largest first → fewest inputs / fewest checks
+    var needed = parseFloat(minAmount), selected = [], sum = 0, i = 0;
+    (function next() {
+      if (sum >= needed) { callback({ coins: selected, total: sum }); return; }
+      if (i >= pool.length) { callback(null); return; }   // ran out of signable coins before covering the bet
+      var c = pool[i++];
+      MDS.cmd("checkaddress address:" + c.address, function (chk) {
+        if (chk && chk.response && chk.response.simple) { selected.push(c); sum += parseFloat(c.amount); }
+        next();
+      });
+    })();
   });
 }
 function addMultipleInputs(txid, coins, idx, callback) {
@@ -202,7 +218,8 @@ function createBet(presetId, betAmount, cb) {
       var secret = extractResponse(rres); if (!secret) { cb("Random failed"); return; }
       MDS.cmd("hash data:" + secret, function (hres) {
         var commit = extractResponse(hres); if (!commit) { cb("Hash failed"); return; }
-        saveSecret("casino_secret_for_" + commit, secret, function () {
+        saveSecret("casino_secret_for_" + commit, secret, function (serr) {
+          if (serr) { cb(serr); return; }   // preimage not durable → do NOT lock funds
           var stateObj = '{"0":"' + MY_PUBKEY + '","1":"' + MY_HEX_ADDR + '","2":"' + commit + '","3":"' + p.range + '","4":"' + p.payout + '","5":"' + bet + '","6":"0","7":"' + TIMEOUT_BLOCKS + '"}';
           var cmd = "send amount:" + stake + " address:" + SCRIPT_ADDR + " state:" + stateObj;
           MDS.cmd(cmd, function (sres) {
@@ -231,7 +248,8 @@ function takeBet(coinid, pick, cb) {
         var secret = extractResponse(rres); if (!secret) { cb("Random failed"); return; }
         MDS.cmd("hash data:" + secret, function (hres) {
           var commit = extractResponse(hres); if (!commit) { cb("Hash failed"); return; }
-          saveSecret("casino_psecret_for_" + commit, secret, function () {
+          saveSecret("casino_psecret_for_" + commit, secret, function (serr) {
+            if (serr) { cb(serr); return; }   // preimage not durable → do NOT commit the take
             findCoins("0x00", parseFloat(bet), coinid, function (result) {
               if (!result) { cb("Insufficient Minima (need " + bet + ")"); return; }
               MDS.cmd("txncreate id:" + txid, function (r0) {

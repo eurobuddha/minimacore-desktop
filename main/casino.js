@@ -54,7 +54,7 @@ function log(line) {
 // ---- keychain-backed keypair (commit preimages + identity cache + history) ----
 function kpAccount(key) { return "casino-" + crypto.createHash("sha256").update(String(key)).digest("hex"); }
 function kpGet(key) { try { return require("./config").getSecret(kpAccount(key)); } catch (e) { return null; } }
-function kpSet(key, value) { try { require("./config").setSecret(String(value), kpAccount(key)); } catch (e) {} }
+function kpSet(key, value) { try { return require("./config").setSecret(String(value), kpAccount(key)) === true; } catch (e) { return false; } }
 function kpDelete(key) { try { require("./config").deleteSecret(kpAccount(key)); } catch (e) {} }
 
 // ---- cross-realm marshalling (parity with atomix; casino uses Array.isArray so it's belt-and-braces) ----
@@ -73,14 +73,17 @@ function buildMds() {
     cmd(command, cb) {
       // the donor calls cmd WITHOUT a callback in places (newscript, txndelete) — valid in the browser shim, so no-op.
       const done = typeof cb === "function" ? cb : () => {};
-      const c = String(command);
+      let c = String(command);
       if (/^checkmode\b/.test(c)) { done(toVm({ status: true, response: { mode: "WRITE" } })); return; }  // admin RPC is always WRITE
+      // The donor's service.js re-registers the covenant with a PLAIN newscript (no trackall). Force trackall:true
+      // onto every newscript so it can never clobber the tracking that surfaces OTHER players' open bets (discovery).
+      if (/^newscript\b/.test(c) && !/\btrackall:/.test(c)) c += " trackall:true";
       if (CASINO_SEND.test(c)) { pinMinimaSend(runner, c).then(p => runner(p)).then(r => done(toVm(r)), () => done(toVm({ status: false }))); return; }
       runner(c).then(r => done(toVm(r)), () => done(toVm({ status: false })));
     },
     keypair: {
       get(key, cb) { const v = kpGet(key); cb(v == null ? { status: false, value: null } : { status: true, value: v }); },
-      set(key, value, cb) { kpSet(key, value); if (cb) cb({ status: true }); }   // config.setSecret is sync-durable
+      set(key, value, cb) { const ok = kpSet(key, value); if (cb) cb({ status: ok }); }   // report REAL durability (fund-safety: preimage writes gate the send)
     },
     notify(msg) { log("notify: " + msg); emitter.emit("notify", String(msg)); },
     log(msg) { log(String(msg)); emitter.emit("update"); },
