@@ -324,8 +324,11 @@ casino.emitter.on("notify", (msg) => {   // reveal/resolve milestones — OS not
     n.show();
   } catch (e) { /* best-effort */ }
 });
-let casinoStarted = false;
-node.on("status", (s) => { if (s.state === "running" && !casinoStarted) { casinoStarted = true; casino.startLoop(); } });
+// Casino tab removed in 0.11.1 — do NOT start its background auto-processor (it would auto-reveal/resolve bets
+// while hidden). Module code (main/casino.js + main/casino/) and the IPC handlers above are kept dormant; to
+// restore the feature, uncomment this start-gate and re-add the tab button + #view-casino in index.html.
+// let casinoStarted = false;
+// node.on("status", (s) => { if (s.state === "running" && !casinoStarted) { casinoStarted = true; casino.startLoop(); } });
 
 // Vestr (token vesting)
 ipcMain.handle("mcd:vestrStatus", () => vestr.status());
