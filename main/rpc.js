@@ -30,12 +30,19 @@ function rpcCall(port, secret, command) {
   return new Promise((resolve, reject) => {
     const auth = "Basic " + Buffer.from("minima:" + secret).toString("base64");
     const usePost = command.length > GET_MAX;
+    // The node's RPC handler reads a POST body ONLY via the Content-Length header (CMDHandler.java). Node's
+    // http client would otherwise use chunked transfer-encoding — which the node ignores, reading an EMPTY body
+    // and returning "[]" (zero commands run). So we MUST set Content-Length explicitly on POST, or every command
+    // over GET_MAX (mail images, large txnimport/state blobs) silently no-ops.
+    const headers = usePost
+      ? { Authorization: auth, "Content-Type": "text/plain", "Content-Length": Buffer.byteLength(command) }
+      : { Authorization: auth };
     const options = {
       host: "127.0.0.1",
       port,
       method: usePost ? "POST" : "GET",
       path: usePost ? "/" : "/" + encodeURIComponent(command),
-      headers: { Authorization: auth },
+      headers,
       timeout: timeoutFor(command),
       // Minima's lightweight Java RPC server emits response headers that Node's strict llhttp parser rejects
       // ("Invalid header value char"), so every call would fail to parse. Parse leniently, like curl. Safe:
