@@ -3723,21 +3723,50 @@ async function renderShopBrowse() {
   const grid = (s.products || []).map(p => {
     const qty = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99;
     return `<div class="card shop-prod">
-      ${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-prod-img shop-prod-noimg">🛍</div>`}
-      <div class="shop-prod-name">${esc(p.name)}</div>
-      <div class="view__desc">${esc(p.description || "")}</div>
-      <div class="row" style="justify-content:space-between;align-items:center;margin-top:6px">
-        <span class="mono">${esc(p.price)} ${esc(s.currency)}</span>
-        <span class="shop-stepper"><button class="btn btn--sm btn--outline" data-dec="${esc(p.id)}" ${qty <= 0 ? "disabled" : ""}>−</button><span class="mono" style="min-width:20px;text-align:center">${qty}</span><button class="btn btn--sm btn--outline" data-inc="${esc(p.id)}" ${qty >= cap ? "disabled" : ""}>+</button></span>
-      </div></div>`;
+      <div class="shop-prod-imgwrap" data-open="${esc(p.id)}" title="View details">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-prod-img shop-prod-noimg">🛍</div>`}<span class="shop-zoom">⤢</span></div>
+      <div class="shop-prod-name" data-open="${esc(p.id)}">${esc(p.name)}</div>
+      <div class="view__desc shop-prod-desc">${esc(p.description || "")}</div>
+      <div class="shop-prod-price mono">${esc(p.price)} ${esc(s.currency)}</div>
+      ${shopStepper(p.id, qty, cap)}
+    </div>`;
   }).join("");
   host.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><div><div class="card__title" style="margin:0">${esc(s.shopName)}</div><div class="view__desc">pays in ${esc(s.currency)}</div></div><button class="btn btn--sm btn--outline" id="shopClose">Close</button></div>
     <div class="shop-grid">${grid}</div>
     ${cartCount ? `<div class="shop-cartbar"><span>${cartCount} item(s) · <span class="mono">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></span><button class="btn btn--primary btn--sm" id="shopCheckout">Checkout</button></div>` : ""}`;
   el("shopClose").onclick = () => { shopLoaded = null; shopCart = {}; renderShopBrowse(); };
-  host.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { const id = b.dataset.inc; shopCart[id] = (shopCart[id] || 0) + 1; renderShopBrowse(); });
+  host.querySelectorAll("[data-open]").forEach(e => e.onclick = () => shopProductModal(e.dataset.open));
+  host.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { const id = b.dataset.inc, cap = shopCapOf(id); shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); renderShopBrowse(); });
   host.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const id = b.dataset.dec; shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; renderShopBrowse(); });
   if (el("shopCheckout")) el("shopCheckout").onclick = shopOpenCheckout;
+}
+function shopStepper(id, qty, cap) {
+  return `<div class="shop-stepper"><button class="shop-step" data-dec="${esc(id)}" ${qty <= 0 ? "disabled" : ""}>−</button><span class="shop-qty mono">${qty}</span><button class="shop-step" data-inc="${esc(id)}" ${qty >= cap ? "disabled" : ""}>+</button></div>`;
+}
+function shopCapOf(id) { const p = (shopLoaded && shopLoaded.products || []).find(x => x.id === id); return p ? (Number(p.maxUnits) || 99) : 99; }
+// Rich product detail modal — big image, full description, qty + add-to-cart.
+function shopProductModal(id) {
+  const s = shopLoaded; const p = (s && s.products || []).find(x => x.id === id); if (!p) return;
+  const qty = shopCart[id] || 0, cap = Number(p.maxUnits) || 99;
+  let ov = document.getElementById("shopModalOv");
+  if (!ov) { ov = document.createElement("div"); ov.id = "shopModalOv"; ov.className = "shop-modal-ov"; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="shop-modal">
+    <button class="shop-modal-x" id="shopModalX" aria-label="Close">✕</button>
+    ${p.image ? `<img class="shop-modal-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-modal-img shop-prod-noimg" style="height:200px;font-size:56px">🛍</div>`}
+    <div class="shop-modal-body">
+      <div class="shop-modal-name">${esc(p.name)}</div>
+      <div class="shop-modal-price mono">${esc(p.price)} ${esc(s.currency)}</div>
+      <div class="shop-modal-desc">${esc(p.description || "No description.")}</div>
+      <div class="view__desc">Up to ${cap} per order · from ${esc(s.shopName)}</div>
+      <div class="shop-modal-buy">${shopStepper(id, qty, cap)}<button class="btn btn--primary" id="mAdd">${qty > 0 ? "In cart ✓" : "Add to cart"}</button></div>
+    </div></div>`;
+  const close = () => { const o = document.getElementById("shopModalOv"); if (o) o.remove(); document.removeEventListener("keydown", onKey); renderShopBrowse(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  el("shopModalX").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.querySelector("[data-inc]").onclick = () => { shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); shopProductModal(id); };
+  ov.querySelector("[data-dec]").onclick = () => { shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; shopProductModal(id); };
+  el("mAdd").onclick = () => { if (!shopCart[id]) shopCart[id] = 1; shopProductModal(id); };
 }
 function shopCartTotal() {
   const s = shopLoaded; if (!s) return 0; let t = 0;
