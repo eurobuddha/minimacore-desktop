@@ -78,6 +78,25 @@ contextBridge.exposeInMainWorld("mcd", {
   mailInvalidate: () => ipcRenderer.invoke("mcd:mailInvalidate"),
   onMail: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:mail", h); return () => ipcRenderer.removeListener("mcd:mail", h); },
 
+  // miniMall (shop / studio / orders)
+  shopInit: () => ipcRenderer.invoke("mcd:shopInit"),
+  shopVendorCard: () => ipcRenderer.invoke("mcd:shopVendorCard"),
+  shopMyShops: () => ipcRenderer.invoke("mcd:shopMyShops"),
+  shopSave: (cfg) => ipcRenderer.invoke("mcd:shopSave", cfg),
+  shopDelete: (shopId) => ipcRenderer.invoke("mcd:shopDelete", shopId),
+  shopOrders: () => ipcRenderer.invoke("mcd:shopOrders"),
+  shopOrder: (ref) => ipcRenderer.invoke("mcd:shopOrder", ref),
+  shopNewCount: () => ipcRenderer.invoke("mcd:shopNewCount"),
+  shopPlaceOrder: (shopCfg, items, total, shipping, delivery, note) => ipcRenderer.invoke("mcd:shopPlaceOrder", shopCfg, items, total, shipping, delivery, note),
+  shopRetryPay: (ref) => ipcRenderer.invoke("mcd:shopRetryPay", ref),
+  shopAdvance: (ref, status) => ipcRenderer.invoke("mcd:shopAdvance", ref, status),
+  shopReply: (ref, text) => ipcRenderer.invoke("mcd:shopReply", ref, text),
+  shopScan: () => ipcRenderer.invoke("mcd:shopScan"),
+  shopInvalidate: () => ipcRenderer.invoke("mcd:shopInvalidate"),
+  shopExport: (json, name) => ipcRenderer.invoke("mcd:shopExport", json, name),
+  shopImport: () => ipcRenderer.invoke("mcd:shopImport"),
+  onShop: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:shop", h); return () => ipcRenderer.removeListener("mcd:shop", h); },
+
   // PandaPools (AMM)
   ppPools: () => ipcRenderer.invoke("mcd:ppPools"),
   ppMyPools: () => ipcRenderer.invoke("mcd:ppMyPools"),

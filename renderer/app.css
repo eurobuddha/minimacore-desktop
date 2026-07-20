@@ -549,3 +549,27 @@ body { font-family: var(--sans); }
 #view-atomix .ax-prev-sum .bidpx { color:var(--green); font-weight:700; }
 #view-atomix .ax-prev-sum .askpx { color:var(--accent); font-weight:700; }
 #view-atomix .ax-prev-cross { font-size:12.5px; color:var(--red); line-height:1.4; }
+
+/* ============================ miniMall (shop · studio · orders) ============================ */
+#view-minimall .ax-seclabel { font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin:12px 0 6px; font-weight:700; }
+#view-minimall .shop-order { cursor:pointer; transition:border-color .12s; }
+#view-minimall .shop-order:hover { border-color:var(--accent); }
+#view-minimall .shop-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-left:6px; vertical-align:middle; }
+#view-minimall .shop-pill { display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--dim); }
+#view-minimall .shop-pill.ok { background:var(--green); border-color:transparent; color:#08120a; }
+#view-minimall .shop-pill.acc { background:var(--accent); border-color:transparent; color:var(--on-accent); }
+#view-minimall .shop-pill.warn { background:var(--red); border-color:transparent; color:#fff; }
+#view-minimall .shop-warn { font-size:12.5px; color:var(--red); border:1px solid var(--red); border-radius:10px; padding:8px 10px; line-height:1.4; }
+#view-minimall .shop-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:8px; }
+#view-minimall .shop-prod { display:flex; flex-direction:column; }
+#view-minimall .shop-prod-img { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:10px; background:var(--surface2); }
+#view-minimall .shop-prod-noimg { display:flex; align-items:center; justify-content:center; font-size:32px; color:var(--dim); }
+#view-minimall .shop-prod-name { font-weight:700; margin-top:6px; }
+#view-minimall .shop-stepper { display:inline-flex; align-items:center; gap:6px; }
+#view-minimall .shop-cartbar { position:sticky; bottom:0; margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--surface2); border:1px solid var(--accent); border-radius:12px; padding:10px 12px; box-shadow:0 6px 18px -8px rgba(0,0,0,.5); }
+#view-minimall .shop-imgdrop { border:1px dashed var(--border); border-radius:10px; min-height:64px; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:12px; cursor:pointer; margin-bottom:6px; overflow:hidden; }
+#view-minimall .shop-imgdrop.drag { border-color:var(--accent); background:var(--accent-bg,rgba(247,147,26,.1)); }
+#view-minimall .shop-imgdrop .shop-prod-img { aspect-ratio:auto; max-height:120px; width:auto; }
+#view-minimall .shop-prod-edit .field__input { margin-top:6px; }
+#view-minimall .shop-card { font-size:11px; color:var(--dim); background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:6px 8px; margin-top:4px; word-break:break-all; }
+#view-minimall .mail-thread { display:flex; flex-direction:column; gap:6px; }

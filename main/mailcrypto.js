@@ -38,15 +38,20 @@ function ikmFromSeed(seedStr) {
   return Buffer.from(s, "utf8");
 }
 
-/** Derive the messaging identity. Returns { boxPk,boxSk,signPk,signSk (Uint8Array), publicId ("0x"+128hex) }. */
-async function deriveIdentity(seedStr) {
+/** Derive an identity from the seed under an explicit HKDF domain (box/sign `info` strings). Different domains
+ *  from the SAME seed yield independent, non-clashing identities — this is how minimaMail ("minima-comms-*") and
+ *  miniMall ("minimerch-*") coexist on one node. Returns { boxPk,boxSk,signPk,signSk (Uint8Array), publicId }. */
+async function deriveIdentityDomain(seedStr, boxInfo, signInfo) {
   const s = await ready();
   const ikm = ikmFromSeed(seedStr);
-  const box = s.crypto_box_seed_keypair(new Uint8Array(hkdf32(ikm, BOX_INFO)));
-  const sign = s.crypto_sign_seed_keypair(new Uint8Array(hkdf32(ikm, SIGN_INFO)));
+  const box = s.crypto_box_seed_keypair(new Uint8Array(hkdf32(ikm, boxInfo)));
+  const sign = s.crypto_sign_seed_keypair(new Uint8Array(hkdf32(ikm, signInfo)));
   const publicId = "0x" + s.to_hex(box.publicKey) + s.to_hex(sign.publicKey);
   return { boxPk: box.publicKey, boxSk: box.privateKey, signPk: sign.publicKey, signSk: sign.privateKey, publicId };
 }
+
+/** Derive the minimaMail messaging identity ("minima-comms-*" domain). */
+async function deriveIdentity(seedStr) { return deriveIdentityDomain(seedStr, BOX_INFO, SIGN_INFO); }
 
 // --- publicId helpers (64 raw bytes = boxPk[32] || signPk[32]) ---
 // Decode with Buffer (strict-validated first) rather than _sodium.from_hex, so isValidPublicId/boxPkOf/signPkOf work
@@ -118,4 +123,4 @@ function keypairConsistent(id) {
   } catch (e) { return false; }
 }
 
-module.exports = { ready, deriveIdentity, seal, open, serializeIdentity, loadIdentity, keypairConsistent, isValidPublicId, boxPkOf, signPkOf };
+module.exports = { ready, deriveIdentity, deriveIdentityDomain, seal, open, serializeIdentity, loadIdentity, keypairConsistent, isValidPublicId, boxPkOf, signPkOf };

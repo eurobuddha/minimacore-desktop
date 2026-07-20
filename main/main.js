@@ -20,6 +20,7 @@ const faucet = require("./faucet");
 const mail = require("./mail");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
+const shop = require("./shop");
 
 let win = null;
 let tray = null;
@@ -160,6 +161,22 @@ ipcMain.handle("mcd:mailArchivedThreads", () => mail.archivedThreads());
 ipcMain.handle("mcd:mailSetArchived", (_e, hashref, on) => mail.setArchived(hashref, on));
 ipcMain.handle("mcd:mailScan", () => mail.scan());
 ipcMain.handle("mcd:mailInvalidate", () => { mail.invalidateIdentity(); return true; });
+
+// ---- miniMall (shop) ----
+ipcMain.handle("mcd:shopInit", async () => { await shop.init(); return shop.myIdentity(); });
+ipcMain.handle("mcd:shopVendorCard", async () => { await shop.init(); return shop.vendorCard(); });
+ipcMain.handle("mcd:shopMyShops", () => shop.myShops());
+ipcMain.handle("mcd:shopSave", (_e, cfg) => shop.saveShop(cfg));
+ipcMain.handle("mcd:shopDelete", (_e, shopId) => shop.deleteShop(shopId));
+ipcMain.handle("mcd:shopOrders", () => shop.ordersList());
+ipcMain.handle("mcd:shopOrder", (_e, ref) => shop.orderDetail(ref));
+ipcMain.handle("mcd:shopNewCount", () => shop.newOrderCount());
+ipcMain.handle("mcd:shopPlaceOrder", (_e, shopCfg, items, total, shipping, delivery, note) => shop.placeOrder(shopCfg, items, total, shipping, delivery, note));
+ipcMain.handle("mcd:shopRetryPay", (_e, ref) => shop.retryPayment(ref));
+ipcMain.handle("mcd:shopAdvance", (_e, ref, status) => shop.advanceStatus(ref, status));
+ipcMain.handle("mcd:shopReply", (_e, ref, text) => shop.reply(ref, text));
+ipcMain.handle("mcd:shopScan", () => shop.scanOnce());
+ipcMain.handle("mcd:shopInvalidate", () => { shop.invalidateIdentity(); return true; });
 // backup: keys stay in main; the renderer only supplies the passphrase and triggers the file dialog.
 ipcMain.handle("mcd:mailExportBackup", async (_e, passphrase) => {
   if (typeof passphrase !== "string" || passphrase.length < 8) throw new Error("Use a passphrase of at least 8 characters.");
@@ -191,8 +208,19 @@ mail.emitter.on("incoming", (info) => {
     n.show();
   } catch (e) { /* notifications are best-effort */ }
 });
+// miniMall: order feed → renderer; OS notification on a new incoming order (vendor) when unfocused
+shop.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:shop"); });
+shop.emitter.on("incoming", (info) => {
+  try {
+    if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
+    if (info.paid) return;   // payment-matched events don't pop a toast; only new orders do
+    const n = new Notification({ title: "miniMall — new order", body: (info.shopName ? info.shopName + " · " : "") + (info.amount ? info.amount + " " + (info.currency || "") : "New order"), silent: false });
+    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+    n.show();
+  } catch (e) {}
+});
 let mailStarted = false;
-node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); } });
+node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); shop.startLoop().catch(() => {}); } });
 
 // PandaPools (AMM) — read model + actions; the AMM logic is the reused MDS core (main/pandapools/*).
 ipcMain.handle("mcd:ppPools", () => pandapools.pools());
@@ -283,6 +311,19 @@ ipcMain.handle("mcd:exportCsv", async (_e, text, name) => {
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, String(text == null ? "" : text), "utf8");
   return r.filePath;
+});
+
+// miniMall: export a .shop bundle (save dialog) / import one (open dialog → parsed JSON)
+ipcMain.handle("mcd:shopExport", async (_e, json, name) => {
+  const r = await dialog.showSaveDialog(win, { defaultPath: (name || "shop") + ".shop", filters: [{ name: "miniMall shop", extensions: ["shop"] }] });
+  if (r.canceled || !r.filePath) return null;
+  fs.writeFileSync(r.filePath, String(json == null ? "" : json), "utf8");
+  return r.filePath;
+});
+ipcMain.handle("mcd:shopImport", async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "miniMall shop", extensions: ["shop", "json"] }] });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return null;
+  try { return JSON.parse(fs.readFileSync(r.filePaths[0], "utf8")); } catch (e) { throw new Error("Not a valid .shop file."); }
 });
 
 // forward node events to the window + tray
