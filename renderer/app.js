@@ -3324,10 +3324,18 @@ function axLevelRow(tag, idP, idA, pv, av, cls) {
     + `<input class="ax-lvl-p mono" id="${idP}" inputmode="decimal" placeholder="price" value="${esc(pv == null ? "" : pv)}" autocomplete="off" />`
     + `<input class="ax-lvl-a mono" id="${idA}" inputmode="decimal" placeholder="size" value="${esc(av == null ? "" : av)}" autocomplete="off" /></div>`;
 }
+/** Compact cockpit cell: a small persistent label ABOVE a right-aligned input (dense, not a full-width row). */
+function axCell(label, id, val) { return `<div class="ax-cell"><span class="ax-celllabel">${label}</span>${axGenField(id, val, "")}</div>`; }
+/** Compact ladder rung for the twin-column ladder: tag + price + size. cls = "ask" | "bid". */
+function axRung(tag, idP, idA, pv, av, cls) {
+  return `<div class="ax-rung ${cls}"><span class="ax-rung-tag">${tag}</span>`
+    + `<input class="ax-rung-p mono" id="${idP}" inputmode="decimal" placeholder="price" value="${esc(pv == null ? "" : pv)}" autocomplete="off" />`
+    + `<input class="ax-rung-a mono" id="${idA}" inputmode="decimal" placeholder="size" value="${esc(av == null ? "" : av)}" autocomplete="off" /></div>`;
+}
 function axStartPegPoll(fn) { axStopPegPoll(); fn(); axPegPollTimer = setInterval(() => { if (activeView === "atomix" && axView === "market" && axEditing) fn(); else axStopPegPoll(); }, 2500); }
 function axStopPegPoll() { if (axPegPollTimer) { clearInterval(axPegPollTimer); axPegPollTimer = null; } }
-/** The FULL maker editor — transcribed from the native "My market / ladder": Enabled + Peg switches, live oracle
- *  price, skew/reprice, a mid·step·size·levels generator that auto-fills 6 ASK + 6 BID editable rows, min, preview. */
+/** The maker editor — native "My market / ladder" reinterpreted for desktop width: a compact CONTROL COCKPIT
+ *  (Enabled + Peg toggles, live oracle, labelled auto-fill/peg fields) over TWIN side-by-side ASK│BID ladders. */
 function axMakerEditor(mc, ccy, b) {
   const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || { bids: [], asks: [] };
   const parity = b ? !!b.pricingParity : (axStatusCache.currency === "mxusdt");
@@ -3337,29 +3345,33 @@ function axMakerEditor(mc, ccy, b) {
   const asks = (man.asks || []).slice().sort((x, y) => x.p - y.p);   // ascending → index 0 = A1 (best/lowest ask)
   const bids = (man.bids || []).slice().sort((x, y) => y.p - x.p);   // descending → index 0 = B1 (best/highest bid)
   let askRows = "", bidRows = "";
-  for (let i = 5; i >= 0; i--) { const l = asks[i] || {}; askRows += axLevelRow("A" + (i + 1), "axAskP" + i, "axAskA" + i, l.p, l.a, "ask"); }   // A6 top … A1 bottom (by the spread)
-  for (let i = 0; i < 6; i++) { const l = bids[i] || {}; bidRows += axLevelRow("B" + (i + 1), "axBidP" + i, "axBidA" + i, l.p, l.a, "bid"); }
-  return `<div class="ax-mkr-hint">Your depth ladder for ${esc(ccy)} / USDT (price = USDT per ${esc(ccy)}):<br>`
-      + `•&nbsp; ASKS — where YOU SELL ${esc(ccy)} (higher). BIDS — where YOU BUY (lower).<br>`
-      + `•&nbsp; Each level's amount is a per-take cap. Leave rows blank to skip them.<br>`
-      + `•&nbsp; Tip: make your best level your largest.</div>`
-    + axEditRow("Enabled", axSwitch("axEnabled", enabled))
-    + `<div class="ax-seclabel">AUTO MARKET-MAKE — PEG TO ${src.toUpperCase()}</div>`
-    + axEditRow("Peg ladder to " + src + " (auto-reprice)", axSwitch("axPegToggle", peg))
-    + `<div class="ax-oracle mono" id="axOracle">${peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off")}</div>`
-    + `<div class="ax-mkr-hint2">While pegged, the ladder regenerates around the ${src} mid (± step %, your size per level) at every publish, and re-publishes when the market moves ≥ your threshold. If the feed goes down your order is withdrawn for safety, then restored when it recovers.</div>`
-    + axGenRow("Skew · %", "axBias", c.bias != null ? c.bias : "")
-    + axGenRow("Reprice move · %", "axReprice", c.reprice != null ? c.reprice : "1")
-    + `<div class="ax-seclabel">AUTO-FILL (mid · step % · levels, then ask/bid size — seeds the rungs as you type; edit any rung after)</div>`
-    + axGenRow("Mid price · USDT/" + esc(ccy), "axMid", "")
-    + axGenRow("Rung spacing · %", "axStep", c.step != null ? c.step : "")
-    + axGenRow("Levels · per side", "axLevels", c.levels != null ? c.levels : "1")
-    + axGenRow("Ask size · " + esc(ccy), "axAskSize", c.askSize != null ? c.askSize : (c.size != null ? c.size : ""))
-    + axGenRow("Bid size · " + esc(ccy), "axBidSize", c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ""))
-    + `<div class="ax-side-hdr ask">ASKS — you SELL ${esc(ccy)} (higher price)</div><div class="ax-lvl-hdr">price · USDT/${esc(ccy)} &nbsp;·&nbsp; size · ${esc(ccy)}</div>${askRows}`
-    + `<div class="ax-side-hdr bid">BIDS — you BUY ${esc(ccy)} (lower price)</div><div class="ax-lvl-hdr">price · USDT/${esc(ccy)} &nbsp;·&nbsp; size · ${esc(ccy)}</div>${bidRows}`
-    + axEditRow("Min trade · " + esc(ccy), axEditInput("axMin", c.min != null ? c.min : ""))
-    + `<div class="ax-prev-label">Preview</div><div class="ax-prev" id="axMkrPreview"><div class="empty">—</div></div>`
+  for (let i = 0; i < 6; i++) { const l = asks[i] || {}; askRows += axRung("A" + (i + 1), "axAskP" + i, "axAskA" + i, l.p, l.a, "ask"); }   // A1 (best) top → A6
+  for (let i = 0; i < 6; i++) { const l = bids[i] || {}; bidRows += axRung("B" + (i + 1), "axBidP" + i, "axBidA" + i, l.p, l.a, "bid"); }   // B1 (best) top → B6
+  const oracle = peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off");
+  return `<div class="ax-cockpit-top">`
+      + `<span class="ax-tog"><span class="ax-tog-l">Enabled</span>${axSwitch("axEnabled", enabled)}</span>`
+      + `<span class="ax-tog"><span class="ax-tog-l">Peg → ${src}</span>${axSwitch("axPegToggle", peg)}</span>`
+      + `<span class="ax-oracle mono" id="axOracle">${oracle}</span></div>`
+    + `<div class="ax-mkr-hint">price = USDT per ${esc(ccy)} · size = per-take cap in ${esc(ccy)} · blank a rung to skip it</div>`
+    + `<div class="ax-cockpit">`
+      + `<div class="ax-cell-grp"><span class="ax-seclabel">AUTO-FILL</span><div class="ax-cell-row">`
+        + axCell("Mid · USDT", "axMid", "")
+        + axCell("Step · %", "axStep", c.step != null ? c.step : "")
+        + axCell("Levels", "axLevels", c.levels != null ? c.levels : "1")
+        + axCell("Ask · " + esc(ccy), "axAskSize", c.askSize != null ? c.askSize : (c.size != null ? c.size : ""))
+        + axCell("Bid · " + esc(ccy), "axBidSize", c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ""))
+        + `</div></div>`
+      + `<div class="ax-cell-grp"><span class="ax-seclabel">PEG</span><div class="ax-cell-row">`
+        + axCell("Skew · %", "axBias", c.bias != null ? c.bias : "")
+        + axCell("Reprice · %", "axReprice", c.reprice != null ? c.reprice : "1")
+        + `</div></div></div>`
+    + `<div class="ax-twin">`
+      + `<div class="ax-lad-col"><div class="ax-lad-hdr ask">ASKS · you SELL ${esc(ccy)}</div>${askRows}</div>`
+      + `<div class="ax-lad-col"><div class="ax-lad-hdr bid">BIDS · you BUY ${esc(ccy)}</div>${bidRows}</div></div>`
+    + `<div class="ax-spread-mid mono" id="axSpread">—</div>`
+    + `<div class="ax-mkr-foot">`
+      + axEditRow("Min trade · " + esc(ccy), axEditInput("axMin", c.min != null ? c.min : ""))
+      + `<div class="ax-prev" id="axMkrPreview"><div class="empty">—</div></div></div>`
     + `<button class="btn btn--primary btn--full" id="axSave" style="margin-top:12px">Save &amp; publish</button>`
     + `<div class="ax-mkr-actions" style="margin-top:8px"><button class="btn btn--outline btn--full" id="axWithdraw">Withdraw market</button><button class="btn btn--outline btn--full" id="axCancel">Cancel</button></div>`;
 }
@@ -3374,6 +3386,15 @@ function axWireMakerEditor(ccy) {
   const updPreview = () => {
     const host = el("axMkrPreview"); if (!host) return;
     const { asks, bids } = collect();
+    // centered spread readout between the twin ladders
+    const sp = el("axSpread");
+    if (sp) {
+      if (asks.length && bids.length) {
+        const ba = Math.min(...asks.map(l => l.p)), bb = Math.max(...bids.map(l => l.p)), d = ba - bb;
+        sp.textContent = d > 0 ? `spread ${fmtPx(d)} · ${(d / bb * 100).toFixed(1)}%` : "⚠ crossed";
+        sp.classList.toggle("crossed", d <= 0);
+      } else { sp.textContent = "—"; sp.classList.remove("crossed"); }
+    }
     if (asks.length && bids.length) {
       const bestAsk = Math.min(...asks.map(l => l.p)), bestBid = Math.max(...bids.map(l => l.p));
       if (bestBid >= bestAsk) { host.innerHTML = `<div class="ax-prev-cross">⚠ Crossed — best bid ${fmtPx(bestBid)} ≥ best ask ${fmtPx(bestAsk)}: you'd sell cheaper than you buy</div>`; return; }
