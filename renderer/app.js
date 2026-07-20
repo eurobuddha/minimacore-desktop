@@ -3749,7 +3749,7 @@ let shopShipId = null;
 function shopSelectedShipping() { const s = shopLoaded; if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(x => x.id === shopShipId) || s.shipping[0]; }
 async function shopOpenCheckout() {
   const s = shopLoaded;
-  const shipOpts = (s.shipping || []).map(sh => `<option value="${esc(sh.id)}">${esc(sh.label)} (+${esc(String(sh.fee))})</option>`).join("");
+  const shipOpts = (s.shipping || []).map(sh => `<option value="${esc(sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? " (+" + esc(String(sh.fee)) + " " + esc(s.currency) + ")" : " (free)"}</option>`).join("");
   const host = el("shopSub");
   host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBackStore">← Store</button>
     <div class="card" style="margin-top:8px"><div class="card__title">Checkout · ${esc(s.shopName)}</div>
@@ -3781,14 +3781,17 @@ async function shopDoPay() {
 
 // ---- Studio: author a .shop (auto vendor card from the node identity) ----
 function shopSlug(s) { return String(s || "shop").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shop"; }
+// Standard shipping: Digital (always free), Domestic + International (fees configurable).
+function shopStandardShipping() { return [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0" }, { id: "international", label: "International", fee: "0" }]; }
+function shopNormalizeShipping(list) { const by = {}; (list || []).forEach(s => { if (s && s.id) by[s.id] = s; }); return shopStandardShipping().map(std => ({ id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") })); }
 async function renderShopStudio() {
   const host = el("shopSub"); if (!host) return;
   if (!shopDraft) {
     const mine = await api.shopMyShops().catch(() => []);
     host.innerHTML = `<button class="btn btn--primary btn--full" id="shopNew">+ New shop</button>
       ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(s.shopName)}</b><div class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</div></div><div class="seg"><button class="btn btn--sm btn--outline" data-editshop="${esc(s.shopId)}">Edit</button><button class="btn btn--sm btn--outline" data-exportshop="${esc(s.shopId)}">Export</button></div></div></div>`).join("") : `<div class="card"><div class="empty">No shops yet. Create one — customers load the exported <span class="mono">.shop</span> file to buy.</div></div>`}`;
-    el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: [{ id: "std", label: "Standard", fee: "0" }], products: [] }; renderShopStudio(); };
-    host.querySelectorAll("[data-editshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); renderShopStudio(); });
+    el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: shopStandardShipping(), products: [] }; renderShopStudio(); };
+    host.querySelectorAll("[data-editshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); shopDraft.shipping = shopNormalizeShipping(shopDraft.shipping); renderShopStudio(); });
     host.querySelectorAll("[data-exportshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast("Exported → " + p, "ok"); });
     return;
   }
@@ -3800,7 +3803,9 @@ async function renderShopStudio() {
       <input class="field__input" data-pf="description" data-pi="${i}" placeholder="Description" value="${esc(p.description || "")}" autocomplete="off"/>
       <div class="row" style="gap:6px"><input class="field__input" data-pf="price" data-pi="${i}" inputmode="decimal" placeholder="Price" value="${esc(p.price || "")}" style="flex:1" autocomplete="off"/><input class="field__input" data-pf="maxUnits" data-pi="${i}" inputmode="numeric" placeholder="Max qty" value="${esc(p.maxUnits || "")}" style="flex:1" autocomplete="off"/></div>
     </div>`).join("");
-  const ship = d.shipping.map((sh, i) => `<div class="row" style="gap:6px;margin-top:4px"><input class="field__input" data-sf="label" data-si="${i}" placeholder="Label" value="${esc(sh.label || "")}" style="flex:2" autocomplete="off"/><input class="field__input" data-sf="fee" data-si="${i}" inputmode="decimal" placeholder="Fee" value="${esc(sh.fee || "")}" style="flex:1" autocomplete="off"/><button class="btn btn--sm btn--outline" data-delship="${i}">✕</button></div>`).join("");
+  const ship = d.shipping.map((sh, i) => sh.id === "digital"
+    ? `<div class="row" style="justify-content:space-between;margin-top:4px"><span>Digital</span><span class="view__desc">Free</span></div>`
+    : `<div class="row" style="align-items:center;justify-content:space-between;margin-top:4px"><span>${esc(sh.label)}</span><input class="field__input" data-sf="fee" data-si="${i}" inputmode="decimal" placeholder="Fee (${esc(d.currency)})" value="${esc(sh.fee || "")}" style="flex:0 0 130px;text-align:right" autocomplete="off"/></div>`).join("");
   host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopStudioBack">← My shops</button>
     <div class="card" style="margin-top:8px"><div class="card__title">${d.shopId ? "Edit shop" : "New shop"}</div>
       <div class="field"><div class="field__label">Shop name</div><input class="field__input" id="sdName" value="${esc(d.shopName)}" placeholder="My Shop" autocomplete="off"/></div>
@@ -3808,18 +3813,16 @@ async function renderShopStudio() {
       <div class="view__desc">Vendor card (auto-derived from your node — this is how buyers' orders reach you):</div>
       <div class="mono shop-card">${esc((d.vendorPublicId || "").slice(0, 18))}… | ${esc(d.vendorAddress || "")}</div>
     </div>
-    <div class="card"><div class="card__title">Shipping</div>${ship}<button class="btn btn--outline btn--sm" id="sdAddShip" style="margin-top:6px">+ Shipping option</button></div>
+    <div class="card"><div class="card__title">Shipping</div><div class="view__desc">Digital delivery is free. Set your Domestic &amp; International fees.</div>${ship}</div>
     <div class="card"><div class="card__title">Products (max 40)</div>${prods || '<div class="empty">Add your first product.</div>'}<button class="btn btn--outline btn--full" id="sdAddProd" style="margin-top:8px">+ Add product</button></div>
     <button class="btn btn--primary btn--full" id="sdSave">Save${d.shopId ? "" : " & export .shop"}</button>`;
   const readForm = () => {
     d.shopName = el("sdName").value.trim();
     host.querySelectorAll("[data-pf]").forEach(inp => { const i = +inp.dataset.pi; d.products[i][inp.dataset.pf] = inp.value; });
-    host.querySelectorAll("[data-sf]").forEach(inp => { const i = +inp.dataset.si; d.shipping[i][inp.dataset.sf] = inp.value; });
+    host.querySelectorAll("[data-sf]").forEach(inp => { const i = +inp.dataset.si; if (d.shipping[i]) d.shipping[i].fee = inp.value; });
   };
   el("shopStudioBack").onclick = () => { readForm(); shopDraft = null; renderShopStudio(); };
   host.querySelectorAll("[data-cur]").forEach(b => b.onclick = () => { readForm(); d.currency = b.dataset.cur; renderShopStudio(); });
-  el("sdAddShip").onclick = () => { readForm(); d.shipping.push({ id: "s" + d.shipping.length, label: "", fee: "0" }); renderShopStudio(); };
-  host.querySelectorAll("[data-delship]").forEach(b => b.onclick = () => { readForm(); d.shipping.splice(+b.dataset.delship, 1); renderShopStudio(); });
   el("sdAddProd").onclick = () => { readForm(); if (d.products.length >= 40) return toast("Max 40 products", "warn"); d.products.push({ id: "p" + Date.now().toString(36), name: "", description: "", mode: "units", price: "", maxUnits: "10", image: "" }); renderShopStudio(); };
   host.querySelectorAll("[data-delprod]").forEach(b => b.onclick = () => { readForm(); d.products.splice(+b.dataset.delprod, 1); renderShopStudio(); });
   host.querySelectorAll(".shop-imgdrop").forEach(dz => {
@@ -3836,7 +3839,7 @@ async function renderShopStudio() {
     if (!d.products.length) return toast("Add at least one product", "warn");
     const cfg = { shopName: d.shopName, shopId: d.shopId || shopSlug(d.shopName), vendorPublicId: d.vendorPublicId, vendorAddress: d.vendorAddress,
       currency: d.currency, tokenid: d.currency === "Minima" ? "0x00" : "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
-      shipping: d.shipping.filter(s => s.label).map((s, i) => ({ id: s.id || "s" + i, label: s.label, fee: String(Number(s.fee) || 0) })),
+      shipping: shopNormalizeShipping(d.shipping),
       products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price), maxUnits: String(Number(p.maxUnits) || 10), image: p.image || "" })) };
     await api.shopSave(cfg);
     const wasNew = !d.shopId;
