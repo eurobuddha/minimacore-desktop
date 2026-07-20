@@ -83,6 +83,7 @@ async function boot() {
   api.onPandapools(onPandapoolsUpdate);
   api.onAtomix(onAtomixUpdate);
   api.onShop(onShopUpdate);
+  api.onCasino(onCasinoUpdate);
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -376,7 +377,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState();   // seed changed → re-derive the mail identity
+    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState();   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -415,7 +416,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState();   // seed changed → re-derive the mail identity
+      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState();   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -494,6 +495,7 @@ function renderActive() {
   else if (activeView === "pandapools") renderPandapools();
   else if (activeView === "atomix") renderAtomix();
   else if (activeView === "minimall") renderMiniMall();
+  else if (activeView === "casino") renderCasino();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -2583,7 +2585,7 @@ async function renderSettings() {
     if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
     try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
-      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); }   // seed reset → re-derive the mail identity
+      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState(); }   // seed reset → re-derive the mail identity
       toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";
@@ -2961,6 +2963,7 @@ let axPegPollTimer = null;              // interval polling the oracle price whi
 let axUpdateTimer = null;
 
 function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; axEnaMode = null; axStopPegPoll(); }
+function resetCasinoState() { casinoView = "play"; casinoPick = {}; casinoStatusCache = null; }
 
 function axHeader(active) {
   const st = axStatusCache;
@@ -3890,4 +3893,28 @@ function shopResizeImage(file) {
     }; img.onerror = () => resolve(""); img.src = fr.result; };
     fr.onerror = () => resolve(""); fr.readAsDataURL(file);
   });
+}
+
+// ============================ Casino (Zero Edge Casino — on-chain commit-reveal) ============================
+// Fleshed out in S2 (PLAY/MY BETS) + S3 (HOUSE) + S4 (animations/SFX). S0: shell + badge + update plumbing.
+let casinoView = "play";        // play | house | mybets | history
+let casinoUpdateTimer = null;
+let casinoPick = {};            // coinid → chosen outcome index (PLAY)
+let casinoStatusCache = null;   // last casinoStatus()
+
+function onCasinoUpdate() {
+  if (casinoUpdateTimer) clearTimeout(casinoUpdateTimer);
+  casinoUpdateTimer = setTimeout(() => {
+    refreshCasinoBadge();
+    if (activeView !== "casino") return;
+    if (el("casinoBody") && el("casinoBody").querySelector("input:focus")) return;   // never stomp a form
+    renderCasino();
+  }, 350);
+}
+async function refreshCasinoBadge() {
+  try { const n = await api.casinoNewCount(); const b = el("casinoBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; } catch (e) {}
+}
+async function renderCasino() {
+  const host = el("casinoBody"); if (!host) return;
+  host.innerHTML = '<div class="view__title">Casino</div><div class="card"><div class="view__desc">Zero Edge Casino — loading…</div></div>';
 }

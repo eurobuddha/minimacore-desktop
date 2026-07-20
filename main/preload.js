@@ -151,6 +151,23 @@ contextBridge.exposeInMainWorld("mcd", {
   axInvalidate: () => ipcRenderer.invoke("mcd:axInvalidate"),
   onAtomix: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:atomix", h); return () => ipcRenderer.removeListener("mcd:atomix", h); },
 
+  // Casino (Zero Edge Casino — on-chain commit-reveal)
+  casinoStatus: () => ipcRenderer.invoke("mcd:casinoStatus"),
+  casinoOpenBets: () => ipcRenderer.invoke("mcd:casinoOpenBets"),
+  casinoMyBets: () => ipcRenderer.invoke("mcd:casinoMyBets"),
+  casinoHistory: () => ipcRenderer.invoke("mcd:casinoHistory"),
+  casinoBalance: () => ipcRenderer.invoke("mcd:casinoBalance"),
+  casinoCreate: (preset, bet) => ipcRenderer.invoke("mcd:casinoCreate", preset, bet),
+  casinoTake: (coinid, pick) => ipcRenderer.invoke("mcd:casinoTake", coinid, pick),
+  casinoCancel: (coinid) => ipcRenderer.invoke("mcd:casinoCancel", coinid),
+  casinoResolve: (coinid) => ipcRenderer.invoke("mcd:casinoResolve", coinid),
+  casinoReveal: (coinid) => ipcRenderer.invoke("mcd:casinoReveal", coinid),
+  casinoClaimTimeout: (coinid) => ipcRenderer.invoke("mcd:casinoClaimTimeout", coinid),
+  casinoNewCount: () => ipcRenderer.invoke("mcd:casinoNewCount"),
+  casinoSeen: () => ipcRenderer.invoke("mcd:casinoSeen"),
+  casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),
+  onCasino: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casino", h); return () => ipcRenderer.removeListener("mcd:casino", h); },
+
   // pushes
   onStatus: (fn) => { const h = (_e, s) => fn(s); ipcRenderer.on("mcd:status", h); return () => ipcRenderer.removeListener("mcd:status", h); },
   onLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:log", h); return () => ipcRenderer.removeListener("mcd:log", h); }

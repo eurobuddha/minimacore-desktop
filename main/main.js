@@ -21,6 +21,7 @@ const mail = require("./mail");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const shop = require("./shop");
+const casino = require("./casino");
 
 let win = null;
 let tray = null;
@@ -297,6 +298,34 @@ atomix.emitter.on("notify", (msg) => {   // settlement/OTC milestones — OS not
 });
 let axStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted = true; atomix.startLoop(); } });
+
+// Casino (Zero Edge Casino — on-chain commit-reveal)
+ipcMain.handle("mcd:casinoStatus", () => casino.status());
+ipcMain.handle("mcd:casinoOpenBets", () => casino.openBets());
+ipcMain.handle("mcd:casinoMyBets", () => casino.myBets());
+ipcMain.handle("mcd:casinoHistory", () => casino.history());
+ipcMain.handle("mcd:casinoBalance", () => casino.balance());
+ipcMain.handle("mcd:casinoCreate", (_e, preset, bet) => casino.create(preset, bet));
+ipcMain.handle("mcd:casinoTake", (_e, coinid, pick) => casino.take(coinid, pick));
+ipcMain.handle("mcd:casinoCancel", (_e, coinid) => casino.cancel(coinid));
+ipcMain.handle("mcd:casinoResolve", (_e, coinid) => casino.resolve(coinid));
+ipcMain.handle("mcd:casinoReveal", (_e, coinid) => casino.reveal(coinid));
+ipcMain.handle("mcd:casinoClaimTimeout", (_e, coinid) => casino.claimTimeout(coinid));
+ipcMain.handle("mcd:casinoNewCount", () => casino.newCount());
+ipcMain.handle("mcd:casinoSeen", () => casino.markSeen());
+ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
+casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
+casino.emitter.on("notify", (msg) => {   // reveal/resolve milestones — OS notification when the app isn't focused
+  try {
+    if (win && !win.isDestroyed() && win.isFocused()) return;
+    const n = new Notification({ title: "Casino", body: String(msg), silent: false });
+    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+    n.show();
+  } catch (e) { /* best-effort */ }
+});
+let casinoStarted = false;
+node.on("status", (s) => { if (s.state === "running" && !casinoStarted) { casinoStarted = true; casino.startLoop(); } });
+
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));
 ipcMain.handle("mcd:histAdd", (_e, rows) => histDb.merge(Array.isArray(rows) ? rows : []));
 ipcMain.handle("mcd:histClear", async () => { await histDb.clear(); return true; });
@@ -348,6 +377,7 @@ let quitting = false;
 app.on("before-quit", async (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
+  try { casino.flush(); } catch (err) {}       // casino keychain writes are sync; no-op, kept for symmetry
   try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;
   // Always go through node.stop(), even with no node process: it also releases the router port mapping,
