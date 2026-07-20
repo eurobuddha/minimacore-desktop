@@ -3324,50 +3324,51 @@ function axLevelRow(tag, idP, idA, pv, av, cls) {
     + `<input class="ax-lvl-p mono" id="${idP}" inputmode="decimal" placeholder="price" value="${esc(pv == null ? "" : pv)}" autocomplete="off" />`
     + `<input class="ax-lvl-a mono" id="${idA}" inputmode="decimal" placeholder="size" value="${esc(av == null ? "" : av)}" autocomplete="off" /></div>`;
 }
-/** Compact cockpit cell: a small persistent label ABOVE a right-aligned input (dense, not a full-width row). */
-function axCell(label, id, val) { return `<div class="ax-cell"><span class="ax-celllabel">${label}</span>${axGenField(id, val, "")}</div>`; }
-/** Compact ladder rung for the twin-column ladder: tag + price + size. cls = "ask" | "bid". */
-function axRung(tag, idP, idA, pv, av, cls) {
-  return `<div class="ax-rung ${cls}"><span class="ax-rung-tag">${tag}</span>`
-    + `<input class="ax-rung-p mono" id="${idP}" inputmode="decimal" placeholder="price" value="${esc(pv == null ? "" : pv)}" autocomplete="off" />`
-    + `<input class="ax-rung-a mono" id="${idA}" inputmode="decimal" placeholder="size" value="${esc(av == null ? "" : av)}" autocomplete="off" /></div>`;
+/** Inline cockpit field: a small label + narrow input on one line (dense). */
+function axFld(label, id, val) { return `<span class="ax-fld"><b>${label}</b>${axGenField(id, val, "")}</span>`; }
+/** One editable ladder row, MIRRORING the read-only book (axDepthRow): bid half (amount OUTER / price INNER, via
+ *  CSS row-reverse) │ ask half (price INNER / amount OUTER). Same rung IDs (axBidP/A, axAskP/A) → wiring unchanged. */
+function axMakerRow(i, best, bp, ba, ap, aa) {
+  const inp = (cls, id, v, ph) => `<input class="${cls} mono" id="${id}" inputmode="decimal" placeholder="${ph}" value="${esc(v == null ? "" : v)}" autocomplete="off" />`;
+  return `<div class="ax-mrow${best ? " best" : ""}" id="axRow${i}">`
+    + `<div class="ax-mhalf bid"><div class="top">${inp("ax-px bidpx", "axBidP" + i, bp, "price")}${inp("ax-sz", "axBidA" + i, ba, "size")}</div></div>`
+    + `<span class="divider">│</span>`
+    + `<div class="ax-mhalf ask"><div class="top">${inp("ax-px askpx", "axAskP" + i, ap, "price")}${inp("ax-sz", "axAskA" + i, aa, "size")}</div></div></div>`;
 }
 function axStartPegPoll(fn) { axStopPegPoll(); fn(); axPegPollTimer = setInterval(() => { if (activeView === "atomix" && axView === "market" && axEditing) fn(); else axStopPegPoll(); }, 2500); }
 function axStopPegPoll() { if (axPegPollTimer) { clearInterval(axPegPollTimer); axPegPollTimer = null; } }
-/** The maker editor — native "My market / ladder" reinterpreted for desktop width: a compact CONTROL COCKPIT
- *  (Enabled + Peg toggles, live oracle, labelled auto-fill/peg fields) over TWIN side-by-side ASK│BID ladders. */
+/** The maker editor — MIRRORS the read-only order book: a compact CONTROL COCKPIT (Enabled + Peg toggles, live
+ *  oracle, and one row of fields mid·step·levels·size·skew·reprice) over a single ladder where BIDS are on the LEFT
+ *  and ASKS on the RIGHT, prices meeting in the middle at the spread, amounts on the outer edges, best row on top.
+ *  Auto (peg) mode by default; `size` seeds every rung and each amount stays editable; only `levels` rungs show. */
 function axMakerEditor(mc, ccy, b) {
   const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || { bids: [], asks: [] };
   const parity = b ? !!b.pricingParity : (axStatusCache.currency === "mxusdt");
   const src = parity ? "Parity" : "MEXC";
   const enabled = axEnaMode != null ? axEnaMode : !st.withdrawn;
-  const peg = axPegMode != null ? axPegMode : (!!c.pegEnable && c.step > 0 && c.size > 0);
-  const asks = (man.asks || []).slice().sort((x, y) => x.p - y.p);   // ascending → index 0 = A1 (best/lowest ask)
-  const bids = (man.bids || []).slice().sort((x, y) => y.p - x.p);   // descending → index 0 = B1 (best/highest bid)
-  let askRows = "", bidRows = "";
-  for (let i = 0; i < 6; i++) { const l = asks[i] || {}; askRows += axRung("A" + (i + 1), "axAskP" + i, "axAskA" + i, l.p, l.a, "ask"); }   // A1 (best) top → A6
-  for (let i = 0; i < 6; i++) { const l = bids[i] || {}; bidRows += axRung("B" + (i + 1), "axBidP" + i, "axBidA" + i, l.p, l.a, "bid"); }   // B1 (best) top → B6
+  const peg = axPegMode != null ? axPegMode : (c.step > 0 ? !!c.pegEnable : true);   // default AUTO for a fresh market
+  const asks = (man.asks || []).slice().sort((x, y) => x.p - y.p);   // ascending → index 0 = best (lowest) ask
+  const bids = (man.bids || []).slice().sort((x, y) => y.p - x.p);   // descending → index 0 = best (highest) bid
+  let rows = "";
+  for (let i = 0; i < 6; i++) { const bl = bids[i] || {}, al = asks[i] || {}; rows += axMakerRow(i, i === 0, bl.p, bl.a, al.p, al.a); }
   const oracle = peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off");
+  const sz = c.size != null ? c.size : (c.askSize != null ? c.askSize : "");
   return `<div class="ax-cockpit-top">`
       + `<span class="ax-tog"><span class="ax-tog-l">Enabled</span>${axSwitch("axEnabled", enabled)}</span>`
       + `<span class="ax-tog"><span class="ax-tog-l">Peg → ${src}</span>${axSwitch("axPegToggle", peg)}</span>`
       + `<span class="ax-oracle mono" id="axOracle">${oracle}</span></div>`
-    + `<div class="ax-mkr-hint">price = USDT per ${esc(ccy)} · size = per-take cap in ${esc(ccy)} · blank a rung to skip it</div>`
     + `<div class="ax-cockpit">`
-      + `<div class="ax-cell-grp"><span class="ax-seclabel">AUTO-FILL</span><div class="ax-cell-row">`
-        + axCell("Mid · USDT", "axMid", "")
-        + axCell("Step · %", "axStep", c.step != null ? c.step : "")
-        + axCell("Levels", "axLevels", c.levels != null ? c.levels : "1")
-        + axCell("Ask · " + esc(ccy), "axAskSize", c.askSize != null ? c.askSize : (c.size != null ? c.size : ""))
-        + axCell("Bid · " + esc(ccy), "axBidSize", c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ""))
-        + `</div></div>`
-      + `<div class="ax-cell-grp"><span class="ax-seclabel">PEG</span><div class="ax-cell-row">`
-        + axCell("Skew · %", "axBias", c.bias != null ? c.bias : "")
-        + axCell("Reprice · %", "axReprice", c.reprice != null ? c.reprice : "1")
-        + `</div></div></div>`
-    + `<div class="ax-twin">`
-      + `<div class="ax-lad-col"><div class="ax-lad-hdr ask">ASKS · you SELL ${esc(ccy)}</div>${askRows}</div>`
-      + `<div class="ax-lad-col"><div class="ax-lad-hdr bid">BIDS · you BUY ${esc(ccy)}</div>${bidRows}</div></div>`
+      + axFld("mid", "axMid", "")
+      + axFld("step %", "axStep", c.step != null ? c.step : "1")
+      + axFld("levels", "axLevels", c.levels != null ? c.levels : "3")
+      + axFld("size", "axSize", sz)
+      + axFld("skew %", "axBias", c.bias != null ? c.bias : "0")
+      + axFld("reprice %", "axReprice", c.reprice != null ? c.reprice : "1")
+      + `</div>`
+    + `<div class="ax-mkr-hint">Auto mode: prices track the ${src} mid · <b>size</b> seeds every rung — edit any amount or price · only your chosen levels show</div>`
+    + `<div class="ax-legend"><span class="sell">BIDS · you buy ${esc(ccy)}</span><span class="buy">ASKS · you sell ${esc(ccy)}</span></div>`
+    + `<div class="ax-mcolhdr"><span>amount&nbsp;·&nbsp;price</span><span>price&nbsp;·&nbsp;amount</span></div>`
+    + `<div id="axLadder">${rows}</div>`
     + `<div class="ax-spread-mid mono" id="axSpread">—</div>`
     + `<div class="ax-mkr-foot">`
       + axEditRow("Min trade · " + esc(ccy), axEditInput("axMin", c.min != null ? c.min : ""))
@@ -3404,42 +3405,52 @@ function axWireMakerEditor(ccy) {
     const askS = asks.length ? `${asks.length} lvl · best ${fmtPx(Math.min(...asks.map(l => l.p)))} · ${fmtAbbrev(sum(asks))} ${esc(ccy)}` : "none";
     host.innerHTML = `<div class="ax-prev-sum mono"><div><span class="bidpx">BIDS</span>&nbsp; ${bidS}</div><div><span class="askpx">ASKS</span>&nbsp; ${askS}</div></div>`;
   };
-  // fill the 6+6 rows from mid·step·size·levels(+skew) — native genManual/fillFromPeg. mid = oracle when pegged.
-  const genLadder = midOverride => {
-    const step = num("axStep"), askSize = num("axAskSize"), bidSize = num("axBidSize"), m = midOverride != null ? midOverride : num("axMid");
-    if (!(m > 0) || !(step > 0) || !(askSize > 0 || bidSize > 0)) { updPreview(); return; }   // need a step + at least ONE side sized
-    const levels = Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1));
+  const clampLevels = () => Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1));
+  const showLevels = () => { const L = clampLevels(); for (let i = 0; i < 6; i++) { const r = el("axRow" + i); if (r) r.style.display = i < L ? "" : "none"; } };
+  // PRICES from mid·step·skew for the visible rungs (prices are auto); blank hidden rungs so they aren't published;
+  // seed only EMPTY sizes so a hand-edited amount survives a re-price. Called on mid/step/skew/levels + the peg tick.
+  const reprice = midOverride => {
+    const m = midOverride != null ? midOverride : num("axMid"), step = num("axStep"), size = num("axSize"), L = clampLevels();
     const quoted = m * (1 + Math.max(-20, Math.min(20, num("axBias"))) / 100);
     filling = true;
     try {
       for (let i = 0; i < 6; i++) {
-        const on = i < levels, ap = el("axAskP" + i), aa = el("axAskA" + i), bp = el("axBidP" + i), ba = el("axBidA" + i);
-        const askOn = on && askSize > 0, bidOn = on && bidSize > 0;   // blank a side whose size is 0 → single-sided seed
-        if (ap) ap.value = askOn ? fmtPx(quoted * (1 + (i + 1) * step / 100)) : "";
-        if (aa) aa.value = askOn ? fmtPx(askSize) : "";
-        if (bp) bp.value = bidOn ? fmtPx(quoted * (1 - (i + 1) * step / 100)) : "";
-        if (ba) ba.value = bidOn ? fmtPx(bidSize) : "";
+        const on = i < L, bp = el("axBidP" + i), ap = el("axAskP" + i), ba = el("axBidA" + i), aa = el("axAskA" + i);
+        if (on) {
+          if (m > 0 && step > 0) { if (bp) bp.value = fmtPx(quoted * (1 - (i + 1) * step / 100)); if (ap) ap.value = fmtPx(quoted * (1 + (i + 1) * step / 100)); }
+          if (size > 0) { if (ba && !ba.value) ba.value = fmtPx(size); if (aa && !aa.value) aa.value = fmtPx(size); }
+        } else { if (bp) bp.value = ""; if (ap) ap.value = ""; if (ba) ba.value = ""; if (aa) aa.value = ""; }
       }
     } finally { filling = false; }
+    showLevels(); updPreview();
+  };
+  // SIZE seeds every visible rung's amount — the ONE control that overwrites hand-edited amounts (the master size).
+  const seedSizes = () => {
+    const size = num("axSize"), L = clampLevels();
+    filling = true;
+    try { for (let i = 0; i < 6; i++) { const on = i < L, ba = el("axBidA" + i), aa = el("axAskA" + i); if (ba) ba.value = on && size > 0 ? fmtPx(size) : ""; if (aa) aa.value = on && size > 0 ? fmtPx(size) : ""; } }
+    finally { filling = false; }
     updPreview();
   };
   // pegged: pull the live oracle mid from the engine, set the oracle line + mid field, regenerate the rows
   const refreshPeg = async () => {
-    const pv = await api.axMakerPreview({ pegEnable: true, step: num("axStep"), askSize: num("axAskSize"), bidSize: num("axBidSize"), bias: num("axBias"), levels: num("axLevels") || 1, reprice: num("axReprice") || 1, min: num("axMin") }, {}).catch(() => null);
+    const pv = await api.axMakerPreview({ pegEnable: true, step: num("axStep"), askSize: num("axSize"), bidSize: num("axSize"), bias: num("axBias"), levels: num("axLevels") || 1, reprice: num("axReprice") || 1, min: num("axMin") }, {}).catch(() => null);
     if (!pv) return;
     axOracleMid = pv.mid || 0;
     const ol = el("axOracle"); if (ol) ol.textContent = pv.mid > 0 ? (esc(pv.source || ccy) + " · mid " + fmtPx(pv.mid) + (pv.fresh ? "" : " (stale)") + (pv.wide ? " · WIDE" : "")) : ("waiting for " + esc(pv.source || "market") + " price…");
     const midE = el("axMid"); if (midE && pegOn()) midE.value = pv.mid > 0 ? fmtPx(pv.mid) : "";
-    if (pv.mid > 0 && pegOn()) genLadder(pv.mid);
+    if (pv.mid > 0 && pegOn()) reprice(pv.mid);
   };
   const pegModeUi = () => { const on = pegOn(), midE = el("axMid"); if (midE) { midE.disabled = on; midE.style.opacity = on ? "0.5" : "1"; } };
 
   const swEna = el("axEnabled"); if (swEna) swEna.onclick = () => { swEna.classList.toggle("on"); const on = swEna.classList.contains("on"); swEna.setAttribute("aria-checked", on); axEnaMode = on; };
   const swPeg = el("axPegToggle"); if (swPeg) swPeg.onclick = () => {
     swPeg.classList.toggle("on"); const on = swPeg.classList.contains("on"); swPeg.setAttribute("aria-checked", on); axPegMode = on; pegModeUi();
-    if (on) axStartPegPoll(refreshPeg); else { axStopPegPoll(); const ol = el("axOracle"); if (ol) ol.textContent = "peg off"; genLadder(); }
+    if (on) axStartPegPoll(refreshPeg); else { axStopPegPoll(); const ol = el("axOracle"); if (ol) ol.textContent = "peg off"; reprice(); }
   };
-  ["axMid", "axStep", "axAskSize", "axBidSize", "axLevels", "axBias"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => { if (filling) return; if (pegOn()) { if (axOracleMid > 0) genLadder(axOracleMid); } else genLadder(); }); });
+  // price controls (mid/step/skew/levels) re-price the rungs (sizes preserved); `size` re-seeds every amount.
+  ["axMid", "axStep", "axBias", "axLevels"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => { if (filling) return; reprice(pegOn() && axOracleMid > 0 ? axOracleMid : undefined); }); });
+  const szE = el("axSize"); if (szE) szE.addEventListener("input", () => { if (filling) return; seedSizes(); });
   for (let i = 0; i < 6; i++) ["axAskP", "axAskA", "axBidP", "axBidA"].forEach(pfx => { const e = el(pfx + i); if (e) e.addEventListener("input", () => { if (!filling) updPreview(); }); });
   const minE = el("axMin"); if (minE) minE.addEventListener("input", updPreview);
 
@@ -3450,15 +3461,17 @@ function axWireMakerEditor(ccy) {
       const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) }));
       toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); return;
     }
-    const step = num("axStep"), askSize = num("axAskSize"), bidSize = num("axBidSize");
-    const cfg = { pegEnable: pegOn() && step > 0 && (askSize > 0 || bidSize > 0), step, size: Math.max(askSize, bidSize), askSize, bidSize, bias: num("axBias"), reprice: num("axReprice") || 1, levels: Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1)), min: num("axMin") };
+    const step = num("axStep"), size = num("axSize");
+    const cfg = { pegEnable: pegOn() && step > 0 && size > 0, step, size, askSize: size, bidSize: size, bias: num("axBias"), reprice: num("axReprice") || 1, levels: clampLevels(), min: num("axMin") };
     const r = await api.axMakerSave(cfg, collect()).catch(e => ({ err: String(e.message || e) }));
     toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); finish();
   };
   el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); };
   el("axCancel").onclick = finish;
 
-  pegModeUi(); updPreview();
+  pegModeUi(); showLevels();
+  if (num("axSize") > 0) reprice();   // on open: seed prices (if mid set) + fill empty amounts for the visible rungs
+  updPreview();
   if (pegOn()) axStartPegPoll(refreshPeg);
 }
 
