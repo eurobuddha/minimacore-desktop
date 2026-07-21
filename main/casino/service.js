@@ -14,6 +14,7 @@ var MY_KEYS={};
 var BUSY={};
 var POSTED={},REPOST_AFTER=8;
 var WRITE_MODE=false;
+var SCRIPT_OK=false;   // covenant script registered + VERIFIED on this node (else reveals/resolves are rejected)
 
 // ===== Helpers (duplicated from index.html — small, no MDS.load needed) =====
 function getState(coin,port){
@@ -49,6 +50,38 @@ function recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payou
   });
 }
 
+// RELIABILITY (root-cause fix): register the covenant script and VERIFY it took. The old code did a
+// fire-and-forget `newscript` with no check; on some nodes it silently never registered, so every
+// reveal/resolve built a transaction with NO script attached (txncheck scripts:0) → rejected by
+// consensus → bets stuck forever, plus a pile of leaked half-built txns. We now confirm the returned
+// address matches SCRIPT_ADDR and retry every block until confirmed.
+function ensureScript(cb){
+  if(SCRIPT_OK){if(cb)cb();return}
+  MDS.cmd('newscript script:"'+SCRIPT+'" trackall:true',function(res){
+    var addr=(res&&res.response)?(res.response.address||''):'';
+    if(res&&res.status&&addr&&addr.toUpperCase()===SCRIPT_ADDR.toUpperCase()){
+      SCRIPT_OK=true;
+      MDS.log("Casino service: covenant script registered + verified");
+    }else{
+      MDS.log("Casino service: script registration not confirmed — retrying next block");
+    }
+    if(cb)cb();
+  });
+}
+// Delete stale half-built svc_ txns left by earlier failed attempts (they otherwise accumulate in
+// txnlist and bloat the node). Safe: a posted reveal/resolve lives in the mempool, not in this workspace.
+function purgeStaleTxns(){
+  MDS.cmd("txnlist",function(res){
+    try{
+      var arr=(res&&res.response)||[];
+      for(var i=0;i<arr.length;i++){
+        var tid=arr[i].txnid||arr[i].id||'';
+        if(typeof tid==='string'&&(tid.indexOf('svc_reveal_')===0||tid.indexOf('svc_resolve_')===0))MDS.cmd("txndelete id:"+tid);
+      }
+    }catch(e){}
+  });
+}
+
 // ===== Init =====
 MDS.init(function(msg){
 
@@ -62,8 +95,10 @@ MDS.init(function(msg){
         MDS.log("Casino service: READ mode — auto-processing disabled");
       }
     });
-    // Register script (fire-and-forget, address is hardcoded)
-    MDS.cmd('newscript script:"'+SCRIPT+'"');
+    // Register the covenant script (verified + retried) — REQUIRED or reveals/resolves are rejected.
+    ensureScript();
+    // Clear any leaked half-built txns from prior failed attempts.
+    purgeStaleTxns();
     // Load wallet keys
     MDS.cmd("keys",function(res){
       try{
@@ -75,7 +110,8 @@ MDS.init(function(msg){
   }
 
   if(msg.event==='NEWBLOCK'){
-    if(WRITE_MODE)processCoins();
+    // Ensure the covenant script is registered before processing; only process once confirmed.
+    if(WRITE_MODE)ensureScript(function(){if(SCRIPT_OK)processCoins()});
   }
 });
 
@@ -146,9 +182,9 @@ function doReveal(coin){
                 if(rp&&rp.status){
                   MDS.log("Casino service: revealed secret for "+coinid.substring(0,16)+"...");
                 }else{
-                  MDS.cmd("txndelete id:"+txid);
                   MDS.log("Casino service: reveal FAILED for "+coinid.substring(0,16)+"...");
                 }
+                MDS.cmd("txndelete id:"+txid);   // always clear the build workspace (avoids the txnlist leak)
                 delete BUSY[coinid];
               });
             });
@@ -194,9 +230,9 @@ function doResolve(coin){
                     MDS.log("Casino service: resolved "+coinid.substring(0,16)+"... "+(playerWins?"PLAYER WINS":"HOUSE WINS"));
                     recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payout,totalAmt);
                   }else{
-                    MDS.cmd("txndelete id:"+txid);
                     MDS.log("Casino service: resolve FAILED for "+coinid.substring(0,16)+"...");
                   }
+                  MDS.cmd("txndelete id:"+txid);   // always clear the build workspace (avoids the txnlist leak)
                   delete BUSY[coinid];
                 });
               });
