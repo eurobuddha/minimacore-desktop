@@ -103,7 +103,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
-ipcMain.handle("mcd:saveConfig", (_e, patch) => config.save(patch || {}));
+ipcMain.handle("mcd:saveConfig", (_e, patch) => { const c = config.save(patch || {}); try { if (c.casinoEnabled) startCasinoIfEnabled(); } catch (e) {} return c; });
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -306,6 +306,10 @@ ipcMain.handle("mcd:casinoOpenBets", () => casino.openBets());
 ipcMain.handle("mcd:casinoMyBets", () => casino.myBets());
 ipcMain.handle("mcd:casinoHistory", () => casino.history());
 ipcMain.handle("mcd:casinoBalance", () => casino.balance());
+ipcMain.handle("mcd:casinoRawBets", () => casino.rawBets());
+ipcMain.handle("mcd:casinoWalletCoins", () => casino.walletCoins());
+ipcMain.handle("mcd:casinoStakeable", () => casino.stakeable());
+ipcMain.handle("mcd:casinoResolveOutcome", (_e, commit, role) => casino.resolveOutcome(commit, role));
 ipcMain.handle("mcd:casinoCreate", (_e, preset, bet) => casino.create(preset, bet));
 ipcMain.handle("mcd:casinoTake", (_e, coinid, pick) => casino.take(coinid, pick));
 ipcMain.handle("mcd:casinoCancel", (_e, coinid) => casino.cancel(coinid));
@@ -316,6 +320,7 @@ ipcMain.handle("mcd:casinoNewCount", () => casino.newCount());
 ipcMain.handle("mcd:casinoSeen", () => casino.markSeen());
 ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
 casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
+casino.emitter.on("log", (l) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casinolog", l); });   // activity board feed
 casino.emitter.on("notify", (msg) => {   // reveal/resolve milestones — OS notification when the app isn't focused
   try {
     if (win && !win.isDestroyed() && win.isFocused()) return;
@@ -324,11 +329,17 @@ casino.emitter.on("notify", (msg) => {   // reveal/resolve milestones — OS not
     n.show();
   } catch (e) { /* best-effort */ }
 });
-// Casino tab removed in 0.11.1 — do NOT start its background auto-processor (it would auto-reveal/resolve bets
-// while hidden). Module code (main/casino.js + main/casino/) and the IPC handlers above are kept dormant; to
-// restore the feature, uncomment this start-gate and re-add the tab button + #view-casino in index.html.
-// let casinoStarted = false;
-// node.on("status", (s) => { if (s.state === "running" && !casinoStarted) { casinoStarted = true; casino.startLoop(); } });
+// Casino background auto-processor (reveal/resolve). GATED on config.casinoEnabled — not just the tab being
+// visible — so a hidden/disabled Casino never auto-reveals or resolves bets. Starts on node-running if already
+// enabled; startCasinoIfEnabled() is also called from the saveConfig handler so toggling it ON starts it live.
+let casinoStarted = false;
+function startCasinoIfEnabled() {
+  if (casinoStarted) return;
+  if (node.state !== "running") return;
+  if (!require("./config").load().casinoEnabled) return;
+  casinoStarted = true; casino.startLoop();
+}
+node.on("status", (s) => { if (s.state === "running") startCasinoIfEnabled(); });
 
 // Vestr (token vesting)
 ipcMain.handle("mcd:vestrStatus", () => vestr.status());

@@ -48,7 +48,8 @@ let runner = (cmd) => {
 function log(line) {
   const entry = new Date().toISOString().slice(11, 19) + " " + String(line);
   LOG_RING.push(entry); if (LOG_RING.length > 200) LOG_RING.shift();
-  console.log("[casino]", String(line));
+  console.log("[chance]", String(line));
+  try { emitter.emit("log", entry); } catch (e) { /* emitter always defined by call time */ }
 }
 
 // ---- keychain-backed keypair (commit preimages + identity cache + history) ----
@@ -78,7 +79,14 @@ function buildMds() {
       // The donor's service.js re-registers the covenant with a PLAIN newscript (no trackall). Force trackall:true
       // onto every newscript so it can never clobber the tracking that surfaces OTHER players' open bets (discovery).
       if (/^newscript\b/.test(c) && !/\btrackall:/.test(c)) c += " trackall:true";
-      if (CASINO_SEND.test(c)) { pinMinimaSend(runner, c).then(p => runner(p)).then(r => done(toVm(r)), () => done(toVm({ status: false }))); return; }
+      if (CASINO_SEND.test(c)) {
+        const insuf = "Not enough spendable MINIMA for this stake — you can only stake coins your own wallet holds (check the sendable balance in the header).";
+        pinMinimaSend(runner, c).then(p => runner(p)).then(
+          r => { if (r && r.status === false && !r.error) r.error = insuf; done(toVm(r)); },
+          () => done(toVm({ status: false, error: insuf }))
+        );
+        return;
+      }
       runner(c).then(r => done(toVm(r)), () => done(toVm({ status: false })));
     },
     keypair: {
@@ -105,8 +113,8 @@ async function init() {
     try {
       const reg = await runner('newscript script:"' + CASINO_SCRIPT + '" trackall:true');
       const addr = reg && reg.response && (reg.response.address || reg.response.miniaddress);
-      if (addr && String(addr).toUpperCase() !== CONTRACT.toUpperCase()) log("WARNING: casino script address mismatch: " + addr);
-      else log("casino script registered (trackall) → " + CONTRACT);
+      if (addr && String(addr).toUpperCase() !== CONTRACT.toUpperCase()) log("WARNING: chance script address mismatch: " + addr);
+      else log("chance script registered (trackall) → " + CONTRACT);
     } catch (e) { log("newscript failed: " + (e && e.message)); }
     ready = true;
     fire("inited");   // service.js: checkmode → newscript → keys; then auto-processes on each NEWBLOCK we fire
@@ -134,7 +142,7 @@ function invalidate() {
   generation++;
   stopLoop();
   kpDelete("casino_pubkey"); kpDelete("casino_hexaddr"); kpDelete("casino_miniaddr");
-  ctx = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null; vmJsonParse = null;
+  ctx = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null; vmJsonParse = null; myKeysCache = null;
   emitter.emit("update");
   startLoop();
 }
@@ -146,7 +154,7 @@ function status() {
 }
 
 // ---- read-model + actions ----
-function C() { if (!ctx || !ctx.CASINO) throw new Error("Casino engine not ready yet"); return ctx.CASINO; }
+function C() { if (!ctx || !ctx.CASINO) throw new Error("P2PChance engine not ready yet"); return ctx.CASINO; }
 function pcb(fn) { return new Promise((res, rej) => { try { fn((err, val) => err ? rej(err instanceof Error ? err : new Error(String(err))) : res(val)); } catch (e) { rej(e); } }); }
 function jclone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
 
@@ -160,6 +168,101 @@ async function cancel(coinid) { const r = await pcb(cb => C().cancelBet(coinid, 
 async function resolve(coinid) { const r = await pcb(cb => C().manualResolve(coinid, cb)); emitter.emit("update"); return jclone(r); }
 async function reveal(coinid) { const r = await pcb(cb => C().manualReveal(coinid, cb)); emitter.emit("update"); return jclone(r); }
 async function claimTimeout(coinid) { const r = await pcb(cb => C().claimTimeout(coinid, cb)); emitter.emit("update"); return jclone(r); }
+
+// ---- raw reads for the renderer's per-block state machine (rich activity feed) + maker result detection ----
+const cnorm = (v) => String(v || "").toUpperCase().replace(/^0X/, "");
+const cstate = (arr, p) => { const s = (arr || []).find(v => String(v.port) === String(p)); return s ? s.data : ""; };
+const cmnum = (v) => parseFloat(parseFloat(v).toFixed(8));
+function cgame(range) { range = parseInt(range); return range === 2 ? "Coin Flip" : range === 6 ? "Dice" : range === 36 ? "Roulette" : "Custom (" + range + ")"; }
+function cpick(range, pick) { range = parseInt(range); const p = parseInt(pick); if (isNaN(p)) return "—"; return range === 2 ? (p === 0 ? "Heads" : "Tails") : String(p + 1); }
+
+// Wallet keys are cached and NEVER degraded to empty on a transient `keys` RPC miss — a poisoned empty set would
+// mislabel our OWN bets as not-ours and silently drop them from the result pipeline (a real silent-failure cause).
+let myKeysCache = null;
+async function loadMyKeys() {
+  try {
+    const k = await runner("keys");
+    const list = (k && k.response && (k.response.keys || k.response)) || [];
+    const set = new Set();
+    (Array.isArray(list) ? list : []).forEach(x => { const pk = cnorm((x && x.publickey) || x); if (pk) set.add(pk); });
+    if (set.size) myKeysCache = set;   // replace only on a good fetch
+  } catch (e) { /* keep the last-good cache */ }
+  return myKeysCache || new Set();
+}
+// rawBets: ALL coins at the covenant (incl. other players'), WITH state, annotated amHouse/amPlayer.
+async function rawBets() {
+  const r = await runner("coins address:" + CONTRACT);
+  const coins = (r && r.response) || [];
+  const mine = await loadMyKeys();
+  return coins.map(c => ({ coinid: c.coinid, address: c.address, miniaddress: c.miniaddress, amount: c.amount, age: c.age, created: c.created, state: c.state || [], amHouse: mine.has(cnorm(cstate(c.state, 0))), amPlayer: mine.has(cnorm(cstate(c.state, 8))) }));
+}
+async function walletCoins() { const r = await runner("coins relevant:true tokenid:0x00"); return (r && r.response) || []; }
+
+// stakeable: the biggest bet the wallet can ACTUALLY place right now = the largest SINGLE signable (own-key)
+// address's SENDABLE MINIMA total. The node's raw balance/`sendable` inflates this with in-play covenant coins
+// (they sit at the shared casino address, NOT wallet-spendable) and pending coins, so a stake shown as affordable
+// could be rejected for insufficient funds. A stake at or under this ceiling can always be funded (pinMinimaSend
+// pins that same address, combining its coins). checkaddress → {simple:true} is the reliable own-key test.
+async function stakeable() {
+  let coins; try { const r = await runner("coins relevant:true sendable:true tokenid:0x00"); coins = (r && r.response) || []; } catch (e) { return "0"; }
+  const byAddr = {};
+  for (const c of coins) {
+    const addr = String(c.address || ""); const amt = Number(c.amount) || 0;
+    if (addr.length < 42 || amt <= 0) continue;
+    byAddr[addr] = (byAddr[addr] || 0) + amt;
+  }
+  let best = 0;
+  for (const addr of Object.keys(byAddr)) {
+    try { const chk = await runner("checkaddress address:" + addr); if (chk && chk.response && chk.response.simple) best = Math.max(best, byAddr[addr]); } catch (e) {}
+  }
+  return String(best);
+}
+
+// resolveOutcome: MECHANISM B — read the taker's RESOLVE transaction, which is self-contained: it carries
+// player_secret in txn.state[13] AND the spent bet coin with FULL state (incl. house_secret[12]). So EITHER side
+// computes the EXACT result the instant the taker resolves. Matched by the house commit (state[2], survives all
+// phases). Writes the shared casino_history keychain so History/badge update, and emits notify/update.
+async function resolveOutcome(commit, role) {
+  const want = cnorm(commit);
+  let r; try { r = await runner("txpow address:" + CONTRACT); } catch (e) { return { found: false }; }
+  const list = (r && r.response) || [];
+  for (const tp of list) {
+    const txn = (tp && tp.body && tp.body.txn) || (tp && tp.txn) || null; if (!txn) continue;
+    const ps = cstate(txn.state, 13); if (!ps) continue;                        // only resolve txns carry state[13]
+    const inp = (txn.inputs || [])[0]; if (!inp) continue;
+    if (cnorm(inp.address) !== cnorm(CONTRACT)) continue;
+    if (cnorm(cstate(inp.state, 2)) !== want) continue;                         // our bet, by commit
+    const hs = cstate(inp.state, 12);
+    const range = parseInt(cstate(inp.state, 3)) || 2, payout = parseInt(cstate(inp.state, 4)) || range;
+    const bet = cstate(inp.state, 5) || "0", pick = parseInt(cstate(inp.state, 11));
+    const amount = parseFloat(inp.amount) || 0, playerAddr = cstate(inp.state, 9);
+    let exactResult = null, hashPlayerWins;
+    try {                                                                        // mirror service.js:211-214
+      const hres = await runner("hash data:" + String(hs) + String(ps).substring(2));   // hs keeps 0x, ps drops its 0x
+      const hash = (hres && hres.response && hres.response.hash) || "";
+      exactResult = parseInt(hash.substring(2, 10), 16) % range;
+      hashPlayerWins = (exactResult === pick);
+    } catch (e) {}
+    const winnings = cmnum(parseFloat(bet) * payout);
+    const paidPlayer = (txn.outputs || []).some(o => cnorm(o.address) === cnorm(playerAddr) && Math.abs(parseFloat(o.amount) - winnings) < 0.001);
+    let playerWins = (hashPlayerWins === undefined) ? paidPlayer : hashPlayerWins;
+    if (hashPlayerWins !== undefined && hashPlayerWins !== paidPlayer) playerWins = paidPlayer;   // outputs = consensus truth
+    const won = role === "House" ? !playerWins : playerWins;
+    const profit = role === "House" ? (won ? parseFloat(bet) : cmnum(parseFloat(bet) * (payout - 1))) : (won ? cmnum(winnings - parseFloat(bet)) : parseFloat(bet));
+    const coinid = inp.coinid, pickLabel = cpick(range, pick), rLabel = exactResult != null ? cpick(range, exactResult) : "—";
+    try {
+      const rawh = kpGet("casino_history"); let hist = []; try { if (rawh) hist = JSON.parse(rawh); } catch (e) {}
+      if (!hist.some(h => h.coinid === coinid)) {
+        hist.unshift({ coinid, role, game: cgame(range), range, pickLabel, resultLabel: rLabel, profit, won, bet, amount, txid: coinid, time: Date.now() });
+        if (hist.length > 50) hist.pop(); kpSet("casino_history", JSON.stringify(hist));
+      }
+    } catch (e) {}
+    emitter.emit("notify", (won ? "You WON +" : "You lost −") + profit + " Minima — " + cgame(range));
+    emitter.emit("update");
+    return { found: true, coinid, won, playerWins, result: exactResult, resultLabel: rLabel, pick, pickLabel, range, payout, bet, amount };
+  }
+  return { found: false };
+}
 
 // ---- unseen-result badge (history entries newer than the last time the user opened the tab) ----
 async function newCount() {
@@ -180,7 +283,7 @@ async function markSeen() {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
-  openBets, myBets, history, balance,
+  openBets, myBets, history, balance, rawBets, walletCoins, stakeable, resolveOutcome,
   create, take, cancel, resolve, reveal, claimTimeout, newCount, markSeen,
   _setRunner: (fn) => { runner = fn; }, _ctx: () => ctx, _fire: fire, CONTRACT, CASINO_SCRIPT
 };

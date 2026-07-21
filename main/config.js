@@ -54,7 +54,9 @@ const DEFAULTS = {
   params: PARAMS.defaultParams(),   // EVERY other minima.jar startup flag, user-editable at first run
   extraArgs: "",             // any additional raw args, appended verbatim
   labels: {},                // address → friendly name (shown in Receive / History / CSV)
-  theme: "current"           // current | original-light | original-dark
+  theme: "current",          // current | original-light | original-dark
+  casinoEnabled: false,      // Casino tab hidden until enabled in Settings (18+ self-cert); also gates the bg auto-processor
+  casinoAgeCertified: false  // user self-certified 18+ / legal gambling age
 };
 
 function load() {

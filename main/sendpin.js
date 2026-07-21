@@ -22,15 +22,25 @@ async function pinMinimaSend(runner, command) {
   const am = /\bamount:([0-9.]+)/.exec(c);
   const need = am ? (Number(am[1]) || 0) : 0;
   try {
-    const coinsR = await runner("coins relevant:true tokenid:0x00");
-    const coins = ((coinsR && coinsR.response) || [])
-      .filter(x => Number(x.amount) > 0 && Number(x.amount) >= need)   // must cover the send amount on its own
-      .sort((a, b) => Number(a.amount) - Number(b.amount));            // smallest covering coin → minimal disturbance
-    for (const x of coins) {
-      const addr = String(x.address || "");
-      if (addr.length < 42) continue;                                  // short = sentinel/beacon (anyone-can-spend, no key)
+    const coinsR = await runner("coins relevant:true sendable:true tokenid:0x00");   // SENDABLE only — pending/locked/covenant coins can't fund a send
+    const all = ((coinsR && coinsR.response) || []).filter(x => Number(x.amount) > 0 && String(x.address || "").length >= 42);
+    // (1) Prefer a SINGLE coin that covers the amount on its own — minimal disturbance, smallest first.
+    const single = all.filter(x => Number(x.amount) >= need).sort((a, b) => Number(a.amount) - Number(b.amount));
+    for (const x of single) {
+      const addr = String(x.address);
       const chk = await runner("checkaddress address:" + addr);
-      if (chk && chk.response && chk.response.simple) return c + " fromaddress:" + addr;
+      if (chk && chk.response && chk.response.simple) return c + " fromaddress:" + addr;   // short/beacon addrs → {} (no .simple)
+    }
+    // (2) No single coin covers → pin the SIGNABLE address whose coins TOTAL covers the amount (the node then combines
+    //     the coins AT that address). This lets fragmented own-funds be spent instead of falling back to the raw send,
+    //     which would auto-select beacon/covenant dust and hit the KeyRow.getPrivateKey() NPE ("Send failed").
+    const byAddr = {};
+    for (const x of all) { const a = String(x.address); (byAddr[a] = byAddr[a] || 0); byAddr[a] += Number(x.amount); }
+    const covering = Object.keys(byAddr).map(a => ({ a, total: byAddr[a] })).filter(o => o.total >= need)
+      .sort((x, y) => x.total - y.total);   // smallest covering address total first
+    for (const o of covering) {
+      const chk = await runner("checkaddress address:" + o.a);
+      if (chk && chk.response && chk.response.simple) return c + " fromaddress:" + o.a;
     }
   } catch (e) { /* best-effort: fall through to the unmodified send */ }
   return c;

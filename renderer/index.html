@@ -27,8 +27,8 @@
         <button class="tab" data-view="pandapools">Pools</button>
         <button class="tab" data-view="atomix">AtomiX</button>
         <button class="tab" data-view="minimall">miniMall<span class="tab-badge" id="shopBadge" hidden></span></button>
-        <!-- Casino tab removed in 0.11.1 (code kept: main/casino.js + main/casino/, and the dormant wiring). To
-             restore: re-add this button, the #view-casino section below, and the casino start-gate in main.js. -->
+        <!-- Casino: hidden by default; unhidden by boot() only when CFG.casinoEnabled (Settings 18+ self-cert). -->
+        <button class="tab" data-view="casino" id="casinoTab" hidden>P2PChance<span class="tab-badge" id="casinoBadge" hidden></span></button>
         <button class="tab" data-view="vestr">Vestr</button>
         <button class="tab" data-view="history">History</button>
         <button class="tab" data-view="terminal">Terminal</button>
@@ -76,9 +76,9 @@
         <div id="shopBody"></div>
       </section>
 
-      <!-- Casino view removed in 0.11.1 (code preserved). Restore with the tab button + main.js start-gate.
-      <section class="view" id="view-casino"><div id="casinoBody"></div></section>
-      -->
+      <section class="view" id="view-casino">
+        <div id="casinoBody"></div>
+      </section>
 
       <section class="view" id="view-vestr">
         <div id="vestrBody"></div>
