@@ -102,13 +102,22 @@
                 if (e || secret) return nextS();
                 H.scanNotifySecret(s.hash, NOTIFY_SCAN_DEPTH, function (err, coins) {
                     coins = coins || [];
-                    var found = null;
+                    // Candidate preimages: every notify coin whose state[101] matches this hashlock and carries a
+                    // state[100]. The NOTIFY sink is ANYONE-CAN-WRITE, so we must NOT trust the first match — we
+                    // VERIFY each candidate hashes to the lock (SHA2) and pin the first VALID one. insertSecret is
+                    // first-write-wins, so pinning a forged preimage here would permanently block MY claim (fund loss).
+                    var cands = [];
                     for (var j = 0; j < coins.length; j++) {
                         var c = coins[j];
-                        if (c && sameHash(H.stateAt(c, 101), s.hash) && H.stateAt(c, 100)) { found = H.stateAt(c, 100); break; }
+                        if (c && sameHash(H.stateAt(c, 101), s.hash) && H.stateAt(c, 100)) cands.push(H.stateAt(c, 100));
                     }
-                    if (!found) return nextS();
-                    DB.insertSecret(s.hash, found, function () { nextS(); });
+                    (function tryCand(k) {
+                        if (k >= cands.length) return nextS();          // no valid preimage revealed yet
+                        H.verifyPreimage(cands[k], s.hash, function (ve, ok) {
+                            if (ok) return DB.insertSecret(s.hash, cands[k], function () { nextS(); });
+                            tryCand(k + 1);                              // forged/garbage preimage → keep scanning
+                        });
+                    })(0);
                 });
             });
         }, done);
@@ -235,7 +244,12 @@
     function harvestEthPreimage(hash, gc, cb) {
         try {
             if (gc && gc.preimage && AX.ethrpc.hexToBig(gc.preimage) !== 0n) {
-                return DB.insertSecret(hash, gc.preimage, function () { cb(); });
+                // Defence-in-depth: the ETH tuple comes from a single public RPC — verify the preimage hashes to
+                // the lock before pinning, so a fabricated getContract can't poison the store.
+                return H.verifyPreimage(gc.preimage, hash, function (ve, ok) {
+                    if (ok) return DB.insertSecret(hash, gc.preimage, function () { cb(); });
+                    cb();
+                });
             }
         } catch (e2) { }
         cb();

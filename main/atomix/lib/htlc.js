@@ -80,6 +80,19 @@
         });
     }
 
+    /** FUND-SAFETY: verify a candidate preimage hashes (SHA2/SHA256 — the exact derivation generateSecret used, via
+     *  the node's `hash type:sha2`) to `hash`. The NOTIFY sink is anyone-can-write and DB.insertSecret is
+     *  first-write-wins, so a harvested preimage MUST be verified before it is pinned — otherwise a forged notify
+     *  coin (or a fabricated ETH-contract tuple) poisons the secret store and permanently blocks the maker's claim.
+     *  cb(err, boolean). */
+    function verifyPreimage(secret, hash, cb) {
+        if (!secret || !hash) return cb(null, false);
+        M.cmdR('hash type:sha2 data:' + secret, function (err, resp) {
+            if (err || !resp || !resp.hash) return cb(null, false);
+            cb(null, normKey(resp.hash) === normKey(hash));
+        });
+    }
+
     /** Current chain tip block number. cb(err, block:int). */
     function currentBlock(cb) {
         M.cmdR('block', function (err, resp) { cb(err, err ? 0 : (resp ? Number(resp.block || 0) : 0)); });
@@ -263,7 +276,7 @@
         MINIMA_BLOCK_TIME: MINIMA_BLOCK_TIME, TIMELOCK_BLOCKS: TIMELOCK_BLOCKS, CP_BLOCKS: CP_BLOCKS,
         CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK,
         setup: setup, loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
-        generateSecret: generateSecret, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
+        generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         coinAmount: coinAmount, lock: lock, lockFromCoins: lockFromCoins, myFreeCoins: myFreeCoins,
         claim: claim, refund: refund, scanByHash: scanByHash, scanByKey: scanByKey, scanNotifySecret: scanNotifySecret,
         scanAllHtlcCoins: scanAllHtlcCoins
