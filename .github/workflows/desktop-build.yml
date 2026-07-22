@@ -1,0 +1,77 @@
+name: Build desktop (mac / win / linux)
+
+# Manual runs produce downloadable artifacts; pushing a tag like v0.13.0 also
+# attaches the installers to a GitHub Release. Each runner builds its OWN platform
+# natively and jlinks its OWN bundled JRE into resources/jre (gitignored), so the
+# existing extraResources mapping (resources/jre -> jre) needs no change.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+            ebflag: --mac --arm64
+          - os: windows-latest
+            platform: win
+            ebflag: --win
+          - os: ubuntu-latest
+            platform: linux
+            ebflag: --linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # minima.jar is Java 8 bytecode, so any modern JRE runs it. Temurin 21 LTS is
+      # available on all three runners; we jlink a minimal JRE from it.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build bundled JRE (jlink)
+        shell: bash
+        run: |
+          jlink \
+            --add-modules java.se,jdk.unsupported \
+            --strip-debug --no-header-files --no-man-pages --compress=2 \
+            --output resources/jre
+          ls resources/jre/bin
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build installer
+        shell: bash
+        run: npx electron-builder ${{ matrix.ebflag }} --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimacore-${{ matrix.platform }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
+          if-no-files-found: warn
+
+      - name: Attach to release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage

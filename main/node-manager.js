@@ -76,11 +76,12 @@ class NodeManager extends EventEmitter {
     return bundled;
   }
 
-  /** Bundled jlink JRE when packaged; system `java` in dev. */
+  /** Bundled jlink JRE when packaged; system `java` in dev. Windows launches java.exe. */
   javaPath() {
+    const exe = process.platform === "win32" ? "java.exe" : "java";
     const bundled = app.isPackaged
-      ? path.join(process.resourcesPath, "jre", "bin", "java")
-      : path.join(__dirname, "..", "resources", "jre", "bin", "java");
+      ? path.join(process.resourcesPath, "jre", "bin", exe)
+      : path.join(__dirname, "..", "resources", "jre", "bin", exe);
     return fs.existsSync(bundled) ? bundled : "java";
   }
 

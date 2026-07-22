@@ -1,14 +1,17 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.12.5",
-  "description": "macOS wrapper for the minimaCore node — runs and updates minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
+  "version": "0.13.0",
+  "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs and updates minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac --universal",
+    "dist": "electron-builder --mac --arm64",
+    "dist:mac": "electron-builder --mac --arm64",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
     "test:atomix": "bash scripts/atomix-parity-check.sh && node scripts/atomix-unit.js",
   "test:casino": "bash scripts/casino-parity-check.sh && node scripts/casino-glue-test.js",
     "gate:atomix": "node scripts/atomix-boot-gate.js && node scripts/atomix-s2-gate.js"
@@ -35,6 +38,35 @@
           "target": "dmg",
           "arch": [
             "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Finance",
+      "maintainer": "eurobuddha <eurobuddha@gmail.com>",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
           ]
         }
       ]
