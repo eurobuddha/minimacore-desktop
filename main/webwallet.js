@@ -1,0 +1,208 @@
+/*
+ * webwallet.js — a LOCAL, in-app "Web Wallet" for minimaCore Desktop. Reproduces Minima's official Web Wallet
+ * (access a wallet straight from a SEED PHRASE via a -megammr node) but SECURELY: everything runs against the
+ * LOCAL node over loopback RPC, so the seed NEVER leaves this machine. It is NOT a server and binds no socket.
+ *
+ * The public wallet.minima.global drained users because a REMOTE host saw the seed (it signed server-side).
+ * Here the "server" is the user's own node on 127.0.0.1 — the seed reaches only the local node, which derives
+ * the key with `keys action:genkey` (a pure derivation — NOT written to the wallet DB) and signs node-side.
+ *
+ * Command flow (grounded in minima-core source + the official webWallet bundle):
+ *   derive:  keys action:genkey phrase:"<seed>"            -> { address, miniaddress, publickey, script, privatekey }
+ *   read:    balance megammr:true address:<addr>           -> the MegaMMR coin set for the (untracked) address
+ *   send:    sendfrom fromaddress:<addr> address:<to> amount:<a> tokenid:<t> script:"<s>" privatekey:<p>
+ *            keyuses:<n> mine:false                         -> sendfrom pulls untracked coins from the MegaMMR,
+ *                                                             signs node-side (txnsign publickey:custom), broadcasts.
+ *   (no newscript/coinexport/coinimport backfill needed — that's only for the local-sign/txnbasics path.)
+ *
+ * FUND-CRITICAL — keyuses: the node does NOT track uses for a genkey-derived key, so WE must. keyuses is the
+ * WOTS one-time-leaf index; signing twice at the same value leaks the private key = fund loss. We persist a
+ * per-address monotonic counter, RESERVE-BEFORE-SIGN (write n+1 durably BEFORE the send that uses n), require an
+ * explicit user acknowledgement of the seed's prior-use count, and never reuse a value (over-skip is safe).
+ * The counter is per-install: do NOT drive the SAME seed from two installs / a cloud-synced userData at once —
+ * they'd hand out the same leaf twice (the single-instance lock only guards one machine).
+ */
+const { EventEmitter } = require("events");
+const fs = require("fs");
+const path = require("path");
+const { rpcCall } = require("./rpc");
+let app = null; try { app = require("electron").app; } catch (e) {}
+
+const emitter = new EventEmitter();
+const LOG_RING = [];
+
+let runner = (cmd) => {
+  const config = require("./config"), node = require("./node-manager");
+  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+};
+function log(line) { const e = new Date().toISOString().slice(11, 19) + " " + String(line); LOG_RING.push(e); if (LOG_RING.length > 200) LOG_RING.shift(); }
+
+// ---------------------------------------------------------------------------
+// validation — NEVER interpolate unvalidated free-text into a command string
+// (the node's parser is space-tokenised + last-wins, so injection = fund redirect).
+// ---------------------------------------------------------------------------
+// A real Minima receiving address: Mx… (base58 alphanumeric, len 40–80) or 0x + up to 64 hex. Charset-locked
+// (copied from mail.js looksLikeMinimaAddress — a length-only check let "Mx… address:0x<attacker>" through).
+function looksLikeMinimaAddress(a) {
+  if (typeof a !== "string") return false;
+  if (/^0x[0-9A-Fa-f]{1,64}$/.test(a)) return true;
+  if (/^Mx[0-9A-Za-z]+$/.test(a)) return a.length >= 40 && a.length <= 80;
+  return false;
+}
+// BIP39-style seed phrase: lowercase words separated by single spaces. Blocks any char that could break out of
+// the quoted `phrase:"…"` argument (BIP39 words are [a-z] only, so this is strict but correct).
+function isSeedPhrase(s) { return typeof s === "string" && /^[a-z]+( [a-z]+){0,26}$/.test(s.trim()) && s.trim().split(" ").length >= 12; }
+function isAmount(a) { return typeof a === "string" && /^\d{1,30}(\.\d{1,30})?$/.test(a) && Number(a) > 0; }
+function isTokenid(t) { return t === "0x00" || (typeof t === "string" && /^0x[0-9A-Fa-f]{64}$/.test(t)); }
+function isScript(s) { return typeof s === "string" && /^RETURN SIGNEDBY\(0x[0-9A-Fa-f]{2,140}\)$/.test(s); }
+function isPrivKey(p) { return typeof p === "string" && /^0x[0-9A-Fa-f]{2,200}$/.test(p); }
+
+// ---------------------------------------------------------------------------
+// keyuses store — durable, monotonic, reserve-before-sign. { "<0xaddr>": { keyuses, ack } }
+// ---------------------------------------------------------------------------
+function storePath() { return path.join(app ? app.getPath("userData") : ".", "webwallet-keyuses.json"); }
+function loadStore() { try { return JSON.parse(fs.readFileSync(storePath(), "utf8")) || {}; } catch (e) { return {}; } }
+function writeStore(obj) {
+  const p = storePath(), tmp = p + ".tmp";
+  const fd = fs.openSync(tmp, "w");
+  try { fs.writeFileSync(fd, JSON.stringify(obj)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, p);   // atomic replace
+  // fsync the DIRECTORY too, so the rename (i.e. the counter advance) survives power-loss. Without this a crash
+  // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
+  try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
+}
+function entryFor(store, addr) { return store[addr] || { keyuses: 0, ack: false }; }
+
+/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. */
+function ackKeyuses(address, count) {
+  if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const store = loadStore();
+  const e = entryFor(store, address);
+  e.keyuses = Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss)
+  e.ack = true;
+  store[address] = e;
+  writeStore(store);
+  return { address, keyuses: e.keyuses, ack: true };
+}
+/** Current stored keyuses info for an address (does not mutate). */
+function keyusesInfo(address) { const e = entryFor(loadStore(), address); return { address, keyuses: e.keyuses || 0, ack: !!e.ack }; }
+/** RESERVE: durably advance the counter to n+1 and return n (the leaf to sign at). Reserve-before-sign. */
+function reserveKeyuse(address) {
+  const store = loadStore();
+  const e = entryFor(store, address);
+  const n = e.keyuses || 0;
+  e.keyuses = n + 1;                          // persist BEFORE the caller signs at n
+  store[address] = e;
+  writeStore(store);
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// node interaction
+// ---------------------------------------------------------------------------
+function resp(r) { return (r && r.response) || null; }
+
+/** Authoritative megammr check — read straight from the node (defense in depth vs the renderer's status push). */
+async function isMegammr() {
+  const r = await runner("status").catch(() => null);
+  const d = resp(r);
+  return !!(d && d.megammr);
+}
+
+/** Derive the wallet's single address from the seed. Returns PUBLIC material only — never the private key. */
+async function derive(seed) {
+  if (!isSeedPhrase(seed)) throw new Error("Enter a valid seed phrase (12–24 lowercase words)");
+  if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
+  const r = await runner('keys action:genkey phrase:"' + seed.trim() + '"');
+  const d = resp(r);
+  if (!d || !d.address) throw new Error("Could not derive wallet from seed");
+  return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script };
+}
+
+/** Read the address's balances via the MegaMMR. Token-grain: a token coin's spendable is `tokenamount`. */
+async function read(address) {
+  if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address)) && !looksLikeMinimaAddress(address)) throw new Error("bad address");
+  const r = await runner("balance megammr:true address:" + address).catch(() => null);
+  const rows = (r && Array.isArray(r.response)) ? r.response : [];
+  return rows.map(b => ({
+    tokenid: b.tokenid,
+    name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid).slice(0, 12)),
+    confirmed: String(b.confirmed != null ? b.confirmed : "0"),
+    sendable: String(b.sendable != null ? b.sendable : "0"),
+    unconfirmed: String(b.unconfirmed != null ? b.unconfirmed : "0"),
+    decimals: (b.token && b.token.decimals != null) ? b.token.decimals : (b.tokenid === "0x00" ? 0 : null)
+  }));
+}
+
+/**
+ * FUND-CRITICAL send. Re-derives the private key from the seed IN-MEMORY (never persisted, wiped after use),
+ * validates every argument, RESERVES the keyuses leaf durably before signing, then runs the single `sendfrom`.
+ * Requires the user to have acknowledged the address's prior-use count (ackKeyuses) first.
+ */
+async function send(opts) {
+  const { seed, to, amount, tokenid } = opts || {};
+  if (!isSeedPhrase(seed)) throw new Error("Invalid seed phrase");
+  if (!looksLikeMinimaAddress(to)) throw new Error("Invalid recipient address");
+  if (!isAmount(amount)) throw new Error("Invalid amount");
+  const tok = tokenid || "0x00";
+  if (!isTokenid(tok)) throw new Error("Invalid token id");
+  if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
+
+  // confirm the recipient is a real, spendable address on this node
+  const chk = resp(await runner("checkaddress address:" + to).catch(() => null));
+  if (!chk || !chk["0x"]) throw new Error("Recipient address failed validation");
+
+  // derive key material (private key stays in this scope only)
+  let script = null, privatekey = null, fromaddress = null;
+  {
+    const d = resp(await runner('keys action:genkey phrase:"' + seed.trim() + '"'));
+    if (!d || !d.address || !d.script || !d.privatekey) throw new Error("Could not derive signing key");
+    script = d.script; privatekey = d.privatekey; fromaddress = d.address;
+  }
+  if (!isScript(script) || !isPrivKey(privatekey) || !/^0x[0-9A-Fa-f]{1,64}$/.test(fromaddress)) {
+    privatekey = null; throw new Error("Derived key material failed validation");
+  }
+
+  // keyuses gate: the user MUST have acknowledged the seed's prior-use count for this address
+  const info = keyusesInfo(fromaddress);
+  if (!info.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
+
+  // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
+  const n = reserveKeyuse(fromaddress);
+  const cmd = "sendfrom fromaddress:" + fromaddress
+    + " address:" + to
+    + " amount:" + amount
+    + " tokenid:" + tok
+    + ' script:"' + script + '"'
+    + " privatekey:" + privatekey
+    + " keyuses:" + n
+    + " mine:false";
+  let r;
+  try {
+    r = await runner(cmd);
+  } catch (e) {
+    // AMBIGUOUS: a transport/timeout error means the node MAY still have posted the txn. NEVER auto-retry — a
+    // retry burns a fresh leaf (no key reuse) but selects different coins and could pay the recipient TWICE.
+    // Return an ambiguous result (not a throw, so the flag survives the IPC boundary) so the UI blocks retry.
+    return { ok: false, ambiguous: true, keyuse: n, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying (a blind retry could pay twice)." };
+  } finally {
+    privatekey = null;   // best-effort scrub
+  }
+  const ok = r && (r.status === true || r.pending === true);
+  if (!ok) return { ok: false, keyuse: n, message: (r && (r.error || r.message)) || "Send failed" };
+  log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : tok.slice(0, 10)) + " from " + fromaddress.slice(0, 10) + " (keyuse " + n + ")");
+  emitter.emit("update");
+  const txnid = resp(r) && (resp(r).txpowid || (resp(r).body && resp(r).body.txn && resp(r).body.txn.transactionid));
+  return { ok: true, keyuse: n, txnid: txnid || null };
+}
+
+function status() { return { log: LOG_RING.slice(-20) }; }
+
+module.exports = {
+  emitter, isMegammr, derive, read, send,
+  keyusesInfo, ackKeyuses,
+  _setRunner: (fn) => { runner = fn; },
+  // exported for unit tests
+  _validators: { looksLikeMinimaAddress, isSeedPhrase, isAmount, isTokenid, isScript, isPrivKey }
+};

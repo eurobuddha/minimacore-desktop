@@ -23,6 +23,7 @@ const atomix = require("./atomix");
 const shop = require("./shop");
 const casino = require("./casino");
 const vestr = require("./vestr");
+const webwallet = require("./webwallet");
 
 let win = null;
 let tray = null;
@@ -352,6 +353,22 @@ ipcMain.handle("mcd:vestrCalculate", (_e, amount, startMs, endMs, graceHours) =>
 vestr.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:vestr"); });
 let vestrStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !vestrStarted) { vestrStarted = true; vestr.startLoop(); } });
+
+// Web Wallet (local, megammr-gated). All node I/O + fund logic lives in webwallet.js; the seed reaches only
+// the local node over loopback. `wwEnableMegammr` sets the -megammr param and restarts (the tab's warning CTA).
+ipcMain.handle("mcd:wwMegammr", () => webwallet.isMegammr());
+ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
+ipcMain.handle("mcd:wwRead", (_e, address) => webwallet.read(address));
+ipcMain.handle("mcd:wwKeyuses", (_e, address) => webwallet.keyusesInfo(address));
+ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(address, count));
+ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
+ipcMain.handle("mcd:wwEnableMegammr", async () => {
+  const c = config.load();
+  config.save({ params: Object.assign({}, c.params, { megammr: true }) });
+  await node.restart();
+  return node.snapshot();
+});
+webwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:webwallet"); });
 
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));
 ipcMain.handle("mcd:histAdd", (_e, rows) => histDb.merge(Array.isArray(rows) ? rows : []));

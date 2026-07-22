@@ -190,6 +190,8 @@ class NodeManager extends EventEmitter {
           block: (r.chain && r.chain.block) || 0,
           connections: (r.network && r.network.connected) || 0,
           locked: !!r.locked,
+          megammr: !!r.megammr,   // GeneralParams.IS_MEGAMMR — gates the Web Wallet tab
+
           // direction-aware fields come from the `network` poll below — carry the last known values
           incoming: prev.incoming ?? 0,
           acceptingInLinks: prev.acceptingInLinks ?? null,

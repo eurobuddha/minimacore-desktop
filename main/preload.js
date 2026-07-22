@@ -183,6 +183,16 @@ contextBridge.exposeInMainWorld("mcd", {
   vestrCalculate: (amount, startMs, endMs, graceHours) => ipcRenderer.invoke("mcd:vestrCalculate", amount, startMs, endMs, graceHours),
   onVestr: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:vestr", h); return () => ipcRenderer.removeListener("mcd:vestr", h); },
 
+  // Web Wallet (local, megammr-gated). Seed is passed to main for loopback signing only; never persisted.
+  wwMegammr: () => ipcRenderer.invoke("mcd:wwMegammr"),
+  wwDerive: (seed) => ipcRenderer.invoke("mcd:wwDerive", seed),
+  wwRead: (address) => ipcRenderer.invoke("mcd:wwRead", address),
+  wwKeyuses: (address) => ipcRenderer.invoke("mcd:wwKeyuses", address),
+  wwAckKeyuses: (address, count) => ipcRenderer.invoke("mcd:wwAckKeyuses", address, count),
+  wwSend: (opts) => ipcRenderer.invoke("mcd:wwSend", opts),
+  wwEnableMegammr: () => ipcRenderer.invoke("mcd:wwEnableMegammr"),
+  onWebWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:webwallet", h); return () => ipcRenderer.removeListener("mcd:webwallet", h); },
+
   // pushes
   onStatus: (fn) => { const h = (_e, s) => fn(s); ipcRenderer.on("mcd:status", h); return () => ipcRenderer.removeListener("mcd:status", h); },
   onLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:log", h); return () => ipcRenderer.removeListener("mcd:log", h); }
