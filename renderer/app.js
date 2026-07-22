@@ -565,8 +565,8 @@ function renderWwUnlock(body) {
       // M2: auto-check on-chain key-uses so the confirm field never defaults to a bare 0 for a seed that has
       // already spent elsewhere (under-counting reuses a WOTS leaf = fund loss). Best-effort; floored below.
       wwKuSuggest = 0;
-      try { const ka = await api.keyAudit([wwAddr.publickey]); const k = ka && ka.keys && ka.keys[0]; if (k) wwKuSuggest = Math.max(Number(k.spend_blocks) || 0, Number(k.spent_coins) || 0); } catch (e) {}
-      wwBal = await api.wwRead(wwAddr.address).catch(() => []);
+      if (!wwAddr.isNodeSeed) { try { const ka = await api.keyAudit([wwAddr.publickey]); const k = ka && ka.keys && ka.keys[0]; if (k) wwKuSuggest = Math.max(Number(k.spend_blocks) || 0, Number(k.spent_coins) || 0); } catch (e) {} }
+      wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => []);
       el("wwSeedIn").value = "";
       renderWebWallet();
     } catch (e) {
@@ -586,13 +586,15 @@ function renderWwWallet(body) {
     `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
        <span>${esc(b.name)}</span>
        <span style="font-family:var(--mono,monospace)">${esc(b.sendable)}<small style="opacity:.6"> sendable</small></span>
-     </div>`).join("") || `<div class="view__desc">No coins found for this wallet on the MegaMMR.</div>`;
+     </div>`).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
 
   const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
     .map(b => `<option value="${esc(b.tokenid)}">${esc(b.name)}</option>`).join("");
 
   const kuDefault = Math.max(Number(ku.keyuses) || 0, Number(wwKuSuggest) || 0);
-  const kuPanel = ku.ack
+  const kuPanel = a.isNodeSeed
+    ? `<div class="view__desc">This is <b>your node's own wallet</b> — showing your full balance across every address. Sends go through the node, which selects coins and manages your signing keys automatically.</div>`
+    : (ku.ack
     ? `<div class="view__desc">Key-uses confirmed: next signing index <b>${esc(String(ku.keyuses))}</b>. <a href="#" id="wwKuEdit">change</a></div>`
     : `<div class="card" style="border-color:var(--accent)">
          <div class="view__desc"><b>Confirm key-uses before sending.</b> How many payments has this wallet ALREADY made
@@ -604,7 +606,7 @@ function renderWwWallet(body) {
            <button class="btn btn--outline" id="wwKuCheck">Check on-chain</button>
            <button class="btn btn--outline" id="wwKuConfirm">Confirm</button>
          </div>
-       </div>`;
+       </div>`);
 
   const ambigBanner = wwAmbiguous
     ? `<div class="card" style="border-color:var(--accent)">
@@ -613,7 +615,7 @@ function renderWwWallet(body) {
          <button class="btn btn--outline" id="wwAmbigClear">I've checked — re-enable Send</button>
        </div>`
     : "";
-  const sendDisabled = (ku.ack && !wwAmbiguous) ? "" : "disabled";
+  const sendDisabled = ((a.isNodeSeed || ku.ack) && !wwAmbiguous) ? "" : "disabled";
   body.innerHTML = `
     <div class="view__title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Web Wallet</span>
@@ -640,11 +642,13 @@ function renderWwWallet(body) {
     </div>`;
 
   el("wwAddrBox").addEventListener("click", () => copy(recv));
-  el("wwRefresh").addEventListener("click", async () => { wwBal = await api.wwRead(a.address).catch(() => wwBal); renderWebWallet(); });
+  el("wwRefresh").addEventListener("click", async () => { wwBal = await api.wwRead(a.address, a.isNodeSeed).catch(() => wwBal); renderWebWallet(); });
   el("wwLockBtn").addEventListener("click", () => { wwLock(); renderWebWallet(); toast("Wallet locked", "ok"); });
   const ambigBtn = el("wwAmbigClear"); if (ambigBtn) ambigBtn.addEventListener("click", () => { wwAmbiguous = false; renderWebWallet(); });
 
-  if (!ku.ack) {
+  if (a.isNodeSeed) {
+    el("wwSendBtn").addEventListener("click", () => wwDoSend());   // node wallet: no key-uses gate, node manages keys
+  } else if (!ku.ack) {
     el("wwKuConfirm").addEventListener("click", async () => {
       const n = Math.max(0, Math.floor(Number(el("wwKuIn").value) || 0));
       try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed ✓", "ok"); }

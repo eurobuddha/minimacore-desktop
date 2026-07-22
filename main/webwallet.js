@@ -33,6 +33,7 @@ const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
 const { rpcCall } = require("./rpc");
+const { pinMinimaSend } = require("./sendpin");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const emitter = new EventEmitter();
@@ -122,20 +123,33 @@ async function isMegammr() {
   return !!(d && d.megammr);
 }
 
-/** Derive the wallet's single address from the seed. Returns PUBLIC material only — never the private key. */
+/** Does the running node's OWN wallet contain this public key? If so, the entered seed IS the node's own seed
+ *  (keys genkey uses modifier 0 = the wallet's first key; the node derives 0,1,2,… from the same base seed). */
+async function nodeHasPubkey(pubkey) {
+  if (!pubkey) return false;
+  const r = resp(await runner("keys action:list").catch(() => null));
+  const keys = (r && r.keys) || [];
+  const pk = String(pubkey).toLowerCase();
+  return keys.some(k => k && k.publickey && String(k.publickey).toLowerCase() === pk);
+}
+
+/** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the
+ *  balance can be the node's FULL total (a real wallet spreads coins over many keys). PUBLIC material only. */
 async function derive(seed) {
   if (!isPhrase(seed)) throw new Error('Enter your seed phrase (a " or \\ or line break can\'t be carried safely)');
   if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
   const r = await runner('keys action:genkey phrase:"' + seed + '"');   // VERBATIM — anyphrase, case-sensitive
   const d = resp(r);
   if (!d || !d.address) throw new Error("Could not derive wallet from seed");
-  return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script };
+  const isNodeSeed = await nodeHasPubkey(d.publickey);
+  return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script, isNodeSeed };
 }
 
-/** Read the address's balances via the MegaMMR. Token-grain: a token coin's spendable is `tokenamount`. */
-async function read(address) {
+/** Balances. For the node's OWN seed use `balance` — the FULL wallet total across ALL its addresses (coins are
+ *  spread over many keys, so a single genkey address reads ~0). For a foreign seed, the single megammr address. */
+async function read(address, nodeSeed) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address)) && !looksLikeMinimaAddress(address)) throw new Error("bad address");
-  const r = await runner("balance megammr:true address:" + address).catch(() => null);
+  const r = await runner(nodeSeed ? "balance" : ("balance megammr:true address:" + address)).catch(() => null);
   const rows = (r && Array.isArray(r.response)) ? r.response : [];
   return rows.map(b => ({
     tokenid: b.tokenid,
@@ -166,16 +180,34 @@ async function send(opts) {
   if (!chk || !chk["0x"]) throw new Error("Recipient address failed validation");
 
   // derive key material (private key stays in this scope only) — phrase passed VERBATIM
-  let script = null, privatekey = null, fromaddress = null;
+  let script = null, privatekey = null, fromaddress = null, pubkey = null;
   {
     const d = resp(await runner('keys action:genkey phrase:"' + seed + '"'));
     if (!d || !d.address || !d.script || !d.privatekey) throw new Error("Could not derive signing key");
-    script = d.script; privatekey = d.privatekey; fromaddress = d.address;
+    script = d.script; privatekey = d.privatekey; fromaddress = d.address; pubkey = d.publickey;
   }
   if (!isScript(script) || !isPrivKey(privatekey) || !/^0x[0-9A-Fa-f]{1,64}$/.test(fromaddress)) {
     privatekey = null; throw new Error("Derived key material failed validation");
   }
 
+  // If this is the running node's OWN wallet, let the NODE send: it coin-selects across ALL its addresses and
+  // manages its own keyuses (no single-address / manual-keyuses limits). Same path as the desktop Wallet tab.
+  if (await nodeHasPubkey(pubkey)) {
+    privatekey = null;   // not needed — the node signs with its own keys
+    let cmd = "send amount:" + amount + " address:" + to + " tokenid:" + tok;
+    try { cmd = await pinMinimaSend(runner, cmd); } catch (e) {}   // dodge shared-node beacon-dust NPE
+    let nr;
+    try { nr = await runner(cmd); }
+    catch (e) { return { ok: false, ambiguous: true, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying." }; }
+    const nok = nr && (nr.status === true || nr.pending === true);
+    if (!nok) return { ok: false, message: (nr && (nr.error || nr.message)) || "Send failed" };
+    log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : tok.slice(0, 10)) + " (node wallet)");
+    emitter.emit("update");
+    const ntx = resp(nr) && (resp(nr).txpowid || (resp(nr).body && resp(nr).body.txn && resp(nr).body.txn.transactionid));
+    return { ok: true, txnid: ntx || null };
+  }
+
+  // FOREIGN seed → single-address non-custodial sendfrom with the durable keyuses gate.
   // keyuses gate: the user MUST have acknowledged the seed's prior-use count for this address
   const info = keyusesInfo(fromaddress);
   if (!info.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }

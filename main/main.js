@@ -358,7 +358,7 @@ node.on("status", (s) => { if (s.state === "running" && !vestrStarted) { vestrSt
 // the local node over loopback. `wwEnableMegammr` sets the -megammr param and restarts (the tab's warning CTA).
 ipcMain.handle("mcd:wwMegammr", () => webwallet.isMegammr());
 ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
-ipcMain.handle("mcd:wwRead", (_e, address) => webwallet.read(address));
+ipcMain.handle("mcd:wwRead", (_e, address, nodeSeed) => webwallet.read(address, nodeSeed));
 ipcMain.handle("mcd:wwKeyuses", (_e, address) => webwallet.keyusesInfo(address));
 ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(address, count));
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));

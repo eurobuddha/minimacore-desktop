@@ -186,7 +186,7 @@ contextBridge.exposeInMainWorld("mcd", {
   // Web Wallet (local, megammr-gated). Seed is passed to main for loopback signing only; never persisted.
   wwMegammr: () => ipcRenderer.invoke("mcd:wwMegammr"),
   wwDerive: (seed) => ipcRenderer.invoke("mcd:wwDerive", seed),
-  wwRead: (address) => ipcRenderer.invoke("mcd:wwRead", address),
+  wwRead: (address, nodeSeed) => ipcRenderer.invoke("mcd:wwRead", address, nodeSeed),
   wwKeyuses: (address) => ipcRenderer.invoke("mcd:wwKeyuses", address),
   wwAckKeyuses: (address, count) => ipcRenderer.invoke("mcd:wwAckKeyuses", address, count),
   wwSend: (opts) => ipcRenderer.invoke("mcd:wwSend", opts),
