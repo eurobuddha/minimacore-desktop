@@ -10,6 +10,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write   # required for the tag build to create the GitHub Release
+
 jobs:
   build:
     name: ${{ matrix.platform }}
