@@ -238,8 +238,12 @@ class NodeManager extends EventEmitter {
              uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
   }
   log(line) {
-    for (const l of String(line).split("\n")) {
+    for (let l of String(line).split("\n")) {
       if (!l.trim()) continue;
+      // Redact a seed phrase / private key if the node ever echoes one into an error line (the Web Wallet derives
+      // & signs over loopback via `keys genkey phrase:"…"` / `sendfrom … privatekey:0x…`), so they can NEVER end
+      // up in the Logs view.
+      l = l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
       this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
     }
     if (this.logs.length > LOG_MAX_LINES) this.logs.splice(0, this.logs.length - LOG_MAX_LINES);

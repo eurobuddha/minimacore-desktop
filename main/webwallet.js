@@ -1,26 +1,33 @@
 /*
- * webwallet.js — a LOCAL, in-app "Web Wallet" for minimaCore Desktop. Reproduces Minima's official Web Wallet
- * (access a wallet straight from a SEED PHRASE via a -megammr node) but SECURELY: everything runs against the
- * LOCAL node over loopback RPC, so the seed NEVER leaves this machine. It is NOT a server and binds no socket.
+ * webwallet.js — a LOCAL, in-app "Web Wallet" for minimaCore Desktop. A NATIVE reproduction of Minima's official
+ * Web Wallet v2.5.2 (access a wallet straight from a SEED PHRASE via a -megammr node) — faithful to the original's
+ * exact command flow, but auditable, integral to the wrapper, and hardened. Everything runs against the LOCAL node
+ * over loopback RPC, so the seed NEVER leaves this machine. It is NOT a server and binds no socket.
  *
- * The public wallet.minima.global drained users because a REMOTE host saw the seed (it signed server-side).
- * Here the "server" is the user's own node on 127.0.0.1 — the seed reaches only the local node, which derives
- * the key with `keys action:genkey` (a pure derivation — NOT written to the wallet DB) and signs node-side.
+ * The public wallet.minima.global drained users because a REMOTE host saw the seed (it signed server-side). Here
+ * the "server" is the user's own node on 127.0.0.1 — the seed reaches only the local node, which derives the key
+ * with `keys action:genkey` (a pure derivation — NOT written to the wallet DB) and signs node-side.
  *
- * Command flow (grounded in minima-core source + the official webWallet bundle):
+ * Command flow (VERBATIM from the real webWallet bundle + minima-core source):
  *   derive:  keys action:genkey phrase:"<seed>"            -> { address, miniaddress, publickey, script, privatekey }
  *   read:    balance megammr:true address:<addr>           -> the MegaMMR coin set for the (untracked) address
  *   send:    sendfrom fromaddress:<addr> address:<to> amount:<a> tokenid:<t> script:"<s>" privatekey:<p>
  *            keyuses:<n> mine:false                         -> sendfrom pulls untracked coins from the MegaMMR,
  *                                                             signs node-side (txnsign publickey:custom), broadcasts.
- *   (no newscript/coinexport/coinimport backfill needed — that's only for the local-sign/txnbasics path.)
  *
- * FUND-CRITICAL — keyuses: the node does NOT track uses for a genkey-derived key, so WE must. keyuses is the
- * WOTS one-time-leaf index; signing twice at the same value leaks the private key = fund loss. We persist a
- * per-address monotonic counter, RESERVE-BEFORE-SIGN (write n+1 durably BEFORE the send that uses n), require an
- * explicit user acknowledgement of the seed's prior-use count, and never reuse a value (over-skip is safe).
- * The counter is per-install: do NOT drive the SAME seed from two installs / a cloud-synced userData at once —
- * they'd hand out the same leaf twice (the single-instance lock only guards one machine).
+ * SEED = ANY PHRASE (anyphrase). `keys genkey` runs BIP39.convertStringToSeed on the phrase VERBATIM — there is NO
+ * dictionary or word-count validation, and the seed is CASE- and SPACING-SENSITIVE. So a seed is NOT "12–24 words":
+ * it is whatever string the wallet was created with. It MUST be passed faithfully (never lowercased/collapsed — that
+ * derives a different wallet). This mirrors the desktop's own restore flow (renderer/app.js:286-294).
+ * (Note: the node parser normalises a `:` inside the quoted phrase and routes `{`/`[` via a different path; we're
+ * internally consistent — derive & send use the IDENTICAL string — so the address shown is exactly where a send pulls
+ * from. Only matters when importing an external wallet whose passphrase contains those chars.)
+ *
+ * FUND-CRITICAL — keyuses: the node does NOT track uses for a genkey-derived key, so WE must. keyuses is the WOTS
+ * one-time-leaf index; signing twice at the same value leaks the private key = fund loss. We persist a per-address
+ * monotonic counter, RESERVE-BEFORE-SIGN (write n+1 durably BEFORE the send that uses n), require an explicit user
+ * acknowledgement of the seed's prior-use count, and never reuse a value (over-skip is safe). Per-install: do NOT
+ * drive the SAME seed from two installs / a cloud-synced userData at once — they'd hand out the same leaf twice.
  */
 const { EventEmitter } = require("events");
 const fs = require("fs");
@@ -49,9 +56,14 @@ function looksLikeMinimaAddress(a) {
   if (/^Mx[0-9A-Za-z]+$/.test(a)) return a.length >= 40 && a.length <= 80;
   return false;
 }
-// BIP39-style seed phrase: lowercase words separated by single spaces. Blocks any char that could break out of
-// the quoted `phrase:"…"` argument (BIP39 words are [a-z] only, so this is strict but correct).
-function isSeedPhrase(s) { return typeof s === "string" && /^[a-z]+( [a-z]+){0,26}$/.test(s.trim()) && s.trim().split(" ").length >= 12; }
+// ANY non-empty phrase of any length/case is a valid Minima seed (anyphrase — see header). Reject ONLY what would
+// break out of phrase:"…" (`"` / `\`) or silently change the derived seed (control chars / newlines). This is the
+// desktop restore flow's guard (renderer/app.js:293-294): NOT a word-count or dictionary check.
+function isPhrase(s) {
+  if (typeof s !== "string" || s.length === 0 || s.length > 1024) return false;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c < 32 || c === 34 || c === 92) return false; }  // reject control chars, double-quote(34) and backslash(92)
+  return true;
+}
 function isAmount(a) { return typeof a === "string" && /^\d{1,30}(\.\d{1,30})?$/.test(a) && Number(a) > 0; }
 function isTokenid(t) { return t === "0x00" || (typeof t === "string" && /^0x[0-9A-Fa-f]{64}$/.test(t)); }
 function isScript(s) { return typeof s === "string" && /^RETURN SIGNEDBY\(0x[0-9A-Fa-f]{2,140}\)$/.test(s); }
@@ -112,9 +124,9 @@ async function isMegammr() {
 
 /** Derive the wallet's single address from the seed. Returns PUBLIC material only — never the private key. */
 async function derive(seed) {
-  if (!isSeedPhrase(seed)) throw new Error("Enter a valid seed phrase (12–24 lowercase words)");
+  if (!isPhrase(seed)) throw new Error('Enter your seed phrase (a " or \\ or line break can\'t be carried safely)');
   if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
-  const r = await runner('keys action:genkey phrase:"' + seed.trim() + '"');
+  const r = await runner('keys action:genkey phrase:"' + seed + '"');   // VERBATIM — anyphrase, case-sensitive
   const d = resp(r);
   if (!d || !d.address) throw new Error("Could not derive wallet from seed");
   return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script };
@@ -142,7 +154,7 @@ async function read(address) {
  */
 async function send(opts) {
   const { seed, to, amount, tokenid } = opts || {};
-  if (!isSeedPhrase(seed)) throw new Error("Invalid seed phrase");
+  if (!isPhrase(seed)) throw new Error("Invalid seed phrase");
   if (!looksLikeMinimaAddress(to)) throw new Error("Invalid recipient address");
   if (!isAmount(amount)) throw new Error("Invalid amount");
   const tok = tokenid || "0x00";
@@ -153,10 +165,10 @@ async function send(opts) {
   const chk = resp(await runner("checkaddress address:" + to).catch(() => null));
   if (!chk || !chk["0x"]) throw new Error("Recipient address failed validation");
 
-  // derive key material (private key stays in this scope only)
+  // derive key material (private key stays in this scope only) — phrase passed VERBATIM
   let script = null, privatekey = null, fromaddress = null;
   {
-    const d = resp(await runner('keys action:genkey phrase:"' + seed.trim() + '"'));
+    const d = resp(await runner('keys action:genkey phrase:"' + seed + '"'));
     if (!d || !d.address || !d.script || !d.privatekey) throw new Error("Could not derive signing key");
     script = d.script; privatekey = d.privatekey; fromaddress = d.address;
   }
@@ -204,5 +216,5 @@ module.exports = {
   keyusesInfo, ackKeyuses,
   _setRunner: (fn) => { runner = fn; },
   // exported for unit tests
-  _validators: { looksLikeMinimaAddress, isSeedPhrase, isAmount, isTokenid, isScript, isPrivKey }
+  _validators: { looksLikeMinimaAddress, isPhrase, isAmount, isTokenid, isScript, isPrivKey }
 };

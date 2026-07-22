@@ -124,7 +124,7 @@ function onStatus(s) {
   }
   if (activeView === "node") renderNode(s);
   wwLastStatus = s;
-  if (activeView === "webwallet") renderWebWallet();   // flip the megammr gate live after enable+restart
+  wwLiveRender();   // flip the megammr gate live after enable+restart — but NEVER rebuild the form on a routine block tick
 }
 
 // ---- first-run wizard: network + wallet presets + the FULL startup-parameter editor ----
@@ -434,6 +434,8 @@ function showRestoreOverlay() {
 
 // ---- tabs / refresh --------------------------------------------------------
 function selectTab(view) {
+  // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
+  if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   activeView = view;
   const active = document.querySelector('.tab[data-view="' + view + '"]');
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab--active", b.dataset.view === view));
@@ -498,14 +500,20 @@ function initTabScroll() {
 // Access a wallet straight from a seed phrase, backed by the LOCAL -megammr node. The seed is passed to main
 // only for loopback signing (keys genkey → sendfrom on 127.0.0.1) and is never persisted. Held here in memory
 // while unlocked; cleared on Lock. See main/webwallet.js for the fund-critical send + keyuses handling.
-let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwAmbiguous = false;
+let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwAmbiguous = false, wwMode = null;
 
-function onWebWalletUpdate() { if (activeView === "webwallet") renderWebWallet(); }
+// The 4 render "modes". A LIVE update (block tick / status push) must ONLY re-render when the mode CHANGES —
+// re-rendering the same mode rebuilds the panel and WIPES whatever the user is typing (the seed textarea, the send
+// form). User-initiated calls (tab select, unlock, refresh, lock, send) call renderWebWallet() directly instead.
+function currentWwMode() { if (!running) return "waiting"; if (!wwMegammrOn()) return "gate"; if (!wwSeed || !wwAddr) return "unlock"; return "wallet"; }
+function wwLiveRender() { if (activeView === "webwallet" && currentWwMode() !== wwMode) renderWebWallet(); }
+function onWebWalletUpdate() { wwLiveRender(); }
 function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwAmbiguous = false; }
 function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
 
 async function renderWebWallet() {
   const body = el("webwalletBody");
+  wwMode = currentWwMode();   // record what we're about to render, so wwLiveRender only re-renders on a real change
   if (!running) { body.innerHTML = `<div class="view__title">Web Wallet</div><div class="card"><div class="view__desc">Waiting for the node…</div></div>`; return; }
   if (!wwMegammrOn()) return renderWwGate(body);
   if (!wwSeed || !wwAddr) return renderWwUnlock(body);
@@ -538,13 +546,17 @@ function renderWwUnlock(body) {
         <br><b>Never type your seed into a website Web Wallet</b> — a hosted site can steal it (that has drained wallets).</div>
     </div>
     <div class="card">
-      <div class="field"><div class="field__label">Seed phrase (12–24 words)</div>
-        <textarea class="field__input" id="wwSeedIn" rows="3" placeholder="word word word …" autocomplete="off" spellcheck="false"></textarea></div>
+      <div class="field"><div class="field__label">Seed phrase</div>
+        <textarea class="field__input" id="wwSeedIn" rows="3" placeholder="24 words, or your own passphrase" autocomplete="off" spellcheck="false"></textarea>
+        <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as created — it is case- and spacing-sensitive.</div></div>
       <button class="btn btn--outline btn--full" id="wwUnlockBtn">Unlock wallet</button>
     </div>`;
   el("wwUnlockBtn").addEventListener("click", async () => {
-    const seed = String(el("wwSeedIn").value || "").trim().replace(/\s+/g, " ").toLowerCase();
-    if (seed.split(" ").length < 12) { toast("Enter a 12–24 word seed phrase", "err"); return; }
+    // Pass the phrase VERBATIM (only trim leading/trailing whitespace) — the node hashes it faithfully, so
+    // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard (app.js:2784).
+    const seed = String(el("wwSeedIn").value || "").trim();
+    if (!seed) { toast("Enter your seed phrase.", "err"); return; }
+    if (/["\\\n\r\t]/.test(seed)) { toast("Seed has a \", \\ or line break the command can't carry — enter it as one clean line.", "err"); return; }
     const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = "Deriving…";
     try {
       wwAddr = await api.wwDerive(seed);
@@ -4190,16 +4202,25 @@ function casinoFmt(v) {   // TRUNCATE to 3 dp, NEVER round up — a shown balanc
 
 // --- pure Web-Audio SFX (CSP-safe: no files, no network) ---
 const casinoSfx = (() => {
-  let ac = null;
-  function ctx() { try { if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)(); return ac; } catch (e) { return null; } }
-  function tone(freq, dur, type, vol, when) { const a = ctx(); if (!a) return; const t = a.currentTime + (when || 0); const o = a.createOscillator(), g = a.createGain(); o.type = type || "sine"; o.frequency.value = freq; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol || 0.14, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur); }
+  let ac = null, master = null, nbuf = null;
+  function ctx() { try { if (!ac) { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination); } return ac; } catch (e) { return null; } }
   const on = () => { try { return localStorage.getItem("casino_mute") !== "1"; } catch (e) { return true; } };
+  function noise() { const a = ctx(); if (!a) return null; if (!nbuf) { nbuf = a.createBuffer(1, a.sampleRate, a.sampleRate); const d = nbuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; } return nbuf; }
+  function tone(freq, dur, type, vol, when) { const a = ctx(); if (!a) return; const t = a.currentTime + (when || 0); const o = a.createOscillator(), g = a.createGain(); o.type = type || "sine"; o.frequency.value = freq; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol || 0.14, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur); }
+  // noise-based mechanical click (spin ticks / roulette ball clatter)
+  function click(freq, dur, vol, q) { const a = ctx(); if (!a) return; const s = a.createBufferSource(); s.buffer = noise(); const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = q || 9; const g = a.createGain(); s.connect(bp); bp.connect(g); g.connect(master); const t = a.currentTime; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); s.start(t); s.stop(t + dur + 0.02); }
+  // FM bell for the win fanfare
+  function bell(freq, at, dur, vol) { const a = ctx(); if (!a) return; const car = a.createOscillator(), mod = a.createOscillator(), mg = a.createGain(), g = a.createGain(); mod.frequency.value = freq * 1.5; mg.gain.value = freq * 1.2; mod.connect(mg); mg.connect(car.frequency); car.frequency.value = freq; car.type = "sine"; car.connect(g); g.connect(master); const t = a.currentTime + at; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); car.start(t); mod.start(t); car.stop(t + dur + 0.05); mod.stop(t + dur + 0.05); }
   return {
+    resume() { const a = ctx(); if (a && a.resume) try { a.resume(); } catch (e) {} },
     chip() { if (!on()) return; tone(180, 0.06, "square", 0.08); tone(240, 0.05, "square", 0.06, 0.045); },
     deal() { if (!on()) return; tone(330, 0.06, "triangle", 0.09); },
-    spin() { if (!on()) return; tone(440, 0.05, "sawtooth", 0.05); tone(520, 0.05, "sawtooth", 0.05, 0.1); },
-    win() { if (!on()) return; [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, "sine", 0.13, i * 0.09)); },
-    lose() { if (!on()) return; tone(210, 0.35, "sawtooth", 0.1); tone(150, 0.45, "sawtooth", 0.09, 0.08); },
+    spin() { if (!on()) return; click(1900, 0.03, 0.07, 10); },
+    tick() { if (!on()) return; click(3000, 0.03, 0.05, 6); },
+    clatter() { if (!on()) return; click(1700, 0.03, 0.13, 11); },
+    land() { if (!on()) return; click(1500, 0.05, 0.18, 4); },
+    win() { if (!on()) return; if (!ctx()) return; [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => bell(f, i * 0.1, 1.0, 0.34)); bell(1318.5, 0.44, 1.3, 0.18); for (let i = 0; i < 7; i++) click(3800 + Math.random() * 3200, 0.06, 0.06, 6); },
+    lose() { if (!on()) return; const a = ctx(); if (!a) return; const t = a.currentTime; const o = a.createOscillator(), lp = a.createBiquadFilter(), g = a.createGain(); o.type = "sawtooth"; o.frequency.setValueAtTime(210, t); o.frequency.exponentialRampToValueAtTime(66, t + 0.55); lp.type = "lowpass"; lp.frequency.value = 1000; o.connect(lp); lp.connect(g); g.connect(master); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.34, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.65); o.start(t); o.stop(t + 0.68); const s = a.createBufferSource(); s.buffer = noise(); const l2 = a.createBiquadFilter(); l2.type = "lowpass"; l2.frequency.value = 160; const g2 = a.createGain(); s.connect(l2); l2.connect(g2); g2.connect(master); g2.gain.setValueAtTime(0.45, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.32); s.start(t); s.stop(t + 0.34); },
     chime() { if (!on()) return; tone(880, 0.12, "sine", 0.1); tone(1174, 0.14, "sine", 0.09, 0.08); }
   };
 })();
@@ -4416,12 +4437,29 @@ async function casinoCheckCreateConfirm() {
   casinoView = "mybets";                     // JUMP to My Bets — the ONLY place bets live
 }
 
+// Take-confirm via the AUTHORITATIVE myBets read-model (not the flaky per-block raw-coin diff). The instant a NEW
+// amPlayer phase>=1 bet appears, the take is confirmed on-chain → clear the "Confirming" placeholder so the bet
+// renders in My Bets with its in-play animation (and its result later flashes via casinoWatchResults/ResolveResults).
+async function casinoCheckTakeConfirm() {
+  if (!Object.keys(casinoTaking).length) return;
+  let mine; try { mine = await api.casinoMyBets() || []; } catch (e) { return; }
+  const key = Object.keys(casinoTaking)[0], tk = casinoTaking[key];
+  const fresh = mine.find(b => b.amPlayer && b.phase >= 1 && !(tk.snap && tk.snap.has(b.coinid)));
+  if (!fresh) return;
+  delete casinoTaking[key];
+  const block = await casinoBlock();
+  casinoActivity("✓ " + (tk.game || "Bet") + " bet taken & confirmed on-chain" + (block ? " (block " + block + ")" : "") + " — game on! Waiting for the house to reveal.", "ok");
+  toast((tk.game || "Bet") + " is live ✓", "ok"); casinoSfx.chime();
+  if (activeView === "casino") casinoView = "mybets";
+}
+
 function onCasinoUpdate() {
   if (casinoUpdateTimer) clearTimeout(casinoUpdateTimer);
   casinoUpdateTimer = setTimeout(async () => {
     refreshCasinoBadge();
     await casinoRefresh();        // per-block: diff raw coins → narrate every step + detect results
     await casinoCheckCreateConfirm();   // confirm a just-posted create via myBets → clear status + jump to My Bets
+    await casinoCheckTakeConfirm();     // confirm a just-posted TAKE via myBets → clear "Confirming", keep on My Bets
     await casinoWatchResults();   // flash service-recorded (player) results with the exact outcome
     if (activeView !== "casino") return;
     if (el("casinoBody") && el("casinoBody").querySelector("input:focus")) return;   // never stomp a form
@@ -4522,11 +4560,15 @@ async function casinoDoTake(coinid) {
   if (pick === undefined || pick === null || pick === "") { toast("Choose your pick first", "warn"); return; }
   casinoBusy[coinid] = true; renderCasinoPlay(); casinoSfx.deal();
   casinoActivity("Taking bet — building & posting your take transaction…", "accent");
+  // Snapshot my current bets BEFORE posting, so the authoritative-myBets take-confirm (casinoCheckTakeConfirm)
+  // can spot the NEW taken bet regardless of raw-coin snapshot timing (mirrors casinoDoCreate's snap).
+  const takeSnap = new Set();
+  try { (await api.casinoMyBets() || []).forEach(b => takeSnap.add(b.coinid)); } catch (e) {}
   try {
     const r = await api.casinoTake(coinid, pick);
     delete casinoBusy[coinid]; delete casinoPick[coinid];
     const g = (r && r.game) || "Bet", range = (r && r.range) || 2;
-    casinoTaking[coinid] = { game: g, range };
+    casinoTaking[coinid] = { game: g, range, snap: takeSnap };
     casinoActivity("Take accepted by the node — waiting for on-chain confirmation (can take up to 3 blocks)…", "warn");
     toast(g + " bet posted — confirming on-chain…", "ok");
     casinoView = "mybets"; renderCasino();
@@ -4707,37 +4749,161 @@ async function renderCasinoHistory() {
   }).join("") + `</div>`;
 }
 
-// ---------------- win/lose flash (full-screen, body-appended; TERMINAL palette) ----------------
+// ---------------- reveal experience: spin → LAND on the real on-chain result → win/lose ----------------
+// Purely presentational. The outcome + exact roll come from the confirmed on-chain resolve (mechanism B /
+// service history) — this only spins the coin/dice/no-zero wheel to LAND on that result, then reveals.
+// The contract, engine.js, service.js and payout are untouched; nothing here can change a result.
+const CASINO_WHEEL = [32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]; // 36 pockets, NO zero (zero-edge), authentic clustered order
+const CASINO_RED = {}; [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].forEach(n => { CASINO_RED[n] = 1; });
+const CASINO_PIP = { 1:[5], 2:[3,7], 3:[3,5,7], 4:[1,3,7,9], 5:[1,3,5,7,9], 6:[1,3,4,6,7,9] };
+function casinoLabelToIdx(range, label) { if (label == null || label === "—") return -1; if (range == 2) return /head/i.test(label) ? 0 : 1; const n = parseInt(label); return isNaN(n) ? -1 : n - 1; }
+function casinoNonPick(pick, range) { range = parseInt(range) || 2; if (range < 2) return 0; let r; do { r = Math.floor(Math.random() * range); } while (r === pick); return r; }
+function casinoSetDie(die, val) { [].forEach.call(die.querySelectorAll("i"), x => x.classList.remove("on")); (CASINO_PIP[val] || []).forEach(p => { const el = die.querySelector('i[data-i="' + p + '"]'); if (el) el.classList.add("on"); }); }
+function casinoWheelHTML() {
+  const seg = 360 / 36, R = 88; let stops = [], nums = "";
+  for (let k = 0; k < 36; k++) { const n = CASINO_WHEEL[k]; stops.push((CASINO_RED[n] ? "#b01f2b" : "#14171c") + " " + (k * seg).toFixed(3) + "deg " + ((k + 1) * seg).toFixed(3) + "deg"); }
+  for (let m = 0; m < 36; m++) { const Ci = (m + 0.5) * seg, rad = (Ci - 90) * Math.PI / 180, x = Math.cos(rad) * R, y = Math.sin(rad) * R;
+    nums += '<div class="cf-num" style="transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + Ci + 'deg)"><span>' + CASINO_WHEEL[m] + '</span></div>'; }
+  return '<div class="cf-roubox"><div class="cf-roupin"></div><div class="cf-wheel"><div class="cf-wheelbg" style="background:conic-gradient(' + stops.join(",") + ')"></div>' + nums + '</div><div class="cf-rouhub"></div></div>';
+}
+// build the game visual in `stage`, start spinning, and return { land(resultIdx, done) } which decelerates onto the result
+function casinoSpinner(stage, range) {
+  const gv = document.createElement("div"); gv.className = "cf-gv"; stage.appendChild(gv);
+  if (range == 2) {
+    gv.innerHTML = '<div class="cf-coin"><div class="cf-face cf-front"><div class="cf-sheen"></div><div class="cf-rim"></div><span class="cf-sym">H</span></div><div class="cf-face cf-back"><div class="cf-sheen"></div><div class="cf-rim"></div><span class="cf-sym">T</span></div></div>';
+    const coin = gv.querySelector(".cf-coin"); let ang = 0, raf, landing = false;
+    (function fr() { ang += 27; coin.style.transform = "rotateY(" + ang + "deg)"; if (!landing) raf = requestAnimationFrame(fr); })();
+    const tick = setInterval(() => casinoSfx.tick(), 110);
+    return { land(res, done) { landing = true; cancelAnimationFrame(raf); clearInterval(tick);
+      const target = Math.ceil((ang + 540) / 360) * 360 + (res === 0 ? 0 : 180), from = ang, t0 = performance.now();
+      (function la(now) { const p = Math.min(1, (now - t0) / 820), e = 1 - Math.pow(1 - p, 3); coin.style.transform = "rotateY(" + (from + (target - from) * e) + "deg)";
+        if (p < 1) requestAnimationFrame(la); else { coin.style.transform = "rotateY(" + target + "deg)"; casinoSfx.land(); done && done(); } })(t0); } };
+  }
+  if (range == 6) {
+    let d = '<div class="cf-die">'; for (let i = 1; i <= 9; i++) d += '<i data-i="' + i + '"></i>'; d += '</div>'; gv.innerHTML = d;
+    const die = gv.querySelector(".cf-die"); casinoSetDie(die, 6); let a = 0, raf, landing = false;
+    const iv = setInterval(() => { casinoSetDie(die, 1 + Math.floor(Math.random() * 6)); casinoSfx.tick(); }, 85);
+    (function fr() { a += 1; die.style.transform = "rotate(" + (Math.sin(a / 3) * 15) + "deg) translateY(" + (Math.cos(a / 4) * 5) + "px)"; if (!landing) raf = requestAnimationFrame(fr); })();
+    return { land(res, done) { landing = true; clearInterval(iv); cancelAnimationFrame(raf); casinoSetDie(die, res + 1); const t0 = performance.now();
+      (function la(now) { const p = Math.min(1, (now - t0) / 440), e = 1 - Math.pow(1 - p, 3); die.style.transform = "rotate(" + ((1 - e) * 8) + "deg) scale(" + (1 + (1 - e) * 0.07) + ")";
+        if (p < 1) requestAnimationFrame(la); else { die.style.transform = "rotate(0) scale(1)"; casinoSfx.land(); done && done(); } })(t0); } };
+  }
+  gv.innerHTML = casinoWheelHTML();   // roulette — no-zero 36-pocket
+  const wheel = gv.querySelector(".cf-wheel"); let ang = 0, raf, landing = false, seg = 360 / 36;
+  (function fr() { ang += 14; wheel.style.transform = "rotate(" + ang + "deg)"; if (!landing) raf = requestAnimationFrame(fr); })();
+  const st = setInterval(() => casinoSfx.spin(), 70);
+  return { land(res, done) { landing = true; cancelAnimationFrame(raf); clearInterval(st);
+    const idx = CASINO_WHEEL.indexOf(res + 1), Ci = (idx + 0.5) * seg, base = (Math.ceil(ang / 360) + 4) * 360, target = base + (360 - Ci), from = ang, dur = 2600, t0 = performance.now();
+    for (let i = 0; i < 26; i++) { setTimeout(() => casinoSfx.clatter(), dur * (1 - Math.pow(1 - i / 26, 2))); }   // decelerating ball clatter
+    (function la(now) { const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 4); wheel.style.transform = "rotate(" + (from + (target - from) * e) + "deg)";
+      if (p < 1) requestAnimationFrame(la); else { casinoSfx.land(); done && done(); } })(t0); } };
+}
+function casinoConfetti(cv) {
+  const ctx = cv.getContext("2d"), W = cv.width = cv.offsetWidth * devicePixelRatio, H = cv.height = cv.offsetHeight * devicePixelRatio, P = [];
+  const cols = ["#33C088", "#F5C451", "#FF7A55", "#FFFFFF", "#7ad0ff"];
+  for (let i = 0; i < 140; i++) P.push({ x: W * (0.2 + Math.random() * 0.6), y: H * 0.6, vx: (Math.random() - 0.5) * 16 * devicePixelRatio, vy: (Math.random() * -17 - 7) * devicePixelRatio, g: 0.5 * devicePixelRatio, s: (4 + Math.random() * 6) * devicePixelRatio, c: cols[i % cols.length], rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4 });
+  const t0 = performance.now();
+  (function fr(now) { ctx.clearRect(0, 0, W, H); let live = false; P.forEach(p => { p.vy += p.g; p.x += p.vx; p.y += p.vy; p.vx *= 0.99; p.rot += p.vr; const a = Math.max(0, 1 - (now - t0) / 1500); if (p.y < H + 20) live = true; ctx.save(); ctx.globalAlpha = a; ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.c; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.6); ctx.restore(); });
+    if (live && now - t0 < 1600) requestAnimationFrame(fr); else ctx.clearRect(0, 0, W, H); })(t0);
+}
+function casinoRevealCSS() {
+  if (document.getElementById("cf-css")) return;
+  const s = document.createElement("style"); s.id = "cf-css";
+  s.textContent = `
+  .cf-ov{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;
+    background:radial-gradient(120% 100% at 50% 40%,rgba(0,0,0,.55),rgba(0,0,0,.86));animation:cfIn .2s ease}
+  @keyframes cfIn{from{opacity:0}to{opacity:1}}
+  .cf-card{width:min(420px,92vw);background:linear-gradient(180deg,#1a1d23,#131519);border:1px solid rgba(255,255,255,.15);
+    border-radius:18px;overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.6);position:relative}
+  .cf-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .cf-game{font:750 14px/1 system-ui,sans-serif;color:#ECEDF0}
+  .cf-pip{font:600 10px/1 var(--mono,ui-monospace,monospace);letter-spacing:.1em;text-transform:uppercase;color:#9C9FA8}
+  .cf-stage{position:relative;height:236px;display:flex;align-items:center;justify-content:center;overflow:hidden;
+    background:radial-gradient(120% 92% at 50% 0%,#1a3a2c,#0c1a13 60%,#0a0d0b)}
+  .cf-gv{display:flex;align-items:center;justify-content:center;z-index:2}
+  .cf-conf{position:absolute;inset:0;z-index:8;pointer-events:none}
+  .cf-coin{width:132px;height:132px;position:relative;transform-style:preserve-3d;will-change:transform}
+  .cf-face{position:absolute;inset:0;border-radius:50%;-webkit-backface-visibility:hidden;backface-visibility:hidden;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 16px 38px rgba(0,0,0,.55),inset 0 0 0 2px rgba(0,0,0,.25),inset 0 0 24px rgba(0,0,0,.28)}
+  .cf-front{background:radial-gradient(circle at 37% 28%,#ffe7a6,#f0a63c 52%,#a9631a);color:#5b3410}
+  .cf-back{transform:rotateY(180deg);background:radial-gradient(circle at 37% 28%,#ffcda2,#e8763d 52%,#8f381d);color:#4a1c0d}
+  .cf-sheen{position:absolute;inset:0;border-radius:50%;mix-blend-mode:overlay;opacity:.7;
+    background:conic-gradient(from -40deg,rgba(255,255,255,.55),rgba(0,0,0,.2) 22%,rgba(255,255,255,.5) 50%,rgba(0,0,0,.25) 74%,rgba(255,255,255,.55))}
+  .cf-rim{position:absolute;inset:5px;border-radius:50%;box-shadow:inset 0 0 0 3px rgba(255,255,255,.22),inset 0 -7px 15px rgba(0,0,0,.3)}
+  .cf-sym{position:relative;z-index:2;font:860 54px/1 system-ui,sans-serif;text-shadow:0 2px 0 rgba(0,0,0,.22),0 -1px 0 rgba(255,255,255,.35)}
+  .cf-die{width:114px;height:114px;border-radius:20px;background:linear-gradient(150deg,#f6f7f9,#c7cad2);
+    box-shadow:0 14px 30px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.6),inset 0 -10px 16px rgba(0,0,0,.12);
+    display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);padding:15px;gap:4px;will-change:transform}
+  .cf-die i{align-self:center;justify-self:center;width:19px;height:19px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#39404c,#0d1015);box-shadow:inset 0 -2px 3px rgba(0,0,0,.5);visibility:hidden}
+  .cf-die i.on{visibility:visible}
+  .cf-roubox{position:relative;width:210px;height:210px}
+  .cf-wheel{position:absolute;inset:0;border-radius:50%;will-change:transform;
+    box-shadow:0 14px 40px rgba(0,0,0,.55),inset 0 0 0 8px #241a0e,inset 0 0 0 11px #F5C451,inset 0 0 0 13px #241a0e}
+  .cf-wheelbg{position:absolute;inset:14px;border-radius:50%;box-shadow:inset 0 0 0 2px rgba(0,0,0,.4)}
+  .cf-num{position:absolute;top:50%;left:50%;width:0;height:0;font:700 9px/1 var(--mono,ui-monospace,monospace);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8)}
+  .cf-num span{position:absolute;transform:translate(-50%,-50%)}
+  .cf-rouhub{position:absolute;top:50%;left:50%;width:62px;height:62px;transform:translate(-50%,-50%);border-radius:50%;z-index:3;
+    background:radial-gradient(circle at 40% 34%,#4a3a20,#150f07);border:2px solid #F5C451;box-shadow:0 5px 14px rgba(0,0,0,.5)}
+  .cf-roupin{position:absolute;top:-4px;left:50%;transform:translateX(-50%);z-index:5;width:0;height:0;
+    border-left:10px solid transparent;border-right:10px solid transparent;border-top:18px solid #F5C451;filter:drop-shadow(0 3px 3px rgba(0,0,0,.7))}
+  .cf-strip{display:none;align-items:center;gap:14px;padding:14px 16px;border-top:1px solid rgba(255,255,255,.08);
+    transform:translateY(10px);opacity:0;transition:transform .3s cubic-bezier(.2,1.3,.4,1),opacity .3s}
+  .cf-strip.on{display:flex;transform:translateY(0);opacity:1}
+  .cf-verdict{font:800 22px/1 var(--mono,ui-monospace,monospace);white-space:nowrap}
+  .cf-strip.win .cf-verdict{color:var(--green,#33C088)}
+  .cf-strip.lose .cf-verdict{color:var(--red,#F05560)}
+  .cf-meta{font:11px/1.45 var(--mono,ui-monospace,monospace);color:#9C9FA8}.cf-meta b{color:#ECEDF0}
+  .cf-strip.win{box-shadow:inset 0 1px 0 rgba(51,192,136,.4)}
+  .cf-go{display:block;width:calc(100% - 32px);margin:0 16px 16px;padding:12px;border:0;border-radius:11px;cursor:pointer;
+    font:750 14px system-ui,sans-serif;color:#20130c;background:linear-gradient(180deg,#F5C451,#F7A73A);box-shadow:0 8px 20px rgba(247,167,58,.28)}
+  .cf-go:hover{filter:brightness(1.06)} .cf-go:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  @media(prefers-reduced-motion:reduce){.cf-ov *{animation-duration:.001ms!important;transition-duration:.05ms!important}}`;
+  document.head.appendChild(s);
+}
+
+// Same signature as before, so the four reveal points + fairness path are unchanged. Spins, lands on the REAL
+// result (already confirmed on-chain by the time this runs), then reveals with the bolder win/lose sound.
 function casinoFlash(won, game, amount, pickLabel, resultLabel, range, role) {
-  won ? casinoSfx.win() : casinoSfx.lose();
-  const g = casinoGame(range || 2);
-  const ov = document.createElement("div");
-  ov.className = "casino-flash-ov";
-  // House sees "the player picked X"; Player sees "you picked X". pickLabel is always the PLAYER's pick.
+  range = parseInt(range) || 2;
+  casinoRevealCSS(); casinoSfx.resume();
+  const g = casinoGame(range);
+  const pIdx = casinoLabelToIdx(range, pickLabel);
+  let rIdx = casinoLabelToIdx(range, resultLabel);
+  if (rIdx < 0 || rIdx >= range) rIdx = won ? (pIdx >= 0 ? pIdx : 0) : casinoNonPick(pIdx, range);   // "—" fallback: won⇒pick, lose⇒a non-pick
   const whose = role === "House" ? "player picked" : "you picked";
-  const detail = (resultLabel && resultLabel !== "—")
-    ? `<div class="casino-flash__detail">Result <b>${esc(resultLabel)}</b>${(pickLabel && pickLabel !== "—") ? ` · ${whose} <b>${esc(pickLabel)}</b>` : ""}</div>`
-    : ((pickLabel && pickLabel !== "—") ? `<div class="casino-flash__detail">${whose} <b>${esc(pickLabel)}</b></div>` : "");
-  const amt = (amount != null && amount !== "") ? `<div class="casino-flash__amt" style="color:${won ? "var(--green)" : "var(--red)"}">${won ? "+" : "−"}${casinoFmt(amount)} MINIMA</div>` : "";
-  const confetti = won ? ["✦", "★", "✦", "●", "★"].map((ch, i) => {
-    const left = [20, 50, 75, 35, 85][i], dur = [1.5, 1.8, 1.6, 1.4, 1.7][i], delay = [.1, .3, .2, .4, .15][i];
-    return `<span class="casino-confetti" style="left:${left}%;animation:${i % 2 ? "casinoCf2" : "casinoCf1"} ${dur}s ease-in forwards ${delay}s;color:${i % 2 ? "var(--amber)" : "var(--green)"}">${ch}</span>`;
-  }).join("") : "";
-  ov.innerHTML = `<div class="casino-flash ${won ? "is-win" : "is-lose"}">
-      ${confetti}
-      <div class="casino-flash__spin casino-spin-${g.range}"><span>${g.icon}</span></div>
-      <div class="casino-flash__ttl" style="color:${won ? "var(--green)" : "var(--red)"}">${won ? "YOU WIN" : "YOU LOSE"}</div>
-      ${detail}${amt}
-      <div class="casino-flash__game">${esc(g.name)}</div>
-      <button class="btn btn--primary casino-flash__go">CONTINUE</button>
-    </div>`;
+  const shownResult = (resultLabel && resultLabel !== "—") ? resultLabel : casinoPickLabel(range, rIdx);
+
+  const ov = document.createElement("div"); ov.className = "cf-ov";
+  ov.innerHTML = '<div class="cf-card">'
+    + '<div class="cf-head"><span class="cf-game">' + esc(g.name) + ' · as ' + esc(role || "") + '</span><span class="cf-pip">resolving on-chain…</span></div>'
+    + '<div class="cf-stage"></div>'
+    + '<div class="cf-strip"><span class="cf-verdict"></span><span class="cf-meta"></span></div>'
+    + '<canvas class="cf-conf"></canvas><button class="cf-go">Continue</button></div>';
   document.body.appendChild(ov);
-  const close = () => { ov.remove(); };
-  ov.addEventListener("click", e => { if (e.target === ov) close(); });
-  ov.querySelector(".casino-flash__go").addEventListener("click", close);
-  const onKey = e => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); } };
+  let closed = false, autoT = null;
+  const close = () => { if (closed) return; closed = true; clearTimeout(autoT); ov.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = e => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", onKey);
-  if (activeView === "casino") setTimeout(() => { if (document.body.contains(ov)) renderCasino(); }, 400);
+  ov.addEventListener("click", e => { if (e.target === ov) close(); });
+  ov.querySelector(".cf-go").addEventListener("click", close);
+
+  const spinner = casinoSpinner(ov.querySelector(".cf-stage"), range);
+  const PRE = range == 36 ? 350 : 750;   // brief pre-spin; the decel/land is the show
+  setTimeout(() => {
+    if (closed) return;
+    spinner.land(rIdx, () => {
+      if (closed) return;
+      ov.querySelector(".cf-pip").textContent = "resolved on-chain · provably fair";
+      const strip = ov.querySelector(".cf-strip"); strip.classList.add("on", won ? "win" : "lose");
+      const amtTxt = (amount != null && amount !== "") ? (" " + (won ? "+" : "−") + casinoFmt(amount) + " MINIMA") : "";
+      strip.querySelector(".cf-verdict").textContent = (won ? "✓ WON" : "✗ LOST") + amtTxt;
+      strip.querySelector(".cf-meta").innerHTML = ((pickLabel && pickLabel !== "—") ? whose + " <b>" + esc(pickLabel) + "</b> · " : "") + "landed <b>" + esc(shownResult) + "</b>";
+      if (won) { casinoSfx.win(); casinoConfetti(ov.querySelector(".cf-conf")); } else casinoSfx.lose();
+      autoT = setTimeout(close, 5200);
+      if (activeView === "casino") setTimeout(() => { if (activeView === "casino") renderCasino(); }, 300);
+    });
+  }, PRE);
 }
 
 // ============================ Vestr (token vesting — shared covenant 0x3C43…) ============================
