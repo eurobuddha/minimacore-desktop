@@ -3734,9 +3734,39 @@ function axWireMakerEditor(ccy) {
 async function renderAxActivity() {
   const host = el("axBody");
   const swaps = await api.axSwaps().catch(() => []);
-  host.innerHTML = `${axHeader("activity")}<div class="card"><div class="card__title">Your swaps</div>${swaps.length ? "" : '<div class="empty">No swaps yet — your completed and refunded swaps appear here.</div>'}<div id="axSwapList">${axSwapRows(swaps)}</div></div>`;
+  host.innerHTML = `${axHeader("activity")}<div class="card">
+    <div class="card__title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Your swaps</span>
+      ${swaps.length ? '<button class="btn btn--ghost" id="axExportBtn" title="Export all your swaps (maker + taker) as CSV">⬇ Export CSV</button>' : ""}
+    </div>
+    ${swaps.length ? "" : '<div class="empty">No swaps yet — your completed and refunded swaps appear here.</div>'}
+    <div id="axSwapList">${axSwapRows(swaps)}</div></div>`;
   wireAxHeader();
   wireAxSwapRows();
+  const eb = el("axExportBtn"); if (eb) eb.onclick = () => axExportCsv();
+}
+// Export the user's full swap history to CSV — one file, each row tagged Maker (RESPONDER) or Taker (INITIATOR),
+// with the on-chain leg tx ids. Reuses the History tab's formula-injection sanitizer + the generic save-dialog IPC.
+async function axExportCsv() {
+  const rows = await api.axExportSwaps().catch(() => []);
+  if (!rows.length) { toast("No swaps to export", ""); return; }
+  const q = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
+  const cols = ["Date", "Role", "Direction", "Sold Amount", "Sold Token", "Bought Amount", "Bought Token", "Price (USDT/MINIMA)", "Counterparty", "Status", "Contract Id", "Minima Tx", "Eth Tx"];
+  const roleLabel = (r) => r === "RESPONDER" ? "Maker" : (r === "INITIATOR" ? "Taker" : (r || ""));
+  const dirLabel = (d) => d === "MINIMA_TO_ERC20" ? "Sell MINIMA" : (d === "ERC20_TO_MINIMA" ? "Buy MINIMA" : (d || ""));
+  const iso = (ms) => { const n = Number(ms); return (n > 0 && isFinite(n)) ? new Date(n).toISOString() : ""; };
+  const price = (s) => {   // USDT per MINIMA, comparable across both directions
+    const sell = parseFloat(s.sellAmount), buy = parseFloat(s.buyAmount);
+    if (!(sell > 0) || !(buy > 0)) return "";
+    const p = s.direction === "MINIMA_TO_ERC20" ? buy / sell : (s.direction === "ERC20_TO_MINIMA" ? sell / buy : 0);
+    return p > 0 ? String(Number(p.toPrecision(8))) : "";
+  };
+  const lines = rows.map(s => [iso(s.created), roleLabel(s.role), dirLabel(s.direction),
+    s.sellAmount, axTok(s.sellToken), s.buyAmount, axTok(s.buyToken), price(s),
+    s.counterparty, String(s.status == null ? "" : s.status).toLowerCase(), s.contractId, s.minimaTx, s.ethTx].map(q).join(","));
+  const csv = [cols.join(","), ...lines].join("\r\n");
+  const path = await api.exportCsv(csv, "atomix-trades.csv").catch(() => null);
+  toast(path ? `Saved ${rows.length} trades ✓` : "Export cancelled", path ? "ok" : "");
 }
 function axSwapRows(swaps) {
   return swaps.map(s => `<div class="row" style="justify-content:space-between;cursor:pointer" data-axhash="${esc(s.hash)}">

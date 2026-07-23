@@ -389,6 +389,26 @@ async function swaps() {
   return jclone(all.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
     sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status, updated: s.updated })));
 }
+// Full per-swap history for CSV export — every swap column PLUS the on-chain leg tx ids joined from the events log.
+// getEvents rows are {event, token, amount, note(=txnhash), date}: the Minima leg logs token 'minima' (note=txpowid),
+// the ETH leg logs token 'ETH:<addr>' (note=eth tx hash). settle.js also logs ETH collect/expire with a NON-hash note
+// ("confirmed on-chain") — so keep only real 0x… ids. role stays raw (INITIATOR/RESPONDER); the renderer labels it.
+async function exportSwaps() {
+  const A = AX();
+  const all = await p(cb => A.swapdb.allSwaps(cb));
+  const isTx = (v) => /^0x[0-9a-fA-F]{16,}$/.test(String(v == null ? "" : v));
+  const out = [];
+  for (const s of all) {
+    const events = await p(cb => A.swapdb.getEvents(s.hash, cb)).catch(() => []);
+    const pick = (pred) => { const seen = []; for (const e of (events || [])) { if (e && pred(e) && isTx(e.note) && seen.indexOf(e.note) < 0) seen.push(e.note); } return seen.join(";"); };
+    out.push({ hash: s.hash, role: s.role, direction: s.direction, sellToken: s.sellToken, sellAmount: s.sellAmount,
+      buyToken: s.buyToken, buyAmount: s.buyAmount, counterparty: s.counterparty, status: s.status, contractId: s.contractId,
+      created: s.created, updated: s.updated,
+      minimaTx: pick(e => String(e.token) === "minima"),
+      ethTx: pick(e => String(e.token || "").slice(0, 3) === "ETH") });
+  }
+  return jclone(out);
+}
 async function inspect(hash) {
   const A = AX(), DB = A.swapdb, H = A.htlc, EO = A.ethops;
   const s = await p(cb => DB.getSwap(hash, cb));
@@ -585,7 +605,7 @@ async function otcDealAction(ref, action, amount, price) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
-  book, quote, swapPreview, swapExecute, swaps, inspect, marketHistory, wallet, exportKey, coins,
+  book, quote, swapPreview, swapExecute, swaps, exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute,
   makerCfg, makerPreview, makerSave, makerPublish, makerWithdraw, switchCurrency,
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,

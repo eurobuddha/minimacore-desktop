@@ -274,6 +274,7 @@ ipcMain.handle("mcd:axQuote", (_e, sell, amount, slip) => atomix.quote(sell, amo
 ipcMain.handle("mcd:axSwapPreview", (_e, sell, amount, slip) => atomix.swapPreview(sell, amount, slip));
 ipcMain.handle("mcd:axSwap", (_e, quoteId) => atomix.swapExecute(quoteId));
 ipcMain.handle("mcd:axSwaps", () => atomix.swaps());
+ipcMain.handle("mcd:axExportSwaps", () => atomix.exportSwaps());
 ipcMain.handle("mcd:axInspect", (_e, hash) => atomix.inspect(hash));
 ipcMain.handle("mcd:axMarketHistory", () => atomix.marketHistory());
 ipcMain.handle("mcd:axWallet", () => atomix.wallet());
