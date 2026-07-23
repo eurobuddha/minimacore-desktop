@@ -91,6 +91,7 @@ async function boot() {
   api.onMail(onMailUpdate);
   api.onPandapools(onPandapoolsUpdate);
   api.onAtomix(onAtomixUpdate);
+  api.onEthWallet(onEthWalletUpdate);
   api.onShop(onShopUpdate);
   api.onCasino(onCasinoUpdate);
   api.onCasinoLog(casinoActivity);        // activity-board feed (main-side casino MDS.log lines)
@@ -730,6 +731,7 @@ function renderActive() {
   else if (activeView === "mail") renderMail();
   else if (activeView === "pandapools") renderPandapools();
   else if (activeView === "atomix") renderAtomix();
+  else if (activeView === "ethwallet") renderEthWallet();
   else if (activeView === "minimall") renderMiniMall();
   else if (activeView === "casino") renderCasino();
   else if (activeView === "vestr") renderVestr();
@@ -3938,6 +3940,226 @@ async function refreshAxActive() {
     if (stagesEl) stagesEl.innerHTML = axStagesRows(swaps, bals, axQuoteMeta ? axQuoteMeta.ccy : "mxUSDT");
   }
   // OTC/Wallet: leave the form alone; the user re-enters or taps Refresh (an OS notification flags OTC activity).
+}
+
+// ============================ ETH Wallet (standalone tab) ============================
+// A full ERC20 wallet on the SAME seed-derived ethbridge address AtomiX uses (main/ethwallet.js → main/atomix.js
+// glue → byte-identical AtomiX ETH engine). Reads: ETH + arbitrary tokens. Sends: ETH + any ERC20, Low/Med/High
+// fee tiers. Etherscan links open externally (the safeLinkRow <a target=_blank> pattern the app already uses).
+let ewStatusCache = { ready: false };
+let ewUpdateTimer = null;
+const EW_ETHERSCAN = "https://etherscan.io/";
+function resetEwState() { ewStatusCache = { ready: false }; }
+
+function ewEthIcon() { return `<span class="ew-ic ew-ic--eth">Ξ</span>`; }
+function ewTokIcon(addr) { return `<img class="ew-ic" src="${TOK.identiconDataUri(addr)}" alt="" />`; }
+
+async function renderEthWallet() {
+  const host = el("ewBody"); if (!host) return;
+  const st = await api.ewStatus().catch(() => ({ ready: false }));
+  ewStatusCache = st;
+  const title = `<div class="view__title" style="border:0;padding-bottom:2px">ETH Wallet <span class="ew-net">Mainnet · real funds</span></div>
+    <div class="view__desc" style="margin-top:0">A full Ethereum wallet derived from this node's seed — the same address AtomiX and minimaSwap use. Send ETH and any ERC20 token; fees, tokens and RPC are yours to control.</div>`;
+  if (!st.ready) {
+    host.innerHTML = `${title}<div class="card"><div class="card__title">Setting up your wallet…</div>
+      <div class="view__desc">${running ? "Your key is being derived from the node. This needs the node running with write access — if your vault is locked, unlock it first. Your wallet appears here automatically." : "Start your node to unlock your ETH wallet."}</div>
+      <button class="btn btn--outline btn--sm" id="ewRetry" style="margin-top:10px">Refresh</button></div>`;
+    el("ewRetry").onclick = renderEthWallet;
+    return;
+  }
+  const b = await api.ewBalances().catch(() => null);
+  if (!b) {
+    host.innerHTML = `${title}<div class="card"><div class="card__title">Couldn't read balances</div>
+      <div class="view__desc">The Ethereum RPC didn't respond just now — it auto-falls-back across public nodes. Try again in a moment.</div>
+      <button class="btn btn--outline btn--sm" id="ewRetry" style="margin-top:10px">Refresh</button></div>`;
+    el("ewRetry").onclick = renderEthWallet;
+    return;
+  }
+  const tokenCards = b.tokens.map(t => `<div class="card ew-asset" data-ewtok="${esc(t.address)}">
+      ${ewTokIcon(t.address)}
+      <div class="ew-asset__main"><div class="card__title">${esc(t.symbol)}</div><div class="ew-val mono">${esc(TOK.tidyAmount(t.balance))} ${esc(t.symbol)}</div></div>
+      <button class="btn btn--sm btn--outline ew-menu" data-ewmenu="${esc(t.address)}" title="Token options">⋯</button>
+    </div>`).join("");
+  host.innerHTML = `${title}
+    <div class="card ew-addr" id="ewAddrCard"><div class="card__title">Your address · tap to receive</div><div class="mono ew-addr__v">${esc(b.shortAddr)}</div></div>
+    <div class="card ew-asset" id="ewEthCard">${ewEthIcon()}<div class="ew-asset__main"><div class="card__title">Ethereum</div><div class="ew-val mono" style="color:var(--accent)">${esc(TOK.tidyAmount(b.eth))} ETH</div></div></div>
+    ${tokenCards}
+    <div class="seg ew-actions" style="flex-wrap:wrap;margin-top:12px">
+      <button class="btn btn--primary btn--sm" id="ewSend">Send</button>
+      <button class="btn btn--outline btn--sm" id="ewReceive">Receive</button>
+      <button class="btn btn--outline btn--sm" id="ewRefresh">Refresh</button>
+      <button class="btn btn--outline btn--sm" id="ewAddTok">+ Add token</button>
+      <a class="btn btn--outline btn--sm" href="${EW_ETHERSCAN}address/${esc(b.address)}" target="_blank" rel="noreferrer">Etherscan ↗</a>
+      <button class="btn btn--outline btn--sm" id="ewSettings">Settings</button>
+    </div>`;
+  el("ewAddrCard").onclick = () => ewReceive(b.address);
+  el("ewEthCard").onclick = () => ewSendDialog(b, "eth");
+  el("ewSend").onclick = () => ewSendDialog(b, "eth");
+  el("ewReceive").onclick = () => ewReceive(b.address);
+  el("ewRefresh").onclick = () => { toast("Refreshing…"); renderEthWallet(); };
+  el("ewAddTok").onclick = () => ewAddTokenDialog();
+  el("ewSettings").onclick = () => ewSettingsDialog(b);
+  host.querySelectorAll("[data-ewtok]").forEach(c => c.onclick = e => { if (e.target.closest("[data-ewmenu]")) return; ewSendDialog(b, c.dataset.ewtok); });
+  host.querySelectorAll("[data-ewmenu]").forEach(btn => btn.onclick = e => { e.stopPropagation(); ewTokenMenu(b, btn.dataset.ewmenu); });
+}
+
+function ewReceive(addr) {
+  let qrHtml = "";
+  if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(addr); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:10px auto">${qr.createImgTag(5, 6)}</div>`; }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewRxOv"><div class="modal">
+    <div class="modal__title">Receive · Ethereum</div>
+    <div class="mono" style="user-select:all;word-break:break-all;text-align:center;font-size:13px">${esc(addr)}</div>${qrHtml}
+    <div class="view__desc">Same address on all EVM networks — fund it with Ethereum ETH and tokens.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewRxClose">Close</button><button class="btn btn--primary btn--full" id="ewRxCopy">Copy address</button></div></div></div>`);
+  const ov = el("ewRxOv"); const close = () => ov && ov.remove();
+  el("ewRxClose").onclick = close; el("ewRxCopy").onclick = () => copy(addr);
+  ov.onclick = e => { if (e.target.id === "ewRxOv") close(); };
+}
+
+function ewSendDialog(b, startAsset) {
+  const assets = [{ key: "eth", sym: "ETH" }].concat(b.tokens.map(t => ({ key: t.address, sym: t.symbol })));
+  let asset = assets.some(a => a.key === startAsset) ? startAsset : "eth";
+  const symOf = k => (assets.find(a => a.key === k) || { sym: "?" }).sym;
+  const chips = assets.map(a => `<button class="btn btn--sm ew-tokpick" data-ewasset="${esc(a.key)}">${esc(a.sym)}</button>`).join("");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewSendOv"><div class="modal">
+    <div class="modal__title">Send</div>
+    <div class="seg ew-tokrow" style="flex-wrap:wrap;gap:6px">${chips}</div>
+    <div class="field"><div class="field__label">To</div><input class="field__input mono" id="ewTo" placeholder="0x… recipient" autocomplete="off" spellcheck="false" /></div>
+    <div class="field"><div class="field__label">Amount <button class="btn btn--sm btn--outline" id="ewMax" style="float:right">Max</button></div><input class="field__input mono" id="ewAmt" placeholder="0.00" autocomplete="off" /></div>
+    <div class="view__desc">Sends are irreversible. Double-check the address.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewSendCancel">Cancel</button><button class="btn btn--primary btn--full" id="ewSendReview">Review</button></div></div></div>`);
+  const ov = el("ewSendOv"); const close = () => ov && ov.remove();
+  const paint = () => ov.querySelectorAll("[data-ewasset]").forEach(x => x.className = "btn btn--sm ew-tokpick " + (x.dataset.ewasset === asset ? "btn--primary" : "btn--outline"));
+  ov.querySelectorAll("[data-ewasset]").forEach(x => x.onclick = () => { asset = x.dataset.ewasset; paint(); });
+  paint();
+  el("ewMax").onclick = async () => { const m = await api.ewSendMax(asset).catch(() => null); if (m != null) el("ewAmt").value = m; };
+  el("ewSendCancel").onclick = close;
+  ov.onclick = e => { if (e.target.id === "ewSendOv") close(); };
+  el("ewSendReview").onclick = async () => {
+    const to = el("ewTo").value.trim(), amt = el("ewAmt").value.trim();
+    const r = await api.ewSendReview(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
+    if (r.err) { toast(r.err, "warn"); return; }
+    close();
+    ewConfirmSend(asset, symOf(asset), to, amt, r.fees);
+  };
+}
+
+// Confirm with the native Low/Med/High fee tiers (default Medium); live fee + gwei per tier.
+function ewConfirmSend(asset, sym, to, amt, fees) {
+  let tier = "med";
+  const label = t => (t === "low" ? "Low" : t === "high" ? "High" : "Medium");
+  const tierBtns = ["low", "med", "high"].map(t => `<button class="btn btn--sm ew-tier" data-ewtier="${t}">${label(t)}</button>`).join("");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewCfOv"><div class="modal">
+    <div class="modal__title">Confirm send</div>
+    <div class="kv"><span class="kv__k">Send</span><span class="kv__v mono">${esc(amt)} ${esc(sym)}</span></div>
+    <div class="kv"><span class="kv__k">To</span><span class="kv__v mono">${esc(short(to, 26))}</span></div>
+    <div class="field__label" style="margin-top:10px">Network fee</div>
+    <div class="seg ew-tierrow" style="gap:6px">${tierBtns}</div>
+    <div class="mono ew-feeline" id="ewFee"></div>
+    <div class="view__desc" style="color:var(--amber);margin-top:8px">This cannot be undone.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewCfCancel">Cancel</button><button class="btn btn--primary btn--full" id="ewCfSend">Send now</button></div></div></div>`);
+  const ov = el("ewCfOv"); const close = () => ov && ov.remove();
+  const feeEl = el("ewFee");
+  const paintFee = () => {
+    const f = fees && fees[tier];
+    feeEl.textContent = f ? `≈ ${TOK.tidyAmount(f.fee)} ETH  ·  ${TOK.tidyAmount(f.gwei)} gwei` : "";
+    ov.querySelectorAll("[data-ewtier]").forEach(x => x.className = "btn btn--sm ew-tier " + (x.dataset.ewtier === tier ? "btn--primary" : "btn--outline"));
+  };
+  ov.querySelectorAll("[data-ewtier]").forEach(x => x.onclick = () => { tier = x.dataset.ewtier; paintFee(); });
+  paintFee();
+  el("ewCfCancel").onclick = close;
+  ov.onclick = e => { if (e.target.id === "ewCfOv") close(); };
+  el("ewCfSend").onclick = async () => {
+    const btn = el("ewCfSend"); btn.disabled = true; btn.textContent = "Sending…";
+    const s = await api.ewSend(asset, to, amt, tier).catch(e => ({ err: String(e.message || e) }));
+    close();
+    toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok");
+    if (activeView === "ethwallet") renderEthWallet();
+  };
+}
+
+async function ewAddTokenDialog() {
+  const addr = await showPrompt("Add token", "", "0x… ERC20 contract address");
+  if (!addr) return;
+  toast("Reading token…");
+  const r = await api.ewAddToken(String(addr).trim()).catch(e => ({ err: String(e.message || e) }));
+  toast(r && r.err ? r.err : "✓ Added " + (r.token ? r.token.symbol : "token"), r && r.err ? "warn" : "ok");
+  if (r && !r.err && activeView === "ethwallet") renderEthWallet();
+}
+
+function ewTokenMenu(b, addr) {
+  const t = b.tokens.find(x => x.address === addr) || { symbol: "Token", address: addr };
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewMenuOv"><div class="modal">
+    <div class="modal__title">${esc(t.symbol)}</div>
+    <div class="seg" style="flex-direction:column;gap:8px">
+      <button class="btn btn--outline btn--full" id="ewMenuSend">Send ${esc(t.symbol)}</button>
+      <a class="btn btn--outline btn--full" href="${EW_ETHERSCAN}token/${esc(addr)}?a=${esc(b.address)}" target="_blank" rel="noreferrer">View on Etherscan ↗</a>
+      <button class="btn btn--outline btn--full" id="ewMenuCopy">Copy contract address</button>
+      <button class="btn btn--outline btn--full" id="ewMenuRemove" style="color:var(--red)">Remove from list</button>
+    </div>
+    <div class="seg" style="margin-top:10px"><button class="btn btn--outline btn--full" id="ewMenuClose">Close</button></div></div></div>`);
+  const ov = el("ewMenuOv"); const close = () => ov && ov.remove();
+  el("ewMenuClose").onclick = close; ov.onclick = e => { if (e.target.id === "ewMenuOv") close(); };
+  el("ewMenuSend").onclick = () => { close(); ewSendDialog(b, addr); };
+  el("ewMenuCopy").onclick = () => copy(addr);
+  el("ewMenuRemove").onclick = async () => { close(); await api.ewRemoveToken(addr).catch(() => {}); if (activeView === "ethwallet") renderEthWallet(); };
+}
+
+function ewSettingsDialog(b) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewSetOv"><div class="modal">
+    <div class="modal__title">ETH Wallet settings</div>
+    <div class="seg" style="flex-direction:column;gap:8px">
+      <button class="btn btn--outline btn--full" id="ewSetKey">Export private key</button>
+      <button class="btn btn--outline btn--full" id="ewSetRpc">RPC endpoint</button>
+      <button class="btn btn--outline btn--full" id="ewSetTok">Add token</button>
+      <a class="btn btn--outline btn--full" href="${EW_ETHERSCAN}address/${esc(b.address)}" target="_blank" rel="noreferrer">View address on Etherscan ↗</a>
+    </div>
+    <div class="view__desc" style="margin-top:10px">Your key is derived from this node's seed — the same address AtomiX and minimaSwap use. There is nothing to back up separately; restore your Minima seed and this wallet returns.</div>
+    <div class="seg" style="margin-top:8px"><button class="btn btn--outline btn--full" id="ewSetClose">Close</button></div></div></div>`);
+  const ov = el("ewSetOv"); const close = () => ov && ov.remove();
+  el("ewSetClose").onclick = close; ov.onclick = e => { if (e.target.id === "ewSetOv") close(); };
+  el("ewSetKey").onclick = () => { close(); ewExportKey(); };
+  el("ewSetRpc").onclick = () => { close(); ewRpcDialog(); };
+  el("ewSetTok").onclick = () => { close(); ewAddTokenDialog(); };
+}
+
+async function ewExportKey() {
+  if (!await showConfirm("Export ETH private key", "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.", "Reveal key", true)) return;
+  const pk = await api.ewExportKey().catch(() => null);
+  if (!pk) { toast("Wallet not ready", "warn"); return; }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewPkOv"><div class="modal">
+    <div class="modal__title">ETH private key</div><div class="view__desc" style="color:var(--red)">⚠ Keep this secret.</div>
+    <div class="mono" style="user-select:all;word-break:break-all;font-size:12px">${esc(pk)}</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewPkClose">Close</button><button class="btn btn--primary btn--full" id="ewPkCopy">Copy key</button></div></div></div>`);
+  const ov = el("ewPkOv"); const close = () => ov && ov.remove();
+  el("ewPkClose").onclick = close; el("ewPkCopy").onclick = () => copy(pk);
+  ov.onclick = e => { if (e.target.id === "ewPkOv") close(); };
+}
+
+async function ewRpcDialog() {
+  const st = await api.ewStatus().catch(() => ({}));
+  const cur = st && st.rpc ? st.rpc : "";
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewRpcOv"><div class="modal">
+    <div class="modal__title">RPC endpoint</div>
+    <div class="field"><div class="field__label">Custom HTTPS RPC (blank = built-in public nodes)</div><input class="field__input mono" id="ewRpcIn" placeholder="https://…" value="${esc(cur)}" autocomplete="off" spellcheck="false" /></div>
+    <div class="view__desc">Falls back to public keyless nodes automatically. Only public https hosts are allowed — local/private addresses are blocked for safety.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewRpcDefault">Use default</button><button class="btn btn--primary btn--full" id="ewRpcSave">Save</button></div>
+    <div class="seg" style="margin-top:8px"><button class="btn btn--outline btn--full" id="ewRpcCancel">Cancel</button></div></div></div>`);
+  const ov = el("ewRpcOv"); const close = () => ov && ov.remove();
+  el("ewRpcCancel").onclick = close; ov.onclick = e => { if (e.target.id === "ewRpcOv") close(); };
+  el("ewRpcDefault").onclick = async () => { const r = await api.ewSetRpc("").catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Using default public RPCs", r && r.err ? "warn" : "ok"); close(); };
+  el("ewRpcSave").onclick = async () => { const u = el("ewRpcIn").value.trim(); const r = await api.ewSetRpc(u).catch(e => ({ err: String(e.message || e) })); if (r && r.err) { toast(r.err, "warn"); return; } toast("✓ RPC saved", "ok"); close(); };
+}
+
+// live push: refresh the passive dashboard only, and never while a dialog is open (the frozen-form rule)
+function onEthWalletUpdate() {
+  if (ewUpdateTimer) return;
+  ewUpdateTimer = setTimeout(() => {
+    ewUpdateTimer = null;
+    if (activeView !== "ethwallet" || !el("ewBody")) return;
+    if ([...document.querySelectorAll(".overlay")].some(o => o.offsetParent !== null)) return;   // a modal is open
+    renderEthWallet().catch(() => {});
+  }, 400);
 }
 
 // ============================ miniMall (shop · studio · orders) ============================

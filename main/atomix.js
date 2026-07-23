@@ -30,7 +30,9 @@ const NET_HOSTS = new Set([
   "api.mexc.com"
 ]);
 function allowedUrl(u) {
-  try { return NET_HOSTS.has(new URL(String(u)).hostname); } catch (e) { return false; }
+  // NET_HOSTS = the built-in ETH RPCs + MEXC. ethUserHosts = a user-set custom RPC host, already SSRF-validated
+  // (https + non-private) at the point it was saved — never a raw user string reaching here unchecked.
+  try { const h = new URL(String(u)).hostname; return NET_HOSTS.has(h) || ethUserHosts.has(h); } catch (e) { return false; }
 }
 
 let ctx = null;               // the vm context (ctx.AX / ctx.READY / ctx.CTX)
@@ -173,6 +175,7 @@ function invalidate() {
   try { fs.unlinkSync(path.join(dir(), "atomix.sqlite")); } catch (e) {}
   ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null;
   vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
+  ethRpcAppliedUrl = null;               // the new boot builds a fresh ctx.RPC → re-apply any saved custom RPC to it
   emitter.emit("update");
   startLoop();
 }
@@ -603,12 +606,288 @@ async function otcDealAction(ref, action, amount, price) {
   emitter.emit("update"); return { ok: true };
 }
 
+// ============================ ETH Wallet (standalone tab) — full-parity glue over the same engine ============
+// The "ETH Wallet" top-level tab is a full ERC20 wallet on the SAME seed-derived ethbridge address AtomiX uses.
+// EVERYTHING here CALLS the byte-identical engine primitives (AX.ethops / AX.wallet / AX.ethtx / AX.abi / AX.dec)
+// — no engine file is edited (parity gate). New surface vs the AtomiX wallet sub-tab: an arbitrary ERC20 token
+// list, generic per-token balances + sends, Low/Med/High fee tiers, and an SSRF-guarded custom RPC.
+
+// --- token list (persisted; native TokenStore seed set) ---
+const ETH_TOKENS_FILE = () => path.join(dir(), "ethtokens.json");
+const ETH_SEED_TOKENS = [
+  { symbol: "USDT", address: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 },
+  { symbol: "USDC", address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6 },
+  { symbol: "DAI",  address: "0x6b175474e89094c44da98b954eedeac495271d0f", decimals: 18 },
+  { symbol: "WETH", address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", decimals: 18 }
+];
+const isEthAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a == null ? "" : a).trim());
+const lc = (a) => String(a || "").toLowerCase();
+let ethTokenList = null;
+function ethTokensLoad() {
+  if (ethTokenList) return ethTokenList;
+  try {
+    const raw = fs.readFileSync(ETH_TOKENS_FILE(), "utf8");
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length) {
+      ethTokenList = arr.filter(t => t && isEthAddr(t.address) && Number.isInteger(t.decimals))
+        .map(t => ({ symbol: ethCleanSymbol(t.symbol, t.address), address: lc(t.address), decimals: t.decimals }));
+      if (ethTokenList.length) return ethTokenList;
+    }
+  } catch (e) {}
+  ethTokenList = ETH_SEED_TOKENS.map(t => ({ ...t, address: lc(t.address) }));
+  ethTokensSave();
+  return ethTokenList;
+}
+function ethTokensSave() { try { fs.writeFileSync(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || []), "utf8"); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
+/** sanitise a contract-supplied symbol(): printable, trimmed, capped — it is attacker-controlled (any contract). */
+function ethCleanSymbol(sym, addr) {
+  let s = String(sym == null ? "" : sym).replace(/[^\x20-\x7e]/g, "").trim();
+  if (!s) s = "0x" + lc(addr).replace(/^0x/, "").slice(0, 4).toUpperCase();
+  return s.slice(0, 12);
+}
+function hexToAscii(h) { let s = ""; for (let i = 0; i + 1 < h.length; i += 2) { const c = parseInt(h.slice(i, i + 2), 16); if (c) s += String.fromCharCode(c); } return s; }
+/** Decode an ERC20 symbol() return — tolerant of dynamic-string OR bytes32 encodings (native fetchSymbol). */
+function ethDecodeSymbol(retHex, addr) {
+  const h = String(retHex == null ? "" : retHex).replace(/^0x/i, "");
+  try {
+    if (h.length >= 128) {
+      const off = parseInt(h.slice(0, 64), 16) * 2;
+      const len = parseInt(h.slice(off, off + 64), 16);
+      if (len > 0 && len <= 64) { const s = hexToAscii(h.slice(off + 64, off + 64 + len * 2)); if (/^[\x20-\x7e]+$/.test(s)) return ethCleanSymbol(s, addr); }
+    }
+  } catch (e) {}
+  const b32 = hexToAscii(h.slice(0, 64)).replace(/ +$/, "");
+  if (b32 && /^[\x20-\x7e]+$/.test(b32)) return ethCleanSymbol(b32, addr);
+  return ethCleanSymbol("", addr);
+}
+/** Read decimals()+symbol() for a contract via eth_call (for add-by-address). Throws if not an ERC20. */
+async function ethTokenMeta(address) {
+  const A = AX();
+  const addr = lc(address);
+  const decData = A.abi.encodeCall("decimals()", []);
+  const decRet = await p(cb => ctx.RPC.ethCall(addr, decData, cb));
+  // An EOA / non-ERC20 returns "0x" (empty success, no revert) → decode would silently yield 0. Reject a short
+  // return so a bare address can't be added as a bogus 0-decimals token (native fetchDecimals throws here too).
+  if (!decRet || String(decRet).replace(/^0x/i, "").length < 64) throw new Error("no decimals() — not an ERC20?");
+  let decimals;
+  try { decimals = Number(A.abi.decode(["uint256"], decRet)[0]); } catch (e) { decimals = NaN; }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error("no decimals() — not an ERC20?");
+  let symRet = null;
+  try { symRet = await p(cb => ctx.RPC.ethCall(addr, A.abi.encodeCall("symbol()", []), cb)); } catch (e) {}
+  return { symbol: ethDecodeSymbol(symRet, addr), address: addr, decimals };
+}
+function ethTokens() { return jclone(ethTokensLoad()); }
+async function ethAddToken(address) {
+  if (!isEthAddr(address)) return { err: "Enter a valid contract address (0x + 40 hex)." };
+  const addr = lc(address);
+  ethTokensLoad();
+  if (ethTokenList.some(t => t.address === addr)) return { err: "That token is already in your list." };
+  let meta;
+  try { meta = await ethTokenMeta(addr); } catch (e) { return { err: "Couldn't read that token — is it an ERC20? (" + (e && e.message ? e.message : e) + ")" }; }
+  ethTokenList.push(meta); ethTokensSave();
+  emitter.emit("update");
+  return { ok: true, token: jclone(meta) };
+}
+function ethRemoveToken(address) {
+  const addr = lc(address);
+  ethTokensLoad();
+  ethTokenList = ethTokenList.filter(t => t.address !== addr); ethTokensSave();
+  emitter.emit("update");
+  return { ok: true };
+}
+
+// --- balances: native ETH + every listed token (raw + display; raw gates fund checks) ---
+async function ethBalances() {
+  const A = AX();
+  const addr = vmCtx().eth.address;
+  await ensureRpcOverride();
+  const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, addr);
+  const out = { address: addr, shortAddr: A.wallet.shortAddr(addr), eth: "0", ethWei: "0", tokens: [], at: Date.now() };
+  await p(cb => ctx.RPC.getBalance(addr, cb)).then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); }).catch(() => {});
+  for (const t of ethTokensLoad()) {
+    let raw = "0", bal = "0";
+    try { const r = await p(cb => ops.balanceOf(t.address, cb)); raw = r.toString(); bal = A.dec.formatUnits(r, t.decimals); } catch (e) {}
+    out.tokens.push({ symbol: t.symbol, address: t.address, decimals: t.decimals, balance: bal, raw });
+  }
+  return jclone(out);
+}
+async function ethWallet() {
+  const A = AX();
+  return jclone({ address: vmCtx().eth.address, shortAddr: A.wallet.shortAddr(vmCtx().eth.address),
+    rpc: ctx.RPC.url, tiers: ["low", "med", "high"] });
+}
+
+// --- fee tiers: scale gas price via a proxy rpc so the ENTIRE F1 nonce serializer in AX.ethtx is reused ---
+const ETH_FEE_MULT = { low: 100, med: 130, high: 170 };   // native FEE_MULT, % of network gas price
+const ETH_FALLBACK_GP = 2000000000n;                      // mirror AX.ethtx FALLBACK_GAS_PRICE
+function ethTierMult(tier) { return ETH_FEE_MULT[tier] || ETH_FEE_MULT.med; }
+/** proxy rpc: delegate everything to `base`, but pre-divide gasPrice by the +20% AX.ethtx re-applies so the tx
+ *  lands on exactly base×mult/100 (native semantics). The F5 2×-base-fee floor inside AX.ethtx still applies. */
+function ethGasScaledRpc(base, multPct) {
+  return {
+    getTransactionCount: (a, cb) => base.getTransactionCount(a, cb),
+    sendRawTransaction: (h, cb) => base.sendRawTransaction(h, cb),
+    baseFeePerGasOrZero: (cb) => base.baseFeePerGasOrZero(cb),
+    ethCall: (to, data, cb) => base.ethCall(to, data, cb),
+    getBalance: (a, cb) => base.getBalance(a, cb),
+    gasPrice: (cb) => base.gasPrice((e, gp) => {
+      if (e) return cb(e);
+      let g = (gp == null ? 0n : gp);
+      if (g <= 0n) return cb(null, g);                    // 0 → AX.ethtx substitutes its own fallback (tier moot)
+      return cb(null, (g * BigInt(multPct) * 10n) / (100n * 12n));
+    })
+  };
+}
+/** Estimated fee (wei) the given tier will actually cost: max(base×mult/100, 2×baseFee) × gasLimit. Preview "≈". */
+async function ethTierFeeWei(gasLimit, multPct) {
+  let base = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n);
+  if (base == null || base <= 0n) base = ETH_FALLBACK_GP;
+  const baseFee = await p(cb => ctx.RPC.baseFeePerGasOrZero(cb)).catch(() => 0n);
+  let gp = (base * BigInt(multPct)) / 100n;
+  const floor = (baseFee > 0n) ? baseFee * 2n : 0n;
+  if (gp < floor) gp = floor;
+  return { feeWei: gasLimit * gp, gpWei: gp };
+}
+
+// --- send: native ETH or any listed/added ERC20, with a chosen fee tier (fund checks on RAW balances) ---
+function ethTokenBy(address) { const addr = lc(address); return ethTokensLoad().find(t => t.address === addr) || null; }
+// Reserve gas for the PRICIEST tier (High ×1.7) so Max — or any reviewed send — stays affordable at whatever tier
+// the user picks in the confirm dialog. gasReserveWei applies its own ×1.2, so ×170/120 lands the reserve on ×1.7.
+function ethReserveGp(base) { const b = (base != null && base > 0n) ? base : ETH_FALLBACK_GP; return (b * 170n) / 120n; }
+async function ethSendMax(asset) {
+  const A = AX();
+  await ensureRpcOverride();
+  if (asset === "eth") {
+    const wei = await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb));
+    const gp = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n);
+    return A.dec.formatUnits(A.wallet.maxEthSendWei(BigInt(wei), ethReserveGp(gp)), 18);
+  }
+  const t = ethTokenBy(asset); if (!t) return "0";
+  const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
+  const raw = await p(cb => ops.balanceOf(t.address, cb)).catch(() => 0n);
+  return A.dec.formatUnits(raw, t.decimals);
+}
+/** Validate + preview a send. asset = 'eth' | <token contract 0x…>. Returns {err} or {ok, sym, decimals, fees}. */
+async function ethSendReview(asset, to, amt) {
+  const A = AX();
+  await ensureRpcOverride();
+  if (!A.wallet.isEthAddr(to)) return { err: "Enter a valid Ethereum address (0x + 40 hex characters)." };
+  if (!A.wallet.validDec(amt)) return { err: "Enter a plain decimal amount." };
+  const ethWeiR = await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb)).catch(() => null);
+  if (ethWeiR == null) return { err: "Could not read your ETH balance — try again." };
+  const ethWei = BigInt(ethWeiR);
+  const isEth = asset === "eth";
+  const gasLimit = isEth ? A.wallet.GAS_ETH : A.wallet.GAS_ERC20;
+  let sym = "ETH", decimals = 18;
+  if (isEth) {
+    let wei; try { wei = A.dec.parseUnits(amt, 18); } catch (e) { return { err: "Enter a plain decimal amount." }; }
+    if (wei <= 0n) return { err: "Enter an amount above zero." };
+    if (wei + A.wallet.gasReserveWei(ethReserveGp(await gpOrFallback()), A.wallet.GAS_ETH) > ethWei) return { err: "Not enough ETH for that amount plus network gas — try Max." };
+  } else {
+    const t = ethTokenBy(asset); if (!t) return { err: "Unknown token — add it first." };
+    sym = t.symbol; decimals = t.decimals;
+    let raw; try { raw = A.dec.parseUnits(amt, decimals); } catch (e) { return { err: "Enter a plain decimal amount." }; }
+    if (raw <= 0n) return { err: "Enter an amount above zero — that is below the token's smallest unit." };
+    const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
+    const held = await p(cb => ops.balanceOf(t.address, cb)).catch(() => 0n);
+    if (raw > held) return { err: "That is more " + sym + " than this wallet holds." };
+    if (A.wallet.gasReserveWei(ethReserveGp(await gpOrFallback()), A.wallet.GAS_ERC20) > ethWei) return { err: "Sending " + sym + " needs a little ETH for gas — fund the wallet with ETH first." };
+  }
+  const fees = {};
+  for (const tier of ["low", "med", "high"]) {
+    const f = await ethTierFeeWei(gasLimit, ethTierMult(tier));
+    fees[tier] = { fee: A.dec.formatUnits(f.feeWei, 18), gwei: A.dec.formatUnits(f.gpWei, 9) };
+  }
+  return { ok: true, sym, decimals, fees };
+}
+async function gpOrFallback() { const gp = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n); return (gp == null || gp <= 0n) ? ETH_FALLBACK_GP : gp; }
+/** Broadcast the send at the chosen tier. Reuses AX.wallet.sendEth (ETH) or AX.ethtx.send (any ERC20) through the
+ *  gas-scaled proxy rpc — so the F1 per-address nonce serializer is fully in force. NO timeout (a rejected-but-
+ *  broadcasting send must not be retried into a double transfer — the serializer bounds it). */
+async function ethSendExecute(asset, to, amt, tier) {
+  const A = AX();
+  await ensureRpcOverride();
+  if (!A.wallet.isEthAddr(to)) throw new Error("Invalid recipient address.");
+  if (!A.wallet.validDec(amt)) throw new Error("Invalid amount.");
+  const proxy = ethGasScaledRpc(ctx.RPC, ethTierMult(tier));
+  const from = vmCtx().eth.address, priv = vmCtx().eth.privKey;
+  let tx;
+  if (asset === "eth") {
+    tx = await p(cb => A.wallet.sendEth(proxy, priv, from, to, amt, cb));
+  } else {
+    const t = ethTokenBy(asset); if (!t) throw new Error("Unknown token — add it first.");
+    let raw; try { raw = A.dec.parseUnits(amt, t.decimals); } catch (e) { throw new Error("Invalid amount."); }
+    if (raw <= 0n) throw new Error("Amount below the token's smallest unit.");
+    const data = A.abi.encodeCall("transfer(address,uint256)", [{ t: "address", v: to }, { t: "uint256", v: raw }]);
+    tx = await p(cb => A.ethtx.send(proxy, priv, from, A.ethops.NET.chainId, t.address, data, 0n, A.wallet.GAS_ERC20, cb));
+  }
+  emitter.emit("update");
+  return { tx };
+}
+
+// --- custom RPC override (SSRF-guarded): https only, no private/loopback host; added to the allowlist for the
+//     engine's net shim + prepended to the endpoint list. Persisted and re-applied after each (re)boot. ---
+const ethUserHosts = new Set();
+let ethRpcOverride = null;      // {url, host} — desired custom primary, or null
+let ethRpcAppliedUrl = null;    // the override URL actually pushed to ctx.RPC — compare against THIS, not ctx.RPC.url
+                                // (which drifts on sticky-endpoint failover and would else re-apply + resetAll spuriously)
+const ETH_RPC_FILE = () => path.join(dir(), "ethrpc.json");
+function ethPrivateHost(host) {
+  const h = lc(host).replace(/^\[|\]$/g, "").replace(/\.$/, "");   // strip IPv6 brackets + a trailing FQDN dot
+  if (!h) return true;
+  // Block EVERY IPv6 literal outright: public RPC providers use hostnames or IPv4, so a raw IPv6 endpoint is
+  // vanishingly rare — and this kills the whole evasion class at once (::1, [fd00::1], [::ffff:127.0.0.1], etc.).
+  if (h.indexOf(":") >= 0) return true;
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".localhost")) return true;
+  if (/^127\.|^10\.|^192\.168\.|^169\.254\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^0\.|^255\./.test(h)) return true;
+  return false;
+}
+function ethValidateRpc(url) {
+  let u; try { u = new URL(String(url)); } catch (e) { return { err: "That doesn't look like a URL." }; }
+  if (u.protocol !== "https:") return { err: "Use an https:// endpoint." };
+  if (ethPrivateHost(u.hostname)) return { err: "That host isn't allowed (local/private addresses are blocked)." };
+  return { ok: true, url: u.toString(), host: u.hostname };
+}
+function ethRpcLoad() {
+  if (ethRpcOverride !== null) return ethRpcOverride;
+  try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; } } catch (e) {}
+  ethRpcOverride = null; return null;
+}
+/** Apply a saved override to the (possibly freshly re-booted) engine rpc — ONCE per override value. Compares
+ *  against ethRpcAppliedUrl (not ctx.RPC.url, which drifts on failover) so an endpoint failover never triggers a
+ *  spurious re-apply + ethtx.resetAll() that would wipe in-flight nonce state. A fresh engine boot resets ctx.RPC,
+ *  so re-apply when the applied marker is cleared (see invalidate) or when a new override is saved. */
+async function ensureRpcOverride() {
+  const o = ethRpcLoad();
+  if (!o || !ctx || !ctx.READY || !ctx.RPC) return;
+  if (ethRpcAppliedUrl === o.url && ctx.RPC.url) return;   // already applied to a live rpc
+  ethUserHosts.add(o.host);
+  try { ctx.RPC.setUrl(o.url); AX().ethtx.resetAll(); ethRpcAppliedUrl = o.url; } catch (e) {}
+}
+async function ethSetRpc(url) {
+  if (url == null || String(url).trim() === "") {   // clear → back to the built-in fallbacks
+    ethRpcOverride = null; ethRpcAppliedUrl = null; try { fs.unlinkSync(ETH_RPC_FILE()); } catch (e) {}
+    try { ctx.RPC.setUrl(AX().ethrpc.FALLBACKS[0]); AX().ethtx.resetAll(); } catch (e) {}
+    emitter.emit("update"); return { ok: true, rpc: ctx && ctx.RPC ? ctx.RPC.url : null };
+  }
+  const v = ethValidateRpc(url);
+  if (v.err) return { err: v.err };
+  ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host);
+  try { fs.writeFileSync(ETH_RPC_FILE(), JSON.stringify(ethRpcOverride), "utf8"); } catch (e) {}
+  try { ctx.RPC.setUrl(v.url); AX().ethtx.resetAll(); ethRpcAppliedUrl = v.url; } catch (e) {}
+  emitter.emit("update");
+  return { ok: true, rpc: v.url };
+}
+
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
   book, quote, swapPreview, swapExecute, swaps, exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute,
   makerCfg, makerPreview, makerSave, makerPublish, makerWithdraw, switchCurrency,
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
+  ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute, ethSetRpc,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
   _ctx: () => ctx, _fire: fire
 };

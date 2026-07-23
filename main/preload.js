@@ -156,6 +156,19 @@ contextBridge.exposeInMainWorld("mcd", {
   axInvalidate: () => ipcRenderer.invoke("mcd:axInvalidate"),
   onAtomix: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:atomix", h); return () => ipcRenderer.removeListener("mcd:atomix", h); },
 
+  // ETH Wallet (standalone ERC20 wallet on the seed-derived address)
+  ewStatus: () => ipcRenderer.invoke("mcd:ewStatus"),
+  ewBalances: () => ipcRenderer.invoke("mcd:ewBalances"),
+  ewTokens: () => ipcRenderer.invoke("mcd:ewTokens"),
+  ewAddToken: (addr) => ipcRenderer.invoke("mcd:ewAddToken", addr),
+  ewRemoveToken: (addr) => ipcRenderer.invoke("mcd:ewRemoveToken", addr),
+  ewSendMax: (asset) => ipcRenderer.invoke("mcd:ewSendMax", asset),
+  ewSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:ewSendReview", asset, to, amt),
+  ewSend: (asset, to, amt, tier) => ipcRenderer.invoke("mcd:ewSend", asset, to, amt, tier),
+  ewExportKey: () => ipcRenderer.invoke("mcd:ewExportKey"),
+  ewSetRpc: (url) => ipcRenderer.invoke("mcd:ewSetRpc", url),
+  onEthWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:ethwallet", h); return () => ipcRenderer.removeListener("mcd:ethwallet", h); },
+
   // Casino (Zero Edge Casino — on-chain commit-reveal)
   casinoStatus: () => ipcRenderer.invoke("mcd:casinoStatus"),
   casinoOpenBets: () => ipcRenderer.invoke("mcd:casinoOpenBets"),

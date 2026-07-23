@@ -20,6 +20,7 @@ const faucet = require("./faucet");
 const mail = require("./mail");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
+const ethwallet = require("./ethwallet");
 const shop = require("./shop");
 const casino = require("./casino");
 const vestr = require("./vestr");
@@ -306,6 +307,19 @@ atomix.emitter.on("notify", (msg) => {   // settlement/OTC milestones — OS not
 });
 let axStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted = true; atomix.startLoop(); } });
+
+// ETH Wallet — a standalone full-parity ERC20 wallet on the SAME seed-derived address, reusing the AtomiX engine.
+ipcMain.handle("mcd:ewStatus", () => ethwallet.status());
+ipcMain.handle("mcd:ewBalances", () => ethwallet.balances());
+ipcMain.handle("mcd:ewTokens", () => ethwallet.tokens());
+ipcMain.handle("mcd:ewAddToken", (_e, addr) => ethwallet.addToken(addr));
+ipcMain.handle("mcd:ewRemoveToken", (_e, addr) => ethwallet.removeToken(addr));
+ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
+ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
+ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
+ipcMain.handle("mcd:ewExportKey", () => ethwallet.exportKey());
+ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
+ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
 // Casino (Zero Edge Casino — on-chain commit-reveal)
 ipcMain.handle("mcd:casinoStatus", () => casino.status());

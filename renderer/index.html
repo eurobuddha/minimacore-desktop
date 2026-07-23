@@ -27,6 +27,7 @@
         <button class="tab" data-view="mail">Mail<span class="tab-badge" id="mailBadge" hidden></span></button>
         <button class="tab" data-view="pandapools">Pools</button>
         <button class="tab" data-view="atomix">AtomiX</button>
+        <button class="tab" data-view="ethwallet">ETH Wallet</button>
         <button class="tab" data-view="minimall">miniMall<span class="tab-badge" id="shopBadge" hidden></span></button>
         <!-- Casino: hidden by default; unhidden by boot() only when CFG.casinoEnabled (Settings 18+ self-cert). -->
         <button class="tab" data-view="casino" id="casinoTab" hidden>P2PChance<span class="tab-badge" id="casinoBadge" hidden></span></button>
@@ -75,6 +76,10 @@
 
       <section class="view" id="view-atomix">
         <div id="axBody"></div>
+      </section>
+
+      <section class="view" id="view-ethwallet">
+        <div id="ewBody"></div>
       </section>
 
       <section class="view" id="view-minimall">
