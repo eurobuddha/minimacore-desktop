@@ -582,17 +582,15 @@ function renderWwWallet(body) {
   let qrHtml = "";
   try { if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(recv); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:6px auto">${qr.createImgTag(4, 6)}</div>`; } } catch (e) {}
 
-  // Show the CONFIRMED balance as the headline figure. A foreign megammr wallet reports sendable:0 (the node holds
-  // none of its keys) even though it holds coins — showing `sendable` made a 655k wallet read as "zero". Only surface
-  // a separate "sendable" figure when it is > 0 and genuinely differs (i.e. the node's OWN wallet with locked coins).
-  const balRows = (wwBal.length ? wwBal : []).map(b => {
-    const showSendable = Number(b.sendable) > 0 && String(b.sendable) !== String(b.confirmed);
-    return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
+  // Match the original webWallet EXACTLY: display `confirmed`, and append "/<unconfirmed>" only when there is a
+  // pending amount. It never shows `sendable` — a foreign megammr seed reports sendable:0 (the node holds none of its
+  // keys) even though the coins are real and spendable via sendfrom, so showing sendable made a 655k wallet read "0".
+  const balRows = (wwBal.length ? wwBal : []).map(b =>
+    `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
        <span>${esc(b.name)}</span>
        <span style="font-family:var(--mono,monospace)">${esc(b.confirmed)}${
-         showSendable ? `<small style="opacity:.6"> (${esc(b.sendable)} sendable)</small>` : ""}</span>
-     </div>`;
-  }).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
+         (b.unconfirmed && String(b.unconfirmed) !== "0") ? `<small style="opacity:.6"> / ${esc(b.unconfirmed)}</small>` : ""}</span>
+     </div>`).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
 
   const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
     .map(b => `<option value="${esc(b.tokenid)}">${esc(b.name)}</option>`).join("");
