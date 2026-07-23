@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld("mcd", {
   // node command over RPC → { status, response } (same shape the Android NodeApi consumes)
   cmd: (command) => ipcRenderer.invoke("mcd:cmd", command),
 
+  // reliable clipboard write via the MAIN process (the renderer's navigator.clipboard silently rejects when the
+  // window isn't focused, leaving stale data on the clipboard while the UI still says "Copied"). Returns true on ok.
+  clip: (text) => ipcRenderer.invoke("mcd:clip", text),
+
   // config
   getConfig: () => ipcRenderer.invoke("mcd:getConfig"),
   saveConfig: (patch) => ipcRenderer.invoke("mcd:saveConfig", patch),

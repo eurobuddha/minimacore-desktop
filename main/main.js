@@ -5,7 +5,7 @@
  * the IPC handlers here, which proxy to the local RPC using the main-held secret. On launch we start the
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, Notification, session } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, Notification, session, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const config = require("./config");
@@ -101,6 +101,11 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const pinned = /^send\s/.test(command) ? await pinMinimaSend(run, command) : command;
   return run(pinned);
 });
+
+// Clipboard writes go through the main process — main-process clipboard.writeText is synchronous and never subject
+// to the renderer navigator.clipboard's focus/permission failures (which silently left stale data on the clipboard
+// while the UI still said "Copied"). Coerce nullish to "" so it never writes the string "null"/"undefined".
+ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? "" : String(text)); return true; });
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });

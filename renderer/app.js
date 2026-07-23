@@ -52,7 +52,16 @@ function toast(msg, kind) {
   const t = el("toast"); t.className = "toast" + (kind ? " " + kind : ""); t.textContent = msg; t.style.display = "";
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, 3200);
 }
-function copy(text) { try { navigator.clipboard.writeText(text); toast("Copied ✓", "ok"); } catch (e) {} }
+// Copy through the MAIN process (api.clip → clipboard.writeText) — reliable regardless of window focus. The old
+// navigator.clipboard.writeText rejected silently when unfocused, so the toast lied and the clipboard kept stale
+// data. Await the real result and only report success when the write actually happened; fall back to the web API.
+async function copy(text) {
+  const s = String(text == null ? "" : text);
+  let ok = false;
+  try { ok = !!(await api.clip(s)); } catch (e) { ok = false; }
+  if (!ok) { try { await navigator.clipboard.writeText(s); ok = true; } catch (e) { ok = false; } }
+  toast(ok ? "Copied ✓" : "Copy failed — select the text and press ⌘C", ok ? "ok" : "err");
+}
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function short(s, n) { s = String(s || ""); return s.length > (n || 18) ? s.slice(0, (n || 18)) + "…" : s; }
 
