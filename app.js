@@ -81,6 +81,15 @@ async function boot() {
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
   api.onPandapools(onPandapoolsUpdate);
+  api.onAtomix(onAtomixUpdate);
+  api.onShop(onShopUpdate);
+  api.onCasino(onCasinoUpdate);
+  api.onCasinoLog(casinoActivity);        // activity-board feed (main-side casino MDS.log lines)
+  api.onVestr(onVestrUpdate);
+  api.onWebWallet(onWebWalletUpdate);
+
+  // Casino is opt-in (18+). Reveal its tab only when enabled in Settings; otherwise it stays hidden.
+  const ctab = el("casinoTab"); if (ctab) ctab.hidden = !CFG.casinoEnabled;
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -114,6 +123,8 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   if (activeView === "node") renderNode(s);
+  wwLastStatus = s;
+  wwLiveRender();   // flip the megammr gate live after enable+restart — but NEVER rebuild the form on a routine block tick
 }
 
 // ---- first-run wizard: network + wallet presets + the FULL startup-parameter editor ----
@@ -374,7 +385,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState();   // seed changed → re-derive the mail identity
+    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState();   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -413,7 +424,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState();   // seed changed → re-derive the mail identity
+      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState();   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -423,6 +434,8 @@ function showRestoreOverlay() {
 
 // ---- tabs / refresh --------------------------------------------------------
 function selectTab(view) {
+  // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
+  if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   activeView = view;
   const active = document.querySelector('.tab[data-view="' + view + '"]');
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab--active", b.dataset.view === view));
@@ -483,13 +496,230 @@ function initTabScroll() {
   // Manrope/Geist load async → tab widths change after first paint; reposition the ink once they settle.
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionTabInk);
 }
+// ===================== Web Wallet (local, MegaMMR-gated) =====================
+// Access a wallet straight from a seed phrase, backed by the LOCAL -megammr node. The seed is passed to main
+// only for loopback signing (keys genkey → sendfrom on 127.0.0.1) and is never persisted. Held here in memory
+// while unlocked; cleared on Lock. See main/webwallet.js for the fund-critical send + keyuses handling.
+let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwAmbiguous = false, wwMode = null;
+
+// The 4 render "modes". A LIVE update (block tick / status push) must ONLY re-render when the mode CHANGES —
+// re-rendering the same mode rebuilds the panel and WIPES whatever the user is typing (the seed textarea, the send
+// form). User-initiated calls (tab select, unlock, refresh, lock, send) call renderWebWallet() directly instead.
+function currentWwMode() { if (!running) return "waiting"; if (!wwMegammrOn()) return "gate"; if (!wwSeed || !wwAddr) return "unlock"; return "wallet"; }
+function wwLiveRender() { if (activeView === "webwallet" && currentWwMode() !== wwMode) renderWebWallet(); }
+function onWebWalletUpdate() { wwLiveRender(); }
+function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwAmbiguous = false; }
+function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
+
+async function renderWebWallet() {
+  const body = el("webwalletBody");
+  wwMode = currentWwMode();   // record what we're about to render, so wwLiveRender only re-renders on a real change
+  if (!running) { body.innerHTML = `<div class="view__title">Web Wallet</div><div class="card"><div class="view__desc">Waiting for the node…</div></div>`; return; }
+  if (!wwMegammrOn()) return renderWwGate(body);
+  if (!wwSeed || !wwAddr) return renderWwUnlock(body);
+  return renderWwWallet(body);
+}
+
+function renderWwGate(body) {
+  body.innerHTML = `
+    <div class="view__title">Web Wallet</div>
+    <div class="card">
+      <div class="view__desc"><b>A MegaMMR node is required.</b> The Web Wallet accesses a wallet from its seed
+        phrase, so the node must keep the full MegaMMR to serve coin data + proofs for your wallet's addresses.</div>
+      <div class="view__desc" style="opacity:.8">Enabling MegaMMR restarts the node and grows the node data over
+        time. This is a one-time change.</div>
+      <button class="btn btn--outline btn--full" id="wwEnableBtn">Enable MegaMMR &amp; restart node</button>
+    </div>`;
+  el("wwEnableBtn").addEventListener("click", async () => {
+    const b = el("wwEnableBtn"); b.disabled = true; b.textContent = "Restarting node…";
+    try { await api.wwEnableMegammr(); toast("MegaMMR enabled — node restarting", "ok"); }
+    catch (e) { toast("Could not enable MegaMMR", "err"); b.disabled = false; b.textContent = "Enable MegaMMR & restart node"; }
+  });
+}
+
+function renderWwUnlock(body) {
+  body.innerHTML = `
+    <div class="view__title">Web Wallet</div>
+    <div class="card" style="border-color:var(--accent)">
+      <div class="view__desc"><b>Runs entirely on this computer.</b> Your seed is sent only to your own local node
+        (127.0.0.1) to derive keys and sign — it never leaves this machine and is never saved.
+        <br><b>Never type your seed into a website Web Wallet</b> — a hosted site can steal it (that has drained wallets).</div>
+    </div>
+    <div class="card">
+      <div class="field"><div class="field__label">Seed phrase</div>
+        <textarea class="field__input" id="wwSeedIn" rows="3" placeholder="24 words, or your own passphrase" autocomplete="off" spellcheck="false"></textarea>
+        <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as created — it is case- and spacing-sensitive.</div></div>
+      <button class="btn btn--outline btn--full" id="wwUnlockBtn">Unlock wallet</button>
+    </div>`;
+  el("wwUnlockBtn").addEventListener("click", async () => {
+    // Pass the phrase VERBATIM (only trim leading/trailing whitespace) — the node hashes it faithfully, so
+    // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard (app.js:2784).
+    const seed = String(el("wwSeedIn").value || "").trim();
+    if (!seed) { toast("Enter your seed phrase.", "err"); return; }
+    if (/["\\\n\r\t]/.test(seed)) { toast("Seed has a \", \\ or line break the command can't carry — enter it as one clean line.", "err"); return; }
+    const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = "Deriving…";
+    try {
+      wwAddr = await api.wwDerive(seed);
+      wwSeed = seed;
+      wwKu = await api.wwKeyuses(wwAddr.address).catch(() => ({ keyuses: 0, ack: false }));
+      // M2: auto-check on-chain key-uses so the confirm field never defaults to a bare 0 for a seed that has
+      // already spent elsewhere (under-counting reuses a WOTS leaf = fund loss). Best-effort; floored below.
+      wwKuSuggest = 0;
+      if (!wwAddr.isNodeSeed) { try { const ka = await api.keyAudit([wwAddr.publickey]); const k = ka && ka.keys && ka.keys[0]; if (k) wwKuSuggest = Math.max(Number(k.spend_blocks) || 0, Number(k.spent_coins) || 0); } catch (e) {} }
+      wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => []);
+      el("wwSeedIn").value = "";
+      renderWebWallet();
+    } catch (e) {
+      toast((e && e.message) || "Could not unlock", "err");
+      b.disabled = false; b.textContent = "Unlock wallet";
+    }
+  });
+}
+
+function renderWwWallet(body) {
+  const a = wwAddr, ku = wwKu || { keyuses: 0, ack: false };
+  const recv = a.miniaddress || a.address;
+  let qrHtml = "";
+  try { if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(recv); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:6px auto">${qr.createImgTag(4, 6)}</div>`; } } catch (e) {}
+
+  const balRows = (wwBal.length ? wwBal : []).map(b =>
+    `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
+       <span>${esc(b.name)}</span>
+       <span style="font-family:var(--mono,monospace)">${esc(b.sendable)}<small style="opacity:.6"> sendable</small></span>
+     </div>`).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
+
+  const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
+    .map(b => `<option value="${esc(b.tokenid)}">${esc(b.name)}</option>`).join("");
+
+  const kuDefault = Math.max(Number(ku.keyuses) || 0, Number(wwKuSuggest) || 0);
+  const kuPanel = a.isNodeSeed
+    ? `<div class="view__desc">This is <b>your node's own wallet</b> — showing your full balance across every address. Sends go through the node, which selects coins and manages your signing keys automatically.</div>`
+    : (ku.ack
+    ? `<div class="view__desc">Key-uses confirmed: next signing index <b>${esc(String(ku.keyuses))}</b>. <a href="#" id="wwKuEdit">change</a></div>`
+    : `<div class="card" style="border-color:var(--accent)">
+         <div class="view__desc"><b>Confirm key-uses before sending.</b> How many payments has this wallet ALREADY made
+           anywhere (0 for a brand-new seed)? Over-estimating is safe; <b>under-estimating can reuse a signing key and
+           lose your funds</b>.${wwKuSuggest > 0 ? ` <b>On-chain check suggests at least ${esc(String(wwKuSuggest))}.</b>` : ""}</div>
+         <div class="field"><div class="field__label">Payments already made by this seed</div>
+           <input class="field__input" id="wwKuIn" type="number" min="0" step="1" value="${esc(String(kuDefault))}" /></div>
+         <div style="display:flex;gap:8px">
+           <button class="btn btn--outline" id="wwKuCheck">Check on-chain</button>
+           <button class="btn btn--outline" id="wwKuConfirm">Confirm</button>
+         </div>
+       </div>`);
+
+  const ambigBanner = wwAmbiguous
+    ? `<div class="card" style="border-color:var(--accent)">
+         <div class="view__desc"><b>⚠ Last send status is UNKNOWN.</b> The node didn't confirm — the payment may have
+           gone through. Check <b>History</b> / your balance before sending again, or you could pay twice.</div>
+         <button class="btn btn--outline" id="wwAmbigClear">I've checked — re-enable Send</button>
+       </div>`
+    : "";
+  const sendDisabled = ((a.isNodeSeed || ku.ack) && !wwAmbiguous) ? "" : "disabled";
+  body.innerHTML = `
+    <div class="view__title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Web Wallet</span>
+      <span><button class="btn btn--ghost" id="wwRefresh">Refresh</button> <button class="btn btn--ghost" id="wwLockBtn">Lock</button></span>
+    </div>
+    <div class="card">
+      <div class="view__desc">Receive address</div>
+      ${qrHtml}
+      <div class="addrbox" id="wwAddrBox" title="Click to copy">${esc(recv)}</div>
+    </div>
+    <div class="view__desc" style="margin:10px 2px 4px">Balances</div>
+    ${balRows}
+    <div class="view__desc" style="margin:12px 2px 4px">Send</div>
+    ${kuPanel}
+    ${ambigBanner}
+    <div class="card">
+      <div class="field"><div class="field__label">To (address)</div>
+        <input class="field__input" id="wwTo" placeholder="Mx… or 0x…" autocomplete="off" spellcheck="false" ${sendDisabled}></div>
+      <div class="field"><div class="field__label">Token</div>
+        <select class="field__input" id="wwTok" ${sendDisabled}>${tokOpts}</select></div>
+      <div class="field"><div class="field__label">Amount</div>
+        <input class="field__input" id="wwAmt" placeholder="0.0" autocomplete="off" ${sendDisabled}></div>
+      <button class="btn btn--outline btn--full" id="wwSendBtn" ${sendDisabled}>Send</button>
+    </div>`;
+
+  el("wwAddrBox").addEventListener("click", () => copy(recv));
+  el("wwRefresh").addEventListener("click", async () => { wwBal = await api.wwRead(a.address, a.isNodeSeed).catch(() => wwBal); renderWebWallet(); });
+  el("wwLockBtn").addEventListener("click", () => { wwLock(); renderWebWallet(); toast("Wallet locked", "ok"); });
+  const ambigBtn = el("wwAmbigClear"); if (ambigBtn) ambigBtn.addEventListener("click", () => { wwAmbiguous = false; renderWebWallet(); });
+
+  if (a.isNodeSeed) {
+    el("wwSendBtn").addEventListener("click", () => wwDoSend());   // node wallet: no key-uses gate, node manages keys
+  } else if (!ku.ack) {
+    el("wwKuConfirm").addEventListener("click", async () => {
+      const n = Math.max(0, Math.floor(Number(el("wwKuIn").value) || 0));
+      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed ✓", "ok"); }
+      catch (e) { toast("Could not save key-uses", "err"); }
+    });
+    el("wwKuCheck").addEventListener("click", async () => {
+      const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = "Checking…";
+      try {
+        const r = await api.keyAudit([a.publickey]);
+        const k = r && r.keys && r.keys[0];
+        const onchain = k ? Math.max(Number(k.spend_blocks) || 0, Number(k.spent_coins) || 0) : 0;
+        const cur = Number(el("wwKuIn").value) || 0;
+        el("wwKuIn").value = String(Math.max(cur, onchain));
+        toast("On-chain uses: " + onchain + " (set as minimum)", "ok");
+      } catch (e) { toast("On-chain check unavailable", "err"); }
+      btn.disabled = false; btn.textContent = "Check on-chain";
+    });
+  } else {
+    const ed = el("wwKuEdit"); if (ed) ed.addEventListener("click", (ev) => { ev.preventDefault(); wwKu.ack = false; renderWebWallet(); });
+    el("wwSendBtn").addEventListener("click", () => wwDoSend());
+  }
+}
+
+async function wwDoSend() {
+  const to = String(el("wwTo").value || "").trim();
+  const amount = String(el("wwAmt").value || "").trim();
+  const tokenid = el("wwTok").value;
+  if (!to) { toast("Enter a recipient address", "err"); return; }
+  if (!(Number(amount) > 0)) { toast("Enter a valid amount", "err"); return; }
+  const btn = el("wwSendBtn");
+  if (!wwArmed) {   // two-tap confirm — sends are irreversible
+    wwArmed = true; btn.textContent = "Tap again to confirm — irreversible";
+    setTimeout(() => { if (wwArmed) { wwArmed = false; btn.textContent = "Send"; } }, 4000);
+    return;
+  }
+  wwArmed = false; btn.disabled = true; btn.textContent = "Sending…";
+  let r;
+  try { r = await api.wwSend({ seed: wwSeed, to, amount, tokenid }); }
+  catch (e) { toast((e && e.message) || "Send failed", "err"); btn.disabled = false; btn.textContent = "Send"; return; }
+
+  if (r && r.ok) {
+    toast("Sent ✓" + (r.txnid ? " " + short(r.txnid, 12) : ""), "ok");
+    el("wwTo").value = ""; el("wwAmt").value = "";
+    wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
+    wwBal = await api.wwRead(wwAddr.address).catch(() => wwBal);
+    renderWebWallet();
+  } else if (r && r.ambiguous) {
+    // M1: don't offer a one-tap retry — surface the unknown state, refresh balances, and gate re-send behind
+    // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while wwAmbiguous).
+    wwAmbiguous = true;
+    toast(r.message || "Send status unknown — verify before retrying", "err");
+    wwBal = await api.wwRead(wwAddr.address).catch(() => wwBal);
+    renderWebWallet();
+  } else {
+    toast((r && r.message) || "Send failed", "err");
+    btn.disabled = false; btn.textContent = "Send";
+  }
+}
+
 function renderActive() {
   if (!running && activeView !== "node") { /* wallet views need the node */ }
   if (activeView === "balances") renderBalances();
   else if (activeView === "receive") renderReceive();
   else if (activeView === "send") renderSend();
+  else if (activeView === "webwallet") renderWebWallet();
   else if (activeView === "mail") renderMail();
   else if (activeView === "pandapools") renderPandapools();
+  else if (activeView === "atomix") renderAtomix();
+  else if (activeView === "minimall") renderMiniMall();
+  else if (activeView === "casino") renderCasino();
+  else if (activeView === "vestr") renderVestr();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -1989,7 +2219,7 @@ function histQueryArgs() { return { search: HIST_FILTER.search, token: HIST_FILT
 // the wallet's net effect. A plain node never imports those covenants, so its `history` difference already reflects
 // only own coins; this set lets us reproduce that view even though our node tracks the covenants. Mx + 0x forms.
 let HIST_OWN = null;
-const HIST_NORM_VER = 2;   // bump when normalize()'s classification changes → re-normalizes already-stored rows once
+const HIST_NORM_VER = 3;   // bump when normalize()'s classification changes → re-normalizes already-stored rows once
 async function loadOwnAddresses() {
   try {
     const j = await api.cmd("scripts");
@@ -2009,7 +2239,11 @@ async function loadOwnAddresses() {
 async function renderHistory() {
   ensureHistActions();
   await ensureHistFilter();
-  if (running) { if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses(); await renormalizeStored(); }
+  if (running) {
+    if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();
+    const rebuilt = await maybeRebuildHistory();   // one-time re-fetch to backfill real token amounts (tokenamount)
+    if (!rebuilt) await renormalizeStored();        // otherwise reclassify stored rows in place
+  }
   await renderHistoryList();
   if (running) syncHistory({ older: false });
 }
@@ -2150,7 +2384,15 @@ function relTime(ms) {
 }
 
 // coin/txpow → normalized row (ported from the native history apps' difference→direction + split/consol rules)
-function coinLite(c) { return { address: c.miniaddress || c.address || "", amount: c.amount || c.tokenamount || "0", tokenid: c.tokenid || MINIMA, token: c.token, coinid: c.coinid || "", state: c.state || [] }; }
+// Store the coin's REAL display amount. For a token coin the on-chain `amount` is a raw sub-grain value (e.g. a pool
+// coin's mxUSDT shows as 2.8e-37); the node's decoded real value is `tokenamount`. MINIMA (0x00) has no tokenamount —
+// its `amount` is already real. Getting this right is what lets a pool swap's mxUSDT leg be recovered (it settles into
+// the wallet as a dust-encoded token coin whose tokenamount is the true amount). Mirrors the balances read at :753.
+function coinLite(c) {
+  const tid = c.tokenid || MINIMA;
+  const amount = tid === MINIMA ? (c.amount || "0") : (c.tokenamount != null ? c.tokenamount : (c.amount || "0"));
+  return { address: c.miniaddress || c.address || "", amount: String(amount), tokenid: tid, token: c.token, coinid: c.coinid || "", state: c.state || [] };
+}
 function absCmp(a, b) {   // compare |decimal string a| vs |b| without float rounding
   a = String(a).replace(/^-/, ""); b = String(b).replace(/^-/, "");
   const as = a.split("."), bs = b.split(".");
@@ -2203,11 +2445,32 @@ function signedNet(inputs, outputs) {
   for (const t of Object.keys(acc)) {
     let v = acc[t]; const sc = scale[t] || 0, neg = v < 0n; if (neg) v = -v;
     let s = v.toString();
-    if (sc > 0) { s = s.padStart(sc + 1, "0"); s = s.slice(0, -sc) + "." + s.slice(-sc); }
-    s = s.replace(/\.?0+$/, "") || "0";
+    if (sc > 0) { s = s.padStart(sc + 1, "0"); s = (s.slice(0, -sc) + "." + s.slice(-sc)).replace(/0+$/, "").replace(/\.$/, ""); }
+    s = s || "0";   // strip FRACTIONAL trailing zeros only — never touch an integer's trailing zeros ("60" must stay "60")
     out[t] = (neg && s !== "0" ? "-" : "") + s;
   }
   return out;
+}
+// A token's on-chain grain (decimal places), read from its coin metadata. MINIMA → -1 (never quantize; it legitimately
+// moves in tiny amounts). Unknown token → 18 (a safe ceiling that keeps any real amount but zeros covenant dust).
+function tokDec(tid, inputs, outputs) {
+  if (tid === MINIMA) return -1;
+  const c = inputs.concat(outputs).find(x => x.tokenid === tid && x.token && x.token.decimals != null);
+  const d = c ? parseInt(c.token.decimals, 10) : NaN;
+  return Number.isFinite(d) ? d : 18;
+}
+// Floor |amount| to `dec` decimals (keep sign). On-chain token amounts are always multiples of the grain, so this is
+// lossless for real balances — but a PandaPools covenant encodes reserves in a SUB-grain token fraction (e.g. 2.8e-37
+// USDT), which this correctly collapses to "0" so it is never mistaken for a swap's counter leg.
+function quantTok(amountStr, dec) {
+  if (dec < 0) return String(amountStr);
+  const neg = String(amountStr).startsWith("-");
+  const parts = String(amountStr).replace(/^-/, "").split(".");
+  const ip = (parts[0] || "0").replace(/^0+(?=\d)/, ""), fp = (parts[1] || "").slice(0, dec);
+  let s = ip + (fp ? "." + fp : "");
+  if (fp) s = s.replace(/0+$/, "").replace(/\.$/, "");   // fractional trailing zeros only — keep an integer's ("100")
+  s = s || "0";
+  return (neg && s !== "0" ? "-" : "") + s;
 }
 // Classify a transaction from its coins + the node's own `difference`. Shared by fresh normalize() and the one-time
 // re-normalize of stored rows. When a foreign (covenant) coin is present, `nodeDiff` counts it and a pool swap nets
@@ -2218,8 +2481,15 @@ function classify(inputs, outputs, nodeDiff) {
   const inCount = inputs.length, outCount = outputs.length;
   const hasForeign = inputs.some(c => !ownAddr(c)) || outputs.some(c => !ownAddr(c));
   const ownIn = inputs.filter(ownAddr), ownOut = outputs.filter(ownAddr);
-  const diff = (HIST_OWN && HIST_OWN.size && hasForeign && (ownIn.length || ownOut.length))
+  let diff = (HIST_OWN && HIST_OWN.size && hasForeign && (ownIn.length || ownOut.length))
     ? signedNet(ownIn, ownOut) : nodeDiff;
+  // Quantize each token leg to its grain so covenant reserve-dust drops out (a pool deposit/withdraw is then a plain
+  // MINIMA Sent/Received, not a spurious "Sold N MINIMA for 0.0000…"). No-op for already-grain node differences.
+  if (HIST_OWN && HIST_OWN.size) {
+    const cleaned = {};
+    for (const t of Object.keys(diff)) cleaned[t] = quantTok(diff[t], tokDec(t, inputs, outputs));
+    diff = cleaned;
+  }
   let primTok = MINIMA, primAmt = "0";
   for (const tid of Object.keys(diff)) if (absCmp(diff[tid], primAmt) > 0) { primTok = tid; primAmt = diff[tid]; }
   const signed = String(primAmt), neg = signed.startsWith("-");
@@ -2294,46 +2564,68 @@ async function renormalizeStored() {
 // the first already-stored txpowid, and a "Load older" pull runs to an empty page or a generous row budget.
 const HIST_PAGE = 100;          // node default (was 8 — a native-Binder holdover)
 const HIST_OLDER_BUDGET = 2000; // rows fetched per "Load older" click
+// Returns { fetched, reachable }. `reachable` = the node served at least one page (so a caller like the one-time
+// rebuild can tell "node down, retry later" apart from "nothing new"). opts.rebuild re-fetches from offset 0 and
+// UPSERTS every row (no stop-at-known) so a coinLite/normalize change re-writes the whole stored history.
 async function syncHistory(opts) {
   opts = opts || {};
-  if (HIST_SYNCING) return; HIST_SYNCING = true;
+  if (HIST_SYNCING) return { fetched: 0, reachable: false, completed: false }; HIST_SYNCING = true;
+  let reachable = false, fetched = 0, completed = false;   // completed = the loop reached a clean end (empty page / all-known), not a node error
   try {
     if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();   // classify new rows over own coins (native's view)
-    const known = new Set((await api.histGet()).map(r => r.txpowid));
-    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false, fetched = 0;
+    const upsertAll = !!(opts.older || opts.rebuild);            // don't stop at the first already-stored txpowid
+    const known = upsertAll ? null : new Set((await api.histGet()).map(r => r.txpowid));
+    let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false;
     let batch = [];
     const flushBatch = async () => { if (batch.length) { await api.histAdd(batch); batch = []; } };
     for (;;) {
       let page;
       try {
         const j = await api.cmd(`history relevant:true max:${max} offset:${offset}`);
-        page = (!j || j.status !== true || !j.response) ? { over: true } : { txpows: j.response.txpows || [], details: j.response.details || [] };
+        if (j && j.status === true && j.response) { reachable = true; page = { txpows: j.response.txpows || [], details: j.response.details || [] }; }
+        else page = { over: true };
       } catch (e) { page = { over: true }; }
       if (page.over) { if (max > 1) { max = Math.floor(max / 2); continue; } if (skips < 3) { skips++; offset += 1; max = HIST_PAGE; continue; } break; }
-      if (!page.txpows.length) break;
+      if (!page.txpows.length) { completed = true; break; }   // natural end of history
       for (let i = 0; i < page.txpows.length; i++) {
         const row = normalize(page.txpows[i], page.details[i]);
         if (!row.txpowid) continue;
-        if (!opts.older && known.has(row.txpowid)) { hitKnown = true; break; }
+        if (!upsertAll && known.has(row.txpowid)) { hitKnown = true; break; }
         batch.push(row); fetched++;
       }
-      if (hitKnown) break;
+      if (hitKnown) { completed = true; break; }
       offset += page.txpows.length; max = HIST_PAGE; skips = 0;
       if (batch.length >= 500) await flushBatch();          // bound memory/IPC on a deep first sync
       if (opts.older && fetched >= HIST_OLDER_BUDGET) break;
     }
     await flushBatch();
+    // rebuild reaches the end, so it advances the "oldest" watermark too (Math.max branch) — no redundant re-scan later.
     histOldestOffset = opts.older ? offset : Math.max(histOldestOffset, offset);
     await renderHistoryList();
   } finally { HIST_SYNCING = false; }
+  return { fetched, reachable, completed };
+}
+// One-time re-fetch of the whole stored history after a capture/normalize change that needs FRESH node data (the
+// stored coins can't be re-decoded in place — e.g. capturing `tokenamount`, dropped by older coinLite). Gated by
+// HIST_REBUILD_VER; the marker is set ONLY once the rebuild reached the natural END of history (reachable AND
+// completed) — a node-down or mid-stream-truncated launch leaves the marker unset and retries next session, so no
+// older rows are left permanently stale with the pre-tokenamount amounts.
+const HIST_REBUILD_VER = 1;
+async function maybeRebuildHistory() {
+  if (localStorage.getItem("histRebuildVer") === String(HIST_REBUILD_VER)) return false;
+  const r = await syncHistory({ rebuild: true });
+  if (r && r.reachable && r.completed) { localStorage.setItem("histRebuildVer", String(HIST_REBUILD_VER)); return true; }
+  return r && r.reachable;   // reached the node (rows updated) but not the end → don't mark done; still skip renormalize this render
 }
 function histType(r) { return r.kind !== "normal" ? r.kind : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self"); }
 function histDate(ms) { return ms ? new Date(ms).toISOString().slice(0, 19).replace("T", " ") : ""; }
 // Copy/CSV export the CURRENTLY FILTERED set (not just what's on screen), with the richer columns.
-const HIST_COLS = ["date", "type", "direction", "amount", "token", "fee", "counterparty", "txpowid", "block", "inputs", "outputs", "deltas"];
+const HIST_COLS = ["date", "type", "direction", "amount", "token", "counter_amount", "counter_token", "fee", "counterparty", "txpowid", "block", "inputs", "outputs", "deltas"];
 function histCells(r) {
   const deltas = Object.keys(r.difference || {}).map(t => `${TOK.shortId(t)}:${TOK.tidyAmount(r.difference[t])}`).join(" ");
+  const tc = (r.kind === "buy" || r.kind === "sell") ? tradeCounter(r) : null;   // the mxUSDT (token) leg of a swap
   return [histDate(r.time), histType(r), r.direction || "", TOK.tidyAmount(r.amount), r.tokenName,
+    tc ? TOK.tidyAmount(tc.amt) : "", tc ? tc.name : "",
     (r.burn != null ? TOK.tidyAmount(r.burn) : ""), labelFor(r.counterparty) || r.counterparty || "", r.txpowid, r.block,
     r.inCount != null ? r.inCount : "", r.outCount != null ? r.outCount : "", deltas];
 }
@@ -2348,7 +2640,9 @@ async function copyHistory() {
 }
 async function exportHistory() {
   const rows = await histExportRows();
-  const q = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  // Quote for CSV; neutralize spreadsheet formula-injection (a token name like "=HYPERLINK(...)" is attacker-set) by
+  // prefixing a single quote when a cell leads with a formula trigger — Excel/Sheets evaluate those even when quoted.
+  const q = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
   const lines = rows.map(r => histCells(r).map(q).join(","));
   const csv = [HIST_COLS.join(","), ...lines].join("\r\n");
   const p = await api.exportCsv(csv, "minima-history.csv");
@@ -2476,6 +2770,10 @@ async function renderSettings() {
     </div>
     <div class="card"><div class="card__title">Appearance</div>
       <button class="btn btn--outline btn--full" id="setTheme">Theme: ${esc(CFG.theme)}</button>
+    </div>
+    <div class="card"><div class="card__title">P2PChance <span class="casino-18">18+</span></div>
+      <div class="view__desc">Peer-to-peer games of chance (coin flip · dice · roulette), settled on-chain directly between two people — <b>no middleman, no house edge, true odds</b>. Real MINIMA is at stake. Hidden by default; enabling requires a one-time age self-certification.</div>
+      <button class="btn btn--outline btn--full" id="setCasino">${CFG.casinoEnabled ? "Disable P2PChance" : "Enable P2PChance (18+)"}</button>
     </div>`;
   el("setAddr").onclick = () => copy(fullAddr);
   el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
@@ -2515,7 +2813,7 @@ async function renderSettings() {
     if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
     try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
-      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); }   // seed reset → re-derive the mail identity
+      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState(); }   // seed reset → re-derive the mail identity
       toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";
@@ -2533,6 +2831,20 @@ async function renderSettings() {
   el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
   el("diagGo").onclick = async () => { const c = el("diagCmd").value.trim(); if (!c) return; try { const r = await api.cmd(c); el("diagOut").textContent = JSON.stringify(r, null, 2); } catch (e) { el("diagOut").textContent = e.message; } };
   el("setTheme").onclick = () => { cycleTheme(); renderSettings(); };
+  el("setCasino").onclick = () => {
+    if (CFG.casinoEnabled) {   // turn OFF — hide tab, leave the background processor to stop on next boot
+      api.saveConfig({ casinoEnabled: false }).then(c => { CFG = c; });
+      const ct = el("casinoTab"); if (ct) ct.hidden = true;
+      if (activeView === "casino") selectTab("balances");
+      toast("P2PChance disabled", "ok"); renderSettings();
+      return;
+    }
+    casinoAgeGate(async () => {   // turn ON — one-time 18+ self-cert (styled gate)
+      CFG = await api.saveConfig({ casinoEnabled: true, casinoAgeCertified: true });
+      const ct = el("casinoTab"); if (ct) ct.hidden = false;
+      toast("P2PChance enabled ✓", "ok"); renderSettings();
+    });
+  };
   // key-uses panel: copy an address on click, run the deep audit on demand, and auto-run it once on open (rate-limited).
   if (el("kuList")) el("kuList").onclick = (e) => { const row = e.target.closest(".ku-row"); if (row && e.target.classList.contains("ku-addr") && row.dataset.addr) copy(row.dataset.addr); };
   if (el("kuAudit")) el("kuAudit").onclick = () => runKeyAudit(true);
@@ -2874,3 +3186,1878 @@ async function renderLogs() {
 
 boot();
 initLogs();
+
+// ============================ AtomiX (atomic swaps) ============================
+// The reused MDS engine runs in the main process (main/atomix/*); this renderer is a faithful transcription
+// of the donor lib/ui.js flows into the desktop TERMINAL design system. Live updates patch PASSIVE regions
+// only — never rebuild a form the user is typing into (the Mail frozen-tab rule).
+let axView = "swap";                    // swap | market | activity | otc | wallet
+let axSell = true;                      // swap direction
+let axSlip = 4.2;                       // buy-sweep max slippage %
+let axStatusCache = { ready: false };
+let axLastBook = null;
+let axMakerCfgCache = null;             // last maker read-model {cfg,manual,state,lastPublishMs} — for editor re-render on toggle
+let axPegMode = null;                   // maker editor peg/manual toggle (null = defer to saved cfg.pegEnable)
+let axEditing = false;                  // Market tab: editing your own order? (donor S.editing) — false shows Edit/Publish buttons
+let axEnaMode = null;                   // maker editor "Enabled" switch (null = defer to saved state.withdrawn)
+let axOracleMid = 0;                    // last live oracle mid (peg) — drives the ladder generator while pegged
+let axPegPollTimer = null;              // interval polling the oracle price while the peg switch is on
+let axUpdateTimer = null;
+
+function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; axEnaMode = null; axStopPegPoll(); }
+function resetCasinoState() { casinoView = "play"; casinoPick = {}; casinoStatusCache = null; casinoPendingCreate = null; casinoTaking = {}; casinoCancelling = {}; casinoPrevBets = []; casinoResults = []; casinoStartupChecked = false; casinoCreateMsg = { text: "", cls: "" }; try { localStorage.removeItem("casino_watch"); } catch (e) {} }
+
+function axHeader(active) {
+  const st = axStatusCache;
+  const ccy = st.currency === "minima" ? "MINIMA" : (st.currency === "mxusdt" ? "mxUSDT" : "…");
+  const dot = st.ready ? '<span style="color:var(--green)">●</span> ' : '<span style="color:var(--amber)">●</span> ';
+  const tabs = [["swap", "Swap"], ["market", "Market"], ["activity", "Activity"], ["otc", "OTC"], ["wallet", "Wallet"]]
+    .map(([v, l]) => `<button class="btn btn--sm ${active === v ? "btn--primary" : "btn--outline"}" data-axview="${v}">${l}</button>`).join("");
+  return `<div class="view__title">AtomiX <span class="mail-ver">${dot}${st.ready ? "live" : "starting…"} · ${esc(ccy)}</span>
+      <button class="btn btn--sm btn--outline" id="axCcy" style="float:right">Switch to ${st.currency === "minima" ? "mxUSDT" : "MINIMA"}</button>
+      <button class="btn btn--sm btn--outline" id="axHelp" style="float:right;margin-right:6px">?</button></div>
+    <div class="seg" style="flex-wrap:wrap">${tabs}</div>`;
+}
+function wireAxHeader() {
+  document.querySelectorAll("#axBody [data-axview]").forEach(b => b.onclick = () => { axView = b.dataset.axview; renderAtomix(); });
+  const c = el("axCcy"); if (c) c.onclick = axSwitchCurrency;
+  const h = el("axHelp"); if (h) h.onclick = axWelcome;
+}
+
+async function renderAtomix() {
+  const host = el("axBody");
+  if (!host) return;
+  if (!running) { host.innerHTML = `<div class="empty">Start your node to use AtomiX.</div>`; return; }
+  axStatusCache = await api.axStatus().catch(() => ({ ready: false }));
+  // currency accent: mxUSDT = Tether green, MINIMA = orange (donor trading.js) — scoped to #view-atomix.
+  const vroot = el("view-atomix"); if (vroot) vroot.setAttribute("data-axccy", axStatusCache.currency === "minima" ? "minima" : "mxusdt");
+  if (!axStatusCache.ready) {
+    host.innerHTML = `${axHeader(axView)}<div class="empty">AtomiX is starting on your node — deriving your swap identity and registering the covenant. This clears on its own in a few seconds.</div>`;
+    wireAxHeader(); return;
+  }
+  if (axView === "swap") return renderAxSwap();
+  if (axView === "market") return renderAxMarket();
+  if (axView === "activity") return renderAxActivity();
+  if (axView === "otc") return renderAxOtc();
+  if (axView === "wallet") return renderAxWallet();
+}
+
+// ---- Swap ----
+// donor swapplan (6dp grain) reproduced client-side for the LIVE typing estimate (labelled an estimate; the
+// engine's exact BigDecimal math is used on Review/execute). computeUsdt=floor6(ccy×price); computeMinima=floor6(usdt÷price).
+function ax6(x) { return isFinite(x) && x > 0 ? String(Math.floor(x * 1e6) / 1e6) : ""; }
+function axCleanNum(v) { return String(v).replace(/[^0-9.]/g, ""); }
+let axAmt = "";              // canonical ccy (mxUSDT/MINIMA) amount — bidirectional card keeps this
+let axPreviewTimer = null, axQuoteMeta = null;
+let axBalsCache = null;      // last wallet balances — instant paint; ETH reads are slow so we refresh async
+
+async function renderAxSwap() {
+  const host = el("axBody");
+  const [b, swaps] = await Promise.all([api.axBook().catch(() => null), api.axSwaps().catch(() => [])]);
+  axLastBook = b;
+  const ccy = (b && b.label) || "mxUSDT";
+  const bals = axBalsCache || { minima: "0", usdt: "0", eth: "0" };
+  // refresh balances in the background (slow ETH reads) → patch the chips + stages without a full re-render
+  api.axWallet().then(w => {
+    if (!w || activeView !== "atomix" || axView !== "swap") return;
+    axBalsCache = w.bals;
+    const chips = el("axBody").querySelectorAll(".ax-chip .ax-avail");
+    // send chip is index 0, receive chip index 1; send=ccy in SELL, USDT in BUY
+    if (chips[0]) chips[0].textContent = "avail " + (axSell ? w.bals.minima : w.bals.usdt);
+    if (chips[1]) chips[1].textContent = "avail " + (axSell ? w.bals.usdt : w.bals.minima);
+    const st = el("axBody").querySelector(".ax-stages"); if (st) st.innerHTML = axStagesRows(swaps, w.bals, ccy);
+  }).catch(() => {});
+  const q = b || {};
+  const have = axSell ? (q.bestBid > 0) : (q.bestAsk > 0);
+  const price = axSell ? q.bestBid : q.bestAsk;
+  const cap = axSell ? q.bidCap : q.askCap;
+  axQuoteMeta = { price, cap, ccy };
+
+  const noQuote = !have ? `<div class="card">
+      <div style="font-weight:600">No one is quoting a ${axSell ? "buy" : "sell"} price right now.</div>
+      <div class="empty" style="margin-top:6px">Check back soon, or open Market to place your own order and wait for a match.</div>
+      <button class="btn btn--outline btn--sm" id="axOpenMarket" style="margin-top:8px">Open Market</button>
+    </div>` : "";
+
+  // market-context line — the swap page's at-a-glance book summary (maker count + best bid/ask + spread)
+  const mktctx = b ? `<div class="ax-mktctx"><b>${b.scanned || 0}</b> maker${(b.scanned || 0) === 1 ? "" : "s"} on the book`
+    + (b.bestBid ? ` · bid <b>${fmtPx(b.bestBid)}</b>` : "")
+    + (b.bestAsk ? ` · ask <b>${fmtPx(b.bestAsk)}</b>` : "")
+    + (b.bestBid && b.bestAsk ? ` · spread ${fmtPx(b.bestAsk - b.bestBid)}` : "") + `</div>` : "";
+
+  const sendCcy = axSell;   // SELL → you send ccy; BUY → you send USDT
+  const usdtEst = have ? ax6(Number(axAmt) * price) : "";
+  const dual = have ? `<div class="card">
+      <div class="field__label">YOU SEND</div>
+      <div class="ax-amtrow">${axChip(sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "InCcy" : "InUsdt"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? axAmt : usdtEst)}" autocomplete="off" /></div>
+      <div class="ax-flip"><button class="btn btn--sm btn--outline" id="axFlip" title="Flip direction">⇅</button></div>
+      <div class="field__label">YOU RECEIVE (estimate)</div>
+      <div class="ax-amtrow">${axChip(!sendCcy, ccy, bals)}<input class="ax-amt mono" id="ax${sendCcy ? "InUsdt" : "InCcy"}" inputmode="decimal" placeholder="0.00" value="${esc(sendCcy ? usdtEst : axAmt)}" autocomplete="off" /></div>
+      ${axSell ? "" : axSlipRow()}
+      <div class="view__desc" id="axBestLine">${axBestLine(price, cap, ccy)}</div>
+      <button class="btn btn--primary btn--full" id="axReview">Review swap</button>
+      <div id="axStatusLine"></div>
+    </div>` : "";
+
+  host.innerHTML = `${axHeader("swap")}
+    <div class="view__title" style="border:0;padding-bottom:2px">Swap ${esc(ccy)} ⇄ USDT</div>
+    <div class="view__desc" style="margin-top:0">Enter an amount — see exactly what you'll get at the best price.</div>
+    <div class="seg"><button class="btn btn--full ${axSell ? "btn--primary" : "btn--outline"}" id="axDirSell">Sell ${esc(ccy)}</button><button class="btn btn--full ${axSell ? "btn--outline" : "btn--primary"}" id="axDirBuy">Buy ${esc(ccy)}</button></div>
+    ${mktctx}
+    ${noQuote}${dual}
+    ${axStages(swaps, bals, ccy)}`;
+  wireAxHeader();
+  el("axDirSell").onclick = () => { axSell = true; renderAxSwap(); };
+  el("axDirBuy").onclick = () => { axSell = false; renderAxSwap(); };
+  const om = el("axOpenMarket"); if (om) om.onclick = () => { axView = "market"; renderAtomix(); };
+  const fl = el("axFlip"); if (fl) fl.onclick = () => { axSell = !axSell; renderAxSwap(); };
+  wireAxSlipRow();
+  const rv = el("axReview"); if (rv) rv.onclick = axDoReview;
+  wireAxSwapInputs(price, ccy);
+}
+
+/** Coin chip with the live available balance (donor coinChip): disc badge + label + "avail X". */
+function axChip(isCcy, ccy, bals) {
+  const avail = isCcy ? bals.minima : bals.usdt;
+  return `<div class="ax-chip"><span class="ax-disc${isCcy ? "" : " usdt"}">${isCcy ? "M" : "$"}</span><span class="ax-tick">${esc(isCcy ? ccy : "USDT")}</span><span class="ax-avail">avail ${esc(avail)}</span></div>`;
+}
+/** Bidirectional wiring: typing one field updates the OTHER (never the focused one) + refreshes the best-price
+ *  line via a debounced exact engine preview. No re-render → the edited field keeps focus (donor rule). */
+function wireAxSwapInputs(price, ccy) {
+  const ccyIn = el("axInCcy"), usdtIn = el("axInUsdt");
+  if (!ccyIn || !usdtIn) return;
+  // strict numeric-only: keep at most one dot; sanitize the FIELD (not just axAmt) so text can't be entered.
+  const sanitize = (inp) => { const c = axCleanNum(inp.value); if (c !== inp.value) { const at = inp.selectionStart; inp.value = c; try { inp.setSelectionRange(at - 1 < 0 ? 0 : at, at - 1 < 0 ? 0 : at); } catch (e) {} } return c; };
+  ccyIn.addEventListener("input", () => {
+    axAmt = sanitize(ccyIn);
+    if (document.activeElement !== usdtIn) usdtIn.value = price > 0 && Number(axAmt) > 0 ? ax6(Number(axAmt) * price) : "";
+    axSchedulePreview();
+  });
+  usdtIn.addEventListener("input", () => {
+    const u = sanitize(usdtIn);
+    axAmt = price > 0 && Number(u) > 0 ? ax6(Number(u) / price) : "";
+    if (document.activeElement !== ccyIn) ccyIn.value = axAmt;
+    axSchedulePreview();
+  });
+}
+/** Debounced exact preview: refines the receive estimate + best-price line with the engine's real numbers
+ *  (sweep avg differs from the single best price once the amount exceeds the best level's cap). */
+function axSchedulePreview() {
+  if (axPreviewTimer) clearTimeout(axPreviewTimer);
+  axPreviewTimer = setTimeout(async () => {
+    if (activeView !== "atomix" || axView !== "swap" || !axAmt) return;
+    const pv = await api.axSwapPreview(axSell, axAmt, axSlip).catch(() => null);
+    if (!pv || activeView !== "atomix" || axView !== "swap") return;
+    const bl = el("axBestLine");
+    if (pv.err) { if (bl) bl.textContent = pv.err; return; }
+    const m = pv.meta || {};
+    if (bl) bl.textContent = axBestLine(m.bestPrice, m.bestCap, m.label, m.depth);
+    // refine the RECEIVE field with exact engine math (not the local float), but never the focused input
+    const recv = axSell ? el("axInUsdt") : el("axInCcy");
+    if (recv && document.activeElement !== recv) {
+      const val = pv.single ? (axSell ? pv.single.usdt : pv.single.minima) : (axSell ? String(pv.plan.totalUsdt) : String(pv.plan.filledMinima));
+      if (val != null) recv.value = val;
+    }
+  }, 250);
+}
+function axBestLine(price, cap, ccy, depth) {
+  if (!(price > 0)) return "No live makers on the book right now.";
+  let s = `Best price ${fmtPx(price)} USDT/${ccy}  ·  up to ~${fmtAbbrev(cap)} at best`;
+  if (depth != null && depth > cap + 1e-9) s += `, ~${fmtAbbrev(depth)} across the book`;
+  if (!axSell) s += "  ·  ETH gas per part";
+  return s;
+}
+function axSlipRow() {
+  return `<div class="kv"><span>Max slippage</span><span>${[2, 4.2].map(s => `<button class="btn btn--sm ${axSlip === s ? "btn--primary" : "btn--outline"}" data-axslip="${s}">${s}%</button>`).join("")}<button class="btn btn--sm ${axSlip !== 2 && axSlip !== 4.2 ? "btn--primary" : "btn--outline"}" id="axSlipCustom">${axSlip !== 2 && axSlip !== 4.2 ? axSlip + "%" : "Custom"}</button></span></div>`;
+}
+function wireAxSlipRow() {
+  document.querySelectorAll("#axBody [data-axslip]").forEach(x => x.onclick = () => { axSlip = Number(x.dataset.axslip); renderAxSwap(); });
+  const sc = el("axSlipCustom"); if (sc) sc.onclick = async () => {
+    const v = await showPrompt("Custom max slippage", "", "e.g. 1.5", { message: "Percent (0.1 – 50). A BUY sweep will not take levels priced beyond this above the best ask." });
+    const n = parseFloat(v); if (isFinite(n) && n >= 0.1 && n <= 50) { axSlip = Math.round(n * 10) / 10; renderAxSwap(); } else if (v != null) toast("Enter a percent between 0.1 and 50", "warn");
+  };
+}
+// Price display — donor AX.fmt.px parity: 6 significant figures, trailing zeros stripped. (The old 2dp-above-1
+// rounding collapsed a near-1.0 mxUSDT book to "1" on every row — the ladder looked empty/degenerate.)
+function fmtPx(p) { p = Number(p); if (!isFinite(p) || p <= 0) return "0"; let s = p.toPrecision(6); if (s.indexOf(".") > -1) s = s.replace(/0+$/, "").replace(/\.$/, ""); return s; }
+
+/** The "YOUR SWAP" stages tracker (donor stages()): node/balance readiness + the in-flight swap's 4 legs. */
+function axStages(swaps, bals, ccy) {
+  return `<div class="field__label" style="margin-top:16px">YOUR SWAP</div><div class="ax-stages">${axStagesRows(swaps, bals, ccy)}</div>`;
+}
+function axStagesRows(swaps, bals, ccy) {
+  const gt = v => parseFloat(v) > 0;
+  const rows = [];
+  rows.push(axStageRow(axStatusCache.ready ? "done" : "warn", "Node ready"));
+  if (axSell) rows.push(axStageRow(gt(bals.minima) ? "done" : "pending", ccy + " ready to sell"));
+  else { rows.push(axStageRow(gt(bals.usdt) ? "done" : "pending", "USDT ready to spend")); rows.push(axStageRow(gt(bals.eth) ? "done" : "pending", "ETH for gas")); }
+  const sw = (swaps || []).find(s => s.status !== "COMPLETE" && s.status !== "REFUNDED" && s.status !== "ERROR");
+  if (sw) {
+    rows.push(`<div class="ax-swapline mono">${esc(sw.sellamount)} ${esc(axTok(sw.selltoken))} → ${esc(sw.buyamount)} ${esc(axTok(sw.buytoken))} · ${esc(String(sw.role).toLowerCase())}</div>`);
+    rows.push(axStageRow(axLegDone(sw, 1), "Locked your " + esc(sw.sellamount) + " " + esc(axTok(sw.selltoken))));
+    rows.push(axStageRow(axLegDone(sw, 2), "Counterparty locks their side"));
+    rows.push(axStageRow(axLegDone(sw, 3), "Claim your " + esc(sw.buyamount) + " " + esc(axTok(sw.buytoken))));
+    rows.push(axStageRow(axLegDone(sw, 4), "Swap complete"));
+  } else rows.push(axStageRow("pending", "Enter an amount and tap Review to begin"));
+  return rows.join("");
+}
+function axStageRow(state, text) { return `<div class="ax-stage ${state}"><span class="sdot"></span><span>${text}</span></div>`; }
+function axLegDone(sw, n) {
+  const s = sw.status;
+  if (s === "COMPLETE") return "done";
+  if (s === "REFUNDED") return n === 1 ? "warn" : "pending";
+  if (n === 1) return "done";
+  if (n === 2) return (s === "LOCKED" || s === "CLAIMING") ? "active" : "pending";
+  if (n === 3) return s === "CLAIMING" ? "active" : "pending";
+  return "pending";
+}
+
+async function axDoReview() {
+  if (!axAmt) { toast("Enter how much " + (axQuoteMeta ? axQuoteMeta.ccy : "mxUSDT") + " to " + (axSell ? "sell" : "buy"), "warn"); return; }
+  const q = await api.axQuote(axSell, axAmt, axSlip).catch(e => ({ err: String(e.message || e) }));
+  if (q.err) { toast(q.err, "warn"); return; }
+  const ccy = q.label, sh = s => { const n = Number(s); return isFinite(n) ? String(Math.round(n * 1e6) / 1e6) : s; };
+  let title, msg;
+  if (q.single) {
+    title = "Review — Sell " + ccy;
+    msg = `Sell  ${q.single.minima} ${ccy}\nReceive  ≈ ${q.single.usdt} USDT\n\nBest price ${fmtPx(q.single.price)} USDT/${ccy}\nCounterparty  ${axShort(q.single.maker)}\nThis locks your ${ccy} on-chain.`;
+  } else {
+    const p = q.plan, n = p.legs.length;
+    const head = `Avg ${fmtPx(p.avgPrice)}  ·  worst ${fmtPx(p.worstPrice)} USDT/${ccy}${!axSell && p.slippagePct > 0 ? "  ·  within " + sh(p.slippagePct) + "% slippage" : ""}`;
+    const parts = p.legs.map((l, i) => `Part ${i + 1} · ${l.minima} ${ccy} @ ${fmtPx(l.price)} → ${l.usdt} USDT · ${axShort(l.maker)}`).join("\n");
+    const total = axSell ? `Total: sell ${sh(p.filledMinima)} ${ccy} · receive ≈ ${sh(p.totalUsdt)} USDT` : `Total: pay ≈ ${sh(p.totalUsdt)} USDT · receive ≈ ${sh(p.filledMinima)} ${ccy}`;
+    const partial = p.partial ? `\n\nFills ${fmtAbbrev(p.filledMinima)} of ${fmtAbbrev(p.target)} ${ccy} — ${(!axSell && p.stopReason === "slippage") ? "the rest is priced beyond your " + sh(p.slippagePct) + "% slippage." : "the rest isn't available in the book right now."}` : "";
+    const gas = !axSell ? `\n\nEach part is a separate Ethereum transaction — you pay ETH gas ${n} ${n === 1 ? "time." : "times."}` : "";
+    title = axSell ? `Sell ${fmtAbbrev(p.filledMinima)} ${ccy} in ${n} ${n === 1 ? "part" : "parts"}` : `Buy ≈ ${fmtAbbrev(p.filledMinima)} ${ccy} for ≈ ${sh(p.totalUsdt)} USDT in ${n} ${n === 1 ? "part" : "parts"}`;
+    msg = `${head}\n\n${parts}\n\n${total}${partial}${gas}`;
+  }
+  const go = await showConfirm(title, msg, q.plan && q.plan.legs.length > 1 ? "Start sweep" : "Start swap");
+  if (!go) return;
+  const rv = el("axReview"); if (rv) rv.disabled = true;
+  const r = await api.axSwap(q.quoteId).catch(e => ({ err: String(e.message || e) }));
+  if (r && r.err) { toast(r.err, "warn"); }
+  else if (r) { toast(`✓ ${r.ok}/${r.of} leg${r.of === 1 ? "" : "s"} locked — watching for the counterparty.${r.stopped ? " " + r.stopped : ""}`, "ok"); axAmt = ""; }
+  if (activeView === "atomix" && axView === "swap") renderAxSwap();
+}
+function axShort(pk) { pk = String(pk || ""); return pk.length < 14 ? pk : pk.slice(0, 8) + "…" + pk.slice(-6); }
+
+// ---- Market (donor marketTab: order book · your market editor/actions · market history) ----
+async function renderAxMarket() {
+  const host = el("axBody");
+  axStopPegPoll();
+  const [b, mh, mc] = await Promise.all([api.axBook().catch(() => null), api.axMarketHistory().catch(() => ({ chart: [], recent: [] })), api.axMakerCfg().catch(() => null)]);
+  axLastBook = b; axMakerCfgCache = mc;
+  const ccy = b ? b.label : "mxUSDT";
+  const count = b ? (b.scanned || 0) : 0;
+  const others = b && b.makers > 0 && b.makers !== count ? ` · ${b.makers} other` : "";
+  // "your market" — status line (LIVE / offline) + either the [Edit my order][Publish] actions or the editor.
+  const yourMkt = axEditing
+    ? axMakerEditor(mc, ccy, b)
+    : `${axYourMarketStatus(mc, b)}<div class="ax-mkr-actions"><button class="btn btn--outline btn--full" id="axEdit">Edit my order</button><button class="btn btn--primary btn--full" id="axPublish">Publish</button></div>`;
+  host.innerHTML = `${axHeader("market")}
+    <div class="card"><div class="card__title">Order book · ${count} live${others}</div>
+      <div class="view__desc">The live order book. Tap a price to trade, or publish your own offer.</div>
+      <div class="ax-ladder">${axLadder(b, ccy)}</div>
+      <button class="btn btn--outline btn--sm" id="axBookRefresh" style="margin-top:8px">Refresh</button>
+    </div>
+    <div class="card"><div class="card__title">Your market · ${esc(ccy)} ⇄ USDT</div><div id="axMktHost">${yourMkt}</div></div>
+    ${axEditing ? "" : `<div class="card"><div class="card__title">Market history <span class="mail-ver">price only</span></div>
+      <canvas id="axChart" width="640" height="160" style="width:100%;height:160px"></canvas>
+      <div class="view__desc">${axHistLine(mh)}</div>${axHistRows(mh)}
+    </div>`}`;
+  wireAxHeader();
+  el("axBookRefresh").onclick = renderAxMarket;
+  // tap-to-trade: clicking a takeable level prefills the swap on the correct side (bid → you sell, ask → you buy)
+  host.querySelectorAll(".ax-depth .ax-half[data-take]").forEach(h => h.onclick = () => { axSell = h.getAttribute("data-take") === "bid"; axView = "swap"; renderAtomix(); });
+  if (axEditing) {
+    axWireMakerEditor(ccy);
+  } else {
+    el("axEdit").onclick = () => { axEditing = true; axPegMode = null; renderAxMarket(); };
+    el("axPublish").onclick = async () => { const btn = el("axPublish"); btn.disabled = true; btn.textContent = "Publishing…"; const r = await api.axMakerPublish().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Market published", r && r.err ? "warn" : "ok"); renderAxMarket(); };
+    setTimeout(() => { try { axDrawChart(el("axChart"), mh.chart); } catch (e) {} }, 0);
+  }
+}
+/** "Your market" status: LIVE (own levels on the book, peg mid, last publish) or offline — so you can SEE your market. */
+function axYourMarketStatus(mc, b) {
+  const st = (mc && mc.state) || {};
+  let mine = 0, mineRows = "";
+  if (b) {
+    (b.bids || []).forEach(r => { if (r.mine) { mine++; mineRows += `<div class="ax-mymkt-row"><span class="bidpx">BID ${fmtPx(r.p)}</span><span class="ax-sz">${fmtAbbrev(r.cap)}</span></div>`; } });
+    (b.asks || []).forEach(r => { if (r.mine) { mine++; mineRows += `<div class="ax-mymkt-row"><span class="askpx">ASK ${fmtPx(r.p)}</span><span class="ax-sz">${fmtAbbrev(r.cap)}</span></div>`; } });
+  }
+  const live = mine > 0 && !st.withdrawn;
+  const mid = st.lastMid || st.lastPrice;
+  const txt = live
+    ? `LIVE · ${mine} level${mine === 1 ? "" : "s"} on the book` + (mid ? ` · mid ${fmtPx(mid)}` : "") + (mc && mc.lastPublishMs ? ` · published ${axAgo(mc.lastPublishMs)}` : "")
+    : (st.withdrawn ? "Offline · market withdrawn" : "Offline · you have no live order");
+  return `<div class="ax-mkr-status ${live ? "live" : "off"}"><span class="dot"></span>${esc(txt)}</div>`
+    + (live ? `<div class="ax-mymkt">${mineRows}</div>` : "");
+}
+/** The live depth ladder (donor marketTab): spread line + legend + up to 12 paired bid│ask rows. */
+function axLadder(b, ccy) {
+  if (!b || (!b.bids.length && !b.asks.length)) return `<div class="empty">No live orders yet. Publish one below, or wait for a counterparty.</div>`;
+  let out = "";
+  if (b.bestBid && b.bestAsk) out += `<div class="ax-spread">spread ${fmtPx(b.bestAsk - b.bestBid)} USDT · USDT per ${esc(ccy)}, size in ${esc(ccy)}</div>`;
+  out += `<div class="ax-legend"><span class="sell">SELL ${esc(ccy)} (bid)</span><span class="buy">BUY ${esc(ccy)} (ask)</span></div>`;
+  const n = Math.min(Math.max(b.bids.length, b.asks.length), 12);
+  for (let i = 0; i < n; i++) out += axDepthRow(b.bids[i], b.asks[i], i === 0);
+  return out;
+}
+function axDepthRow(bid, ask, best) {
+  return `<div class="ax-depth${best ? " best" : ""}">${axDepthHalf(bid, true)}<span class="divider">│</span>${axDepthHalf(ask, false)}</div>`;
+}
+function axDepthHalf(row, isBid) {
+  if (!row) return `<div class="ax-half${isBid ? " bid" : ""}"><span class="ax-sz">—</span></div>`;
+  const take = !row.mine && row.cap > 0;
+  const tag = row.mine ? `<span class="ax-tag you">you</span>` : `<span class="ax-tag">${esc(axShort(row.signer))}</span>`;
+  return `<div class="ax-half${isBid ? " bid" : ""}${take ? " takeable" : ""}"${take ? ` data-take="${isBid ? "bid" : "ask"}"` : ""}>`
+    + `<span class="top"><span class="ax-px ${isBid ? "bidpx" : "askpx"}">${fmtPx(row.p)}</span><span class="ax-sz">${fmtAbbrev(row.cap)}</span></span>${tag}</div>`;
+}
+// Size display — donor AX.fmt.abbrev parity: "—" for ≤0; floor to 2dp (<10) or 1dp (≥10); "k" ≥ 1000.
+function fmtAbbrev(v) { v = Number(v); if (!(v > 0)) return "—"; const trim = x => { const dp = x < 10 ? 2 : 1, f = Math.pow(10, dp); return (Math.floor(x * f) / f).toString(); }; return v >= 1000 ? trim(v / 1000) + "k" : trim(v); }
+function axHistLine(mh) {
+  const last = mh.chart.length ? fmtPx(mh.chart[mh.chart.length - 1].price) : "—";
+  let ex = 0, op = 0; (mh.recent || []).forEach(t => { if (t.status === "EXECUTED") ex++; else if (t.status === "OPEN") op++; });
+  return `last ${last} · ${ex} filled · ${op} open`;
+}
+function axHistRows(mh) {
+  if (!(mh.recent || []).length) return `<div class="empty">No trades observed yet — AtomiX records swaps network-wide as they happen (no backfill).</div>`;
+  return mh.recent.map(t => {
+    const cls = t.status === "EXECUTED" ? "var(--green)" : t.status === "REFUNDED" ? "var(--red)" : "var(--dim)";
+    const lbl = t.status === "EXECUTED" ? "filled" : t.status === "REFUNDED" ? "cancelled" : "open";
+    return `<div class="row" style="justify-content:space-between"><span class="mono">${fmtPx(t.price)}</span><span class="mono" style="color:var(--dim)">${fmtAbbrev(Number(t.sizeMinima))} M</span><span class="mail-ver" style="color:${cls}">${lbl}</span></div>`;
+  }).join("");
+}
+function axDrawChart(canvas, data) {
+  const cv = canvas && canvas.getContext && canvas.getContext("2d"); if (!cv) return;
+  const w = canvas.width, h = canvas.height, padL = 46, padR = 8, padT = 8, padB = 16;
+  const css = getComputedStyle(document.documentElement);
+  const ACC = (css.getPropertyValue("--accent") || "#FF7358").trim(), DIM = (css.getPropertyValue("--dim") || "#888").trim();
+  cv.clearRect(0, 0, w, h); cv.font = "11px monospace"; cv.fillStyle = DIM;
+  if (!data || data.length < 2) { cv.fillText(!data || !data.length ? "Collecting market data…" : "need 2+ trades to chart", padL, h / 2); return; }
+  let minP = Infinity, maxP = -Infinity, minB = Infinity, maxB = -Infinity;
+  data.forEach(t => { minP = Math.min(minP, t.price); maxP = Math.max(maxP, t.price); minB = Math.min(minB, t.createdBlock); maxB = Math.max(maxB, t.createdBlock); });
+  if (maxP <= minP) maxP = minP + Math.max(minP * 0.001, 1e-9); if (maxB <= minB) maxB = minB + 1;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const px = bk => padL + ((bk - minB) / (maxB - minB)) * plotW, py = v => padT + (1 - (v - minP) / (maxP - minP)) * plotH;
+  cv.strokeStyle = DIM; cv.lineWidth = 1; cv.beginPath(); cv.moveTo(padL, padT); cv.lineTo(padL, h - padB); cv.lineTo(w - padR, h - padB); cv.stroke();
+  cv.fillText(String(fmtPx(maxP)), 2, padT + 9); cv.fillText(String(fmtPx(minP)), 2, h - padB);
+  cv.strokeStyle = ACC; cv.lineWidth = 2; cv.beginPath();
+  data.forEach((t, i) => { const x = px(t.createdBlock), y = py(t.price); if (i === 0) cv.moveTo(x, y); else cv.lineTo(x, y); }); cv.stroke();
+  cv.fillStyle = ACC; data.forEach(t => { cv.beginPath(); cv.arc(px(t.createdBlock), py(t.price), 2.5, 0, Math.PI * 2); cv.fill(); });
+}
+/** "12s ago" / "4m ago" / "2h ago" from an epoch-ms timestamp. */
+function axAgo(ms) {
+  const s = Math.max(0, Math.round((Date.now() - Number(ms)) / 1000));
+  if (s < 60) return s + "s ago"; if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return Math.round(s / 3600) + "h ago"; return Math.round(s / 86400) + "d ago";
+}
+// donor editRow/editInput/toggle → label-left / input-right rows, an On/Off pill, exact donor labels.
+function axEditRow(label, right) { return `<div class="ax-editrow"><span class="ax-editlabel">${label}</span>${right}</div>`; }
+function axEditInput(id, val) { return `<input class="ax-editinput mono" id="${id}" inputmode="decimal" placeholder="0" value="${esc(val)}" autocomplete="off" />`; }
+function axSwitch(id, on) { return `<button class="ax-switch${on ? " on" : ""}" id="${id}" role="switch" aria-checked="${on}"><span class="knob"></span></button>`; }
+function axGenField(id, val, ph) { return `<input class="ax-genfield mono" id="${id}" inputmode="decimal" placeholder="${esc(ph || "")}" value="${esc(val == null ? "" : val)}" autocomplete="off" />`; }
+// Generator field with a PERSISTENT "Name · unit" caption (label-left, reuses the .ax-editrow pattern) so the field
+// is identifiable even with a value typed — placeholders alone vanish on input. Same id → wiring is unchanged.
+function axGenRow(label, id, val) { return `<div class="ax-editrow"><span class="ax-editlabel">${label}</span>${axGenField(id, val, "0")}</div>`; }
+/** One editable ladder level: tag (A1/B1…) + price + size. cls = "ask" | "bid". */
+function axLevelRow(tag, idP, idA, pv, av, cls) {
+  return `<div class="ax-lvl ${cls}"><span class="ax-lvl-tag">${tag}</span>`
+    + `<input class="ax-lvl-p mono" id="${idP}" inputmode="decimal" placeholder="price" value="${esc(pv == null ? "" : pv)}" autocomplete="off" />`
+    + `<input class="ax-lvl-a mono" id="${idA}" inputmode="decimal" placeholder="size" value="${esc(av == null ? "" : av)}" autocomplete="off" /></div>`;
+}
+/** Inline cockpit field: a small label + narrow input on one line (dense). */
+function axFld(label, id, val) { return `<span class="ax-fld"><b>${label}</b>${axGenField(id, val, "")}</span>`; }
+/** One editable ladder row, MIRRORING the read-only book (axDepthRow): bid half (amount OUTER / price INNER, via
+ *  CSS row-reverse) │ ask half (price INNER / amount OUTER). Same rung IDs (axBidP/A, axAskP/A) → wiring unchanged. */
+function axMakerRow(i, best, bp, ba, ap, aa) {
+  const inp = (cls, id, v, ph) => `<input class="${cls} mono" id="${id}" inputmode="decimal" placeholder="${ph}" value="${esc(v == null ? "" : v)}" autocomplete="off" />`;
+  return `<div class="ax-mrow${best ? " best" : ""}" id="axRow${i}">`
+    + `<div class="ax-mhalf bid"><div class="top">${inp("ax-px bidpx", "axBidP" + i, bp, "price")}${inp("ax-sz", "axBidA" + i, ba, "size")}</div></div>`
+    + `<span class="divider">│</span>`
+    + `<div class="ax-mhalf ask"><div class="top">${inp("ax-px askpx", "axAskP" + i, ap, "price")}${inp("ax-sz", "axAskA" + i, aa, "size")}</div></div></div>`;
+}
+function axStartPegPoll(fn) { axStopPegPoll(); fn(); axPegPollTimer = setInterval(() => { if (activeView === "atomix" && axView === "market" && axEditing) fn(); else axStopPegPoll(); }, 2500); }
+function axStopPegPoll() { if (axPegPollTimer) { clearInterval(axPegPollTimer); axPegPollTimer = null; } }
+/** The maker editor — MIRRORS the read-only order book: a compact CONTROL COCKPIT (Enabled + Peg toggles, live
+ *  oracle, and one row of fields mid·step·levels·size·skew·reprice) over a single ladder where BIDS are on the LEFT
+ *  and ASKS on the RIGHT, prices meeting in the middle at the spread, amounts on the outer edges, best row on top.
+ *  Auto (peg) mode by default; `size` seeds every rung and each amount stays editable; only `levels` rungs show. */
+function axMakerEditor(mc, ccy, b) {
+  const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || { bids: [], asks: [] };
+  const parity = b ? !!b.pricingParity : (axStatusCache.currency === "mxusdt");
+  const src = parity ? "Parity" : "MEXC";
+  const enabled = axEnaMode != null ? axEnaMode : !st.withdrawn;
+  const peg = axPegMode != null ? axPegMode : (c.step > 0 ? !!c.pegEnable : true);   // default AUTO for a fresh market
+  const asks = (man.asks || []).slice().sort((x, y) => x.p - y.p);   // ascending → index 0 = best (lowest) ask
+  const bids = (man.bids || []).slice().sort((x, y) => y.p - x.p);   // descending → index 0 = best (highest) bid
+  let rows = "";
+  for (let i = 0; i < 6; i++) { const bl = bids[i] || {}, al = asks[i] || {}; rows += axMakerRow(i, i === 0, bl.p, bl.a, al.p, al.a); }
+  const oracle = peg ? "fetching " + src + " price…" : (src === "Parity" ? "Parity · mid 1.0" : "peg off");
+  const sz = c.size != null ? c.size : (c.askSize != null ? c.askSize : "");
+  return `<div class="ax-cockpit-top">`
+      + `<span class="ax-tog"><span class="ax-tog-l">Enabled</span>${axSwitch("axEnabled", enabled)}</span>`
+      + `<span class="ax-tog"><span class="ax-tog-l">Peg → ${src}</span>${axSwitch("axPegToggle", peg)}</span>`
+      + `<span class="ax-oracle mono" id="axOracle">${oracle}</span></div>`
+    + `<div class="ax-cockpit">`
+      + axFld("mid", "axMid", "")
+      + axFld("step %", "axStep", c.step != null ? c.step : "1")
+      + axFld("levels", "axLevels", c.levels != null ? c.levels : "3")
+      + axFld("size", "axSize", sz)
+      + axFld("skew %", "axBias", c.bias != null ? c.bias : "0")
+      + axFld("reprice %", "axReprice", c.reprice != null ? c.reprice : "1")
+      + `</div>`
+    + `<div class="ax-mkr-hint">Auto mode: prices track the ${src} mid · <b>size</b> seeds every rung — edit any amount or price · only your chosen levels show</div>`
+    + `<div class="ax-legend"><span class="sell">BIDS · you buy ${esc(ccy)}</span><span class="buy">ASKS · you sell ${esc(ccy)}</span></div>`
+    + `<div class="ax-mcolhdr"><span>amount&nbsp;·&nbsp;price</span><span>price&nbsp;·&nbsp;amount</span></div>`
+    + `<div id="axLadder">${rows}</div>`
+    + `<div class="ax-spread-mid mono" id="axSpread">—</div>`
+    + `<div class="ax-mkr-foot">`
+      + axEditRow("Min trade · " + esc(ccy), axEditInput("axMin", c.min != null ? c.min : ""))
+      + `<div class="ax-prev" id="axMkrPreview"><div class="empty">—</div></div></div>`
+    + `<button class="btn btn--primary btn--full" id="axSave" style="margin-top:12px">Save &amp; publish</button>`
+    + `<div class="ax-mkr-actions" style="margin-top:8px"><button class="btn btn--outline btn--full" id="axWithdraw">Withdraw market</button><button class="btn btn--outline btn--full" id="axCancel">Cancel</button></div>`;
+}
+function axWireMakerEditor(ccy) {
+  const num = id => { const e = el(id); return e ? (Number(e.value) || 0) : 0; };
+  const pegOn = () => { const e = el("axPegToggle"); return !!(e && e.classList.contains("on")); };
+  const enaOn = () => { const e = el("axEnabled"); return !!(e && e.classList.contains("on")); };
+  const getRows = pfx => { const out = []; for (let i = 0; i < 6; i++) out.push({ p: num(pfx + "P" + i), a: num(pfx + "A" + i) }); return out; };
+  const collect = () => ({ asks: getRows("axAsk").filter(l => l.p > 0 && l.a > 0), bids: getRows("axBid").filter(l => l.p > 0 && l.a > 0) });
+  let filling = false;
+  // live preview summary from the rows (native updateLadderPreview): level counts, best prices, side totals, crossed
+  const updPreview = () => {
+    const host = el("axMkrPreview"); if (!host) return;
+    const { asks, bids } = collect();
+    // centered spread readout between the twin ladders
+    const sp = el("axSpread");
+    if (sp) {
+      if (asks.length && bids.length) {
+        const ba = Math.min(...asks.map(l => l.p)), bb = Math.max(...bids.map(l => l.p)), d = ba - bb;
+        sp.textContent = d > 0 ? `spread ${fmtPx(d)} · ${(d / bb * 100).toFixed(1)}%` : "⚠ crossed";
+        sp.classList.toggle("crossed", d <= 0);
+      } else { sp.textContent = "—"; sp.classList.remove("crossed"); }
+    }
+    if (asks.length && bids.length) {
+      const bestAsk = Math.min(...asks.map(l => l.p)), bestBid = Math.max(...bids.map(l => l.p));
+      if (bestBid >= bestAsk) { host.innerHTML = `<div class="ax-prev-cross">⚠ Crossed — best bid ${fmtPx(bestBid)} ≥ best ask ${fmtPx(bestAsk)}: you'd sell cheaper than you buy</div>`; return; }
+    }
+    const sum = arr => arr.reduce((s, l) => s + l.a, 0);
+    const bidS = bids.length ? `${bids.length} lvl · best ${fmtPx(Math.max(...bids.map(l => l.p)))} · ${fmtAbbrev(sum(bids))} ${esc(ccy)}` : "none";
+    const askS = asks.length ? `${asks.length} lvl · best ${fmtPx(Math.min(...asks.map(l => l.p)))} · ${fmtAbbrev(sum(asks))} ${esc(ccy)}` : "none";
+    host.innerHTML = `<div class="ax-prev-sum mono"><div><span class="bidpx">BIDS</span>&nbsp; ${bidS}</div><div><span class="askpx">ASKS</span>&nbsp; ${askS}</div></div>`;
+  };
+  const clampLevels = () => Math.max(1, Math.min(6, Math.floor(num("axLevels")) || 1));
+  const showLevels = () => { const L = clampLevels(); for (let i = 0; i < 6; i++) { const r = el("axRow" + i); if (r) r.style.display = i < L ? "" : "none"; } };
+  // PRICES from mid·step·skew for the visible rungs (prices are auto); blank hidden rungs so they aren't published;
+  // seed only EMPTY sizes so a hand-edited amount survives a re-price. Called on mid/step/skew/levels + the peg tick.
+  const reprice = midOverride => {
+    const m = midOverride != null ? midOverride : num("axMid"), step = num("axStep"), size = num("axSize"), L = clampLevels();
+    const quoted = m * (1 + Math.max(-20, Math.min(20, num("axBias"))) / 100);
+    filling = true;
+    try {
+      for (let i = 0; i < 6; i++) {
+        const on = i < L, bp = el("axBidP" + i), ap = el("axAskP" + i), ba = el("axBidA" + i), aa = el("axAskA" + i);
+        if (on) {
+          if (m > 0 && step > 0) { if (bp) bp.value = fmtPx(quoted * (1 - (i + 1) * step / 100)); if (ap) ap.value = fmtPx(quoted * (1 + (i + 1) * step / 100)); }
+          if (size > 0) { if (ba && !ba.value) ba.value = fmtPx(size); if (aa && !aa.value) aa.value = fmtPx(size); }
+        } else { if (bp) bp.value = ""; if (ap) ap.value = ""; if (ba) ba.value = ""; if (aa) aa.value = ""; }
+      }
+    } finally { filling = false; }
+    showLevels(); updPreview();
+  };
+  // SIZE seeds every visible rung's amount — the ONE control that overwrites hand-edited amounts (the master size).
+  const seedSizes = () => {
+    const size = num("axSize"), L = clampLevels();
+    filling = true;
+    try { for (let i = 0; i < 6; i++) { const on = i < L, ba = el("axBidA" + i), aa = el("axAskA" + i); if (ba) ba.value = on && size > 0 ? fmtPx(size) : ""; if (aa) aa.value = on && size > 0 ? fmtPx(size) : ""; } }
+    finally { filling = false; }
+    updPreview();
+  };
+  // pegged: pull the live oracle mid from the engine, set the oracle line + mid field, regenerate the rows
+  const refreshPeg = async () => {
+    const pv = await api.axMakerPreview({ pegEnable: true, step: num("axStep"), askSize: num("axSize"), bidSize: num("axSize"), bias: num("axBias"), levels: num("axLevels") || 1, reprice: num("axReprice") || 1, min: num("axMin") }, {}).catch(() => null);
+    if (!pv) return;
+    axOracleMid = pv.mid || 0;
+    const ol = el("axOracle"); if (ol) ol.textContent = pv.mid > 0 ? (esc(pv.source || ccy) + " · mid " + fmtPx(pv.mid) + (pv.fresh ? "" : " (stale)") + (pv.wide ? " · WIDE" : "")) : ("waiting for " + esc(pv.source || "market") + " price…");
+    const midE = el("axMid"); if (midE && pegOn()) midE.value = pv.mid > 0 ? fmtPx(pv.mid) : "";
+    if (pv.mid > 0 && pegOn()) reprice(pv.mid);
+  };
+  const pegModeUi = () => { const on = pegOn(), midE = el("axMid"); if (midE) { midE.disabled = on; midE.style.opacity = on ? "0.5" : "1"; } };
+
+  const swEna = el("axEnabled"); if (swEna) swEna.onclick = () => { swEna.classList.toggle("on"); const on = swEna.classList.contains("on"); swEna.setAttribute("aria-checked", on); axEnaMode = on; };
+  const swPeg = el("axPegToggle"); if (swPeg) swPeg.onclick = () => {
+    swPeg.classList.toggle("on"); const on = swPeg.classList.contains("on"); swPeg.setAttribute("aria-checked", on); axPegMode = on; pegModeUi();
+    if (on) axStartPegPoll(refreshPeg); else { axStopPegPoll(); const ol = el("axOracle"); if (ol) ol.textContent = "peg off"; reprice(); }
+  };
+  // price controls (mid/step/skew/levels) re-price the rungs (sizes preserved); `size` re-seeds every amount.
+  ["axMid", "axStep", "axBias", "axLevels"].forEach(id => { const e = el(id); if (e) e.addEventListener("input", () => { if (filling) return; reprice(pegOn() && axOracleMid > 0 ? axOracleMid : undefined); }); });
+  const szE = el("axSize"); if (szE) szE.addEventListener("input", () => { if (filling) return; seedSizes(); });
+  for (let i = 0; i < 6; i++) ["axAskP", "axAskA", "axBidP", "axBidA"].forEach(pfx => { const e = el(pfx + i); if (e) e.addEventListener("input", () => { if (!filling) updPreview(); }); });
+  const minE = el("axMin"); if (minE) minE.addEventListener("input", updPreview);
+
+  const finish = () => { axEditing = false; axPegMode = null; axEnaMode = null; axStopPegPoll(); renderAxMarket(); };
+  el("axSave").onclick = async () => {
+    const btn = el("axSave"); btn.disabled = true; btn.textContent = "Saving…";
+    if (!enaOn()) {   // Enabled OFF → withdraw (tombstone), like the native disable
+      const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) }));
+      toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); return;
+    }
+    const step = num("axStep"), size = num("axSize");
+    const cfg = { pegEnable: pegOn() && step > 0 && size > 0, step, size, askSize: size, bidSize: size, bias: num("axBias"), reprice: num("axReprice") || 1, levels: clampLevels(), min: num("axMin") };
+    const r = await api.axMakerSave(cfg, collect()).catch(e => ({ err: String(e.message || e) }));
+    toast(r && r.err ? r.err : "✓ Market saved + published", r && r.err ? "warn" : "ok"); finish();
+  };
+  el("axWithdraw").onclick = async () => { if (!await showConfirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw", true)) return; const r = await api.axMakerWithdraw().catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "Market withdrawn", r && r.err ? "warn" : "ok"); finish(); };
+  el("axCancel").onclick = finish;
+
+  pegModeUi(); showLevels();
+  if (num("axSize") > 0) reprice();   // on open: seed prices (if mid set) + fill empty amounts for the visible rungs
+  updPreview();
+  if (pegOn()) axStartPegPoll(refreshPeg);
+}
+
+// ---- Activity ----
+async function renderAxActivity() {
+  const host = el("axBody");
+  const swaps = await api.axSwaps().catch(() => []);
+  host.innerHTML = `${axHeader("activity")}<div class="card"><div class="card__title">Your swaps</div>${swaps.length ? "" : '<div class="empty">No swaps yet — your completed and refunded swaps appear here.</div>'}<div id="axSwapList">${axSwapRows(swaps)}</div></div>`;
+  wireAxHeader();
+  wireAxSwapRows();
+}
+function axSwapRows(swaps) {
+  return swaps.map(s => `<div class="row" style="justify-content:space-between;cursor:pointer" data-axhash="${esc(s.hash)}">
+    <span class="mono" style="font-size:13px">${esc(s.sellamount)} ${esc(axTok(s.selltoken))} → ${esc(s.buyamount)} ${esc(axTok(s.buytoken))}</span>
+    <span class="mail-ver">${esc(String(s.status).toLowerCase())}</span></div>`).join("");
+}
+function axTok(t) { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = String(t).toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "mxUSDT"; } return t; }
+function wireAxSwapRows() {
+  document.querySelectorAll("#axBody [data-axhash]").forEach(r => r.onclick = async () => {
+    toast("Checking…");
+    const lines = await api.axInspect(r.dataset.axhash).catch(e => ["Check failed: " + (e.message || e)]);
+    showAxReport(r.dataset.axhash, lines);
+  });
+}
+function showAxReport(hash, lines) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axRepOv"><div class="modal">
+    <div class="modal__title">Swap status</div><div class="view__desc" style="white-space:pre-wrap">${esc(lines.join("\n"))}</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axRepClose">Close</button><button class="btn btn--primary btn--full" id="axRepAgain">Check again</button></div></div></div>`);
+  const ov = el("axRepOv"); const close = () => ov && ov.remove();
+  el("axRepClose").onclick = close;
+  el("axRepAgain").onclick = async () => { close(); const l = await api.axInspect(hash).catch(e => ["Check failed"]); showAxReport(hash, l); };
+  ov.onclick = e => { if (e.target.id === "axRepOv") close(); };
+}
+
+// ---- OTC ----
+async function renderAxOtc() {
+  const host = el("axBody");
+  const o = await api.axOtc().catch(() => ({ board: [], deals: [], myOffer: {} }));
+  const ccy = axStatusCache.currency === "minima" ? "MINIMA" : "mxUSDT";
+  host.innerHTML = `${axHeader("otc")}
+    <div class="card"><div class="card__title">Your availability (${esc(ccy)})</div>
+      <div class="row"><div class="field" style="flex:1"><div class="field__label">Max to SELL</div><input class="field__input" id="axOtcSell" value="${o.myOffer && o.myOffer.sellSize || ""}" /></div>
+        <div class="field" style="flex:1"><div class="field__label">Max to BUY</div><input class="field__input" id="axOtcBuy" value="${o.myOffer && o.myOffer.buySize || ""}" /></div></div>
+      <div class="seg"><button class="btn btn--primary btn--full" id="axOtcLive">Go live</button><button class="btn btn--outline btn--full" id="axOtcWithdraw">Withdraw</button></div></div>
+    <div class="card"><div class="card__title">LP board</div>${o.board.length ? o.board.map((lp, i) => `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(TOK.shortId(lp.cid))}</span><span>sell ${esc(lp.sell)} · buy ${esc(lp.buy)}</span><button class="btn btn--sm btn--outline" data-axlp="${i}">Propose</button></div>`).join("") : '<div class="empty">No LPs live right now.</div>'}</div>
+    <div class="card"><div class="card__title">Your deals</div>${o.deals.length ? o.deals.map(d => axDealRow(d)).join("") : '<div class="empty">No active deals.</div>'}</div>`;
+  wireAxHeader();
+  el("axOtcLive").onclick = async () => { const r = await api.axOtcGoLive(el("axOtcSell").value, el("axOtcBuy").value).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Availability published", r && r.err ? "warn" : "ok"); };
+  el("axOtcWithdraw").onclick = async () => { await api.axOtcWithdraw().catch(() => {}); toast("Availability withdrawn"); };
+  document.querySelectorAll("#axBody [data-axlp]").forEach(btn => btn.onclick = () => axOtcPropose(o.board[Number(btn.dataset.axlp)]));
+  document.querySelectorAll("#axBody [data-axaccept]").forEach(btn => btn.onclick = async () => { await api.axOtcDeal(btn.dataset.axaccept, "accept").catch(e => toast(e.message || e, "warn")); renderAxOtc(); });
+  document.querySelectorAll("#axBody [data-axreject]").forEach(btn => btn.onclick = async () => { await api.axOtcDeal(btn.dataset.axreject, "reject").catch(() => {}); renderAxOtc(); });
+}
+function axDealRow(d) {
+  const canAct = d.whoseTurn === "ME" && (d.status === "PROPOSED" || d.status === "COUNTERED");
+  return `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(d.side)} ${esc(d.amount)} @ ${esc(d.price)}</span><span class="mail-ver">${esc(String(d.status).toLowerCase())}</span>${canAct ? `<span><button class="btn btn--sm btn--primary" data-axaccept="${esc(d.ref)}">Accept</button> <button class="btn btn--sm btn--danger" data-axreject="${esc(d.ref)}">Reject</button></span>` : ""}</div>`;
+}
+async function axOtcPropose(lp) {
+  if (!lp) return;
+  const sideRaw = await showPrompt("Deal side", "SELL", "SELL or BUY", { message: "SELL = you buy their " + (axStatusCache.currency === "minima" ? "MINIMA" : "mxUSDT") + "; BUY = you sell yours." });
+  if (!sideRaw) return;
+  const side = String(sideRaw).trim().toUpperCase();
+  if (side !== "SELL" && side !== "BUY") { toast("Side must be SELL or BUY", "warn"); return; }
+  const amount = await showPrompt("Amount", "", "0.0"); if (!amount) return;
+  const price = await showPrompt("Price (USDT each)", "", "1.0"); if (!price) return;
+  const r = await api.axOtcPropose({ cid: lp.cid, mpk: lp.mpk, eth: lp.eth }, side, amount, price).catch(e => ({ err: String(e.message || e) }));
+  toast(r && r.err ? r.err : "✓ Proposed — waiting on the LP", r && r.err ? "warn" : "ok"); renderAxOtc();
+}
+
+// ---- Wallet (ETH) ----
+async function renderAxWallet() {
+  const host = el("axBody");
+  const w = await api.axWallet().catch(() => null);
+  if (!w) { host.innerHTML = `${axHeader("wallet")}<div class="empty">Wallet not ready.</div>`; wireAxHeader(); return; }
+  const b = w.bals, m = b.meta;
+  const locked = m ? Math.max(0, (Number(m.confirmed) || 0) - (Number(m.sendable) || 0)) : 0;
+  host.innerHTML = `${axHeader("wallet")}
+    <div class="card" id="axMinCard" style="cursor:pointer"><div class="card__title">${esc(w.label)} · available to swap</div>
+      <div class="mono" style="font-size:22px;color:var(--accent)">${esc(b.minima)} ${esc(w.label)}</div>
+      <div class="view__desc">${m ? `confirmed ${m.confirmed} · locked ≈ ${Math.round(locked * 1e6) / 1e6} · unconfirmed ${m.unconfirmed} · ${m.coins} coins · tap for coins` : ""}</div></div>
+    <div class="card" id="axEthCard" style="cursor:pointer"><div class="card__title">Ethereum</div>
+      <div class="mono" style="font-size:22px">${esc(b.eth)} ETH</div><div class="view__desc mono">${esc(w.shortAddr)}</div></div>
+    <div class="card"><div class="card__title">USDT · Ethereum</div><div class="mono" style="font-size:22px">${esc(b.usdt)} USDT</div></div>
+    <div class="seg" style="flex-wrap:wrap"><button class="btn btn--outline btn--sm" id="axRefreshBal">Refresh</button><button class="btn btn--outline btn--sm" id="axFund">Fund / QR</button><button class="btn btn--outline btn--sm" id="axSend">Send</button><button class="btn btn--outline btn--sm" id="axExport">Export key</button></div>`;
+  wireAxHeader();
+  el("axMinCard").onclick = axCoinDump;
+  el("axEthCard").onclick = () => axReceive(w.addr);
+  el("axRefreshBal").onclick = renderAxWallet;
+  el("axFund").onclick = () => axReceive(w.addr);
+  el("axSend").onclick = () => axSendDialog(w);
+  el("axExport").onclick = axExportKey;
+}
+function axReceive(addr) {
+  let qrHtml = "";
+  if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(addr); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:10px auto">${qr.createImgTag(5, 6)}</div>`; }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axRxOv"><div class="modal">
+    <div class="modal__title">Receive / Fund · Ethereum</div>
+    <div class="mono" style="user-select:all;word-break:break-all;text-align:center;font-size:13px">${esc(addr)}</div>${qrHtml}
+    <div class="view__desc">Same address on all EVM networks — fund it with Ethereum ETH and tokens.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axRxClose">Close</button><button class="btn btn--primary btn--full" id="axRxCopy">Copy address</button></div></div></div>`);
+  const ov = el("axRxOv"); const close = () => ov && ov.remove();
+  el("axRxClose").onclick = close; el("axRxCopy").onclick = () => { copy(addr); };
+  ov.onclick = e => { if (e.target.id === "axRxOv") close(); };
+}
+async function axExportKey() {
+  if (!await showConfirm("Export ETH private key", "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.", "Reveal key", true)) return;
+  const pk = await api.axExportKey().catch(() => null);
+  if (!pk) { toast("Wallet not ready", "warn"); return; }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axPkOv"><div class="modal">
+    <div class="modal__title">ETH private key</div><div class="view__desc" style="color:var(--red)">⚠ Keep this secret.</div>
+    <div class="mono" style="user-select:all;word-break:break-all;font-size:12px">${esc(pk)}</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axPkClose">Close</button><button class="btn btn--primary btn--full" id="axPkCopy">Copy key</button></div></div></div>`);
+  const ov = el("axPkOv"); const close = () => ov && ov.remove();
+  el("axPkClose").onclick = close; el("axPkCopy").onclick = () => copy(pk);
+  ov.onclick = e => { if (e.target.id === "axPkOv") close(); };
+}
+async function axCoinDump() {
+  const rows = await api.axCoins().catch(() => []);
+  const body = rows.length ? rows.map(c => `<div class="row mono" style="font-size:12px"><span>${esc(c.amount)}</span><span style="color:var(--dim)">${esc(TOK.shortId(c.coinid))}</span></div>`).join("") : '<div class="empty">No sendable coins right now.</div>';
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axCoinOv"><div class="modal"><div class="modal__title">Your coins</div>${body}<div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axCoinClose">Close</button></div></div></div>`);
+  const ov = el("axCoinOv"); el("axCoinClose").onclick = () => ov.remove(); ov.onclick = e => { if (e.target.id === "axCoinOv") ov.remove(); };
+}
+async function axSendDialog(w) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axSendOv"><div class="modal">
+    <div class="modal__title">Send from this wallet</div>
+    <div class="seg"><button class="btn btn--primary btn--full" id="axSendEth" data-asset="eth">ETH</button><button class="btn btn--outline btn--full" id="axSendUsdt" data-asset="usdt">USDT</button></div>
+    <div class="field"><div class="field__label">To</div><input class="field__input mono" id="axSendTo" placeholder="0x… recipient" autocomplete="off" /></div>
+    <div class="field"><div class="field__label">Amount <button class="btn btn--sm btn--outline" id="axSendMax" style="float:right">Max</button></div><input class="field__input mono" id="axSendAmt" placeholder="0.00" autocomplete="off" /></div>
+    <div class="view__desc">Sends are irreversible. Double-check the address.</div>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axSendCancel">Cancel</button><button class="btn btn--primary btn--full" id="axSendReview">Review</button></div></div></div>`);
+  const ov = el("axSendOv"); let asset = "eth"; const close = () => ov && ov.remove();
+  const setAsset = a => { asset = a; el("axSendEth").className = "btn btn--full " + (a === "eth" ? "btn--primary" : "btn--outline"); el("axSendUsdt").className = "btn btn--full " + (a === "usdt" ? "btn--primary" : "btn--outline"); };
+  el("axSendEth").onclick = () => setAsset("eth"); el("axSendUsdt").onclick = () => setAsset("usdt");
+  el("axSendMax").onclick = async () => { const m = await api.axSendMax(asset).catch(() => null); if (m != null) el("axSendAmt").value = m; };
+  el("axSendCancel").onclick = close;
+  ov.onclick = e => { if (e.target.id === "axSendOv") close(); };
+  el("axSendReview").onclick = async () => {
+    const to = el("axSendTo").value.trim(), amt = el("axSendAmt").value.trim();
+    const r = await api.axSendReview(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
+    if (r.err) { toast(r.err, "warn"); return; }
+    close();
+    if (!await showConfirm("Review — Send " + (asset === "eth" ? "ETH" : "USDT"), `Send  ${amt} ${asset === "eth" ? "ETH" : "USDT"}\nTo  ${to}\n\nNetwork fee ≈ ${r.fee} ETH\nThis cannot be undone.`, "Send now", true)) return;
+    const s = await api.axSend(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
+    toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok");
+    if (activeView === "atomix" && axView === "wallet") renderAxWallet();
+  };
+}
+
+async function axSwitchCurrency() {
+  const to = axStatusCache.currency === "minima" ? "mxUSDT" : "MINIMA";
+  if (!await showConfirm("Switch to " + to + "?", "Your live market on the current book is withdrawn first, then AtomiX moves to the " + to + " book. Any in-flight swap still settles.", "Switch")) return;
+  const r = await api.axSwitchCurrency(axStatusCache.currency === "minima" ? "mxusdt" : "minima").catch(e => ({ err: String(e.message || e) }));
+  if (r && r.err) toast(r.err, "warn");
+  renderAtomix();
+}
+function axWelcome() {
+  showConfirm("Welcome to AtomiX", "Swap MINIMA or mxUSDT ⇄ Ethereum USDT trustlessly across chains — no middleman ever holds your funds.\n\nYour keys are derived from this node's seed, so it's the same wallet and identity on any device running AtomiX.\n\nTabs: Swap (quick trade) · Market (full order book + your maker order) · Activity (your swaps) · OTC (private negotiated deals) · Wallet (your ETH).\n\nInteroperates on the SAME on-chain books as the AtomiX phone app and MiniDapp.", "Get started");
+}
+
+// live push: patch passive regions only; never rebuild a form the user is typing into
+function onAtomixUpdate() {
+  if (axUpdateTimer) return;
+  axUpdateTimer = setTimeout(() => { axUpdateTimer = null; refreshAxActive().catch(() => {}); }, 400);
+}
+async function refreshAxActive() {
+  if (activeView !== "atomix" || !el("axBody")) return;
+  // NEVER rebuild a view while the user is typing in one of its inputs (the Mail frozen-tab rule). The Market
+  // maker editor + OTC availability + Swap amount all hold live inputs.
+  const focusInBody = document.activeElement && el("axBody").contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+  if (axView === "activity") return renderAxActivity();
+  if (axView === "market") { if (!focusInBody) return renderAxMarket(); return; }   // skip while configuring the market
+  if (axView === "swap") {
+    // if the user isn't typing an amount, a full re-render refreshes the book/best-price/stages; otherwise
+    // only refresh the stages tracker in place (never touch the amount inputs).
+    if (!focusInBody) return renderAxSwap();
+    const swaps = await api.axSwaps().catch(() => []); const w = await api.axWallet().catch(() => null);
+    const bals = (w && w.bals) || { minima: "0", usdt: "0", eth: "0" };
+    const stagesEl = el("axBody").querySelector(".ax-stages");
+    if (stagesEl) stagesEl.innerHTML = axStagesRows(swaps, bals, axQuoteMeta ? axQuoteMeta.ccy : "mxUSDT");
+  }
+  // OTC/Wallet: leave the form alone; the user re-enters or taps Refresh (an OS notification flags OTC activity).
+}
+
+// ============================ miniMall (shop · studio · orders) ============================
+let shopView = "orders";        // orders | shop | studio
+let shopIdentity = null;        // { publicId, vendorAddress }
+let shopLoaded = null;          // the .shop config open in the Shop viewer
+let shopCart = {};              // productId → qty
+let shopOrderRef = null;        // open order detail
+let shopDraft = null;           // Studio: the shop config being authored
+let shopUpdateTimer = null;
+
+async function onShopUpdate() {
+  if (shopUpdateTimer) clearTimeout(shopUpdateTimer);
+  shopUpdateTimer = setTimeout(async () => {
+    refreshShopBadge();
+    if (activeView !== "minimall") return;
+    if (el("shopBody") && el("shopBody").querySelector("input:focus, textarea:focus")) return;   // never stomp a form
+    if (shopView === "orders") renderShopSub();
+  }, 350);
+}
+async function refreshShopBadge() {
+  try { const n = await api.shopNewCount(); const b = el("shopBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; } catch (e) {}
+}
+
+async function renderMiniMall() {
+  const host = el("shopBody"); if (!host) return;
+  if (!shopIdentity) { try { shopIdentity = await api.shopInit(); } catch (e) {} }
+  const tab = (v, label) => `<button class="btn btn--sm ${shopView === v ? "btn--primary" : "btn--outline"}" data-shopview="${v}">${label}</button>`;
+  host.innerHTML = `<div class="view__title" style="border:0;padding-bottom:2px">miniMall</div>
+    <div class="view__desc" style="margin-top:0">Your on-chain shops — author, sell, and receive orders. Interoperates with the miniMall apps on the same network.</div>
+    <div class="seg" style="margin-bottom:10px">${tab("orders", "Orders")}${tab("shop", "Shop")}${tab("studio", "Studio")}</div>
+    <div id="shopSub"></div>`;
+  document.querySelectorAll("#shopBody [data-shopview]").forEach(b => b.onclick = () => { shopView = b.dataset.shopview; shopOrderRef = null; renderMiniMall(); });
+  renderShopSub();
+}
+function renderShopSub() {
+  if (shopView === "orders") renderShopOrders();
+  else if (shopView === "shop") renderShopBrowse();
+  else renderShopStudio();
+}
+function shopStatusPill(status, unpaid) {
+  const cls = ({ DELIVERED: "ok", SHIPPED: "ok", PAID: "acc", CONFIRMED: "acc", UNDERPAID: "warn", WRONG_TOKEN: "warn" })[status] || "";
+  const label = unpaid && status === "PENDING" ? "unpaid" : String(status || "").toLowerCase();
+  return `<span class="shop-pill ${cls}">${esc(label)}</span>`;
+}
+
+// ---- Orders (miniMail): Selling (incoming to my shops) + Buying (my placed orders) ----
+async function renderShopOrders() {
+  const host = el("shopSub"); if (!host) return;
+  if (shopOrderRef) return renderShopOrderDetail(shopOrderRef);
+  const orders = await api.shopOrders().catch(() => []);
+  const id = shopIdentity ? axShort(shopIdentity.publicId) : "…";
+  if (!orders.length) { host.innerHTML = `<div class="card"><div class="empty">No orders yet. Orders to your shops (Selling) and orders you place (Buying) both land here.<br>Your shop id: <span class="mono">${id}</span></div></div>`; return; }
+  const row = o => `<div class="card shop-order" data-oref="${esc(o.ref)}"><div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><span class="mono">${esc(o.ref)}</span>${o.unread ? ' <span class="shop-dot"></span>' : ""}<div class="view__desc" style="margin:2px 0 0">${esc(o.shopName || "")}</div></div>
+      <div style="text-align:right"><div class="mono">${esc(o.amount)} ${esc(o.currency)}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
+  const sec = (title, list) => list.length ? `<div class="ax-seclabel">${title}</div>` + list.map(row).join("") : "";
+  host.innerHTML = sec("SELLING · orders to your shops", orders.filter(o => o.role === "sell")) + sec("BUYING · orders you placed", orders.filter(o => o.role === "buy"));
+  host.querySelectorAll("[data-oref]").forEach(r => r.onclick = () => { shopOrderRef = r.dataset.oref; renderShopOrders(); });
+}
+async function renderShopOrderDetail(ref) {
+  const host = el("shopSub"); if (!host) return;
+  const d = await api.shopOrder(ref).catch(() => null);
+  if (!d || !d.order) { shopOrderRef = null; return renderShopOrders(); }
+  const o = d.order, isSell = o.role === "sell";
+  const items = (o.items || []).map(i => `<div class="row" style="justify-content:space-between"><span>${esc(i.product)}${i.size ? " · " + esc(i.size) : ""} × ${esc(String(i.quantity))}</span><span class="mono">${esc(i.lineTotal || "")}</span></div>`).join("");
+  const chat = (d.chat || []).map(m => `<div class="mail-bubble ${m.incoming ? "" : "mail-bubble--me"}"><div class="mail-bubble__body">${esc(m.message)}</div></div>`).join("");
+  host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBack">← Orders</button>
+    <div class="card" style="margin-top:8px"><div class="card__title">${esc(o.ref)} · ${isSell ? "incoming order" : "your order"}</div>
+      ${shopStatusPill(o.status, d.unpaid)}
+      <div class="view__desc" style="margin-top:6px">${esc(o.shopName || "")}</div>${items}
+      <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>Total</span><span class="mono">${esc(o.amount)} ${esc(o.currency)}</span></div>
+      ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
+      ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
+      ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : "Awaiting payment"}</div>` : ""}
+      ${(!isSell && d.ambiguous) ? `<div class="shop-warn" style="margin-top:8px">⚠ The payment timed out — it may already have gone through. Check your Balance/History before sending again, to avoid paying twice.</div>` : ""}
+      ${(!isSell && d.unpaid && !d.ambiguous && !o.paid) ? `<button class="btn btn--primary btn--full" id="shopRetry" style="margin-top:8px">Retry payment</button>` : ""}
+      ${isSell ? shopAdvanceRow(o) : ""}
+    </div>
+    <div class="card"><div class="card__title">Messages</div><div class="mail-thread" style="max-height:200px;overflow:auto">${chat || '<div class="empty">No messages yet.</div>'}</div>
+      <div class="row" style="margin-top:8px;gap:6px"><input class="field__input" id="shopMsg" placeholder="Message the ${isSell ? "buyer" : "vendor"}…" style="flex:1" autocomplete="off"/><button class="btn btn--outline btn--sm" id="shopSend">Send</button></div>
+    </div>`;
+  el("shopBack").onclick = () => { shopOrderRef = null; renderShopOrders(); };
+  if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; try { await api.shopRetryPay(ref); toast("Payment sent ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
+  el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
+  document.querySelectorAll("[data-advance]").forEach(b => b.onclick = async () => { b.disabled = true; try { await api.shopAdvance(ref, b.dataset.advance); toast("Status updated ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); });
+}
+function shopAdvanceRow(o) {
+  if (o.status === "INQUIRY") return "";
+  if (!o.paid) return `<div class="view__desc" style="margin-top:8px">Awaiting payment before you can confirm.</div>`;
+  const flow = ["CONFIRMED", "SHIPPED", "DELIVERED"], rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 };
+  const cur = rank[o.status] != null ? rank[o.status] : -1, next = flow[cur + 1];
+  if (!next) return `<div class="view__desc" style="margin-top:8px">Order delivered ✓</div>`;
+  return `<button class="btn btn--primary btn--full" data-advance="${next}" style="margin-top:8px">Mark ${next.toLowerCase()}</button>`;
+}
+
+// ---- Shop viewer: load a .shop → storefront → cart → checkout → order + payment ----
+async function renderShopBrowse() {
+  const host = el("shopSub"); if (!host) return;
+  if (!shopLoaded) {
+    const mine = await api.shopMyShops().catch(() => []);
+    host.innerHTML = `<div class="card"><div class="card__title">Open a shop</div>
+      <div class="view__desc">Load a <span class="mono">.shop</span> a vendor shared with you, or preview one of yours.</div>
+      <button class="btn btn--primary btn--full" id="shopOpenFile" style="margin-top:8px">Open a .shop file…</button></div>
+      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card shop-order" data-openmine="${esc(s.shopId)}"><div class="row" style="justify-content:space-between"><span>${esc(s.shopName)}</span><span class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</span></div></div>`).join("") : ""}`;
+    el("shopOpenFile").onclick = async () => { try { const cfg = await api.shopImport(); if (cfg) { shopLoaded = cfg; shopCart = {}; renderShopBrowse(); } } catch (e) { toast(e.message || "not a valid .shop", "warn"); } };
+    host.querySelectorAll("[data-openmine]").forEach(c => c.onclick = async () => { const mine2 = await api.shopMyShops(); shopLoaded = mine2.find(s => s.shopId === c.dataset.openmine); shopCart = {}; renderShopBrowse(); });
+    return;
+  }
+  const s = shopLoaded;
+  const cartCount = Object.values(shopCart).reduce((a, b) => a + b, 0);
+  const grid = (s.products || []).map(p => {
+    const qty = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99;
+    return `<div class="card shop-prod">
+      <div class="shop-prod-imgwrap" data-open="${esc(p.id)}" title="View details">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-prod-img shop-prod-noimg">🛍</div>`}<span class="shop-zoom">⤢</span></div>
+      <div class="shop-prod-name" data-open="${esc(p.id)}">${esc(p.name)}</div>
+      <div class="view__desc shop-prod-desc">${esc(p.description || "")}</div>
+      <div class="shop-prod-price mono">${esc(p.price)} ${esc(s.currency)}</div>
+      ${shopStepper(p.id, qty, cap)}
+    </div>`;
+  }).join("");
+  host.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><div><div class="card__title" style="margin:0">${esc(s.shopName)}</div><div class="view__desc">pays in ${esc(s.currency)}</div></div><button class="btn btn--sm btn--outline" id="shopClose">Close</button></div>
+    <div class="shop-grid">${grid}</div>
+    ${cartCount ? `<div class="shop-cartbar"><span>${cartCount} item(s) · <span class="mono">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></span><button class="btn btn--primary btn--sm" id="shopCheckout">Checkout</button></div>` : ""}`;
+  el("shopClose").onclick = () => { shopLoaded = null; shopCart = {}; renderShopBrowse(); };
+  host.querySelectorAll("[data-open]").forEach(e => e.onclick = () => shopProductModal(e.dataset.open));
+  host.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { const id = b.dataset.inc, cap = shopCapOf(id); shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); renderShopBrowse(); });
+  host.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const id = b.dataset.dec; shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; renderShopBrowse(); });
+  if (el("shopCheckout")) el("shopCheckout").onclick = shopOpenCheckout;
+}
+function shopStepper(id, qty, cap) {
+  return `<div class="shop-stepper"><button class="shop-step" data-dec="${esc(id)}" ${qty <= 0 ? "disabled" : ""}>−</button><span class="shop-qty mono">${qty}</span><button class="shop-step" data-inc="${esc(id)}" ${qty >= cap ? "disabled" : ""}>+</button></div>`;
+}
+function shopCapOf(id) { const p = (shopLoaded && shopLoaded.products || []).find(x => x.id === id); return p ? (Number(p.maxUnits) || 99) : 99; }
+// Rich product detail modal — big image, full description, qty + add-to-cart.
+function shopProductModal(id) {
+  const s = shopLoaded; const p = (s && s.products || []).find(x => x.id === id); if (!p) return;
+  const qty = shopCart[id] || 0, cap = Number(p.maxUnits) || 99;
+  let ov = document.getElementById("shopModalOv");
+  if (!ov) { ov = document.createElement("div"); ov.id = "shopModalOv"; ov.className = "shop-modal-ov"; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="shop-modal">
+    <button class="shop-modal-x" id="shopModalX" aria-label="Close">✕</button>
+    ${p.image ? `<img class="shop-modal-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-modal-img shop-prod-noimg" style="height:200px;font-size:56px">🛍</div>`}
+    <div class="shop-modal-body">
+      <div class="shop-modal-name">${esc(p.name)}</div>
+      <div class="shop-modal-price mono">${esc(p.price)} ${esc(s.currency)}</div>
+      <div class="shop-modal-desc">${esc(p.description || "No description.")}</div>
+      <div class="view__desc">Up to ${cap} per order · from ${esc(s.shopName)}</div>
+      <div class="shop-modal-buy">${shopStepper(id, qty, cap)}<button class="btn btn--primary" id="mAdd">${qty > 0 ? "In cart ✓" : "Add to cart"}</button></div>
+    </div></div>`;
+  const close = () => { const o = document.getElementById("shopModalOv"); if (o) o.remove(); document.removeEventListener("keydown", onKey); renderShopBrowse(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  el("shopModalX").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.querySelector("[data-inc]").onclick = () => { shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); shopProductModal(id); };
+  ov.querySelector("[data-dec]").onclick = () => { shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; shopProductModal(id); };
+  el("mAdd").onclick = () => { if (!shopCart[id]) shopCart[id] = 1; shopProductModal(id); };
+}
+function shopCartTotal() {
+  const s = shopLoaded; if (!s) return 0; let t = 0;
+  for (const p of (s.products || [])) { const q = shopCart[p.id] || 0; if (q) t += q * Number(p.price); }
+  const ship = shopSelectedShipping(); if (ship) t += Number(ship.fee) || 0;
+  return t;
+}
+let shopShipId = null;
+function shopSelectedShipping() { const s = shopLoaded; if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(x => x.id === shopShipId) || s.shipping[0]; }
+async function shopOpenCheckout() {
+  const s = shopLoaded;
+  const shipOpts = (s.shipping || []).map(sh => `<option value="${esc(sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? " (+" + esc(String(sh.fee)) + " " + esc(s.currency) + ")" : " (free)"}</option>`).join("");
+  const host = el("shopSub");
+  host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBackStore">← Store</button>
+    <div class="card" style="margin-top:8px"><div class="card__title">Checkout · ${esc(s.shopName)}</div>
+      ${(s.products || []).filter(p => shopCart[p.id]).map(p => `<div class="row" style="justify-content:space-between"><span>${esc(p.name)} × ${shopCart[p.id]}</span><span class="mono">${(shopCart[p.id] * Number(p.price)).toFixed(6)}</span></div>`).join("")}
+      ${shipOpts ? `<div class="field" style="margin-top:8px"><div class="field__label">Shipping</div><select class="field__input" id="shopShip">${shipOpts}</select></div>` : ""}
+      <div class="field"><div class="field__label">Delivery (address / email — encrypted, only the vendor sees it)</div><textarea class="field__input" id="shopDelivery" rows="2" placeholder="Where should this go?"></textarea></div>
+      <div class="field"><div class="field__label">Note (optional)</div><input class="field__input" id="shopNote" placeholder="Anything for the vendor?" autocomplete="off"/></div>
+      <div class="row" style="justify-content:space-between;margin-top:8px;font-weight:700"><span>Total</span><span class="mono" id="shopCkTotal">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></div>
+      <button class="btn btn--primary btn--full" id="shopPay" style="margin-top:10px">Pay & place order</button>
+      <div class="view__desc" style="margin-top:6px">Sends an encrypted order to the vendor + the ${esc(s.currency)} payment in one go.</div>
+    </div>`;
+  el("shopBackStore").onclick = () => renderShopBrowse();
+  if (el("shopShip")) el("shopShip").onchange = () => { shopShipId = el("shopShip").value; el("shopCkTotal").textContent = shopCartTotal().toFixed(6) + " " + s.currency; };
+  el("shopPay").onclick = shopDoPay;
+}
+async function shopDoPay() {
+  const s = shopLoaded; const btn = el("shopPay"); btn.disabled = true; btn.textContent = "Placing order…";
+  const items = (s.products || []).filter(p => shopCart[p.id]).map(p => ({ product: p.name, quantity: shopCart[p.id], unitPrice: String(p.price), lineTotal: (shopCart[p.id] * Number(p.price)).toFixed(6) }));
+  if (!items.length) { toast("Cart is empty", "warn"); btn.disabled = false; btn.textContent = "Pay & place order"; return; }
+  const ship = shopSelectedShipping(), total = shopCartTotal().toFixed(6);
+  const delivery = (el("shopDelivery") && el("shopDelivery").value.trim()) || "", note = (el("shopNote") && el("shopNote").value.trim()) || "";
+  try {
+    const r = await api.shopPlaceOrder(s, items, total, ship ? ship.label : "", delivery, note);
+    if (r.payError) toast("Order sent, but payment failed: " + r.payError + " — retry from Orders.", "warn");
+    else toast("Order placed ✓ " + r.ref, "ok");
+    shopCart = {}; shopLoaded = null; shopView = "orders"; shopOrderRef = null; renderMiniMall();
+  } catch (e) { toast(e.message || "order failed", "warn"); btn.disabled = false; btn.textContent = "Pay & place order"; }
+}
+
+// ---- Studio: author a .shop (auto vendor card from the node identity) ----
+function shopSlug(s) { return String(s || "shop").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shop"; }
+// Standard shipping: Digital (always free), Domestic + International (fees configurable).
+function shopStandardShipping() { return [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0" }, { id: "international", label: "International", fee: "0" }]; }
+function shopNormalizeShipping(list) { const by = {}; (list || []).forEach(s => { if (s && s.id) by[s.id] = s; }); return shopStandardShipping().map(std => ({ id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") })); }
+async function renderShopStudio() {
+  const host = el("shopSub"); if (!host) return;
+  if (!shopDraft) {
+    const mine = await api.shopMyShops().catch(() => []);
+    host.innerHTML = `<button class="btn btn--primary btn--full" id="shopNew">+ New shop</button>
+      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(s.shopName)}</b><div class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</div></div><div class="seg"><button class="btn btn--sm btn--outline" data-editshop="${esc(s.shopId)}">Edit</button><button class="btn btn--sm btn--outline" data-exportshop="${esc(s.shopId)}">Export</button></div></div></div>`).join("") : `<div class="card"><div class="empty">No shops yet. Create one — customers load the exported <span class="mono">.shop</span> file to buy.</div></div>`}`;
+    el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: shopStandardShipping(), products: [] }; renderShopStudio(); };
+    host.querySelectorAll("[data-editshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); shopDraft.shipping = shopNormalizeShipping(shopDraft.shipping); renderShopStudio(); });
+    host.querySelectorAll("[data-exportshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast("Exported → " + p, "ok"); });
+    return;
+  }
+  const d = shopDraft;
+  const prods = d.products.map((p, i) => `<div class="card shop-prod-edit">
+      <div class="row" style="justify-content:space-between"><b>Item ${i + 1}</b><button class="btn btn--sm btn--outline" data-delprod="${i}">Remove</button></div>
+      <div class="shop-imgdrop" data-imgi="${i}">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}"/>` : "drop / click to add a photo"}</div>
+      <input class="field__input" data-pf="name" data-pi="${i}" placeholder="Name" value="${esc(p.name || "")}" autocomplete="off"/>
+      <input class="field__input" data-pf="description" data-pi="${i}" placeholder="Description" value="${esc(p.description || "")}" autocomplete="off"/>
+      <div class="row" style="gap:6px"><input class="field__input" data-pf="price" data-pi="${i}" inputmode="decimal" placeholder="Price" value="${esc(p.price || "")}" style="flex:1" autocomplete="off"/><input class="field__input" data-pf="maxUnits" data-pi="${i}" inputmode="numeric" placeholder="Max qty" value="${esc(p.maxUnits || "")}" style="flex:1" autocomplete="off"/></div>
+    </div>`).join("");
+  const ship = d.shipping.map((sh, i) => sh.id === "digital"
+    ? `<div class="row" style="justify-content:space-between;margin-top:4px"><span>Digital</span><span class="view__desc">Free</span></div>`
+    : `<div class="row" style="align-items:center;justify-content:space-between;margin-top:4px"><span>${esc(sh.label)}</span><input class="field__input" data-sf="fee" data-si="${i}" inputmode="decimal" placeholder="Fee (${esc(d.currency)})" value="${esc(sh.fee || "")}" style="flex:0 0 130px;text-align:right" autocomplete="off"/></div>`).join("");
+  host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopStudioBack">← My shops</button>
+    <div class="card" style="margin-top:8px"><div class="card__title">${d.shopId ? "Edit shop" : "New shop"}</div>
+      <div class="field"><div class="field__label">Shop name</div><input class="field__input" id="sdName" value="${esc(d.shopName)}" placeholder="My Shop" autocomplete="off"/></div>
+      <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">mxUSDT</button></div></div>
+      <div class="view__desc">Vendor card (auto-derived from your node — this is how buyers' orders reach you):</div>
+      <div class="mono shop-card">${esc((d.vendorPublicId || "").slice(0, 18))}… | ${esc(d.vendorAddress || "")}</div>
+    </div>
+    <div class="card"><div class="card__title">Shipping</div><div class="view__desc">Digital delivery is free. Set your Domestic &amp; International fees.</div>${ship}</div>
+    <div class="card"><div class="card__title">Products (max 40)</div>${prods || '<div class="empty">Add your first product.</div>'}<button class="btn btn--outline btn--full" id="sdAddProd" style="margin-top:8px">+ Add product</button></div>
+    <button class="btn btn--primary btn--full" id="sdSave">Save${d.shopId ? "" : " & export .shop"}</button>`;
+  const readForm = () => {
+    d.shopName = el("sdName").value.trim();
+    host.querySelectorAll("[data-pf]").forEach(inp => { const i = +inp.dataset.pi; d.products[i][inp.dataset.pf] = inp.value; });
+    host.querySelectorAll("[data-sf]").forEach(inp => { const i = +inp.dataset.si; if (d.shipping[i]) d.shipping[i].fee = inp.value; });
+  };
+  el("shopStudioBack").onclick = () => { readForm(); shopDraft = null; renderShopStudio(); };
+  host.querySelectorAll("[data-cur]").forEach(b => b.onclick = () => { readForm(); d.currency = b.dataset.cur; renderShopStudio(); });
+  el("sdAddProd").onclick = () => { readForm(); if (d.products.length >= 40) return toast("Max 40 products", "warn"); d.products.push({ id: "p" + Date.now().toString(36), name: "", description: "", mode: "units", price: "", maxUnits: "10", image: "" }); renderShopStudio(); };
+  host.querySelectorAll("[data-delprod]").forEach(b => b.onclick = () => { readForm(); d.products.splice(+b.dataset.delprod, 1); renderShopStudio(); });
+  host.querySelectorAll(".shop-imgdrop").forEach(dz => {
+    const i = +dz.dataset.imgi;
+    const pick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.onchange = async () => { if (inp.files[0]) { readForm(); d.products[i].image = await shopResizeImage(inp.files[0]); renderShopStudio(); } }; inp.click(); };
+    dz.onclick = pick;
+    dz.ondragover = e => { e.preventDefault(); dz.classList.add("drag"); };
+    dz.ondragleave = () => dz.classList.remove("drag");
+    dz.ondrop = async e => { e.preventDefault(); dz.classList.remove("drag"); const f = e.dataTransfer.files[0]; if (f) { readForm(); d.products[i].image = await shopResizeImage(f); renderShopStudio(); } };
+  });
+  el("sdSave").onclick = async () => {
+    readForm();
+    if (!d.shopName) return toast("Give the shop a name", "warn");
+    if (!d.products.length) return toast("Add at least one product", "warn");
+    const cfg = { shopName: d.shopName, shopId: d.shopId || shopSlug(d.shopName), vendorPublicId: d.vendorPublicId, vendorAddress: d.vendorAddress,
+      currency: d.currency, tokenid: d.currency === "Minima" ? "0x00" : "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+      shipping: shopNormalizeShipping(d.shipping),
+      products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price), maxUnits: String(Number(p.maxUnits) || 10), image: p.image || "" })) };
+    await api.shopSave(cfg);
+    const wasNew = !d.shopId;
+    shopDraft = null;
+    toast("Shop saved ✓", "ok");
+    if (wasNew) { const p = await api.shopExport(JSON.stringify(cfg, null, 2), cfg.shopId); if (p) toast("Exported → " + p, "ok"); }
+    renderShopStudio();
+  };
+}
+function shopResizeImage(file) {
+  return new Promise((resolve) => {
+    const fr = new FileReader();
+    fr.onload = () => { const img = new Image(); img.onload = () => {
+      let w = img.width, h = img.height; const scale = Math.min(1, 1024 / Math.max(w, h)); w = Math.round(w * scale); h = Math.round(h * scale);
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = h; cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      let q = 0.85, out = cv.toDataURL("image/jpeg", q);
+      while (out.length > 150000 && q > 0.3) { q -= 0.1; out = cv.toDataURL("image/jpeg", q); }
+      resolve(out);
+    }; img.onerror = () => resolve(""); img.src = fr.result; };
+    fr.onerror = () => resolve(""); fr.readAsDataURL(file);
+  });
+}
+
+// ============================ Casino (Zero Edge Casino — on-chain commit-reveal) ============================
+// Fleshed out in S2 (PLAY/MY BETS) + S3 (HOUSE) + S4 (animations/SFX). S0: shell + badge + update plumbing.
+let casinoView = "play";        // play | house | mybets | history
+let casinoUpdateTimer = null;
+let casinoPick = {};            // coinid → chosen outcome index (PLAY)
+let casinoStatusCache = null;   // last casinoStatus()
+
+const CASINO_PRESETS = {
+  flip: { name: "Coin Flip", icon: "✦", range: 2, payout: 2, labels: ["Heads", "Tails"] },
+  dice: { name: "Dice", icon: "⚀", range: 6, payout: 6, labels: ["1", "2", "3", "4", "5", "6"] },
+  roulette: { name: "Roulette", icon: "◉", range: 36, payout: 36, labels: null }
+};
+let casinoHousePreset = "flip";
+let casinoBusy = {};            // coinid/action → true while a txn is in flight (disable buttons)
+const casinoFlashed = {};      // coinid → true once its win/lose flash has shown (session)
+
+function casinoGame(range) { return range == 2 ? CASINO_PRESETS.flip : range == 6 ? CASINO_PRESETS.dice : range == 36 ? CASINO_PRESETS.roulette : { name: "Custom (" + range + ")", icon: "✳", range: range, payout: range }; }
+function casinoPickLabel(range, pick) { return range == 2 ? (parseInt(pick) === 0 ? "Heads" : "Tails") : "" + (parseInt(pick) + 1); }
+function casinoFmt(v) {   // TRUNCATE to 3 dp, NEVER round up — a shown balance must never exceed the real one
+  let n = parseFloat(v); if (isNaN(n)) n = 0;
+  const neg = n < 0; n = Math.floor(Math.abs(n) * 1000) / 1000;
+  let s = n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  const p = s.split("."); p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (neg ? "-" : "") + p.join(".");
+}
+
+// --- pure Web-Audio SFX (CSP-safe: no files, no network) ---
+const casinoSfx = (() => {
+  let ac = null, master = null, nbuf = null;
+  function ctx() { try { if (!ac) { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination); } return ac; } catch (e) { return null; } }
+  const on = () => { try { return localStorage.getItem("casino_mute") !== "1"; } catch (e) { return true; } };
+  function noise() { const a = ctx(); if (!a) return null; if (!nbuf) { nbuf = a.createBuffer(1, a.sampleRate, a.sampleRate); const d = nbuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; } return nbuf; }
+  function tone(freq, dur, type, vol, when) { const a = ctx(); if (!a) return; const t = a.currentTime + (when || 0); const o = a.createOscillator(), g = a.createGain(); o.type = type || "sine"; o.frequency.value = freq; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol || 0.14, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur); }
+  // noise-based mechanical click (spin ticks / roulette ball clatter)
+  function click(freq, dur, vol, q) { const a = ctx(); if (!a) return; const s = a.createBufferSource(); s.buffer = noise(); const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = q || 9; const g = a.createGain(); s.connect(bp); bp.connect(g); g.connect(master); const t = a.currentTime; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); s.start(t); s.stop(t + dur + 0.02); }
+  // FM bell for the win fanfare
+  function bell(freq, at, dur, vol) { const a = ctx(); if (!a) return; const car = a.createOscillator(), mod = a.createOscillator(), mg = a.createGain(), g = a.createGain(); mod.frequency.value = freq * 1.5; mg.gain.value = freq * 1.2; mod.connect(mg); mg.connect(car.frequency); car.frequency.value = freq; car.type = "sine"; car.connect(g); g.connect(master); const t = a.currentTime + at; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); car.start(t); mod.start(t); car.stop(t + dur + 0.05); mod.stop(t + dur + 0.05); }
+  return {
+    resume() { const a = ctx(); if (a && a.resume) try { a.resume(); } catch (e) {} },
+    chip() { if (!on()) return; tone(180, 0.06, "square", 0.08); tone(240, 0.05, "square", 0.06, 0.045); },
+    deal() { if (!on()) return; tone(330, 0.06, "triangle", 0.09); },
+    spin() { if (!on()) return; click(1900, 0.03, 0.07, 10); },
+    tick() { if (!on()) return; click(3000, 0.03, 0.05, 6); },
+    clatter() { if (!on()) return; click(1700, 0.03, 0.13, 11); },
+    land() { if (!on()) return; click(1500, 0.05, 0.18, 4); },
+    win() { if (!on()) return; if (!ctx()) return; [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => bell(f, i * 0.1, 1.0, 0.34)); bell(1318.5, 0.44, 1.3, 0.18); for (let i = 0; i < 7; i++) click(3800 + Math.random() * 3200, 0.06, 0.06, 6); },
+    lose() { if (!on()) return; const a = ctx(); if (!a) return; const t = a.currentTime; const o = a.createOscillator(), lp = a.createBiquadFilter(), g = a.createGain(); o.type = "sawtooth"; o.frequency.setValueAtTime(210, t); o.frequency.exponentialRampToValueAtTime(66, t + 0.55); lp.type = "lowpass"; lp.frequency.value = 1000; o.connect(lp); lp.connect(g); g.connect(master); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.34, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.65); o.start(t); o.stop(t + 0.68); const s = a.createBufferSource(); s.buffer = noise(); const l2 = a.createBiquadFilter(); l2.type = "lowpass"; l2.frequency.value = 160; const g2 = a.createGain(); s.connect(l2); l2.connect(g2); g2.connect(master); g2.gain.setValueAtTime(0.45, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.32); s.start(t); s.stop(t + 0.34); },
+    chime() { if (!on()) return; tone(880, 0.12, "sine", 0.1); tone(1174, 0.14, "sine", 0.09, 0.08); }
+  };
+})();
+
+// --- in-play looping animation builders (ported from Zero Edge MDS; shown the whole time a bet resolves) ---
+function casinoCoinAnim() {
+  const face = (L) => '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="none" stroke="#9c7d0a" stroke-width="2.5"/><circle cx="50" cy="50" r="45.5" fill="none" stroke="#b8960b" stroke-width=".6" stroke-dasharray="1.8 1.6"/><text x="50" y="58" text-anchor="middle" font-family="Georgia,serif" font-size="36" font-weight="bold" fill="#7a5c00">' + L + '</text></svg>';
+  return '<div class="casino-anim"><div class="coin-scene"><div class="coin-box coin-box--spin"><div class="coin-f">' + face('H') + '</div><div class="coin-b">' + face('T') + '</div></div></div></div>';
+}
+function casinoDiceAnim() {
+  const pips = [1, 2, 3, 4, 5, 6];
+  let h = '<div class="casino-anim"><div class="dice-scene"><div class="dice-box dice-box--roll">';
+  for (let f = 0; f < 6; f++) { h += '<div class="dice-face df' + (f + 1) + '">'; for (let p = 0; p < pips[f]; p++) h += '<span class="pip"></span>'; h += '</div>'; }
+  return h + '</div></div></div>';
+}
+function casinoRouletteAnim() {
+  return '<div class="casino-anim"><div class="rl-scene"><div class="rl-rim"></div><div class="rl-track"></div><div class="rl-wheel rl-wheel--spin"><div class="rl-inner"></div><div class="rl-center">P2P</div></div><div class="rl-ball"></div></div></div>';
+}
+function casinoAnimHTML(range) { return range == 2 ? casinoCoinAnim() : range == 6 ? casinoDiceAnim() : range == 36 ? casinoRouletteAnim() : ''; }
+
+// --- activity board (the notice-board feed; fed by main-side casino MDS.log via onCasinoLog) ---
+let casinoLog = [];
+function casinoActClass(m) {
+  const s = String(m).toLowerCase();
+  if (/fail|error|reject|missing/.test(s)) return "err";
+  if (/\bwon\b|\bwins\b|resolved|revealed|confirmed|created|paid|settle/.test(s)) return "ok";
+  if (/reveal|resolv|waiting|pending|building|signing|secret/.test(s)) return "warn";
+  if (/new |open bet|seen|took|taken/.test(s)) return "accent";
+  return "info";
+}
+function casinoActAppend(box, e) {
+  const row = document.createElement("div"); row.className = "casino-act__e";
+  row.innerHTML = '<span class="casino-act__t">' + esc(e.t) + '</span><span class="casino-act__m ' + e.cls + '">' + esc(e.msg) + '</span>';
+  box.appendChild(row);
+}
+function casinoActPaint() { const box = el("casinoActLog"); if (!box) return; box.innerHTML = ""; casinoLog.forEach(e => casinoActAppend(box, e)); box.scrollTop = box.scrollHeight; }
+function casinoNowHMS() { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0"); }
+// 1-arg = a main-side "HH:MM:SS msg" line (parsed + rebranded); 2-arg = a renderer message with an explicit class.
+function casinoActivity(line, cls) {
+  let t, msg = String(line == null ? "" : line);
+  if (cls !== undefined) { t = casinoNowHMS(); }
+  else {
+    const m = msg.match(/^(\d{2}:\d{2}:\d{2})\s+([\s\S]*)$/);
+    if (m) { t = m[1]; msg = m[2]; } else { t = casinoNowHMS(); }
+    msg = msg.replace(/^Casino service:\s*/i, "");                                // drop the donor prefix
+    msg = msg.replace(/Casino/g, "Chance").replace(/casino/g, "chance");          // cosmetic rebrand (donor untouched)
+    cls = casinoActClass(msg);
+  }
+  if (!msg.trim()) return;
+  casinoLog.push({ t, msg, cls });
+  if (casinoLog.length > 200) casinoLog.shift();
+  const box = el("casinoActLog");
+  if (box) { casinoActAppend(box, casinoLog[casinoLog.length - 1]); box.scrollTop = box.scrollHeight; }
+}
+
+// ===== Ported MDS bet-lifecycle state machine (refreshBets diff) — drives the rich activity feed + results =====
+// A bet is NOT "real" until the chain confirms it. Each block we diff the RAW coins (as MDS does) and narrate.
+let casinoPendingCreate = null;   // { game, range, stake }   — a create posted, not yet on-chain
+let casinoTaking = {};            // coinid → { game, range }  — a take posted, not yet on-chain
+let casinoCancelling = {};        // coinid → true             — a cancel posted, not yet confirmed
+let casinoPrevBets = [];          // last raw-coins snapshot (for the diff)
+let casinoResults = [];           // settled bets awaiting payout/result detection
+let casinoStartupChecked = false; // one-shot: recover results that settled while the app was closed
+async function casinoBlock() { try { const s = await api.casinoStatus(); return (s && s.block) ? Number(s.block) : null; } catch (e) { return null; } }
+function casinoGetState(coin, port) { const a = (coin && coin.state) || []; for (let i = 0; i < a.length; i++) { if (String(a[i].port) === String(port)) return a[i].data; } return ""; }
+function casinoNum(v) { return parseFloat(parseFloat(v).toFixed(8)); }
+let casinoCreateMsg = { text: "", cls: "" };   // persists the Offer-page status across re-renders
+function casinoSetCreateStatus(msg, cls) { casinoCreateMsg = { text: msg || "", cls: cls || "" }; const e = el("casinoCreateStatus"); if (e) { e.textContent = casinoCreateMsg.text; e.className = "casino-cstatus" + (cls ? " casino-cstatus--" + cls : ""); } }
+
+// Per-block: diff the raw coins, narrate every transition, capture settled bets for result detection.
+async function casinoRefresh() {
+  let bets; try { bets = await api.casinoRawBets(); } catch (e) { return; }
+  if (!Array.isArray(bets)) return;
+  const gs = casinoGetState, prev = casinoPrevBets, block = await casinoBlock();
+
+  // (2) phase transitions — match a bet across phases by its house commit state[2] (coinid changes each phase)
+  if (prev.length) {
+    bets.forEach(c => {
+      const hc = gs(c, 2); if (!hc) return;
+      const p = prev.find(x => gs(x, 2) === hc && x.coinid !== c.coinid); if (!p) return;
+      const oldPh = parseInt(gs(p, 6)) || 0, newPh = parseInt(gs(c, 6)) || 0; if (oldPh === newPh) return;
+      const rng = parseInt(gs(c, 3)) || 2, g = casinoGame(rng);
+      if (oldPh === 0 && newPh === 1 && c.amHouse) { casinoActivity("Your " + g.name + " bet was taken — player picked " + casinoPickLabel(rng, gs(c, 11)) + ". Revealing your secret next block…", "accent"); toast("Your " + g.name + " bet was taken — game on!", "ok"); if (activeView === "casino") casinoView = "mybets"; casinoSfx.deal(); }
+      if (oldPh === 1 && newPh === 2 && c.amHouse) { casinoActivity("Secret revealed on your " + g.name + " bet — waiting for the player to resolve & collect…", "warn"); }
+      if (oldPh === 1 && newPh === 2 && c.amPlayer) { casinoActivity("House revealed the secret on your " + g.name + " bet — resolving your result…", "warn"); casinoSfx.chime(); }
+    });
+  }
+  // (3) settled — a bet I was in (by commit) has no successor now → capture it for payout/result detection
+  if (prev.length) {
+    const liveCommits = new Set(bets.map(c => gs(c, 2)).filter(Boolean));
+    prev.forEach(p => {
+      if (!(p.amHouse || p.amPlayer)) return;
+      const hc = gs(p, 2); if (!hc || liveCommits.has(hc)) return;              // still on-chain (advanced) → not settled
+      if ((parseInt(gs(p, 6)) || 0) < 1) return;                                // only bets that were actually in play
+      if (casinoResults.some(r => r.commit === hc)) return;
+      const rng = parseInt(gs(p, 3)) || 2;
+      casinoResults.push({ commit: hc, coinid: p.coinid, role: p.amHouse ? "House" : "Player", range: rng, payout: parseInt(gs(p, 4)) || rng, bet: gs(p, 5) || "0", amount: parseFloat(p.amount) || 0, pickIdx: parseInt(gs(p, 11)), winAddr: gs(p, p.amHouse ? 1 : 9), atBlock: block || 0, attempts: 0, time: Date.now() });
+    });
+  }
+  // maintain the restart-proof watchlist for my in-play bets; recover (one-shot) any that settled while closed
+  bets.forEach(c => {
+    if ((c.amHouse || c.amPlayer) && (parseInt(gs(c, 6)) || 0) >= 1) {
+      const hc = gs(c, 2);
+      if (hc) casinoWatchAdd(hc, { role: c.amHouse ? "House" : "Player", range: parseInt(gs(c, 3)) || 2, payout: parseInt(gs(c, 4)) || 2, bet: gs(c, 5) || "0", amount: parseFloat(c.amount) || 0, pickIdx: parseInt(gs(c, 11)), coinid: c.coinid });
+    }
+  });
+  if (!casinoStartupChecked) {
+    casinoStartupChecked = true;
+    const live = new Set(bets.map(c => gs(c, 2)).filter(Boolean));
+    const w = casinoWatchGet();
+    Object.keys(w).forEach(hc => {
+      if (!live.has(hc) && !casinoResults.some(r => r.commit === hc)) {
+        const m = w[hc];
+        casinoResults.push({ commit: hc, coinid: m.coinid, role: m.role, range: m.range, payout: m.payout, bet: m.bet, amount: m.amount, pickIdx: m.pickIdx, winAddr: "", atBlock: block || 0, attempts: 0, time: Date.now() });
+      }
+    });
+  }
+  // (4) take confirmed — a new phase-1 coin where I'm player appeared
+  if (Object.keys(casinoTaking).length) {
+    const prevIds = new Set(prev.map(p => p.coinid));
+    const took = bets.find(c => c.amPlayer && (parseInt(gs(c, 6)) || 0) >= 1 && !prevIds.has(c.coinid));
+    if (took) { const cid = Object.keys(casinoTaking)[0], tk = casinoTaking[cid]; delete casinoTaking[cid]; casinoActivity("✓ " + tk.game + " bet taken & confirmed on-chain" + (block ? " (block " + block + ")" : "") + " — waiting for the house to reveal.", "ok"); }
+  }
+  // (5) cancel confirmed — the cancelled coin is gone
+  Object.keys(casinoCancelling).forEach(cid => { if (!bets.some(c => c.coinid === cid)) { delete casinoCancelling[cid]; casinoActivity("✓ Bet cancelled & confirmed on-chain — your stake was returned.", "ok"); toast("Cancel confirmed — stake returned ✓", "ok"); } });
+
+  casinoPrevBets = bets;
+  await casinoResolveResults(block);
+}
+
+// Ported coinIsPayout + resolvePendingResults: detect the incoming payout to decide win/lose + winnings for
+// the side the background service did NOT record (mainly the house). De-duped against history.
+function casinoCoinIsPayout(c, pr, amt) {
+  const created = parseInt(c.created);
+  if (isNaN(created) || created < ((pr.atBlock || 0) - 2)) return false;   // must be a fresh coin
+  if (Math.abs(parseFloat(c.amount) - amt) >= 0.001) return false;         // of the payout value
+  if (pr.winAddr) { return (c.address || "") === pr.winAddr || (c.miniaddress || "") === pr.winAddr; }
+  return true;
+}
+// Restart-proof watchlist of my in-play bets (commit → meta), so a result that settles while the app is closed
+// is still recovered on next launch (via the retroactive txpow read).
+function casinoWatchGet() { try { return JSON.parse(localStorage.getItem("casino_watch") || "{}"); } catch (e) { return {}; } }
+function casinoWatchSet(w) { try { localStorage.setItem("casino_watch", JSON.stringify(w)); } catch (e) {} }
+function casinoWatchAdd(commit, meta) { if (!commit) return; const w = casinoWatchGet(); w[commit] = meta; casinoWatchSet(w); }
+function casinoWatchDrop(commit) { if (!commit) return; const w = casinoWatchGet(); if (w[commit] !== undefined) { delete w[commit]; casinoWatchSet(w); } }
+function casinoResultProfit(pr, out) {
+  const bet = parseFloat(out.bet != null ? out.bet : pr.bet), payout = out.payout || pr.payout;
+  if (pr.role === "House") return out.won ? bet : casinoNum(bet * (payout - 1));
+  return out.won ? casinoNum(casinoNum(bet * payout) - bet) : bet;
+}
+async function casinoResolveResults(block) {
+  if (!casinoResults.length) return;
+  let hist; try { hist = await api.casinoHistory() || []; } catch (e) { hist = []; }
+  const keep = [];
+  for (const pr of casinoResults) {
+    if (hist.some(h => h.coinid === pr.coinid)) { casinoWatchDrop(pr.commit); continue; }   // service recorded it → casinoWatchResults flashes it
+    // PRIMARY — mechanism B: read the taker's resolve txn for the EXACT result, instantly.
+    let out = null; try { out = await api.casinoResolveOutcome(pr.commit, pr.role); } catch (e) {}
+    if (out && out.found) {
+      const profit = casinoResultProfit(pr, out);
+      casinoFlashed[out.coinid] = true; if (pr.coinid) casinoFlashed[pr.coinid] = true;   // BEFORE flashing → main just wrote history; block a double-modal
+      casinoFlash(out.won, casinoGame(out.range).name, profit, out.pickLabel, out.resultLabel, out.range, pr.role);
+      casinoActivity((out.won ? "✓ WON +" : "✗ LOST −") + casinoFmt(profit) + " MINIMA — " + casinoGame(out.range).name + " (as " + pr.role + ")" + (out.resultLabel && out.resultLabel !== "—" ? " · result " + out.resultLabel : ""), out.won ? "ok" : "err");
+      casinoWatchDrop(pr.commit);
+      continue;
+    }
+    // Not in the txpowdb yet — retry a few blocks, then FALLBACK A (payout-coin detection), made prompt.
+    pr.attempts = (pr.attempts || 0) + 1;
+    if (pr.attempts < 3) { keep.push(pr); continue; }
+    let wallet; try { wallet = await api.casinoWalletCoins() || []; } catch (e) { keep.push(pr); continue; }
+    const plain = wallet.filter(c => !c.state || c.state.length === 0);
+    let won, profit;
+    if (pr.role === "House") { won = plain.some(c => casinoCoinIsPayout(c, pr, parseFloat(pr.amount))); profit = won ? parseFloat(pr.bet) : casinoNum(parseFloat(pr.bet) * (pr.payout - 1)); }
+    else { const winAmt = casinoNum(parseFloat(pr.bet) * pr.payout); won = plain.some(c => casinoCoinIsPayout(c, pr, winAmt)); profit = won ? casinoNum(winAmt - parseFloat(pr.bet)) : parseFloat(pr.bet); }
+    if (!won && pr.attempts < 6) { keep.push(pr); continue; }   // give a loss a few more blocks before committing
+    const pickLbl = (pr.pickIdx >= 0 && !isNaN(pr.pickIdx)) ? casinoPickLabel(pr.range, pr.pickIdx) : "—";
+    casinoFlash(won, casinoGame(pr.range).name, profit, pickLbl, "—", pr.range, pr.role);
+    casinoActivity((won ? "✓ WON +" : "✗ LOST −") + casinoFmt(profit) + " MINIMA — " + casinoGame(pr.range).name + " (as " + pr.role + ")", won ? "ok" : "err");
+    if (pr.coinid) casinoFlashed[pr.coinid] = true;
+    casinoWatchDrop(pr.commit);
+  }
+  casinoResults = keep;
+  if (activeView === "casino") renderCasino();
+}
+
+// --- one-time 18+ self-cert gate (styled overlay, matches the approved mock) ---
+function casinoAgeGate(onCertify) {
+  const ov = document.createElement("div"); ov.className = "casino-age-ov";
+  ov.innerHTML = '<div class="casino-age"><h3>⚠ AGE VERIFICATION</h3>' +
+    '<p>P2PChance is <b>peer-to-peer betting with real MINIMA</b> — you play directly against another person, settled on-chain. No house, no edge — true odds.</p>' +
+    '<p class="fine">“I certify that I am 18 or older and of legal gambling age in my jurisdiction, and I accept the risks of betting real MINIMA.”</p>' +
+    '<div class="casino-age__row"><button class="btn btn--outline" id="ageCancel">Cancel</button><button class="btn btn--primary" id="ageOk">I certify — enable</button></div></div>';
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener("click", e => { if (e.target === ov) close(); });
+  ov.querySelector("#ageCancel").addEventListener("click", close);
+  ov.querySelector("#ageOk").addEventListener("click", () => { close(); try { onCertify(); } catch (e) {} });
+}
+
+// Create-confirm via the AUTHORITATIVE digested read-model (myBets), not the raw-coin annotation. The instant a
+// NEW phase-0 bet where I'm house appears (not in the pre-post snapshot), the create is confirmed on-chain →
+// clear the transient Offer-page status and JUMP to My Bets, the one place bets live.
+async function casinoCheckCreateConfirm() {
+  if (!casinoPendingCreate) return;
+  const pc = casinoPendingCreate;
+  let mine; try { mine = await api.casinoMyBets() || []; } catch (e) { return; }
+  const fresh = mine.find(b => b.amHouse && b.phase === 0 && !(pc.snap && pc.snap.has(b.coinid)));
+  if (!fresh) return;
+  casinoPendingCreate = null;
+  const block = await casinoBlock();
+  casinoActivity("✓ " + pc.game + " bet confirmed on-chain — LIVE" + (block ? " (block " + block + ")" : "") + ", " + casinoFmt(pc.stake) + " MINIMA locked. Waiting for a taker.", "ok");
+  casinoSetCreateStatus("", "");            // clear the transient status — no stale "waiting"
+  toast(pc.game + " bet is live ✓", "ok"); casinoSfx.chime();
+  casinoView = "mybets";                     // JUMP to My Bets — the ONLY place bets live
+}
+
+// Take-confirm via the AUTHORITATIVE myBets read-model (not the flaky per-block raw-coin diff). The instant a NEW
+// amPlayer phase>=1 bet appears, the take is confirmed on-chain → clear the "Confirming" placeholder so the bet
+// renders in My Bets with its in-play animation (and its result later flashes via casinoWatchResults/ResolveResults).
+async function casinoCheckTakeConfirm() {
+  if (!Object.keys(casinoTaking).length) return;
+  let mine; try { mine = await api.casinoMyBets() || []; } catch (e) { return; }
+  const key = Object.keys(casinoTaking)[0], tk = casinoTaking[key];
+  const fresh = mine.find(b => b.amPlayer && b.phase >= 1 && !(tk.snap && tk.snap.has(b.coinid)));
+  if (!fresh) return;
+  delete casinoTaking[key];
+  const block = await casinoBlock();
+  casinoActivity("✓ " + (tk.game || "Bet") + " bet taken & confirmed on-chain" + (block ? " (block " + block + ")" : "") + " — game on! Waiting for the house to reveal.", "ok");
+  toast((tk.game || "Bet") + " is live ✓", "ok"); casinoSfx.chime();
+  if (activeView === "casino") casinoView = "mybets";
+}
+
+function onCasinoUpdate() {
+  if (casinoUpdateTimer) clearTimeout(casinoUpdateTimer);
+  casinoUpdateTimer = setTimeout(async () => {
+    refreshCasinoBadge();
+    await casinoRefresh();        // per-block: diff raw coins → narrate every step + detect results
+    await casinoCheckCreateConfirm();   // confirm a just-posted create via myBets → clear status + jump to My Bets
+    await casinoCheckTakeConfirm();     // confirm a just-posted TAKE via myBets → clear "Confirming", keep on My Bets
+    await casinoWatchResults();   // flash service-recorded (player) results with the exact outcome
+    if (activeView !== "casino") return;
+    if (el("casinoBody") && el("casinoBody").querySelector("input:focus")) return;   // never stomp a form
+    renderCasino();
+  }, 350);
+}
+async function refreshCasinoBadge() {
+  try { const n = await api.casinoNewCount(); const b = el("casinoBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; } catch (e) {}
+}
+// A background reveal/resolve (service.js) records to casino_history — surface the newest fresh win/lose as a flash.
+async function casinoWatchResults() {
+  let hist = []; try { hist = await api.casinoHistory(); } catch (e) { return; }
+  const now = Date.now();
+  const fresh = (hist || []).filter(h => h && h.coinid && !casinoFlashed[h.coinid] && (now - (Number(h.time) || 0)) < 180000);
+  if (!fresh.length) { (hist || []).forEach(h => { if (h && h.coinid) casinoFlashed[h.coinid] = true; }); return; }
+  (hist || []).forEach(h => { if (h && h.coinid) casinoFlashed[h.coinid] = true; });   // mark all seen so only the newest flashes
+  const h = fresh[0];   // history is newest-first
+  casinoFlash(!!h.won, h.game, h.profit, h.pickLabel, h.resultLabel, h.range, h.role);
+  casinoActivity((h.won ? "✓ WON +" : "✗ LOST −") + casinoFmt(h.profit) + " MINIMA — " + h.game + " (as " + (h.role || "") + ")", h.won ? "ok" : "err");
+}
+
+async function renderCasino() {
+  const host = el("casinoBody"); if (!host) return;
+  let st = null, bal = "0", stake = null;
+  try { st = await api.casinoStatus(); } catch (e) {}
+  try { bal = await api.casinoBalance(); } catch (e) {}
+  try { stake = await api.casinoStakeable(); } catch (e) {}   // honest max single bet (largest signable-address sendable total)
+  casinoStatusCache = st;
+  api.casinoSeen().catch(() => {}); refreshCasinoBadge();   // viewing the tab clears the unseen-result badge
+  const ready = st && st.ready;
+  const sub = (v, label) => `<button class="btn btn--sm ${casinoView === v ? "btn--primary" : "btn--outline"}" data-cv="${v}">${label}</button>`;
+  host.innerHTML =
+    `<div class="view__title" style="display:flex;align-items:center;gap:10px">P2PChance
+       <span style="font:600 11px/1 var(--mono);color:var(--dim);letter-spacing:0">TRUE ODDS · NO HOUSE</span>
+       <span style="flex:1"></span>
+       <button class="btn btn--sm btn--outline" id="casinoMute" title="Sound">${(() => { try { return localStorage.getItem("casino_mute") === "1" ? "🔇" : "🔊"; } catch (e) { return "🔊"; } })()}</button>
+     </div>
+     <div class="view__desc" style="margin:-4px 2px 10px">Games of chance played directly between two people, settled on-chain — <b>no middleman, no house edge, true odds</b>. Real MINIMA at stake.</div>
+     <div class="casino-hdr">
+       <div><span class="casino-hdr__k">Available to bet</span><span class="casino-hdr__v" title="The largest single bet you can place right now — in-play stakes & pending coins excluded">${casinoFmt(stake != null ? stake : bal)} <small>MINIMA</small></span></div>
+       <div><span class="casino-hdr__k">Block</span><span class="casino-hdr__v">${st && st.block ? "#" + st.block : "—"}</span></div>
+       <div><span class="casino-hdr__k">Engine</span><span class="casino-hdr__v" style="color:${ready ? "var(--green)" : "var(--amber)"}">${ready ? "ready" : "starting…"}</span></div>
+     </div>
+     <div class="seg" style="margin:10px 0 12px">${sub("play", "Play")}${sub("house", "Offer a Bet")}${sub("mybets", "My Bets")}${sub("history", "History")}</div>
+     <div id="casinoSub"></div>
+     <div class="casino-act"><div class="casino-act__hdr"><span class="casino-act__dot"></span>Activity</div><div class="casino-act__log" id="casinoActLog"></div></div>`;
+  host.querySelectorAll("[data-cv]").forEach(b => b.addEventListener("click", () => { casinoView = b.dataset.cv; renderCasino(); }));
+  const mute = el("casinoMute");
+  if (mute) mute.addEventListener("click", () => { try { const m = localStorage.getItem("casino_mute") === "1"; localStorage.setItem("casino_mute", m ? "0" : "1"); } catch (e) {} renderCasino(); });
+  renderCasinoSub();
+  casinoActPaint();   // restore the activity board from the ring after a re-render
+}
+
+function renderCasinoSub() {
+  if (casinoView === "play") return renderCasinoPlay();
+  if (casinoView === "house") return renderCasinoHouse();
+  if (casinoView === "mybets") return renderCasinoMyBets();
+  if (casinoView === "history") return renderCasinoHistory();
+}
+
+// ---------------- PLAY: take other players' open bets ----------------
+async function renderCasinoPlay() {
+  const host = el("casinoSub"); if (!host) return;
+  let bets = []; try { bets = await api.casinoOpenBets(); } catch (e) {}
+  if (el("casinoSub") !== host) return;   // view changed while awaiting
+  if (!bets.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No open bets right now. Switch to <b>Be the House</b> to offer one, or check back — bets from the native app & MiniDapp appear here too.</div></div>`; return; }
+  host.innerHTML = bets.map(b => {
+    const g = casinoGame(b.range), odds = (b.payout - 1);
+    const win = casinoFmt(parseFloat(b.bet) * b.payout);
+    const pick = casinoPick[b.coinid];
+    const picker = casinoPicker(b.range, b.coinid, pick);
+    const canTake = pick !== undefined && pick !== null && pick !== "";
+    return `<div class="card casino-bet">
+      <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span>
+        <span class="casino-bet__name">${esc(g.name)}</span>
+        <span class="casino-bet__odds">${odds}:1</span></div>
+      <div class="casino-bet__row"><span>Bet</span><b>${casinoFmt(b.bet)} MINIMA</b></div>
+      <div class="casino-bet__row"><span>You win</span><b style="color:var(--green)">${win} MINIMA</b></div>
+      <div class="casino-pickwrap">${picker}</div>
+      <button class="btn btn--primary btn--full casino-take" data-coin="${b.coinid}" ${canTake && !casinoBusy[b.coinid] ? "" : "disabled"}>${casinoBusy[b.coinid] ? "Taking…" : (canTake ? "TAKE BET — pick " + esc(casinoPickLabel(b.range, pick)) : "Choose your pick")}</button>
+    </div>`;
+  }).join("");
+  // pick controls
+  host.querySelectorAll("[data-pick]").forEach(elm => elm.addEventListener("click", () => { casinoPick[elm.dataset.coin] = parseInt(elm.dataset.pick); renderCasinoPlay(); }));
+  host.querySelectorAll("input[data-picknum]").forEach(inp => inp.addEventListener("input", () => { const v = parseInt(inp.value); casinoPick[inp.dataset.picknum] = (v >= 1 && v <= 36) ? v - 1 : ""; const btn = host.querySelector(`.casino-take[data-coin="${inp.dataset.picknum}"]`); if (btn) { const ok = casinoPick[inp.dataset.picknum] !== "" && casinoPick[inp.dataset.picknum] != null; btn.disabled = !ok; btn.textContent = ok ? "TAKE BET — pick " + (casinoPick[inp.dataset.picknum] + 1) : "Choose your pick"; } }));
+  host.querySelectorAll(".casino-take").forEach(btn => btn.addEventListener("click", () => casinoDoTake(btn.dataset.coin)));
+}
+
+function casinoPicker(range, coinid, pick) {
+  if (range == 2) return ["Heads", "Tails"].map((l, i) => `<button class="btn btn--sm ${pick === i ? "btn--primary" : "btn--outline"}" data-pick="${i}" data-coin="${coinid}">${l}</button>`).join("");
+  if (range == 6) return [0, 1, 2, 3, 4, 5].map(i => `<button class="btn btn--sm ${pick === i ? "btn--primary" : "btn--outline"}" data-pick="${i}" data-coin="${coinid}" style="min-width:38px">${i + 1}</button>`).join("");
+  return `<input class="field__input" type="number" min="1" max="36" placeholder="Pick a number 1–36" data-picknum="${coinid}" value="${pick != null && pick !== "" ? pick + 1 : ""}" style="max-width:220px">`;
+}
+
+async function casinoDoTake(coinid) {
+  if (casinoBusy[coinid]) return;
+  const pick = casinoPick[coinid];
+  if (pick === undefined || pick === null || pick === "") { toast("Choose your pick first", "warn"); return; }
+  casinoBusy[coinid] = true; renderCasinoPlay(); casinoSfx.deal();
+  casinoActivity("Taking bet — building & posting your take transaction…", "accent");
+  // Snapshot my current bets BEFORE posting, so the authoritative-myBets take-confirm (casinoCheckTakeConfirm)
+  // can spot the NEW taken bet regardless of raw-coin snapshot timing (mirrors casinoDoCreate's snap).
+  const takeSnap = new Set();
+  try { (await api.casinoMyBets() || []).forEach(b => takeSnap.add(b.coinid)); } catch (e) {}
+  try {
+    const r = await api.casinoTake(coinid, pick);
+    delete casinoBusy[coinid]; delete casinoPick[coinid];
+    const g = (r && r.game) || "Bet", range = (r && r.range) || 2;
+    casinoTaking[coinid] = { game: g, range, snap: takeSnap };
+    casinoActivity("Take accepted by the node — waiting for on-chain confirmation (can take up to 3 blocks)…", "warn");
+    toast(g + " bet posted — confirming on-chain…", "ok");
+    casinoView = "mybets"; renderCasino();
+  } catch (e) {
+    delete casinoBusy[coinid];
+    const msg = (e && e.message ? e.message : String(e));
+    casinoActivity("Take failed: " + msg, "err");
+    toast("Take failed: " + msg, "err");
+    renderCasinoPlay();
+  }
+}
+
+// ---------------- HOUSE: create a bet + manage your open offers ----------------
+async function renderCasinoHouse() {
+  const host = el("casinoSub"); if (!host) return;
+  const p = CASINO_PRESETS[casinoHousePreset];
+  const betInput = el("casinoBetAmt");
+  const curBet = betInput ? betInput.value : "";
+  const card = (id, g) => `<button class="btn btn--sm ${casinoHousePreset === id ? "btn--primary" : "btn--outline"}" data-preset="${id}" style="flex-direction:column;gap:2px;padding:10px 6px"><span style="font-size:18px">${g.icon}</span><span>${g.name}</span><span style="font:600 10px/1 var(--mono);opacity:.7">${g.payout - 1}:1</span></button>`;
+  host.innerHTML =
+    `<div class="card">
+      <div class="casino-presets">${card("flip", CASINO_PRESETS.flip)}${card("dice", CASINO_PRESETS.dice)}${card("roulette", CASINO_PRESETS.roulette)}</div>
+      <label class="casino-lbl">Player's bet (MINIMA)</label>
+      <input class="field__input" id="casinoBetAmt" type="number" min="0" step="0.01" placeholder="e.g. 10" value="${esc(curBet)}">
+      <div id="casinoHouseSummary" class="casino-summary"></div>
+      <button class="btn btn--primary btn--full" id="casinoCreateBtn" ${casinoBusy.create ? "disabled" : ""}>${casinoBusy.create ? "Creating…" : "CREATE BET"}</button>
+      <div id="casinoCreateStatus" class="casino-cstatus${casinoCreateMsg.cls ? " casino-cstatus--" + casinoCreateMsg.cls : ""}">${esc(casinoCreateMsg.text)}</div>
+      <div class="casino-note">You stake the amount you could lose; the player adds their bet and picks an outcome. When they take it, your node auto-reveals — zero house edge, the whole pot is paid out. Once your bet confirms on-chain (up to 3 blocks) you'll jump to <b>My Bets</b> — that's where all your bets live.</div>
+    </div>`;
+  host.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => { casinoHousePreset = b.dataset.preset; renderCasinoHouse(); }));
+  const amt = el("casinoBetAmt");
+  if (amt) amt.addEventListener("input", casinoUpdateHouseSummary);
+  casinoUpdateHouseSummary();
+  const cb = el("casinoCreateBtn");
+  if (cb) cb.addEventListener("click", casinoDoCreate);
+}
+
+function casinoUpdateHouseSummary() {
+  const box = el("casinoHouseSummary"); if (!box) return;
+  const p = CASINO_PRESETS[casinoHousePreset];
+  const bet = parseFloat((el("casinoBetAmt") || {}).value) || 0;
+  let stake = parseFloat((bet * (p.payout - 1)).toFixed(8)); if (stake <= 0) stake = bet;
+  box.innerHTML = `<div class="casino-summary__row"><span>You lock</span><b>${casinoFmt(stake)} MINIMA</b></div>
+    <div class="casino-summary__row"><span>If the player wins</span><b style="color:var(--red)">−${casinoFmt(stake)}</b></div>
+    <div class="casino-summary__row"><span>If the player loses</span><b style="color:var(--green)">+${casinoFmt(bet)}</b></div>
+    <div class="casino-summary__row"><span>Odds</span><b>${p.payout - 1}:1 (fair)</b></div>`;
+  const cb = el("casinoCreateBtn"); if (cb && !casinoBusy.create) cb.textContent = stake > 0 ? "CREATE BET — LOCK " + casinoFmt(stake) : "CREATE BET";
+}
+
+async function casinoDoCreate() {
+  if (casinoBusy.create) return;
+  const bet = parseFloat((el("casinoBetAmt") || {}).value);
+  if (!bet || bet <= 0 || isNaN(bet)) { toast("Enter a valid bet amount", "warn"); return; }
+  const p = CASINO_PRESETS[casinoHousePreset];
+  casinoBusy.create = true; casinoSetCreateStatus("Generating secret & posting your stake transaction…", "warn"); renderCasinoHouse(); casinoSfx.chip();
+  casinoActivity("Creating " + p.name + " bet — building & posting the stake transaction…", "accent");
+  // Snapshot the coinids of my current bets BEFORE posting — the create is confirmed when a NEW phase-0 amHouse bet appears.
+  const snap = new Set();
+  try { (await api.casinoMyBets() || []).forEach(b => snap.add(b.coinid)); } catch (e) {}
+  try {
+    const r = await api.casinoCreate(casinoHousePreset, String(bet));
+    delete casinoBusy.create;
+    casinoPendingCreate = { game: p.name, range: p.range, stake: (r && r.stake) || bet, snap };
+    casinoActivity("Transaction accepted by the node — waiting for on-chain confirmation (up to 3 blocks)…", "warn");
+    casinoSetCreateStatus("Posted — waiting for on-chain confirmation (up to 3 blocks)…", "warn");
+    toast(p.name + " bet posted — confirming on-chain…", "ok");
+    renderCasinoHouse();   // STAY on the Offer page; the bet appears in My Bets only once it confirms on-chain
+  } catch (e) {
+    delete casinoBusy.create;
+    const msg = (e && e.message ? e.message : String(e));
+    casinoActivity("Create failed: " + msg, "err");
+    casinoSetCreateStatus("Create failed: " + msg, "err");
+    toast("Create failed: " + msg, "err");
+    renderCasinoHouse();
+  }
+}
+
+async function casinoDoCancel(coinid) {
+  if (casinoBusy[coinid]) return;
+  casinoBusy[coinid] = true; renderCasinoHouse();
+  casinoActivity("Cancelling bet — building & posting the reclaim transaction…", "accent");
+  try {
+    const r = await api.casinoCancel(coinid);
+    delete casinoBusy[coinid];
+    casinoCancelling[coinid] = true;
+    casinoActivity("Cancel accepted by the node — waiting for on-chain confirmation…", "warn");
+    toast("Cancel posted — confirming on-chain…", "ok");
+    renderCasino();
+  } catch (e) {
+    delete casinoBusy[coinid];
+    const msg = (e && e.message ? e.message : String(e));
+    casinoActivity("Cancel failed: " + msg, "err");
+    toast("Cancel failed: " + msg, "err");
+    renderCasinoHouse();
+  }
+}
+
+// ---------------- MY BETS: active bets in flight ----------------
+async function renderCasinoMyBets() {
+  const host = el("casinoSub"); if (!host) return;
+  let bets = []; try { bets = await api.casinoMyBets(); } catch (e) {}
+  if (el("casinoSub") !== host) return;
+  const active = (bets || []).filter(b => b.phase !== 0 || b.amHouse);   // include my open offers too
+  // Pending placeholders — a create/take is NOT a real bet until the chain confirms it (mirrors MDS).
+  // Pending CREATE shows its status on the Offer page; pending TAKE is a TEXT-ONLY card here (no animation —
+  // the spinning game only plays once a bet is actually in play, phase >= 1).
+  let ph = "";
+  if (Object.keys(casinoTaking).length) ph += `<div class="card" style="text-align:center"><div class="casino-note" style="color:var(--amber);font-weight:600;margin:0">⏳ Bet taken! It can take up to 3 blocks for your bet to appear here.</div></div>`;
+  if (!ph && !active.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No bets in flight. Take one in <b>Play</b> or offer one in <b>Be the House</b>.</div></div>`; return; }
+  host.innerHTML = ph + active.map(b => {
+    const g = casinoGame(b.range);
+    let statusTxt = "", statusCol = "var(--amber)", extra = "";
+    const canTimeout = b.expired;
+    if (b.phase === 0) { statusTxt = "Open — waiting for a taker"; extra = `<button class="btn btn--sm btn--outline casino-cancel" data-coin="${b.coinid}">Cancel & reclaim</button>`; }
+    else if (b.phase === 1 && b.amHouse) { statusTxt = "Taken — auto-revealing…"; extra = b.age > 10 ? `<button class="btn btn--sm btn--outline casino-reveal" data-coin="${b.coinid}">Force reveal</button>` : ""; }
+    else if (b.phase === 1) { statusTxt = "Waiting for house to reveal…"; }
+    else if (b.phase === 2 && b.amPlayer) { statusTxt = "Revealing — auto-resolving…"; statusCol = "var(--green)"; extra = b.age > 10 ? `<button class="btn btn--sm btn--outline casino-resolve" data-coin="${b.coinid}">Force resolve</button>` : ""; }
+    else if (b.phase === 2) { statusTxt = "Waiting for player to resolve…"; }
+    if (canTimeout) extra = `<button class="btn btn--sm btn--outline casino-timeout" data-coin="${b.coinid}" style="color:var(--red);border-color:var(--red)">Claim timeout</button>`;
+    const pickTxt = (b.pick !== "" && b.pick != null && b.amPlayer) ? " · picked " + casinoPickLabel(b.range, b.pick) : "";
+    const inflight = b.phase >= 1;   // taken/revealing/resolving → show the looping game animation
+    return `<div class="card casino-bet${inflight ? " casino-waiting" : ""}">
+      <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span><span class="casino-bet__name">${esc(g.name)}</span>
+        <span class="casino-bet__role">${esc(b.role)}${pickTxt}</span></div>
+      ${inflight ? casinoAnimHTML(b.range) : ""}
+      <div class="casino-bet__row"><span>Pot</span><b>${casinoFmt(b.amount)} MINIMA</b></div>
+      <div class="casino-bet__row"><span>Status</span><b style="color:${statusCol}">${statusTxt}</b></div>
+      ${b.timeout ? `<div class="casino-bet__row"><span>Age</span><b>${b.age}/${b.timeout} blocks</b></div>` : ""}
+      ${casinoBusy[b.coinid] ? `<div class="casino-note" style="color:var(--amber)">${casinoCancelling[b.coinid] ? "Cancelling — posting to chain…" : "Posting to chain…"}</div>` : extra}
+    </div>`;
+  }).join("");
+  host.querySelectorAll(".casino-cancel").forEach(btn => btn.addEventListener("click", () => casinoDoCancel(btn.dataset.coin)));
+  host.querySelectorAll(".casino-reveal").forEach(btn => btn.addEventListener("click", () => casinoDoFallback(btn.dataset.coin, "reveal")));
+  host.querySelectorAll(".casino-resolve").forEach(btn => btn.addEventListener("click", () => casinoDoFallback(btn.dataset.coin, "resolve")));
+  host.querySelectorAll(".casino-timeout").forEach(btn => btn.addEventListener("click", () => casinoDoFallback(btn.dataset.coin, "timeout")));
+}
+
+async function casinoDoFallback(coinid, kind) {
+  if (casinoBusy[coinid]) return;
+  const label = kind === "reveal" ? "Revealing secret" : kind === "resolve" ? "Resolving result" : "Claiming timeout";
+  casinoBusy[coinid] = true; renderCasinoMyBets();
+  casinoActivity(label + " — building & posting the transaction…", "accent");
+  const fn = kind === "reveal" ? api.casinoReveal : kind === "resolve" ? api.casinoResolve : api.casinoClaimTimeout;
+  try {
+    const r = await fn(coinid);
+    delete casinoBusy[coinid];
+    if (kind === "resolve" && r) {
+      casinoFlashed[coinid] = true;
+      const won = r.isHouse ? !r.playerWins : r.playerWins;
+      casinoFlash(won, casinoGame(r.range).name, null, casinoPickLabel(r.range, r.pick), casinoPickLabel(r.range, r.result), r.range, r.isHouse ? "House" : "Player");
+      casinoActivity((won ? "✓ WON — " : "✗ LOST — ") + casinoGame(r.range).name + " resolved on-chain (result " + casinoPickLabel(r.range, r.result) + ")", won ? "ok" : "err");
+    } else {
+      casinoActivity(label + " accepted — waiting for on-chain confirmation…", "warn");
+      toast(kind === "timeout" ? "Timeout claimed — " + casinoFmt(r && r.amount) + " MINIMA returned ✓" : "Posted — confirming on-chain…", "ok");
+    }
+    renderCasino();
+  } catch (e) {
+    delete casinoBusy[coinid];
+    const msg = (e && e.message ? e.message : String(e));
+    casinoActivity(label + " failed: " + msg, "err");
+    toast("Failed: " + msg, "err");
+    renderCasinoMyBets();
+  }
+}
+
+// ---------------- HISTORY ----------------
+async function renderCasinoHistory() {
+  const host = el("casinoSub"); if (!host) return;
+  let hist = []; try { hist = await api.casinoHistory(); } catch (e) {}
+  if (el("casinoSub") !== host) return;
+  if (!hist.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No completed bets yet.</div></div>`; return; }
+  host.innerHTML = `<div class="card" style="padding:0;overflow:hidden">` + hist.map(rb => {
+    const won = !!rb.won, col = won ? "var(--green)" : "var(--red)", sign = won ? "+" : "−";
+    const pk = (rb.pickLabel && rb.pickLabel !== "—") ? `<div class="casino-hist__sub">Picked ${esc(rb.pickLabel)} → Result ${esc(rb.resultLabel)}</div>` : "";
+    return `<div class="casino-hist"><span class="casino-ico" style="font-size:17px">${casinoGame(rb.range).icon}</span>
+      <div style="flex:1"><div class="casino-hist__ttl">${esc(rb.game)} <span style="color:var(--dim);font-weight:400">as ${esc(rb.role)}</span></div>${pk}</div>
+      <div style="font:800 14px/1 var(--mono);color:${col}">${sign}${casinoFmt(rb.profit)}</div></div>`;
+  }).join("") + `</div>`;
+}
+
+// ---------------- reveal experience: spin → LAND on the real on-chain result → win/lose ----------------
+// Purely presentational. The outcome + exact roll come from the confirmed on-chain resolve (mechanism B /
+// service history) — this only spins the coin/dice/no-zero wheel to LAND on that result, then reveals.
+// The contract, engine.js, service.js and payout are untouched; nothing here can change a result.
+const CASINO_WHEEL = [32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]; // 36 pockets, NO zero (zero-edge), authentic clustered order
+const CASINO_RED = {}; [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].forEach(n => { CASINO_RED[n] = 1; });
+const CASINO_PIP = { 1:[5], 2:[3,7], 3:[3,5,7], 4:[1,3,7,9], 5:[1,3,5,7,9], 6:[1,3,4,6,7,9] };
+function casinoLabelToIdx(range, label) { if (label == null || label === "—") return -1; if (range == 2) return /head/i.test(label) ? 0 : 1; const n = parseInt(label); return isNaN(n) ? -1 : n - 1; }
+function casinoNonPick(pick, range) { range = parseInt(range) || 2; if (range < 2) return 0; let r; do { r = Math.floor(Math.random() * range); } while (r === pick); return r; }
+function casinoSetDie(die, val) { [].forEach.call(die.querySelectorAll("i"), x => x.classList.remove("on")); (CASINO_PIP[val] || []).forEach(p => { const el = die.querySelector('i[data-i="' + p + '"]'); if (el) el.classList.add("on"); }); }
+function casinoWheelHTML() {
+  const seg = 360 / 36, R = 88; let stops = [], nums = "";
+  for (let k = 0; k < 36; k++) { const n = CASINO_WHEEL[k]; stops.push((CASINO_RED[n] ? "#b01f2b" : "#14171c") + " " + (k * seg).toFixed(3) + "deg " + ((k + 1) * seg).toFixed(3) + "deg"); }
+  for (let m = 0; m < 36; m++) { const Ci = (m + 0.5) * seg, rad = (Ci - 90) * Math.PI / 180, x = Math.cos(rad) * R, y = Math.sin(rad) * R;
+    nums += '<div class="cf-num" style="transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + Ci + 'deg)"><span>' + CASINO_WHEEL[m] + '</span></div>'; }
+  return '<div class="cf-roubox"><div class="cf-roupin"></div><div class="cf-wheel"><div class="cf-wheelbg" style="background:conic-gradient(' + stops.join(",") + ')"></div>' + nums + '</div><div class="cf-rouhub"></div></div>';
+}
+// build the game visual in `stage`, start spinning, and return { land(resultIdx, done) } which decelerates onto the result
+function casinoSpinner(stage, range) {
+  const gv = document.createElement("div"); gv.className = "cf-gv"; stage.appendChild(gv);
+  if (range == 2) {
+    gv.innerHTML = '<div class="cf-coin"><div class="cf-face cf-front"><div class="cf-sheen"></div><div class="cf-rim"></div><span class="cf-sym">H</span></div><div class="cf-face cf-back"><div class="cf-sheen"></div><div class="cf-rim"></div><span class="cf-sym">T</span></div></div>';
+    const coin = gv.querySelector(".cf-coin"); let ang = 0, raf, landing = false;
+    (function fr() { ang += 27; coin.style.transform = "rotateY(" + ang + "deg)"; if (!landing) raf = requestAnimationFrame(fr); })();
+    const tick = setInterval(() => casinoSfx.tick(), 110);
+    return { land(res, done) { landing = true; cancelAnimationFrame(raf); clearInterval(tick);
+      const target = Math.ceil((ang + 540) / 360) * 360 + (res === 0 ? 0 : 180), from = ang, t0 = performance.now();
+      (function la(now) { const p = Math.min(1, (now - t0) / 820), e = 1 - Math.pow(1 - p, 3); coin.style.transform = "rotateY(" + (from + (target - from) * e) + "deg)";
+        if (p < 1) requestAnimationFrame(la); else { coin.style.transform = "rotateY(" + target + "deg)"; casinoSfx.land(); done && done(); } })(t0); } };
+  }
+  if (range == 6) {
+    let d = '<div class="cf-die">'; for (let i = 1; i <= 9; i++) d += '<i data-i="' + i + '"></i>'; d += '</div>'; gv.innerHTML = d;
+    const die = gv.querySelector(".cf-die"); casinoSetDie(die, 6); let a = 0, raf, landing = false;
+    const iv = setInterval(() => { casinoSetDie(die, 1 + Math.floor(Math.random() * 6)); casinoSfx.tick(); }, 85);
+    (function fr() { a += 1; die.style.transform = "rotate(" + (Math.sin(a / 3) * 15) + "deg) translateY(" + (Math.cos(a / 4) * 5) + "px)"; if (!landing) raf = requestAnimationFrame(fr); })();
+    return { land(res, done) { landing = true; clearInterval(iv); cancelAnimationFrame(raf); casinoSetDie(die, res + 1); const t0 = performance.now();
+      (function la(now) { const p = Math.min(1, (now - t0) / 440), e = 1 - Math.pow(1 - p, 3); die.style.transform = "rotate(" + ((1 - e) * 8) + "deg) scale(" + (1 + (1 - e) * 0.07) + ")";
+        if (p < 1) requestAnimationFrame(la); else { die.style.transform = "rotate(0) scale(1)"; casinoSfx.land(); done && done(); } })(t0); } };
+  }
+  gv.innerHTML = casinoWheelHTML();   // roulette — no-zero 36-pocket
+  const wheel = gv.querySelector(".cf-wheel"); let ang = 0, raf, landing = false, seg = 360 / 36;
+  (function fr() { ang += 14; wheel.style.transform = "rotate(" + ang + "deg)"; if (!landing) raf = requestAnimationFrame(fr); })();
+  const st = setInterval(() => casinoSfx.spin(), 70);
+  return { land(res, done) { landing = true; cancelAnimationFrame(raf); clearInterval(st);
+    const idx = CASINO_WHEEL.indexOf(res + 1), Ci = (idx + 0.5) * seg, base = (Math.ceil(ang / 360) + 4) * 360, target = base + (360 - Ci), from = ang, dur = 2600, t0 = performance.now();
+    for (let i = 0; i < 26; i++) { setTimeout(() => casinoSfx.clatter(), dur * (1 - Math.pow(1 - i / 26, 2))); }   // decelerating ball clatter
+    (function la(now) { const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 4); wheel.style.transform = "rotate(" + (from + (target - from) * e) + "deg)";
+      if (p < 1) requestAnimationFrame(la); else { casinoSfx.land(); done && done(); } })(t0); } };
+}
+function casinoConfetti(cv) {
+  const ctx = cv.getContext("2d"), W = cv.width = cv.offsetWidth * devicePixelRatio, H = cv.height = cv.offsetHeight * devicePixelRatio, P = [];
+  const cols = ["#33C088", "#F5C451", "#FF7A55", "#FFFFFF", "#7ad0ff"];
+  for (let i = 0; i < 140; i++) P.push({ x: W * (0.2 + Math.random() * 0.6), y: H * 0.6, vx: (Math.random() - 0.5) * 16 * devicePixelRatio, vy: (Math.random() * -17 - 7) * devicePixelRatio, g: 0.5 * devicePixelRatio, s: (4 + Math.random() * 6) * devicePixelRatio, c: cols[i % cols.length], rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4 });
+  const t0 = performance.now();
+  (function fr(now) { ctx.clearRect(0, 0, W, H); let live = false; P.forEach(p => { p.vy += p.g; p.x += p.vx; p.y += p.vy; p.vx *= 0.99; p.rot += p.vr; const a = Math.max(0, 1 - (now - t0) / 1500); if (p.y < H + 20) live = true; ctx.save(); ctx.globalAlpha = a; ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.c; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.6); ctx.restore(); });
+    if (live && now - t0 < 1600) requestAnimationFrame(fr); else ctx.clearRect(0, 0, W, H); })(t0);
+}
+function casinoRevealCSS() {
+  if (document.getElementById("cf-css")) return;
+  const s = document.createElement("style"); s.id = "cf-css";
+  s.textContent = `
+  .cf-ov{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;
+    background:radial-gradient(120% 100% at 50% 40%,rgba(0,0,0,.55),rgba(0,0,0,.86));animation:cfIn .2s ease}
+  @keyframes cfIn{from{opacity:0}to{opacity:1}}
+  .cf-card{width:min(420px,92vw);background:linear-gradient(180deg,#1a1d23,#131519);border:1px solid rgba(255,255,255,.15);
+    border-radius:18px;overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.6);position:relative}
+  .cf-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .cf-game{font:750 14px/1 system-ui,sans-serif;color:#ECEDF0}
+  .cf-pip{font:600 10px/1 var(--mono,ui-monospace,monospace);letter-spacing:.1em;text-transform:uppercase;color:#9C9FA8}
+  .cf-stage{position:relative;height:236px;display:flex;align-items:center;justify-content:center;overflow:hidden;
+    background:radial-gradient(120% 92% at 50% 0%,#1a3a2c,#0c1a13 60%,#0a0d0b)}
+  .cf-gv{display:flex;align-items:center;justify-content:center;z-index:2}
+  .cf-conf{position:absolute;inset:0;z-index:8;pointer-events:none}
+  .cf-coin{width:132px;height:132px;position:relative;transform-style:preserve-3d;will-change:transform}
+  .cf-face{position:absolute;inset:0;border-radius:50%;-webkit-backface-visibility:hidden;backface-visibility:hidden;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 16px 38px rgba(0,0,0,.55),inset 0 0 0 2px rgba(0,0,0,.25),inset 0 0 24px rgba(0,0,0,.28)}
+  .cf-front{background:radial-gradient(circle at 37% 28%,#ffe7a6,#f0a63c 52%,#a9631a);color:#5b3410}
+  .cf-back{transform:rotateY(180deg);background:radial-gradient(circle at 37% 28%,#ffcda2,#e8763d 52%,#8f381d);color:#4a1c0d}
+  .cf-sheen{position:absolute;inset:0;border-radius:50%;mix-blend-mode:overlay;opacity:.7;
+    background:conic-gradient(from -40deg,rgba(255,255,255,.55),rgba(0,0,0,.2) 22%,rgba(255,255,255,.5) 50%,rgba(0,0,0,.25) 74%,rgba(255,255,255,.55))}
+  .cf-rim{position:absolute;inset:5px;border-radius:50%;box-shadow:inset 0 0 0 3px rgba(255,255,255,.22),inset 0 -7px 15px rgba(0,0,0,.3)}
+  .cf-sym{position:relative;z-index:2;font:860 54px/1 system-ui,sans-serif;text-shadow:0 2px 0 rgba(0,0,0,.22),0 -1px 0 rgba(255,255,255,.35)}
+  .cf-die{width:114px;height:114px;border-radius:20px;background:linear-gradient(150deg,#f6f7f9,#c7cad2);
+    box-shadow:0 14px 30px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.6),inset 0 -10px 16px rgba(0,0,0,.12);
+    display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);padding:15px;gap:4px;will-change:transform}
+  .cf-die i{align-self:center;justify-self:center;width:19px;height:19px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#39404c,#0d1015);box-shadow:inset 0 -2px 3px rgba(0,0,0,.5);visibility:hidden}
+  .cf-die i.on{visibility:visible}
+  .cf-roubox{position:relative;width:210px;height:210px}
+  .cf-wheel{position:absolute;inset:0;border-radius:50%;will-change:transform;
+    box-shadow:0 14px 40px rgba(0,0,0,.55),inset 0 0 0 8px #241a0e,inset 0 0 0 11px #F5C451,inset 0 0 0 13px #241a0e}
+  .cf-wheelbg{position:absolute;inset:14px;border-radius:50%;box-shadow:inset 0 0 0 2px rgba(0,0,0,.4)}
+  .cf-num{position:absolute;top:50%;left:50%;width:0;height:0;font:700 9px/1 var(--mono,ui-monospace,monospace);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8)}
+  .cf-num span{position:absolute;transform:translate(-50%,-50%)}
+  .cf-rouhub{position:absolute;top:50%;left:50%;width:62px;height:62px;transform:translate(-50%,-50%);border-radius:50%;z-index:3;
+    background:radial-gradient(circle at 40% 34%,#4a3a20,#150f07);border:2px solid #F5C451;box-shadow:0 5px 14px rgba(0,0,0,.5)}
+  .cf-roupin{position:absolute;top:-4px;left:50%;transform:translateX(-50%);z-index:5;width:0;height:0;
+    border-left:10px solid transparent;border-right:10px solid transparent;border-top:18px solid #F5C451;filter:drop-shadow(0 3px 3px rgba(0,0,0,.7))}
+  .cf-strip{display:none;align-items:center;gap:14px;padding:14px 16px;border-top:1px solid rgba(255,255,255,.08);
+    transform:translateY(10px);opacity:0;transition:transform .3s cubic-bezier(.2,1.3,.4,1),opacity .3s}
+  .cf-strip.on{display:flex;transform:translateY(0);opacity:1}
+  .cf-verdict{font:800 22px/1 var(--mono,ui-monospace,monospace);white-space:nowrap}
+  .cf-strip.win .cf-verdict{color:var(--green,#33C088)}
+  .cf-strip.lose .cf-verdict{color:var(--red,#F05560)}
+  .cf-meta{font:11px/1.45 var(--mono,ui-monospace,monospace);color:#9C9FA8}.cf-meta b{color:#ECEDF0}
+  .cf-strip.win{box-shadow:inset 0 1px 0 rgba(51,192,136,.4)}
+  .cf-go{display:block;width:calc(100% - 32px);margin:0 16px 16px;padding:12px;border:0;border-radius:11px;cursor:pointer;
+    font:750 14px system-ui,sans-serif;color:#20130c;background:linear-gradient(180deg,#F5C451,#F7A73A);box-shadow:0 8px 20px rgba(247,167,58,.28)}
+  .cf-go:hover{filter:brightness(1.06)} .cf-go:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  @media(prefers-reduced-motion:reduce){.cf-ov *{animation-duration:.001ms!important;transition-duration:.05ms!important}}`;
+  document.head.appendChild(s);
+}
+
+// Same signature as before, so the four reveal points + fairness path are unchanged. Spins, lands on the REAL
+// result (already confirmed on-chain by the time this runs), then reveals with the bolder win/lose sound.
+function casinoFlash(won, game, amount, pickLabel, resultLabel, range, role) {
+  range = parseInt(range) || 2;
+  casinoRevealCSS(); casinoSfx.resume();
+  const g = casinoGame(range);
+  const pIdx = casinoLabelToIdx(range, pickLabel);
+  let rIdx = casinoLabelToIdx(range, resultLabel);
+  if (rIdx < 0 || rIdx >= range) rIdx = won ? (pIdx >= 0 ? pIdx : 0) : casinoNonPick(pIdx, range);   // "—" fallback: won⇒pick, lose⇒a non-pick
+  const whose = role === "House" ? "player picked" : "you picked";
+  const shownResult = (resultLabel && resultLabel !== "—") ? resultLabel : casinoPickLabel(range, rIdx);
+
+  const ov = document.createElement("div"); ov.className = "cf-ov";
+  ov.innerHTML = '<div class="cf-card">'
+    + '<div class="cf-head"><span class="cf-game">' + esc(g.name) + ' · as ' + esc(role || "") + '</span><span class="cf-pip">resolving on-chain…</span></div>'
+    + '<div class="cf-stage"></div>'
+    + '<div class="cf-strip"><span class="cf-verdict"></span><span class="cf-meta"></span></div>'
+    + '<canvas class="cf-conf"></canvas><button class="cf-go">Continue</button></div>';
+  document.body.appendChild(ov);
+  let closed = false, autoT = null;
+  const close = () => { if (closed) return; closed = true; clearTimeout(autoT); ov.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = e => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  ov.addEventListener("click", e => { if (e.target === ov) close(); });
+  ov.querySelector(".cf-go").addEventListener("click", close);
+
+  const spinner = casinoSpinner(ov.querySelector(".cf-stage"), range);
+  const PRE = range == 36 ? 350 : 750;   // brief pre-spin; the decel/land is the show
+  setTimeout(() => {
+    if (closed) return;
+    spinner.land(rIdx, () => {
+      if (closed) return;
+      ov.querySelector(".cf-pip").textContent = "resolved on-chain · provably fair";
+      const strip = ov.querySelector(".cf-strip"); strip.classList.add("on", won ? "win" : "lose");
+      const amtTxt = (amount != null && amount !== "") ? (" " + (won ? "+" : "−") + casinoFmt(amount) + " MINIMA") : "";
+      strip.querySelector(".cf-verdict").textContent = (won ? "✓ WON" : "✗ LOST") + amtTxt;
+      strip.querySelector(".cf-meta").innerHTML = ((pickLabel && pickLabel !== "—") ? whose + " <b>" + esc(pickLabel) + "</b> · " : "") + "landed <b>" + esc(shownResult) + "</b>";
+      if (won) { casinoSfx.win(); casinoConfetti(ov.querySelector(".cf-conf")); } else casinoSfx.lose();
+      autoT = setTimeout(close, 5200);
+      if (activeView === "casino") setTimeout(() => { if (activeView === "casino") renderCasino(); }, 300);
+    });
+  }, PRE);
+}
+
+// ============================ Vestr (token vesting — shared covenant 0x3C43…) ============================
+// Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,
+// collectable per grace cadence. Node computes the exact collectable (main/vestr.js runscript). Merged layout.
+let vestrView = "list";          // list | create | calc
+let vestrUpdateTimer = null;
+let vestrTokMap = null;          // tokenid → name
+let vestrBusy = {};
+const VESTR_GRACE = [["None (continuous)", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
+
+function vFmt(v) { const n = Number(v); return isNaN(n) ? "0" : n.toLocaleString(undefined, { maximumFractionDigits: 8 }); }
+function vTok(tid) { if (tid === "0x00") return "MINIMA"; return (vestrTokMap && vestrTokMap[tid]) || (String(tid).slice(0, 8) + "…"); }
+function vShort(a) { a = String(a || ""); return a.length > 16 ? a.slice(0, 8) + "…" + a.slice(-4) : a; }
+
+function onVestrUpdate() {
+  if (vestrUpdateTimer) clearTimeout(vestrUpdateTimer);
+  vestrUpdateTimer = setTimeout(() => {
+    if (activeView !== "vestr") return;
+    if (el("vestrBody") && el("vestrBody").querySelector("input:focus, select:focus")) return;   // never stomp a form
+    if (vestrView === "list") renderVestrSub();
+  }, 350);
+}
+
+async function renderVestr() {
+  const host = el("vestrBody"); if (!host) return;
+  if (!vestrTokMap) { try { const t = await api.vestrTokens(); vestrTokMap = {}; (t || []).forEach(x => vestrTokMap[x.tokenid] = x.name); } catch (e) {} }
+  const tab = (v, label) => `<button class="btn btn--sm ${vestrView === v ? "btn--primary" : "btn--outline"}" data-vv="${v}">${label}</button>`;
+  host.innerHTML = `<div class="view__title" style="display:flex;align-items:center;gap:10px">Vestr <span style="font:600 11px/1 var(--mono);color:var(--dim)">TOKEN VESTING · shared covenant</span></div>`
+    + `<div class="seg" style="margin:8px 0 12px">${tab("list", "My Contracts")}${tab("create", "Create")}${tab("calc", "Calculate")}</div>`
+    + `<div id="vestrSub"></div>`;
+  host.querySelectorAll("[data-vv]").forEach(b => b.addEventListener("click", () => { vestrView = b.dataset.vv; renderVestr(); }));
+  renderVestrSub();
+}
+function renderVestrSub() {
+  if (vestrView === "list") return renderVestrList();
+  if (vestrView === "create") return renderVestrCreate();
+  if (vestrView === "calc") return renderVestrCalc();
+}
+
+// ---- My Contracts ----
+async function renderVestrList() {
+  const host = el("vestrSub"); if (!host) return;
+  let vs = []; try { vs = await api.vestrList(); } catch (e) {}
+  if (el("vestrSub") !== host) return;
+  if (!vs.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">You have no vesting contracts yet. <b>Create</b> one, or ask someone to vest to your address — contracts from the native app & web dapp appear here too.</div></div>`; return; }
+  host.innerHTML = vs.map(v => {
+    const badge = v.expired ? `<span class="v-badge done">fully vested</span>` : v.cliffed ? `<span class="v-badge cliff">not started</span>` : `<span class="v-badge">${v.pctVested}% vested</span>`;
+    const availCol = v.canCollectNow ? "var(--green)" : "var(--dim)";
+    let action;
+    if (v.canCollectNow) action = `<div class="v-collect"><div class="v-fee"><span class="v-flabel">Fee (burn)</span><input class="field__input" id="vburn_${v.coinid}" value="0"></div><button class="btn btn--primary v-cbtn" data-coin="${v.coinid}" ${vestrBusy[v.coinid] ? "disabled" : ""}>${vestrBusy[v.coinid] ? "Collecting…" : "Collect " + vFmt(v.cancollect) + " " + vTok(v.tokenid)}</button></div>`;
+    else if (v.cliffed) action = `<div class="v-note">Vesting hasn't started — nothing collectable until block ${v.startBlock.toLocaleString()}.</div>`;
+    else if (v.mustwait) action = `<div class="v-note">Grace period — collect again in ~${Number(v.mustwaitblocks).toLocaleString()} blocks.</div>`;
+    else action = `<div class="v-note">Nothing available to collect right now.</div>`;
+    return `<div class="card v-card">
+      <div class="v-top"><span class="v-amt">${vFmt(v.amount)} <small>${esc(vTok(v.tokenid))}</small> <span style="color:var(--dim);font-weight:400">locked</span></span>${badge}</div>
+      <div class="v-to mono">→ ${esc(vShort(v.beneficiary))}</div>
+      <div class="v-bar"><i style="width:${v.pctVested}%;${v.expired ? "background:var(--green)" : ""}"></i></div>
+      <div class="v-sub mono"><span>start · block ${v.startBlock.toLocaleString()}</span><span>end · block ${v.endBlock.toLocaleString()}</span></div>
+      <div class="v-avail"><span class="k">Available to collect now</span><span class="val" style="color:${availCol}">${vFmt(v.cancollect)}</span></div>
+      <div class="v-stats">
+        <div><span>Collected</span><b>${vFmt(v.collected)}</b></div><div><span>Total locked</span><b>${vFmt(v.total)}</b></div>
+        <div><span>Remaining</span><b>${vFmt(v.amount)}</b></div><div><span>Collect every</span><b>${esc(v.graceLabel)}</b></div>
+      </div>
+      ${action}
+    </div>`;
+  }).join("");
+  host.querySelectorAll(".v-cbtn").forEach(btn => btn.addEventListener("click", () => {
+    const coin = btn.dataset.coin, fee = (el("vburn_" + coin) || {}).value || "0";
+    vestrDoCollect(coin, fee);
+  }));
+}
+async function vestrDoCollect(coinid, burn) {
+  if (vestrBusy[coinid]) return;
+  vestrBusy[coinid] = true; renderVestrList();
+  try { const r = await api.vestrCollect(coinid, burn); delete vestrBusy[coinid]; toast("Collected " + vFmt(r && r.collected) + " " + vTok(r && r.tokenid) + " ✓", "ok"); renderVestrList(); }
+  catch (e) { delete vestrBusy[coinid]; toast("Collect failed: " + (e && e.message ? e.message : e), "err"); renderVestrList(); }
+}
+
+// ---- Create ----
+async function renderVestrCreate() {
+  const host = el("vestrSub"); if (!host) return;
+  let toks = []; try { toks = await api.vestrTokens(); } catch (e) {}
+  let myAddr = ""; try { myAddr = await api.vestrMyAddress(); } catch (e) {}
+  if (el("vestrSub") !== host) return;
+  const now = new Date(), toLocal = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const startDef = toLocal(now), endDef = toLocal(new Date(now.getTime() + 90 * 24 * 3600 * 1000));
+  host.innerHTML = `<div class="card">
+    <label class="v-flabel">Token</label>
+    <select class="field__input" id="vcTok">${toks.map(t => `<option value="${t.tokenid}">${esc(t.name)} — ${vFmt(t.sendable)} available</option>`).join("") || '<option value="0x00">MINIMA</option>'}</select>
+    <label class="v-flabel">Amount to lock</label>
+    <input class="field__input" id="vcAmt" inputmode="decimal" placeholder="e.g. 1000">
+    <label class="v-flabel">Beneficiary (withdrawal) address</label>
+    <div class="v-row"><input class="field__input" id="vcAddr" placeholder="0x… / Mx…" style="flex:1"><button class="btn btn--outline" id="vcMine" style="flex:0 0 auto">My address</button></div>
+    <div class="v-row">
+      <div style="flex:1"><label class="v-flabel">Start</label><input class="field__input" id="vcStart" type="datetime-local" value="${startDef}"></div>
+      <div style="flex:1"><label class="v-flabel">End</label><input class="field__input" id="vcEnd" type="datetime-local" value="${endDef}"></div>
+    </div>
+    <label class="v-flabel">Release cadence (grace)</label>
+    <select class="field__input" id="vcGrace">${VESTR_GRACE.map(([l, h], i) => `<option value="${h}" ${l === "Weekly" ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <div class="v-row">
+      <div style="flex:1"><label class="v-flabel">Network fee (burn) · optional</label><input class="field__input" id="vcBurn" value="0"></div>
+      <div style="flex:1"><label class="v-flabel">Vault password · optional</label><input class="field__input" id="vcPw" type="password" placeholder="if node locked"></div>
+    </div>
+    <button class="btn btn--primary btn--full" id="vcCreate">Review &amp; create</button>
+    <div class="v-note" style="margin-top:9px">Funds lock into the shared vesting covenant and release linearly from Start to End; the beneficiary collects the vested-so-far amount, no more often than the grace cadence. <b>There is no cancel</b> — locked funds only ever flow to the beneficiary (which can be your own address).</div>
+  </div>`;
+  el("vcMine").addEventListener("click", () => { el("vcAddr").value = myAddr; });
+  el("vcCreate").addEventListener("click", vestrDoCreate);
+}
+async function vestrDoCreate() {
+  const btn = el("vcCreate"); if (!btn || btn.disabled) return;
+  const opts = {
+    tokenid: el("vcTok").value, amount: (el("vcAmt").value || "").trim(), beneficiary: (el("vcAddr").value || "").trim(),
+    startMs: new Date(el("vcStart").value).getTime(), endMs: new Date(el("vcEnd").value).getTime(),
+    graceHours: Number(el("vcGrace").value) || 0, burn: (el("vcBurn").value || "0").trim(), password: (el("vcPw").value || "")
+  };
+  if (!(Number(opts.amount) > 0)) { toast("Enter a valid amount", "warn"); return; }
+  if (!opts.beneficiary) { toast("Enter a beneficiary address", "warn"); return; }
+  const ok = await showConfirm("Create vesting contract?", `Lock ${vFmt(opts.amount)} ${vTok(opts.tokenid)} to ${vShort(opts.beneficiary)}, released ${VESTR_GRACE.find(g => g[1] === opts.graceHours)?.[0] || ""} from start to end. This cannot be cancelled.`, "Lock funds", false);
+  if (!ok) return;
+  btn.disabled = true; btn.textContent = "Locking…";
+  try { const r = await api.vestrCreate(opts); toast("Vesting contract created ✓", "ok"); vestrView = "list"; renderVestr(); }
+  catch (e) { btn.disabled = false; btn.textContent = "Review & create"; toast("Create failed: " + (e && e.message ? e.message : e), "err"); }
+}
+
+// ---- Calculate (offline preview) ----
+async function renderVestrCalc() {
+  const host = el("vestrSub"); if (!host) return;
+  host.innerHTML = `<div class="card">
+    <div class="v-note" style="margin-top:0">Preview a schedule without locking anything.</div>
+    <div class="v-row" style="margin-top:10px">
+      <div style="flex:1"><label class="v-flabel">Amount</label><input class="field__input" id="vkAmt" value="1000"></div>
+      <div style="flex:1"><label class="v-flabel">Grace</label><select class="field__input" id="vkGrace">${VESTR_GRACE.map(([l, h]) => `<option value="${h}" ${l === "Weekly" ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    </div>
+    <div class="v-row">
+      <div style="flex:1"><label class="v-flabel">Start</label><input class="field__input" id="vkStart" type="date"></div>
+      <div style="flex:1"><label class="v-flabel">End</label><input class="field__input" id="vkEnd" type="date"></div>
+    </div>
+    <div id="vkOut"></div>
+  </div>`;
+  const rerun = async () => {
+    const s = el("vkStart").value ? new Date(el("vkStart").value).getTime() : Date.now();
+    const e = el("vkEnd").value ? new Date(el("vkEnd").value).getTime() : Date.now() + 90 * 24 * 3600 * 1000;
+    const r = await api.vestrCalculate(el("vkAmt").value || "0", s, e, Number(el("vkGrace").value) || 0).catch(() => null);
+    const out = el("vkOut"); if (!out || !r) return;
+    const label = VESTR_GRACE.find(g => g[1] === (Number(el("vkGrace").value) || 0))?.[0] || "period";
+    out.innerHTML = `<div class="v-avail" style="border-top:0;margin-top:14px"><span class="k">Released per ${esc(label.toLowerCase())}</span><span class="val" style="color:var(--accent)">≈ ${vFmt(r.perPeriod.toFixed(6))}</span></div>
+      <div class="v-stats"><div><span>Duration</span><b>${r.durBlocks.toLocaleString()} blocks · ~${r.weeks.toFixed(1)} wks</b></div><div><span>Per-block</span><b>${vFmt(r.perBlock.toFixed(8))}</b></div></div>`;
+  };
+  ["vkAmt", "vkGrace", "vkStart", "vkEnd"].forEach(id => el(id).addEventListener("input", rerun));
+  rerun();
+}

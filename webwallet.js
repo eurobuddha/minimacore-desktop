@@ -133,23 +133,6 @@ async function nodeHasPubkey(pubkey) {
   return keys.some(k => k && k.publickey && String(k.publickey).toLowerCase() === pk);
 }
 
-/** The running node's OWN seed phrase (loopback only; used to recognise the node's wallet even if `keys action:list`
- *  transiently hiccups). Same command mail.js uses. Returns null if the wallet is password-locked / unavailable. */
-async function nodeSeedPhrase() {
-  const r = resp(await runner("vault action:seed").catch(() => null));
-  const p = r && (r.phrase || r.seedphrase || r.seed);
-  return (typeof p === "string" && p) ? p : null;
-}
-
-/** Is the entered seed the running node's OWN wallet? True if the derived key-0 pubkey is in the node's key set,
- *  OR the phrase equals the node's own seed. The second check is a belt-and-suspenders fallback so a momentary
- *  `keys action:list` failure can never mis-classify the node's own wallet as a foreign seed (→ empty balance). */
-async function isNodeOwnSeed(pubkey, seed) {
-  if (await nodeHasPubkey(pubkey)) return true;
-  const np = await nodeSeedPhrase();
-  return !!(np && String(np) === String(seed));
-}
-
 /** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the
  *  balance can be the node's FULL total (a real wallet spreads coins over many keys). PUBLIC material only. */
 async function derive(seed) {
@@ -158,7 +141,7 @@ async function derive(seed) {
   const r = await runner('keys action:genkey phrase:"' + seed + '"');   // VERBATIM — anyphrase, case-sensitive
   const d = resp(r);
   if (!d || !d.address) throw new Error("Could not derive wallet from seed");
-  const isNodeSeed = await isNodeOwnSeed(d.publickey, seed);
+  const isNodeSeed = await nodeHasPubkey(d.publickey);
   return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script, isNodeSeed };
 }
 
@@ -209,7 +192,7 @@ async function send(opts) {
 
   // If this is the running node's OWN wallet, let the NODE send: it coin-selects across ALL its addresses and
   // manages its own keyuses (no single-address / manual-keyuses limits). Same path as the desktop Wallet tab.
-  if (await isNodeOwnSeed(pubkey, seed)) {
+  if (await nodeHasPubkey(pubkey)) {
     privatekey = null;   // not needed — the node signs with its own keys
     let cmd = "send amount:" + amount + " address:" + to + " tokenid:" + tok;
     try { cmd = await pinMinimaSend(runner, cmd); } catch (e) {}   // dodge shared-node beacon-dust NPE

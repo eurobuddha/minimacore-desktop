@@ -582,10 +582,13 @@ function renderWwWallet(body) {
   let qrHtml = "";
   try { if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(recv); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:6px auto">${qr.createImgTag(4, 6)}</div>`; } } catch (e) {}
 
+  // Show the CONFIRMED total as the headline figure (a real wallet's `sendable` can be temporarily 0 while coins
+  // are pending/locked — showing only sendable made a funded wallet read as "zero"). Sendable is shown alongside.
   const balRows = (wwBal.length ? wwBal : []).map(b =>
     `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
        <span>${esc(b.name)}</span>
-       <span style="font-family:var(--mono,monospace)">${esc(b.sendable)}<small style="opacity:.6"> sendable</small></span>
+       <span style="font-family:var(--mono,monospace)">${esc(b.confirmed)}<small style="opacity:.6"> total</small>${
+         String(b.sendable) !== String(b.confirmed) ? ` &middot; ${esc(b.sendable)}<small style="opacity:.6"> sendable</small>` : ""}</span>
      </div>`).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
 
   const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
@@ -693,14 +696,14 @@ async function wwDoSend() {
     toast("Sent ✓" + (r.txnid ? " " + short(r.txnid, 12) : ""), "ok");
     el("wwTo").value = ""; el("wwAmt").value = "";
     wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
-    wwBal = await api.wwRead(wwAddr.address).catch(() => wwBal);
+    wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else if (r && r.ambiguous) {
     // M1: don't offer a one-tap retry — surface the unknown state, refresh balances, and gate re-send behind
     // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while wwAmbiguous).
     wwAmbiguous = true;
     toast(r.message || "Send status unknown — verify before retrying", "err");
-    wwBal = await api.wwRead(wwAddr.address).catch(() => wwBal);
+    wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else {
     toast((r && r.message) || "Send failed", "err");
