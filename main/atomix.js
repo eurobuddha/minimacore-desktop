@@ -622,6 +622,25 @@ const ETH_SEED_TOKENS = [
 ];
 const isEthAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a == null ? "" : a).trim());
 const lc = (a) => String(a || "").toLowerCase();
+// One decimals validator shared by ADD (ethTokenMeta) and LOAD (ethTokensLoad) so they can never drift. An
+// out-of-range value (e.g. a tampered ethtokens.json with decimals:1e40) would make formatUnits loop quadratically
+// → main-process hang/OOM, so it must be rejected on BOTH paths, not just at add-time.
+const ethValidDecimals = (n) => Number.isInteger(n) && n >= 0 && n <= 36;
+/** EIP-55 checksum verify (reuses the engine keccak). Accepts all-lower / all-upper (no checksum present); for a
+ *  MIXED-case address the casing must match the checksum, else it's a typo → refuse (a wrong address = unrecoverable
+ *  funds). Mirrors how mainstream wallets guard address entry. Requires a booted engine (A = AX()). */
+function ethAddrChecksumOk(A, addr) {
+  const raw = String(addr == null ? "" : addr).trim().replace(/^0x/i, "");
+  if (!/^[0-9a-fA-F]{40}$/.test(raw)) return false;
+  if (raw === raw.toLowerCase() || raw === raw.toUpperCase()) return true;   // no mixed case → nothing to check
+  let hash; try { hash = A.hex.to(A.eth.keccakBytes(A.hex.utf8(raw.toLowerCase()))); } catch (e) { return true; }
+  for (let i = 0; i < 40; i++) {
+    const c = raw[i];
+    if (c >= "0" && c <= "9") continue;
+    if ((parseInt(hash[i], 16) >= 8) !== (c === c.toUpperCase())) return false;
+  }
+  return true;
+}
 let ethTokenList = null;
 function ethTokensLoad() {
   if (ethTokenList) return ethTokenList;
@@ -629,7 +648,7 @@ function ethTokensLoad() {
     const raw = fs.readFileSync(ETH_TOKENS_FILE(), "utf8");
     const arr = JSON.parse(raw);
     if (Array.isArray(arr) && arr.length) {
-      ethTokenList = arr.filter(t => t && isEthAddr(t.address) && Number.isInteger(t.decimals))
+      ethTokenList = arr.filter(t => t && isEthAddr(t.address) && ethValidDecimals(t.decimals))
         .map(t => ({ symbol: ethCleanSymbol(t.symbol, t.address), address: lc(t.address), decimals: t.decimals }));
       if (ethTokenList.length) return ethTokenList;
     }
@@ -641,7 +660,10 @@ function ethTokensLoad() {
 function ethTokensSave() { try { fs.writeFileSync(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || []), "utf8"); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
 /** sanitise a contract-supplied symbol(): printable, trimmed, capped — it is attacker-controlled (any contract). */
 function ethCleanSymbol(sym, addr) {
-  let s = String(sym == null ? "" : sym).replace(/[^\x20-\x7e]/g, "").trim();
+  // printable-only, and ALSO strip HTML-dangerous chars server-side (defense-in-depth: the renderer esc()s every
+  // sink, but stripping < > " ' ` & \ here means a single future missed esc can't regress into stored injection —
+  // and no legitimate ERC20 symbol contains these).
+  let s = String(sym == null ? "" : sym).replace(/[^\x20-\x7e]/g, "").replace(/[<>"'`&\\]/g, "").trim();
   if (!s) s = "0x" + lc(addr).replace(/^0x/, "").slice(0, 4).toUpperCase();
   return s.slice(0, 12);
 }
@@ -671,7 +693,7 @@ async function ethTokenMeta(address) {
   if (!decRet || String(decRet).replace(/^0x/i, "").length < 64) throw new Error("no decimals() — not an ERC20?");
   let decimals;
   try { decimals = Number(A.abi.decode(["uint256"], decRet)[0]); } catch (e) { decimals = NaN; }
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error("no decimals() — not an ERC20?");
+  if (!ethValidDecimals(decimals)) throw new Error("no decimals() — not an ERC20?");
   let symRet = null;
   try { symRet = await p(cb => ctx.RPC.ethCall(addr, A.abi.encodeCall("symbol()", []), cb)); } catch (e) {}
   return { symbol: ethDecodeSymbol(symRet, addr), address: addr, decimals };
@@ -721,46 +743,66 @@ async function ethWallet() {
 const ETH_FEE_MULT = { low: 100, med: 130, high: 170 };   // native FEE_MULT, % of network gas price
 const ETH_FALLBACK_GP = 2000000000n;                      // mirror AX.ethtx FALLBACK_GAS_PRICE
 function ethTierMult(tier) { return ETH_FEE_MULT[tier] || ETH_FEE_MULT.med; }
-/** proxy rpc: delegate everything to `base`, but pre-divide gasPrice by the +20% AX.ethtx re-applies so the tx
- *  lands on exactly base×mult/100 (native semantics). The F5 2×-base-fee floor inside AX.ethtx still applies. */
+/** The realistic gas ANCHOR: max(network gasPrice, 2×baseFee). AX.ethtx hard-floors EVERY send at 2×baseFee (F5),
+ *  so on mainnet — where gasPrice ≈ 1.1×baseFee — a tier that merely scales gasPrice lands BELOW that floor and
+ *  gets clamped, making Low/Med/High identical (the "selector does nothing" bug). Anchoring the tiers to effBase
+ *  and scaling ABOVE the floor makes them actually differ while never underpricing. Low = effBase (= the engine's
+ *  own floor, the cheapest a send can go without editing the byte-identical ethtx.js). */
+// A hostile / transiently-wrong RPC can report an absurd eth_gasPrice; since gas is paid in ETH and a plain send
+// uses gasLimit×gasPrice exactly, an uncapped value lets a colluding node capture up to the whole ETH balance as
+// fee. Clamp the anchor at a ceiling far above any real mainnet price (~50× extreme congestion) — legit sends are
+// unaffected; catastrophic overpay is bounded to gasLimit×cap. Applied identically here and in the send proxy.
+const ETH_MAX_GAS_PRICE = 5000000000000n;   // 5000 gwei
+function ethCapGas(g) { return g > ETH_MAX_GAS_PRICE ? ETH_MAX_GAS_PRICE : g; }
+async function ethGasNow() {
+  let base = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n);
+  if (base == null || base <= 0n) base = ETH_FALLBACK_GP;
+  let baseFee = await p(cb => ctx.RPC.baseFeePerGasOrZero(cb)).catch(() => 0n);
+  if (baseFee == null || baseFee < 0n) baseFee = 0n;
+  const floor2 = baseFee > 0n ? baseFee * 2n : 0n;
+  const effBase = ethCapGas(base > floor2 ? base : floor2);
+  return { base, baseFee, effBase, capped: effBase >= ETH_MAX_GAS_PRICE };
+}
+function ethTierGp(effBase, multPct) { return (effBase * BigInt(multPct)) / 100n; }   // final per-tier gas price
+/** proxy rpc: delegate everything to `base`, scaling ONLY gasPrice → effBase×mult/100, pre-divided by the +20%
+ *  AX.ethtx re-applies, so the broadcast lands on exactly the previewed tier price. Because effBase ≥ 2×baseFee,
+ *  the engine's F5 floor never re-clamps it — the tier is authoritative. The whole F1 nonce serializer is reused. */
 function ethGasScaledRpc(base, multPct) {
   return {
     getTransactionCount: (a, cb) => base.getTransactionCount(a, cb),
     sendRawTransaction: (h, cb) => base.sendRawTransaction(h, cb),
-    baseFeePerGasOrZero: (cb) => base.baseFeePerGasOrZero(cb),
+    // CRITICAL: the engine (AX.ethtx.doSend) re-floors the final gas price to 2×baseFee AFTER our scaling — using
+    // THIS value. A hostile RPC could report an astronomical baseFee to force gas = whole balance, bypassing the
+    // anchor cap. Clamp baseFee to ETH_MAX_GAS_PRICE/2 so the engine's 2×baseFee floor can never exceed the cap.
+    baseFeePerGasOrZero: (cb) => base.baseFeePerGasOrZero((e, bf) => cb(e, (bf != null && bf > ETH_MAX_GAS_PRICE / 2n) ? ETH_MAX_GAS_PRICE / 2n : bf)),
     ethCall: (to, data, cb) => base.ethCall(to, data, cb),
     getBalance: (a, cb) => base.getBalance(a, cb),
     gasPrice: (cb) => base.gasPrice((e, gp) => {
       if (e) return cb(e);
-      let g = (gp == null ? 0n : gp);
-      if (g <= 0n) return cb(null, g);                    // 0 → AX.ethtx substitutes its own fallback (tier moot)
-      return cb(null, (g * BigInt(multPct) * 10n) / (100n * 12n));
+      const g = (gp == null || gp <= 0n) ? ETH_FALLBACK_GP : gp;
+      base.baseFeePerGasOrZero((e2, bf) => {                 // baseFeePerGasOrZero never errs (cb(null, 0n) on failure)
+        const floor2 = (bf != null && bf > 0n) ? bf * 2n : 0n;
+        const effBase = ethCapGas(g > floor2 ? g : floor2);  // same sane ceiling as ethGasNow (hostile-RPC overpay bound)
+        cb(null, (effBase * BigInt(multPct) * 10n) / (100n * 12n));
+      });
     })
   };
-}
-/** Estimated fee (wei) the given tier will actually cost: max(base×mult/100, 2×baseFee) × gasLimit. Preview "≈". */
-async function ethTierFeeWei(gasLimit, multPct) {
-  let base = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n);
-  if (base == null || base <= 0n) base = ETH_FALLBACK_GP;
-  const baseFee = await p(cb => ctx.RPC.baseFeePerGasOrZero(cb)).catch(() => 0n);
-  let gp = (base * BigInt(multPct)) / 100n;
-  const floor = (baseFee > 0n) ? baseFee * 2n : 0n;
-  if (gp < floor) gp = floor;
-  return { feeWei: gasLimit * gp, gpWei: gp };
 }
 
 // --- send: native ETH or any listed/added ERC20, with a chosen fee tier (fund checks on RAW balances) ---
 function ethTokenBy(address) { const addr = lc(address); return ethTokensLoad().find(t => t.address === addr) || null; }
 // Reserve gas for the PRICIEST tier (High ×1.7) so Max — or any reviewed send — stays affordable at whatever tier
-// the user picks in the confirm dialog. gasReserveWei applies its own ×1.2, so ×170/120 lands the reserve on ×1.7.
-function ethReserveGp(base) { const b = (base != null && base > 0n) ? base : ETH_FALLBACK_GP; return (b * 170n) / 120n; }
+// the user picks in the confirm dialog. gasReserveWei applies its own ×1.2, so ÷1.2 lands the reserve on the tier
+// price; use ×175/120 (a hair above High's ×170/120) so integer-BigInt truncation can NEVER leave the reserve a
+// wei short of the actual cost — over-reserving by a sliver only leaves a touch more dust on Max, never underfunds.
+function ethReserveGp(effBase) { const b = (effBase != null && effBase > 0n) ? effBase : ETH_FALLBACK_GP; return (b * 175n) / 120n; }
 async function ethSendMax(asset) {
   const A = AX();
   await ensureRpcOverride();
   if (asset === "eth") {
     const wei = await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb));
-    const gp = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n);
-    return A.dec.formatUnits(A.wallet.maxEthSendWei(BigInt(wei), ethReserveGp(gp)), 18);
+    const g = await ethGasNow();
+    return A.dec.formatUnits(A.wallet.maxEthSendWei(BigInt(wei), ethReserveGp(g.effBase)), 18);
   }
   const t = ethTokenBy(asset); if (!t) return "0";
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
@@ -772,17 +814,19 @@ async function ethSendReview(asset, to, amt) {
   const A = AX();
   await ensureRpcOverride();
   if (!A.wallet.isEthAddr(to)) return { err: "Enter a valid Ethereum address (0x + 40 hex characters)." };
+  if (!ethAddrChecksumOk(A, to)) return { err: "That address has an invalid checksum — double-check it. A single wrong character sends funds somewhere unrecoverable." };
   if (!A.wallet.validDec(amt)) return { err: "Enter a plain decimal amount." };
   const ethWeiR = await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb)).catch(() => null);
   if (ethWeiR == null) return { err: "Could not read your ETH balance — try again." };
   const ethWei = BigInt(ethWeiR);
+  const g = await ethGasNow();
   const isEth = asset === "eth";
   const gasLimit = isEth ? A.wallet.GAS_ETH : A.wallet.GAS_ERC20;
   let sym = "ETH", decimals = 18;
   if (isEth) {
     let wei; try { wei = A.dec.parseUnits(amt, 18); } catch (e) { return { err: "Enter a plain decimal amount." }; }
     if (wei <= 0n) return { err: "Enter an amount above zero." };
-    if (wei + A.wallet.gasReserveWei(ethReserveGp(await gpOrFallback()), A.wallet.GAS_ETH) > ethWei) return { err: "Not enough ETH for that amount plus network gas — try Max." };
+    if (wei + A.wallet.gasReserveWei(ethReserveGp(g.effBase), A.wallet.GAS_ETH) > ethWei) return { err: "Not enough ETH for that amount plus network gas — try Max." };
   } else {
     const t = ethTokenBy(asset); if (!t) return { err: "Unknown token — add it first." };
     sym = t.symbol; decimals = t.decimals;
@@ -791,38 +835,66 @@ async function ethSendReview(asset, to, amt) {
     const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
     const held = await p(cb => ops.balanceOf(t.address, cb)).catch(() => 0n);
     if (raw > held) return { err: "That is more " + sym + " than this wallet holds." };
-    if (A.wallet.gasReserveWei(ethReserveGp(await gpOrFallback()), A.wallet.GAS_ERC20) > ethWei) return { err: "Sending " + sym + " needs a little ETH for gas — fund the wallet with ETH first." };
+    if (A.wallet.gasReserveWei(ethReserveGp(g.effBase), A.wallet.GAS_ERC20) > ethWei) return { err: "Sending " + sym + " needs a little ETH for gas — fund the wallet with ETH first." };
   }
   const fees = {};
   for (const tier of ["low", "med", "high"]) {
-    const f = await ethTierFeeWei(gasLimit, ethTierMult(tier));
-    fees[tier] = { fee: A.dec.formatUnits(f.feeWei, 18), gwei: A.dec.formatUnits(f.gpWei, 9) };
+    const gp = ethTierGp(g.effBase, ethTierMult(tier));
+    fees[tier] = { fee: A.dec.formatUnits(gp * gasLimit, 18), gwei: A.dec.formatUnits(gp, 9) };
   }
-  return { ok: true, sym, decimals, fees };
+  return { ok: true, sym, decimals, fees, capped: g.capped };   // capped = RPC reported an absurd gas price (warn)
 }
-async function gpOrFallback() { const gp = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => 0n); return (gp == null || gp <= 0n) ? ETH_FALLBACK_GP : gp; }
+// Main-side duplicate-intent guard (F1): the F1 nonce serializer prevents a nonce COLLISION but each queued send
+// gets a distinct consecutive nonce — so two executes for one intent = two real transfers. The renderer disables
+// the button, but the main process must not rely on that: one send per address at a time, full stop.
+const ethSendInFlight = new Set();
+/** A broadcast that FAILED with a transport/connectivity error MIGHT have propagated first — presenting it as a
+ *  clean failure invites a retry that double-sends (F2). A clean node REJECTION (nonce/insufficient/revert) did not
+ *  land and is safe to surface as a plain failure. "already known" = it IS in the mempool → also treat as uncertain. */
+function ethAmbiguousBroadcast(msg) {
+  const m = String(msg == null ? "" : msg).toLowerCase();
+  // Check the UNCERTAIN markers FIRST — the safe default must win. ethrpc aggregates every endpoint's error into one
+  // string, so a tx that landed on node A (its reply lost: "socket hang up") then got mined can make later nodes
+  // answer "nonce too low" for the SAME raw tx → the aggregate holds both. If we checked clean-reject first, that
+  // would report a clean failure the user retries into a DOUBLE-SEND. Any uncertain marker → treat as may-have-landed.
+  return /timeout|timed out|econnreset|econnrefused|socket hang up|hang up|network|failed on all rpcs|etimedout|enetunreach|ehostunreach|already known|known transaction/.test(m);
+}
 /** Broadcast the send at the chosen tier. Reuses AX.wallet.sendEth (ETH) or AX.ethtx.send (any ERC20) through the
  *  gas-scaled proxy rpc — so the F1 per-address nonce serializer is fully in force. NO timeout (a rejected-but-
- *  broadcasting send must not be retried into a double transfer — the serializer bounds it). */
+ *  broadcasting send must not be retried into a double transfer). */
 async function ethSendExecute(asset, to, amt, tier) {
   const A = AX();
   await ensureRpcOverride();
-  if (!A.wallet.isEthAddr(to)) throw new Error("Invalid recipient address.");
+  const toClean = String(to == null ? "" : to).trim();                                 // F7: trim before any use
+  if (!A.wallet.isEthAddr(toClean)) throw new Error("Invalid recipient address.");
+  if (!ethAddrChecksumOk(A, toClean)) throw new Error("That address has an invalid checksum — double-check it.");   // F4
   if (!A.wallet.validDec(amt)) throw new Error("Invalid amount.");
-  const proxy = ethGasScaledRpc(ctx.RPC, ethTierMult(tier));
   const from = vmCtx().eth.address, priv = vmCtx().eth.privKey;
-  let tx;
-  if (asset === "eth") {
-    tx = await p(cb => A.wallet.sendEth(proxy, priv, from, to, amt, cb));
-  } else {
-    const t = ethTokenBy(asset); if (!t) throw new Error("Unknown token — add it first.");
-    let raw; try { raw = A.dec.parseUnits(amt, t.decimals); } catch (e) { throw new Error("Invalid amount."); }
-    if (raw <= 0n) throw new Error("Amount below the token's smallest unit.");
-    const data = A.abi.encodeCall("transfer(address,uint256)", [{ t: "address", v: to }, { t: "uint256", v: raw }]);
-    tx = await p(cb => A.ethtx.send(proxy, priv, from, A.ethops.NET.chainId, t.address, data, 0n, A.wallet.GAS_ERC20, cb));
+  if (ethSendInFlight.has(from)) return { err: "A send from this wallet is already in progress — wait for it to finish." };   // F1
+  ethSendInFlight.add(from);
+  try {
+    const proxy = ethGasScaledRpc(ctx.RPC, ethTierMult(tier));
+    let tx;
+    if (asset === "eth") {
+      tx = await p(cb => A.wallet.sendEth(proxy, priv, from, toClean, amt, cb));
+    } else {
+      const t = ethTokenBy(asset); if (!t) throw new Error("Unknown token — add it first.");
+      let raw; try { raw = A.dec.parseUnits(amt, t.decimals); } catch (e) { throw new Error("Invalid amount."); }
+      if (raw <= 0n) throw new Error("Amount below the token's smallest unit.");
+      const data = A.abi.encodeCall("transfer(address,uint256)", [{ t: "address", v: toClean }, { t: "uint256", v: raw }]);
+      tx = await p(cb => A.ethtx.send(proxy, priv, from, A.ethops.NET.chainId, t.address, data, 0n, A.wallet.GAS_ERC20, cb));
+    }
+    emitter.emit("update");
+    return { tx };
+  } catch (e) {
+    if (ethAmbiguousBroadcast(e && e.message)) {   // F2: might have landed → make the user check, never a clean "failed"
+      emitter.emit("update");
+      return { uncertain: true, err: "Network glitch while broadcasting — your transaction may or may not have gone through. Check your address on Etherscan before sending again." };
+    }
+    throw e;
+  } finally {
+    ethSendInFlight.delete(from);
   }
-  emitter.emit("update");
-  return { tx };
 }
 
 // --- custom RPC override (SSRF-guarded): https only, no private/loopback host; added to the allowlist for the
@@ -841,6 +913,7 @@ function ethPrivateHost(host) {
   if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".localhost")) return true;
   if (/^127\.|^10\.|^192\.168\.|^169\.254\./.test(h)) return true;
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return true;   // CGNAT 100.64.0.0/10 (parity with netfetch)
   if (/^0\.|^255\./.test(h)) return true;
   return false;
 }
@@ -855,28 +928,34 @@ function ethRpcLoad() {
   try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; } } catch (e) {}
   ethRpcOverride = null; return null;
 }
+// NB we deliberately do NOT call AX.ethtx.resetAll() when repointing the RPC. This wallet is MAINNET-ONLY and an
+// override is just a different mainnet endpoint — the account's nonce is the SAME across all mainnet nodes, so the
+// F1 nonce cache stays valid (any endpoint lag is reconciled by F1's own STALE_MS self-heal). resetAll would wipe
+// the WHOLE per-address map, and if it fired while a swap sweep had ETH locks queued it could split the queue and
+// drop a leg (bounded, never a double-send — but avoidable). Skipping it removes that interaction entirely.
 /** Apply a saved override to the (possibly freshly re-booted) engine rpc — ONCE per override value. Compares
- *  against ethRpcAppliedUrl (not ctx.RPC.url, which drifts on failover) so an endpoint failover never triggers a
- *  spurious re-apply + ethtx.resetAll() that would wipe in-flight nonce state. A fresh engine boot resets ctx.RPC,
- *  so re-apply when the applied marker is cleared (see invalidate) or when a new override is saved. */
+ *  against ethRpcAppliedUrl (not ctx.RPC.url, which drifts on failover) so an endpoint failover never re-applies
+ *  spuriously. A fresh engine boot resets ctx.RPC, so re-apply when the marker is cleared (invalidate) or a new
+ *  override is saved. */
 async function ensureRpcOverride() {
   const o = ethRpcLoad();
   if (!o || !ctx || !ctx.READY || !ctx.RPC) return;
   if (ethRpcAppliedUrl === o.url && ctx.RPC.url) return;   // already applied to a live rpc
   ethUserHosts.add(o.host);
-  try { ctx.RPC.setUrl(o.url); AX().ethtx.resetAll(); ethRpcAppliedUrl = o.url; } catch (e) {}
+  try { ctx.RPC.setUrl(o.url); ethRpcAppliedUrl = o.url; } catch (e) {}
 }
 async function ethSetRpc(url) {
   if (url == null || String(url).trim() === "") {   // clear → back to the built-in fallbacks
+    if (ethRpcOverride && ethRpcOverride.host) ethUserHosts.delete(ethRpcOverride.host);   // drop the cleared host from the allowlist
     ethRpcOverride = null; ethRpcAppliedUrl = null; try { fs.unlinkSync(ETH_RPC_FILE()); } catch (e) {}
-    try { ctx.RPC.setUrl(AX().ethrpc.FALLBACKS[0]); AX().ethtx.resetAll(); } catch (e) {}
+    try { ctx.RPC.setUrl(AX().ethrpc.FALLBACKS[0]); } catch (e) {}
     emitter.emit("update"); return { ok: true, rpc: ctx && ctx.RPC ? ctx.RPC.url : null };
   }
   const v = ethValidateRpc(url);
   if (v.err) return { err: v.err };
   ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host);
   try { fs.writeFileSync(ETH_RPC_FILE(), JSON.stringify(ethRpcOverride), "utf8"); } catch (e) {}
-  try { ctx.RPC.setUrl(v.url); AX().ethtx.resetAll(); ethRpcAppliedUrl = v.url; } catch (e) {}
+  try { ctx.RPC.setUrl(v.url); ethRpcAppliedUrl = v.url; } catch (e) {}
   emitter.emit("update");
   return { ok: true, rpc: v.url };
 }
@@ -889,5 +968,11 @@ module.exports = {
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
   ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute, ethSetRpc,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
-  _ctx: () => ctx, _fire: fire
+  _ctx: () => ctx, _fire: fire,
+  // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
+  _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,
+    ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,
+    ethTokensLoad, ethRpcLoad, ETH_FALLBACK_GP, ETH_FEE_MULT, ETH_MAX_GAS_PRICE },
+  // test-only: reset the module-level ETH caches so a harness can drive a fresh userData dir per case
+  _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethUserHosts.clear(); }
 };

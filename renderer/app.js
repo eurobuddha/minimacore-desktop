@@ -4040,22 +4040,24 @@ function ewSendDialog(b, startAsset) {
     const r = await api.ewSendReview(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
     if (r.err) { toast(r.err, "warn"); return; }
     close();
-    ewConfirmSend(asset, symOf(asset), to, amt, r.fees);
+    ewConfirmSend(asset, symOf(asset), to, amt, r.fees, r.capped);
   };
 }
 
 // Confirm with the native Low/Med/High fee tiers (default Medium); live fee + gwei per tier.
-function ewConfirmSend(asset, sym, to, amt, fees) {
+function ewConfirmSend(asset, sym, to, amt, fees, capped) {
   let tier = "med";
+  const cappedWarn = capped ? `<div class="view__desc" style="color:var(--red);margin-top:6px">⚠ Network gas looks abnormally high — your RPC endpoint may be faulty or hostile. Consider changing it in Settings before sending.</div>` : "";
   const label = t => (t === "low" ? "Low" : t === "high" ? "High" : "Medium");
   const tierBtns = ["low", "med", "high"].map(t => `<button class="btn btn--sm ew-tier" data-ewtier="${t}">${label(t)}</button>`).join("");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewCfOv"><div class="modal">
     <div class="modal__title">Confirm send</div>
     <div class="kv"><span class="kv__k">Send</span><span class="kv__v mono">${esc(amt)} ${esc(sym)}</span></div>
-    <div class="kv"><span class="kv__k">To</span><span class="kv__v mono">${esc(short(to, 26))}</span></div>
+    <div class="field__label" style="margin-top:8px">To — check every character</div>
+    <div class="mono" style="word-break:break-all;font-size:12.5px;background:var(--surface2);border-radius:6px;padding:8px 10px">${esc(to)}</div>
     <div class="field__label" style="margin-top:10px">Network fee</div>
     <div class="seg ew-tierrow" style="gap:6px">${tierBtns}</div>
-    <div class="mono ew-feeline" id="ewFee"></div>
+    <div class="mono ew-feeline" id="ewFee"></div>${cappedWarn}
     <div class="view__desc" style="color:var(--amber);margin-top:8px">This cannot be undone.</div>
     <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewCfCancel">Cancel</button><button class="btn btn--primary btn--full" id="ewCfSend">Send now</button></div></div></div>`);
   const ov = el("ewCfOv"); const close = () => ov && ov.remove();
@@ -4073,7 +4075,10 @@ function ewConfirmSend(asset, sym, to, amt, fees) {
     const btn = el("ewCfSend"); btn.disabled = true; btn.textContent = "Sending…";
     const s = await api.ewSend(asset, to, amt, tier).catch(e => ({ err: String(e.message || e) }));
     close();
-    toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok");
+    // uncertain = a network glitch mid-broadcast; warn (don't imply success OR clean failure), the user checks Etherscan
+    if (s && s.uncertain) toast(s.err, "warn");
+    else if (s && s.err) toast(s.err, "warn");
+    else toast("✓ Broadcast — tx " + TOK.shortId(s.tx), "ok");
     if (activeView === "ethwallet") renderEthWallet();
   };
 }
@@ -4142,7 +4147,7 @@ async function ewRpcDialog() {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewRpcOv"><div class="modal">
     <div class="modal__title">RPC endpoint</div>
     <div class="field"><div class="field__label">Custom HTTPS RPC (blank = built-in public nodes)</div><input class="field__input mono" id="ewRpcIn" placeholder="https://…" value="${esc(cur)}" autocomplete="off" spellcheck="false" /></div>
-    <div class="view__desc">Falls back to public keyless nodes automatically. Only public https hosts are allowed — local/private addresses are blocked for safety.</div>
+    <div class="view__desc">Falls back to public keyless nodes automatically. Only public https hosts are allowed — local/private addresses are blocked for safety. This endpoint is used for all Ethereum activity on this node, including AtomiX swap settlement.</div>
     <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewRpcDefault">Use default</button><button class="btn btn--primary btn--full" id="ewRpcSave">Save</button></div>
     <div class="seg" style="margin-top:8px"><button class="btn btn--outline btn--full" id="ewRpcCancel">Cancel</button></div></div></div>`);
   const ov = el("ewRpcOv"); const close = () => ov && ov.remove();
@@ -4157,7 +4162,9 @@ function onEthWalletUpdate() {
   ewUpdateTimer = setTimeout(() => {
     ewUpdateTimer = null;
     if (activeView !== "ethwallet" || !el("ewBody")) return;
-    if ([...document.querySelectorAll(".overlay")].some(o => o.offsetParent !== null)) return;   // a modal is open
+    // Don't rebuild while a dialog is open. NB offsetParent is ALWAYS null for position:fixed (.overlay), so test
+    // computed display instead — and skip the always-present hidden #setup overlay (display:none → excluded).
+    if ([...document.querySelectorAll(".overlay")].some(o => getComputedStyle(o).display !== "none")) return;
     renderEthWallet().catch(() => {});
   }, 400);
 }

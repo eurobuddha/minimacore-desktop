@@ -47,7 +47,15 @@ function createWindow() {
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));   // no child windows inherit camera/etc
+  // Deny ALL child windows (no camera/etc inheritance). BUT for the ETH Wallet's Etherscan links, open them in the
+  // user's real browser via shell.openExternal — allowed ONLY for the exact https://etherscan.io/ prefix so no
+  // attacker-influenced or non-https scheme can ever be launched. rel=noreferrer on the anchors covers tabnabbing.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (typeof url === "string" && url.startsWith("https://etherscan.io/")) { shell.openExternal(url); }
+    return { action: "deny" };
+  });
+  // Defense-in-depth: never let the app frame itself navigate away from the bundled file:// renderer.
+  win.webContents.on("will-navigate", (e, url) => { if (!String(url).startsWith("file://")) e.preventDefault(); });
   win.on("closed", () => { win = null; });
 }
 
