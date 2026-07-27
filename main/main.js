@@ -247,6 +247,7 @@ ipcMain.handle("mcd:ppFeed", () => pandapools.feed());
 ipcMain.handle("mcd:ppScan", () => pandapools.scanNow());
 ipcMain.handle("mcd:ppQuote", (_e, tok, minimaToToken, amount) => pandapools.quoteSwap(tok, minimaToToken, amount));
 ipcMain.handle("mcd:ppPairInfo", (_e, tok) => pandapools.pairInfo(tok));
+ipcMain.handle("mcd:ppAggregate", () => pandapools.aggregateInfo());
 ipcMain.handle("mcd:ppSwap", (_e, quoteId) => pandapools.swap(quoteId));
 ipcMain.handle("mcd:ppCreate", (_e, tok, dec, x0, y0) => pandapools.createPool(tok, dec, x0, y0));
 ipcMain.handle("mcd:ppCreatePreview", (_e, dec, x0, y0) => pandapools.createPreview(dec, x0, y0));

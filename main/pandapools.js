@@ -225,6 +225,26 @@ function pairInfo(tok) {
   var pair = pairPoolsFor(tok);
   return { pools: pair.length, depth: s(ctx.Router.aggregateDepth(pair)) };
 }
+/** Per-token aggregates for the Pools tab "Combined" (collective-pool) view — reuses the engine's own Curve/Router
+ *  aggregation (Decimal-exact, the SAME numbers the swap router uses), so the combined card is a pure display, no
+ *  new pool math. Groups by token (Router.byToken, funded only, deepest pair first). Returns
+ *  [{tok, name, count, totalMinima, totalToken, price, depth}]. */
+function aggregateInfo() {
+  if (!ctx) return [];
+  return ctx.Router.byToken(POOLS).map(function (g) {
+    var totM = ctx.Curve.totalMinima(g);
+    var price = ctx.Curve.aggregatePrice(g);            // reserve-weighted token per MINIMA
+    return {
+      tok: g[0].tok,
+      name: ctx.PP.tokenLabel({ tok: g[0].tok, tokName: g[0].tokName }),
+      count: g.length,
+      totalMinima: s(totM),
+      totalToken: s(totM.times(price)),                 // summed token side, derived from the two aggregates
+      price: s(price),
+      depth: s(ctx.Router.aggregateDepth(g))            // routable MINIMA depth (deepest MAX_POOLS)
+    };
+  });
+}
 /** Quote a swap AND STASH the exact route under a quoteId — the renderer confirms this quote, then swap(quoteId)
  *  posts THAT route verbatim (frozen-quote; no re-quote, no slippage floor — matches native/MDS confirmSwap→doSwap). */
 function quoteAndStash(tok, minimaToToken, amountIn) {
@@ -464,7 +484,7 @@ function importCoin(data, next) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
-  pools, myPools, activity, feed, quoteSwap: quoteAndStash, pairInfo, createPreview,
+  pools, myPools, activity, feed, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
   _setRunner, _setDataDir,

@@ -1646,6 +1646,8 @@ function showPayResult(ok, message, txid, ambiguous) {
 
 // ---- PandaPools (AMM) — Swap / Pools / My LP / Activity. ----
 let ppView = "swap";            // swap | pools | mylp | activity
+let ppPoolsMode = "indiv";      // Pools tab: "indiv" = per-pool list | "combined" = one collective card per token
+let ppPoolsRenderSeq = 0;       // guards against a fast toggle: a stale in-flight render is dropped, not painted
 let PP_POOLS = [];
 let PP_MINE = [];               // my owned pools (for the LP-management sheets)
 let PP_SWAP_TOKS = [];          // [{tok,name}] pairs available to trade
@@ -1876,13 +1878,34 @@ function wirePpCopy(root) { root.querySelectorAll("[data-copy]").forEach(n => n.
 
 async function renderPpPools() {
   const host = el("ppBody");
+  const seq = ++ppPoolsRenderSeq;
   PP_POOLS = await api.ppPools().catch(() => []);
   const depth = PP_POOLS.reduce((sum, p) => sum + (parseFloat(p.reserveM) || 0), 0);
   const summary = PP_POOLS.length ? `${PP_POOLS.length} pool${PP_POOLS.length === 1 ? "" : "s"} · ~${ppNum(depth)} MINIMA aggregate depth` : "";
+  const seg = `<div class="seg" style="margin-bottom:10px">
+    <button class="btn btn--sm ${ppPoolsMode === "indiv" ? "btn--primary" : "btn--outline"}" data-ppmode="indiv">Individual</button>
+    <button class="btn btn--sm ${ppPoolsMode === "combined" ? "btn--primary" : "btn--outline"}" data-ppmode="combined">Combined</button></div>`;
+  const body = ppPoolsMode === "combined" ? ppCombinedCards(await api.ppAggregate().catch(() => [])) : ppPairRows(PP_POOLS);
+  if (seq !== ppPoolsRenderSeq) return;   // a newer render started while we awaited — drop this stale paint
   host.innerHTML = `${ppHeader("pools")}
     <div class="view__desc">Live constant-product pools on the shared mainnet registry — the same pools the phone app and the MDS MiniDapp trade.${summary ? " " + esc(summary) + "." : ""}</div>
-    <div id="ppList">${ppPairRows(PP_POOLS)}</div>`;
-  wirePpHeader(); wirePpPoolRows(el("ppList"));
+    ${seg}
+    <div id="ppList">${body}</div>`;
+  wirePpHeader();
+  host.querySelectorAll("[data-ppmode]").forEach(b => b.onclick = () => { ppPoolsMode = b.dataset.ppmode; renderPpPools(); });
+  if (ppPoolsMode !== "combined") wirePpPoolRows(el("ppList"));
+}
+// Combined = one collective-pool card per token (summed reserves + aggregate price + count + depth), from the
+// Decimal-exact engine aggregates (api.ppAggregate → main/pandapools.js aggregateInfo → Curve/Router). Display only.
+function ppCombinedCards(agg) {
+  if (!agg || !agg.length) return `<div class="empty">No funded pools to combine yet.</div>`;
+  return agg.map(a => {
+    const name = esc(a.name || TOK.shortId(a.tok));
+    return `<div class="card"><div class="card__title">MINIMA / ${name} · combined <span class="mail-ver">${a.count} pool${a.count > 1 ? "s" : ""}</span></div>
+      <div class="kv"><span class="kv__k">total reserves</span><span class="kv__v mono">${esc(TOK.tidyAmount(a.totalMinima))} MINIMA · ${esc(TOK.tidyAmount(a.totalToken))} ${name}</span></div>
+      <div class="kv"><span class="kv__k">aggregate spot price</span><span class="kv__v mono">${esc(TOK.tidyAmount(a.price))} ${name}/MINIMA</span></div>
+      <div class="kv"><span class="kv__k">tradeable depth</span><span class="kv__v mono">${esc(TOK.tidyAmount(a.depth))} MINIMA</span></div></div>`;
+  }).join("");
 }
 async function renderPpMyLP() {
   const host = el("ppBody");

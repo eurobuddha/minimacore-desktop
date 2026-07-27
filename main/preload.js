@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppScan: () => ipcRenderer.invoke("mcd:ppScan"),
   ppQuote: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppQuote", tok, minimaToToken, amount),
   ppPairInfo: (tok) => ipcRenderer.invoke("mcd:ppPairInfo", tok),
+  ppAggregate: () => ipcRenderer.invoke("mcd:ppAggregate"),
   ppSwap: (quoteId) => ipcRenderer.invoke("mcd:ppSwap", quoteId),
   ppCreate: (tok, dec, x0, y0) => ipcRenderer.invoke("mcd:ppCreate", tok, dec, x0, y0),
   ppCreatePreview: (dec, x0, y0) => ipcRenderer.invoke("mcd:ppCreatePreview", dec, x0, y0),
