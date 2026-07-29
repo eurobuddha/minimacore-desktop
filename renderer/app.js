@@ -3865,7 +3865,8 @@ async function renderAxWallet() {
     <div class="card" id="axEthCard" style="cursor:pointer"><div class="card__title">Ethereum</div>
       <div class="mono" style="font-size:22px">${esc(b.eth)} ETH</div><div class="view__desc mono">${esc(w.shortAddr)}</div></div>
     <div class="card"><div class="card__title">USDT · Ethereum</div><div class="mono" style="font-size:22px">${esc(b.usdt)} USDT</div></div>
-    <div class="seg" style="flex-wrap:wrap"><button class="btn btn--outline btn--sm" id="axRefreshBal">Refresh</button><button class="btn btn--outline btn--sm" id="axFund">Fund / QR</button><button class="btn btn--outline btn--sm" id="axSend">Send</button><button class="btn btn--outline btn--sm" id="axExport">Export key</button></div>`;
+    <div class="seg" style="flex-wrap:wrap"><button class="btn btn--outline btn--sm" id="axRefreshBal">Refresh</button><button class="btn btn--outline btn--sm" id="axFund">Fund / QR</button><button class="btn btn--outline btn--sm" id="axSend">Send</button><button class="btn btn--outline btn--sm" id="axExport">Export key</button></div>
+    ${b.ethErr ? `<div style="color:var(--red);font-size:12px;padding:8px 2px 0">⚠ ${esc(b.ethErr)}</div>` : ""}`;
   wireAxHeader();
   el("axMinCard").onclick = axCoinDump;
   el("axEthCard").onclick = () => axReceive(w.addr);

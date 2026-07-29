@@ -217,8 +217,16 @@ async function balances() {
     ? { confirmed: r0.confirmed, unconfirmed: r0.unconfirmed, sendable: r0.sendable, coins: r0.coins, at: Date.now() }
     : { confirmed: "0", unconfirmed: "0", sendable: "0", coins: 0, at: Date.now() };
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
-  await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb)).then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); }).catch(() => {});
-  await p(cb => ops.balanceOf(A.ethops.NET.usdt, cb)).then(raw => { out.usdtRaw = raw.toString(); out.usdt = A.dec.formatUnits(raw, 6); }).catch(() => {});
+  // Donor parity (atomix-mds app.js refreshEthBalances / native m:732,2589): a failed ETH read must NOT read as
+  // a confident "0" — that says "your wallet is empty" when we simply could not see it. Show '—' and surface the
+  // reason; ethErr is assigned on BOTH branches so the next good read clears the renderer's banner.
+  // ethWei/usdtRaw stay numeric strings — sendMax/checkSend BigInt() them, and 0 there fails closed.
+  await p(cb => ctx.RPC.getBalance(vmCtx().eth.address, cb))
+    .then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); out.ethErr = null; })
+    .catch(e => { out.eth = "—"; out.ethErr = (e && e.message) ? e.message : String(e); });
+  await p(cb => ops.balanceOf(A.ethops.NET.usdt, cb))
+    .then(raw => { out.usdtRaw = raw.toString(); out.usdt = A.dec.formatUnits(raw, 6); })
+    .catch(() => { out.usdt = "—"; });   // per-token failure shows in its own card, never in the ETH banner
   return out;
 }
 
@@ -277,7 +285,12 @@ function computeQuote(A, SP, sell, amountStr, slipPct, b, bals) {
     const slip = (Number(slipPct) || 0) / 100;
     const plan = SP.buildSweepPlan(b, false, amountStr, slip, myId());
     if (!plan.legs.length) return { err: plan.stopReason === "below-min" ? "That's below the makers' minimum trade size." : "No liquidity available to fill that right now.", meta };
-    if (plan.totalUsdt > Number(bals.usdt) + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + " USDT.", meta };
+    // FAIL CLOSED on an unreadable balance: a failed ERC20 read gives '—', and Number('—') is NaN — every
+    // comparison against NaN is false, so a bare `>` would wave the spend through exactly when we cannot see
+    // the balance. Same guard as the donor (atomix-mds app.js onReview).
+    const haveUsdt = Number(bals.usdt);
+    if (!isFinite(haveUsdt)) return { err: "Can’t read your USDT balance right now — hit Refresh on the Wallet tab, then try again.", meta };
+    if (plan.totalUsdt > haveUsdt + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + " USDT.", meta };
     model = { mode: "sweep", sell: false, plan };
   }
   return { model, meta };

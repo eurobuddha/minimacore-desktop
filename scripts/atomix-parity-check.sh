@@ -1,13 +1,22 @@
 #!/bin/bash
 # PARITY GATE: every AtomiX engine file under main/atomix/ must be BYTE-IDENTICAL to the donor
-# ~/Projects/atomix-mds (the canonical engine repo — same rule as main/pandapools/ vs pandapools-mds).
+# atomix-mds (the canonical engine repo — same rule as main/pandapools/ vs pandapools-mds).
 # A change is a FILE COPY from the donor, never a hand-edit. Desktop-only glue (loader.js) is exempt.
 # Donor pinned at atomix-mds 0.1.9 (6f8376f) at module creation; the check diffs against the donor's
 # WORKING TREE so a donor upgrade shows here as a diff until the copy is refreshed deliberately.
 set -e
 cd "$(dirname "$0")/.."
-DONOR="${ATOMIX_DONOR:-$HOME/Projects/atomix-mds}"
-[ -d "$DONOR" ] || { echo "donor repo not found at $DONOR"; exit 2; }
+# Donor location: $ATOMIX_DONOR wins, else the first candidate that exists. The 2026-07-28 build-family
+# reorg moved the donor from ~/Projects/atomix-mds to ~/Projects/minima/mds/atomix-mds; the old path is
+# kept as a fallback so a pre-reorg checkout still gates instead of silently exiting 2.
+DONOR="$ATOMIX_DONOR"
+if [ -z "$DONOR" ]; then
+  for c in "$HOME/Projects/minima/mds/atomix-mds" "$HOME/Projects/atomix-mds"; do
+    [ -d "$c" ] && { DONOR="$c"; break; }
+  done
+fi
+[ -n "$DONOR" ] && [ -d "$DONOR" ] || {
+  echo "donor repo not found — looked for \$ATOMIX_DONOR, ~/Projects/minima/mds/atomix-mds, ~/Projects/atomix-mds"; exit 2; }
 
 FAIL=0
 # The manifest = service.js's own MDS.load list + service.js itself (the engine, complete).
