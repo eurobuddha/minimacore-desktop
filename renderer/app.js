@@ -752,6 +752,7 @@ async function renderBalances() {
   const host = el("balList");
   if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
   const bal = await tryCmd("balance");
+  BAL_AT = Date.now();                                   // drives the "updated Ns ago" stamp
   if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
   BAL_BY_TID = {};
   for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
@@ -781,6 +782,7 @@ async function renderBalances() {
 }
 let BAL_BY_TID = {};       // tokenid → last balance row, so a card click can open the modal without refetching
 let SENDABLE_COUNT = {};   // tokenid → count of SPENDABLE coins (what consolidate can actually merge)
+let BAL_AT = 0;            // when the last `balance` reply landed — the breakdown's "updated Ns ago"
 
 /** Is this balance row a 1-of-1 NFT? (non-Minima, total supply 1, no fractional decimals) */
 function isNftBal(b) {
@@ -821,16 +823,33 @@ function balCardHtml(b) {
   const locked = decSub(confirmed, sendable);
   const nft = isNftBal(b);
   const sub = nft ? "Spendable · NFT" : "Spendable";
-  const meta = [];
-  if (locked !== "0") meta.push(`🔒 ${esc(TOK.tidyAmount(locked))} locked`);
-  if (coins) meta.push(`${coins} coin${coins === 1 ? "" : "s"}`);
   return `<div class="card card--token" data-tokenid="${esc(b.tokenid || MINIMA)}">
     <div class="kv"><span class="kv__k">${iconCell}${esc(name)}</span><span class="kv__v">${esc(TOK.tidyAmount(sendable))}</span></div>
     <div class="kv bal-sub"><span class="kv__k">${sub}</span><span class="kv__v">${esc(TOK.ticker(b.token) || "")}</span></div>
-    ${meta.length ? `<div class="bal-meta">${meta.join(" · ")}</div>` : ""}
-    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">pending</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
+    <div class="bal-breakdown">${esc(balBreakdown(b, confirmed, locked, coins))}</div>
     ${nudge}
   </div>`;
+}
+
+/**
+ * The full balance breakdown — parity with the PandaPools native app 0.9.20 and AtomiX, whose whole point is
+ * that the displayed numbers are never a black box.
+ *
+ * EVERY figure shows, zeros included. Previously `locked` and `pending` appeared only when non-zero, so a
+ * wallet with everything committed to a pool or a script showed a spendable figure and nothing at all
+ * explaining where the rest had gone.
+ *
+ * The headline stays SENDABLE for the reason given above — this only adds the context around it. `locked` is
+ * confirmed − sendable and is shown with "≈" because it is derived, not node-supplied.
+ */
+function balBreakdown(b, confirmed, locked, coins) {
+  const ago = BAL_AT ? `${Math.max(0, Math.round((Date.now() - BAL_AT) / 1000))}s ago` : "never";
+  return `confirmed ${TOK.tidyAmount(confirmed)}`
+    + `  ·  locked ≈ ${TOK.tidyAmount(locked)}`
+    + `  ·  unconfirmed ${TOK.tidyAmount(b.unconfirmed || "0")}`
+    + `  ·  ${coins} coin${coins === 1 ? "" : "s"}`
+    + `  ·  updated ${ago}`
+    + `  ·  click for coins`;
 }
 
 // After paint: swap in real icons (inline data → now; http/ipfs → SSRF-guarded main fetch) + validation badge
@@ -982,8 +1001,17 @@ async function showTokenDetail(b) {
   }
 }
 
-const COIN_LIST_CAP = 50;   // most coins shown in the modal; more get a "+N more" footer
+/** The shared PandaPools discovery beacon address ("PANDAPOOLS" in hex). Dust coins here are registry
+ *  beacons, not spendable liquidity — worth naming so they don't read as unexplained locked funds. */
+const PANDA_SENTINEL = "0x50414E4441504F4F4C53";
 
+/**
+ * Every coin the node holds for this token — the answer to "why is confirmed bigger than sendable".
+ *
+ * Nothing is capped and no coinid is elided: this is an audit view, and a truncated id can't be looked up.
+ * The whole list is copyable, and each coin is tagged with WHY it isn't spendable where we can tell —
+ * (pool) for a PandaPools covenant reserve, (beacon) for registry dust.
+ */
 async function loadCoinList(tid, isNative, box) {
   if (!validTok(tid)) { box.innerHTML = `<div class="view__desc">Invalid token id.</div>`; return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
   box.innerHTML = `<div class="spin spin--sm">Loading coins…</div>`;
@@ -993,22 +1021,37 @@ async function loadCoinList(tid, isNative, box) {
     let sendableIds = new Set();
     try { const s = await cmd(`coins relevant:true sendable:true tokenid:${tid}`) || []; for (const c of s) sendableIds.add(c.coinid); } catch (e) {}
     if (!all.length) { box.innerHTML = `<div class="view__desc">No coins.</div>`; return; }
-    const shown = all.slice(0, COIN_LIST_CAP);
-    box.innerHTML = shown.map(c => {
+    // Pool covenant addresses this install knows about, so a reserve coin can be named as such.
+    let poolAddrs = new Set();
+    try {
+      for (const p of (await api.ppPools()) || []) {
+        if (p.address) poolAddrs.add(String(p.address).toLowerCase());
+        if (p.mxaddress) poolAddrs.add(String(p.mxaddress).toLowerCase());
+      }
+    } catch (e) { /* Pools engine not up — coins still list, just without the (pool) tag */ }
+    const tagOf = (c) => {
+      const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
+      if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="chip chip--pool">pool</span>`;
+      if (ad === PANDA_SENTINEL.toLowerCase()) return `<span class="chip chip--beacon">beacon</span>`;
+      return "";
+    };
+    box.innerHTML = all.map(c => {
       const amt = TOK.tidyAmount(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
       const spend = sendableIds.has(c.coinid);
       const cid = String(c.coinid || "");
-      const tail = cid.length > 14 ? "…" + cid.slice(-12) : cid;
       const bits = [];
       if (c.created) bits.push("block " + esc(String(c.created)));
       if (c.age != null) bits.push("age " + esc(String(c.age)));
       return `<div class="coin-row" data-cid="${esc(cid)}" title="click to copy coin id">
         <div class="coin-row__top"><span class="coin-amt">${esc(amt)}</span>
-          <span class="chip ${spend ? "chip--spend" : "chip--lock"}">${spend ? "spendable" : "🔒 locked"}</span></div>
-        <div class="coin-row__sub">${esc(tail)}${bits.length ? " · " + bits.join(" · ") : ""}</div>
+          <span class="chip ${spend ? "chip--spend" : "chip--lock"}">${spend ? "spendable" : "🔒 locked"}</span>${tagOf(c)}</div>
+        <div class="coin-row__sub coin-row__cid">${esc(cid)}${bits.length ? " · " + bits.join(" · ") : ""}</div>
       </div>`;
-    }).join("") + (all.length > shown.length ? `<div class="view__desc">+ ${all.length - shown.length} more coin${all.length - shown.length === 1 ? "" : "s"} not shown</div>` : "");
+    }).join("") + `<div class="view__desc coin-copyall" title="copy every coin id">copy all ${all.length} coin${all.length === 1 ? "" : "s"}</div>`;
     box.querySelectorAll(".coin-row[data-cid]").forEach(r => r.onclick = () => copy(r.dataset.cid));
+    const ca = box.querySelector(".coin-copyall");
+    if (ca) ca.onclick = () => copy(all.map(c =>
+      `${TOK.tidyAmount(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"))}\n${c.coinid || ""}`).join("\n"));
   } catch (e) {
     box.innerHTML = `<div class="view__desc">Couldn't load coins: ${esc(e.message || String(e))}</div>`;
   }
