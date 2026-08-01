@@ -1959,13 +1959,40 @@ async function renderPpMyLP() {
     <div id="ppMine" style="margin-top:12px">${ppMineHtml(PP_MINE)}</div>
     <div class="card" style="margin-top:12px"><div class="card__title">Recovery</div>
       <div class="view__desc">Back up your pools (covenant params + a snapshot of the reserve coins — no seed) so you can re-track and withdraw them on any node. Cross-compatible with the phone app and the MDS MiniDapp.</div>
-      <div class="seg"><button class="btn btn--outline btn--full" id="ppBackupBtn">Back up</button><button class="btn btn--outline btn--full" id="ppRestoreBtn">Restore</button><button class="btn btn--outline btn--full" id="ppGuideBtn">How it works</button></div></div>`;
+      <div class="seg"><button class="btn btn--outline btn--full" id="ppBackupBtn">Back up</button><button class="btn btn--outline btn--full" id="ppRestoreBtn">Restore</button><button class="btn btn--outline btn--full" id="ppGuideBtn">How it works</button></div></div>
+    <div class="card" style="margin-top:12px"><div class="card__title">Statement</div>
+      <div class="view__desc">A per-pool statement for accounting: what you put in, your own trades against it, what is in the pool now, and the profit. Your transactions only — the profit figures read the pool's reserves live, so everyone else's trading is already in them.</div>
+      <div class="seg"><button class="btn btn--outline btn--full" id="ppStatementBtn">Export statement (.csv)</button></div></div>`;
   wirePpHeader(); wirePpCopy(el("ppMine")); wirePpMineActions(el("ppMine"));
   el("ppCreateBtn").onclick = showPpCreate;
   el("ppCollectBtn").onclick = doPpCollect;
   el("ppBackupBtn").onclick = showPpBackup;
   el("ppRestoreBtn").onclick = showPpRestore;
   el("ppGuideBtn").onclick = showPpGuide;
+  el("ppStatementBtn").onclick = doPpStatement;
+}
+
+let ppStatementBusy = false;
+/**
+ * Build and save the per-pool statement. Tops up the permanent history mirror first — a statement built on a
+ * half-filled history would be quietly incomplete, which is the worst way for an accounting file to be wrong.
+ * If the backfill still hasn't finished, the file says so and so does the toast.
+ */
+async function doPpStatement() {
+  if (ppStatementBusy) return;                                     // the sync can take a while — no stacking
+  ppStatementBusy = true;
+  const prog = showProgress("Building statement…", "Catching the transaction history up with the node…");
+  let r;
+  try { r = await api.ppStatement(); }
+  catch (e) { prog.close(); ppStatementBusy = false; toast("Statement failed: " + e.message, "err"); return; }
+  prog.close();
+  ppStatementBusy = false;
+  if (!r || !r.pools) { toast("No pools to report on yet — create one first.", "err"); return; }
+  const p = await api.exportCsv(r.csv, "pandapools-statement.csv");
+  if (!p) { toast("Export cancelled", ""); return; }
+  toast(r.backfilled
+    ? `Saved ✓ — ${r.pools} pool${r.pools === 1 ? "" : "s"}, ${r.rows} transactions`
+    : `Saved ✓ — history still syncing (${r.rows} so far); the file says so`, "ok");
 }
 let ppBackupBusy = false;
 async function showPpBackup() {

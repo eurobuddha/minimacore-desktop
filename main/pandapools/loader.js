@@ -14,7 +14,7 @@ const path = require("path");
 const vm = require("vm");
 
 // index.html load order (minus mds.js, which the shim replaces).
-const ALL_FILES = ["decimal.js", "covenant.js", "curve.js", "router.js", "book.js", "store.js", "poolmgr.js", "service.js"];
+const ALL_FILES = ["decimal.js", "covenant.js", "curve.js", "router.js", "book.js", "store.js", "history.js", "statement.js", "poolmgr.js", "service.js"];
 
 /**
  * Build a vm context with the given `mds` shim and evaluate `files` (default: all) in order.

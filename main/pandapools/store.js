@@ -22,7 +22,7 @@ var Store = (function () {
     function init(cb) {
         // probe one table; only CREATE the set if missing (avoids pending prompts)
         MDS.sql("SELECT 1 FROM pp_activity LIMIT 1", function (r) {
-            function fin() { migrateFeedKind(function () { migrateActivityRefaddr(function () { ensureOwnPools(function () { ready = true; if (cb) cb(); }); }); }); }
+            function fin() { migrateFeedKind(function () { migrateActivityRefaddr(function () { ensureOwnPools(function () { ensureHistory(function () { ready = true; if (cb) cb(); }); }); }); }); }
             if (r && r.status) { fin(); return; }
             create(fin);
         });
@@ -54,6 +54,34 @@ var Store = (function () {
         MDS.sql("SELECT kind FROM pp_feed LIMIT 1", function (r) {
             if (r && r.status) { cb(); return; }
             MDS.sql("ALTER TABLE pp_feed ADD COLUMN kind varchar(12) DEFAULT 'SWAP'", function () { cb(); });
+        });
+    }
+
+    /**
+     * pp_history — a permanent, txpowid-keyed mirror of the node's `history relevant:true`, the MiniDapp
+     * counterpart of the native app's HistoryDb.
+     *
+     * It ACCUMULATES and is never pruned, which is the point: the node retains only a window, so once a
+     * transaction ages out of `history` this is the only remaining record of it. Everything the pool
+     * statement needs lives here — the per-token `deltas` map (this wallet's net effect) plus the raw input
+     * and output coin arrays, which are what let a routed swap be split across the pools it actually touched.
+     *
+     * Probed-then-created like every other table, so a normal run never triggers a pending SQL prompt.
+     */
+    function ensureHistory(cb) {
+        MDS.sql("SELECT 1 FROM pp_history LIMIT 1", function (r) {
+            if (r && r.status) { cb(); return; }
+            MDS.sql(
+                "CREATE TABLE IF NOT EXISTS `pp_history` (" +
+                " `txpowid` varchar(80) NOT NULL PRIMARY KEY," +
+                " `block` bigint NOT NULL," +
+                " `timemilli` bigint NOT NULL," +
+                " `direction` varchar(12) NOT NULL," +
+                " `deltas` text NOT NULL," +
+                " `counterparty` varchar(90)," +
+                " `inputs` text," +
+                " `outputs` text," +
+                " `synced_at` bigint NOT NULL)", function () { cb(); });
         });
     }
 
@@ -233,6 +261,59 @@ var Store = (function () {
         });
     }
 
+    // -------------------------------------------------------- pp_history (permanent on-chain mirror)
+
+    /** Write one transaction. Calls back TRUE if it was NEW, FALSE if this txpowid was already stored.
+     *  That boolean is load-bearing: it is how the incremental sync knows it has caught up with itself. */
+    function histInsert(e, cb) {
+        if (!ready) { cb(false); return; }
+        MDS.sql("INSERT INTO pp_history (txpowid, block, timemilli, direction, deltas, counterparty, inputs, outputs, synced_at)"
+            + " VALUES ('" + esc(e.txpowid) + "'," + (e.block || 0) + "," + (e.timemilli || 0) + ",'" + esc(e.direction || "") + "','"
+            + esc(e.deltas || "{}") + "','" + esc(e.counterparty || "") + "','" + esc(e.inputs || "[]") + "','"
+            + esc(e.outputs || "[]") + "'," + Date.now() + ")",
+            function (r) { cb(!!(r && r.status)); });   // PK violation → status false → already held
+    }
+
+    /** Every stored transaction, OLDEST FIRST — the order a statement needs, since running totals only mean
+     *  anything accumulated forwards. Unbounded by design: a ledger with a LIMIT on it does not reconcile. */
+    function histAll(cb) {
+        if (!ready) { cb([]); return; }
+        MDS.sql("SELECT txpowid, block, timemilli, direction, deltas, counterparty, inputs, outputs FROM pp_history"
+            + " ORDER BY block ASC, timemilli ASC", function (r) {
+            var out = [];
+            if (r && r.status && r.rows) r.rows.forEach(function (row) {
+                out.push({
+                    txpowid: row.TXPOWID, block: Number(row.BLOCK), timemilli: Number(row.TIMEMILLI),
+                    direction: row.DIRECTION, deltas: row.DELTAS, counterparty: row.COUNTERPARTY,
+                    inputs: row.INPUTS, outputs: row.OUTPUTS
+                });
+            });
+            cb(out);
+        });
+    }
+
+    function histStats(cb) {
+        if (!ready) { cb({ count: 0, minBlock: 0, maxBlock: 0 }); return; }
+        MDS.sql("SELECT COUNT(*) AS C, MIN(block) AS MN, MAX(block) AS MX FROM pp_history", function (r) {
+            var row = (r && r.status && r.rows && r.rows.length) ? r.rows[0] : null;
+            cb({ count: row ? Number(row.C || 0) : 0, minBlock: row ? Number(row.MN || 0) : 0, maxBlock: row ? Number(row.MX || 0) : 0 });
+        });
+    }
+
+    // -------------------------------------------------------- generic kv (sync bookkeeping)
+    function kvGet(k, cb) {
+        if (!ready) { cb(""); return; }
+        MDS.sql("SELECT v FROM pp_kv WHERE k='" + esc(k) + "'", function (r) {
+            cb((r && r.status && r.rows && r.rows.length) ? String(r.rows[0].V) : "");
+        });
+    }
+    function kvSet(k, v, cb) {
+        if (!ready) { if (cb) cb(); return; }
+        MDS.sql("DELETE FROM pp_kv WHERE k='" + esc(k) + "'", function () {
+            MDS.sql("INSERT INTO pp_kv (k, v) VALUES ('" + esc(k) + "','" + esc(v) + "')", function () { if (cb) cb(); });
+        });
+    }
+
     // -------------------------------------------------------- known PandaPools covenant addresses
     // For the personal My-Activity filter: keep only on-chain rows that touch a pool covenant address AND moved
     // my wallet. Grows on discovery + owned pools (both 0x and Mx forms, lowercased), PERSISTED, never shrinks
@@ -302,6 +383,8 @@ var Store = (function () {
         actRecord: actRecord, actRecordFailed: actRecordFailed, actList: actList, actSetStatus: actSetStatus,
         confirmed: confirmed, statusText: statusText, CONFIRM_BLOCKS: CONFIRM_BLOCKS,
         feedList: feedList, knownAddrsGet: knownAddrsGet, knownAddrsAdd: knownAddrsAdd,
-        ownRecord: ownRecord, ownAll: ownAll
+        ownRecord: ownRecord, ownAll: ownAll,
+        histInsert: histInsert, histAll: histAll, histStats: histStats,
+        kvGet: kvGet, kvSet: kvSet
     };
 })();

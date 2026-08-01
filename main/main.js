@@ -243,6 +243,7 @@ node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStar
 ipcMain.handle("mcd:ppPools", () => pandapools.pools());
 ipcMain.handle("mcd:ppMyPools", () => pandapools.myPools());
 ipcMain.handle("mcd:ppActivity", () => pandapools.activity());
+ipcMain.handle("mcd:ppStatement", () => pandapools.statement());
 ipcMain.handle("mcd:ppFeed", () => pandapools.feed());
 ipcMain.handle("mcd:ppScan", () => pandapools.scanNow());
 ipcMain.handle("mcd:ppQuote", (_e, tok, minimaToToken, amount) => pandapools.quoteSwap(tok, minimaToToken, amount));

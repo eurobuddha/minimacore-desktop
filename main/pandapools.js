@@ -56,6 +56,12 @@ function buildMds() {
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
     cmd: function (command, cb) { runner(command).then(function (r) { if (cb) cb(r); }, function () { if (cb) cb({ status: false }); }); },
     sql: sqlShim.sql,
+    // history.js pages the node's `history` into the permanent mirror and adapts its page size downward on
+    // any page that fails. The 256 KB reply cap that forces the Android app down to max:1 lives in the
+    // ANDROID BROADCAST RECEIVER (MinimaReceiver.MAX_MESSAGE_LEN), not in the node — and this transport is
+    // the node's own HTTP RPC, which imposes no size limit at all (see main/rpc.js: it simply accumulates the
+    // body). So page far harder here; a backfill that takes hours at max:64 finishes in minutes at 512.
+    historyPageMax: 512,
     log: function () { /* console.log.apply(console, arguments); */ },
     init: function (cb) { serviceHandler = cb; },                    // capture — we drive the events ourselves
     net: { GET: function (url, cb) { if (cb) cb({ status: false }); } },   // MEXC ticker is optional; stubbed
@@ -207,6 +213,45 @@ function myPools() {
 // live chain tip (updated every block by the scan cycle).
 function activity() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.actList(120, function (a) { resolve((a || []).map(function (e) { return { type: e.type, summary: e.summary, txpowid: e.txpowid, ts: e.ts, failed: e.failed, failMsg: e.failMsg, confirmed: ctx.Store.confirmed(e, lastTip), submitBlock: e.submitBlock }; })); }); }); }
 function feed() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.feedList(100, function (f) { resolve((f || []).map(function (e) { return { pool: e.pool, tokenLabel: e.tokenLabel, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), price: s(e.price), ts: e.ts }; })); }); }); }
+
+/**
+ * The per-pool statement CSV: what you put in, your own trades, what is in the pool now, and the profit.
+ *
+ * Built from the permanent pp_history mirror (history.js keeps it topped up) plus the live reserves from the
+ * current scan, so the file and the Pools tab cannot disagree. Syncs first, because a statement built on a
+ * half-filled history would be quietly incomplete — the worst way for an accounting file to be wrong.
+ */
+function statement() {
+  if (!ctx) return Promise.resolve({ csv: "", rows: 0, backfilled: false });
+  return new Promise(function (resolve) {
+    ctx.History.sync(function () {
+      // Same ownership test as the My LP tab: a pool is ours if we hold a recovery recipe for it, and the
+      // reserves come from the live scan — so the statement and the pool card read the same numbers.
+      ctx.Store.ownAll(function (recipes) {
+        var owned = {}; (recipes || []).forEach(function (r) { if (r.address) owned[r.address.toLowerCase()] = true; });
+        ctx.Store.knownAddrsGet(function (known) {
+          ctx.Store.histAll(function (rows) {
+            ctx.Store.kvGet("hist_backfilled", function (done) {
+              var mine = POOLS.filter(function (p) { return p.address && owned[p.address.toLowerCase()]; })
+                .map(function (p) {
+                  return { address: p.address, label: ctx.PP.tokenLabel(p), reserveM: s(p.reserveM), reserveT: s(p.reserveT) };
+                });
+              var csv = ctx.Statement.build(rows, mine, known,
+                { at: Date.now(), version: app.getVersion(), backfilled: done === "true" });
+              resolve({ csv: csv, rows: rows.length, pools: mine.length, backfilled: done === "true" });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
+/** Keep the permanent history mirror current. Fire-and-forget; safe to call every block. */
+function syncHistory() {
+  if (!ctx || ctx.History.isRunning()) return Promise.resolve(0);
+  return new Promise(function (resolve) { ctx.History.sync(function (added) { resolve(added); }); });
+}
 
 // ---- actions (promise wrappers over PoolMgr's {ok,fail} callbacks) ----
 function poolByAddress(addr) { for (var i = 0; i < POOLS.length; i++) if (POOLS[i].address && POOLS[i].address.toLowerCase() === String(addr || "").toLowerCase()) return POOLS[i]; return null; }
@@ -484,7 +529,7 @@ function importCoin(data, next) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
-  pools, myPools, activity, feed, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
+  pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
   _setRunner, _setDataDir,
