@@ -566,6 +566,86 @@ var PoolMgr = (function () {
         return out;
     }
 
+    // ============================================== KEY USES (one-time-signature counter)
+    //
+    // Minima signatures are STATEFUL: each key is a Winternitz tree and every signature must consume the
+    // NEXT leaf. Signing one leaf twice over different data leaks that leaf's private key.
+    //
+    // A pool's owner key is minted with `newaddress`, so a seed-only re-sync doesn't bring it back — only
+    // the 64 defaults are rebuilt. ensureOwnerKeys re-mints it (keys derive as hash(seed, index), so the
+    // same seed reproduces the same keys in order) but the node inserts EVERY new key at uses = 0. Without
+    // winding it forward, the next owner action re-signs leaves the pre-restore node already spent.
+    //
+    // There is no command to SET a counter — `keys` offers only list/genkey/checkkeys/new/createallkeys,
+    // and updateAllKeyUses rewrites all 64 defaults at once. The private key can't be fetched either
+    // (KeyRow.toJSON has privatekey commented out). So we advance it the one way the node exposes: each
+    // `sign` call runs Wallet.signData, which increments and persists uses by one. The leaves burned are
+    // exactly the ones being skipped, so nothing of value is lost — and it works on ANY node, no fork.
+
+    var BURN_DATA = "0x00";      // constant, meaningless — never a valid transaction id
+    var RECHECK_EVERY = 25;      // re-read the node's real count rather than trusting our arithmetic
+    var MAX_BURN = 20000;        // a target beyond this means a bad backup, not a busy key
+    // Own copy: service.js loads AFTER this file, so its REFRESH_BLOCKS isn't defined yet. Must stay in
+    // step with service.js and native PoolRefresher.REFRESH_BLOCKS — it sets the keep-fresh cadence, which
+    // is how many owner signatures a stretch of elapsed blocks implies.
+    var KEYUSE_REFRESH_BLOCKS = 900;
+
+    /** Current use count for one public key, or null if this node doesn't hold it. */
+    function readKeyUses(publickey, cb) {
+        if (!publickey) { cb(null); return; }
+        MDS.cmd("keys action:list publickey:" + publickey, function (j) {
+            var resp = j ? j.response : null;
+            var arr = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.keys) ? resp.keys : null);
+            if (!arr) { cb(null); return; }
+            var want = String(publickey).toLowerCase();
+            for (var i = 0; i < arr.length; i++) {
+                var k = arr[i];
+                if (k && String(k.publickey || "").toLowerCase() === want && k.uses !== undefined) { cb(Number(k.uses)); return; }
+            }
+            cb(null);   // absent must read as UNKNOWN, never as 0 — 0 would resume at the first leaf
+        });
+    }
+
+    /** Where a restored owner key should resume: what it had spent, plus the keep-fresh signatures that
+     *  could have happened since, plus slack for deposits/migrates/collects. Every term measured. */
+    function restoreTarget(usesAtBackup, blockAtBackup, currentBlock, slack) {
+        var gap = 0;
+        if (currentBlock > blockAtBackup && blockAtBackup > 0) {
+            gap = Math.ceil((currentBlock - blockAtBackup) / KEYUSE_REFRESH_BLOCKS);
+        }
+        return Math.max(0, usesAtBackup || 0) + gap + Math.max(0, slack || 0);
+    }
+
+    /** Advance `publickey` to at least `target` by burning leaves. NEVER lowers. done(ok, finalUses, err) */
+    function advanceKeyUses(publickey, target, onProgress, done) {
+        if (!publickey) { done(false, 0, "no public key"); return; }
+        if (!(target > 0)) { done(true, 0, null); return; }
+        readKeyUses(publickey, function (uses) {
+            if (uses === null) { done(false, 0, "the node doesn't hold that key"); return; }
+            if (uses >= target) { done(true, uses, null); return; }          // already past it
+            if (target - uses > MAX_BURN) {
+                done(false, uses, "that backup asks for " + (target - uses) + " more key uses, which looks wrong");
+                return;
+            }
+            burnTo(publickey, target, uses, onProgress, done);
+        });
+    }
+    function burnTo(publickey, target, uses, onProgress, done) {
+        if (uses >= target) { done(true, uses, null); return; }
+        if (onProgress) onProgress(uses, target);
+        MDS.cmd("sign publickey:" + publickey + " data:" + BURN_DATA, function (j) {
+            if (!j || !j.status) { done(false, uses, "the node refused to sign — key not advanced"); return; }
+            var next = uses + 1;
+            if (next % RECHECK_EVERY === 0) {
+                readKeyUses(publickey, function (real) {
+                    burnTo(publickey, target, real === null ? next : Math.max(real, next), onProgress, done);
+                });
+            } else {
+                burnTo(publickey, target, next, onProgress, done);
+            }
+        });
+    }
+
     // ================================================================ SWAP (routed)
     function swap(route, minimaToToken, done) {   // done.ok(txpowid), done.fail
         if (!route || !route.ok || !route.allocs.length) { done.fail("no route — trade too small for the pools"); return; }
@@ -630,6 +710,7 @@ var PoolMgr = (function () {
         refresh: refresh,
         forwardOwnerFunds: forwardOwnerFunds,
         sweepOwnerFunds: sweepOwnerFunds,
-        ensureOwnerKeys: ensureOwnerKeys
+        ensureOwnerKeys: ensureOwnerKeys,
+        readKeyUses: readKeyUses, restoreTarget: restoreTarget, advanceKeyUses: advanceKeyUses
     };
 })();

@@ -473,18 +473,30 @@ async function backup() {
       var funded = {};
       POOLS.forEach(function (p) { if (p && p.address && ctx.Curve.funded(p)) funded[p.address.toLowerCase()] = p; });
       var pools = [], pending = recipes.length;
-      function fin() { if (--pending === 0) resolve({ json: JSON.stringify({ pandapools_backup: 1, pools: pools }, null, 2) }); }
+      function fin() { if (--pending === 0) resolve({ json: JSON.stringify({ pandapools_backup: 2, pools: pools }, null, 2) }); }
       recipes.forEach(function (r) {
         var e = { addr: r.address || "", mx: r.mxaddress || "", opk: r.opk || "", oadr: r.oadr || "",
           tok: r.tok || "", dec: (r.tokDecimals == null ? 8 : r.tokDecimals), kmin: r.kmin || "0", script: r.script || "" };
         pools.push(e);
         var f = funded[(r.address || "").toLowerCase()];
-        if (f && f.coinidM && f.coinidT) {
-          nodeCmd("coinexport coinid:" + f.coinidM).then(function (jm) {
-            var rm = jm && jm.response; if (rm && rm.data) e.cm = rm.data;
-            nodeCmd("coinexport coinid:" + f.coinidT).then(function (jt) { var rt = jt && jt.response; if (rt && rt.data) e.ct = rt.data; fin(); }).catch(fin);
-          }).catch(fin);
-        } else fin();
+        function afterCoins() {
+          if (f && f.coinidM && f.coinidT) {
+            nodeCmd("coinexport coinid:" + f.coinidM).then(function (jm) {
+              var rm = jm && jm.response; if (rm && rm.data) e.cm = rm.data;
+              nodeCmd("coinexport coinid:" + f.coinidT).then(function (jt) { var rt = jt && jt.response; if (rt && rt.data) e.ct = rt.data; fin(); }).catch(fin);
+            }).catch(fin);
+          } else fin();
+        }
+        // Stamp the owner key's ACTUAL one-time-signature count and the height it was read at. Without it a
+        // later restore resumes the regenerated key at leaf 0 and re-signs leaves already spent on-chain.
+        if (e.opk && ctx.PoolMgr.readKeyUses) {
+          try {
+            ctx.PoolMgr.readKeyUses(e.opk, function (uses) {
+              if (uses !== null && uses !== undefined) { e.opkuses = uses; if (lastTip > 0) e.atblock = lastTip; }
+              afterCoins();
+            });
+          } catch (err) { afterCoins(); }
+        } else afterCoins();
       });
     });
   }), 120000, "Backup timed out — try again.");
@@ -503,12 +515,49 @@ async function restore(json) {
           // Regenerate any missing $OPK owner keys — a seed-only restore only brings back the 64 defaults, so a
           // newaddress owner key must be re-issued in order for restored pools to be closeable/collectable.
           var opks = pools.map(function (x) { return x && x.opk; }).filter(Boolean);
-          ctx.PoolMgr.ensureOwnerKeys(opks, function (regen) { emitter.emit("update"); scanNow().catch(function () {}); resolve({ restored: ok, total: total, regen: regen }); });
+          ctx.PoolMgr.ensureOwnerKeys(opks, function (regen) {
+            // A regenerated key comes back at uses = 0. Wind it forward to where it actually left off
+            // BEFORE anything can sign with it — that ordering is the whole fix.
+            advanceRestoredKeys(pools, 0, function (warn) {
+              emitter.emit("update"); scanNow().catch(function () {});
+              resolve({ restored: ok, total: total, regen: regen, warn: warn || null });
+            });
+          });
         }
       });
     });
   }), 240000, "Restore timed out — check My LP; some pools may have been re-tracked.");
 }
+/** Owner actions other than keep-fresh that could also have signed since the backup. Erring high costs a
+ *  leaf out of 262,144; falling short leaks the key. */
+const USES_SLACK = 50;
+
+/** Wind each restored owner key forward to the count it had reached. Sequential on purpose — each pass
+ *  burns real signatures, and firing them concurrently is the pattern that caused reuse in the first
+ *  place. Best-effort per pool, but every failure is REPORTED, never swallowed. */
+function advanceRestoredKeys(pools, i, done) {
+  if (i >= pools.length) { done(null); return; }
+  const e = pools[i];
+  if (!e || !e.opk || !ctx.PoolMgr.advanceKeyUses) { advanceRestoredKeys(pools, i + 1, done); return; }
+  const label = (e.addr || "pool").slice(0, 10) + "…";
+  if (e.opkuses === undefined) {
+    // A pre-v2 backup carries no count. Say so rather than quietly resuming at leaf 0.
+    advanceRestoredKeys(pools, i + 1, function () {
+      done(label + ": this backup predates key-use tracking, so the owner key's signature count is unknown. "
+         + "Re-back-up now and avoid reusing this pool.");
+    });
+    return;
+  }
+  const target = ctx.PoolMgr.restoreTarget(e.opkuses, e.atblock || 0, lastTip, USES_SLACK);
+  ctx.PoolMgr.advanceKeyUses(e.opk, target, null, function (okAdv, finalUses, err) {
+    if (okAdv) { advanceRestoredKeys(pools, i + 1, done); return; }
+    advanceRestoredKeys(pools, i + 1, function () {
+      done(label + ": could not restore the owner key's usage (" + err + "). Do not use this pool until that "
+         + "succeeds — signing now could expose the key.");
+    });
+  });
+}
+
 function restoreOne(e, cbRaw) {
   var done = false; function cb(v) { if (done) return; done = true; cbRaw(v); }   // fire once, whatever the .then/.catch does
   if (!e || !e.addr) { cb(false); return; }
