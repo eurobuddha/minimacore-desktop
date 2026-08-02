@@ -141,7 +141,13 @@
         AX.flow.each(cmds, function (c, i, next) { M.cmdR(c, function (e, resp) { last = resp; next(e); }); },
             function (err) { cb(err, last); });
     }
-    function txnId() { return 'axswap_' + Math.floor(Date.now()).toString(16); }
+    /** Node-side transaction id. The counter is NOT decoration: Date.now() alone is millisecond-granular,
+     *  so two settlement actions starting in the same millisecond produced the SAME id — their
+     *  txninput/txnstate/txnsign commands then interleaved into ONE merged transaction which got posted.
+     *  A corrupt spend, and a signature over content neither caller intended. Native uses nanoTime; this is
+     *  the JS equivalent (same fix as pandapools/service.js). */
+    var txnSeq = 0;
+    function txnId() { return 'axswap_' + Math.floor(Date.now()).toString(16) + '_' + (++txnSeq).toString(16); }
     function deleteTxn(id) { M.cmd('txndelete id:' + id, function () {}); }
 
     /**
@@ -279,6 +285,7 @@
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         coinAmount: coinAmount, lock: lock, lockFromCoins: lockFromCoins, myFreeCoins: myFreeCoins,
         claim: claim, refund: refund, scanByHash: scanByHash, scanByKey: scanByKey, scanNotifySecret: scanNotifySecret,
-        scanAllHtlcCoins: scanAllHtlcCoins
+        scanAllHtlcCoins: scanAllHtlcCoins,
+        _txnId: txnId          // exported for the uniqueness test only
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

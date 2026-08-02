@@ -18,8 +18,23 @@
     /** cmd(command, cb(fullResult)). */
     function cmd(command, cb) { g.MDS.cmd(command, function (r) { cb(r); }); }
 
-    /** cmdR(command, cb(err, response)) — err is null on status:true OR pending:true. */
+    /** cmdR(command, cb(err, response)) — err is null on status:true OR pending:true.
+     *
+     *  A command that makes the node SIGN goes through AX.signgate, so this context never has two
+     *  signatures in flight. Signing one key concurrently makes the node issue the same one-time leaf for
+     *  two different messages, which leaks that leaf's private key. Reads are untouched — gating them too
+     *  would serialise the whole app for no safety gain. */
     function cmdR(command, cb) {
+        if (g.AX && g.AX.signgate && g.AX.signgate.signs(command)) {
+            g.AX.signgate.submit(function (release) {
+                rawCmdR(command, function (e, resp, r) { release(); cb(e, resp, r); });
+            });
+            return;
+        }
+        rawCmdR(command, cb);
+    }
+
+    function rawCmdR(command, cb) {
         g.MDS.cmd(command, function (r) {
             if (r && (r.status === true || r.pending === true)) cb(null, r.response, r);
             else cb(new Error('cmd failed: ' + command + ' — ' + (r && r.error)), null, r);

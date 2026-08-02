@@ -22,6 +22,7 @@ MDS.load('lib/abi.js');           // ABI encode/decode (needs ax_eth keccak) —
 MDS.load('lib/ethhtlc.js');       // ETH HTLC interface (needs abi + sodium + hex + decimal)
 MDS.load('lib/identity.js');
 MDS.load('lib/trading.js');
+MDS.load('lib/signgate.js');
 MDS.load('lib/mdsw.js');
 MDS.load('lib/ethrpc.js');         // ETH JSON-RPC over MDS.net.POST (needs mds)
 MDS.load('lib/ethtx.js');          // legacy tx sign+send + nonce serializer (needs ethrpc + ax_eth + flow)
