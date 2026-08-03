@@ -24,6 +24,12 @@
     var DB = AX.swapdb, H = AX.htlc, EO = AX.ethops, D = AX.dec, F = AX.flow, TR = AX.trading;
 
     var HTLC_SCAN_DEPTH = 256, NOTIFY_SCAN_DEPTH = 256, ETH_RETRY_SECS = 150;
+    /** REFUND discovery only. `coins depth:` is a walk-back over BLOCKS from the tip, so at 256 a coin I locked
+     *  went invisible ~3h33m after creation — while the responder leg becomes refundable just 36 blocks in. Miss
+     *  that window and the coin was stranded for good. 1024 is the practical ceiling
+     *  (MINIMA_CASCADE_START_DEPTH: past it the tree cascades and there is no parent to walk), which is why the
+     *  sweep also asks for MegaMMR. The hot path keeps 256 — this is used only by the per-hash expired sweep. */
+    var REFUND_SCAN_DEPTH = 1024;
     var C = null, ethAttempt = {}, inflight = {};
     var _now = function () { return Date.now(); };
     function nowUnix() { return Math.floor(_now() / 1000); }
@@ -148,7 +154,12 @@
                         if (isMyPublishKey(H.stateAt(coin, 4))) checkCanSwapCoin(coin, block, nextC);   // locked to me → claim
                         else if (isMyPublishKey(H.stateAt(coin, 0))) checkExpiredMinima(coin, block, nextC);  // I locked → refund if expired
                         else nextC();
-                    }, done);
+                    }, function () {
+                        // The scan above reaches only HTLC_SCAN_DEPTH blocks back, so it stops finding my own
+                        // expired locks long before they stop being refundable. Drive those from the DB, which
+                        // has no depth window — exactly as the ETH side already does.
+                        sweepExpiredMinima(all, block, done);
+                    });
                 });
             });
             });   // close harvestNotifySecrets
@@ -209,19 +220,51 @@
         });
     }
 
+    /** REFUND backstop, driven from the DB rather than a bounded chain scan.
+     *
+     *  Refund eligibility used to be decided by the same shallow scan that found the coin, so a lock older than
+     *  HTLC_SCAN_DEPTH blocks became permanently unrefundable — discovery and eligibility were tied together.
+     *  `swaps` records every leg I locked and its absolute timelock, so eligibility is decided WITHOUT the chain.
+     *  Only a swap already known to be past its timelock costs a node command, and then per-hash and deep. */
+    function sweepExpiredMinima(all, block, done) {
+        var due = (all || []).filter(function (s) {
+            return s && s.hash && s.myLegIsMinima
+                && s.status !== DB.ST_COMPLETE && s.status !== DB.ST_REFUNDED && s.status !== DB.ST_ERROR
+                && s.myTimelock > 0 && block > s.myTimelock
+                && ethRetryDue('refundM:' + s.hash);      // same window as the refund itself
+        });
+        F.each(due, function (s, i, nextS) {
+            DB.hasEvent(s.hash, DB.EV_EXPIRED, function (e, have) {
+                if (have) return nextS();
+                H.scanByHashDeep(s.hash, 2, REFUND_SCAN_DEPTH, function (err, coins) {
+                    F.each(coins || [], function (coin, j, nextC) {
+                        if (coin && isMyPublishKey(H.stateAt(coin, 0)) && sameHash(H.stateAt(coin, 5), s.hash))
+                            checkExpiredMinima(coin, block, nextC);
+                        else nextC();
+                    }, nextS);
+                });
+            });
+        }, done);
+    }
+
     /** A coin I locked (owner state[0]) past its timelock → reclaim it. */
     function checkExpiredMinima(coin, block, next) {
         var timelock = Number(H.stateAt(coin, 3)) || 0;
         if (block <= timelock) return next();
         var hash = H.stateAt(coin, 5), key = 'refundM:' + hash;
         DB.hasEvent(hash, DB.EV_EXPIRED, function (e, have) {
-            if (have || inflight[key]) return next();
-            inflight[key] = true;
+            // SELF-HEALING gate, as on the claim path. The old guard was a bare `inflight[key] = true` cleared
+            // only inside the post callback, so a callback that never arrived held it forever and the refund
+            // NEVER retried. A timestamp cannot leak: a lost callback costs one ETH_RETRY_SECS window.
+            if (have || !ethRetryDue(key)) return next();
+            markEthAttempt(key);
             H.refund(coin, C.myMinimaAddr, function (eR, txpowid) {
-                if (eR) { delete inflight[key]; return next(); }
-                DB.logEvent(hash, DB.EV_EXPIRED, 'minima', H.coinAmount(coin), txpowid, function () {
-                    DB.setSwapStatus(hash, DB.ST_REFUNDED, function () {
-                        delete inflight[key];
+                if (eR) return next();          // leave the stamp → retries after the window
+                // Status FIRST: EV_EXPIRED is a permanent veto on any future refund, so dying between these two
+                // writes would leave the swap un-refundable AND still reading "locked".
+                DB.setSwapStatus(hash, DB.ST_REFUNDED, function () {
+                    DB.logEvent(hash, DB.EV_EXPIRED, 'minima', H.coinAmount(coin), txpowid, function () {
+                        delete ethAttempt[key];
                         notify('Swap refunded', 'Timelock passed — reclaimed your ' + TR.labelForToken(coin.tokenid || '0x00'));
                         onChanged(); next();
                     });

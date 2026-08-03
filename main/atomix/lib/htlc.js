@@ -252,18 +252,23 @@
 
     // ---- settlement scans (coinnotify-add a shared address FIRST, then a bounded state-filtered read) ----
 
-    function scanState(value, coinageMin, depth, cb) {
+    function scanState(value, coinageMin, depth, cb, megammr) {
         // SETTLEMENT scan: NO tokenid filter — the state: value (a unique hashlock or my pubkey) already scopes the
         // reply, and dropping the token filter lets a claim/refund find an in-flight coin in EITHER currency.
         M.cmd('coinnotify action:add address:' + HTLC_ADDRESS, function () {
             M.cmdR('coins coinage:' + coinageMin + ' simplestate:true state:' + normKey(value) +
-                ' address:' + HTLC_ADDRESS + ' depth:' + depth, function (err, resp) {
+                ' address:' + HTLC_ADDRESS + ' depth:' + depth + (megammr ? ' megammr:true' : ''), function (err, resp) {
                 cb(err, (!err && Array.isArray(resp)) ? resp : []);
             });
         });
     }
     /** Open HTLC coins for one hashlock (state[5]). */
     function scanByHash(hash, coinageMin, depth, cb) { scanState(hash, coinageMin, depth, cb); }
+    /** As scanByHash, but also asks the node to fall through into the MegaMMR once the TxPoW tree runs out.
+     *  `coins` downgrades this itself (coins.java: checkmegammr = GeneralParams.IS_MEGAMMR), so a node not run
+     *  with -megammr silently ignores it. On a MegaMMR node a coin I locked stays findable at ANY age — the only
+     *  way to refund a lock older than the ~1024-block tree. Used by the expired-refund sweep. */
+    function scanByHashDeep(hash, coinageMin, depth, cb) { scanState(hash, coinageMin, depth, cb, true); }
     /** Open HTLC coins carrying MY key — owner state[0] (coins I locked) or receiver state[4] (locked to me). */
     function scanByKey(myPubkey, coinageMin, depth, cb) { scanState(myPubkey, coinageMin, depth, cb); }
 
@@ -284,7 +289,8 @@
         setup: setup, loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         coinAmount: coinAmount, lock: lock, lockFromCoins: lockFromCoins, myFreeCoins: myFreeCoins,
-        claim: claim, refund: refund, scanByHash: scanByHash, scanByKey: scanByKey, scanNotifySecret: scanNotifySecret,
+        claim: claim, refund: refund, scanByHash: scanByHash, scanByHashDeep: scanByHashDeep,
+        scanByKey: scanByKey, scanNotifySecret: scanNotifySecret,
         scanAllHtlcCoins: scanAllHtlcCoins,
         _txnId: txnId          // exported for the uniqueness test only
     };
