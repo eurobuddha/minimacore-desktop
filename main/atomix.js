@@ -569,6 +569,10 @@ async function switchCurrency(key) {
   if (A.trading.active().key === key) return { ok: true };
   const avail = await makerAvail();
   await withTimeout(p(cb => A.maker.onCurrencySwitch(jvm(avail), () => cb(null))), 60000, "switch");
+  // OTC quiesces WITH the order side (native 0.1.16 / atomix-mds 0.1.16): the OTC board sentinel is
+  // per-currency, so an offer armed by otcGoLive would re-advertise the LEAVING currency's sizes on the
+  // ARRIVING currency's board. Disarm only — the old board's coin ages out, as it does in both peers.
+  A.otc.setMyOffer(false, 0, 0);
   await p(cb => A.mds.kvSet("trading_currency", key, () => cb(null)));
   fire("MDS_TIMER_60SECONDS");   // nudge reloadShared now instead of waiting for the next block
   emitter.emit("update");
