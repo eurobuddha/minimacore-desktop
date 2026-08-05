@@ -135,10 +135,23 @@
             all = all || [];
             harvestNotifySecrets(all, function () {
             // BUY-claim discovery per hash (reliable — a coin I only RECEIVE can be missed by relevant:true).
+            // DEEP, like the refund sweep: the secret is revealed on the COUNTERPARTY's schedule, so by the time
+            // it arrives the counter-coin can be older than the shallow walk-back — the shallow scan then finds
+            // nothing forever and the swap freezes in CLAIMING with the funds claimable on-chain (the claim-side
+            // twin of the stranded-refund bug the deep sweep already fixes; native parity: atomix 0.1.17).
+            // Throttled HARD: the deep scan is a heavy per-hash node query (coinnotify + 1024-block walk) and
+            // the node runs commands on ONE thread — unthrottled per-poll scans for several pending claims
+            // build a backlog that outlives every callback timeout and nothing settles. ONE scan per cycle,
+            // one per hash per ETH_RETRY_SECS window, round-robin across hashes (native parity: atomix 0.1.17).
             var claimHashes = all.filter(function (s) { return s && !s.myLegIsMinima && s.status !== DB.ST_COMPLETE && s.status !== DB.ST_REFUNDED && s.status !== DB.ST_ERROR; })
                 .map(function (s) { return s.hash; });
-            F.each(claimHashes, function (hash, i, nextH) {
-                H.scanByHash(hash, 2, HTLC_SCAN_DEPTH, function (err, coins) {
+            var dueClaim = null;
+            for (var ci = 0; ci < claimHashes.length; ci++) {
+                if (ethRetryDue('claimScan:' + claimHashes[ci])) { dueClaim = claimHashes[ci]; break; }
+            }
+            if (dueClaim) markEthAttempt('claimScan:' + dueClaim);
+            F.each(dueClaim ? [dueClaim] : [], function (hash, i, nextH) {
+                H.scanByHashDeep(hash, 2, REFUND_SCAN_DEPTH, function (err, coins) {
                     coins = coins || [];
                     F.each(coins, function (coin, j, nextC) {
                         if (coin && isMyPublishKey(H.stateAt(coin, 4)) && sameHash(H.stateAt(coin, 5), hash)) checkCanSwapCoin(coin, block, nextC);

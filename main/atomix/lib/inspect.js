@@ -55,7 +55,9 @@
         }
 
         // ---- counterparty leg ----
-        if (sell) {
+        // myLegIsMinima, not direction: for a RESPONDER row the old `sell` key printed my own ETH lock as the
+        // counterparty leg ("withdrawn (complete)" on a stuck swap). Native parity: atomix 0.1.17.
+        if (s.myLegIsMinima) {
             if (!f.gc) {
                 L.push('• Counterparty ' + s.buyToken + ' leg: NOT FOUND yet — the maker hasn’t locked it.');
             } else {
@@ -70,7 +72,7 @@
                 L.push('• Counterparty ' + s.buyToken + ' leg: FOUND ' + H.coinAmount(f.cpMin) + ' ' + s.buyToken + ' — '
                     + (f.secretKnown ? 'claimable now (claiming on the next poll)' : 'waiting for the secret'));
             } else {
-                L.push('• Counterparty ' + s.buyToken + ' leg: NOT FOUND yet — the maker hasn’t locked ' + s.buyToken + ' (or it’s <2 confirmations old).');
+                L.push('• Counterparty ' + s.buyToken + ' leg: NOT FOUND — not locked yet, <2 confirmations old, or already spent.');
             }
         }
 
