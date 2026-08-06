@@ -2035,9 +2035,12 @@ async function showPpRestore() {
     if (el("pprStatus")) el("pprStatus").textContent = "Restoring…";
     try {
       const r = await api.ppRestore(json);
-      if (el("pprStatus")) el("pprStatus").textContent = "Re-tracked " + r.restored + " of " + r.total + " pool" + (r.total === 1 ? "" : "s") + (r.regen ? " (regenerated " + r.regen + " owner key" + (r.regen === 1 ? "" : "s") + ")" : "") + " — rescanning…";
-      toast("Restored ✓", "ok");
-      setTimeout(() => { close(); renderPandapools(); }, 1600);
+      const foreignNote = r.foreign ? " ! " + r.foreign + " owner key" + (r.foreign === 1 ? " was" : "s were") + " created under a DIFFERENT seed — this node cannot sign for those pools; restore them on the device/seed that created them." : "";
+      const warnNote = r.warn ? " ! " + r.warn : "";   // e.g. "could not restore the owner key's usage" — must reach the user
+      if (el("pprStatus")) el("pprStatus").textContent = "Re-tracked " + r.restored + " of " + r.total + " pool" + (r.total === 1 ? "" : "s") + (r.regen ? " (regenerated " + r.regen + " owner key" + (r.regen === 1 ? "" : "s") + ")" : "") + foreignNote + warnNote + ((r.foreign || r.warn) ? "" : " — rescanning…");
+      toast(r.foreign ? "Restored — " + r.foreign + " pool key" + (r.foreign === 1 ? "" : "s") + " from a different seed" : (r.warn ? "Restored with a warning — see the restore panel" : "Restored ✓"), (r.foreign || r.warn) ? "err" : "ok");
+      // keep the modal open on any warning — the status line is the only place it's explained
+      if (r.foreign || r.warn) renderPandapools(); else setTimeout(() => { close(); renderPandapools(); }, 1600);
     } catch (e) { if (el("pprStatus")) el("pprStatus").textContent = e.message; toast("Restore failed: " + e.message, "err"); }
     finally { busy = false; }
   };
@@ -2068,7 +2071,8 @@ async function doPpCollect() {
   try {
     const r = await api.ppCollect();
     prog.close();
-    toast(r && r.coins ? "Collected " + r.coins + " coin(s) to your wallet ✓" : "Nothing to collect right now.", "ok");
+    const skippedNote = r && r.foreign ? " (" + r.foreign + " owner key" + (r.foreign === 1 ? "" : "s") + " from a different seed — those pools can't sign here)" : "";
+    toast((r && r.coins ? "Collected " + r.coins + " coin(s) to your wallet ✓" : "Nothing to collect right now.") + skippedNote, r && r.foreign ? "err" : "ok");
     renderPandapools();
   } catch (e) { prog.close(); toast("Collect failed: " + e.message, "err"); }
   finally { ppCollectBusy = false; }

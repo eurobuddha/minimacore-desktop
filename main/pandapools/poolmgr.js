@@ -306,6 +306,9 @@ var PoolMgr = (function () {
             var oadr = r ? (r.address || "") : "";
             var opk = r ? (r.publickey || "") : "";
             if (!oadr || !opk) { done.fail("could not mint an owner key (grant this app write access to create pools)"); return; }
+            // the reply's `total` is the key count AFTER this mint → this key's derivation index; remember
+            // it so a later owner-key hunt is exact (and a foreign seed provable with zero mints)
+            if (r && Number(r.total) > 0) rememberKidx(opk, Number(r.total) - 1);
             var script = Covenant.script(opk, oadr, tokenid, kmin);
             // 2. derive the canonical covenant address (+ parseok pre-flight)
             deriveAddress(script, function (address, mx) {
@@ -537,31 +540,212 @@ var PoolMgr = (function () {
     // derived deterministically as hash(seed, sequentialIndex), so re-issuing `newaddress` on the SAME seed
     // reproduces the historical keys IN ORDER — create new addresses until each wanted pubkey reappears. No-op
     // if the node already holds them (the normal case: the `keys` check finds them all).
+    //
+    // THE HUNT IS BUDGETED. An $OPK minted under a DIFFERENT seed (a backup restored from another node, a
+    // recipe carried across devices) can never be re-derived here, and every minted key is a PERMANENT wallet
+    // row — there is no key-delete command, and a live node was found carrying 166 junk keys from exactly this
+    // runaway. So each (seed, opk) pair gets a LIFETIME budget of MAX_NEW_KEYS mints, persisted per mint
+    // (pp_kv "opkhunt"), and once spent the pair is reported UNREACHABLE — "created under a different seed" —
+    // and never hunted again on this seed. The seed is identified by a fingerprint: the publickey of the
+    // wallet's lowest-`modifier` key (the modifier IS the derivation index; index 0 = the seed's first default
+    // key). Re-seeding changes the fingerprint and re-opens the budget — load-bearing, because even the
+    // CORRECT seed's restore rebuilds only the 64 defaults and still needs its hunt allowed.
+    //
+    // kidx: when a key's own derivation index is known (captured from newaddress's `total` at create,
+    // stamped into backups since v3, remembered in pp_kv "opkidx"), the hunt is EXACT — mint precisely to
+    // that index — and a wallet already PAST the index without holding the key proves a foreign seed with
+    // ZERO mints.
+    //
+    // SERIAL: one hunt at a time; overlapping callers queue and each re-runs its own `keys` check. The rules
+    // mirror the native HuntBudget.java exactly — that file's JVM tests are the spec.
     var MAX_NEW_KEYS = 256;
-    function ensureOwnerKeys(wantedOpks, done) {   // done(regenerated)
-        var wanted = {}; var any = false;
-        (wantedOpks || []).forEach(function (o) { if (o) { wanted[o.toLowerCase()] = true; any = true; } });
-        if (!any) { done(0); return; }
-        MDS.cmd("keys", function (j) {
-            pubkeysOf(j).forEach(function (pk) { delete wanted[pk]; });
-            if (!Object.keys(wanted).length) { done(0); return; }   // node already holds every owner key — no-op
-            huntKeys(wanted, 0, 0, done);
+    var MAX_KIDX_MINT = 2048;   // a recipe pointing deeper than this looks corrupt, not busy — distrust it
+    var NO_FP = "nofp";
+
+    // pp_kv-backed maps. The LIVE copies start empty and pp_kv is MERGED in once (max wins) — never
+    // replaced — so charges minted before the store came up are kept, and concurrent first callers
+    // (a restore stamping many kidx entries) can't clobber each other. While the store isn't ready the
+    // hunt runs on the live maps (kvSet drops writes until ready; the next durable save persists all).
+    // huntLedger: {"<fp>|<opk>": mintsCharged} · kidxMap: {"<opk>": derivation index}
+    var huntLedger = {}, kidxMap = {};
+    var huntStateDurable = false;     // pp_kv has been merged into the live maps
+    var huntStateWaiters = null;      // callbacks queued while that merge is in flight
+    function loadHuntState(cb) {
+        if (huntStateDurable) { cb(); return; }
+        var store = (typeof Store !== "undefined" && Store.kvGet) ? Store : null;
+        if (!store || (store.isReady && !store.isReady())) { cb(); return; }   // not durable yet — run on the live maps
+        if (huntStateWaiters) { huntStateWaiters.push(cb); return; }           // single-flight merge
+        huntStateWaiters = [cb];
+        store.kvGet("opkhunt", function (h, hOk) {
+            var disk = {}; try { disk = h ? JSON.parse(h) : {}; } catch (e) {}
+            Object.keys(disk).forEach(function (k) {
+                var v = Math.floor(Number(disk[k]));   // sanitize: a tampered value must not poison the cap
+                if (isFinite(v) && v > 0 && !(huntLedger[k] >= v)) huntLedger[k] = v;
+            });
+            store.kvGet("opkidx", function (kv, kOk) {
+                var dk = {}; try { dk = kv ? JSON.parse(kv) : {}; } catch (e2) {}
+                Object.keys(dk).forEach(function (o) {
+                    var v = toKidx(dk[o]);
+                    if (v >= 0 && (kidxMap[o] === undefined || kidxMap[o] < v)) kidxMap[o] = v;
+                });
+                // Durable ONLY when both reads were confirmed: a transient SQL failure reads as "", and
+                // marking that durable would let a later save clobber the persisted ledger with these
+                // near-empty maps — re-opening a spent budget. Saves are gated on durable for the same reason.
+                huntStateDurable = (hOk !== false && kOk !== false);
+                var ws = huntStateWaiters; huntStateWaiters = null;
+                ws.forEach(function (w) { w(); });
+            });
         });
     }
-    function huntKeys(wanted, created, regenerated, done) {
-        if (!Object.keys(wanted).length || created >= MAX_NEW_KEYS) { done(regenerated); return; }
+    function saveHuntLedger() { if (huntStateDurable && typeof Store !== "undefined" && Store.kvSet) Store.kvSet("opkhunt", JSON.stringify(huntLedger)); }
+    function saveKidxMap() { if (huntStateDurable && typeof Store !== "undefined" && Store.kvSet) Store.kvSet("opkidx", JSON.stringify(kidxMap)); }
+
+    /** STRICT kidx parse: a finite number or pure digit-string, else -1. Number() coercion is not
+     *  enough — Number(null)/Number("")/Number(false) are all 0, and a phantom kidx 0 with any populated
+     *  wallet would falsely PROVE a legitimate key foreign (`total > 0` always). */
+    function toKidx(v) {
+        if (typeof v === "number" && isFinite(v)) { v = Math.floor(v); return v >= 0 ? v : -1; }
+        if (typeof v === "string" && /^[0-9]+$/.test(v)) return parseInt(v, 10);
+        return -1;
+    }
+
+    /** Remember an owner key's derivation index (newaddress's `total` at create; a v3 backup on restore;
+     *  the node's key row at backup time). Takes effect in memory immediately; persisted once durable. */
+    function rememberKidx(opk, kidx) {
+        kidx = toKidx(kidx);   // a malformed backup value must never brand a legitimate key foreign
+        if (!opk || kidx < 0) return;
+        var k = String(opk).toLowerCase();
+        // duplicates should agree; if they don't, the LARGER only delays a foreign-proof — the
+        // smaller could fake one, which must never happen
+        if (kidxMap[k] !== undefined && kidxMap[k] >= kidx) return;
+        kidxMap[k] = kidx;
+        loadHuntState(function () { saveKidxMap(); });
+    }
+
+    // --- the decision rules (byte-for-byte the logic of native HuntBudget.java) ---
+    function keyRowsOf(j) {
+        var resp = j ? j.response : null;
+        return Array.isArray(resp) ? resp : (resp && Array.isArray(resp.keys) ? resp.keys : null);
+    }
+    function parseModifier(s) {
+        if (s === undefined || s === null) return null;
+        var h = String(s).trim();
+        if (h.slice(0, 2).toLowerCase() === "0x") h = h.slice(2);
+        if (!h || !/^[0-9a-fA-F]+$/.test(h)) return null;
+        return parseInt(h, 16);   // NUMERIC — as strings "0xFF" sorts after "0x0100"
+    }
+    /** Seed fingerprint: the lowest-modifier key's pubkey (the reply is an unordered SELECT). */
+    function fingerprintOf(j) {
+        var arr = keyRowsOf(j); if (!arr) return NO_FP;
+        var best = null, pk = null;
+        for (var i = 0; i < arr.length; i++) {
+            var k = arr[i]; if (!k || !k.publickey) continue;
+            var m = parseModifier(k.modifier);
+            if (m === null) continue;
+            if (best === null || m < best) { best = m; pk = String(k.publickey).toLowerCase(); }
+        }
+        return pk || NO_FP;
+    }
+    /** Wallet key count (`response.total`, else row count) = the NEXT mint's derivation index. */
+    function keyTotalOf(j) {
+        var resp = j ? j.response : null;
+        if (resp && !Array.isArray(resp) && resp.total !== undefined) return Number(resp.total);
+        var arr = keyRowsOf(j);
+        return arr ? arr.length : -1;
+    }
+    function mintsNeeded(kidx, total) { return Math.max(0, kidx + 1 - total); }
+    /** A known-index key the wallet is already PAST, yet does not hold, is another seed's key. */
+    function provenForeign(kidx, total) { return kidx >= 0 && total >= 0 && total > kidx; }
+    /** A kidx trustworthy enough to drive an exact hunt (known, not passed, not absurdly deep). */
+    function kidxUsable(kidx, total) { return kidx >= 0 && total >= 0 && total <= kidx && mintsNeeded(kidx, total) <= MAX_KIDX_MINT; }
+
+    // --- the serial gate: one hunt in flight, so overlapping callers can't double-charge the ledger ---
+    var huntBusy = false, huntQueue = [];
+    function ensureOwnerKeys(wantedOpks, done) {   // done(regenerated, unreachable[])
+        var wanted = {}; var any = false;
+        (wantedOpks || []).forEach(function (o) { if (o) { wanted[o.toLowerCase()] = true; any = true; } });
+        if (!any) { done(0, []); return; }
+        var job = function () {
+            beginHunt(wanted, function (regen, unreachable) {
+                huntBusy = false;
+                var next = huntQueue.shift();
+                if (next) { huntBusy = true; next(); }
+                done(regen, unreachable);
+            });
+        };
+        if (huntBusy) { huntQueue.push(job); return; }
+        huntBusy = true; job();
+    }
+
+    function beginHunt(wanted, done) {
+        loadHuntState(function () {
+            MDS.cmd("keys", function (j) {
+                // Without a readable key list we don't know what's held — prove nothing, mint nothing.
+                // (status:true with unreadable rows would make every wanted key "look missing".)
+                if (!j || j.status === false || !keyRowsOf(j)) { done(0, []); return; }
+                pubkeysOf(j).forEach(function (pk) { delete wanted[pk]; });
+                if (!Object.keys(wanted).length) { done(0, []); return; }   // node holds every owner key — no-op
+                var fp = fingerprintOf(j), total = keyTotalOf(j);
+                // Partition: counting = inside its budget (charged per mint, drives the loop); watch =
+                // budget spent, matched for FREE if a mint happens to produce it; unreachable = reported
+                // as another seed's key. A kidx the wallet is already past is proven foreign RIGHT HERE —
+                // zero mints (the poisoned Collect that used to re-burn 256 keys per tap now burns none).
+                var counting = {}, watch = {}, unreachable = {}, kidx = {};
+                Object.keys(wanted).forEach(function (opk) {
+                    var ki = kidxMap[opk] === undefined ? -1 : kidxMap[opk];
+                    var spent = huntLedger[fp + "|" + opk] || 0;
+                    if (kidxUsable(ki, total)) { counting[opk] = true; kidx[opk] = ki; }   // exact target — the flat cap does not bind
+                    else if (provenForeign(ki, total)) { huntLedger[fp + "|" + opk] = Math.max(spent, MAX_NEW_KEYS); unreachable[opk] = true; }
+                    else if (spent >= MAX_NEW_KEYS) { unreachable[opk] = true; watch[opk] = true; }
+                    else counting[opk] = true;
+                });
+                saveHuntLedger();
+                if (!Object.keys(counting).length) { done(0, Object.keys(unreachable)); return; }
+                huntKeys(fp, counting, watch, kidx, unreachable, total, 0, 0, done);
+            });
+        });
+    }
+    function huntKeys(fp, counting, watch, kidx, unreachable, total, regenerated, minted, done) {
+        // Hard per-run backstop: termination normally comes from the per-key budgets, but no single run
+        // may ever out-mint the deepest legitimate exact target, whatever state the ledger is in.
+        if (!Object.keys(counting).length || minted >= MAX_KIDX_MINT) { done(regenerated, Object.keys(unreachable)); return; }
         MDS.cmd("newaddress", function (j) {
-            var r = j ? j.response : null;
+            var r = (j && j.status !== false) ? j.response : null;
             var pk = r && r.publickey ? String(r.publickey).toLowerCase() : "";
-            var reg = regenerated;
-            if (pk && wanted[pk]) { delete wanted[pk]; reg++; }
-            huntKeys(wanted, created + 1, reg, done);
+            // A FAILED mint (status:false — locked vault, denied write permission, node error) created
+            // NO key, so it must not charge the ledger: charging would burn a legitimate key's whole
+            // budget on 256 failed calls and falsely brand it another seed's. Stop instead — charges
+            // so far are already persisted, so a resumed hunt keeps only its remainder.
+            if (!pk) { done(regenerated, Object.keys(unreachable)); return; }
+            // the reply's `total` is the count AFTER creation → the minted key's index is total-1
+            var newIdx = (Number(r.total) > 0) ? Number(r.total) - 1 : Math.max(total, 0);
+            total = newIdx + 1;
+            if (pk && (counting[pk] || watch[pk])) {
+                delete counting[pk]; delete watch[pk]; delete unreachable[pk];
+                delete huntLedger[fp + "|" + pk];   // found — its count must not linger
+                rememberKidx(pk, newIdx);           // free exactness if this key is ever wiped again
+                regenerated++;
+            }
+            Object.keys(counting).forEach(function (opk) {
+                var key = fp + "|" + opk;
+                var spent = (huntLedger[key] || 0) + 1;   // this mint "passed by" every still-wanted key
+                huntLedger[key] = spent;
+                if (kidx[opk] !== undefined) {
+                    if (newIdx >= kidx[opk]) {   // walked past its exact index without a match — foreign PROVEN
+                        huntLedger[key] = Math.max(spent, MAX_NEW_KEYS);
+                        unreachable[opk] = true; delete counting[opk];
+                    }
+                } else if (spent >= MAX_NEW_KEYS) {
+                    unreachable[opk] = true; delete counting[opk];
+                }
+            });
+            saveHuntLedger();   // per mint, so an interrupted hunt resumes with only its remainder
+            huntKeys(fp, counting, watch, kidx, unreachable, total, regenerated, minted + 1, done);
         });
     }
     function pubkeysOf(j) {
         var out = [];
-        var resp = j ? j.response : null;
-        var arr = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.keys) ? resp.keys : null);
+        var arr = keyRowsOf(j);
         if (arr) for (var i = 0; i < arr.length; i++) { var k = arr[i]; if (k && k.publickey) out.push(String(k.publickey).toLowerCase()); }
         return out;
     }
@@ -590,19 +774,23 @@ var PoolMgr = (function () {
     // is how many owner signatures a stretch of elapsed blocks implies.
     var KEYUSE_REFRESH_BLOCKS = 900;
 
-    /** Current use count for one public key, or null if this node doesn't hold it. */
+    /** Current use count for one public key (null if this node doesn't hold it), plus the key's
+     *  derivation index as a second argument (-1 unknown) — same row, no extra command. */
     function readKeyUses(publickey, cb) {
-        if (!publickey) { cb(null); return; }
+        if (!publickey) { cb(null, -1); return; }
         MDS.cmd("keys action:list publickey:" + publickey, function (j) {
-            var resp = j ? j.response : null;
-            var arr = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.keys) ? resp.keys : null);
-            if (!arr) { cb(null); return; }
+            var arr = keyRowsOf(j);
+            if (!arr) { cb(null, -1); return; }
             var want = String(publickey).toLowerCase();
             for (var i = 0; i < arr.length; i++) {
                 var k = arr[i];
-                if (k && String(k.publickey || "").toLowerCase() === want && k.uses !== undefined) { cb(Number(k.uses)); return; }
+                if (k && String(k.publickey || "").toLowerCase() === want && k.uses !== undefined) {
+                    var mod = parseModifier(k.modifier);
+                    cb(Number(k.uses), mod === null ? -1 : mod);
+                    return;
+                }
             }
-            cb(null);   // absent must read as UNKNOWN, never as 0 — 0 would resume at the first leaf
+            cb(null, -1);   // absent must read as UNKNOWN, never as 0 — 0 would resume at the first leaf
         });
     }
 
@@ -710,7 +898,7 @@ var PoolMgr = (function () {
         refresh: refresh,
         forwardOwnerFunds: forwardOwnerFunds,
         sweepOwnerFunds: sweepOwnerFunds,
-        ensureOwnerKeys: ensureOwnerKeys,
+        ensureOwnerKeys: ensureOwnerKeys, rememberKidx: rememberKidx,
         readKeyUses: readKeyUses, restoreTarget: restoreTarget, advanceKeyUses: advanceKeyUses
     };
 })();

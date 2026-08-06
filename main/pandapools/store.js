@@ -301,10 +301,11 @@ var Store = (function () {
     }
 
     // -------------------------------------------------------- generic kv (sync bookkeeping)
-    function kvGet(k, cb) {
-        if (!ready) { cb(""); return; }
+    function kvGet(k, cb) {   // cb(value, ok) — ok=false means the read FAILED (distinct from "no row")
+        if (!ready) { cb("", false); return; }
         MDS.sql("SELECT v FROM pp_kv WHERE k='" + esc(k) + "'", function (r) {
-            cb((r && r.status && r.rows && r.rows.length) ? String(r.rows[0].V) : "");
+            var ok = !!(r && r.status);
+            cb(ok && r.rows && r.rows.length ? String(r.rows[0].V) : "", ok);
         });
     }
     function kvSet(k, v, cb) {
