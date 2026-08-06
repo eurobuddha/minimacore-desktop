@@ -155,6 +155,7 @@
 
     /** Publish my OTC availability (signed 1-nano coin at the OTC board sentinel). cb(err). */
     function publishOffer(cb) {
+        if (AX.identitywatch && AX.identitywatch.halted()) return cb && cb();   // HALTED — no new OTC liability
         var o = { sellSize: myOffer.sellSize, buySize: myOffer.buySize, enable: myOffer.enable,
             minimaPublicKey: C.myMinimaPk, ethAddress: C.ethAddr, commsPublicId: C.identity.publicId(), ts: Date.now() };
         var msg = H.utf8(JSON.stringify(offerToJson(o)));

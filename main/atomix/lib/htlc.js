@@ -29,14 +29,41 @@
     var CP_SECS_CHECK = 3600;                   // responder half-window guard
 
     /** Register the covenant so its address resolves + reads coins, and pick/persist the swap identity key.
-     *  setup(cb(err, {miniaddress, address, publickey})). */
+     *  setup(cb(err, {miniaddress, address, publickey})).
+     *
+     *  PERSISTED as of 0.1.19. It used to take a fresh `getaddress` every boot — but that is core
+     *  Wallet.getDefaultAddress() → new Random().nextInt(numkeys), i.e. a RANDOM default key per call. So the
+     *  published receiver key ROTATED on every service restart / page reload, and settle.js's claim discovery
+     *  (isMyPublishKey on state[4]) then failed to recognise a counter-leg locked to the previous boot's key:
+     *  swap stuck in CLAIMING, counterparty refunds at timeout and keeps the side we already paid. Native
+     *  persists for exactly this reason ("the published maker key must stay constant").
+     *
+     *  Persisting reintroduces the orphan risk (a reseed makes the saved key unsignable), which is why the
+     *  saved key is verified against the node's live key list here and the app HALTS on a mismatch
+     *  (identitywatch) instead of silently re-picking. */
     function setup(cb) {
         M.cmdR('newscript trackall:false script:"' + HTLC_SCRIPT + '"', function (err) {
             if (err) return cb(err);
-            M.cmdR('getaddress', function (err2, a) {
-                if (err2) return cb(err2);
-                if (!a || !a.miniaddress) return cb(new Error('getaddress returned no address (node pending/locked?)'));
-                cb(null, { miniaddress: a.miniaddress, address: a.address, publickey: a.publickey });
+            M.kvGet('swap_identity', '', function (raw) {
+                var saved = null;
+                try { saved = raw ? JSON.parse(raw) : null; } catch (e) { saved = null; }
+                if (saved && saved.miniaddress && saved.publickey) {
+                    // Adopt it either way — in-flight swaps must keep settling with the key they were made
+                    // with — and let identitywatch halt new liabilities if the node does not own it.
+                    loadKeys(function (e2, keys) {
+                        if (!e2 && keys && keys.length && keys.indexOf(normKey(saved.publickey)) < 0)
+                            MDS.log('[AtomiX] IDENTITY ORPHANED: node does not own saved swap key '
+                                + saved.publickey + ' (' + keys.length + ' keys checked) — halting; reinstall required');
+                        cb(null, saved);
+                    });
+                    return;
+                }
+                M.cmdR('getaddress', function (err2, a) {
+                    if (err2) return cb(err2);
+                    if (!a || !a.miniaddress) return cb(new Error('getaddress returned no address (node pending/locked?)'));
+                    var info = { miniaddress: a.miniaddress, address: a.address, publickey: a.publickey };
+                    M.kvSet('swap_identity', JSON.stringify(info), function () { cb(null, info); });
+                });
             });
         });
     }

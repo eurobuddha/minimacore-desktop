@@ -161,6 +161,8 @@
 
     /** Background keep-alive: republish when the peg says reprice, or once the keep-alive interval elapses. cb(err). */
     function keepAlive(avail, cb) {
+        // HALTED (identitywatch): never publish an order under a key the node does not own.
+        if (AX.identitywatch && AX.identitywatch.halted()) return cb && cb();
         cb = cb || function () {};
         var c = cfgCache || {};
         if (!c.pegEnable && !(manualCache && ((manualCache.bids || []).length || (manualCache.asks || []).length))) return cb(null);  // nothing configured

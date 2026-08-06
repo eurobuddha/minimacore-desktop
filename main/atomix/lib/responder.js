@@ -32,7 +32,13 @@
     function nowUnix() { return Math.floor(_now() / 1000); }
 
     function configure(ctx) { C = ctx; }
-    function ready() { return !!(C && C.rpc && C.ethPriv && C.ethAddr && C.myMinimaPk && C.myMinimaAddr); }
+    // HALTED (identitywatch): the responder is the ONE place this dapp commits fresh money against someone
+    // else's lock, so the halt lands here — both onSellTake and scanIncomingBuys go through ready(). Settlement
+    // of swaps already in flight is deliberately NOT gated: freezing that is how funds got stranded.
+    function ready() {
+        if (AX.identitywatch && AX.identitywatch.halted()) return false;
+        return !!(C && C.rpc && C.ethPriv && C.ethAddr && C.myMinimaPk && C.myMinimaAddr);
+    }
     function ops() { return EO.make(C.rpc, C.ethPriv, C.ethAddr); }
     function notify(t, b) { if (C && C.notify) C.notify(t, b); }
     function onChanged() { if (C && C.onSwapsChanged) C.onSwapsChanged(); }

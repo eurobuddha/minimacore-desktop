@@ -32,6 +32,7 @@ MDS.load('lib/htlc.js');
 MDS.load('lib/order.js');          // order model (responder reads my published ladder)
 MDS.load('lib/prng.js');
 MDS.load('lib/boot.js');
+MDS.load('lib/identitywatch.js');   // key-vs-node verdict (must precede settle/maker gates)
 MDS.load('lib/settle.js');         // taker settlement engine (needs swapdb + htlc + ethops + dec + flow + trading)
 MDS.load('lib/orderbook.js');      // publish/scan the shared order book (needs order + identity + sodium + mds)
 MDS.load('lib/peg.js');            // price oracle + auto-MM ladder (needs order + trading + mds)
@@ -119,6 +120,9 @@ function poll() {
     }
     POLLING = true; POLL_START = Date.now();
     reloadShared(function () {
+        // Keep asking whether our keys still belong to this node (throttled inside). The service lives as long
+        // as the node, so a reseed mid-life is exactly the case that used to go unnoticed.
+        AX.identitywatch.check(CTX, function () {
         AX.settle.poll(function () {
             AX.maker.refreshPeg(function () {
                 getBalances(function (avail) {
@@ -132,6 +136,7 @@ function poll() {
                                 AX.htlc.currentBlock(function (eB, tip) {
                                     if (eB) { POLLING = false; return; }
                                     AX.market.poll(tip, function () { POLLING = false; });
+                                });
                                 });
                             });
                         });

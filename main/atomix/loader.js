@@ -35,6 +35,7 @@ function createContext(mds) {
   // and the swap-status report builder. The desktop orchestrator needs both — load them into the same context.
   mds.load("lib/wallet.js");
   mds.load("lib/inspect.js");
+  mds.load("lib/identitywatch.js");
   return ctx;   // ctx.AX = the full engine; the captured MDS.init handler drives it
 }
 
