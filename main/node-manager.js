@@ -6,7 +6,7 @@
  * and emit status events the window/tray subscribe to. Stop is graceful: RPC `quit` first (clean H2/db
  * shutdown), SIGTERM as the fallback.
  *
- * The jar it runs: a user-data copy (updatable by the jar updater) if present, else the bundled resource.
+ * The jar it runs: always the one shipped with the app (see jarPath — the in-app updater is disabled).
  */
 const { app } = require("electron");
 const { spawn } = require("child_process");
@@ -66,14 +66,18 @@ class NodeManager extends EventEmitter {
     });
   }
 
-  /** The jar to run: the updater-managed copy in userData wins; the bundled resource is the fallback. */
+  /**
+   * The jar to run: always the one shipped with the app.
+   *
+   * This used to prefer an updater-managed copy in userData. With the updater disabled that
+   * precedence became a trap: anyone who had ever run it would keep booting their downloaded jar
+   * forever, so a shipped fix — the Wallet.signData one-time-signature fix among them — would never
+   * reach them. Any stale userData jar is now ignored rather than deleted; nothing reads it.
+   */
   jarPath() {
-    const updated = path.join(app.getPath("userData"), "jar", "minima.jar");
-    if (fs.existsSync(updated)) return updated;
-    const bundled = app.isPackaged
+    return app.isPackaged
       ? path.join(process.resourcesPath, "minima.jar")
       : path.join(__dirname, "..", "resources", "minima.jar");
-    return bundled;
   }
 
   /** Bundled jlink JRE when packaged; system `java` in dev. Windows launches java.exe. */

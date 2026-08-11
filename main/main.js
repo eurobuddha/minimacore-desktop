@@ -13,7 +13,7 @@ const node = require("./node-manager");
 const portmap = require("./portmap");
 const rpc = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
-const updater = require("./updater");
+// ./updater is intentionally not required — the jar updater is disabled (see the handlers below).
 const netfetch = require("./netfetch");
 const histDb = require("./history-db");
 const faucet = require("./faucet");
@@ -132,8 +132,13 @@ ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return nod
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());
 
-ipcMain.handle("mcd:checkJarUpdate", () => updater.checkForUpdate());
-ipcMain.handle("mcd:applyJarUpdate", async (_e, rel) => { const r = await updater.applyUpdate(rel); await node.restart(); return r; });
+// JAR UPDATER DISABLED. The node jar is shipped with the app and is the only jar we run.
+// It pointed at a GitHub releases feed defaulting to eurobuddha/minima-core — a private repo with
+// no releases — so it could never find anything; and were that repo opened up, desktop users would
+// silently be moved onto fork builds. The handlers stay registered so any caller gets a clear
+// answer instead of an "no handler registered" throw.
+ipcMain.handle("mcd:checkJarUpdate", () => ({ available: false, reason: "Node updates ship with the app." }));
+ipcMain.handle("mcd:applyJarUpdate", async () => { throw new Error("The in-app node updater is disabled."); });
 
 // token icons + history store + CSV export (no requireRunning — these render off the local store / cache)
 ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
