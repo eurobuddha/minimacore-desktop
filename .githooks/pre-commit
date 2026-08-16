@@ -1,0 +1,18 @@
+#!/bin/sh
+# Guardrail (Node) — every code change ships with a package.json version bump.
+# Blocks a commit touching JS/TS/HTML/CSS/SVG source unless package.json
+# "version" changed vs HEAD. Real funds, real chain. No --no-verify.
+staged=$(git diff --cached --name-only); [ -z "$staged" ] && exit 0
+code=$(printf '%s\n' "$staged" | grep -iE '\.(js|mjs|ts|tsx|jsx|html|htm|css|svg)$' | grep -vE '(^|/)(node_modules|dist|build)/' | grep -viE 'package-lock\.json|(^|/)mds\.js$')
+[ -z "$code" ] && exit 0
+hv=$(git show HEAD:package.json 2>/dev/null | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1)
+sv=$(git show :package.json 2>/dev/null | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1)
+[ -z "$sv" ] && sv=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' package.json 2>/dev/null | head -1)
+if [ -n "$hv" ] && [ "$hv" = "$sv" ]; then
+  echo "──────────────────────────────────────────────────────────────────"
+  echo "  COMMIT BLOCKED — source changed but package.json \"version\" did NOT bump."
+  echo "  Rule: every code change ships with a version bump (real funds, real chain)."
+  echo "  Fix: bump \"version\" in package.json, stage it, then commit again."
+  echo "──────────────────────────────────────────────────────────────────"; exit 1
+fi
+exit 0
