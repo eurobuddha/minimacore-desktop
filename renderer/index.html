@@ -106,7 +106,11 @@
         <div class="view__title">Terminal</div>
         <div class="view__desc" style="color:var(--amber)">Commands run against your live node immediately — there is no confirmation guard.</div>
         <pre class="logbox termout" id="termOut"></pre>
-        <input class="field__input" id="termIn" placeholder="a node command, e.g. status  ·  ↑/↓ history · Tab completes" autocomplete="off" spellcheck="false" style="margin-top:8px" />
+        <div class="termwrap">
+          <div class="termsug" id="termSug" style="display:none"></div>
+          <div class="termhint" id="termHint" style="display:none"></div>
+          <input class="field__input" id="termIn" placeholder="a node command, e.g. status  ·  ↑/↓ history · Tab completes" autocomplete="off" spellcheck="false" />
+        </div>
         <div class="seg" style="margin-top:8px">
           <button class="btn btn--sm btn--outline" id="termClear">Clear</button>
           <button class="btn btn--sm btn--outline" id="termCopy">Copy output</button>
@@ -153,6 +157,8 @@
 
   <script src="qrcode.js"></script>
   <script src="params.js"></script>
+  <script src="termhelp.js"></script>
+  <script src="termcomplete.js"></script>
   <script src="tokenicons.js"></script>
   <script src="app.js"></script>
 </body>

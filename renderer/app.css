@@ -118,8 +118,23 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 #view-terminal.view--active, #view-logs.view--active { display: flex; flex-direction: column; height: 100%; }
 .termout, .logsout { flex: 1 1 auto; max-height: none; min-height: 200px; user-select: text; color: var(--text);
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 13px; margin: 0; }
-#view-terminal .field__input { margin-top: 8px; flex: 0 0 auto; }
+#view-terminal .field__input { flex: 0 0 auto; }
 #view-terminal .seg, #view-logs .seg { flex: 0 0 auto; }
+
+/* Terminal autocomplete — dropdown opens ABOVE the input (input sits at the view's bottom) */
+.termwrap { position: relative; flex: 0 0 auto; margin-top: 8px; }
+.termwrap .field__input { width: 100%; }
+.termsug { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+  max-height: 234px; overflow-y: auto; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
+.termsug__row { display: flex; gap: 8px; align-items: baseline; padding: 7px 12px; cursor: pointer;
+  font-family: var(--mono); font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; }
+.termsug__row--sel { background: var(--accent-bg); }
+.termsug__row--sel .termsug__l { color: var(--accent); }
+.termsug__req { color: var(--amber); font-size: 11px; flex: 0 0 auto; }
+.termsug__d { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.termhint { font-family: var(--mono); font-size: 11px; color: var(--dim); padding: 0 2px 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* token dropdown — match the dark fields, custom chevron */
 select.field__input { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 34px;

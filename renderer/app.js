@@ -22,7 +22,9 @@ let histOldestOffset = 0;    // how deep "Load older" has paged
 let TERM_OUT = "";
 const TERM_HIST = [];
 let termIdx = -1;
-let TERM_CMDS = null;        // command names for Tab-completion (lazy from `help`)
+let SUG_ITEMS = [];          // current autocomplete suggestions (from TermComplete.suggest)
+let SUG_SEL = 0;             // highlighted suggestion index
+const SUG_MAX = 40;          // dropdown row cap
 let SEND_TOKENS = [];        // [{tokenid, name, sendable}] for the Send/Split/Consolidate token dropdowns
 
 function tokenOptions() {
@@ -2762,50 +2764,86 @@ async function exportHistory() {
 }
 
 // ---- Terminal (full node console — runs commands immediately, no guard) ----
-const FALLBACK_CMDS = ["balance", "coins", "send", "consolidate", "tokens", "tokencreate", "status", "block", "history",
-  "getaddress", "newaddress", "keys", "vault", "backup", "tokenvalidate", "checkaddress", "scripts", "help", "txncreate",
-  "txninput", "txnoutput", "txnsign", "txnpost", "txndelete", "megammrsync", "peers", "network", "quit", "coinexport",
-  "coinimport", "cointrack", "newscript", "sendpoll", "runscript", "hash", "random", "convert", "maths", "mmrcreate"];
-function parseHelpNames(h) {
-  const out = new Set();
-  const arr = Array.isArray(h) ? h : (h && (h.commands || h.response)) || [];
-  if (Array.isArray(arr)) for (const c of arr) { if (typeof c === "string") out.add(c.split(/\s/)[0]); else if (c && c.command) out.add(String(c.command).split(/\s/)[0]); }
-  else if (typeof h === "string") { (h.match(/\b[a-z][a-z0-9]{2,}\b/g) || []).forEach(w => out.add(w)); }
-  return out.size ? [...out].sort() : FALLBACK_CMDS.slice();
+// Autocomplete: TermComplete (termcomplete.js, ported from apks/terminalide) suggests
+// commands → params → param values as you type; Tab accepts, arrows navigate, Esc closes.
+function termSugUpdate() {
+  const inp = el("termIn"); if (!inp) return;
+  const res = TermComplete.suggest(inp.value, inp.selectionStart);
+  SUG_ITEMS = res.items.slice(0, SUG_MAX); SUG_SEL = 0;
+  const hint = el("termHint");
+  if (res.paramHint) { hint.textContent = res.paramHint; hint.style.display = ""; }
+  else hint.style.display = "none";
+  termSugRender();
+}
+function termSugRender() {
+  const box = el("termSug");
+  if (!SUG_ITEMS.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+  box.innerHTML = SUG_ITEMS.map((it, i) =>
+    `<div class="termsug__row${i === SUG_SEL ? " termsug__row--sel" : ""}" data-i="${i}">` +
+    `<span class="termsug__l">${esc(it.label)}</span>` +
+    (it.required ? `<span class="termsug__req">required</span>` : "") +
+    (it.desc ? `<span class="termsug__d">${esc(it.desc)}</span>` : "") + `</div>`).join("");
+  box.style.display = "";
+  // mousedown (not click): fires before the input's blur, and preventDefault keeps focus in the input
+  for (const row of box.children) row.onmousedown = (e) => { e.preventDefault(); termSugAccept(SUG_ITEMS[+row.dataset.i]); };
+  const sel = box.children[SUG_SEL]; if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+function termSugClose() {
+  SUG_ITEMS = []; SUG_SEL = 0;
+  const box = el("termSug"), hint = el("termHint");
+  if (box) { box.style.display = "none"; box.innerHTML = ""; }
+  if (hint) hint.style.display = "none";
+}
+function termSugAccept(item) {
+  const inp = el("termIn"), cur = inp.value, caret = inp.selectionStart;
+  inp.value = TermComplete.apply(cur, caret, item);   // re-derived at accept time, splices the token only
+  const c = TermComplete.applyCaret(cur, caret, item);
+  inp.setSelectionRange(c, c);
+  termSugUpdate();                                    // Tab flows onward: command → params → values
 }
 function appendTerm(s) {
   TERM_OUT += (TERM_OUT ? "\n" : "") + s;
   if (TERM_OUT.length > 20000) TERM_OUT = TERM_OUT.slice(TERM_OUT.length - 20000);
   const out = el("termOut"); if (out) { out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight; }
 }
-async function renderTerminal() {
+function renderTerminal() {
   const out = el("termOut"), inp = el("termIn");
   out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight;
-  if (!TERM_CMDS && running) { const h = await tryCmd("help"); TERM_CMDS = parseHelpNames(h); }
   el("termClear").onclick = () => { TERM_OUT = ""; out.textContent = ""; };
   el("termCopy").onclick = () => copy(TERM_OUT);
   inp.onkeydown = async (e) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter") {                          // Enter ALWAYS submits, dropdown open or not
       const c = inp.value.trim(); if (!c) return;
-      inp.value = ""; TERM_HIST.push(c); termIdx = TERM_HIST.length;
+      inp.value = ""; termSugClose();
+      TERM_HIST.push(c); termIdx = TERM_HIST.length;
       appendTerm("> " + c);
       try { const r = await api.cmd(c); appendTerm(JSON.stringify(r, null, 2)); }
       catch (err) { appendTerm("error: " + (err && err.message || err)); }
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault(); if (!TERM_HIST.length) return;
-      termIdx = Math.max(0, termIdx - 1); inp.value = TERM_HIST[termIdx] || "";
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault(); if (!TERM_HIST.length) return;
-      termIdx = Math.min(TERM_HIST.length, termIdx + 1); inp.value = TERM_HIST[termIdx] || "";
+    } else if (e.key === "Escape") {                  // the escape hatch to reach ↑ history while suggestions are up
+      if (SUG_ITEMS.length) { e.preventDefault(); termSugClose(); }
     } else if (e.key === "Tab") {
       e.preventDefault();
-      const parts = inp.value.split(" "), frag = parts[0];
-      if (!frag || !TERM_CMDS) return;
-      const matches = TERM_CMDS.filter(c => c.startsWith(frag));
-      if (matches.length) { const i = matches.indexOf(frag); parts[0] = matches[(i + 1) % matches.length]; inp.value = parts.join(" "); }
+      if (SUG_ITEMS.length) termSugAccept(SUG_ITEMS[Math.min(SUG_SEL, SUG_ITEMS.length - 1)]);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const d = e.key === "ArrowDown" ? 1 : -1;
+      if (SUG_ITEMS.length) {                         // dropdown open → move highlight (wraps)
+        SUG_SEL = (SUG_SEL + d + SUG_ITEMS.length) % SUG_ITEMS.length; termSugRender();
+      } else if (TERM_HIST.length) {                  // else history, as before
+        termIdx = Math.max(0, Math.min(TERM_HIST.length, termIdx + d));
+        inp.value = TERM_HIST[termIdx] || "";
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+        termSugUpdate();
+      }
     }
   };
+  inp.oninput = termSugUpdate;                        // typing / paste / cut
+  inp.onblur = termSugClose;                          // focus loss (incl. tab switch, click-outside) closes
+  // Caret moves (←/→/Home/End/mouse click) retrigger suggestions, like terminalide's
+  // setOnCaretMoved. Property assignment = one listener no matter how often we re-render.
+  document.onselectionchange = () => { if (document.activeElement === el("termIn")) termSugUpdate(); };
   inp.focus();
+  termSugUpdate();
 }
 
 // ---- Settings --------------------------------------------------------------
