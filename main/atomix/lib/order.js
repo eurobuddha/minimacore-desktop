@@ -24,6 +24,12 @@
     }
 
     function finite(v) { return (isFinite(v) && v > 0) ? v : 0; }
+    /** MA-19: a non-empty hex string (optional 0x). Local copy so ingest validation has no load-order dependency. */
+    function isHex(v) {
+        if (v == null) return false;
+        var s = String(v).trim().replace(/^0x/i, '');
+        return s.length > 0 && /^[0-9a-fA-F]+$/.test(s);
+    }
 
     // ---- effective levels: enable-aware; a disabled pair advertises NOTHING (this is how a tombstone works) ----
     function effectiveBids(o, sym) {
@@ -78,6 +84,11 @@
     function fromJson(j) {
         var o = make();
         o.mpk = j.mpk || ''; o.eth = j.eth || ''; o.cid = j.cid || ''; o.ts = Number(j.ts) || 0;
+        // MA-19 (defence in depth): the Ed25519 signature proves AUTHORSHIP, not well-formedness. Blank a non-hex
+        // mpk/eth so a hostile maker can't smuggle a node-command-injecting string through to htlc.lock. A blanked
+        // key makes the order un-tradeable, not fatal.
+        if (o.mpk && !isHex(o.mpk)) o.mpk = '';
+        if (o.eth && !isHex(o.eth)) o.eth = '';
         if (j.bal) { o.minimaAvail = finite(Number(j.bal.m)); o.usdtAvail = finite(Number(j.bal.u)); }
         var jp = j.pairs || {};
         for (var sym in jp) {

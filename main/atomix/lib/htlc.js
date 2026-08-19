@@ -82,6 +82,25 @@
     /** Node stores state hex UPPER-CASE and matches `state:` case-sensitively — normalise every filter/compare. */
     function normKey(v) { return String(v).replace(/^0x/i, '').toUpperCase(); }
 
+    // ---- MA-19: command-injection guards (mirror of native MinimaHtlc.isHex/isDecimal, 2026-08) ----
+    // Minima node commands are flat, space-separated key:value strings handed verbatim to the node, so a space
+    // (or any non-hex byte) in a peer- or on-chain-sourced value would inject an extra command parameter into a
+    // fund-moving command. Reject non-hex/non-decimal at every interpolation point. Real pubkeys, hashlocks,
+    // coinids, token ids and ETH keys are ALWAYS hex, so these only ever reject malformed/hostile input.
+    /** True iff v is a non-empty hex string (optional 0x prefix). */
+    function isHex(v) {
+        if (v == null) return false;
+        var s = String(v).trim();
+        if (s.indexOf('0x') === 0 || s.indexOf('0X') === 0) s = s.substring(2);
+        return s.length > 0 && /^[0-9a-fA-F]+$/.test(s);
+    }
+    /** reqToken is a hex ETH token address OR the currency-agnostic literal 'minima' (the mxUSDT counter-leg
+     *  marker — see responder.js). Both are OUR OWN values, never peer input; whitelist 'minima' so the guard
+     *  does not reject every mxUSDT counter-leg lock (the native 0.1.35 regression this mirror must not repeat). */
+    function isHexOrMinima(v) { return isHex(v) || (v != null && String(v).trim().toLowerCase() === 'minima'); }
+    /** True iff v is a plain non-negative decimal amount (no space/letter that could inject a parameter). */
+    function isDecimal(v) { return v != null && /^[0-9]+(\.[0-9]+)?$/.test(String(v).trim()); }
+
     /** Read a coin state value by port, handling both {"port":val} simplestate and [{port,data}] shapes. */
     function stateAt(coin, port) {
         var st = coin && coin.state;
@@ -151,11 +170,18 @@
      * cb(err, txpowid). NOTE: like native, a returned txpowid is the mempool id — NOT the eventual on-chain id.
      */
     function lock(p, cb) {
+        // MA-19: reject non-hex/non-decimal before building the send (receiverPubkey comes from a peer order).
+        if (!isHex(p.receiverPubkey)) return cb(new Error('lock: non-hex counterparty key'));
+        if (!isHex(p.hashlock))       return cb(new Error('lock: non-hex hashlock'));
+        if (!isHex(p.ownerEthKey))    return cb(new Error('lock: non-hex owner ETH key'));
+        if (!isHexOrMinima(p.reqToken)) return cb(new Error('lock: bad request token'));
+        if (!isDecimal(p.requestAmount)) return cb(new Error('lock: non-decimal request amount'));
+        var amount = maybeGrain(p.amount, p.tokenId);
+        if (!isDecimal(amount))       return cb(new Error('lock: non-decimal amount'));
         var state = {
             '0': p.myPubkey, '1': p.requestAmount, '2': '[' + p.reqToken + ']', '3': p.timelockBlock,
             '4': p.receiverPubkey, '5': p.hashlock, '6': p.ownerEthKey, '7': p.otc
         };
-        var amount = maybeGrain(p.amount, p.tokenId);
         var send = 'send amount:' + amount + ' mine:true address:' + HTLC_ADDRESS +
             ' state:' + JSON.stringify(state) + ' tokenid:' + p.tokenId;
         M.cmdR(send, function (err, resp) { cb(err, err ? '' : (resp ? (resp.txpowid || '') : '')); });
@@ -187,6 +213,12 @@
         if (!coinid) return cb(new Error('claim: coin has no coinid'));   // never build a spend with an empty input
         var tokenid = coin.tokenid || '0x00';
         var amount = coinAmount(coin), owner = stateAt(coin, 0), receiver = stateAt(coin, 4);
+        // MA-19: coinid/tokenid/owner/receiver come from a coin at the anyone-can-write shared HTLC address, and
+        // secret is harvested from the anyone-can-write NOTIFY sink — reject non-hex/non-decimal before any command.
+        if (!isHex(coinid) || !isHex(tokenid)) return cb(new Error('claim: non-hex coin id/token'));
+        if (!isHex(owner) || !isHex(receiver)) return cb(new Error('claim: non-hex coin state key'));
+        if (!isHex(secret) || !isHex(hash))    return cb(new Error('claim: non-hex secret/hash'));
+        if (!isDecimal(amount))                return cb(new Error('claim: non-decimal coin amount'));
         var change = AX.dec.sub(amount, NOTIFY_AMOUNT);
         var id = txnId();
         var seq = [
@@ -214,7 +246,17 @@
      */
     function lockFromCoins(p, cb) {
         if (!p.coinids || !p.coinids.length) return cb(new Error('no coins to lock'));
+        // MA-19: receiverPubkey can come from an on-chain event / peer order; reqToken is 'minima' on the mxUSDT
+        // counter-leg (whitelisted); each coinid pins an input. Reject non-hex/non-decimal before any txn command.
+        if (!isHex(p.receiverPubkey)) return cb(new Error('lock: non-hex counterparty key'));
+        if (!isHex(p.hashlock))       return cb(new Error('lock: non-hex hashlock'));
+        if (!isHex(p.ownerEthKey))    return cb(new Error('lock: non-hex owner ETH key'));
+        if (!isHexOrMinima(p.reqToken)) return cb(new Error('lock: bad request token'));
+        if (!isDecimal(p.requestAmount)) return cb(new Error('lock: non-decimal request amount'));
+        for (var ci = 0; ci < p.coinids.length; ci++) if (!isHex(p.coinids[ci])) return cb(new Error('lock: non-hex coinid'));
         var amount = maybeGrain(p.amount, p.tokenId), change = AX.dec.sub(p.totalSelected, amount);
+        if (!isDecimal(amount)) return cb(new Error('lock: non-decimal amount'));
+        if (AX.dec.gt0(change) && !isDecimal(change)) return cb(new Error('lock: non-decimal change'));
         var id = txnId(), seq = ['txncreate id:' + id];
         for (var i = 0; i < p.coinids.length; i++) seq.push('txninput id:' + id + ' coinid:' + p.coinids[i]);
         seq.push('txnstate id:' + id + ' port:0 value:' + p.myPubkey);
@@ -265,6 +307,10 @@
         if (!coinid) return cb(new Error('refund: coin has no coinid'));
         var tokenid = coin.tokenid || '0x00';
         var amount = coinAmount(coin), owner = stateAt(coin, 0);
+        // MA-19: coinid/tokenid/owner/amount come from a coin at the anyone-can-write shared HTLC address.
+        if (!isHex(coinid) || !isHex(tokenid)) return cb(new Error('refund: non-hex coin id/token'));
+        if (!isHex(owner))     return cb(new Error('refund: non-hex owner key'));
+        if (!isDecimal(amount)) return cb(new Error('refund: non-decimal coin amount'));
         var id = txnId();
         var seq = [
             'txncreate id:' + id,
@@ -280,6 +326,7 @@
     // ---- settlement scans (coinnotify-add a shared address FIRST, then a bounded state-filtered read) ----
 
     function scanState(value, coinageMin, depth, cb, megammr) {
+        if (!isHex(value)) return cb(new Error('scan: non-hex state value'));   // MA-19: value is interpolated into the coins command
         // SETTLEMENT scan: NO tokenid filter — the state: value (a unique hashlock or my pubkey) already scopes the
         // reply, and dropping the token filter lets a claim/refund find an in-flight coin in EITHER currency.
         M.cmd('coinnotify action:add address:' + HTLC_ADDRESS, function () {
@@ -314,6 +361,7 @@
         MINIMA_BLOCK_TIME: MINIMA_BLOCK_TIME, TIMELOCK_BLOCKS: TIMELOCK_BLOCKS, CP_BLOCKS: CP_BLOCKS,
         CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK,
         setup: setup, loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
+        isHex: isHex, isHexOrMinima: isHexOrMinima, isDecimal: isDecimal,
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         coinAmount: coinAmount, lock: lock, lockFromCoins: lockFromCoins, myFreeCoins: myFreeCoins,
         claim: claim, refund: refund, scanByHash: scanByHash, scanByHashDeep: scanByHashDeep,
