@@ -214,12 +214,34 @@ var PoolMgr = (function () {
         });
     }
 
+    // OWNER flows only (refresh/deposit/close — create/migrate register inline): the owner WANTS the pool
+    // relevant, so trackall:true is correct — their reserves are their capital.
     function ensureTracked(p, then) {
         MDS.cmd("newscript trackall:true script:" + Covenant.scriptArg(Covenant.script(p.opk, p.oadr, p.tok, p.kmin)), function () { then(); });
     }
+    // SWAP path: make the covenant available for txnbasics WITHOUT adopting a stranger's reserves into this
+    // wallet's balance. txnbasics reads the script table regardless of the track flag, so trackall:false swaps
+    // identically — but the pool's coins never become relevant. A row already on the node (ANY track value) is
+    // left untouched: newscript REPLACES an existing row, so re-registering here would downgrade an LP's own
+    // trackall:true. Only the node's AFFIRMATIVE "not found" ({"status":false} + its not-found error, via the
+    // SUCCESS callback) registers; any AMBIGUOUS failure (timeout-shaped, dropped reply) writes NOTHING — the
+    // row may exist and we merely failed to read it. A genuinely-missing row then fails closed at
+    // txnbasics/txncheck (valid.scripts false → txndelete) and nothing posts. NOTE the row-exists check leans
+    // on j.response being a single non-empty object — an empty-array response would also read "exists" and
+    // fail closed downstream, never write a wrong track state.
+    function ensureTrackedForSwap(p, then) {
+        MDS.cmd("scripts address:" + p.address, function (j) {
+            if (j && PP.truthy(j.status) && j.response) { then(); return; }   // row exists → never touch it
+            var notFound = j && j.status === false && /not found/i.test(String(j.error || ""));
+            if (!notFound) { then(); return; }   // ambiguous failure → no write (see above)
+            var script = (p.covenantScript && p.covenantScript.length) ? p.covenantScript
+                       : Covenant.script(p.opk, p.oadr, p.tok, p.kmin);
+            MDS.cmd("newscript trackall:false script:" + Covenant.scriptArg(script), function () { then(); });
+        });
+    }
     function ensureTrackedAll(allocs, i, then) {
         if (i >= allocs.length) { then(); return; }
-        ensureTracked(allocs[i].pool, function () { ensureTrackedAll(allocs, i + 1, then); });
+        ensureTrackedForSwap(allocs[i].pool, function () { ensureTrackedAll(allocs, i + 1, then); });
     }
 
     // ---------------------------------------------------------------- announce-beacon state (one port per call)

@@ -281,7 +281,12 @@ ipcMain.handle("mcd:ppLoadBackup", async () => {
 });
 pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
 let ppStarted = false;
-node.on("status", (s) => { if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); } });
+let ppNodeWasDown = false;   // in-app node restart → re-fire the PandaPools service boot (hygiene sweep re-run)
+node.on("status", (s) => {
+  if (s.state === "running" && !ppStarted) { ppStarted = true; pandapools.startLoop(); return; }
+  if (s.state !== "running" && ppStarted) { ppNodeWasDown = true; return; }
+  if (s.state === "running" && ppStarted && ppNodeWasDown) { ppNodeWasDown = false; pandapools.onNodeRestarted(); }
+});
 
 // AtomiX (atomic swaps) — the reused MDS engine (main/atomix/*) in a vm; read model + actions.
 ipcMain.handle("mcd:axStatus", () => atomix.status());

@@ -82,6 +82,14 @@ async function init() {
   return initPromise;
 }
 function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best effort */ } }
+/** The node restarted IN-APP (tray "Restart node" / settings / megammr): its in-memory relevance cache was
+ *  just rebuilt, so any tracking demotes that were pending a restart are now effective — and unlike MDS,
+ *  the desktop service context survives, so `inited` would never re-fire on its own. Re-fire it (idempotent:
+ *  coinnotify cleanup, ensureTables, retrackOwn, cleanForeign, scan) so the hygiene sweep re-runs without
+ *  waiting for the next full app launch. */
+function onNodeRestarted() {
+  if (ready && serviceHandler) serviceHandler({ event: "inited" });
+}
 /** On a wallet seed restore the identity changed. Drop the loaded context + cached pools and wipe the local store,
  *  so the background keep-fresh worker stops churning on the previous seed's (now unspendable) pools and My LP clears.
  *  Recovery recipes are for the previous wallet and are re-importable from a PandaPools backup. Mirrors mail's invalidate. */
@@ -628,5 +636,6 @@ module.exports = {
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
+  onNodeRestarted,
   _setRunner, _setDataDir,
 };

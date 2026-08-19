@@ -1,9 +1,9 @@
 /*
  * service.js — PandaPools background worker. Runs headless whenever the node is up (page open or not), so:
- *   (1) the sentinel coin notifier stays registered,
- *   (2) pool discovery stays fresh and every newly-seen registry pool is `newscript trackall`-ed
- *       (track-on-discovery) → it becomes a tracked contract that NEVER prunes, so this node keeps the pool
- *       enumerable + swappable forever, and
+ *   (1) legacy sentinel tracking stays cleaned up (see the inited handler),
+ *   (2) pool discovery stays fresh via the depth-bounded registry scan (track-on-discovery was REMOVED —
+ *       it grew the node's tracked set without bound), plus the launch re-track of OWNED pools and the
+ *       foreign-tracking hygiene sweep, and
  *   (3) the GlobalFeed keeps capturing swaps across all pools even while the UI is closed.
  *
  * SELF-CONTAINED: the MDS service runtime injects only the `MDS` global (no decimal.js, no dapp modules), so
@@ -146,7 +146,7 @@ MDS.init(function (msg) {
         // `coinnotify action:add` it, which made the node retain every dust beacon ever posted there (they never
         // spend) into an ever-growing set. Discovery now reads the recent chain via a depth-bounded scan instead.
         MDS.cmd("coinnotify action:remove address:" + SENTINEL, function () {});
-        ensureTables(function () { READY = true; MDS.log("PandaPools service ready"); retrackOwn(); scan(); });
+        ensureTables(function () { READY = true; MDS.log("PandaPools service ready"); retrackOwn(); cleanForeign(); scan(); });
     }
     if (msg.event === "NEWBLOCK") { if (READY) scan(); }
 });
@@ -188,10 +188,16 @@ function retrackOwn() {
         MDS.cmd("scripts", function (sres) {
             var tracked = {};
             var arr = (sres && sres.status && Array.isArray(sres.response)) ? sres.response : [];
-            for (var i = 0; i < arr.length; i++) { var ad = arr[i] && arr[i].address; if (ad) tracked[String(ad).toLowerCase()] = true; }
+            // record the TRACK FLAG, not mere row existence: a swap now leaves track:false rows behind, and an
+            // own pool demoted to (or registered at) track:false must still be upgraded to trackall:true here.
+            // A row with NO track field (very old node) counts as tracked — keeps old nodes write-free.
+            for (var i = 0; i < arr.length; i++) {
+                var ad = arr[i] && arr[i].address;
+                if (ad) tracked[String(ad).toLowerCase()] = (arr[i].track === undefined) ? true : truthy(arr[i].track);
+            }
             recipes.forEach(function (row) {
                 var addr = row.ADDRESS ? String(row.ADDRESS).toLowerCase() : "";
-                if (!addr || tracked[addr]) return;   // already tracked → no redundant write
+                if (!addr || tracked[addr]) return;   // already track:true → no redundant write
                 var script = (row.SCRIPT && row.SCRIPT.length) ? row.SCRIPT
                            : (row.OPK && row.OADR && row.TOK && row.KMIN ? covScript(row.OPK, row.OADR, row.TOK, row.KMIN) : "");
                 if (script) MDS.cmd("newscript trackall:true script:" + scriptArg(script), function () {});
@@ -199,6 +205,111 @@ function retrackOwn() {
         });
     });
 }
+// Wallet-balance hygiene sweep (parity with native 0.9.27 cleanForeignTracking; once per launch, AFTER
+// retrackOwn): demote every tracked FOREIGN pool covenant to trackall:false and cointrack-off its lingering
+// relevant coins, so a stranger's pool reserves stop counting into this wallet's balance. Old builds' swap
+// path ran `newscript trackall:true` on every routed pool and nothing ever untracked it; the swap path now
+// registers foreign pools track:false, and this sweep heals nodes the old builds polluted. Fail-safe: if
+// `keys` (or pp_ownpools) can't be read, ownership can't be proven → ZERO writes. Re-running each launch is
+// deliberate — core keeps a demoted address in its in-memory relevance cache until the node restarts, so new
+// pool coins can keep turning relevant in between.
+function cleanForeign() {
+    MDS.cmd("keys", function (kj) {
+        var myKeys = {}, any = false;
+        var resp = (kj && kj.status) ? kj.response : null;
+        var karr = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.keys) ? resp.keys : null);
+        if (karr) for (var i = 0; i < karr.length; i++) {
+            var pk = karr[i] && karr[i].publickey;
+            if (pk) { myKeys[String(pk).toLowerCase()] = true; any = true; }
+        }
+        if (!any) return;   // keys unreadable/empty → ownership unprovable → zero writes
+        readOwnSets(function (own) {
+            if (!own) return;   // recipes unreadable → fail-safe abort
+            MDS.cmd("scripts", function (sres) {
+                var arr = (sres && sres.status && Array.isArray(sres.response)) ? sres.response : [];
+                var foreign = [];   // {address, opk (lower), script (VERBATIM — newscript REPLACES the row), track}
+                for (var i = 0; i < arr.length; i++) {
+                    var row = arr[i]; if (!row) continue;
+                    var sc = row.script || "";
+                    if (sc.indexOf("VERIFYOUT(@INPUT @ADDRESS") < 0 || sc.indexOf("GTE MAX(x*y") < 0) continue;
+                    var addr = row.address ? String(row.address) : "";
+                    var opk = grp(P_OPK, sc);
+                    if (!addr || !opk) continue;   // ownership unprovable for this row → never touched
+                    var a = addr.toLowerCase(), k = opk.toLowerCase();
+                    if (myKeys[k] || own.opks[k] || own.addrs[a]) continue;   // OWN (any route) → spared
+                    foreign.push({ address: addr, opk: k, script: sc, track: truthy(row.track) });
+                }
+                if (!foreign.length) return;
+                // Re-read pp_ownpools JUST before writing: a Restore that landed while this sweep was
+                // classifying (ownRecord is persisted before the restore's newscript) must not see its
+                // pool demoted moments later.
+                readOwnSets(function (own2) {
+                    if (!own2) return;   // fail-safe: write nothing
+                    var confirmed = foreign.filter(function (f) {
+                        return !own2.addrs[f.address.toLowerCase()] && !own2.opks[f.opk];
+                    });
+                    if (confirmed.length) demoteForeign(confirmed, 0);
+                });
+            });
+        });
+    });
+}
+// pp_ownpools → {addrs:{lower:true}, opks:{lower:true}}, or null on a failed read. Column-name case
+// depends on the SQL layer — accept both, matching lockedMap's convention in poolmgr.js.
+function readOwnSets(cb) {
+    MDS.sql("SELECT ADDRESS, OPK FROM pp_ownpools", function (r) {
+        if (!r || !r.status) { cb(null); return; }
+        var own = { addrs: {}, opks: {} };
+        var rows = r.rows || [];
+        for (var i = 0; i < rows.length; i++) {
+            var ad = rows[i] && (rows[i].ADDRESS || rows[i].address);
+            var ok = rows[i] && (rows[i].OPK || rows[i].opk);
+            if (ad) own.addrs[String(ad).toLowerCase()] = true;
+            if (ok) own.opks[String(ok).toLowerCase()] = true;
+        }
+        cb(own);
+    });
+}
+function demoteForeign(foreign, i) {
+    if (i >= foreign.length) { untrackForeignCoins(foreign); return; }
+    if (!foreign[i].track) { demoteForeign(foreign, i + 1); return; }
+    // the row's VERBATIM script — a legacy-fee covenant reconstructs differently and would claim a new address
+    MDS.cmd("newscript trackall:false script:" + scriptArg(foreign[i].script), function (r) {
+        // Read-restricted install: writes queue in the node's Pending panel. ABORT the demote loop — N stale
+        // pending demotes per launch is a prompt storm, and one approved AFTER a later restore could downgrade
+        // a by-then-own row. Skip straight to the coin pass (cointrack denials are swallowed harmlessly).
+        if (r && (r.pending === true || (r.status === false && /pending/i.test(String(r.error || ""))))) {
+            untrackForeignCoins(foreign); return;
+        }
+        demoteForeign(foreign, i + 1);
+    });
+}
+// ALL foreign covenant addresses (not just still-track:true rows) — also heals a partial prior sweep and
+// in-session re-pollution from the stale relevance cache. ONE BOUNDED QUERY PER ADDRESS, sequential — never
+// an unbounded `coins relevant:true`: replies near the 256K cap come back failed/empty (see history.js), and
+// the polluted, coin-heavy nodes this sweep targets are the likeliest to hit it.
+function untrackForeignCoins(foreign) {
+    untrackNextAddress(foreign, 0);
+}
+function untrackNextAddress(foreign, i) {
+    if (i >= foreign.length) return;
+    var addrLower = foreign[i].address.toLowerCase();
+    MDS.cmd("coins relevant:true address:" + foreign[i].address, function (j) {
+        var arr = (j && j.status && Array.isArray(j.response)) ? j.response : [];
+        var ids = [];
+        for (var k = 0; k < arr.length; k++) {
+            var c = arr[k]; if (!c || !c.coinid) continue;
+            if (String(c.address || "").toLowerCase() === addrLower) ids.push(c.coinid);
+        }
+        untrackNextCoin(ids, 0, function () { untrackNextAddress(foreign, i + 1); });
+    });
+}
+function untrackNextCoin(ids, i, then) {
+    if (i >= ids.length) { then(); return; }
+    // {"status":false} (already spent / ADMIN denied) arrives via the SUCCESS callback — keep going
+    MDS.cmd("cointrack enable:false coinid:" + ids[i], function () { untrackNextCoin(ids, i + 1, then); });
+}
+
 // Add the lifecycle `kind` column to a pre-0.2.0 pp_feed (default SWAP so old rows still render). The page
 // (store.js) and this headless service both run this; whichever adds the column first wins, and a duplicate
 // ALTER from the other just errors harmlessly (swallowed by the no-op callback).

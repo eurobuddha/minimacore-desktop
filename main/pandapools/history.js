@@ -5,14 +5,12 @@
  * came back — about four transactions. That is fine for a glance and useless for accounting: a pool statement
  * built on four rows is silently near-empty, which is the worst way for a financial report to be wrong.
  *
- * WHY THE PAGE SIZE IS NOT TINY HERE. The famous 256,000-byte reply cap is NOT a node limit — it lives in
- * the Android broadcast receiver (`MinimaReceiver.MAX_MESSAGE_LEN`), so it binds the native APK and nothing
- * else. There is no equivalent in the MDS bridge (`MDSCommandHandler` imposes no size limit) and none in the
- * node core. The native app must page at max:1 because an over-limit broadcast is an UNCATCHABLE Binder
- * failure that force-kills the app; over MDS the worst case is a reply that doesn't arrive, which is
- * recoverable. Do not copy the native's max:1 here — it would make a full backfill take hours for no reason.
+ * WHY THE PAGE SIZE IS SMALL. Large `history` replies can hit the MDS/node reply cap and come back as an
+ * empty/failed page. Unlike the native APK's broadcast Binder failure this is catchable here, but a false
+ * empty page must not be mistaken for "history is complete". Start under the measured danger zone and still
+ * adapt downward if a page fails.
  *
- * The page size still ADAPTS: it starts large, halves on any page that fails to come back, and at max:1
+ * The page size ADAPTS: it starts at max:4, halves on any page that fails to come back, and at max:1
  * skips a single oversized transaction rather than stalling everything behind it. Because the failure mode
  * is recoverable, the starting size is a throughput choice, not a safety constraint — a too-large start
  * costs a couple of wasted round-trips and nothing more.
@@ -26,10 +24,9 @@
  */
 var History = (function () {
 
-    // No reply cap on this transport — see the header. Halves if a page doesn't land. The host may raise it:
-    // minimaCore Desktop talks straight to the node's HTTP RPC, which has no size limit at all, so it sets a
-    // much larger page through the MDS shim rather than editing this file (3-way byte-parity rule).
-    var START_MAX = (typeof MDS !== "undefined" && MDS.historyPageMax) ? MDS.historyPageMax : 64;
+    // Four pool-heavy txpows were measured at ~160 KB, comfortably below the 256 KB danger zone; if a host
+    // knows its transport can safely carry more, it may override this through MDS.historyPageMax.
+    var START_MAX = (typeof MDS !== "undefined" && MDS.historyPageMax) ? MDS.historyPageMax : 4;
     var PAGE_DELAY = 250;     // ms between pages: a background catch-up, not a race
     var MAX_FETCHES = 600;    // hard stop across all pages + retries, so a pathological node can't spin forever
     var MAX_SKIP = 3;         // consecutive max:1 failures tolerated before giving up

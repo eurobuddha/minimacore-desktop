@@ -8,8 +8,9 @@
  *   so the creator's pools stay enumerable forever, independent of the (prunable) announce beacon.
  * Source 2: the registry announce beacons (`coins ... address:SENTINEL`) — discovers OTHER creators' pools.
  *
- * Track-on-discovery: a newly-seen registry pool's covenant is `newscript trackall`-ed once confirmed
- * funded, so it becomes a Source-1 tracked contract and stays GTC-visible + swappable on THIS node forever.
+ * Track-on-discovery for other creators' pools was removed in the native 0.9.14 / MDS 0.6.4 line:
+ * it made the node's `scripts` reply grow without bound. Registry pools stay visible through the bounded
+ * recent beacon window, kept fresh by the decentralized re-announce mesh.
  */
 var Book = (function () {
 
@@ -125,8 +126,7 @@ var Book = (function () {
                             opk: p.opk, oadr: p.oadr, tok: p.tok, kmin: p.kmin,
                             address: resp.script.address,
                             mxaddress: resp.script.mxaddress || "",
-                            // registry-discovered (not already tracked) → remember its covenant so done() can
-                            // track it once confirmed funded (track-on-discovery).
+                            // registry-discovered (not already tracked). Do NOT track it here; see done().
                             covenantScript: tracked ? null : script,
                             tokName: null, tokDecimals: 8,
                             reserveM: null, coinidM: null, reserveT: null, coinidT: null,
