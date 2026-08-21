@@ -8,7 +8,7 @@
  * address). We hand out strictly-increasing nonces and SELF-HEAL a dropped own-tx by falling back to "pending"
  * once it has sat stuck-behind us for STALE_MS. A false heal is fund-safe: it's an RBF of an in-flight nonce — if
  * the original is fine it wins and the heal-send is rejected ("nonce too low"), so send() errors and nothing is
- * committed. F5: floor the gasPrice at 2× base fee so a stale value can't sit below a risen base fee and hang.
+ * committed. F5: floor the gasPrice at base fee +12.5% + a 0.2 gwei tip so a stale value can't sit below a risen base fee and hang (0.1.40: was 2× base — over-reserved ~4× and starved new wallets).
  * Cross-instance (UI vs service) handoff still relies on a fresh "pending" at cold start.
  * Requires AX.ethrpc, AX.eth (signLegacyTx), AX.flow. Attaches to AX.ethtx.
  */
@@ -16,7 +16,8 @@
     'use strict';
     var AX = g.AX = g.AX || {};
 
-    var FALLBACK_GAS_PRICE = 2000000000n;   // 2 gwei
+    var FALLBACK_GAS_PRICE = 1000000000n;   // 1 gwei (only used when eth_gasPrice returns ≤0)
+    var PRIORITY_TIP_WEI = 200000000n;      // 0.2 gwei tip on the base-fee floor
     var STALE_MS = 120000;
 
     // address → { st:{next,syncAtMs}, q:[jobs], busy:bool }. next=-1 means cold (read "pending").
@@ -77,9 +78,12 @@
             rpc.gasPrice(function (e2, gp) {
                 if (e2) return done(e2);
                 if (gp <= 0n) gp = FALLBACK_GAS_PRICE;
-                gp = (gp * 12n) / 10n;                        // +20% headroom
+                gp = (gp * 9n) / 8n;                          // +12.5% headroom (was +20%)
                 rpc.baseFeePerGasOrZero(function (_e3, baseFee) {
-                    if (baseFee > 0n) { var floor = baseFee * 2n; if (gp < floor) gp = floor; }   // F5
+                    // 0.1.40: floor at base+12.5%+tip (was 2×base). The old 2× floor with a fixed 500k gas limit
+                    // forced a near-empty node-derived wallet to pre-hold ~0.0005 ETH for a ~0.00005 ETH op, so
+                    // new users' swaps silently mutual-refunded.
+                    if (baseFee > 0n) { var floor = (baseFee * 9n) / 8n + PRIORITY_TIP_WEI; if (gp < floor) gp = floor; }
                     var raw;
                     try {
                         raw = AX.eth.signLegacyTx(

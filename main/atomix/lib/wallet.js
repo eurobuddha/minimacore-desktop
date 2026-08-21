@@ -21,9 +21,9 @@
     function isEthAddr(a) { return /^0x[0-9a-fA-F]{40}$/.test(String(a == null ? '' : a).trim()); }
     function validDec(s) { return /^[0-9]+(\.[0-9]+)?$/.test(String(s == null ? '' : s).trim()); }
 
-    /** The wei this wallet must RESERVE for one send's gas, mirroring the serializer's +20% headroom (F5's
-     *  base-fee floor can raise the actual price further — the review shows "≈"). gasPriceWei: BigInt. */
-    function gasReserveWei(gasPriceWei, gasLimit) { return gasLimit * ((gasPriceWei * 12n) / 10n); }
+    /** The wei this wallet must RESERVE for one send's gas, mirroring the serializer's +12.5% headroom (0.1.40:
+     *  was +20%; F5's base-fee floor can raise the actual price further — the review shows "≈"). gasPriceWei: BigInt. */
+    function gasReserveWei(gasPriceWei, gasLimit) { return gasLimit * ((gasPriceWei * 9n) / 8n); }
     /** Max spendable ETH after reserving gas for the send itself. Returns wei BigInt ≥ 0. */
     function maxEthSendWei(balanceWei, gasPriceWei) {
         var m = balanceWei - gasReserveWei(gasPriceWei, GAS_ETH);

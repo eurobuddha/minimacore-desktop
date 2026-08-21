@@ -21,7 +21,11 @@
             'https://eth.api.onfinality.io/public', 'https://api.zan.top/eth-mainnet',
             'https://eth.rpc.blxrbdn.com', 'https://gateway.tenderly.co/public/mainnet', 'https://1rpc.io/eth'
         ],
-        gas: { approve: 100000, newContract: 500000, withdraw: 500000, refund: 500000 }
+        // Gas limits calibrated from real on-chain gasUsed (2026-08-21): newContract ~250.5k, withdraw/refund
+        // ~110.8k, approve ~48.9k. The old blanket 500000 forced a wallet to pre-hold gasLimit×gasPrice at
+        // submission (unused gas refunds), so a near-empty node-derived wallet couldn't afford its own leg and
+        // the swap silently mutual-refunded (proven live: 0.0005 ETH failed, 0.001 worked). ~1.5× headroom.
+        gas: { approve: 80000, newContract: 375000, withdraw: 160000, refund: 160000 }
     };
 
     /** native b32: left-pad when shorter, keep the LAST 32 bytes when longer → 32-byte Uint8Array. */
