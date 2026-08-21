@@ -143,8 +143,17 @@
             // the node runs commands on ONE thread — unthrottled per-poll scans for several pending claims
             // build a backlog that outlives every callback timeout and nothing settles. ONE scan per cycle,
             // one per hash per ETH_RETRY_SECS window, round-robin across hashes (native parity: atomix 0.1.17).
-            var claimHashes = all.filter(function (s) { return s && !s.myLegIsMinima && s.status !== DB.ST_COMPLETE && s.status !== DB.ST_REFUNDED && s.status !== DB.ST_ERROR; })
-                .map(function (s) { return s.hash; });
+            var claimHashes = all.filter(function (s) {
+                if (!s || s.myLegIsMinima) return false;
+                if (s.status === DB.ST_COMPLETE || s.status === DB.ST_REFUNDED || s.status === DB.ST_ERROR) return false;
+                // ZOMBIE-SCAN REAPER (0.1.21, native SwapEngine parity): an ERC20→mxUSDT INITIATOR past its own ETH
+                // refund window can never still claim the shorter mxUSDT counter-leg; if that leg's refund never
+                // CONFIRMED on-chain the swap stays non-terminal and claimScan polls its dead hash forever.
+                // Membership only, no fund decision. Scoped to this role+direction (a MINIMA_TO_ERC20 RESPONDER's
+                // mxUSDT claim stays live ~2h, so a blanket cutoff would strand it).
+                if (s.role === 'INITIATOR' && s.direction === 'ERC20_TO_MINIMA' && s.myTimelock > 0 && nowUnix() > s.myTimelock) return false;
+                return true;
+            }).map(function (s) { return s.hash; });
             var dueClaim = null;
             for (var ci = 0; ci < claimHashes.length; ci++) {
                 if (ethRetryDue('claimScan:' + claimHashes[ci])) { dueClaim = claimHashes[ci]; break; }
@@ -376,13 +385,22 @@
             }, function () { notify('Swap complete', 'Withdrew your ' + (swap.buyToken || 'USDT')); onChanged(); next(); });
         });
     }
+    /** A human reason a swap refunded (0.1.21, native parity): prefer a stored EV_MISMATCH note; else the common
+     *  case — the counterparty never locked their counter-leg. Async (DB.getEvents). Read-only; no fund decision. */
+    function refundReason(hash, cb) {
+        DB.getEvents(hash, function (e, evs) {
+            var m = null;
+            (evs || []).forEach(function (ev) { if (!m && ev.event === DB.EV_MISMATCH && ev.note) m = ev.note; });
+            cb('Reclaimed your tokens — ' + (m || 'the counterparty never locked their side before the timeout'));
+        });
+    }
     function confirmEthRefunded(hash, next) {
         delete ethAttempt['refundE:' + hash];
         DB.getSwap(hash, function (e, cur) {
             if (cur && cur.status === DB.ST_REFUNDED) return next();
             finalize(hash, DB.EV_EXPIRED, DB.ST_REFUNDED, function (have, cb2) {
                 if (!have) DB.logEvent(hash, DB.EV_EXPIRED, 'ETH', '', 'confirmed on-chain', cb2); else cb2();
-            }, function () { notify('Swap refunded', 'Reclaimed your tokens'); onChanged(); next(); });
+            }, function () { refundReason(hash, function (reason) { notify('Swap refunded', reason); onChanged(); next(); }); });
         });
     }
     /** The counterparty refunded the ETH leg I was to receive — this swap failed for me. Mark terminal ONCE. */
