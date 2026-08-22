@@ -34,7 +34,7 @@ casino._setRunner(async (cmd) => {
   sent.push(cmd);
   if (/^block\b/.test(cmd)) return { status: true, response: { block: 100 } };
   if (/^newscript\b/.test(cmd)) return { status: true, response: { address: CONTRACT } };
-  if (/^keys\b/.test(cmd)) return { status: true, response: [{ publickey: "0xMYPK" }] };
+  if (/^keys\b/.test(cmd)) return { status: true, response: { keys: [{ publickey: "0xMYPK" }] } };   // real core shape
   if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: "0xMYPK", address: WALLET_ADDR, miniaddress: "MxWALLET" } };
   if (/^balance\b/.test(cmd)) return { status: true, response: [{ sendable: "500" }] };
   if (/^coins relevant:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [{ amount: "500", address: WALLET_ADDR, coinid: "0xFUND1" }] };
@@ -43,6 +43,13 @@ casino._setRunner(async (cmd) => {
     { amount: "19.84626467552", address: WALLET_ADDR, coinid: "0xFUND1", state: [] }   // 11-dp coin: change must NOT round up
   ] };
   if (/^checkaddress\b/.test(cmd)) return { status: true, response: { simple: /address:0x[0-9A-Fa-f]{64}\b/.test(cmd) } };
+  if (/^scripts\b/.test(cmd)) return { status: true, response: [{ address: WALLET_ADDR, simple: true }] };
+  if (/^coins relevant:true address:0xD65ADBBB/.test(cmd)) return { status: true, response: [
+    { coinid: "0xSTRANGERBET", state: [{ port: 0, data: "0xNOTMYPK" }, { port: 1, data: "0xNOTMYADDR" }] },  // foreign → untrack
+    { coinid: "0xMINEBYKEY", state: [{ port: 0, data: "0xMYPK" }] },                                        // my key → spare
+    { coinid: "0xMINEBYADDR", state: [{ port: 0, data: "0xNOTMYPK" }, { port: 9, data: WALLET_ADDR }] }     // my addr → spare
+  ] };
+  if (/^cointrack\b/.test(cmd)) return { status: true };
   if (/^coins address:/.test(cmd)) return { status: true, response: [OPEN_BET] };
   if (/^random\b/.test(cmd)) return { status: true, response: { random: "0x" + "11".repeat(32) } };
   if (/^hash data:/.test(cmd)) return { status: true, response: { hash: "0x" + "22".repeat(32) } };
@@ -61,7 +68,14 @@ const has = (re) => sent.some(c => re.test(c));
 (async () => {
   await casino.init();
   assert(casino.status().contract === CONTRACT, "status contract = " + CONTRACT);
-  assert(has(/^newscript script:".*" trackall:true/), "registered script with trackall:true");
+  assert(has(/^newscript script:".*" trackall:false/), "registered script with trackall:false (balance-pollution fix)");
+  assert(!has(/^newscript .*trackall:true/), "no newscript may carry trackall:true any more");
+
+  // Hygiene sweep (fund-critical filter): runs off the service keys callback during init.
+  await new Promise(r => setTimeout(r, 150));
+  const unt = sent.filter(c => /^cointrack enable:false coinid:/.test(c));
+  assert(unt.length === 1 && /0xSTRANGERBET/.test(unt[0]), "sweep untracks ONLY the stranger's bet coin");
+  assert(!sent.some(c => /^cointrack .*coinid:0xMINE/.test(c)), "sweep NEVER untracks a coin carrying an own key/address");
 
   // read-model
   const open = await casino.openBets();
@@ -72,7 +86,7 @@ const has = (re) => sent.some(c => re.test(c));
   sent.length = 0;
   casino._fire("NEWBLOCK");
   await new Promise(r => setTimeout(r, 80));
-  assert(has(/^coins address:0xD65ADBBB/), "checkmode→WRITE: service.js scans the contract on NEWBLOCK");
+  assert(has(/^coins address:0xD65ADBBB.* depth:4096/), "checkmode→WRITE: service.js scans the contract on NEWBLOCK, depth-capped ABOVE the stock cascade (2048)");
 
   // HOUSE create — the covenant send + pin
   sent.length = 0;

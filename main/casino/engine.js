@@ -189,7 +189,7 @@ function recordResult(coinid, range, playerpick, result, playerWins, isHouse, be
 
 // ============================ read model ============================
 function coinsAtContract(cb) {
-  MDS.cmd("coins address:" + SCRIPT_ADDR, function (res) { cb((res && res.status && res.response) ? res.response : []); });
+  MDS.cmd("coins address:" + SCRIPT_ADDR + " depth:4096", function (res) { cb((res && res.status && res.response) ? res.response : []); });
 }
 function openBets(cb) {
   ensureReady(function () {

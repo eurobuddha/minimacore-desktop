@@ -13,7 +13,9 @@
  *    (casino_secret_for_* / casino_psecret_for_*) are the crown jewels — a lost preimage strands the pot until the
  *    1500-block timeout — so they are written durably BEFORE the on-chain send. Keys are hashed to a stable account
  *    token so uppercase-hex commits can't collide in the keychain/file-fallback path.
- *  - the covenant is registered with `trackall:true` so `coins address:CONTRACT` surfaces OTHER players' open bets
+ *  - the covenant is registered with `trackall:false` (2.8.9 line): `coins address:CONTRACT` is a chain-tree walk
+ *    and surfaces other players' open bets WITHOUT tracking; trackall:true only polluted every player's balance
+ *    with the whole network's pots. Own bets stay relevant via core's state-var matching (ports 0/1/8/9).
  *    (discovery + native/MDS interop); the donor's plain newscript is insufficient on a fresh node.
  */
 const { EventEmitter } = require("events");
@@ -76,9 +78,13 @@ function buildMds() {
       const done = typeof cb === "function" ? cb : () => {};
       let c = String(command);
       if (/^checkmode\b/.test(c)) { done(toVm({ status: true, response: { mode: "WRITE" } })); return; }  // admin RPC is always WRITE
-      // The donor's service.js re-registers the covenant with a PLAIN newscript (no trackall). Force trackall:true
-      // onto every newscript so it can never clobber the tracking that surfaces OTHER players' open bets (discovery).
-      if (/^newscript\b/.test(c) && !/\btrackall:/.test(c)) c += " trackall:true";
+      // Normalise every donor newscript to trackall:false: the row is needed for txnbasics ScriptProofs
+      // (track-flag-blind), but trackall:true adopts every stranger's bet into the balance forever — and a
+      // stale donor copy re-registering trackall:true would silently re-promote the row (newscript REPLACES).
+      if (/^newscript\b/.test(c)) {
+        c = c.replace(/\btrackall:true\b/, "trackall:false");
+        if (!/\btrackall:/.test(c)) c += " trackall:false";
+      }
       if (CASINO_SEND.test(c)) {
         const insuf = "Not enough spendable MINIMA for this stake — you can only stake coins your own wallet holds (check the sendable balance in the header).";
         pinMinimaSend(runner, c).then(p => runner(p)).then(
@@ -109,12 +115,13 @@ async function init() {
   initPromise = (async () => {
     ctx = createContext(buildMds());
     if (gen !== generation) { ctx = null; return; }
-    // Register the covenant WITH trackall:true (discovery + interop). Assert it resolves to the shared address.
+    // Register the covenant trackall:false — the ROW enables ScriptProofs (interop); tracking is not needed
+    // for discovery (`coins address:` is relevance-free) and only polluted the balance. Assert the address.
     try {
-      const reg = await runner('newscript script:"' + CASINO_SCRIPT + '" trackall:true');
+      const reg = await runner('newscript script:"' + CASINO_SCRIPT + '" trackall:false');
       const addr = reg && reg.response && (reg.response.address || reg.response.miniaddress);
       if (addr && String(addr).toUpperCase() !== CONTRACT.toUpperCase()) log("WARNING: chance script address mismatch: " + addr);
-      else log("chance script registered (trackall) → " + CONTRACT);
+      else log("chance script registered (trackall:false) → " + CONTRACT);
     } catch (e) { log("newscript failed: " + (e && e.message)); }
     ready = true;
     fire("inited");   // service.js: checkmode → newscript → keys; then auto-processes on each NEWBLOCK we fire
@@ -191,7 +198,7 @@ async function loadMyKeys() {
 }
 // rawBets: ALL coins at the covenant (incl. other players'), WITH state, annotated amHouse/amPlayer.
 async function rawBets() {
-  const r = await runner("coins address:" + CONTRACT);
+  const r = await runner("coins address:" + CONTRACT + " depth:4096");   // cap above every tree length (stock cascade 2048)
   const coins = (r && r.response) || [];
   const mine = await loadMyKeys();
   return coins.map(c => ({ coinid: c.coinid, address: c.address, miniaddress: c.miniaddress, amount: c.amount, age: c.age, created: c.created, state: c.state || [], amHouse: mine.has(cnorm(cstate(c.state, 0))), amPlayer: mine.has(cnorm(cstate(c.state, 8))) }));

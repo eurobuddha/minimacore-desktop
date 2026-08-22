@@ -23,4 +23,4 @@ if ! diff -q "main/casino/service.js" "$DONOR/service.js" >/dev/null 2>&1; then
   echo "PARITY FAIL: main/casino/service.js differs from donor $DONOR/service.js"
   exit 1
 fi
-echo "casino parity OK — service.js byte-identical to the donor (Zero Edge Casino v2.8.3)"
+echo "casino parity OK — service.js byte-identical to the donor (Zero Edge Casino v2.8.9)"

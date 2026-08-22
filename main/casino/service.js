@@ -55,9 +55,15 @@ function recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payou
 // reveal/resolve built a transaction with NO script attached (txncheck scripts:0) → rejected by
 // consensus → bets stuck forever, plus a pile of leaked half-built txns. We now confirm the returned
 // address matches SCRIPT_ADDR and retry every block until confirmed.
+// trackall:false (2.8.9): the reliability requirement is the script ROW existing — txnbasics reads
+// the script table regardless of the track flag. trackall:true made every player's node adopt EVERY
+// bet on the network into its confirmed balance forever (one shared address for all players). Your
+// OWN bets stay relevant without tracking: core matches wallet keys/addresses against the coin's HEX
+// state (ports 0/1/8/9). Discovery is `coins address:` — relevance-free. newscript REPLACES the row,
+// so this registration also demotes a row an old build promoted.
 function ensureScript(cb){
   if(SCRIPT_OK){if(cb)cb();return}
-  MDS.cmd('newscript script:"'+SCRIPT+'" trackall:true',function(res){
+  MDS.cmd('newscript script:"'+SCRIPT+'" trackall:false',function(res){
     var addr=(res&&res.response)?(res.response.address||''):'';
     if(res&&res.status&&addr&&addr.toUpperCase()===SCRIPT_ADDR.toUpperCase()){
       SCRIPT_OK=true;
@@ -99,13 +105,17 @@ MDS.init(function(msg){
     ensureScript();
     // Clear any leaked half-built txns from prior failed attempts.
     purgeStaleTxns();
-    // Load wallet keys
+    // Load wallet keys, then run the balance-hygiene sweep (needs the keys to prove ownership).
     MDS.cmd("keys",function(res){
       try{
-        var list=res.response.keys||res.response;
+        // NB: on a bare-array response, `.keys` is Array.prototype.keys (a truthy METHOD) — the old
+        // `res.response.keys||res.response` silently parsed ZERO keys on that shape, disabling
+        // auto-reveal/resolve AND the hygiene sweep. Only accept a real keys ARRAY.
+        var list=(res.response&&Array.isArray(res.response.keys))?res.response.keys:res.response;
         if(Array.isArray(list)){for(var i=0;i<list.length;i++){var pk=list[i].publickey||list[i];if(pk&&typeof pk==='string')MY_KEYS[pk]=true}}
       }catch(e){}
       MDS.log("Casino service: loaded "+Object.keys(MY_KEYS).length+" keys");
+      cleanTracking();
     });
   }
 
@@ -115,6 +125,58 @@ MDS.init(function(msg){
   }
 });
 
+// ===== Balance-hygiene sweep (once per service session) =====
+// Old builds registered the shared casino script trackall:true, so one play made this node adopt
+// EVERY bet on the network into its confirmed balance forever. ensureScript() (trackall:false) now
+// demotes the row each registration; this sweep drops relevance from already-adopted stranger coins.
+// Coins carrying MY keys/addresses in state ports 0/1/8/9 are spared — those are my live bets.
+// WARNING: this spare-filter is the ONLY protection. cointrack on an EXISTING coin is permanent —
+// core re-checks relevance only when a block first processes a coin, so a wrongly-untracked live own
+// bet would drop from the tree at cascade and its timeout claim would become impossible. That is why
+// the sweep ABORTS (and retries next start) whenever keys or the scripts table can't be read — never
+// proceed on partial ownership knowledge. cointrack denials ({"status":false} via the SUCCESS
+// callback) are skipped; a PENDING-shaped reply (read-mode install on a stock node) aborts the loop
+// so we never flood the node's pending list. Re-runs each service start because core's in-memory
+// relevance cache only clears on node restart.
+var CLEANED=false;
+function cleanTracking(){
+  if(CLEANED)return;
+  if(Object.keys(MY_KEYS).length===0)return;   // unprovable → zero writes (retried next service start)
+  CLEANED=true;
+  var mine={};
+  Object.keys(MY_KEYS).forEach(function(k){mine[k.toLowerCase()]=true});
+  // ports 1/9 may carry ANY of the wallet's addresses — collect them from the scripts table's simple rows
+  MDS.cmd("scripts",function(sres){
+    if(!sres||!sres.status||!Array.isArray(sres.response)){CLEANED=false;return}   // ports 1/9 net unavailable → abort, retry next start
+    var arr=sres.response;
+    for(var i=0;i<arr.length;i++){
+      var r=arr[i];if(!r)continue;
+      var simple=(r.simple===true)||(String(r.simple).toLowerCase()==='true');
+      if(simple&&r.address)mine[String(r.address).toLowerCase()]=true;
+    }
+    MDS.cmd("coins relevant:true address:"+SCRIPT_ADDR,function(cres){
+      var coins=(cres&&cres.status&&Array.isArray(cres.response))?cres.response:[];
+      var ids=[];
+      for(var j=0;j<coins.length;j++){
+        var c=coins[j];if(!c||!c.coinid)continue;
+        var p0=String(getState(c,0)).toLowerCase(),p1=String(getState(c,1)).toLowerCase();
+        var p8=String(getState(c,8)).toLowerCase(),p9=String(getState(c,9)).toLowerCase();
+        if(mine[p0]||mine[p1]||mine[p8]||mine[p9])continue;   // my bet — spare it
+        ids.push(c.coinid);
+      }
+      if(ids.length)MDS.log("Casino service: hygiene sweep untracking "+ids.length+" foreign bet coin(s)");
+      untrackNext(ids,0);
+    });
+  });
+}
+function untrackNext(ids,i){
+  if(i>=ids.length)return;
+  MDS.cmd("cointrack enable:false coinid:"+ids[i],function(r){
+    if(r&&r.pending===true)return;   // read-mode install: don't flood the pending list — stop the loop
+    untrackNext(ids,i+1);
+  });
+}
+
 // ===== Process coins on each block =====
 function processCoins(){
   // Stand down while the casino tab is open & active (its heartbeat is fresh) — otherwise the page
@@ -122,7 +184,11 @@ function processCoins(){
   MDS.keypair.get("casino_tab_hb",function(hb){
     var ts=(hb&&hb.value)?parseInt(hb.value):0;
     if(Date.now()-ts<12000)return;
-  MDS.cmd("coins address:"+SCRIPT_ADDR,function(res){
+  // depth:4096 is a pathological-growth cap only: it sits ABOVE every tree length (family fork cascades
+  // at 1024, STOCK Minima at 2048 and oscillates to ~2148), so the walk always reaches the root and old
+  // claimable coins (carried in the root as relevant) are never hidden. NEVER lower this below the stock
+  // cascade: a 2000 cap silently strands >2000-block-old timeout claims on stock nodes.
+  MDS.cmd("coins address:"+SCRIPT_ADDR+" depth:4096",function(res){
     if(!res.status||!res.response)return;
     // Prune cooldown/busy entries for coins that have advanced or been spent.
     var present={};res.response.forEach(function(c){present[c.coinid]=true});
