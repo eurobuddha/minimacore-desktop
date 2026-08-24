@@ -26,6 +26,10 @@
     var TURN_ME = 'ME', TURN_PEER = 'PEER';
     var PROPOSE = 'PROPOSE', COUNTER = 'COUNTER', ACCEPT = 'ACCEPT', REJECT = 'REJECT', EXECUTE = 'EXECUTE';
     var EXPIRE_MS = 60 * 60 * 1000, PRUNE_MS = 24 * 60 * 60 * 1000;
+    // An inbound offer awaiting MY move: the proposer's waiting side expires after EXPIRE_MS, so past that the
+    // deal is already dead on their end — an ACCEPT would go to a terminal deal, at a price that only gets staler.
+    // Give the user a real window to see it, then age it out like everything else (it used to sit forever).
+    var INBOUND_EXPIRE_MS = 24 * 60 * 60 * 1000;
     var EXEC_CLAIM_TTL_MS = 10 * 60 * 1000;   // a dead claimant's otc_exec row is stealable after this
     // Retry/re-arm pacing MUST exceed the worst-case ETH broadcast (~4 RPC calls × 9-endpoint fallback ≈ 7min):
     // a shorter window would re-execute (NEW hash → second funded HTLC) while a SLOW — not crashed — broadcast is
@@ -392,7 +396,8 @@
         return approxEq(gotMinima, wantMinima) && approxEq(gotUsdt, wantUsdt);
     }
 
-    /** Expire stale deals + prune long-finished ones + RE-ARM stuck executes. settleFn(hash, cb(swapStatus)) links
+    /** Expire stale deals (peer-turn past EXPIRE_MS, ignored inbound my-turn offers past INBOUND_EXPIRE_MS) +
+     *  prune long-finished ones + RE-ARM stuck executes. settleFn(hash, cb(swapStatus)) links
      *  to on-chain settlement. Re-arm paths (both idempotent via claimExecute + the AGREED status check):
      *  • INSTIGATOR + AGREED (not stale) → retry executeDeal each poll (a failed/crashed execute previously had
      *    NOTHING re-triggering it — the deal silently died at expiry).
@@ -412,6 +417,10 @@
                     });
                 } else if (stale && (d.status === ST_AGREED || (d.status === ST_EXECUTING && !d.hash) ||
                     ((d.status === ST_PROPOSED || d.status === ST_COUNTERED) && d.whoseTurn === TURN_PEER))) {
+                    d.status = ST_EXPIRED; upsertDeal(d, function () { changed(); finishTerminal(); });
+                } else if ((d.status === ST_PROPOSED || d.status === ST_COUNTERED) && d.whoseTurn === TURN_ME &&
+                    now - d.updated > INBOUND_EXPIRE_MS) {
+                    // ignored inbound offer → zombie on the peer's side, stale price on mine
                     d.status = ST_EXPIRED; upsertDeal(d, function () { changed(); finishTerminal(); });
                 } else if (d.status === ST_AGREED && d.role === ROLE_INSTIGATOR && now - d.updated > EXEC_RETRY_MS) {
                     executeDeal(d, function () { n(); });                     // paced retry (single-actor via claim)
