@@ -287,8 +287,12 @@
                 DB.setSwapStatus(hash, DB.ST_REFUNDED, function () {
                     DB.logEvent(hash, DB.EV_EXPIRED, 'minima', H.coinAmount(coin), txpowid, function () {
                         delete ethAttempt[key];
-                        notify('Swap refunded', 'Timelock passed — reclaimed your ' + TR.labelForToken(coin.tokenid || '0x00'));
-                        onChanged(); next();
+                        // 0.1.24: the Minima-leg refund says WHY, like the ETH leg has since 0.1.21
+                        refundReason(hash, function (reason) {
+                            notify('Swap refunded', 'Timelock passed — reclaimed your '
+                                + TR.labelForToken(coin.tokenid || '0x00') + ' (' + reason + ')');
+                            onChanged(); next();
+                        });
                     });
                 });
             });
@@ -385,13 +389,22 @@
             }, function () { notify('Swap complete', 'Withdrew your ' + (swap.buyToken || 'USDT')); onChanged(); next(); });
         });
     }
-    /** A human reason a swap refunded (0.1.21, native parity): prefer a stored EV_MISMATCH note; else the common
-     *  case — the counterparty never locked their counter-leg. Async (DB.getEvents). Read-only; no fund decision. */
+    /** A human reason a swap refunded (0.1.21, native parity; role-aware since 0.1.24): prefer a stored
+     *  EV_MISMATCH note; else by role — an INITIATOR's leg refunds because the counterparty never locked, a
+     *  RESPONDER's counter-leg because the counterparty locked but never claimed (proven live 2026-08-27: a
+     *  first-time buyer locked 438 USDT, never claimed the matching mxUSDT counter-leg, and the bare
+     *  "Timelock passed" left the operator diagnosing on-chain). Returns the bare clause — callers prefix.
+     *  Async (DB.getEvents + DB.getSwap). Read-only; no fund decision. */
     function refundReason(hash, cb) {
         DB.getEvents(hash, function (e, evs) {
             var m = null;
             (evs || []).forEach(function (ev) { if (!m && ev.event === DB.EV_MISMATCH && ev.note) m = ev.note; });
-            cb('Reclaimed your tokens — ' + (m || 'the counterparty never locked their side before the timeout'));
+            if (m) return cb(m);
+            DB.getSwap(hash, function (e2, sw) {
+                cb(sw && sw.role === 'RESPONDER'
+                    ? 'the counterparty locked their side but never claimed yours before the timeout'
+                    : 'the counterparty never locked their side before the timeout');
+            });
         });
     }
     function confirmEthRefunded(hash, next) {
@@ -400,7 +413,7 @@
             if (cur && cur.status === DB.ST_REFUNDED) return next();
             finalize(hash, DB.EV_EXPIRED, DB.ST_REFUNDED, function (have, cb2) {
                 if (!have) DB.logEvent(hash, DB.EV_EXPIRED, 'ETH', '', 'confirmed on-chain', cb2); else cb2();
-            }, function () { refundReason(hash, function (reason) { notify('Swap refunded', reason); onChanged(); next(); }); });
+            }, function () { refundReason(hash, function (reason) { notify('Swap refunded', 'Reclaimed your tokens — ' + reason); onChanged(); next(); }); });
         });
     }
     /** The counterparty refunded the ETH leg I was to receive — this swap failed for me. Mark terminal ONCE. */
