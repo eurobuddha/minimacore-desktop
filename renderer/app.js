@@ -1879,13 +1879,40 @@ function ppMineHtml(mine) {
     }
     return `<div class="card"><div class="card__title">MINIMA / ${nm}</div>${rows}
       <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div>
-      <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div></div>`;
+      <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div>
+      <span class="pc-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</span></div>`;
   }).join("");
 }
 function wirePpMineActions(root) {
   root.querySelectorAll("[data-ppadd]").forEach(b => b.onclick = () => showPpDeposit(b.dataset.ppadd));
   root.querySelectorAll("[data-ppmig]").forEach(b => b.onclick = () => showPpMigrate(b.dataset.ppmig));
   root.querySelectorAll("[data-ppwd]").forEach(b => b.onclick = () => confirmPpWithdraw(b.dataset.ppwd));
+  root.querySelectorAll("[data-ppcalc]").forEach(b => b.onclick = () => showPpCalc(b.dataset.ppcalc));
+}
+/**
+ * The what-if pool calculator (parity with native PoolCalcDialog / MDS openCalc): a starting pool — seeded from one
+ * of this device's pools when an address is given — then move the price and see the reserves, ratio, value vs
+ * holding and fees on the curve. Maths + form live in renderer/poolcalc.js (byte-identical to the MDS calc.js).
+ * Display only: nothing here touches the node or the chain.
+ */
+function showPpCalc(addr) {
+  const seed = addr ? (PP_MINE || []).find(p => p.address === addr) : null;
+  const cs = getComputedStyle(document.documentElement);
+  const cv = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
+  const f = PoolCalc.form({
+    x0: seed && seed.reserveM ? String(seed.reserveM) : "100000",
+    y0: seed && seed.reserveT ? String(seed.reserveT) : "500",
+    tok: seed ? (seed.tokName || TOK.shortId(seed.tok)) : "mxUSDT",
+    colors: { accent: cv("--accent", "#F7931A"), ink: cv("--heading", "#fff"), dim: cv("--dim", "#9A9AA8"), grid: cv("--border-light", "#2A2A38"), surface: cv("--surface2", "#1F1F2B"), font: cv("--sans", "sans-serif") }
+  });
+  const ov = document.createElement("div"); ov.className = "overlay"; ov.id = "ppCalcOv";
+  const m = document.createElement("div"); m.className = "modal modal--wide";
+  const t = document.createElement("div"); t.className = "modal__title"; t.innerText = "Pool calculator";
+  const done = document.createElement("button"); done.className = "btn btn--primary btn--full"; done.innerText = "Done"; done.style.marginTop = "10px";
+  m.appendChild(t); m.appendChild(f.el); m.appendChild(done); ov.appendChild(m); document.body.appendChild(ov);
+  const close = () => { if (ov.parentNode) ov.remove(); };
+  done.onclick = close; ov.onclick = (e) => { if (e.target === ov) close(); };
+  f.render();
 }
 // Normalize a SWAP summary to the consistent "Bought/Sold N MINIMA for M <token>" framing. New swaps are already
 // recorded this way; older rows were stored from the token's side ("Bought <token> for <minima>") — reframe those.
@@ -1964,8 +1991,12 @@ async function renderPpMyLP() {
       <div class="seg"><button class="btn btn--outline btn--full" id="ppBackupBtn">Back up</button><button class="btn btn--outline btn--full" id="ppRestoreBtn">Restore</button><button class="btn btn--outline btn--full" id="ppGuideBtn">How it works</button></div></div>
     <div class="card" style="margin-top:12px"><div class="card__title">Statement</div>
       <div class="view__desc">A per-pool statement for accounting: what you put in, your own trades against it, what is in the pool now, and the profit. Your transactions only — the profit figures read the pool's reserves live, so everyone else's trading is already in them.</div>
-      <div class="seg"><button class="btn btn--outline btn--full" id="ppStatementBtn">Export statement (.csv)</button></div></div>`;
+      <div class="seg"><button class="btn btn--outline btn--full" id="ppStatementBtn">Export statement (.csv)</button></div></div>
+    <div class="card" style="margin-top:12px"><div class="card__title">Pool calculator</div>
+      <div class="view__desc">What happens to a pool when the price moves: enter a starting pool (or open it from one of your pool cards, seeded with its live reserves), move the MINIMA price and see the reserves, their ratio, the value versus holding and the effect of fees on the constant-product curve. Display only.</div>
+      <div class="seg"><button class="btn btn--outline btn--full" id="ppCalcBtn">Open the calculator</button></div></div>`;
   wirePpHeader(); wirePpCopy(el("ppMine")); wirePpMineActions(el("ppMine"));
+  el("ppCalcBtn").onclick = () => showPpCalc(null);
   el("ppCreateBtn").onclick = showPpCreate;
   el("ppCollectBtn").onclick = doPpCollect;
   el("ppBackupBtn").onclick = showPpBackup;
