@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.16.22",
+  "version": "0.16.23",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -10,6 +10,7 @@
     "start": "electron .",
     "dist": "electron-builder --mac --arm64",
     "dist:mac": "electron-builder --mac --arm64",
+    "dist:mac:signed": "APPLE_KEYCHAIN_PROFILE=minimadesk npm run dist:mac && scripts/verify-mac.sh",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
     "test:atomix": "bash scripts/atomix-parity-check.sh && node scripts/atomix-unit.js",
@@ -28,8 +29,10 @@
     "mac": {
       "category": "public.app-category.finance",
       "icon": "build/icon.icns",
-      "identity": null,
+      "identity": "Developer ID Application",
       "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
