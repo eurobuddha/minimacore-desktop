@@ -10,7 +10,7 @@
     "start": "electron .",
     "dist": "electron-builder --mac --arm64",
     "dist:mac": "electron-builder --mac --arm64",
-    "dist:mac:signed": "APPLE_KEYCHAIN_PROFILE=minimadesk npm run dist:mac && scripts/verify-mac.sh",
+    "dist:mac:signed": "APPLE_KEYCHAIN_PROFILE=minimadesk npm run dist:mac && scripts/notarize-dmg.sh && scripts/verify-mac.sh",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
     "test:atomix": "bash scripts/atomix-parity-check.sh && node scripts/atomix-unit.js",
