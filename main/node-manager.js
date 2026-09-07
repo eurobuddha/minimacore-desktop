@@ -18,6 +18,12 @@ const portmap = require("./portmap");
 const { rpcCall } = require("./rpc");
 
 const LOG_MAX_LINES = 800;
+// Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
+// The stock RPC ones are replaced by the node's loopback admin RPC (-Dparlons.node.rpc=true), which the
+// app's RPC client reaches unchanged on basePort+4 (it ignores the Basic auth header).
+const PARLONS_REFUSED = new Set(["rpc", "rpcenable", "rpcpassword", "rpccrlf", "seed", "anyseed", "dbpassword",
+  "clean", "genesis", "test", "solo", "testchainlength", "daemon", "noshutdownhook", "jnlp", "help"]);
+const PARLONS_DEFAULT_ROOTNODE = "31.125.188.214:9001";   // the fork ships an empty node list: give it one peer
 const HEALTH_EVERY_MS = 10_000;
 const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
 
@@ -42,6 +48,9 @@ class NodeManager extends EventEmitter {
     this.startedTs = 0;
     this.wasMapped = false;
     this.lastNetRestart = 0;
+    // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
+    // not from `status` (the chain is up well before the account has attached to the relays).
+    this.parlons = { ready: false, error: "", version: "", cape: false };
     portmap.setLogger(line => this.log(line));
     portmap.on("status", st => {
       // Late mapping recovery: after ~1h with no in-links the jar flips isAcceptingInLinks=false and
@@ -75,10 +84,23 @@ class NodeManager extends EventEmitter {
    * reach them. Any stale userData jar is now ignored rather than deleted; nothing reads it.
    */
   jarPath() {
+    const name = this.kind() === "parlons" ? "parlons-node.jar" : "minima.jar";
     return app.isPackaged
-      ? path.join(process.resourcesPath, "minima.jar")
-      : path.join(__dirname, "..", "resources", "minima.jar");
+      ? path.join(process.resourcesPath, name)
+      : path.join(__dirname, "..", "resources", name);
   }
+
+  /** "parlons" (parlons-node.jar: node + Parlons account + relay when contributing) or "minima". */
+  kind() { return config.load().nodeKind === "minima" ? "minima" : "parlons"; }
+
+  /** The node's data folder (also where the Parlons account keeps its files: account.txt, invite.txt,
+   *  panel-ticket.txt, panel.txt). */
+  dataDir() { const cfg = config.load(); return cfg.dataFolder || config.defaultDataFolder(); }
+
+  /** The account's local web panel port (loopback), Parlons kind only. */
+  panelPort() { return config.load().basePort + 586; }
+  /** The Maxima relay (cape) port when contributing: base + 500 (12501 on the default base). */
+  capePort() { return config.load().basePort + 500; }
 
   /** Bundled jlink JRE when packaged; system `java` in dev. Windows launches java.exe. */
   javaPath() {
@@ -98,6 +120,7 @@ class NodeManager extends EventEmitter {
     const cfg = config.load();
     const dataDir = cfg.dataFolder || config.defaultDataFolder();
     fs.mkdirSync(dataDir, { recursive: true });
+    if (this.kind() === "parlons") return this.buildParlonsArgs(cfg, dataDir);
     // App-managed base: the app depends on these, so it sets them itself (they're excluded from params).
     const args = ["-jar", this.jarPath(),
       "-data", dataDir,
@@ -123,9 +146,62 @@ class NodeManager extends EventEmitter {
     return args;
   }
 
+  /**
+   * The Parlons Node takes NO command-line flags: every knob is a -D property before -jar, and Minima's
+   * own flags travel inside ONE quoted -Dparlons.node.args string (the jar's tokeniser honours quotes,
+   * so a data folder with spaces is fine). Same data folder layout as minima.jar (<data>/1.1/…), proven
+   * on a copy of a real node folder, so switching kinds keeps the wallet.
+   */
+  buildParlonsArgs(cfg, dataDir) {
+    const params = config.effectiveParams();
+    const megammr = !!params.megammr;
+    const heap = parseInt(cfg.heapMb, 10) > 0 ? parseInt(cfg.heapMb, 10) : (megammr ? 3072 : 1536);
+    const q = (v) => '"' + String(v).replace(/(["\\])/g, "\\$1") + '"';
+    const flags = ["-basefolder", q(dataDir)];
+    for (const [k, v] of Object.entries(params)) {
+      if (PARLONS_REFUSED.has(k) || k === "megammr") continue;   // megammr goes through its own -D below
+      if (v === true) flags.push("-" + k);
+      else if (v === false || v === "" || v == null) continue;
+      else flags.push("-" + k, q(v));
+    }
+    for (const tok of tokenizeArgs(cfg.extraArgs)) {
+      const key = tok.replace(/^-+/, "").toLowerCase();
+      if (tok.startsWith("-") && PARLONS_REFUSED.has(key)) continue;
+      flags.push(/\s/.test(tok) ? q(tok) : tok);
+    }
+    const args = [
+      "-Xmx" + heap + "m",
+      "-Dparlons.node.data=" + dataDir,
+      "-Dparlons.node.port=" + cfg.basePort,
+      "-Dparlons.node.rpc=true",
+      "-Dparlons.node.megammr=" + megammr,
+      "-Dparlons.relay.port=" + (cfg.contribute ? this.capePort() : 0),
+      "-Dparlons.panel.port=" + this.panelPort(),
+      "-Dparlons.gateway.port=" + (cfg.basePort + 584)
+    ];
+    if (cfg.network === "custom" && cfg.customConnect) args.push("-Dparlons.node.connect=" + cfg.customConnect);
+    else if (!params.p2prootnode && !params.connect) args.push("-Dparlons.node.rootnode=" + (cfg.peers || PARLONS_DEFAULT_ROOTNODE));
+    args.push("-Dparlons.node.args=" + flags.join(" "), "-jar", this.jarPath());
+    return args;
+  }
+
+  /** Why the Parlons Node cannot run with the current settings ("" = it can). Checked before a switch. */
+  parlonsBlocker() {
+    const cfg = config.load();
+    if (cfg.network === "solo") return "The Parlons Node is a mainnet node: a solo/private network needs the plain Minima node.";
+    if (cfg.params && cfg.params.dbpassword === true) return "The Parlons Node cannot take -dbpassword (a wallet DB password): keep the plain Minima node, or set up again without one.";
+    if (!fs.existsSync(this.parlonsJarPath())) return "parlons-node.jar is not bundled in this build.";
+    return "";
+  }
+  parlonsJarPath() {
+    return app.isPackaged ? path.join(process.resourcesPath, "parlons-node.jar")
+                          : path.join(__dirname, "..", "resources", "parlons-node.jar");
+  }
+
   start() {
     if (this.proc) return;
     this.lastError = null;
+    this.parlons = { ready: false, error: "", version: "", cape: false };
     this.setState("starting");
     const args = this.buildArgs();
     this.log("[app] starting node: java " + args.map(a => (a.length > 60 ? a.slice(0, 57) + "…" : a))
@@ -141,7 +217,10 @@ class NodeManager extends EventEmitter {
     this.proc = p;
     this.startedTs = Date.now();
     const cfg = config.load();
-    if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries
+    if (cfg.contribute) {
+      portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries
+      if (this.kind() === "parlons") portmap.cape.start(this.capePort());   // the Maxima relay's port too
+    }
     p.stdout.on("data", d => this.log(String(d)));
     p.stderr.on("data", d => this.log(String(d)));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
@@ -164,6 +243,7 @@ class NodeManager extends EventEmitter {
   /** Graceful stop: RPC quit (clean db close) → SIGTERM fallback. Resolves when the process is gone. */
   async stop() {
     await portmap.stop();                               // bounded (<~3s); re-mapped on the next start()
+    await portmap.cape.stop();
     if (!this.proc) { this.setState("stopped"); return; }
     this.setState("stopping");
     this.stopHealth();
@@ -236,14 +316,32 @@ class NodeManager extends EventEmitter {
   // ---- state/logs ----
   setState(s) { this.state = s; this.emit("status", this.snapshot()); }
   snapshot() {
+    const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError,
-             jar: this.jarPath(), rpcPort: this.rpcPort(),
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind,
+             parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
+             capemap: kind === "parlons" ? portmap.cape.status() : null,
              uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
+  }
+  /** The Parlons Node narrates its account in its log; that is the honest readiness signal. */
+  watchParlonsLine(l) {
+    if (!l.startsWith("[parlons-node]")) return;
+    let changed = false;
+    const m = l.match(/Parlons Node (\d+\.\d+\.\d+)/);
+    if (m && !this.parlons.version) { this.parlons.version = m[1]; changed = true; }
+    if (l.includes("account up:")) { this.parlons.ready = true; this.parlons.error = ""; changed = true; }
+    if (l.includes("Maxima cape up on port")) { this.parlons.cape = true; changed = true; }
+    if (l.includes("account layer FAILED") || l.includes("Maxima cape FAILED")) {
+      this.parlons.error = l.replace(/^\[parlons-node\]\s*/, "").slice(0, 300); changed = true;
+    }
+    if (l.includes("REFUSING to start")) { this.parlons.error = l.replace(/^\[parlons-node\]\s*/, "").slice(0, 300); changed = true; }
+    if (changed) this.emit("status", this.snapshot());
   }
   log(line) {
     for (let l of String(line).split("\n")) {
       if (!l.trim()) continue;
+      try { this.watchParlonsLine(l); } catch (e) {}
       // Redact a seed phrase / private key if the node ever echoes one into an error line (the Web Wallet derives
       // & signs over loopback via `keys genkey phrase:"…"` / `sendfrom … privatekey:0x…`), so they can NEVER end
       // up in the Logs view.

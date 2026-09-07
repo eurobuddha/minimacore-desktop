@@ -25,6 +25,7 @@ const shop = require("./shop");
 const casino = require("./casino");
 const vestr = require("./vestr");
 const webwallet = require("./webwallet");
+const parlons = require("./parlons");
 
 let win = null;
 let tray = null;
@@ -43,10 +44,25 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      webviewTag: true          // ONE hardened <webview>: the Parlons account's own web panel (loopback)
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
+  // The Parlons tab's <webview> may only ever show the account's loopback panel: strip any preload,
+  // force isolation, and refuse any other src. The guest gets no window.open either.
+  win.webContents.on("will-attach-webview", (ev, prefs, params) => {
+    delete prefs.preload; delete prefs.preloadURL;
+    prefs.nodeIntegration = false; prefs.contextIsolation = true; prefs.webSecurity = true; prefs.sandbox = true;
+    const src = String((params && params.src) || "");
+    if (!src.startsWith("http://127.0.0.1:" + node.panelPort() + "/")) ev.preventDefault();
+  });
+  win.webContents.on("did-attach-webview", (_ev, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: "deny" }));
+    contents.on("will-navigate", (e, url) => {
+      if (!String(url).startsWith("http://127.0.0.1:" + node.panelPort() + "/")) e.preventDefault();
+    });
+  });
   // Deny ALL child windows (no camera/etc inheritance). BUT for the ETH Wallet's Etherscan links, open them in the
   // user's real browser via shell.openExternal — allowed ONLY for the exact https://etherscan.io/ prefix so no
   // attacker-influenced or non-https scheme can ever be launched. rel=noreferrer on the anchors covers tabnabbing.
@@ -131,6 +147,19 @@ ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snap
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());
+
+// Parlons account (Parlons Node kind): status for the tab's strip, the one-time panel link for the
+// <webview>, "open in browser", and the kind switch (restarts the node).
+ipcMain.handle("mcd:parlonsStatus", () => parlons.status());
+ipcMain.handle("mcd:parlonsPanelUrl", () => parlons.ticketUrl());
+ipcMain.handle("mcd:parlonsOpenExternal", () => parlons.openExternal());
+ipcMain.handle("mcd:setNodeKind", async (_e, kind) => {
+  const k = kind === "minima" ? "minima" : "parlons";
+  if (k === "parlons") { const why = node.parlonsBlocker(); if (why) throw new Error(why); }
+  config.save({ nodeKind: k });
+  await node.restart();
+  return node.snapshot();
+});
 
 // JAR UPDATER DISABLED. The node jar is shipped with the app and is the only jar we run.
 // It pointed at a GitHub releases feed defaulting to eurobuddha/minima-core — a private repo with

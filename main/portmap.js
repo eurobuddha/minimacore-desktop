@@ -300,4 +300,11 @@ class PortMapper extends EventEmitter {
   }
 }
 
-module.exports = new PortMapper();
+const main = new PortMapper();
+// The Parlons Node's Maxima relay (cape) listens on its own port when contributing: a second, independent
+// mapping with the same lifecycle (node-manager starts/stops both). Its status rides the main emitter.
+main.cape = new PortMapper();
+main.cape.setLogger = main.setLogger.bind(main);   // one logger line-prefix for both
+main.cape.log = (msg) => main.log("cape " + msg);
+main.cape.on("status", () => main.emit("status", main.status()));
+module.exports = main;

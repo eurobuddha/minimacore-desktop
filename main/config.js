@@ -40,6 +40,10 @@ function readSecretFile(p) {
 }
 
 const DEFAULTS = {
+  nodeKind: "parlons",       // "parlons" = parlons-node.jar (node + your Parlons account + relay when contributing)
+                             // "minima"  = plain minima.jar. New installs get parlons; an existing install keeps
+                             //             minima until it opts in (see load()).
+  heapMb: 0,                 // -Xmx for the Parlons Node (0 = automatic: 3072 with MegaMMR, else 1536)
   setupDone: false,          // node wizard completed
   walletDone: false,         // seed onboarding (new/restore) completed
   walletMode: "new",         // "new" (boot+connect) | "restore" (post-boot megammrsync). Seed is NEVER persisted.
@@ -63,6 +67,10 @@ function load() {
   let j = {};
   try { j = JSON.parse(fs.readFileSync(configPath(), "utf8")); } catch (e) { /* first run */ }
   const merged = Object.assign({}, DEFAULTS, j);
+  // An install from before the Parlons Node existed keeps its plain node until the user switches in
+  // Settings; a fresh install starts on the Parlons Node.
+  if (!("nodeKind" in j) && j.setupDone) merged.nodeKind = "minima";
+  if (merged.nodeKind !== "minima") merged.nodeKind = "parlons";
   // params: keep ONLY flags in the current manifest — a saved value wins, otherwise the default. This adds
   // any newly-supported flag and DROPS ones we've removed (e.g. the MDS flags minimaCore has no layer for),
   // so a stale config can never resurrect a flag we no longer expose.

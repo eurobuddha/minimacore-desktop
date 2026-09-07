@@ -135,6 +135,11 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   if (activeView === "node") renderNode(s);
+  // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
+  if (activeView === "parlons" && s.parlons) {
+    const sig = (s.parlons.ready ? "1" : "0") + "|" + (s.parlons.error || "") + "|" + s.state;
+    if (sig !== parlonsLastSig) { parlonsLastSig = sig; renderParlons(); }
+  }
   wwLastStatus = s;
   wwLiveRender();   // flip the megammr gate live after enable+restart — but NEVER rebuild the form on a routine block tick
 }
@@ -737,6 +742,7 @@ function renderActive() {
   else if (activeView === "minimall") renderMiniMall();
   else if (activeView === "casino") renderCasino();
   else if (activeView === "vestr") renderVestr();
+  else if (activeView === "parlons") renderParlons();
   else if (activeView === "history") renderHistory();
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
@@ -2888,7 +2894,18 @@ async function renderSettings() {
   const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
   const fullAddr = (addr && (addr.miniaddress || addr.address)) || "—";
+  const kind = CFG.nodeKind === "minima" ? "minima" : "parlons";
   host.innerHTML = `
+    <div class="card"><div class="card__title">Node</div>
+      <div class="view__desc">${kind === "parlons"
+        ? "This is the <b>Parlons Node</b>: a full Minima node plus your Parlons account (chat, calls, payments) under this node's seed, and a Maxima relay when you contribute. The Parlons tab is your account."
+        : "This is the <b>plain Minima node</b>. The Parlons Node is the same node plus your Parlons account under this seed — same chain, same wallet, same data folder."}</div>
+      <label class="prow"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span class="prow__l">Parlons Node — node + your Parlons account (recommended)</span></label>
+      <label class="prow"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span class="prow__l">Plain Minima node — no Parlons account</span></label>
+      <div class="field"><div class="field__label">Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)</div><input class="field__input" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" /></div>
+      <button class="btn btn--outline btn--full" id="setKindApply">Apply and restart the node</button>
+      <div class="status" id="setKindStatus"></div>
+    </div>
     <div class="card"><div class="card__title">Wallet</div>
       <div class="field__label">Your address</div>
       <div class="addrbox addrbox__addr" id="setAddr" title="Click to copy" style="margin-top:0">${esc(fullAddr)}</div>
@@ -2966,6 +2983,20 @@ async function renderSettings() {
     try { const r = await api.faucet(addr); st.textContent = r.message; st.className = "status " + (r.status ? "status--ok" : "status--err"); toast(r.message, r.status ? "ok" : "err"); }
     catch (e) { st.textContent = "Faucet error."; st.className = "status status--err"; }
     btn.disabled = false; btn.textContent = "Request Minima";
+  };
+  el("setKindApply").onclick = async () => {
+    const want = (host.querySelector('input[name="setKind"]:checked') || {}).value === "minima" ? "minima" : "parlons";
+    const heapMb = Math.max(0, parseInt(el("setHeap").value, 10) || 0);
+    const stat = el("setKindStatus");
+    el("setKindApply").disabled = true; stat.textContent = "Restarting the node…";
+    try {
+      CFG = await api.saveConfig({ heapMb });
+      await api.setNodeKind(want);
+      CFG = await api.getConfig();
+      stat.textContent = want === "parlons" ? "Parlons Node starting — see the Parlons tab." : "Plain Minima node starting.";
+      toast("Node restarting…", "ok");
+    } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
+    el("setKindApply").disabled = false;
   };
   el("setReveal").onclick = async () => { const v = await tryCmd("vault"); const p = seedFrom(v); if (!p) { toast("Couldn't read the seed.", "err"); return; } el("setSeed").style.display = ""; el("setSeed").textContent = p; };
   el("setRestore").onclick = () => showRestoreOverlay();
@@ -5490,4 +5521,61 @@ async function renderVestrCalc() {
   };
   ["vkAmt", "vkGrace", "vkStart", "vkEnd"].forEach(id => el(id).addEventListener("input", rerun));
   rerun();
+}
+
+
+// ---- Parlons: the account this node hosts (Parlons Node kind) ------------------------------------------
+// The account serves its own web panel on loopback; the tab embeds it in ONE hardened <webview> and shows a
+// native strip above it (address, pairing, open-in-browser). The panel signs in with a one-time link the
+// account keeps beside its data; a fresh link is fetched whenever the account (re)starts.
+let parlonsLoadedFor = "";     // the node start we last loaded the panel for (uptime-based key)
+let parlonsLastSig = "";       // readiness/error signature that last drove a re-render
+let parlonsStatusCache = null;
+async function renderParlons() {
+  const strip = el("parlonsStrip"), body = el("parlonsBody");
+  const st = await api.parlonsStatus().catch(() => null);
+  parlonsStatusCache = st;
+  if (!st) { strip.innerHTML = ""; body.innerHTML = `<div class="spin">…</div>`; return; }
+  if (st.kind !== "parlons") {
+    strip.innerHTML = "";
+    body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
+      <div class="view__desc">Your node can host your Parlons account: private chat, calls and payments under this node's own seed, with your phones and computers paired to it. This install still runs the plain Minima node.</div>
+      ${st.blocker ? `<div class="status status--warn">${esc(st.blocker)}</div>` : `<button class="btn btn--primary btn--full" id="parlonsSwitch">Switch to the Parlons Node (restarts the node; wallet and data stay)</button>`}
+      </div>`;
+    const b = el("parlonsSwitch");
+    if (b) b.onclick = async () => {
+      if (!confirm("Switch this node to the Parlons Node?\n\nSame chain, same wallet, same data folder — plus your Parlons account. The node restarts now.")) return;
+      b.disabled = true; b.textContent = "Switching…";
+      try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast("Parlons Node starting…", "ok"); renderParlons(); }
+      catch (e) { toast(e.message || String(e), "err"); b.disabled = false; b.textContent = "Switch to the Parlons Node"; }
+    };
+    return;
+  }
+  const addr = st.address || "";
+  strip.innerHTML = `<div class="parlons-strip">
+      <span>${st.ready ? "Account up" : (st.error ? "Account error" : "Starting the account…")}${st.version ? " · Parlons Node " + esc(st.version) : ""}${st.cape ? " · relaying" : ""}</span>
+      ${addr ? `<span class="addr" id="parlonsAddr" title="Click to copy the account address">${esc(addr)}</span>` : ""}
+      <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button>
+      <button class="btn btn--sm btn--outline" id="parlonsBrowser">Open in browser</button>
+    </div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
+  const a = el("parlonsAddr");
+  if (a) a.onclick = async () => { await api.clip(addr); toast("Account address copied", "ok"); };
+  el("parlonsReload").onclick = () => { parlonsLoadedFor = ""; renderParlons(); };
+  el("parlonsBrowser").onclick = async () => { const ok = await api.parlonsOpenExternal(); toast(ok ? "Opened in your browser" : "The account is not up yet", ok ? "ok" : "err"); };
+  if (!st.ready) {
+    if (!body.querySelector("webview")) body.innerHTML = `<div class="spin">${st.error ? "The account did not start — see the Logs tab." : "Waiting for the account to attach to the network…"}</div>`;
+    return;
+  }
+  const ns = await api.nodeStatus().catch(() => null);
+  const key = String(st.panelPort) + ":" + (ns && ns.uptimeMs ? String(Date.now() - ns.uptimeMs).slice(0, -4) : "0");   // one key per node start
+  if (body.querySelector("webview") && parlonsLoadedFor === key) return;   // already showing this start's session
+  const url = await api.parlonsPanelUrl().catch(() => "");
+  if (!url) { body.innerHTML = `<div class="spin">Getting a sign-in link from the account…</div>`; setTimeout(() => { if (activeView === "parlons") renderParlons(); }, 1500); return; }
+  parlonsLoadedFor = key;
+  body.innerHTML = "";
+  const wv = document.createElement("webview");
+  wv.setAttribute("partition", "persist:parlons");
+  wv.setAttribute("allowpopups", "false");
+  wv.setAttribute("src", url);
+  body.appendChild(wv);
 }

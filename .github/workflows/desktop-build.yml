@@ -48,13 +48,18 @@ jobs:
         shell: bash
         run: |
           jlink \
-            --add-modules java.se,jdk.unsupported \
+            --add-modules java.se,jdk.unsupported,jdk.httpserver \
             --strip-debug --no-header-files --no-man-pages --compress=2 \
             --output resources/jre
           ls resources/jre/bin
 
       - name: Install deps
         run: npm ci
+
+      # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
+      - name: Fetch parlons-node.jar
+        shell: bash
+        run: bash scripts/fetch-parlons-node-jar.sh
 
       - name: Build installer
         shell: bash

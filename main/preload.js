@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
   portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
 
+  // Parlons account (the Parlons Node hosts it under this node's seed)
+  parlonsStatus: () => ipcRenderer.invoke("mcd:parlonsStatus"),
+  parlonsPanelUrl: () => ipcRenderer.invoke("mcd:parlonsPanelUrl"),
+  parlonsOpenExternal: () => ipcRenderer.invoke("mcd:parlonsOpenExternal"),
+  setNodeKind: (kind) => ipcRenderer.invoke("mcd:setNodeKind", kind),
+
   // jar updater
   checkJarUpdate: () => ipcRenderer.invoke("mcd:checkJarUpdate"),
   applyJarUpdate: (rel) => ipcRenderer.invoke("mcd:applyJarUpdate", rel),

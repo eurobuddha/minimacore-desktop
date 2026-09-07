@@ -1,13 +1,14 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.16.23",
+  "version": "0.16.24",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
+    "fetch:parlons": "bash scripts/fetch-parlons-node-jar.sh",
     "dist": "electron-builder --mac --arm64",
     "dist:mac": "electron-builder --mac --arm64",
     "dist:mac:signed": "APPLE_KEYCHAIN_PROFILE=minimadesk npm run dist:mac && scripts/notarize-dmg.sh && scripts/verify-mac.sh",
@@ -125,6 +126,10 @@
       {
         "from": "resources/minima.jar",
         "to": "minima.jar"
+      },
+      {
+        "from": "resources/parlons-node.jar",
+        "to": "parlons-node.jar"
       },
       {
         "from": "resources/jre",

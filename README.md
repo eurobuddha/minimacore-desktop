@@ -30,12 +30,22 @@ npm start                 # runs against a bundled minima.jar
 
 ## Build the .dmg
 ```
-# 1. bundle a minimal JRE (Apple Silicon):
-jlink --add-modules java.se,jdk.unsupported --strip-debug --no-header-files --no-man-pages --output resources/jre
-# 2. package:
-./node_modules/.bin/electron-builder --mac        # → dist/minimaCore-<ver>-arm64.dmg
+# 1. bundle a minimal JRE (Apple Silicon). jdk.httpserver is REQUIRED: the Parlons Node's admin RPC,
+#    wallet gateway and the account's web panel are com.sun.net.httpserver servers.
+jlink --add-modules java.se,jdk.unsupported,jdk.httpserver --strip-debug --no-header-files --no-man-pages --output resources/jre
+# 2. fetch the Parlons Node jar (the node-v* release of eurobuddha/maxima, checksum-verified):
+npm run fetch:parlons                              # → resources/parlons-node.jar (gitignored)
+# 3. package:
+npm run dist:mac:signed                           # → dist/minimaCore-<ver>-arm64.dmg, notarized + verified
 ```
-The bundled node jar lives at `resources/minima.jar` (copied from `minima-core/jar/minima.jar`).
+Two node jars ship: `resources/minima.jar` (the plain node, copied from `minima-core/jar/minima.jar`) and
+`resources/parlons-node.jar` (the same node fork + a Maxima relay + wallet gateway + the user's Parlons
+account, from https://github.com/eurobuddha/maxima/releases node-v*). `nodeKind` in the app config picks
+which one runs (new installs: the Parlons Node; an older install keeps the plain node until it switches in
+Settings → Node). The Parlons Node takes no argv: node-manager passes -D properties and puts Minima's own
+flags in one quoted `-Dparlons.node.args` string. Ports on the default base 12001: P2P 12001, admin RPC
+12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback), Maxima relay 12501
+(only when contributing; mapped on the router like the P2P port).
 
 ## Notes / TODO
 - Currently an **arm64** (Apple Silicon), **unsigned** build. Universal (x64) needs an x64 JRE; distribution

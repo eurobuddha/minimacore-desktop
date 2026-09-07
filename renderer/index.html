@@ -31,6 +31,7 @@
         <button class="tab" data-view="minimall">miniMall<span class="tab-badge" id="shopBadge" hidden></span></button>
         <!-- Casino: hidden by default; unhidden by boot() only when CFG.casinoEnabled (Settings 18+ self-cert). -->
         <button class="tab" data-view="casino" id="casinoTab" hidden>P2PChance<span class="tab-badge" id="casinoBadge" hidden></span></button>
+        <button class="tab" data-view="parlons">Parlons</button>
         <button class="tab" data-view="vestr">Vestr</button>
         <button class="tab" data-view="history">History</button>
         <button class="tab" data-view="terminal">Terminal</button>
@@ -88,6 +89,11 @@
 
       <section class="view" id="view-casino">
         <div id="casinoBody"></div>
+      </section>
+
+      <section class="view" id="view-parlons">
+        <div id="parlonsStrip"></div>
+        <div id="parlonsBody"></div>
       </section>
 
       <section class="view" id="view-vestr">
