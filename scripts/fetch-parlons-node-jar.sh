@@ -12,8 +12,15 @@ if [ -n "${PARLONS_NODE_VERSION:-}" ]; then
   JAR_URL="https://github.com/$REPO/releases/download/node-v$PARLONS_NODE_VERSION/parlons-node-$PARLONS_NODE_VERSION.jar"
   SUM_URL="https://github.com/$REPO/releases/download/node-v$PARLONS_NODE_VERSION/SHA256SUMS"
 else
-  JAR_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/parlons-node-[0-9.]+\.jar' | head -1)"
-  SUM_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/SHA256SUMS' | head -1)"
+  # The releases API lags a just-created release by minutes; gh's list is consistent - prefer it.
+  NEWEST="$(gh release list -R "$REPO" --limit 100 2>/dev/null | grep -oE '^node-v[0-9.]+' | sort -t. -k3,3n | tail -1 | sed 's/^node-v//')"
+  if [ -n "$NEWEST" ]; then
+    JAR_URL="https://github.com/$REPO/releases/download/node-v$NEWEST/parlons-node-$NEWEST.jar"
+    SUM_URL="https://github.com/$REPO/releases/download/node-v$NEWEST/SHA256SUMS"
+  else
+    JAR_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/parlons-node-[0-9.]+\.jar' | head -1)"
+    SUM_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/SHA256SUMS' | head -1)"
+  fi
 fi
 [ -n "$JAR_URL" ] || { echo "no node-v* release with a parlons-node jar found"; exit 1; }
 NAME="$(basename "$JAR_URL")"
