@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeStart: () => ipcRenderer.invoke("mcd:nodeStart"),
   nodeStop: () => ipcRenderer.invoke("mcd:nodeStop"),
   nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
+  nodeReclaim: () => ipcRenderer.invoke("mcd:nodeReclaim"),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
   portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
 

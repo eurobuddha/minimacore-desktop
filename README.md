@@ -47,6 +47,15 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback), Maxima relay 12501
 (only when contributing; mapped on the router like the P2P port).
 
+## Node lifecycle (0.16.25)
+The node must never outlive the app, and the app must never fight a node it left behind. `node-manager`
+writes `<userData>/node.pid` on spawn; every start first reclaims a stale node (the pidfile's pid and
+whoever listens on the base port, when its command line is a minima/parlons node on our port or data
+folder: RPC quit → SIGTERM → SIGKILL, bounded), and refuses to start when the port belongs to something
+else (the Node tab names it). `will-quit` / `process.exit` SIGKILL the child as a last resort. Seen live
+2026-09-07: a java left behind by a crashed launch held port 12001 and the H2 databases, and the next
+launch died with "Database may be already in use".
+
 ## Notes / TODO
 - Currently an **arm64** (Apple Silicon), **unsigned** build. Universal (x64) needs an x64 JRE; distribution
   wants Developer ID signing + notarization.

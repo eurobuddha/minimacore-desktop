@@ -3344,8 +3344,10 @@ function renderNode(s) {
     <div class="kv"><span class="kv__k">Network</span><span class="kv__v">${esc(CFG.network)}</span></div>
     <div class="kv"><span class="kv__k">RPC port</span><span class="kv__v">${esc(s.rpcPort || CFG.basePort + 4)}</span></div>
     ${s.lastError ? `<div class="kv"><span class="kv__k">Error</span><span class="kv__v kv__v--red">${esc(s.lastError)}</span></div>` : ""}
+    ${s.portOwner ? `<div class="kv"><span class="kv__k">Port held by</span><span class="kv__v" style="word-break:break-all">pid ${esc(s.portOwner.pid)} · ${esc(s.portOwner.command)}</span></div>` : ""}
     <div class="seg" style="margin-top:10px">
       <button class="btn btn--sm btn--outline" id="nRestart">Restart node</button>
+      ${s.state === "error" ? `<button class="btn btn--sm btn--outline" id="nReclaim">Stop any node on port ${esc(CFG.basePort)} and start</button>` : ""}
     </div>
     ${CFG.network !== "solo" ? `<button class="btn btn--outline btn--full" id="nContrib" style="margin-top:8px">Contribute to the network: ${contributing ? "On — turn off" : "Off — turn on"}</button>` : ""}
     <button class="btn btn--outline btn--full" id="nReconfig" style="margin-top:8px">Reconfigure node (network · new/restore · startup params)…</button>`;
@@ -3363,6 +3365,8 @@ function renderNode(s) {
   };
   el("nReconfig").onclick = () => showSetup();
   el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
+  const nReclaim = el("nReclaim");
+  if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = "Stopping…"; try { await api.nodeReclaim(); toast("Node restarting…", "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
   // The in-app jar updater is disabled — the node jar ships with the app. See main/updater.js.
   paintLogs();   // refresh the Node-tab log pane now that this view is active
 }

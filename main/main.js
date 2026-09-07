@@ -142,7 +142,9 @@ ipcMain.handle("mcd:pickFolder", async () => {
 });
 
 ipcMain.handle("mcd:nodeStatus", () => node.snapshot());
-ipcMain.handle("mcd:nodeStart", () => { node.start(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeStart", async () => { await node.start(); return node.snapshot(); });
+// Stop whatever node holds our port/data folder (an earlier launch's), then start. Same reclaim as every start.
+ipcMain.handle("mcd:nodeReclaim", async () => { await node.stop(); await node.start(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
@@ -483,6 +485,12 @@ app.whenReady().then(() => {
   if (c.setupDone && c.walletDone) node.start();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
+
+// The node must never outlive the app: a normal quit goes through before-quit → node.stop() (graceful);
+// these two are the last resort for every other way out (uncaught exception, will-quit after a failed
+// stop). A SIGKILL of the app itself is what reclaimStaleNode() on the next start is for.
+app.on("will-quit", () => { try { node.killNow(); } catch (e) {} });
+process.on("exit", () => { try { node.killNow(); } catch (e) {} });
 
 app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhere */ if (process.platform !== "darwin") app.quit(); });
 
