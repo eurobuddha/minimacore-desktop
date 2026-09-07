@@ -47,6 +47,11 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback), Maxima relay 12501
 (only when contributing; mapped on the router like the P2P port).
 
+## The Parlons tab (0.16.26)
+The tab is the account's own web panel (parlons-node 0.2.48): a full chat window - chats, conversations
+with photos, contacts, devices (pairing QR), node, settings - live over server-sent events. The app only
+embeds it (one hardened `<webview>` on the loopback panel) and adds the strip above it.
+
 ## Node lifecycle (0.16.25)
 The node must never outlive the app, and the app must never fight a node it left behind. `node-manager`
 writes `<userData>/node.pid` on spawn; every start first reclaims a stale node (the pidfile's pid and
