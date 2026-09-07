@@ -43,9 +43,14 @@ Two node jars ship: `resources/minima.jar` (the plain node, copied from `minima-
 account, from https://github.com/eurobuddha/maxima/releases node-v*). `nodeKind` in the app config picks
 which one runs (new installs: the Parlons Node; an older install keeps the plain node until it switches in
 Settings → Node). The Parlons Node takes no argv: node-manager passes -D properties and puts Minima's own
-flags in one quoted `-Dparlons.node.args` string. Ports on the default base 12001: P2P 12001, admin RPC
-12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback), Maxima relay 12501
-(only when contributing; mapped on the router like the P2P port).
+flags in one quoted `-Dparlons.node.args` string. Ports on the default base 12001: P2P 12001 - which, when contributing, ALSO carries the Parlons/Maxima
+relay (the node hands relay clients over by their greeting: one public port, the one you already forward);
+admin RPC 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback).
+
+## 0.16.29
+One public port. The Parlons relay inside the node now rides the Minima P2P port (parlons-node 0.2.51,
+`-Dparlons.relay.port=shared`), so the port you already forward for the chain carries the relay and the
+account too; the second mapping (12501) is gone.
 
 ## 0.16.28
 The Parlons tab is the panel alone - no native strip above it (the strip only speaks while the account is

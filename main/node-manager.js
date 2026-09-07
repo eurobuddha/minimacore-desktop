@@ -140,8 +140,8 @@ class NodeManager extends EventEmitter {
 
   /** The account's local web panel port (loopback), Parlons kind only. */
   panelPort() { return config.load().basePort + 586; }
-  /** The Maxima relay (cape) port when contributing: base + 500 (12501 on the default base). */
-  capePort() { return config.load().basePort + 500; }
+  /** The Maxima relay (cape) port when contributing: the P2P port itself (one public port). */
+  capePort() { return config.load().basePort; }
 
   /** Bundled jlink JRE when packaged; system `java` in dev. Windows launches java.exe. */
   javaPath() {
@@ -216,7 +216,9 @@ class NodeManager extends EventEmitter {
       "-Dparlons.node.port=" + cfg.basePort,
       "-Dparlons.node.rpc=true",
       "-Dparlons.node.megammr=" + megammr,
-      "-Dparlons.relay.port=" + (cfg.contribute ? this.capePort() : 0),
+      // One public port: when contributing, the Maxima relay rides the Minima P2P port (the fork hands
+      // Parlons clients over by their greeting), so the mapping the app already holds is the only one.
+      "-Dparlons.relay.port=" + (cfg.contribute ? "shared" : "0"),
       "-Dparlons.panel.port=" + this.panelPort(),
       "-Dparlons.gateway.port=" + (cfg.basePort + 584)
     ];
@@ -320,10 +322,7 @@ class NodeManager extends EventEmitter {
       fs.writeFileSync(this.pidfilePath(), JSON.stringify({ pid: p.pid, port: cfg.basePort, jar: this.jarPath(),
         dataDir: cfg.dataFolder || config.defaultDataFolder(), startedAt: this.startedTs }));
     } catch (e) {}
-    if (cfg.contribute) {
-      portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries
-      if (this.kind() === "parlons") portmap.cape.start(this.capePort());   // the Maxima relay's port too
-    }
+    if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
     p.stdout.on("data", d => this.log(String(d)));
     p.stderr.on("data", d => this.log(String(d)));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
@@ -347,7 +346,6 @@ class NodeManager extends EventEmitter {
   /** Graceful stop: RPC quit (clean db close) → SIGTERM fallback. Resolves when the process is gone. */
   async stop() {
     await portmap.stop();                               // bounded (<~3s); re-mapped on the next start()
-    await portmap.cape.stop();
     if (!this.proc) { this.setState("stopped"); return; }
     this.setState("stopping");
     this.stopHealth();
@@ -425,7 +423,7 @@ class NodeManager extends EventEmitter {
              jar: this.jarPath(), rpcPort: this.rpcPort(), kind,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
-             capemap: kind === "parlons" ? portmap.cape.status() : null,
+
              uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
   }
   /** The Parlons Node narrates its account in its log; that is the honest readiness signal. */
