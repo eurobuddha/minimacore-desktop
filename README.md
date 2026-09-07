@@ -47,6 +47,10 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 relay (the node hands relay clients over by their greeting: one public port, the one you already forward);
 admin RPC 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback).
 
+## 0.16.30
+parlons-node 0.2.52: the account reaches its own relay over loopback (routers rarely hairpin) and "Your relay"
+turns reachable on the node's own evidence - an incoming chain peer on the port you forward.
+
 ## 0.16.29
 One public port. The Parlons relay inside the node now rides the Minima P2P port (parlons-node 0.2.51,
 `-Dparlons.relay.port=shared`), so the port you already forward for the chain carries the relay and the
