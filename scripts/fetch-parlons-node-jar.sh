@@ -8,12 +8,18 @@ mkdir -p resources
 REPO="eurobuddha/maxima"
 API="https://api.github.com/repos/$REPO/releases?per_page=50"
 JSON="$(curl -fsSL "$API")"
+# Default pin: package.json "parlonsNode" (the version the last local build shipped), so CI's Windows and
+# Linux installers carry exactly the same Parlons Node as the Mac DMG. Override with PARLONS_NODE_VERSION.
+if [ -z "${PARLONS_NODE_VERSION:-}" ] && [ -f package.json ]; then
+  PARLONS_NODE_VERSION="$(node -p "require('./package.json').parlonsNode || ''" 2>/dev/null || true)"
+fi
 if [ -n "${PARLONS_NODE_VERSION:-}" ]; then
   JAR_URL="https://github.com/$REPO/releases/download/node-v$PARLONS_NODE_VERSION/parlons-node-$PARLONS_NODE_VERSION.jar"
   SUM_URL="https://github.com/$REPO/releases/download/node-v$PARLONS_NODE_VERSION/SHA256SUMS"
 else
   # The releases API lags a just-created release by minutes; gh's list is consistent - prefer it.
-  NEWEST="$(gh release list -R "$REPO" --limit 100 2>/dev/null | grep -oE '^node-v[0-9.]+' | sort -t. -k3,3n | tail -1 | sed 's/^node-v//')"
+  # (gh is unauthenticated on CI runners: a failed listing falls through to the API, it must not abort)
+  NEWEST="$( (gh release list -R "$REPO" --limit 100 2>/dev/null || true) | grep -oE '^node-v[0-9.]+' | sort -t. -k3,3n | tail -1 | sed 's/^node-v//' || true)"
   if [ -n "$NEWEST" ]; then
     JAR_URL="https://github.com/$REPO/releases/download/node-v$NEWEST/parlons-node-$NEWEST.jar"
     SUM_URL="https://github.com/$REPO/releases/download/node-v$NEWEST/SHA256SUMS"

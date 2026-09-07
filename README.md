@@ -47,6 +47,12 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 relay (the node hands relay clients over by their greeting: one public port, the one you already forward);
 admin RPC 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback).
 
+## 0.16.35
+Windows and Linux installers again: CI's Parlons Node fetch no longer dies on an unauthenticated `gh`, every
+platform ships the Parlons Node pinned in package.json (`parlonsNode`), installers are named
+`minimaCore-<ver>-x64.exe` / `.AppImage`, and `scripts/publish-desktop-platforms.sh` adds their rows to the
+update feed. Windows and Linux builds are unsigned.
+
 ## 0.16.34
 parlons-node 0.2.58: share a contact from the Parlons panel (Copy address, Send to a contact…; a received
 contact card has Add contact). The Node page gets a Port forwarding card: TCP port, the address to send it to
