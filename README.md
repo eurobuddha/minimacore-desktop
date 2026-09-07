@@ -47,6 +47,9 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 relay (the node hands relay clients over by their greeting: one public port, the one you already forward);
 admin RPC 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback).
 
+## 0.16.36
+CI fetch of the Parlons Node: sha256sum on Windows, no unauthenticated GitHub API call when the version is pinned (the shared Mac runner was rate-limited), token passed on CI. Installer names fixed to minimaCore-<ver>-x64.exe / .AppImage.
+
 ## 0.16.35
 Windows and Linux installers again: CI's Parlons Node fetch no longer dies on an unauthenticated `gh`, every
 platform ships the Parlons Node pinned in package.json (`parlonsNode`), installers are named
