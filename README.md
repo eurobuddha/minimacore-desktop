@@ -47,6 +47,12 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback), Maxima relay 12501
 (only when contributing; mapped on the router like the P2P port).
 
+## 0.16.28
+The Parlons tab is the panel alone - no native strip above it (the strip only speaks while the account is
+starting or in error). parlons-node 0.2.50: a contributing desktop's own relay is adopted after the node
+learns its public address and anchors the permanent address once proven reachable; the panel's Node page
+shows "Your relay" with its state and connections.
+
 ## In-app updates (0.16.27)
 The app reads a one-app store feed - `https://eurobuddha.com/pandaapps/minimacore-desktop.json` (manifest
 only, the PandaApps convention; the DMG lives on the GitHub release `v<ver>`) - at launch and every 6 h

@@ -5583,18 +5583,14 @@ async function renderParlons() {
     };
     return;
   }
-  const addr = st.address || "";
-  strip.innerHTML = `<div class="parlons-strip">
-      <span>${st.ready ? "Account up" : (st.error ? "Account error" : "Starting the account…")}${st.version ? " · Parlons Node " + esc(st.version) : ""}${st.cape ? " · relaying" : ""}</span>
-      ${addr ? `<span class="addr" id="parlonsAddr" title="Click to copy the account address">${esc(addr)}</span>` : ""}
-      ${addr && st.anchor ? `<span style="flex-basis:100%">Reaches you through relay ${esc(st.anchor)} — the directory anchor that resolves this address, not your own machine. Your own relay takes over when you contribute.</span>` : ""}
-      <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button>
-      <button class="btn btn--sm btn--outline" id="parlonsBrowser">Open in browser</button>
-    </div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
-  const a = el("parlonsAddr");
-  if (a) a.onclick = async () => { await api.clip(addr); toast("Account address copied", "ok"); };
-  el("parlonsReload").onclick = () => { parlonsLoadedFor = ""; renderParlons(); };
-  el("parlonsBrowser").onclick = async () => { const ok = await api.parlonsOpenExternal(); toast(ok ? "Opened in your browser" : "The account is not up yet", ok ? "ok" : "err"); };
+  // The panel IS the Parlons app: no native chrome above it. The strip only speaks when the account
+  // is not up (starting / error).
+  if (st.ready && !st.error) strip.innerHTML = "";
+  else {
+    strip.innerHTML = `<div class="parlons-strip"><span>${st.error ? "Account error" : "Starting the account…"}${st.version ? " · Parlons Node " + esc(st.version) : ""}</span>
+        <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
+    el("parlonsReload").onclick = () => { parlonsLoadedFor = ""; renderParlons(); };
+  }
   if (!st.ready) {
     if (!body.querySelector("webview")) body.innerHTML = `<div class="spin">${st.error ? "The account did not start — see the Logs tab." : "Waiting for the account to attach to the network…"}</div>`;
     return;
