@@ -7,7 +7,12 @@ cd "$(dirname "$0")/.."
 mkdir -p resources
 REPO="eurobuddha/maxima"
 API="https://api.github.com/repos/$REPO/releases?per_page=50"
-JSON="$(curl -fsSL "$API")"
+# sha256 tool: shasum on macOS, sha256sum on Linux and Git-for-Windows
+if command -v shasum >/dev/null 2>&1; then SHA() { shasum -a 256 -c -; }; else SHA() { sha256sum -c -; }; fi
+# The releases API is only asked when nothing pins the version (it is rate-limited per runner IP: 403s
+# on shared CI hosts); an auth token, when the environment has one, lifts the limit.
+AUTH=(); [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ] && AUTH=(-H "Authorization: Bearer ${GH_TOKEN:-$GITHUB_TOKEN}")
+api_json() { curl -fsSL "${AUTH[@]}" "$API" 2>/dev/null || true; }
 # Default pin: package.json "parlonsNode" (the version the last local build shipped), so CI's Windows and
 # Linux installers carry exactly the same Parlons Node as the Mac DMG. Override with PARLONS_NODE_VERSION.
 if [ -z "${PARLONS_NODE_VERSION:-}" ] && [ -f package.json ]; then
@@ -24,8 +29,9 @@ else
     JAR_URL="https://github.com/$REPO/releases/download/node-v$NEWEST/parlons-node-$NEWEST.jar"
     SUM_URL="https://github.com/$REPO/releases/download/node-v$NEWEST/SHA256SUMS"
   else
-    JAR_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/parlons-node-[0-9.]+\.jar' | head -1)"
-    SUM_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/SHA256SUMS' | head -1)"
+    JSON="$(api_json)"
+    JAR_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/parlons-node-[0-9.]+\.jar' | head -1 || true)"
+    SUM_URL="$(printf '%s' "$JSON" | grep -oE 'https://github.com/[^"]+/node-v[^"]+/SHA256SUMS' | head -1 || true)"
   fi
 fi
 [ -n "$JAR_URL" ] || { echo "no node-v* release with a parlons-node jar found"; exit 1; }
@@ -34,7 +40,7 @@ TMP="$(mktemp -d)"
 echo "fetching $JAR_URL"
 curl -fSL -o "$TMP/$NAME" "$JAR_URL"
 curl -fsSL -o "$TMP/SHA256SUMS" "$SUM_URL"
-( cd "$TMP" && grep " $NAME\$" SHA256SUMS | shasum -a 256 -c - )
+( cd "$TMP" && grep " $NAME\$" SHA256SUMS | SHA )
 mv "$TMP/$NAME" resources/parlons-node.jar
 rm -rf "$TMP"
 echo "resources/parlons-node.jar = $NAME ($(du -h resources/parlons-node.jar | cut -f1))"

@@ -59,6 +59,8 @@ jobs:
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/fetch-parlons-node-jar.sh
 
       - name: Build installer
