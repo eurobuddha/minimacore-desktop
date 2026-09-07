@@ -1,102 +1,104 @@
 /*
- * updater.js — keeps minima.jar current from a GitHub releases feed.
+ * updater.js — minimaCore Desktop learns about its own updates from a one-app store feed.
  *
- * check → find the latest release's `minima.jar` asset (+ a `minima.jar.sha256` asset or a `sha256:<hex>` line
- * in the release body) → compare tag vs the running node version → report. apply → download to a temp file →
- * sha256-verify (when a hash is published) → atomically move into userData/jar/minima.jar. main.js restarts
- * the node afterwards; the bundled 5.9 MB jar remains the fallback if userData/jar is absent.
- *
- * Repo is configurable (config.updateRepo / MCD_RELEASE_REPO), default the minima-core fork. Until the user
- * publishes a minima.jar release there, check() simply reports "up to date / none found" — never errors.
+ * The feed is a single manifest-only JSON (the PandaApps convention: metadata in the feed, binaries on
+ * GitHub Releases, sha256 per file), served from the eurobuddha.com store host:
+ *   https://eurobuddha.com/pandaapps/minimacore-desktop.json
+ *   { "app": "minimaCore Desktop", "version": "0.16.27", "date": "…", "notes": "…",
+ *     "platforms": { "mac-arm64": { "file": "https://github.com/eurobuddha/minimacore-desktop/releases/download/v0.16.27/minimaCore-0.16.27-arm64.dmg", "sha256": "…", "size": 154786107 }, "win-x64": {…}, "linux-x64": {…} } }
+ * check(): GET the feed (host-pinned, 20 s, never an error to the user), compare with app.getVersion().
+ * download(): fetch the platform's file to ~/Downloads, verify sha256, reveal it. No silent install — the
+ * user drags the signed DMG (or runs the installer) exactly as for a fresh install.
+ * config.updateFeed overrides the URL for a self-hosted feed.
  */
-const { app } = require("electron");
+const { app, shell } = require("electron");
 const https = require("https");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const config = require("./config");
-const node = require("./node-manager");
 
-function repo() {
-  const cfg = config.load();
-  return process.env.MCD_RELEASE_REPO || cfg.updateRepo || "eurobuddha/minima-core";
+const DEFAULT_FEED = "https://eurobuddha.com/pandaapps/minimacore-desktop.json";
+const CHECK_EVERY_MS = 6 * 3600_000;
+
+let status = { checkedAt: 0, available: false, version: "", notes: "", date: "", file: "", sha256: "", size: 0, error: "", downloaded: "" };
+let timer = null;
+
+function feedUrl() { const c = config.load(); return (c.updateFeed && String(c.updateFeed).trim()) || DEFAULT_FEED; }
+function platformKey() {
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  return process.platform === "darwin" ? "mac-" + arch : process.platform === "win32" ? "win-" + arch : "linux-" + arch;
 }
-
-function ghGet(urlPath, { json = true } = {}) {
+/** semver-ish compare on the numeric dotted part: 1 if a > b, -1 if a < b, 0 if equal. */
+function cmpVersion(a, b) {
+  const pa = String(a || "").split(/[.-]/).map(x => parseInt(x, 10)), pb = String(b || "").split(/[.-]/).map(x => parseInt(x, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = Number.isFinite(pa[i]) ? pa[i] : 0, y = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+function get(url, { timeout = 20000, maxRedirects = 5 } = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.request({
-      host: "api.github.com", path: urlPath, method: "GET",
-      headers: { "User-Agent": "minimaCore-Desktop", Accept: "application/vnd.github+json" }, timeout: 20000
-    }, res => {
-      let body = "";
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { return download(res.headers.location).then(resolve, reject); }
-      res.on("data", d => body += d);
-      res.on("end", () => {
-        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error("GitHub " + res.statusCode));
-        try { resolve(json ? JSON.parse(body) : body); } catch (e) { reject(e); }
-      });
+    const u = new URL(url);
+    const mod = u.protocol === "http:" ? http : https;
+    const req = mod.get(u, { headers: { "User-Agent": "minimaCore-Desktop/" + app.getVersion(), Accept: "*/*" }, timeout }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && maxRedirects > 0) {
+        res.resume(); return get(new URL(res.headers.location, url).toString(), { timeout, maxRedirects: maxRedirects - 1 }).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error("HTTP " + res.statusCode)); }
+      const chunks = []; res.on("data", c => chunks.push(c)); res.on("end", () => resolve(Buffer.concat(chunks)));
     });
     req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", reject); req.end();
+    req.on("error", reject);
   });
 }
 
-/** Download a URL (following one redirect) to a Buffer. */
-function download(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, { headers: { "User-Agent": "minimaCore-Desktop" }, timeout: 60000 }, res => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { res.resume(); return download(res.headers.location).then(resolve, reject); }
-      if (res.statusCode !== 200) { res.resume(); return reject(new Error("download HTTP " + res.statusCode)); }
-      const chunks = [];
-      res.on("data", c => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    }).on("error", reject);
-  });
-}
-
-function activeInfo() {
-  const updated = path.join(app.getPath("userData"), "jar", "minima.jar");
-  return { updatedPresent: fs.existsSync(updated), runningVersion: (node.health && node.health.version) || "" };
-}
-
-async function checkForUpdate() {
-  let rel;
-  try { rel = await ghGet("/repos/" + repo() + "/releases/latest"); }
-  catch (e) { return { available: false, reason: "No node update available (" + e.message + ").", repo: repo(), ...activeInfo() }; }
-  const assets = rel.assets || [];
-  const jar = assets.find(a => a.name === "minima.jar");
-  if (!jar) return { available: false, reason: "Latest release has no minima.jar asset.", repo: repo(), tag: rel.tag_name, ...activeInfo() };
-  const shaAsset = assets.find(a => a.name === "minima.jar.sha256");
-  let sha256 = null;
-  if (shaAsset) { try { sha256 = (await download(shaAsset.browser_download_url)).toString().trim().split(/\s+/)[0]; } catch (e) {} }
-  if (!sha256) { const m = /sha256[:\s]+([0-9a-f]{64})/i.exec(rel.body || ""); if (m) sha256 = m[1].toLowerCase(); }
-  const info = activeInfo();
-  const available = !info.runningVersion || (rel.tag_name && rel.tag_name.replace(/^v/, "") !== info.runningVersion);
-  return { available, version: rel.tag_name, url: jar.browser_download_url, sha256, size: jar.size,
-           notes: (rel.body || "").slice(0, 400), repo: repo(), reason: available ? "" : "You're on the latest node.", ...info };
-}
-
-// SECURITY: the download URL + hash are ALWAYS re-derived here from a fresh checkForUpdate() (the trusted GitHub
-// API over TLS) — never taken from the caller. The renderer only triggers "install the latest"; it cannot point us
-// at an arbitrary jar. Any renderer-supplied argument is used solely as an optional version sanity-check and is
-// otherwise ignored, so a compromised renderer cannot install (and then execute, on node restart) a hostile jar.
-async function applyUpdate(expect) {
-  const fresh = await checkForUpdate();
-  if (!fresh || !fresh.url) throw new Error("no node update available to install");
-  if (expect && expect.version && fresh.version && expect.version !== fresh.version) {
-    throw new Error("update changed since you checked — re-check and try again");
+/** Read the feed and remember what it says. Never throws; the reason lands in status.error. */
+async function check() {
+  try {
+    const url = feedUrl();
+    const u = new URL(url);
+    if (u.protocol !== "https:" && !(u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"))) throw new Error("the update feed must be https");
+    const body = JSON.parse((await get(url)).toString("utf8"));
+    const p = (body.platforms || {})[platformKey()] || {};
+    const newer = cmpVersion(body.version, app.getVersion()) > 0;
+    status = { checkedAt: Date.now(), available: newer && !!p.file, version: String(body.version || ""), notes: String(body.notes || ""), date: String(body.date || ""),
+               file: String(p.file || ""), sha256: String(p.sha256 || "").toLowerCase(), size: Number(p.size || 0), error: "", downloaded: status.downloaded && status.version === body.version ? status.downloaded : "" };
+  } catch (e) {
+    status = Object.assign({}, status, { checkedAt: Date.now(), error: (e && e.message) || String(e) });
   }
-  const buf = await download(fresh.url);
-  if (fresh.sha256) {
+  return status;
+}
+
+/** Download the platform file to ~/Downloads, verify sha256, reveal it. Returns the path. */
+async function download() {
+  if (!status.available || !status.file) throw new Error("no update to download");
+  const u = new URL(status.file);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"))) throw new Error("refusing a non-https download");
+  const buf = await get(status.file, { timeout: 15 * 60_000 });
+  if (status.sha256) {
     const got = crypto.createHash("sha256").update(buf).digest("hex");
-    if (got.toLowerCase() !== fresh.sha256.toLowerCase()) throw new Error("sha256 mismatch — refusing to install");
+    if (got !== status.sha256) throw new Error("sha256 mismatch — the download does not match the feed; not saved");
   }
-  const jarDir = path.join(app.getPath("userData"), "jar");
-  fs.mkdirSync(jarDir, { recursive: true });
-  const tmp = path.join(jarDir, "minima.jar.download");
-  fs.writeFileSync(tmp, buf);
-  fs.renameSync(tmp, path.join(jarDir, "minima.jar"));   // atomic swap
-  return { installed: true, version: fresh.version, sha256verified: !!fresh.sha256 };
+  const dir = app.getPath("downloads");
+  fs.mkdirSync(dir, { recursive: true });
+  const name = path.basename(u.pathname) || ("minimaCore-" + status.version);
+  const dest = path.join(dir, name);
+  fs.writeFileSync(dest + ".part", buf);
+  fs.renameSync(dest + ".part", dest);
+  status.downloaded = dest;
+  shell.showItemInFolder(dest);   // revealed, not opened: the user installs it like a fresh download
+  return dest;
 }
 
-module.exports = { checkForUpdate, applyUpdate };
+function start() {
+  if (timer) return;
+  setTimeout(() => check().catch(() => {}), 8000);
+  timer = setInterval(() => check().catch(() => {}), CHECK_EVERY_MS);
+  if (timer.unref) timer.unref();
+}
+function current() { return Object.assign({ feed: feedUrl(), platform: platformKey(), running: app.getVersion() }, status); }
+
+module.exports = { check, download, start, current, cmpVersion, DEFAULT_FEED };

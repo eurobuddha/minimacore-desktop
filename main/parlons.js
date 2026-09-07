@@ -35,6 +35,9 @@ function status() {
     panelPort: node.panelPort(),
     capePort: node.capePort(),
     address: node.kind() === "parlons" ? readTrim(path.join(dir, "account.txt")) : "",   // the permanent MAX#… (whole)
+    // The tail of the permanent address is the DIRECTORY ANCHOR - the relay that resolves the account -
+    // never this machine. A fleet relay while not contributing; the node's own cape once it is.
+    anchor: node.kind() === "parlons" ? (readTrim(path.join(dir, "account.txt")).split("@").pop() || "") : "",
     invite: node.kind() === "parlons" ? readTrim(path.join(dir, "invite.txt")) : "",     // MAX#…?code=… while a code is outstanding
     hasTicket: !!ticketUrl(),
     blocker: node.parlonsBlocker()

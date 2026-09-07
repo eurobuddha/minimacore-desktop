@@ -47,6 +47,14 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback), Maxima relay 12501
 (only when contributing; mapped on the router like the P2P port).
 
+## In-app updates (0.16.27)
+The app reads a one-app store feed - `https://eurobuddha.com/pandaapps/minimacore-desktop.json` (manifest
+only, the PandaApps convention; the DMG lives on the GitHub release `v<ver>`) - at launch and every 6 h
+(`main/updater.js`). A newer build shows an "Update x.y.z" pill next to the version, a Settings → Updates
+card and a tray line; Download saves the file to ~/Downloads, verified against the feed's sha256, and
+reveals it. Nothing installs by itself. Publish with `scripts/publish-desktop.sh <ver> "<notes>"` after
+`npm run dist:mac:signed`. `updateFeed` in the app config points a self-hoster at their own feed.
+
 ## The Parlons tab (0.16.26)
 The tab is the account's own web panel (parlons-node 0.2.48): a full chat window - chats, conversations
 with photos, contacts, devices (pairing QR), node, settings - live over server-sent events. The app only

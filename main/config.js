@@ -44,6 +44,7 @@ const DEFAULTS = {
                              // "minima"  = plain minima.jar. New installs get parlons; an existing install keeps
                              //             minima until it opts in (see load()).
   heapMb: 0,                 // -Xmx for the Parlons Node (0 = automatic: 3072 with MegaMMR, else 1536)
+  updateFeed: "",            // the one-app store feed the app checks for updates ("" = the eurobuddha.com feed)
   setupDone: false,          // node wizard completed
   walletDone: false,         // seed onboarding (new/restore) completed
   walletMode: "new",         // "new" (boot+connect) | "restore" (post-boot megammrsync). Seed is NEVER persisted.

@@ -87,6 +87,13 @@ async function boot() {
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => selectTab(b.dataset.view));
   initTabScroll();
   api.appVersion().then(v => { const e = el("hdrVer"); if (e && v) e.textContent = "v" + v; }).catch(() => {});
+  // App updates: the store feed is checked in the main process; the pill appears when a newer build exists.
+  const refreshUpdatePill = async () => {
+    try { const u = await api.updateStatus(); const b = el("hdrUpdate"); if (!b) return; b.hidden = !u.available; if (u.available) b.textContent = "Update " + u.version; } catch (e) {}
+  };
+  el("hdrUpdate").addEventListener("click", () => { selectTab("settings"); setTimeout(() => { const c = el("updCard"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); }, 200); });
+  if (api.onOpenUpdate) api.onOpenUpdate(() => el("hdrUpdate").click());
+  refreshUpdatePill(); setTimeout(refreshUpdatePill, 15_000); setInterval(refreshUpdatePill, 60_000);   // the first feed check runs ~8 s after launch
 
   api.onStatus(onStatus);
   api.onLog(appendLog);
@@ -2906,6 +2913,12 @@ async function renderSettings() {
       <button class="btn btn--outline btn--full" id="setKindApply">Apply and restart the node</button>
       <div class="status" id="setKindStatus"></div>
     </div>
+    <div class="card" id="updCard"><div class="card__title">Updates</div>
+      <div class="view__desc">minimaCore checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.</div>
+      <div id="updBody" class="view__desc">Checking…</div>
+      <div class="seg"><button class="btn btn--sm btn--outline" id="updCheck">Check now</button><button class="btn btn--sm btn--primary" id="updGet" hidden>Download</button></div>
+      <div class="status" id="updStatus"></div>
+    </div>
     <div class="card"><div class="card__title">Wallet</div>
       <div class="field__label">Your address</div>
       <div class="addrbox addrbox__addr" id="setAddr" title="Click to copy" style="margin-top:0">${esc(fullAddr)}</div>
@@ -2983,6 +2996,21 @@ async function renderSettings() {
     try { const r = await api.faucet(addr); st.textContent = r.message; st.className = "status " + (r.status ? "status--ok" : "status--err"); toast(r.message, r.status ? "ok" : "err"); }
     catch (e) { st.textContent = "Faucet error."; st.className = "status status--err"; }
     btn.disabled = false; btn.textContent = "Request Minima";
+  };
+  const drawUpdate = (u) => {
+    const b = el("updBody"), g = el("updGet"); if (!b) return;
+    if (u.error && !u.available) b.textContent = "Could not read the feed (" + u.error + "). Running v" + u.running + ".";
+    else if (u.available) b.innerHTML = "<b>minimaCore " + esc(u.version) + "</b> is available (you run v" + esc(u.running) + ")" + (u.date ? " · " + esc(u.date) : "") + (u.notes ? "<br>" + esc(u.notes) : "") + (u.downloaded ? "<br>Downloaded to " + esc(u.downloaded) : "");
+    else b.textContent = "You run the newest build, v" + u.running + (u.checkedAt ? " (checked " + new Date(u.checkedAt).toLocaleTimeString() + ")" : "") + ".";
+    g.hidden = !u.available;
+  };
+  api.updateStatus().then(drawUpdate).catch(() => {});
+  el("updCheck").onclick = async () => { el("updStatus").textContent = "Checking…"; try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = e.message || String(e); } };
+  el("updGet").onclick = async () => {
+    el("updGet").disabled = true; el("updStatus").textContent = "Downloading — the file is verified against the feed before it is saved…";
+    try { const r = await api.updateDownload(); el("updStatus").textContent = "Saved and verified: " + r.path + " — install it over this app, then relaunch."; drawUpdate(r.status); }
+    catch (e) { el("updStatus").textContent = e.message || String(e); }
+    el("updGet").disabled = false;
   };
   el("setKindApply").onclick = async () => {
     const want = (host.querySelector('input[name="setKind"]:checked') || {}).value === "minima" ? "minima" : "parlons";
@@ -5559,6 +5587,7 @@ async function renderParlons() {
   strip.innerHTML = `<div class="parlons-strip">
       <span>${st.ready ? "Account up" : (st.error ? "Account error" : "Starting the account…")}${st.version ? " · Parlons Node " + esc(st.version) : ""}${st.cape ? " · relaying" : ""}</span>
       ${addr ? `<span class="addr" id="parlonsAddr" title="Click to copy the account address">${esc(addr)}</span>` : ""}
+      ${addr && st.anchor ? `<span style="flex-basis:100%">Reaches you through relay ${esc(st.anchor)} — the directory anchor that resolves this address, not your own machine. Your own relay takes over when you contribute.</span>` : ""}
       <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button>
       <button class="btn btn--sm btn--outline" id="parlonsBrowser">Open in browser</button>
     </div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;

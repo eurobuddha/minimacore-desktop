@@ -36,6 +36,11 @@ contextBridge.exposeInMainWorld("mcd", {
   parlonsOpenExternal: () => ipcRenderer.invoke("mcd:parlonsOpenExternal"),
   setNodeKind: (kind) => ipcRenderer.invoke("mcd:setNodeKind", kind),
 
+  // app updates from the minimaCore store feed
+  updateStatus: () => ipcRenderer.invoke("mcd:updateStatus"),
+  updateCheck: () => ipcRenderer.invoke("mcd:updateCheck"),
+  updateDownload: () => ipcRenderer.invoke("mcd:updateDownload"),
+  onOpenUpdate: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:openUpdate", h); return () => ipcRenderer.removeListener("mcd:openUpdate", h); },
   // jar updater
   checkJarUpdate: () => ipcRenderer.invoke("mcd:checkJarUpdate"),
   applyJarUpdate: (rel) => ipcRenderer.invoke("mcd:applyJarUpdate", rel),

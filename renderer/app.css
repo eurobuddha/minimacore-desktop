@@ -864,3 +864,7 @@ body { font-family: var(--sans); }
 #parlonsBody webview { flex: 1 1 auto; min-height: 320px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .parlons-strip { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 8px; font-size: 12px; color: var(--dim); }
 .parlons-strip .addr { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; cursor: pointer; color: var(--text); }
+
+/* update pill next to the version: only when the store feed has a newer build */
+.hdr__update { cursor: pointer; border: 1px solid var(--accent); color: var(--accent); background: transparent; margin-left: 6px; }
+.hdr__update:hover { background: var(--accent); color: #fff; }

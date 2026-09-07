@@ -13,7 +13,7 @@ const node = require("./node-manager");
 const portmap = require("./portmap");
 const rpc = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
-// ./updater is intentionally not required — the jar updater is disabled (see the handlers below).
+const updater = require("./updater");   // app updates from the minimaCore store feed (the jar itself ships with the app)
 const netfetch = require("./netfetch");
 const histDb = require("./history-db");
 const faucet = require("./faucet");
@@ -103,6 +103,7 @@ function setupTray() {
       { type: "separator" },
       { label: "Show", click: () => { if (win) win.show(); else createWindow(); } },
       { label: "Restart node", click: () => node.restart() },
+      ...(updater.current().available ? [{ type: "separator" }, { label: "Update to minimaCore " + updater.current().version + "…", click: () => { if (win) { win.show(); win.webContents.send("mcd:openUpdate"); } } }] : []),
       { type: "separator" },
       { label: "Quit", click: () => app.quit() }
     ]);
@@ -168,6 +169,10 @@ ipcMain.handle("mcd:setNodeKind", async (_e, kind) => {
 // no releases — so it could never find anything; and were that repo opened up, desktop users would
 // silently be moved onto fork builds. The handlers stay registered so any caller gets a clear
 // answer instead of an "no handler registered" throw.
+// App updates: the one-app store feed (main/updater.js). The node jar ships with the app and is never updated alone.
+ipcMain.handle("mcd:updateStatus", () => updater.current());
+ipcMain.handle("mcd:updateCheck", async () => { await updater.check(); return updater.current(); });
+ipcMain.handle("mcd:updateDownload", async () => { const p = await updater.download(); return { path: p, status: updater.current() }; });
 ipcMain.handle("mcd:checkJarUpdate", () => ({ available: false, reason: "Node updates ship with the app." }));
 ipcMain.handle("mcd:applyJarUpdate", async () => { throw new Error("The in-app node updater is disabled."); });
 
@@ -483,6 +488,7 @@ app.whenReady().then(() => {
   // calls nodeStart when the user finishes — otherwise the node would silently start before any choice.
   const c = config.load();
   if (c.setupDone && c.walletDone) node.start();
+  updater.start();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
