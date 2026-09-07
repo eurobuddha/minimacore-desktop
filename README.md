@@ -47,6 +47,11 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 relay (the node hands relay clients over by their greeting: one public port, the one you already forward);
 admin RPC 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback).
 
+## 0.16.33
+parlons-node 0.2.55: a message you send from the phone now appears in the desktop Parlons panel at once
+(and one sent from the panel appears on the phone), with its ticks. Before, the other device showed it only
+on its next reload of that conversation.
+
 ## 0.16.32
 parlons-node 0.2.54: one-port review fixes. The relay hand-off now runs on the node's own network thread
 (it can never leave the chain node in a blocking read), frames pipelined behind a greeting are replayed
