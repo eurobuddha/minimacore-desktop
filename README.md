@@ -47,6 +47,9 @@ flags in one quoted `-Dparlons.node.args` string. Ports on the default base 1200
 relay (the node hands relay clients over by their greeting: one public port, the one you already forward);
 admin RPC 12005 (loopback), wallet gateway 12585 (loopback), Parlons web panel 12587 (loopback).
 
+## 0.16.31
+parlons-node 0.2.53: the Parlons Node page refreshes itself while open.
+
 ## 0.16.30
 parlons-node 0.2.52: the account reaches its own relay over loopback (routers rarely hairpin) and "Your relay"
 turns reachable on the node's own evidence - an incoming chain peer on the port you forward.
