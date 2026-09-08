@@ -393,6 +393,7 @@ ipcMain.handle("mcd:casinoCancel", (_e, coinid) => casino.cancel(coinid));
 ipcMain.handle("mcd:casinoResolve", (_e, coinid) => casino.resolve(coinid));
 ipcMain.handle("mcd:casinoReveal", (_e, coinid) => casino.reveal(coinid));
 ipcMain.handle("mcd:casinoClaimTimeout", (_e, coinid) => casino.claimTimeout(coinid));
+ipcMain.handle("mcd:casinoSetCurrency", (_e, tokenid) => casino.setCurrency(tokenid));
 ipcMain.handle("mcd:casinoNewCount", () => casino.newCount());
 ipcMain.handle("mcd:casinoSeen", () => casino.markSeen());
 ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });

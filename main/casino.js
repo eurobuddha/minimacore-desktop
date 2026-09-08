@@ -175,6 +175,10 @@ async function cancel(coinid) { const r = await pcb(cb => C().cancelBet(coinid, 
 async function resolve(coinid) { const r = await pcb(cb => C().manualResolve(coinid, cb)); emitter.emit("update"); return jclone(r); }
 async function reveal(coinid) { const r = await pcb(cb => C().manualReveal(coinid, cb)); emitter.emit("update"); return jclone(r); }
 async function claimTimeout(coinid) { const r = await pcb(cb => C().claimTimeout(coinid, cb)); emitter.emit("update"); return jclone(r); }
+// Set the active currency for NEW bets + the header balance (the renderer's MINIMA|USD toggle). No-op
+// until the engine is ready; the renderer re-sends it on load and on every toggle. Existing-bet ops
+// derive their token from the coin, so they never depend on this.
+function setCurrency(tok) { try { if (ctx && ctx.CASINO && ctx.CASINO.setCurrency) ctx.CASINO.setCurrency(tok); } catch (e) {} return true; }
 
 // ---- raw reads for the renderer's per-block state machine (rich activity feed) + maker result detection ----
 const cnorm = (v) => String(v || "").toUpperCase().replace(/^0X/, "");
@@ -231,6 +235,10 @@ async function stakeable() {
 // phases). Writes the shared casino_history keychain so History/badge update, and emits notify/update.
 async function resolveOutcome(commit, role) {
   const want = cnorm(commit);
+  // A coloured-token (MxUSD) coin/output carries its real value in tokenamount; `amount` is the ~1e-37
+  // native shell. Read value through oAmt and match token via oTok so MxUSD results detect correctly.
+  const oAmt = o => (o && o.tokenamount !== undefined && o.tokenamount !== null && o.tokenamount !== "") ? parseFloat(o.tokenamount) : (parseFloat(o && o.amount) || 0);
+  const oTok = o => (o && o.tokenid) ? o.tokenid : "0x00";
   let r; try { r = await runner("txpow address:" + CONTRACT); } catch (e) { return { found: false }; }
   const list = (r && r.response) || [];
   for (const tp of list) {
@@ -242,7 +250,7 @@ async function resolveOutcome(commit, role) {
     const hs = cstate(inp.state, 12);
     const range = parseInt(cstate(inp.state, 3)) || 2, payout = parseInt(cstate(inp.state, 4)) || range;
     const bet = cstate(inp.state, 5) || "0", pick = parseInt(cstate(inp.state, 11));
-    const amount = parseFloat(inp.amount) || 0, playerAddr = cstate(inp.state, 9);
+    const amount = oAmt(inp), betTok = oTok(inp), playerAddr = cstate(inp.state, 9);
     let exactResult = null, hashPlayerWins;
     try {                                                                        // mirror service.js:211-214
       const hres = await runner("hash data:" + String(hs) + String(ps).substring(2));   // hs keeps 0x, ps drops its 0x
@@ -251,7 +259,7 @@ async function resolveOutcome(commit, role) {
       hashPlayerWins = (exactResult === pick);
     } catch (e) {}
     const winnings = cmnum(parseFloat(bet) * payout);
-    const paidPlayer = (txn.outputs || []).some(o => cnorm(o.address) === cnorm(playerAddr) && Math.abs(parseFloat(o.amount) - winnings) < 0.001);
+    const paidPlayer = (txn.outputs || []).some(o => cnorm(o.address) === cnorm(playerAddr) && cnorm(oTok(o)) === cnorm(betTok) && Math.abs(oAmt(o) - winnings) < 0.001);
     let playerWins = (hashPlayerWins === undefined) ? paidPlayer : hashPlayerWins;
     if (hashPlayerWins !== undefined && hashPlayerWins !== paidPlayer) playerWins = paidPlayer;   // outputs = consensus truth
     const won = role === "House" ? !playerWins : playerWins;
@@ -260,13 +268,13 @@ async function resolveOutcome(commit, role) {
     try {
       const rawh = kpGet("casino_history"); let hist = []; try { if (rawh) hist = JSON.parse(rawh); } catch (e) {}
       if (!hist.some(h => h.coinid === coinid)) {
-        hist.unshift({ coinid, role, game: cgame(range), range, pickLabel, resultLabel: rLabel, profit, won, bet, amount, txid: coinid, time: Date.now() });
+        hist.unshift({ coinid, role, game: cgame(range), range, pickLabel, resultLabel: rLabel, profit, won, bet, amount, tokenid: betTok, txid: coinid, time: Date.now() });
         if (hist.length > 50) hist.pop(); kpSet("casino_history", JSON.stringify(hist));
       }
     } catch (e) {}
-    emitter.emit("notify", (won ? "You WON +" : "You lost −") + profit + " Minima — " + cgame(range));
+    emitter.emit("notify", (won ? "You WON +" : "You lost −") + profit + (betTok === "0x00" ? " Minima" : " USD") + " — " + cgame(range));
     emitter.emit("update");
-    return { found: true, coinid, won, playerWins, result: exactResult, resultLabel: rLabel, pick, pickLabel, range, payout, bet, amount };
+    return { found: true, coinid, won, playerWins, result: exactResult, resultLabel: rLabel, pick, pickLabel, range, payout, bet, amount, tokenid: betTok };
   }
   return { found: false };
 }
@@ -291,6 +299,6 @@ async function markSeen() {
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
   openBets, myBets, history, balance, rawBets, walletCoins, stakeable, resolveOutcome,
-  create, take, cancel, resolve, reveal, claimTimeout, newCount, markSeen,
+  create, take, cancel, resolve, reveal, claimTimeout, setCurrency, newCount, markSeen,
   _setRunner: (fn) => { runner = fn; }, _ctx: () => ctx, _fire: fire, CONTRACT, CASINO_SCRIPT
 };

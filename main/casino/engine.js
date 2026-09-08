@@ -26,6 +26,21 @@ var READY = false;
 var SEQ = 0;
 function tag() { return Date.now() + "_" + (++SEQ); }   // unique local txn-builder id (never on-chain)
 
+// ===== Currency (MxUSD "dollar mode") =====
+// Two currencies share the SAME token-agnostic covenant + SCRIPT_ADDR; only the coin's token differs:
+// native Minima (0x00) or MxUSD (the Minima dollar-pegged coloured token, shown to players as "USD").
+// ACTIVE_TOKEN (set from the renderer's toggle via setCurrency) is used ONLY when CREATING a bet and
+// reading the header balance. Every op on an EXISTING bet derives its token from the coin (coinTok) —
+// so you can never act in the wrong token, and the covenant double-enforces it (@TOKENID on every output).
+var USD_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+var ACTIVE_TOKEN = "0x00";
+function setCurrency(tok) { ACTIVE_TOKEN = (tok && String(tok).indexOf("0x") === 0) ? String(tok) : "0x00"; }
+function coinTok(coin) { return (coin && coin.tokenid) ? coin.tokenid : "0x00"; }
+// FUND-CRITICAL: a coloured-token coin's value is in `tokenamount`; its `amount` is the ~1e-37 native
+// shell. Reading `amount` on a MxUSD coin/output breaks coin selection / change / payout (fund loss).
+// ALWAYS read a coin's value through this.
+function coinAmount(coin) { if (!coin) return "0"; var ta = coin.tokenamount; if (ta !== undefined && ta !== null && ta !== "") return String(ta); return (coin.amount == null || coin.amount === "") ? "0" : String(coin.amount); }
+
 // ---- shared helpers (identical to service.js's copies; safe in the shared context) ----
 function getState(coin, port) {
   if (!coin.state) return "";
@@ -116,14 +131,16 @@ function findCoins(tokenid, minAmount, excludeCoinid, callback) {
     var pool = res.response.filter(function (c) { return !c.state || c.state.length === 0; });
     pool = pool.filter(function (c) { return String(c.address || "").length >= 60; });   // cheap prefilter: drop short sentinels
     if (excludeCoinid) pool = pool.filter(function (c) { return c.coinid !== excludeCoinid; });
-    pool.sort(function (a, b) { return parseFloat(b.amount) - parseFloat(a.amount); });   // largest first → fewest inputs / fewest checks
+    // FUND-CRITICAL: select by the coin's REAL value (coinAmount = tokenamount for a coloured token like
+    // MxUSD, never the ~1e-37 native `amount` shell) — else a MxUSD take can never fund itself.
+    pool.sort(function (a, b) { return parseFloat(coinAmount(b)) - parseFloat(coinAmount(a)); });   // largest first → fewest inputs / fewest checks
     var needed = parseFloat(minAmount), selected = [], sum = 0, i = 0;
     (function next() {
       if (sum >= needed) { callback({ coins: selected, total: sum }); return; }
       if (i >= pool.length) { callback(null); return; }   // ran out of signable coins before covering the bet
       var c = pool[i++];
       MDS.cmd("checkaddress address:" + c.address, function (chk) {
-        if (chk && chk.response && chk.response.simple) { selected.push(c); sum += parseFloat(c.amount); }
+        if (chk && chk.response && chk.response.simple) { selected.push(c); sum += parseFloat(coinAmount(c)); }
         next();
       });
     })();
@@ -173,12 +190,12 @@ function ensureReady(cb) {
 }
 
 // ---- history record (dedup by coinid; mirrors service.js recordServiceResult, from either role's view) ----
-function recordResult(coinid, range, playerpick, result, playerWins, isHouse, bet, payout, totalAmt) {
+function recordResult(coinid, range, playerpick, result, playerWins, isHouse, bet, payout, totalAmt, tokenid) {
   var iWon = (playerWins && !isHouse) || (!playerWins && isHouse);
   var profit;
   if (iWon) { profit = isHouse ? parseFloat(bet) : miniNum(parseFloat(bet) * payout - parseFloat(bet)); }
   else { profit = isHouse ? miniNum(parseFloat(bet) * (payout - 1)) : parseFloat(bet); }
-  var entry = { coinid: coinid, role: isHouse ? "House" : "Player", game: gameType(range).name, range: range, pickLabel: pickLabel(range, playerpick), resultLabel: pickLabel(range, result), profit: profit, won: iWon, bet: bet, amount: totalAmt, txid: coinid, time: Date.now() };
+  var entry = { coinid: coinid, role: isHouse ? "House" : "Player", game: gameType(range).name, range: range, pickLabel: pickLabel(range, playerpick), resultLabel: pickLabel(range, result), profit: profit, won: iWon, bet: bet, amount: totalAmt, tokenid: tokenid || "0x00", txid: coinid, time: Date.now() };
   MDS.keypair.get("casino_history", function (h) {
     var hist = []; try { if (h && h.value) hist = JSON.parse(h.value); } catch (e) {}
     if (hist.some(function (rb) { return rb.coinid === coinid; })) return;
@@ -199,7 +216,7 @@ function openBets(cb) {
         if ((parseInt(getState(c, 6)) || 0) !== 0) return;               // phase 0 only
         if (isMyKey(getState(c, 0))) return;                              // can't take your own open bet
         var range = parseInt(getState(c, 3)) || 2;
-        out.push({ coinid: c.coinid, range: range, payout: parseInt(getState(c, 4)) || range, bet: getState(c, 5), amount: c.amount, game: gameType(range).name, housePk: getState(c, 0), age: parseInt(c.age) || 0, timeout: parseInt(getState(c, 7)) || 0 });
+        out.push({ coinid: c.coinid, range: range, payout: parseInt(getState(c, 4)) || range, bet: getState(c, 5), amount: coinAmount(c), tokenid: coinTok(c), game: gameType(range).name, housePk: getState(c, 0), age: parseInt(c.age) || 0, timeout: parseInt(getState(c, 7)) || 0 });
       });
       cb(null, out);
     });
@@ -214,7 +231,7 @@ function myBets(cb) {
         if (!amHouse && !amPlayer) return;
         var phase = parseInt(getState(c, 6)) || 0, range = parseInt(getState(c, 3)) || 2;
         var timeout = parseInt(getState(c, 7)) || 0, age = parseInt(c.age) || 0;
-        out.push({ coinid: c.coinid, phase: phase, role: amHouse && !amPlayer ? "House" : (amPlayer && !amHouse ? "Player" : "Self"), amHouse: amHouse, amPlayer: amPlayer, range: range, payout: parseInt(getState(c, 4)) || range, bet: getState(c, 5), amount: c.amount, pick: getState(c, 11), game: gameType(range).name, age: age, timeout: timeout, expired: timeout > 0 && age > timeout });
+        out.push({ coinid: c.coinid, phase: phase, role: amHouse && !amPlayer ? "House" : (amPlayer && !amHouse ? "Player" : "Self"), amHouse: amHouse, amPlayer: amPlayer, range: range, payout: parseInt(getState(c, 4)) || range, bet: getState(c, 5), amount: coinAmount(c), tokenid: coinTok(c), pick: getState(c, 11), game: gameType(range).name, age: age, timeout: timeout, expired: timeout > 0 && age > timeout });
       });
       cb(null, out);
     });
@@ -227,7 +244,9 @@ function history(cb) {
   });
 }
 function balance(cb) {
-  MDS.cmd("balance", function (res) { var s = "0"; if (res && res.status && res.response && res.response.length > 0) s = String(res.response[0].sendable); cb(null, s); });
+  // Balance of the ACTIVE currency's token (sendable = tradeable, contract-unlocked coins). The value
+  // is already in human token units; the renderer labels/format it per the active currency.
+  MDS.cmd("balance tokenid:" + ACTIVE_TOKEN, function (res) { var s = "0"; if (res && res.status && res.response && res.response.length > 0) s = String(res.response[0].sendable); cb(null, s); });
 }
 
 // ============================ actions (donor txn functions — command strings verbatim) ============================
@@ -247,7 +266,7 @@ function createBet(presetId, betAmount, cb) {
         saveSecret("casino_secret_for_" + commit, secret, function (serr) {
           if (serr) { cb(serr); return; }   // preimage not durable → do NOT lock funds
           var stateObj = '{"0":"' + MY_PUBKEY + '","1":"' + MY_HEX_ADDR + '","2":"' + commit + '","3":"' + p.range + '","4":"' + p.payout + '","5":"' + bet + '","6":"0","7":"' + TIMEOUT_BLOCKS + '"}';
-          var cmd = "send amount:" + stake + " address:" + SCRIPT_ADDR + " state:" + stateObj;
+          var cmd = "send amount:" + stake + " address:" + SCRIPT_ADDR + " tokenid:" + ACTIVE_TOKEN + " state:" + stateObj;
           MDS.cmd(cmd, function (sres) {
             if (sres && sres.status) cb(null, { ok: true, game: p.name, bet: bet, stake: stake, odds: (p.payout - 1) });
             else cb((sres && sres.error) || "Send failed");
@@ -266,7 +285,8 @@ function takeBet(coinid, pick, cb) {
       var coin = coins.find(function (c) { return c.coinid === coinid; });
       if (!coin) { cb("Bet not found (already taken?)"); return; }
       if ((parseInt(getState(coin, 6)) || 0) !== 0) { cb("Bet no longer open"); return; }
-      var bet = getState(coin, 5), total = decAdd(coin.amount, bet);   // exact pot = contract coin + bet (full precision)
+      var betToken = coinTok(coin);   // fund + pay in the bet coin's OWN token (never the toggle)
+      var bet = getState(coin, 5), total = decAdd(coinAmount(coin), bet);   // exact pot = contract coin + bet (full precision)
       var range = parseInt(getState(coin, 3)) || 2;
       pick = parseInt(pick) || 0; if (pick < 0 || pick >= range) { cb("Invalid pick"); return; }
       var txid = "take_" + tag();
@@ -276,19 +296,19 @@ function takeBet(coinid, pick, cb) {
           var commit = extractResponse(hres); if (!commit) { cb("Hash failed"); return; }
           saveSecret("casino_psecret_for_" + commit, secret, function (serr) {
             if (serr) { cb(serr); return; }   // preimage not durable → do NOT commit the take
-            findCoins("0x00", parseFloat(bet), coinid, function (result) {
-              if (!result) { cb("Insufficient Minima (need " + bet + ")"); return; }
+            findCoins(betToken, parseFloat(bet), coinid, function (result) {
+              if (!result) { cb("Insufficient " + (betToken === "0x00" ? "Minima" : "USD") + " (need " + bet + ")"); return; }
               MDS.cmd("txncreate id:" + txid, function (r0) {
                 if (!r0.status) { cb("txncreate failed"); return; }
                 MDS.cmd("txninput id:" + txid + " coinid:" + coinid, function (r1) {
                   if (!r1.status) { MDS.cmd("txndelete id:" + txid); cb("contract input failed"); return; }
                   addMultipleInputs(txid, result.coins, 0, function (ok) {
                     if (!ok) { MDS.cmd("txndelete id:" + txid); cb("fund input failed"); return; }
-                    MDS.cmd("txnoutput id:" + txid + " amount:" + total + " address:" + SCRIPT_ADDR + " storestate:true", function (r3) {
+                    MDS.cmd("txnoutput id:" + txid + " amount:" + total + " address:" + SCRIPT_ADDR + " tokenid:" + betToken + " storestate:true", function (r3) {
                       if (!r3.status) { MDS.cmd("txndelete id:" + txid); cb("output failed"); return; }
                       // exact change = (funding coins summed) − bet, at FULL precision — NEVER rounded (a rounded-up
                       // change makes outputs exceed inputs → node rejects: validamounts:false, the take-fails bug).
-                      var fundTotal = result.coins.reduce(function (acc, fc) { return decAdd(acc, fc.amount); }, "0");
+                      var fundTotal = result.coins.reduce(function (acc, fc) { return decAdd(acc, coinAmount(fc)); }, "0");
                       var change = decSub(fundTotal, bet);
                       var afterChange = function () {
                         var states = [[0, getState(coin, 0)], [1, getState(coin, 1)], [2, getState(coin, 2)], [3, getState(coin, 3)], [4, getState(coin, 4)], [5, getState(coin, 5)], [6, "1"], [7, getState(coin, 7)], [8, MY_PUBKEY], [9, MY_HEX_ADDR], [10, commit], [11, "" + pick]];
@@ -303,7 +323,7 @@ function takeBet(coinid, pick, cb) {
                           });
                         });
                       };
-                      if (decCmp(change, "0.000001") > 0) { MDS.cmd("txnoutput id:" + txid + " amount:" + change + " address:" + MY_HEX_ADDR + " storestate:false", function (rc) { if (!rc.status) { MDS.cmd("txndelete id:" + txid); cb("change output failed"); return; } afterChange(); }); }
+                      if (decCmp(change, "0.000001") > 0) { MDS.cmd("txnoutput id:" + txid + " amount:" + change + " address:" + MY_HEX_ADDR + " tokenid:" + betToken + " storestate:false", function (rc) { if (!rc.status) { MDS.cmd("txndelete id:" + txid); cb("change output failed"); return; } afterChange(); }); }
                       else { afterChange(); }
                     });
                   });
@@ -331,7 +351,7 @@ function manualReveal(coinid, cb) {
           if (!r0.status) { cb("txncreate failed"); return; }
           MDS.cmd("txninput id:" + txid + " coinid:" + coinid, function (r1) {
             if (!r1.status) { MDS.cmd("txndelete id:" + txid); cb("input failed"); return; }
-            MDS.cmd("txnoutput id:" + txid + " amount:" + coin.amount + " address:" + SCRIPT_ADDR + " storestate:true", function (r2) {
+            MDS.cmd("txnoutput id:" + txid + " amount:" + coinAmount(coin) + " address:" + SCRIPT_ADDR + " tokenid:" + coinTok(coin) + " storestate:true", function (r2) {
               if (!r2.status) { MDS.cmd("txndelete id:" + txid); cb("output failed"); return; }
               var states = [[0, getState(coin, 0)], [1, getState(coin, 1)], [2, getState(coin, 2)], [3, getState(coin, 3)], [4, getState(coin, 4)], [5, getState(coin, 5)], [6, "2"], [7, getState(coin, 7)], [8, getState(coin, 8)], [9, getState(coin, 9)], [10, getState(coin, 10)], [11, getState(coin, 11)], [12, housesecret]];
               setStates(txid, states, 0, function () {
@@ -363,7 +383,8 @@ function manualResolve(coinid, cb) {
         if (!sres.value) { cb("Player secret not found"); return; }
         var playersecret = sres.value, housesecret = getState(coin, 12);
         var bet = getState(coin, 5), payout = parseInt(getState(coin, 4)), range = parseInt(getState(coin, 3)), playerpick = parseInt(getState(coin, 11));
-        var winnings = miniNum(parseFloat(bet) * payout), totalAmt = parseFloat(coin.amount);
+        var betToken = coinTok(coin);   // pay out in the bet coin's OWN token
+        var winnings = miniNum(parseFloat(bet) * payout), totalAmt = parseFloat(coinAmount(coin));
         var houseaddr = getState(coin, 1), playeraddr = getState(coin, 9);
         var combined = housesecret + playersecret.substring(2);
         MDS.cmd("hash data:" + combined, function (hres) {
@@ -382,7 +403,7 @@ function manualResolve(coinid, cb) {
                       var rp = Array.isArray(resArr) ? resArr[resArr.length - 1] : resArr;
                       if (rp && rp.status) {
                         var isHouse = isMyKey(getState(coin, 0));
-                        recordResult(coinid, range, playerpick, result, playerWins, isHouse, bet, payout, totalAmt);
+                        recordResult(coinid, range, playerpick, result, playerWins, isHouse, bet, payout, totalAmt, betToken);
                         cb(null, { ok: true, playerWins: playerWins, result: result, pick: playerpick, range: range, isHouse: isHouse });
                       } else { MDS.cmd("txndelete id:" + txid); cb("Resolve failed: " + (rp ? rp.error : "")); }
                     });
@@ -390,14 +411,14 @@ function manualResolve(coinid, cb) {
                 });
               };
               if (playerWins) {
-                MDS.cmd("txnoutput id:" + txid + " amount:" + winnings + " address:" + playeraddr + " storestate:false", function (ro1) {
+                MDS.cmd("txnoutput id:" + txid + " amount:" + winnings + " address:" + playeraddr + " tokenid:" + betToken + " storestate:false", function (ro1) {
                   if (!ro1.status) { MDS.cmd("txndelete id:" + txid); cb("payout output failed"); return; }
                   var remainder = miniNum(totalAmt - winnings);
-                  if (remainder > 0.00001) { MDS.cmd("txnoutput id:" + txid + " amount:" + remainder + " address:" + houseaddr + " storestate:false", function (ro2) { if (!ro2.status) { MDS.cmd("txndelete id:" + txid); cb("remainder failed"); return; } afterOutputs(); }); }
+                  if (remainder > 0.00001) { MDS.cmd("txnoutput id:" + txid + " amount:" + remainder + " address:" + houseaddr + " tokenid:" + betToken + " storestate:false", function (ro2) { if (!ro2.status) { MDS.cmd("txndelete id:" + txid); cb("remainder failed"); return; } afterOutputs(); }); }
                   else { afterOutputs(); }
                 });
               } else {
-                MDS.cmd("txnoutput id:" + txid + " amount:" + totalAmt + " address:" + houseaddr + " storestate:false", function (ro1) {
+                MDS.cmd("txnoutput id:" + txid + " amount:" + totalAmt + " address:" + houseaddr + " tokenid:" + betToken + " storestate:false", function (ro1) {
                   if (!ro1.status) { MDS.cmd("txndelete id:" + txid); cb("payout output failed"); return; }
                   afterOutputs();
                 });
@@ -423,13 +444,13 @@ function cancelBet(coinid, cb) {
         if (!r0.status) { cb("txncreate failed"); return; }
         MDS.cmd("txninput id:" + txid + " coinid:" + coinid, function (r1) {
           if (!r1.status) { MDS.cmd("txndelete id:" + txid); cb("input failed"); return; }
-          MDS.cmd("txnoutput id:" + txid + " amount:" + coin.amount + " address:" + MY_HEX_ADDR + " storestate:false", function (r2) {
+          MDS.cmd("txnoutput id:" + txid + " amount:" + coinAmount(coin) + " address:" + MY_HEX_ADDR + " tokenid:" + coinTok(coin) + " storestate:false", function (r2) {
             if (!r2.status) { MDS.cmd("txndelete id:" + txid); cb("output failed"); return; }
             MDS.cmd("txnsign id:" + txid + " publickey:" + getState(coin, 0), function (rs) {
               if (!rs.status) { MDS.cmd("txndelete id:" + txid); cb("Sign failed"); return; }
               MDS.cmd("txnbasics id:" + txid + ";txnpost id:" + txid, function (resArr) {
                 var rp = Array.isArray(resArr) ? resArr[resArr.length - 1] : resArr;
-                if (rp && rp.status) cb(null, { ok: true, amount: coin.amount });
+                if (rp && rp.status) cb(null, { ok: true, amount: coinAmount(coin) });
                 else { MDS.cmd("txndelete id:" + txid); cb("Cancel failed"); }
               });
             });
@@ -456,13 +477,13 @@ function claimTimeout(coinid, cb) {
         if (!r0.status) { cb("txncreate failed"); return; }
         MDS.cmd("txninput id:" + txid + " coinid:" + coinid, function (r1) {
           if (!r1.status) { MDS.cmd("txndelete id:" + txid); cb("input failed"); return; }
-          MDS.cmd("txnoutput id:" + txid + " amount:" + coin.amount + " address:" + MY_HEX_ADDR + " storestate:false", function (r2) {
+          MDS.cmd("txnoutput id:" + txid + " amount:" + coinAmount(coin) + " address:" + MY_HEX_ADDR + " tokenid:" + coinTok(coin) + " storestate:false", function (r2) {
             if (!r2.status) { MDS.cmd("txndelete id:" + txid); cb("output failed"); return; }
             MDS.cmd("txnsign id:" + txid + " publickey:" + signKey, function (rs) {
               if (!rs.status) { MDS.cmd("txndelete id:" + txid); cb("Sign failed"); return; }
               MDS.cmd("txnbasics id:" + txid + ";txnpost id:" + txid, function (resArr) {
                 var rp = Array.isArray(resArr) ? resArr[resArr.length - 1] : resArr;
-                if (rp && rp.status) cb(null, { ok: true, amount: coin.amount });
+                if (rp && rp.status) cb(null, { ok: true, amount: coinAmount(coin) });
                 else { MDS.cmd("txndelete id:" + txid); cb("Claim failed"); }
               });
             });
@@ -478,5 +499,6 @@ global.CASINO = {
   status: function () { return { ready: READY, pubkey: MY_PUBKEY, address: MY_HEX_ADDR, keys: Object.keys(MY_KEYS).length, contract: SCRIPT_ADDR }; },
   openBets: openBets, myBets: myBets, history: history, balance: balance,
   createBet: createBet, takeBet: takeBet, cancelBet: cancelBet,
-  manualReveal: manualReveal, manualResolve: manualResolve, claimTimeout: claimTimeout
+  manualReveal: manualReveal, manualResolve: manualResolve, claimTimeout: claimTimeout,
+  setCurrency: setCurrency
 };

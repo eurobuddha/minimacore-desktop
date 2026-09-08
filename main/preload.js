@@ -199,6 +199,7 @@ contextBridge.exposeInMainWorld("mcd", {
   casinoResolve: (coinid) => ipcRenderer.invoke("mcd:casinoResolve", coinid),
   casinoReveal: (coinid) => ipcRenderer.invoke("mcd:casinoReveal", coinid),
   casinoClaimTimeout: (coinid) => ipcRenderer.invoke("mcd:casinoClaimTimeout", coinid),
+  casinoSetCurrency: (tokenid) => ipcRenderer.invoke("mcd:casinoSetCurrency", tokenid),
   casinoNewCount: () => ipcRenderer.invoke("mcd:casinoNewCount"),
   casinoSeen: () => ipcRenderer.invoke("mcd:casinoSeen"),
   casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),

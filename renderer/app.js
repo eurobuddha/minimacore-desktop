@@ -4689,6 +4689,34 @@ const casinoFlashed = {};      // coinid → true once its win/lose flash has sh
 
 function casinoGame(range) { return range == 2 ? CASINO_PRESETS.flip : range == 6 ? CASINO_PRESETS.dice : range == 36 ? CASINO_PRESETS.roulette : { name: "Custom (" + range + ")", icon: "✳", range: range, payout: range }; }
 function casinoPickLabel(range, pick) { return range == 2 ? (parseInt(pick) === 0 ? "Heads" : "Tails") : "" + (parseInt(pick) + 1); }
+// ===== Currency (MxUSD "dollar mode") — mirrors the native APK / MDS. Persisted in CFG.casinoDollar; the
+// active token is pushed to the main-process engine via api.casinoSetCurrency so NEW bets + the header balance
+// use it. Existing-bet ops derive their token from the coin, so the renderer just filters/labels by tokenid. =====
+var CASINO_USD_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+function casinoDollar() { return !!(CFG && CFG.casinoDollar); }
+function casinoCcyToken() { return casinoDollar() ? CASINO_USD_TOKENID : "0x00"; }
+function casinoCcyLabel() { return casinoDollar() ? "USD" : "MINIMA"; }
+function casinoIsMinimaTok(t) { return !t || t === "0x00"; }
+function casinoCcyName(t) { return casinoIsMinimaTok(t) ? "MINIMA" : "USD"; }   // label a specific bet's token
+function casinoTokIsActive(t) { return casinoIsMinimaTok(t) ? !casinoDollar() : (casinoDollar() && String(t).toLowerCase() === CASINO_USD_TOKENID.toLowerCase()); }
+// Display: Minima keeps the 3dp truncation; MxUSD shows its TRUE token resolution (tidy full precision — a
+// coloured token's whole point is its decimals; truncating would hide real value). Display-only, never tx.
+function casinoFmtTok(v, tokenid) {
+  if (casinoIsMinimaTok(tokenid)) return casinoFmt(v);
+  var s = String(v == null ? "0" : v);
+  if (s.indexOf("e") >= 0 || s.indexOf("E") >= 0) { var n = parseFloat(v); s = isNaN(n) ? "0" : n.toFixed(12); }
+  if (s.indexOf(".") >= 0) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return (s === "" || s === "-") ? "0" : s;
+}
+function applyCasinoCcyTheme() { try { var h = el("casinoBody"); if (!h) return; if (casinoDollar()) h.setAttribute("data-ccy", "usd"); else h.removeAttribute("data-ccy"); } catch (e) {} }
+function casinoSyncCurrency() { try { api.casinoSetCurrency(casinoCcyToken()); } catch (e) {} }   // tell the engine (new bets + balance)
+async function casinoToggleCurrency() {
+  CFG.casinoDollar = !casinoDollar();
+  try { CFG = await api.saveConfig({ casinoDollar: CFG.casinoDollar }); } catch (e) {}
+  casinoSyncCurrency();
+  renderCasino();
+}
+
 function casinoFmt(v) {   // TRUNCATE to 3 dp, NEVER round up — a shown balance must never exceed the real one
   let n = parseFloat(v); if (isNaN(n)) n = 0;
   const neg = n < 0; n = Math.floor(Math.abs(n) * 1000) / 1000;
@@ -4985,18 +5013,24 @@ async function renderCasino() {
   try { bal = await api.casinoBalance(); } catch (e) {}
   try { stake = await api.casinoStakeable(); } catch (e) {}   // honest max single bet (largest signable-address sendable total)
   casinoStatusCache = st;
+  casinoSyncCurrency();   // ensure the engine's active token matches the toggle (new bets + balance)
   api.casinoSeen().catch(() => {}); refreshCasinoBadge();   // viewing the tab clears the unseen-result badge
   const ready = st && st.ready;
+  // Header "available to bet": in USD mode the Minima-only stakeable ceiling doesn't apply, so show the
+  // MxUSD balance at true resolution; in Minima mode keep the honest single-address stakeable ceiling.
+  const availLbl = casinoCcyLabel();
+  const availVal = casinoDollar() ? casinoFmtTok(bal, casinoCcyToken()) : casinoFmt(stake != null ? stake : bal);
   const sub = (v, label) => `<button class="btn btn--sm ${casinoView === v ? "btn--primary" : "btn--outline"}" data-cv="${v}">${label}</button>`;
   host.innerHTML =
     `<div class="view__title" style="display:flex;align-items:center;gap:10px">P2PChance
        <span style="font:600 11px/1 var(--mono);color:var(--dim);letter-spacing:0">TRUE ODDS · NO HOUSE</span>
        <span style="flex:1"></span>
+       <button class="btn btn--sm btn--outline" id="casinoCcy" title="Currency — Minima or MxUSD (USD)">${casinoCcyLabel()}</button>
        <button class="btn btn--sm btn--outline" id="casinoMute" title="Sound">${(() => { try { return localStorage.getItem("casino_mute") === "1" ? "🔇" : "🔊"; } catch (e) { return "🔊"; } })()}</button>
      </div>
-     <div class="view__desc" style="margin:-4px 2px 10px">Games of chance played directly between two people, settled on-chain — <b>no middleman, no house edge, true odds</b>. Real MINIMA at stake.</div>
+     <div class="view__desc" style="margin:-4px 2px 10px">Games of chance played directly between two people, settled on-chain — <b>no middleman, no house edge, true odds</b>. Real ${esc(availLbl)} at stake.</div>
      <div class="casino-hdr">
-       <div><span class="casino-hdr__k">Available to bet</span><span class="casino-hdr__v" title="The largest single bet you can place right now — in-play stakes & pending coins excluded">${casinoFmt(stake != null ? stake : bal)} <small>MINIMA</small></span></div>
+       <div><span class="casino-hdr__k">Available to bet</span><span class="casino-hdr__v" title="The largest single bet you can place right now — in-play stakes & pending coins excluded">${availVal} <small>${esc(availLbl)}</small></span></div>
        <div><span class="casino-hdr__k">Block</span><span class="casino-hdr__v">${st && st.block ? "#" + st.block : "—"}</span></div>
        <div><span class="casino-hdr__k">Engine</span><span class="casino-hdr__v" style="color:${ready ? "var(--green)" : "var(--amber)"}">${ready ? "ready" : "starting…"}</span></div>
      </div>
@@ -5006,6 +5040,9 @@ async function renderCasino() {
   host.querySelectorAll("[data-cv]").forEach(b => b.addEventListener("click", () => { casinoView = b.dataset.cv; renderCasino(); }));
   const mute = el("casinoMute");
   if (mute) mute.addEventListener("click", () => { try { const m = localStorage.getItem("casino_mute") === "1"; localStorage.setItem("casino_mute", m ? "0" : "1"); } catch (e) {} renderCasino(); });
+  const ccy = el("casinoCcy");
+  if (ccy) ccy.addEventListener("click", casinoToggleCurrency);
+  applyCasinoCcyTheme();   // green "dollar" accent on casinoBody when USD is active
   renderCasinoSub();
   casinoActPaint();   // restore the activity board from the ring after a re-render
 }
@@ -5022,10 +5059,11 @@ async function renderCasinoPlay() {
   const host = el("casinoSub"); if (!host) return;
   let bets = []; try { bets = await api.casinoOpenBets(); } catch (e) {}
   if (el("casinoSub") !== host) return;   // view changed while awaiting
-  if (!bets.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No open bets right now. Switch to <b>Be the House</b> to offer one, or check back — bets from the native app & MiniDapp appear here too.</div></div>`; return; }
+  bets = (bets || []).filter(b => casinoTokIsActive(b.tokenid));   // show only the active currency's open bets
+  if (!bets.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No open ${esc(casinoCcyLabel())} bets right now. Switch to <b>Be the House</b> to offer one, or check back — bets from the native app & MiniDapp appear here too.</div></div>`; return; }
   host.innerHTML = bets.map(b => {
-    const g = casinoGame(b.range), odds = (b.payout - 1);
-    const win = casinoFmt(parseFloat(b.bet) * b.payout);
+    const g = casinoGame(b.range), odds = (b.payout - 1), tn = casinoCcyName(b.tokenid);
+    const win = casinoFmtTok(parseFloat(b.bet) * b.payout, b.tokenid);
     const pick = casinoPick[b.coinid];
     const picker = casinoPicker(b.range, b.coinid, pick);
     const canTake = pick !== undefined && pick !== null && pick !== "";
@@ -5033,8 +5071,8 @@ async function renderCasinoPlay() {
       <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span>
         <span class="casino-bet__name">${esc(g.name)}</span>
         <span class="casino-bet__odds">${odds}:1</span></div>
-      <div class="casino-bet__row"><span>Bet</span><b>${casinoFmt(b.bet)} MINIMA</b></div>
-      <div class="casino-bet__row"><span>You win</span><b style="color:var(--green)">${win} MINIMA</b></div>
+      <div class="casino-bet__row"><span>Bet</span><b>${casinoFmtTok(b.bet, b.tokenid)} ${tn}</b></div>
+      <div class="casino-bet__row"><span>You win</span><b style="color:var(--green)">${win} ${tn}</b></div>
       <div class="casino-pickwrap">${picker}</div>
       <button class="btn btn--primary btn--full casino-take" data-coin="${b.coinid}" ${canTake && !casinoBusy[b.coinid] ? "" : "disabled"}>${casinoBusy[b.coinid] ? "Taking…" : (canTake ? "TAKE BET — pick " + esc(casinoPickLabel(b.range, pick)) : "Choose your pick")}</button>
     </div>`;
@@ -5088,7 +5126,7 @@ async function renderCasinoHouse() {
   host.innerHTML =
     `<div class="card">
       <div class="casino-presets">${card("flip", CASINO_PRESETS.flip)}${card("dice", CASINO_PRESETS.dice)}${card("roulette", CASINO_PRESETS.roulette)}</div>
-      <label class="casino-lbl">Player's bet (MINIMA)</label>
+      <label class="casino-lbl">Player's bet (${esc(casinoCcyLabel())})</label>
       <input class="field__input" id="casinoBetAmt" type="number" min="0" step="0.01" placeholder="e.g. 10" value="${esc(curBet)}">
       <div id="casinoHouseSummary" class="casino-summary"></div>
       <button class="btn btn--primary btn--full" id="casinoCreateBtn" ${casinoBusy.create ? "disabled" : ""}>${casinoBusy.create ? "Creating…" : "CREATE BET"}</button>
@@ -5108,7 +5146,7 @@ function casinoUpdateHouseSummary() {
   const p = CASINO_PRESETS[casinoHousePreset];
   const bet = parseFloat((el("casinoBetAmt") || {}).value) || 0;
   let stake = parseFloat((bet * (p.payout - 1)).toFixed(8)); if (stake <= 0) stake = bet;
-  box.innerHTML = `<div class="casino-summary__row"><span>You lock</span><b>${casinoFmt(stake)} MINIMA</b></div>
+  box.innerHTML = `<div class="casino-summary__row"><span>You lock</span><b>${casinoFmt(stake)} ${esc(casinoCcyLabel())}</b></div>
     <div class="casino-summary__row"><span>If the player wins</span><b style="color:var(--red)">−${casinoFmt(stake)}</b></div>
     <div class="casino-summary__row"><span>If the player loses</span><b style="color:var(--green)">+${casinoFmt(bet)}</b></div>
     <div class="casino-summary__row"><span>Odds</span><b>${p.payout - 1}:1 (fair)</b></div>`;
@@ -5168,7 +5206,7 @@ async function renderCasinoMyBets() {
   const host = el("casinoSub"); if (!host) return;
   let bets = []; try { bets = await api.casinoMyBets(); } catch (e) {}
   if (el("casinoSub") !== host) return;
-  const active = (bets || []).filter(b => b.phase !== 0 || b.amHouse);   // include my open offers too
+  const active = (bets || []).filter(b => (b.phase !== 0 || b.amHouse) && casinoTokIsActive(b.tokenid));   // my open offers too, active currency only
   // Pending placeholders — a create/take is NOT a real bet until the chain confirms it (mirrors MDS).
   // Pending CREATE shows its status on the Offer page; pending TAKE is a TEXT-ONLY card here (no animation —
   // the spinning game only plays once a bet is actually in play, phase >= 1).
@@ -5191,7 +5229,7 @@ async function renderCasinoMyBets() {
       <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span><span class="casino-bet__name">${esc(g.name)}</span>
         <span class="casino-bet__role">${esc(b.role)}${pickTxt}</span></div>
       ${inflight ? casinoAnimHTML(b.range) : ""}
-      <div class="casino-bet__row"><span>Pot</span><b>${casinoFmt(b.amount)} MINIMA</b></div>
+      <div class="casino-bet__row"><span>Pot</span><b>${casinoFmtTok(b.amount, b.tokenid)} ${casinoCcyName(b.tokenid)}</b></div>
       <div class="casino-bet__row"><span>Status</span><b style="color:${statusCol}">${statusTxt}</b></div>
       ${b.timeout ? `<div class="casino-bet__row"><span>Age</span><b>${b.age}/${b.timeout} blocks</b></div>` : ""}
       ${casinoBusy[b.coinid] ? `<div class="casino-note" style="color:var(--amber)">${casinoCancelling[b.coinid] ? "Cancelling — posting to chain…" : "Posting to chain…"}</div>` : extra}
@@ -5236,13 +5274,14 @@ async function renderCasinoHistory() {
   const host = el("casinoSub"); if (!host) return;
   let hist = []; try { hist = await api.casinoHistory(); } catch (e) {}
   if (el("casinoSub") !== host) return;
-  if (!hist.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No completed bets yet.</div></div>`; return; }
+  hist = (hist || []).filter(rb => casinoTokIsActive(rb.tokenid));   // active currency only (a mixed Minima/USD list is meaningless)
+  if (!hist.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">No completed ${esc(casinoCcyLabel())} bets yet.</div></div>`; return; }
   host.innerHTML = `<div class="card" style="padding:0;overflow:hidden">` + hist.map(rb => {
     const won = !!rb.won, col = won ? "var(--green)" : "var(--red)", sign = won ? "+" : "−";
     const pk = (rb.pickLabel && rb.pickLabel !== "—") ? `<div class="casino-hist__sub">Picked ${esc(rb.pickLabel)} → Result ${esc(rb.resultLabel)}</div>` : "";
     return `<div class="casino-hist"><span class="casino-ico" style="font-size:17px">${casinoGame(rb.range).icon}</span>
       <div style="flex:1"><div class="casino-hist__ttl">${esc(rb.game)} <span style="color:var(--dim);font-weight:400">as ${esc(rb.role)}</span></div>${pk}</div>
-      <div style="font:800 14px/1 var(--mono);color:${col}">${sign}${casinoFmt(rb.profit)}</div></div>`;
+      <div style="font:800 14px/1 var(--mono);color:${col}">${sign}${casinoFmtTok(rb.profit, rb.tokenid)} <small style="font-weight:600;color:var(--dim)">${casinoCcyName(rb.tokenid)}</small></div></div>`;
   }).join("") + `</div>`;
 }
 

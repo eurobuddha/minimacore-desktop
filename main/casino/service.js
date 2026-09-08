@@ -23,6 +23,10 @@ function getState(coin,port){
   return'';
 }
 function isMyKey(pk){return MY_KEYS[pk]===true}
+// FUND-CRITICAL: a coloured-token (MxUSD) coin's value is in tokenamount; its `amount` is the ~1e-37
+// native shell. Always read a coin's value through this, and carry the coin's own tokenid on outputs.
+function coinAmount(coin){if(!coin)return"0";var ta=coin.tokenamount;if(ta!==undefined&&ta!==null&&ta!=="")return String(ta);return(coin.amount==null||coin.amount==="")?"0":String(coin.amount)}
+function coinTok(coin){return(coin&&coin.tokenid)?coin.tokenid:"0x00"}
 function extractResponse(res){
   if(!res||!res.response)return null;
   var r=res.response;
@@ -39,9 +43,9 @@ function gameTypeName(range){if(range==2)return'Coin Flip';if(range==6)return'Di
 function pickLbl(range,pick){if(range==2)return parseInt(pick)===0?'Heads':'Tails';return''+(parseInt(pick)+1)}
 // Record the EXACT resolved result (player perspective) to the shared casino_history, so index.html
 // shows the right outcome for a bet the service resolved while the tab was closed — no lossy guess.
-function recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payout,totalAmt){
+function recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payout,totalAmt,tokenid){
   var profit=playerWins?miniNum(parseFloat(bet)*payout-parseFloat(bet)):parseFloat(bet);
-  var entry={coinid:coinid,role:'Player',game:gameTypeName(range),range:range,pickLabel:pickLbl(range,playerpick),resultLabel:pickLbl(range,result),profit:profit,won:playerWins,bet:bet,amount:totalAmt,txid:coinid,time:Date.now()};
+  var entry={coinid:coinid,role:'Player',game:gameTypeName(range),range:range,pickLabel:pickLbl(range,playerpick),resultLabel:pickLbl(range,result),profit:profit,won:playerWins,bet:bet,amount:totalAmt,tokenid:tokenid||"0x00",txid:coinid,time:Date.now()};
   MDS.keypair.get("casino_history",function(h){
     var hist=[];try{if(h&&h.value)hist=JSON.parse(h.value)}catch(e){}
     if(hist.some(function(rb){return rb.coinid===coinid}))return;
@@ -231,7 +235,7 @@ function doReveal(coin){
       if(!r0.status){delete BUSY[coinid];return}
       MDS.cmd("txninput id:"+txid+" coinid:"+coinid,function(r1){
         if(!r1.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
-        MDS.cmd("txnoutput id:"+txid+" amount:"+coin.amount+" address:"+SCRIPT_ADDR+" storestate:true",function(r2){
+        MDS.cmd("txnoutput id:"+txid+" amount:"+coinAmount(coin)+" address:"+SCRIPT_ADDR+" tokenid:"+coinTok(coin)+" storestate:true",function(r2){
           if(!r2.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
           var states=[
             [0,getState(coin,0)],[1,getState(coin,1)],[2,getState(coin,2)],
@@ -270,7 +274,8 @@ function doResolve(coin){
     var playersecret=sres.value;
     var housesecret=getState(coin,12);
     var bet=getState(coin,5),payout=parseInt(getState(coin,4)),range=parseInt(getState(coin,3)),playerpick=parseInt(getState(coin,11));
-    var winnings=miniNum(parseFloat(bet)*payout),totalAmt=parseFloat(coin.amount);
+    var betToken=coinTok(coin);
+    var winnings=miniNum(parseFloat(bet)*payout),totalAmt=parseFloat(coinAmount(coin));
     var houseaddr=getState(coin,1),playeraddr=getState(coin,9);
     var combined=housesecret+playersecret.substring(2);
 
@@ -294,7 +299,7 @@ function doResolve(coin){
                   var rp=Array.isArray(resArr)?resArr[resArr.length-1]:resArr;
                   if(rp&&rp.status){
                     MDS.log("Casino service: resolved "+coinid.substring(0,16)+"... "+(playerWins?"PLAYER WINS":"HOUSE WINS"));
-                    recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payout,totalAmt);
+                    recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payout,totalAmt,betToken);
                   }else{
                     MDS.log("Casino service: resolve FAILED for "+coinid.substring(0,16)+"...");
                   }
@@ -306,12 +311,12 @@ function doResolve(coin){
           };
 
           if(playerWins){
-            // Player wins: payout winnings to player, remainder to house
-            MDS.cmd("txnoutput id:"+txid+" amount:"+winnings+" address:"+playeraddr+" storestate:false",function(r2){
+            // Player wins: payout winnings to player, remainder to house — in the bet coin's own token
+            MDS.cmd("txnoutput id:"+txid+" amount:"+winnings+" address:"+playeraddr+" tokenid:"+betToken+" storestate:false",function(r2){
               if(!r2.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
               if(totalAmt>winnings){
                 var remainder=miniNum(totalAmt-winnings);
-                MDS.cmd("txnoutput id:"+txid+" amount:"+remainder+" address:"+houseaddr+" storestate:false",function(r3){
+                MDS.cmd("txnoutput id:"+txid+" amount:"+remainder+" address:"+houseaddr+" tokenid:"+betToken+" storestate:false",function(r3){
                   if(!r3.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
                   afterOutputs();
                 });
@@ -320,8 +325,8 @@ function doResolve(coin){
               }
             });
           }else{
-            // House wins: all to house
-            MDS.cmd("txnoutput id:"+txid+" amount:"+totalAmt+" address:"+houseaddr+" storestate:false",function(r2){
+            // House wins: all to house — in the bet coin's own token
+            MDS.cmd("txnoutput id:"+txid+" amount:"+totalAmt+" address:"+houseaddr+" tokenid:"+betToken+" storestate:false",function(r2){
               if(!r2.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
               afterOutputs();
             });

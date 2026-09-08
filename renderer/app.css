@@ -660,6 +660,10 @@ body { font-family: var(--sans); }
 #view-minimall .mail-thread { display:flex; flex-direction:column; gap:6px; }
 
 /* ============================ Casino (Zero Edge) ============================ */
+/* MxUSD "dollar mode": re-point the accent to dollar-green, SCOPED to the casino view (data-ccy is set on
+   #casinoBody) so the rest of the app keeps its normal accent. Redefining the CSS vars cascades to every
+   casino descendant that uses var(--accent)/var(--accent-bg). */
+#casinoBody[data-ccy="usd"] { --accent:#26a17b; --accent-bg:rgba(38,161,123,.14); }
 .casino-hdr { display:flex; gap:10px; }
 .casino-hdr > div { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:9px 11px; display:flex; flex-direction:column; gap:3px; }
 .casino-hdr__k { font:600 10px/1 var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
