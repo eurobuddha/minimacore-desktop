@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.38] — Pools: Withdraw/Add/Migrate re-read the live pool coin (fixes "the pool moved")
+- **Fixed** Close/Withdraw (and Add, Migrate) in the Pools tab failing with *"an input coin was already spent (the pool moved) — nothing was posted"* on an active pool (parity with native **0.9.36 / 0.9.40** and MDS **0.6.21**). The desktop spent the pool's coin ids cached at the last scan; a counterparty swap — or its own keep-fresh (~every 900 blocks) — spends and recreates those coins, so the cached id is a spent coin and the tx dies at `txncheck` (`mmrproofs=false`). It now re-reads the LIVE covenant coin (fresh `coinidM/coinidT` + amounts) right before building close/add/migrate, retries close once if the pool moves, and re-derives Add's balanced token side from the live ratio. Covenant params (`opk/oadr/tok/kmin/address`) are untouched.
+
+## [0.16.37] — casino: MxUSD (dollar) currency toggle
+- (Casino change by another author — commit `65141da`; full entry pending from that author.)
+
 ## [0.16.36] — CI fetch works on every runner; installer names fixed
 - **Fixed** the CI matrix's Parlons Node fetch so every runner completes it: `sha256sum` on Windows (no `shasum` there), no unauthenticated releases-API call when the node version is pinned (the shared Mac runner was rate-limited to a 403), and the job token passed to the fetch step (`GH_TOKEN: ${{ github.token }}`).
 - **Fixed** the installer names to `minimaCore-<ver>-x64.exe` / `minimaCore-<ver>-x64.AppImage` (electron-builder rendered `${arch}` as `x86_64` for the AppImage; the artifact name now carries the literal `x64`).

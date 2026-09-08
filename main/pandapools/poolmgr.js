@@ -381,18 +381,24 @@ var PoolMgr = (function () {
     // ================================================================ ADD LIQUIDITY (grow-in-place)
     function deposit(p, addMRaw, addTRaw, done) {   // done.ok(txpowid), done.fail
         if (!Curve.funded(p)) { done.fail("pool has no live reserves"); return; }
-        var addM = PP.dec(addMRaw), addT = PP.dec(addTRaw);
-        if (addM.lt(0) || addT.lt(0) || (addM.isZero() && addT.isZero())) { done.fail("enter an amount to add"); return; }
-        var addTc = addT.toDP(p.tokDecimals, D.ROUND_DOWN);
-        var newX = PP.dec(p.reserveM).plus(addM);
-        var newY = PP.dec(p.reserveT).plus(addTc);
-        var cap = PP.decOr(p.kmin, 0).times(GROW_CAP_MULT);
-        if (cap.gt(0) && newX.times(newY).gt(cap)) {
-            done.fail("this deposit would push K past 2×KMIN — use Migrate to add liquidity and reset the floor"); return;
-        }
+        var addM = PP.dec(addMRaw);
+        if (addM.lte(0)) { done.fail("enter an amount to add"); return; }
         var tok = p.tok, tokArg = " tokenid:" + tok;
         var excl = {}; excl[p.address.toLowerCase()] = true;
         ensureTracked(p, function () {
+          // Re-read the live pool coin first — deposit grows reserves in place and spends the current
+          // covenant coin; a stale snapshot fails with "already spent (the pool moved)".
+          withFreshCoins(p, function () {
+            // Re-derive the balanced token side from the LIVE ratio (reserveT/reserveM), not the
+            // dialog-time amount — a swap in the dialog window would otherwise post off-ratio and shift
+            // the price. Keeps the add balanced against current reserves.
+            var addTc = addM.times(PP.dec(p.reserveT)).div(PP.dec(p.reserveM)).toDP(p.tokDecimals, D.ROUND_DOWN);
+            var newX = PP.dec(p.reserveM).plus(addM);
+            var newY = PP.dec(p.reserveT).plus(addTc);
+            var cap = PP.decOr(p.kmin, 0).times(GROW_CAP_MULT);
+            if (cap.gt(0) && newX.times(newY).gt(cap)) {
+                done.fail("this deposit would push K past 2×KMIN — use Migrate to add liquidity and reset the floor"); return;
+            }
             selectCoins(MINIMA, addM, excl, function (mfunds, msum) {
                 if (!mfunds) { done.fail("insufficient MINIMA to add"); return; }
                 selectCoins(tok, addTc, excl, function (tfunds, tsum) {
@@ -415,6 +421,7 @@ var PoolMgr = (function () {
                     buildAndPost(txid, cmds, ["auto", p.opk], done);
                 });
             });
+          }, done.fail);   // end withFreshCoins
         });
     }
 
@@ -439,7 +446,9 @@ var PoolMgr = (function () {
                     kmin: kmin2, tokDecimals: p.tokDecimals, reserveM: newX, reserveT: newYc, tokName: p.tokName,
                     covenantScript: script2   // authoritative script → stored in the recovery recipe
                 };
-                buildMigrate(p, np, newX, newYc, done);
+                // Re-read the live OLD-pool coin first — migrate sweeps the current reserves to $OADR,
+                // pinned by VERIFYOUT to the input coin amount; a stale snapshot fails "already spent".
+                withFreshCoins(p, function () { buildMigrate(p, np, newX, newYc, done); }, done.fail);
             });
         }, done.fail);
     }
@@ -479,19 +488,66 @@ var PoolMgr = (function () {
         });
     }
 
+    // Re-read a single pool's LIVE reserve coins at its covenant address and overwrite
+    // coinidM/coinidT/reserveM/reserveT with the current largest coin per leg — call before an owner
+    // tx (close/add/migrate) so it spends the CURRENT coin, not a stale scan snapshot: a swap, or our
+    // own keep-fresh (REFRESH_BLOCKS), spends and recreates the coins, so a cached id is a SPENT coin
+    // and the tx dies at txncheck ("an input coin was already spent — the pool moved"). Covenant params
+    // (opk/oadr/tok/kmin/address) are invariant across coin moves. Mirrors native PoolRefresher.readLiveReserves.
+    function readLiveReserves(p, done) {   // done(funded)
+        if (!p || !p.address) { done(false); return; }
+        MDS.cmd("coins address:" + p.address, function (j) {
+            var cs = (j && j.status && Array.isArray(j.response)) ? j.response : [];
+            p.reserveM = null; p.reserveT = null; p.coinidM = ""; p.coinidT = ""; p.reserveBlock = 0;
+            var mBlk = 0, tBlk = 0;
+            for (var i = 0; i < cs.length; i++) {
+                var c = cs[i];
+                if (!c || c.spent === true) continue;
+                var tid = c.tokenid || "";
+                if (tid === "0x00") {
+                    var amtM = PP.dec(c.amount || "0");
+                    if (p.reserveM === null || amtM.gt(p.reserveM)) { p.reserveM = amtM; p.coinidM = c.coinid || ""; mBlk = parseInt(c.created) || 0; }
+                } else if (p.tok && p.tok.toLowerCase() === tid.toLowerCase()) {
+                    var amtT = PP.dec(c.tokenamount !== undefined ? c.tokenamount : (c.amount || "0"));
+                    if (p.reserveT === null || amtT.gt(p.reserveT)) { p.reserveT = amtT; p.coinidT = c.coinid || ""; tBlk = parseInt(c.created) || 0; }
+                }
+            }
+            p.reserveBlock = Math.max(mBlk, tBlk);
+            done(Curve.funded(p));
+        });
+    }
+
+    // Re-read the live coin then run ok(); abort via fail(msg) if it can't be read or is now empty.
+    function withFreshCoins(p, ok, fail) {
+        readLiveReserves(p, function (funded) {
+            if (!funded) { fail("couldn't read the pool's current reserves — refresh and try again"); return; }
+            ok();
+        });
+    }
+
     // ================================================================ CLOSE (owner sweep)
     function close(p, done) {   // done.ok(txpowid), done.fail
         if (!Curve.funded(p)) { done.fail("pool has no live reserves to withdraw"); return; }
-        var tokArg = " tokenid:" + p.tok;
         ensureTracked(p, function () {
-            var txid = "ppclose_" + tag();
-            var cmds = ["txncreate id:" + txid];
-            cmds.push("txninput id:" + txid + " coinid:" + p.coinidM);   // 0 -> owner exit
-            cmds.push("txninput id:" + txid + " coinid:" + p.coinidT);   // 1 -> owner exit
-            cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(PP.dec(p.reserveM)) + " address:" + p.oadr + " storestate:false");
-            cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(PP.dec(p.reserveT)) + " address:" + p.oadr + tokArg + " storestate:false");
-            // no wallet funding inputs → only the owner signature is needed
-            buildAndPost(txid, cmds, [p.opk], done);
+            var retried = false;
+            function attempt() {
+                // Re-read the LIVE coin right before building; retry ONCE if the pool moves under us.
+                withFreshCoins(p, function () {
+                    var tokArg = " tokenid:" + p.tok;
+                    var txid = "ppclose_" + tag();
+                    var cmds = ["txncreate id:" + txid];
+                    cmds.push("txninput id:" + txid + " coinid:" + p.coinidM);   // 0 -> owner exit
+                    cmds.push("txninput id:" + txid + " coinid:" + p.coinidT);   // 1 -> owner exit
+                    cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(PP.dec(p.reserveM)) + " address:" + p.oadr + " storestate:false");
+                    cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(PP.dec(p.reserveT)) + " address:" + p.oadr + tokArg + " storestate:false");
+                    // no wallet funding inputs → only the owner signature is needed
+                    buildAndPost(txid, cmds, [p.opk], { ok: done.ok, fail: function (message) {
+                        if (!retried && message && message.indexOf("already spent") >= 0) { retried = true; attempt(); return; }
+                        done.fail(message);
+                    } });
+                }, done.fail);
+            }
+            attempt();
         });
     }
 
