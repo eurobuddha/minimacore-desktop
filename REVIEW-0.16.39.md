@@ -31,7 +31,7 @@ Eleven shared engine files are byte-identical, including all new activity/recove
 
 - 18 regression tests pass against the MDS engine and against Desktop's copied engine (`tests/activity-chain.test.cjs`, set PP_ENGINE_ROOT for the latter).
 - The actual Android consolidation fixture reconstructs original ID `0x8C6B7401E1343318C7EC80563408C9978C40B7CA59EF76CE443EB0D2B68D27EB`. Altered headers, wrong mined hashes and malformed parents fail closed.
-- Tests cover immutable new-receipt matching, old receipts, 140 retained failures, verification across 200 history records, advancing proof data, not-found/reorg evidence, transport/malformed replies, public/wallet separation, SQL persistence/reload, incomplete pages, storage failure retention and MDS rendering.
+- Tests cover immutable new-receipt matching, old receipts, 140 retained failures, verification across 200 history records, not-found/reorg evidence, transport/malformed replies, public/wallet separation, SQL persistence/reload, incomplete pages, storage failure retention and MDS rendering.
 - Desktop parity/display check passes for real counts, withdrawal classification, UTC times, copyable original IDs, observation provenance and HTML escaping.
 - Successful SQL operations from the suite replay against Minima's H2 2.4.240 engine as well as Desktop sql.js.
 - Changed scripts and MDS inline scripts parse; git diff --check passes.
@@ -39,3 +39,9 @@ Eleven shared engine files are byte-identical, including all new activity/recove
 ## Verdict and limits
 
 Approve for packaged validation. No spending/signing command or live-wallet transaction was issued during testing. Recovery still needs the node's retained header (and the original ID); missing archived history is not fabricated. Public address responses are not byte-bounded by a node max argument; a failed lookup stays visible. Live MDS/Desktop wallet verification and installer deployment are separate from the isolated tests above.
+
+## Packaged validation
+
+First and only macOS ARM64 artifact: `dist/minimaCore-0.16.39-arm64.dmg`. SHA-256 `c8617ccd03da69bdc56f615c50790844f561329a1176eb586bbaed008c2be6b7`. Developer ID signing, strict deep codesign verification, Apple notarization, app/DMG stapling and Gatekeeper checks all passed (`scripts/verify-mac.sh`: ALL OK). The packaged app.asar version is 0.16.39, and every changed runtime file matches the committed source exactly. No prior versioned DMG was overwritten.
+
+MDS 0.6.22 source was verified on GitHub at 34bf886a519833b0449340f9798dbcca617bcfad; Desktop 0.16.39 source at 90832864e722776248264c450be1495643f307c4. These artifacts have not been installed into a live MDS/Desktop wallet during this task. Windows/Linux installers and store publication are not part of this local macOS package validation.
