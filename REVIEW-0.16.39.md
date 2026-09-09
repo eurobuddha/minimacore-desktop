@@ -45,3 +45,11 @@ Approve for packaged validation. No spending/signing command or live-wallet tran
 First and only macOS ARM64 artifact: `dist/minimaCore-0.16.39-arm64.dmg`. SHA-256 `c8617ccd03da69bdc56f615c50790844f561329a1176eb586bbaed008c2be6b7`. Developer ID signing, strict deep codesign verification, Apple notarization, app/DMG stapling and Gatekeeper checks all passed (`scripts/verify-mac.sh`: ALL OK). The packaged app.asar version is 0.16.39, and every changed runtime file matches the committed source exactly. No prior versioned DMG was overwritten.
 
 MDS 0.6.22 source was verified on GitHub at 34bf886a519833b0449340f9798dbcca617bcfad; Desktop 0.16.39 source at 90832864e722776248264c450be1495643f307c4. These artifacts have not been installed into a live MDS/Desktop wallet during this task. Windows/Linux installers and store publication are not part of this local macOS package validation.
+
+## Publication — 9 September 2026
+
+GitHub release v0.16.39 is published. CI run 34342463688 succeeded on macOS, Windows and Linux. The public Mac asset is the previously verified signed/notarized local DMG. The live update feed at https://eurobuddha.com/pandaapps/minimacore-desktop.json lists all three platforms at 0.16.39. Generated pandaapps/ files remain ignored by repository convention; published feed values are recorded here and in the PandaApps catalog.
+
+- Mac SHA-256: `c8617ccd03da69bdc56f615c50790844f561329a1176eb586bbaed008c2be6b7`
+- Windows SHA-256: `19139c8ee27e4e76bf769c411ee04af5375e307dad18b0a7f159f66ec0bca2cd`
+- Linux SHA-256: `5a958407bf24dbc81047d69d471d6bc2eae5f890c9e361fa3f0a199ce45ddb41`
