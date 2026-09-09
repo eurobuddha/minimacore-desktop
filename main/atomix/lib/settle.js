@@ -83,11 +83,13 @@
         H.currentBlock(function (e, block) {
             if (e) return cb();
             runMinimaChecks(block, function () {
+                confirmPendingMinima(function () {
                 runEthChecks(block, function () {
                     // MAKER buy-take discovery (TAKE-sentinel handshakes → lock the mxUSDT counter-leg), if the
                     // responder is live on this instance (needs a published order); a no-op on a taker-only instance.
                     if (AX.responder && AX.responder.ready()) AX.responder.scanIncomingBuys(block, cb);
                     else cb();
+                });
                 });
             });
         });
@@ -227,12 +229,8 @@
                             onChanged();
                             H.claim(coin, hash, secret, C.myMinimaAddr, function (eC, txpowid) {
                                 if (eC) return next();          // leave the attempt stamp → retry after the window
-                                DB.logEvent(hash, DB.EV_COLLECT, 'minima', H.coinAmount(coin), txpowid, function () {
-                                    DB.setSwapStatus(hash, DB.ST_COMPLETE, function () {
-                                        delete ethAttempt['claimM:' + hash];
-                                        notify('Swap complete', 'Claimed ' + H.coinAmount(coin) + ' ' + TR.labelForToken(coin.tokenid || '0x00'));
-                                        onChanged(); next();
-                                    });
+                                DB.logEvent(hash, DB.EV_MINIMA_CLAIM_SUBMITTED, coin.tokenid || '0x00', H.coinAmount(coin), txpowid, function () {
+                                    onChanged(); next();
                                 });
                             });
                         });
@@ -271,8 +269,8 @@
 
     /** A coin I locked (owner state[0]) past its timelock → reclaim it. */
     function checkExpiredMinima(coin, block, next) {
-        var timelock = Number(H.stateAt(coin, 3)) || 0;
-        if (block <= timelock) return next();
+        var rawTimelock = H.stateAt(coin, 3), timelock = Number(rawTimelock);
+        if (!/^[0-9]+$/.test(String(rawTimelock)) || !isFinite(timelock) || timelock > 2147483647 || block <= timelock) return next();
         var hash = H.stateAt(coin, 5), key = 'refundM:' + hash;
         DB.hasEvent(hash, DB.EV_EXPIRED, function (e, have) {
             // SELF-HEALING gate, as on the claim path. The old guard was a bare `inflight[key] = true` cleared
@@ -282,16 +280,43 @@
             markEthAttempt(key);
             H.refund(coin, C.myMinimaAddr, function (eR, txpowid) {
                 if (eR) return next();          // leave the stamp → retries after the window
-                // Status FIRST: EV_EXPIRED is a permanent veto on any future refund, so dying between these two
-                // writes would leave the swap un-refundable AND still reading "locked".
-                DB.setSwapStatus(hash, DB.ST_REFUNDED, function () {
-                    DB.logEvent(hash, DB.EV_EXPIRED, 'minima', H.coinAmount(coin), txpowid, function () {
-                        delete ethAttempt[key];
-                        // 0.1.24: the Minima-leg refund says WHY, like the ETH leg has since 0.1.21
-                        refundReason(hash, function (reason) {
-                            notify('Swap refunded', 'Timelock passed — reclaimed your '
-                                + TR.labelForToken(coin.tokenid || '0x00') + ' (' + reason + ')');
-                            onChanged(); next();
+                DB.logEvent(hash, DB.EV_MINIMA_REFUND_SUBMITTED, coin.tokenid || '0x00', H.coinAmount(coin), txpowid, function () {
+                    onChanged(); next();
+                });
+            });
+        });
+    }
+
+    function confirmPendingMinima(done) {
+        DB.allSwaps(function (err, swaps) {
+            if (err) return done();
+            var selected = null, oldest = Infinity;
+            F.each(swaps || [], function (s, i, next) {
+                if (!s || s.status === DB.ST_COMPLETE || s.status === DB.ST_REFUNDED) return next();
+                DB.getEvents(s.hash, function (e, events) {
+                    (events || []).forEach(function (r) {
+                        if (r.event !== DB.EV_MINIMA_CLAIM_SUBMITTED && r.event !== DB.EV_MINIMA_REFUND_SUBMITTED) return;
+                        if (!/^0x[0-9a-f]{64}$/i.test(String(r.note))) return;
+                        var key = 'receiptM:' + r.note, at = ethAttempt[key] || 0;
+                        if (ethRetryDue(key) && at < oldest) { oldest = at; selected = { hash: s.hash, receipt: r, key: key }; }
+                    });
+                    next();
+                });
+            }, function () {
+                if (!selected) return done();
+                var r = selected.receipt, hash = selected.hash, refund = r.event === DB.EV_MINIMA_REFUND_SUBMITTED;
+                markEthAttempt(selected.key);
+                H.confirmationDepth(r.note, function (e, depth) {
+                    if (e || depth < 2) return done();
+                    DB.getSwap(hash, function (eS, s) {
+                        if (eS || !s || s.status === DB.ST_COMPLETE || s.status === DB.ST_REFUNDED) return done();
+                        DB.setSwapStatus(hash, refund ? DB.ST_REFUNDED : DB.ST_COMPLETE, function (eW) {
+                            if (eW) return done();
+                            DB.logEvent(hash, refund ? DB.EV_EXPIRED : DB.EV_COLLECT, 'minima', r.amount, r.note, function () {
+                                delete ethAttempt[(refund ? 'refundM:' : 'claimM:') + hash];
+                                notify(refund ? 'Swap refunded' : 'Swap complete', (refund ? 'Reclaimed ' : 'Claimed ') + r.amount + ' ' + TR.labelForToken(r.token) + ' — confirmed on-chain');
+                                onChanged(); done();
+                            });
                         });
                     });
                 });

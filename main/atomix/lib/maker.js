@@ -127,10 +127,9 @@
     function clampAsks(o, cb) {
         var p = o.pairs[SYM];
         if (!p || !p.en || p.asks.length < 2) return cb(o);
-        AX.htlc.myFreeCoins(TR.active().tokenId, function (err, coins) {
+        AX.htlc.tokenBalance(TR.active().tokenId, function (err, balance) {
             if (err) { O.trimAsks(p, 1); return cb(o); }               // fail SAFE, not open
-            var total = 0;
-            for (var i = 0; i < (coins || []).length; i++) total += Number(AX.htlc.coinAmount(coins[i])) || 0;
+            var total = Number(balance.sendable);
             var cum = 0, backable = 0;
             for (var j = 0; j < p.asks.length; j++) { cum += p.asks[j].a; if (cum <= total + 1e-9) backable++; else break; }
             O.trimAsks(p, backable);

@@ -430,7 +430,8 @@ async function inspect(hash) {
   const s = await p(cb => DB.getSwap(hash, cb));
   if (!s) return ["No record of this swap."];
   const block = await p(cb => H.currentBlock(cb)).catch(() => -1);
-  const coins = await p(cb => H.scanByHash(hash, 2, 256, cb)).catch(() => []);
+  let minimaError = null;
+  const coins = await p(cb => H.scanByHashDeep(hash, 2, 1024, cb)).catch(e => { minimaError = e.message; return []; });
   let myMin = null, cpMin = null;
   const myPk = vmCtx().htlc.publickey;
   for (const c of coins || []) {
@@ -441,12 +442,12 @@ async function inspect(hash) {
   const secret = await p(cb => DB.getSecret(hash, cb)).catch(() => null);
   const events = await p(cb => DB.getEvents(hash, cb)).catch(() => []);
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
-  const facts = { swap: s, block, secretKnown: !!secret, myMin, cpMin, gc: null, gcAmountHuman: "", myEthStillLocked: null, events: events || [] };
-  if (s.direction === "MINIMA_TO_ERC20") {
-    const gc = await p(cb => ops.getContract(EO.contractId(hash), cb)).catch(() => null);
+  const facts = { swap: s, block, minimaError, secretKnown: !!secret, myMin, cpMin, gc: null, gcAmountHuman: "", myEthStillLocked: null, events: events || [] };
+  if (s.myLegIsMinima) {
+    const gc = await p(cb => ops.getContract(EO.contractId(hash), cb)).catch(e => { facts.ethError = e.message; return null; });
     if (gc) { facts.gc = gc; facts.gcAmountHuman = A.dec.formatUnits(gc.amount, String(gc.tokenContract).toLowerCase() === EO.NET.usdt.toLowerCase() ? EO.NET.usdtDecimals : 18); }
   } else {
-    facts.myEthStillLocked = await p(cb => ops.canCollect(s.contractId, cb)).catch(() => false);
+    facts.myEthStillLocked = await p(cb => ops.canCollect(s.contractId, cb)).catch(() => null);
   }
   return jclone(A.inspect.buildReport(facts));
 }
@@ -467,8 +468,8 @@ async function wallet() {
 function exportKey() { AX(); return vmCtx().eth.privKey; }   // renderer shows the 2-step native warning flow
 async function coins() {
   const A = AX();
-  const r = await runner("coins relevant:true sendable:true tokenid:" + A.trading.active().tokenId + " coinage:1").catch(() => null);
-  const rows = (r && Array.isArray(r.response)) ? r.response.map(c => ({ amount: A.htlc.coinAmount(c), coinid: c.coinid || "" })) : [];
+  const result = await p(cb => A.htlc.myRelevantCoins(A.trading.active().tokenId, cb));
+  const rows = result.map(c => ({ amount: A.htlc.coinAmount(c), coinid: c.coinid || "" }));
   rows.sort((a, b2) => Number(b2.amount) - Number(a.amount));
   return jclone(rows.slice(0, 50));
 }

@@ -36,49 +36,53 @@
      */
     function buildReport(f) {
         var s = f.swap, L = [];
-        var sell = s.direction === 'MINIMA_TO_ERC20';
+        var sell = !!s.myLegIsMinima;
         L.push((sell ? 'Sell ' : 'Buy ') + s.sellAmount + ' ' + s.sellToken + ' → ' + s.buyAmount + ' ' + s.buyToken
             + '  ·  ' + String(s.status).toLowerCase());
 
         // ---- my leg ----
         if (s.myLegIsMinima) {
-            if (f.myMin) {
+            if (f.minimaError) { L.push('• Your Minima leg: UNKNOWN — ' + f.minimaError); }
+            else if (f.myMin) {
                 var tl = Number(H.stateAt(f.myMin, 3)) || 0;
                 L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': LOCKED — refundable at block ' + tl
                     + (f.block > 0 ? ' (~' + Math.max(0, Math.round((tl - f.block) * 50 / 60)) + ' min)' : ''));
             } else {
-                L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': not locked on-chain now — '
-                    + (s.status === 'REFUNDED' ? 'refunded' : s.status === 'COMPLETE' ? 'claimed by the counterparty (complete)' : 'spent/claimed'));
+                L.push('• Your ' + s.sellToken + ': not found in the last 1024 blocks at 2 confirmations. This does not prove it was spent; check the recorded transaction.');
             }
         } else {
-            L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': ' + (f.myEthStillLocked ? 'LOCKED on Ethereum' : 'claimed or refunded'));
+            L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': ' + (f.myEthStillLocked == null ? 'UNKNOWN — Ethereum check unavailable' : f.myEthStillLocked ? 'LOCKED on Ethereum' : 'claimed or refunded'));
         }
 
         // ---- counterparty leg ----
         // myLegIsMinima, not direction: for a RESPONDER row the old `sell` key printed my own ETH lock as the
         // counterparty leg ("withdrawn (complete)" on a stuck swap). Native parity: atomix 0.1.17.
         if (s.myLegIsMinima) {
-            if (!f.gc) {
+            if (f.ethError) { L.push('• Counterparty Ethereum leg: UNKNOWN — ' + f.ethError); }
+            else if (!f.gc) {
                 L.push('• Counterparty ' + s.buyToken + ' leg: NOT FOUND yet — the maker hasn’t locked it.');
             } else {
-                var claimable = !f.gc.withdrawn && !f.gc.refunded;
+                var open = !f.gc.withdrawn && !f.gc.refunded, claimable = open && f.secretKnown;
                 L.push('• Counterparty ' + s.buyToken + ' leg: FOUND ' + f.gcAmountHuman + ' ' + s.buyToken
-                    + (claimable ? ' — claimable now' : (f.gc.withdrawn ? ' — withdrawn (complete)' : ' — refunded')));
-                if (claimable) L.push('→ Claiming on the next poll — your ' + s.buyToken + ' arrives shortly.');
-                else if (f.gc.refunded) L.push('→ Maker’s leg timed out & refunded; your ' + s.sellToken + ' auto-refunds at block ' + s.myTimelock + '.');
+                    + (open ? (claimable ? ' — secret known; awaiting claim confirmation' : ' — locked; waiting for the secret') : (f.gc.withdrawn ? ' — withdrawn' : ' — refunded')));
+                if (f.gc.refunded) L.push(f.myMin ? 'The counterparty refunded. Your visible Minima lock is refundable after block ' + s.myTimelock + '.' : 'The counterparty refunded. No Minima lock was found to refund; verify the recorded submission.');
             }
         } else {
-            if (f.cpMin) {
+            if (f.minimaError) { L.push('• Counterparty Minima leg: UNKNOWN — ' + f.minimaError); }
+            else if (f.cpMin) {
                 L.push('• Counterparty ' + s.buyToken + ' leg: FOUND ' + H.coinAmount(f.cpMin) + ' ' + s.buyToken + ' — '
-                    + (f.secretKnown ? 'claimable now (claiming on the next poll)' : 'waiting for the secret'));
+                    + (f.secretKnown ? 'secret known; awaiting claim confirmation' : 'waiting for the secret'));
             } else {
                 L.push('• Counterparty ' + s.buyToken + ' leg: NOT FOUND — not locked yet, <2 confirmations old, or already spent.');
             }
         }
 
+        L.push('• Scan: last 1024 blocks, minimum 2 confirmations; node block ' + f.block + '.');
+        if (s.hash) L.push('• Hashlock: ' + s.hash);
         L.push('• Secret: ' + (f.secretKnown ? 'known (you can claim)' : 'not revealed yet'));
         for (var i = 0; i < (f.events || []).length; i++) {
             var n = String(f.events[i].note || '').toLowerCase();
+            if (/^0x[0-9a-f]{64}$/i.test(n)) L.push('• Recorded transaction: ' + f.events[i].note);
             if (n.indexOf('mismatch') >= 0 || n.indexOf('invalid') >= 0 || n.indexOf('incorrect') >= 0
                 || n.indexOf('too close') >= 0 || n.indexOf('fail') >= 0) L.push('⚠ ' + f.events[i].note);
         }

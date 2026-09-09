@@ -132,7 +132,7 @@
      *  coin (or a fabricated ETH-contract tuple) poisons the secret store and permanently blocks the maker's claim.
      *  cb(err, boolean). */
     function verifyPreimage(secret, hash, cb) {
-        if (!secret || !hash) return cb(null, false);
+        if (!isHex(secret) || !isHex(hash)) return cb(null, false);
         M.cmdR('hash type:sha2 data:' + secret, function (err, resp) {
             if (err || !resp || !resp.hash) return cb(null, false);
             cb(null, normKey(resp.hash) === normKey(hash));
@@ -191,7 +191,7 @@
      *  must txndelete on error — claim/refund do). Uses cmdR so status:false surfaces as a real error. */
     function runSeq(cmds, cb) {
         var last = null;
-        AX.flow.each(cmds, function (c, i, next) { M.cmdR(c, function (e, resp) { last = resp; next(e); }); },
+        AX.flow.each(cmds, function (c, i, next) { M.cmdR(c, function (e, resp) { last = resp; next(e || (c.indexOf('txncheck ') === 0 ? checkFailure(resp) : null)); }); },
             function (err) { cb(err, last); });
     }
     /** Node-side transaction id. The counter is NOT decoration: Date.now() alone is millisecond-granular,
@@ -232,7 +232,8 @@
         seq.push('txnstate id:' + id + ' port:102 value:[' + owner + ']');
         seq.push('txnstate id:' + id + ' port:103 value:[' + receiver + ']');
         seq.push('txnsign id:' + id + ' publickey:' + receiver);
-        seq.push('txnpost id:' + id + ' mine:true auto:true txndelete:true');
+        seq.push('txnbasics id:' + id, 'txncheck id:' + id);
+        seq.push('txnpost id:' + id + ' mine:true txndelete:true');
         runSeq(seq, function (err, last) { if (err) { deleteTxn(id); return cb(err); } cb(null, txpowOf(last)); });
     }
 
@@ -270,19 +271,74 @@
         seq.push('txnoutput id:' + id + ' amount:' + amount + ' address:' + HTLC_ADDRESS + ' tokenid:' + p.tokenId + ' storestate:true');
         if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' amount:' + change + ' address:' + p.myAddress + ' tokenid:' + p.tokenId + ' storestate:false');
         seq.push('txnsign id:' + id + ' publickey:auto');
+        seq.push('txnbasics id:' + id, 'txncheck id:' + id);
         runSeq(seq, function (err) {
             if (err) { deleteTxn(id); return cb(err); }
-            M.cmdR('txnpost id:' + id + ' mine:true auto:true txndelete:true', function (pe, resp) {
+            M.cmdR('txnpost id:' + id + ' mine:true txndelete:true', function (pe, resp) {
                 if (pe) { deleteTxn(id); return cb(new Error('POSTED:' + pe.message)); }   // may have broadcast → NEVER retry
                 cb(null, txpowOf(resp));
             });
         });
     }
 
-    /** My spendable coins of a token (confirmed, coinage:1) — the pool a responder/ladder can lock against. cb(err, arr). */
+    // Native 0.1.46–0.1.52: fresh balance preflight, strict validation and compact bounded wallet reads.
+    function tokenBalance(tokenId, cb) {
+        if (!isHex(tokenId)) return cb(new Error('balance: invalid token'));
+        M.cmdR('balance tokenid:' + tokenId, function (err, response, raw) {
+            if (err) return cb(err);
+            if (!raw || raw.status !== true) return cb(new Error('balance: no successful node reply'));
+            var b = response;
+            if (Array.isArray(b)) {
+                if (!b.length) return cb(null, { coins: 0, sendable: '0', confirmed: '0', unconfirmed: '0' });
+                if (b.length !== 1) return cb(new Error('balance: unexpected token rows'));
+                b = b[0];
+            }
+            var count = b && b.coins;
+            if (!b || !/^[0-9]+(?:\.0+)?$/.test(String(count)) || Number(count) > 2147483647
+                    || !isDecimal(b.sendable) || !isDecimal(b.confirmed) || !isDecimal(b.unconfirmed)
+                    || (b.tokenid && String(b.tokenid).toLowerCase() !== String(tokenId).toLowerCase()))
+                return cb(new Error('balance: invalid token summary'));
+            cb(null, { coins: Number(count), sendable: String(b.sendable), confirmed: String(b.confirmed), unconfirmed: String(b.unconfirmed) });
+        });
+    }
+    function guardedCoins(tokenId, command, cb) {
+        tokenBalance(tokenId, function (err, b) {
+            if (err) return cb(err);
+            var cap = String(tokenId).toLowerCase() === '0x00' ? 200 : 53;
+            if (b.coins > cap) return cb(new Error('TOO_MANY_COINS: ' + b.coins + ' coins; safe read limit ' + cap
+                + '. Consolidate a small batch in your node wallet, wait for confirmation, then retry.'), null, b);
+            if (!b.coins) return cb(null, []);
+            M.cmdR(command, function (e, rows) {
+                if (e) return cb(e);
+                if (!Array.isArray(rows)) return cb(new Error('coins: invalid reply'));
+                cb(null, rows);
+            });
+        });
+    }
     function myFreeCoins(tokenId, cb) {
-        M.cmdR('coins relevant:true sendable:true tokenid:' + tokenId + ' coinage:1', function (err, resp) {
-            cb(err, (!err && Array.isArray(resp)) ? resp : []);
+        guardedCoins(tokenId, 'coins relevant:true sendable:true tokenid:' + tokenId + ' coinage:1 checkmempool:true', cb);
+    }
+    function myRelevantCoins(tokenId, cb) {
+        guardedCoins(tokenId, 'coins relevant:true tokenid:' + tokenId + ' simplestate:true', cb);
+    }
+    function flag(o, key) { var v = o && o[key]; return v === true || v === 1 || (typeof v === 'string' && /^(true|1)$/i.test(v.trim())); }
+    // PandaPools TxPost.checkFailure, also used by native MinimaHtlc. Proofs are built once, never auto-posted twice.
+    function checkFailure(r) {
+        var v = r && r.valid;
+        if (!flag(v, 'mmrproofs')) return new Error('Input spent or invalid proof. Nothing was posted.');
+        if (!flag(r, 'validamounts')) return new Error('Amounts do not balance. Nothing was posted.');
+        if (!flag(v, 'scripts')) return new Error('Contract rejected the transaction. Nothing was posted.');
+        if (!flag(v, 'basic') || !flag(r, 'allsignaturesvalid') || !flag(r, 'validtransaction'))
+            return new Error('Transaction/signature validation failed. Nothing was posted.');
+        return null;
+    }
+    function confirmationDepth(txpowid, cb) {
+        if (!/^0x[0-9a-f]{64}$/i.test(String(txpowid))) return cb(new Error('Invalid TxPoW identifier'));
+        M.cmdR('txpow onchain:' + txpowid, function (e, r, raw) {
+            if (e) return cb(e);
+            var d = r && r.confirmations;
+            cb(null, raw && raw.status === true && flag(r, 'found') && /^[0-9]+$/.test(String(d))
+                && Number(d) <= 2147483647 ? Number(d) : -1);
         });
     }
 
@@ -317,7 +373,8 @@
             'txninput id:' + id + ' coinid:' + coinid,
             'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + amount + ' address:' + myAddress,
             'txnsign id:' + id + ' publickey:' + owner,
-            'txnpost id:' + id + ' auto:true txndelete:true'
+            'txnbasics id:' + id, 'txncheck id:' + id,
+            'txnpost id:' + id + ' mine:true txndelete:true'
         ];
         runSeq(seq, function (err, last) { if (err) { deleteTxn(id); return cb(err); } cb(null, txpowOf(last)); });
     }
@@ -363,6 +420,7 @@
         setup: setup, loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
         isHex: isHex, isHexOrMinima: isHexOrMinima, isDecimal: isDecimal,
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
+        tokenBalance: tokenBalance, myRelevantCoins: myRelevantCoins, confirmationDepth: confirmationDepth,
         coinAmount: coinAmount, lock: lock, lockFromCoins: lockFromCoins, myFreeCoins: myFreeCoins,
         claim: claim, refund: refund, scanByHash: scanByHash, scanByHashDeep: scanByHashDeep,
         scanByKey: scanByKey, scanNotifySecret: scanNotifySecret,

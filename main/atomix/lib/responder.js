@@ -280,13 +280,22 @@
     }
 
     /** [Minima] Lock the mxUSDT counter-leg (block + CP_BLOCKS) from largest-first reserved coins. next(). */
+    var lastCoinDecline = 0;
     function lockMinimaCounterLeg(c, block, next) {
         var hash = c.hashlock, timelock = block + Number(AX.htlc.CP_BLOCKS);
         var reqMinimaHuman = D.formatUnits(c.requestAmount, 18);    // mxUSDT they want from me
         var receiverPubkey = c.minimaPublicKey;
         var actTok = TR.active().tokenId;
         H.myFreeCoins(actTok, function (e, coins) {
-            if (e) return next();
+            if (e) {
+                releaseHash(hash);
+                if (!lastCoinDecline || Date.now() - lastCoinDecline >= 1800000) {
+                    lastCoinDecline = Date.now();
+                    notify('Buy request declined', e.message + ' Hashlock: ' + hash);
+                }
+                return next();
+            }
+            if (actTok !== TR.active().tokenId) return next();
             var picked = selectCoins(coins, reqMinimaHuman);
             if (!picked.ids.length) {
                 notify('Buy request declined', 'Not enough free ' + TR.active().coinLabel + ' to fill ' + reqMinimaHuman);
