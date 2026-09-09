@@ -56,6 +56,7 @@ function rpcCall(port, secret, command) {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", d => { body += d; });
+      res.on("error", reject);
       res.on("end", () => {
         if (res.statusCode === 401) { reject(new Error("RPC authentication failed")); return; }
         try { resolve(JSON.parse(body)); }

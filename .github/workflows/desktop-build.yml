@@ -56,6 +56,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Verify RPC bridge
+        run: npm run test:rpc
+
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash
