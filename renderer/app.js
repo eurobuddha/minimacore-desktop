@@ -5617,15 +5617,25 @@ async function renderVestrCalc() {
 // The account serves its own web panel on loopback; the tab embeds it in ONE hardened <webview> and shows a
 // native strip above it (address, pairing, open-in-browser). The panel signs in with a one-time link the
 // account keeps beside its data; a fresh link is fetched whenever the account (re)starts.
-let parlonsLoadedFor = "";     // the node start we last loaded the panel for (uptime-based key)
+let parlonsLoadedFor = "";     // exact node start we last loaded the panel for
 let parlonsLastSig = "";       // readiness/error signature that last drove a re-render
 let parlonsStatusCache = null;
-async function renderParlons() {
+let parlonsRenderSeq = 0, parlonsRetry = null;
+async function renderParlons(attempt = 0) {
+  const seq = ++parlonsRenderSeq; clearTimeout(parlonsRetry);
   const strip = el("parlonsStrip"), body = el("parlonsBody");
+  function retry(message) {
+    parlonsLoadedFor = "";
+    strip.innerHTML = `<div class="parlons-strip"><span>${esc(message)}</span><button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>`;
+    body.innerHTML = `<div class="spin" role="status">${esc(message)}</div>`;
+    el("parlonsReload").onclick = () => renderParlons();
+  }
   const st = await api.parlonsStatus().catch(() => null);
+  if (seq !== parlonsRenderSeq || activeView !== "parlons") return;
   parlonsStatusCache = st;
-  if (!st) { strip.innerHTML = ""; body.innerHTML = `<div class="spin">…</div>`; return; }
+  if (!st) { retry("Could not check the account. Reload to try again."); return; }
   if (st.kind !== "parlons") {
+    parlonsLoadedFor = "";
     strip.innerHTML = "";
     body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
       <div class="view__desc">Your node can host your Parlons account: private chat, calls and payments under this node's own seed, with your phones and computers paired to it. This install still runs the plain Minima node.</div>
@@ -5648,15 +5658,23 @@ async function renderParlons() {
         <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
     el("parlonsReload").onclick = () => { parlonsLoadedFor = ""; renderParlons(); };
   }
-  if (!st.ready) {
-    if (!body.querySelector("webview")) body.innerHTML = `<div class="spin">${st.error ? "The account did not start — see the Logs tab." : "Waiting for the account to attach to the network…"}</div>`;
+  if (!st.ready || st.error) {
+    parlonsLoadedFor = "";
+    body.innerHTML = `<div class="spin">${st.error ? "The account did not start — see the Logs tab." : "Waiting for the account to attach to the network…"}</div>`;
     return;
   }
   const ns = await api.nodeStatus().catch(() => null);
-  const key = String(st.panelPort) + ":" + (ns && ns.uptimeMs ? String(Date.now() - ns.uptimeMs).slice(0, -4) : "0");   // one key per node start
+  if (seq !== parlonsRenderSeq || activeView !== "parlons") return;
+  if (!ns || !ns.startedTs) { retry("Could not identify the running node. Reload to try again."); return; }
+  const key = String(st.panelPort) + ":" + ns.startedTs;   // minimaDesk's exact one-key-per-start model
   if (body.querySelector("webview") && parlonsLoadedFor === key) return;   // already showing this start's session
   const url = await api.parlonsPanelUrl().catch(() => "");
-  if (!url) { body.innerHTML = `<div class="spin">Getting a sign-in link from the account…</div>`; setTimeout(() => { if (activeView === "parlons") renderParlons(); }, 1500); return; }
+  if (seq !== parlonsRenderSeq || activeView !== "parlons") return;
+  if (!url) {
+    retry(attempt >= 20 ? "Could not get a sign-in link. Reload to try again." : "Getting a sign-in link from the account…");
+    if (attempt < 20) parlonsRetry = setTimeout(() => { if (seq === parlonsRenderSeq && activeView === "parlons") renderParlons(attempt + 1); }, 1500);
+    return;
+  }
   parlonsLoadedFor = key;
   body.innerHTML = "";
   const wv = document.createElement("webview");

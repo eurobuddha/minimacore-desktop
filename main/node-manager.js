@@ -424,6 +424,7 @@ class NodeManager extends EventEmitter {
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
+             startedTs: this.proc ? this.startedTs : 0,
              uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
   }
   /** The Parlons Node narrates its account in its log; that is the honest readiness signal. */

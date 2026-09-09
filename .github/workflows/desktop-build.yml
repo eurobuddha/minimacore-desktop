@@ -59,6 +59,9 @@ jobs:
       - name: Verify RPC bridge
         run: npm run test:rpc
 
+      - name: Verify Parlons panel sessions
+        run: npm run test:parlons
+
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash
