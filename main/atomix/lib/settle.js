@@ -249,11 +249,13 @@
     function sweepExpiredMinima(all, block, done) {
         var due = (all || []).filter(function (s) {
             return s && s.hash && s.myLegIsMinima
-                && s.status !== DB.ST_COMPLETE && s.status !== DB.ST_REFUNDED && s.status !== DB.ST_ERROR
+                && s.status !== DB.ST_COMPLETE && s.status !== DB.ST_REFUNDED
                 && s.myTimelock > 0 && block > s.myTimelock
-                && ethRetryDue('refundM:' + s.hash);      // same window as the refund itself
+                && ethRetryDue('refundM:' + s.hash) && ethRetryDue('refundScan:' + s.hash);      // same window as the refund itself
         });
-        F.each(due, function (s, i, nextS) {
+        due.sort(function (a, b) { return (ethAttempt['refundScan:' + a.hash] || 0) - (ethAttempt['refundScan:' + b.hash] || 0); });
+        F.each(due.slice(0, 1), function (s, i, nextS) {
+            markEthAttempt('refundScan:' + s.hash);
             DB.hasEvent(s.hash, DB.EV_EXPIRED, function (e, have) {
                 if (have) return nextS();
                 H.scanByHashDeep(s.hash, 2, REFUND_SCAN_DEPTH, function (err, coins) {

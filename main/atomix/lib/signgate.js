@@ -57,9 +57,8 @@
     /** Queue an operation. It receives a `release` it MUST call exactly once, however it ends. */
     function submit(op) {
         QUEUE.push(op);
-        // A hold older than the ceiling means its callback was lost; take the gate back rather than
-        // wedging every future signature behind a dead operation.
-        if (busy && busySince && (Date.now() - busySince) > MAX_HOLD_MS) busy = false;
+        // Do not overlap a slow/uncertain signing operation with another signing command.
+        // Elapsed time is not cancellation: retain the hold until its actual callback returns.
         if (!busy) next();
     }
 

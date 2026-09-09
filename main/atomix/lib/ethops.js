@@ -48,12 +48,26 @@
             /** Is this leg still collectable (not withdrawn/refunded)? cb(err, bool). */
             canCollect: function (contractId, cb) {
                 var call = EH.canCollectCall(contractId);
-                rpc.ethCall(NET.htlc, call.data, function (e, ret) { cb(e, e ? false : EH.decodeBool(ret)); });
+                rpc.ethCall(NET.htlc, call.data, function (e, ret) {
+                    if (e) return cb(e);
+                    if (!/^0x0{63}[01]$/i.test(String(ret))) return cb(new Error('Invalid canCollect reply'));
+                    cb(null, EH.decodeBool(ret));
+                });
             },
             /** Full contract state by id (eth_call getContract). cb(err, Contract|null); null = no such contract. */
             getContract: function (contractId, cb) {
                 var call = EH.getContractCall(contractId);
-                rpc.ethCall(NET.htlc, call.data, function (e, ret) { cb(e, e ? null : EH.decodeGetContract(contractId, ret)); });
+                rpc.ethCall(NET.htlc, call.data, function (e, ret) {
+                    if (e) return cb(e);
+                    if (!/^0x[0-9a-f]{768}$/i.test(String(ret))) return cb(new Error('Incomplete or malformed getContract reply'));
+                    for (var i = 0, indexes = [8, 9, 11]; i < indexes.length; i++) {
+                        var word = ret.slice(2 + indexes[i] * 64, 2 + (indexes[i] + 1) * 64);
+                        if (!/^0{63}[01]$/.test(word)) return cb(new Error('Invalid contract boolean reply'));
+                    }
+                    var contract = EH.decodeGetContract(contractId, ret);
+                    if (!contract && !/^0{64}$/.test(ret.slice(2, 66))) return cb(new Error('Invalid contract state reply'));
+                    cb(null, contract);
+                });
             }
         };
     }
