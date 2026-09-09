@@ -14,7 +14,7 @@ const path = require("path");
 const vm = require("vm");
 
 // index.html load order (minus mds.js, which the shim replaces).
-const ALL_FILES = ["decimal.js", "covenant.js", "curve.js", "router.js", "book.js", "store.js", "history.js", "statement.js", "poolmgr.js", "service.js"];
+const ALL_FILES = ["decimal.js", "covenant.js", "curve.js", "router.js", "book.js", "store.js", "history.js", "statement.js", "sha3.js", "receipt-recovery.js", "activity-chain.js", "poolmgr.js", "service.js"];
 
 /**
  * Build a vm context with the given `mds` shim and evaluate `files` (default: all) in order.
@@ -26,7 +26,7 @@ function createContext(mds, files) {
   // as the CHILD realm's own — injecting the parent realm's would be redundant and would break `x instanceof Array`
   // inside the vm. Only inject the genuinely-missing Node globals the reused files touch (console) plus timers, and MDS.
   const sandbox = { MDS: mds, console: console, setTimeout: setTimeout, clearTimeout: clearTimeout };
-  sandbox.global = sandbox;
+  sandbox.global = sandbox; sandbox.self = sandbox;
   const ctx = vm.createContext(sandbox);
   (files || ALL_FILES).forEach((f) => {
     const code = fs.readFileSync(path.join(__dirname, f), "utf8");

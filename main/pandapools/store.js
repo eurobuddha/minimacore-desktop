@@ -181,22 +181,17 @@ var Store = (function () {
         if (!ready) return;
         MDS.sql("INSERT INTO pp_activity (type, summary, txpowid, submitblock, status, failmsg, refaddr, ts) VALUES ('" +
             esc(type) + "','" + esc(summary) + "','" + esc(txpowid || "") + "'," + (parseInt(submitBlock) || 0) +
-            ",'ok','','" + esc(refaddr || "") + "', " + Date.now() + ")", function () { trimActivity(); });
+            ",'ok','','" + esc(refaddr || "") + "', " + Date.now() + ")", function () {});
     }
     function actRecordFailed(type, summary, failMsg) {
         if (!ready) return;
         MDS.sql("INSERT INTO pp_activity (type, summary, txpowid, submitblock, status, failmsg, ts) VALUES ('" +
-            esc(type) + "','" + esc(summary) + "','',0,'failed','" + esc(failMsg || "") + "', " + Date.now() + ")", function () { trimActivity(); });
-    }
-    function trimActivity() {
-        MDS.sql("SELECT id FROM pp_activity ORDER BY id DESC LIMIT 1 OFFSET " + ACT_MAX, function (r) {
-            if (r && r.status && r.rows && r.rows.length) MDS.sql("DELETE FROM pp_activity WHERE id <= " + (parseInt(r.rows[0].ID) || 0));
-        });
+            esc(type) + "','" + esc(summary) + "','',0,'failed','" + esc(failMsg || "") + "', " + Date.now() + ")", function () {});
     }
     /** cb(entries[]) newest first. Each: {type,summary,txpowid,submitBlock,ts,failed,failMsg}. */
     function actList(limit, cb) {
-        if (!ready) { cb([]); return; }
-        MDS.sql("SELECT * FROM pp_activity ORDER BY id DESC LIMIT " + (limit || ACT_MAX), function (r) {
+        if (!ready) { cb([], false); return; }
+        MDS.sql("SELECT * FROM pp_activity ORDER BY id DESC" + (limit === -1 ? "" : " LIMIT " + (limit || ACT_MAX)), function (r) {
             var out = [];
             if (r && r.status && r.rows) r.rows.forEach(function (row) {
                 out.push({
@@ -207,31 +202,13 @@ var Store = (function () {
                     confirmedOnchain: row.STATUS === "confirmed"   // verified: pool reserves landed on-chain
                 });
             });
-            cb(out);
+            cb(out, !!(r && r.status));
         });
     }
     var CONFIRM_BLOCKS = 3;
-    // A tx is "Confirmed" only once we've VERIFIED its effect landed on the main chain — one of its output coins
-    // exists in the UTXO set (set by verifyPendingActivity in index.html). Block-count alone is NOT enough: a tx
-    // can be mined then reorged out (esp. on a freshly-resynced node) and never re-mine, which used to show a
-    // false "Confirmed" for a pool that doesn't exist. Non-tx local notes (no txpowid) keep the old block/time rule.
-    function confirmed(entry, chainBlock) {
-        if (entry.failed) return false;
-        if (entry.confirmedOnchain) return true;   // verified: the pool's reserves are on-chain (set by the verifier)
-        // A CREATE with a stored covenant address must be VERIFIED against its reserves — block-count alone gave a
-        // false "Confirmed" for a create that was mined then reorged out (its covenant stays empty). The verifier
-        // (verifyPendingActivity) resolves it to confirmed/failed within ~12 blocks. Legacy creates (no refaddr)
-        // and every other action type keep the block/time rule (they don't create a phantom pool, and their output
-        // coins get spent so on-chain liveness is an unreliable signal for them).
-        if (entry.type === "CREATE" && entry.refaddr) return false;
-        if (entry.submitBlock > 0 && chainBlock > 0) return (chainBlock - entry.submitBlock) >= CONFIRM_BLOCKS;
-        return (Date.now() - entry.ts) > 4 * 60000;
-    }
-    function statusText(entry, chainBlock) {
-        if (entry.failed) return "Failed";
-        if (confirmed(entry, chainBlock)) return "Confirmed";
-        return "Confirming…";
-    }
+    // Only a successful stock-node onchain lookup establishes confirmation.
+    function confirmed(entry) { return !entry.failed && entry.verifiedAt > 0 && entry.verifiedDepth >= CONFIRM_BLOCKS; }
+    function statusText(entry) { return ActivityChain.statusText(entry); }
     /** Verifier (index.html) marks an entry confirmed once an output landed, or failed if it never did. Only
      *  touches still-'ok' rows so a resolved entry is never flipped back. */
     function actSetStatus(txpowid, status, failMsg) {
@@ -247,7 +224,7 @@ var Store = (function () {
     /** cb(events[]) newest first. Each: {pool,tokenLabel,kind,minimaIn,minimaAmt,tokenAmt,price,ts}. */
     function feedList(limit, cb) {
         if (!ready) { cb([]); return; }
-        MDS.sql("SELECT * FROM pp_feed ORDER BY id DESC LIMIT " + (limit || FEED_MAX), function (r) {
+        MDS.sql("SELECT * FROM pp_feed ORDER BY id DESC" + (limit === -1 ? "" : " LIMIT " + (limit || FEED_MAX)), function (r) {
             var out = [];
             if (r && r.status && r.rows) r.rows.forEach(function (row) {
                 out.push({
@@ -271,13 +248,18 @@ var Store = (function () {
             + " VALUES ('" + esc(e.txpowid) + "'," + (e.block || 0) + "," + (e.timemilli || 0) + ",'" + esc(e.direction || "") + "','"
             + esc(e.deltas || "{}") + "','" + esc(e.counterparty || "") + "','" + esc(e.inputs || "[]") + "','"
             + esc(e.outputs || "[]") + "'," + Date.now() + ")",
-            function (r) { cb(!!(r && r.status)); });   // PK violation → status false → already held
+            function (r) {
+                if (r && r.status) { cb(true, true); return; }
+                MDS.sql("SELECT txpowid FROM pp_history WHERE txpowid='" + esc(e.txpowid) + "'", function (found) {
+                    cb(false, !!(found && found.status && found.rows && found.rows.length));
+                });
+            });
     }
 
     /** Every stored transaction, OLDEST FIRST — the order a statement needs, since running totals only mean
      *  anything accumulated forwards. Unbounded by design: a ledger with a LIMIT on it does not reconcile. */
     function histAll(cb) {
-        if (!ready) { cb([]); return; }
+        if (!ready) { cb([], false); return; }
         MDS.sql("SELECT txpowid, block, timemilli, direction, deltas, counterparty, inputs, outputs FROM pp_history"
             + " ORDER BY block ASC, timemilli ASC", function (r) {
             var out = [];
@@ -288,7 +270,7 @@ var Store = (function () {
                     inputs: row.INPUTS, outputs: row.OUTPUTS
                 });
             });
-            cb(out);
+            cb(out, !!(r && r.status));
         });
     }
 
@@ -321,13 +303,13 @@ var Store = (function () {
     // (a past swap on a pool that has since closed must still match), and excludes the SENTINEL (so background
     // re-announce dust beacons aren't surfaced as personal activity).
     function knownAddrsGet(cb) {
-        if (!ready) { cb({}); return; }
+        if (!ready) { cb({}, false); return; }
         MDS.sql("SELECT v FROM pp_kv WHERE k='knownaddrs'", function (r) {
             var set = {};
             if (r && r.status && r.rows && r.rows.length) {
                 try { (JSON.parse(r.rows[0].V) || []).forEach(function (a) { if (a) set[String(a).toLowerCase()] = true; }); } catch (e) {}
             }
-            cb(set);
+            cb(set, !!(r && r.status));
         });
     }
     function knownAddrsAdd(addrs, cb) {

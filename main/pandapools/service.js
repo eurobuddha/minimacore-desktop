@@ -435,7 +435,7 @@ function done(pools) {
         // reply without bound, until it overflows the 256 KB cap. Already-tracked pools stay visible; new pools
         // stay discoverable via their fresh Source-2 beacon (kept alive by keep-fresh + the gossip mesh).
     }
-    ingestFeed(funded);
+    // Reserve snapshots are not transaction evidence. ActivityChain queries actual pool transactions.
     maybeReannounceSvc(funded);
     maybeRefreshSvc();   // sources its own owned pools from pp_ownpools (no longer the discovered set)
 }

@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.39] — Verified activity, receipt recovery and public pool history
+- Mirror Android activity fixes: real node confirmation counts, exact immutable transaction matching, cryptographic legacy receipt recovery, chronological receipt/history display and transaction timestamps in UTC.
+- Preserve all existing receipts, including old failures; add Show more. Stop inferred reserve-snapshot transaction claims and label preserved observations accurately.
+- Fetch actual public pool transactions separately from wallet accounting. Show read/lookup failures and keep incomplete history repair pending.
+- 18 regression tests pass against both engines; shared-file parity, frontend checks and H2/SQLite validation pass. See [review](REVIEW-0.16.39.md).
+
 ## [0.16.38] — Pools: Withdraw/Add/Migrate re-read the live pool coin (fixes "the pool moved")
 - **Fixed** Close/Withdraw (and Add, Migrate) in the Pools tab failing with *"an input coin was already spent (the pool moved) — nothing was posted"* on an active pool (parity with native **0.9.36 / 0.9.40** and MDS **0.6.21**). The desktop spent the pool's coin ids cached at the last scan; a counterparty swap — or its own keep-fresh (~every 900 blocks) — spends and recreates those coins, so the cached id is a spent coin and the tx dies at `txncheck` (`mmrproofs=false`). It now re-reads the LIVE covenant coin (fresh `coinidM/coinidT` + amounts) right before building close/add/migrate, retries close once if the pool moves, and re-derives Add's balanced token side from the live ratio. Covenant params (`opk/oadr/tok/kmin/address`) are untouched.
 

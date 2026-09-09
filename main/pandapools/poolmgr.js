@@ -151,7 +151,10 @@ var PoolMgr = (function () {
                     return;
                 }
                 MDS.cmd("txnpost id:" + txid, function (rp) {
-                    if (rp && rp.status === true) { MDS.cmd("txndelete id:" + txid); done.ok(extractTxpowid(rp, txid)); }
+                    if (rp && rp.status === true && !isPending(rp)) {
+                        var posted = extractTxpowid(rp, txid);
+                        ActivityChain.rememberSubmission(rp, posted, function () { MDS.cmd("txndelete id:" + txid); done.ok(posted); });
+                    }
                     else { MDS.cmd("txndelete id:" + txid); done.fail("post rejected" + errOf(rp)); }
                 });
             });

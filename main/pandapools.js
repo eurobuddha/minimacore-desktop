@@ -23,7 +23,6 @@ const { makeSqlShim } = require("./pandapools/sqlshim");
 const { fetchJson } = require("./netfetch");
 
 const SCAN_EVERY_MS = 12000;          // poll cadence; work only runs when the tip block advances
-const VERIFY_FAIL_BLOCKS = 12;        // a CREATE whose reserves never land within this is marked failed (parity)
 
 // ---- external market price (MEXC MINIMA/USDT) — the create-flow price anchor (parity with the MDS dapp) ----
 // PandaPools only creates MINIMA / USDT pools (the pair with a live market feed), so a pool always opens at the
@@ -76,6 +75,8 @@ async function init() {
     sqlShim = await makeSqlShim(path.join(dir, "pandapools.sqlite"));
     ctx = createContext(buildMds(), ALL_FILES);                     // loads all reused files; service.js registers via MDS.init
     await new Promise(function (r) { ctx.Store.init(function () { r(); }); });
+    await new Promise(function (resolve, reject) { ctx.ActivityChain.init(function (ok) { if (ok) resolve(); else reject(new Error("Pool transaction storage unavailable")); }); });
+    ctx.ActivityChain.onChange(function () { emitter.emit("update"); });
     if (serviceHandler) serviceHandler({ event: "inited" });         // boot service.js (coinnotify cleanup + retrackOwn + first scan)
     ready = true;
   })().catch(function (e) { initPromise = null; throw e; });         // don't cache a rejection → a transient init failure can retry
@@ -97,6 +98,7 @@ function invalidate() {
   try { stopLoop(); } catch (e) {}
   try { if (sqlShim) sqlShim.flush(); } catch (e) {}
   try { fs.unlinkSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}   // fresh store next init
+  if (ctx && ctx.ActivityChain) ctx.ActivityChain.stop();
   ctx = null; serviceHandler = null; sqlShim = null; ready = false; initPromise = null;
   POOLS = []; lastTip = 0; scanning = false; scanStartTs = 0; lastQuotes = {};   // stale routes reference the old seed's pools
   emitter.emit("update");
@@ -158,6 +160,7 @@ function startLoop() {
   if (scanTimer) return;
   var tick = function () {
     currentBlock().then(function (tip) {
+      if (ctx) ctx.ActivityChain.verify();
       if (tip && tip !== lastTip) { lastTip = tip; runCycle(tip); }
     }).catch(function () {});
   };
@@ -172,30 +175,16 @@ function runCycle(tip) {
   // 1) UI discovery — Book.scan gives the funded pool list the renderer trades on.
   try { ctx.Book.scan(function (pools) {
     POOLS = pools || [];
+    var addresses = []; POOLS.forEach(function (p) { if (p.address) addresses.push(p.address); if (p.mxaddress) addresses.push(p.mxaddress); });
+    ctx.Store.knownAddrsAdd(addresses);
     scanning = false;                 // reset BEFORE emitting, so a throwing update-listener can't leave it wedged
     emitter.emit("update");
     // 2) background engine — service.js does its own discovery snapshot + feed + keep-fresh + re-announce.
     try { if (serviceHandler) serviceHandler({ event: "NEWBLOCK" }); } catch (e) {}
     // 3) resume any pending signature (harmless on a full-RPC node), then verify pending CREATEs.
     try { ctx.PoolMgr.onNewBlock(); } catch (e) {}
-    verifyPendingActivity(tip);
+    syncHistory(); ctx.ActivityChain.verify(); ctx.ActivityChain.syncPublic(false);
   }); } catch (e) { scanning = false; }   // a synchronous throw must not wedge the cycle (the 2-min guard also recovers)
-}
-
-/** Mark a CREATE activity 'confirmed' once its covenant reserves land, or 'failed' after VERIFY_FAIL_BLOCKS. */
-function verifyPendingActivity(tip) {
-  if (!ctx) return;                                              // an invalidate() may have nulled ctx while this cycle was in flight
-  ctx.Store.actList(120, function (acts) {
-    acts.forEach(function (a) {
-      if (a.type !== "CREATE" || !a.refaddr || !a.txpowid || a.confirmedOnchain || a.failed) return;
-      nodeCmd("coins address:" + a.refaddr).then(function (j) {
-        var cs = (j && j.status && Array.isArray(j.response)) ? j.response : [];
-        var funded = cs.some(function (c) { return c && c.spent !== true; });
-        if (funded) { ctx.Store.actSetStatus(a.txpowid, "confirmed", ""); emitter.emit("update"); }
-        else if (a.submitBlock > 0 && tip - a.submitBlock >= VERIFY_FAIL_BLOCKS) { ctx.Store.actSetStatus(a.txpowid, "failed", "the pool's reserves never landed on-chain"); emitter.emit("update"); }
-      }).catch(function () {});
-    });
-  });
 }
 
 // ---- read model (JSON-safe) ----
@@ -215,12 +204,29 @@ function myPools() {
     });
   });
 }
-// `confirmed` must use the shared Store.confirmed() (block-count fallback for swaps), NOT the raw
-// confirmedOnchain flag — the on-chain verifier only ever confirms CREATE rows (they have a covenant address
-// to check), so reading the flag alone left SWAP/DEPOSIT/etc. stuck on "Confirming…" forever. lastTip is the
-// live chain tip (updated every block by the scan cycle).
-function activity() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.actList(120, function (a) { resolve((a || []).map(function (e) { return { type: e.type, summary: e.summary, txpowid: e.txpowid, ts: e.ts, failed: e.failed, failMsg: e.failMsg, confirmed: ctx.Store.confirmed(e, lastTip), submitBlock: e.submitBlock }; })); }); }); }
-function feed() { if (!ctx) return Promise.resolve([]); return new Promise(function (resolve) { ctx.Store.feedList(100, function (f) { resolve((f || []).map(function (e) { return { pool: e.pool, tokenLabel: e.tokenLabel, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), price: s(e.price), ts: e.ts }; })); }); }); }
+function activityLabels(active) { active = active || ctx; var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "USDT"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = active.PP.tokenLabel(p); }); return labels; }
+function activity() {
+  if (!ctx) return Promise.resolve([]);
+  const active = ctx;
+  return new Promise(function (resolve) { active.ActivityChain.snapshot(function (snap) {
+    var rows = snap.rows.map(function (r) { return active.ActivityChain.rowModel(r, activityLabels(active)); });
+    var error = [snap.error, active.History.error()].filter(Boolean).join(" · ");
+    if (error) rows.unshift({ type: "STATUS", summary: error });
+    resolve(rows);
+  }); });
+}
+function feed() {
+  if (!ctx) return Promise.resolve([]);
+  const active = ctx;
+  return new Promise(function (resolve) { active.ActivityChain.snapshot(function (snap) {
+    var labels = activityLabels(active);
+    var rows = snap.events.map(function (e) { return { pool: e.pool, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: e.minimaAmt, tokenAmt: e.tokenAmt, tokenLabel: labels[String(e.tokenid).toLowerCase()] || active.PP.shorten(e.tokenid), txpowid: e.txpowid, ts: e.ts, statusText: e.transaction.statusText, confirmed: e.transaction.confirmed, verifiedAt: e.transaction.verifiedAt }; });
+    active.Store.feedList(-1, function (observations) {
+      observations.forEach(function (e) { rows.push({ pool: e.pool, kind: e.kind, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), tokenLabel: e.tokenLabel, ts: e.ts, observed: true }); });
+      resolve(rows);
+    });
+  }); });
+}
 
 /**
  * The per-pool statement CSV: what you put in, your own trades, what is in the pool now, and the profit.
@@ -258,7 +264,7 @@ function statement() {
 /** Keep the permanent history mirror current. Fire-and-forget; safe to call every block. */
 function syncHistory() {
   if (!ctx || ctx.History.isRunning()) return Promise.resolve(0);
-  return new Promise(function (resolve) { ctx.History.sync(function (added) { resolve(added); }); });
+  return new Promise(function (resolve) { ctx.History.sync(function (added) { if (ctx) ctx.ActivityChain.verify(); emitter.emit("update"); resolve(added); }); });
 }
 
 // ---- actions (promise wrappers over PoolMgr's {ok,fail} callbacks) ----

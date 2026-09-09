@@ -1938,23 +1938,40 @@ function ppSwapSummary(a) {
   if (m) return "Bought " + m[1] + " MINIMA for " + m[2];
   return s;
 }
+let ppActivityShown = 60, ppFeedShown = 60;
+function ppTxDate(ms) { return ms > 0 ? new Date(Number(ms)).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC") : "Time unknown"; }
+function ppTxId(id) { return id ? `<span class="mono" data-copy="${esc(id)}" title="${esc(id)}">${esc(TOK.shortId(id))}</span>` : ""; }
 function ppActsHtml(acts) {
-  return acts.length ? acts.map(a => `<div class="row"><div class="row__mid">
-      <div class="row__l1">${esc(a.type)} ${a.failed ? "· <span style=\"color:var(--red)\">Failed</span>" : a.confirmed ? "· <span style=\"color:var(--green)\">Confirmed</span>" : "· Confirming…"}</div>
-      <div class="row__l2">${esc(short(ppSwapSummary(a), 58))}</div></div><div class="row__r">${esc(relTime(a.ts))}</div></div>`).join("")
-    : `<div class="empty">No activity yet.</div>`;
+  let html = acts.slice(0, ppActivityShown).map(a => {
+    if (a.type === "STATUS") return `<div class="view__desc">${esc(a.summary)}</div>`;
+    return `<div class="row"><div class="row__mid">
+      <div class="row__l1">${esc(a.type)} · <span style="color:${a.failed ? "var(--red)" : a.confirmed ? "var(--green)" : "var(--amber)"}">${esc(a.statusText || "Waiting for node check")}</span></div>
+      <div class="row__l2">${esc(ppSwapSummary(a))}</div>
+      <div class="row__l2">${ppTxId(a.txpowid)} · ${esc(a.timeLabel || "Submitted")} ${esc(ppTxDate(a.ts))}</div>
+      ${a.originalTxpowid && a.originalTxpowid.toLowerCase() !== String(a.txpowid).toLowerCase() ? `<div class="row__l2">Original submission ${ppTxId(a.originalTxpowid)}</div>` : ""}
+      ${a.verifiedAt ? `<div class="row__l2">Checked ${esc(ppTxDate(a.verifiedAt))}</div>` : ""}
+      ${a.failed && a.failMsg ? `<div class="row__l2">${esc(a.failMsg)}</div>` : ""}</div></div>`;
+  }).join("");
+  if (acts.length > ppActivityShown) html += `<button class="btn btn--outline" data-ppmore="activity">Show more (${acts.length - ppActivityShown} remaining)</button>`;
+  return html || `<div class="empty">No activity yet.</div>`;
 }
 function ppFeedHtml(feed) {
-  // Always framed from MINIMA's side: MINIMA into the pool = someone SOLD MINIMA; MINIMA out = someone BOUGHT it.
-  return feed.length ? feed.map(f => {
-    const verb = f.minimaIn ? "Sold" : "Bought";
-    const cls = f.minimaIn ? "row__l1--red" : "row__l1--green";
-    return `<div class="row"><div class="row__mid">
-      <div class="row__l1 ${cls}">${verb} ${esc(TOK.tidyAmount(f.minimaAmt))} MINIMA</div>
-      <div class="row__l2">for ${esc(TOK.tidyAmount(f.tokenAmt))} ${esc(f.tokenLabel)}</div></div>
-      <div class="row__r">${esc(relTime(f.ts))}</div></div>`;
-  }).join("")
-    : `<div class="empty">No swaps seen yet.</div>`;
+  const transactions = feed.filter(f => !f.observed), observations = feed.filter(f => f.observed);
+  let html = transactions.slice(0, ppFeedShown).map(f => {
+    const action = f.kind === "CREATE" ? "Pool creation" : f.kind === "ADD" ? "Liquidity addition" : f.kind === "WITHDRAW" ? "Liquidity withdrawal" : f.kind === "SWAP" ? (f.minimaIn ? "MINIMA sale" : "MINIMA purchase") : "Pool reserves changed";
+    return `<div class="row"><div class="row__mid"><div class="row__l1">${esc(action)} · ${esc(TOK.tidyAmount(f.minimaAmt))} MINIMA / ${esc(TOK.tidyAmount(f.tokenAmt))} ${esc(f.tokenLabel)}</div>
+      <div class="row__l2">${ppTxId(f.txpowid)} · Transaction ${esc(ppTxDate(f.ts))}</div>
+      <div class="row__l2" style="color:${f.confirmed ? "var(--green)" : "var(--amber)"}">${esc(f.statusText)}${f.verifiedAt ? " · Checked " + esc(ppTxDate(f.verifiedAt)) : ""}</div></div></div>`;
+  }).join("");
+  if (!transactions.length) html = `<div class="empty">No pool transactions found in this node’s retained history.</div>`;
+  if (transactions.length > ppFeedShown) html += `<button class="btn btn--outline" data-ppmore="feed">Show more (${transactions.length - ppFeedShown} remaining)</button>`;
+  if (observations.length) html += `<div class="view__desc">Previous local observations — inferred from scans, not verified transactions</div>`;
+  observations.forEach(f => { html += `<div class="row"><div class="row__mid"><div class="row__l1">${esc(f.kind)} observation · ${esc(f.minimaAmt)} MINIMA / ${esc(f.tokenAmt)} ${esc(f.tokenLabel)}</div><div class="row__l2">Observed on this device ${esc(ppTxDate(f.ts))} · Transaction time unknown</div></div></div>`; });
+  return html;
+}
+function wirePpActivity(root) {
+  wirePpCopy(root);
+  root.querySelectorAll("[data-ppmore]").forEach(b => b.onclick = () => { if (b.dataset.ppmore === "activity") ppActivityShown += 60; else ppFeedShown += 60; refreshPpActive(); });
 }
 function wirePpPoolRows(root) {
   root.querySelectorAll(".row[data-pool]").forEach(n => n.oncontextmenu = (e) => { e.preventDefault(); copy(n.dataset.pool); toast("Pool address copied", "ok"); });
@@ -2327,7 +2344,7 @@ async function renderPpActivity() {
   host.innerHTML = `${ppHeader("activity")}
     <div class="card" id="ppActs"><div class="card__title">Your activity</div>${ppActsHtml(acts)}</div>
     <div class="card" id="ppFeed"><div class="card__title">Market feed <span class="mail-ver">all pools</span></div>${ppFeedHtml(feed)}</div>`;
-  wirePpHeader();
+  wirePpHeader(); wirePpActivity(host);
 }
 // Live scan updates: patch ONLY the passive list container of the active sub-view IN PLACE (preserve scroll); never
 // rebuild the header or any form (the "frozen tab" rule — matters once swap/create inputs land in later steps).
@@ -2358,6 +2375,7 @@ async function refreshPpActive() {
     if (el("ppActs")) el("ppActs").innerHTML = `<div class="card__title">Your activity</div>${ppActsHtml(acts)}`;
     if (el("ppFeed")) el("ppFeed").innerHTML = `<div class="card__title">Market feed <span class="mail-ver">all pools</span></div>${ppFeedHtml(feed)}`;
   }
+  if (ppView === "activity" && el("ppBody")) wirePpActivity(el("ppBody"));
   if (el("ppBody")) el("ppBody").scrollTop = sy;
 }
 

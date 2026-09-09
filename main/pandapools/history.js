@@ -31,35 +31,40 @@ var History = (function () {
     var MAX_FETCHES = 600;    // hard stop across all pages + retries, so a pathological node can't spin forever
     var MAX_SKIP = 3;         // consecutive max:1 failures tolerated before giving up
 
-    var running = false;
+    var running = false, lastError = "";
 
     function isRunning() { return running; }
 
     /** Sync now. `cb(added, ok)` fires once, when there is nothing left to fetch. */
     function sync(cb) {
         if (running) { if (cb) cb(0, true); return; }
-        running = true;
-        Store.kvGet("hist_backfilled", function (done) {
+        running = true; lastError = "";
+        Store.kvGet("hist_backfilled", function (done, readOk) {
+          if (readOk === false) { running = false; lastError = "History metadata unavailable"; if (cb) cb(0, false); return; }
+          Store.kvGet("activity_repair_v1", function (repaired, repairOk) {
+            if (repairOk === false) { running = false; lastError = "Receipt repair metadata unavailable"; if (cb) cb(0, false); return; }
             var st = {
-                backfill: done !== "true",
+                backfill: done !== "true" || repaired !== "true", incomplete: false,
                 pageMax: START_MAX,
                 added: 0, fetches: 0, skips: 0,
                 cb: cb
             };
             page(st, 0);
+          });
         });
     }
 
     function finish(st, ok) {
         running = false;
+        if (!ok) lastError = "Node history sync incomplete; retrying on the next refresh";
         Store.kvSet("hist_synced_at", String(Date.now()), function () {
             if (st.cb) st.cb(st.added, ok);
         });
     }
 
     function page(st, offset) {
-        if (++st.fetches > MAX_FETCHES) { finish(st, true); return; }
-        MDS.cmd("history relevant:true max:" + st.pageMax + " offset:" + offset, function (j) {
+        if (++st.fetches > MAX_FETCHES) { finish(st, false); return; }
+        ActivityChain.readCommand("history relevant:true max:" + st.pageMax + " offset:" + offset, function (j) {
             var resp = (j && j.status) ? j.response : null;
             var txpows = resp && Array.isArray(resp.txpows) ? resp.txpows : null;
             if (!txpows) { shrink(st, offset); return; }        // dropped / over-cap stub → smaller page
@@ -72,16 +77,20 @@ var History = (function () {
 
             txpows.forEach(function (tx, i) {
                 var e = entryFrom(tx, details[i]);
-                if (!e || !e.txpowid) { if (--pending === 0) afterPage(); return; }
-                Store.histInsert(e, function (isNew) {
-                    if (isNew) st.added++; else hitKnown = true;
-                    if (--pending === 0) afterPage();
+                if (!e || !e.txpowid) { st.incomplete = true; if (--pending === 0) afterPage(); return; }
+                ActivityChain.observe(tx, function (identityOk) {
+                    if (!identityOk) st.incomplete = true;
+                    Store.histInsert(e, function (isNew, storedOk) {
+                        if (storedOk === false) st.incomplete = true;
+                        if (isNew) st.added++; else if (storedOk !== false) hitKnown = true;
+                        if (--pending === 0) afterPage();
+                    });
                 });
             });
 
             function afterPage() {
-                if (got < st.pageMax) { markDone(st, function () { finish(st, true); }); return; }   // end of history
-                if (!st.backfill && hitKnown) { finish(st, true); return; }                          // caught up
+                if (got < st.pageMax) { markDone(st, function () { finish(st, !st.incomplete); }); return; }   // end of history
+                if (!st.backfill && hitKnown) { finish(st, !st.incomplete); return; }                          // caught up
                 setTimeout(function () { page(st, offset + got); }, PAGE_DELAY);
             }
         });
@@ -94,6 +103,7 @@ var History = (function () {
             st.pageMax = Math.max(1, Math.floor(st.pageMax / 2));
             setTimeout(function () { page(st, offset); }, PAGE_DELAY);
         } else if (++st.skips <= MAX_SKIP) {
+            st.incomplete = true;
             setTimeout(function () { page(st, offset + 1); }, PAGE_DELAY);
         } else {
             finish(st, false);
@@ -101,8 +111,8 @@ var History = (function () {
     }
 
     function markDone(st, cb) {
-        if (!st.backfill) { cb(); return; }
-        Store.kvSet("hist_backfilled", "true", cb);
+        if (!st.backfill || st.incomplete) { cb(); return; }
+        Store.kvSet("hist_backfilled", "true", function () { Store.kvSet("activity_repair_v1", "true", cb); });
     }
 
     /**
@@ -162,5 +172,5 @@ var History = (function () {
         return "";
     }
 
-    return { sync: sync, isRunning: isRunning, entryFrom: entryFrom };
+    return { sync: sync, isRunning: isRunning, entryFrom: entryFrom, error: function () { return lastError; } };
 })();
