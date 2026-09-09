@@ -1,13 +1,13 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const donor = process.env.PP_MDS_ROOT || path.resolve(root, '../../mds/pandapools-mds');
-const files = ['decimal.js','covenant.js','curve.js','router.js','book.js','store.js','history.js','statement.js','sha3.js','receipt-recovery.js','activity-chain.js'];
+const files = ['decimal.js','covenant.js','curve.js','router.js','book.js','store.js','history.js','statement.js','sha3.js','receipt-recovery.js','activity-chain.js','reserve-recovery.js'];
 for (const f of files) assert.equal(fs.readFileSync(path.join(root,'main/pandapools',f),'utf8'),fs.readFileSync(path.join(donor,f),'utf8'),'MDS/Desktop drift: '+f);
 for (const engine of [donor,path.join(root,'main/pandapools')]) {
   assert(fs.readFileSync(path.join(engine,'poolmgr.js'),'utf8').includes('ActivityChain.rememberSubmission(rp, posted'));
   assert(!fs.readFileSync(path.join(engine,'service.js'),'utf8').includes('    ingestFeed(funded);'));
 }
-console.log('PASS 11 byte-identical MDS/Desktop engine files');
+console.log('PASS 12 byte-identical MDS/Desktop engine files');
 const source=fs.readFileSync(path.join(root,'renderer/app.js'),'utf8');
 const htmlCode=source.slice(source.indexOf('function ppSwapSummary'),source.indexOf('function wirePpPoolRows'));
 const ctx={TOK:{shortId:s=>s,tidyAmount:s=>s},esc:s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;')};vm.createContext(ctx);vm.runInContext(htmlCode,ctx);

@@ -94,18 +94,16 @@ var PoolMgr = (function () {
     }
 
     /** Sign `signers` (["auto"] and/or a hex owner pubkey) in order; each may pend and resume on NEWBLOCK. */
-    function signAll(txid, signers, idx, onDone, onFail) {
-        if (idx >= signers.length) { onDone(); return; }
-        var pk = signers[idx];
-        MDS.cmd("txnsign id:" + txid + " publickey:" + pk, function (res) {
-            if (res && res.status === true && !isPending(res)) {
-                signAll(txid, signers, idx + 1, onDone, onFail); return;   // WRITE fast-path
-            }
-            if (isPending(res)) {
-                waitSign(txid, function () { signAll(txid, signers, idx + 1, onDone, onFail); }, onFail);
-                return;
-            }
-            onFail("signing failed" + errOf(res));
+    function signAll(txid, signers, idx, onDone, onFail, inputs) {
+        if(idx>=signers.length){onDone();return;}
+        var pk=signers[idx];
+        ReserveRecovery.checkSignature(inputs,pk,function(error){
+            if(error){onFail(error);return;}
+            MDS.cmd("txnsign id:"+txid+" publickey:"+pk,function(res){
+                if(res&&res.status===true&&!isPending(res)){signAll(txid,signers,idx+1,onDone,onFail,inputs);return;}
+                if(isPending(res)){MDS.cmd("txndelete id:"+txid,function(){onFail("Signature unexpectedly queued. Transaction cancelled; deny its pending approval in MiniHub and enable WRITE mode.");});return;}
+                onFail("signing failed"+errOf(res));
+            });
         });
     }
 
@@ -163,11 +161,12 @@ var PoolMgr = (function () {
 
     /** build (runChain) → sign (signAll, pending-aware) → finalize. `done` = { ok(txpowid), fail(msg) }. */
     function buildAndPost(txid, cmds, signers, done) {
+        var inputs=cmds.filter(function(q){return q.indexOf("txninput ")===0;}).map(function(q){var m=q.match(/(?:^|\s)coinid:(0x[0-9a-fA-F]+)(?:\s|$)/);return m?m[1]:"";});
         runChain(cmds, txid, function (ok, res) {
             if (!ok) { done.fail("building the transaction failed" + errOf(res)); return; }
             signAll(txid, signers, 0,
                 function () { finalize(txid, done); },
-                function (msg) { MDS.cmd("txndelete id:" + txid); done.fail(msg); });
+                function (msg) { MDS.cmd("txndelete id:" + txid); done.fail(msg); }, inputs);
         });
     }
 
@@ -180,6 +179,14 @@ var PoolMgr = (function () {
     /** Largest-first sendable wallet coins for a token summing to >= need. `excludeLower` = {addrLower:true}
      *  (pool covenant addresses AND owner payout addresses) are never selected. cb(coins,sum) or cb(null). */
     function selectCoins(tokenid, needRaw, excludeLower, cb) {
+        Store.ownAll(function(ps,ok){
+            if(ok===false){cb(null);return;}
+            var exclusions={};Object.keys(excludeLower||{}).forEach(function(a){exclusions[a]=true;});
+            ps.forEach(function(p){if(p.oadr)exclusions[p.oadr.toLowerCase()]=true;});
+            selectNonOwnerCoins(tokenid,needRaw,exclusions,cb);
+        });
+    }
+    function selectNonOwnerCoins(tokenid, needRaw, excludeLower, cb) {
         var need = PP.dec(needRaw);
         if (need.lte(0)) { cb([], new D(0)); return; }
         MDS.cmd("coins relevant:true sendable:true tokenid:" + tokenid, function (res) {
@@ -344,7 +351,8 @@ var PoolMgr = (function () {
                         kmin: kmin, tokDecimals: tokDecimals, reserveM: x0, reserveT: y0c, tokName: null,
                         covenantScript: script   // authoritative script → stored in the recovery recipe
                     };
-                    buildCreate(p, x0, y0c, tokenid, done);
+                    p.signingStateUnverified=false;
+                    Store.ownRecord(p,function(saved){if(saved)buildCreate(p,x0,y0c,tokenid,done);else done.fail("Could not save the pool recovery recipe. Nothing posted.");});
                 });
             }, done.fail);
         });
@@ -451,7 +459,8 @@ var PoolMgr = (function () {
                 };
                 // Re-read the live OLD-pool coin first — migrate sweeps the current reserves to $OADR,
                 // pinned by VERIFYOUT to the input coin amount; a stale snapshot fails "already spent".
-                withFreshCoins(p, function () { buildMigrate(p, np, newX, newYc, done); }, done.fail);
+                np.signingStateUnverified=false;
+                Store.ownRecord(np,function(saved){if(!saved){done.fail("Could not save the pool recovery recipe. Nothing posted.");return;}withFreshCoins(p, function () { buildMigrate(p, np, newX, newYc, done); }, done.fail);});
             });
         }, done.fail);
     }
@@ -497,27 +506,8 @@ var PoolMgr = (function () {
     // own keep-fresh (REFRESH_BLOCKS), spends and recreates the coins, so a cached id is a SPENT coin
     // and the tx dies at txncheck ("an input coin was already spent — the pool moved"). Covenant params
     // (opk/oadr/tok/kmin/address) are invariant across coin moves. Mirrors native PoolRefresher.readLiveReserves.
-    function readLiveReserves(p, done) {   // done(funded)
-        if (!p || !p.address) { done(false); return; }
-        MDS.cmd("coins address:" + p.address, function (j) {
-            var cs = (j && j.status && Array.isArray(j.response)) ? j.response : [];
-            p.reserveM = null; p.reserveT = null; p.coinidM = ""; p.coinidT = ""; p.reserveBlock = 0;
-            var mBlk = 0, tBlk = 0;
-            for (var i = 0; i < cs.length; i++) {
-                var c = cs[i];
-                if (!c || c.spent === true) continue;
-                var tid = c.tokenid || "";
-                if (tid === "0x00") {
-                    var amtM = PP.dec(c.amount || "0");
-                    if (p.reserveM === null || amtM.gt(p.reserveM)) { p.reserveM = amtM; p.coinidM = c.coinid || ""; mBlk = parseInt(c.created) || 0; }
-                } else if (p.tok && p.tok.toLowerCase() === tid.toLowerCase()) {
-                    var amtT = PP.dec(c.tokenamount !== undefined ? c.tokenamount : (c.amount || "0"));
-                    if (p.reserveT === null || amtT.gt(p.reserveT)) { p.reserveT = amtT; p.coinidT = c.coinid || ""; tBlk = parseInt(c.created) || 0; }
-                }
-            }
-            p.reserveBlock = Math.max(mBlk, tBlk);
-            done(Curve.funded(p));
-        });
+    function readLiveReserves(p, done) {
+        ReserveRecovery.readReserves(p, done);
     }
 
     // Re-read the live coin then run ok(); abort via fail(msg) if it can't be read or is now empty.
@@ -742,20 +732,9 @@ var PoolMgr = (function () {
 
     // --- the serial gate: one hunt in flight, so overlapping callers can't double-charge the ledger ---
     var huntBusy = false, huntQueue = [];
-    function ensureOwnerKeys(wantedOpks, done) {   // done(regenerated, unreachable[])
-        var wanted = {}; var any = false;
-        (wantedOpks || []).forEach(function (o) { if (o) { wanted[o.toLowerCase()] = true; any = true; } });
-        if (!any) { done(0, []); return; }
-        var job = function () {
-            beginHunt(wanted, function (regen, unreachable) {
-                huntBusy = false;
-                var next = huntQueue.shift();
-                if (next) { huntBusy = true; next(); }
-                done(regen, unreachable);
-            });
-        };
-        if (huntBusy) { huntQueue.push(job); return; }
-        huntBusy = true; job();
+    // Read-only: a recipe or elapsed-block estimate cannot restore a WOTS key's signing state.
+    function ensureOwnerKeys(wantedOpks, done) {
+        ReserveRecovery.ensureKeys(wantedOpks, done);
     }
 
     function beginHunt(wanted, done) {
@@ -861,13 +840,13 @@ var PoolMgr = (function () {
         if (!publickey) { cb(null, -1); return; }
         MDS.cmd("keys action:list publickey:" + publickey, function (j) {
             var arr = keyRowsOf(j);
-            if (!arr) { cb(null, -1); return; }
+            if (!j || j.status !== true || j.pending === true || !arr) { cb(null, -1); return; }
             var want = String(publickey).toLowerCase();
             for (var i = 0; i < arr.length; i++) {
                 var k = arr[i];
                 if (k && String(k.publickey || "").toLowerCase() === want && k.uses !== undefined) {
                     var mod = parseModifier(k.modifier);
-                    cb(Number(k.uses), mod === null ? -1 : mod);
+                    cb(ReserveRecovery.integer(k.uses,262144) ? Number(k.uses) : null, mod === null ? -1 : mod);
                     return;
                 }
             }
@@ -980,6 +959,6 @@ var PoolMgr = (function () {
         forwardOwnerFunds: forwardOwnerFunds,
         sweepOwnerFunds: sweepOwnerFunds,
         ensureOwnerKeys: ensureOwnerKeys, rememberKidx: rememberKidx,
-        readKeyUses: readKeyUses, restoreTarget: restoreTarget, advanceKeyUses: advanceKeyUses
+        readKeyUses: readKeyUses
     };
 })();

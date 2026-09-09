@@ -42,6 +42,7 @@ let ready = false, initPromise = null;
 let scanTimer = null, lastTip = 0, scanning = false, scanStartTs = 0;
 let POOLS = [];                        // latest funded pools from Book.scan (Decimal reserves)
 let dataDir = null;
+let contextEpoch=0, quarantineRequired=false;
 
 // swappable node-command runner (overridable in tests via _setRunner) — mirrors mail.js:42-45.
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
@@ -50,11 +51,14 @@ function _setDataDir(d) { dataDir = d; }
 function nodeCmd(cmd) { return runner(cmd); }
 
 function buildMds() {
+  const epoch=contextEpoch, storage=sqlShim;
   return {
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
-    cmd: function (command, cb) { runner(command).then(function (r) { if (cb) cb(r); }, function () { if (cb) cb({ status: false }); }); },
-    sql: sqlShim.sql,
+    cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}runner(command).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { if (cb) cb({ status: false }); }); },
+    sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
+    persistRecovery: function(cb) { cb(epoch===contextEpoch&&storage.flushChecked()); },
+    archiveGET: function(url,cb) { fetchJson(url).then(cb,function(){cb(null);}); },
     // history.js pages the node's `history` into the permanent mirror and adapts its page size downward on
     // any page that fails. The 256 KB reply cap that forces the Android app down to max:1 lives in the
     // ANDROID BROADCAST RECEIVER (MinimaReceiver.MAX_MESSAGE_LEN), not in the node — and this transport is
@@ -70,16 +74,25 @@ function buildMds() {
 async function init() {
   if (ready) return;
   if (initPromise) return initPromise;
+  const epoch=contextEpoch;
   initPromise = (async function () {
     const dir = dataDir || app.getPath("userData");
-    sqlShim = await makeSqlShim(path.join(dir, "pandapools.sqlite"));
+    const storage = await makeSqlShim(path.join(dir, "pandapools.sqlite"));
+    if(epoch!==contextEpoch)throw new Error("Wallet identity changed during pool initialization.");
+    sqlShim=storage;
     ctx = createContext(buildMds(), ALL_FILES);                     // loads all reused files; service.js registers via MDS.init
     await new Promise(function (r) { ctx.Store.init(function () { r(); }); });
     await new Promise(function (resolve, reject) { ctx.ActivityChain.init(function (ok) { if (ok) resolve(); else reject(new Error("Pool transaction storage unavailable")); }); });
+    if(epoch!==contextEpoch)throw new Error("Wallet identity changed during pool initialization.");
+    if(quarantineRequired){
+      const held=storage.sql("UPDATE pp_ownpools SET signing_unverified=1");
+      if(!held.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine remains stopped.");
+      quarantineRequired=false;
+    }
     ctx.ActivityChain.onChange(function () { emitter.emit("update"); });
     if (serviceHandler) serviceHandler({ event: "inited" });         // boot service.js (coinnotify cleanup + retrackOwn + first scan)
     ready = true;
-  })().catch(function (e) { initPromise = null; throw e; });         // don't cache a rejection → a transient init failure can retry
+  })().catch(function (e) { if(epoch===contextEpoch){initPromise=null;ready=false;if(ctx&&ctx.ActivityChain)ctx.ActivityChain.stop();ctx=null;serviceHandler=null;} throw e; });         // don't cache a rejection → a transient init failure can retry
   return initPromise;
 }
 function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best effort */ } }
@@ -91,18 +104,19 @@ function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best eff
 function onNodeRestarted() {
   if (ready && serviceHandler) serviceHandler({ event: "inited" });
 }
-/** On a wallet seed restore the identity changed. Drop the loaded context + cached pools and wipe the local store,
- *  so the background keep-fresh worker stops churning on the previous seed's (now unspendable) pools and My LP clears.
- *  Recovery recipes are for the previous wallet and are re-importable from a PandaPools backup. Mirrors mail's invalidate. */
-function invalidate() {
-  try { stopLoop(); } catch (e) {}
-  try { if (sqlShim) sqlShim.flush(); } catch (e) {}
-  try { fs.unlinkSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}   // fresh store next init
-  if (ctx && ctx.ActivityChain) ctx.ActivityChain.stop();
-  ctx = null; serviceHandler = null; sqlShim = null; ready = false; initPromise = null;
-  POOLS = []; lastTip = 0; scanning = false; scanStartTs = 0; lastQuotes = {};   // stale routes reference the old seed's pools
-  emitter.emit("update");
-  startLoop();                                                    // re-init under the new seed on the next tick
+/** Wallet identity changes invalidate live work, never the saved recipes or usage floors. */
+async function invalidate() {
+  quarantineRequired=true;stopLoop();contextEpoch++;
+  const old=ctx,storage=sqlShim;
+  if(old&&old.ActivityChain)old.ActivityChain.stop();
+  ready=false;ctx=null;serviceHandler=null;initPromise=null;
+  POOLS=[];lastTip=0;scanning=false;scanStartTs=0;lastQuotes={};
+  if(storage){
+    const r=storage.sql("UPDATE pp_ownpools SET signing_unverified=1");
+    if(!r.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine stopped; resolve storage before restarting.");
+    quarantineRequired=false;
+  }
+  sqlShim=null;emitter.emit("update");await init();startLoop();
 }
 
 // ---- helpers ----
@@ -190,19 +204,16 @@ function runCycle(tip) {
 // ---- read model (JSON-safe) ----
 function pools() { if (!ctx) return []; return POOLS.map(serializePool).filter(Boolean); }
 function myPools() {
-  // A pool is "mine" if we hold a recovery recipe for it (created here) — cross-referenced with the live scan.
-  if (!ctx) return Promise.resolve([]);
-  return new Promise(function (resolve) {
-    ctx.Store.ownAll(function (recipes) {
-      var mine = {}; recipes.forEach(function (r) { if (r.address) mine[r.address.toLowerCase()] = true; });
-      var owned = POOLS.filter(function (p) { return p.address && mine[p.address.toLowerCase()]; });
-      if (!owned.length) { resolve([]); return; }
-      var pending = owned.length, out = [];
-      owned.forEach(function (p) {                                 // fetch each pool's LP baseline (feeBaseK/initPrice/block) for the economics
-        ctx.Store.lpGet(p.address, function (snap) { out.push(serializeMyPool(p, snap)); if (--pending === 0) resolve(out); });
-      });
-    });
-  });
+  if(!ctx)return Promise.resolve([]);const active=ctx;
+  return new Promise((resolve,reject)=>active.Store.ownAll((recipes,ok)=>{
+    if(ok===false){reject(new Error("Saved pool recipes could not be read."));return;}
+    Promise.all(recipes.map(r=>{
+      const p=POOLS.find(p=>p.address&&p.address.toLowerCase()===r.address.toLowerCase()&&active.ReserveRecovery.complete(p));
+      const state={address:r.address,tok:r.tok,opk:r.opk,signingStateUnverified:r.signingStateUnverified||active.Store.confirmationFailed(r.opk),unresolved:!p};
+      if(!p)return state;
+      return new Promise(done=>active.Store.lpGet(p.address,snap=>done(Object.assign(serializeMyPool(p,snap),state))));
+    })).then(resolve,reject);
+  }));
 }
 function activityLabels(active) { active = active || ctx; var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "USDT"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = active.PP.tokenLabel(p); }); return labels; }
 function activity() {
@@ -440,8 +451,7 @@ function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) {
  *  soon fails with "Public Key not found". Re-issue newaddress until it reappears (a no-op if already held; can
  *  only succeed under the pool's creating seed). The hunt is BUDGETED (see poolmgr.js): a key another seed
  *  minted comes back as unreachable instead of burning 256 fresh wallet keys per attempt — cb(foreign) says so. */
-const FOREIGN_KEY_MSG = "This pool's owner key belongs to a different seed — this node cannot sign for it. "
-  + "Manage this pool on the device/seed that created it.";
+const UNAVAILABLE_KEY_MSG = "Owner signing is paused or its current key state could not be verified. Open Pool recovery and confirm the latest complete wallet signing state.";
 function ensureOwnerKey(opk, cb) {
   if (!opk || !ctx || !ctx.PoolMgr || !ctx.PoolMgr.ensureOwnerKeys) return cb(false);
   try {
@@ -459,7 +469,7 @@ function closePool(addr) {
   return actionOnPool(addr, function (p, d) {
     var deadline = Date.now() + HUNT_SPEND_GUARD_MS;
     ensureOwnerKey(p.opk, function (foreign) {
-      if (foreign) { d.fail(FOREIGN_KEY_MSG); return; }
+      if (foreign) { d.fail(UNAVAILABLE_KEY_MSG); return; }
       if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — retry"); return; }
       ctx.PoolMgr.close(p, d);
     });
@@ -471,7 +481,7 @@ async function migrate(addr, newX, newY) {
   return withTimeout(new Promise(function (resolve, reject) {
     var deadline = Date.now() + HUNT_SPEND_GUARD_MS;
     ensureOwnerKey(p.opk, function (foreign) {
-      if (foreign) { reject(new Error(FOREIGN_KEY_MSG)); return; }
+      if (foreign) { reject(new Error(UNAVAILABLE_KEY_MSG)); return; }
       if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — retry")); return; }
       ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } });
     });
@@ -507,141 +517,44 @@ async function scanNow() { await init(); return new Promise(function (r) { ctx.B
 // ---- Recovery (Layer 3): backup + restore. Byte-compatible with native/MDS ({pandapools_backup:1, pools:[…]}),
 //      public data only (recipe params + a fresh coinexport of each reserve coin) — no seed, cannot move funds.
 async function backup() {
-  await init();
-  await scanNow();                                                 // freshen POOLS so we can coinexport the current reserve coins
-  return withTimeout(new Promise(function (resolve) {
-    ctx.Store.ownAll(function (recipes) {
-      recipes = recipes || [];
-      if (!recipes.length) { resolve({ empty: true, json: "" }); return; }
-      var funded = {};
-      POOLS.forEach(function (p) { if (p && p.address && ctx.Curve.funded(p)) funded[p.address.toLowerCase()] = p; });
-      var pools = [], pending = recipes.length;
-      function fin() { if (--pending === 0) resolve({ json: JSON.stringify({ pandapools_backup: 3, pools: pools }, null, 2) }); }
-      recipes.forEach(function (r) {
-        var e = { addr: r.address || "", mx: r.mxaddress || "", opk: r.opk || "", oadr: r.oadr || "",
-          tok: r.tok || "", dec: (r.tokDecimals == null ? 8 : r.tokDecimals), kmin: r.kmin || "0", script: r.script || "" };
-        pools.push(e);
-        var f = funded[(r.address || "").toLowerCase()];
-        function afterCoins() {
-          if (f && f.coinidM && f.coinidT) {
-            nodeCmd("coinexport coinid:" + f.coinidM).then(function (jm) {
-              var rm = jm && jm.response; if (rm && rm.data) e.cm = rm.data;
-              nodeCmd("coinexport coinid:" + f.coinidT).then(function (jt) { var rt = jt && jt.response; if (rt && rt.data) e.ct = rt.data; fin(); }).catch(fin);
-            }).catch(fin);
-          } else fin();
-        }
-        // Stamp the owner key's ACTUAL one-time-signature count and the height it was read at. Without it a
-        // later restore resumes the regenerated key at leaf 0 and re-signs leaves already spent on-chain.
-        if (e.opk && ctx.PoolMgr.readKeyUses) {
-          try {
-            ctx.PoolMgr.readKeyUses(e.opk, function (uses, kidx) {
-              if (uses !== null && uses !== undefined) { e.opkuses = uses; if (lastTip > 0) e.atblock = lastTip; }
-              // v3: the key's derivation index — a restore's hunt becomes exact, and a backup restored
-              // onto the WRONG seed is proven foreign with zero minted keys. Backfill it locally too: a
-              // pre-v3 pool only reveals its index while the node still HOLDS the key — i.e. right now.
-              if (kidx >= 0) { e.kidx = kidx; if (ctx.PoolMgr.rememberKidx) ctx.PoolMgr.rememberKidx(e.opk, kidx); }
-              afterCoins();
-            });
-          } catch (err) { afterCoins(); }
-        } else afterCoins();
-      });
-    });
-  }), 120000, "Backup timed out — try again.");
+  await init(); const active=ctx;
+  return new Promise(resolve => active.ReserveRecovery.backup(lastTip,resolve));
 }
+let recoveryBusy=false;
 async function restore(json) {
   await init();
-  var root; try { root = JSON.parse(json); } catch (e) { throw new Error("That doesn't look like a PandaPools backup (invalid JSON)."); }
-  var pools = root && root.pools;
-  if (!root || !root.pandapools_backup || !Array.isArray(pools) || !pools.length) throw new Error("No PandaPools pools found in that backup.");
-  return withTimeout(new Promise(function (resolve) {
-    // v3 backups carry each owner key's derivation index — remember them BEFORE the hunt so it can run
-    // exact (and prove a wrong-seed restore with zero minted keys).
-    if (ctx.PoolMgr.rememberKidx) pools.forEach(function (e) { if (e && e.opk && e.kidx >= 0) ctx.PoolMgr.rememberKidx(e.opk, e.kidx); });
-    var total = pools.length, fin = 0, ok = 0;
-    pools.forEach(function (e) {
-      restoreOne(e, function (good) {
-        if (good) ok++;
-        if (++fin === total) {
-          // Regenerate any missing $OPK owner keys — a seed-only restore only brings back the 64 defaults, so a
-          // newaddress owner key must be re-issued in order for restored pools to be closeable/collectable.
-          var opks = pools.map(function (x) { return x && x.opk; }).filter(Boolean);
-          ctx.PoolMgr.ensureOwnerKeys(opks, function (regen, unreachable) {
-            var foreignSet = {};
-            (unreachable || []).forEach(function (o) { foreignSet[o] = true; });
-            // A regenerated key comes back at uses = 0. Wind it forward to where it actually left off
-            // BEFORE anything can sign with it — that ordering is the whole fix.
-            advanceRestoredKeys(pools, 0, foreignSet, function (warn) {
-              emitter.emit("update"); scanNow().catch(function () {});
-              resolve({ restored: ok, total: total, regen: regen, foreign: unreachable ? unreachable.length : 0, warn: warn || null });
-            });
-          });
-        }
-      });
-    });
-  }), 240000, "Restore timed out — check My LP; some pools may have been re-tracked.");
+  if(typeof json!=="string"||json.length>8*1024*1024)throw new Error("Invalid or oversized pool backup.");
+  if(recoveryBusy)throw new Error("Pool recovery is already running.");
+  recoveryBusy=true;const active=ctx;
+  try {
+    return await new Promise(resolve => active.ReserveRecovery.configuredArchive(archive => {
+      active.ReserveRecovery.restore(json,archive,null,r => {emitter.emit("update");if(active===ctx)scanNow().catch(()=>{});resolve(r);});
+    }));
+  } finally {recoveryBusy=false;}
 }
-/** Owner actions other than keep-fresh that could also have signed since the backup. Erring high costs a
- *  leaf out of 262,144; falling short leaks the key. */
-const USES_SLACK = 50;
-
-/** Wind each restored owner key forward to the count it had reached. Sequential on purpose — each pass
- *  burns real signatures, and firing them concurrently is the pattern that caused reuse in the first
- *  place. Best-effort per pool, but every failure is REPORTED, never swallowed. Keys the hunt proved to be
- *  another seed's ({@code foreignSet}) are skipped — there is nothing to advance on this node and never
- *  will be; their count already reaches the UI as r.foreign. */
-function advanceRestoredKeys(pools, i, foreignSet, done) {
-  if (i >= pools.length) { done(null); return; }
-  const e = pools[i];
-  if (!e || !e.opk || !ctx.PoolMgr.advanceKeyUses) { advanceRestoredKeys(pools, i + 1, foreignSet, done); return; }
-  const label = (e.addr || "pool").slice(0, 10) + "…";
-  if (foreignSet && foreignSet[String(e.opk).toLowerCase()]) {
-    // Skip SILENTLY: the foreign count already reaches the UI as r.foreign, and hijacking the single
-    // warn slot here would mask a later pool's security-critical "could not restore the owner key's
-    // usage" warning (the warn chain is first-set-wins).
-    advanceRestoredKeys(pools, i + 1, foreignSet, done);
-    return;
-  }
-  if (e.opkuses === undefined) {
-    // A pre-v2 backup carries no count. Say so rather than quietly resuming at leaf 0.
-    advanceRestoredKeys(pools, i + 1, foreignSet, function () {
-      done(label + ": this backup predates key-use tracking, so the owner key's signature count is unknown. "
-         + "Re-back-up now and avoid reusing this pool.");
-    });
-    return;
-  }
-  const target = ctx.PoolMgr.restoreTarget(e.opkuses, e.atblock || 0, lastTip, USES_SLACK);
-  ctx.PoolMgr.advanceKeyUses(e.opk, target, null, function (okAdv, finalUses, err) {
-    if (okAdv) { advanceRestoredKeys(pools, i + 1, foreignSet, done); return; }
-    advanceRestoredKeys(pools, i + 1, foreignSet, function () {
-      done(label + ": could not restore the owner key's usage (" + err + "). Do not use this pool until that "
-         + "succeeds — signing now could expose the key.");
-    });
-  });
+async function recoverSaved(address) {
+  await init();const active=ctx;
+  const recipes=await new Promise((resolve,reject)=>active.Store.ownAll((ps,ok)=>ok===false?reject(new Error("Pool storage unavailable.")):resolve(ps)));
+  const p=recipes.find(r=>r.address.toLowerCase()===String(address).toLowerCase());
+  if(!p)throw new Error("Saved pool recipe not found.");
+  return restore(JSON.stringify({pandapools_backup:3,pools:[active.ReserveRecovery.entry(p)]}));
 }
-
-function restoreOne(e, cbRaw) {
-  var done = false; function cb(v) { if (done) return; done = true; cbRaw(v); }   // fire once, whatever the .then/.catch does
-  if (!e || !e.addr) { cb(false); return; }
-  ctx.Store.ownRecord({ address: e.addr, mxaddress: e.mx || "", opk: e.opk || "", oadr: e.oadr || "",
-    tok: e.tok || "", tokDecimals: (e.dec == null ? 8 : e.dec), kmin: e.kmin || "0", covenantScript: e.script || "" });
-  ctx.Store.knownAddrsAdd([e.addr, e.mx]);
-  var script = (e.script && e.script.length) ? e.script : (e.opk && e.oadr && e.tok && e.kmin ? ctx.Covenant.script(e.opk, e.oadr, e.tok, e.kmin) : "");
-  if (!script) { cb(true); return; }                              // recipe persisted; no script to re-track
-  nodeCmd("newscript trackall:true script:" + ctx.Covenant.scriptArg(script)).then(function () {
-    importCoin(e.cm, function () { importCoin(e.ct, function () { cb(true); }); });
-  }).catch(function () { cb(true); });
+async function archiveSettings(url) {
+  await init();const active=ctx;
+  if(url===undefined)return new Promise(resolve=>active.Store.kvGet("recovery_archive",value=>resolve(value)));
+  if(typeof url!=="string")throw new Error("Invalid archive endpoint.");
+  return new Promise(resolve=>active.ReserveRecovery.saveArchive(url,resolve));
 }
-function importCoin(data, next) {
-  var d = String(data || "");
-  if (!d || /\s/.test(d)) { next(); return; }                    // coinexport blobs are a single space-free token; reject anything else (a hostile backup can't smuggle extra command params)
-  nodeCmd("coinimport track:true data:" + d).then(function () { next(); }, function () { next(); });
+async function confirmSigning(opk,attested) {
+  await init();if(attested!==true||typeof opk!=="string"||!/^0x[0-9a-fA-F]{64}$/.test(opk))return false;
+  const active=ctx;return new Promise(resolve=>active.ReserveRecovery.confirmKey(opk,ok=>{emitter.emit("update");resolve(ok);}));
 }
 
 module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
-  swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore,
+  swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore, recoverSaved, archiveSettings, confirmSigning,
   onNodeRestarted,
   _setRunner, _setDataDir,
 };

@@ -167,13 +167,21 @@ function ensureTables(cb) {
 }
 // pp_ownpools is written by the page (store.js ownRecord); the service only reads it (re-track on launch).
 function ensureOwn(cb) {
+    var cols=[["opkuses","int DEFAULT -1"],["signing_unverified","int DEFAULT 1"],["lastcoinm","varchar(80)"],["lastcoint","varchar(80)"]];
+    function columns(i){
+        if(i===cols.length){cb();return;}
+        MDS.sql("SELECT "+cols[i][0]+" FROM pp_ownpools LIMIT 1",function(r){
+            if(r&&r.status===true){columns(i+1);return;}
+            MDS.sql("ALTER TABLE pp_ownpools ADD COLUMN "+cols[i][0]+" "+cols[i][1],function(){columns(i+1);});
+        });
+    }
     MDS.sql("SELECT 1 FROM pp_ownpools LIMIT 1", function (r) {
-        if (r && r.status) { cb(); return; }
+        if (r && r.status) { columns(0); return; }
         MDS.sql(
             "CREATE TABLE IF NOT EXISTS `pp_ownpools` (" +
             " `address` varchar(80) NOT NULL PRIMARY KEY, `mx` varchar(80)," +
             " `opk` varchar(140) NOT NULL, `oadr` varchar(80) NOT NULL, `tok` varchar(80) NOT NULL," +
-            " `tdec` int NOT NULL, `kmin` varchar(120) NOT NULL, `script` text)", function () { cb(); });
+            " `tdec` int NOT NULL, `kmin` varchar(120) NOT NULL, `script` text)", function () { columns(0); });
     });
 }
 // Layer 2 — re-track on launch (headless): re-register every owned-pool covenant so a wiped/re-synced node
@@ -270,44 +278,38 @@ function readOwnSets(cb) {
         cb(own);
     });
 }
-function demoteForeign(foreign, i) {
-    if (i >= foreign.length) { untrackForeignCoins(foreign); return; }
-    if (!foreign[i].track) { demoteForeign(foreign, i + 1); return; }
-    // the row's VERBATIM script — a legacy-fee covenant reconstructs differently and would claim a new address
-    MDS.cmd("newscript trackall:false script:" + scriptArg(foreign[i].script), function (r) {
-        // Read-restricted install: writes queue in the node's Pending panel. ABORT the demote loop — N stale
-        // pending demotes per launch is a prompt storm, and one approved AFTER a later restore could downgrade
-        // a by-then-own row. Skip straight to the coin pass (cointrack denials are swallowed harmlessly).
-        if (r && (r.pending === true || (r.status === false && /pending/i.test(String(r.error || ""))))) {
-            untrackForeignCoins(foreign); return;
-        }
-        demoteForeign(foreign, i + 1);
+function stillForeign(row,cb){
+    readOwnSets(function(own){cb(!!own&&!own.addrs[row.address.toLowerCase()]&&!own.opks[String(row.opk||"").toLowerCase()]);});
+}
+function demoteForeign(foreign,i){
+    if(i>=foreign.length){untrackForeignCoins(foreign);return;}
+    var row=foreign[i];if(!row.track){demoteForeign(foreign,i+1);return;}
+    stillForeign(row,function(ok){
+        if(!ok){demoteForeign(foreign,i+1);return;}
+        MDS.cmd("newscript trackall:false script:"+scriptArg(row.script),function(){demoteForeign(foreign,i+1);});
     });
 }
-// ALL foreign covenant addresses (not just still-track:true rows) — also heals a partial prior sweep and
-// in-session re-pollution from the stale relevance cache. ONE BOUNDED QUERY PER ADDRESS, sequential — never
-// an unbounded `coins relevant:true`: replies near the 256K cap come back failed/empty (see history.js), and
-// the polluted, coin-heavy nodes this sweep targets are the likeliest to hit it.
-function untrackForeignCoins(foreign) {
-    untrackNextAddress(foreign, 0);
-}
-function untrackNextAddress(foreign, i) {
-    if (i >= foreign.length) return;
-    var addrLower = foreign[i].address.toLowerCase();
-    MDS.cmd("coins relevant:true address:" + foreign[i].address, function (j) {
-        var arr = (j && j.status && Array.isArray(j.response)) ? j.response : [];
-        var ids = [];
-        for (var k = 0; k < arr.length; k++) {
-            var c = arr[k]; if (!c || !c.coinid) continue;
-            if (String(c.address || "").toLowerCase() === addrLower) ids.push(c.coinid);
-        }
-        untrackNextCoin(ids, 0, function () { untrackNextAddress(foreign, i + 1); });
+function untrackForeignCoins(foreign){untrackNextAddress(foreign,0);}
+function untrackNextAddress(foreign,i){
+    if(i>=foreign.length)return;var row=foreign[i];
+    stillForeign(row,function(ok){
+        if(!ok){untrackNextAddress(foreign,i+1);return;}
+        MDS.cmd("coins relevant:true address:"+row.address,function(j){
+            var cs=j&&j.status===true&&Array.isArray(j.response)?j.response:[];
+            var ids=cs.filter(function(c){return c&&/^0x[0-9a-fA-F]{64}$/.test(c.coinid)&&String(c.address).toLowerCase()===row.address.toLowerCase();}).map(function(c){return c.coinid;});
+            untrackNextCoin(row,ids,0,function(){untrackNextAddress(foreign,i+1);});
+        });
     });
 }
-function untrackNextCoin(ids, i, then) {
-    if (i >= ids.length) { then(); return; }
-    // {"status":false} (already spent / ADMIN denied) arrives via the SUCCESS callback — keep going
-    MDS.cmd("cointrack enable:false coinid:" + ids[i], function () { untrackNextCoin(ids, i + 1, then); });
+function untrackNextCoin(row,ids,i,then){
+    if(i>=ids.length){then();return;}
+    stillForeign(row,function(ok){
+        if(!ok){then();return;}
+        // READ-mode cointrack must not create a delayed cleanup approval after a future restore.
+        MDS.cmd("checkmode",function(j){if(!j||j.status!==true||!j.response||j.response.writemode!==true){then();return;}
+            stillForeign(row,function(current){if(!current){then();return;}MDS.cmd("cointrack enable:false coinid:"+ids[i],function(){untrackNextCoin(row,ids,i+1,then);});});
+        });
+    });
 }
 
 // Add the lifecycle `kind` column to a pre-0.2.0 pp_feed (default SWAP so old rows still render). The page
@@ -525,22 +527,9 @@ function reannounceSvc(p, key) {
 // duplicate refresh whose double-spent inputs are rejected at consensus (fund-safe).
 // Largest coin per leg at the covenant address = the true reserve (a dust coin can't masquerade); record the
 // newest kept-coin block for the reserve age. Same selection as the discovery fund() — mirrors native fillReserves.
-function fillReservesSvc(pool, j) {
-    var cs = (j && j.status && Array.isArray(j.response)) ? j.response : [];
-    var mBlk = 0, tBlk = 0;
-    for (var i = 0; i < cs.length; i++) {
-        var c = cs[i];
-        if (!c || c.spent === true) continue;
-        var tid = c.tokenid || "";
-        if (tid === "0x00") {
-            var m = c.amount || "0";
-            if (pool.reserveM === null || decCmp(m, pool.reserveM) > 0) { pool.reserveM = m; pool.coinidM = c.coinid || ""; mBlk = parseInt(c.created) || 0; }
-        } else if (pool.tok && pool.tok.toLowerCase() === tid.toLowerCase()) {
-            var t = (c.tokenamount !== undefined ? c.tokenamount : (c.amount || "0"));
-            if (pool.reserveT === null || decCmp(t, pool.reserveT) > 0) { pool.reserveT = t; pool.coinidT = c.coinid || ""; tBlk = parseInt(c.created) || 0; }
-        }
-    }
-    pool.reserveBlock = Math.max(mBlk, tBlk);
+function fillReservesSvc(pool,j){
+    if(!ReserveRecovery.fill(pool,j)||!ReserveRecovery.complete(pool))return false;
+    pool.reserveM=PP.plain(pool.reserveM);pool.reserveT=PP.plain(pool.reserveT);return true;
 }
 
 // KEEP-FRESH driven from the DURABLE pp_ownpools recipes + a per-covenant reserve scan — NOT the general
@@ -567,15 +556,15 @@ function maybeRefreshSvc() {
             }
             recipes.forEach(function (row) {
                 var p = { address: row.ADDRESS, opk: row.OPK, oadr: row.OADR, tok: row.TOK, kmin: row.KMIN,
-                          reserveM: null, reserveT: null, coinidM: null, coinidT: null, reserveBlock: 0 };
-                if (!p.address || !p.opk || !p.oadr || !p.tok || !p.kmin) { fire(); return; }
+                          reserveM: null, reserveT: null, coinidM: row.LASTCOINM||"", coinidT: row.LASTCOINT||"", reserveBlock: 0 };
+                if (!p.address || !p.opk || !p.oadr || !p.tok || !p.kmin || row.SIGNING_UNVERIFIED == null || Number(row.SIGNING_UNVERIFIED) !== 0) { fire(); return; }
                 var a = p.address.toLowerCase();
                 if (REFRESH_SVC[a] && (t - REFRESH_SVC[a]) < REFRESH_TTL_MS) { fire(); return; }   // already refreshing
-                MDS.cmd("coins address:" + p.address, function (j) {
-                    fillReservesSvc(p, j);
-                    if (isFunded(p) && p.coinidM && p.coinidT) {
-                        var age = (p.reserveBlock > 0) ? (tip - p.reserveBlock) : Infinity;   // unknown age → refresh
-                        if (age > REFRESH_BLOCKS) aging.push(p);
+                ReserveRecovery.readCurrent(p,function(j){
+                    if(fillReservesSvc(p,j)){
+                        var oldest=Math.min(p.reserveBlockM,p.reserveBlockT),age=oldest>0?tip-oldest:Infinity;
+                        if(age>REFRESH_BLOCKS)aging.push(p);
+                        MDS.sql("UPDATE pp_ownpools SET lastcoinm='"+p.coinidM+"',lastcoint='"+p.coinidT+"' WHERE address='"+p.address.toLowerCase()+"'",function(){});
                     }
                     fire();
                 });
@@ -633,11 +622,13 @@ function refreshSvc(p) {
 
 // sequential command runner — abort (cb false) on the first non-success (matches poolmgr.js runChain)
 function runCmds(cmds, i, cb) {
-    if (i >= cmds.length) { cb(true); return; }
-    MDS.cmd(cmds[i], function (res) {
-        if (!res || res.status !== true) { cb(false); return; }
-        runCmds(cmds, i + 1, cb);
-    });
+    if(i>=cmds.length){cb(true);return;}
+    function execute(){MDS.cmd(cmds[i],function(res){if(!res||res.status!==true||res.pending===true){cb(false);return;}runCmds(cmds,i+1,cb);});}
+    if(cmds[i].indexOf("txnsign ")===0){
+        var inputs=cmds.slice(0,i).filter(function(q){return q.indexOf("txninput ")===0;}).map(function(q){var m=q.match(/(?:^|\s)coinid:(0x[0-9a-fA-F]+)(?:\s|$)/);return m?m[1]:"";});
+        var signer=cmds[i].match(/(?:^|\s)publickey:(auto|0x[0-9a-fA-F]+)(?:\s|$)/);
+        ReserveRecovery.checkSignature(inputs,signer?signer[1]:"",function(error){if(error)cb(false);else execute();});
+    }else execute();
 }
 
 // ---------------------------------------------------------------- GlobalFeed ingest (shares pp_feed / pp_kv)

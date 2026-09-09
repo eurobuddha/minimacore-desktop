@@ -21,8 +21,11 @@ async function makeSqlShim(filePath) {
   }
   const SQL = await sqlReady;
   let db;
-  try { db = new SQL.Database(new Uint8Array(fs.readFileSync(filePath))); }
-  catch (e) { db = new SQL.Database(); }                    // ENOENT → fresh DB
+  try { db = new SQL.Database(new Uint8Array(fs.readFileSync(filePath)));
+    const check=db.exec("PRAGMA quick_check");
+    if(!check.length||check[0].values.some(row=>row[0]!=="ok"))throw new Error("Pool database integrity check failed.");
+  }
+  catch (e) { if(e.code!=="ENOENT")throw e; db = new SQL.Database(); }                    // ENOENT → fresh DB
 
   let writeTimer = null;
   function persistSoon() {
@@ -82,22 +85,20 @@ async function makeSqlShim(filePath) {
     return res;
   }
 
-  // `persist` exposes the debounced whole-image save for callers that write via `_db` directly (e.g. history-db.js
-  // uses prepared statements + bound params on `_db` for speed/safety, then schedules a save with this). Additive —
-  // the reused pandapools code keeps using `sql`/`flush` exactly as before.
-  // flush(): synchronous, ATOMIC (tmp+rename) — the AtomiX glue routes every HTLC-secret write through this for
-  // crash-safety, so a torn write here would be worse than the debounce it replaces. Same tmp+rename as persistSoon.
-  return {
-    sql: sqlCmd, persist: persistSoon, _db: db,
-    flush: () => {
-      if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
-      try {
-        const tmp = filePath + ".tmp";
-        fs.writeFileSync(tmp, Buffer.from(db.export()));
-        fs.renameSync(tmp, filePath);
-      } catch (e) { /* image left as-is; next write retries */ }
-    }
-  };
+  // Checked counterpart of the existing atomic whole-image save, used for recovery guards.
+  function flushChecked() {
+    if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+    let fd;
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const tmp = filePath + ".tmp";
+      fd = fs.openSync(tmp, "w", 0o600);
+      fs.writeFileSync(fd, Buffer.from(db.export())); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
+      fs.renameSync(tmp, filePath);
+      return true;
+    } catch (e) { if (fd !== undefined) try { fs.closeSync(fd); } catch (_) {} return false; }
+  }
+  return { sql: sqlCmd, persist: persistSoon, _db: db, flush: flushChecked, flushChecked };
 }
 
 module.exports = { makeSqlShim };

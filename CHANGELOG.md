@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.54] — Durable pool recovery and verified signing state
+- Keep unresolved owned pools visible with their full covenant address and a reserve-recovery action. Validate current local reserves, receiving-node coin proofs, and fresh MegaMMR proofs; failed imports never count as recovered.
+- Preserve recipes, observed key-use floors and reserve-ID hints. Backups re-read live coins and discard proofs if reserves move during export. Proofs expire; recovery requires current complete wallet signing state and available chain proofs.
+- Quarantine restored and legacy recipes until explicit current-wallet confirmation. Never regenerate owner keys or estimate/burn historic key use during restore. Verify actual signing keys immediately before owner and automatic signatures.
+- Refresh using the oldest verified reserve leg and the covenant funding floor. Prevent tracking cleanup from undoing a concurrent restore.
+
 ## [0.16.39] — Verified activity, receipt recovery and public pool history
 - Mirror Android activity fixes: real node confirmation counts, exact immutable transaction matching, cryptographic legacy receipt recovery, chronological receipt/history display and transaction timestamps in UTC.
 - Preserve all existing receipts, including old failures; add Show more. Stop inferred reserve-snapshot transaction claims and label preserved observations accurately.

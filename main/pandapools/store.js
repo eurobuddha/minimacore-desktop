@@ -12,7 +12,7 @@
  */
 var Store = (function () {
     var D = Decimal;
-    var ready = false;
+    var ready = false, recoveryReady = false;
     var FEED_MAX = 100;
     var ACT_MAX = 120;
 
@@ -22,7 +22,7 @@ var Store = (function () {
     function init(cb) {
         // probe one table; only CREATE the set if missing (avoids pending prompts)
         MDS.sql("SELECT 1 FROM pp_activity LIMIT 1", function (r) {
-            function fin() { migrateFeedKind(function () { migrateActivityRefaddr(function () { ensureOwnPools(function () { ensureHistory(function () { ready = true; if (cb) cb(); }); }); }); }); }
+            function fin() { migrateFeedKind(function () { migrateActivityRefaddr(function () { ensureOwnPools(function () { ensureRecoveryColumns(function () { ensureHistory(function () { ready = true; if (cb) cb(); }); }); }); }); }); }
             if (r && r.status) { fin(); return; }
             create(fin);
         });
@@ -47,6 +47,20 @@ var Store = (function () {
                 " `tdec` int NOT NULL, `kmin` varchar(120) NOT NULL, `script` text)", function () { cb(); });
         });
     }
+    function ensureRecoveryColumns(cb) {
+        var columns = [["opkuses","int DEFAULT -1"],["signing_unverified","int DEFAULT 1"],["lastcoinm","varchar(80)"],["lastcoint","varchar(80)"]];
+        function next(i) {
+            if(i===columns.length){recoveryReady=true;cb();return;}
+            var col=columns[i];
+            MDS.sql("SELECT "+col[0]+" FROM pp_ownpools LIMIT 1",function(r){
+                if(r&&r.status===true){next(i+1);return;}
+                MDS.sql("ALTER TABLE pp_ownpools ADD COLUMN "+col[0]+" "+col[1],function(){
+                    MDS.sql("SELECT "+col[0]+" FROM pp_ownpools LIMIT 1",function(check){if(check&&check.status===true)next(i+1);else cb();});
+                });
+            });
+        }next(0);
+    }
+
     // Add the lifecycle `kind` column to a pp_feed created by a pre-0.2.0 install (default SWAP so old rows
     // render). The page and the headless service both run this; a duplicate ALTER from the loser errors
     // harmlessly (swallowed). The SELECT succeeds once the column exists, so it's a one-time change either way.
@@ -290,11 +304,9 @@ var Store = (function () {
             cb(ok && r.rows && r.rows.length ? String(r.rows[0].V) : "", ok);
         });
     }
-    function kvSet(k, v, cb) {
-        if (!ready) { if (cb) cb(); return; }
-        MDS.sql("DELETE FROM pp_kv WHERE k='" + esc(k) + "'", function () {
-            MDS.sql("INSERT INTO pp_kv (k, v) VALUES ('" + esc(k) + "','" + esc(v) + "')", function () { if (cb) cb(); });
-        });
+    function kvSet(k,v,cb){
+        if(!ready){if(cb)cb(false);return;}
+        MDS.sql("MERGE INTO pp_kv (k,v) KEY(k) VALUES ('"+esc(k)+"','"+esc(v)+"')",function(r){if(cb)cb(!!r&&r.status===true);});
     }
 
     // -------------------------------------------------------- known PandaPools covenant addresses
@@ -328,35 +340,75 @@ var Store = (function () {
 
     // -------------------------------------------------------- OwnPoolStore (Layer 1: recipe persistence)
     // A durable, node-independent recipe for each pool THIS device owns — enough to regenerate + re-track the
-    // covenant (the script is deterministic from opk/oadr/tok/kmin, so we store params, not the script). Seed +
-    // recipe ⇒ always reclaimable. Recorded on create/migrate + backfilled on discovery; KEPT on close (a stale
+    // covenant (the script is deterministic from opk/oadr/tok/kmin, so we store params, not the script). Current signing state and available chain proofs are also required. Recorded on create/migrate + backfilled on discovery; KEPT on close (a stale
     // recipe just re-tracks a spent covenant = a harmless no-op). Grows, never auto-removed.
-    function ownRecord(p) {
-        if (!ready || !p || !p.address || !p.opk || !p.oadr || !p.tok || !p.kmin) return;
-        var a = esc(p.address.toLowerCase());
-        // Prefer the pool's AUTHORITATIVE on-chain script (exact for any fee/template); reconstruct from params
-        // only as a fallback (exact for the current template). Native does the same — this future-proofs a pool
-        // whose covenant isn't byte-reconstructible from the current TEMPLATE (e.g. a legacy-fee pool).
-        var script = (p.covenantScript && p.covenantScript.length) ? p.covenantScript
-                   : (typeof Covenant !== "undefined" ? Covenant.script(p.opk, p.oadr, p.tok, p.kmin) : "");
-        MDS.sql("DELETE FROM pp_ownpools WHERE address='" + a + "'", function () {
-            MDS.sql("INSERT INTO pp_ownpools (address, mx, opk, oadr, tok, tdec, kmin, script) VALUES ('" +
-                a + "','" + esc(p.mxaddress || "") + "','" + esc(p.opk) + "','" + esc(p.oadr) + "','" +
-                esc(p.tok) + "'," + (isNaN(parseInt(p.tokDecimals)) ? 8 : parseInt(p.tokDecimals)) + ",'" + esc(String(p.kmin)) + "','" + esc(script) + "')");
-        });
-    }
-    /** cb(recipes[]) — each {address, mxaddress, opk, oadr, tok, tokDecimals, kmin, script}. */
-    function ownAll(cb) {
-        if (!ready) { cb([]); return; }
-        MDS.sql("SELECT * FROM pp_ownpools", function (r) {
-            var out = [];
-            if (r && r.status && r.rows) r.rows.forEach(function (row) {
-                out.push({
-                    address: row.ADDRESS, mxaddress: row.MX || "", opk: row.OPK, oadr: row.OADR,
-                    tok: row.TOK, tokDecimals: (isNaN(parseInt(row.TDEC)) ? 8 : parseInt(row.TDEC)), kmin: row.KMIN, script: row.SCRIPT || ""
+    var failedConfirmations={},pendingHintPersistence=false;
+    function persistRecovery(cb){function done(ok){if(ok)pendingHintPersistence=false;cb(ok);}if(MDS.persistRecovery)MDS.persistRecovery(done);else done(true);}
+    function confirmationFailed(opk){return !!failedConfirmations[String(opk).toLowerCase()];}
+    function ownRecord(p,cb) {
+        cb=cb||function(){};
+        if(!ready||!recoveryReady||!p||!p.address||!p.opk||!p.oadr||!p.tok||!p.kmin){cb(false);return;}
+        var a=esc(p.address.toLowerCase()),script=p.covenantScript||p.script||Covenant.script(p.opk,p.oadr,p.tok,p.kmin);
+        var uses=ReserveRecovery.integer(p.minimumOwnerUses,262144)?Number(p.minimumOwnerUses):-1,hold=p.signingStateUnverified===true?1:0,insertHold=p.signingStateUnverified===false?0:1;
+        var vals="'"+a+"','"+esc(p.mxaddress||"")+"','"+esc(p.opk)+"','"+esc(p.oadr)+"','"+esc(p.tok)+"',"+(ReserveRecovery.integer(p.tokDecimals,44)?Number(p.tokDecimals):8)+",'"+esc(String(p.kmin))+"','"+esc(script)+"',"+uses+","+insertHold;
+        // No DELETE gap. Existing recipes remain intact if a write fails or another context records them.
+        MDS.sql("INSERT INTO pp_ownpools (address,mx,opk,oadr,tok,tdec,kmin,script,opkuses,signing_unverified) SELECT "+vals+" WHERE NOT EXISTS (SELECT 1 FROM pp_ownpools WHERE address='"+a+"')",function(){
+            // Atomic monotonic merges: neither rediscovery nor an older backup can lower these guards.
+            MDS.sql("UPDATE pp_ownpools SET opkuses=CASE WHEN opkuses<"+uses+" THEN "+uses+" ELSE opkuses END, signing_unverified=CASE WHEN signing_unverified<"+hold+" THEN "+hold+" ELSE signing_unverified END WHERE address='"+a+"'",function(r){
+                if(!r||r.status!==true){cb(false);return;}
+                MDS.sql("SELECT opk,opkuses,signing_unverified FROM pp_ownpools WHERE address='"+a+"'",function(check){
+                    var row=check&&check.status===true&&check.rows&&check.rows[0];
+                    if(!row||String(row.OPK).toLowerCase()!==String(p.opk).toLowerCase()||Number(row.OPKUSES)<uses||Number(row.SIGNING_UNVERIFIED)<hold){cb(false);return;}
+                    persistRecovery(function(ok){if(!ok){cb(false);return;}if(p.coinidM&&p.coinidT&&ReserveRecovery.complete(p))ownRememberReserves(p,cb);else cb(true);});
                 });
             });
-            cb(out);
+        });
+    }
+    function ownRememberReserves(p,cb){
+        cb=cb||function(){};
+        if(!recoveryReady||!ReserveRecovery.complete(p)||!/^0x[0-9a-fA-F]{64}$/.test(p.coinidM)||!/^0x[0-9a-fA-F]{64}$/.test(p.coinidT)){cb(false);return;}
+        var where=" WHERE address='"+esc(p.address.toLowerCase())+"'";
+        MDS.sql("SELECT lastcoinm,lastcoint FROM pp_ownpools"+where,function(r){
+            if(!r||r.status!==true||!Array.isArray(r.rows)){cb(false);return;}
+            if(!r.rows.length){cb(true);return;}
+            var old=r.rows[0];
+            if(String(old.LASTCOINM||"").toLowerCase()===p.coinidM.toLowerCase()&&String(old.LASTCOINT||"").toLowerCase()===p.coinidT.toLowerCase()){
+                if(pendingHintPersistence)persistRecovery(cb);else cb(true);return;
+            }
+            pendingHintPersistence=true;
+            MDS.sql("UPDATE pp_ownpools SET lastcoinm='"+esc(p.coinidM)+"',lastcoint='"+esc(p.coinidT)+"'"+where,function(updated){if(!updated||updated.status!==true){cb(false);return;}persistRecovery(cb);});
+        });
+    }
+    function ownAll(cb) {
+        if(!ready||!recoveryReady){cb([],false);return;}
+        MDS.sql("SELECT * FROM pp_ownpools",function(r){
+            var out=[];
+            if(r&&r.status===true&&Array.isArray(r.rows))r.rows.forEach(function(row){
+                out.push({address:row.ADDRESS,mxaddress:row.MX||"",opk:row.OPK,oadr:row.OADR,tok:row.TOK,tokDecimals:Number(row.TDEC),kmin:row.KMIN,script:row.SCRIPT||"",minimumOwnerUses:Number(row.OPKUSES),signingStateUnverified:Number(row.SIGNING_UNVERIFIED)!==0,coinidM:row.LASTCOINM||"",coinidT:row.LASTCOINT||""});
+            });
+            cb(out,!!r&&r.status===true&&Array.isArray(r.rows));
+        });
+    }
+    // Called only after the owner's explicit current-wallet/other-signers attestation.
+    function ownAcknowledge(opk,uses,cb){
+        if(!recoveryReady||!/^0x[0-9a-fA-F]{64}$/.test(opk)||!ReserveRecovery.integer(uses,262143)){cb(false);return;}
+        var k=opk.toLowerCase();
+        ownAll(function(ps,ok){
+            var matching=ps.filter(function(p){return p.opk.toLowerCase()===k;});
+            if(!ok||!matching.length||matching.some(function(p){return p.minimumOwnerUses>uses;})){cb(false);return;}
+            failedConfirmations[k]=true;
+            function fail(){MDS.sql("UPDATE pp_ownpools SET signing_unverified=1 WHERE LOWER(opk)='"+esc(k)+"'",function(){persistRecovery(function(){cb(false);});});}
+            MDS.sql("UPDATE pp_ownpools SET signing_unverified=0,opkuses="+Number(uses)+" WHERE LOWER(opk)='"+esc(k)+"' AND opkuses<="+Number(uses),function(r){
+                if(!r||r.status!==true){fail();return;}
+                persistRecovery(function(saved){
+                    if(!saved){fail();return;}
+                    ownAll(function(current,readOk){
+                        var same=current.filter(function(p){return p.opk.toLowerCase()===k;});
+                        if(!readOk||same.length!==matching.length||!same.every(function(p){return !p.signingStateUnverified&&p.minimumOwnerUses===Number(uses);})){fail();return;}
+                        delete failedConfirmations[k];cb(true);
+                    });
+                });
+            });
         });
     }
 
@@ -366,7 +418,7 @@ var Store = (function () {
         actRecord: actRecord, actRecordFailed: actRecordFailed, actList: actList, actSetStatus: actSetStatus,
         confirmed: confirmed, statusText: statusText, CONFIRM_BLOCKS: CONFIRM_BLOCKS,
         feedList: feedList, knownAddrsGet: knownAddrsGet, knownAddrsAdd: knownAddrsAdd,
-        ownRecord: ownRecord, ownAll: ownAll,
+        confirmationFailed: confirmationFailed, ownRecord: ownRecord, ownAll: ownAll, ownRememberReserves: ownRememberReserves, ownAcknowledge: ownAcknowledge,
         histInsert: histInsert, histAll: histAll, histStats: histStats,
         kvGet: kvGet, kvSet: kvSet
     };

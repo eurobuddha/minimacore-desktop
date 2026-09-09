@@ -1881,6 +1881,8 @@ function ppMineHtml(mine) {
   if (!mine.length) return `<div class="empty">You don't own any pools yet. Create one with the button above.</div>`;
   return mine.map(p => {
     const nm = esc(p.tokName || TOK.shortId(p.tok));
+    const hold=p.signingStateUnverified?`<div class="view__desc">Owner signing paused. Confirm the latest complete wallet signing state and stop other signing copies.</div><button class="btn btn--outline" data-ppconfirm="${esc(p.opk)}">Confirm wallet state</button>`:"";
+    if(p.unresolved)return `<div class="card"><div class="card__title">Saved pool · reserves unavailable</div><div class="view__desc">The recipe is retained. An empty local lookup does not prove funds were spent.</div><div style="overflow-wrap:anywhere;user-select:text">${esc(p.address)}</div>${hold}<button class="btn btn--outline" data-pprecover="${esc(p.address)}">Recover reserves</button></div>`;
     let rows = `<div class="kv"><span>Your liquidity</span><span>${esc(TOK.tidyAmount(p.reserveM))} MINIMA + ${esc(TOK.tidyAmount(p.reserveT))} ${nm}</span></div>`
       + `<div class="kv"><span>Value now</span><span>≈ ${esc(TOK.tidyAmount(p.value))} MINIMA</span></div>`
       + `<div class="kv"><span>Pool price</span><span>${esc(TOK.tidyAmount(p.poolPrice))} ${nm} / MINIMA</span></div>`
@@ -1890,13 +1892,15 @@ function ppMineHtml(mine) {
         + `<div class="kv"><span>Impermanent loss</span><span${p.il < -0.01 ? ' style="color:var(--red)"' : ""}>${esc(ppNum(p.il))}% vs holding</span></div>`;
       if (p.ageBlocks > 0) rows += `<div class="kv"><span>Age</span><span>${Number(p.ageBlocks) || 0} blocks (~${esc(ppNum(p.ageBlocks * 50 / 3600))} h)</span></div>`;
     }
-    return `<div class="card"><div class="card__title">MINIMA / ${nm}</div>${rows}
+    return `<div class="card"><div class="card__title">MINIMA / ${nm}</div>${hold}${rows}
       <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div>
       <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div>
       <span class="pc-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</span></div>`;
   }).join("");
 }
 function wirePpMineActions(root) {
+  root.querySelectorAll("[data-pprecover]").forEach(b => b.onclick = () => recoverPpSaved(b.dataset.pprecover));
+  root.querySelectorAll("[data-ppconfirm]").forEach(b => b.onclick = () => confirmPpSigning(b.dataset.ppconfirm));
   root.querySelectorAll("[data-ppadd]").forEach(b => b.onclick = () => showPpDeposit(b.dataset.ppadd));
   root.querySelectorAll("[data-ppmig]").forEach(b => b.onclick = () => showPpMigrate(b.dataset.ppmig));
   root.querySelectorAll("[data-ppwd]").forEach(b => b.onclick = () => confirmPpWithdraw(b.dataset.ppwd));
@@ -2011,14 +2015,14 @@ function ppCombinedCards(agg) {
 }
 async function renderPpMyLP() {
   const host = el("ppBody");
-  PP_MINE = await api.ppMyPools().catch(() => []);
+  try { PP_MINE=await api.ppMyPools(); } catch(e) {host.innerHTML=`${ppHeader("mylp")}<div class="empty">${esc(e.message)}</div>`;wirePpHeader();return;}
   host.innerHTML = `${ppHeader("mylp")}
     <div class="view__desc">Pools you created on this device. Keep-fresh maintains their reserves automatically — <b>leave this app running</b> so your pools stay live for everyone.</div>
     <div class="seg"><button class="btn btn--primary btn--full" id="ppCreateBtn">＋ Create a pool</button><button class="btn btn--outline btn--full" id="ppCollectBtn">Collect to wallet</button></div>
     <div id="ppMine" style="margin-top:12px">${ppMineHtml(PP_MINE)}</div>
     <div class="card" style="margin-top:12px"><div class="card__title">Recovery</div>
-      <div class="view__desc">Back up your pools (covenant params + a snapshot of the reserve coins — no seed) so you can re-track and withdraw them on any node. Cross-compatible with the phone app and the MDS MiniDapp.</div>
-      <div class="seg"><button class="btn btn--outline btn--full" id="ppBackupBtn">Back up</button><button class="btn btn--outline btn--full" id="ppRestoreBtn">Restore</button><button class="btn btn--outline btn--full" id="ppGuideBtn">How it works</button></div></div>
+      <div class="view__desc">Keep the latest complete MinimaCore wallet backup and this public pool recipe. Proofs expire; recovery needs current signing state and available chain proofs.</div>
+      <div class="seg"><button class="btn btn--outline btn--full" id="ppBackupBtn">Back up</button><button class="btn btn--outline btn--full" id="ppRestoreBtn">Restore</button><button class="btn btn--outline btn--full" id="ppArchiveBtn">Recovery archive</button><button class="btn btn--outline btn--full" id="ppGuideBtn">How it works</button></div></div>
     <div class="card" style="margin-top:12px"><div class="card__title">Statement</div>
       <div class="view__desc">A per-pool statement for accounting: what you put in, your own trades against it, what is in the pool now, and the profit. Your transactions only — the profit figures read the pool's reserves live, so everyone else's trading is already in them.</div>
       <div class="seg"><button class="btn btn--outline btn--full" id="ppStatementBtn">Export statement (.csv)</button></div></div>
@@ -2032,6 +2036,7 @@ async function renderPpMyLP() {
   el("ppBackupBtn").onclick = showPpBackup;
   el("ppRestoreBtn").onclick = showPpRestore;
   el("ppGuideBtn").onclick = showPpGuide;
+  el("ppArchiveBtn").onclick = showPpArchive;
   el("ppStatementBtn").onclick = doPpStatement;
 }
 
@@ -2066,10 +2071,11 @@ async function showPpBackup() {
   prog.close();
   ppBackupBusy = false;
   if (r && r.empty) { toast("No pools to back up yet — create one first.", "err"); return; }
-  const json = (r && r.json) || "";
+  if(!r||r.error||!r.json){toast(r&&r.error||"Backup could not be created.","err");return;}
+  const json = r.json;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppbOv"><div class="modal">
     <div class="modal__title">Your pool backup</div>
-    <div class="view__desc">Save this somewhere safe. To restore later, paste it into Restore on any device. Public data only — no seed.</div>
+    <div class="view__desc">Save this public recipe alongside your latest complete MinimaCore wallet backup. Proof snapshots expire; later recovery may need a synced MegaMMR archive.</div>
     <textarea class="field__input" id="ppbTa" readonly style="min-height:150px;font-family:monospace;font-size:11px">${esc(json)}</textarea>
     <div class="seg" style="margin-top:10px"><button class="btn btn--outline btn--full" id="ppbCopy">Copy</button><button class="btn btn--primary btn--full" id="ppbSave">Save file</button></div>
     <button class="btn btn--outline btn--full" id="ppbClose" style="margin-top:8px">Done</button></div></div>`);
@@ -2081,7 +2087,7 @@ async function showPpBackup() {
 async function showPpRestore() {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="pprOv"><div class="modal">
     <div class="modal__title">Restore pools</div>
-    <div class="view__desc">Paste a PandaPools backup (or load a file). This re-tracks your pools on THIS node and re-imports the reserve coins so you can withdraw again — even on a brand-new node. Only restore backups you trust.</div>
+    <div class="view__desc">Restore public pool recipes and verify reserves on this node. Expired proofs need a synced MegaMMR archive. Owner signing stays paused until you confirm current wallet signing state.</div>
     <textarea class="field__input" id="pprTa" placeholder="…paste backup JSON here" style="min-height:130px;font-family:monospace;font-size:11px"></textarea>
     <div class="view__desc" id="pprStatus" style="margin-top:6px"></div>
     <div class="seg" style="margin-top:8px"><button class="btn btn--outline btn--full" id="pprFile">Load file</button><button class="btn btn--primary btn--full" id="pprGo">Restore</button></div>
@@ -2098,12 +2104,9 @@ async function showPpRestore() {
     if (el("pprStatus")) el("pprStatus").textContent = "Restoring…";
     try {
       const r = await api.ppRestore(json);
-      const foreignNote = r.foreign ? " ! " + r.foreign + " owner key" + (r.foreign === 1 ? " was" : "s were") + " created under a DIFFERENT seed — this node cannot sign for those pools; restore them on the device/seed that created them." : "";
-      const warnNote = r.warn ? " ! " + r.warn : "";   // e.g. "could not restore the owner key's usage" — must reach the user
-      if (el("pprStatus")) el("pprStatus").textContent = "Re-tracked " + r.restored + " of " + r.total + " pool" + (r.total === 1 ? "" : "s") + (r.regen ? " (regenerated " + r.regen + " owner key" + (r.regen === 1 ? "" : "s") + ")" : "") + foreignNote + warnNote + ((r.foreign || r.warn) ? "" : " — rescanning…");
-      toast(r.foreign ? "Restored — " + r.foreign + " pool key" + (r.foreign === 1 ? "" : "s") + " from a different seed" : (r.warn ? "Restored with a warning — see the restore panel" : "Restored ✓"), (r.foreign || r.warn) ? "err" : "ok");
-      // keep the modal open on any warning — the status line is the only place it's explained
-      if (r.foreign || r.warn) renderPandapools(); else setTimeout(() => { close(); renderPandapools(); }, 1600);
+      if(el("pprStatus"))el("pprStatus").textContent=ppRecoveryResult(r);
+      toast(`Verified reserves for ${r.restored} of ${r.total} pools.`,r.restored===r.total&&r.total?"ok":"err");
+      renderPandapools();
     } catch (e) { if (el("pprStatus")) el("pprStatus").textContent = e.message; toast("Restore failed: " + e.message, "err"); }
     finally { busy = false; }
   };
@@ -2111,18 +2114,31 @@ async function showPpRestore() {
 function showPpGuide() {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ppgOv"><div class="modal">
     <div class="modal__title">How pool recovery works</div>
-    <div class="view__desc" style="white-space:pre-wrap">Your pools are recoverable at several levels:
+    <div class="view__desc" style="white-space:pre-wrap">Keep the latest complete MinimaCore wallet backup and this pool recipe. Proofs expire. A seed or recipe alone is insufficient.
 
-• RECIPE — this app keeps a recipe (covenant + params) for every pool you own, so it can always re-derive and re-track them.
-• RE-TRACK — on launch it re-registers any owned covenant a resynced/wiped node lost, so discovery finds them again.
-• BACKUP — “Back up” exports those recipes plus a fresh snapshot of each reserve coin (public data only, no seed). “Restore” re-tracks + re-imports them on ANY node — even a brand-new one — and regenerates your owner keys so the pools are withdrawable.
-• KEEP-FRESH — while this app is open, it recreates your pools' reserves before they age out, so every light node keeps seeing and trading them.
-• GOSSIP — it re-posts faded discovery beacons for pools it knows, so they stay findable even while their creator is offline.
+Saved recipes identify pools even when a light node no longer sees their coins. Restore verifies local reserves, then backup proofs, then current proofs from a synced MegaMMR archive. Missing reserves remain visible and are never reported as recovered.
 
-Last resort: your seed + a MegaMMR resync restores the coins; the recipe re-tracks the pools.</div>
+Restore does not regenerate keys or estimate past signature use. Confirm signing only with current complete wallet state and no other signing copies. Keep-fresh requires the app and node to remain running; it cannot guarantee availability while offline.</div>
     <button class="btn btn--outline btn--full" id="ppgClose" style="margin-top:10px">Close</button></div></div>`);
   const ov = el("ppgOv"); const close = () => { if (ov) ov.remove(); };
   el("ppgClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppgOv") close(); };
+}
+function ppRecoveryResult(r){return `Verified reserves for ${r.restored} of ${r.total} pools.\n${(r.details||[]).join("\n\n")}\n${r.warn||""}`;}
+async function recoverPpSaved(address){
+  const prog=showProgress("Recovering reserves…","Checking local reserves and current archive proofs. No transaction is signed.");
+  try {const r=await api.ppRecoverSaved(address);prog.close();await showConfirm("Recovery result",ppRecoveryResult(r),"Done");renderPandapools();}
+  catch(e){prog.close();toast(e.message,"err");}
+}
+async function confirmPpSigning(opk){
+  const accepted=await showConfirm("Confirm current wallet signing state","Confirm only if this node has the latest complete MinimaCore wallet backup, including signing counters, and every other copy has stopped signing. A seed or old backup is insufficient. This enables owner spending and automatic refresh for key: "+opk,"I confirm current wallet state");
+  if(!accepted)return;
+  try {const ok=await api.ppConfirmSigning(opk,true);toast(ok?"Confirmation saved. Owner signing enabled.":"Could not confirm. Signing remains paused.",ok?"ok":"err");renderPandapools();}catch(e){toast(e.message,"err");}
+}
+async function showPpArchive(){
+  let current;try{current=await api.ppArchiveSettings();}catch(e){toast(e.message,"err");return;}
+  document.body.insertAdjacentHTML("beforeend",`<div class="overlay" id="ppaOv"><div class="modal"><div class="modal__title">Recovery archive</div><div class="view__desc">Optional public HTTPS MegaMMR RPC endpoint for current proofs. Your node verifies every proof. Leave empty for local MegaMMR or backup proofs.</div><input class="field__input" id="ppaUrl" type="url" value="${esc(current)}" placeholder="https://archive.example.com"><div class="view__desc" id="ppaStatus"></div><div class="seg"><button class="btn btn--outline" id="ppaCancel">Cancel</button><button class="btn btn--primary" id="ppaSave">Save</button></div></div></div>`);
+  const ov=el("ppaOv");el("ppaCancel").onclick=()=>ov.remove();
+  el("ppaSave").onclick=async()=>{try{const ok=await api.ppArchiveSettings(el("ppaUrl").value);if(ok){ov.remove();toast("Recovery archive saved.","ok");}else el("ppaStatus").textContent="Could not save. Use a public HTTPS hostname without credentials, query or fragment.";}catch(e){el("ppaStatus").textContent=e.message;}};
 }
 let ppCollectBusy = false;
 async function doPpCollect() {
@@ -2134,7 +2150,7 @@ async function doPpCollect() {
   try {
     const r = await api.ppCollect();
     prog.close();
-    const skippedNote = r && r.foreign ? " (" + r.foreign + " owner key" + (r.foreign === 1 ? "" : "s") + " from a different seed — those pools can't sign here)" : "";
+    const skippedNote = r && r.foreign ? " (" + r.foreign + " owner key" + (r.foreign === 1 ? "" : "s") + " paused or unavailable — confirm current wallet state in Recovery)" : "";
     toast((r && r.coins ? "Collected " + r.coins + " coin(s) to your wallet ✓" : "Nothing to collect right now.") + skippedNote, r && r.foreign ? "err" : "ok");
     renderPandapools();
   } catch (e) { prog.close(); toast("Collect failed: " + e.message, "err"); }

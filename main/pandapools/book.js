@@ -146,30 +146,7 @@ var Book = (function () {
         function oneDone() { if (--pending === 0) done(pools, cb); }
 
         pools.forEach(function (pool) {
-            MDS.cmd("coins address:" + pool.address, function (j) {
-                var cs = (j && j.status && Array.isArray(j.response)) ? j.response : [];
-                var mBlk = 0, tBlk = 0;   // created block of the kept coin per leg (for reserve age)
-                for (var i = 0; i < cs.length; i++) {
-                    var c = cs[i];
-                    if (!c || c.spent === true) continue;
-                    var tid = c.tokenid || "";
-                    if (tid === "0x00") {
-                        var amtM = PP.dec(c.amount || "0");
-                        if (pool.reserveM === null || amtM.gt(pool.reserveM)) {   // keep the LARGEST (ignore forged dust)
-                            pool.reserveM = amtM; pool.coinidM = c.coinid || ""; mBlk = parseInt(c.created) || 0;
-                        }
-                    } else if (pool.tok && pool.tok.toLowerCase() === tid.toLowerCase()) {
-                        var amtT = PP.dec(c.tokenamount !== undefined ? c.tokenamount : (c.amount || "0"));
-                        if (pool.reserveT === null || amtT.gt(pool.reserveT)) {
-                            pool.reserveT = amtT; pool.coinidT = c.coinid || ""; tBlk = parseInt(c.created) || 0;
-                            pool.tokName = PP.tokenName(c.token, tid);
-                            pool.tokDecimals = PP.tokenDecimals(c.token);
-                        }
-                    }
-                }
-                pool.reserveBlock = Math.max(mBlk, tBlk);   // most-recent recreate = the pool's reserve age anchor
-                oneDone();
-            });
+            ReserveRecovery.readReserves(pool,function(){oneDone();});
         });
     }
 
@@ -177,7 +154,7 @@ var Book = (function () {
         var funded = [];
         for (var i = 0; i < pools.length; i++) {
             var p = pools[i];
-            if (!Curve.funded(p)) continue;
+            if (!ReserveRecovery.complete(p)) continue;
             funded.push(p);
             // Track-on-discovery REMOVED (parity with native 0.9.14): it grew the node's tracked set — and hence
             // the `scripts` reply (Source 1) — without bound, until that reply overflows the 256 KB cap. Pools
