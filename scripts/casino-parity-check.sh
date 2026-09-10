@@ -23,4 +23,6 @@ if ! diff -q "main/casino/service.js" "$DONOR/service.js" >/dev/null 2>&1; then
   echo "PARITY FAIL: main/casino/service.js differs from donor $DONOR/service.js"
   exit 1
 fi
-echo "casino parity OK — service.js byte-identical to the donor (Zero Edge Casino v2.8.9)"
+diff -q "main/casino/timeout-claims.js" "$DONOR/timeout-claims.js"
+echo "casino parity OK — service.js and timeout-claims.js byte-identical to the donor"
+CASINO_DONOR="$DONOR" node --test scripts/casino-timeout-test.cjs

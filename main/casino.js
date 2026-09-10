@@ -100,6 +100,7 @@ function buildMds() {
       set(key, value, cb) { const ok = kpSet(key, value); if (cb) cb({ status: ok }); }   // report REAL durability (fund-safety: preimage writes gate the send)
     },
     notify(msg) { log("notify: " + msg); emitter.emit("notify", String(msg)); },
+    notifycancel() { emitter.emit("notifycancel"); },
     log(msg) { log(String(msg)); emitter.emit("update"); },
     init(cb) { serviceHandler = cb; }
     // .load is attached by loader.createContext
@@ -193,7 +194,7 @@ let myKeysCache = null;
 async function loadMyKeys() {
   try {
     const k = await runner("keys");
-    const list = (k && k.response && (k.response.keys || k.response)) || [];
+    const list = (k && k.response && (Array.isArray(k.response.keys) ? k.response.keys : k.response)) || [];
     const set = new Set();
     (Array.isArray(list) ? list : []).forEach(x => { const pk = cnorm((x && x.publickey) || x); if (pk) set.add(pk); });
     if (set.size) myKeysCache = set;   // replace only on a good fetch
@@ -203,9 +204,10 @@ async function loadMyKeys() {
 // rawBets: ALL coins at the covenant (incl. other players'), WITH state, annotated amHouse/amPlayer.
 async function rawBets() {
   const r = await runner("coins address:" + CONTRACT + " depth:4096");   // cap above every tree length (stock cascade 2048)
-  const coins = (r && r.response) || [];
+  if (!r || !r.status || !Array.isArray(r.response)) throw new Error("Casino coin scan unavailable");
+  const coins = r.response;
   const mine = await loadMyKeys();
-  return coins.map(c => ({ coinid: c.coinid, address: c.address, miniaddress: c.miniaddress, amount: c.amount, age: c.age, created: c.created, state: c.state || [], amHouse: mine.has(cnorm(cstate(c.state, 0))), amPlayer: mine.has(cnorm(cstate(c.state, 8))) }));
+  return coins.map(c => ({ coinid: c.coinid, address: c.address, miniaddress: c.miniaddress, amount: c.amount, tokenid: c.tokenid || "0x00", tokenamount: c.tokenamount, age: c.age, created: c.created, state: c.state || [], amHouse: mine.has(cnorm(cstate(c.state, 0))), amPlayer: mine.has(cnorm(cstate(c.state, 8))) }));
 }
 async function walletCoins() { const r = await runner("coins relevant:true tokenid:0x00"); return (r && r.response) || []; }
 

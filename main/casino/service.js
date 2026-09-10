@@ -126,6 +126,7 @@ MDS.init(function(msg){
   if(msg.event==='NEWBLOCK'){
     // Ensure the covenant script is registered before processing; only process once confirmed.
     if(WRITE_MODE)ensureScript(function(){if(SCRIPT_OK)processCoins()});
+    else processCoins();
   }
 });
 
@@ -181,19 +182,25 @@ function untrackNext(ids,i){
   });
 }
 
+// Shared with the browser and byte-copied into desktop. Notifications never post claims.
+MDS.load("timeout-claims.js");
+var updateTimeoutReminder=CasinoTimeouts.notifier(MDS);
+
 // ===== Process coins on each block =====
 function processCoins(){
   // Stand down while the casino tab is open & active (its heartbeat is fresh) — otherwise the page
   // and this service would both post reveal/resolve for the same coin (competing txns / stalls).
   MDS.keypair.get("casino_tab_hb",function(hb){
     var ts=(hb&&hb.value)?parseInt(hb.value):0;
-    if(Date.now()-ts<12000)return;
+    var foreground=Date.now()-ts<12000;
   // depth:4096 is a pathological-growth cap only: it sits ABOVE every tree length (family fork cascades
   // at 1024, STOCK Minima at 2048 and oscillates to ~2148), so the walk always reaches the root and old
   // claimable coins (carried in the root as relevant) are never hidden. NEVER lower this below the stock
   // cascade: a 2000 cap silently strands >2000-block-old timeout claims on stock nodes.
   MDS.cmd("coins address:"+SCRIPT_ADDR+" depth:4096",function(res){
-    if(!res.status||!res.response)return;
+    if(!res||!res.status||!Array.isArray(res.response))return;
+    updateTimeoutReminder(CasinoTimeouts.snapshot(res.response,isMyKey),foreground);
+    if(foreground||!WRITE_MODE||!SCRIPT_OK)return;
     // Prune cooldown/busy entries for coins that have advanced or been spent.
     var present={};res.response.forEach(function(c){present[c.coinid]=true});
     Object.keys(POSTED).forEach(function(id){if(!present[id])delete POSTED[id]});

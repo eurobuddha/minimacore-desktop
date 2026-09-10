@@ -103,6 +103,7 @@ async function boot() {
   api.onEthWallet(onEthWalletUpdate);
   api.onShop(onShopUpdate);
   api.onCasino(onCasinoUpdate);
+  api.onCasinoClaims(() => { casinoView = "mybets"; selectTab("casino"); });
   api.onCasinoLog(casinoActivity);        // activity-board feed (main-side casino MDS.log lines)
   api.onVestr(onVestrUpdate);
   api.onWebWallet(onWebWalletUpdate);
@@ -3474,7 +3475,7 @@ let axPegPollTimer = null;              // interval polling the oracle price whi
 let axUpdateTimer = null;
 
 function resetAxState() { axView = "swap"; axSell = true; axSlip = 4.2; axStatusCache = { ready: false }; axLastBook = null; axAmt = ""; axBalsCache = null; axQuoteMeta = null; axEditing = false; axPegMode = null; axEnaMode = null; axStopPegPoll(); }
-function resetCasinoState() { casinoView = "play"; casinoPick = {}; casinoStatusCache = null; casinoPendingCreate = null; casinoTaking = {}; casinoCancelling = {}; casinoPrevBets = []; casinoResults = []; casinoStartupChecked = false; casinoCreateMsg = { text: "", cls: "" }; try { localStorage.removeItem("casino_watch"); } catch (e) {} }
+function resetCasinoState() { casinoOwnedBets = []; casinoView = "play"; casinoPick = {}; casinoStatusCache = null; casinoPendingCreate = null; casinoTaking = {}; casinoCancelling = {}; casinoPrevBets = []; casinoResults = []; casinoStartupChecked = false; casinoCreateMsg = { text: "", cls: "" }; try { localStorage.removeItem("casino_watch"); } catch (e) {} }
 
 function axHeader(active) {
   const st = axStatusCache;
@@ -5040,6 +5041,7 @@ async function casinoWatchResults() {
   casinoActivity((h.won ? "✓ WON +" : "✗ LOST −") + casinoFmt(h.profit) + " MINIMA — " + h.game + " (as " + (h.role || "") + ")", h.won ? "ok" : "err");
 }
 
+let casinoOwnedBets = [];   // last successful all-currency scan; transient RPC misses must not hide claims
 async function renderCasino() {
   const host = el("casinoBody"); if (!host) return;
   let st = null, bal = "0", stake = null;
@@ -5050,6 +5052,12 @@ async function renderCasino() {
   casinoSyncCurrency();   // ensure the engine's active token matches the toggle (new bets + balance)
   api.casinoSeen().catch(() => {}); refreshCasinoBadge();   // viewing the tab clears the unseen-result badge
   const ready = st && st.ready;
+  try { casinoOwnedBets = await api.casinoMyBets(); } catch (e) {}
+  const owned = casinoOwnedBets;
+  const claims = owned.filter(b => b.canClaimTimeout);
+  const nativeClaims = claims.filter(b => casinoIsMinimaTok(b.tokenid)).length;
+  const usdClaims = claims.length - nativeClaims;
+  const claimSummary = claims.length + " timeout claim" + (claims.length === 1 ? "" : "s") + " available (" + [nativeClaims ? nativeClaims + " Minima" : "", usdClaims ? usdClaims + " USD" : ""].filter(Boolean).join(" · ") + ")";
   // Header "available to bet": in USD mode the Minima-only stakeable ceiling doesn't apply, so show the
   // MxUSD balance at true resolution; in Minima mode keep the honest single-address stakeable ceiling.
   const availLbl = casinoCcyLabel();
@@ -5068,7 +5076,8 @@ async function renderCasino() {
        <div><span class="casino-hdr__k">Block</span><span class="casino-hdr__v">${st && st.block ? "#" + st.block : "—"}</span></div>
        <div><span class="casino-hdr__k">Engine</span><span class="casino-hdr__v" style="color:${ready ? "var(--green)" : "var(--amber)"}">${ready ? "ready" : "starting…"}</span></div>
      </div>
-     <div class="seg" style="margin:10px 0 12px">${sub("play", "Play")}${sub("house", "Offer a Bet")}${sub("mybets", "My Bets")}${sub("history", "History")}</div>
+     ${claims.length ? `<button class="btn btn--outline" data-cv="mybets" style="width:100%;color:var(--amber)">${esc(claimSummary)} — Open My Bets</button>` : ""}
+     <div class="seg" style="margin:10px 0 12px">${sub("play", "Play")}${sub("house", "Offer a Bet")}${sub("mybets", "My Bets" + (owned.length ? " (" + owned.length + ")" : ""))}${sub("history", "History")}</div>
      <div id="casinoSub"></div>
      <div class="casino-act"><div class="casino-act__hdr"><span class="casino-act__dot"></span>Activity</div><div class="casino-act__log" id="casinoActLog"></div></div>`;
   host.querySelectorAll("[data-cv]").forEach(b => b.addEventListener("click", () => { casinoView = b.dataset.cv; renderCasino(); }));
@@ -5238,9 +5247,10 @@ async function casinoDoCancel(coinid) {
 // ---------------- MY BETS: active bets in flight ----------------
 async function renderCasinoMyBets() {
   const host = el("casinoSub"); if (!host) return;
-  let bets = []; try { bets = await api.casinoMyBets(); } catch (e) {}
+  try { casinoOwnedBets = await api.casinoMyBets(); } catch (e) {}
+  const bets = casinoOwnedBets;
   if (el("casinoSub") !== host) return;
-  const active = (bets || []).filter(b => (b.phase !== 0 || b.amHouse) && casinoTokIsActive(b.tokenid));   // my open offers too, active currency only
+  const active = bets || [];   // Every owned bet, independent of the currency toggle.
   // Pending placeholders — a create/take is NOT a real bet until the chain confirms it (mirrors MDS).
   // Pending CREATE shows its status on the Offer page; pending TAKE is a TEXT-ONLY card here (no animation —
   // the spinning game only plays once a bet is actually in play, phase >= 1).
@@ -5250,22 +5260,23 @@ async function renderCasinoMyBets() {
   host.innerHTML = ph + active.map(b => {
     const g = casinoGame(b.range);
     let statusTxt = "", statusCol = "var(--amber)", extra = "";
-    const canTimeout = b.expired;
+    const canTimeout = b.canClaimTimeout;
     if (b.phase === 0) { statusTxt = "Open — waiting for a taker"; extra = `<button class="btn btn--sm btn--outline casino-cancel" data-coin="${b.coinid}">Cancel & reclaim</button>`; }
     else if (b.phase === 1 && b.amHouse) { statusTxt = "Taken — auto-revealing…"; extra = b.age > 10 ? `<button class="btn btn--sm btn--outline casino-reveal" data-coin="${b.coinid}">Force reveal</button>` : ""; }
     else if (b.phase === 1) { statusTxt = "Waiting for house to reveal…"; }
     else if (b.phase === 2 && b.amPlayer) { statusTxt = "Revealing — auto-resolving…"; statusCol = "var(--green)"; extra = b.age > 10 ? `<button class="btn btn--sm btn--outline casino-resolve" data-coin="${b.coinid}">Force resolve</button>` : ""; }
     else if (b.phase === 2) { statusTxt = "Waiting for player to resolve…"; }
+    if (b.expired && b.phase >= 1) statusTxt = canTimeout ? "Timeout claim available" : "Counterparty can claim timeout";
     if (canTimeout) extra = `<button class="btn btn--sm btn--outline casino-timeout" data-coin="${b.coinid}" style="color:var(--red);border-color:var(--red)">Claim timeout</button>`;
     const pickTxt = (b.pick !== "" && b.pick != null && b.amPlayer) ? " · picked " + casinoPickLabel(b.range, b.pick) : "";
     const inflight = b.phase >= 1;   // taken/revealing/resolving → show the looping game animation
     return `<div class="card casino-bet${inflight ? " casino-waiting" : ""}">
-      <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span><span class="casino-bet__name">${esc(g.name)}</span>
+      <div class="casino-bet__top"><span class="casino-ico">${g.icon}</span><span class="casino-bet__name">${esc(g.name)} · ${casinoCcyName(b.tokenid)}</span>
         <span class="casino-bet__role">${esc(b.role)}${pickTxt}</span></div>
       ${inflight ? casinoAnimHTML(b.range) : ""}
       <div class="casino-bet__row"><span>Pot</span><b>${casinoFmtTok(b.amount, b.tokenid)} ${casinoCcyName(b.tokenid)}</b></div>
       <div class="casino-bet__row"><span>Status</span><b style="color:${statusCol}">${statusTxt}</b></div>
-      ${b.timeout ? `<div class="casino-bet__row"><span>Age</span><b>${b.age}/${b.timeout} blocks</b></div>` : ""}
+      ${b.timeout ? `<div class="casino-bet__row"><span>Age</span><b>${b.blocksUntilClaim == null ? "Waiting for block age" : b.blocksUntilClaim > 0 ? b.blocksUntilClaim + " blocks until timeout" : "Expired"}</b></div>` : ""}
       ${casinoBusy[b.coinid] ? `<div class="casino-note" style="color:var(--amber)">${casinoCancelling[b.coinid] ? "Cancelling — posting to chain…" : "Posting to chain…"}</div>` : extra}
     </div>`;
   }).join("");

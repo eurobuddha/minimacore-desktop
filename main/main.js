@@ -402,11 +402,14 @@ ipcMain.handle("mcd:casinoSeen", () => casino.markSeen());
 ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
 casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
 casino.emitter.on("log", (l) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casinolog", l); });   // activity board feed
-casino.emitter.on("notify", (msg) => {   // reveal/resolve milestones — OS notification when the app isn't focused
+let casinoClaimNotification = null;
+casino.emitter.on("notifycancel", () => { if (casinoClaimNotification) casinoClaimNotification.close(); casinoClaimNotification = null; });
+casino.emitter.on("notify", (msg) => {   // stable timeout reminder; click routes to My Bets
   try {
-    if (win && !win.isDestroyed() && win.isFocused()) return;
-    const n = new Notification({ title: "Casino", body: String(msg), silent: false });
-    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+    if (casinoClaimNotification) casinoClaimNotification.close();
+    const n = new Notification({ title: "Casino timeout claims", body: String(msg), silent: !!(win && !win.isDestroyed() && win.isFocused()) });
+    casinoClaimNotification = n;
+    n.on("click", () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:casinoClaims"); } });
     n.show();
   } catch (e) { /* best-effort */ }
 });
