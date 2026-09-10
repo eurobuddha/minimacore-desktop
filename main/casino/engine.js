@@ -440,6 +440,8 @@ function cancelBet(coinid, cb) {
       if (!coin) { cb("Bet not found"); return; }
       if ((parseInt(getState(coin, 6)) || 0) !== 0) { cb("Only an untaken bet can be cancelled"); return; }
       if (!isMyKey(getState(coin, 0))) { cb("Not your bet"); return; }
+      CasinoOffers.requestCancel(MDS,coin,function(err){
+      if(err){cb(err);return;}
       var txid = "cancel_" + tag();
       MDS.cmd("txncreate id:" + txid, function (r0) {
         if (!r0.status) { cb("txncreate failed"); return; }
@@ -457,6 +459,7 @@ function cancelBet(coinid, cb) {
             });
           });
         });
+      });
       });
     });
   });

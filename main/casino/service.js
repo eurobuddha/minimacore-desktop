@@ -1,6 +1,6 @@
 /**
  * Zero Edge Casino — Background Service
- * Runs persistently in MiniHub. Handles auto-reveal and auto-resolve
+ * Runs persistently in MiniHub. Renews open offers and handles auto-reveal and auto-resolve
  * so users can close the casino tab after placing/taking a bet.
  *
  * Secrets are shared via MDS.keypair (same MiniDapp UID as index.html).
@@ -86,10 +86,26 @@ function purgeStaleTxns(){
       var arr=(res&&res.response)||[];
       for(var i=0;i<arr.length;i++){
         var tid=arr[i].txnid||arr[i].id||'';
-        if(typeof tid==='string'&&(tid.indexOf('svc_reveal_')===0||tid.indexOf('svc_resolve_')===0))MDS.cmd("txndelete id:"+tid);
+        if(typeof tid==='string'&&(tid.indexOf('svc_reveal_')===0||tid.indexOf('svc_resolve_')===0||tid.indexOf('svc_offer_')===0))MDS.cmd("txndelete id:"+tid);
       }
     }catch(e){}
   });
+}
+
+// Refresh the existing wallet-key parser before scans: the UI can create its first identity
+// after this service starts. A stale startup-only set would leave those offers unmaintained.
+function refreshKeys(cb){
+    MDS.cmd("keys",function(res){
+      try{
+        // NB: on a bare-array response, `.keys` is Array.prototype.keys (a truthy METHOD) — the old
+        // `res.response.keys||res.response` silently parsed ZERO keys on that shape, disabling
+        // auto-reveal/resolve AND the hygiene sweep. Only accept a real keys ARRAY.
+        var list=(res.response&&Array.isArray(res.response.keys))?res.response.keys:res.response;
+        if(Array.isArray(list)){for(var i=0;i<list.length;i++){var pk=list[i].publickey||list[i];if(pk&&typeof pk==='string')MY_KEYS[pk]=true}}
+      }catch(e){}
+      MDS.log("Casino service: loaded "+Object.keys(MY_KEYS).length+" keys");
+      if(cb)cb();
+    });
 }
 
 // ===== Init =====
@@ -110,23 +126,15 @@ MDS.init(function(msg){
     // Clear any leaked half-built txns from prior failed attempts.
     purgeStaleTxns();
     // Load wallet keys, then run the balance-hygiene sweep (needs the keys to prove ownership).
-    MDS.cmd("keys",function(res){
-      try{
-        // NB: on a bare-array response, `.keys` is Array.prototype.keys (a truthy METHOD) — the old
-        // `res.response.keys||res.response` silently parsed ZERO keys on that shape, disabling
-        // auto-reveal/resolve AND the hygiene sweep. Only accept a real keys ARRAY.
-        var list=(res.response&&Array.isArray(res.response.keys))?res.response.keys:res.response;
-        if(Array.isArray(list)){for(var i=0;i<list.length;i++){var pk=list[i].publickey||list[i];if(pk&&typeof pk==='string')MY_KEYS[pk]=true}}
-      }catch(e){}
-      MDS.log("Casino service: loaded "+Object.keys(MY_KEYS).length+" keys");
-      cleanTracking();
-    });
+    refreshKeys(cleanTracking);
   }
 
   if(msg.event==='NEWBLOCK'){
     // Ensure the covenant script is registered before processing; only process once confirmed.
-    if(WRITE_MODE)ensureScript(function(){if(SCRIPT_OK)processCoins()});
-    else processCoins();
+    refreshKeys(function(){
+      if(WRITE_MODE)ensureScript(function(){if(SCRIPT_OK)processCoins()});
+      else processCoins();
+    });
   }
 });
 
@@ -184,6 +192,7 @@ function untrackNext(ids,i){
 
 // Shared with the browser and byte-copied into desktop. Notifications never post claims.
 MDS.load("timeout-claims.js");
+MDS.load("offer-keepalive.js");
 var updateTimeoutReminder=CasinoTimeouts.notifier(MDS);
 
 // ===== Process coins on each block =====
@@ -200,11 +209,12 @@ function processCoins(){
   MDS.cmd("coins address:"+SCRIPT_ADDR+" depth:4096",function(res){
     if(!res||!res.status||!Array.isArray(res.response))return;
     updateTimeoutReminder(CasinoTimeouts.snapshot(res.response,isMyKey),foreground);
-    if(foreground||!WRITE_MODE||!SCRIPT_OK)return;
+    if(!WRITE_MODE||!SCRIPT_OK)return;
     // Prune cooldown/busy entries for coins that have advanced or been spent.
     var present={};res.response.forEach(function(c){present[c.coinid]=true});
     Object.keys(POSTED).forEach(function(id){if(!present[id])delete POSTED[id]});
     Object.keys(BUSY).forEach(function(id){if(!present[id])delete BUSY[id]});
+    var renewalsStarted=0;
     res.response.forEach(function(coin){
       var phase=getState(coin,6);
       var coinid=coin.coinid;
@@ -213,6 +223,23 @@ function processCoins(){
       // Cooldown: txnpost mines async, so don't re-post the same transition every block while it
       // confirms (that races competing txns and stalls). Wait REPOST_AFTER blocks per coin.
       if(POSTED[coinid]!==undefined&&(age-POSTED[coinid])<REPOST_AFTER)return;
+
+      // Service alone owns phase-0 upkeep, INCLUDING while the page heartbeat is fresh.
+      // No wallet funding: spend only the existing offer coin back to this same covenant.
+      if(phase==='0'&&isMyKey(getState(coin,0))){
+        BUSY[coinid]=true;
+        MDS.keypair.get(CasinoOffers.cancelKey(coin),function(flag){
+          if(renewalsStarted>=2 || (!CasinoOffers.due(coin)&&!(flag&&flag.value==='1'))){delete BUSY[coinid];return;}
+          renewalsStarted++;POSTED[coinid]=age;
+          CasinoOffers.maintain(MDS,coin,isMyKey,'',function(err,result){
+            delete BUSY[coinid];
+            if(err)MDS.log('Offer keepalive: '+err);
+            else if(result)MDS.log(result.cancelled?'Offer cancellation posted':'Open offer renewed ('+(coinTok(coin)==='0x00'?'Minima':'USD')+')');
+          });
+        });
+        return;
+      }
+      if(foreground)return; // foreground still owns reveal/resolve, as before
 
       // Phase 1 + I'm house → auto-reveal
       if(phase==='1'&&isMyKey(getState(coin,0))){

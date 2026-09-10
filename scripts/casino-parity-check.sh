@@ -24,5 +24,6 @@ if ! diff -q "main/casino/service.js" "$DONOR/service.js" >/dev/null 2>&1; then
   exit 1
 fi
 diff -q "main/casino/timeout-claims.js" "$DONOR/timeout-claims.js"
-echo "casino parity OK — service.js and timeout-claims.js byte-identical to the donor"
-CASINO_DONOR="$DONOR" node --test scripts/casino-timeout-test.cjs
+diff -q "main/casino/offer-keepalive.js" "$DONOR/offer-keepalive.js"
+echo "casino parity OK — service.js, timeout-claims.js and offer-keepalive.js byte-identical to the donor"
+CASINO_DONOR="$DONOR" node --test scripts/casino-timeout-test.cjs scripts/casino-keepalive-test.cjs
