@@ -207,6 +207,7 @@ contextBridge.exposeInMainWorld("mcd", {
   casinoSeen: () => ipcRenderer.invoke("mcd:casinoSeen"),
   casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),
   onCasino: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casino", h); return () => ipcRenderer.removeListener("mcd:casino", h); },
+  onCasinoClaims: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casinoClaims", h); return () => ipcRenderer.removeListener("mcd:casinoClaims", h); },
   onCasinoLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:casinolog", h); return () => ipcRenderer.removeListener("mcd:casinolog", h); },
 
   // Vestr (token vesting)

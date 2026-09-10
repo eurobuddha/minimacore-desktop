@@ -179,7 +179,7 @@ function fetchAndStoreIdentity(cb) {
 }
 function loadWalletKeys(cb) {
   MDS.cmd("keys", function (res) {
-    try { if (res && res.status && res.response) { var list = res.response.keys || res.response; if (Array.isArray(list)) { for (var i = 0; i < list.length; i++) { var pk = list[i].publickey || list[i]; if (pk && typeof pk === "string") MY_KEYS[pk] = true; } } } } catch (e) {}
+    try { if (res && res.status && res.response) { var list = Array.isArray(res.response.keys) ? res.response.keys : res.response; if (Array.isArray(list)) { for (var i = 0; i < list.length; i++) { var pk = list[i].publickey || list[i]; if (pk && typeof pk === "string") MY_KEYS[pk] = true; } } } } catch (e) {}
     if (MY_PUBKEY) MY_KEYS[MY_PUBKEY] = true;
     if (cb) cb();
   });
@@ -206,7 +206,7 @@ function recordResult(coinid, range, playerpick, result, playerWins, isHouse, be
 
 // ============================ read model ============================
 function coinsAtContract(cb) {
-  MDS.cmd("coins address:" + SCRIPT_ADDR + " depth:4096", function (res) { cb((res && res.status && res.response) ? res.response : []); });
+  MDS.cmd("coins address:" + SCRIPT_ADDR + " depth:4096", function (res) { var ok = res && res.status && Array.isArray(res.response); cb(ok ? res.response : [], ok ? null : "Casino coin scan unavailable"); });
 }
 function openBets(cb) {
   ensureReady(function () {
@@ -224,14 +224,15 @@ function openBets(cb) {
 }
 function myBets(cb) {
   ensureReady(function () {
-    coinsAtContract(function (coins) {
+    coinsAtContract(function (coins, err) {
+      if (err) { cb(err); return; }
       var out = [];
       coins.forEach(function (c) {
         var amHouse = isMyKey(getState(c, 0)), amPlayer = isMyKey(getState(c, 8));
         if (!amHouse && !amPlayer) return;
         var phase = parseInt(getState(c, 6)) || 0, range = parseInt(getState(c, 3)) || 2;
-        var timeout = parseInt(getState(c, 7)) || 0, age = parseInt(c.age) || 0;
-        out.push({ coinid: c.coinid, phase: phase, role: amHouse && !amPlayer ? "House" : (amPlayer && !amHouse ? "Player" : "Self"), amHouse: amHouse, amPlayer: amPlayer, range: range, payout: parseInt(getState(c, 4)) || range, bet: getState(c, 5), amount: coinAmount(c), tokenid: coinTok(c), pick: getState(c, 11), game: gameType(range).name, age: age, timeout: timeout, expired: timeout > 0 && age > timeout });
+        var timeout = CasinoTimeouts.timeout(c), age = CasinoTimeouts.age(c);
+        out.push({ coinid: c.coinid, phase: phase, role: amHouse && !amPlayer ? "House" : (amPlayer && !amHouse ? "Player" : "Self"), amHouse: amHouse, amPlayer: amPlayer, range: range, payout: parseInt(getState(c, 4)) || range, bet: getState(c, 5), amount: coinAmount(c), tokenid: coinTok(c), pick: getState(c, 11), game: gameType(range).name, age: age, timeout: timeout, expired: CasinoTimeouts.expired(c), canClaimTimeout: CasinoTimeouts.canClaim(c, isMyKey), blocksUntilClaim: CasinoTimeouts.age(c) < 0 ? null : Math.max(0, CasinoTimeouts.timeout(c) + 1 - CasinoTimeouts.age(c)) });
       });
       cb(null, out);
     });
@@ -439,6 +440,8 @@ function cancelBet(coinid, cb) {
       if (!coin) { cb("Bet not found"); return; }
       if ((parseInt(getState(coin, 6)) || 0) !== 0) { cb("Only an untaken bet can be cancelled"); return; }
       if (!isMyKey(getState(coin, 0))) { cb("Not your bet"); return; }
+      CasinoOffers.requestCancel(MDS,coin,function(err){
+      if(err){cb(err);return;}
       var txid = "cancel_" + tag();
       MDS.cmd("txncreate id:" + txid, function (r0) {
         if (!r0.status) { cb("txncreate failed"); return; }
@@ -457,6 +460,7 @@ function cancelBet(coinid, cb) {
           });
         });
       });
+      });
     });
   });
 }
@@ -469,9 +473,8 @@ function claimTimeout(coinid, cb) {
       if (!coin) { cb("Bet not found"); return; }
       var phase = parseInt(getState(coin, 6)) || 0;
       var signKey = phase === 1 ? getState(coin, 8) : getState(coin, 0);
-      if (!isMyKey(signKey)) { cb("You can't claim this bet"); return; }
-      var timeout = parseInt(getState(coin, 7)) || 0, age = parseInt(coin.age) || 0;
-      if (!(timeout > 0 && age > timeout)) { cb("Not yet timed out (" + age + "/" + timeout + " blocks)"); return; }
+      if (!CasinoTimeouts.canClaim(coin, isMyKey)) { cb("No timeout claim available for this wallet"); return; }
+      // Eligibility above uses the covenant's strict age > timeout boundary.
       var txid = "timeout_" + tag();
       MDS.cmd("txncreate id:" + txid, function (r0) {
         if (!r0.status) { cb("txncreate failed"); return; }
