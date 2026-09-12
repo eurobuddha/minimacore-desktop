@@ -32,7 +32,13 @@ let tray = null;
 
 // single instance — a second launch focuses the existing window
 if (!app.requestSingleInstanceLock()) { app.quit(); }
-app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+
+require("./parlons-calls").install({
+  port: () => node.panelPort(),
+  window: () => win,
+  focusPanel: () => { if (win && !win.isDestroyed()) win.webContents.send("parlons:incoming"); }
+});
 
 function createWindow() {
   win = new BrowserWindow({
@@ -72,6 +78,9 @@ function createWindow() {
   });
   // Defense-in-depth: never let the app frame itself navigate away from the bundled file:// renderer.
   win.webContents.on("will-navigate", (e, url) => { if (!String(url).startsWith("file://")) e.preventDefault(); });
+  // On macOS the app/node already stays running after closing its window. Keep the call
+  // receiver alive too; explicit Quit still closes it through the existing graceful shutdown.
+  win.on("close", e => { if (process.platform === "darwin" && !quitting) { e.preventDefault(); win.hide(); } });
   win.on("closed", () => { win = null; });
 }
 
@@ -496,7 +505,7 @@ app.whenReady().then(() => {
   const c = config.load();
   if (c.setupDone && c.walletDone) node.start();
   updater.start();
-  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); else if (win) { win.show(); win.focus(); } });
 });
 
 // The node must never outlive the app: a normal quit goes through before-quit → node.stop() (graceful);

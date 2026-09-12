@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.16.80",
+  "version": "0.16.81",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "test:termcomplete": "node scripts/termcomplete-test.js",
     "gate:atomix": "node scripts/atomix-boot-gate.js && node scripts/atomix-s2-gate.js",
     "test:rpc": "node --test scripts/rpc-test.cjs",
-    "test:parlons": "node --test scripts/parlons-view-test.cjs",
+    "test:parlons": "node --test scripts/parlons-view-test.cjs scripts/parlons-calls-test.cjs",
     "test:pandapools-recovery": "node --test scripts/pandapools-recovery.test.cjs scripts/pandapools-recovery-lifecycle.test.cjs"
   },
   "devDependencies": {
@@ -40,7 +40,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSCameraUsageDescription": "minimaMail uses the camera only to scan a contact's QR code."
+        "NSCameraUsageDescription": "Parlons uses your camera for video calls and scanning QR codes.",
+        "NSMicrophoneUsageDescription": "Parlons uses your microphone for voice and video calls."
       },
       "target": [
         {
@@ -148,5 +149,5 @@
     "qrcode-generator": "^2.0.4",
     "sql.js": "^1.13.0"
   },
-  "parlonsNode": "0.2.106"
+  "parlonsNode": "0.2.107"
 }

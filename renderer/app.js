@@ -96,6 +96,7 @@ async function boot() {
   refreshUpdatePill(); setTimeout(refreshUpdatePill, 15_000); setInterval(refreshUpdatePill, 60_000);   // the first feed check runs ~8 s after launch
 
   api.onStatus(onStatus);
+  api.onParlonsIncoming(() => selectTab("parlons"));
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
   api.onPandapools(onPandapoolsUpdate);
@@ -144,7 +145,7 @@ function onStatus(s) {
   }
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
-  if (activeView === "parlons" && s.parlons) {
+  if (s.parlons) {
     const sig = (s.parlons.ready ? "1" : "0") + "|" + (s.parlons.error || "") + "|" + s.state;
     if (sig !== parlonsLastSig) { parlonsLastSig = sig; renderParlons(); }
   }
@@ -5658,7 +5659,7 @@ async function renderParlons(attempt = 0) {
     el("parlonsReload").onclick = () => renderParlons();
   }
   const st = await api.parlonsStatus().catch(() => null);
-  if (seq !== parlonsRenderSeq || activeView !== "parlons") return;
+  if (seq !== parlonsRenderSeq) return;
   parlonsStatusCache = st;
   if (!st) { retry("Could not check the account. Reload to try again."); return; }
   if (st.kind !== "parlons") {
@@ -5691,15 +5692,15 @@ async function renderParlons(attempt = 0) {
     return;
   }
   const ns = await api.nodeStatus().catch(() => null);
-  if (seq !== parlonsRenderSeq || activeView !== "parlons") return;
+  if (seq !== parlonsRenderSeq) return;
   if (!ns || !ns.startedTs) { retry("Could not identify the running node. Reload to try again."); return; }
   const key = String(st.panelPort) + ":" + ns.startedTs;   // minimaDesk's exact one-key-per-start model
   if (body.querySelector("webview") && parlonsLoadedFor === key) return;   // already showing this start's session
   const url = await api.parlonsPanelUrl().catch(() => "");
-  if (seq !== parlonsRenderSeq || activeView !== "parlons") return;
+  if (seq !== parlonsRenderSeq) return;
   if (!url) {
     retry(attempt >= 20 ? "Could not get a sign-in link. Reload to try again." : "Getting a sign-in link from the account…");
-    if (attempt < 20) parlonsRetry = setTimeout(() => { if (seq === parlonsRenderSeq && activeView === "parlons") renderParlons(attempt + 1); }, 1500);
+    if (attempt < 20) parlonsRetry = setTimeout(() => { if (seq === parlonsRenderSeq) renderParlons(attempt + 1); }, 1500);
     return;
   }
   parlonsLoadedFor = key;

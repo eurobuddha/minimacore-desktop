@@ -28,3 +28,5 @@ test('an unavailable account exposes a retry instead of a blank spinner', async 
   const f = fixture(); f.api.parlonsStatus = async () => { throw new Error('offline'); }; await f.render();
   assert.match(f.el('parlonsBody').innerHTML, /Could not check/); assert.equal(typeof f.el('parlonsReload').onclick, 'function');
 });
+
+test("receiver loads while another tab is selected", async () => { const f = fixture(); f.ctx.activeView = "balances"; await f.render(); assert.equal(f.calls, 1); assert.ok(f.webview); });
