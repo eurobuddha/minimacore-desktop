@@ -56,7 +56,7 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
   // The Parlons tab's <webview> may only ever show the account's loopback panel: strip any preload,
-  // force isolation, and refuse any other src. The guest gets no window.open either.
+  // force isolation, and refuse any other src. External web links open in the OS browser; no guest child windows.
   win.webContents.on("will-attach-webview", (ev, prefs, params) => {
     delete prefs.preload; delete prefs.preloadURL;
     prefs.nodeIntegration = false; prefs.contextIsolation = true; prefs.webSecurity = true; prefs.sandbox = true;
@@ -64,7 +64,10 @@ function createWindow() {
     if (!src.startsWith("http://127.0.0.1:" + node.panelPort() + "/")) ev.preventDefault();
   });
   win.webContents.on("did-attach-webview", (_ev, contents) => {
-    contents.setWindowOpenHandler(() => ({ action: "deny" }));
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+      return { action: "deny" };
+    });
     contents.on("will-navigate", (e, url) => {
       if (!String(url).startsWith("http://127.0.0.1:" + node.panelPort() + "/")) e.preventDefault();
     });
