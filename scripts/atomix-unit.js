@@ -94,6 +94,65 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     } finally { A.engine.startLeg = origStartLeg; atomix.stopLoop(); atomix.flush(); }
   });
 
+  // ---- publish-send coin pin: must fund the send, not just be signable ----
+  // Live failure (2026-09-14): the wallet held a 1e-44 MINIMA dust coin. `fromaddress:` RESTRICTS inputs to
+  // that address, so pinning to it made the 1e-9 publish unfundable and the node returned a BARE
+  // {status:false} with NO error text — surfacing as "cmd failed: send … — undefined" and blocking every
+  // market publish. Signable is necessary but NOT sufficient: the coin must also cover the amount.
+  {
+    const atomix = require("../main/atomix");
+    const PUB = 'send amount:0.000000001 address:0x5553445453574150 tokenid:0x00 state:{"1":"0xaa"}';
+    const DUST = "0x" + "F".repeat(64), NANO = "0x" + "8".repeat(64), BIG = "0x" + "1".repeat(64);
+    const SHORT = "0x5553445453574150";
+    const mkRunner = (coins) => async (cmd) => {
+      if (/^coins /.test(cmd)) return { response: coins };
+      if (/^checkaddress /.test(cmd)) return { response: { simple: !/0x5553445453574150/.test(cmd) } };
+      return { status: true };
+    };
+    const origRunner = atomix._setRunner;
+
+    await okA("pins to the smallest coin that COVERS the send, not the smallest overall", async () => {
+      atomix._setRunner(mkRunner([
+        { amount: "0.00000000000000000000000000000000000000000001", address: DUST },
+        { amount: "0.000000001", address: NANO },
+        { amount: "5", address: BIG },
+      ]));
+      const out = await atomix._pinPublishSend(PUB);
+      assert.ok(!out.includes(DUST), "must NOT pin to the 1e-44 dust coin");
+      assert.ok(out.endsWith(" fromaddress:" + NANO), "pins to the 1e-9 coin, got: " + out);
+    });
+
+    await okA("skips unsignable sentinel/beacon dust", async () => {
+      atomix._setRunner(mkRunner([
+        { amount: "0.000000002", address: SHORT },      // short = anyone-can-spend, no key
+        { amount: "5", address: BIG },
+      ]));
+      const out = await atomix._pinPublishSend(PUB);
+      assert.ok(out.endsWith(" fromaddress:" + BIG), "falls through to the signable coin, got: " + out);
+    });
+
+    await okA("no sufficient coin → sends UNPINNED rather than pinning an unfundable one", async () => {
+      atomix._setRunner(mkRunner([
+        { amount: "0.00000000000000000000000000000000000000000001", address: DUST },
+      ]));
+      const out = await atomix._pinPublishSend(PUB);
+      assert.equal(out, PUB, "command returned unmodified");
+    });
+
+    await okA("a coin exactly equal to the amount is acceptable", async () => {
+      atomix._setRunner(mkRunner([{ amount: "0.000000001", address: NANO }]));
+      const out = await atomix._pinPublishSend(PUB);
+      assert.ok(out.endsWith(" fromaddress:" + NANO), "exact-amount coin pins, got: " + out);
+    });
+
+    await okA("non-publish sends are left completely alone", async () => {
+      atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
+      const plain = "send amount:1 address:0xABC tokenid:0x00";
+      assert.equal(await atomix._pinPublishSend(plain), plain);
+    });
+    void origRunner;
+  }
+
   console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed");
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("UNIT ERROR:", e); process.exit(1); });

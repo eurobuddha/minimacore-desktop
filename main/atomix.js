@@ -65,18 +65,25 @@ function log(line) {
 // pin these sends to the smallest SIMPLE (wallet-signable) MINIMA coin via `fromaddress:` so an unsignable coin
 // can never be selected. checkaddress → {simple:true} is the reliable signable test (beacon addrs return {}).
 const AX_PUBLISH_SEND = /^send\s+.*\bamount:0\.000000001\b.*\btokenid:0x00\b.*\bstate:/;
+const AX_PUBLISH_AMOUNT = 0.000000001;
 async function pinPublishSend(command) {
   if (!AX_PUBLISH_SEND.test(command) || /\bfromaddress:/.test(command)) return command;
   try {
     const coinsR = await runner("coins relevant:true tokenid:0x00");
-    const coins = ((coinsR && coinsR.response) || []).filter(c => Number(c.amount) > 0)
-      .sort((a, b) => Number(a.amount) - Number(b.amount));   // smallest first → funds from disposable dust, never the reserve/main coin
+    // MUST cover the send: `fromaddress:` RESTRICTS the input set to that one address, so pinning to a coin
+    // smaller than the amount makes the send unfundable and the node answers a BARE {status:false} with NO
+    // error text — surfacing as the useless "cmd failed: send … — undefined". A wallet accumulates sub-nano
+    // dust from other dapps (a 0.00000000000000000000000000000000000000000001 coin was the live cause), and
+    // "smallest first" walked straight into it. Filter FIRST, then take the smallest that can actually pay.
+    const coins = ((coinsR && coinsR.response) || []).filter(c => Number(c.amount) >= AX_PUBLISH_AMOUNT)
+      .sort((a, b) => Number(a.amount) - Number(b.amount));   // smallest sufficient → funds from disposable dust, never the reserve/main coin
     for (const c of coins) {
       const addr = String(c.address || "");
       if (addr.length < 42) continue;                          // short = sentinel/beacon (anyone-can-spend, no key)
       const chk = await runner("checkaddress address:" + addr);
       if (chk && chk.response && chk.response.simple) return command + " fromaddress:" + addr;
     }
+    log("publish-send pin: no signable MINIMA coin >= " + AX_PUBLISH_AMOUNT + " — sending unpinned");
   } catch (e) { log("publish-send pin failed: " + (e && e.message)); }
   return command;   // best-effort: fall back to the unmodified send
 }
@@ -995,6 +1002,8 @@ module.exports = {
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
   ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute, ethSetRpc,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
+  // test-only: the publish-send coin pin (scripts/atomix-unit.js) — drive it with _setRunner
+  _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,
   _ctx: () => ctx, _fire: fire,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,
