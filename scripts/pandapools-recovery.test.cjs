@@ -121,11 +121,20 @@ test('Book discovery populates both young reserve ages for the foreground refres
 });
 test('MDS and Desktop cards retain full unresolved address and recovery/signing actions',async()=>{
  const h=await harness();try{h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);
+ // The MDS half reads the DONOR tree (eurobuddha/pandapools-mds). CI deliberately does not check that repo
+ // out — see scripts/pandapools-parity-manifest.cjs: donor comparison is a LOCAL gate, CI verifies the
+ // committed digest manifest instead. Reading it unconditionally made this test crash on all three CI legs
+ // the moment 0.16.87 added `npm run test:pandapools` to the workflow. Run the donor half when the donor is
+ // there (always, locally), and never silently: when it is absent say so, and still run the Desktop half
+ // below, which is in-repo and is the part CI can actually prove.
  const donor=process.env.PP_MDS_ROOT||path.resolve(desktop,'../../mds/pandapools-mds');
- const html=fs.readFileSync(path.join(donor,'index.html'),'utf8'),elements={};
+ const donorHtml=path.join(donor,'index.html');
+ if(fs.existsSync(donorHtml)){
+ const html=fs.readFileSync(donorHtml,'utf8'),elements={};
  Object.assign(h.c,{POOLS:[],pendingCreate:null,mine:()=>true,withSnapshots:(_ps,cb)=>cb(),D:h.c.Decimal,el:id=>elements[id]||(elements[id]={})});
  vm.runInContext(html.slice(html.indexOf('    function renderMyLp()'),html.indexOf('    function withSnapshots'))+'\n'+html.split('\n').find(l=>l.includes('function btn(label,'))+'\n'+html.split('\n').find(l=>l.includes('function esc(s)')),h.c);
  h.c.renderMyLp();const card=elements.lpList.innerHTML;assert(card.includes(addr));assert(card.includes('Recover reserves'));assert(card.includes('Owner signing paused'));assert.equal(elements.lpValue.innerText,'Reserves unavailable');
+ }else{console.log('    # donor MDS tree absent ('+donor+') — MDS card assertions skipped, Desktop card still checked');}
  const renderer=fs.readFileSync(path.join(desktop,'renderer/app.js'),'utf8'),c={TOK:{shortId:s=>s},esc:s=>String(s).replace(/</g,'&lt;'),short:s=>s};vm.createContext(c);vm.runInContext(renderer.slice(renderer.indexOf('function ppNum('),renderer.indexOf('function wirePpMineActions(')),c);
  const desktopCard=c.ppMineHtml([{address:addr,opk,tok,unresolved:true,signingStateUnverified:true}]);assert(desktopCard.includes(addr));assert(desktopCard.includes('data-pprecover'));assert(desktopCard.includes('data-ppconfirm'));assert(!desktopCard.includes('data-ppwd'));
  }finally{h.close();}
