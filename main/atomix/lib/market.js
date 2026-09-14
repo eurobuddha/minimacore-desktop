@@ -27,13 +27,16 @@
     /** One collection cycle. Idempotent; safe every poll. cb(). */
     function poll(tipBlock, cb) {
         cb = F.once(cb || function () {});
+        // Capture the token the scan will actually run under, and carry it through ingest: everything this
+        // cycle observes or reconciles belongs to THIS market and must not touch the other one's rows.
+        var token = AX.trading.active().tokenId;
         H.scanAllHtlcCoins(0, HTLC_DEPTH, function (err, coins) {
             if (err) return cb();
-            ingest(coins || [], tipBlock, cb);
+            ingest(coins || [], tipBlock, token, cb);
         });
     }
 
-    function ingest(coins, tipBlock, cb) {
+    function ingest(coins, tipBlock, token, cb) {
         var seen = {};
         F.each(coins, function (c, i, next) {
             if (!c || !c.coinid) return next();
@@ -46,11 +49,14 @@
                 coinid: c.coinid, hash: H.stateAt(c, 5), price: p, sizeMinima: size,
                 reqAmount: reqAmount, reqToken: H.stateAt(c, 2), owner: H.stateAt(c, 0),
                 receiver: H.stateAt(c, 4), createdBlock: Number(c.created) || tipBlock,
-                timelock: Number(H.stateAt(c, 3)) || 0
+                timelock: Number(H.stateAt(c, 3)) || 0, tokenId: token
             }, function () { next(); });
         }, function () {
-            // Any lock we had OPEN that's no longer in the scan has been spent → classify it.
-            DB.openTrades(function (e, open) {
+            // Any lock we had OPEN that's no longer in the scan has been spent → classify it. Scoped to the
+            // token we just scanned: the scan is token-filtered, so the OTHER currency's open locks are absent
+            // from it by construction, and reconciling them here marked every one EXECUTED or REFUNDED on a
+            // currency switch.
+            DB.openTrades(token, function (e, open) {
                 F.each(open || [], function (t, i, next) {
                     if (seen[t.coinid]) return next();
                     reconcileSpent(t, tipBlock, next);

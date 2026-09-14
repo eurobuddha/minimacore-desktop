@@ -190,12 +190,11 @@
         });
     }
 
-    /** The tokenid of the currency a swap BOUGHT (from its buyToken label), for verifying the received coin. */
+    /** The tokenid of the currency a swap BOUGHT (from its buyToken label), for verifying the received coin.
+     *  Uses the one canonical label -> market map so the legacy mxUSDT spelling attributes too. */
     function expectedTokenId(sw) {
-        var lbl = sw && sw.buyToken;
-        if (lbl === TR.MINIMA.coinLabel) return TR.MINIMA.tokenId;
-        if (lbl === TR.MXUSDT.coinLabel) return TR.MXUSDT.tokenId;
-        return TR.active().tokenId;
+        var c = sw ? TR.forCoinLabel(sw.buyToken) : null;
+        return c ? c.tokenId : TR.active().tokenId;
     }
 
     /** I am the receiver (state[4]) of a Minima HTLC coin and I hold the secret → claim it. */

@@ -51,6 +51,78 @@
         return _active.coinLabel;
     }
 
+    // ---- attributing a RECORDED swap to its market (native TradingContext.forCoinLabel/forSwap) ----
+
+    /**
+     * The market a Minima-side coin LABEL belongs to, or null for an Ethereum-leg symbol ("USDT", "WETH") or an
+     * unrecognised legacy label. Swap rows persist the label current when they were written, so the dollar
+     * token's ALIASES both match: it is properly MxUSD and rows on disk say "mxUSDT", so a later rename cannot
+     * orphan existing history. Deliberately does NOT match the bare "USDT" — that is the ERC20 leg of every
+     * swap in BOTH markets, so matching it would attribute every row to the dollar market.
+     */
+    function forCoinLabel(label) {
+        if (label === null || label === undefined) return null;
+        var l = String(label).trim();
+        if (!l) return null;
+        var k;
+        for (k in CTX) if (CTX[k].coinLabel.toLowerCase() === l.toLowerCase()) return CTX[k];
+        if (l.toLowerCase() === 'mxusd' || l.toLowerCase() === 'mxusdt') return CTX.MXUSDT;
+        if (l.toLowerCase() === 'minima') return CTX.MINIMA;
+        return null;
+    }
+
+    /** The market a recorded swap belongs to — whichever leg carries a Minima-side label. null when neither
+     *  does (an unattributable legacy row); callers MUST show such a row, never hide it. */
+    function forSwap(sellToken, buyToken) {
+        return forCoinLabel(sellToken) || forCoinLabel(buyToken);
+    }
+
+    // ---- which recorded swaps belong on screen in the selected market (native swap/SwapVisibility.java) ----
+
+    /** Grace past a BLOCK-denominated timelock, ~20h at Minima's ~50s blocks — far longer than the sweep needs,
+     *  so a refund landing can never blink a row off screen mid-confirmation. */
+    var GRACE_BLOCKS = 1440;
+    /** Grace past a SECONDS-denominated (Ethereum leg) timelock. */
+    var GRACE_SECS = 24 * 60 * 60;
+
+    /** A finished swap: nothing left to claim or refund. */
+    function isTerminalSwap(s) {
+        var st = s && (s.status || s.STATUS);
+        return st === 'COMPLETE' || st === 'REFUNDED' || st === 'ERROR';
+    }
+
+    /**
+     * Is my own locked leg still inside its timelock (plus grace)? The units differ by leg and nothing in the
+     * value says which: mylegminima means myTimelock is a Minima BLOCK height, otherwise it is unix SECONDS.
+     * Switched explicitly rather than guessed from magnitude — reading one as the other would compare an epoch
+     * against a block count and call every such swap live forever.
+     */
+    function withinWindow(s, chainBlock, nowMs) {
+        var tl = Number(s && (s.mytimelock !== undefined ? s.mytimelock : s.myTimelock)) || 0;
+        if (tl <= 0) return true;                                           // no known deadline → assume live
+        var minimaLeg = s.mylegminima !== undefined ? s.mylegminima : s.myLegIsMinima;
+        if (minimaLeg === 1 || minimaLeg === '1' || minimaLeg === true) {
+            if (!chainBlock || chainBlock <= 0) return true;                // tip not fetched yet → assume live
+            return chainBlock <= tl + GRACE_BLOCKS;
+        }
+        return Math.floor(nowMs / 1000) <= tl + GRACE_SECS;
+    }
+
+    /**
+     * Should this swap appear while `act` is the selected market? Its own market always; the OTHER market only
+     * while it is still actionable (non-terminal AND inside its window), because settlement is deliberately
+     * currency-agnostic and hiding a leg you could still recover could cost real funds — while a row whose
+     * window closed long ago is not actionable from any screen and belongs in its own currency's history.
+     * Every unknown fails OPEN: an unattributable legacy row, a missing timelock, or an unknown tip all render.
+     */
+    function visibleIn(s, act, chainBlock, nowMs) {
+        if (!s) return false;
+        var own = forSwap(s.selltoken !== undefined ? s.selltoken : s.sellToken,
+                          s.buytoken !== undefined ? s.buytoken : s.buyToken);
+        if (!own || !act || own === act) return true;
+        return !isTerminalSwap(s) && withinWindow(s, chainBlock, nowMs);
+    }
+
     /** Semantic palette (Design.java) — mode ∈ {dark,light}; accent overlaid from the active currency. */
     var PALETTE = {
         dark: {
@@ -71,7 +143,9 @@
         CTX: CTX, MINIMA: CTX.MINIMA, MXUSDT: CTX.MXUSDT,
         MINIMA_TOKENID: MINIMA_TOKENID, USDT_TOKENID: USDT_TOKENID,
         active: active, other: other, byKey: byKey, setActive: setActive, loadKey: loadKey,
-        labelForToken: labelForToken,
+        labelForToken: labelForToken, forCoinLabel: forCoinLabel, forSwap: forSwap,
+        isTerminalSwap: isTerminalSwap, withinWindow: withinWindow, visibleIn: visibleIn,
+        GRACE_BLOCKS: GRACE_BLOCKS, GRACE_SECS: GRACE_SECS,
         PALETTE: PALETTE, USDT_TEAL: USDT_TEAL, STAGE_WARN: STAGE_WARN
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

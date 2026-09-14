@@ -402,7 +402,12 @@ async function swapExecute(quoteId) {
 async function swaps() {
   const A = AX();
   const all = await p(cb => A.swapdb.allSwaps(cb));
-  return jclone(all.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
+  // Donor 0.1.27: scope the list to the ACTIVE market, but never hide a swap in the OTHER currency that is
+  // still actionable (non-terminal AND inside its timelock). Settlement is currency-agnostic, so a claimable
+  // or refundable leg must stay visible; a long-dead row belongs in its own currency's history.
+  const act = A.trading.active(), now = Date.now(), tip = Number(lastTip) || 0;
+  const shown = all.filter(s => A.trading.visibleIn(s, act, tip, now));
+  return jclone(shown.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
     sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status, updated: s.updated })));
 }
 // Full per-swap history for CSV export — every swap column PLUS the on-chain leg tx ids joined from the events log.
@@ -455,8 +460,12 @@ async function inspect(hash) {
 // ---- market history / wallet / coins ----
 async function marketHistory() {
   const A = AX();
-  const chart = await p(cb => A.swapdb.executedTrades(200, cb)).catch(() => []);
-  const recent = await p(cb => A.swapdb.recentTrades(50, cb)).catch(() => []);
+  // Donor 0.1.28: market prints are TOKEN-SCOPED. Both reads now take the market's tokenid — without it the
+  // chart mixed mxUSD's parity ~1.00 prints with MINIMA's ~0.004 in one series. Passing the callback in the
+  // tokenid slot (the old 2-arg form) would silently never fire it, so this must move with the engine copy.
+  const tok = A.trading.active().tokenId;
+  const chart = await p(cb => A.swapdb.executedTrades(200, tok, cb)).catch(() => []);
+  const recent = await p(cb => A.swapdb.recentTrades(50, tok, cb)).catch(() => []);
   return jclone({ chart, recent });
 }
 async function wallet() {

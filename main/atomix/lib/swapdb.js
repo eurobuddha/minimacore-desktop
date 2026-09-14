@@ -52,10 +52,29 @@
                 "`status` varchar(20), `contractid` varchar(200), `mytimelock` bigint, `mylegminima` int, `created` bigint, `updated` bigint)",
             "CREATE TABLE IF NOT EXISTS `market_trades` (`coinid` varchar(200) NOT NULL PRIMARY KEY, `hash` varchar(200), " +
                 "`price` double, `size_minima` text, `req_amount` text, `req_token` text, `owner` text, `receiver` text, " +
-                "`created_block` bigint, `timelock` bigint, `observed_at` bigint, `status` varchar(20), `secret` text)"
+                "`created_block` bigint, `timelock` bigint, `observed_at` bigint, `status` varchar(20), `secret` text, " +
+                "`tokenid` varchar(200))"
+        ];
+        // Existing stores predate `tokenid` — add it, then back-attribute the untagged rows ONCE by price band.
+        // A heuristic, but a wide one: the dollar market is pegged at parity (~1.00) while MINIMA trades around
+        // 0.004, ~200x apart, so 0.5 sits in empty space between them. Display only — no fund decision reads it.
+        //
+        // These are BEST-EFFORT and run in their own pass: flow.each ABORTS on the first error, and on every
+        // boot after the first the ALTER fails with "duplicate column" — which is the SUCCESS case, not a
+        // failure. Letting that abort the chain would kill engine boot forever. Plain ADD COLUMN, no
+        // "IF NOT EXISTS": that clause is H2-only and SQLite (the desktop shim runs this same engine) rejects
+        // it outright with a syntax error, so the H2-only spelling broke boot on desktop.
+        var migrations = [
+            "ALTER TABLE `market_trades` ADD COLUMN `tokenid` varchar(200)",
+            "UPDATE `market_trades` SET `tokenid` = CASE WHEN `price` >= 0.5 THEN '" + AX.trading.USDT_TOKENID +
+                "' ELSE '" + AX.trading.MINIMA_TOKENID + "' END WHERE `tokenid` IS NULL OR `tokenid` = ''"
         ];
         // Serialise the DDL — H2 dislikes some concurrent DDL, and a table must exist before its index.
-        AX.flow.each(ddl, function (stmt, i, next) { write(stmt, next); }, cb);
+        AX.flow.each(ddl, function (stmt, i, next) { write(stmt, next); }, function (err) {
+            if (err) return cb && cb(err);
+            AX.flow.each(migrations, function (stmt, i, next) { write(stmt, function () { next(); }); },
+                function () { cb && cb(null); });
+        });
     }
 
     // ================= secrets =================
@@ -152,21 +171,26 @@
         if (!t.coinid) return cb && cb(null);
         // INSERT-if-absent (H2): a terminal row keeps its status; observed_at stays first-seen.
         write("INSERT INTO `market_trades` (`coinid`,`hash`,`price`,`size_minima`,`req_amount`,`req_token`,`owner`," +
-            "`receiver`,`created_block`,`timelock`,`observed_at`,`status`) SELECT '" + esc(t.coinid) + "','" + esc(norm(t.hash)) + "'," +
+            "`receiver`,`created_block`,`timelock`,`observed_at`,`status`,`tokenid`) SELECT '" + esc(t.coinid) + "','" + esc(norm(t.hash)) + "'," +
             num(t.price) + ",'" + esc(t.sizeMinima) + "','" + esc(t.reqAmount) + "','" + esc(t.reqToken) + "','" + esc(t.owner) + "','" +
             esc(t.receiver) + "'," + num(t.createdBlock) + "," + num(t.timelock) + "," + now() + ",'" + MT_OPEN +
-            "' WHERE NOT EXISTS (SELECT 1 FROM `market_trades` WHERE `coinid`='" + esc(t.coinid) + "')", cb);
+            "','" + esc(t.tokenId || '') + "' WHERE NOT EXISTS (SELECT 1 FROM `market_trades` WHERE `coinid`='" + esc(t.coinid) + "')", cb);
     }
     function readTrade(r) {
         return {
             coinid: r.COINID, hash: r.HASH, price: Number(r.PRICE), sizeMinima: r.SIZE_MINIMA,
             reqAmount: r.REQ_AMOUNT, reqToken: r.REQ_TOKEN, owner: r.OWNER, receiver: r.RECEIVER,
             createdBlock: Number(r.CREATED_BLOCK), timelock: Number(r.TIMELOCK), observedAt: Number(r.OBSERVED_AT),
-            status: r.STATUS, secret: r.SECRET
+            status: r.STATUS, secret: r.SECRET, tokenId: r.TOKENID
         };
     }
-    function openTrades(cb) {
-        read("SELECT * FROM `market_trades` WHERE `status`='" + MT_OPEN + "'", function (e, rs) { cb(e, e ? [] : rs.map(readTrade)); });
+    /** Trades still OPEN in ONE market. The token scope is MANDATORY, not a nicety: the scan that feeds the
+     *  reconcile is itself token-filtered, so an unscoped read handed the collector the OTHER currency's open
+     *  locks — absent from the scan through no fault of their own — and it duly marked every one of them
+     *  EXECUTED or REFUNDED. */
+    function openTrades(tokenId, cb) {
+        read("SELECT * FROM `market_trades` WHERE `status`='" + MT_OPEN + "' AND `tokenid`='" + esc(tokenId || '') + "'",
+            function (e, rs) { cb(e, e ? [] : rs.map(readTrade)); });
     }
     function markTradeExecuted(coinid, secret, cb) {
         var set = "`status`='" + MT_EXECUTED + "'" + (secret ? ",`secret`='" + esc(secret) + "'" : "");
@@ -175,13 +199,16 @@
     function markTradeRefunded(coinid, cb) {
         write("UPDATE `market_trades` SET `status`='" + MT_REFUNDED + "' WHERE `coinid`='" + esc(coinid) + "'", cb);
     }
-    function recentTrades(limit, cb) {
-        read("SELECT * FROM `market_trades` ORDER BY `created_block` DESC, `observed_at` DESC LIMIT " + num(limit),
+    /** Recent trades in ONE market (any status), newest first. */
+    function recentTrades(limit, tokenId, cb) {
+        read("SELECT * FROM `market_trades` WHERE `tokenid`='" + esc(tokenId || '') +
+            "' ORDER BY `created_block` DESC, `observed_at` DESC LIMIT " + num(limit),
             function (e, rs) { cb(e, e ? [] : rs.map(readTrade)); });
     }
-    /** Executed prints for the chart, oldest→newest so a line plots left-to-right. */
-    function executedTrades(limit, cb) {
-        read("SELECT * FROM (SELECT * FROM `market_trades` WHERE `status`='" + MT_EXECUTED + "' ORDER BY `created_block` DESC LIMIT " +
+    /** Executed prints for ONE market's chart, oldest→newest so a line plots left-to-right. */
+    function executedTrades(limit, tokenId, cb) {
+        read("SELECT * FROM (SELECT * FROM `market_trades` WHERE `status`='" + MT_EXECUTED + "' AND `tokenid`='" +
+            esc(tokenId || '') + "' ORDER BY `created_block` DESC LIMIT " +
             num(limit) + ") ORDER BY `created_block` ASC", function (e, rs) { cb(e, e ? [] : rs.map(readTrade)); });
     }
 
