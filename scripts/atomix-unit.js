@@ -104,8 +104,9 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     const PUB = 'send amount:0.000000001 address:0x5553445453574150 tokenid:0x00 state:{"1":"0xaa"}';
     const DUST = "0x" + "F".repeat(64), NANO = "0x" + "8".repeat(64), BIG = "0x" + "1".repeat(64);
     const SHORT = "0x5553445453574150";
+    let lastCoinsCmd = "";
     const mkRunner = (coins) => async (cmd) => {
-      if (/^coins /.test(cmd)) return { response: coins };
+      if (/^coins /.test(cmd)) { lastCoinsCmd = cmd; return { response: coins }; }
       if (/^checkaddress /.test(cmd)) return { response: { simple: !/0x5553445453574150/.test(cmd) } };
       return { status: true };
     };
@@ -143,6 +144,17 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       atomix._setRunner(mkRunner([{ amount: "0.000000001", address: NANO }]));
       const out = await atomix._pinPublishSend(PUB);
       assert.ok(out.endsWith(" fromaddress:" + NANO), "exact-amount coin pins, got: " + out);
+    });
+
+    await okA("only asks the node for SPENDABLE coins (coinage filter)", async () => {
+      // A publish's own change output is a brand-new coin and becomes the new smallest. Pinned to it,
+      // the node answers "No Coins of tokenid:0x00 available!" — so every publish poisoned the next one.
+      // Proven live: the same coin failed at age ~1 block and succeeded at age 5.
+      atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
+      await atomix._pinPublishSend(PUB);
+      assert.ok(/\bcoinage:\d+/.test(lastCoinsCmd), "coins query must carry a coinage filter, got: " + lastCoinsCmd);
+      const n = Number(/\bcoinage:(\d+)/.exec(lastCoinsCmd)[1]);
+      assert.ok(n >= 3, "coinage must clear the node's ~3-confirmation spend rule, got " + n);
     });
 
     await okA("non-publish sends are left completely alone", async () => {

@@ -66,10 +66,16 @@ function log(line) {
 // can never be selected. checkaddress → {simple:true} is the reliable signable test (beacon addrs return {}).
 const AX_PUBLISH_SEND = /^send\s+.*\bamount:0\.000000001\b.*\btokenid:0x00\b.*\bstate:/;
 const AX_PUBLISH_AMOUNT = 0.000000001;
+// Coins younger than this are NOT SPENDABLE yet, and `fromaddress:` pinned to one makes the node answer
+// "No Coins of tokenid:0x00 available!". Proven on the live node: the same coin failed at age ~1 block and
+// succeeded at age 5. This matters because a publish's own CHANGE output is a brand-new coin that becomes
+// the new smallest — so without this filter EVERY publish poisoned the NEXT one, which is exactly how
+// market publishing stayed broken. 5 gives margin over the node's ~3-confirmation spend rule.
+const AX_PUBLISH_MIN_COINAGE = 5;
 async function pinPublishSend(command) {
   if (!AX_PUBLISH_SEND.test(command) || /\bfromaddress:/.test(command)) return command;
   try {
-    const coinsR = await runner("coins relevant:true tokenid:0x00");
+    const coinsR = await runner("coins relevant:true tokenid:0x00 coinage:" + AX_PUBLISH_MIN_COINAGE);
     // MUST cover the send: `fromaddress:` RESTRICTS the input set to that one address, so pinning to a coin
     // smaller than the amount makes the send unfundable and the node answers a BARE {status:false} with NO
     // error text — surfacing as the useless "cmd failed: send … — undefined". A wallet accumulates sub-nano
@@ -83,7 +89,8 @@ async function pinPublishSend(command) {
       const chk = await runner("checkaddress address:" + addr);
       if (chk && chk.response && chk.response.simple) return command + " fromaddress:" + addr;
     }
-    log("publish-send pin: no signable MINIMA coin >= " + AX_PUBLISH_AMOUNT + " — sending unpinned");
+    log("publish-send pin: no spendable signable MINIMA coin >= " + AX_PUBLISH_AMOUNT
+        + " (coinage >= " + AX_PUBLISH_MIN_COINAGE + ") — sending unpinned");
   } catch (e) { log("publish-send pin failed: " + (e && e.message)); }
   return command;   // best-effort: fall back to the unmodified send
 }
@@ -98,8 +105,12 @@ function buildMds() {
       // vm realm (JSON round-trip via the vm's own parser). Without this the book always reads empty. (sql
       // rows are consumed by realm-independent ops — Array.isArray/.map/index — so they need no marshalling.)
       const c = String(command);
-      if (AX_PUBLISH_SEND.test(c)) { pinPublishSend(c).then(p => runner(p)).then(r => cb(toVm(r)), () => cb(toVm({ status: false }))); return; }
-      runner(c).then(r => cb(toVm(r)), () => cb(toVm({ status: false })));
+      // A REJECTION here used to become a bare {status:false}, which mdsw renders as "cmd failed: … —
+      // undefined". That threw away the only clue (auth/timeout/bad-reply) and made a publish failure
+      // undiagnosable from the UI. Carry the reason through as `error` instead.
+      const failed = (e) => cb(toVm({ status: false, error: (e && e.message) ? e.message : String(e) }));
+      if (AX_PUBLISH_SEND.test(c)) { pinPublishSend(c).then(p => runner(p)).then(r => cb(toVm(r)), failed); return; }
+      runner(c).then(r => cb(toVm(r)), failed);
     },
     sql(query, cb) {
       sqlShim.sql(query, cb);
