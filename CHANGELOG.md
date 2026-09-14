@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.87] — PandaPools engine parity: serial signing gate, CoinLock, `$OADR` funding exclusion
+- Bring the Desktop PandaPools engine back to byte-equality with the MDS MiniDapp. `poolmgr.js` and `service.js` had drifted ~200 lines each with Desktop behind, missing the serial signing gate, the MiniDapp-wide `pp_signlock`, the `pp_coinlocks` CoinLock and the `$OADR` funding exclusion in five places — the complete 0.9.22 defect set, on the surface where one 12s poller drives scan, background worker, pending-sign resume and verify in a single vm context over a single sqlite file. Two transactions signing one key sign the same Winternitz leaf over different data, which discloses that leaf's private key.
+- Expose `setInterval`/`clearInterval` to the engine's vm sandbox. The sign-lock heartbeat calls `setInterval` unconditionally, so without it every create, deposit, close, migrate and swap would fail; `service.js` guards with `typeof`, which would instead hold the lock with no heartbeat and let the TTL reap it mid-chain, silently.
+- Stop a serialised fund action from posting after its caller gave up. The engine's queue makes an action wait where the glue's timeout cannot see it, so a slot could come up after the UI said "timed out — retry" and still post, letting the retry double-post against the same coins with both attempts signing. The glue now stamps a deadline before enqueueing and drops an abandoned slot without entering the engine.
+- Enforce engine parity automatically: 14 files byte-checked against the donor, a committed sha256 manifest for CI (which cannot see the donor repo), `--update` refusing to launder local drift, `-text` on the copied files, and the gate wired ahead of the installer build on all three matrix legs.
+- 31 PandaPools tests pass (24 pre-existing, 7 new); RPC and Parlons suites unaffected. Reverting the engine and shim fails 4 of the 7 new tests. No feature work. See [review](REVIEW-0.16.87.md).
+
 ## [0.16.54] — Durable pool recovery and verified signing state
 - Keep unresolved owned pools visible with their full covenant address and a reserve-recovery action. Validate current local reserves, receiving-node coin proofs, and fresh MegaMMR proofs; failed imports never count as recovered.
 - Preserve recipes, observed key-use floors and reserve-ID hints. Backups re-read live coins and discard proofs if reserves move during export. Proofs expire; recovery requires current complete wallet signing state and available chain proofs.

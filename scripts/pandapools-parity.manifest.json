@@ -1,0 +1,66 @@
+{
+  "_comment": "Digests of the PandaPools engine files copied verbatim from the MDS MiniDapp. Regenerate ONLY with `node scripts/pandapools-parity-manifest.cjs --update` beside a deliberate engine re-copy. Desktop-only runtime differences belong in loader.js / sqlshim.js / main/pandapools.js, never here.",
+  "donor": {
+    "root": "../../mds/pandapools-mds",
+    "mdsVersion": "0.6.23",
+    "gitSha": "e56c833f3aedcc59f4661d5ad8045ba03bd8b127"
+  },
+  "files": {
+    "decimal.js": {
+      "sha256": "fd10a24b79763cc81be1484129358c40b215efdefbc216737ca2cba715a50bf6",
+      "bytes": 131722
+    },
+    "covenant.js": {
+      "sha256": "30200560e93018d53f275059d360c986ff0341317a671cd459f23eaa9d5c756a",
+      "bytes": 5104
+    },
+    "curve.js": {
+      "sha256": "33e0d26a4e053c5d7234f655c74b1da28ab43491869feff90d8fd49bb15d7df8",
+      "bytes": 9661
+    },
+    "router.js": {
+      "sha256": "90e6d6316e23f4175db660e24a8b6fb0eb2cce589855df8a73d9f7f851970d75",
+      "bytes": 5964
+    },
+    "book.js": {
+      "sha256": "20f2713fa200301bcbc960561d008c2461addf5dfb655fe15b5e80fc54bf0cc3",
+      "bytes": 8324
+    },
+    "store.js": {
+      "sha256": "f136b701359aa868f6374739b5e8adfba079f945d9255b9a1063891dcc746896",
+      "bytes": 25871
+    },
+    "history.js": {
+      "sha256": "97b2e9d6b46e8171627b8c9594564cf30a63abd6bd9f1a9aaa34f10828beb808",
+      "bytes": 8708
+    },
+    "statement.js": {
+      "sha256": "186482b7478a6acc095983d3be5925d8e704fc4a0d018f69e977e95ccf14c349",
+      "bytes": 15178
+    },
+    "sha3.js": {
+      "sha256": "6378cc474ad0a0db3e88c0c67b7bd4a154e1b318f44dbbd13927f6e220efaa38",
+      "bytes": 21296
+    },
+    "receipt-recovery.js": {
+      "sha256": "c70bcf1846ddd3a48db65049d69d5c72d7829be6903a4c931580ba332e7878ec",
+      "bytes": 4378
+    },
+    "activity-chain.js": {
+      "sha256": "89776cc3dec372b7fccbddfcb33ca0707cdf8e969d5b93ea36e1b45ce1a57e7b",
+      "bytes": 19119
+    },
+    "poolmgr.js": {
+      "sha256": "60de3388b039980a18784bded88d62cdb6f34bb451f4b82ff6b0f2cadf045a7c",
+      "bytes": 70051
+    },
+    "reserve-recovery.js": {
+      "sha256": "23ee7c951d6eab451c1f93123b0ead9a5c9b0bae015d0886f6492f4607c2f85f",
+      "bytes": 21943
+    },
+    "service.js": {
+      "sha256": "260413b3ff69122539439b09743f2b0241d1827e9f0b55edcf980bf6a88c8d83",
+      "bytes": 51350
+    }
+  }
+}

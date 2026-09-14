@@ -1,7 +1,8 @@
 /*
  * pandapools.js — PandaPools orchestrator (main process). The AMM logic itself is REUSED VERBATIM from the MDS
- * MiniDapp (main/pandapools/*.js, copied byte-identical from ~/Projects/pandapools-mds for 3-way parity). This
- * module only provides the runtime the reused code expects and the read-model / actions the renderer calls:
+ * MiniDapp (main/pandapools/*.js, copied byte-identical from ../../mds/pandapools-mds for 3-way parity, and
+ * digest-pinned by scripts/pandapools-parity.manifest.json). This module only provides the runtime the reused
+ * code expects and the read-model / actions the renderer calls:
  *
  *   • an `MDS` shim: MDS.cmd → the node over RPC (mirrors mail.js's runner), MDS.sql → sql.js, MDS.log → console,
  *     MDS.net.GET → fetch, MDS.init → captured so we drive service.js's inited/NEWBLOCK from our own timer.
@@ -130,6 +131,60 @@ function D(x) { return ctx.PP.dec(x); }
 function s(d) { try { return ctx.PP.plain(d); } catch (e) { return "0"; } }
 /** Reject a fund action that never settles (a dropped PoolMgr callback / a node command that never returns). */
 function withTimeout(p, ms, msg) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(msg)); }, ms); })]); }
+
+// ------------------------------------------------------------------ glue-level fund-action queue
+//
+// Since 0.16.83 the reused engine serialises every build→sign→post chain (poolmgr.js submitSign +
+// the pp_signlock row shared with service.js). That fixes concurrent signing, but it moves the WAIT
+// somewhere the caller's withTimeout cannot see: an action can now sit QUEUED INSIDE the engine past
+// its own timeout, at which point the UI has already said "timed out — retry" while the queued chain
+// is still alive and will happily post. A retry then double-posts against the same coins and both
+// attempts sign, burning owner-key leaves — the exact hazard the pre-spend deadline was added for, with
+// a new cause. Restore's auto-withdraw makes it near-certain, because it enqueues one close per pool.
+//
+// So the glue keeps its own serial queue in front of the engine and stamps a deadline BEFORE enqueueing:
+// a slot that comes up after its caller gave up is dropped without ever calling into the engine, so
+// nothing signs. The engine's gate still matters — it is what serialises us against service.js's
+// background keep-fresh/re-announce, which does not come through here at all.
+var ACTION_QUEUE = [], ACTION_RUNNING = false;
+var ACTION_EXEC_MS = 200000;        // execution budget once a slot is entered (the pre-0.16.83 timeout)
+var ACTION_QUEUE_WAIT_MS = 600000;  // how long a slot may wait for its turn before it is abandoned
+var ACTION_TOTAL_MS = ACTION_EXEC_MS + ACTION_QUEUE_WAIT_MS;
+
+function pumpActionQueue() {
+  if (ACTION_RUNNING) return;
+  var job = ACTION_QUEUE.shift();
+  if (!job) return;
+  ACTION_RUNNING = true;
+  var release = function () { ACTION_RUNNING = false; setTimeout(pumpActionQueue, 0); };
+  // Dropped rather than run: the caller has already been told this timed out, so a spend here would be
+  // the late double-post. Nothing has been sent — the engine was never entered.
+  if (job.abandoned()) { job.reject(new Error(job.label + " timed out while queued — nothing was posted. Retry.")); release(); return; }
+  var settled = false;
+  var once = function (fn) { return function (v) { if (settled) return; settled = true; release(); fn(v); }; };
+  try { job.run(once(job.resolve), once(job.reject)); }
+  catch (e) { once(job.reject)(e instanceof Error ? e : new Error(String(e))); }
+}
+
+/**
+ * Run one fund action through the glue's serial queue. `run(resolve, reject)` is called only when the slot is
+ * entered and only if the caller is still waiting; it gets `ACTION_EXEC_MS` to settle.
+ */
+function queuedAction(label, run) {
+  var enqueuedAt = Date.now(), gaveUp = false;
+  var p = new Promise(function (resolve, reject) {
+    ACTION_QUEUE.push({
+      label: label, run: run, resolve: resolve, reject: reject,
+      abandoned: function () { return gaveUp || (Date.now() - enqueuedAt) > ACTION_QUEUE_WAIT_MS; },
+    });
+    setTimeout(pumpActionQueue, 0);
+  });
+  return withTimeout(p, ACTION_TOTAL_MS, label + " timed out — check Activity and your balance before retrying.")
+    .catch(function (e) { gaveUp = true; throw e; });
+}
+
+/** Deadline for the pre-spend guards, stamped when a slot is ENTERED (never at enqueue time). */
+function execDeadline() { return Date.now() + ACTION_EXEC_MS - 10000; }
 
 /** A Book pool (Decimal reserves) → a JSON-safe object for the renderer. */
 function serializePool(p) {
@@ -440,17 +495,23 @@ function actionOnPool(addr, fn, label, summary) {
   return init().then(function () {
     var p = poolByAddress(addr);
     if (!p) return Promise.reject(new Error("Pool not found in the current scan — try again in a moment."));
-    return withTimeout(new Promise(function (resolve, reject) { fn(p, { ok: function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); }, fail: function (m) { reject(new Error(m)); } }); }),
-      200000, label + " timed out — check Activity and your balance before retrying.");
+    return queuedAction(label, function (resolve, reject) {
+      fn(p, {
+        ok: function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); },
+        fail: function (m) { reject(new Error(m)); },
+      });
+    });
   });
 }
 function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, d); }, "ADD", "Added liquidity"); }
 
-/** Self-heal the owner key before an owner-signed spend (WITHDRAW / MIGRATE): $OPK is a newaddress key
- *  (index ≥ 64) the node re-derives lazily; a restore regenerates it ASYNCHRONOUSLY, so a spend attempted too
- *  soon fails with "Public Key not found". Re-issue newaddress until it reappears (a no-op if already held; can
- *  only succeed under the pool's creating seed). The hunt is BUDGETED (see poolmgr.js): a key another seed
- *  minted comes back as unreachable instead of burning 256 fresh wallet keys per attempt — cb(foreign) says so. */
+/** READ-ONLY owner-key and signing-state pre-flight before an owner-signed spend (WITHDRAW / MIGRATE).
+ *  Delegates to PoolMgr.ensureOwnerKeys, which since MDS 0.6.2x is ReserveRecovery.ensureKeys: it reads the
+ *  node's key list and the saved recipes and NEVER creates or advances a key. Recreating an old Winternitz key
+ *  at use zero can disclose its signing material, and a recipe plus an elapsed-block estimate cannot establish
+ *  the highest previously used leaf — so a key this wallet does not hold comes back as unreachable and the spend
+ *  is refused. `cb(foreign)` is true for every blocked case: key absent, node unreadable, key exhausted, recipe
+ *  signing-quarantined, or the node's counter below the recipe's recorded floor. */
 const UNAVAILABLE_KEY_MSG = "Owner signing is paused or its current key state could not be verified. Open Pool recovery and confirm the latest complete wallet signing state.";
 function ensureOwnerKey(opk, cb) {
   if (!opk || !ctx || !ctx.PoolMgr || !ctx.PoolMgr.ensureOwnerKeys) return cb(false);
@@ -460,17 +521,17 @@ function ensureOwnerKey(opk, cb) {
     });
   } catch (e) { cb(false); }
 }
-/** The hunt gate is serial, so an unrelated caller's multi-minute hunt can delay ours past the caller's
- *  withTimeout. Once the UI has said "timed out — retry", a late spend MUST NOT fire — the retry would
- *  double-post against the same coins (both posts sign, burning owner-key leaves; one fails on-chain).
- *  Deadlines sit just under each caller's withTimeout so the guard always fires first. */
-var HUNT_SPEND_GUARD_MS = 190000;   // vs the 200s close/migrate withTimeout
+/** The owner-key pre-flight is itself serialised, so an unrelated caller's read can delay ours. Once the UI has
+ *  said "timed out — retry", a late spend MUST NOT fire — the retry would double-post against the same coins and
+ *  both posts would sign, burning owner-key leaves. The deadline is stamped when the queue slot is ENTERED
+ *  (execDeadline), so it measures execution only; waiting for the slot is handled by queuedAction, which drops an
+ *  abandoned slot before the engine is ever called. */
 function closePool(addr) {
   return actionOnPool(addr, function (p, d) {
-    var deadline = Date.now() + HUNT_SPEND_GUARD_MS;
+    var deadline = execDeadline();
     ensureOwnerKey(p.opk, function (foreign) {
       if (foreign) { d.fail(UNAVAILABLE_KEY_MSG); return; }
-      if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — retry"); return; }
+      if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — nothing was posted. Retry."); return; }
       ctx.PoolMgr.close(p, d);
     });
   }, "WITHDRAW", "Withdrew a pool's reserves");
@@ -478,15 +539,14 @@ function closePool(addr) {
 async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
-  return withTimeout(new Promise(function (resolve, reject) {
-    var deadline = Date.now() + HUNT_SPEND_GUARD_MS;
+  return queuedAction("Migrate", function (resolve, reject) {
+    var deadline = execDeadline();
     ensureOwnerKey(p.opk, function (foreign) {
       if (foreign) { reject(new Error(UNAVAILABLE_KEY_MSG)); return; }
-      if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — retry")); return; }
+      if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — nothing was posted. Retry.")); return; }
       ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } });
     });
-  }),
-    200000, "Migrate timed out — check Activity and your balance before retrying.");
+  });
 }
 
 /** Forward funds sitting at MY pools' owner addresses ($OADR) onward to the default-64 wallet — so withdrawn
@@ -500,7 +560,7 @@ async function collectToWallet() {
       var opks = (recipes || []).map(function (r) { return r.opk; }).filter(Boolean);
       // regenerate every owner key first ($OADR returns SIGNEDBY($OPK)) — self-heal the post-restore race.
       // A foreign-seed key doesn't abort the sweep (the other pools' funds still move) — it's reported.
-      var deadline = Date.now() + 230000;   // just under this promise's 240s withTimeout (see HUNT_SPEND_GUARD_MS)
+      var deadline = Date.now() + 230000;   // just under this promise's 240s withTimeout (cf. execDeadline)
       ctx.PoolMgr.ensureOwnerKeys(opks, function (regen, unreachable) {
         if (Date.now() > deadline) { resolve({ addresses: 0, coins: 0, foreign: unreachable ? unreachable.length : 0 }); return; }
         ctx.PoolMgr.sweepOwnerFunds(oadrs, { swept: function (addresses, coins) {

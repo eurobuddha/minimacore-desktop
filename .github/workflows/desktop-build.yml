@@ -62,6 +62,14 @@ jobs:
       - name: Verify Parlons panel sessions
         run: npm run test:parlons
 
+      # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
+      # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
+      # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
+      # release). Runs on all three matrix legs, so it also catches line-ending corruption of the copied files.
+      # Placed BEFORE the build so a drifted engine can never produce an installer.
+      - name: Verify PandaPools engine parity + recovery
+        run: npm run test:pandapools
+
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash

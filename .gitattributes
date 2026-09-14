@@ -1,1 +1,6 @@
 graphify-out/graph.json merge=graphify
+
+# PandaPools engine files are copied byte-for-byte from the pandapools-mds MiniDapp and their sha256 digests
+# are pinned in scripts/pandapools-parity.manifest.json. Any line-ending translation would change those bytes
+# and fail the parity gate on the Windows/Linux CI legs, so keep them exactly as committed.
+main/pandapools/*.js -text

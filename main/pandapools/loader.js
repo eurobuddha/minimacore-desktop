@@ -1,6 +1,6 @@
 /*
  * loader.js — runs the byte-identical PandaPools MDS modules (decimal.js / covenant.js / curve.js / router.js /
- * book.js / store.js / poolmgr.js / service.js, copied verbatim from ~/Projects/pandapools-mds for 3-way parity)
+ * book.js / store.js / poolmgr.js / service.js, copied verbatim from ../../../mds/pandapools-mds for 3-way parity)
  * inside ONE shared V8 vm context, with a small `MDS` shim injected so the reused code runs UNMODIFIED.
  *
  * The MDS files are browser/MDS-runtime globals (`var Covenant = (function(){…})()`), so evaluating them in a vm
@@ -25,7 +25,17 @@ function createContext(mds, files) {
   // A vm context already provides EVERY ECMAScript intrinsic (Object/Array/Math/JSON/Date/RegExp/BigInt/Promise/…)
   // as the CHILD realm's own — injecting the parent realm's would be redundant and would break `x instanceof Array`
   // inside the vm. Only inject the genuinely-missing Node globals the reused files touch (console) plus timers, and MDS.
-  const sandbox = { MDS: mds, console: console, setTimeout: setTimeout, clearTimeout: clearTimeout };
+  //
+  // setInterval/clearInterval are REQUIRED, not optional. The signing gate's global-lock heartbeat calls
+  // setInterval UNCONDITIONALLY (poolmgr.js buildAndPost), so without it every create/deposit/close/migrate/swap
+  // dies with "ReferenceError: setInterval is not defined". service.js guards with `typeof`, which here is WORSE,
+  // not safer: it would hold the lock with NO heartbeat and let SIGN_LOCK_TTL_MS reap a live lock mid-chain,
+  // silently. Both are cleared on every exit path (gated() / forceReleaseActiveSign).
+  const sandbox = {
+    MDS: mds, console: console,
+    setTimeout: setTimeout, clearTimeout: clearTimeout,
+    setInterval: setInterval, clearInterval: clearInterval,
+  };
   sandbox.global = sandbox; sandbox.self = sandbox;
   const ctx = vm.createContext(sandbox);
   (files || ALL_FILES).forEach((f) => {

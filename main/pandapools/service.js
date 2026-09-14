@@ -1,9 +1,9 @@
 /*
  * service.js — PandaPools background worker. Runs headless whenever the node is up (page open or not), so:
- *   (1) legacy sentinel tracking stays cleaned up (see the inited handler),
- *   (2) pool discovery stays fresh via the depth-bounded registry scan (track-on-discovery was REMOVED —
- *       it grew the node's tracked set without bound), plus the launch re-track of OWNED pools and the
- *       foreign-tracking hygiene sweep, and
+ *   (1) stale sentinel coin notification is removed on launch,
+ *   (2) pool discovery stays fresh from owned tracked contracts plus the bounded registry beacon window;
+ *       track-on-discovery for other creators' pools is deliberately removed so `scripts` cannot grow
+ *       without bound, and
  *   (3) the GlobalFeed keeps capturing swaps across all pools even while the UI is closed.
  *
  * SELF-CONTAINED: the MDS service runtime injects only the `MDS` global (no decimal.js, no dapp modules), so
@@ -42,6 +42,9 @@ var MAX_REFRESH_PER_RUN = 8;
 var refreshCounter = 0;
 var SCANNING = false, scanStartTs = 0;   // re-entrancy guard: one scan at a time (avoids the snap/feed race under
                                          // NEWBLOCK bursts), with a 2-min stuck-guard so a dropped callback can't wedge it
+var SIGN_QUEUE = [], SIGNING = false, SIGN_WATCHDOG = null, ACTIVE_SIGN = null, MAX_HOLD_MS = 200000;
+var SIGN_LOCK_TTL_MS = 5 * 60 * 1000, SIGN_LOCK_RETRY_MS = 1000, SIGN_LOCK_HEARTBEAT_MS = 30000;
+var LOCK_TTL_MS = 3 * 60 * 1000;
 
 // The covenant template, ONE line, byte-identical to PoolCovenant/covenant.js (0.5% fee = *5/1000).
 var TEMPLATE =
@@ -445,6 +448,140 @@ function done(pools) {
 // ---------------------------------------------------------------- Layer 5: background faded-beacon re-announce
 function annKeySvc(opk, oadr, tok, kmin) { return (opk + "|" + oadr + "|" + tok + "|" + kmin).toLowerCase(); }
 
+// ---------------------------------------------------------------- fund-safety shared primitives
+//
+// Native 0.9.22 added two app-wide protections: a serial signing gate and CoinLock. The MDS page and service
+// are separate JS contexts, so coin reservations are held in SQL (`pp_coinlocks`) rather than a local map.
+function sqlEsc(s) { return String(s || "").replace(/'/g, "''"); }
+function lockTableSvc(cb) {
+    MDS.sql("CREATE TABLE IF NOT EXISTS `pp_coinlocks` (`coinid` varchar(160) primary key, `ts` bigint)", function () { cb(); });
+}
+function pruneLocksSvc(cb) {
+    lockTableSvc(function () { MDS.sql("DELETE FROM `pp_coinlocks` WHERE `ts`<" + (Date.now() - LOCK_TTL_MS), function () { cb(); }); });
+}
+function lockedMapSvc(cb) {
+    pruneLocksSvc(function () {
+        MDS.sql("SELECT `coinid` FROM `pp_coinlocks`", function (r) {
+            var rows = (r && r.status && r.rows) ? r.rows : [], m = {}, i, id;
+            for (i = 0; i < rows.length; i++) { id = rows[i].COINID || rows[i].coinid; if (id) m[String(id)] = true; }
+            cb(m);
+        });
+    });
+}
+function releaseIdsSvc(ids, cb) {
+    if (!ids || !ids.length) { if (cb) cb(); return; }
+    var quoted = ids.map(function (id) { return "'" + sqlEsc(id) + "'"; }).join(",");
+    MDS.sql("DELETE FROM `pp_coinlocks` WHERE `coinid` IN (" + quoted + ")", function () { if (cb) cb(); });
+}
+function reserveLocksSvc(coins, cb) {
+    var ids = [], i;
+    for (i = 0; i < (coins || []).length; i++) if (coins[i] && coins[i].coinid) ids.push(String(coins[i].coinid));
+    if (!ids.length) { cb(true); return; }
+    lockTableSvc(function () {
+        var n = 0, now = Date.now(), claimed = [];
+        (function one() {
+            if (n >= ids.length) { cb(true); return; }
+            var id = ids[n++];
+            MDS.sql("INSERT INTO `pp_coinlocks` (`coinid`,`ts`) VALUES ('" + sqlEsc(id) + "'," + now + ")", function (r) {
+                if (!r || r.status !== true) { releaseIdsSvc(claimed, function () { cb(false); }); return; }
+                claimed.push(id);
+                one();
+            });
+        })();
+    });
+}
+function bestMinimaCoinSvc(excludeLower, need, retried, cb) {
+    MDS.cmd("coins relevant:true sendable:true tokenid:0x00", function (res) {
+        var arr = (res && res.status && Array.isArray(res.response)) ? res.response : [];
+        lockedMapSvc(function (locks) {
+            var best = null, i, c;
+            for (i = 0; i < arr.length; i++) {
+                c = arr[i];
+                if (!c) continue;
+                if (excludeLower && excludeLower[(c.address || "").toLowerCase()]) continue;
+                if (locks[String(c.coinid || "")]) continue;
+                if (!best || decCmp(c.amount || "0", best.amount || "0") > 0) best = c;
+            }
+            if (!best || decCmp(best.amount || "0", need) < 0) { cb(null); return; }
+            reserveLocksSvc([best], function (ok) {
+                if (ok) { cb(best); return; }
+                if (!retried) { bestMinimaCoinSvc(excludeLower, need, true, cb); return; }
+                cb(null);
+            });
+        });
+    });
+}
+function signLockTableSvc(cb) {
+    MDS.sql("CREATE TABLE IF NOT EXISTS `pp_signlock` (`id` int primary key, `owner` varchar(160), `ts` bigint)", function () { cb(); });
+}
+function acquireGlobalSignLockSvc(owner, cb) {
+    signLockTableSvc(function () {
+        MDS.sql("DELETE FROM `pp_signlock` WHERE `ts`<" + (Date.now() - SIGN_LOCK_TTL_MS), function () {
+            MDS.sql("INSERT INTO `pp_signlock` (`id`,`owner`,`ts`) VALUES (1,'" + sqlEsc(owner) + "'," + Date.now() + ")", function (r) {
+                if (r && r.status === true) { cb(true); return; }
+                if(typeof setTimeout!=="function"){cb(false);return;}
+                setTimeout(function () { acquireGlobalSignLockSvc(owner, cb); }, SIGN_LOCK_RETRY_MS);
+            });
+        });
+    });
+}
+function touchGlobalSignLockSvc(owner) {
+    MDS.sql("UPDATE `pp_signlock` SET `ts`=" + Date.now() + " WHERE `id`=1 AND `owner`='" + sqlEsc(owner) + "'", function () {});
+}
+function releaseGlobalSignLockSvc(owner, cb) {
+    MDS.sql("DELETE FROM `pp_signlock` WHERE `id`=1 AND `owner`='" + sqlEsc(owner) + "'", function () { if (cb) cb(); });
+}
+function scheduleSignWatchdogSvc() {
+    clearSignWatchdogSvc();
+    if(typeof setTimeout!=="function")return;
+    SIGN_WATCHDOG = setTimeout(function () { SIGN_WATCHDOG = null; forceReleaseActiveSignSvc(); }, MAX_HOLD_MS);
+}
+function clearSignWatchdogSvc() { if (SIGN_WATCHDOG) { clearTimeout(SIGN_WATCHDOG); SIGN_WATCHDOG = null; } }
+function submitSignSvc(chain) { SIGN_QUEUE.push(chain); if (!SIGNING) startNextSignSvc(); }
+function startNextSignSvc() {
+    clearSignWatchdogSvc();
+    var next = SIGN_QUEUE.shift();
+    if (!next) { SIGNING = false; return; }
+    SIGNING = true; next();
+}
+function forceReleaseActiveSignSvc() {
+    var active = ACTIVE_SIGN;
+    if (!active) { startNextSignSvc(); return; }
+    if (active.heartbeat) clearInterval(active.heartbeat);
+    releaseGlobalSignLockSvc(active.owner, function () {
+        if (ACTIVE_SIGN && ACTIVE_SIGN.owner === active.owner) ACTIVE_SIGN = null;
+        startNextSignSvc();
+    });
+}
+function finishSignSvc(cb, ok, owner, heartbeat) {
+    clearSignWatchdogSvc();
+    if (heartbeat) clearInterval(heartbeat);
+    releaseGlobalSignLockSvc(owner, function () {
+        if (ACTIVE_SIGN && ACTIVE_SIGN.owner === owner) ACTIVE_SIGN = null;
+        startNextSignSvc();
+        cb(ok);
+    });
+}
+function checkPostSvc(txid, cmds, cb) {
+    submitSignSvc(function () {
+        var owner = "service_" + Date.now() + "_" + Math.floor(Math.random() * 0xffffff).toString(16);
+        acquireGlobalSignLockSvc(owner, function (locked) {
+            if(locked===false){startNextSignSvc();cb(false);return;}
+            var heartbeat = typeof setInterval==="function" ? setInterval(function () { touchGlobalSignLockSvc(owner); }, SIGN_LOCK_HEARTBEAT_MS) : null;
+            ACTIVE_SIGN = { owner: owner, heartbeat: heartbeat };
+            scheduleSignWatchdogSvc();
+            runCmds(cmds, 0, function (okChain) {
+                if (!okChain) { finishSignSvc(cb, false, owner, heartbeat); return; }
+                MDS.cmd("txncheck id:" + txid, function (rc) {
+                    var resp = rc ? rc.response : null, v = resp ? resp.valid : null;
+                    if (!(v && truthy(v.scripts) && truthy(resp.validamounts) && truthy(v.mmrproofs))) { finishSignSvc(cb, false, owner, heartbeat); return; }
+                    MDS.cmd("txnpost id:" + txid, function (rp) { finishSignSvc(cb, !!(rp && rp.status === true), owner, heartbeat); });
+                });
+            });
+        });
+    });
+}
+
 // GOSSIP: for EVERY funded pool this node knows (its own + any it has discovered) whose beacon has FADED
 // from the recent window, post ONE fresh beacon — so a pool created on a now-offline node stays discoverable
 // to strangers' fresh nodes while its creator is away. Any node that has discovered a pool helps keep it
@@ -485,13 +622,8 @@ function reannounceSvc(p, key) {
     // On any failure, re-open the key so the NEXT sweep retries (a one-shot skip would defeat background upkeep).
     // On success, ANN_SVC[key] stays set until the beacon confirms back into the window (scan() clears it then).
     function giveUp(txid) { if (txid) MDS.cmd("txndelete id:" + txid, function () {}); delete ANN_SVC[key]; }
-    MDS.cmd("coins relevant:true sendable:true tokenid:0x00", function (res) {
-        var arr = (res && res.status && Array.isArray(res.response)) ? res.response : [];
-        var excl = p.address.toLowerCase(), best = null;
-        for (var i = 0; i < arr.length; i++) {                      // largest wallet MINIMA coin, never the covenant address
-            var c = arr[i]; if (!c || (c.address || "").toLowerCase() === excl) continue;
-            if (!best || decCmp(c.amount || "0", best.amount || "0") > 0) best = c;
-        }
+    var excl = {}; excl[p.address.toLowerCase()] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;
+    bestMinimaCoinSvc(excl, ANNOUNCE_DUST, false, function (best) {
         if (!best || decCmp(best.amount || "0", ANNOUNCE_DUST) < 0) { giveUp(null); return; }   // no spare MINIMA → retry later
         var txid = "ppannsvc_" + (Date.now()) + "_" + (++annCounter);
         var cmds = ["txncreate id:" + txid, "txninput id:" + txid + " coinid:" + best.coinid];
@@ -506,14 +638,9 @@ function reannounceSvc(p, key) {
         cmds.push("txnstate id:" + txid + " port:5 value:" + p.kmin);
         cmds.push("txnsign id:" + txid + " publickey:auto");   // funding coin only — no $OPK, no covenant coin
         cmds.push("txnbasics id:" + txid);
-        runCmds(cmds, 0, function (okChain) {
-            if (!okChain) { giveUp(txid); return; }
-            MDS.cmd("txncheck id:" + txid, function (rc) {
-                var resp = rc ? rc.response : null, v = resp ? resp.valid : null;
-                // gate exactly like poolmgr.finalize: valid.scripts (covenant verdict) + validamounts + valid.mmrproofs
-                if (!(v && truthy(v.scripts) && truthy(resp.validamounts) && truthy(v.mmrproofs))) { giveUp(txid); return; }
-                MDS.cmd("txnpost id:" + txid, function () { MDS.cmd("txndelete id:" + txid, function () {}); });   // posted → keep ANN_SVC[key] until the beacon reappears
-            });
+        checkPostSvc(txid, cmds, function (ok) {
+            if (!ok) { giveUp(txid); return; }
+            MDS.cmd("txndelete id:" + txid, function () {});   // posted → keep ANN_SVC[key] until the beacon reappears
         });
     });
 }
@@ -578,13 +705,8 @@ function refreshSvc(p) {
     function giveUp(txid) { if (txid) MDS.cmd("txndelete id:" + txid, function () {}); delete REFRESH_SVC[a]; }   // allow a retry next sweep
     // register the covenant (idempotent) so txnbasics can attach its script, then fund the beacon dust + build
     MDS.cmd("newscript trackall:true script:" + scriptArg(covScript(p.opk, p.oadr, p.tok, p.kmin)), function () {
-        MDS.cmd("coins relevant:true sendable:true tokenid:0x00", function (res) {
-            var arr = (res && res.status && Array.isArray(res.response)) ? res.response : [];
-            var best = null;
-            for (var i = 0; i < arr.length; i++) {                          // largest wallet MINIMA coin, never the covenant address
-                var c = arr[i]; if (!c || (c.address || "").toLowerCase() === a) continue;
-                if (!best || decCmp(c.amount || "0", best.amount || "0") > 0) best = c;
-            }
+        var excl = {}; excl[a] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;
+        bestMinimaCoinSvc(excl, ANNOUNCE_DUST, false, function (best) {
             if (!best || decCmp(best.amount || "0", ANNOUNCE_DUST) < 0) { giveUp(null); return; }   // no spare MINIMA → retry later
             var tokArg = " tokenid:" + p.tok;
             var txid = "pprefsvc_" + (Date.now()) + "_" + (++refreshCounter);
@@ -607,14 +729,9 @@ function refreshSvc(p) {
             cmds.push("txnsign id:" + txid + " publickey:auto");        // funding coin
             cmds.push("txnsign id:" + txid + " publickey:" + p.opk);    // owner grow branch
             cmds.push("txnbasics id:" + txid);
-            runCmds(cmds, 0, function (okChain) {
-                if (!okChain) { giveUp(txid); return; }
-                MDS.cmd("txncheck id:" + txid, function (rc) {
-                    var resp = rc ? rc.response : null, v = resp ? resp.valid : null;
-                    // gate exactly like the beacon path: valid.scripts (covenant verdict) + validamounts + valid.mmrproofs
-                    if (!(v && truthy(v.scripts) && truthy(resp.validamounts) && truthy(v.mmrproofs))) { giveUp(txid); return; }
-                    MDS.cmd("txnpost id:" + txid, function () { MDS.cmd("txndelete id:" + txid, function () {}); });   // posted → new coins are young → the aging gate stops a re-fire
-                });
+            checkPostSvc(txid, cmds, function (ok) {
+                if (!ok) { giveUp(txid); return; }
+                MDS.cmd("txndelete id:" + txid, function () {});   // posted → new coins are young → the aging gate stops a re-fire
             });
         });
     });

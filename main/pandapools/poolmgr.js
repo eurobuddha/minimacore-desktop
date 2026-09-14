@@ -34,6 +34,9 @@ var PoolMgr = (function () {
     // txid -> { baseline, onSigned, onFail } for a txnsign awaiting the user's pending approval.
     var PENDING = {};
     var statusHook = null;   // optional fn(msg) so the UI can say "approve in Pending Actions…"
+    var SIGN_QUEUE = [], SIGNING = false, SIGN_WATCHDOG = null, ACTIVE_SIGN = null, MAX_HOLD_MS = 200000;
+    var SIGN_LOCK_TTL_MS = 5 * 60 * 1000, SIGN_LOCK_RETRY_MS = 1000, SIGN_LOCK_HEARTBEAT_MS = 30000;
+    var LOCK_TTL_MS = 3 * 60 * 1000;
 
     function setStatusHook(fn) { statusHook = fn; }
     function pendingMsg(m) { if (statusHook) statusHook(m); }
@@ -59,6 +62,86 @@ var PoolMgr = (function () {
         return fallback;
     }
     function tag() { return Date.now() + "_" + Math.floor(Math.random() * 0xffffff).toString(16); }
+
+    // ---------------------------------------------------------------- serial signing gate
+    //
+    // Native 0.9.22 serialises every build→sign→post chain because Minima signatures are stateful one-time
+    // leaves. Two concurrent txns can otherwise sign the same wallet key leaf over different data. MDS has an
+    // extra restricted-permission pending-sign path, so the watchdog reschedules while a user approval is
+    // genuinely outstanding; it only releases a chain whose callback was lost.
+    function pendingCount() { var n = 0, k; for (k in PENDING) if (PENDING.hasOwnProperty(k)) n++; return n; }
+    function scheduleWatchdog() {
+        clearWatchdog();
+        SIGN_WATCHDOG = setTimeout(function () {
+            SIGN_WATCHDOG = null;
+            if (pendingCount() > 0) { scheduleWatchdog(); return; }
+            forceReleaseActiveSign();
+        }, MAX_HOLD_MS);
+    }
+    function clearWatchdog() {
+        if (SIGN_WATCHDOG) { clearTimeout(SIGN_WATCHDOG); SIGN_WATCHDOG = null; }
+    }
+    function submitSign(chain) {
+        SIGN_QUEUE.push(chain);
+        if (!SIGNING) startNextSign();
+    }
+    function startNextSign() {
+        clearWatchdog();
+        var next = SIGN_QUEUE.shift();
+        if (!next) { SIGNING = false; return; }
+        SIGNING = true;
+        next();
+    }
+    function releaseSign() { startNextSign(); }
+    function forceReleaseActiveSign() {
+        var active = ACTIVE_SIGN;
+        if (!active) { startNextSign(); return; }
+        if (active.heartbeat) clearInterval(active.heartbeat);
+        releaseGlobalSignLock(active.owner, function () {
+            if (ACTIVE_SIGN && ACTIVE_SIGN.owner === active.owner) ACTIVE_SIGN = null;
+            startNextSign();
+        });
+    }
+    function gated(done, owner, heartbeat) {
+        var released = false;
+        function free(after) {
+            if (released) return;
+            released = true;
+            clearWatchdog();
+            if (heartbeat) clearInterval(heartbeat);
+            releaseGlobalSignLock(owner, function () {
+                if (ACTIVE_SIGN && ACTIVE_SIGN.owner === owner) ACTIVE_SIGN = null;
+                releaseSign();
+                after();
+            });
+        }
+        return {
+            ok: function (txpowid) { free(function () { done.ok(txpowid); }); },
+            fail: function (msg) { free(function () { done.fail(msg); }); }
+        };
+    }
+
+    // SQL-backed MiniDapp-wide signing lock. Native TxPost's static queue is process-wide; MDS page and service
+    // are separate contexts, so the "one signing chain at once" invariant has to live in the shared database.
+    function signLockTable(cb) {
+        MDS.sql("CREATE TABLE IF NOT EXISTS `pp_signlock` (`id` int primary key, `owner` varchar(160), `ts` bigint)", function () { cb(); });
+    }
+    function acquireGlobalSignLock(owner, cb) {
+        signLockTable(function () {
+            MDS.sql("DELETE FROM `pp_signlock` WHERE `ts`<" + (Date.now() - SIGN_LOCK_TTL_MS), function () {
+                MDS.sql("INSERT INTO `pp_signlock` (`id`,`owner`,`ts`) VALUES (1,'" + sqlEsc(owner) + "'," + Date.now() + ")", function (r) {
+                    if (r && r.status === true) { cb(); return; }
+                    setTimeout(function () { acquireGlobalSignLock(owner, cb); }, SIGN_LOCK_RETRY_MS);
+                });
+            });
+        });
+    }
+    function touchGlobalSignLock(owner) {
+        MDS.sql("UPDATE `pp_signlock` SET `ts`=" + Date.now() + " WHERE `id`=1 AND `owner`='" + sqlEsc(owner) + "'", function () {});
+    }
+    function releaseGlobalSignLock(owner, cb) {
+        MDS.sql("DELETE FROM `pp_signlock` WHERE `id`=1 AND `owner`='" + sqlEsc(owner) + "'", function () { if (cb) cb(); });
+    }
 
     /** Run node commands sequentially, aborting (+ txndelete) on the first status:false / transport error.
      *  These are all NON-signing commands (txncreate/input/output/state) so they never pend. */
@@ -162,11 +245,20 @@ var PoolMgr = (function () {
     /** build (runChain) → sign (signAll, pending-aware) → finalize. `done` = { ok(txpowid), fail(msg) }. */
     function buildAndPost(txid, cmds, signers, done) {
         var inputs=cmds.filter(function(q){return q.indexOf("txninput ")===0;}).map(function(q){var m=q.match(/(?:^|\s)coinid:(0x[0-9a-fA-F]+)(?:\s|$)/);return m?m[1]:"";});
-        runChain(cmds, txid, function (ok, res) {
-            if (!ok) { done.fail("building the transaction failed" + errOf(res)); return; }
-            signAll(txid, signers, 0,
-                function () { finalize(txid, done); },
-                function (msg) { MDS.cmd("txndelete id:" + txid); done.fail(msg); }, inputs);
+        submitSign(function () {
+            var owner = "page_" + tag();
+            acquireGlobalSignLock(owner, function () {
+                var heartbeat = setInterval(function () { touchGlobalSignLock(owner); }, SIGN_LOCK_HEARTBEAT_MS);
+                ACTIVE_SIGN = { owner: owner, heartbeat: heartbeat };
+                scheduleWatchdog();
+                var gdone = gated(done, owner, heartbeat);
+                runChain(cmds, txid, function (ok, res) {
+                    if (!ok) { gdone.fail("building the transaction failed" + errOf(res)); return; }
+                    signAll(txid, signers, 0,
+                        function () { finalize(txid, gdone); },
+                        function (msg) { MDS.cmd("txndelete id:" + txid); gdone.fail(msg); }, inputs);
+                });
+            });
         });
     }
 
@@ -174,6 +266,47 @@ var PoolMgr = (function () {
     function coinAmt(c, tokenid) {
         if (PP.isMinima(tokenid)) return PP.dec(c.amount || "0");
         return PP.dec(c.tokenamount !== undefined ? c.tokenamount : (c.amount || "0"));
+    }
+
+    // Shared MiniDapp coin reservations. Native CoinLock is process-wide; in MDS the UI and service run in
+    // separate JS contexts, so the equivalent must live in SQL. A lost/failed txn frees itself by TTL.
+    function sqlEsc(s) { return String(s || "").replace(/'/g, "''"); }
+    function lockTable(cb) {
+        MDS.sql("CREATE TABLE IF NOT EXISTS `pp_coinlocks` (`coinid` varchar(160) primary key, `ts` bigint)", function () { cb(); });
+    }
+    function pruneLocks(cb) {
+        lockTable(function () { MDS.sql("DELETE FROM `pp_coinlocks` WHERE `ts`<" + (Date.now() - LOCK_TTL_MS), function () { cb(); }); });
+    }
+    function lockedMap(cb) {
+        pruneLocks(function () {
+            MDS.sql("SELECT `coinid` FROM `pp_coinlocks`", function (r) {
+                var rows = (r && r.status && r.rows) ? r.rows : [], m = {}, i, id;
+                for (i = 0; i < rows.length; i++) { id = rows[i].COINID || rows[i].coinid; if (id) m[String(id)] = true; }
+                cb(m);
+            });
+        });
+    }
+    function releaseIds(ids, cb) {
+        if (!ids || !ids.length) { if (cb) cb(); return; }
+        var quoted = ids.map(function (id) { return "'" + sqlEsc(id) + "'"; }).join(",");
+        MDS.sql("DELETE FROM `pp_coinlocks` WHERE `coinid` IN (" + quoted + ")", function () { if (cb) cb(); });
+    }
+    function reserveLocks(coins, cb) {
+        var ids = [], i;
+        for (i = 0; i < (coins || []).length; i++) if (coins[i] && coins[i].coinid) ids.push(String(coins[i].coinid));
+        if (!ids.length) { cb(true); return; }
+        lockTable(function () {
+            var n = 0, now = Date.now(), claimed = [];
+            (function one() {
+                if (n >= ids.length) { cb(true); return; }
+                var id = ids[n++];
+                MDS.sql("INSERT INTO `pp_coinlocks` (`coinid`,`ts`) VALUES ('" + sqlEsc(id) + "'," + now + ")", function (r) {
+                    if (!r || r.status !== true) { releaseIds(claimed, function () { cb(false); }); return; }
+                    claimed.push(id);
+                    one();
+                });
+            })();
+        });
     }
 
     /** Largest-first sendable wallet coins for a token summing to >= need. `excludeLower` = {addrLower:true}
@@ -187,26 +320,39 @@ var PoolMgr = (function () {
         });
     }
     function selectNonOwnerCoins(tokenid, needRaw, excludeLower, cb) {
+        selectCoinsAttempt(tokenid, needRaw, excludeLower, false, cb);
+    }
+    function selectCoinsAttempt(tokenid, needRaw, excludeLower, retried, cb) {
         var need = PP.dec(needRaw);
         if (need.lte(0)) { cb([], new D(0)); return; }
         MDS.cmd("coins relevant:true sendable:true tokenid:" + tokenid, function (res) {
             var arr = (res && res.status && Array.isArray(res.response)) ? res.response : null;
             if (!arr || !arr.length) { cb(null); return; }
-            var avail = [];
-            for (var i = 0; i < arr.length; i++) {
-                var c = arr[i];
-                if (!c) continue;
-                if (excludeLower && excludeLower[(c.address || "").toLowerCase()]) continue;
-                avail.push(c);
-            }
-            avail.sort(function (a, b) { return coinAmt(b, tokenid).cmp(coinAmt(a, tokenid)); });
-            var sel = [], sum = new D(0);
-            for (var j = 0; j < avail.length; j++) {
-                sel.push(avail[j]);
-                sum = sum.plus(coinAmt(avail[j], tokenid));
-                if (sum.gte(need)) { cb(sel, sum); return; }
-            }
-            cb(null);
+            lockedMap(function (locks) {
+                var avail = [], i, c;
+                for (i = 0; i < arr.length; i++) {
+                    c = arr[i];
+                    if (!c) continue;
+                    if (excludeLower && excludeLower[(c.address || "").toLowerCase()]) continue;
+                    if (locks[String(c.coinid || "")]) continue;
+                    avail.push(c);
+                }
+                avail.sort(function (a, b) { return coinAmt(b, tokenid).cmp(coinAmt(a, tokenid)); });
+                var sel = [], sum = new D(0);
+                for (var j = 0; j < avail.length; j++) {
+                    sel.push(avail[j]);
+                    sum = sum.plus(coinAmt(avail[j], tokenid));
+                    if (sum.gte(need)) {
+                        reserveLocks(sel, function (ok) {
+                            if (ok) { cb(sel, sum); return; }
+                            if (!retried) { selectCoinsAttempt(tokenid, needRaw, excludeLower, true, cb); return; }
+                            cb(null);
+                        });
+                        return;
+                    }
+                }
+                cb(null);
+            });
         });
     }
 
@@ -271,7 +417,7 @@ var PoolMgr = (function () {
     // reserves are untouched — this adds no spend authority.
     function reannounce(p, done) {   // done.ok(txpowid), done.fail(msg)
         if (!p || !p.address || !p.opk || !p.tok || !p.oadr || !p.kmin) { done.fail("incomplete pool record"); return; }
-        var excl = {}; excl[p.address.toLowerCase()] = true;   // never select a covenant coin
+        var excl = {}; excl[p.address.toLowerCase()] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;   // never select covenant/$OADR coins
         selectCoins(MINIMA, ANNOUNCE_DUST, excl, function (mfunds, msum) {
             if (!mfunds) { done.fail("no spare MINIMA to re-announce"); return; }
             var txid = "ppann_" + tag();
@@ -298,7 +444,7 @@ var PoolMgr = (function () {
             done.fail("incomplete pool record"); return;
         }
         var tok = p.tok, tokArg = " tokenid:" + tok;
-        var excl = {}; excl[p.address.toLowerCase()] = true;   // never select a covenant coin as funding
+        var excl = {}; excl[p.address.toLowerCase()] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;   // never select covenant/$OADR coins as funding
         ensureTracked(p, function () {
             selectCoins(MINIMA, ANNOUNCE_DUST, excl, function (mfunds, msum) {   // tiny funding for the beacon dust
                 if (!mfunds) { done.fail("no spare MINIMA to refresh the pool"); return; }
@@ -360,7 +506,7 @@ var PoolMgr = (function () {
 
     function buildCreate(p, x0, y0, tokenid, done) {
         var minimaNeed = x0.plus(ANNOUNCE_DUST);
-        var excl = {}; excl[p.address.toLowerCase()] = true;
+        var excl = {}; excl[p.address.toLowerCase()] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;
         selectCoins(MINIMA, minimaNeed, excl, function (mfunds, msum) {
             if (!mfunds) { done.fail("insufficient MINIMA to seed the pool"); return; }
             selectCoins(tokenid, y0, excl, function (tfunds, tsum) {
@@ -395,7 +541,7 @@ var PoolMgr = (function () {
         var addM = PP.dec(addMRaw);
         if (addM.lte(0)) { done.fail("enter an amount to add"); return; }
         var tok = p.tok, tokArg = " tokenid:" + tok;
-        var excl = {}; excl[p.address.toLowerCase()] = true;
+        var excl = {}; excl[p.address.toLowerCase()] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;
         ensureTracked(p, function () {
           // Re-read the live pool coin first — deposit grows reserves in place and spends the current
           // covenant coin; a stale snapshot fails with "already spent (the pool moved)".
@@ -469,7 +615,7 @@ var PoolMgr = (function () {
         var tok = p.tok, tokArg = " tokenid:" + tok;
         var oldX = PP.dec(p.reserveM), oldY = PP.dec(p.reserveT);
         var minimaNeed = newX.plus(ANNOUNCE_DUST);
-        var excl = {}; excl[p.address.toLowerCase()] = true;
+        var excl = {}; excl[p.address.toLowerCase()] = true; if (p.oadr) excl[p.oadr.toLowerCase()] = true;
         selectCoins(MINIMA, minimaNeed, excl, function (mfunds, msum) {
             if (!mfunds) { done.fail("insufficient MINIMA for the new pool"); return; }
             selectCoins(tok, newY, excl, function (tfunds, tsum) {
