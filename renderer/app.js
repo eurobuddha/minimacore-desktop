@@ -4010,7 +4010,9 @@ async function axExportCsv() {
   if (!rows.length) { toast("No swaps to export", ""); return; }
   const q = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
   const cols = ["Date", "Role", "Direction", "Sold Amount", "Sold Token", "Bought Amount", "Bought Token", "Price (USDT/MINIMA)", "Counterparty", "Status", "Contract Id", "Minima Tx", "Eth Tx"];
-  const roleLabel = (r) => r === "RESPONDER" ? "Maker" : (r === "INITIATOR" ? "Taker" : (r || ""));
+  // One role mapping for the whole app (axRoleLabel), capitalised for the file so the CSV's existing
+  // "Maker"/"Taker" column is byte-identical to before — the ledger in tools/dexHistory reads these columns.
+  const roleLabel = (r) => { const x = axRoleLabel(r); return x ? x[0].toUpperCase() + x.slice(1) : ""; };
   const dirLabel = (d) => d === "MINIMA_TO_ERC20" ? "Sell MINIMA" : (d === "ERC20_TO_MINIMA" ? "Buy MINIMA" : (d || ""));
   const iso = (ms) => { const n = Number(ms); return (n > 0 && isFinite(n)) ? new Date(n).toISOString() : ""; };
   const price = (s) => {   // USDT per MINIMA, comparable across both directions
@@ -4026,13 +4028,42 @@ async function axExportCsv() {
   const path = await api.exportCsv(csv, "atomix-trades.csv").catch(() => null);
   toast(path ? `Saved ${rows.length} trades ✓` : "Export cancelled", path ? "ok" : "");
 }
+// Native parity (MainActivity.historySwapCard): three lines, not one. The old single line showed only
+// amounts + raw status, which told you nothing about WHEN, WHICH SIDE you were, or WHO with.
+//   1. amounts + the status pill
+//   2. how long ago · your side · the counterparty
+//   3. the engine's plain-language state line ("Done — received 4.95 USDT.")
+// The counterparty is rendered IN FULL, never shortened: an address exists to be copied and used, and
+// .row__l2 already word-breaks so a 64-char key wraps instead of overflowing. Click it to copy.
 function axSwapRows(swaps) {
-  return swaps.map(s => `<div class="row" style="justify-content:space-between;cursor:pointer" data-axhash="${esc(s.hash)}">
-    <span class="mono" style="font-size:13px">${esc(s.sellamount)} ${esc(axTok(s.selltoken))} → ${esc(s.buyamount)} ${esc(axTok(s.buytoken))}</span>
-    <span class="mail-ver">${esc(String(s.status).toLowerCase())}</span></div>`).join("");
+  return swaps.map(s => {
+    const meta = [relTime(s.created), axRoleLabel(s.role)].filter(Boolean).map(esc).join(" · ");
+    const cp = s.counterparty
+      ? ` · <span class="mono" data-axcopy="${esc(s.counterparty)}" style="cursor:copy" title="Click to copy">${esc(s.counterparty)}</span>`
+      : "";
+    return `<div class="row" style="cursor:pointer" data-axhash="${esc(s.hash)}">
+      <div class="row__mid">
+        <div class="row__l1 mono">${esc(s.sellamount)} ${esc(axTok(s.selltoken))} → ${esc(s.buyamount)} ${esc(axTok(s.buytoken))}</div>
+        <div class="row__l2">${meta}${cp}</div>
+        ${s.detail ? `<div class="row__l2">${esc(s.detail)}</div>` : ""}
+      </div>
+      <span class="mail-ver">${esc(axStatusLabel(s.status))}</span></div>`;
+  }).join("");
+}
+// RESPONDER makes the market, INITIATOR takes it. Same mapping the CSV export uses, so the tab and the
+// exported file never disagree about which side you were.
+function axRoleLabel(r) { return r === "RESPONDER" ? "maker" : (r === "INITIATOR" ? "taker" : String(r || "").toLowerCase()); }
+// Raw DB states are internal; these are the words the APK and the MiniDapp show. STARTED especially: your
+// leg is locked and nothing is wrong, so it reads "waiting", not "started".
+function axStatusLabel(st) {
+  return { STARTED: "waiting", LOCKED: "locked", CLAIMING: "claiming", COMPLETE: "complete",
+    REFUNDED: "refunded", ERROR: "error" }[st] || String(st == null ? "" : st).toLowerCase();
 }
 function axTok(t) { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = String(t).toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "mxUSDT"; } return t; }
 function wireAxSwapRows() {
+  // Copy the FULL counterparty without also opening the inspect modal the row click triggers.
+  document.querySelectorAll("#axBody [data-axcopy]").forEach(n => n.onclick = (e) => {
+    e.stopPropagation(); copy(n.dataset.axcopy); });
   document.querySelectorAll("#axBody [data-axhash]").forEach(r => r.onclick = async () => {
     toast("Checking…");
     const lines = await api.axInspect(r.dataset.axhash).catch(e => ["Check failed: " + (e.message || e)]);

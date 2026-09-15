@@ -425,8 +425,18 @@ async function swaps() {
   // or refundable leg must stay visible; a long-dead row belongs in its own currency's history.
   const act = A.trading.active(), now = Date.now(), tip = Number(lastTip) || 0;
   const shown = all.filter(s => A.trading.visibleIn(s, act, tip, now));
-  return jclone(shown.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
-    sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status, updated: s.updated })));
+  // The Activity list needs more than amounts+status to be usable: WHEN it happened, WHICH SIDE I was, WHO
+  // with, and WHAT STATE it is actually in. `created` and `counterparty` were simply never projected, so the
+  // renderer could not show them however it tried. `detail` is the engine's own plain-language line — the
+  // same text the MiniDapp shows — so "waiting" is never ambiguous. statusDetail reads the lowercase field
+  // names, which is exactly this projection's shape, so it is fed the row rather than a second mapping.
+  return jclone(shown.map(s => {
+    const row = { hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
+      sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status,
+      created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId };
+    row.detail = A.inspect.statusDetail(row);
+    return row;
+  }));
 }
 // Full per-swap history for CSV export — every swap column PLUS the on-chain leg tx ids joined from the events log.
 // getEvents rows are {event, token, amount, note(=txnhash), date}: the Minima leg logs token 'minima' (note=txpowid),

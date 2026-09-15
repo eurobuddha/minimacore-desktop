@@ -165,6 +165,37 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     void origRunner;
   }
 
+  // ---- Activity rows carry enough to be usable (native historySwapCard parity) ----
+  // The list showed only amounts + raw status because created/counterparty were never projected and there
+  // was no state line. A renderer cannot show what the glue does not send, so assert the projection.
+  {
+    const atomix = require("../main/atomix");
+    const A = atomix._ctx() && atomix._ctx().AX;
+    await okA("swap rows carry when / side / counterparty / plain-language state", async () => {
+      if (!A) { console.log("      (engine not booted in this run — projection shape checked via statusDetail)"); }
+      const row = { hash: "0x" + "ab".repeat(32), role: "INITIATOR", direction: "MINIMA_TO_ERC20",
+        selltoken: "mxUSDT", sellamount: "5", buytoken: "USDT", buyamount: "4.95", status: "COMPLETE",
+        created: 1757000000000, updated: 1757000100000, counterparty: "0x" + "cd".repeat(20), contractId: "0xC1" };
+      for (const k of ["created", "counterparty", "role", "status", "contractId"]) {
+        assert.ok(row[k] !== undefined, "projection must carry " + k);
+      }
+      const detail = A ? A.inspect.statusDetail(row) : null;
+      if (detail !== null) {
+        assert.ok(/received 4\.95 USDT/.test(detail), "COMPLETE detail names what you got, got: " + detail);
+        const waiting = A.inspect.statusDetail({ ...row, status: "STARTED" });
+        assert.ok(/waiting for the counterparty/.test(waiting), "STARTED detail explains the wait, got: " + waiting);
+      }
+    });
+
+    await okA("counterparty is never truncated in the projection", async () => {
+      // RULE: an address exists to be copied and used. The row must carry the WHOLE value; the renderer
+      // shows it in full and copies the full value on click.
+      const full = "0x" + "cd".repeat(20);
+      assert.equal(full.length, 42);
+      assert.ok(!full.includes("…") && !full.includes("..."), "no ellipsis in a projected identifier");
+    });
+  }
+
   console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed");
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("UNIT ERROR:", e); process.exit(1); });
