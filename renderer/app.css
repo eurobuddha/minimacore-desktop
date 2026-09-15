@@ -872,3 +872,11 @@ body { font-family: var(--sans); }
 /* update pill next to the version: only when the store feed has a newer build */
 .hdr__update { cursor: pointer; border: 1px solid var(--accent); color: var(--accent); background: transparent; margin-left: 6px; }
 .hdr__update:hover { background: var(--accent); color: #fff; }
+
+/* RULE 1 — a shortened identifier must still be copyable IN FULL (idHtml + the delegated handler in boot()).
+   Looks like the value it stands for, advertises that it is clickable, and never gets selected by accident. */
+.idcopy { cursor: pointer; border-bottom: 1px dotted var(--dim2); }
+.idcopy:hover { color: var(--fg); border-bottom-color: var(--fg); }
+/* A toast carrying a full id to copy: clickable, and it stays up long enough to actually click. */
+.toast--copy { cursor: pointer; }
+.toast--copy:hover { border-color: var(--fg); }

@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.96] — Identifiers stay recoverable, and the Wallet Send asks first
+- **The vesting confirm shows the beneficiary IN FULL, on its own line.** It showed `0x1234abcd…ef12` — 12 visible characters — as the last thing between the user and a contract whose own text says it cannot be cancelled. That is precisely the shape an address-substitution swap is built to survive. The dialog now prints the whole address and asks the user to check it character by character.
+- **The main Wallet Send now confirms before it sends.** Every other send path in the app already did — minimaMail pay, ETH send, AtomiX swap, the PandaPools actions, Vestr — and this is the one people use most. It validated, then went straight to the chain on one click, with the recipient nowhere on screen. The review shows the full address and the amount.
+- **A truncated identifier is always one click from the complete one.** New `idHtml()` renders the short form but carries the whole value in `data-copy` and in the tooltip, and a delegated handler in `boot()` copies it — so this works in every view, not just the PandaPools ones that had their own wiring. Applied to the order-book maker key, LP coin ids, the sendable-coin list, and history coin ids and addresses.
+- **Txid toasts no longer destroy the id.** `toast()` takes an optional full value: the toast becomes clickable, puts the COMPLETE id on the clipboard, and stays up 8s instead of 3.2s so there is time to click. A toast was the worst place to lose an identifier — it showed `0xab12…` briefly and nothing anywhere kept the rest. Covers the wallet send, mail pay, and the two AtomiX broadcast paths.
+- Confirm dialogs wrap long values (`overflow-wrap:anywhere`) so a 64-character address fits rather than overflowing — the point is to show it whole, not to shorten it to fit.
+
 ## [0.16.95] — Release integrity: pin the node jar, mandate the update hash, verify the app we actually ship
 - **The bundled Parlons Node jar is now pinned by digest in `package.json` (`parlonsNodeSha256`), not just by version.** `SHA256SUMS` ships from the same GitHub release as the jar, so checking one against the other proves the download arrived intact — not that it is the jar we meant to ship. The pin is the authority; the release sums stay as a transport check and must agree with it. Same discipline `main/pandapools` already has.
 - **A verification that verified nothing now fails.** `grep " $NAME$" SHA256SUMS | sha256sum -c -` exits 0 on EMPTY stdin under GNU coreutils (macOS `shasum` exits 1), so a renamed or missing asset passed the gate and shipped on the Linux and Windows legs. Every match is asserted non-empty before it is trusted.

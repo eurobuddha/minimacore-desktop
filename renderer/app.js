@@ -50,9 +50,23 @@ async function tryCmd(command) { try { return await cmd(command); } catch (e) { 
 
 // ---- ui helpers ------------------------------------------------------------
 let toastTimer = null;
-function toast(msg, kind) {
-  const t = el("toast"); t.className = "toast" + (kind ? " " + kind : ""); t.textContent = msg; t.style.display = "";
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, 3200);
+/**
+ * toast(msg, kind, copyText)
+ *
+ * `copyText` is the RULE-1 escape hatch. An identifier exists to be pasted into an explorer or a support
+ * ticket, and a toast is the worst place to lose one: it shows briefly, then it is gone with no second
+ * surface holding the value. Txid toasts used to print `short(txid, 12)` and nothing anywhere kept the rest.
+ * When copyText is given the toast becomes clickable and puts the COMPLETE string on the clipboard, and it
+ * stays up longer so there is time to click it.
+ */
+function toast(msg, kind, copyText) {
+  const t = el("toast");
+  t.className = "toast" + (kind ? " " + kind : "") + (copyText ? " toast--copy" : "");
+  t.textContent = msg + (copyText ? "  ⧉" : "");
+  t.style.display = "";
+  t.onclick = copyText ? (() => copy(copyText)) : null;
+  t.title = copyText ? "Click to copy the full id" : "";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; t.onclick = null; }, copyText ? 8000 : 3200);
 }
 // Copy through the MAIN process (api.clip → clipboard.writeText) — reliable regardless of window focus. The old
 // navigator.clipboard.writeText rejected silently when unfocused, so the toast lied and the clipboard kept stale
@@ -66,6 +80,20 @@ async function copy(text) {
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function short(s, n) { s = String(s || ""); return s.length > (n || 18) ? s.slice(0, (n || 18)) + "…" : s; }
+/**
+ * idHtml(value, shown) — a shortened identifier that is still COPYABLE IN FULL (RULE 1).
+ *
+ * An address, coin id or txid exists to be pasted somewhere. Rendering `0xb126…b652` with no way back to the
+ * whole string destroys the only thing it was for. Where the layout genuinely cannot carry 64 characters,
+ * this keeps the full value exactly one click away — data-copy holds it complete, the delegated handler in
+ * boot() copies it, and the tooltip shows it. `shown` defaults to the 8…6 form used across the app.
+ */
+function idHtml(value, shown) {
+  const v = String(value == null ? "" : value);
+  if (!v) return "";
+  const disp = shown || (v.length < 16 ? v : v.slice(0, 8) + "…" + v.slice(-6));
+  return `<span class="idcopy" data-copy="${esc(v)}" title="${esc(v)}\n(click to copy)">${esc(disp)}</span>`;
+}
 
 // ---- theme -----------------------------------------------------------------
 // TERMINAL identity: dark default + light toggle. Legacy stored themes (current/original-*) → dark.
@@ -86,6 +114,14 @@ async function boot() {
   el("nodePill").onclick = () => selectTab("node");
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => selectTab(b.dataset.view));
   initTabScroll();
+  // RULE 1, app-wide: anything rendered with a shortened identifier carries the COMPLETE value in
+  // data-copy, and one click puts that complete value on the clipboard. Delegated from the document so it
+  // works for every view without each render path having to remember to wire it (the PandaPools views had
+  // their own wirePpCopy; everywhere else a truncated id was simply unrecoverable).
+  document.addEventListener("click", (e) => {
+    const n = e.target && e.target.closest && e.target.closest("[data-copy]");
+    if (n && n.dataset.copy) { e.preventDefault(); copy(n.dataset.copy); }
+  });
   api.appVersion().then(v => { const e = el("hdrVer"); if (e && v) e.textContent = "v" + v; }).catch(() => {});
   // App updates: the store feed is checked in the main process; the pill appears when a newer build exists.
   const refreshUpdatePill = async () => {
@@ -720,7 +756,7 @@ async function wwDoSend() {
   catch (e) { toast((e && e.message) || "Send failed", "err"); btn.disabled = false; btn.textContent = "Send"; return; }
 
   if (r && r.ok) {
-    toast("Sent ✓" + (r.txnid ? " " + short(r.txnid, 12) : ""), "ok");
+    toast("Sent ✓" + (r.txnid ? " " + short(r.txnid, 12) : ""), "ok", r.txnid || null);
     el("wwTo").value = ""; el("wwAmt").value = "";
     wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
     wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
@@ -1194,7 +1230,7 @@ function showPrompt(title, initial, placeholder, opts) {
 function showConfirm(title, message, okLabel, danger) {
   return new Promise((resolve) => {
     document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="confirmOv"><div class="modal">
-      <div class="modal__title">${esc(title)}</div><div class="view__desc" style="white-space:pre-wrap">${esc(message || "")}</div>
+      <div class="modal__title">${esc(title)}</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message || "")}</div>
       <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="cfCancel">Cancel</button>
         <button class="btn ${danger ? "btn--danger" : "btn--primary"} btn--full" id="cfOk">${esc(okLabel || "OK")}</button></div></div></div>`);
     const ov = el("confirmOv"); const done = (v) => { if (ov) ov.remove(); resolve(v); };
@@ -2530,8 +2566,8 @@ function showHistoryDetail(r, tip) {
   const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "—";
   // Each coin: amount + token → address, with the coinid and any state variables when present.
   const bd = (list) => (list && list.length ? list.map(c => {
-    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${esc(short(c.address, 16))}`;
-    if (c.coinid) line += ` <span class="hist-dim">${esc(short(c.coinid, 12))}</span>`;
+    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${idHtml(c.address, short(c.address, 16))}`;
+    if (c.coinid) line += ` <span class="hist-dim">${idHtml(c.coinid, short(c.coinid, 12))}</span>`;
     if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(short(String(s.data), 40))}</span>`).join("");
     return line;
   }).join("<br>") : "—");
@@ -3277,8 +3313,17 @@ function sendForm(mode) {
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
         if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
+        // Review before it leaves. Every OTHER send in this app confirms first — minimaMail pay, ETH send,
+        // AtomiX swap, the PandaPools actions, Vestr — and this is the one people use most. The recipient is
+        // shown IN FULL so a mistyped or clipboard-swapped address has somewhere to be caught.
+        const tname = tokOf(tok).name || (tok === MINIMA ? "MINIMA" : tok);
+        if (!await showConfirm(`Send ${amt} ${tname}?`,
+              `To\n${to}\n\nAmount\n${amt} ${tname}\n\nCheck the address above — this sends real funds and cannot be undone.`,
+              "Send now", false)) {
+          el("sGo").disabled = false; el("sGo").textContent = "Send"; return;
+        }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
-        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok"); el("sTo").value = el("sAmt").value = ""; refreshAvail();
+        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
       } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send";
     };
@@ -3780,7 +3825,7 @@ function axDepthRow(bid, ask, best) {
 function axDepthHalf(row, isBid) {
   if (!row) return `<div class="ax-half${isBid ? " bid" : ""}"><span class="ax-sz">—</span></div>`;
   const take = !row.mine && row.cap > 0;
-  const tag = row.mine ? `<span class="ax-tag you">you</span>` : `<span class="ax-tag">${esc(axShort(row.signer))}</span>`;
+  const tag = row.mine ? `<span class="ax-tag you">you</span>` : `<span class="ax-tag">${idHtml(row.signer, axShort(row.signer))}</span>`;
   return `<div class="ax-half${isBid ? " bid" : ""}${take ? " takeable" : ""}"${take ? ` data-take="${isBid ? "bid" : "ask"}"` : ""}>`
     + `<span class="top"><span class="ax-px ${isBid ? "bidpx" : "askpx"}">${fmtPx(row.p)}</span><span class="ax-sz">${fmtAbbrev(row.cap)}</span></span>${tag}</div>`;
 }
@@ -4090,7 +4135,7 @@ async function renderAxOtc() {
       <div class="row"><div class="field" style="flex:1"><div class="field__label">Max to SELL</div><input class="field__input" id="axOtcSell" value="${o.myOffer && o.myOffer.sellSize || ""}" /></div>
         <div class="field" style="flex:1"><div class="field__label">Max to BUY</div><input class="field__input" id="axOtcBuy" value="${o.myOffer && o.myOffer.buySize || ""}" /></div></div>
       <div class="seg"><button class="btn btn--primary btn--full" id="axOtcLive">Go live</button><button class="btn btn--outline btn--full" id="axOtcWithdraw">Withdraw</button></div></div>
-    <div class="card"><div class="card__title">LP board</div>${o.board.length ? o.board.map((lp, i) => `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${esc(TOK.shortId(lp.cid))}</span><span>sell ${esc(lp.sell)} · buy ${esc(lp.buy)}</span><button class="btn btn--sm btn--outline" data-axlp="${i}">Propose</button></div>`).join("") : '<div class="empty">No LPs live right now.</div>'}</div>
+    <div class="card"><div class="card__title">LP board</div>${o.board.length ? o.board.map((lp, i) => `<div class="row" style="justify-content:space-between"><span class="mono" style="font-size:12px">${idHtml(lp.cid, TOK.shortId(lp.cid))}</span><span>sell ${esc(lp.sell)} · buy ${esc(lp.buy)}</span><button class="btn btn--sm btn--outline" data-axlp="${i}">Propose</button></div>`).join("") : '<div class="empty">No LPs live right now.</div>'}</div>
     <div class="card"><div class="card__title">Your deals</div>${o.deals.length ? o.deals.map(d => axDealRow(d)).join("") : '<div class="empty">No active deals.</div>'}</div>`;
   wireAxHeader();
   el("axOtcLive").onclick = async () => { const r = await api.axOtcGoLive(el("axOtcSell").value, el("axOtcBuy").value).catch(e => ({ err: String(e.message || e) })); toast(r && r.err ? r.err : "✓ Availability published", r && r.err ? "warn" : "ok"); };
@@ -4165,7 +4210,7 @@ async function axExportKey() {
 }
 async function axCoinDump() {
   const rows = await api.axCoins().catch(() => []);
-  const body = rows.length ? rows.map(c => `<div class="row mono" style="font-size:12px"><span>${esc(c.amount)}</span><span style="color:var(--dim)">${esc(TOK.shortId(c.coinid))}</span></div>`).join("") : '<div class="empty">No sendable coins right now.</div>';
+  const body = rows.length ? rows.map(c => `<div class="row mono" style="font-size:12px"><span>${esc(c.amount)}</span><span style="color:var(--dim)">${idHtml(c.coinid, TOK.shortId(c.coinid))}</span></div>`).join("") : '<div class="empty">No sendable coins right now.</div>';
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="axCoinOv"><div class="modal"><div class="modal__title">Your coins</div>${body}<div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="axCoinClose">Close</button></div></div></div>`);
   const ov = el("axCoinOv"); el("axCoinClose").onclick = () => ov.remove(); ov.onclick = e => { if (e.target.id === "axCoinOv") ov.remove(); };
 }
@@ -4190,7 +4235,7 @@ async function axSendDialog(w) {
     close();
     if (!await showConfirm("Review — Send " + (asset === "eth" ? "ETH" : "USDT"), `Send  ${amt} ${asset === "eth" ? "ETH" : "USDT"}\nTo  ${to}\n\nNetwork fee ≈ ${r.fee} ETH\nThis cannot be undone.`, "Send now", true)) return;
     const s = await api.axSend(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
-    toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok");
+    toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok", (s && !s.err && s.tx) || null);
     if (activeView === "atomix" && axView === "wallet") renderAxWallet();
   };
 }
@@ -4366,7 +4411,7 @@ function ewConfirmSend(asset, sym, to, amt, fees, capped) {
     // uncertain = a network glitch mid-broadcast; warn (don't imply success OR clean failure), the user checks Etherscan
     if (s && s.uncertain) toast(s.err, "warn");
     else if (s && s.err) toast(s.err, "warn");
-    else toast("✓ Broadcast — tx " + TOK.shortId(s.tx), "ok");
+    else toast("✓ Broadcast — tx " + TOK.shortId(s.tx), "ok", (s && s.tx) || null);
     if (activeView === "ethwallet") renderEthWallet();
   };
 }
@@ -5573,7 +5618,7 @@ async function renderVestrList() {
     else action = `<div class="v-note">Nothing available to collect right now.</div>`;
     return `<div class="card v-card">
       <div class="v-top"><span class="v-amt">${vFmt(v.amount)} <small>${esc(vTok(v.tokenid))}</small> <span style="color:var(--dim);font-weight:400">locked</span></span>${badge}</div>
-      <div class="v-to mono">→ ${esc(vShort(v.beneficiary))}</div>
+      <div class="v-to mono">→ ${idHtml(v.beneficiary)}</div>
       <div class="v-bar"><i style="width:${v.pctVested}%;${v.expired ? "background:var(--green)" : ""}"></i></div>
       <div class="v-sub mono"><span>start · block ${v.startBlock.toLocaleString()}</span><span>end · block ${v.endBlock.toLocaleString()}</span></div>
       <div class="v-avail"><span class="k">Available to collect now</span><span class="val" style="color:${availCol}">${vFmt(v.cancollect)}</span></div>
@@ -5636,7 +5681,13 @@ async function vestrDoCreate() {
   };
   if (!(Number(opts.amount) > 0)) { toast("Enter a valid amount", "warn"); return; }
   if (!opts.beneficiary) { toast("Enter a beneficiary address", "warn"); return; }
-  const ok = await showConfirm("Create vesting contract?", `Lock ${vFmt(opts.amount)} ${vTok(opts.tokenid)} to ${vShort(opts.beneficiary)}, released ${VESTR_GRACE.find(g => g[1] === opts.graceHours)?.[0] || ""} from start to end. This cannot be cancelled.`, "Lock funds", false);
+  // The beneficiary is shown IN FULL, on its own line. This dialog is the last thing between the user and a
+  // contract with no cancel path, so it is the one place a truncated address is least excusable: 8 visible
+  // characters plus 4 is exactly what an address-substitution swap is designed to survive.
+  const ok = await showConfirm("Create vesting contract?",
+    `Lock ${vFmt(opts.amount)} ${vTok(opts.tokenid)}\n\nBeneficiary\n${opts.beneficiary}\n\n` +
+    `Released ${VESTR_GRACE.find(g => g[1] === opts.graceHours)?.[0] || ""} from start to end.\n` +
+    `Check the address above character by character — this cannot be cancelled.`, "Lock funds", false);
   if (!ok) return;
   btn.disabled = true; btn.textContent = "Locking…";
   try { const r = await api.vestrCreate(opts); toast("Vesting contract created ✓", "ok"); vestrView = "list"; renderVestr(); }
