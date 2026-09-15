@@ -3122,7 +3122,9 @@ async function renderSettings() {
     const warn = resetsWallet
       ? "⚠ This RESETS your wallet to the entered seed (regenerates keys, sets key-uses). Continue?"
       : "Re-fetches the chain and your coins. Your seed, keys and key-uses are NOT changed. Continue?";
-    if (!confirm("Resync from " + rhost + "?\n\n" + warn)) return;
+    // showConfirm, not the browser's blocking confirm(): the rest of the app uses it, and this is the
+    // dialog in front of a wallet RESET. A native modal also freezes the renderer while it is open.
+    if (!await showConfirm("Resync from " + rhost + "?", warn, resetsWallet ? "Reset and resync" : "Resync", resetsWallet)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
     try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
       if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState(); }   // seed reset → re-derive the mail identity
@@ -3472,7 +3474,8 @@ function renderNode(s) {
     const msg = turnOn
       ? "Contribute to the network?\n\nYour node will accept incoming connections and help other nodes sync. This asks your router to open TCP " + CFG.basePort + " (UPnP), keeps ~50 days of block history (a one-time extra download), and restarts the node now.\n\nNot all routers allow this — if yours doesn't, you'll still help by relaying."
       : "Stop contributing?\n\nYour node goes back to a light wallet (outbound connections only), the router port is closed, and the node restarts now.";
-    if (!confirm(msg)) return;
+    if (!await showConfirm(turnOn ? "Contribute to the network?" : "Stop contributing?",
+        msg.slice(msg.indexOf("\n\n") + 2), turnOn ? "Contribute" : "Stop", !turnOn)) return;
     const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     CFG = await api.saveConfig({ contribute: turnOn, params });
     toast(turnOn ? "Contributing — restarting node…" : "Back to light wallet — restarting node…");
@@ -5759,7 +5762,8 @@ async function renderParlons(attempt = 0) {
       </div>`;
     const b = el("parlonsSwitch");
     if (b) b.onclick = async () => {
-      if (!confirm("Switch this node to the Parlons Node?\n\nSame chain, same wallet, same data folder — plus your Parlons account. The node restarts now.")) return;
+      if (!await showConfirm("Switch this node to the Parlons Node?",
+          "Same chain, same wallet, same data folder — plus your Parlons account. The node restarts now.", "Switch")) return;
       b.disabled = true; b.textContent = "Switching…";
       try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast("Parlons Node starting…", "ok"); renderParlons(); }
       catch (e) { toast(e.message || String(e), "err"); b.disabled = false; b.textContent = "Switch to the Parlons Node"; }

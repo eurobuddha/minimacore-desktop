@@ -79,6 +79,25 @@ jobs:
       - name: Verify PandaPools engine parity + recovery
         run: npm run test:pandapools
 
+      # The donor-free halves of the other suites. The parity checks in test:atomix / test:casino diff against
+      # donor repos that CI does not check out, but the units and gates below need nothing external — and they
+      # cover fund-safety surfaces (the ETH RPC SSRF allowlist is 136 of these checks). Leaving them out meant
+      # a regression that reopened that allowlist could ship three installers with nothing going red.
+      - name: Verify ETH wallet guards
+        run: npm run test:ethwallet
+
+      # NOT gate:atomix — the S1/S2 gates boot the engine against a live mainnet node in the minimega docker
+      # container and compare the derived ETH identity with that peer's. There is no such node here, so they
+      # stay a local pre-release step. atomix-unit skips its one container-dependent check and says so.
+      - name: Verify AtomiX glue
+        run: node scripts/atomix-unit.js
+
+      - name: Verify Casino glue
+        run: node scripts/casino-glue-test.js
+
+      - name: Verify terminal autocomplete
+        run: npm run test:termcomplete
+
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash

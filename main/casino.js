@@ -28,6 +28,8 @@ let app = null; try { app = require("electron").app; } catch (e) {}
 const emitter = new EventEmitter();
 
 const CONTRACT = "0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F";
+// The Minima dollar-pegged token is MxUSD (the engine copy calls the same id USD_TOKENID).
+const MXUSD_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 // The covenant script — MUST compile to CONTRACT (identical to native + MDS). Verbatim from the donor service.js.
 const CASINO_SCRIPT = 'LET hpk=PREVSTATE(0) LET ha=PREVSTATE(1) LET hc=PREVSTATE(2) LET rng=PREVSTATE(3) LET po=PREVSTATE(4) LET bt=PREVSTATE(5) LET ph=PREVSTATE(6) LET to=PREVSTATE(7) IF ph EQ 0 AND SIGNEDBY(hpk) THEN RETURN TRUE ENDIF IF ph EQ 0 THEN ASSERT SAMESTATE(0 5) ASSERT STATE(6) EQ 1 ASSERT STATE(7) EQ to ASSERT STATE(11) GTE 0 AND STATE(11) LT rng ASSERT VERIFYOUT(@INPUT @ADDRESS @AMOUNT+bt @TOKENID TRUE) RETURN TRUE ENDIF LET qk=PREVSTATE(8) LET pk=PREVSTATE(11) IF ph EQ 1 AND SIGNEDBY(hpk) THEN ASSERT SAMESTATE(0 5) ASSERT STATE(6) EQ 2 ASSERT SAMESTATE(7 11) LET hs=STATE(12) ASSERT SHA3(hs) EQ hc ASSERT VERIFYOUT(@INPUT @ADDRESS @AMOUNT @TOKENID TRUE) RETURN TRUE ENDIF IF ph EQ 1 AND @COINAGE GT to AND SIGNEDBY(qk) THEN RETURN TRUE ENDIF IF ph EQ 2 AND SIGNEDBY(qk) THEN LET ps=STATE(13) ASSERT SHA3(ps) EQ PREVSTATE(10) LET hs=PREVSTATE(12) LET h=SHA3(CONCAT(hs ps)) LET r=NUMBER(SUBSET(0 4 h))%rng IF r EQ pk THEN LET w=bt*po ASSERT VERIFYOUT(@INPUT PREVSTATE(9) w @TOKENID FALSE) IF @AMOUNT GT w THEN ASSERT VERIFYOUT(@INPUT+1 ha @AMOUNT-w @TOKENID FALSE) ENDIF ELSE ASSERT VERIFYOUT(@INPUT ha @AMOUNT @TOKENID FALSE) ENDIF RETURN TRUE ENDIF IF ph EQ 2 AND @COINAGE GT to AND SIGNEDBY(hpk) THEN RETURN TRUE ENDIF RETURN FALSE';
 
@@ -274,7 +276,10 @@ async function resolveOutcome(commit, role) {
         if (hist.length > 50) hist.pop(); kpSet("casino_history", JSON.stringify(hist));
       }
     } catch (e) {}
-    emitter.emit("notify", (won ? "You WON +" : "You lost −") + profit + (betTok === "0x00" ? " Minima" : " USD") + " — " + cgame(range));
+    // Name the token rather than assuming every non-MINIMA bet is the dollar one. It happens to be true today
+    // (MxUSD is the only other currency the casino offers) and would quietly start lying the moment it isn't.
+    const tokLabel = betTok === "0x00" ? " Minima" : (betTok.toLowerCase() === MXUSD_TOKENID.toLowerCase() ? " MxUSD" : " " + betTok);
+    emitter.emit("notify", (won ? "You WON +" : "You lost −") + profit + tokLabel + " — " + cgame(range));
     emitter.emit("update");
     return { found: true, coinid, won, playerWins, result: exactResult, resultLabel: rLabel, pick, pickLabel, range, payout, bet, amount, tokenid: betTok };
   }

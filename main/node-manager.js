@@ -69,6 +69,37 @@ function commandOf(pid) {
   } catch (e) { return ""; }
 }
 
+/**
+ * Render an argv for the log with every secret value replaced, never merely shortened.
+ *
+ * Any flag the params manifest marks `type:"secret"` (-rpcpassword, -dbpassword, the -mysql DSN …) has its
+ * VALUE dropped, whether it arrives as `-flag value` or as a single `-Dkey=value`. The rpcSecret is also
+ * substring-replaced because the Parlons kind folds the whole Minima flag string into one -D argument.
+ */
+function redactArgs(args, rpcSecret) {
+  const PARAMS = require("../renderer/params.js");
+  const secretFlags = new Set();
+  for (const g of PARAMS.GROUPS) for (const it of g.items) if (it.type === "secret") secretFlags.add(it.flag);
+  secretFlags.add("rpcpassword");
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = String(args[i]);
+    const flag = a.replace(/^-+/, "").split("=")[0].toLowerCase();
+    if (a.startsWith("-") && secretFlags.has(flag)) {
+      if (a.includes("=")) { out.push(a.slice(0, a.indexOf("=") + 1) + "•••"); continue; }
+      out.push(a); if (i + 1 < args.length && !String(args[i + 1]).startsWith("-")) { out.push("•••"); i++; }
+      continue;
+    }
+    out.push(a.length > 60 ? a.slice(0, 57) + "…" : a);
+  }
+  let line = out.join(" ");
+  if (rpcSecret) line = line.split(rpcSecret).join("•••");
+  for (const f of secretFlags) {                       // inside the one quoted -Dparlons.node.args= blob
+    line = line.replace(new RegExp("(-" + f + "\\s+)(\"[^\"]*\"|\\S+)", "gi"), "$1•••");
+  }
+  return line;
+}
+
 function killPid(pid, signal) {
   try {
     if (process.platform === "win32") execFileSync("taskkill", ["/PID", String(pid), "/T", signal === "SIGKILL" ? "/F" : "/T"], { stdio: "ignore" });
@@ -305,8 +336,10 @@ class NodeManager extends EventEmitter {
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
     const args = this.buildArgs();
-    this.log("[app] starting node: java " + args.map(a => (a.length > 60 ? a.slice(0, 57) + "…" : a))
-      .join(" ").replace(config.rpcSecret(), "•••"));
+    // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
+    // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
+    // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
+    this.log("[app] starting node: java " + redactArgs(args, config.rpcSecret()));
     let p;
     try {
       p = spawn(this.javaPath(), args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -349,12 +382,15 @@ class NodeManager extends EventEmitter {
     if (!this.proc) { this.setState("stopped"); return; }
     this.setState("stopping");
     this.stopHealth();
+    // Bounded, always. The interval used to clear ONLY when this.proc went null, so if neither signal reaped
+    // the child (an unkillable/zombie process, or kill() throwing EPERM) this promise never settled — and
+    // before-quit awaits it after preventDefault(), so the app hung on quit with no window to close.
     const gone = new Promise(res => {
       const t = setTimeout(() => { try { this.proc && this.proc.kill("SIGTERM"); } catch (e) {} }, 12_000);
       const t2 = setTimeout(() => { try { this.proc && this.proc.kill("SIGKILL"); } catch (e) {} }, 25_000);
-      const iv = setInterval(() => {
-        if (!this.proc) { clearTimeout(t); clearTimeout(t2); clearInterval(iv); res(); }
-      }, 300);
+      const deadline = setTimeout(() => { finish(); }, 35_000);
+      const iv = setInterval(() => { if (!this.proc) finish(); }, 300);
+      const finish = () => { clearTimeout(t); clearTimeout(t2); clearTimeout(deadline); clearInterval(iv); res(); };
     });
     try { await rpcCall(this.rpcPort(), config.rpcSecret(), "quit"); } catch (e) { /* fall through to signals */ }
     await gone;

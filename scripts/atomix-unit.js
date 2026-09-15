@@ -8,7 +8,7 @@
 const assert = require("assert");
 const os = require("os"), path = require("path"), fs = require("fs");
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 function ok(name, fn) { try { fn(); pass++; console.log("  ✓", name); } catch (e) { fail++; console.error("  ✗", name, "—", e.message); } }
 async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", name); } catch (e) { fail++; console.error("  ✗", name, "—", e.message); } }
 
@@ -58,6 +58,17 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
   });
 
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
+  // This one is NOT hermetic: it reuses the live minimega docker container for the crypto-bearing commands
+  // (vault/seedrandom/newscript/getaddress), because the identity and covenant must derive for real. CI has
+  // no such container, so probe for it and SKIP rather than fail — a skip that says so is honest; counting it
+  // as a failure would train people to ignore a red suite, and counting it as a pass would be a lie.
+  const haveMinimega = await new Promise((res) => {
+    require("child_process").execFile("docker", ["exec", "minimega", "true"], { timeout: 8000 }, (e) => res(!e));
+  });
+  if (!haveMinimega) {
+    skipped++;
+    console.log("  ⊘ frozen quote replay — SKIPPED (no minimega docker container; run it locally for this check)");
+  } else
   await okA("frozen quote issues a replayable quoteId; replay consumes it", async () => {
     const atomix = require("../main/atomix");
     atomix._setDataDir(fs.mkdtempSync(path.join(os.tmpdir(), "axq-")));
@@ -196,6 +207,7 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     });
   }
 
-  console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed");
+  const skipNote = skipped ? " (" + skipped + " skipped — needs the minimega container)" : "";
+  console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" + skipNote : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed" + skipNote);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("UNIT ERROR:", e); process.exit(1); });
