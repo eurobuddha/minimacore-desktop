@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.94] — AtomiX signing gate: a synchronous throw no longer latches it shut
+- Re-copied `main/atomix/lib/signgate.js` from the donor at atomix-mds 0.1.30 (engine files are a copy, never a hand-edit — `npm run test:atomix` proves byte-parity). If a signing op threw before it reached the node, `next()` left the gate held with no callback pending, so every later claim, refund and publish queued behind a dead hold and silently never signed until the app restarted — for an HTLC leg that is a missed claim window. The gate is now freed on a synchronous throw, which is safe precisely because no signature was issued on that path, and the error still reaches the caller unchanged.
+- No time-based release, and the header now says why instead of describing a "lazy stale-hold check" that was never implemented (`MAX_HOLD_MS` and `busySince` were assigned and never read; both are gone). Elapsed time cannot tell a lost callback from a slow one — the node's write timeout is already 180s — and freeing a hold whose signature is still in flight would sign one Winternitz leaf twice, which is the key-disclosing bug the gate exists to prevent. A wedged gate costs a missed claim; a wrong release costs the key.
+- `multisig` is now gated: `multisig action:sign` signs but starts with neither 'sign' nor 'send', so prefix matching missed it entirely. AtomiX never calls it; it is listed so the gate stays honest for any host that does.
+- Donor suite 583 pass (6 new), desktop AtomiX parity 40/40 files, glue units 14/14.
+
 ## [0.16.93] — SSRF guard: pin the vetted address (DNS-rebinding fix)
 - `netfetch` vetted a hostname by resolving it, then handed the bare name to `http.request`, which resolved it AGAIN. An attacker-controlled resolver answers public for the check and `127.0.0.1` for the connect, so the request lands on the node's own RPC — which on the Parlons node takes commands with NO authentication. Token metadata is attacker-supplied and the wallet list fetches icons automatically, so a token sent to your address could run `send` with no user action. The vetted address is now PINNED for the connection (`vetHost` + `connectPin`); no second lookup can occur, on the first hop or any redirect. Same fix on `postText` (the ETH JSON-RPC path).
 - A bracketed IPv6 literal (`new URL("http://[::1]/").hostname` keeps the brackets, which `net.isIP` rejects) skipped the literal-IP branch and reached the resolver. Brackets are stripped before the check.

@@ -31,21 +31,29 @@
 
     var QUEUE = [];
     var busy = false;
-    var busySince = 0;
 
-    /** Longer than any node write timeout, so a hold is only ever treated as dead for a genuinely lost
-     *  callback — never for an operation that is merely slow. Proof-of-work is not quick. */
-    var MAX_HOLD_MS = 200000;
-
-    // NO TIMERS. setTimeout does not exist in the Rhino MDS service context — it appears only in
+    // NO TIME-BASED RELEASE, DELIBERATELY. An earlier header here described a "lazy stale-hold check" that
+    // would free a hold older than ~200s; it was never implemented, and it must not be. Elapsed time cannot
+    // distinguish a LOST callback from a SLOW one, and the node's own write timeout is already 180s because
+    // proof-of-work is not quick. Freeing a hold whose signature is still in flight is the concurrent-signing
+    // bug this whole module exists to prevent — two signatures over different data on one Winternitz leaf,
+    // which discloses that leaf's private key. A wedged gate costs a missed claim; a wrong release costs the
+    // key. So the ONLY thing that frees the gate is a callback — real (release) or provably-absent (the
+    // synchronous-throw path in next(), where no signature was ever issued).
+    //
+    // NO TIMERS EITHER. setTimeout does not exist in the Rhino MDS service context — it appears only in
     // lib/app.js, which is the browser page. This file loads in BOTH contexts, so a timer-based watchdog
-    // would throw the moment the service tried to sign. The stale-hold check below is lazy instead: it
-    // runs when the next operation is submitted, which is the only moment anything cares.
+    // would throw the moment the service tried to sign.
 
     /** Commands that make the node sign, i.e. consume a one-time key leaf. `send` signs internally exactly
      *  as `txnsign` does, and is this app's highest-frequency signer (one per order publish, OTC publish
-     *  and tombstone), so leaving it out would defeat the gate entirely. */
-    var SIGNING = ['send', 'txnsign', 'sign', 'consolidate', 'tokencreate'];
+     *  and tombstone), so leaving it out would defeat the gate entirely.
+     *
+     *  Matching is by PREFIX, which errs towards over-gating and never under: `sendview`/`sendnosign` don't
+     *  sign but are serialised anyway (harmless — they are rare and fast), while `multisig action:sign` DOES
+     *  sign and would otherwise have slipped past the gate entirely, since it starts with neither 'sign' nor
+     *  'send'. AtomiX itself never calls multisig; it is listed so the gate stays honest for any host that does. */
+    var SIGNING = ['send', 'txnsign', 'sign', 'consolidate', 'tokencreate', 'multisig'];
 
     function signs(command) {
         if (!command) return false;
@@ -64,9 +72,8 @@
 
     function next() {
         var op = QUEUE.shift();
-        if (!op) { busy = false; busySince = 0; return; }
+        if (!op) { busy = false; return; }
         busy = true;
-        busySince = Date.now();
         var freed = false;
         // idempotent: a sequence with several exit paths can safely release from all of them
         var release = function () {
@@ -74,7 +81,10 @@
             freed = true;
             next();
         };
-        op(release);
+        // A SYNCHRONOUS throw out of op (e.g. the host's cmd shim failing before it ever reaches the node)
+        // would otherwise leave busy latched with no callback pending — the same wedge, reached instantly
+        // rather than after a timeout. Free the gate, then let the error propagate to the caller unchanged.
+        try { op(release); } catch (e) { release(); throw e; }
     }
 
     AX.signgate = { submit: submit, signs: signs, _pending: function () { return QUEUE.length; } };
