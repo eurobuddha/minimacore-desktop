@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.16.93] — SSRF guard: pin the vetted address (DNS-rebinding fix)
+- `netfetch` vetted a hostname by resolving it, then handed the bare name to `http.request`, which resolved it AGAIN. An attacker-controlled resolver answers public for the check and `127.0.0.1` for the connect, so the request lands on the node's own RPC — which on the Parlons node takes commands with NO authentication. Token metadata is attacker-supplied and the wallet list fetches icons automatically, so a token sent to your address could run `send` with no user action. The vetted address is now PINNED for the connection (`vetHost` + `connectPin`); no second lookup can occur, on the first hop or any redirect. Same fix on `postText` (the ETH JSON-RPC path).
+- A bracketed IPv6 literal (`new URL("http://[::1]/").hostname` keeps the brackets, which `net.isIP` rejects) skipped the literal-IP branch and reached the resolver. Brackets are stripped before the check.
+- The pinned `lookup` answers both shapes node uses: `(err, address, family)` and, for Happy Eyeballs / `autoSelectFamily` (default-on since node 20, so the path electron 33 actually takes), an ARRAY under `{all:true}`. Getting that wrong would have broken every fetch.
+- 6 new tests (`npm run test:netfetch`), wired into CI ahead of the installer build on all three legs. Verified live afterwards: MEXC JSON and a real favicon still fetch over TLS; loopback still refused.
+
 ## [0.16.87] — PandaPools engine parity: serial signing gate, CoinLock, `$OADR` funding exclusion
 - Bring the Desktop PandaPools engine back to byte-equality with the MDS MiniDapp. `poolmgr.js` and `service.js` had drifted ~200 lines each with Desktop behind, missing the serial signing gate, the MiniDapp-wide `pp_signlock`, the `pp_coinlocks` CoinLock and the `$OADR` funding exclusion in five places — the complete 0.9.22 defect set, on the surface where one 12s poller drives scan, background worker, pending-sign resume and verify in a single vm context over a single sqlite file. Two transactions signing one key sign the same Winternitz leaf over different data, which discloses that leaf's private key.
 - Expose `setInterval`/`clearInterval` to the engine's vm sandbox. The sign-lock heartbeat calls `setInterval` unconditionally, so without it every create, deposit, close, migrate and swap would fail; `service.js` guards with `typeof`, which would instead hold the lock with no heartbeat and let the TTL reap it mid-chain, silently.

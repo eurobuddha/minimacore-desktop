@@ -4,6 +4,11 @@
  *
  *   - SSRF guard: resolve ALL A/AAAA records and refuse loopback / private / link-local / ULA / mapped-v4
  *     (and re-check on every redirect) so a hostile icon url can't point us at the node RPC or the LAN.
+ *     The vetted address is then PINNED for the connection (vetHost + connectPin). Vetting the name and
+ *     letting the client re-resolve it was a DNS-rebinding hole: the attacker's resolver answers public for
+ *     the check and 127.0.0.1 for the connect, and since the Parlons admin RPC takes commands with NO auth,
+ *     a token's icon url could run `send`. Token metadata is attacker-supplied, and the wallet list fetches
+ *     these automatically, so this path is reachable with no user action.
  *   - 8 MB streaming byte cap (abort past it) so an icon can't OOM us.
  *   - Bounded concurrency (4) so dozens of token urls don't spawn dozens of sockets.
  *   - Returns a `data:` URI (safe under `img-src data:`) or null; NEVER throws to the renderer.
@@ -48,13 +53,45 @@ function ipBlocked(addr) {
   return false;
 }
 async function isBlockedHost(host) {
-  if (!host) return true;
-  if (net.isIP(host)) return ipBlocked(host);            // literal IP — no DNS
+  return (await vetHost(host)) === null;
+}
+
+/**
+ * Resolve a host ONCE, vet every answer, and return the address to actually dial — or null if blocked.
+ *
+ * DNS REBINDING (the reason this returns an address instead of a boolean): vetting a NAME and then letting
+ * the HTTP client resolve it again is not a guard at all. The attacker's own resolver answers with a public
+ * IP for our check and 127.0.0.1 for the client's lookup a moment later, and the request lands on the node's
+ * OWN RPC — which on the Parlons node accepts commands with no authentication, so `send` is reachable from a
+ * token's icon url. We therefore resolve once and PIN that address for the connection (see connectPin).
+ */
+async function vetHost(host) {
+  if (!host) return null;
+  // URL.hostname keeps the brackets on an IPv6 literal ("[::1]"), which net.isIP does NOT recognise — so a
+  // bracketed literal used to skip the literal-IP branch and reach the resolver. Strip them first.
+  const bare = String(host).replace(/^\[(.*)\]$/, "$1");
+  if (net.isIP(bare)) return ipBlocked(bare) ? null : { address: bare, family: net.isIPv6(bare) ? 6 : 4 };
   let addrs;
   try { addrs = await dns.promises.lookup(host, { all: true }); }
-  catch (e) { return true; }                             // unresolvable → blocked
-  if (!addrs.length) return true;
-  return addrs.some(a => ipBlocked(a.address));          // any private answer → blocked
+  catch (e) { return null; }                             // unresolvable → blocked
+  if (!addrs.length) return null;
+  if (addrs.some(a => ipBlocked(a.address))) return null; // any private answer → blocked (unchanged policy)
+  const a = addrs[0];
+  return { address: a.address, family: a.family };
+}
+
+/**
+ * A `lookup` override that hands the socket the ALREADY-VETTED address, so no second DNS query can occur.
+ * Node calls this either as (host, {all:true}, cb) — the Happy-Eyeballs/autoSelectFamily path, default-on
+ * since Node 20 and so the one Electron 33 actually takes — expecting an ARRAY, or as (host, opts, cb)
+ * expecting (err, address, family). Both shapes are answered; getting this wrong would fail every fetch.
+ */
+function connectPin(vetted) {
+  return function (hostname, opts, cb) {
+    const entry = { address: vetted.address, family: vetted.family };
+    if (opts && opts.all) return cb(null, [entry]);
+    return cb(null, entry.address, entry.family);
+  };
 }
 
 // ---- bounded concurrency ---------------------------------------------------
@@ -72,10 +109,11 @@ function getCapped(urlStr, redirectsLeft, accept) {
     let u;
     try { u = new URL(urlStr); } catch (e) { return resolve(null); }
     if (u.protocol !== "http:" && u.protocol !== "https:") return resolve(null);
-    isBlockedHost(u.hostname).then(blocked => {
-      if (blocked) return resolve(null);
+    vetHost(u.hostname).then(vetted => {
+      if (!vetted) return resolve(null);
       const lib = u.protocol === "https:" ? https : http;
-      const req = lib.request(u, { method: "GET", headers: { "User-Agent": "minimaCore-Desktop", Accept: accept || "image/*" } }, res => {
+      const req = lib.request(u, { method: "GET", lookup: connectPin(vetted),
+        headers: { "User-Agent": "minimaCore-Desktop", Accept: accept || "image/*" } }, res => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
           if (redirectsLeft <= 0) return resolve(null);
@@ -144,8 +182,10 @@ async function fetchJson(url) {
 }
 
 /** POST a small JSON body → raw response TEXT, or null on any failure/guard. Built for the AtomiX module's
- *  Ethereum JSON-RPC calls (the caller pins the host allowlist — same division of duty as fetchJson/MEXC and
- *  the keyAudit handler). Same SSRF guard + byte cap + bounded pool as GETs. POSTs never follow redirects
+ *  Ethereum JSON-RPC calls. The host allowlist lives in the caller's shim (main/atomix.js NET_HOSTS +
+ *  ethUserHosts) — NOT in lib/ethrpc.js, which takes the configured url plus its keyless fallbacks and
+ *  relies on ethSetRpc having validated the former. Same SSRF guard + byte cap + bounded pool as GETs,
+ *  including the pinned-address connect. POSTs never follow redirects
  *  (a redirected RPC POST is suspect; the pinned endpoints don't redirect). NEVER throws. */
 async function postText(url, body) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
@@ -156,10 +196,10 @@ async function postText(url, body) {
       let u;
       try { u = new URL(url.trim()); } catch (e) { return resolve(null); }
       if (u.protocol !== "http:" && u.protocol !== "https:") return resolve(null);
-      isBlockedHost(u.hostname).then(blocked => {
-        if (blocked) return resolve(null);
+      vetHost(u.hostname).then(vetted => {
+        if (!vetted) return resolve(null);
         const lib = u.protocol === "https:" ? https : http;
-        const req = lib.request(u, { method: "POST", headers: {
+        const req = lib.request(u, { method: "POST", lookup: connectPin(vetted), headers: {
           "User-Agent": "minimaCore-Desktop", "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body), Accept: "application/json"
         } }, res => {
