@@ -139,12 +139,15 @@ async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
   const msg = { type: T.ORDER, ref, randomid: randomId(), from: identity.publicId, to: shopCfg.vendorPublicId,
     date: Date.now(), shopId: shopCfg.shopId, shopName: shopCfg.shopName, items, amount: String(total),
     currency: shopCfg.currency, tokenid, shipping: shipping || "", delivery: delivery || "", buyerPayaddr: vendorAddress, message: note || "" };
-  // local order first (role=buy) so a failed payment still shows with a retry
+  // local order first (role=buy) so a failed payment still shows with a retry.
+  // The vendor address goes in HERE, in the object upsertOrder persists — stashing it afterwards with
+  // `store.order(ref).vendorAddress = …` only mutated the in-memory row and never flushed, so a crash before
+  // the next unrelated write lost it and retryPayment fell back to store.shop(), which is exactly the source
+  // this stash exists to avoid trusting. The ambiguity flags either side of it already use setMetaSync.
   store.upsertOrder({ ref, role: "buy", counterparty: shopCfg.vendorPublicId, shopId: shopCfg.shopId, shopName: shopCfg.shopName,
     items, amount: String(total), currency: shopCfg.currency, tokenid, shipping: shipping || "", delivery: delivery || "",
+    vendorAddress: shopCfg.vendorAddress,
     status: "PENDING", paid: false, date: msg.date, unread: false });
-  // stash the vendor address on the order so a retry never has to trust anything else
-  const ord = store.order(ref); if (ord) ord.vendorAddress = shopCfg.vendorAddress;
   await sendMerchMessage(shopCfg.vendorPublicId, msg);
   let payTxpow = null, payError = null;
   try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; }

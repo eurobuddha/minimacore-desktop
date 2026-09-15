@@ -3133,6 +3133,12 @@ async function renderSettings() {
   el("setBackup").onclick = async () => {
     const pw = el("bkPw").value.trim();
     if (!pw) { toast("Enter a backup password."); return; }
+    // A `"` closes password:"…" early, so the node encrypted the backup under a DIFFERENT password than the
+    // one typed and reported success — the user only finds out when a restore fails, with funds behind it.
+    // The resync handler forty lines up already guards its password this way; this one didn't.
+    if (/["\\]/.test(pw) || /[\n\r\t]/.test(pw)) {
+      toast("Backup password can't contain a \" or \\ or a line break — the node can't carry it safely.", "err"); return;
+    }
     try { await cmd(`backup password:"${pw}"`); toast("Encrypted backup written to the node data folder ✓", "ok"); }
     catch (e) { toast("Backup failed: " + e.message, "err"); }
   };

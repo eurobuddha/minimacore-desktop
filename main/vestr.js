@@ -16,6 +16,7 @@ const { EventEmitter } = require("events");
 const crypto = require("crypto");
 const { rpcCall } = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
+const V = require("./validate");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const emitter = new EventEmitter();
@@ -127,8 +128,15 @@ async function blockHeightForDate(whenMs, tp) { return tp + Math.round((Number(w
 async function create(opts) {
   await init();
   const { tokenid, amount, beneficiary, startMs, endMs, graceHours, burn, password } = opts || {};
-  if (!(Number(amount) > 0)) throw new Error("Enter a valid amount to lock");
+  // Everything below is interpolated into a space-tokenised, LAST-WINS command, so a value carrying a space
+  // and another `key:` rewrites the command around it — `tokenid` of "0x00 address:0xATTACKER" would append a
+  // second address that wins over CONTRACT. main/webwallet.js states the rule ("NEVER interpolate unvalidated
+  // free-text"); this module was the one that opted out of it.
+  if (!V.isAmount(String(amount))) throw new Error("Enter a valid amount to lock");
   if (!beneficiary) throw new Error("Enter a beneficiary address");
+  if (!V.isTokenid(tokenid)) throw new Error("Invalid token id");
+  if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
+  if (password != null && password !== "" && !V.isQuotableText(String(password))) throw new Error("The wallet password can't contain quotes, backslashes or line breaks");
   if (!(Number(endMs) > Number(startMs))) throw new Error("End must be after start");
   const chk = await runner("checkaddress address:" + beneficiary).catch(() => null);
   const addr0x = chk && chk.response && chk.response["0x"];
@@ -139,7 +147,7 @@ async function create(opts) {
   const uid = "0x" + crypto.randomBytes(32).toString("hex").toUpperCase();
   const now = Date.now();
   const state = '{"0":"' + addr0x + '","1":"' + amount + '","2":"' + startBlock + '","3":"' + endBlock + '","4":"' + minblockwait + '","5":"' + now + '","6":"' + Number(startMs) + '","7":"' + (Number(graceHours) || 0) + '","8":"' + Number(endMs) + '","199":"' + uid + '"}';
-  let cmd = "send debug:false " + (password ? "password:" + password + " " : "") + "amount:" + amount + " address:" + CONTRACT + " tokenid:" + tokenid + " state:" + state;
+  let cmd = "send debug:false " + (password ? 'password:"' + password + '" ' : "") + "amount:" + amount + " address:" + CONTRACT + " tokenid:" + tokenid + " state:" + state;
   if (burn && Number(burn) > 0) cmd += " burn:" + burn;
   if (tokenid === "0x00") cmd = await pinMinimaSend(runner, cmd);   // MINIMA lock: dodge shared-node beacon-dust NPE
   const res = await runner(cmd);
@@ -150,6 +158,8 @@ async function create(opts) {
 // ---- collect / claim (VERBATIM 1.8.1 order — amount from the NODE via runscript) ----
 async function collect(coinid, burn) {
   await init();
+  if (!V.isHexId(coinid)) throw new Error("Invalid coin id");
+  if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
   const cr = await runner("coins coinid:" + coinid).catch(() => null);
   const coin = cr && Array.isArray(cr.response) && cr.response[0];
   if (!coin) throw new Error("Contract coin not found (already collected?)");

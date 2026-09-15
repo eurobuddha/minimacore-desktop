@@ -81,7 +81,40 @@ function load() {
   return merged;
 }
 
-function save(cfg) {
+/**
+ * Accept only keys we actually define, with the shape we expect.
+ *
+ * The patch arrives from the renderer over IPC and these values become `java` argv — basePort, dataFolder,
+ * extraArgs and every entry in params. spawn() is used without a shell, so there is no shell-injection path,
+ * and the renderer is our own bundled code; this is defence in depth, and mostly it stops a typo'd or stale
+ * key silently accumulating in config.json forever (load() already prunes params that way, but not the
+ * top-level). An unknown key is dropped rather than rejected, so an older renderer can't be bricked by it.
+ */
+function sanitisePatch(cfg) {
+  const out = {};
+  for (const k of Object.keys(cfg || {})) {
+    if (!(k in DEFAULTS)) continue;                       // not one of ours → drop
+    const v = cfg[k], want = typeof DEFAULTS[k];
+    if (k === "params" || k === "labels") { if (v && typeof v === "object" && !Array.isArray(v)) out[k] = v; continue; }
+    if (want === "boolean") { out[k] = !!v; continue; }
+    if (want === "number") {
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n)) continue;
+      if (k === "basePort") { if (n < 1024 || n > 65535 - 600) continue; }   // room for the +584/+586 offsets
+      if (k === "heapMb" && (n < 0 || n > 262144)) continue;
+      out[k] = n; continue;
+    }
+    if (want === "string") { if (typeof v === "string") out[k] = v; continue; }
+    out[k] = v;
+  }
+  return out;
+}
+
+function save(patch) {
+  // Work on a COPY: the secret-marker rewrite below replaces values in cfg.params, and mutating the caller's
+  // object (the live IPC argument) is a side effect no caller asks for.
+  const cfg = sanitisePatch(patch);
+  if (cfg.params) cfg.params = Object.assign({}, cfg.params);
   const cur = load();
   // Route secret params (passwords / DSNs) to the Keychain; store only a boolean "set" marker in config.
   if (cfg.params) {
