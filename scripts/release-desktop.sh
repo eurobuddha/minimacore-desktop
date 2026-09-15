@@ -13,7 +13,10 @@ VER="${1:?version, e.g. 0.16.35}"; NOTES="${2:-minimaCore Desktop $VER}"
 REPO="eurobuddha/minimacore-desktop"
 DMG="dist/minimaCore-$VER-arm64.dmg"
 [ -f "$DMG" ] || { echo "no $DMG - build it first: npm run dist:mac:signed"; exit 1; }
-xcrun stapler validate "$DMG" > /dev/null || { echo "$DMG is not notarized+stapled - refusing"; exit 1; }
+# The FULL gate, not just "is a ticket attached": stapled proves notarization, it does not prove a Developer
+# ID signature, the hardened runtime, or that Gatekeeper actually accepts the app and the DMG. verify-mac.sh
+# checks all of those and that the .app matches this version, and a DMG that fails it is not releasable.
+scripts/verify-mac.sh || { echo "$DMG failed scripts/verify-mac.sh - refusing to release it"; exit 1; }
 [ "$(node -p "require('./package.json').version")" = "$VER" ] || { echo "package.json is not $VER"; exit 1; }
 [ -z "$(git status --porcelain -- package.json main renderer scripts README.md)" ] || { echo "uncommitted changes - commit first"; exit 1; }
 echo "== tag v$VER"

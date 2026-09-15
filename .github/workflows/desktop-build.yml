@@ -64,6 +64,10 @@ jobs:
       - name: Verify SSRF guard
         run: npm run test:netfetch
 
+      # The update channel is the one path that puts an executable in front of the user.
+      - name: Verify updater guards
+        run: npm run test:updater
+
       - name: Verify Parlons panel sessions
         run: npm run test:parlons
 

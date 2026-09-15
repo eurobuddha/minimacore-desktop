@@ -7,8 +7,12 @@
  *   { "app": "minimaCore Desktop", "version": "0.16.27", "date": "…", "notes": "…",
  *     "platforms": { "mac-arm64": { "file": "https://github.com/eurobuddha/minimacore-desktop/releases/download/v0.16.27/minimaCore-0.16.27-arm64.dmg", "sha256": "…", "size": 154786107 }, "win-x64": {…}, "linux-x64": {…} } }
  * check(): GET the feed (host-pinned, 20 s, never an error to the user), compare with app.getVersion().
- * download(): fetch the platform's file to ~/Downloads, verify sha256, reveal it. No silent install — the
- * user drags the signed DMG (or runs the installer) exactly as for a fresh install.
+ * download(): fetch the platform's file to ~/Downloads, verify sha256 + size, reveal it. No silent install —
+ * the user drags the signed DMG (or runs the installer) exactly as for a fresh install.
+ *
+ * TRANSPORT RULES: https on EVERY hop (a redirect is re-checked, so one 302 can't downgrade the channel to
+ * http), and the sha256 is MANDATORY — a feed that omits it makes the update unavailable rather than
+ * unverified. Only loopback may use http, for a self-hosted feed on this machine.
  * config.updateFeed overrides the URL for a self-hosted feed.
  */
 const { app, shell } = require("electron");
@@ -39,9 +43,18 @@ function cmpVersion(a, b) {
   }
   return 0;
 }
+/** https, or http ONLY to loopback (a self-hosted feed on this machine). Anything else is refused. */
+function schemeOk(u) {
+  return u.protocol === "https:" || (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"));
+}
+
 function get(url, { timeout = 20000, maxRedirects = 5 } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
+    // The scheme was checked on the URL we were HANDED; a redirect is a new URL and gets the same check.
+    // Without this, one 302 to http:// silently downgraded the whole transfer — and for the feed, which is
+    // what tells the app a newer version exists and where to get it, that is the entire update channel.
+    if (!schemeOk(u)) { reject(new Error("refusing a non-https update URL: " + u.protocol + "//" + u.hostname)); return; }
     const mod = u.protocol === "http:" ? http : https;
     const req = mod.get(u, { headers: { "User-Agent": "minimaCore-Desktop/" + app.getVersion(), Accept: "*/*" }, timeout }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && maxRedirects > 0) {
@@ -60,11 +73,14 @@ async function check() {
   try {
     const url = feedUrl();
     const u = new URL(url);
-    if (u.protocol !== "https:" && !(u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"))) throw new Error("the update feed must be https");
+    if (!schemeOk(u)) throw new Error("the update feed must be https");
     const body = JSON.parse((await get(url)).toString("utf8"));
     const p = (body.platforms || {})[platformKey()] || {};
     const newer = cmpVersion(body.version, app.getVersion()) > 0;
-    status = { checkedAt: Date.now(), available: newer && !!p.file, version: String(body.version || ""), notes: String(body.notes || ""), date: String(body.date || ""),
+    // Require the hash HERE too, not just at download time: an update the download step will refuse is not
+    // an available update, and offering it would put a dead "Update" button in front of the user.
+    const hashed = /^[0-9a-f]{64}$/.test(String(p.sha256 || "").toLowerCase());
+    status = { checkedAt: Date.now(), available: newer && !!p.file && hashed, version: String(body.version || ""), notes: String(body.notes || ""), date: String(body.date || ""),
                file: String(p.file || ""), sha256: String(p.sha256 || "").toLowerCase(), size: Number(p.size || 0), error: "", downloaded: status.downloaded && status.version === body.version ? status.downloaded : "" };
   } catch (e) {
     status = Object.assign({}, status, { checkedAt: Date.now(), error: (e && e.message) || String(e) });
@@ -76,12 +92,15 @@ async function check() {
 async function download() {
   if (!status.available || !status.file) throw new Error("no update to download");
   const u = new URL(status.file);
-  if (u.protocol !== "https:" && !(u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"))) throw new Error("refusing a non-https download");
+  if (!schemeOk(u)) throw new Error("refusing a non-https download");
+  // The hash is MANDATORY. `if (status.sha256)` meant a feed that simply omitted it got an unverified
+  // installer written to ~/Downloads and revealed for the user to run. On macOS notarization is a second
+  // line of defence; the Windows .exe and Linux .AppImage are unsigned, so there is nothing else at all.
+  if (!/^[0-9a-f]{64}$/.test(status.sha256)) throw new Error("the feed carries no sha256 for this platform — refusing to download");
   const buf = await get(status.file, { timeout: 15 * 60_000 });
-  if (status.sha256) {
-    const got = crypto.createHash("sha256").update(buf).digest("hex");
-    if (got !== status.sha256) throw new Error("sha256 mismatch — the download does not match the feed; not saved");
-  }
+  const got = crypto.createHash("sha256").update(buf).digest("hex");
+  if (got !== status.sha256) throw new Error("sha256 mismatch — the download does not match the feed; not saved");
+  if (status.size > 0 && buf.length !== status.size) throw new Error("size mismatch — the download does not match the feed; not saved");
   const dir = app.getPath("downloads");
   fs.mkdirSync(dir, { recursive: true });
   const name = path.basename(u.pathname) || ("minimaCore-" + status.version);

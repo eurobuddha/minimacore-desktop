@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.16.94",
+  "version": "0.16.95",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node \u2014 runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "gate:atomix": "node scripts/atomix-boot-gate.js && node scripts/atomix-s2-gate.js",
     "test:rpc": "node --test scripts/rpc-test.cjs",
     "test:netfetch": "node --test scripts/netfetch-test.cjs",
+    "test:updater": "node --test scripts/updater-test.cjs",
     "test:parlons": "node --test scripts/parlons-view-test.cjs scripts/parlons-calls-test.cjs",
     "test:pandapools-recovery": "node --test scripts/pandapools-recovery.test.cjs scripts/pandapools-recovery-lifecycle.test.cjs",
     "test:pandapools-parity": "node scripts/pandapools-parity-check.cjs",
@@ -153,5 +154,6 @@
     "qrcode-generator": "^2.0.4",
     "sql.js": "^1.13.0"
   },
-  "parlonsNode": "0.2.112"
+  "parlonsNode": "0.2.112",
+  "parlonsNodeSha256": "680b0a88ef6cc4c83137116aba672339e80e5ce2edc2f2134a898b25f10a8f44"
 }
