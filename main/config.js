@@ -61,7 +61,11 @@ const DEFAULTS = {
   labels: {},                // address → friendly name (shown in Receive / History / CSV)
   theme: "current",          // current | original-light | original-dark
   casinoEnabled: false,      // Casino tab hidden until enabled in Settings (18+ self-cert); also gates the bg auto-processor
-  casinoAgeCertified: false  // user self-certified 18+ / legal gambling age
+  casinoAgeCertified: false, // user self-certified 18+ / legal gambling age
+  casinoDollar: false        // Casino currency toggle: false = MINIMA, true = MxUSD. It MUST be declared here —
+                             // save() drops any key DEFAULTS does not name, and this one being absent is what
+                             // froze the toggle in 0.16.97 (it had lived in the renderer only since 0.16.37).
+                             // scripts/config-keys-test.cjs now fails the build if a renderer key goes missing.
 };
 
 function load() {
@@ -93,7 +97,9 @@ function load() {
 function sanitisePatch(cfg) {
   const out = {};
   for (const k of Object.keys(cfg || {})) {
-    if (!(k in DEFAULTS)) continue;                       // not one of ours → drop
+    // Drop LOUDLY. A silent drop is what turned the 0.16.97 casinoDollar regression into a "broken button":
+    // the setting could never persist, nothing threw, and nothing said why.
+    if (!(k in DEFAULTS)) { console.warn("[config] ignoring unknown config key '" + k + "' — add it to DEFAULTS if it should persist"); continue; }
     const v = cfg[k], want = typeof DEFAULTS[k];
     if (k === "params" || k === "labels") { if (v && typeof v === "object" && !Array.isArray(v)) out[k] = v; continue; }
     if (want === "boolean") { out[k] = !!v; continue; }

@@ -116,12 +116,17 @@ async function boot() {
   initTabScroll();
   // RULE 1, app-wide: anything rendered with a shortened identifier carries the COMPLETE value in
   // data-copy, and one click puts that complete value on the clipboard. Delegated from the document so it
-  // works for every view without each render path having to remember to wire it (the PandaPools views had
-  // their own wirePpCopy; everywhere else a truncated id was simply unrecoverable).
+  // works for every view without each render path having to remember to wire it. It REPLACES the old
+  // per-view wirePpCopy (PandaPools only); running both made every PandaPools id copy twice.
+  // CAPTURE phase, and it stops the event dead. A copy span can sit INSIDE a clickable row — the AtomiX depth
+  // book nests one in `.ax-half[data-take]`, whose handler jumps to the Swap tab and picks a side — so
+  // "copy this maker's key" was also starting a trade setup. Capture is what makes stopping it work at all:
+  // on the bubble phase this listener runs LAST (document is outermost), long after the row's own handler.
+  // Copy is a terminal action, so no ancestor wants the click as well.
   document.addEventListener("click", (e) => {
     const n = e.target && e.target.closest && e.target.closest("[data-copy]");
-    if (n && n.dataset.copy) { e.preventDefault(); copy(n.dataset.copy); }
-  });
+    if (n && n.dataset.copy) { e.preventDefault(); e.stopPropagation(); copy(n.dataset.copy); }
+  }, true);
   api.appVersion().then(v => { const e = el("hdrVer"); if (e && v) e.textContent = "v" + v; }).catch(() => {});
   // App updates: the store feed is checked in the main process; the pill appears when a newer build exists.
   const refreshUpdatePill = async () => {
@@ -2012,13 +2017,11 @@ function ppFeedHtml(feed) {
   return html;
 }
 function wirePpActivity(root) {
-  wirePpCopy(root);
   root.querySelectorAll("[data-ppmore]").forEach(b => b.onclick = () => { if (b.dataset.ppmore === "activity") ppActivityShown += 60; else ppFeedShown += 60; refreshPpActive(); });
 }
 function wirePpPoolRows(root) {
   root.querySelectorAll(".row[data-pool]").forEach(n => n.oncontextmenu = (e) => { e.preventDefault(); copy(n.dataset.pool); toast("Pool address copied", "ok"); });
 }
-function wirePpCopy(root) { root.querySelectorAll("[data-copy]").forEach(n => n.onclick = () => { copy(n.dataset.copy); toast("Copied", "ok"); }); }
 
 async function renderPpPools() {
   const host = el("ppBody");
@@ -2067,7 +2070,7 @@ async function renderPpMyLP() {
     <div class="card" style="margin-top:12px"><div class="card__title">Pool calculator</div>
       <div class="view__desc">What happens to a pool when the price moves: enter a starting pool (or open it from one of your pool cards, seeded with its live reserves), move the MINIMA price and see the reserves, their ratio, the value versus holding and the effect of fees on the constant-product curve. Display only.</div>
       <div class="seg"><button class="btn btn--outline btn--full" id="ppCalcBtn">Open the calculator</button></div></div>`;
-  wirePpHeader(); wirePpCopy(el("ppMine")); wirePpMineActions(el("ppMine"));
+  wirePpHeader(); wirePpMineActions(el("ppMine"));
   el("ppCalcBtn").onclick = () => showPpCalc(null);
   el("ppCreateBtn").onclick = showPpCreate;
   el("ppCollectBtn").onclick = doPpCollect;
@@ -2422,7 +2425,7 @@ async function refreshPpActive() {
   } else if (ppView === "mylp") {
     if (!el("ppMine")) return;
     PP_MINE = await api.ppMyPools().catch(() => []);
-    const c = el("ppMine"); if (c) { c.innerHTML = ppMineHtml(PP_MINE); wirePpCopy(c); wirePpMineActions(c); }
+    const c = el("ppMine"); if (c) { c.innerHTML = ppMineHtml(PP_MINE); wirePpMineActions(c); }
   } else if (ppView === "activity") {
     if (!el("ppActs")) return;
     const [acts, feed] = await Promise.all([api.ppActivity().catch(() => []), api.ppFeed().catch(() => [])]);

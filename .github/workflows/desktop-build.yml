@@ -68,6 +68,11 @@ jobs:
       - name: Verify updater guards
         run: npm run test:updater
 
+      # Every key the renderer persists must be declared in config DEFAULTS. save() drops the ones it does not
+      # know, silently — which is exactly how the Casino currency toggle died between 0.16.97 and 0.16.99.
+      - name: Verify config keys
+        run: npm run test:config-keys
+
       - name: Verify Parlons panel sessions
         run: npm run test:parlons
 
