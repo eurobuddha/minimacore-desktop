@@ -331,6 +331,28 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.equal(full.length, 42);
       assert.ok(!full.includes("…") && !full.includes("..."), "no ellipsis in a projected identifier");
     });
+
+    // ---- 0.17.4: a refused claim must be VISIBLE on the row (engine 0.1.31 writes *_FAILED events) ----
+    ok("Activity row projects the newest failure reason, and a later success clears it", () => {
+      const note = "script proof missing — the node has no script row for the covenant address. Nothing was posted.";
+      // getEvents rows are newest-first
+      assert.equal(atomix._lastFailureNote([{ event: "MINIMA_CLAIM_FAILED", note }, { event: "CPTXN_SENT", note: "0xabc" }]), note);
+      assert.equal(atomix._lastFailureNote([{ event: "MINIMA_CLAIM_SUBMITTED", note: "0xTXP" }, { event: "MINIMA_CLAIM_FAILED", note }]), "");
+      assert.equal(atomix._lastFailureNote([{ event: "CPTXN_SENT", note: "0xabc" }]), "");
+      assert.equal(atomix._lastFailureNote([]), "");
+    });
+    await okA("the shim hands a txncheck verdict to the engine untouched (normReply must not clobber `valid`)", async () => {
+      const mds = atomix._buildMds();
+      atomix._setRunner(async (cmd) => {
+        if (/^txncheck /.test(cmd)) return { status: true, response: { inputs: 1, scripts: 0, validamounts: true, valid: { basic: true, mmrproofs: true, scripts: false } } };
+        return { status: true };
+      });
+      const r = await new Promise(res => mds.cmd("txncheck id:axswap_test", res));
+      assert.equal(r.status, true);
+      assert.equal(r.response.scripts, 0); assert.equal(r.response.inputs, 1);
+      assert.strictEqual(r.response.valid.scripts, false, "valid.scripts must reach checkFailure as-is");
+      assert.ok(!("error" in r) || r.error == null, "a status:true reply gains no error");
+    });
   }
 
   const skipNote = skipped ? " (" + skipped + " skipped — needs the minimega container)" : "";

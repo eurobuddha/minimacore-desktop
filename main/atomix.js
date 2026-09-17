@@ -470,13 +470,29 @@ async function swaps() {
   // renderer could not show them however it tried. `detail` is the engine's own plain-language line — the
   // same text the MiniDapp shows — so "waiting" is never ambiguous. statusDetail reads the lowercase field
   // names, which is exactly this projection's shape, so it is fed the row rather than a second mapping.
-  return jclone(shown.map(s => {
+  // The newest *_FAILED event's reason rides on the row (`lastFail`) so statusDetail can say "Claim FAILING — …"
+  // instead of "claiming now" while attempts are being refused. Engine 0.1.31 writes one such event per distinct
+  // reason; before it, a claim could fail ~45 times over two hours with the row still reading "claiming".
+  const rows = [];
+  for (const s of shown) {
     const row = { hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
       sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status,
       created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId };
+    row.lastFail = lastFailureNote(await p(cb => A.swapdb.getEvents(s.hash, cb)).catch(() => []));
     row.detail = A.inspect.statusDetail(row);
-    return row;
-  }));
+    rows.push(row);
+  }
+  return jclone(rows);
+}
+/** getEvents rows arrive newest-first; the reason of the newest *_FAILED event, or "" when the newest settlement
+ *  event is a success (a later SUBMITTED/COLLECT/EXPIRED supersedes an earlier failure). */
+function lastFailureNote(events) {
+  for (const e of events || []) {
+    const ev = String(e.event || "");
+    if (/_FAILED$/.test(ev)) return String(e.note || "");
+    if (/_SUBMITTED$|^CPTXN_COLLECT$|^CPTXN_EXPIRED$/.test(ev)) return "";
+  }
+  return "";
 }
 // Full per-swap history for CSV export — every swap column PLUS the on-chain leg tx ids joined from the events log.
 // getEvents rows are {event, token, amount, note(=txnhash), date}: the Minima leg logs token 'minima' (note=txpowid),
@@ -1078,6 +1094,7 @@ module.exports = {
   // test-only: the publish-send coin pin (scripts/atomix-unit.js) — drive it with _setRunner
   _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,
   _buildMds: buildMds,   // test-only: the MDS shim, so the cmd reply normalisation can be asserted
+  _lastFailureNote: lastFailureNote,   // test-only: the Activity row's failure projection
   _publishSendWithRetry: publishSendWithRetry,
   _ctx: () => ctx, _fire: fire,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed

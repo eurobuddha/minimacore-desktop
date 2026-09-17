@@ -16,7 +16,9 @@
             case 'STARTED': return 'Locked your ' + s.sellamount + ' ' + tok(s.selltoken) + ' — waiting for the counterparty to lock their side.';
             case 'LOCKED': return initiator ? 'Counterparty locked — claiming your funds next.'
                 : 'You locked your side — waiting for the counterparty to reveal the secret.';
-            case 'CLAIMING': return 'Counterparty locked — claiming your ' + s.buyamount + ' ' + tok(s.buytoken) + ' now.';
+            case 'CLAIMING': return s.lastFail
+                ? 'Claim FAILING — ' + s.lastFail + ' Retrying automatically.'   // the newest *_FAILED event's reason, if the host projects it
+                : 'Counterparty locked — claiming your ' + s.buyamount + ' ' + tok(s.buytoken) + ' now.';
             case 'COMPLETE': return 'Done — received ' + s.buyamount + ' ' + tok(s.buytoken) + '.';
             case 'REFUNDED': return 'Timed out — your ' + s.sellamount + ' ' + tok(s.selltoken) + ' was refunded.';
             default: return '';

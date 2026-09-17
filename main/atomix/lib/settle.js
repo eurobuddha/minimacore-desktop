@@ -31,6 +31,9 @@
      *  sweep also asks for MegaMMR. The hot path keeps 256 — this is used only by the per-hash expired sweep. */
     var REFUND_SCAN_DEPTH = 1024;
     var C = null, ethAttempt = {}, inflight = {};
+    /** Last failure message reported per claim/refund key — one event row + one notification per DISTINCT
+     *  reason, not one per attempt (a two-hour claim window is ~45 attempts). Cleared on success. */
+    var lastFail = {};
     var _now = function () { return Date.now(); };
     function nowUnix() { return Math.floor(_now() / 1000); }
 
@@ -38,6 +41,32 @@
     function ready() { return !!(C && C.rpc && C.ethPriv && C.ethAddr && C.myMinimaPk && C.myMinimaAddr); }
     function ops() { return EO.make(C.rpc, C.ethPriv, C.ethAddr); }
     function notify(t, b) { if (C && C.notify) C.notify(t, b); }
+    function log(s) { try { if (g.MDS && g.MDS.log) g.MDS.log(s); } catch (e) { } }
+    /**
+     * A claim/refund attempt failed. This used to be `if (err) return next();` — no log line, no event, no
+     * notification, no status change — and on 2026-09-15 that hid ~45 consecutive failures of a 5 mxUSDT claim
+     * for two hours, until the counterparty refunded at the timelock and kept both sides (the node had lost the
+     * covenant's script row; every attempt was refused by txncheck; the reason was discarded each time).
+     *   - log the full error + txncheck verdict on EVERY attempt (the node log is the operator's record);
+     *   - write ONE event row per distinct reason (the Activity row and the Check report read it);
+     *   - notify on the first failure and whenever the reason changes — the user had two hours to act;
+     *   - when the cause was ours to fix (covenant re-registered) or the transport (RPC timeout), make the retry
+     *     stamp due on the NEXT poll instead of after ETH_RETRY_SECS. A genuine rejection keeps the window.
+     */
+    function reportFailure(kind, hash, coin, err, next) {
+        var msg = String((err && err.message) || err), key = (kind === 'claim' ? 'claimM:' : 'refundM:') + hash;
+        var detail = err && err.detail ? ' ' + JSON.stringify(err.detail) : '';
+        log('[AtomiX] ' + kind.toUpperCase() + ' FAILED ' + hash + (err && err.step ? ' at ' + err.step : '') + ': ' + msg + detail);
+        // Due again in 1s — i.e. on the NEXT poll, not a second attempt by the other scan path in this pass.
+        if (err && (err.code === 'SCRIPT_MISSING' || /RPC timeout|ECONN|timed out/i.test(msg))) ethAttempt[key] = nowUnix() - ETH_RETRY_SECS + 1;
+        if (lastFail[key] === msg) return next();
+        lastFail[key] = msg;
+        var ev = kind === 'claim' ? DB.EV_MINIMA_CLAIM_FAILED : DB.EV_MINIMA_REFUND_FAILED;
+        DB.logEvent(hash, ev, (coin && coin.tokenid) || '0x00', H.coinAmount(coin), msg, function () {
+            notify('AtomiX ' + kind + ' failing', msg + ' — retrying automatically. Swap ' + hash);
+            onChanged(); next();
+        });
+    }
     function onChanged() { if (C && C.onSwapsChanged) C.onSwapsChanged(); }
     function ethRetryDue(k) { return nowUnix() - (ethAttempt[k] || 0) >= ETH_RETRY_SECS; }
     function markEthAttempt(k) { ethAttempt[k] = nowUnix(); }
@@ -227,7 +256,8 @@
                         DB.setSwapStatus(hash, DB.ST_CLAIMING, function () {
                             onChanged();
                             H.claim(coin, hash, secret, C.myMinimaAddr, function (eC, txpowid) {
-                                if (eC) return next();          // leave the attempt stamp → retry after the window
+                                if (eC) return reportFailure('claim', hash, coin, eC, next);   // stamp stays unless reportFailure clears it
+                                delete lastFail['claimM:' + hash];
                                 DB.logEvent(hash, DB.EV_MINIMA_CLAIM_SUBMITTED, coin.tokenid || '0x00', H.coinAmount(coin), txpowid, function () {
                                     onChanged(); next();
                                 });
@@ -280,7 +310,8 @@
             if (have || !ethRetryDue(key)) return next();
             markEthAttempt(key);
             H.refund(coin, C.myMinimaAddr, function (eR, txpowid) {
-                if (eR) return next();          // leave the stamp → retries after the window
+                if (eR) return reportFailure('refund', hash, coin, eR, next);   // stamp stays unless reportFailure clears it
+                delete lastFail[key];
                 DB.logEvent(hash, DB.EV_MINIMA_REFUND_SUBMITTED, coin.tokenid || '0x00', H.coinAmount(coin), txpowid, function () {
                     onChanged(); next();
                 });
@@ -459,7 +490,7 @@
     AX.settle = {
         configure: configure, ready: ready, poll: poll,
         amountTokenOk: amountTokenOk, stripReqToken: stripReqToken, decimalsOf: decimalsOf,
-        _setNow: function (fn) { _now = fn; }, _reset: function () { ethAttempt = {}; inflight = {}; },
+        _setNow: function (fn) { _now = fn; }, _reset: function () { ethAttempt = {}; inflight = {}; lastFail = {}; },
         ETH_RETRY_SECS: ETH_RETRY_SECS
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

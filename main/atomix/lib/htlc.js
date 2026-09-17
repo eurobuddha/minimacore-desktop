@@ -18,6 +18,7 @@
         'RETURN VERIFYOUT(@INPUT 0xFFEEDD9999 0.0001 @TOKENID TRUE)';
 
     var HTLC_ADDRESS = 'MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G';
+    var HTLC_ADDRESS_HEX = '0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A';   // the same address as the node reports it
     var NOTIFY = '0xFFEEDD9999';
     var NOTIFY_AMOUNT = '0.0001';
     var MINIMA_BLOCK_TIME = 50;                 // seconds
@@ -42,8 +43,9 @@
      *  saved key is verified against the node's live key list here and the app HALTS on a mismatch
      *  (identitywatch) instead of silently re-picking. */
     function setup(cb) {
-        M.cmdR('newscript trackall:false script:"' + HTLC_SCRIPT + '"', function (err) {
+        ensureScript(function (err) {
             if (err) return cb(err);
+            purgeStaleTxns();
             M.kvGet('swap_identity', '', function (raw) {
                 var saved = null;
                 try { saved = raw ? JSON.parse(raw) : null; } catch (e) { saved = null; }
@@ -66,6 +68,76 @@
                 });
             });
         });
+    }
+
+    /**
+     * The covenant must be REGISTERED on the node — and not just once at boot. `txnbasics` looks each input's
+     * script up in the wallet's script table and, when the row is missing, SILENTLY builds the witness without
+     * the ScriptProof (core txnutils.setMMRandScripts, zExitOnFail=false); `txncheck` then reports
+     * valid.scripts=false and the spend is never posted. Proven live 2026-09-15 on minimaCore Desktop: the node
+     * lost its custom-script rows for 2h+, ~45 consecutive claims of a 5 mxUSDT counter-leg failed exactly so
+     * (the Casino covenant alongside it: "signatures 1, mmrproofs 1, scripts 0"), and the counterparty refunded
+     * at the timelock — 4.95 USDT lost. A node restart cured it only because every engine re-issues newscript
+     * at boot. `newscript` is a non-atomic removeScript + addScript whose add can fail leaving NO row
+     * (core newscript.java / Wallet.addScript), so: read the row by ADDRESS (the address is the script's hash, so
+     * a row there IS the right script), re-register only when absent, and verify the address the node computed
+     * — the Casino donor's verified-registration pattern. cb(err, registeredNow).
+     */
+    function ensureScript(cb) {
+        M.cmdR('scripts address:' + HTLC_ADDRESS, function (err, row) {
+            if (!err && registeredAt(row)) return cb(null, false);   // a status:false / unknown address reads as absent
+            registerScript(function (e2) { cb(e2, !e2); });
+        });
+    }
+    function registerScript(cb) {
+        M.cmdR('newscript trackall:false script:"' + HTLC_SCRIPT + '"', function (err, resp) {
+            if (err) return cb(err);
+            if (!registeredAt(resp)) return cb(new Error('covenant registration not confirmed by the node (newscript returned '
+                + ((resp && (resp.miniaddress || resp.address)) || 'no address') + ', expected ' + HTLC_ADDRESS + ')'));
+            cb(null);
+        });
+    }
+    function registeredAt(row) {
+        if (!row) return false;
+        var mx = String(row.miniaddress || '').toUpperCase(), hex = String(row.address || '').toUpperCase();
+        return mx === HTLC_ADDRESS.toUpperCase() || hex === HTLC_ADDRESS_HEX.toUpperCase();
+    }
+    /** Run a build-and-post `attempt(done)` with the covenant verified first, and — if txncheck still says the
+     *  witness carries no script for an input (err.code SCRIPT_MISSING: the row vanished between the read and
+     *  txnbasics, or was never written) — re-register and rebuild ONCE, now, instead of surfacing the failure and
+     *  waiting a retry window the counterparty's timelock may not allow. Nothing was posted on that path (the
+     *  failure is txncheck's, before txnpost), so a rebuild is safe for the split-post lock as well. */
+    function withScript(attempt, cb) {
+        ensureScript(function (e) {
+            if (e) return cb(e);
+            attempt(function (err, res) {
+                if (!err || err.code !== 'SCRIPT_MISSING') return cb(err, res);
+                registerScript(function (e2) {
+                    if (e2) { err.message += ' (re-registration failed: ' + e2.message + ')'; return cb(err); }
+                    attempt(cb);
+                });
+            });
+        });
+    }
+    /** Half-built `axswap_*` transactions a lost `txndelete` left in the node's workspace — a claim attempt whose
+     *  RPC timed out mid-sequence (2026-09-15 left `axswap_1a0a6d682f2_15` behind). Nothing posted lives there (a
+     *  posted transaction is in the mempool), so deleting is safe. Only ids older than an hour: the id embeds its
+     *  creation time, and the other MDS context (the browser page also boots htlc) may be mid-sequence on a
+     *  fresh one. Casino donor pattern (purgeStaleTxns). Best-effort, runs once per setup. */
+    var STALE_TXN_MS = 60 * 60 * 1000;
+    function purgeStaleTxns() {
+        try {
+            M.cmd('txnlist', function (r) {
+                var arr = (r && r.status === true && Array.isArray(r.response)) ? r.response : [];
+                for (var i = 0; i < arr.length; i++) {
+                    var tid = (arr[i] && (arr[i].id || arr[i].txnid)) || '';
+                    var m = /^axswap_([0-9a-f]+)_[0-9a-f]+$/.exec(String(tid));
+                    if (!m) continue;
+                    var made = parseInt(m[1], 16);
+                    if (isFinite(made) && Date.now() - made > STALE_TXN_MS) M.cmd('txndelete id:' + tid, function () {});
+                }
+            });
+        } catch (e) { /* housekeeping only — never let it fail a boot */ }
     }
 
     /** All 64 node default pubkeys (normalised UPPER, no 0x) for owner/refund matching. loadKeys(cb(err, [pk])). */
@@ -191,8 +263,16 @@
      *  must txndelete on error — claim/refund do). Uses cmdR so status:false surfaces as a real error. */
     function runSeq(cmds, cb) {
         var last = null;
-        AX.flow.each(cmds, function (c, i, next) { M.cmdR(c, function (e, resp) { last = resp; next(e || (c.indexOf('txncheck ') === 0 ? checkFailure(resp) : null)); }); },
-            function (err) { cb(err, last); });
+        AX.flow.each(cmds, function (c, i, next) {
+            M.cmdR(c, function (e, resp, raw) {
+                last = resp;
+                var err = e || (c.indexOf('txncheck ') === 0 ? checkFailure(resp) : null);
+                // The failing step + the node's verdict travel WITH the error: the caller txndeletes the
+                // half-built transaction, so this is the only record of why it was refused.
+                if (err && !err.step) { err.step = c.split(' ')[0]; if (raw !== undefined) err.reply = raw; }
+                next(err);
+            });
+        }, function (err) { cb(err, last); });
     }
     /** Node-side transaction id. The counter is NOT decoration: Date.now() alone is millisecond-granular,
      *  so two settlement actions starting in the same millisecond produced the SAME id — their
@@ -220,21 +300,23 @@
         if (!isHex(secret) || !isHex(hash))    return cb(new Error('claim: non-hex secret/hash'));
         if (!isDecimal(amount))                return cb(new Error('claim: non-decimal coin amount'));
         var change = AX.dec.sub(amount, NOTIFY_AMOUNT);
-        var id = txnId();
-        var seq = [
-            'txncreate id:' + id,
-            'txninput id:' + id + ' coinid:' + coinid,
-            'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + NOTIFY_AMOUNT + ' address:' + NOTIFY
-        ];
-        if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + change + ' address:' + myAddress);
-        seq.push('txnstate id:' + id + ' port:100 value:' + secret);
-        seq.push('txnstate id:' + id + ' port:101 value:' + hash);
-        seq.push('txnstate id:' + id + ' port:102 value:[' + owner + ']');
-        seq.push('txnstate id:' + id + ' port:103 value:[' + receiver + ']');
-        seq.push('txnsign id:' + id + ' publickey:' + receiver);
-        seq.push('txnbasics id:' + id, 'txncheck id:' + id);
-        seq.push('txnpost id:' + id + ' mine:true txndelete:true');
-        runSeq(seq, function (err, last) { if (err) { deleteTxn(id); return cb(err); } cb(null, txpowOf(last)); });
+        withScript(function (done) {
+            var id = txnId();
+            var seq = [
+                'txncreate id:' + id,
+                'txninput id:' + id + ' coinid:' + coinid,
+                'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + NOTIFY_AMOUNT + ' address:' + NOTIFY
+            ];
+            if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + change + ' address:' + myAddress);
+            seq.push('txnstate id:' + id + ' port:100 value:' + secret);
+            seq.push('txnstate id:' + id + ' port:101 value:' + hash);
+            seq.push('txnstate id:' + id + ' port:102 value:[' + owner + ']');
+            seq.push('txnstate id:' + id + ' port:103 value:[' + receiver + ']');
+            seq.push('txnsign id:' + id + ' publickey:' + receiver);
+            seq.push('txnbasics id:' + id, 'txncheck id:' + id);
+            seq.push('txnpost id:' + id + ' mine:true txndelete:true');
+            runSeq(seq, function (err, last) { if (err) { deleteTxn(id); return done(err); } done(null, txpowOf(last)); });
+        }, cb);
     }
 
     /**
@@ -258,27 +340,29 @@
         var amount = maybeGrain(p.amount, p.tokenId), change = AX.dec.sub(p.totalSelected, amount);
         if (!isDecimal(amount)) return cb(new Error('lock: non-decimal amount'));
         if (AX.dec.gt0(change) && !isDecimal(change)) return cb(new Error('lock: non-decimal change'));
-        var id = txnId(), seq = ['txncreate id:' + id];
-        for (var i = 0; i < p.coinids.length; i++) seq.push('txninput id:' + id + ' coinid:' + p.coinids[i]);
-        seq.push('txnstate id:' + id + ' port:0 value:' + p.myPubkey);
-        seq.push('txnstate id:' + id + ' port:1 value:' + p.requestAmount);
-        seq.push('txnstate id:' + id + ' port:2 value:[' + p.reqToken + ']');
-        seq.push('txnstate id:' + id + ' port:3 value:' + p.timelockBlock);
-        seq.push('txnstate id:' + id + ' port:4 value:' + p.receiverPubkey);
-        seq.push('txnstate id:' + id + ' port:5 value:' + p.hashlock);
-        seq.push('txnstate id:' + id + ' port:6 value:' + p.ownerEthKey);
-        seq.push('txnstate id:' + id + ' port:7 value:' + p.otc);
-        seq.push('txnoutput id:' + id + ' amount:' + amount + ' address:' + HTLC_ADDRESS + ' tokenid:' + p.tokenId + ' storestate:true');
-        if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' amount:' + change + ' address:' + p.myAddress + ' tokenid:' + p.tokenId + ' storestate:false');
-        seq.push('txnsign id:' + id + ' publickey:auto');
-        seq.push('txnbasics id:' + id, 'txncheck id:' + id);
-        runSeq(seq, function (err) {
-            if (err) { deleteTxn(id); return cb(err); }
-            M.cmdR('txnpost id:' + id + ' mine:true txndelete:true', function (pe, resp) {
-                if (pe) { deleteTxn(id); return cb(new Error('POSTED:' + pe.message)); }   // may have broadcast → NEVER retry
-                cb(null, txpowOf(resp));
+        withScript(function (done) {
+            var id = txnId(), seq = ['txncreate id:' + id];
+            for (var i = 0; i < p.coinids.length; i++) seq.push('txninput id:' + id + ' coinid:' + p.coinids[i]);
+            seq.push('txnstate id:' + id + ' port:0 value:' + p.myPubkey);
+            seq.push('txnstate id:' + id + ' port:1 value:' + p.requestAmount);
+            seq.push('txnstate id:' + id + ' port:2 value:[' + p.reqToken + ']');
+            seq.push('txnstate id:' + id + ' port:3 value:' + p.timelockBlock);
+            seq.push('txnstate id:' + id + ' port:4 value:' + p.receiverPubkey);
+            seq.push('txnstate id:' + id + ' port:5 value:' + p.hashlock);
+            seq.push('txnstate id:' + id + ' port:6 value:' + p.ownerEthKey);
+            seq.push('txnstate id:' + id + ' port:7 value:' + p.otc);
+            seq.push('txnoutput id:' + id + ' amount:' + amount + ' address:' + HTLC_ADDRESS + ' tokenid:' + p.tokenId + ' storestate:true');
+            if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' amount:' + change + ' address:' + p.myAddress + ' tokenid:' + p.tokenId + ' storestate:false');
+            seq.push('txnsign id:' + id + ' publickey:auto');
+            seq.push('txnbasics id:' + id, 'txncheck id:' + id);
+            runSeq(seq, function (err) {
+                if (err) { deleteTxn(id); return done(err); }
+                M.cmdR('txnpost id:' + id + ' mine:true txndelete:true', function (pe, resp) {
+                    if (pe) { deleteTxn(id); return done(new Error('POSTED:' + pe.message)); }   // may have broadcast → NEVER retry
+                    done(null, txpowOf(resp));
+                });
             });
-        });
+        }, cb);
     }
 
     // Native 0.1.46–0.1.52: fresh balance preflight, strict validation and compact bounded wallet reads.
@@ -324,13 +408,26 @@
     function flag(o, key) { var v = o && o[key]; return v === true || v === 1 || (typeof v === 'string' && /^(true|1)$/i.test(v.trim())); }
     // PandaPools TxPost.checkFailure, also used by native MinimaHtlc. Proofs are built once, never auto-posted twice.
     function checkFailure(r) {
-        var v = r && r.valid;
-        if (!flag(v, 'mmrproofs')) return new Error('Input spent or invalid proof. Nothing was posted.');
-        if (!flag(r, 'validamounts')) return new Error('Amounts do not balance. Nothing was posted.');
-        if (!flag(v, 'scripts')) return new Error('Contract rejected the transaction. Nothing was posted.');
-        if (!flag(v, 'basic') || !flag(r, 'allsignaturesvalid') || !flag(r, 'validtransaction'))
-            return new Error('Transaction/signature validation failed. Nothing was posted.');
-        return null;
+        var v = r && r.valid, err = null;
+        if (!flag(v, 'mmrproofs')) err = new Error('Input spent or invalid proof. Nothing was posted.');
+        else if (!flag(r, 'validamounts')) err = new Error('Amounts do not balance. Nothing was posted.');
+        else if (!flag(v, 'scripts')) {
+            // txncheck counts the witness's scripts and the inputs separately. Fewer scripts than inputs means
+            // txnbasics found no script row for an input's address and left the ScriptProof out — the contract
+            // was never RUN, and only re-registering the covenant can fix it (see ensureScript). A genuine
+            // contract FALSE carries a script per address. (Several inputs at ONE wallet address share a proof,
+            // so a real rejection of such a lock reads as missing once; the single rebuild then reports it.)
+            var ins = Number(r && r.inputs), scr = Number(r && r.scripts);
+            if (isFinite(ins) && isFinite(scr) && scr < ins) {
+                err = new Error('script proof missing — the node has no script row for the covenant address. Nothing was posted.');
+                err.code = 'SCRIPT_MISSING';
+            } else err = new Error('Contract rejected the transaction. Nothing was posted.');
+        }
+        else if (!flag(v, 'basic') || !flag(r, 'allsignaturesvalid') || !flag(r, 'validtransaction'))
+            err = new Error('Transaction/signature validation failed. Nothing was posted.');
+        if (err) err.detail = { valid: v, inputs: r && r.inputs, scripts: r && r.scripts, validamounts: r && r.validamounts,
+            allsignaturesvalid: r && r.allsignaturesvalid, validtransaction: r && r.validtransaction };
+        return err;
     }
     function confirmationDepth(txpowid, cb) {
         if (!/^0x[0-9a-f]{64}$/i.test(String(txpowid))) return cb(new Error('Invalid TxPoW identifier'));
@@ -367,16 +464,18 @@
         if (!isHex(coinid) || !isHex(tokenid)) return cb(new Error('refund: non-hex coin id/token'));
         if (!isHex(owner))     return cb(new Error('refund: non-hex owner key'));
         if (!isDecimal(amount)) return cb(new Error('refund: non-decimal coin amount'));
-        var id = txnId();
-        var seq = [
-            'txncreate id:' + id,
-            'txninput id:' + id + ' coinid:' + coinid,
-            'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + amount + ' address:' + myAddress,
-            'txnsign id:' + id + ' publickey:' + owner,
-            'txnbasics id:' + id, 'txncheck id:' + id,
-            'txnpost id:' + id + ' mine:true txndelete:true'
-        ];
-        runSeq(seq, function (err, last) { if (err) { deleteTxn(id); return cb(err); } cb(null, txpowOf(last)); });
+        withScript(function (done) {
+            var id = txnId();
+            var seq = [
+                'txncreate id:' + id,
+                'txninput id:' + id + ' coinid:' + coinid,
+                'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + amount + ' address:' + myAddress,
+                'txnsign id:' + id + ' publickey:' + owner,
+                'txnbasics id:' + id, 'txncheck id:' + id,
+                'txnpost id:' + id + ' mine:true txndelete:true'
+            ];
+            runSeq(seq, function (err, last) { if (err) { deleteTxn(id); return done(err); } done(null, txpowOf(last)); });
+        }, cb);
     }
     function txpowOf(resp) { return resp ? (resp.txpowid || '') : ''; }
 
@@ -417,7 +516,8 @@
         SCRIPT: HTLC_SCRIPT, ADDRESS: HTLC_ADDRESS, NOTIFY: NOTIFY, NOTIFY_AMOUNT: NOTIFY_AMOUNT,
         MINIMA_BLOCK_TIME: MINIMA_BLOCK_TIME, TIMELOCK_BLOCKS: TIMELOCK_BLOCKS, CP_BLOCKS: CP_BLOCKS,
         CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK,
-        setup: setup, loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
+        setup: setup, ensureScript: ensureScript, purgeStaleTxns: purgeStaleTxns, ADDRESS_HEX: HTLC_ADDRESS_HEX,
+        loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
         isHex: isHex, isHexOrMinima: isHexOrMinima, isDecimal: isDecimal,
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         tokenBalance: tokenBalance, myRelevantCoins: myRelevantCoins, confirmationDepth: confirmationDepth,

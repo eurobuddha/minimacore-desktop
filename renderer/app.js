@@ -4134,7 +4134,7 @@ function axRoleLabel(r) { return r === "RESPONDER" ? "maker" : (r === "INITIATOR
 // leg is locked and nothing is wrong, so it reads "waiting", not "started".
 function axStatusLabel(st) {
   return { STARTED: "waiting", LOCKED: "locked", CLAIMING: "claiming", COMPLETE: "complete",
-    REFUNDED: "refunded", ERROR: "error" }[st] || String(st == null ? "" : st).toLowerCase();
+    REFUNDED: "refunded", ERROR: "failed" }[st] || String(st == null ? "" : st).toLowerCase();   // ERROR = a leg lost/unrecoverable; the row's detail says why
 }
 function axTok(t) { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = String(t).toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "mxUSDT"; } return t; }
 function wireAxSwapRows() {
