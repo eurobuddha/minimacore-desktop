@@ -52,6 +52,11 @@ function restore() {
   https.request = realHttpsRequest;
 }
 
+/** Call a pinned lookup and await its answer — connectPin defers by design, see the real-socket tests. */
+function callLookup(lookup, host, opts) {
+  return new Promise((res) => lookup(host, opts, (...a) => res(a)));
+}
+
 // ---- tests -----------------------------------------------------------------
 
 test('a host that resolves to loopback is refused outright', async () => {
@@ -84,19 +89,17 @@ test('the vetted address is PINNED — the connect cannot take a second, rebound
     assert.strictEqual(typeof opts.lookup, 'function', 'a custom lookup MUST be supplied, or node re-resolves');
 
     // the (err, address, family) shape
-    let got = null;
-    opts.lookup('rebind.evil.test', {}, (e, address, family) => { got = { e, address, family }; });
-    assert.strictEqual(got.e, null);
-    assert.strictEqual(got.address, '93.184.216.34', 'must dial the address that was vetted, not the rebind');
-    assert.strictEqual(got.family, 4);
+    const [e1, address, family] = await callLookup(opts.lookup, 'rebind.evil.test', {});
+    assert.strictEqual(e1, null);
+    assert.strictEqual(address, '93.184.216.34', 'must dial the address that was vetted, not the rebind');
+    assert.strictEqual(family, 4);
 
     // the {all:true} shape — Happy Eyeballs / autoSelectFamily, default-on since node 20, so this is the
     // path electron actually takes. Answering it with the non-array shape breaks EVERY fetch.
-    let all = null;
-    opts.lookup('rebind.evil.test', { all: true }, (e, entries) => { all = { e, entries }; });
-    assert.strictEqual(all.e, null);
-    assert.ok(Array.isArray(all.entries), 'with {all:true} node expects an ARRAY of entries');
-    assert.deepStrictEqual(all.entries, [{ address: '93.184.216.34', family: 4 }]);
+    const [e2, entries] = await callLookup(opts.lookup, 'rebind.evil.test', { all: true });
+    assert.strictEqual(e2, null);
+    assert.ok(Array.isArray(entries), 'with {all:true} node expects an ARRAY of entries');
+    assert.deepStrictEqual(entries, [{ address: '93.184.216.34', family: 4 }]);
   } finally { restore(); }
 });
 
@@ -107,9 +110,8 @@ test('postText pins the vetted address too (the ETH JSON-RPC path)', async () =>
     await netfetch.postText('https://eth.evil.test/', '{"jsonrpc":"2.0"}');
     assert.strictEqual(seen.length, 1);
     assert.strictEqual(typeof seen[0].lookup, 'function');
-    let got = null;
-    seen[0].lookup('eth.evil.test', {}, (e, address) => { got = address; });
-    assert.strictEqual(got, '93.184.216.34');
+    const [, addr] = await callLookup(seen[0].lookup, 'eth.evil.test', {});
+    assert.strictEqual(addr, '93.184.216.34');
   } finally { restore(); }
 });
 
@@ -133,5 +135,71 @@ test('isBlockedHost keeps its boolean contract for existing callers', async () =
     assert.strictEqual(await netfetch.isBlockedHost('10.1.2.3'), true);
     assert.strictEqual(await netfetch.isBlockedHost('ok.example.test'), false);
     assert.strictEqual(await netfetch.isBlockedHost(''), true);
+  } finally { restore(); }
+});
+
+// ---------------------------------------------------------------------------
+// REAL SOCKETS. Everything above stubs http.request, which is why it could not
+// catch the 0.16.93 crash: the fault was in WHEN our custom `lookup` calls back,
+// and a stubbed request never runs node's connect path at all.
+//
+// The bug: connectPin called cb synchronously. node's net runs lookupAndConnect
+// from inside request() and assumes the lookup is async (the real dns.lookup
+// always is), so internalConnect ran inside request(), failed at the syscall,
+// and called socket.destroy(err) — queueing the socket's error emit BEFORE the
+// http agent queued the listener that routes it to `req`. The socket then
+// emitted 'error' with nothing listening: uncaught exception, dead main process.
+// On the user's Mac this fired every morning on wake, when DNS still answers
+// from cache but the route is not up yet, so connect(2) fails immediately.
+//
+// {address:'1.2.3.4', family:6} reproduces that deterministically and offline:
+// an IPv4 address declared IPv6 fails in connect(2) with EINVAL, the same shape
+// as the EADDRNOTAVAIL seen on wake.
+// ---------------------------------------------------------------------------
+
+/** Run fn while capturing any uncaughtException instead of dying. */
+async function captureUncaught(fn) {
+  const prior = process.listeners('uncaughtException');
+  process.removeAllListeners('uncaughtException');
+  const seen = [];
+  process.on('uncaughtException', (e) => seen.push(e));
+  try { const value = await fn(); await new Promise(r => setTimeout(r, 250)); return { value, seen }; }
+  finally { process.removeAllListeners('uncaughtException'); prior.forEach(l => process.on('uncaughtException', l)); }
+}
+
+test('a connect that fails in the syscall is HANDLED, never uncaught', async () => {
+  stubDns([[{ address: '1.2.3.4', family: 6 }]]);   // vets clean, then fails at connect(2)
+  try {
+    const { value, seen } = await captureUncaught(() => netfetch.tokenIcon('http://wake.example.test/icon.png'));
+    assert.deepStrictEqual(seen.map(e => e.code || e.message), [],
+      'a failing connect must reach req.on("error"), not escape as an uncaught exception — ' +
+      'this is the 0.16.93 crash: a synchronous lookup callback runs connect inside request(), ' +
+      'before the http agent has wired the socket error listener');
+    assert.strictEqual(value, null, 'the fetch degrades to null');
+  } finally { restore(); }
+});
+
+test('postText survives the same failure (the AtomiX ETH-RPC path that crashed)', async () => {
+  stubDns([[{ address: '1.2.3.4', family: 6 }]]);
+  try {
+    const { value, seen } = await captureUncaught(() => netfetch.postText('https://eth.example.test/', '{"jsonrpc":"2.0"}'));
+    assert.deepStrictEqual(seen.map(e => e.code || e.message), [], 'no uncaught exception from the POST path');
+    assert.strictEqual(value, null);
+  } finally { restore(); }
+});
+
+test('a failed connect releases its pool slot, so later fetches still run', async () => {
+  stubDns([[{ address: '1.2.3.4', family: 6 }]]);
+  try {
+    await captureUncaught(async () => {
+      // POOL is 4: if a failure held its slot, the 5th and 6th would queue forever.
+      for (let i = 0; i < 6; i++) {
+        const r = await Promise.race([
+          netfetch.tokenIcon('http://wake' + i + '.example.test/i.png'),
+          new Promise(res => setTimeout(() => res('TIMED_OUT'), 4000)),
+        ]);
+        assert.strictEqual(r, null, 'fetch #' + (i + 1) + ' must complete (got ' + r + ') — the pool leaked');
+      }
+    });
   } finally { restore(); }
 });

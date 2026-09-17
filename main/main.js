@@ -30,6 +30,25 @@ const parlons = require("./parlons");
 let win = null;
 let tray = null;
 
+/**
+ * LAST RESORT — an app supervising a node that holds real funds must not die because a socket failed.
+ *
+ * One did: a connect error on wake reached no listener and Electron's default handler killed the main
+ * process, taking AtomiX with it (the 0.16.93 lookup regression, fixed in main/netfetch.js). Registering
+ * these listeners also replaces that modal "A JavaScript error occurred in the main process" dialog.
+ *
+ * This is a NET, not a licence to leave faults unfixed. Everything lands in the Logs view in full, with its
+ * stack, prefixed so it is impossible to mistake for node output — node.log() already splits on newlines,
+ * caps each line and redacts seed phrases and private keys. Registered before anything else can throw.
+ */
+function logFatal(kind, err) {
+  const detail = (err && err.stack) ? err.stack : String(err && err.message ? err.message : err);
+  try { node.log("[app] " + kind + " — " + detail); } catch (e) { /* logging must never throw */ }
+  try { console.error("[app] " + kind + ":", err); } catch (e) {}
+}
+process.on("uncaughtException", (err) => logFatal("UNCAUGHT EXCEPTION", err));
+process.on("unhandledRejection", (reason) => logFatal("UNHANDLED REJECTION", reason));
+
 // single instance — a second launch focuses the existing window
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });

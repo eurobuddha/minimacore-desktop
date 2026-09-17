@@ -89,8 +89,17 @@ async function vetHost(host) {
 function connectPin(vetted) {
   return function (hostname, opts, cb) {
     const entry = { address: vetted.address, family: vetted.family };
-    if (opts && opts.all) return cb(null, [entry]);
-    return cb(null, entry.address, entry.family);
+    // DEFER. This is not a style choice — node's net runs lookupAndConnect from INSIDE request() and only
+    // wires the socket's error listener a tick later, because the real dns.lookup is always async (node's
+    // own net.js says so: "There are no event listeners registered yet so defer the error event"). Calling
+    // back synchronously ran internalConnect inside request(), so a connect that fails at the syscall — a
+    // Mac waking with DNS still cached but no route yet, EADDRNOTAVAIL — destroyed the socket before
+    // anything was listening. Over http that surfaced as an uncaught exception that killed the main
+    // process; over https (the AtomiX ETH-RPC path) request() threw outright and the fetch never settled.
+    setImmediate(() => {
+      if (opts && opts.all) cb(null, [entry]);
+      else cb(null, entry.address, entry.family);
+    });
   };
 }
 
@@ -105,13 +114,22 @@ function release() { active--; const next = queue.shift(); if (next) { active++;
 
 // ---- capped GET (follows redirects, re-guarding each hop) -------------------
 function getCapped(urlStr, redirectsLeft, accept) {
-  return new Promise((resolve) => {
+  return new Promise((resolveRaw) => {
+    // SETTLE EXACTLY ONCE, ALWAYS. Every caller holds a pool slot across this promise and releases it in a
+    // `finally`, so a promise that never settles holds that slot for the life of the process — four of those
+    // and all outbound HTTP is wedged. The watchdog is the backstop for any path that forgets to resolve;
+    // req.setTimeout cannot cover it, because a request that threw on creation has no timer at all.
+    let done = false;
+    const resolve = (v) => { if (done) return; done = true; clearTimeout(watchdog); resolveRaw(v); };
+    const watchdog = setTimeout(() => resolve(null), READ_TIMEOUT_MS + 5000);
+    if (watchdog.unref) watchdog.unref();
     let u;
     try { u = new URL(urlStr); } catch (e) { return resolve(null); }
     if (u.protocol !== "http:" && u.protocol !== "https:") return resolve(null);
     vetHost(u.hostname).then(vetted => {
       if (!vetted) return resolve(null);
       const lib = u.protocol === "https:" ? https : http;
+      try {
       const req = lib.request(u, { method: "GET", lookup: connectPin(vetted),
         headers: { "User-Agent": "minimaCore-Desktop", Accept: accept || "image/*" } }, res => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -134,7 +152,8 @@ function getCapped(urlStr, redirectsLeft, accept) {
       req.setTimeout(READ_TIMEOUT_MS, () => { req.destroy(); resolve(null); });
       req.on("error", () => resolve(null));
       req.end();
-    });
+      } catch (e) { resolve(null); }   // request() can throw outright (https + a socket killed mid-handshake)
+    }).catch(() => resolve(null));
   });
 }
 
@@ -192,13 +211,18 @@ async function postText(url, body) {
   if (typeof body !== "string" || body.length > 64 * 1024) return null;   // RPC payloads are tiny
   await acquire();
   try {
-    return await new Promise((resolve) => {
+    return await new Promise((resolveRaw) => {
+      let done = false;                                  // settle exactly once, always — see getCapped
+      const resolve = (v) => { if (done) return; done = true; clearTimeout(watchdog); resolveRaw(v); };
+      const watchdog = setTimeout(() => resolve(null), READ_TIMEOUT_MS + 5000);
+      if (watchdog.unref) watchdog.unref();
       let u;
       try { u = new URL(url.trim()); } catch (e) { return resolve(null); }
       if (u.protocol !== "http:" && u.protocol !== "https:") return resolve(null);
       vetHost(u.hostname).then(vetted => {
         if (!vetted) return resolve(null);
         const lib = u.protocol === "https:" ? https : http;
+        try {
         const req = lib.request(u, { method: "POST", lookup: connectPin(vetted), headers: {
           "User-Agent": "minimaCore-Desktop", "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body), Accept: "application/json"
@@ -216,7 +240,8 @@ async function postText(url, body) {
         req.setTimeout(READ_TIMEOUT_MS, () => { req.destroy(); resolve(null); });
         req.on("error", () => resolve(null));
         req.end(body);
-      });
+        } catch (e) { resolve(null); }
+      }).catch(() => resolve(null));
     });
   } finally { release(); }
 }
