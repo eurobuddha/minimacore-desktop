@@ -21,6 +21,7 @@
                 : 'Counterparty locked — claiming your ' + s.buyamount + ' ' + tok(s.buytoken) + ' now.';
             case 'COMPLETE': return 'Done — received ' + s.buyamount + ' ' + tok(s.buytoken) + '.';
             case 'REFUNDED': return 'Timed out — your ' + s.sellamount + ' ' + tok(s.selltoken) + ' was refunded.';
+            case 'ERROR': return 'Failed — ' + (s.lastFail || 'see the Check report.');   // a leg lost; the SWAP_LOST / *_FAILED note says how
             default: return '';
         }
     }
@@ -86,7 +87,7 @@
             var n = String(f.events[i].note || '').toLowerCase();
             if (/^0x[0-9a-f]{64}$/i.test(n)) L.push('• Recorded transaction: ' + f.events[i].note);
             if (n.indexOf('mismatch') >= 0 || n.indexOf('invalid') >= 0 || n.indexOf('incorrect') >= 0
-                || n.indexOf('too close') >= 0 || n.indexOf('fail') >= 0) L.push('⚠ ' + f.events[i].note);
+                || n.indexOf('too close') >= 0 || n.indexOf('fail') >= 0 || f.events[i].event === 'SWAP_LOST') L.push('⚠ ' + f.events[i].note);
         }
         if (s.status !== 'COMPLETE' && s.status !== 'REFUNDED')
             L.push('(swaps take a few minutes — ~50s polls + 2 confirmations per step)');

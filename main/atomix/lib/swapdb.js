@@ -24,6 +24,10 @@
     // A claim/refund attempt the node refused — note = the reason (one row per distinct reason). Never gates
     // anything; it exists so a failing settlement is VISIBLE while there is still time to act.
     var EV_MINIMA_CLAIM_FAILED = 'MINIMA_CLAIM_FAILED', EV_MINIMA_REFUND_FAILED = 'MINIMA_REFUND_FAILED';
+    // Terminal: the counterparty took the leg I paid and reclaimed theirs — nothing left to claim. Written once,
+    // with the plain-language reason as its note, when a swap is finalised as lost (settle.finalizeMinimaLost /
+    // finalizeEthLost). 2026-09-15: such a row read "claiming" for two days.
+    var EV_LOST = 'SWAP_LOST';
     // ---- UX swap status ----
     var ST_STARTED = 'STARTED', ST_LOCKED = 'LOCKED', ST_CLAIMING = 'CLAIMING',
         ST_COMPLETE = 'COMPLETE', ST_REFUNDED = 'REFUNDED', ST_ERROR = 'ERROR';
@@ -202,6 +206,12 @@
     function markTradeRefunded(coinid, cb) {
         write("UPDATE `market_trades` SET `status`='" + MT_REFUNDED + "' WHERE `coinid`='" + esc(coinid) + "'", cb);
     }
+    /** The observed on-chain lock for ONE hashlock (the counterparty's leg as the market collector saw it) — its
+     *  BLOCK timelock is what decides whether that leg can already have been refunded. Null when never observed. */
+    function tradeByHash(hash, cb) {
+        read("SELECT * FROM `market_trades` WHERE `hash`='" + esc(norm(hash)) + "' ORDER BY `created_block` DESC LIMIT 1",
+            function (e, rs) { cb(e, (!e && rs && rs.length) ? readTrade(rs[0]) : null); });
+    }
     /** Recent trades in ONE market (any status), newest first. */
     function recentTrades(limit, tokenId, cb) {
         read("SELECT * FROM `market_trades` WHERE `tokenid`='" + esc(tokenId || '') +
@@ -218,6 +228,7 @@
     AX.swapdb = {
         EV_MINIMA_CLAIM_SUBMITTED: EV_MINIMA_CLAIM_SUBMITTED, EV_MINIMA_REFUND_SUBMITTED: EV_MINIMA_REFUND_SUBMITTED,
         EV_MINIMA_CLAIM_FAILED: EV_MINIMA_CLAIM_FAILED, EV_MINIMA_REFUND_FAILED: EV_MINIMA_REFUND_FAILED,
+        EV_LOST: EV_LOST,
         EV_STARTED: EV_STARTED, EV_CPSENT: EV_CPSENT, EV_COLLECT: EV_COLLECT, EV_EXPIRED: EV_EXPIRED, EV_MISMATCH: EV_MISMATCH,
         ST_STARTED: ST_STARTED, ST_LOCKED: ST_LOCKED, ST_CLAIMING: ST_CLAIMING, ST_COMPLETE: ST_COMPLETE, ST_REFUNDED: ST_REFUNDED, ST_ERROR: ST_ERROR,
         MT_OPEN: MT_OPEN, MT_EXECUTED: MT_EXECUTED, MT_REFUNDED: MT_REFUNDED,
@@ -227,7 +238,7 @@
         insertMyHtlc: insertMyHtlc, getRequest: getRequest,
         upsertSwap: upsertSwap, setSwapStatus: setSwapStatus, setSwapContractId: setSwapContractId,
         getSwap: getSwap, deleteSwap: deleteSwap, allSwaps: allSwaps, activeHashes: activeHashes,
-        upsertOpenTrade: upsertOpenTrade, openTrades: openTrades, markTradeExecuted: markTradeExecuted,
+        upsertOpenTrade: upsertOpenTrade, openTrades: openTrades, tradeByHash: tradeByHash, markTradeExecuted: markTradeExecuted,
         markTradeRefunded: markTradeRefunded, recentTrades: recentTrades, executedTrades: executedTrades
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

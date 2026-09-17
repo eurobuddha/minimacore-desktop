@@ -484,12 +484,12 @@ async function swaps() {
   }
   return jclone(rows);
 }
-/** getEvents rows arrive newest-first; the reason of the newest *_FAILED event, or "" when the newest settlement
- *  event is a success (a later SUBMITTED/COLLECT/EXPIRED supersedes an earlier failure). */
+/** getEvents rows arrive newest-first; the reason of the newest *_FAILED or SWAP_LOST event, or "" when the newest
+ *  settlement event is a success (a later SUBMITTED/COLLECT/EXPIRED supersedes an earlier failure). */
 function lastFailureNote(events) {
   for (const e of events || []) {
     const ev = String(e.event || "");
-    if (/_FAILED$/.test(ev)) return String(e.note || "");
+    if (/_FAILED$|^SWAP_LOST$/.test(ev)) return String(e.note || "");
     if (/_SUBMITTED$|^CPTXN_COLLECT$|^CPTXN_EXPIRED$/.test(ev)) return "";
   }
   return "";

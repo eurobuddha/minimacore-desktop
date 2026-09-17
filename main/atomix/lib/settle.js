@@ -409,7 +409,7 @@
                 });
             } else if (iAmSender) {
                 if (gc.refunded) return confirmEthRefunded(hash, next);           // AUTHORITATIVE: my leg refunded
-                if (gc.withdrawn) return next();                                  // maker claimed my USDT; my mxUSDT arrives via the Minima claim
+                if (gc.withdrawn) return checkMinimaLost(swap, hash, next);       // they hold my USDT: my mxUSDT arrives via the Minima claim — or never
                 C.rpc.latestBlockTimestamp(function (eT, chainNow) {
                     var now = eT ? nowUnix() : chainNow;                          // chain time is what the vault enforces
                     if (now > gc.timelock) return broadcastEthRefund(cid, hash, next);
@@ -477,7 +477,59 @@
     function finalizeEthLost(hash, next) {
         DB.getSwap(hash, function (e, cur) {
             if (!cur || cur.status === DB.ST_ERROR || cur.status === DB.ST_REFUNDED || cur.status === DB.ST_COMPLETE) return next();
-            DB.setSwapStatus(hash, DB.ST_ERROR, function () { onChanged(); next(); });
+            var note = 'counterparty refunded their ' + cur.buyAmount + ' ' + cur.buyToken + ' leg before you claimed it'
+                + (cur.myLegIsMinima ? ' — your ' + cur.sellAmount + ' ' + cur.sellToken + ' lock is refundable at its timelock' : '');
+            finalize(hash, DB.EV_LOST, DB.ST_ERROR, function (have, cb2) {
+                if (!have) DB.logEvent(hash, DB.EV_LOST, 'ETH', cur.buyAmount, note, cb2); else cb2();
+            }, function () { notify('Swap FAILED', note + '. Swap ' + hash); onChanged(); next(); });
+        });
+    }
+    /**
+     * The counterparty withdrew my ETH leg (they hold my USDT and revealed the secret) and my Minima claim never
+     * confirmed. Once their coin is GONE and its timelock has passed, they reclaimed it and this swap is lost for
+     * me — say so ONCE (ST_ERROR + SWAP_LOST + notify) instead of "claiming" forever. 2026-09-15: the row read
+     * CLAIMING for two days after the loss, with nothing left to claim. Decision inputs, all read-only: no
+     * COLLECT, no RECENT claim submission (a confirmed late claim still flips ERROR → COMPLETE via
+     * confirmPendingMinima), no open coin for the hash in the deep scan, and the block past the leg's timelock —
+     * from the market collector's row for the hash, or, if it never observed the lock, a bounded fallback: four
+     * hours past my own ETH timelock, by when any 144-block Minima leg has long expired. Throttled per hash. */
+    var LOST_FALLBACK_SECS = 4 * 3600, RECENT_SUBMIT_MS = 30 * 60 * 1000;
+    function checkMinimaLost(swap, hash, next) {
+        if (!swap || swap.myLegIsMinima) return next();
+        var key = 'lostM:' + hash;
+        if (!ethRetryDue(key)) return next();
+        markEthAttempt(key);
+        DB.hasEvent(hash, DB.EV_COLLECT, function (e, collected) {
+            if (e || collected) return next();
+            DB.getEvents(hash, function (e2, evs) {
+                if (e2) return next();
+                var recentSubmit = (evs || []).some(function (r) { return r.event === DB.EV_MINIMA_CLAIM_SUBMITTED && (_now() - Number(r.date || 0)) < RECENT_SUBMIT_MS; });
+                if (recentSubmit) return next();
+                H.currentBlock(function (e3, block) {
+                    if (e3) return next();
+                    H.scanByHashDeep(hash, 2, REFUND_SCAN_DEPTH, function (e4, coins) {
+                        if (e4) return next();
+                        var open = (coins || []).some(function (c) { return c && isMyPublishKey(H.stateAt(c, 4)) && sameHash(H.stateAt(c, 5), hash); });
+                        if (open) return next();                       // still claimable — the claim path owns it
+                        DB.tradeByHash(hash, function (e5, t) {
+                            var expired = (t && t.timelock > 0) ? block > t.timelock
+                                : (swap.myTimelock > 0 && nowUnix() > swap.myTimelock + LOST_FALLBACK_SECS);
+                            if (!expired) return next();
+                            finalizeMinimaLost(hash, next);
+                        });
+                    });
+                });
+            });
+        });
+    }
+    function finalizeMinimaLost(hash, next) {
+        DB.getSwap(hash, function (e, cur) {
+            if (!cur || cur.status === DB.ST_ERROR || cur.status === DB.ST_REFUNDED || cur.status === DB.ST_COMPLETE) return next();
+            var note = 'counterparty withdrew your ' + cur.sellAmount + ' ' + cur.sellToken + ' and reclaimed their '
+                + cur.buyAmount + ' ' + cur.buyToken + ' at the timelock — our claim never posted';
+            finalize(hash, DB.EV_LOST, DB.ST_ERROR, function (have, cb2) {
+                if (!have) DB.logEvent(hash, DB.EV_LOST, 'minima', cur.buyAmount, note, cb2); else cb2();
+            }, function () { notify('Swap FAILED', note + '. Swap ' + hash); onChanged(); next(); });
         });
     }
     // helper: log the terminal event (once) then set the terminal status.

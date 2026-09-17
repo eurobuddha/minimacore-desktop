@@ -340,6 +340,9 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.equal(atomix._lastFailureNote([{ event: "MINIMA_CLAIM_SUBMITTED", note: "0xTXP" }, { event: "MINIMA_CLAIM_FAILED", note }]), "");
       assert.equal(atomix._lastFailureNote([{ event: "CPTXN_SENT", note: "0xabc" }]), "");
       assert.equal(atomix._lastFailureNote([]), "");
+      // 0.17.5: a lost leg (engine 0.1.32) is a terminal failure — its reason shows on the row the same way
+      const lost = "counterparty withdrew your 4.95 USDT and reclaimed their 5 mxUSDT at the timelock — our claim never posted";
+      assert.equal(atomix._lastFailureNote([{ event: "SWAP_LOST", note: lost }, { event: "MINIMA_CLAIM_FAILED", note }]), lost);
     });
     await okA("the shim hands a txncheck verdict to the engine untouched (normReply must not clobber `valid`)", async () => {
       const mds = atomix._buildMds();
