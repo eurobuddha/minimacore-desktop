@@ -76,6 +76,10 @@ jobs:
       - name: Verify Parlons panel sessions
         run: npm run test:parlons
 
+      # The node's stdout on disk (rotated). The line that explained a lost swap lived only in a RAM ring.
+      - name: Verify node log file
+        run: npm run test:node-log
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a

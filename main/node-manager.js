@@ -16,6 +16,7 @@ const path = require("path");
 const config = require("./config");
 const portmap = require("./portmap");
 const { rpcCall } = require("./rpc");
+const { createNodeLog } = require("./nodelog");
 
 const LOG_MAX_LINES = 800;
 // Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
@@ -273,6 +274,14 @@ class NodeManager extends EventEmitter {
   }
 
   pidfilePath() { return path.join(app.getPath("userData"), "node.pid"); }
+  /** <userData>/node.log, opened lazily (userData is not resolvable at require time). */
+  diskLog() {
+    if (!this._diskLog) {
+      try { this._diskLog = createNodeLog(app.getPath("userData")); }
+      catch (e) { this._diskLog = { append() {} }; }   // no userData yet (headless/test) → RAM ring only
+    }
+    return this._diskLog;
+  }
 
   /**
    * A node this app started earlier and never stopped (the app crashed, was force-quit, or its stop
@@ -493,6 +502,9 @@ class NodeManager extends EventEmitter {
       // up in the Logs view.
       l = l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
       this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
+      // The same redacted line, on disk and untruncated (main/nodelog.js): the RAM ring holds ~800 lines,
+      // and the one line that explained a lost swap had rolled out of it long before anyone looked.
+      this.diskLog().append(l);
     }
     if (this.logs.length > LOG_MAX_LINES) this.logs.splice(0, this.logs.length - LOG_MAX_LINES);
     this.emit("log");
