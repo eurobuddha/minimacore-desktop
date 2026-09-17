@@ -200,6 +200,74 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.ok(!/checkaddress/.test(fn), "nor its own signability probe");
     });
 
+    await okA("asks the node ONLY for coins `send` will accept (checkmempool:true)", async () => {
+      // THE REAL PUBLISH BUG (found in the node's Java, proved on-chain). `coins` defaults checkmempool to
+      // FALSE, so it still lists a coin already committed to an unconfirmed txn; `send` filters those out
+      // unconditionally (send.java:317-333 and again in selectCoins). The pin trusted `coins`, handed
+      // `fromaddress:` a coin `send` refuses, and the send failed "Insufficient funds.. you only have 0".
+      // Two coins on the live wallet were each spent by two different txpows before this was found.
+      atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
+      await atomix._pinPublishSend(PUB);
+      assert.ok(/\bcheckmempool:true\b/.test(lastCoinsCmd),
+        "coins query must carry checkmempool:true so candidates match what send accepts, got: " + lastCoinsCmd);
+    });
+
+    await okA("a node reply that fails with `message` (not `error`) surfaces the real reason", async () => {
+      // send.java:376-381 returns {status:false, message:"Insufficient funds.."} — no `error` key, because
+      // CommandRunner only sets `error` on a thrown exception. mdsw.js reads r.error, so every such failure
+      // rendered as "— undefined" and the node's actual explanation was thrown away.
+      const mds = atomix._buildMds();
+      atomix._setRunner(async (cmd) => {
+        if (/^coins /.test(cmd)) return { response: [{ amount: "5", address: BIG }] };
+        if (/^checkaddress /.test(cmd)) return { response: { simple: true } };
+        if (/^send /.test(cmd)) return { status: false, message: "Insufficient funds.. you only have 0 require:0.000000001" };
+        return { status: true };
+      });
+      const r = await new Promise(res => mds.cmd(PUB, res));
+      assert.equal(r.status, false);
+      assert.ok(r.error && /Insufficient funds/.test(r.error),
+        "the shim must copy `message` into `error` so the UI shows it, got error=" + r.error);
+    });
+
+    await okA("a refused pin rotates to the next signable address instead of failing", async () => {
+      // `coins` and `send` are separate code paths in the node, so a pin can still name a coin `send`
+      // refuses (e.g. a leaked TxPoWMiner.mMiningCoins entry, which never self-heals). That used to strand
+      // the maker until a node restart. Now: bare {status:false} on address A → retry pinned to B.
+      const A = "0x" + "A".repeat(64), B2 = "0x" + "B".repeat(64);
+      const sends = [];
+      atomix._setRunner(async (cmd) => {
+        if (/^coins /.test(cmd)) return { response: [{ amount: "0.5", address: A }, { amount: "7", address: B2 }] };
+        if (/^checkaddress /.test(cmd)) return { response: { simple: true } };
+        if (/^send /.test(cmd)) {
+          sends.push(cmd);
+          const from = (/\bfromaddress:(0x[0-9A-Fa-f]+)/.exec(cmd) || [])[1];
+          if (from === A) return { status: false, message: "Insufficient funds.. you only have 0 require:0.000000001" };
+          return { status: true, response: { txpowid: "0xOK" } };
+        }
+        return { status: true };
+      });
+      const r = await atomix._publishSendWithRetry(PUB);
+      assert.equal(r.status, true, "the publish must succeed on the second candidate");
+      assert.equal(sends.length, 2, "exactly two send attempts, got " + sends.length);
+      assert.ok(sends[0].endsWith(" fromaddress:" + A), "first attempt pinned to the smallest (A)");
+      assert.ok(sends[1].endsWith(" fromaddress:" + B2), "second attempt rotated to B, got: " + sends[1]);
+    });
+
+    await okA("a REAL error is surfaced immediately, never retried", async () => {
+      // A thrown/transport failure carries `error` and is not the refusal signature — looping on it would
+      // burn candidates and hide the actual problem.
+      let sendCount = 0;
+      atomix._setRunner(async (cmd) => {
+        if (/^coins /.test(cmd)) return { response: [{ amount: "5", address: BIG }] };
+        if (/^checkaddress /.test(cmd)) return { response: { simple: true } };
+        if (/^send /.test(cmd)) { sendCount++; return { status: false, error: "RPC authentication failed" }; }
+        return { status: true };
+      });
+      const r = await atomix._publishSendWithRetry(PUB);
+      assert.equal(sendCount, 1, "a real error must not be retried, got " + sendCount + " attempts");
+      assert.ok(/authentication/.test(r.error));
+    });
+
     await okA("non-publish sends are left completely alone", async () => {
       atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
       const plain = "send amount:1 address:0xABC tokenid:0x00";

@@ -89,14 +89,50 @@ const AX_PUBLISH_MIN_COINAGE = 5;
  *
  * Only the AtomiX-specific part stays here: WHICH sends to pin (AX_PUBLISH_SEND) and the minimum coin age.
  */
-async function pinPublishSend(command) {
+async function pinPublishSend(command, exclude) {
   if (!AX_PUBLISH_SEND.test(command)) return command;
-  const pinned = await pinMinimaSend(runner, command, { minCoinage: AX_PUBLISH_MIN_COINAGE });
+  const pinned = await pinMinimaSend(runner, command, { minCoinage: AX_PUBLISH_MIN_COINAGE, exclude });
   if (pinned === command) {
     log("publish-send pin: no sendable signable MINIMA coin >= " + AX_PUBLISH_AMOUNT
         + " (coinage >= " + AX_PUBLISH_MIN_COINAGE + ") — sending unpinned");
   }
   return pinned;
+}
+
+// The node's own explanation for a failed send lives under `message`, not `error`: send.java:376-381 returns
+// {status:false, message:"Insufficient funds.."} normally, and CommandRunner only sets `error` when an
+// exception is thrown. mdsw.js reads r.error, so this rendered as "cmd failed: … — undefined" for months while
+// the node was telling us exactly what was wrong. Copy it across before the reply reaches the vm.
+function normReply(r) {
+  if (r && r.status === false && !r.error && r.message) r.error = String(r.message);
+  return r;
+}
+/** A publish send the node declined without throwing — the "pinned to a coin `send` will not spend" signature.
+ *  Retryable: pick another address. A thrown/transport error is NOT this and must surface as-is. */
+function bareRefusal(r) { return !!(r && r.status === false && !r.pending && !r.error); }
+const AX_PUBLISH_MAX_PINS = 4;
+
+/**
+ * Publish send with candidate rotation. `coins` and `send` are separate code paths in the node, so even with
+ * checkmempool:true the pin can, in principle, name a coin `send` refuses (e.g. a leaked mining-list entry).
+ * Rather than surface that as a failure — which used to strand the maker until a node restart — try the
+ * next signable address, then fall back to an unpinned send, and say which happened in the log.
+ */
+async function publishSendWithRetry(command) {
+  const tried = new Set();
+  for (let attempt = 0; attempt < AX_PUBLISH_MAX_PINS; attempt++) {
+    const pinned = await pinPublishSend(command, tried);
+    if (pinned === command) break;                                   // nothing left to pin → unpinned below
+    const m = /\bfromaddress:(0x[0-9A-Fa-f]+)/.exec(pinned);
+    const addr = m ? m[1] : "";
+    const r = await runner(pinned);
+    if (!bareRefusal(r)) return r;                                   // success, pending, or a REAL error
+    log("publish-send pin: node refused funding from " + addr + " (" + (r && r.message ? r.message : "no reason given")
+        + ") — trying the next signable address");
+    if (addr) tried.add(addr.toLowerCase());
+  }
+  log("publish-send pin: no pinned candidate accepted after " + tried.size + " — sending unpinned");
+  return runner(command);
 }
 
 function buildMds() {
@@ -113,8 +149,8 @@ function buildMds() {
       // undefined". That threw away the only clue (auth/timeout/bad-reply) and made a publish failure
       // undiagnosable from the UI. Carry the reason through as `error` instead.
       const failed = (e) => cb(toVm({ status: false, error: (e && e.message) ? e.message : String(e) }));
-      if (AX_PUBLISH_SEND.test(c)) { pinPublishSend(c).then(p => runner(p)).then(r => cb(toVm(r)), failed); return; }
-      runner(c).then(r => cb(toVm(r)), failed);
+      if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c).then(r => cb(toVm(normReply(r))), failed); return; }
+      runner(c).then(r => cb(toVm(normReply(r))), failed);
     },
     sql(query, cb) {
       sqlShim.sql(query, cb);
@@ -1029,6 +1065,8 @@ module.exports = {
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
   // test-only: the publish-send coin pin (scripts/atomix-unit.js) — drive it with _setRunner
   _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,
+  _buildMds: buildMds,   // test-only: the MDS shim, so the cmd reply normalisation can be asserted
+  _publishSendWithRetry: publishSendWithRetry,
   _ctx: () => ctx, _fire: fire,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,

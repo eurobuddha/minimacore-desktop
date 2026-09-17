@@ -22,6 +22,9 @@ async function pinMinimaSend(runner, command, opts) {
   // to a coin the node will not spend yet makes the send unfundable, so every publish poisoned the next.
   // Other callers leave it unset; `sendable:true` alone already excludes what they care about.
   const minCoinage = (opts && Number(opts.minCoinage) > 0) ? Math.floor(Number(opts.minCoinage)) : 0;
+  // exclude: addresses (any case) the caller has already tried and the node refused. Lets a caller rotate to
+  // the next candidate instead of re-pinning the same one — the AtomiX publish retry uses this.
+  const exclude = new Set([...((opts && opts.exclude) || [])].map(a => String(a).toLowerCase()));
   const tok = /\btokenid:(0x[0-9A-Fa-f]+)/.exec(c);
   if (tok && tok[1].toLowerCase() !== "0x00") return c;   // an explicit non-MINIMA token → not beacon-polluted
   const am = /\bamount:([0-9.]+)/.exec(c);
@@ -39,11 +42,20 @@ async function pinMinimaSend(runner, command, opts) {
     return ap === bp ? 0 : (ap < bp ? -1 : 1);
   };
   try {
-    // SENDABLE only — a coin already committed to an unconfirmed txn, or locked in a covenant, cannot fund a
-    // send even when it is old enough. `coinage:` does NOT imply it: that was the AtomiX publish failure.
-    const coinsR = await runner("coins relevant:true sendable:true tokenid:0x00"
+    // Ask for exactly the coins `send` will ACCEPT, or the pin is a trap. In the node (coins.java:194)
+    // checkmempool defaults to FALSE, so `coins` still lists a coin already committed to an unconfirmed
+    // transaction; `send` (send.java:317-333, and again inside selectCoins) excludes those unconditionally —
+    // the same two checks: being mined (TxPoWMiner.mMiningCoins) or in the RAM mempool. Without this flag the
+    // pin handed `fromaddress:` a coin `send` refused, every input at that address was skipped, and the send
+    // died with "Insufficient funds.. you only have 0". Proved on-chain: two coins each spent by two txpows.
+    // `sendable:true` is unrelated to this — it is Wallet.isAddressSimple (my own non-contract address).
+    // Both lists are RAM-only and do not self-heal promptly (checkForCoinID ignores isOnMainChain; the mining
+    // list leaks on a timeout), which is why only a node restart used to clear it.
+    const coinsR = await runner("coins relevant:true sendable:true checkmempool:true tokenid:0x00"
       + (minCoinage ? " coinage:" + minCoinage : ""));
-    const all = ((coinsR && coinsR.response) || []).filter(x => cmpDec(x.amount, "0") > 0 && String(x.address || "").length >= 42);
+    const all = ((coinsR && coinsR.response) || [])
+      .filter(x => cmpDec(x.amount, "0") > 0 && String(x.address || "").length >= 42)
+      .filter(x => !exclude.has(String(x.address || "").toLowerCase()));
     // One checkaddress per ADDRESS, not per coin: several coins share an address, and each probe is a round
     // trip with a 30s ceiling, so the old per-coin loop could re-ask the same question many times over.
     const signable = new Map();

@@ -38,7 +38,9 @@ casino._setRunner(async (cmd) => {
   if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: "0xMYPK", address: WALLET_ADDR, miniaddress: "MxWALLET" } };
   if (/^balance\b/.test(cmd)) return { status: true, response: [{ sendable: "500" }] };
   if (/^coins relevant:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [{ amount: "500", address: WALLET_ADDR, coinid: "0xFUND1" }] };
-  if (/^coins relevant:true sendable:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [
+  // The shared pin now asks for checkmempool:true between sendable and tokenid (the AtomiX publish fix);
+  // match on the flags, not their adjacency, so this mock stays honest about what the pin sends.
+  if (/^coins relevant:true sendable:true (checkmempool:true )?tokenid:0x00\b/.test(cmd)) return { status: true, response: [
     { amount: "1", address: BEACON_ADDR, coinid: "0xDUST", state: [] },      // must be skipped (short addr)
     { amount: "19.84626467552", address: WALLET_ADDR, coinid: "0xFUND1", state: [] }   // 11-dp coin: change must NOT round up
   ] };
