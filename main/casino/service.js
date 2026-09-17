@@ -65,17 +65,37 @@ function recordServiceResult(coinid,range,playerpick,result,playerWins,bet,payou
 // OWN bets stay relevant without tracking: core matches wallet keys/addresses against the coin's HEX
 // state (ports 0/1/8/9). Discovery is `coins address:` — relevance-free. newscript REPLACES the row,
 // so this registration also demotes a row an old build promoted.
+// 2.9.3: SCRIPT_OK is no longer a one-shot boot latch. On 2026-09-15 the node's wallet lost its custom
+// script rows MID-RUN (the AtomiX covenant vanished alongside this one): txnbasics silently built every
+// reveal/resolve without a ScriptProof (txnlist showed "signatures 1, mmrproofs 1, scripts 0"), four
+// timeout posts were rejected by consensus over two hours, and only a node restart — which re-ran
+// newscript — cured it. So the row is RE-READ every SCRIPT_CHECK_EVERY blocks (one cheap `scripts
+// address:` query) and re-registered when it is gone. newscript itself is a non-atomic remove+add whose
+// add can fail leaving no row, which is why the read verifies the address the node computed.
+var SCRIPT_CHECK_EVERY=10, scriptCheckTick=0;
+function scriptRowOk(row){
+  var addr=row?String(row.address||''):'';
+  return !!addr&&addr.toUpperCase()===SCRIPT_ADDR.toUpperCase();
+}
 function ensureScript(cb){
-  if(SCRIPT_OK){if(cb)cb();return}
-  MDS.cmd('newscript script:"'+SCRIPT+'" trackall:false',function(res){
-    var addr=(res&&res.response)?(res.response.address||''):'';
-    if(res&&res.status&&addr&&addr.toUpperCase()===SCRIPT_ADDR.toUpperCase()){
+  if(SCRIPT_OK&&(++scriptCheckTick%SCRIPT_CHECK_EVERY)!==0){if(cb)cb();return}
+  MDS.cmd('scripts address:'+SCRIPT_ADDR,function(res){
+    if(res&&res.status&&scriptRowOk(res.response)){
+      if(!SCRIPT_OK)MDS.log("Casino service: covenant script row present + verified");
       SCRIPT_OK=true;
-      MDS.log("Casino service: covenant script registered + verified");
-    }else{
-      MDS.log("Casino service: script registration not confirmed — retrying next block");
+      if(cb)cb();return;
     }
-    if(cb)cb();
+    if(SCRIPT_OK)MDS.log("Casino service: covenant script row MISSING on the node — re-registering (spends would be rejected without it)");
+    SCRIPT_OK=false;
+    MDS.cmd('newscript script:"'+SCRIPT+'" trackall:false',function(r2){
+      if(r2&&r2.status&&scriptRowOk(r2.response)){
+        SCRIPT_OK=true;
+        MDS.log("Casino service: covenant script registered + verified");
+      }else{
+        MDS.log("Casino service: script registration not confirmed — retrying next block");
+      }
+      if(cb)cb();
+    });
   });
 }
 // Delete stale half-built svc_ txns left by earlier failed attempts (they otherwise accumulate in
