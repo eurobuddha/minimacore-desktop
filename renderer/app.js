@@ -3552,6 +3552,26 @@ function wireAxHeader() {
   const h = el("axHelp"); if (h) h.onclick = axWelcome;
 }
 
+/**
+ * Refresh the header's currency/readiness in place — status only, no innerHTML on #axBody.
+ *
+ * axStatusCache used to be written in exactly ONE place (renderAtomix), and the live-update path never
+ * called it, so once the engine flipped currency the body showed the new one (fresh label from axBook) while
+ * the header and the "Switch to …" button kept the old one indefinitely. renderAtomix() is the wrong tool for
+ * the push path: it awaits a 30s-bounded book scan and ends every branch in host.innerHTML, which would
+ * destroy the maker editor and OTC inputs mid-typing — exactly what refreshAxActive's focus guard prevents.
+ */
+async function axRefreshStatus() {
+  const fresh = await api.axStatus().catch(() => null);
+  if (!fresh) return;                                             // keep the last-good cache on a transient miss
+  axStatusCache = fresh;
+  const vroot = el("view-atomix"); if (vroot) vroot.setAttribute("data-axccy", fresh.currency === "minima" ? "minima" : "mxusdt");
+  const ccy = fresh.currency === "minima" ? "MINIMA" : (fresh.currency === "mxusdt" ? "mxUSDT" : "…");
+  const dot = fresh.ready ? '<span style="color:var(--green)">●</span> ' : '<span style="color:var(--amber)">●</span> ';
+  const ver = document.querySelector("#axBody .view__title .mail-ver");
+  if (ver) ver.innerHTML = `${dot}${fresh.ready ? "live" : "starting…"} · ${esc(ccy)}`;
+  const btn = el("axCcy"); if (btn) btn.textContent = "Switch to " + (fresh.currency === "minima" ? "mxUSDT" : "MINIMA");
+}
 async function renderAtomix() {
   const host = el("axBody");
   if (!host) return;
@@ -4253,10 +4273,18 @@ async function axSendDialog(w) {
 }
 
 async function axSwitchCurrency() {
-  const to = axStatusCache.currency === "minima" ? "mxUSDT" : "MINIMA";
+  // Derive the target ONCE. Reading axStatusCache.currency twice (label, then call) was a latent
+  // inconsistency if a push refreshed the cache between the reads; and with the engine now switching
+  // synchronously, re-reading status afterwards means the next click starts from server truth rather than a
+  // stale cache that asks for the key the engine already holds (which the glue early-returns as a no-op).
+  const cur = axStatusCache.currency;
+  const key = cur === "minima" ? "mxusdt" : "minima";
+  const to = key === "mxusdt" ? "mxUSDT" : "MINIMA";
   if (!await showConfirm("Switch to " + to + "?", "Your live market on the current book is withdrawn first, then AtomiX moves to the " + to + " book. Any in-flight swap still settles.", "Switch")) return;
-  const r = await api.axSwitchCurrency(axStatusCache.currency === "minima" ? "mxusdt" : "minima").catch(e => ({ err: String(e.message || e) }));
+  const btn = el("axCcy"); if (btn) { btn.disabled = true; btn.textContent = "Switching…"; }   // no double-entry while the tombstone posts
+  const r = await api.axSwitchCurrency(key).catch(e => ({ err: String(e.message || e) }));
   if (r && r.err) toast(r.err, "warn");
+  await axRefreshStatus();
   renderAtomix();
 }
 function axWelcome() {
@@ -4270,6 +4298,7 @@ function onAtomixUpdate() {
 }
 async function refreshAxActive() {
   if (activeView !== "atomix" || !el("axBody")) return;
+  await axRefreshStatus();   // header + accent from server truth, on EVERY tab — before the focus guard below
   // NEVER rebuild a view while the user is typing in one of its inputs (the Mail frozen-tab rule). The Market
   // maker editor + OTC availability + Swap amount all hold live inputs.
   const focusInBody = document.activeElement && el("axBody").contains(document.activeElement) && document.activeElement.tagName === "INPUT";

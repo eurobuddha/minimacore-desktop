@@ -268,6 +268,32 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.ok(/authentication/.test(r.error));
     });
 
+    await okA("switchCurrency applies the switch itself instead of firing into the POLLING guard", async () => {
+      // service.js's poll() returns early when a pass is in flight, and switchCurrency has just spent up to
+      // 60s tombstoning — so a pass usually IS in flight and the MDS_TIMER_60SECONDS nudge was swallowed.
+      // The engine kept the old currency for up to a minute; the renderer's stale cache then made the next
+      // click a server-side no-op. reloadShared is the donor's own function and a vm global (same access
+      // class as the ctx.RPC.setUrl the glue already uses), so call it directly. Structural, because the
+      // engine-driving path needs the minimega container.
+      const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "atomix.js"), "utf8");
+      const fn = src.slice(src.indexOf("async function switchCurrency"), src.indexOf("\n}", src.indexOf("async function switchCurrency")));
+      assert.ok(/ctx\.reloadShared\s*\(/.test(fn), "switchCurrency must call ctx.reloadShared directly");
+      assert.ok(!/fire\(\s*"MDS_TIMER_60SECONDS"/.test(fn), "and must not rely on the poll nudge, which the POLLING guard swallows");
+      assert.ok(!/kvSet\([^)]*\(\)\s*=>\s*cb\(null\)/.test(fn), "kvSet's error must be propagated, not discarded as cb(null)");
+    });
+
+    await okA("reloadShared is reachable from the glue (the toggle fix depends on it)", async () => {
+      // service.js is evaluated by vm.runInContext with no function wrapper, so its top-level declarations
+      // are properties of the context. If a future donor sync wraps it in an IIFE, the toggle fix silently
+      // stops working — this is what catches that. Built with an inert MDS shim: no node, no network.
+      const { createContext } = require("../main/atomix/loader");
+      const inert = { minidappuid: "", cmd(c, cb) { if (cb) cb({ status: false }); }, sql(q, cb) { if (cb) cb({ status: true, rows: [] }); },
+        net: { GET(u, cb) { cb({}); }, POST(u, d, cb) { cb({}); } }, notify() {}, log() {}, init() {} };
+      const ctx = createContext(inert);
+      assert.equal(typeof ctx.reloadShared, "function", "ctx.reloadShared must be a vm global");
+      assert.equal(typeof ctx.POLLING, "boolean", "and the POLLING guard it bypasses must be the service.js var");
+    });
+
     await okA("non-publish sends are left completely alone", async () => {
       atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
       const plain = "send amount:1 address:0xABC tokenid:0x00";

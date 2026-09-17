@@ -639,8 +639,8 @@ async function makerWithdraw() {
 // cross-realm safety: hand the vm engine COPIES built in its own realm (so it never sees a foreign object).
 function jvm(obj) { return toVm(obj); }
 
-// ---- currency switch (donor switchCurrency: tombstone under the OLD identity, then flip the kv — the vm
-// service's reloadShared detects it next poll and reconfigures every engine itself) ----
+// ---- currency switch (donor switchCurrency: tombstone under the OLD identity, flip the kv, then apply the
+// switch IMMEDIATELY via the service's own reloadShared — see the comment inside for why not the poll nudge) ----
 async function switchCurrency(key) {
   const A = AX();
   if (key !== "minima" && key !== "mxusdt") throw new Error("bad currency");
@@ -651,8 +651,20 @@ async function switchCurrency(key) {
   // per-currency, so an offer armed by otcGoLive would re-advertise the LEAVING currency's sizes on the
   // ARRIVING currency's board. Disarm only — the old board's coin ages out, as it does in both peers.
   A.otc.setMyOffer(false, 0, 0);
-  await p(cb => A.mds.kvSet("trading_currency", key, () => cb(null)));
-  fire("MDS_TIMER_60SECONDS");   // nudge reloadShared now instead of waiting for the next block
+  // Propagate a failed MERGE: mdsw.js names trading_currency as the one write that must not fail silently,
+  // and `() => cb(null)` was reporting success unconditionally — leaving the maker tombstoned under the old
+  // currency with the row unchanged and {ok:true} returned.
+  await p(cb => A.mds.kvSet("trading_currency", key, e => cb(e)));
+  // Apply NOW. This used to fire MDS_TIMER_60SECONDS and hope: service.js's poll() returns early when a pass
+  // is already in flight, and we have just spent up to 60s tombstoning, so a pass usually IS in flight — the
+  // nudge was swallowed and the engine kept the old currency for up to a minute, while the renderer's stale
+  // cache made the next click a server-side no-op. reloadShared is the donor's own function (a vm global,
+  // same access class as the ctx.RPC.setUrl we already use): it re-reads the kv row, swaps the trading
+  // context, resets the maker and reconfigures every engine. Idempotent — the next poll compares equal and
+  // no-ops. Deliberately NOT ctx.POLLING = false: that would defeat the fund-safety watchdog and allow two
+  // concurrent settlement passes. A pass already in flight continues under the new config, as it did on the
+  // old 60s path; maker.resetForReload() has cleared ORDER, so a mid-flight keepAlive republishes nothing.
+  await p(cb => ctx.reloadShared(() => cb(null)));
   emitter.emit("update");
   return { ok: true };
 }
