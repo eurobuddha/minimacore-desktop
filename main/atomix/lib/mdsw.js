@@ -37,7 +37,11 @@
     function rawCmdR(command, cb) {
         g.MDS.cmd(command, function (r) {
             if (r && (r.status === true || r.pending === true)) cb(null, r.response, r);
-            else cb(new Error('cmd failed: ' + command + ' — ' + (r && r.error)), null, r);
+            // The node's own explanation for a declined command lives under `message`, not `error`: send.java
+            // returns {status:false, message:"Insufficient funds.."} normally, and CommandRunner only sets
+            // `error` when an exception is thrown. Reading r.error alone rendered exactly that failure as
+            // "— undefined" for months while the node was saying what was wrong.
+            else cb(new Error('cmd failed: ' + command + ' — ' + ((r && (r.error || r.message)) || 'no reason given')), null, r);
         });
     }
 

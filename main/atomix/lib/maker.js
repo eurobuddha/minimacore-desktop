@@ -166,9 +166,15 @@
         var c = cfgCache || {};
         if (!c.pegEnable && !(manualCache && ((manualCache.bids || []).length || (manualCache.asks || []).length))) return cb(null);  // nothing configured
         var due = (Date.now() - lastPublishMs) >= KEEPALIVE_MS;
-        if (c.pegEnable && PEG.shouldReprice(pegCfg(), lastPublishMs)) return publish(avail, cb);
-        if (due) return publish(avail, cb);
-        cb(null);
+        if (!(c.pegEnable && PEG.shouldReprice(pegCfg(), lastPublishMs)) && !due) return cb(null);
+        // The currency can be switched by the OTHER context (the page) while this pass is already past
+        // reloadShared: the UI tombstones the old ladder, and a keep-alive still running as the OLD currency
+        // would republish it for one interval. Re-read the shared kv right before publishing; if it moved,
+        // skip — the next pass reconfigures every engine and publishes under the new currency.
+        M.kvGet('trading_currency', TR.active().key, function (k) {
+            if (k !== TR.active().key) return cb(null);
+            publish(avail, cb);
+        });
     }
 
     /** Refresh the oracle price (drives shouldReprice), persisting the last-good stamp. cb(). */
@@ -182,7 +188,13 @@
     /** Currency switch (UI, BEFORE the flip): tombstone the OLD market + wipe the OLD currency's peg state so the
      *  new currency can't price off the old. Call while TR is still the OLD currency (saveState keys off it). */
     function onCurrencySwitch(avail, cb) {
-        tombstone(avail, function () { PEG.resetForSwitch(); ORDER = null; stateCache = {}; saveState(cb || function () {}); });
+        cb = cb || function () {};
+        // A tombstone that FAILED must stop the switch: proceeding flips the currency while the old ladder is
+        // still live and, from the next poll, mispriced — the exact hazard the tombstone exists to prevent.
+        tombstone(avail, function (err) {
+            if (err) return cb(err);
+            PEG.resetForSwitch(); ORDER = null; stateCache = {}; saveState(cb);
+        });
     }
 
     /** Currency reload (service, AFTER the flip was detected in kv): drop the old in-memory order/peg WITHOUT
