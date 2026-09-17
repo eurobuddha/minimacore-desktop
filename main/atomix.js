@@ -16,6 +16,7 @@ const { rpcCall } = require("./rpc");
 const { createContext } = require("./atomix/loader");
 const { makeSqlShim } = require("./pandapools/sqlshim");   // the proven generic H2→SQLite shim (3rd instance)
 const netfetch = require("./netfetch");
+const { pinMinimaSend } = require("./sendpin");   // the SHARED coin pin — see pinPublishSend below
 // electron/config/node-manager are lazy so the headless gate harness can drive this module bare-node
 // via _setRunner/_setDataDir (one implementation for tests AND the app — no harness drift).
 let app = null; try { app = require("electron").app; } catch (e) {}
@@ -72,27 +73,30 @@ const AX_PUBLISH_AMOUNT = 0.000000001;
 // the new smallest — so without this filter EVERY publish poisoned the NEXT one, which is exactly how
 // market publishing stayed broken. 5 gives margin over the node's ~3-confirmation spend rule.
 const AX_PUBLISH_MIN_COINAGE = 5;
+/**
+ * Pin an order-book publish/tombstone send to a coin that can actually fund it.
+ *
+ * This used to be its own implementation and it DRIFTED. main/sendpin.js is the shared pin every other send
+ * in the app goes through (mail, shop, vestr, webwallet, casino, the terminal), and it gained three fixes
+ * this copy never got: it asks the node for `sendable:true` coins, it compares 44-decimal amounts exactly
+ * instead of as doubles, and it falls back to an address whose coins TOTAL cover the amount.
+ *
+ * `sendable:true` is the one that broke publishing. `coinage:` does NOT imply it: a coin already spent by an
+ * unconfirmed transaction is still `relevant` and still old enough, so a republish inside the ~1 block after
+ * the previous publish re-picked that same coin, pinned to it, and the node refused the send with a bare
+ * {status:false} — the "cmd failed: send … — undefined" seen after every node restart, where the engine
+ * publishes immediately (maker.js lastPublishMs = 0) and the user then retries into that window.
+ *
+ * Only the AtomiX-specific part stays here: WHICH sends to pin (AX_PUBLISH_SEND) and the minimum coin age.
+ */
 async function pinPublishSend(command) {
-  if (!AX_PUBLISH_SEND.test(command) || /\bfromaddress:/.test(command)) return command;
-  try {
-    const coinsR = await runner("coins relevant:true tokenid:0x00 coinage:" + AX_PUBLISH_MIN_COINAGE);
-    // MUST cover the send: `fromaddress:` RESTRICTS the input set to that one address, so pinning to a coin
-    // smaller than the amount makes the send unfundable and the node answers a BARE {status:false} with NO
-    // error text — surfacing as the useless "cmd failed: send … — undefined". A wallet accumulates sub-nano
-    // dust from other dapps (a 0.00000000000000000000000000000000000000000001 coin was the live cause), and
-    // "smallest first" walked straight into it. Filter FIRST, then take the smallest that can actually pay.
-    const coins = ((coinsR && coinsR.response) || []).filter(c => Number(c.amount) >= AX_PUBLISH_AMOUNT)
-      .sort((a, b) => Number(a.amount) - Number(b.amount));   // smallest sufficient → funds from disposable dust, never the reserve/main coin
-    for (const c of coins) {
-      const addr = String(c.address || "");
-      if (addr.length < 42) continue;                          // short = sentinel/beacon (anyone-can-spend, no key)
-      const chk = await runner("checkaddress address:" + addr);
-      if (chk && chk.response && chk.response.simple) return command + " fromaddress:" + addr;
-    }
-    log("publish-send pin: no spendable signable MINIMA coin >= " + AX_PUBLISH_AMOUNT
+  if (!AX_PUBLISH_SEND.test(command)) return command;
+  const pinned = await pinMinimaSend(runner, command, { minCoinage: AX_PUBLISH_MIN_COINAGE });
+  if (pinned === command) {
+    log("publish-send pin: no sendable signable MINIMA coin >= " + AX_PUBLISH_AMOUNT
         + " (coinage >= " + AX_PUBLISH_MIN_COINAGE + ") — sending unpinned");
-  } catch (e) { log("publish-send pin failed: " + (e && e.message)); }
-  return command;   // best-effort: fall back to the unmodified send
+  }
+  return pinned;
 }
 
 function buildMds() {
@@ -733,7 +737,7 @@ function ethDecodeSymbol(retHex, addr) {
       if (len > 0 && len <= 64) { const s = hexToAscii(h.slice(off + 64, off + 64 + len * 2)); if (/^[\x20-\x7e]+$/.test(s)) return ethCleanSymbol(s, addr); }
     }
   } catch (e) {}
-  const b32 = hexToAscii(h.slice(0, 64)).replace(/ +$/, "");
+  const b32 = hexToAscii(h.slice(0, 64)).replace(/\x00+$/, "");
   if (b32 && /^[\x20-\x7e]+$/.test(b32)) return ethCleanSymbol(b32, addr);
   return ethCleanSymbol("", addr);
 }

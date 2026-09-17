@@ -168,6 +168,38 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.ok(n >= 3, "coinage must clear the node's ~3-confirmation spend rule, got " + n);
     });
 
+    await okA("asks the node for SENDABLE coins — coinage alone is not enough", async () => {
+      // THE PUBLISH BUG. `coinage:` says how deep a coin is, NOT whether it can be spent. A coin already
+      // consumed by an unconfirmed txn is still `relevant` and still old enough, so the query returned it,
+      // the pin chose it, and the node refused the send with a bare {status:false} — "cmd failed: send …
+      // — undefined". That is the window right after every publish (and after a node restart, where the
+      // engine publishes immediately and the user then retries into it).
+      atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
+      await atomix._pinPublishSend(PUB);
+      assert.ok(/\bsendable:true\b/.test(lastCoinsCmd),
+        "coins query must ask for sendable:true, got: " + lastCoinsCmd);
+    });
+
+    await okA("a coin the node will not spend is never pinned (it is simply absent)", async () => {
+      // With sendable:true the node omits such coins, so the pin must fall through to unpinned rather than
+      // pick something unfundable. Modelled by the node returning nothing for the sendable query.
+      atomix._setRunner(mkRunner([]));
+      const out = await atomix._pinPublishSend(PUB);
+      assert.equal(out, PUB, "no sendable coin → send unpinned, never pinned to an unspendable one");
+    });
+
+    await okA("the publish pin delegates to main/sendpin.js instead of keeping a private copy", async () => {
+      // It drifted once: sendpin gained sendable:true, exact 44dp comparison and a total-across-an-address
+      // fallback that this path never got, and publishing broke. A structural check, because atomix.js
+      // destructures the helper at load time so it cannot be swapped at runtime.
+      const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "atomix.js"), "utf8");
+      const fn = src.slice(src.indexOf("async function pinPublishSend"), src.indexOf("\nfunction buildMds"));
+      assert.ok(/pinMinimaSend\s*\(/.test(fn), "pinPublishSend must call sendpin.pinMinimaSend");
+      assert.ok(/minCoinage/.test(fn), "and pass the AtomiX coin-age floor through");
+      assert.ok(!/coins relevant:/.test(fn), "and must NOT run its own coins query again — that is the fork that drifted");
+      assert.ok(!/checkaddress/.test(fn), "nor its own signability probe");
+    });
+
     await okA("non-publish sends are left completely alone", async () => {
       atomix._setRunner(mkRunner([{ amount: "5", address: BIG }]));
       const plain = "send amount:1 address:0xABC tokenid:0x00";

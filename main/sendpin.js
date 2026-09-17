@@ -14,9 +14,14 @@
  *  ` fromaddress:<addr>` appended — only for a MINIMA (0x00) `send` that doesn't already pin one. A MINIMA send is
  *  either an explicit `tokenid:0x00` OR one with NO tokenid at all (the node defaults to MINIMA). A non-0x00 token
  *  send is untouched (beacon dust is MINIMA-only). */
-async function pinMinimaSend(runner, command) {
+async function pinMinimaSend(runner, command, opts) {
   const c = String(command);
   if (!/^send\s/.test(c) || /\bfromaddress:/.test(c)) return c;
+  // minCoinage: only consider coins at least N blocks deep. AtomiX's order-book publish needs this — a
+  // publish's own CHANGE output is a brand-new coin that immediately becomes the smallest one, and pinning
+  // to a coin the node will not spend yet makes the send unfundable, so every publish poisoned the next.
+  // Other callers leave it unset; `sendable:true` alone already excludes what they care about.
+  const minCoinage = (opts && Number(opts.minCoinage) > 0) ? Math.floor(Number(opts.minCoinage)) : 0;
   const tok = /\btokenid:(0x[0-9A-Fa-f]+)/.exec(c);
   if (tok && tok[1].toLowerCase() !== "0x00") return c;   // an explicit non-MINIMA token → not beacon-polluted
   const am = /\bamount:([0-9.]+)/.exec(c);
@@ -34,7 +39,10 @@ async function pinMinimaSend(runner, command) {
     return ap === bp ? 0 : (ap < bp ? -1 : 1);
   };
   try {
-    const coinsR = await runner("coins relevant:true sendable:true tokenid:0x00");   // SENDABLE only — pending/locked/covenant coins can't fund a send
+    // SENDABLE only — a coin already committed to an unconfirmed txn, or locked in a covenant, cannot fund a
+    // send even when it is old enough. `coinage:` does NOT imply it: that was the AtomiX publish failure.
+    const coinsR = await runner("coins relevant:true sendable:true tokenid:0x00"
+      + (minCoinage ? " coinage:" + minCoinage : ""));
     const all = ((coinsR && coinsR.response) || []).filter(x => cmpDec(x.amount, "0") > 0 && String(x.address || "").length >= 42);
     // One checkaddress per ADDRESS, not per coin: several coins share an address, and each probe is a round
     // trip with a 30s ceiling, so the old per-coin loop could re-ask the same question many times over.
