@@ -56,7 +56,7 @@
   "54": "d",
   "55": "order.js",
   "56": "Changelog",
-  "57": "init",
+  "57": "book.js",
   "58": "ethwallet.js",
   "59": "tokenicons.js",
   "60": "pandapools-parity-manifest.cjs",
@@ -66,7 +66,7 @@
   "64": "ethTokensLoad",
   "65": "hex.js",
   "66": "trading.js",
-  "67": "atomix/service.js",
+  "67": "buildAndPost",
   "68": "build",
   "69": "identity.js",
   "70": "identitywatch.js",
@@ -83,7 +83,7 @@
   "81": "ax_eth.js",
   "82": "swapplan.js",
   "83": "wallet.js",
-  "84": "validate.js",
+  "84": "beginHunt",
   "85": "actionOnPool",
   "86": "casino-glue-test.js",
   "87": "mdsw.js",
@@ -132,5 +132,8 @@
   "130": "updater.js",
   "131": "parlons.js",
   "132": "ethSendReview",
-  "135": "mailbackup.js"
+  "133": "termcomplete.js",
+  "134": "gated",
+  "135": "mailbackup.js",
+  "136": "createPool"
 }

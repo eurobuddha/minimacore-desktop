@@ -37,6 +37,18 @@
      *   events: [{note}], usdtDecimals: fn(tokenAddr)→dp
      * } → [lines]. Strings are native-verbatim (mxUSDT literals follow the swap's own labels).
      */
+    /** The recorded-transaction line, printed on EVERY report — above all when there is nothing to print. The
+     *  swap row and secret are saved BEFORE the lock is broadcast so a lost reply cannot strand a claimable leg;
+     *  the cost is that a row also exists when the broadcast never happened, and only a successful post writes
+     *  an event carrying a txpow id. So "no recorded transaction" is the evidence, not the lack of it. The old
+     *  report said "check the recorded transaction" and then printed nothing (native parity: atomix 0.1.61). */
+    function recordedTxnSummary(count) {
+        if (count > 0) return '• Recorded transactions: ' + count + ' (listed above).';
+        return '• Recorded transactions: NONE. This row was saved before its broadcast and no transaction id was '
+            + 'ever returned — so the leg was almost certainly never posted to the chain. Nothing is locked and '
+            + 'nothing needs refunding; the row clears itself at the refund block.';
+    }
+
     function buildReport(f) {
         var s = f.swap, L = [];
         var sell = !!s.myLegIsMinima;
@@ -51,7 +63,7 @@
                 L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': LOCKED — refundable at block ' + tl
                     + (f.block > 0 ? ' (~' + Math.max(0, Math.round((tl - f.block) * 50 / 60)) + ' min)' : ''));
             } else {
-                L.push('• Your ' + s.sellToken + ': not found in the last 1024 blocks at 2 confirmations. This does not prove it was spent; check the recorded transaction.');
+                L.push('• Your ' + s.sellToken + ': not found in the last 1024 blocks at 2 confirmations. This does not prove it was spent; see the recorded-transaction line below.');
             }
         } else {
             L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': ' + (f.myEthStillLocked == null ? 'UNKNOWN — Ethereum check unavailable' : f.myEthStillLocked ? 'LOCKED on Ethereum' : 'claimed or refunded'));
@@ -83,12 +95,14 @@
         L.push('• Scan: last 1024 blocks, minimum 2 confirmations; node block ' + f.block + '.');
         if (s.hash) L.push('• Hashlock: ' + s.hash);
         L.push('• Secret: ' + (f.secretKnown ? 'known (you can claim)' : 'not revealed yet'));
+        var recorded = 0;
         for (var i = 0; i < (f.events || []).length; i++) {
             var n = String(f.events[i].note || '').toLowerCase();
-            if (/^0x[0-9a-f]{64}$/i.test(n)) L.push('• Recorded transaction: ' + f.events[i].note);
+            if (/^0x[0-9a-f]{64}$/i.test(n)) { L.push('• Recorded transaction: ' + f.events[i].note); recorded++; }
             if (n.indexOf('mismatch') >= 0 || n.indexOf('invalid') >= 0 || n.indexOf('incorrect') >= 0
                 || n.indexOf('too close') >= 0 || n.indexOf('fail') >= 0 || f.events[i].event === 'SWAP_LOST') L.push('⚠ ' + f.events[i].note);
         }
+        L.push(recordedTxnSummary(recorded));
         if (s.status !== 'COMPLETE' && s.status !== 'REFUNDED')
             L.push('(swaps take a few minutes — ~50s polls + 2 confirmations per step)');
         return L;

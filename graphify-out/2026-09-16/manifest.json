@@ -200,9 +200,9 @@
     "semantic_hash": "1c79a9a644be07ed01c3d297ef54ef09"
   },
   "main/casino.js": {
-    "mtime": 1789071081.0810497,
-    "ast_hash": "d91751df5160a755f86ce27f8fb2dcd3",
-    "semantic_hash": "d91751df5160a755f86ce27f8fb2dcd3"
+    "mtime": 1789508716.98314,
+    "ast_hash": "18355dbc2ad92562abd5c7bf97c8a5b2",
+    "semantic_hash": ""
   },
   "main/casino/engine.js": {
     "mtime": 1789071081.0816991,
@@ -275,9 +275,9 @@
     "semantic_hash": ""
   },
   "main/node-manager.js": {
-    "mtime": 1788967235.4088194,
-    "ast_hash": "40b59d40e68e4f839ea93f8d5536dde2",
-    "semantic_hash": "40b59d40e68e4f839ea93f8d5536dde2"
+    "mtime": 1789508659.6455796,
+    "ast_hash": "78c703a87226eecf10550845f93e2609",
+    "semantic_hash": ""
   },
   "main/pandapools.js": {
     "mtime": 1789389072.8891532,
@@ -385,8 +385,8 @@
     "semantic_hash": "55ece262a691f9306e477b69ade2adc6"
   },
   "package.json": {
-    "mtime": 1789508625.046187,
-    "ast_hash": "2dc3834aca1bdcbd9b4252ee9ffdc55b",
+    "mtime": 1789508844.3850734,
+    "ast_hash": "ae013c107e5b6f210d832fd8f8b2394f",
     "semantic_hash": ""
   },
   "preflight-portmap.mjs": {
@@ -395,8 +395,8 @@
     "semantic_hash": "069f2d183449195c6e5109c1c61fd95b"
   },
   "renderer/app.js": {
-    "mtime": 1789508519.111598,
-    "ast_hash": "74991903342c0ed25e78458ac040d74a",
+    "mtime": 1789508698.1088116,
+    "ast_hash": "aefd845bf577afcc0edc3ce3d6bb12e2",
     "semantic_hash": ""
   },
   "renderer/params.js": {
@@ -430,9 +430,9 @@
     "semantic_hash": "7eb39b558543121dabbde03be33e8d22"
   },
   "scripts/atomix-unit.js": {
-    "mtime": 1789460188.5069952,
-    "ast_hash": "ea84831590b8e835c25b62e2da66afd8",
-    "semantic_hash": "ea84831590b8e835c25b62e2da66afd8"
+    "mtime": 1789508788.117882,
+    "ast_hash": "9dcd5409d37f85f9ee08b45b760e8081",
+    "semantic_hash": ""
   },
   "scripts/casino-glue-test.js": {
     "mtime": 1787420016.7635927,
@@ -455,13 +455,13 @@
     "semantic_hash": "30f2595a20d73a425ee1c541d2a0bebe"
   },
   ".github/workflows/desktop-build.yml": {
-    "mtime": 1789508308.7105043,
-    "ast_hash": "2e39d6e349e2d01b1b6b178ad3766842",
+    "mtime": 1789508811.4334335,
+    "ast_hash": "b3fde6a92b6e0ce7babc7153f8e41d94",
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1789508625.0928802,
-    "ast_hash": "73bc5d53a3a5de90e6e5904f13d97e06",
+    "mtime": 1789508844.4434578,
+    "ast_hash": "e3233ef3314aea83f171418686b0d969",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
