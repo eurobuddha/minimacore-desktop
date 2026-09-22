@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.17.11] — PandaPools: retire is reversible, and the owner-key signing hold stands
+- Engine re-copied from PandaPools MiniDapp **0.6.25**, which reverts a signing-guard weakening: the backfill no longer clears the owner-key hold for a rediscovered pool. Holding the key is not holding the newest counter, and clearing it let keep-fresh sign **unattended** at leaves a previous device had already spent.
+- **0.17.10 shipped the hide half of retire with no un-hide** — no listing, no bring-back, no automatic un-retire. A live funded pool rendering as unresolved (mid-resync, archive unreachable) was one click from leaving the UI permanently; the recipe survived in `pp_ownpools` and in backups, but there was no in-app way to find it again. Now a pool found live on chain is un-retired automatically, a "closed pool(s) kept for recovery" card lists them with **Bring back**, and close/migrate retire the old recipe as native and the MiniDapp already did.
+- `setRetired` reads back instead of trusting an `UPDATE` that matched zero rows, so a missing recipe no longer reports success.
+- 32 PandaPools tests pass (one new, pinning that retire has an un-retire); donor byte-parity and the digest manifest both verify.
+
+## [0.17.10] — PandaPools: one card per pool, and closed pools put away
+- Engine re-copied from PandaPools MiniDapp **0.6.24** (mirrors native 0.9.58/0.9.59).
+- **The leaf-burning path is gone** from the shared engine (`poolmgr.js`: `restoreTarget` / `advanceKeyUses` / `burnTo`). It signed junk data with `sign publickey:` to push a Winternitz counter to a guessed target; advancing a counter cannot undo signatures made elsewhere, and guessing the target is the leak. Unexported and uncalled, so this removed a latent footgun.
+- **Closed and migrated pools can be put away.** Recipes gain a `retired` flag — hidden from the pool list, never deleted, still returned by `ownAll` for backups and key classification.
+- **The unresolved card names both identifiers**, labelled `Pool:` and `Owner key:`. As raw hex the two are indistinguishable, which is how one pool read as two problems on the phone.
+
 ## [0.17.3] — AtomiX currency toggle: switch on the first click, and keep the header honest
 - **The switch is applied immediately.** `switchCurrency` used to write the kv row then fire `MDS_TIMER_60SECONDS` and hope; `service.js`'s `poll()` returns early when a pass is already in flight, and the switch has just spent up to 60 s tombstoning, so a pass usually *is* in flight — the nudge was swallowed and the engine kept the old currency for up to a minute. It now calls the service's own `reloadShared` directly (a vm global, the same access class as the `ctx.RPC.setUrl` the glue already uses), which re-reads the row, swaps the trading context, resets the maker and reconfigures every engine. Idempotent; deliberately **not** `POLLING = false`, which would defeat the fund-safety watchdog. Glue only — no engine edit, no donor round-trip, parity 40/40.
 - **The next click is no longer a no-op.** `axSwitchCurrency` derived its target from a stale `axStatusCache`, so after the lag above it asked for the key the engine already held and the glue early-returned doing nothing — first click looked dead, second only resynced the label, third finally switched. It now derives the key once and re-reads status from the server before rendering. The button is also disabled while the tombstone posts, so a second click can't re-enter the switch.
