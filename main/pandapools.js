@@ -266,6 +266,10 @@ function myPools() {
     // for backups and key classification, and are un-retired if a scan finds the pool live again.
     Promise.all(recipes.filter(r=>!r.retired).map(r=>{
       const p=POOLS.find(p=>p.address&&p.address.toLowerCase()===r.address.toLowerCase()&&active.ReserveRecovery.complete(p));
+      // A pool we can see live on chain is not closed, whatever a past close assumed. Without this the
+      // Desktop had the HIDE half of retire and no un-hide: one click on a pool that merely looked
+      // unresolved (mid-resync, archive down) removed it from the UI with no way back.
+      if(p&&r.retired)active.Store.setRetired(r.address,0,()=>{});
       const state={address:r.address,tok:r.tok,opk:r.opk,signingStateUnverified:r.signingStateUnverified||active.Store.confirmationFailed(r.opk),unresolved:!p};
       if(!p)return state;
       return new Promise(done=>active.Store.lpGet(p.address,snap=>done(Object.assign(serializeMyPool(p,snap),state))));
@@ -534,7 +538,8 @@ function closePool(addr) {
     ensureOwnerKey(p.opk, function (foreign) {
       if (foreign) { d.fail(UNAVAILABLE_KEY_MSG); return; }
       if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — nothing was posted. Retry."); return; }
-      ctx.PoolMgr.close(p, d);
+      ctx.PoolMgr.close(p, { ok: function (txpowid) { ctx.Store.setRetired(p.address, 1, function () {}); d.ok(txpowid); },
+                             fail: function (m) { d.fail(m); } });
     });
   }, "WITHDRAW", "Withdrew a pool's reserves");
 }
@@ -546,7 +551,7 @@ async function migrate(addr, newX, newY) {
     ensureOwnerKey(p.opk, function (foreign) {
       if (foreign) { reject(new Error(UNAVAILABLE_KEY_MSG)); return; }
       if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — nothing was posted. Retry.")); return; }
-      ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } });
+      ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } });
     });
   });
 }

@@ -119,6 +119,23 @@ test('Book discovery populates both young reserve ages for the foreground refres
  const pools=await invoke(h.c.Book.scan);assert.equal(pools.length,1);assert.equal(pools[0].reserveBlockM,1998);assert.equal(pools[0].reserveBlockT,1999);assert(2000-Math.min(pools[0].reserveBlockM,pools[0].reserveBlockT)<900);assert(!h.trace.some(q=>q.startsWith('txnsign')));
  }finally{h.close();}
 });
+test('retire is reversible on Desktop — hide has an un-hide, or funds hide with no way back',async()=>{
+ // THE GAP THIS PINS. 0.17.10 shipped Desktop with the HIDE half of retire and no un-hide: no listing, no
+ // bring-back, and no automatic un-retire. A live funded pool rendering as `unresolved` (mid-resync, archive
+ // down) was one click from leaving the UI permanently. The recipe survived in pp_ownpools and in backups,
+ // but the user had no in-app way to find it again.
+ const h=await harness();try{await invoke(h.c.Store.ownRecord,h.p);
+ await invoke(cb=>h.c.Store.setRetired(h.p.address,1,cb));
+ let [rows]=await new Promise(r=>h.c.Store.ownAll((ps,ok)=>r([ps,ok])));
+ assert.equal(rows.length,1,'hidden, never deleted — still in ownAll for backups');
+ assert.equal(rows[0].retired,true);
+ assert(await invoke(cb=>h.c.Store.setRetired(h.p.address,0,cb)),'un-retire must succeed');
+ [rows]=await new Promise(r=>h.c.Store.ownAll((ps,ok)=>r([ps,ok])));
+ assert.equal(rows[0].retired,false,'a posted close is not a landed close');
+ assert.equal(await invoke(cb=>h.c.Store.setRetired('0x'+'f'.repeat(64),1,cb)),false,
+   'a missing row must NOT report success — an UPDATE matching nothing still returns status:true');
+ }finally{h.close();}
+});
 test('one card per pool, carrying BOTH identifiers and the retire action',async()=>{
  // THE INCIDENT THIS PINS. A user with two healthy pools saw FOUR amber cards: two keyed by covenant
  // address, two by owner key, each a bare 0x… with no label. They are indistinguishable as raw hex, so

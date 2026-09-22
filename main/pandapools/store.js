@@ -419,8 +419,18 @@ var Store = (function () {
     function setRetired(address,retired,cb) {
         var a=esc(String(address||"").toLowerCase());
         if(!a){if(cb)cb(false);return;}
+        // Like every sibling here: the `retired` column only exists after ensureRecoveryColumns has run, so
+        // a call before that would silently hit a table without it.
+        if(!ready||!recoveryReady){if(cb)cb(false);return;}
         MDS.sql("UPDATE pp_ownpools SET retired="+(retired?1:0)+" WHERE LOWER(address)='"+a+"'",function(r){
-            persistRecovery(function(){if(cb)cb(!!(r&&r.status));});
+                if(!(r&&r.status)){if(cb)cb(false);return;}
+                // An UPDATE matching zero rows still reports status:true, so read back rather than claim
+                // success for a recipe that is not there — native OwnPoolStore.setRetired returns false.
+                MDS.sql("SELECT retired FROM pp_ownpools WHERE LOWER(address)='"+a+"'",function(chk){
+                    var rows=chk&&chk.status&&chk.rows?chk.rows:[];
+                    var ok=rows.length===1&&(Number(rows[0].RETIRED)!==0)===!!retired;
+                    persistRecovery(function(){if(cb)cb(ok);});
+                });
         });
     }
 

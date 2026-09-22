@@ -968,14 +968,18 @@ var PoolMgr = (function () {
     //
     // There is no command to SET a counter — `keys` offers only list/genkey/checkkeys/new/createallkeys,
     // and updateAllKeyUses rewrites all 64 defaults at once. The private key can't be fetched either
-    // (KeyRow.toJSON has privatekey commented out). So we advance it the one way the node exposes: each
-    // `sign` call runs Wallet.signData, which increments and persists uses by one. The leaves burned are
-    // exactly the ones being skipped, so nothing of value is lost — and it works on ANY node, no fork.
-
-    // Own copy: service.js loads AFTER this file, so its REFRESH_BLOCKS isn't defined yet. Must stay in
-    // step with service.js and native PoolRefresher.REFRESH_BLOCKS — it sets the keep-fresh cadence, which
-    // is how many owner signatures a stretch of elapsed blocks implies.
-    var KEYUSE_REFRESH_BLOCKS = 900;
+    // (KeyRow.toJSON has privatekey commented out).
+    //
+    // This used to conclude "so advance it by burning leaves with repeated `sign` calls". THAT WAS WRONG,
+    // and the code doing it is deleted (see below). Burning cannot make a restored key safe: you are
+    // guessing how far to wind, and a guess that lands short re-signs a leaf the previous device already
+    // spent — which is the leak the counter exists to prevent. Advancing a counter also cannot undo a
+    // signature already made elsewhere. The only sound resume point is one PROVEN to exceed every
+    // signature that key has ever made, which no node-side trick can establish.
+    //
+    // The supported fix is a wallet resync that sets the counter directly, e.g.
+    //   megammrsync action:resync host:<megammr host> phrase:"<seed>" keys:<kidx+1> keyuses:<floor+margin>
+    // with the floor at least the wallet's current `keys` maxuses. Until then the recipe stays held.
 
     /** Current use count for one public key (null if this node doesn't hold it), plus the key's
      *  derivation index as a second argument (-1 unknown) — same row, no extra command. */

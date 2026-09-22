@@ -1164,7 +1164,7 @@ const MAIL_EMOJIS = ["😀","😃","😄","😁","😆","😅","🤣","😂","�
 // a correspondent could then pay an address the restored wallet no longer controls. Call this alongside every
 // api.mailInvalidate().
 function resetMailState() { MAIL_ID = null; MAIL_CONTACTS = []; mailView = "inbox"; mailPeer = null; }
-function resetPpState() { ppView = "swap"; PP_POOLS = []; PP_MINE = []; PP_SWAP_TOKS = []; ppSwapMinToTok = true; }
+function resetPpState() { ppView = "swap"; PP_POOLS = []; PP_MINE = []; PP_RETIRED = []; PP_SWAP_TOKS = []; ppSwapMinToTok = true; }
 
 function mailAvatar(publicId) { return TOK.identiconDataUri(String(publicId || "0x0").slice(0, 18)); }
 function mailShort(id) { id = String(id || ""); return id.length > 16 ? id.slice(0, 8) + "…" + id.slice(-4) : id; }
@@ -1920,8 +1920,17 @@ async function doPpSwap() {
 
 // HTML builders (reused by the initial render AND the live-update patch) + wiring helpers.
 function ppNum(n) { n = Number(n); if (!isFinite(n)) return "0"; return (n.toFixed(4).replace(/\.?0+$/, "")) || "0"; }   // display-only float format
+let PP_RETIRED = [];
+function ppRetiredHtml() {
+  if (!PP_RETIRED.length) return "";
+  return `<div class="card"><div class="card__title">${PP_RETIRED.length} closed pool(s) kept for recovery</div>`
+    + `<div class="view__desc">Their recipes are still saved and still go into your backups &mdash; they are just out of the way. If a close never actually landed, the pool reappears here on its own.</div>`
+    + PP_RETIRED.map(r => `<div class="view__desc" style="overflow-wrap:anywhere;user-select:text">Pool: ${esc(r.address)}${r.opk ? `<br>Owner key: ${esc(r.opk)}` : ""}</div>`).join("")
+    + `<button class="btn btn--outline" data-ppunretire="all">Bring back</button></div>`;
+}
+
 function ppMineHtml(mine) {
-  if (!mine.length) return `<div class="empty">You don't own any pools yet. Create one with the button above.</div>`;
+  if (!mine.length) return `<div class="empty">You don't own any pools yet. Create one with the button above.</div>` + ppRetiredHtml();
   return mine.map(p => {
     const nm = esc(p.tokName || TOK.shortId(p.tok));
     const hold=p.signingStateUnverified?`<div class="view__desc">Owner signing paused. Confirm the latest complete wallet signing state and stop other signing copies.</div><button class="btn btn--outline" data-ppconfirm="${esc(p.opk)}">Confirm wallet state</button>`:"";
@@ -1942,11 +1951,12 @@ function ppMineHtml(mine) {
       <div class="kv"><span>Address</span><span class="addrbox__addr" style="cursor:pointer" data-copy="${esc(p.address)}">${esc(short(p.address, 22))}</span></div>
       <div class="seg" style="margin-top:8px"><button class="btn btn--sm btn--outline" data-ppadd="${esc(p.address)}">Add</button><button class="btn btn--sm btn--outline" data-ppmig="${esc(p.address)}">Migrate</button><button class="btn btn--sm btn--danger" data-ppwd="${esc(p.address)}">Withdraw</button></div>
       <span class="pc-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</span></div>`;
-  }).join("");
+  }).join("") + ppRetiredHtml();
 }
 function wirePpMineActions(root) {
   root.querySelectorAll("[data-pprecover]").forEach(b => b.onclick = () => recoverPpSaved(b.dataset.pprecover));
   root.querySelectorAll("[data-ppretire]").forEach(b => b.onclick = () => retirePpPool(b.dataset.ppretire));
+  root.querySelectorAll("[data-ppunretire]").forEach(b => b.onclick = () => unretirePpPools());
   root.querySelectorAll("[data-ppconfirm]").forEach(b => b.onclick = () => confirmPpSigning(b.dataset.ppconfirm));
   root.querySelectorAll("[data-ppadd]").forEach(b => b.onclick = () => showPpDeposit(b.dataset.ppadd));
   root.querySelectorAll("[data-ppmig]").forEach(b => b.onclick = () => showPpMigrate(b.dataset.ppmig));
@@ -2060,7 +2070,7 @@ function ppCombinedCards(agg) {
 }
 async function renderPpMyLP() {
   const host = el("ppBody");
-  try { PP_MINE=await api.ppMyPools(); } catch(e) {host.innerHTML=`${ppHeader("mylp")}<div class="empty">${esc(e.message)}</div>`;wirePpHeader();return;}
+  try { PP_MINE=await api.ppMyPools(); PP_RETIRED=await api.ppListRetired().catch(()=>[]); } catch(e) {host.innerHTML=`${ppHeader("mylp")}<div class="empty">${esc(e.message)}</div>`;wirePpHeader();return;}
   host.innerHTML = `${ppHeader("mylp")}
     <div class="view__desc">Pools you created on this device. Keep-fresh maintains their reserves automatically — <b>leave this app running</b> so your pools stay live for everyone.</div>
     <div class="seg"><button class="btn btn--primary btn--full" id="ppCreateBtn">＋ Create a pool</button><button class="btn btn--outline btn--full" id="ppCollectBtn">Collect to wallet</button></div>
@@ -2169,6 +2179,10 @@ Restore does not regenerate keys or estimate past signature use. Confirm signing
   el("ppgClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppgOv") close(); };
 }
 function ppRecoveryResult(r){return `Verified reserves for ${r.restored} of ${r.total} pools.\n${(r.details||[]).join("\n\n")}\n${r.warn||""}`;}
+async function unretirePpPools(){
+  try {for(const r of PP_RETIRED)await api.ppRetirePool(r.address,false);toast("Brought back.","ok");renderPandapools();}
+  catch(e){toast(e.message,"err");}
+}
 async function retirePpPool(address){
   // Hidden, never deleted: the recipe stays in every backup and comes back on its own if the close
   // turns out never to have landed.
@@ -2435,6 +2449,7 @@ async function refreshPpActive() {
   } else if (ppView === "mylp") {
     if (!el("ppMine")) return;
     PP_MINE = await api.ppMyPools().catch(() => []);
+    PP_RETIRED = await api.ppListRetired().catch(() => []);
     const c = el("ppMine"); if (c) { c.innerHTML = ppMineHtml(PP_MINE); wirePpMineActions(c); }
   } else if (ppView === "activity") {
     if (!el("ppActs")) return;
