@@ -262,7 +262,9 @@ function myPools() {
   if(!ctx)return Promise.resolve([]);const active=ctx;
   return new Promise((resolve,reject)=>active.Store.ownAll((recipes,ok)=>{
     if(ok===false){reject(new Error("Saved pool recipes could not be read."));return;}
-    Promise.all(recipes.map(r=>{
+    // Retired recipes (a pool closed or migrated away) are HIDDEN, never deleted — they stay in ownAll
+    // for backups and key classification, and are un-retired if a scan finds the pool live again.
+    Promise.all(recipes.filter(r=>!r.retired).map(r=>{
       const p=POOLS.find(p=>p.address&&p.address.toLowerCase()===r.address.toLowerCase()&&active.ReserveRecovery.complete(p));
       const state={address:r.address,tok:r.tok,opk:r.opk,signingStateUnverified:r.signingStateUnverified||active.Store.confirmationFailed(r.opk),unresolved:!p};
       if(!p)return state;
@@ -592,6 +594,18 @@ async function restore(json) {
     }));
   } finally {recoveryBusy=false;}
 }
+async function retirePool(address, retired) {
+  await init(); const active=ctx;
+  return new Promise(resolve=>active.Store.setRetired(address, retired ? 1 : 0, ()=>{emitter.emit("update");resolve(true);}));
+}
+
+async function listRetired() {
+  await init(); const active=ctx;
+  return new Promise((resolve,reject)=>active.Store.ownAll((recipes,ok)=>ok===false
+    ? reject(new Error("Saved pool recipes could not be read."))
+    : resolve(recipes.filter(r=>r.retired).map(r=>({address:r.address,opk:r.opk})))));
+}
+
 async function recoverSaved(address) {
   await init();const active=ctx;
   const recipes=await new Promise((resolve,reject)=>active.Store.ownAll((ps,ok)=>ok===false?reject(new Error("Pool storage unavailable.")):resolve(ps)));
@@ -614,7 +628,7 @@ module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
-  swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore, recoverSaved, archiveSettings, confirmSigning,
+  swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted,
   _setRunner, _setDataDir,
 };

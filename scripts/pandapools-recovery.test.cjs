@@ -119,23 +119,36 @@ test('Book discovery populates both young reserve ages for the foreground refres
  const pools=await invoke(h.c.Book.scan);assert.equal(pools.length,1);assert.equal(pools[0].reserveBlockM,1998);assert.equal(pools[0].reserveBlockT,1999);assert(2000-Math.min(pools[0].reserveBlockM,pools[0].reserveBlockT)<900);assert(!h.trace.some(q=>q.startsWith('txnsign')));
  }finally{h.close();}
 });
-test('MDS and Desktop cards retain full unresolved address and recovery/signing actions',async()=>{
+test('one card per pool, carrying BOTH identifiers and the retire action',async()=>{
+ // THE INCIDENT THIS PINS. A user with two healthy pools saw FOUR amber cards: two keyed by covenant
+ // address, two by owner key, each a bare 0x… with no label. They are indistinguishable as raw hex, so
+ // one pool read as two problems.
  const h=await harness();try{h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);
  // The MDS half reads the DONOR tree (eurobuddha/pandapools-mds). CI deliberately does not check that repo
- // out — see scripts/pandapools-parity-manifest.cjs: donor comparison is a LOCAL gate, CI verifies the
- // committed digest manifest instead. Reading it unconditionally made this test crash on all three CI legs
- // the moment 0.16.87 added `npm run test:pandapools` to the workflow. Run the donor half when the donor is
- // there (always, locally), and never silently: when it is absent say so, and still run the Desktop half
- // below, which is in-repo and is the part CI can actually prove.
+ // out — donor comparison is a LOCAL gate; CI verifies the committed digest manifest instead. Run the donor
+ // half when the donor is there, never silently skip it, and always run the Desktop half, which is in-repo.
  const donor=process.env.PP_MDS_ROOT||path.resolve(desktop,'../../mds/pandapools-mds');
  const donorHtml=path.join(donor,'index.html');
  if(fs.existsSync(donorHtml)){
  const html=fs.readFileSync(donorHtml,'utf8'),elements={};
- Object.assign(h.c,{POOLS:[],pendingCreate:null,mine:()=>true,withSnapshots:(_ps,cb)=>cb(),D:h.c.Decimal,el:id=>elements[id]||(elements[id]={})});
- vm.runInContext(html.slice(html.indexOf('    function renderMyLp()'),html.indexOf('    function withSnapshots'))+'\n'+html.split('\n').find(l=>l.includes('function btn(label,'))+'\n'+html.split('\n').find(l=>l.includes('function esc(s)')),h.c);
- h.c.renderMyLp();const card=elements.lpList.innerHTML;assert(card.includes(addr));assert(card.includes('Recover reserves'));assert(card.includes('Owner signing paused'));assert.equal(elements.lpValue.innerText,'Reserves unavailable');
+ Object.assign(h.c,{POOLS:[],pendingCreate:null,mine:()=>true,withSnapshots:(_ps,cb)=>cb(),D:h.c.Decimal,
+   MY_KEYS:{[opk.toLowerCase()]:true},el:id=>elements[id]||(elements[id]={})});
+ const idsFn=html.slice(html.indexOf('    function ids(p) {'),html.indexOf('    function btn(label, onclick, primary)'));
+ vm.runInContext(html.slice(html.indexOf('    function renderMyLp()'),html.indexOf('    function withSnapshots'))
+   +'\n'+idsFn
+   +'\n'+html.split('\n').find(l=>l.includes('function btn(label,'))
+   +'\n'+html.split('\n').find(l=>l.includes('function esc(s)')),h.c);
+ h.c.renderMyLp();const card=elements.lpList.innerHTML;
+ assert(card.includes(addr));assert(card.includes(opk),'both identifiers, not just the address');
+ assert(card.includes('Pool:')&&card.includes('Owner key:'),'and both LABELLED');
+ assert.equal(card.split('Owner signing paused').length-1,0,'the held state rides on the same card');
+ assert(card.includes('put it away'));assert.equal(elements.lpValue.innerText,'Reserves unavailable');
  }else{console.log('    # donor MDS tree absent ('+donor+') — MDS card assertions skipped, Desktop card still checked');}
  const renderer=fs.readFileSync(path.join(desktop,'renderer/app.js'),'utf8'),c={TOK:{shortId:s=>s},esc:s=>String(s).replace(/</g,'&lt;'),short:s=>s};vm.createContext(c);vm.runInContext(renderer.slice(renderer.indexOf('function ppNum('),renderer.indexOf('function wirePpMineActions(')),c);
- const desktopCard=c.ppMineHtml([{address:addr,opk,tok,unresolved:true,signingStateUnverified:true}]);assert(desktopCard.includes(addr));assert(desktopCard.includes('data-pprecover'));assert(desktopCard.includes('data-ppconfirm'));assert(!desktopCard.includes('data-ppwd'));
+ const desktopCard=c.ppMineHtml([{address:addr,opk,tok,unresolved:true,signingStateUnverified:true}]);
+ assert(desktopCard.includes(addr));assert(desktopCard.includes(opk),'Desktop must name the owner key too');
+ assert(desktopCard.includes('Pool:')&&desktopCard.includes('Owner key:'),'labelled on Desktop as well');
+ assert(desktopCard.includes('data-pprecover'));assert(desktopCard.includes('data-ppretire'));
+ assert(desktopCard.includes('data-ppconfirm'));assert(!desktopCard.includes('data-ppwd'));
  }finally{h.close();}
 });

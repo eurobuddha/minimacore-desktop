@@ -138,6 +138,8 @@ contextBridge.exposeInMainWorld("mcd", {
   ppBackup: () => ipcRenderer.invoke("mcd:ppBackup"),
   ppRestore: (json) => ipcRenderer.invoke("mcd:ppRestore", json),
   ppRecoverSaved: (addr) => ipcRenderer.invoke("mcd:ppRecoverSaved", addr),
+  ppRetirePool: (addr, retired) => ipcRenderer.invoke("mcd:ppRetirePool", addr, retired),
+  ppListRetired: () => ipcRenderer.invoke("mcd:ppListRetired"),
   ppArchiveSettings: (url) => ipcRenderer.invoke("mcd:ppArchiveSettings", url),
   ppConfirmSigning: (opk, attested) => ipcRenderer.invoke("mcd:ppConfirmSigning", opk, attested),
   ppSaveBackup: (json) => ipcRenderer.invoke("mcd:ppSaveBackup", json),

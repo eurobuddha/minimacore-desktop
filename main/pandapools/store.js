@@ -48,7 +48,7 @@ var Store = (function () {
         });
     }
     function ensureRecoveryColumns(cb) {
-        var columns = [["opkuses","int DEFAULT -1"],["signing_unverified","int DEFAULT 1"],["lastcoinm","varchar(80)"],["lastcoint","varchar(80)"]];
+        var columns = [["opkuses","int DEFAULT -1"],["signing_unverified","int DEFAULT 1"],["lastcoinm","varchar(80)"],["lastcoint","varchar(80)"],["retired","int DEFAULT 0"]];
         function next(i) {
             if(i===columns.length){recoveryReady=true;cb();return;}
             var col=columns[i];
@@ -384,7 +384,7 @@ var Store = (function () {
         MDS.sql("SELECT * FROM pp_ownpools",function(r){
             var out=[];
             if(r&&r.status===true&&Array.isArray(r.rows))r.rows.forEach(function(row){
-                out.push({address:row.ADDRESS,mxaddress:row.MX||"",opk:row.OPK,oadr:row.OADR,tok:row.TOK,tokDecimals:Number(row.TDEC),kmin:row.KMIN,script:row.SCRIPT||"",minimumOwnerUses:Number(row.OPKUSES),signingStateUnverified:Number(row.SIGNING_UNVERIFIED)!==0,coinidM:row.LASTCOINM||"",coinidT:row.LASTCOINT||""});
+                out.push({address:row.ADDRESS,mxaddress:row.MX||"",opk:row.OPK,oadr:row.OADR,tok:row.TOK,tokDecimals:Number(row.TDEC),kmin:row.KMIN,script:row.SCRIPT||"",minimumOwnerUses:Number(row.OPKUSES),signingStateUnverified:Number(row.SIGNING_UNVERIFIED)!==0,retired:Number(row.RETIRED)!==0,coinidM:row.LASTCOINM||"",coinidT:row.LASTCOINT||""});
             });
             cb(out,!!r&&r.status===true&&Array.isArray(r.rows));
         });
@@ -412,13 +412,25 @@ var Store = (function () {
         });
     }
 
+    /** Hide (or un-hide) the recipe of a pool that was closed or migrated away. The row is NEVER deleted:
+     *  a recipe is the only thing that can reclaim a pool, and a posted close is not a landed close, so this
+     *  has to be reversible. ownAll still returns retired rows — backups and key classification still see
+     *  them; only the pool list filters them out. Mirrors native OwnPoolStore.setRetired. */
+    function setRetired(address,retired,cb) {
+        var a=esc(String(address||"").toLowerCase());
+        if(!a){if(cb)cb(false);return;}
+        MDS.sql("UPDATE pp_ownpools SET retired="+(retired?1:0)+" WHERE LOWER(address)='"+a+"'",function(r){
+            persistRecovery(function(){if(cb)cb(!!(r&&r.status));});
+        });
+    }
+
     return {
         init: init, isReady: function () { return ready; },
         lpRecord: lpRecord, lpUpdateFeeBase: lpUpdateFeeBase, lpRemove: lpRemove, lpGet: lpGet,
         actRecord: actRecord, actRecordFailed: actRecordFailed, actList: actList, actSetStatus: actSetStatus,
         confirmed: confirmed, statusText: statusText, CONFIRM_BLOCKS: CONFIRM_BLOCKS,
         feedList: feedList, knownAddrsGet: knownAddrsGet, knownAddrsAdd: knownAddrsAdd,
-        confirmationFailed: confirmationFailed, ownRecord: ownRecord, ownAll: ownAll, ownRememberReserves: ownRememberReserves, ownAcknowledge: ownAcknowledge,
+        confirmationFailed: confirmationFailed, ownRecord: ownRecord, ownAll: ownAll, setRetired: setRetired, ownRememberReserves: ownRememberReserves, ownAcknowledge: ownAcknowledge,
         histInsert: histInsert, histAll: histAll, histStats: histStats,
         kvGet: kvGet, kvSet: kvSet
     };

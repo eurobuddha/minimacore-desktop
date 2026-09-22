@@ -972,9 +972,6 @@ var PoolMgr = (function () {
     // `sign` call runs Wallet.signData, which increments and persists uses by one. The leaves burned are
     // exactly the ones being skipped, so nothing of value is lost — and it works on ANY node, no fork.
 
-    var BURN_DATA = "0x00";      // constant, meaningless — never a valid transaction id
-    var RECHECK_EVERY = 25;      // re-read the node's real count rather than trusting our arithmetic
-    var MAX_BURN = 20000;        // a target beyond this means a bad backup, not a busy key
     // Own copy: service.js loads AFTER this file, so its REFRESH_BLOCKS isn't defined yet. Must stay in
     // step with service.js and native PoolRefresher.REFRESH_BLOCKS — it sets the keep-fresh cadence, which
     // is how many owner signatures a stretch of elapsed blocks implies.
@@ -1000,45 +997,10 @@ var PoolMgr = (function () {
         });
     }
 
-    /** Where a restored owner key should resume: what it had spent, plus the keep-fresh signatures that
-     *  could have happened since, plus slack for deposits/migrates/collects. Every term measured. */
-    function restoreTarget(usesAtBackup, blockAtBackup, currentBlock, slack) {
-        var gap = 0;
-        if (currentBlock > blockAtBackup && blockAtBackup > 0) {
-            gap = Math.ceil((currentBlock - blockAtBackup) / KEYUSE_REFRESH_BLOCKS);
-        }
-        return Math.max(0, usesAtBackup || 0) + gap + Math.max(0, slack || 0);
-    }
-
-    /** Advance `publickey` to at least `target` by burning leaves. NEVER lowers. done(ok, finalUses, err) */
-    function advanceKeyUses(publickey, target, onProgress, done) {
-        if (!publickey) { done(false, 0, "no public key"); return; }
-        if (!(target > 0)) { done(true, 0, null); return; }
-        readKeyUses(publickey, function (uses) {
-            if (uses === null) { done(false, 0, "the node doesn't hold that key"); return; }
-            if (uses >= target) { done(true, uses, null); return; }          // already past it
-            if (target - uses > MAX_BURN) {
-                done(false, uses, "that backup asks for " + (target - uses) + " more key uses, which looks wrong");
-                return;
-            }
-            burnTo(publickey, target, uses, onProgress, done);
-        });
-    }
-    function burnTo(publickey, target, uses, onProgress, done) {
-        if (uses >= target) { done(true, uses, null); return; }
-        if (onProgress) onProgress(uses, target);
-        MDS.cmd("sign publickey:" + publickey + " data:" + BURN_DATA, function (j) {
-            if (!j || !j.status) { done(false, uses, "the node refused to sign — key not advanced"); return; }
-            var next = uses + 1;
-            if (next % RECHECK_EVERY === 0) {
-                readKeyUses(publickey, function (real) {
-                    burnTo(publickey, target, real === null ? next : Math.max(real, next), onProgress, done);
-                });
-            } else {
-                burnTo(publickey, target, next, onProgress, done);
-            }
-        });
-    }
+    // The leaf-BURNING path that used to live here (restoreTarget / advanceKeyUses / burnTo) is deleted.
+    // It signed junk data with `sign publickey:` to push a Winternitz counter up to a guessed target. A
+    // counter cannot be repaired that way: advancing it cannot undo signatures already made elsewhere, and
+    // guessing the target is the leak. Native removed it in 0.9.48 (see KeyUses.java). Do not reintroduce it.
 
     // ================================================================ SWAP (routed)
     function swap(route, minimaToToken, done) {   // done.ok(txpowid), done.fail

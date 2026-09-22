@@ -1925,7 +1925,10 @@ function ppMineHtml(mine) {
   return mine.map(p => {
     const nm = esc(p.tokName || TOK.shortId(p.tok));
     const hold=p.signingStateUnverified?`<div class="view__desc">Owner signing paused. Confirm the latest complete wallet signing state and stop other signing copies.</div><button class="btn btn--outline" data-ppconfirm="${esc(p.opk)}">Confirm wallet state</button>`:"";
-    if(p.unresolved)return `<div class="card"><div class="card__title">Saved pool · reserves unavailable</div><div class="view__desc">The recipe is retained. An empty local lookup does not prove funds were spent.</div><div style="overflow-wrap:anywhere;user-select:text">${esc(p.address)}</div>${hold}<button class="btn btn--outline" data-pprecover="${esc(p.address)}">Recover reserves</button></div>`;
+    // Both identifiers, always LABELLED. An address and an owner key are indistinguishable as raw hex,
+    // which is how one pool read as two problems on the other surfaces.
+    const ids=`<div class="view__desc" style="overflow-wrap:anywhere;user-select:text">Pool: ${esc(p.address)}${p.opk?`<br>Owner key: ${esc(p.opk)}`:""}</div>`;
+    if(p.unresolved)return `<div class="card"><div class="card__title">Saved pool · reserves not found</div>${ids}<div class="view__desc">This node cannot currently see both of this pool's reserve coins. That is what a pool that has been closed looks like, and also what one looks like on a node that is still catching up.</div>${hold}<button class="btn btn--outline" data-pprecover="${esc(p.address)}">Check for reserves</button><button class="btn btn--outline" data-ppretire="${esc(p.address)}">It&rsquo;s closed &mdash; put it away</button></div>`;
     let rows = `<div class="kv"><span>Your liquidity</span><span>${esc(TOK.tidyAmount(p.reserveM))} MINIMA + ${esc(TOK.tidyAmount(p.reserveT))} ${nm}</span></div>`
       + `<div class="kv"><span>Value now</span><span>≈ ${esc(TOK.tidyAmount(p.value))} MINIMA</span></div>`
       + `<div class="kv"><span>Pool price</span><span>${esc(TOK.tidyAmount(p.poolPrice))} ${nm} / MINIMA</span></div>`
@@ -1943,6 +1946,7 @@ function ppMineHtml(mine) {
 }
 function wirePpMineActions(root) {
   root.querySelectorAll("[data-pprecover]").forEach(b => b.onclick = () => recoverPpSaved(b.dataset.pprecover));
+  root.querySelectorAll("[data-ppretire]").forEach(b => b.onclick = () => retirePpPool(b.dataset.ppretire));
   root.querySelectorAll("[data-ppconfirm]").forEach(b => b.onclick = () => confirmPpSigning(b.dataset.ppconfirm));
   root.querySelectorAll("[data-ppadd]").forEach(b => b.onclick = () => showPpDeposit(b.dataset.ppadd));
   root.querySelectorAll("[data-ppmig]").forEach(b => b.onclick = () => showPpMigrate(b.dataset.ppmig));
@@ -2165,6 +2169,12 @@ Restore does not regenerate keys or estimate past signature use. Confirm signing
   el("ppgClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppgOv") close(); };
 }
 function ppRecoveryResult(r){return `Verified reserves for ${r.restored} of ${r.total} pools.\n${(r.details||[]).join("\n\n")}\n${r.warn||""}`;}
+async function retirePpPool(address){
+  // Hidden, never deleted: the recipe stays in every backup and comes back on its own if the close
+  // turns out never to have landed.
+  try {await api.ppRetirePool(address,true);toast("Put away. The recipe is still saved and still goes into your backups.","ok");renderPandapools();}
+  catch(e){toast(e.message,"err");}
+}
 async function recoverPpSaved(address){
   const prog=showProgress("Recovering reserves…","Checking local reserves and current archive proofs. No transaction is signed.");
   try {const r=await api.ppRecoverSaved(address);prog.close();await showConfirm("Recovery result",ppRecoveryResult(r),"Done");renderPandapools();}
