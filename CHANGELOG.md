@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.17.12] — PandaPools: the stranding fix and the collect queue reach the Desktop
+- Engine re-copied from PandaPools MiniDapp **0.6.27**, which ports native 0.9.57, 0.9.56, 0.9.51 and 0.9.49.
+- **The forward that stranded real funds is fixed here too.** Payout addresses now enter a durable `pp_pendingcollect` queue **before** any forward is attempted, and the sweep finishes only when the address reads **empty** — never because a forward reported that it posted. `Collect` is wired to that queue instead of the old fire-and-forget sweep, close enqueues its payout address, and the background service pass keeps at it after the window is closed. A payout address this wallet cannot sign for is now shown in MY LP with the address in full, instead of being silent.
+- **Stranding notifications work here.** The Desktop MDS shim was `cmd`/`sql`/`log`/`init`/`net` only, with no `notify` — so the engine's new warning would have thrown inside the keep-fresh pass and taken refresh, stranding detection and the collect sweep down with it on every tick. The shim now implements `notify` with a real Electron notification, and the engine guards the call regardless.
+- The signing gate names which of six problems it is, and a backup is verified before it is handed over.
+- 32 PandaPools tests pass; donor byte-parity and the digest manifest verify.
+
 ## [0.17.11] — PandaPools: retire is reversible, and the owner-key signing hold stands
 - Engine re-copied from PandaPools MiniDapp **0.6.25**, which reverts a signing-guard weakening: the backfill no longer clears the owner-key hold for a rediscovered pool. Holding the key is not holding the newest counter, and clearing it let keep-fresh sign **unattended** at leaves a previous device had already spent.
 - **0.17.10 shipped the hide half of retire with no un-hide** — no listing, no bring-back, no automatic un-retire. A live funded pool rendering as unresolved (mid-resync, archive unreachable) was one click from leaving the UI permanently; the recipe survived in `pp_ownpools` and in backups, but there was no in-app way to find it again. Now a pool found live on chain is un-retired automatically, a "closed pool(s) kept for recovery" card lists them with **Bring back**, and close/migrate retire the old recipe as native and the MiniDapp already did.

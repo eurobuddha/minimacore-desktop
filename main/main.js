@@ -337,6 +337,7 @@ ipcMain.handle("mcd:ppRestore", (_e, json) => pandapools.restore(json));
 ipcMain.handle("mcd:ppRecoverSaved", (_e, addr) => pandapools.recoverSaved(addr));
 ipcMain.handle("mcd:ppRetirePool", (_e, addr, retired) => pandapools.retirePool(addr, retired));
 ipcMain.handle("mcd:ppListRetired", () => pandapools.listRetired());
+ipcMain.handle("mcd:ppPendingCollect", () => pandapools.pendingCollect());
 ipcMain.handle("mcd:ppArchiveSettings", (_e, url) => pandapools.archiveSettings(url));
 ipcMain.handle("mcd:ppConfirmSigning", (_e, opk, attested) => pandapools.confirmSigning(opk, attested));
 ipcMain.handle("mcd:ppSaveBackup", async (_e, json) => {

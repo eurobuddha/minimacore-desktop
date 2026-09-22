@@ -89,8 +89,14 @@ var Covenant = (function () {
         return out + '"';
     }
 
+    // The discovery depth bound used by book.js and service.js (both still write it inline as depth:1500).
+    // Exposed so the stranding thresholds can derive from it instead of repeating the number, exactly as
+    // native derives StrandingWatch.WARN_AT from PoolCovenant.SENTINEL_SCAN_DEPTH.
+    var SENTINEL_SCAN_DEPTH = 1500;
+
     return {
         SENTINEL: SENTINEL,
+        SENTINEL_SCAN_DEPTH: SENTINEL_SCAN_DEPTH,
         VERSION_HEX: VERSION_HEX,
         MININUMBER_MAX: MININUMBER_MAX,
         script: script,

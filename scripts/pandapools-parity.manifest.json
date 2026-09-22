@@ -2,8 +2,8 @@
   "_comment": "Digests of the PandaPools engine files copied verbatim from the MDS MiniDapp. Regenerate ONLY with `node scripts/pandapools-parity-manifest.cjs --update` beside a deliberate engine re-copy. Desktop-only runtime differences belong in loader.js / sqlshim.js / main/pandapools.js, never here.",
   "donor": {
     "root": "../../mds/pandapools-mds",
-    "mdsVersion": "0.6.25",
-    "gitSha": "1a6c7c079ac09f7df2db94a8d56e94b5465a9ad9"
+    "mdsVersion": "0.6.27",
+    "gitSha": "87bda1203f3d12648a4d1b37bc0b2edb4d98ff29"
   },
   "files": {
     "decimal.js": {
@@ -11,8 +11,8 @@
       "bytes": 131722
     },
     "covenant.js": {
-      "sha256": "30200560e93018d53f275059d360c986ff0341317a671cd459f23eaa9d5c756a",
-      "bytes": 5104
+      "sha256": "4b5a6a731b4c95020bf9bfd6dbee6dc6854ccbb62708b794a9f143bff82b7f23",
+      "bytes": 5489
     },
     "curve.js": {
       "sha256": "33e0d26a4e053c5d7234f655c74b1da28ab43491869feff90d8fd49bb15d7df8",
@@ -27,8 +27,8 @@
       "bytes": 8324
     },
     "store.js": {
-      "sha256": "395726418fb4c03270fb120fca123d69df2dd3c9b599c36d12dcafcb29d4fd26",
-      "bytes": 27496
+      "sha256": "0d5fdbb5cbe8dc689892fcfbce861c48d940a209da1bc5853de40a95a46c2d8e",
+      "bytes": 30514
     },
     "history.js": {
       "sha256": "97b2e9d6b46e8171627b8c9594564cf30a63abd6bd9f1a9aaa34f10828beb808",
@@ -51,16 +51,16 @@
       "bytes": 19119
     },
     "poolmgr.js": {
-      "sha256": "3334ac1a256dd8fc8e5fcca763e311a99ab1fc044000140028703b3bc0e75079",
-      "bytes": 68372
+      "sha256": "5eb169bc2f52d772c7a7a374205e1eeced6e774d71310b17bdd446db0b4b5162",
+      "bytes": 76165
     },
     "reserve-recovery.js": {
-      "sha256": "23ee7c951d6eab451c1f93123b0ead9a5c9b0bae015d0886f6492f4607c2f85f",
-      "bytes": 21943
+      "sha256": "e2e21c1bb05e6c68e4f4147faafb8fd3cf21dc1143743cd6eebc313eb7120df8",
+      "bytes": 28635
     },
     "service.js": {
-      "sha256": "260413b3ff69122539439b09743f2b0241d1827e9f0b55edcf980bf6a88c8d83",
-      "bytes": 51350
+      "sha256": "700ff5ddedf6096563401dc32d035545f432b5b974b54d3fbe3196460045373d",
+      "bytes": 54043
     }
   }
 }

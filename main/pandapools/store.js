@@ -22,7 +22,7 @@ var Store = (function () {
     function init(cb) {
         // probe one table; only CREATE the set if missing (avoids pending prompts)
         MDS.sql("SELECT 1 FROM pp_activity LIMIT 1", function (r) {
-            function fin() { migrateFeedKind(function () { migrateActivityRefaddr(function () { ensureOwnPools(function () { ensureRecoveryColumns(function () { ensureHistory(function () { ready = true; if (cb) cb(); }); }); }); }); }); }
+            function fin() { migrateFeedKind(function () { migrateActivityRefaddr(function () { ensureOwnPools(function () { ensureRecoveryColumns(function () { ensureHistory(function () { ensurePendingCollect(function () { ready = true; if (cb) cb(); }); }); }); }); }); }); }
             if (r && r.status) { fin(); return; }
             create(fin);
         });
@@ -47,6 +47,53 @@ var Store = (function () {
                 " `tdec` int NOT NULL, `kmin` varchar(120) NOT NULL, `script` text)", function () { cb(); });
         });
     }
+    /** Owner payout addresses ($OADR) that still hold withdrawn funds, tracked until they are actually EMPTY.
+     *  Mirrors native PendingCollect (0.9.57). The queue is written BEFORE any forward is attempted, so a
+     *  crash between the close and the forward still leaves the job recorded. */
+    function ensurePendingCollect(cb) {
+        MDS.sql("SELECT 1 FROM pp_pendingcollect LIMIT 1", function (r) {
+            if (r && r.status) { cb(); return; }
+            MDS.sql(
+                "CREATE TABLE IF NOT EXISTS `pp_pendingcollect` (" +
+                " `oadr` varchar(80) NOT NULL PRIMARY KEY, `status` varchar(20) NOT NULL," +
+                " `attempts` int DEFAULT 0, `added_at` bigint DEFAULT 0, `last_try_at` bigint DEFAULT 0," +
+                " `last_error` text)", function () { cb(); });
+        });
+    }
+    function collectAdd(oadr, cb) {
+        var a = esc(String(oadr || "").toLowerCase());
+        if (!ready || !/^0x[0-9a-fA-F]{64}$/.test(String(oadr || ""))) { if (cb) cb(false); return; }
+        MDS.sql("SELECT 1 FROM pp_pendingcollect WHERE oadr='" + a + "'", function (r) {
+            if (r && r.status && r.rows && r.rows.length) { if (cb) cb(true); return; }
+            MDS.sql("INSERT INTO pp_pendingcollect (oadr,status,attempts,added_at,last_try_at,last_error) VALUES ('"
+                + a + "','RETRYING',0," + Date.now() + ",0,'')", function (w) { if (cb) cb(!!(w && w.status)); });
+        });
+    }
+    function collectAll(cb) {
+        if (!ready) { cb([]); return; }
+        MDS.sql("SELECT * FROM pp_pendingcollect", function (r) {
+            var out = [];
+            if (r && r.status === true && Array.isArray(r.rows)) r.rows.forEach(function (row) {
+                out.push({ oadr: row.OADR, status: row.STATUS, attempts: Number(row.ATTEMPTS || 0),
+                           addedAt: Number(row.ADDED_AT || 0), lastTryAt: Number(row.LAST_TRY_AT || 0),
+                           lastError: row.LAST_ERROR || "" });
+            });
+            cb(out);
+        });
+    }
+    function collectAttempted(oadr, status, error, cb) {
+        var a = esc(String(oadr || "").toLowerCase());
+        MDS.sql("UPDATE pp_pendingcollect SET status='" + esc(status) + "', attempts=attempts+1, last_try_at="
+            + Date.now() + ", last_error='" + esc(String(error || "")) + "' WHERE oadr='" + a + "'",
+            function (r) { if (cb) cb(!!(r && r.status)); });
+    }
+    /** The ONLY legitimate reason to stop tracking: the address is empty, proven by a read. Never inferred
+     *  from a forward reporting that it posted — that inference is what stranded 2934.95626348 MxUSD. */
+    function collectClear(oadr, cb) {
+        MDS.sql("DELETE FROM pp_pendingcollect WHERE oadr='" + esc(String(oadr || "").toLowerCase()) + "'",
+            function (r) { if (cb) cb(!!(r && r.status)); });
+    }
+
     function ensureRecoveryColumns(cb) {
         var columns = [["opkuses","int DEFAULT -1"],["signing_unverified","int DEFAULT 1"],["lastcoinm","varchar(80)"],["lastcoint","varchar(80)"],["retired","int DEFAULT 0"]];
         function next(i) {
@@ -440,7 +487,8 @@ var Store = (function () {
         actRecord: actRecord, actRecordFailed: actRecordFailed, actList: actList, actSetStatus: actSetStatus,
         confirmed: confirmed, statusText: statusText, CONFIRM_BLOCKS: CONFIRM_BLOCKS,
         feedList: feedList, knownAddrsGet: knownAddrsGet, knownAddrsAdd: knownAddrsAdd,
-        confirmationFailed: confirmationFailed, ownRecord: ownRecord, ownAll: ownAll, setRetired: setRetired, ownRememberReserves: ownRememberReserves, ownAcknowledge: ownAcknowledge,
+        confirmationFailed: confirmationFailed, ownRecord: ownRecord, ownAll: ownAll, setRetired: setRetired,
+        collectAdd: collectAdd, collectAll: collectAll, collectAttempted: collectAttempted, collectClear: collectClear, ownRememberReserves: ownRememberReserves, ownAcknowledge: ownAcknowledge,
         histInsert: histInsert, histAll: histAll, histStats: histStats,
         kvGet: kvGet, kvSet: kvSet
     };

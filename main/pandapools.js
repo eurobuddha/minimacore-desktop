@@ -66,6 +66,7 @@ function buildMds() {
     // the node's own HTTP RPC, which imposes no size limit at all (see main/rpc.js: it simply accumulates the
     // body). So page far harder here; a backfill that takes hours at max:64 finishes in minutes at 512.
     historyPageMax: 512,
+    notify: (msg) => { try { const { Notification } = require("electron"); if (Notification && Notification.isSupported()) new Notification({ title: "PandaPools", body: String(msg || "") }).show(); } catch (e) { /* headless/test context — the engine falls back to MDS.log */ } },
     log: function () { /* console.log.apply(console, arguments); */ },
     init: function (cb) { serviceHandler = cb; },                    // capture — we drive the events ourselves
     net: { GET: function (url, cb) { if (cb) cb({ status: false }); } },   // MEXC ticker is optional; stubbed
@@ -538,8 +539,15 @@ function closePool(addr) {
     ensureOwnerKey(p.opk, function (foreign) {
       if (foreign) { d.fail(UNAVAILABLE_KEY_MSG); return; }
       if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — nothing was posted. Retry."); return; }
-      ctx.PoolMgr.close(p, { ok: function (txpowid) { ctx.Store.setRetired(p.address, 1, function () {}); d.ok(txpowid); },
-                             fail: function (m) { d.fail(m); } });
+      ctx.PoolMgr.close(p, {
+        ok: function (txpowid) {
+          ctx.Store.setRetired(p.address, 1, function () {});
+          // Queue the payout address BEFORE any forward, so a crash between the close and the forward still
+          // leaves the job recorded. The service pass finishes it and keeps going until the address is empty.
+          ctx.Store.collectAdd(p.oadr, function () { ctx.PoolMgr.collectSweep(function () { emitter.emit("update"); }); });
+          d.ok(txpowid);
+        },
+        fail: function (m) { d.fail(m); } });
     });
   }, "WITHDRAW", "Withdrew a pool's reserves");
 }
@@ -558,6 +566,12 @@ async function migrate(addr, newX, newY) {
 
 /** Forward funds sitting at MY pools' owner addresses ($OADR) onward to the default-64 wallet — so withdrawn
  *  reserves aren't stranded at a newaddress a seed-only restore won't reproduce. Reuses PoolMgr.sweepOwnerFunds. */
+/** Every payout address still holding withdrawn funds, with its status. Drives the MY LP card. */
+async function pendingCollect() {
+  await init(); const active = ctx;
+  return new Promise(resolve => active.Store.collectAll(resolve));
+}
+
 async function collectToWallet() {
   await init();
   return withTimeout(new Promise(function (resolve) {
@@ -570,10 +584,21 @@ async function collectToWallet() {
       var deadline = Date.now() + 230000;   // just under this promise's 240s withTimeout (cf. execDeadline)
       ctx.PoolMgr.ensureOwnerKeys(opks, function (regen, unreachable) {
         if (Date.now() > deadline) { resolve({ addresses: 0, coins: 0, foreign: unreachable ? unreachable.length : 0 }); return; }
-        ctx.PoolMgr.sweepOwnerFunds(oadrs, { swept: function (addresses, coins) {
-          if (coins) { ctx.Store.actRecord("COLLECT", "Collected " + coins + " coin(s) to your wallet", "", lastTip, ""); emitter.emit("update"); }
-          resolve({ addresses: addresses, coins: coins, foreign: unreachable ? unreachable.length : 0 });
-        } });
+        // Enqueue FIRST, then sweep. A fire-and-forget sweep cannot finish a job whose coins are not
+        // spendable yet — that is exactly how 2934.95626348 MxUSD was left behind on 2026-09-14. Queued
+        // addresses are then finished by the background service pass, which outlives this call.
+        var left = oadrs.length;
+        oadrs.forEach(function (a) {
+          ctx.Store.collectAdd(a, function () {
+            if (--left > 0) return;
+            ctx.PoolMgr.collectSweep(function (t) {
+              if (t.cleared) ctx.Store.actRecord("COLLECT", "Moved withdrawn funds from " + t.cleared + " payout address(es) to your wallet", "", lastTip, "");
+              emitter.emit("update");
+              resolve({ addresses: t.cleared, coins: t.cleared, cleared: t.cleared, pending: t.pending,
+                        stranded: t.stranded, foreign: unreachable ? unreachable.length : 0 });
+            });
+          });
+        });
       });
     });
   }), 240000, "Collecting timed out — check your balance; you can retry from My LP.");
@@ -633,7 +658,7 @@ module.exports = {
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
-  swap, createPool, deposit, close: closePool, migrate, collectToWallet, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
+  swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted,
   _setRunner, _setDataDir,
 };

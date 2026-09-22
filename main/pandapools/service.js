@@ -443,6 +443,11 @@ function done(pools) {
     // Reserve snapshots are not transaction evidence. ActivityChain queries actual pool transactions.
     maybeReannounceSvc(funded);
     maybeRefreshSvc();   // sources its own owned pools from pp_ownpools (no longer the discovered set)
+    // Finish moving withdrawn funds OFF the owner payout addresses. Driven here, not from a screen: the old
+    // page-side loop gave up after 8 tries 20 s apart and died with the tab, against coins that are not even
+    // spendable until 3 blocks after the close confirms. Success is the address being EMPTY, read back — never
+    // a forward reporting that it posted. See PoolMgr.collectDecide.
+    if (PoolMgr && PoolMgr.collectSweep) PoolMgr.collectSweep(function () {});
 }
 
 // ---------------------------------------------------------------- Layer 5: background faded-beacon re-announce
@@ -659,6 +664,32 @@ function fillReservesSvc(pool,j){
     pool.reserveM=PP.plain(pool.reserveM);pool.reserveT=PP.plain(pool.reserveT);return true;
 }
 
+/** Warn out loud before a pool goes dark. Mirrors native StrandingWatch (0.9.56). A pool whose reserves are
+ *  not recreated falls into the megammr-only archive and vanishes from every light node including its owner's,
+ *  and the users who need the warning are exactly the ones whose app has not been running — so this fires from
+ *  the background service, not a screen. A quarantined pool is told to Withdraw, not Re-publish: keep-fresh
+ *  refuses to sign for it, so Re-publish is a button that cannot work. */
+function strandWatchSvc(p, age, held) {
+    var level = PoolMgr.strandLevel(age);
+    if (!level) return;                                   // healthy, or age unknown — never escalate on unknown
+    var k = "strand_" + p.address.toLowerCase();
+    Store.kvGet(k, function (raw) {
+        var prev = {}; try { prev = raw ? JSON.parse(raw) : {}; } catch (e) { prev = {}; }
+        var now = Date.now();
+        if (!PoolMgr.strandShouldNotify(level, Number(prev.level || 0), Number(prev.at || 0), now)) return;
+        var what = level === 3 ? "Pool about to become unrecoverable"
+                 : level === 2 ? "Others can no longer find your pool"
+                 : "Your pool needs PandaPools open";
+        var how = held ? "Withdraw it — its signing state was never confirmed, so it cannot refresh itself."
+                       : "Open PandaPools and Re-publish it.";
+        // Guarded: this engine also runs inside the Desktop app, whose MDS shim is a small subset. An
+        // unguarded call would throw here and take the whole keep-fresh pass down with it.
+        var line = what + " (" + age + " blocks since its reserves were recreated). " + how + "  " + p.address;
+        if (typeof MDS.notify === "function") MDS.notify(line); else MDS.log("[strand] " + line);
+        Store.kvSet(k, JSON.stringify({ level: level, at: now }), function () {});
+    });
+}
+
 // KEEP-FRESH driven from the DURABLE pp_ownpools recipes + a per-covenant reserve scan — NOT the general
 // discovery set. So an owned pool is refreshed while it's still young enough even if the registry scan
 // momentarily didn't surface it (a discovery hiccup no longer lets a pool silently age out). Mirrors native
@@ -684,13 +715,17 @@ function maybeRefreshSvc() {
             recipes.forEach(function (row) {
                 var p = { address: row.ADDRESS, opk: row.OPK, oadr: row.OADR, tok: row.TOK, kmin: row.KMIN,
                           reserveM: null, reserveT: null, coinidM: row.LASTCOINM||"", coinidT: row.LASTCOINT||"", reserveBlock: 0 };
-                if (!p.address || !p.opk || !p.oadr || !p.tok || !p.kmin || row.SIGNING_UNVERIFIED == null || Number(row.SIGNING_UNVERIFIED) !== 0) { fire(); return; }
+                if (!p.address || !p.opk || !p.oadr || !p.tok || !p.kmin) { fire(); return; }
+                // A quarantined pool must NOT be refreshed (keep-fresh would have to sign for it) but it MUST
+                // still be watched: it cannot self-heal, so it is the one most likely to strand.
+                var held = row.SIGNING_UNVERIFIED == null || Number(row.SIGNING_UNVERIFIED) !== 0;
                 var a = p.address.toLowerCase();
                 if (REFRESH_SVC[a] && (t - REFRESH_SVC[a]) < REFRESH_TTL_MS) { fire(); return; }   // already refreshing
                 ReserveRecovery.readCurrent(p,function(j){
                     if(fillReservesSvc(p,j)){
                         var oldest=Math.min(p.reserveBlockM,p.reserveBlockT),age=oldest>0?tip-oldest:Infinity;
-                        if(age>REFRESH_BLOCKS)aging.push(p);
+                        strandWatchSvc(p, oldest>0?tip-oldest:0, held);
+                        if(!held&&age>REFRESH_BLOCKS)aging.push(p);
                         MDS.sql("UPDATE pp_ownpools SET lastcoinm='"+p.coinidM+"',lastcoint='"+p.coinidT+"' WHERE address='"+p.address.toLowerCase()+"'",function(){});
                     }
                     fire();

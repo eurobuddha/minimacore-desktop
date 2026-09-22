@@ -1006,6 +1006,138 @@ var PoolMgr = (function () {
     // counter cannot be repaired that way: advancing it cannot undo signatures already made elsewhere, and
     // guessing the target is the leak. Native removed it in 0.9.48 (see KeyUses.java). Do not reintroduce it.
 
+    // ================================================================ STRANDING WATCH
+
+    /**
+     * How close to stranding a pool is. Mirrors native StrandingWatch (0.9.56).
+     *
+     * Stranding is the root cause of every recovery problem in this app: reserves that are not recreated fall
+     * into the megammr-only archive and the pool disappears from every light node, including its owner's — MY
+     * LP then shows "No pools yet" and there is nothing to withdraw. Thresholds are derived from the existing
+     * constants rather than new magic numbers.
+     */
+    var CASCADE_BLOCKS = 1700;
+    var STRAND_NOTICE_AT = 900 + 300;                       // keep-fresh should have run and demonstrably has not
+    var STRAND_WARN_AT   = Covenant.SENTINEL_SCAN_DEPTH;    // 1500 — other wallets have stopped finding it
+    var STRAND_URGENT_AT = CASCADE_BLOCKS - 50;             // 1650 — with room left to act, not after the fact
+    var STRAND_QUIET_MS  = 24 * 60 * 60 * 1000;
+
+    /** age <= 0 means UNKNOWN and is never escalated — warning about a pool whose age we simply have not read
+     *  yet is how a warning gets trained out of a user. */
+    function strandLevel(age) {
+        if (!(age > 0)) return 0;
+        if (age > STRAND_URGENT_AT) return 3;
+        if (age > STRAND_WARN_AT) return 2;
+        if (age > STRAND_NOTICE_AT) return 1;
+        return 0;
+    }
+
+    /** Escalation is immediate; an unchanged level waits out the quiet window; improvement never nags. */
+    function strandShouldNotify(level, lastLevel, lastAt, now) {
+        if (level === 0) return false;
+        if (level > lastLevel) return true;
+        if (level < lastLevel) return false;
+        return (now - lastAt) > STRAND_QUIET_MS;
+    }
+
+    // ================================================================ COLLECT (finish the $OADR hand-off)
+
+    /**
+     * The whole fix, as a pure function. Mirrors native CollectSweeper.decide (0.9.57).
+     *
+     * `remaining` is the coin count at the payout address (null = could not read); `canSign` is whether this
+     * wallet can sign for it (null = could not tell). Note what is ABSENT: any input describing whether a
+     * forward transaction posted. A forward moves the coins it could SEE at that moment — coins not yet
+     * spendable (coinage:3 after the close) are simply not in it — so its success says nothing about whether
+     * the address is empty. Believing it did is exactly what stranded 2934.95626348 MxUSD on 2026-09-14.
+     * "CLEAR" is reachable only from a zero read.
+     */
+    function collectDecide(remaining, canSign) {
+        if (remaining === null || remaining === undefined) return "RETRY";   // unknown: never conclude anything
+        if (remaining === 0) return "CLEAR";
+        if (canSign === null || canSign === undefined) return "RETRY";       // unknown is not "unreachable"
+        return canSign ? "RETRY" : "STRANDED";
+    }
+
+    /** Coins still at `oadr`, or null when the node could not say. */
+    function collectRemaining(oadr, cb) {
+        MDS.cmd("balance address:" + oadr, function (j) {
+            var rows = j && j.status === true && j.response ? (Array.isArray(j.response) ? j.response : [j.response]) : null;
+            if (!rows) { cb(null); return; }
+            var n = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var c = rows[i] && rows[i].coins;
+                if (c === undefined || c === null) { cb(null); return; }
+                var v = Number(c); if (!isFinite(v) || v < 0) { cb(null); return; }
+                n += v;
+            }
+            cb(n);
+        });
+    }
+
+    /** Whether this wallet can sign for the payout address. $OADR is the plain address of the owner key, so
+     *  "is it relevant" IS the question. null = UNKNOWN, never false: a transient failure must not be
+     *  reported to the user as "your funds are unreachable". */
+    function collectCanSign(oadr, cb) {
+        MDS.cmd("checkaddress address:" + oadr, function (j) {
+            var r = j && j.status === true ? j.response : null;
+            if (!r || r.relevant === undefined) { cb(null); return; }
+            cb(r.relevant === true);
+        });
+    }
+
+    /**
+     * Work every tracked payout address once, in series. Driven from the background service, which survives
+     * the page being closed — so retries are effectively unlimited. There is NO attempt cap: giving up after
+     * 8 tries, 20 s apart, only while one screen was alive is what caused the incident.
+     */
+    function collectSweep(done) {
+        Store.collectAll(function (queue) {
+            if (!queue.length) { done({ cleared: 0, pending: 0, stranded: 0 }); return; }
+            var i = 0, tally = { cleared: 0, pending: 0, stranded: 0 };
+            function step() {
+                if (i >= queue.length) { done(tally); return; }
+                var oadr = queue[i++].oadr;
+                // Read the address FIRST. Empty means done — and that is the only thing that means done.
+                collectRemaining(oadr, function (remaining) {
+                    if (collectDecide(remaining, null) === "CLEAR") {
+                        Store.collectClear(oadr, function () { tally.cleared++; step(); });
+                        return;
+                    }
+                    if (remaining === null) {
+                        Store.collectAttempted(oadr, "RETRYING", "could not read the payout address on this node",
+                            function () { tally.pending++; step(); });
+                        return;
+                    }
+                    collectCanSign(oadr, function (canSign) {
+                        var v = collectDecide(remaining, canSign);
+                        if (v === "RETRY" && (canSign === null || canSign === undefined)) {
+                            Store.collectAttempted(oadr, "RETRYING",
+                                "could not check whether this wallet can sign for the payout address",
+                                function () { tally.pending++; step(); });
+                            return;
+                        }
+                        if (v === "STRANDED") {
+                            Store.collectAttempted(oadr, "STRANDED", remaining + " coin(s) are at this address and "
+                                + "this wallet cannot sign for it. The owner key belongs to a wallet this node does "
+                                + "not hold — a seed on its own does not reproduce it. Restore the matching complete "
+                                + "wallet backup.", function () { tally.stranded++; step(); });
+                            return;
+                        }
+                        forwardOwnerFunds(oadr, {
+                            // Deliberately NOT treated as finished. The next pass re-reads the address; only an
+                            // empty read clears the entry.
+                            forwarded: function () { Store.collectAttempted(oadr, "RETRYING", "", function () { tally.pending++; step(); }); },
+                            nothing:   function () { Store.collectAttempted(oadr, "RETRYING", "waiting for the withdrawn coins to become spendable", function () { tally.pending++; step(); }); },
+                            fail:      function (m) { Store.collectAttempted(oadr, "RETRYING", m || "", function () { tally.pending++; step(); }); }
+                        });
+                    });
+                });
+            }
+            step();
+        });
+    }
+
     // ================================================================ SWAP (routed)
     function swap(route, minimaToToken, done) {   // done.ok(txpowid), done.fail
         if (!route || !route.ok || !route.allocs.length) { done.fail("no route — trade too small for the pools"); return; }
@@ -1071,6 +1203,9 @@ var PoolMgr = (function () {
         forwardOwnerFunds: forwardOwnerFunds,
         sweepOwnerFunds: sweepOwnerFunds,
         ensureOwnerKeys: ensureOwnerKeys, rememberKidx: rememberKidx,
+        collectDecide: collectDecide, collectSweep: collectSweep,
+        strandLevel: strandLevel, strandShouldNotify: strandShouldNotify,
+        STRAND_NOTICE_AT: STRAND_NOTICE_AT, STRAND_WARN_AT: STRAND_WARN_AT, STRAND_URGENT_AT: STRAND_URGENT_AT, CASCADE_BLOCKS: CASCADE_BLOCKS,
         readKeyUses: readKeyUses
     };
 })();

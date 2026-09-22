@@ -156,6 +156,38 @@ var ReserveRecovery = (function () {
             restoreOne(root.pools[i++],archive,function(verified,detail){if(verified)ok++;details.push(detail);if(progress)progress(detail);next();});
         }cancelPoolTransactions(function(ok){if(ok)next();else cb({restored:0,total:root.pools.length,warn:"Could not cancel existing pool transactions. Recovery did not start; clear pending PandaPools actions and retry."});});
     }
+    /**
+     * Prove a saved backup is usable, by reading it back. Mirrors native BackupState.verifyExport (0.9.51).
+     *
+     * A write that did not throw is NOT evidence the file is good: a truncated or partially-written backup
+     * otherwise fails for the first time during a real recovery, which is the worst possible moment to find
+     * out. Returns null when the file is sound, or a human sentence naming what is wrong with it.
+     */
+    function verifyExport(readBack, owned, expectedBytes) {
+        if(!readBack)return "the saved file could not be read back";
+        if(expectedBytes>0){
+            var n=(typeof TextEncoder!=="undefined")?new TextEncoder().encode(readBack).length:readBack.length;
+            if(n!==expectedBytes)return "the saved file is a different size than what was written — it may be truncated";
+        }
+        var root; try{root=JSON.parse(readBack);}catch(e){return "the saved file is not readable JSON";}
+        var v=root&&root.pandapools_backup;
+        if(!integer(v,3)||Number(v)<1)return "the saved file is not a PandaPools backup this version can read";
+        if(!Array.isArray(root.pools)||!root.pools.length)return "the saved file contains no pools";
+        var list=owned||[];
+        for(var i=0;i<list.length;i++){
+            var addr=list[i]&&list[i].address; if(!addr)continue;
+            var found=false;
+            for(var j=0;j<root.pools.length&&!found;j++){
+                var e=root.pools[j];
+                if(!e||String(e.addr||"").toLowerCase()!==String(addr).toLowerCase())continue;
+                if(!validRecipe(e))return "the entry for "+addr+" is not a usable recipe";
+                found=true;
+            }
+            if(!found)return "the saved file does not contain "+addr;
+        }
+        return null;
+    }
+
     function backup(height,cb){
         Store.ownAll(function(recipes,readOk){
             if(readOk===false){cb({empty:false,error:"Could not read saved pool recipes."});return;}
@@ -202,10 +234,76 @@ var ReserveRecovery = (function () {
         var rs=keyRows(j),missing={};wanted.forEach(function(k){if(k)missing[key(k)]=true;});
         if(rs)rs.forEach(function(r){if(r&&integer(r.uses,262143))delete missing[key(r.publickey)];});
         ps.forEach(function(p){if(wanted.map(key).indexOf(key(p.opk))<0)return;
-            var row=rs&&rs.filter(function(r){return key(r.publickey)===key(p.opk);})[0];
-            if(p.signingStateUnverified||(typeof Store!=="undefined"&&Store.confirmationFailed(p.opk))||!row||!integer(row.uses,262143)||Number(row.uses)<p.minimumOwnerUses)missing[key(p.opk)]=true;
+            if(classifySigning(p,rs)!==null)missing[key(p.opk)]=true;
         });return Object.keys(missing);
     }
+
+    /**
+     * WHICH signing problem this is — mirrors native OwnerKeyRecovery.classify (0.9.49). Returns null when the
+     * key may sign. Collapsing these into one flat "cannot sign" list sent users at the wrong fix: "restore a
+     * backup" is right for KEY_ABSENT and actively wrong for NODE_UNREADABLE, where we know nothing at all.
+     * Order matters: unreadable outranks absent, because a reply we could not parse is not evidence of anything.
+     */
+    function classifySigning(p,rs){
+        if(!Array.isArray(rs))return "NODE_UNREADABLE";                     // no key list ⇒ we know NOTHING
+        var row=rs.filter(function(r){return key(r.publickey)===key(p.opk);})[0];
+        if(!row)return "KEY_ABSENT";                                        // parsed fine, key is not here
+        if(!integer(row.uses,262144))return "NODE_UNREADABLE";              // present but unparsable is still unknown
+        var uses=Number(row.uses);
+        if(uses>=262144)return "KEY_EXHAUSTED";                             // every one-time signature spent
+        if(p.minimumOwnerUses>=0&&uses<p.minimumOwnerUses)return "COUNTER_REGRESSED";
+        if(typeof Store!=="undefined"&&Store.confirmationFailed(p.opk))return "CONFIRMATION_UNSAVED";
+        if(p.signingStateUnverified)return "SIGNING_QUARANTINED";
+        return null;
+    }
+
+    /** The user-facing sentence for a reason. Full identifiers, never abbreviated. */
+    function signingMessage(reason,opk,nodeUses,floor,address){
+        var tail="\n\nOwner key: "+opk+(address?"\nPool: "+address:"");
+        switch(reason){
+            case "KEY_ABSENT": return "This node's wallet does not hold this pool's owner key, so nothing here can "
+                + "sign for it. Restore the MinimaCore wallet backup from the device that created this pool — a "
+                + "seed phrase alone rebuilds only the 64 default keys, and a pool's owner key is not one of them."+tail;
+            case "NODE_UNREADABLE": return "PandaPools could not read this node's key list, so it does not know "
+                + "whether this key can sign. This says nothing about the key itself — do not change anything "
+                + "about your wallet on the strength of this message. Nothing was posted."+tail;
+            case "KEY_EXHAUSTED": return "This owner key has used all 262,144 of its one-time signatures and can "
+                + "never sign again. Any funds still held under it cannot be moved."+tail;
+            case "COUNTER_REGRESSED": return "This node says the pool's owner key has used "+nodeUses+" one-time "
+                + "signatures, but your saved recipe recorded "+floor+". Signing here would reuse a signature and "
+                + "could expose the key, so PandaPools posted nothing. Restore the newest matching MinimaCore "
+                + "wallet backup — the one from the device that used this pool most recently."+tail;
+            case "CONFIRMATION_UNSAVED": return "A previous signing-state confirmation could not be written to "
+                + "storage, so the hold still stands. Free some space and confirm it again in Pool recovery."+tail;
+            default: return "PandaPools has no record of how many of this owner key's one-time signatures have "
+                + "already been used — the recipe was imported, predates that record, or was rebuilt from what "
+                + "this node could see. Signing the wrong one could expose the key, so nothing was posted. "
+                + "Restore the matching MinimaCore wallet backup — the complete one, including signing state — "
+                + "and confirm it in Pool recovery. A seed phrase on its own is NOT enough: it rebuilds the key "
+                + "with its counter reset, which is exactly what causes this."+tail;
+        }
+    }
+
+    /** Every wanted key that cannot sign, WITH the reason and the numbers behind it. */
+    function classifyKeys(wanted,cb){
+        call(local,"keys",function(j){
+            var rs=keyRows(j);
+            signingRecipes(function(ps,ok){
+                if(ok===false){cb((wanted||[]).map(function(k){return {opk:k,reason:"NODE_UNREADABLE",message:signingMessage("NODE_UNREADABLE",k)};}));return;}
+                var out=[],seen={};
+                (ps||[]).forEach(function(p){
+                    if((wanted||[]).map(key).indexOf(key(p.opk))<0||seen[key(p.opk)])return;
+                    var reason=classifySigning(p,rs); if(reason===null)return;
+                    seen[key(p.opk)]=true;
+                    var row=Array.isArray(rs)?rs.filter(function(r){return key(r.publickey)===key(p.opk);})[0]:null;
+                    out.push({opk:p.opk,reason:reason,nodeUses:row?Number(row.uses):null,floor:p.minimumOwnerUses,
+                              address:p.address||"",message:signingMessage(reason,p.opk,row?Number(row.uses):null,p.minimumOwnerUses,p.address||"")});
+                });
+                cb(out);
+            });
+        });
+    }
+
     function ensureKeys(wanted,cb){
         call(local,"keys",function(j){signingRecipes(function(ps,ok){cb(0,ok===false?(wanted||[]).slice():checkedKeys(wanted||[],j,ps));});});
     }
@@ -281,5 +379,5 @@ var ReserveRecovery = (function () {
             });
         }call(local,"checkmode",function(j){if(!j||!j.response||j.response.writemode!==true){cb("Enable PandaPools WRITE mode in MiniHub before signing; deferred signature approvals are not supported.");return;}input(0);});
     }
-    return {restore:restore,backup:backup,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
+    return {restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
 })();
