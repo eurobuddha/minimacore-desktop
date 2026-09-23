@@ -3,7 +3,7 @@
  * Recovery never regenerates keys, estimates historic leaf use, signs, or posts transactions.
  * Requires the existing Decimal, Covenant, Curve, Store and PoolMgr modules at call time. */
 var ReserveRecovery = (function () {
-    var NOTICE = "Keep the latest complete MinimaCore wallet backup and this pool recipe. Coin proofs expire. Recovery needs current signing state and available chain proofs; a seed or recipe alone is insufficient.";
+    var NOTICE = "Keep ONE of these: a current MinimaCore wallet backup (restores the owner key and its signature counter \u2014 recovery just works), or this pool recipe plus your seed phrase (the recipe records which key the pool uses and what it had spent; recovery then ends with one node command that sets the counter). A seed phrase ALONE is not enough. Coin proofs expire; the recipe does not.";
     function key(v) { return String(v || "").toLowerCase(); }
     function hex(v) { return typeof v === "string" && /^0x(?:[0-9a-fA-F]{2})+$/.test(v); }
     function hash(v) { return typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v); }

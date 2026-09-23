@@ -2,8 +2,8 @@
   "_comment": "Digests of the PandaPools engine files copied verbatim from the MDS MiniDapp. Regenerate ONLY with `node scripts/pandapools-parity-manifest.cjs --update` beside a deliberate engine re-copy. Desktop-only runtime differences belong in loader.js / sqlshim.js / main/pandapools.js, never here.",
   "donor": {
     "root": "../../mds/pandapools-mds",
-    "mdsVersion": "0.6.27",
-    "gitSha": "87bda1203f3d12648a4d1b37bc0b2edb4d98ff29"
+    "mdsVersion": "0.6.28",
+    "gitSha": "38726d8a4a9fe191b8174004d2b26651efeb0ad1"
   },
   "files": {
     "decimal.js": {
@@ -55,8 +55,8 @@
       "bytes": 76165
     },
     "reserve-recovery.js": {
-      "sha256": "e2e21c1bb05e6c68e4f4147faafb8fd3cf21dc1143743cd6eebc313eb7120df8",
-      "bytes": 28635
+      "sha256": "7768b261652f91284582bbfa3a8918e5cad93d74cc5659b083dd07c69b296c69",
+      "bytes": 28821
     },
     "service.js": {
       "sha256": "700ff5ddedf6096563401dc32d035545f432b5b974b54d3fbe3196460045373d",
