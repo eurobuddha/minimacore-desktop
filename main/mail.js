@@ -20,8 +20,21 @@ const CHAINMAIL = "0x434841494E4D41494C";
 const MSG_AMOUNT = "0.000000001";
 const MAIL_KEY_ACCOUNT = "mail-identity";
 const SCAN_EVERY_MS = 10000;
-const POLL_DEPTH = 32;      // steady-state recent window
-const BACKFILL_MAX_DEPTH = 256;
+/*
+ * DEPTH IS BLOCKS, NOT COINS. `coins … depth:N` walks back N BLOCKS from the tip (node search/coins.java), so at
+ * ~50s a block, 32 blocks is ~27 minutes and 256 is ~3h33m — the same arithmetic AtomiX documents at
+ * main/atomix/lib/settle.js:26. The old code backfilled ONCE per process at 256 and then polled 32 forever, so
+ * quitting the app for longer than 3.5 hours meant every message sent in that gap was never fetched, ever.
+ *
+ * Now: the live pass sizes itself to the gap since the last scan (up to WINDOW_DEPTH), and anything older is
+ * swept by a paced backfill that walks DOWN from the covered floor and persists where it got to, so a quit
+ * mid-sweep resumes instead of restarting.
+ */
+const POLL_DEPTH = 32;            // steady state: a few blocks of margin over the ~50s block time
+const WINDOW_DEPTH = 1024;        // one pass ceiling (~14h). Past ~1024 the tree cascades — AtomiX's REFUND_SCAN_DEPTH.
+const MIN_DEPTH = 4;
+const BACKFILL_CHUNK = 512;       // blocks reclaimed per backfill step (~7h), paced one step per scan tick
+const GAP_MARGIN = 8;             // blocks of overlap so a boundary coin can never fall between two passes
 
 const emitter = new EventEmitter();
 const seenCoins = new Set();   // coinids already trial-decrypted this session (skip re-opening on every poll)
@@ -32,13 +45,18 @@ let autoReplyTimes = [];       // timestamps (ms) of recent auto-replies, pruned
 const paReplyCooldown = new Map();  // peer publicId → last auto-reply ms
 const AUTO_REPLY_MAX_PER_HOUR = 24;
 const AUTO_REPLY_PEER_COOLDOWN_MS = 10 * 60 * 1000;
-let identityGen = 0;           // bumped on any identity swap so a stale in-flight scan can't set `backfilled`
+let identityGen = 0;           // bumped on any identity swap so a stale in-flight scan can't move the cursors
 let identity = null;        // {boxPk,boxSk,signPk,signSk,publicId}
 let mypayaddr = "";
 let scanTimer = null;
-let lastTip = 0;
+let lastTip = 0;          // newest block seen by the loop (for status())
+let lastScanTip = 0;      // block height that last triggered a scan
 let scanning = false;
-let backfilled = false;
+// Backfill cursor, mirrored in the store so it survives a quit: `floor` is the oldest block covered, `target`
+// is the block we must reach to close the gap left by the app being shut. `done` means the node stopped
+// serving coins that far back — the honest end of what this node can give us.
+let backfill = { active: false, floor: 0, target: 0, done: false, steps: 0 };
+let lastScanMs = 0;
 
 // swappable node-command runner (overridable in tests via _setRunner)
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
@@ -67,7 +85,8 @@ async function init() {
  *  so the restored (different) identity doesn't show the previous wallet's conversations. Called only on seed change. */
 function invalidateIdentity() {
   config.deleteSecret(MAIL_KEY_ACCOUNT);
-  identity = null; backfilled = false; seenCoins.clear(); mypayaddr = "";
+  identity = null; seenCoins.clear(); mypayaddr = "";
+  backfill = { active: false, floor: 0, target: 0, done: false, steps: 0 }; lastScanMs = 0;
   identityGen++; repliedReq.clear(); paReplyCooldown.clear(); autoReplyTimes = [];
   try { store.clear(); } catch (e) { /* best effort */ }
 }
@@ -102,25 +121,62 @@ async function sendBlob(blobHex) {
   if (!r || (r.status !== true && r.pending !== true)) throw new Error((r && r.error) || "message send failed");
   return r;
 }
-/** Send a message. base = { message, type, image?, amount?, tokenid?, tokenname?, txpowid? }. */
+/** Send a message. base = { message, subject?, type, image?, amount?, tokenid?, tokenname?, txpowid? }.
+ *  SUBJECT is part of the thread key on both sides (threadKey hashes it), exactly as the APK does: an empty
+ *  subject is one running thread per contact, a named one starts its own thread. It used to be hardcoded "",
+ *  which is why the desktop had no subjects at all while the wire format carried the field. */
 async function sendMessage(toPublicId, base) {
   await init();
   if (!mc.isValidPublicId(toPublicId)) throw new Error("Invalid recipient mail id.");
+  const subject = String((base && base.subject) || "").slice(0, 200);
   const rid = randomId(), date = Date.now();
-  const wire = { from: identity.publicId, fromname: store.metaGet("myname") || "", to: toPublicId, subject: "",
+  const wire = { from: identity.publicId, fromname: store.metaGet("myname") || "", to: toPublicId, subject,
     message: base.message || "", randomid: rid, date, type: base.type || "text", payaddr: mypayaddr,
     amount: base.amount, tokenid: base.tokenid, tokenname: base.tokenname, txpowid: base.txpowid, image: base.image };
   const blob = await mc.seal(identity, toPublicId, Buffer.from(toWire(wire), "utf8"));
   if (blob.length > 49000) throw new Error("Message too large for one on-chain coin — shrink the image.");
   const block = await currentBlock();
-  await sendBlob(blob);
-  const local = { hashref: threadKey(identity.publicId, toPublicId, ""), fromname: wire.fromname, frompublickey: identity.publicId,
-    topublickey: toPublicId, subject: "", message: wire.message, randomid: rid, incoming: false, read: true, date,
-    status: "sent", sentblock: block, type: wire.type, amount: base.amount, tokenid: base.tokenid, tokenname: base.tokenname,
+  // Record it as POSTING before the coin is broadcast. The Outbox is then truthful even if the send throws or
+  // the app dies mid-post, and Retry has something to re-seal — the old code only stored a message that had
+  // already succeeded, so a failed send simply vanished.
+  const local = { hashref: threadKey(identity.publicId, toPublicId, subject), fromname: wire.fromname, frompublickey: identity.publicId,
+    topublickey: toPublicId, subject, message: wire.message, randomid: rid, incoming: false, read: true, date,
+    status: "posting", sentblock: block, type: wire.type, amount: base.amount, tokenid: base.tokenid, tokenname: base.tokenname,
     txpowid: base.txpowid, image: base.image, payaddr: mypayaddr };
   store.addMessage(local);
   emitter.emit("update");
+  try { await sendBlob(blob); } catch (e) {
+    store.setStatus(local.hashref, rid, { status: "failed" });
+    local.status = "failed"; emitter.emit("update");
+    throw e;
+  }
+  store.setStatus(local.hashref, rid, { status: "sent", sentblock: block });
+  local.status = "sent";
+  emitter.emit("update");
   return local;
+}
+/** Re-seal and re-post a message the chain never took. The randomid is REUSED so the recipient's dedup
+ *  (hashref|randomid) collapses a double delivery into one — a retry can never duplicate a conversation. */
+async function retrySend(hashref, randomid) {
+  await init();
+  const m = store.thread(hashref).find(x => x.randomid === randomid);
+  if (!m) throw new Error("That message is no longer in the Outbox.");
+  if (m.incoming) throw new Error("Only your own messages can be retried.");
+  const wire = { from: identity.publicId, fromname: m.fromname || store.metaGet("myname") || "", to: m.topublickey,
+    subject: m.subject || "", message: m.message || "", randomid: m.randomid, date: m.date, type: m.type || "text",
+    payaddr: mypayaddr, amount: m.amount, tokenid: m.tokenid, tokenname: m.tokenname, txpowid: m.txpowid, image: m.image };
+  const blob = await mc.seal(identity, m.topublickey, Buffer.from(toWire(wire), "utf8"));
+  const block = await currentBlock();
+  store.setStatus(hashref, randomid, { status: "posting", sentblock: block });
+  emitter.emit("update");
+  try { await sendBlob(blob); } catch (e) {
+    store.setStatus(hashref, randomid, { status: "failed" });
+    emitter.emit("update");
+    throw e;
+  }
+  store.setStatus(hashref, randomid, { status: "sent", sentblock: block });
+  emitter.emit("update");
+  return true;
 }
 async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
   await init();
@@ -187,6 +243,16 @@ function statePort99(coin) {
   if (typeof st === "object") return String(st["99"] || "");
   return "";
 }
+/** How many BLOCKS the live pass must ask for, given where we last got to. The whole history bug lives in
+ *  this one number: it used to be the constant 32. Covers the gap plus a margin, never below the steady-state
+ *  window and never past the one-pass ceiling (the remainder is the backfill's job). */
+function depthForGap(tip, prevTip) {
+  const gap = prevTip ? Math.max(0, tip - prevTip) : 0;   // no cursor yet → nothing to catch up on
+  return Math.min(WINDOW_DEPTH, Math.max(POLL_DEPTH, gap + GAP_MARGIN));
+}
+/** The next block the backfill should reach down to, one chunk below the current floor (never past genesis). */
+function nextFloorTarget(floor) { return Math.max(1, floor - BACKFILL_CHUNK); }
+
 async function queryCoins(depth) {
   try {
     const r = await nodeCmd(`coins address:${CHAINMAIL} order:desc depth:${depth}`);
@@ -194,15 +260,28 @@ async function queryCoins(depth) {
     return null;   // over-limit / bad reply
   } catch (e) { return null; }
 }
-async function scanOnce(deep) {
-  await init();
-  const gen = identityGen;              // if the identity is swapped mid-scan, don't let this stale pass set backfilled
-  const block = await currentBlock();
-  let depth = deep ? BACKFILL_MAX_DEPTH : POLL_DEPTH, coins = null;
-  while (depth >= 4) { coins = await queryCoins(depth); if (coins) break; depth = Math.floor(depth / 2); }
-  if (!coins) return 0;
+/** Ask for `depth` blocks, halving on refusal so one over-wide request can't lose the whole pass.
+ *  Returns { coins, depth } with the depth ACTUALLY served — the caller records coverage from that, never from
+ *  what it asked for. The old loop reused the degraded depth as if it had succeeded at full width, so a single
+ *  node hiccup silently narrowed that session's history to as little as 4 blocks with nothing said. */
+async function queryCoinsDegrading(depth) {
+  let d = Math.max(MIN_DEPTH, Math.floor(depth));
+  while (d >= MIN_DEPTH) {
+    const coins = await queryCoins(d);
+    if (coins) {
+      if (d < depth) try { node.log(`[mail] coins depth:${depth} refused — served ${d}; history below block tip-${d} deferred to the backfill`); } catch (e) {}
+      return { coins, depth: d };
+    }
+    if (d === MIN_DEPTH) break;
+    d = Math.max(MIN_DEPTH, Math.floor(d / 2));
+  }
+  return { coins: null, depth: 0 };
+}
+/** Trial-decrypt a page of coins into the store. `historical` suppresses the payaddr auto-reply: a backfill
+ *  walks over months of old requests and must not answer any of them with a real coin. Returns {fresh,lastFresh,paLearned}. */
+async function processCoins(coins, historical) {
   let fresh = 0, paLearned = false, lastFresh = null;
-  const paSeen = new Set();             // learn each peer's payaddr once per scan; coins are order:desc so newest wins
+  const paSeen = new Set();             // learn each peer's payaddr once per pass; coins are order:desc so newest wins
   for (const coin of coins) {
     const blob = statePort99(coin);
     if (!blob) continue;
@@ -215,16 +294,16 @@ async function scanOnce(deep) {
     let m; try { m = JSON.parse(Buffer.from(o.plaintext).toString("utf8")); } catch (e) { continue; }
     if (o.fromPublicId !== m.from) continue;             // signed-from must equal claimed sender
     if (m.to !== identity.publicId) continue;            // addressed to me
-    // Learn the peer's pay address (piggybacked on EVERY message/control coin) — once per scan, newest coin first.
+    // Learn the peer's pay address (piggybacked on EVERY message/control coin) — once per pass, newest coin first.
     if (m.payaddr && !paSeen.has(m.from)) {
       paSeen.add(m.from);
       if (store.metaGet("pa:" + m.from) !== m.payaddr) { store.metaSet("pa:" + m.from, m.payaddr); paLearned = true; }
     }
     if (m.type === "payaddr-req" || m.type === "payaddr-reply") {
-      // For a REQUEST on a LIVE scan, auto-answer with our own address — the handshake. Suppressed during a deep
-      // backfill (no reply coin per historical request) AND hard rate-limited (per-peer cooldown + global hourly
+      // For a REQUEST on a LIVE pass, auto-answer with our own address — the handshake. Suppressed while walking
+      // history (no reply coin per historical request) AND hard rate-limited (per-peer cooldown + global hourly
       // cap) so a flood of forged requests can't drain coins / WOTS key-uses.
-      if (m.type === "payaddr-req" && !deep && !repliedReq.has(m.randomid)) {
+      if (m.type === "payaddr-req" && !historical && !repliedReq.has(m.randomid)) {
         if (repliedReq.size > 2000) repliedReq.clear();
         repliedReq.add(m.randomid);
         const now = Date.now();
@@ -243,22 +322,126 @@ async function scanOnce(deep) {
       amount: m.amount, tokenid: m.tokenid, tokenname: m.tokenname, txpowid: m.txpowid, image: m.image, payaddr: m.payaddr || "" };
     if (store.addMessage(local)) { fresh++; lastFresh = local; }
   }
-  store.markConfirmed(block);
-  store.metaSet("scanned_tip_block", block);
-  if (deep && gen === identityGen) backfilled = true;
-  if (fresh || paLearned) emitter.emit("update");   // paLearned → an open send-funds sheet can live-fill the address
-  if (fresh && !deep && lastFresh) {                 // live (not backfill) → surface an OS notification
-    const nm = (store.getContact(lastFresh.frompublickey) || {}).username || lastFresh.fromname || "";
-    const preview = lastFresh.type === "image" ? "📷 Photo" : lastFresh.type === "payment" ? "💰 Payment" : (lastFresh.message || "");
-    emitter.emit("incoming", { count: fresh, from: lastFresh.frompublickey, name: nm, preview });
-  }
-  return fresh;
+  return { fresh, paLearned, lastFresh };
 }
-async function scan() { if (scanning) return 0; scanning = true; try { return await scanOnce(!backfilled); } finally { scanning = false; } }
+
+/**
+ * The LIVE pass: cover every block since the last successful scan, not a fixed recent window.
+ *
+ * The gap drives the depth, so reopening the app after four hours asks for ~290 blocks rather than 32 and the
+ * mail sent in that time actually arrives. Anything beyond one window (WINDOW_DEPTH) is handed to the backfill
+ * by recording the gap's far edge as its target — that is the case that used to be lost in silence.
+ */
+async function scanOnce() {
+  await init();
+  const gen = identityGen;              // if the identity is swapped mid-scan, don't let this stale pass move cursors
+  const block = await currentBlock();
+  if (!block) return 0;
+  const prevTip = Number(store.metaGet("scanned_tip_block") || 0);
+  const { coins, depth } = await queryCoinsDegrading(depthForGap(block, prevTip));
+  if (!coins) return 0;
+  const covered = block - depth;        // oldest block this pass actually saw
+  const out = await processCoins(coins, false);
+  store.markConfirmed(block);
+  if (gen === identityGen) {
+    store.metaSet("scanned_tip_block", block);
+    lastScanMs = Date.now();
+    // Floor tracking: we now cover down to `covered`. On the very first scan that IS the floor; later it only
+    // moves down (the backfill's job), never up — otherwise a narrow pass would erase proof of what we hold.
+    const floor = Number(store.metaGet("mail_floor_block") || 0);
+    if (!floor || covered < floor) store.metaSet("mail_floor_block", covered);
+    // A hole opened between what we had and what this pass reached → that is exactly the mail a long shutdown
+    // used to lose. Aim the backfill at it; "as far as the node allows" then keeps walking below it.
+    if (prevTip && prevTip < covered && !backfill.done) {
+      backfill.active = true;
+      backfill.target = Math.max(backfill.target, prevTip);
+    }
+  }
+  if (out.fresh || out.paLearned) emitter.emit("update");   // paLearned → an open send-funds sheet can live-fill the address
+  if (out.fresh && out.lastFresh) {                          // live (not backfill) → surface an OS notification
+    const nm = (store.getContact(out.lastFresh.frompublickey) || {}).username || out.lastFresh.fromname || "";
+    const preview = out.lastFresh.type === "image" ? "📷 Photo" : out.lastFresh.type === "payment" ? "💰 Payment" : (out.lastFresh.message || "");
+    emitter.emit("incoming", { count: out.fresh, from: out.lastFresh.frompublickey, name: nm, preview });
+  }
+  return out.fresh;
+}
+
+/**
+ * ONE step of the backfill: reclaim BACKFILL_CHUNK more blocks below the current floor and persist the new floor,
+ * so a quit mid-sweep resumes where it stopped. `depth` is always measured from the tip, so reaching further back
+ * means asking WIDER — the step stops for good the moment the node will not serve that width, which is the honest
+ * limit of what this node can give us rather than a silent truncation.
+ */
+async function backfillStep() {
+  await init();
+  const gen = identityGen;
+  const tip = await currentBlock();
+  if (!tip) return false;
+  let floor = Number(store.metaGet("mail_floor_block") || 0);
+  if (!floor) { floor = Math.max(1, tip - POLL_DEPTH); store.metaSet("mail_floor_block", floor); }
+  if (floor <= 1) { backfill.active = false; backfill.done = true; return false; }
+  const target = nextFloorTarget(floor);
+  const { coins, depth } = await queryCoinsDegrading(tip - target);
+  // Served no wider than we already hold → this node cannot reach further back. Stop, and say so.
+  if (!coins || (tip - depth) >= floor) {
+    backfill.active = false; backfill.done = true;
+    try { node.log(`[mail] history sweep finished at block ${floor} — the node serves no further back`); } catch (e) {}
+    emitter.emit("update");
+    return false;
+  }
+  const out = await processCoins(coins, true);
+  const reached = tip - depth;
+  if (gen === identityGen) {
+    store.metaSet("mail_floor_block", reached);
+    backfill.floor = reached; backfill.steps++;
+    if (backfill.target && reached <= backfill.target) { backfill.active = false; backfill.target = 0; }
+  }
+  if (out.fresh) try { node.log(`[mail] history sweep: ${out.fresh} recovered down to block ${reached}`); } catch (e) {}
+  emitter.emit("update");   // always: the freshness line is showing this progress
+  return backfill.active;
+}
+
+/** Live pass, then at most ONE backfill step — the sweep is heavy (a widening query per step), so it is paced by
+ *  the block tick rather than run to completion in one go, and the UI stays responsive throughout. */
+async function scan() {
+  if (scanning) return 0;
+  scanning = true;
+  try {
+    const fresh = await scanOnce();
+    if (backfill.active) { try { await backfillStep(); } catch (e) { /* retried on the next tick */ } }
+    return fresh;
+  } finally { scanning = false; }
+}
+/** Start (or resume) the deep sweep by hand — "as far as the node allows". */
+function startBackfill() {
+  backfill.active = true; backfill.done = false;
+  backfill.floor = Number(store.metaGet("mail_floor_block") || 0);
+  emitter.emit("update");
+  return backfillStatus();
+}
+function backfillStatus() {
+  return { active: backfill.active, done: backfill.done, steps: backfill.steps,
+    floor: Number(store.metaGet("mail_floor_block") || 0), target: backfill.target };
+}
+/** Everything the freshness line needs in one call: what we have covered, when we last looked, and whether a
+ *  sweep is running. The old panel could only say "just now" — even when hours of mail were missing. */
+function status() {
+  return { tip: lastTip, scannedTip: Number(store.metaGet("scanned_tip_block") || 0),
+    lastScanMs, scanning, backfill: backfillStatus() };
+}
 
 function startLoop() {
   if (scanTimer) return;
-  const tick = async () => { try { const tip = await currentBlock(); if (tip !== lastTip) { lastTip = tip; await scan(); } } catch (e) {} };
+  // A new block is the trigger, but a running backfill must keep stepping even on a quiet chain — otherwise a
+  // sweep stalls for as long as the network does.
+  const tick = async () => {
+    try {
+      const tip = await currentBlock();
+      if (tip) lastTip = tip;
+      if (tip !== lastScanTip) { lastScanTip = tip; await scan(); }
+      else if (backfill.active && !scanning) { scanning = true; try { await backfillStep(); } finally { scanning = false; } }
+    } catch (e) {}
+  };
   tick();
   scanTimer = setInterval(tick, SCAN_EVERY_MS);
 }
@@ -274,12 +457,21 @@ function setName(name) { store.metaSet("myname", String(name || "")); emitter.em
 // message's from/to is definitive). This hides threads orphaned by an identity change — e.g. a seed restore gives a
 // new mail identity, and the old conversation, keyed with the previous publicId, would otherwise linger as a duplicate.
 function mineThread(t) { const me = identity && identity.publicId; return !!(me && t.last && (t.last.frompublickey === me || t.last.topublickey === me)); }
-function threads() { return store.threads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
+function threads() { return store.threads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last), subject: (t.last && t.last.subject) || "" })); }
+/** Outgoing mail that has not reached the chain yet (Outbox) and outgoing mail that has (Sent) — the APK's two
+ *  folders, off the same store. `status` is the on-chain lifecycle: posting → sent → confirmed, or failed. */
+function outgoing(match) {
+  const me = identity && identity.publicId; if (!me) return [];
+  return store.all().filter(m => m && !m.incoming && m.frompublickey === me && match(m.status || "sent"))
+    .sort((a, b) => (b.date || 0) - (a.date || 0));
+}
+function outbox() { return outgoing(st => st === "posting" || st === "failed"); }
+function sent() { return outgoing(st => st === "sent" || st === "confirmed"); }
 function otherOf(m) { if (!m || !identity) return ""; return m.incoming ? m.frompublickey : m.topublickey; }
 // NOTE: emit ONLY when marking-read actually changed something. The renderer's live-update handler calls these
 // to refresh an open thread; emitting unconditionally would re-trigger that handler forever (a self-feeding loop).
 function thread(hashref) { if (store.markThreadRead(hashref)) emitter.emit("update"); return store.thread(hashref); }
-function threadWith(peer) { if (!identity) return []; const h = threadKey(identity.publicId, peer, ""); if (store.markThreadRead(h)) emitter.emit("update"); return store.thread(h); }
+function threadWith(peer, subject) { if (!identity) return []; const h = threadKey(identity.publicId, peer, subject || ""); if (store.markThreadRead(h)) emitter.emit("update"); return store.thread(h); }
 function contacts() { return store.contacts(); }
 function addContact(share, name) {
   const parts = String(share || "").split("|");
@@ -360,7 +552,11 @@ async function importBackup(passphrase, json) {
 }
 
 module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
+  startBackfill, backfillStatus, status, outbox, sent, retrySend,
   sendMessage, pay, requestPayaddr, resolvePayaddr, myReceivingAddress, looksLikeMinimaAddress,
   myIdentity, shareString, setName, threads, thread, threadWith, contacts, addContact,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
-  _setRunner, CHAINMAIL, threadKey };
+  _setRunner, CHAINMAIL, threadKey,
+  // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)
+  _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget,
+  _limits: { POLL_DEPTH, WINDOW_DEPTH, MIN_DEPTH, BACKFILL_CHUNK, GAP_MARGIN } };

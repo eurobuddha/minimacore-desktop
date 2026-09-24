@@ -230,13 +230,17 @@ ipcMain.handle("mcd:keyReuse", (_e, addrs) => {
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
 ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });
-ipcMain.handle("mcd:mailIdentity", () => mail.myIdentity());
 ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailShare", () => mail.shareString());
 ipcMain.handle("mcd:mailThreads", () => mail.threads());
 ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));
-ipcMain.handle("mcd:mailThreadWith", (_e, peer) => mail.threadWith(peer));
+ipcMain.handle("mcd:mailThreadWith", (_e, peer, subject) => mail.threadWith(peer, subject));
 ipcMain.handle("mcd:mailSend", (_e, to, base) => mail.sendMessage(to, base || {}));
+ipcMain.handle("mcd:mailRetry", (_e, hashref, randomid) => mail.retrySend(hashref, randomid));
+ipcMain.handle("mcd:mailOutbox", () => mail.outbox());
+ipcMain.handle("mcd:mailSent", () => mail.sent());
+ipcMain.handle("mcd:mailStatus", () => mail.status());
+ipcMain.handle("mcd:mailBackfill", () => mail.startBackfill());
 ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo));
 ipcMain.handle("mcd:mailRequestPayaddr", (_e, peer) => mail.requestPayaddr(peer));
 ipcMain.handle("mcd:mailResolvePayaddr", (_e, peer) => mail.resolvePayaddr(peer));

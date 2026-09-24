@@ -86,6 +86,17 @@ function deleteThread(hashref) {
 // archive state lives in meta under `arch:<hashref>`
 function archivedSet() { ensureLoaded(); const s = new Set(); for (const k in mem.meta) if (k.indexOf("arch:") === 0 && mem.meta[k]) s.add(k.slice(5)); return s; }
 function setArchived(hashref, on) { ensureLoaded(); if (on) mem.meta["arch:" + hashref] = true; else delete mem.meta["arch:" + hashref]; persistSoon(); }
+/** Patch one message in place, found by its thread + dedup id. The send lifecycle needs this: a message is
+ *  written as `posting` BEFORE the coin is broadcast (so the Outbox shows it and a crash can't lose it), then
+ *  promoted to `sent` or demoted to `failed` by the same call site. */
+function setStatus(hashref, randomid, patch) {
+  ensureLoaded();
+  const m = mem.messages[hashref + "|" + randomid];
+  if (!m) return false;
+  Object.assign(m, patch);
+  persistSoon();
+  return true;
+}
 function markThreadRead(hashref) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (m.hashref === hashref && m.incoming && !m.read) { m.read = true; ch = true; } if (ch) persistSoon(); return ch; }
 function unreadCount() { ensureLoaded(); return Object.values(mem.messages).filter(m => m.incoming && !m.read).length; }
 function markConfirmed(block) { ensureLoaded(); let ch = false; for (const m of Object.values(mem.messages)) if (!m.incoming && m.status === "sent" && m.sentblock && block >= m.sentblock) { m.status = "confirmed"; ch = true; } if (ch) persistSoon(); }
@@ -106,5 +117,5 @@ function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon()
 function exportAll() { ensureLoaded(); return { messages: mem.messages, contacts: mem.contacts, meta: mem.meta }; }
 
 module.exports = { addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
-  markThreadRead, unreadCount, markConfirmed,
+  markThreadRead, unreadCount, markConfirmed, setStatus,
   contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, exportAll };
