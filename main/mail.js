@@ -35,6 +35,16 @@ const WINDOW_DEPTH = 1024;        // one pass ceiling (~14h). Past ~1024 the tre
 const MIN_DEPTH = 4;
 const BACKFILL_CHUNK = 512;       // blocks reclaimed per backfill step (~7h), paced one step per scan tick
 const GAP_MARGIN = 8;             // blocks of overlap so a boundary coin can never fall between two passes
+/*
+ * The node will not spend a coin younger than GlobalParams.MINIMA_CONFIRM_DEPTH (3) — send.java:249 clamps
+ * `coinage` to that floor and then drops every input newer than tip-3, throwing "No Coins of tokenid:0x00
+ * available!" if nothing is left. Our pin narrows the send to ONE address, so pinning to a coin that young
+ * makes the send unfundable even with a full wallet. Every mail send's own change output is a brand-new coin
+ * that immediately becomes the smallest one, so without this each send poisoned the next — the exact failure
+ * AtomiX hit on order publishes (AX_PUBLISH_MIN_COINAGE, main/atomix.js). 4 leaves a block of margin over the
+ * node's floor; if nothing that old exists the pin simply falls back to an unpinned send, which is fine.
+ */
+const MAIL_MIN_COINAGE = 4;
 
 const emitter = new EventEmitter();
 const seenCoins = new Set();   // coinids already trial-decrypted this session (skip re-opening on every poll)
@@ -117,7 +127,7 @@ async function sendBlob(blobHex) {
   const cmd = `send amount:${MSG_AMOUNT} address:${CHAINMAIL} tokenid:0x00 state:${JSON.stringify({ "99": "0x" + blobHex })}`;
   // shared-node fund-safety: pin the 1-nano send to a signable coin so the node can't grab anyone-can-spend
   // beacon dust (PandaPools etc.) as the input → KeyRow.getPrivateKey() null. See main/sendpin.js.
-  const r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd));
+  const r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd, { minCoinage: MAIL_MIN_COINAGE }));
   if (!r || (r.status !== true && r.pending !== true)) throw new Error((r && r.error) || "message send failed");
   return r;
 }
@@ -192,7 +202,7 @@ async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
   let r;
   // pin a MINIMA (0x00) payment to a signable coin that covers the amount (token payments are untouched — beacon
   // dust is 0x00 only). Best-effort: a payment too big for any single signable coin sends unpinned.
-  try { r = await nodeCmd(await pinMinimaSend(nodeCmd, `send amount:${amount} address:${payaddr} tokenid:${tokenid}`)); }
+  try { r = await nodeCmd(await pinMinimaSend(nodeCmd, `send amount:${amount} address:${payaddr} tokenid:${tokenid}`, { minCoinage: MAIL_MIN_COINAGE })); }
   catch (e) {
     // The send may have been ACCEPTED and posted even though the RPC call timed out / the socket reset. Do NOT
     // report a clean failure — that invites a re-pay (double spend). Tell the caller the status is uncertain.

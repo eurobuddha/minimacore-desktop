@@ -28,6 +28,19 @@
     ["contacts", "Contacts"], ["key", "Your key"], ["settings", "Settings"]];
 
   function init(deps) { D = deps; }
+  /**
+   * What to actually show someone when a send fails. Electron wraps anything thrown in main as
+   * "Error invoking remote method 'mcd:mailRetry': Error: …", which is noise; and the node's own funding
+   * refusal is true but unhelpful, because the wallet is not empty — the coin it wanted was simply too young
+   * to spend. Strip the wrapper, then translate the one message people will actually hit.
+   */
+  function errText(e) {
+    var m = String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "");
+    if (/No Coins of tokenid/i.test(m)) return "Your node had no coin old enough to spend just then — it needs a few blocks. Try again in a minute.";
+    if (/Insufficient funds/i.test(m)) return "Not enough MINIMA in this node's wallet to send.";
+    if (/may have been submitted/i.test(m)) return "The node didn't answer in time — check before sending again.";
+    return m;
+  }
   function reset() { ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
 
   // ---------------------------------------------------------------- identity, names, avatars
@@ -355,7 +368,7 @@
         e.stopPropagation();
         b.disabled = true;
         try { await D.api.mailRetry(b.dataset.retry, b.dataset.rid); D.toast("Re-posting…", "ok"); }
-        catch (err) { D.toast(err.message || String(err), "err"); b.disabled = false; }
+        catch (err) { D.toast(errText(err), "err"); b.disabled = false; }
         render();
       };
     });
@@ -390,7 +403,7 @@
     };
     D.el("mmGoKey").onclick = function () { VIEW = "key"; render(); };
     D.el("mmSweep").onclick = async function () {
-      try { await D.api.mailBackfill(); D.toast("Fetching older mail…", "ok"); } catch (e) { D.toast(e.message || String(e), "err"); }
+      try { await D.api.mailBackfill(); D.toast("Fetching older mail…", "ok"); } catch (e) { D.toast(errText(e), "err"); }
       render();
     };
     D.el("mmHelp").onclick = showAbout;
@@ -448,7 +461,7 @@
     var body = inp.value.trim(); if (!body) return;
     inp.value = "";
     try { await D.api.mailSend(PEER, { message: body, subject: SUBJ }); }
-    catch (e) { D.toast(e.message || String(e), "err"); }
+    catch (e) { D.toast(errText(e), "err"); }
     render();
   }
 
@@ -505,7 +518,7 @@
       await D.api.mailSend(to, { message: body, subject: subject });
       COMPOSE = null;
       openThread(to, subject, "");
-    } catch (e) { D.toast(e.message || String(e), "err"); btn.disabled = false; }
+    } catch (e) { D.toast(errText(e), "err"); btn.disabled = false; }
   }
 
   // ---------------------------------------------------------------- attachments + funds
@@ -534,7 +547,7 @@
     try {
       var b64 = await compressImage(file);
       await D.api.mailSend(PEER, { message: "", subject: SUBJ, type: "image", image: b64 });
-    } catch (e) { D.toast(e.message || String(e), "err"); }
+    } catch (e) { D.toast(errText(e), "err"); }
     render();
   }
   async function composeImage(file) {
@@ -545,7 +558,7 @@
       var b64 = await compressImage(file);
       await D.api.mailSend(to, { message: "", subject: subject, type: "image", image: b64 });
       COMPOSE = null; openThread(to, subject, "");
-    } catch (e) { D.toast(e.message || String(e), "err"); }
+    } catch (e) { D.toast(errText(e), "err"); }
   }
   function plusMenu() {
     D.showActionSheet("Attach", [
@@ -573,9 +586,9 @@
       D.toast("Payment sent ✓", "ok");
     } catch (e) {
       // An RPC timeout is AMBIGUOUS — the coin may well have gone out. Never invite a retry that double-spends.
-      var msg = e.message || String(e);
+      var msg = String((e && e.message) || e || "");
       if (/may have been submitted/i.test(msg)) D.toast("The node didn't answer in time — check your balance before resending.", "err");
-      else D.toast(msg, "err");
+      else D.toast(errText(e), "err");
     }
     render();
   }
@@ -629,14 +642,14 @@
     if (pass.length < 8) { D.toast("Use a passphrase of at least 8 characters.", "err"); return; }
     if (!/^[\x20-\x7e]+$/.test(pass)) { D.toast("Use plain ASCII — the phone app cannot read other characters.", "err"); return; }
     try { var p = await D.api.mailExportBackup(pass); D.toast(p ? "Backed up → " + p : "Cancelled", p ? "ok" : ""); }
-    catch (e) { D.toast(e.message || String(e), "err"); }
+    catch (e) { D.toast(errText(e), "err"); }
   }
   async function doRestore() {
     var pass = await D.showPrompt("Restore from a backup", "", "Backup passphrase",
       { password: true, ok: "Restore", message: "This replaces the identity, contacts and messages on this computer." });
     if (pass == null) return;
     try { await D.api.mailImportBackup(pass); D.toast("Restored ✓", "ok"); booted = false; render(); }
-    catch (e) { D.toast(e.message || String(e), "err"); }
+    catch (e) { D.toast(errText(e), "err"); }
   }
   function showAbout() {
     D.showConfirm("How delivery works",

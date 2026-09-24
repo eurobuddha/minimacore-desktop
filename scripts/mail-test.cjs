@@ -250,3 +250,50 @@ test("bubbles carry the four chain states and never an invented read receipt", a
   assert.ok(!html.includes("✓✓"), "no invented double tick — the protocol has no read receipt");
   assert.ok(html.includes("data-peer="), "rows carry the peer so a click opens the thread");
 });
+
+// ---------------------------------------------------------------- the send pin must respect coin age
+test("a mail send pins to a coin the node will actually spend", async () => {
+  const { pinMinimaSend } = require("../main/sendpin");
+  const ADDR_NEW = "0x" + "11".repeat(32), ADDR_OLD = "0x" + "22".repeat(32);
+  const asked = [];
+  // The node refuses any input younger than MINIMA_CONFIRM_DEPTH (send.java clamps coinage to 3), so the pin
+  // must ask for aged coins. Here the *smallest* coin is brand new — the trap: it is this send's own change.
+  const runner = async (cmd) => {
+    if (/^coins /.test(cmd)) {
+      asked.push(cmd);
+      const aged = /\bcoinage:(\d+)/.exec(cmd);
+      const all = [{ amount: "0.000099607", address: ADDR_NEW, age: 0 }, { amount: "4.25", address: ADDR_OLD, age: 40 }];
+      const min = aged ? Number(aged[1]) : 0;
+      return { response: all.filter((c) => c.age >= min).map((c) => ({ amount: c.amount, address: c.address })) };
+    }
+    if (/^checkaddress /.test(cmd)) return { response: { simple: true } };
+    return { status: true };
+  };
+  const cmd = "send amount:0.000000001 address:0x434841494E4D41494C tokenid:0x00";
+  const pinned = await pinMinimaSend(runner, cmd, { minCoinage: 4 });
+  assert.ok(/\bcoinage:4\b/.test(asked[0]), "the coins query carries the minimum age: " + asked[0]);
+  assert.ok(pinned.includes("fromaddress:" + ADDR_OLD), "it pins the aged coin, not the fresh change output");
+  assert.ok(!pinned.includes(ADDR_NEW), "a coin the node would refuse is never pinned");
+});
+
+test("main/mail.js actually passes that minimum age on both of its sends", () => {
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "mail.js"), "utf8");
+  const calls = [...src.matchAll(/pinMinimaSend\(nodeCmd,[^)]*\)/g)].map((m) => m[0]);
+  assert.ok(calls.length >= 2, "both the message send and the payment send go through the pin");
+  for (const c of calls) assert.ok(/minCoinage/.test(c), "every pinned mail send sets minCoinage: " + c.slice(0, 80));
+  const n = Number((/MAIL_MIN_COINAGE = (\d+)/.exec(src) || [])[1]);
+  assert.ok(n >= 3, "at or above the node's confirm depth, or the pin re-creates the bug (got " + n + ")");
+});
+
+test("a send failure is explained in words, not dumped as an IPC stack", () => {
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.js"), "utf8");
+  // Electron wraps anything main throws as "Error invoking remote method '…': Error: …". Showing that to a
+  // person is noise, and the node's funding refusal is misleading on a full wallet.
+  assert.ok(/Error invoking remote method/.test(src), "the IPC wrapper is stripped somewhere");
+  assert.ok(/No Coins of tokenid/.test(src), "the funding refusal is translated");
+  const raw = [...src.matchAll(/D\.toast\(([^,]+),\s*"err"\)/g)].map((m) => m[1].trim());
+  const leaky = raw.filter((a) => /\be\.message\b|\berr\.message\b|String\(e\)/.test(a));
+  assert.deepEqual(leaky, [], "every error toast goes through errText: " + leaky.join(" | "));
+});
