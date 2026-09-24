@@ -89,3 +89,47 @@ test("the backfill walks down a chunk at a time and stops at genesis", () => {
   assert.equal(mail._nextFloorTarget(3), 1, "clamps at the first block");
   assert.equal(mail._nextFloorTarget(1), 1, "and stays there rather than going negative");
 });
+
+// ---------------------------------------------------------------- the panel loads, and its icons all exist
+test("the Mail panel and its icon set load, and every icon it asks for is defined", () => {
+  const fs = require("fs"), vm = require("vm"), path = require("path");
+  const dir = path.join(__dirname, "..", "renderer");
+  // A DOM-less shim: enough for both files to evaluate. A typo in a template or an icon name fails here
+  // rather than in front of the user, and an unknown icon name renders an empty <svg> that is easy to miss.
+  const sandbox = {
+    document: { getElementById: () => null, createElement: () => ({ getContext: () => ({ drawImage() {} }), toDataURL: () => "" }) },
+    setTimeout, clearTimeout, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console
+  };
+  sandbox.window = sandbox; sandbox.globalThis = sandbox;
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(dir, "mailicons.js"), "utf8"), ctx, { filename: "mailicons.js" });
+  vm.runInContext(fs.readFileSync(path.join(dir, "mail.js"), "utf8"), ctx, { filename: "mail.js" });
+
+  assert.equal(typeof sandbox.micon, "function", "micon is exported");
+  assert.ok(sandbox.MailPanel && typeof sandbox.MailPanel.render === "function", "MailPanel is exported");
+  const src = fs.readFileSync(path.join(dir, "mail.js"), "utf8");
+  const used = [...new Set([...src.matchAll(/micon\("([a-z]+)"/g)].map((m) => m[1]))];
+  assert.ok(used.length > 10, "the panel actually uses the icon set");
+  assert.deepEqual(used.filter((n) => !sandbox.micon.names.includes(n)), [], "no icon is referenced without being defined");
+  assert.ok(sandbox.micon("inbox").startsWith('<svg class="mm-ic" viewBox="0 0 24 24"'), "24-grid SVG markup");
+  assert.equal(sandbox.micon("nope"), "", "an unknown name is empty, never broken markup");
+});
+
+test("the panel's palette cannot leak into the rest of the app", () => {
+  const fs = require("fs"), path = require("path");
+  const css = fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.css"), "utf8");
+  // Every selector that paints must sit inside .mailapp (or the #view-mail host it lives in). The APK's orange
+  // escaping into Balances/AtomiX/Pools is exactly what scoping this file prevents.
+  const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "").split("}")
+    .map((b) => b.split("{")[0].trim()).filter(Boolean)
+    .flatMap((s) => s.split(",").map((x) => x.trim())).filter(Boolean);
+  const loose = selectors.filter((s) => !/(^|\s|\()\.mailapp\b/.test(s) && !/^#view-mail\b/.test(s) && !/^:root\[data-theme/.test(s));
+  assert.deepEqual(loose, [], "unscoped selectors would leak: " + loose.join(" | "));
+  // and the old classes must be gone from the shared sheet, except the ones other panels wear
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.css"), "utf8");
+  for (const dead of [".mail-bubble", ".mail-conv", ".mail-compose", ".mail-daychip", ".mail-av", ".emoji-grid"]) {
+    assert.ok(!app.includes(dead + " "), dead + " should have moved out of app.css");
+  }
+  assert.ok(app.includes(".mail-ver"), ".mail-ver stays — the AtomiX and Parlons headers wear it");
+  assert.ok(app.includes("#view-minimall .mail-thread"), "miniMall keeps its own .mail-thread");
+});

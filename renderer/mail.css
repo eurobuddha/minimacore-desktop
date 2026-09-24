@@ -1,0 +1,206 @@
+/*
+ * mail.css — the Minima Mail panel, to APK parity.
+ *
+ * EVERY rule is scoped under .mailapp and every colour comes from a --mm-* token declared on that wrapper, so
+ * the APK's paper ground and Minima orange cannot leak into Balances, AtomiX, Pools or anything else in the
+ * shell. Values are the APK's own Design.java tokens and dp geometry (1dp = 1px here); the panel follows the
+ * app's existing data-theme attribute, so the shell's theme button drives Paper ⇄ dark with no new setting.
+ *
+ * Class prefix is mm-, NOT mail- : #view-minimall owns .mail-thread (app.css), and the old panel's classes
+ * collided with it.
+ */
+
+.mailapp {
+  /* Paper — Design.java LIGHT. The default, exactly as on the phone. */
+  --mm-bg: #FAF9F6;          /* warm paper */
+  --mm-surface: #FFFFFF;
+  --mm-surface2: #F1EFEA;
+  --mm-hairline: #E8E6E0;
+  --mm-text: #1C1B1A;        /* ink */
+  --mm-dim: #6E6A63;
+  --mm-dim2: #9B968D;
+  --mm-accent: #F7931A;      /* Minima orange, both themes */
+  --mm-on-accent: #FFFFFF;
+  --mm-green: #1F9D5B;
+  --mm-red: #D9483B;
+  --mm-sans: var(--sans);
+  --mm-mono: var(--mono);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  background: var(--mm-bg);
+  color: var(--mm-text);
+  font-family: var(--mm-sans);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow: hidden;
+}
+:root[data-theme="dark"] .mailapp {
+  /* family dark — Design.java DARK */
+  --mm-bg: #0A0A0F;
+  --mm-surface: #15151F;
+  --mm-surface2: #1F1F2B;
+  --mm-hairline: #262633;
+  --mm-text: #FFFFFF;
+  --mm-dim: #9A9AA8;
+  --mm-dim2: #6A6A78;
+  --mm-on-accent: #1A1000;
+  --mm-green: #2ECC71;
+  --mm-red: #E74C3C;
+}
+
+/* the view host has its own padding for every other tab; the panel runs edge to edge like the phone */
+#view-mail.view--active { display: flex; flex-direction: column; height: 100%; padding: 0; }
+#view-mail #mailBody { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+
+.mailapp button { font-family: inherit; }
+.mailapp .mm-ic { width: 22px; height: 22px; display: block; flex: 0 0 auto; }
+
+/* ---- title bar + tab strip (Parlons' strip, the APK's branding) ---- */
+.mailapp .mm-bar { display: flex; align-items: center; gap: 2px; background: var(--mm-surface); padding: 12px 8px 12px 16px; flex: 0 0 auto; }
+.mailapp .mm-brand { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+.mailapp .mm-brand i { font-style: normal; color: var(--mm-accent); }
+.mailapp .mm-ibtn { width: 38px; height: 38px; padding: 8px; border: 0; background: none; color: var(--mm-dim); border-radius: 50%; display: grid; place-items: center; cursor: pointer; flex: 0 0 auto; }
+.mailapp .mm-ibtn:hover { background: var(--mm-surface2); }
+.mailapp .mm-ibtn:disabled { opacity: .5; cursor: default; }
+
+.mailapp .mm-tabs { display: flex; background: var(--mm-surface); padding: 0 4px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
+.mailapp .mm-tabs::-webkit-scrollbar { display: none; }
+.mailapp .mm-tabs button { position: relative; flex: 0 0 auto; font-size: 13.5px; font-weight: 500; color: var(--mm-dim); background: none; border: 0; padding: 12px 11px 11px; white-space: nowrap; cursor: pointer; }
+.mailapp .mm-tabs button[aria-selected="true"] { color: var(--mm-text); font-weight: 700; }
+/* a short centred dash, 34px — not a full-width Material indicator */
+.mailapp .mm-tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 34px; height: 2px; background: var(--mm-accent); transform: translateX(-50%); }
+.mailapp .mm-tabs .mm-cnt { display: inline-block; margin-left: 5px; background: var(--mm-accent); color: var(--mm-on-accent); border-radius: 9px; font-size: 10.5px; font-weight: 700; padding: 0 6px; vertical-align: 1px; }
+
+/* ---- freshness line: what we have actually covered ---- */
+.mailapp .mm-fresh { display: flex; align-items: center; gap: 6px; background: var(--mm-surface); padding: 3px 14px 7px; font-size: 10.5px; color: var(--mm-dim); border-bottom: 1px solid var(--mm-hairline); flex: 0 0 auto; }
+.mailapp .mm-fresh .mm-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mm-green); flex: 0 0 6px; }
+.mailapp .mm-fresh.mm-cold .mm-dot { background: var(--mm-dim2); }
+.mailapp .mm-fresh.mm-busy .mm-dot { background: var(--mm-accent); }
+.mailapp .mm-fresh .mm-grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailapp .mm-fresh .mm-act { display: inline-flex; align-items: center; gap: 4px; color: var(--mm-accent); font-weight: 700; background: none; border: 0; font-size: 10.5px; cursor: pointer; padding: 2px 0; white-space: nowrap; }
+.mailapp .mm-fresh .mm-act .mm-ic { width: 11px; height: 11px; }
+
+.mailapp .mm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; background: var(--mm-bg); }
+.mailapp .mm-list { padding-bottom: 88px; }   /* the FAB never covers the last row */
+.mailapp .mm-empty { text-align: center; color: var(--mm-dim2); font-size: 13px; padding: 64px 24px 0; white-space: pre-line; }
+
+/* ---- the email row: APK padding 14/10, 44px disc, mid 12/8, hairline under every row ---- */
+.mailapp .mm-row { display: flex; align-items: center; width: 100%; text-align: left; padding: 10px 14px; background: var(--mm-bg); color: inherit; border: 0; border-bottom: 1px solid var(--mm-hairline); cursor: pointer; font: inherit; }
+.mailapp .mm-row:hover { background: var(--mm-surface2); }
+.mailapp .mm-av { border-radius: 50%; color: #fff; font-weight: 700; display: grid; place-items: center; flex: 0 0 auto; }
+.mailapp .mm-av--44 { width: 44px; height: 44px; font-size: 16.7px; }
+.mailapp .mm-av--34 { width: 34px; height: 34px; font-size: 13px; }
+.mailapp .mm-av--72 { width: 72px; height: 72px; font-size: 27px; }
+.mailapp .mm-mid { flex: 1; min-width: 0; padding: 0 8px 0 12px; }
+.mailapp .mm-l1 { display: flex; align-items: baseline; gap: 8px; }
+.mailapp .mm-nm { flex: 1; min-width: 0; font-size: 14.5px; color: var(--mm-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mailapp .mm-time { flex: 0 0 auto; font-size: 11px; color: var(--mm-dim2); font-variant-numeric: tabular-nums; }
+.mailapp .mm-subj { font-size: 12.5px; color: var(--mm-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mailapp .mm-subj.mm-none { font-style: italic; color: var(--mm-dim2); }
+.mailapp .mm-snip { font-size: 11.5px; color: var(--mm-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; opacity: .9; }
+.mailapp .mm-row.mm-unread .mm-nm, .mailapp .mm-row.mm-unread .mm-subj { color: var(--mm-text); font-weight: 700; }
+.mailapp .mm-udot { width: 8px; height: 8px; border-radius: 50%; background: var(--mm-accent); flex: 0 0 8px; }
+.mailapp .mm-key { font-family: var(--mm-mono); font-size: 12.5px; }
+
+/* the APK's FAB is a 56px squircle, not a circle */
+.mailapp .mm-fab { position: absolute; right: 20px; bottom: 24px; width: 56px; height: 56px; border-radius: 16px; background: var(--mm-accent); color: var(--mm-on-accent); border: 0; display: grid; place-items: center; cursor: pointer; box-shadow: 0 6px 16px -4px rgba(0,0,0,.45); }
+.mailapp .mm-fab .mm-ic { width: 24px; height: 24px; }
+
+/* ---- Outbox / Sent: no avatar, the status IS the row ---- */
+.mailapp .mm-srow { padding: 10px 14px; border-bottom: 1px solid var(--mm-hairline); }
+.mailapp .mm-sto { display: flex; gap: 8px; align-items: baseline; }
+.mailapp .mm-sto b { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--mm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mailapp .mm-sto span { font-size: 10.5px; color: var(--mm-dim2); font-variant-numeric: tabular-nums; }
+.mailapp .mm-ssnip { font-size: 11.5px; color: var(--mm-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mailapp .mm-stat { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--mm-dim); }
+.mailapp .mm-stat .mm-ic { width: 12px; height: 12px; }
+.mailapp .mm-stat.mm-posting, .mailapp .mm-stat.mm-posting .mm-ic { color: var(--mm-accent); }
+.mailapp .mm-stat.mm-failed, .mailapp .mm-stat.mm-failed .mm-ic { color: var(--mm-red); }
+.mailapp .mm-stat.mm-chain .mm-ic, .mailapp .mm-stat.mm-ok .mm-ic { color: var(--mm-green); }
+.mailapp .mm-retry { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--mm-accent); color: var(--mm-accent); background: none; border-radius: 11px; padding: 2px 9px; font-size: 10.5px; font-weight: 700; cursor: pointer; }
+.mailapp .mm-retry .mm-ic { width: 11px; height: 11px; }
+
+/* ---- thread ---- */
+.mailapp .mm-cbar { display: flex; align-items: center; background: var(--mm-surface); padding: 8px 12px 8px 6px; flex: 0 0 auto; border-bottom: 1px solid var(--mm-hairline); }
+.mailapp .mm-ctitles { flex: 1; min-width: 0; padding-left: 10px; }
+.mailapp .mm-ct { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mailapp .mm-cs { font-family: var(--mm-mono); font-size: 10.5px; color: var(--mm-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mailapp .mm-day { text-align: center; font-size: 11px; color: var(--mm-dim2); padding: 10px 0 8px; }
+.mailapp .mm-mrow { display: flex; padding: 1px 12px; }
+.mailapp .mm-mrow.mm-out { justify-content: flex-end; }
+.mailapp .mm-bub { max-width: 75%; padding: 9px 14px; border-radius: 18px; background: var(--mm-surface2); color: var(--mm-text); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* the incoming hairline exists in Paper only — in dark the surface2 fill carries it (Design.java:1641) */
+.mailapp .mm-mrow.mm-in .mm-bub { border: 1px solid var(--mm-hairline); }
+:root[data-theme="dark"] .mailapp .mm-mrow.mm-in .mm-bub { border: 0; }
+.mailapp .mm-mrow.mm-out .mm-bub { background: var(--mm-accent); color: var(--mm-on-accent); }
+.mailapp .mm-sname { display: block; font-size: 12px; font-weight: 700; color: var(--mm-accent); margin-bottom: 2px; }
+.mailapp .mm-foot { display: flex; align-items: center; gap: 3px; padding: 2px 18px 8px; font-size: 10px; color: var(--mm-dim2); font-variant-numeric: tabular-nums; }
+.mailapp .mm-foot.mm-out { justify-content: flex-end; }
+.mailapp .mm-foot .mm-ic { width: 11px; height: 11px; }
+.mailapp .mm-foot .mm-ic.mm-g { color: var(--mm-green); }
+.mailapp .mm-foot .mm-ic.mm-a { color: var(--mm-accent); }
+.mailapp .mm-foot .mm-ic.mm-r { color: var(--mm-red); }
+.mailapp .mm-foot .mm-lbl.mm-posting { color: var(--mm-accent); }
+.mailapp .mm-foot .mm-lbl.mm-failed { color: var(--mm-red); }
+.mailapp .mm-pay .mm-phead { display: flex; align-items: center; gap: 5px; font-size: 11px; opacity: .82; }
+.mailapp .mm-pay .mm-phead .mm-ic { width: 12px; height: 12px; }
+.mailapp .mm-pay .mm-pamt { font-size: 20px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.mailapp .mm-pay .mm-pmemo { font-size: 13px; margin-top: 4px; opacity: .95; }
+.mailapp .mm-img { display: block; width: 220px; max-width: 100%; height: auto; border-radius: 14px; cursor: zoom-in; }
+
+.mailapp .mm-comp { display: flex; align-items: center; gap: 8px; background: var(--mm-surface); padding: 8px 10px; flex: 0 0 auto; border-top: 1px solid var(--mm-hairline); }
+.mailapp .mm-comp .mm-plus { color: var(--mm-accent); }
+.mailapp .mm-reply { flex: 1; min-width: 0; background: var(--mm-surface2); border: 0; border-radius: 20px; padding: 10px 16px; font-size: 15px; color: var(--mm-text); outline: none; }
+.mailapp .mm-reply::placeholder { color: var(--mm-dim2); }
+.mailapp .mm-send { width: 40px; height: 40px; border-radius: 50%; background: var(--mm-accent); color: var(--mm-on-accent); border: 0; display: grid; place-items: center; flex: 0 0 40px; cursor: pointer; }
+.mailapp .mm-send .mm-ic { width: 16px; height: 16px; }
+.mailapp .mm-send:disabled { opacity: .5; cursor: default; }
+
+/* ---- compose ---- */
+.mailapp .mm-chead { display: flex; align-items: center; gap: 8px; background: var(--mm-surface); padding: 10px 12px 10px 6px; border-bottom: 1px solid var(--mm-hairline); flex: 0 0 auto; }
+.mailapp .mm-chead .mm-t { flex: 1; font-size: 17px; font-weight: 700; }
+.mailapp .mm-sendbtn { display: inline-flex; align-items: center; gap: 5px; background: var(--mm-accent); color: var(--mm-on-accent); border: 0; border-radius: 15px; padding: 6px 13px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.mailapp .mm-sendbtn .mm-ic { width: 13px; height: 13px; }
+.mailapp .mm-sendbtn:disabled { opacity: .6; cursor: default; }
+.mailapp .mm-f { display: flex; align-items: flex-start; gap: 8px; padding: 4px 12px 4px 16px; border-bottom: 1px solid var(--mm-hairline); background: var(--mm-surface); }
+.mailapp .mm-f .mm-lab { flex: 0 0 58px; font-size: 12px; color: var(--mm-dim); padding-top: 11px; }
+.mailapp .mm-f input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--mm-text); padding: 10px 0; font-size: 14px; font-family: inherit; }
+.mailapp .mm-f input.mm-monoin { font-family: var(--mm-mono); font-size: 12.5px; }
+.mailapp .mm-f input::placeholder { color: var(--mm-dim2); }
+.mailapp .mm-f .mm-chips { display: flex; gap: 6px; padding-top: 6px; }
+.mailapp .mm-outchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--mm-accent); color: var(--mm-accent); background: none; border-radius: 11px; padding: 3px 8px; font-size: 10.5px; font-weight: 700; cursor: pointer; }
+.mailapp .mm-outchip .mm-ic { width: 12px; height: 12px; }
+.mailapp .mm-cbody { flex: 1 1 auto; min-height: 0; padding: 12px 16px; font-size: 14.5px; background: var(--mm-bg); color: var(--mm-text); border: 0; outline: none; resize: none; font-family: inherit; line-height: 1.4; }
+.mailapp .mm-cbody::placeholder { color: var(--mm-dim2); }
+.mailapp .mm-attach { display: flex; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--mm-hairline); background: var(--mm-bg); }
+.mailapp .mm-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--mm-surface2); color: var(--mm-accent); border: 0; border-radius: 14px; padding: 6px 11px; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.mailapp .mm-chip .mm-ic { width: 13px; height: 13px; }
+.mailapp .mm-hint { display: flex; gap: 7px; background: var(--mm-surface); padding: 9px 14px 11px; font-size: 10.5px; color: var(--mm-dim); border-top: 1px solid var(--mm-hairline); flex: 0 0 auto; }
+.mailapp .mm-hint .mm-ic { width: 13px; height: 13px; color: var(--mm-accent); flex: 0 0 13px; }
+
+/* ---- identity + settings ---- */
+.mailapp .mm-id { padding: 16px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.mailapp .mm-qr { margin-top: 16px; padding: 8px; background: #fff; border-radius: 2px; line-height: 0; }
+.mailapp .mm-qr img { display: block; image-rendering: pixelated; }
+.mailapp .mm-idcap { font-size: 12px; color: var(--mm-dim); padding: 14px 0 6px; }
+.mailapp .mm-idkey { font-family: var(--mm-mono); font-size: 13px; overflow-wrap: anywhere; cursor: copy; }
+.mailapp .mm-abtn { width: 100%; margin-top: 12px; background: var(--mm-accent); color: var(--mm-on-accent); border: 0; border-radius: 12px; padding: 12px 16px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.mailapp .mm-tbtn { background: none; border: 0; color: var(--mm-accent); font-size: 14px; padding: 12px 8px 0; cursor: pointer; }
+.mailapp .mm-grp { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mm-dim2); padding: 18px 16px 6px; }
+.mailapp .mm-set { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--mm-hairline); width: 100%; text-align: left; background: none; border-left: 0; border-right: 0; border-top: 0; color: inherit; font: inherit; }
+.mailapp .mm-set.mm-tap { cursor: pointer; }
+.mailapp .mm-set.mm-tap:hover { background: var(--mm-surface2); }
+.mailapp .mm-set .mm-m { flex: 1; min-width: 0; }
+.mailapp .mm-set .mm-tt { font-size: 14px; }
+.mailapp .mm-set .mm-dd { font-size: 11px; color: var(--mm-dim); margin-top: 1px; }
+.mailapp .mm-set .mm-vv { font-size: 12.5px; color: var(--mm-dim); }
+.mailapp .mm-set .mm-ic { width: 14px; height: 14px; color: var(--mm-dim2); }
+.mailapp .mm-seg { display: inline-flex; background: var(--mm-surface2); border-radius: 15px; padding: 3px; }
+.mailapp .mm-seg button { font-size: 11.5px; border: 0; background: none; color: var(--mm-dim); padding: 4px 11px; border-radius: 12px; cursor: pointer; }
+.mailapp .mm-seg button[aria-pressed="true"] { background: var(--mm-accent); color: var(--mm-on-accent); font-weight: 700; }
+
+.mailapp :focus-visible { outline: 2px solid var(--mm-accent); outline-offset: -2px; }
