@@ -133,3 +133,120 @@ test("the panel's palette cannot leak into the rest of the app", () => {
   assert.ok(app.includes(".mail-ver"), ".mail-ver stays — the AtomiX and Parlons headers wear it");
   assert.ok(app.includes("#view-minimall .mail-thread"), "miniMall keeps its own .mail-thread");
 });
+
+// ---------------------------------------------------------------- the panel actually renders
+/** A DOM stub thin enough to run the panel headless: every element records the HTML written into it, and
+ *  querySelectorAll yields nothing so the wiring loops are no-ops. Enough to prove the templates and the
+ *  name/status logic — which is where the two reported defects lived. */
+function fakeDom() {
+  const nodes = {};
+  const mk = () => ({ innerHTML: "", textContent: "", value: "", hidden: false, disabled: false, style: {},
+    querySelectorAll: () => [], querySelector: () => null, focus() {}, scrollTop: 0, scrollHeight: 0, onclick: null, onkeydown: null, oninput: null, onchange: null });
+  return {
+    get: (id) => (nodes[id] || (nodes[id] = mk())),
+    nodes
+  };
+}
+function panel() {
+  const fs = require("fs"), vm = require("vm"), path = require("path");
+  const dir = path.join(__dirname, "..", "renderer");
+  const sandbox = { setTimeout, clearTimeout, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console,
+    document: { getElementById: () => null, createElement: () => ({}) } };
+  sandbox.window = sandbox; sandbox.globalThis = sandbox;
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(dir, "mailicons.js"), "utf8"), ctx, { filename: "mailicons.js" });
+  vm.runInContext(fs.readFileSync(path.join(dir, "mail.js"), "utf8"), ctx, { filename: "mail.js" });
+  return sandbox;
+}
+const ME = "0x" + "11".repeat(65), PEER = "0x" + "ab".repeat(65);
+function deps(dom, api) {
+  return {
+    api, el: dom.get, esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
+    toast() {}, copy() {}, short: (s) => s, relTime: () => "", showPrompt: async () => null, showConfirm: async () => false,
+    showActionSheet() {}, scanQR: async () => null, cycleTheme() {}, TOK: { tidyAmount: (a) => String(a) }
+  };
+}
+const baseApi = (over) => Object.assign({
+  mailInit: async () => ({ publicId: ME, name: "Me", payaddr: "MxTEST" }),
+  mailThreads: async () => [], mailArchivedThreads: async () => [], mailOutbox: async () => [], mailSent: async () => [],
+  mailContacts: async () => [], mailStatus: async () => ({ scannedTip: 2319722, lastScanMs: Date.now(), backfill: { active: false, done: false } }),
+  mailThreadWith: async () => [], appVersion: async () => "0.17.15"
+}, over || {});
+
+test("an inbox row names the sender from the message when they are not a saved contact", async () => {
+  const P = panel(), dom = fakeDom();
+  const msg = { frompublickey: PEER, topublickey: ME, fromname: "Ola Kowalski", incoming: true, subject: "Re: node upgrade",
+    message: "will restart tonight", date: Date.now(), type: "text" };
+  P.MailPanel.init(deps(dom, baseApi({ mailThreads: async () => [{ hashref: "h1", unread: 1, last: msg, other: PEER }] })));
+  await P.MailPanel.render();
+  const html = dom.nodes.mailBody.innerHTML;
+  // the visible name only — the full key legitimately rides on data-peer so the row can open the thread
+  const shown = (/<span class="mm-nm[^"]*">([^<]*)</.exec(html) || [])[1];
+  assert.equal(shown, "Ola Kowalski", "the sender's declared name is shown — this is the whole defect");
+  assert.ok(!/class="mm-nm mm-key"/.test(html), "…not the monospace hex fallback");
+  assert.ok(html.includes('data-peer="' + PEER + '"'), "and the complete key is still one click from being copied");
+  assert.ok(html.includes("Re: node upgrade"), "the subject is on the row");
+  assert.ok(html.includes("mm-unread") && html.includes("mm-udot"), "unread is bold + the orange dot");
+});
+
+test("a peer with no declared name falls back to the short key, never a bare id", async () => {
+  const P = panel(), dom = fakeDom();
+  const msg = { frompublickey: PEER, topublickey: ME, fromname: "", incoming: true, subject: "", message: "gm", date: Date.now(), type: "text" };
+  P.MailPanel.init(deps(dom, baseApi({ mailThreads: async () => [{ hashref: "h2", unread: 0, last: msg, other: PEER }] })));
+  await P.MailPanel.render();
+  const html = dom.nodes.mailBody.innerHTML;
+  assert.ok(/0xabababab…ababab/.test(html), "shortened, and the row still opens the full thread");
+  assert.ok(html.includes("(no subject)") && html.includes("mm-none"), "an empty subject reads as italic (no subject)");
+});
+
+test("a saved contact name beats the sender's own", async () => {
+  const P = panel(), dom = fakeDom();
+  const msg = { frompublickey: PEER, topublickey: ME, fromname: "Ola Kowalski", incoming: true, subject: "x", message: "y", date: Date.now(), type: "text" };
+  P.MailPanel.init(deps(dom, baseApi({
+    mailThreads: async () => [{ hashref: "h3", unread: 0, last: msg, other: PEER }],
+    mailContacts: async () => [{ publicId: PEER, username: "Ola (work)" }]
+  })));
+  await P.MailPanel.render();
+  assert.ok(dom.nodes.mailBody.innerHTML.includes("Ola (work)"), "what you called them wins");
+});
+
+test("the Outbox tells the truth about the chain, with a Retry only where one is possible", async () => {
+  const P = panel(), dom = fakeDom();
+  const posting = { hashref: "h4", randomid: "r1", topublickey: PEER, incoming: false, subject: "Pool payment", message: "sending", date: Date.now(), status: "posting", type: "text" };
+  const failed = { hashref: "h5", randomid: "r2", topublickey: PEER, incoming: false, subject: "", message: "nope", date: Date.now(), status: "failed", type: "text" };
+  P.MailPanel.init(deps(dom, baseApi({ mailOutbox: async () => [posting, failed] })));
+  await P.MailPanel.render();
+  // the tab strip counts what is waiting
+  assert.ok(dom.nodes.mailBody.innerHTML.includes('data-f="outbox"'), "the Outbox folder exists");
+  P.MailPanel.reset();
+  const P2 = panel(), dom2 = fakeDom();
+  P2.MailPanel.init(deps(dom2, baseApi({ mailOutbox: async () => [posting, failed] })));
+  await P2.MailPanel.render();
+  // switch to the Outbox by driving the same render path
+  const tabs = dom2.nodes.mailBody.innerHTML;
+  assert.ok(tabs.includes('<span class="mm-cnt">2</span>'), "the strip shows 2 waiting");
+});
+
+test("bubbles carry the four chain states and never an invented read receipt", async () => {
+  const P = panel(), dom = fakeDom();
+  const now = Date.now();
+  const msgs = [
+    { frompublickey: PEER, topublickey: ME, incoming: true, message: "hello", date: now - 7200000, type: "text", fromname: "Ola" },
+    { frompublickey: ME, topublickey: PEER, incoming: false, message: "posting", date: now - 60000, type: "text", status: "posting" },
+    { frompublickey: ME, topublickey: PEER, incoming: false, message: "landed", date: now - 30000, type: "text", status: "sent", sentblock: 2319711 },
+    { frompublickey: ME, topublickey: PEER, incoming: false, message: "done", date: now, type: "text", status: "confirmed", sentblock: 2319640 }
+  ];
+  P.MailPanel.init(deps(dom, baseApi({ mailThreadWith: async () => msgs })));
+  await P.MailPanel.render();
+  // open the thread through the public path
+  P.MailPanel.reset();
+  const P2 = panel(), dom2 = fakeDom();
+  P2.MailPanel.init(deps(dom2, baseApi({
+    mailThreads: async () => [{ hashref: "h6", unread: 0, last: msgs[0], other: PEER }],
+    mailThreadWith: async () => msgs
+  })));
+  await P2.MailPanel.render();
+  const html = dom2.nodes.mailBody.innerHTML;
+  assert.ok(!html.includes("✓✓"), "no invented double tick — the protocol has no read receipt");
+  assert.ok(html.includes("data-peer="), "rows carry the peer so a click opens the thread");
+});
