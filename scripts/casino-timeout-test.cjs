@@ -79,11 +79,12 @@ test('desktop actual VM read model and claim handler match roles, currencies, an
   ok=false;await assert.rejects(mybets,/scan unavailable/);
 });
 test('desktop My Bets displays mixed currencies and only eligible timeout buttons', async () => {
-  const source=read(path.join(desktop,'renderer/app.js'));const host={innerHTML:'',querySelectorAll:()=>[]};
+  // The panel moved to renderer/casino.js in 0.17.19; same function, same assertions, new home.
+  const source=read(path.join(desktop,'renderer/casino.js'));const host={innerHTML:'',querySelectorAll:()=>[]};
   const bets=[{coinid:'0x01',phase:1,amHouse:true,expired:true,canClaimTimeout:false,tokenid:'0x00',range:2,age:11,timeout:10,blocksUntilClaim:0},{coinid:'0x02',phase:2,amHouse:true,expired:true,canClaimTimeout:true,tokenid:USD,range:2,age:11,timeout:10,blocksUntilClaim:0}];
-  const c=vm.createContext({api:{casinoMyBets:async()=>bets},el:()=>host,casinoOwnedBets:[],casinoTaking:{},casinoBusy:{},casinoCancelling:{},casinoGame:()=>({name:'Coin Flip',icon:''}),casinoFmtTok:()=>'',casinoCcyName:t=>t===USD?'USD':'Minima',esc:String,casinoAnimHTML:()=>''});
+  const c=vm.createContext({api:{casinoMyBets:async()=>bets},el:()=>host,casinoOwnedBets:[],casinoTaking:{},casinoBusy:{},casinoCancelling:{},casinoGame:()=>({name:'Coin Flip',icon:''}),casinoFmtTok:()=>'',casinoCcyName:t=>t===USD?'USD':'Minima',esc:String,casinoAnimHTML:()=>'',casinoMountLive:()=>{},casinoStopLive:()=>{}});
   vm.runInContext(sliceFunction(source,'async function renderCasinoMyBets()','async function casinoDoFallback'),c);
-  await c.renderCasinoMyBets();assert.match(host.innerHTML,/Minima/);assert.match(host.innerHTML,/USD/);assert.equal((host.innerHTML.match(/casino-timeout/g)||[]).length,1);
+  await c.renderCasinoMyBets();assert.match(host.innerHTML,/Minima/);assert.match(host.innerHTML,/USD/);assert.equal((host.innerHTML.match(/cz-timeout/g)||[]).length,1);
   c.api.casinoMyBets=async()=>{throw Error('offline');};await c.renderCasinoMyBets();assert.match(host.innerHTML,/USD/);
 });
 test('APK production Java agrees with JavaScript on 160 role/deadline/currency vectors and covenant', () => {
@@ -127,5 +128,8 @@ test('desktop reminder click opens My Bets and the last claim cancellation close
   vm.runInContext(sliceFunction(read(path.join(desktop,'main/main.js')),'let casinoClaimNotification =','// Casino background auto-processor'),c);
   emitter.emit('notify','claim');assert.equal(notices[0].options.silent,true);notices[0].click();assert.deepEqual(sent,['mcd:casinoClaims']);
   emitter.emit('notifycancel');assert.equal(notices[0].closed,true);
-  assert.match(read(path.join(desktop,'renderer/app.js')),/onCasinoClaims\(\(\) => \{ casinoView = "mybets"; selectTab\("casino"\)/);
+  // The panel moved into renderer/casino.js in 0.17.19 (APK parity), so the view switch now goes through its
+  // wiring surface. Same behaviour: the claim notification lands the user on My Bets.
+  assert.match(read(path.join(desktop,'renderer/app.js')),/onCasinoClaims\(\(\) => \{ CasinoPanel\.goToMyBets\(\); selectTab\("casino"\)/);
+  assert.match(read(path.join(desktop,'renderer/casino.js')),/goToMyBets: function \(\) \{ casinoView = "mybets"; \}/);
 });
