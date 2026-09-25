@@ -836,7 +836,6 @@ body { font-family: var(--sans); }
 .pc .kv:last-of-type { border-bottom: none; }
 .pc .kv__v { text-align: left; font-weight: 700; color: var(--heading); }
 .pc .modal__note { margin-top: 4px; }
-.pc-link { display: block; text-align: right; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 10px; user-select: none; }
 
 /* Parlons tab: the account's own web panel fills the view under a thin native strip. */
 #view-parlons.view--active { display: flex; flex-direction: column; height: 100%; padding-bottom: 0; }

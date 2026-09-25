@@ -1,0 +1,201 @@
+/*
+ * pools.css — the PandaPools APK's own palette and geometry, scoped to .ppapp.
+ *
+ * Every colour here comes from apks/pandapools Design.java; every radius from Ui.java, where Ui.radiusPx()
+ * FLOORS the radius at 10dp (Design.radiusDp()'s 6 is a decoy used only by WalletView, which the desktop
+ * skips because Balances already covers it). Nothing outside .ppapp is touched, and nothing inside it reads
+ * a shell token — the panel carries its whole palette so the ◐ STYLE toggle stays independent of the app's
+ * light/dark button, exactly as on the phone.
+ *
+ * dp() is 1px at 1×; sp maps to px 1:1.
+ */
+
+.ppapp {
+  /* Design.java — CURRENT (dark) */
+  --pp-bg: #0A0A0F;
+  --pp-surface: #15151F;
+  --pp-surface2: #1F1F2B;
+  --pp-border2: #2A2A38;
+  --pp-accent: #F7931A;
+  --pp-on-accent: #000000;
+  --pp-text: #FFFFFF;
+  --pp-dim: #9A9AA8;
+  --pp-dim2: #6A6A78;
+  --pp-red: #E74C3C;
+  --pp-amber: #E6A23C;
+  --pp-success: #2ECC71;
+  --pp-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --pp-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --pp-r: 10px;          /* Ui.card / Ui.panel — the floored radius */
+  --pp-rpill: 100px;     /* chips are pills */
+  color: var(--pp-text);
+  font-family: var(--pp-sans);
+  background: var(--pp-bg);
+}
+
+/* ◐ STYLE → "Original": white ground, hard edges, monospace throughout. The APK's second look. */
+.ppapp[data-ppstyle="original"] {
+  --pp-bg: #FFFFFF;
+  --pp-surface: #FFFFFF;
+  --pp-surface2: #F4F4F4;
+  --pp-border2: #000000;
+  --pp-accent: #000000;
+  --pp-on-accent: #FFFFFF;
+  --pp-text: #000000;
+  --pp-dim: #555555;
+  --pp-dim2: #888888;
+  --pp-r: 0px;
+  --pp-rpill: 0px;
+  --pp-sans: var(--pp-mono);
+}
+
+/* ---- header (PoolsActivity.header: padding 16/14/16/10) ---- */
+.ppapp .pp-head { display: flex; align-items: center; gap: 10px; padding: 16px 16px 14px 10px; }
+.ppapp .pp-brand { flex: 1; min-width: 0; }
+.ppapp .pp-name { font-size: 17px; font-weight: 700; color: var(--pp-accent); line-height: 1.15; }
+.ppapp .pp-sub { font-size: 9px; letter-spacing: .15em; color: var(--pp-dim); margin-top: 2px; }
+.ppapp .pp-stylebtn {
+  font: inherit; font-size: 10px; letter-spacing: .08em; cursor: pointer;
+  padding: 5px 11px; border-radius: var(--pp-rpill);
+  background: transparent; color: var(--pp-dim);
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 45%, transparent);
+}
+.ppapp .pp-stylebtn:hover { color: var(--pp-accent); border-color: var(--pp-accent); }
+.ppapp .pp-blk { font-family: var(--pp-mono); font-size: 11px; color: var(--pp-dim2); }
+
+/* ---- tab strip. The APK hard-codes these two colours and does NOT run them through the style
+       toggle; reproducing that is the point. ---- */
+.ppapp .pp-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 0 10px; margin-bottom: 12px; scrollbar-width: none; }
+.ppapp .pp-tabs::-webkit-scrollbar { display: none; }
+.ppapp .pp-tab {
+  font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .06em; white-space: nowrap;
+  cursor: pointer; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 8px 12px; color: #9A9AA8;
+}
+.ppapp .pp-tab.is-on { color: #F7931A; border-bottom-color: #F7931A; }
+
+/* ---- Ui.card / Ui.panel ---- */
+.ppapp .pp-card {
+  background: var(--pp-surface); border-radius: var(--pp-r);
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 35%, transparent);
+  padding: 14px; margin: 0 10px 12px;
+}
+.ppapp .pp-panel {
+  background: var(--pp-surface2); border-radius: var(--pp-r);
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 27.5%, transparent);
+  padding: 12px 14px;
+}
+.ppapp .pp-cardt { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--pp-dim); margin-bottom: 10px; }
+.ppapp .pp-desc { font-size: 12px; line-height: 1.5; color: var(--pp-dim); margin: 0 10px 10px; }
+.ppapp .pp-card .pp-desc, .ppapp .pp-modal .pp-desc { margin-left: 0; margin-right: 0; }
+.ppapp .pp-desc--warn { color: var(--pp-amber); }
+.ppapp .pp-note { font-size: 11px; color: var(--pp-dim2); margin: 0 10px 10px; }
+.ppapp .pp-empty { font-size: 12px; color: var(--pp-dim2); padding: 22px 14px; text-align: center; }
+.ppapp .pp-chip {
+  display: inline-block; font-size: 10px; letter-spacing: .04em; padding: 2px 9px;
+  border-radius: var(--pp-rpill); background: color-mix(in srgb, var(--pp-accent) 14%, transparent);
+  color: var(--pp-accent); margin-left: 6px; vertical-align: 1px;
+}
+
+/* ---- the kv atom (PoolsView.java:158-179) ---- */
+.ppapp .pp-kv { display: flex; padding-top: 3px; gap: 10px; }
+.ppapp .pp-k { max-width: 190px; font-size: 12px; color: var(--pp-dim); }
+.ppapp .pp-v { flex: 1; text-align: right; font-size: 12px; font-family: var(--pp-mono); overflow-wrap: anywhere; }
+.ppapp .pp-v--ok { color: var(--pp-success); }
+/* MyLpView.kvColored — same geometry, proportional face. The inconsistency is the APK's. */
+.ppapp .pp-vc { flex: 1; text-align: right; font-size: 12px; overflow-wrap: anywhere; }
+.ppapp .pp-vc--ok { color: var(--pp-success); }
+.ppapp .pp-vc--bad { color: var(--pp-red); }
+.ppapp .pp-addr { cursor: pointer; }
+.ppapp .pp-addr:hover { color: var(--pp-accent); }
+
+/* ---- rows ---- */
+.ppapp .pp-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid color-mix(in srgb, var(--pp-border2) 27.5%, transparent); }
+.ppapp .pp-row:first-of-type { border-top: 0; }
+.ppapp .pp-row--tap { cursor: pointer; }
+.ppapp .pp-row--tap:hover { background: color-mix(in srgb, var(--pp-accent) 6%, transparent); }
+.ppapp .pp-glyph { width: 16px; flex: none; text-align: center; font-size: 12px; color: var(--pp-dim2); line-height: 1.5; }
+.ppapp .pp-glyph--ok { color: var(--pp-success); }
+.ppapp .pp-glyph--bad { color: var(--pp-red); }
+.ppapp .pp-glyph--wait { color: var(--pp-amber); }
+.ppapp .pp-rowmid { flex: 1; min-width: 0; }
+.ppapp .pp-l1 { font-size: 13px; line-height: 1.45; }
+.ppapp .pp-l2 { font-size: 11px; color: var(--pp-dim); line-height: 1.5; overflow-wrap: anywhere; }
+.ppapp .pp-rowr { color: var(--pp-dim2); font-size: 15px; padding-left: 4px; }
+.ppapp .pp-st--ok { color: var(--pp-success); }
+.ppapp .pp-st--bad { color: var(--pp-red); }
+.ppapp .pp-st--wait { color: var(--pp-amber); }
+.ppapp .mono { font-family: var(--pp-mono); }
+.ppapp .pp-more { margin-top: 10px; }
+
+/* ---- swap legs ---- */
+.ppapp .pp-leglbl { font-size: 10px; letter-spacing: .12em; color: var(--pp-dim); }
+.ppapp .pp-amt {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 4px;
+  font-family: var(--pp-mono); font-size: 24px; font-weight: 600; color: var(--pp-text);
+  background: transparent; border: 0; padding: 0; outline: none; min-height: 32px;
+}
+.ppapp .pp-amt--out { color: var(--pp-accent); }
+.ppapp .pp-amt::placeholder { color: var(--pp-dim2); }
+.ppapp .pp-legbal { font-size: 11px; color: var(--pp-dim2); margin-top: 2px; }
+.ppapp .pp-fliprow { display: flex; justify-content: center; padding: 6px 0; }
+.ppapp .pp-flip {
+  width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+  font-size: 22px; line-height: 1; background: var(--pp-surface2); color: var(--pp-accent);
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 45%, transparent);
+}
+.ppapp .pp-flip:hover { border-color: var(--pp-accent); }
+.ppapp .pp-mkt { color: var(--pp-dim2); font-size: 11px; }
+.ppapp .pp-cta { margin-top: 12px; }
+
+/* ---- My LP summary + health bar ---- */
+.ppapp .pp-sum { padding: 2px 0 10px; }
+.ppapp .pp-sum-k { font-size: 11px; letter-spacing: .1em; color: var(--pp-dim); }
+.ppapp .pp-sum-v { font-family: var(--pp-mono); font-size: 26px; font-weight: 600; margin-top: 2px; }
+.ppapp .pp-sum-u { font-size: 13px; font-weight: 400; color: var(--pp-dim); }
+.ppapp .pp-health { margin: 2px 0 10px; }
+.ppapp .pp-health-bar { height: 8px; border-radius: var(--pp-rpill); background: var(--pp-surface2); overflow: hidden; }
+.ppapp .pp-health-fill { height: 100%; background: var(--pp-success); border-radius: inherit; }
+.ppapp .pp-health-fill.is-warn { background: var(--pp-amber); }
+.ppapp .pp-health-lbl { font-size: 10px; letter-spacing: .06em; color: var(--pp-dim2); margin-top: 4px; }
+.ppapp .pp-health-lbl.is-warn { color: var(--pp-amber); }
+.ppapp .pp-acts { display: flex; gap: 8px; margin-top: 10px; }
+.ppapp .pp-acts .pp-btn { flex: 1; }
+.ppapp .pp-calclink { display: inline-block; margin-top: 10px; font-size: 12px; color: var(--pp-accent); cursor: pointer; }
+.ppapp .pp-calclink:hover { text-decoration: underline; }
+
+/* ---- controls ---- */
+.ppapp .pp-btn {
+  font: inherit; font-size: 13px; cursor: pointer; padding: 11px 16px;
+  border-radius: var(--pp-r); background: transparent; color: var(--pp-text);
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 55%, transparent);
+}
+.ppapp .pp-btn:hover { border-color: var(--pp-accent); color: var(--pp-accent); }
+.ppapp .pp-btn--fill { background: var(--pp-accent); color: var(--pp-on-accent); border-color: var(--pp-accent); font-weight: 600; }
+.ppapp .pp-btn--fill:hover { color: var(--pp-on-accent); filter: brightness(1.08); }
+.ppapp .pp-btn--danger { color: var(--pp-red); border-color: color-mix(in srgb, var(--pp-red) 55%, transparent); }
+.ppapp .pp-btn--danger:hover { border-color: var(--pp-red); color: var(--pp-red); }
+.ppapp .pp-btn--sm { font-size: 12px; padding: 8px 12px; }
+.ppapp .pp-seg { display: flex; gap: 8px; }
+.ppapp .pp-seg > .pp-btn { flex: 1; }
+.ppapp .pp-field { margin-bottom: 10px; }
+.ppapp .pp-lbl { font-size: 10px; letter-spacing: .12em; color: var(--pp-dim); margin-bottom: 5px; }
+.ppapp .pp-input {
+  font: inherit; font-size: 13px; width: 100%; box-sizing: border-box; padding: 10px 12px;
+  border-radius: var(--pp-r); background: var(--pp-surface2); color: var(--pp-text);
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 45%, transparent); outline: none;
+}
+.ppapp .pp-input:focus { border-color: var(--pp-accent); }
+.ppapp select.pp-input { appearance: none; }
+.ppapp textarea.pp-input { resize: vertical; }
+
+/* ---- the panel's own dialogs (appended to <body>, so .ppapp rides on the overlay itself) ---- */
+/* The overlay box itself stays app.css's .overlay — same z-index, so an app-level confirm opened ON TOP of a
+   panel dialog (create → "Create this pool?") still stacks above it by being appended later. */
+.ppapp .pp-modal {
+  width: 100%; max-width: 420px; max-height: 86vh; overflow: auto; box-sizing: border-box;
+  background: var(--pp-surface); border-radius: var(--pp-r); padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--pp-border2) 35%, transparent);
+}
+.ppapp .pp-modal--wide { max-width: 720px; }
+.ppapp .pp-modt { font-size: 15px; font-weight: 700; color: var(--pp-accent); margin-bottom: 8px; }

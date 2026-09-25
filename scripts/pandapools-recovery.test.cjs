@@ -161,8 +161,17 @@ test('one card per pool, carrying BOTH identifiers and the retire action',async(
  assert.equal(card.split('Owner signing paused').length-1,0,'the held state rides on the same card');
  assert(card.includes('put it away'));assert.equal(elements.lpValue.innerText,'Reserves unavailable');
  }else{console.log('    # donor MDS tree absent ('+donor+') — MDS card assertions skipped, Desktop card still checked');}
- const renderer=fs.readFileSync(path.join(desktop,'renderer/app.js'),'utf8'),c={TOK:{shortId:s=>s},esc:s=>String(s).replace(/</g,'&lt;'),short:s=>s};vm.createContext(c);vm.runInContext(renderer.slice(renderer.indexOf('function ppNum('),renderer.indexOf('function wirePpMineActions(')),c);
- const desktopCard=c.ppMineHtml([{address:addr,opk,tok,unresolved:true,signingStateUnverified:true}]);
+ // The Desktop half moved out of renderer/app.js into the PandaPools panel module in 0.17.18 (APK parity).
+ // Same card, same assertions — loaded through the panel's own template export.
+ const c={Math,Date,JSON,String,Number,Boolean,Array,Object,RegExp,Promise,console,setTimeout,clearTimeout,
+   localStorage:{getItem:()=>null,setItem(){},removeItem(){}},
+   document:{getElementById:()=>null,querySelectorAll:()=>[],createElement:()=>({style:{}}),body:{appendChild(){},insertAdjacentHTML(){}}}};
+ c.window=c;c.globalThis=c;vm.createContext(c);
+ vm.runInContext(fs.readFileSync(path.join(desktop,'renderer/pools.js'),'utf8'),c,{filename:'pools.js'});
+ c.PoolsPanel.init({TOK:{shortId:s=>s,tidyAmount:s=>String(s)},esc:s=>String(s).replace(/</g,'&lt;'),short:s=>s,
+   el:()=>null,api:{},toast(){},copy(){},showConfirm:async()=>false,showProgress:()=>({close(){}}),tryCmd:async()=>[],
+   running:()=>true,activeView:()=>'pandapools'});
+ const desktopCard=c.PoolsPanel._mineHtml([{address:addr,opk,tok,unresolved:true,signingStateUnverified:true}]);
  assert(desktopCard.includes(addr));assert(desktopCard.includes(opk),'Desktop must name the owner key too');
  assert(desktopCard.includes('Pool:')&&desktopCard.includes('Owner key:'),'labelled on Desktop as well');
  assert(desktopCard.includes('data-pprecover'));assert(desktopCard.includes('data-ppretire'));
