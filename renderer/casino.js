@@ -413,7 +413,11 @@
        <div class="cz-act${casinoActOpen ? " is-open" : ""}"><div class="cz-act-hdr"><span class="cz-dot is-live"></span>Activity</div><div class="cz-act-log" id="casinoActLog"></div></div>`;
     host.querySelectorAll("[data-cv]").forEach(b => b.addEventListener("click", () => { casinoView = b.dataset.cv; renderCasino(); }));
     const tk = el("casinoTicker");
-    if (tk) tk.addEventListener("click", () => { casinoActOpen = !casinoActOpen; renderCasino(); });
+    if (tk) tk.addEventListener("click", () => {
+      casinoActOpen = !casinoActOpen;
+      const drawer = host.querySelector(".cz-act");
+      if (drawer) drawer.classList.toggle("is-open", casinoActOpen);   // a drawer toggle must not refetch the panel
+    });
     const mute = el("casinoMute");
     if (mute) mute.addEventListener("click", () => { try { const m = localStorage.getItem("casino_mute") === "1"; localStorage.setItem("casino_mute", m ? "0" : "1"); } catch (e) {} renderCasino(); });
     const ccy = el("casinoCcy");
@@ -506,7 +510,7 @@
     const p = CASINO_PRESETS[casinoHousePreset];
     const betInput = el("casinoBetAmt");
     const curBet = betInput ? betInput.value : "";
-    const card = (id, g) => `<button class="cz-preset${casinoHousePreset === id ? " is-on" : ""}" data-preset="${id}"><span class="cz-preset-i">${g.icon}</span><span class="cz-preset-n">${esc(g.name).toUpperCase()}</span><span class="cz-preset-o">${g.payout - 1}:1</span></button>`;
+    const card = (id, g) => `<button class="cz-preset${casinoHousePreset === id ? " is-on" : ""}" data-preset="${id}"><span class="cz-preset-i">${g.icon}</span><span class="cz-preset-n">${esc(g.name.toUpperCase())}</span><span class="cz-preset-o">${g.payout - 1}:1</span></button>`;
     host.innerHTML =
       `<div class="cz-card">
         <div class="cz-presets">${card("flip", CASINO_PRESETS.flip)}${card("dice", CASINO_PRESETS.dice)}${card("roulette", CASINO_PRESETS.roulette)}</div>

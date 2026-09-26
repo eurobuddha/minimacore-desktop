@@ -124,7 +124,7 @@
     opts = opts || {};
     var fitted = fit(cv), ctx = fitted.ctx, w = fitted.w, h = fitted.h;
     var raf = null, stopped = false, landing = false, t0 = 0, from = 0, to = 0, dur = 0, done = null;
-    var ang = 0, face = 1, lastFlick = 0, result = 0;
+    var ang = 0, face = 1, lastFlick = 0, result = 0, diceFrom = 0;
     var tick = opts.tick || function () {};
 
     function frame(now) {
@@ -139,14 +139,13 @@
       } else {
         var t = Math.min(1, (now - t0) / dur);
         if (range == 2) {
-          var th = from + (to - from) * easeOut(t, COIN_EASE);
-          drawCoin(ctx, w, h, th, result === 0 ? "H" : "T");
-          if (t >= 1) drawCoin(ctx, w, h, result === 0 ? 0 : Math.PI, result === 0 ? "H" : "T");
+          var th = t >= 1 ? (result === 0 ? 0 : Math.PI) : from + (to - from) * easeOut(t, COIN_EASE);
+          drawCoin(ctx, w, h, th, Math.cos(th) >= 0 ? "H" : "T");   // two faces, even mid-landing
         } else if (range == 6) {
           if (t < DICE_LOCK_AT) { if (now - lastFlick > DICE_FLICK_MS) { face = 1 + Math.floor(Math.random() * 6); lastFlick = now; } }
           else face = result + 1;
           var e = easeOut(t, 3);
-          drawDie(ctx, w, h, face, (1 - e) * (DICE_SPIN * Math.PI / 180), 1 + (1 - e) * 0.08);
+          drawDie(ctx, w, h, face, (1 - e) * (diceFrom + DICE_SPIN * Math.PI / 180), 1 + (1 - e) * 0.08);
         } else {
           drawWheel(ctx, w, h, from + (to - from) * easeOut(t, ROU_EASE));
         }
@@ -162,7 +161,7 @@
         result = Math.max(0, parseInt(idx, 10) || 0);
         landing = true; done = cb; t0 = performance.now(); from = ang;
         if (range == 2) { dur = COIN_MS; to = ang + COIN_TURNS * 2 * Math.PI + (result === 0 ? 0 : Math.PI); to -= (ang % (2 * Math.PI)); }
-        else if (range == 6) { dur = DICE_MS; }
+        else if (range == 6) { dur = DICE_MS; diceFrom = Math.sin(ang) * 0.22; }
         else {
           dur = ROU_MS;
           var k = WHEEL.indexOf(result + 1), seg = Math.PI * 2 / 36;

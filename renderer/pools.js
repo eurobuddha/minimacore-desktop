@@ -46,12 +46,16 @@
     document.querySelectorAll("#ppBody [data-ppview]").forEach(b => b.onclick = () => { ppView = b.dataset.ppview; renderPandapools(); });
     const s = el("ppStyleBtn"); if (s) s.onclick = ppToggleStyle;
     ppApplyStyle();
-    ppRefreshBlock();
+    if (!PP_BLOCK) ppRefreshBlock();   // first paint only — onStatus feeds the tip through setBlock after that
   }
   // ◐ STYLE — the APK's own two looks (dark "Current" ⇄ white, hard-edged, monospace "Original"). Independent of
   // the desktop shell's light/dark button, exactly as on the phone.
   let PP_STYLE = (() => { try { return localStorage.getItem("pp_style") === "original" ? "original" : "current"; } catch (e) { return "current"; } })();
-  function ppApplyStyle() { const w = el("ppBody"); if (w) w.setAttribute("data-ppstyle", PP_STYLE); }
+  function ppApplyStyle() {
+    const w = el("ppBody"); if (w) w.setAttribute("data-ppstyle", PP_STYLE);
+    // dialogs are appended to <body>, outside #ppBody — stamp them too, or Original shows dark dialogs
+    document.querySelectorAll(".overlay.ppapp").forEach(o => o.setAttribute("data-ppstyle", PP_STYLE));
+  }
   function ppToggleStyle() {
     PP_STYLE = PP_STYLE === "original" ? "current" : "original";
     try { localStorage.setItem("pp_style", PP_STYLE); } catch (e) {}
@@ -87,7 +91,7 @@
     }).join("");
   }
   let PP_BAL_MIN = "0", PP_BAL_TOK = "0";
-  let PP_USDT_ID = null;          // cached market-fed token id (mxUSDT) for the swap-page MEXC line
+  let PP_USDT_ID = null;          // cached market-fed token id (MxUSD) for the swap-page MEXC line
   async function renderPpSwap() {
     const host = el("ppBody");
     const pools = await api.ppPools().catch(() => []);
@@ -186,7 +190,7 @@
     const t = PP_SWAP_TOKS[sel.value | 0]; if (!t) return;
     const amt = amtEl.value.trim();
     const outEl = () => el("ppSwapOut");
-    if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { disp.innerHTML = `<div class="pp-desc">Enter an amount for a live quote.</div>`; if (outEl()) outEl().textContent = "0.0"; return; }
+    if (!/^[0-9]*\.?[0-9]+$/.test(amt) || parseFloat(amt) <= 0) { ppQuoteSeq++; disp.innerHTML = `<div class="pp-desc">Enter an amount for a live quote.</div>`; if (outEl()) outEl().textContent = "0.0"; return; }   // the bump retires any quote still in flight
     const seq = ++ppQuoteSeq;                                       // last-write-wins: a newer quote supersedes this one
     const q = await api.ppQuote(t.tok, ppSwapMinToTok, amt).catch(() => ({ ok: false }));
     if (seq !== ppQuoteSeq) return;                                 // a later keystroke already fired a fresher quote
@@ -331,14 +335,14 @@
     const f = PoolCalc.form({
       x0: seed && seed.reserveM ? String(seed.reserveM) : "100000",
       y0: seed && seed.reserveT ? String(seed.reserveT) : "500",
-      tok: seed ? (seed.tokName || TOK.shortId(seed.tok)) : "mxUSDT",
+      tok: seed ? (seed.tokName || TOK.shortId(seed.tok)) : "MxUSD",
       colors: { accent: cv("--pp-accent", "#F7931A"), ink: cv("--pp-text", "#fff"), dim: cv("--pp-dim", "#9A9AA8"), grid: cv("--pp-border2", "#2A2A38"), surface: cv("--pp-surface2", "#1F1F2B"), font: cv("--pp-sans", "sans-serif") }
     });
     const ov = document.createElement("div"); ov.className = "overlay ppapp"; ov.id = "ppCalcOv";
     const m = document.createElement("div"); m.className = "pp-modal pp-modal--wide";
     const t = document.createElement("div"); t.className = "pp-modt"; t.innerText = "Pool calculator";
     const done = document.createElement("button"); done.className = "pp-btn pp-btn--fill"; done.innerText = "Done"; done.style.marginTop = "10px";
-    m.appendChild(t); m.appendChild(f.el); m.appendChild(done); ov.appendChild(m); document.body.appendChild(ov);
+    m.appendChild(t); m.appendChild(f.el); m.appendChild(done); ov.appendChild(m); document.body.appendChild(ov); ppApplyStyle();
     const close = () => { if (ov.parentNode) ov.remove(); };
     done.onclick = close; ov.onclick = (e) => { if (e.target === ov) close(); };
     f.render();
@@ -490,7 +494,7 @@
       <div class="pp-desc">Save this public recipe alongside your latest complete MinimaCore wallet backup. Proof snapshots expire; later recovery may need a synced MegaMMR archive.</div>
       <textarea class="pp-input" id="ppbTa" readonly style="min-height:150px;font-family:monospace;font-size:11px">${esc(json)}</textarea>
       <div class="pp-seg" style="margin-top:10px"><button class="pp-btn" id="ppbCopy">Copy</button><button class="pp-btn pp-btn--fill" id="ppbSave">Save file</button></div>
-      <button class="pp-btn" id="ppbClose" style="margin-top:8px">Done</button></div></div>`);
+      <button class="pp-btn" id="ppbClose" style="margin-top:8px">Done</button></div></div>`); ppApplyStyle();
     const ov = el("ppbOv"); const close = () => { if (ov) ov.remove(); };
     el("ppbClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppbOv") close(); };
     el("ppbCopy").onclick = () => { copy(json); toast("Copied ✓", "ok"); };
@@ -503,7 +507,7 @@
       <textarea class="pp-input" id="pprTa" placeholder="…paste backup JSON here" style="min-height:130px;font-family:monospace;font-size:11px"></textarea>
       <div class="pp-desc" id="pprStatus" style="margin-top:6px"></div>
       <div class="pp-seg" style="margin-top:8px"><button class="pp-btn" id="pprFile">Load file</button><button class="pp-btn pp-btn--fill" id="pprGo">Restore</button></div>
-      <button class="pp-btn" id="pprCancel" style="margin-top:8px">Cancel</button></div></div>`);
+      <button class="pp-btn" id="pprCancel" style="margin-top:8px">Cancel</button></div></div>`); ppApplyStyle();
     const ov = el("pprOv"); const close = () => { if (ov) ov.remove(); };
     el("pprCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "pprOv") close(); };
     el("pprFile").onclick = async () => { try { const f = await api.ppLoadBackup(); if (f && f.error) { toast(f.error, "err"); return; } if (f && !f.canceled && el("pprTa")) el("pprTa").value = f.json || ""; } catch (e) {} };
@@ -531,7 +535,7 @@
   Saved recipes identify pools even when a light node no longer sees their coins. Restore verifies local reserves, then backup proofs, then current proofs from a synced MegaMMR archive. Missing reserves remain visible and are never reported as recovered.
 
   Restore does not regenerate keys or estimate past signature use. Confirm signing only with current complete wallet state and no other signing copies. Keep-fresh requires the app and node to remain running; it cannot guarantee availability while offline.</div>
-      <button class="pp-btn" id="ppgClose" style="margin-top:10px">Close</button></div></div>`);
+      <button class="pp-btn" id="ppgClose" style="margin-top:10px">Close</button></div></div>`); ppApplyStyle();
     const ov = el("ppgOv"); const close = () => { if (ov) ov.remove(); };
     el("ppgClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppgOv") close(); };
   }
@@ -567,7 +571,7 @@
   }
   async function showPpArchive(){
     let current;try{current=await api.ppArchiveSettings();}catch(e){toast(e.message,"err");return;}
-    document.body.insertAdjacentHTML("beforeend",`<div class="overlay ppapp" id="ppaOv"><div class="pp-modal"><div class="pp-modt">Recovery archive</div><div class="pp-desc">Optional public HTTPS MegaMMR RPC endpoint for current proofs. Your node verifies every proof. Leave empty for local MegaMMR or backup proofs.</div><input class="pp-input" id="ppaUrl" type="url" value="${esc(current)}" placeholder="https://archive.example.com"><div class="pp-desc" id="ppaStatus"></div><div class="pp-seg"><button class="pp-btn" id="ppaCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppaSave">Save</button></div></div></div>`);
+    document.body.insertAdjacentHTML("beforeend",`<div class="overlay ppapp" id="ppaOv"><div class="pp-modal"><div class="pp-modt">Recovery archive</div><div class="pp-desc">Optional public HTTPS MegaMMR RPC endpoint for current proofs. Your node verifies every proof. Leave empty for local MegaMMR or backup proofs.</div><input class="pp-input" id="ppaUrl" type="url" value="${esc(current)}" placeholder="https://archive.example.com"><div class="pp-desc" id="ppaStatus"></div><div class="pp-seg"><button class="pp-btn" id="ppaCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppaSave">Save</button></div></div></div>`);ppApplyStyle(); ppApplyStyle();
     const ov=el("ppaOv");el("ppaCancel").onclick=()=>ov.remove();
     el("ppaSave").onclick=async()=>{try{const ok=await api.ppArchiveSettings(el("ppaUrl").value);if(ok){ov.remove();toast("Recovery archive saved.","ok");}else el("ppaStatus").textContent="Could not save. Use a public HTTPS hostname without credentials, query or fragment.";}catch(e){el("ppaStatus").textContent=e.message;}};
   }
@@ -590,7 +594,7 @@
   // ---- LP management sheets (create / add / migrate / withdraw) ----
   // Token-leg decimals, defensively parsed + clamped (a wrong value → token-grain rejection at createPool).
   function ppSafeDec(token) { const d = parseInt(token && token.decimals, 10); return Number.isFinite(d) && d >= 0 && d <= 18 ? d : 8; }
-  // Create is USDT-only + price-anchored, mirroring the MDS dapp (0.6.6): a pool always opens at the true
+  // Create is MxUSD-only + price-anchored, mirroring the MDS dapp (0.6.6): a pool always opens at the true
   // MINIMA/USDT rate (MEXC market → live-pool spot). Free-ratio manual create is the tier-3 fallback for the
   // very first pool only. openCreate → dispatchCreate → createFormPriced (enter USDT) | createFormManual.
   async function showPpCreate() {
@@ -604,12 +608,12 @@
       const tid = b.tokenid || "";
       if (tid === MINIMA || tid === "0x00") { minimaAvail = parseFloat(b.sendable) || 0; return; }   // MINIMA is the other leg
       const sendable = parseFloat(b.sendable) || 0;
-      if (!tid || sendable <= 0 || !isFed(tid)) return;   // ONLY market-fed pairs (mxUSDT) — no mispriceable pools
+      if (!tid || sendable <= 0 || !isFed(tid)) return;   // ONLY market-fed pairs (MxUSD) — no mispriceable pools
       toks.push({ tokenid: tid, name: TOK.tokenName(b.token, tid), dec: ppSafeDec(b.token), avail: sendable });
     });
     if (!toks.length) {
-      await showConfirm("Get mxUSDT first",
-        "PandaPools creates MINIMA / USDT pools — the pair with a live market price, so a pool always opens at the true rate. Your wallet holds no mxUSDT; receive some first, then create a pool.", "OK");
+      await showConfirm("Get MxUSD first",
+        "PandaPools creates MINIMA / MxUSD pools — the pair with a live market price, so a pool always opens at the true rate. Your wallet holds no MxUSD; receive some first, then create a pool.", "OK");
       return;
     }
     if (toks.length === 1) { ppDispatchCreate(toks[0], minimaAvail); return; }
@@ -617,7 +621,7 @@
     document.body.insertAdjacentHTML("beforeend", `<div class="overlay ppapp" id="ppcPickOv"><div class="pp-modal">
       <div class="pp-modt">Pool MINIMA with…</div>
       <div class="pp-field"><select class="pp-input" id="ppcPick">${opts}</select></div>
-      <div class="pp-seg" style="margin-top:6px"><button class="pp-btn" id="ppcPickCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppcPickGo">Next</button></div></div></div>`);
+      <div class="pp-seg" style="margin-top:6px"><button class="pp-btn" id="ppcPickCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppcPickGo">Next</button></div></div></div>`); ppApplyStyle();
     const ov = el("ppcPickOv"); const close = () => { if (ov) ov.remove(); };
     el("ppcPickCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcPickOv") close(); };
     el("ppcPickGo").onclick = () => { const t = toks[el("ppcPick").value | 0]; close(); if (t) ppDispatchCreate(t, minimaAvail); };
@@ -637,7 +641,7 @@
       <div class="pp-modt">Create MINIMA / ${esc(t.name)} pool</div>
       <div class="pp-field"><div class="pp-lbl">${esc(t.name)} to provide</div><input class="pp-input" id="ppcU" placeholder="e.g. 1.90" autocomplete="off" /></div>
       <div class="pp-desc" id="ppcInfo" style="white-space:pre-wrap"></div>
-      <div class="pp-seg" style="margin-top:6px"><button class="pp-btn" id="ppcCancel">Cancel</button><button class="pp-btn" id="ppcRefresh">↻ Price</button><button class="pp-btn pp-btn--fill" id="ppcGo">Create</button></div></div></div>`);
+      <div class="pp-seg" style="margin-top:6px"><button class="pp-btn" id="ppcCancel">Cancel</button><button class="pp-btn" id="ppcRefresh">↻ Price</button><button class="pp-btn pp-btn--fill" id="ppcGo">Create</button></div></div></div>`); ppApplyStyle();
     const ov = el("ppcOv"); const close = () => { if (ov) ov.remove(); };
     el("ppcCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcOv") close(); };
     const info = () => el("ppcInfo");
@@ -700,7 +704,7 @@
       <div class="pp-field"><div class="pp-lbl">${esc(t.name)} to deposit</div><input class="pp-input" id="ppcY" placeholder="e.g. 0.56" autocomplete="off" /></div>
       <div class="pp-desc" id="ppcPreview" style="white-space:pre-wrap">Enter both amounts to see the opening price.</div>
       <label style="display:block;margin:6px 0;font-size:12px"><input type="checkbox" id="ppcAck" style="margin-right:6px" />I understand I'm setting the opening price with no market to check it against.</label>
-      <div class="pp-seg" style="margin-top:6px"><button class="pp-btn" id="ppcCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppcGo">Create</button></div></div></div>`);
+      <div class="pp-seg" style="margin-top:6px"><button class="pp-btn" id="ppcCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppcGo">Create</button></div></div></div>`); ppApplyStyle();
     const ov = el("ppcOv"); const close = () => { if (ov) ov.remove(); };
     el("ppcCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppcOv") close(); };
     const numOk = (v) => /^[0-9]*\.?[0-9]+$/.test(v) && parseFloat(v) > 0;
@@ -738,7 +742,7 @@
       <div class="pp-modt">${esc(title)}</div><div class="pp-desc">${esc(desc)}</div>
       <div class="pp-field"><div class="pp-lbl">${esc(lblA)}</div><input class="pp-input" id="pp2A" placeholder="0.0" autocomplete="off" /></div>
       <div class="pp-field"><div class="pp-lbl">${esc(lblB)}</div><input class="pp-input" id="pp2B" placeholder="0.0" autocomplete="off" /></div>
-      <div class="pp-seg" style="margin-top:10px"><button class="pp-btn" id="pp2Cancel">Cancel</button><button class="pp-btn pp-btn--fill" id="pp2Go">${esc(okLabel)}</button></div></div></div>`);
+      <div class="pp-seg" style="margin-top:10px"><button class="pp-btn" id="pp2Cancel">Cancel</button><button class="pp-btn pp-btn--fill" id="pp2Go">${esc(okLabel)}</button></div></div></div>`); ppApplyStyle();
     const ov = el("pp2Ov"); const close = () => { if (ov) ov.remove(); };
     el("pp2Cancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "pp2Ov") close(); };
     let busy = false;

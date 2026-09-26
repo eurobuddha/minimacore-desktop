@@ -231,6 +231,33 @@ test("nothing that moves value changed — the engine calls and guards came acro
     "and that same quoteId is what gets posted");
 });
 
+test("0.17.20 review fixes stay fixed — scrim, RULE 2, quote race, style-stamped dialogs", () => {
+  const css = fs.readFileSync(path.join(R, "pools.css"), "utf8");
+  const src = fs.readFileSync(path.join(R, "pools.js"), "utf8");
+  // the wrapper's opaque ground must never win over the shared scrim (same specificity, later sheet)
+  assert.ok(/\.ppapp\.overlay\s*\{[^}]*background:\s*rgba\(0, 0, 0, \.62\)/.test(css), "the dialog scrim is restated at two-class specificity");
+  // RULE 2 — the Minima dollar token is MxUSD; the wrong name must not ride in on a moved file
+  assert.ok(!/mxUSDT/i.test(src.replace(/^\s*\/\/.*$/gm, "")), "no mxUSDT in code or copy");
+  assert.ok(src.includes('"Get MxUSD first"'), "the create gate names the token correctly");
+  // an in-flight quote is retired when the amount is cleared, so it cannot repaint under an empty field
+  assert.ok(/parseFloat\(amt\) <= 0\) \{ ppQuoteSeq\+\+;/.test(src), "the early return bumps the quote sequence");
+  // every dialog carries the ◐ STYLE state, not just the panel body
+  const sites = (src.match(/insertAdjacentHTML\("beforeend"/g) || []).length + (src.match(/document\.body\.appendChild\(ov\)/g) || []).length;
+  const stamped = (src.match(/`\); *ppApplyStyle\(\);/g) || []).length + (src.match(/appendChild\(ov\); ppApplyStyle\(\);/g) || []).length;
+  assert.equal(stamped, sites, "each of the " + sites + " overlay sites re-stamps the style");
+  assert.ok(/querySelectorAll\("\.overlay\.ppapp"\)\.forEach\(o => o\.setAttribute\("data-ppstyle"/.test(src), "and ppApplyStyle reaches them");
+});
+
+test("0.17.20 review fixes stay fixed — drawer toggle, glyph faces, escape order", () => {
+  const src = fs.readFileSync(path.join(R, "casino.js"), "utf8");
+  const art = fs.readFileSync(path.join(R, "casinoart.js"), "utf8");
+  assert.ok(/casinoActOpen = !casinoActOpen;[\s\S]{0,200}classList\.toggle\("is-open", casinoActOpen\)/.test(src), "the ticker click flips a class");
+  assert.ok(!/casinoActOpen = !casinoActOpen; renderCasino\(\)/.test(src), "…and does not refetch the whole panel");
+  assert.ok(src.includes("${esc(g.name.toUpperCase())}"), "uppercase first, escape second");
+  assert.ok(/drawCoin\(ctx, w, h, th, Math\.cos\(th\) >= 0 \? "H" : "T"\)/.test(art), "the coin shows two faces while landing");
+  assert.ok(/diceFrom = Math\.sin\(ang\) \* 0\.22/.test(art), "the dice unwind starts from the wobble, no 180° jump");
+});
+
 test("app.js keeps only the wiring, and defines the reset it always called", () => {
   const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
   assert.ok(app.includes("PoolsPanel.init({"), "the panel is injected, not reached into");

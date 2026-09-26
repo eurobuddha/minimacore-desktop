@@ -191,7 +191,10 @@
 
 /* ---- the panel's own dialogs (appended to <body>, so .ppapp rides on the overlay itself) ---- */
 /* The overlay box itself stays app.css's .overlay — same z-index, so an app-level confirm opened ON TOP of a
-   panel dialog (create → "Create this pool?") still stacks above it by being appended later. */
+   panel dialog (create → "Create this pool?") still stacks above it by being appended later. The wrapper class
+   rides on the overlay ONLY to scope the dialog's tokens: .ppapp's ground colour must not win over the scrim
+   (same specificity, later sheet), so the scrim is restated at two-class specificity here. */
+.ppapp.overlay { background: rgba(0, 0, 0, .62); }
 .ppapp .pp-modal {
   width: 100%; max-width: 420px; max-height: 86vh; overflow: auto; box-sizing: border-box;
   background: var(--pp-surface); border-radius: var(--pp-r); padding: 18px;
