@@ -61,6 +61,39 @@ for (const p of PANELS) {
   });
 }
 
+// ------------------------------------------------------------------ the cascade-collision guard
+// Panel dialogs are created as "overlay <wrap>" so the panel's tokens scope them. Every panel sheet is linked
+// AFTER app.css, so a property the root wrapper declares that .overlay also sets wins by source order and
+// breaks the dialog. It shipped twice: 0.17.19's .ppapp background painted an opaque sheet over the scrim;
+// 0.17.21's .axapp position:relative turned every AtomiX dialog into an in-flow block at the bottom of <body>.
+function ruleBody(css, selector) {
+  const m = new RegExp("(^|\\n)" + selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}").exec(css.replace(/\/\*[\s\S]*?\*\//g, ""));
+  return m ? m[2] : null;
+}
+function propsOf(body) {
+  return new Set((body || "").split(";").map((d) => d.split(":")[0].trim()).filter((k) => k && !k.startsWith("--") && !k.startsWith("/*")));
+}
+test("no panel wrapper declares a property that app.css's .overlay owns, unless it restates it on .wrap.overlay", () => {
+  const app = fs.readFileSync(path.join(R, "app.css"), "utf8");
+  const overlayProps = propsOf(ruleBody(app, ".overlay"));
+  assert.ok(overlayProps.has("position") && overlayProps.has("background"), "sanity: .overlay sets position and background");
+  const bad = [];
+  let checked = 0;
+  for (const p of PANELS) {
+    // only panels that put "overlay <wrap>" on ONE element are exposed to this; Mail uses the shell's dialogs
+    // and P2P Chance carries its own .cz-ov, so neither shares a box with .overlay
+    const js = fs.readFileSync(path.join(R, p.js), "utf8");
+    if (!new RegExp('(class="|className = ")overlay ' + p.wrap + '"').test(js)) continue;
+    checked++;
+    const css = fs.readFileSync(path.join(R, p.css), "utf8");
+    const root = propsOf(ruleBody(css, "." + p.wrap));
+    const restated = propsOf(ruleBody(css, "." + p.wrap + ".overlay"));
+    for (const prop of root) if (overlayProps.has(prop) && !restated.has(prop)) bad.push(p.css + " ." + p.wrap + " { " + prop + " }");
+  }
+  assert.deepEqual(bad, [], "wrapper properties that would beat .overlay by source order: " + bad.join(" | "));
+  assert.ok(checked >= 2, "PandaPools and AtomiX both share the overlay box and were both checked");
+});
+
 // ------------------------------------------------------------------ the PandaPools panel, headless
 /** Load pools.js in a DOM-less sandbox. A typo in any of its ~40 templates fails here, not in front of a user. */
 function panel() {
@@ -532,4 +565,15 @@ test("app.js keeps only the AtomiX wiring, and miniMall's shop id is copyable in
   assert.ok(!/function renderAxSwap|function axMakerEditor|function axLadder/.test(app), "the panel's internals left app.js");
   assert.ok(app.includes("idHtml(shopIdentity.publicId)"), "the shop id no longer goes through a truncating helper");
   assert.ok(!/function axShort/.test(app), "axShort left with the panel");
+});
+
+test("0.17.22 review fixes stay fixed — theme flip repaints the chart, and the chart bitmap is crisp", () => {
+  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
+  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
+  assert.ok(/AX_THEME = AX_THEME === "daylight" \? "onyx" : "daylight";[\s\S]{0,400}axDrawChart\(el\("axChart"\), axLastChart\)/.test(src), "the ☾/☀ toggle redraws an open chart");
+  assert.ok(src.includes("axLastChart = mh.chart"), "…from the series the Market tab last drew");
+  assert.ok(src.includes('<canvas id="axChart" class="ax-chart"></canvas>'), "no fixed bitmap size on the tag");
+  assert.ok(/cv\.setTransform\(dpr, 0, 0, dpr, 0, 0\)/.test(src), "the bitmap follows the CSS box at device resolution");
+  assert.ok(!/position:\s*relative/.test(ruleBody(css, ".axapp") || ""), "the wrapper is not positioned");
+  assert.ok(!/padding-bottom/.test(ruleBody(css, ".axapp") || ""), "no dead gap under the sticky tab bar");
 });

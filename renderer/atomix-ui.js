@@ -82,6 +82,7 @@
   // ☾ / ☀ — the APK's own Onyx ⇄ Daylight, independent of the desktop shell's theme button. DIM is #8B909C in both.
   let AX_THEME = (() => { try { return localStorage.getItem("ax_theme") === "daylight" ? "daylight" : "onyx"; } catch (e) { return "onyx"; } })();
   let AX_VER = "", AX_BLOCK = 0;
+  let axLastChart = null;                 // the series the Market chart last drew — redrawn on a theme flip
   /** Stamp theme + currency on the panel body AND on every open dialog (they live on <body>, outside #axBody). */
   function axApplyLook() {
     const ccy = axStatusCache.currency === "minima" ? "minima" : "mxusdt";
@@ -93,6 +94,7 @@
     try { localStorage.setItem("ax_theme", AX_THEME); } catch (e) {}
     axApplyLook();
     const t = el("axTheme"); if (t) t.textContent = AX_THEME === "daylight" ? "☀" : "☾";
+    if (el("axChart") && axLastChart) { try { axDrawChart(el("axChart"), axLastChart); } catch (e) {} }   // the canvas reads its colours at draw time
   }
   function wireAxHeader() {
     const host = el("axBody");
@@ -343,7 +345,7 @@
     const host = el("axBody");
     axStopPegPoll();
     const [b, mh, mc] = await Promise.all([api.axBook().catch(() => null), api.axMarketHistory().catch(() => ({ chart: [], recent: [] })), api.axMakerCfg().catch(() => null)]);
-    axLastBook = b; axMakerCfgCache = mc;
+    axLastBook = b; axMakerCfgCache = mc; axLastChart = mh.chart;
     const ccy = axCcyName(b ? b.label : "mxUSDT");
     const count = b ? (b.scanned || 0) : 0;
     const others = b && b.makers > 0 && b.makers !== count ? ` · ${b.makers} other` : "";
@@ -359,7 +361,7 @@
       </div>
       <div class="ax-card"><div class="ax-cardt">Your market · ${esc(ccy)} ⇄ USDT</div><div id="axMktHost">${yourMkt}</div></div>
       ${axEditing ? "" : `<div class="ax-card"><div class="ax-cardt">Market history <span class="ax-st">price only</span></div>
-        <canvas id="axChart" class="ax-chart" width="640" height="180"></canvas>
+        <canvas id="axChart" class="ax-chart"></canvas>
         <div class="ax-desc">${axHistLine(mh)}</div>${axHistRows(mh)}
       </div>`}`;
     wireAxHeader();
@@ -427,7 +429,13 @@
   }
   function axDrawChart(canvas, data) {
     const cv = canvas && canvas.getContext && canvas.getContext("2d"); if (!cv) return;
-    const w = canvas.width, h = canvas.height, padL = 46, padR = 8, padT = 8, padB = 16;
+    // Size the bitmap from the CSS box at device resolution, then draw in CSS pixels — a fixed 640-wide
+    // bitmap stretched to the card width distorted every glyph and dot, and blurred on Retina.
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = canvas.clientWidth || 640, h = canvas.clientHeight || 180;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    cv.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const padL = 46, padR = 8, padT = 8, padB = 16;
     const css = getComputedStyle(el("axBody") || document.documentElement);
     const ACC = (css.getPropertyValue("--ax-accent") || "#F7931A").trim(), DIM = (css.getPropertyValue("--ax-dim2") || "#6F7583").trim();
     cv.clearRect(0, 0, w, h); cv.font = "11px \"JetBrains Mono\", ui-monospace, monospace"; cv.fillStyle = DIM;
