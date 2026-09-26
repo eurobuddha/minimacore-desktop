@@ -18,7 +18,8 @@ const R = path.join(__dirname, "..", "renderer");
 const PANELS = [
   { css: "mail.css", wrap: "mailapp", host: "view-mail", js: "mail.js" },
   { css: "pools.css", wrap: "ppapp", host: "view-pandapools", js: "pools.js" },
-  { css: "casino.css", wrap: "czapp", host: "view-casino", js: "casino.js" }
+  { css: "casino.css", wrap: "czapp", host: "view-casino", js: "casino.js" },
+  { css: "atomix-ui.css", wrap: "axapp", host: "view-atomix", js: "atomix-ui.js" }
 ];
 // Font stacks are shared on purpose — the shell's face is the OS face, and a panel that redeclared it would
 // only drift. Colour and geometry tokens are what must never be borrowed.
@@ -412,4 +413,123 @@ test("app.js keeps only the casino wiring", () => {
   assert.ok(!/function renderCasinoPlay/.test(app), "the panel's internals left app.js");
   assert.ok(!/function casinoSpinner/.test(app), "…including the animations");
   assert.equal((app.match(/function resetCasinoState/g) || []).length, 1, "exactly one resetCasinoState");
+});
+
+// ------------------------------------------------------------------ the AtomiX panel, headless
+function axPanel() {
+  const sandbox = { setTimeout, clearTimeout, setInterval, clearInterval, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console,
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    getComputedStyle: () => ({ getPropertyValue: () => "" }),
+    document: { getElementById: () => null, querySelectorAll: () => [], querySelector: () => null, activeElement: null,
+      createElement: () => ({ style: {} }), body: { appendChild() {}, insertAdjacentHTML() {} } } };
+  sandbox.window = sandbox; sandbox.globalThis = sandbox;
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8"), ctx, { filename: "atomix-ui.js" });
+  return sandbox;
+}
+const AX_DEPS = (over) => Object.assign({
+  api: NOOP_API,
+  esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
+  el: () => null, toast() {}, copy() {}, TOK: { shortId: (t) => String(t).slice(0, 10) },
+  showConfirm: async () => false, showPrompt: async () => null, relTime: () => "just now",
+  idHtml: (v) => `<span class="idcopy" data-copy="${v}">${v}</span>`,
+  running: () => true, activeView: () => "atomix"
+}, over || {});
+
+test("the AtomiX panel loads and exposes only its wiring surface", () => {
+  const s = axPanel();
+  assert.ok(s.AtomixPanel, "AtomixPanel is exported");
+  for (const fn of ["init", "render", "onUpdate", "reset", "setVersion", "setBlock"]) {
+    assert.equal(typeof s.AtomixPanel[fn], "function", fn + " is on the panel");
+  }
+});
+
+test("RULE 2 — the Minima dollar token reads MxUSD everywhere; the engine's internal key is untouched", () => {
+  const s = axPanel();
+  assert.equal(s.AtomixPanel._ccyName("mxUSDT"), "MxUSD", "the donor's coinLabel maps to MxUSD");
+  assert.equal(s.AtomixPanel._ccyName("mxusdt"), "MxUSD");
+  assert.equal(s.AtomixPanel._ccyName("minima"), "MINIMA");
+  assert.equal(s.AtomixPanel._ccyName("USDT"), "USDT", "the ERC-20 leg keeps its own name");
+  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  // the only mxUSDT left in code is the engine default fed INTO axCcyName, never a string shown as-is
+  const raw = src.split("\n").filter((l) => /mxUSDT/.test(l) && !/axCcyName\(/.test(l));
+  assert.deepEqual(raw, [], "no user-visible mxUSDT: " + raw.join(" | "));
+  assert.ok(src.includes('key = cur === "minima" ? "mxusdt" : "minima"'), "the engine key stays mxusdt");
+  const eng = fs.readFileSync(path.join(R, "..", "main", "atomix.js"), "utf8");
+  assert.ok(eng.includes("coinLabel"), "main/atomix.js is untouched — it still hands the donor label up");
+});
+
+test("the header is the APK's, and the tab bar is at the bottom in the APK's order with its five icons", () => {
+  const s = axPanel();
+  s.AtomixPanel.init(AX_DEPS());
+  s.AtomixPanel.setVersion("0.17.21"); s.AtomixPanel.setBlock(1234567);
+  s.AtomixPanel._setStatus({ ready: true, currency: "mxusdt" });
+  const head = s.AtomixPanel._header("swap");
+  assert.ok(head.includes('class="ax-brand">AtomiX<'), "the wordmark");
+  assert.ok(head.includes(">MxUSD<"), "the currency pill names the token correctly");
+  assert.ok(head.includes("☾") || head.includes("☀"), "the theme pill");
+  assert.ok(head.includes("Mainnet"), "the live chip");
+  assert.ok(head.includes("v0.17.21  ·  block 1234567  ·  real funds"), "the sub-line");
+  const bar = s.AtomixPanel._tabBar("market");
+  const order = [...bar.matchAll(/data-axview="(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ["swap", "wallet", "activity", "market", "otc"], "the APK's tab order");
+  assert.equal((bar.match(/<svg /g) || []).length, 5, "five icons");
+  assert.ok(bar.includes('class="ax-tab is-on" data-axview="market"'), "the active cell");
+  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
+  assert.ok(/\.axapp \.ax-tabbar\s*\{[^}]*position:\s*sticky;\s*bottom:\s*0/.test(css), "…pinned to the bottom");
+  assert.ok(/\.axapp \.ax-tab svg\s*\{[^}]*width:\s*22px/.test(css), "22px icons over a 10.5px label");
+});
+
+test("the accent follows the traded currency, and DIM is the same in both themes", () => {
+  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
+  assert.ok(/\.axapp\s*\{[^}]*--ax-accent:\s*#26A17B/.test(css), "MxUSD = Tether green, the default");
+  assert.ok(/\.axapp\[data-axccy="minima"\]\s*\{[^}]*--ax-accent:\s*#F7931A/.test(css), "MINIMA = orange");
+  const day = /\.axapp\[data-axtheme="daylight"\]\s*\{([^}]*)\}/.exec(css);
+  assert.ok(day && !/--ax-dim:/.test(day[1]), "Daylight does not redefine --ax-dim (#8B909C in both, per Design.java)");
+  assert.ok(/--ax-dim:\s*#8B909C/.test(css), "and it is #8B909C");
+  assert.ok(!/depth-bar|ax-bar|linear-gradient\(to (left|right)/.test(css), "no depth bars — the APK has none");
+});
+
+test("the order book mirrors around a literal │, bids left / asks right, rank 0 bold on SURFACE2", () => {
+  const s = axPanel();
+  s.AtomixPanel.init(AX_DEPS());
+  const book = { bids: [{ p: 0.998, cap: 120, signer: "0xAAAA", mine: false }], asks: [{ p: 1.002, cap: 80, signer: "0xBBBB", mine: true }], bestBid: 0.998, bestAsk: 1.002 };
+  const html = s.AtomixPanel._ladder(book, "MxUSD");
+  assert.ok(html.includes('<span class="divider">│</span>'), "the literal divider");
+  assert.ok(/ax-half bid[^>]*>[\s\S]*bidpx/.test(html), "bid half carries the bid price");
+  assert.ok(html.includes('class="ax-depth best"'), "rank 0 is the best row");
+  assert.ok(html.includes('data-copy="0xAAAA"'), "RULE 1: the maker key rides in full on the tag");
+  assert.ok(html.includes('class="ax-tag you"'), "your own level is marked");
+  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
+  assert.ok(/\.axapp \.ax-depth\.best\s*\{[^}]*var\(--ax-surface2\)[^}]*font-weight:\s*700/.test(css), "…bold, on SURFACE2");
+});
+
+test("RULE 1 — the review dialog prints maker keys in full, never shortened", () => {
+  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
+  assert.ok(src.includes("Counterparty\\n${q.single.maker}"), "single-leg review carries the whole key");
+  assert.ok(src.includes("USDT\\n  ${l.maker}`"), "…and so does every sweep leg");
+  assert.ok(!/axShort\(q\.single\.maker\)|axShort\(l\.maker\)/.test(src), "axShort is gone from the dialog");
+  assert.ok(src.includes("${idHtml(w.addr)}"), "the Wallet tab shows the whole ETH address, copyable");
+});
+
+test("nothing that moves value changed in the AtomiX rewrite", () => {
+  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
+  for (const call of ["api.axQuote(axSell, axAmt, axSlip)", "api.axSwap(q.quoteId)", "api.axMakerSave(cfg, collect())",
+                      "api.axMakerWithdraw()", "api.axOtcPropose(", "api.axOtcDeal(", "api.axSendReview(asset, to, amt)",
+                      "api.axSend(asset, to, amt)", "api.axSwitchCurrency(key)", "api.axExportKey()"]) {
+    assert.ok(src.includes(call), call + " is still here");
+  }
+  assert.ok(/const q = await api\.axQuote\([\s\S]{0,2200}await showConfirm\(title, msg[\s\S]{0,300}api\.axSwap\(q\.quoteId\)/.test(src),
+    "quote → confirm → post that same quoteId");
+  assert.ok(/showConfirm\("Export ETH private key"/.test(src), "the key-export warning is intact");
+  assert.ok(/showConfirm\("Review — Send "[\s\S]{0,200}This cannot be undone/.test(src), "the irreversible-send confirm is intact");
+  assert.ok(/showConfirm\("Withdraw your market\?"/.test(src), "…and the withdraw confirm");
+});
+
+test("app.js keeps only the AtomiX wiring, and miniMall's shop id is copyable in full", () => {
+  const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
+  assert.ok(app.includes("AtomixPanel.init({"), "the panel is injected, not reached into");
+  assert.ok(!/function renderAxSwap|function axMakerEditor|function axLadder/.test(app), "the panel's internals left app.js");
+  assert.ok(app.includes("idHtml(shopIdentity.publicId)"), "the shop id no longer goes through a truncating helper");
+  assert.ok(!/function axShort/.test(app), "axShort left with the panel");
 });

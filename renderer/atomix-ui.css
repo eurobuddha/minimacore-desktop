@@ -1,0 +1,256 @@
+/*
+ * atomix-ui.css — the AtomiX APK's own palette, type and geometry, scoped to .axapp.
+ *
+ * Colours from apks/atomix Design.java (Onyx / Daylight) + TradingContext.java (the currency layer). Every
+ * selector sits under .axapp; every colour is a --ax-* token declared here, so the desktop shell's theme button
+ * never reaches in — the panel carries its own ☾/☀ pill exactly as the phone does.
+ *
+ * Two things that look like mistakes and are not:
+ *   - DIM is #8B909C in BOTH themes (Design.java:74). It must not be darkened for Daylight.
+ *   - the order book has NO depth bars. The APK has none; the mirror around the │ is the whole design.
+ *
+ * Fonts: Inter + JetBrains Mono, converted locally from the APK's variable TTFs (fonttools → WOFF; no CDN, the
+ * CSP forbids it). Mono carries every price, size, balance and amount; Inter everything else.
+ */
+@font-face { font-family: "Inter"; src: url("fonts/Inter-variable.woff") format("woff"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-variable.woff") format("woff"); font-weight: 100 800; font-display: swap; }
+
+.axapp {
+  /* ONYX (Design.java, dark) */
+  --ax-bg: #0B0D12;
+  --ax-surface: #12151C;
+  --ax-surface2: #1B1F28;
+  --ax-border: rgba(255, 255, 255, .07);     /* 0x12FFFFFF */
+  --ax-text: #EEF0F4;
+  --ax-dim: #8B909C;
+  --ax-dim2: #6F7583;
+  --ax-in: #3FD0A2;                            /* received / bid / positive */
+  --ax-red: #FF5C5C;                           /* error / ask / refund */
+  --ax-amber: #E6A23C;
+  /* the currency layer — MxUSD is the APK's default (TradingContext.MXUSDT) */
+  --ax-accent: #26A17B;
+  --ax-accent-soft: rgba(38, 161, 123, .2);   /* 0x3326A17B */
+  --ax-grad-start: #3DBF93;
+  --ax-on-accent: #FFFFFF;
+  --ax-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --ax-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ax-text);
+  background: var(--ax-bg);
+  font-family: var(--ax-sans);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+  padding-bottom: 66px;                        /* room for the bottom tab bar */
+}
+.axapp[data-axccy="minima"] {
+  --ax-accent: #F7931A;
+  --ax-accent-soft: rgba(247, 147, 26, .2);
+  --ax-grad-start: #FFAB3D;
+  --ax-on-accent: #0B0D12;
+}
+/* DAYLIGHT — cool paper, near-black ink, same DIM */
+.axapp[data-axtheme="daylight"] {
+  --ax-bg: #F3F4F7;
+  --ax-surface: #FFFFFF;
+  --ax-surface2: #EDEEF2;
+  --ax-border: #E6E8EE;
+  --ax-text: #181B22;
+  --ax-dim2: #A6ABB6;
+  --ax-in: #12A97E;
+  --ax-red: #E5484D;
+  --ax-accent-soft: rgba(38, 161, 123, .12);  /* 0x1F26A17B */
+}
+.axapp[data-axtheme="daylight"][data-axccy="minima"] { --ax-accent-soft: rgba(247, 147, 26, .12); --ax-on-accent: #201400; }
+
+.axapp .mono, .axapp .ax-amt, .axapp .ax-px, .axapp .ax-sz, .axapp .ax-big, .axapp .ax-swapline,
+.axapp .ax-editinput, .axapp .ax-genfield, .axapp .ax-lvl-p, .axapp .ax-lvl-a, .axapp .ax-oracle, .axapp .ax-spread-mid { font-family: var(--ax-mono); }
+
+/* ---- header (MainActivity.header) ---- */
+.axapp .ax-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 4px; }
+.axapp .ax-brand { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; flex: 1; min-width: 0; }
+.axapp .ax-pill {
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 6px 11px;
+  border-radius: 14px; background: var(--ax-surface2); color: var(--ax-dim); border: 1px solid transparent;
+}
+.axapp .ax-pill:hover { color: var(--ax-text); }
+.axapp .ax-pill--ccy { color: var(--ax-accent); background: var(--ax-accent-soft); font-family: var(--ax-mono); }
+.axapp .ax-live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--ax-dim); padding: 5px 10px; border-radius: 14px; background: var(--ax-surface2); }
+.axapp .ax-live.is-on { color: var(--ax-accent); background: var(--ax-accent-soft); }
+.axapp .ax-live-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.axapp .ax-sub { font-size: 11px; color: var(--ax-dim); padding: 0 16px 10px; }
+.axapp .ax-pagettl { font-size: 15px; font-weight: 700; padding: 4px 16px 0; }
+.axapp .ax-desc { font-size: 12px; line-height: 1.5; color: var(--ax-dim); margin: 6px 0 0; }
+.axapp .ax-desc--page { margin: 2px 16px 10px; }
+.axapp .ax-empty { font-size: 12px; color: var(--ax-dim); padding: 18px 16px; text-align: center; }
+.axapp .ax-st { display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: .04em; padding: 2px 8px; border-radius: 14px; background: var(--ax-surface2); color: var(--ax-dim); }
+
+/* ---- bottom tab bar (the only panel with one): padding 7/6/9, cells flex:1, 22px icon over 10.5px label,
+       the active cell on an ACCENT_SOFT r14 pill ---- */
+.axapp .ax-tabbar {
+  position: sticky; bottom: 0; z-index: 3; display: flex; gap: 2px; padding: 7px 6px 9px;
+  background: var(--ax-surface); border-top: 1px solid var(--ax-border);
+}
+.axapp .ax-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
+  font: inherit; font-size: 10.5px; font-weight: 600; color: var(--ax-dim);
+  background: none; border: 0; border-radius: 14px; padding: 6px 4px;
+}
+.axapp .ax-tab svg { width: 22px; height: 22px; }
+.axapp .ax-tab.is-on { color: var(--ax-accent); background: var(--ax-accent-soft); }
+
+/* ---- cards (Design.card: SURFACE + 1px BORDER; r18 swap card, r12/14/16 elsewhere) ---- */
+.axapp .ax-card { background: var(--ax-surface); border: 1px solid var(--ax-border); border-radius: 14px; padding: 14px 16px; margin: 0 12px 12px; }
+.axapp .ax-card--tap { cursor: pointer; }
+.axapp .ax-card--tap:hover { border-color: var(--ax-accent); }
+.axapp .ax-cardt { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ax-dim); margin-bottom: 10px; }
+.axapp .ax-big { font-size: 22px; font-weight: 700; }
+.axapp .ax-big--accent { color: var(--ax-accent); }
+.axapp .ax-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; color: var(--ax-dim); margin: 10px 0 6px; }
+.axapp .ax-field { margin-bottom: 8px; }
+.axapp .ax-input {
+  font: inherit; font-size: 13px; width: 100%; box-sizing: border-box; padding: 10px 12px;
+  border-radius: 12px; background: var(--ax-surface2); color: var(--ax-text); border: 1px solid var(--ax-border); outline: none;
+}
+.axapp .ax-input:focus { border-color: var(--ax-accent); }
+.axapp .ax-kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; color: var(--ax-dim); padding: 6px 0; }
+
+/* ---- controls ---- */
+.axapp .ax-btn {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 11px 16px;
+  border-radius: 12px; background: var(--ax-surface2); color: var(--ax-text); border: 1px solid var(--ax-border);
+}
+.axapp .ax-btn:hover { border-color: var(--ax-accent); }
+.axapp .ax-btn:disabled { opacity: .5; cursor: default; }
+.axapp .ax-btn--sm { font-size: 12px; padding: 7px 12px; }
+.axapp .ax-btn--fill { background: var(--ax-accent); color: var(--ax-on-accent); border-color: var(--ax-accent); }
+.axapp .ax-btn--cta {
+  width: 100%; margin-top: 12px; padding: 13px 16px; font-size: 14px; border: 0; color: var(--ax-on-accent);
+  background: linear-gradient(135deg, var(--ax-grad-start), var(--ax-accent));
+}
+.axapp .ax-btn--cta:hover { filter: brightness(1.06); }
+.axapp .ax-btn--danger { color: var(--ax-red); border-color: var(--ax-red); }
+.axapp .ax-btn--ghost { background: none; border-color: transparent; color: var(--ax-dim); padding: 4px 8px; font-size: 12px; }
+.axapp .ax-seg { display: flex; gap: 8px; margin: 0 12px 12px; }
+.axapp .ax-card .ax-seg, .axapp .ax-modal .ax-seg { margin: 0; }
+.axapp .ax-seg > .ax-btn { flex: 1; }
+.axapp .ax-segbtn {
+  flex: 1; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 9px 12px;
+  border-radius: 12px; background: var(--ax-surface2); color: var(--ax-dim); border: 1px solid var(--ax-border);
+}
+.axapp .ax-segbtn.is-on { color: var(--ax-accent); background: var(--ax-accent-soft); border-color: transparent; }
+.axapp .ax-pills { display: flex; gap: 6px; }
+.axapp .ax-pill.is-on { color: var(--ax-accent); background: var(--ax-accent-soft); }
+
+/* ---- swap card: 26px mono legs, receive in the accent, 38px ⇅ between two hairlines ---- */
+.axapp .ax-mktctx { font-size: 12px; color: var(--ax-dim); margin: 0 12px 10px; }
+.axapp .ax-mktctx b { color: var(--ax-text); font-family: var(--ax-mono); }
+.axapp .ax-amtrow { display: flex; align-items: center; gap: 10px; }
+.axapp .ax-chip { display: flex; align-items: center; gap: 7px; padding: 6px 10px 6px 6px; border-radius: 14px; background: var(--ax-surface2); flex: none; }
+.axapp .ax-disc { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; font-family: var(--ax-mono); background: var(--ax-accent); color: var(--ax-on-accent); }
+.axapp .ax-disc.usdt { background: #26A17B; color: #FFFFFF; }
+.axapp .ax-tick { font-size: 12px; font-weight: 700; }
+.axapp .ax-avail { font-size: 10px; color: var(--ax-dim); font-family: var(--ax-mono); }
+.axapp .ax-amt { flex: 1; min-width: 0; font-size: 26px; font-weight: 700; background: none; border: 0; outline: none; color: var(--ax-text); text-align: right; padding: 4px 0; }
+.axapp .ax-amt--recv { color: var(--ax-accent); }
+.axapp .ax-amt::placeholder { color: var(--ax-dim2); }
+.axapp .ax-flip { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; }
+.axapp .ax-flip::before, .axapp .ax-flip::after { content: ""; flex: 1; height: 1px; background: var(--ax-border); }
+.axapp .ax-flipbtn { width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 18px; line-height: 1; background: var(--ax-surface2); color: var(--ax-accent); border: 1px solid var(--ax-border); }
+.axapp .ax-flipbtn:hover { border-color: var(--ax-accent); }
+.axapp .ax-slip { margin-top: 8px; }
+.axapp .ax-slip > span:first-child { font-size: 11.5px; }
+
+/* ---- "YOUR SWAP" stage panel: 9px dots, label bold only while active ---- */
+.axapp .ax-stages { margin: 0 12px 12px; padding: 12px 16px; background: var(--ax-surface); border: 1px solid var(--ax-border); border-radius: 14px; }
+.axapp .ax-stage { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ax-dim); padding: 5px 0; }
+.axapp .ax-stage .sdot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--ax-dim2); flex: none; box-sizing: border-box; }
+.axapp .ax-stage.done .sdot { background: var(--ax-in); border-color: var(--ax-in); }
+.axapp .ax-stage.active .sdot { background: var(--ax-accent); border-color: var(--ax-accent); }
+.axapp .ax-stage.warn .sdot { background: var(--ax-amber); border-color: var(--ax-amber); }
+.axapp .ax-stage.done, .axapp .ax-stage.warn { color: var(--ax-text); }
+.axapp .ax-stage.active { color: var(--ax-text); font-weight: 700; }
+.axapp .ax-swapline { font-size: 12px; color: var(--ax-text); padding: 6px 0 2px; }
+.axapp .ax-lbl + .ax-stages { margin-top: 0; }
+.axapp > .ax-lbl { margin: 14px 16px 6px; }
+
+/* ---- order book (orderLadder): mirrored around a literal │, bids IN() left, asks RED() right, prices hugging
+       the centre, sizes always dim, rank 0 bold and on SURFACE2. NO depth bars. ---- */
+.axapp .ax-ladder { margin-top: 4px; }
+.axapp .ax-spread { font-size: 11px; color: var(--ax-dim); text-align: center; padding: 4px 0 8px; font-family: var(--ax-mono); }
+.axapp .ax-legend { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 0 2px 6px; }
+.axapp .ax-legend .sell { color: var(--ax-in); }
+.axapp .ax-legend .buy { color: var(--ax-red); }
+.axapp .ax-depth { display: flex; align-items: center; gap: 6px; padding: 5px 4px; border-radius: 8px; }
+.axapp .ax-depth.best { background: var(--ax-surface2); font-weight: 700; }
+.axapp .ax-depth .divider { color: var(--ax-dim2); font-family: var(--ax-mono); flex: none; }
+.axapp .ax-half { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.axapp .ax-half .top { display: flex; justify-content: space-between; gap: 8px; }
+.axapp .ax-half.bid .top { flex-direction: row-reverse; }
+.axapp .ax-half.bid { align-items: flex-end; }
+.axapp .ax-half.takeable { cursor: pointer; }
+.axapp .ax-half.takeable:hover .ax-px { text-decoration: underline; }
+.axapp .ax-px { font-size: 13px; }
+.axapp .bidpx { color: var(--ax-in); }
+.axapp .askpx { color: var(--ax-red); }
+.axapp .ax-sz { font-size: 12px; color: var(--ax-dim); }
+.axapp .ax-tag { font-size: 10px; color: var(--ax-dim2); font-family: var(--ax-mono); }
+.axapp .ax-tag.you { color: var(--ax-accent); font-weight: 700; }
+.axapp .ax-chart { display: block; width: 100%; height: 180px; }
+
+/* ---- your market (status + own levels + editor) ---- */
+.axapp .ax-mkr-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ax-dim); padding: 2px 0 8px; }
+.axapp .ax-mkr-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ax-dim2); }
+.axapp .ax-mkr-status.live { color: var(--ax-text); }
+.axapp .ax-mkr-status.live .dot { background: var(--ax-in); }
+.axapp .ax-mymkt { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.axapp .ax-mymkt-row { display: flex; justify-content: space-between; font-size: 12px; font-family: var(--ax-mono); }
+.axapp .ax-mkr-actions { display: flex; gap: 8px; }
+.axapp .ax-mkr-actions .ax-btn { flex: 1; }
+.axapp .ax-cockpit-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.axapp .ax-tog { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ax-dim); }
+.axapp .ax-switch { width: 34px; height: 20px; border-radius: 10px; background: var(--ax-surface2); border: 1px solid var(--ax-border); position: relative; cursor: pointer; padding: 0; }
+.axapp .ax-switch .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--ax-dim); transition: left .15s; }
+.axapp .ax-switch.on { background: var(--ax-accent-soft); border-color: var(--ax-accent); }
+.axapp .ax-switch.on .knob { left: 16px; background: var(--ax-accent); }
+.axapp .ax-tog-l { font-weight: 600; }
+.axapp .ax-oracle { font-size: 11px; color: var(--ax-dim); margin-left: auto; }
+.axapp .ax-cockpit { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 8px; }
+.axapp .ax-fld { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ax-dim); }
+.axapp .ax-fld b { font-weight: 600; }
+.axapp .ax-genfield, .axapp .ax-editinput { font-size: 12px; width: 72px; padding: 5px 7px; border-radius: 8px; background: var(--ax-surface2); color: var(--ax-text); border: 1px solid var(--ax-border); outline: none; }
+.axapp .ax-genfield:focus, .axapp .ax-editinput:focus, .axapp .ax-lvl-p:focus, .axapp .ax-lvl-a:focus { border-color: var(--ax-accent); }
+.axapp .ax-mkr-hint { font-size: 11px; color: var(--ax-dim); line-height: 1.5; margin-bottom: 8px; }
+.axapp .ax-mkr-hint b { color: var(--ax-text); }
+.axapp .ax-mcolhdr { display: flex; justify-content: space-between; font-size: 10px; color: var(--ax-dim2); padding: 0 4px 4px; }
+.axapp .ax-mrow { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 8px; }
+.axapp .ax-mrow.best { background: var(--ax-surface2); }
+.axapp .ax-mrow .divider { color: var(--ax-dim2); font-family: var(--ax-mono); }
+.axapp .ax-mhalf { flex: 1; min-width: 0; }
+.axapp .ax-mhalf .top { display: flex; gap: 6px; }
+.axapp .ax-mhalf.bid .top { flex-direction: row-reverse; }
+.axapp .ax-mhalf input { min-width: 0; flex: 1; font-size: 12px; padding: 5px 6px; border-radius: 8px; background: var(--ax-surface2); color: var(--ax-text); border: 1px solid var(--ax-border); outline: none; font-family: var(--ax-mono); }
+.axapp .ax-mhalf input.bidpx { color: var(--ax-in); }
+.axapp .ax-mhalf input.askpx { color: var(--ax-red); }
+.axapp .ax-mhalf input:focus { border-color: var(--ax-accent); }
+.axapp .ax-spread-mid { text-align: center; font-size: 11px; color: var(--ax-dim); padding: 6px 0; }
+.axapp .ax-spread-mid.crossed { color: var(--ax-red); font-weight: 700; }
+.axapp .ax-editrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
+.axapp .ax-editlabel { font-size: 12px; color: var(--ax-dim); }
+.axapp .ax-mkr-foot { margin-top: 8px; }
+.axapp .ax-prev { margin-top: 6px; }
+.axapp .ax-prev-sum { font-size: 11.5px; line-height: 1.6; }
+.axapp .ax-prev-sum .bidpx, .axapp .ax-prev-sum .askpx { font-weight: 700; }
+.axapp .ax-prev-cross { font-size: 12px; color: var(--ax-red); line-height: 1.4; }
+
+/* ---- rows (activity / OTC / coins) ---- */
+.axapp .ax-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--ax-border); font-size: 12.5px; }
+.axapp .ax-row:first-of-type { border-top: 0; }
+.axapp .ax-rowmid { flex: 1; min-width: 0; }
+.axapp .ax-l1 { font-size: 13px; }
+.axapp .ax-l2 { font-size: 11px; color: var(--ax-dim); line-height: 1.5; overflow-wrap: anywhere; }
+.axapp .ax-card .ax-row[data-axhash] { cursor: pointer; }
+
+/* ---- dialogs (appended to <body>; .axapp rides on the overlay only to scope the tokens — the scrim is the
+       shell's .overlay, restated here at two-class specificity so the wrapper's ground cannot win) ---- */
+.axapp.overlay { background: rgba(0, 0, 0, .62); padding-bottom: 20px; }
+.axapp .ax-modal { width: 100%; max-width: 420px; max-height: 86vh; overflow: auto; box-sizing: border-box; background: var(--ax-surface); border: 1px solid var(--ax-border); border-radius: 16px; padding: 18px; }
+.axapp .ax-modt { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
