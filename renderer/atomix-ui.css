@@ -73,7 +73,25 @@
   border-radius: 14px; background: var(--ax-surface2); color: var(--ax-dim); border: 1px solid transparent;
 }
 .axapp .ax-pill:hover { color: var(--ax-text); }
-.axapp .ax-pill--ccy { color: var(--ax-accent); background: var(--ax-accent-soft); font-family: var(--ax-mono); }
+/* The currency switch. It carried the same accent fill and colour as `.ax-live.is-on` (the Mainnet
+   status pill) three elements along, which is not clickable - so it read as a badge and people did not
+   try it. The border and the ⇄ are what mark it as a control, and both are static; the glow below is
+   dropped wholesale under prefers-reduced-motion and can never be what carries the affordance.
+   The glyph is ::before deliberately: axRefreshStatus sets btn.textContent on every poll
+   (atomix-ui.js:125) and would eat a real child node. (native 0.1.65) */
+.axapp .ax-pill--ccy { color: var(--ax-accent); background: var(--ax-accent-soft); font-family: var(--ax-mono);
+  border-color: color-mix(in srgb, var(--ax-accent) 40%, transparent);
+  animation: ax-ccyglow 2.6s ease-in-out infinite; }
+.axapp .ax-pill--ccy::before { content: '⇄'; margin-right: 6px; opacity: 0.9; font-family: var(--ax-sans, inherit); }
+@keyframes ax-ccyglow {
+  0%, 100% { border-color: color-mix(in srgb, var(--ax-accent) 40%, transparent);
+             box-shadow: 0 0 0 0 transparent; }
+  50%      { border-color: var(--ax-accent);
+             box-shadow: 0 0 6px 0 color-mix(in srgb, var(--ax-accent) 45%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .axapp .ax-pill--ccy { animation: none; border-color: var(--ax-accent); }
+}
 .axapp .ax-live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--ax-dim); padding: 5px 10px; border-radius: 14px; background: var(--ax-surface2); }
 .axapp .ax-live.is-on { color: var(--ax-accent); background: var(--ax-accent-soft); }
 .axapp .ax-live-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

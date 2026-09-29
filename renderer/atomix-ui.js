@@ -58,7 +58,7 @@
     const ccy = axCcyOf(st);
     return `<div class="ax-head">
         <div class="ax-brand">AtomiX</div>
-        <button class="ax-pill ax-pill--ccy" id="axCcy" title="Switch the traded currency">${esc(ccy)}</button>
+        <button class="ax-pill ax-pill--ccy" id="axCcy" title="Switch the traded currency" aria-label="Trading ${esc(ccy)}. Activate to switch currency.">${esc(ccy)}</button>
         <button class="ax-pill" id="axTheme" title="Onyx / Daylight">${AX_THEME === "daylight" ? "☀" : "☾"}</button>
         <span class="ax-live${st.ready ? " is-on" : ""}"><span class="ax-live-dot"></span>${st.ready ? "Mainnet" : "starting…"}</span>
         <button class="ax-pill" id="axHelp" title="About AtomiX">?</button>
