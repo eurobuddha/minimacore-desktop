@@ -38,6 +38,7 @@
   background: var(--ax-bg);
   font-family: var(--ax-sans);
   font-variant-numeric: tabular-nums;
+  --ax-ccy-other: #F7931A;   /* dollar market is green; the ring points at MINIMA orange */
   /* Nothing positional here: dialogs are created as "overlay axapp", and a root property that app.css's
      .overlay also sets would win by source order and break every dialog (this exact thing shipped in
      0.17.21 as position:relative). panels-test.cjs now guards it. */
@@ -47,6 +48,9 @@
   --ax-accent-soft: rgba(247, 147, 26, .2);
   --ax-grad-start: #FFAB3D;
   --ax-on-accent: #0B0D12;
+  /* The moving ring on the currency switch is always the OTHER market's accent — that is where the
+     click takes you. Orange pill -> green ring; green pill -> orange ring (the default below). */
+  --ax-ccy-other: #26A17B;
 }
 /* DAYLIGHT — cool paper, near-black ink, same DIM */
 .axapp[data-axtheme="daylight"] {
@@ -73,25 +77,51 @@
   border-radius: 14px; background: var(--ax-surface2); color: var(--ax-dim); border: 1px solid transparent;
 }
 .axapp .ax-pill:hover { color: var(--ax-text); }
-/* The currency switch. It carried the same accent fill and colour as `.ax-live.is-on` (the Mainnet
-   status pill) three elements along, which is not clickable - so it read as a badge and people did not
-   try it. The border and the ⇄ are what mark it as a control, and both are static; the glow below is
-   dropped wholesale under prefers-reduced-motion and can never be what carries the affordance.
-   The glyph is ::before deliberately: axRefreshStatus sets btn.textContent on every poll
-   (atomix-ui.js:125) and would eat a real child node. (native 0.1.65) */
-.axapp .ax-pill--ccy { color: var(--ax-accent); background: var(--ax-accent-soft); font-family: var(--ax-mono);
-  border-color: color-mix(in srgb, var(--ax-accent) 40%, transparent);
-  animation: ax-ccyglow 2.6s ease-in-out infinite; }
+/* The currency switch.
+   Two earlier attempts are worth not repeating. It carried the same accent fill and colour as
+   `.ax-live.is-on` (the Mainnet status pill), which is not clickable, so it read as a badge.
+   Replacing that with a 1px border that breathed stopped the confusion with the badge and
+   communicated nothing about what the button DOES - too quiet to notice, too static to invite.
+
+   What carries the meaning is the COLOUR OF THE MOVING PART: it is the currency you would switch TO.
+   An orange dot orbiting the green dollar pill says "MINIMA is over there" continuously, while the
+   label still names the market your money is actually in - which matters, because settlement is
+   currency-agnostic and history is currency-scoped, so a chip that periodically displayed the
+   currency you are NOT trading would be a real-funds hazard at a glance.
+
+     dollar market (green pill)  -> a tight ORANGE stop reads as a dot orbiting
+     MINIMA market (orange pill) -> a wide GREEN stop reads as an arc of glow sweeping
+
+   One technique, two gradients. (native 0.1.66) */
+@property --ax-ccy-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+
+.axapp .ax-pill--ccy { color: var(--ax-accent); background: var(--ax-accent-soft);
+  font-family: var(--ax-mono); position: relative; border: none; padding: 7px 12px; isolation: isolate; }
+.axapp .ax-pill--ccy::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 2px; z-index: -1;
+  background: conic-gradient(from var(--ax-ccy-angle),
+      transparent 0deg, transparent 300deg, var(--ax-ccy-other) 342deg, transparent 360deg);
+  /* Ring, not a filled blob: punch the middle out so only the 2px rim paints. */
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: ax-ccyspin 2.4s linear infinite;
+}
+/* MINIMA: a wider, softer band so it reads as a sweeping glow rather than a travelling dot. */
+.axapp[data-axccy="minima"] .ax-pill--ccy::after {
+  background: conic-gradient(from var(--ax-ccy-angle),
+      transparent 0deg, transparent 200deg, var(--ax-ccy-other) 300deg, transparent 360deg);
+}
+/* ::before, not a child node: axRefreshStatus sets btn.textContent on every status poll
+   (atomix-ui.js:125) and would silently eat a real element seconds after render. */
 .axapp .ax-pill--ccy::before { content: '⇄'; margin-right: 6px; opacity: 0.9; font-family: var(--ax-sans, inherit); }
-@keyframes ax-ccyglow {
-  0%, 100% { border-color: color-mix(in srgb, var(--ax-accent) 40%, transparent);
-             box-shadow: 0 0 0 0 transparent; }
-  50%      { border-color: var(--ax-accent);
-             box-shadow: 0 0 6px 0 color-mix(in srgb, var(--ax-accent) 45%, transparent); }
-}
+@keyframes ax-ccyspin { to { --ax-ccy-angle: 360deg; } }
+
 @media (prefers-reduced-motion: reduce) {
-  .axapp .ax-pill--ccy { animation: none; border-color: var(--ax-accent); }
+  /* Motion is the point, but it must not be the ONLY signal: pin the ring as a full static rim. */
+  .axapp .ax-pill--ccy::after { animation: none; background: var(--ax-ccy-other); }
 }
+
 .axapp .ax-live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--ax-dim); padding: 5px 10px; border-radius: 14px; background: var(--ax-surface2); }
 .axapp .ax-live.is-on { color: var(--ax-accent); background: var(--ax-accent-soft); }
 .axapp .ax-live-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
