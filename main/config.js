@@ -65,6 +65,7 @@ const DEFAULTS = {
   theme: "current",          // current | original-light | original-dark
   casinoEnabled: false,      // Casino tab hidden until enabled in Settings (18+ self-cert); also gates the bg auto-processor
   casinoAgeCertified: false, // user self-certified 18+ / legal gambling age
+  openAtLogin: false,        // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
   casinoDollar: false        // Casino currency toggle: false = MINIMA, true = MxUSD. It MUST be declared here —
                              // save() drops any key DEFAULTS does not name, and this one being absent is what
                              // froze the toggle in 0.16.97 (it had lived in the renderer only since 0.16.37).

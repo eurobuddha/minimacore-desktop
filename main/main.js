@@ -13,7 +13,8 @@ const node = require("./node-manager");
 const portmap = require("./portmap");
 const rpc = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
-const updater = require("./updater");   // app updates from the minimaCore store feed (the jar itself ships with the app)
+const updater = require("./updater");
+const loginitem = require("./loginitem");   // "Open at login" — OS login item (mac/win) or XDG autostart (linux)   // app updates from the minimaCore store feed (the jar itself ships with the app)
 const netfetch = require("./netfetch");
 const histDb = require("./history-db");
 const faucet = require("./faucet");
@@ -166,7 +167,12 @@ ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? ""
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
-ipcMain.handle("mcd:saveConfig", (_e, patch) => { const c = config.save(patch || {}); try { if (c.casinoEnabled) startCasinoIfEnabled(); } catch (e) {} return c; });
+ipcMain.handle("mcd:saveConfig", (_e, patch) => {
+  const c = config.save(patch || {});
+  try { if (c.casinoEnabled) startCasinoIfEnabled(); } catch (e) {}
+  if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
+  return c;
+});
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -533,6 +539,7 @@ app.whenReady().then(() => {
   // calls nodeStart when the user finishes — otherwise the node would silently start before any choice.
   const c = config.load();
   if (c.setupDone && c.walletDone) node.start();
+  if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
   updater.start();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); else if (win) { win.show(); win.focus(); } });
 });

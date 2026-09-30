@@ -1925,6 +1925,10 @@ async function renderSettings() {
     <div class="card"><div class="card__title">Appearance</div>
       <button class="btn btn--outline btn--full" id="setTheme">Theme: ${esc(CFG.theme)}</button>
     </div>
+    <div class="card"><div class="card__title">Open at login</div>
+      <div class="view__desc">Start minimaCore — and so your node — when you log in to this computer. It opens to the tray on Mac. Uses the OS login items on Mac and Windows and the autostart folder on Linux.</div>
+      <button class="btn btn--outline btn--full" id="setAutostart">${CFG.openAtLogin ? "Stop opening at login" : "Open at login"}</button>
+    </div>
     <div class="card"><div class="card__title">P2P Chance <span class="casino-18">18+</span></div>
       <div class="view__desc">Peer-to-peer games of chance (coin flip · dice · roulette), settled on-chain directly between two people — <b>no middleman, no house edge, true odds</b>. Real MINIMA is at stake. Hidden by default; enabling requires a one-time age self-certification.</div>
       <button class="btn btn--outline btn--full" id="setCasino">${CFG.casinoEnabled ? "Disable P2P Chance" : "Enable P2P Chance (18+)"}</button>
@@ -2022,6 +2026,14 @@ async function renderSettings() {
   el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
   el("diagGo").onclick = async () => { const c = el("diagCmd").value.trim(); if (!c) return; try { const r = await api.cmd(c); el("diagOut").textContent = JSON.stringify(r, null, 2); } catch (e) { el("diagOut").textContent = e.message; } };
   el("setTheme").onclick = () => { cycleTheme(); renderSettings(); };
+  el("setAutostart").onclick = async () => {
+    const on = !CFG.openAtLogin;
+    CFG = await api.saveConfig({ openAtLogin: on });
+    const li = CFG.loginItem || {};
+    if (li.ok === false) toast((on ? "Saved, but not registered: " : "Saved, but could not unregister: ") + (li.note || "unknown error"), "warn");
+    else toast(on ? "minimaCore will open when you log in ✓" : "minimaCore will no longer open at login", "ok");
+    renderSettings();
+  };
   el("setCasino").onclick = () => {
     if (CFG.casinoEnabled) {   // turn OFF — hide tab, leave the background processor to stop on next boot
       api.saveConfig({ casinoEnabled: false }).then(c => { CFG = c; });
