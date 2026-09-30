@@ -46,7 +46,14 @@ for (const p of PANELS) {
     // A var() the panel reads must be one the panel itself defines. Borrowing --accent/--surface from app.css
     // is how a panel silently starts following the shell's theme button again.
     const read = [...new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))];
-    const declared = new Set([...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((m) => m[1]));
+    // `@property --x { ... }` declares a token too - and more strongly than a plain custom property,
+    // since it also fixes its syntax and initial-value. Registering an animatable angle that way is the
+    // only way to transition one, so a panel that does it was failing this guard for declaring its token
+    // properly. The guard's point is that the token comes from the PANEL, not the shell, and it does.
+    const declared = new Set([
+      ...[...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((m) => m[1]),
+      ...[...css.matchAll(/@property\s+(--[a-z0-9-]+)/g)].map((m) => m[1]),
+    ]);
     const borrowed = read.filter((v) => !declared.has(v) && !SHARED_TOKENS.includes(v));
     assert.deepEqual(borrowed, [], "panel reads a colour/geometry token it does not define: " + borrowed.join(" "));
   });

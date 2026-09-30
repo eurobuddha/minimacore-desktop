@@ -52,7 +52,10 @@ const DEFAULTS = {
   network: "mainnet",        // mainnet | solo | custom  (a preset that fills the params below)
   customConnect: "",         // host:port for network=custom (folds into params.connect)
   peersUrl: "https://spartacusrex.com/minimapeers.txt",  // default -p2pnodes bootstrap list
-  megammrHost: "31.125.188.214:9001",  // megammrsync host for a seed RESTORE (app concept, not a jar param)
+  // A NAME, never a bare IP: this was 31.125.188.214, which is the Pi and has been reassigned to other
+  // duty. A hardcoded address that moves silently breaks seed RESTORE for every new install, and the
+  // user cannot tell a moved host from a broken restore. DNS lets the host move without a release.
+  megammrHost: "eurobuddha.com:9001",  // megammrsync host for a seed RESTORE (app concept, not a jar param)
   basePort: 12001,           // -port. 12001 avoids 9001 jar / 11001 android / 14001 classic / 16001 desktop
   contribute: false,         // "Contribute to the network": -server role + UPnP/NAT-PMP port mapping
   rpcPortManual: "",         // -rpc override; blank → basePort + 4
@@ -76,6 +79,12 @@ function load() {
   // Settings; a fresh install starts on the Parlons Node.
   if (!("nodeKind" in j) && j.setupDone) merged.nodeKind = "minima";
   if (merged.nodeKind !== "minima") merged.nodeKind = "parlons";
+  // One-time migration off the retired hardcoded host. A stored value wins over DEFAULTS (that is what
+  // Object.assign above does), and save() persists the whole merged object - so once an install has saved
+  // its config ONCE, it pins whatever megammrHost was current at the time. Without this, changing the
+  // default only ever helps fresh installs, and every existing one keeps pointing at 31.125.188.214, which
+  // is the Pi and has been reassigned. Matched exactly, so a host the user deliberately set is never touched.
+  if (merged.megammrHost === "31.125.188.214:9001") merged.megammrHost = DEFAULTS.megammrHost;
   // params: keep ONLY flags in the current manifest — a saved value wins, otherwise the default. This adds
   // any newly-supported flag and DROPS ones we've removed (e.g. the MDS flags minimaCore has no layer for),
   // so a stale config can never resurrect a flag we no longer expose.

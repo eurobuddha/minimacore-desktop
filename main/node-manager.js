@@ -24,7 +24,9 @@ const LOG_MAX_LINES = 800;
 // app's RPC client reaches unchanged on basePort+4 (it ignores the Basic auth header).
 const PARLONS_REFUSED = new Set(["rpc", "rpcenable", "rpcpassword", "rpccrlf", "seed", "anyseed", "dbpassword",
   "clean", "genesis", "test", "solo", "testchainlength", "daemon", "noshutdownhook", "jnlp", "help"]);
-const PARLONS_DEFAULT_ROOTNODE = "31.125.188.214:9001";   // the fork ships an empty node list: give it one peer
+// A NAME, never a bare IP - see main/config.js megammrHost. The fork ships an empty node list, so this
+// is the one peer a fresh install has; if it moves, that install has no way onto the network at all.
+const PARLONS_DEFAULT_ROOTNODE = "eurobuddha.com:9001";
 const HEALTH_EVERY_MS = 10_000;
 const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
 

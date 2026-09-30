@@ -116,6 +116,6 @@ launch died with "Database may be already in use".
 - Currently an **arm64** (Apple Silicon), **unsigned** build. Universal (x64) needs an x64 JRE; distribution
   wants Developer ID signing + notarization.
 - Pin the **updater repo** (the minima-core releases that publish `minima.jar`) and confirm the default
-  **mainnet peer / MegaMMR host** (`31.125.188.214:9001`).
+  **mainnet peer / MegaMMR host** (`eurobuddha.com:9001`).
 
 MIT licensed — see `LICENSE`.
