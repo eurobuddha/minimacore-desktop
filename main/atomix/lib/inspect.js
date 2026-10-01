@@ -63,7 +63,16 @@
                 L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': LOCKED — refundable at block ' + tl
                     + (f.block > 0 ? ' (~' + Math.max(0, Math.round((tl - f.block) * 50 / 60)) + ' min)' : ''));
             } else {
-                L.push('• Your ' + s.sellToken + ': not found in the last 1024 blocks at 2 confirmations. This does not prove it was spent; see the recorded-transaction line below.');
+                // Never render an empty bounded scan as a verdict. The lookup reaches a fixed number of
+                // blocks back, so a lock that is simply OLD returns nothing while sitting perfectly unspent
+                // on chain — live 2026-10-01, a 1,304-block-old lock whose owner was told it was spent.
+                // Say which case it is and what happens next. (native 0.1.68)
+                L.push('• Your ' + s.sellToken + ': not returned by the 1024-block lookup. This does NOT mean '
+                    + 'it was spent — the lookup only reaches 1024 blocks back, so a lock older than that '
+                    + 'returns nothing whether or not it is still there.'
+                    + (f.recordedLockCoin
+                        ? ' The coin was recorded while it was in range, so the refund is built from that record and does not need the scan.'
+                        : ' No coin was recorded for this swap, so it needs manual recovery — the coin id can be read from an archive node.'));
             }
         } else {
             L.push('• Your ' + s.sellAmount + ' ' + s.sellToken + ': ' + (f.myEthStillLocked == null ? 'UNKNOWN — Ethereum check unavailable' : f.myEthStillLocked ? 'LOCKED on Ethereum' : 'claimed or refunded'));

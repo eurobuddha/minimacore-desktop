@@ -288,11 +288,31 @@
             DB.hasEvent(s.hash, DB.EV_EXPIRED, function (e, have) {
                 if (have) return nextS();
                 H.scanByHashDeep(s.hash, 2, REFUND_SCAN_DEPTH, function (err, coins) {
+                    // An ERROR is not evidence the coin is gone — only an empty RESULT is. refund() signs
+                    // before txncheck, so acting on a failed lookup would burn a one-time Winternitz leaf in
+                    // exactly the condition (node unreachable) where it cannot possibly succeed.
+                    if (err) return nextS();
+                    var found = false;
                     F.each(coins || [], function (coin, j, nextC) {
-                        if (coin && isMyPublishKey(H.stateAt(coin, 0)) && sameHash(H.stateAt(coin, 5), s.hash))
+                        if (coin && isMyPublishKey(H.stateAt(coin, 0)) && sameHash(H.stateAt(coin, 5), s.hash)) {
+                            found = true;
                             checkExpiredMinima(coin, block, nextC);
-                        else nextC();
-                    }, nextS);
+                        } else nextC();
+                    }, function () {
+                        if (found) return nextS();
+                        // Out of the lookup window. We created this coin; rediscovering it was the mistake.
+                        DB.rememberedLockCoin(s.hash, function (e2, recorded) {
+                            if (!recorded) {
+                                log('refund ' + s.hash +
+                                    ': out of scan range and no recorded coin — needs manual recovery');
+                                return nextS();
+                            }
+                            // The NODE arbitrates: a coin genuinely spent, or a timelock not yet passed, fails
+                            // at txncheck and nothing is broadcast. The caller has already established from the
+                            // DB that this swap is non-terminal and past its own timelock.
+                            checkExpiredMinima(recorded, block, nextS);
+                        });
+                    });
                 });
             });
         }, done);
@@ -301,6 +321,11 @@
     /** A coin I locked (owner state[0]) past its timelock → reclaim it. */
     function checkExpiredMinima(coin, block, next) {
         var rawTimelock = H.stateAt(coin, 3), timelock = Number(rawTimelock);
+        // Record the coin the FIRST time we see it, expired or not. The scan window is a fixed walk back from
+        // the tip, so this lock WILL age out of view and we could then never refund it, because finding it was
+        // a precondition of refunding it. Best-effort and write-once; never blocks the pass. (native 0.1.68)
+        DB.rememberLockCoin(H.stateAt(coin, 5), coin.coinid, H.coinAmount(coin),
+            coin.tokenid || '0x00', H.stateAt(coin, 0));
         if (!/^[0-9]+$/.test(String(rawTimelock)) || !isFinite(timelock) || timelock > 2147483647 || block <= timelock) return next();
         var hash = H.stateAt(coin, 5), key = 'refundM:' + hash;
         DB.hasEvent(hash, DB.EV_EXPIRED, function (e, have) {

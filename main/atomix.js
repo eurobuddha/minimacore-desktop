@@ -65,6 +65,7 @@ function log(line) {
 // grabs that beacon dust → txnsign NPEs ("KeyRow.getPrivateKey() null") and the publish/withdraw fails. Fix:
 // pin these sends to the smallest SIMPLE (wallet-signable) MINIMA coin via `fromaddress:` so an unsignable coin
 // can never be selected. checkaddress → {simple:true} is the reliable signable test (beacon addrs return {}).
+const FUND_DURABLE_WRITE = /INSERT INTO `secrets`|UPDATE `swaps` SET `mycoinid`/i;   // see sql() — writes a refund or claim depends on
 const AX_PUBLISH_SEND = /^send\s+.*\bamount:0\.000000001\b.*\btokenid:0x00\b.*\bstate:/;
 const AX_PUBLISH_AMOUNT = 0.000000001;
 // Coins younger than this are NOT SPENDABLE yet, and `fromaddress:` pinned to one makes the node answer
@@ -155,9 +156,13 @@ function buildMds() {
     sql(query, cb) {
       sqlShim.sql(query, cb);
       // FUND-SAFETY DURABILITY: the H2 peers persist synchronously; our sqlite image is debounced 400ms. A
-      // crash in that window after a SECRET write (the preimage that claims a leg) would degrade an in-flight
-      // swap to refund-only — so secret writes flush the image synchronously. Rare row class; cost is trivial.
-      if (/INSERT INTO `secrets`/i.test(String(query))) { try { sqlShim.flush(); } catch (e) {} }
+      // crash in that window loses the row, so the two row classes that a refund or a claim DEPENDS on are
+      // flushed synchronously. Both are rare; the cost is trivial.
+      //   secrets    — the preimage that claims a leg; losing it degrades an in-flight swap to refund-only.
+      //   mycoinid   — the coin WE locked, written once on first sighting. It is the ONLY durable route to a
+      //                refund after the lock ages out of `coins depth:`; lose it and the coin is stranded,
+      //                which is the exact bug this record exists to prevent. (native 0.1.68)
+      if (FUND_DURABLE_WRITE.test(String(query))) { try { sqlShim.flush(); } catch (e) {} }
     },
     net: {
       GET(url, cb) {
@@ -530,8 +535,14 @@ async function inspect(hash) {
   }
   const secret = await p(cb => DB.getSecret(hash, cb)).catch(() => null);
   const events = await p(cb => DB.getEvents(hash, cb)).catch(() => []);
+  // Whether the lock coin was recorded decides what the report can honestly promise about a lock that has
+  // aged out of the scan window: refundable from the record, or needing manual recovery. Omit it and the
+  // report silently takes the wrong branch and tells the user to go and recover a coin the engine will
+  // actually refund by itself. (native 0.1.68)
+  const recorded = await p(cb => DB.rememberedLockCoin(hash, cb)).catch(() => null);
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address);
-  const facts = { swap: s, block, minimaError, secretKnown: !!secret, myMin, cpMin, gc: null, gcAmountHuman: "", myEthStillLocked: null, events: events || [] };
+  const facts = { swap: s, block, minimaError, secretKnown: !!secret, myMin, cpMin, gc: null, gcAmountHuman: "",
+    myEthStillLocked: null, recordedLockCoin: !!recorded, events: events || [] };
   if (s.myLegIsMinima) {
     const gc = await p(cb => ops.getContract(EO.contractId(hash), cb)).catch(e => { facts.ethError = e.message; return null; });
     if (gc) { facts.gc = gc; facts.gcAmountHuman = A.dec.formatUnits(gc.amount, String(gc.tokenContract).toLowerCase() === EO.NET.usdt.toLowerCase() ? EO.NET.usdtDecimals : 18); }
@@ -1095,6 +1106,7 @@ module.exports = {
   _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,
   _buildMds: buildMds,   // test-only: the MDS shim, so the cmd reply normalisation can be asserted
   _lastFailureNote: lastFailureNote,   // test-only: the Activity row's failure projection
+  _FUND_DURABLE_WRITE: FUND_DURABLE_WRITE,   // test-only: asserted against the SQL swapdb.js really emits
   _publishSendWithRetry: publishSendWithRetry,
   _ctx: () => ctx, _fire: fire,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed

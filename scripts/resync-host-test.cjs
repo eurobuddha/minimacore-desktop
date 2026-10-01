@@ -26,7 +26,7 @@ test('the retired IP is never ASSIGNED as a value', () => {
   // It may legitimately appear in two places: a comment recording the history, and the migration's
   // equality test (which has to name the old address to recognise it). What must never happen again is
   // the IP being the VALUE of a default.
-  for (const rel of ['main/config.js', 'config.js', 'main/node-manager.js']) {
+  for (const rel of ['main/config.js', 'main/node-manager.js']) {
     const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
     const assigned = src.split('\n').filter(l =>
       l.includes(RETIRED) &&
@@ -61,10 +61,12 @@ test('an install already pinned to the retired IP is migrated, not left behind',
     'the migration must adopt the current default rather than another hardcoded literal');
 });
 
-test('the root config.js duplicate has not drifted from the live one', () => {
-  // Nothing requires the root copy (every require is ./config from inside main/), but a stale duplicate
-  // carrying a dead address is precisely the trap this change removes.
-  const a = fs.readFileSync(path.join(ROOT, 'main/config.js'), 'utf8');
-  const b = fs.readFileSync(path.join(ROOT, 'config.js'), 'utf8');
-  assert.strictEqual(b, a, 'config.js and main/config.js have diverged');
+test('there is no root config.js duplicate to go stale', () => {
+  // There used to be a byte-identical copy at the repo root. NOTHING loaded it - every require is
+  // ./config from inside main/, and electron-builder packages only main/** and renderer/** - so its
+  // only effect was to need hand-mirroring, which 0.17.26 (openAtLogin) silently missed. A duplicate
+  // config nobody reads, quietly holding a dead megammrHost, is the exact trap 0.17.25 removed from
+  // the value; deleting the file removes it from the file layout. Don't bring it back.
+  assert.ok(!fs.existsSync(path.join(ROOT, 'config.js')),
+    'a root config.js is back - nothing loads it, so it can only drift from main/config.js');
 });

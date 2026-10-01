@@ -344,6 +344,24 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       const lost = "counterparty withdrew your 4.95 USDT and reclaimed their 5 mxUSDT at the timelock — our claim never posted";
       assert.equal(atomix._lastFailureNote([{ event: "SWAP_LOST", note: lost }, { event: "MINIMA_CLAIM_FAILED", note }]), lost);
     });
+    // ---- 0.17.27: the lock-coin record must be CRASH-DURABLE, like the secret ----
+    ok("the lock-coin write is in the synchronous-flush class, matched against the SQL swapdb really emits", () => {
+      // The sqlite image is debounced 400ms. `mycoinid` is the only durable route to a refund once the lock
+      // ages out of `coins depth:` — if a crash eats it, the coin is stranded, which is the very failure the
+      // record exists to prevent. This reads the statement out of the ENGINE so a reword on either side of
+      // the pair fails the build instead of silently leaving the row debounced.
+      const re = atomix._FUND_DURABLE_WRITE;
+      const src = fs.readFileSync(path.join(__dirname, "..", "main/atomix/lib/swapdb.js"), "utf8");
+      const body = src.slice(src.indexOf("function rememberLockCoin("));
+      const stmt = body.slice(body.indexOf('write("') + 7);
+      const emitted = stmt.slice(0, stmt.indexOf('"'));
+      assert.ok(/mycoinid/.test(emitted), "found the lock-coin statement, not something else: " + emitted);
+      assert.ok(re.test(emitted), "lock-coin write is NOT sync-flushed — regex missed: " + emitted);
+      // and the secret write it shares the class with
+      assert.ok(re.test("INSERT INTO `secrets` (`hash`,`secret`,`added`) VALUES ('0xa','0xb',1)"));
+      // a routine status update must NOT force a flush (that would defeat the debounce entirely)
+      assert.ok(!re.test("UPDATE `swaps` SET `status`='COMPLETE' WHERE `hash`='0xa'"));
+    });
     await okA("the shim hands a txncheck verdict to the engine untouched (normReply must not clobber `valid`)", async () => {
       const mds = atomix._buildMds();
       atomix._setRunner(async (cmd) => {

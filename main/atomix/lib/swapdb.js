@@ -56,7 +56,11 @@
             "CREATE TABLE IF NOT EXISTS `myhtlc` (`hash` varchar(200) NOT NULL PRIMARY KEY, `reqamount` text, `token` text, `eventdate` bigint)",
             "CREATE TABLE IF NOT EXISTS `swaps` (`hash` varchar(200) NOT NULL PRIMARY KEY, `role` varchar(20), `direction` varchar(40), " +
                 "`selltoken` varchar(40), `sellamount` text, `buytoken` varchar(40), `buyamount` text, `counterparty` text, " +
-                "`status` varchar(20), `contractid` varchar(200), `mytimelock` bigint, `mylegminima` int, `created` bigint, `updated` bigint)",
+                "`status` varchar(20), `contractid` varchar(200), `mytimelock` bigint, `mylegminima` int, `created` bigint, `updated` bigint, " +
+                // The coin WE locked. A refund must never depend on rediscovering it: `coins depth:` walks back
+                // a fixed number of blocks, so a lock ages out of view and the engine can then never refund it,
+                // because finding it was a precondition of refunding it. (native 0.1.68)
+                "`mycoinid` varchar(200), `mycoinamount` text, `mycointoken` varchar(200), `mycoinowner` text)",
             "CREATE TABLE IF NOT EXISTS `market_trades` (`coinid` varchar(200) NOT NULL PRIMARY KEY, `hash` varchar(200), " +
                 "`price` double, `size_minima` text, `req_amount` text, `req_token` text, `owner` text, `receiver` text, " +
                 "`created_block` bigint, `timelock` bigint, `observed_at` bigint, `status` varchar(20), `secret` text, " +
@@ -72,6 +76,10 @@
         // "IF NOT EXISTS": that clause is H2-only and SQLite (the desktop shim runs this same engine) rejects
         // it outright with a syntax error, so the H2-only spelling broke boot on desktop.
         var migrations = [
+            "ALTER TABLE `swaps` ADD COLUMN `mycoinid` varchar(200)",
+            "ALTER TABLE `swaps` ADD COLUMN `mycoinamount` text",
+            "ALTER TABLE `swaps` ADD COLUMN `mycointoken` varchar(200)",
+            "ALTER TABLE `swaps` ADD COLUMN `mycoinowner` text",
             "ALTER TABLE `market_trades` ADD COLUMN `tokenid` varchar(200)",
             "UPDATE `market_trades` SET `tokenid` = CASE WHEN `price` >= 0.5 THEN '" + AX.trading.USDT_TOKENID +
                 "' ELSE '" + AX.trading.MINIMA_TOKENID + "' END WHERE `tokenid` IS NULL OR `tokenid` = ''"
@@ -140,6 +148,49 @@
             esc(s.buyToken) + "','" + esc(s.buyAmount) + "','" + esc(s.counterparty) + "','" + esc(s.status) + "','" + esc(s.contractId) + "'," +
             num(s.myTimelock) + "," + (s.myLegIsMinima ? 1 : 0) + "," + num(s.created) + "," + now() + ")", cb);
     }
+    /**
+     * Remember the coin WE locked, the first time the engine sees it on-chain.
+     *
+     * Refunding our own lock must never depend on rediscovering it. `coins depth:` is a fixed walk back from
+     * the tip, so a lock ages out of view (256 blocks on the hot path, 1024 on the expired sweep) and from
+     * then on the engine cannot refund it, because it cannot find it. Live 2026-10-01: a 26.99025 MxUSD lock
+     * 1,304 blocks old, provably unspent in the archive, invisible to the app and reported as "spent/claimed"
+     * purely because the scan was empty. These four values are everything htlc.refund() needs.
+     *
+     * Write-once (`WHERE mycoinid IS NULL OR mycoinid=''`): the first sighting wins, so a later, worse scan
+     * can never overwrite a good record. (native 0.1.68)
+     */
+    function rememberLockCoin(hash, coinid, amount, tokenid, owner, cb) {
+        if (!hash || !coinid) return cb && cb(null);
+        write("UPDATE `swaps` SET `mycoinid`='" + esc(coinid) + "',`mycoinamount`='" + esc(amount) +
+            "',`mycointoken`='" + esc(tokenid) + "',`mycoinowner`='" + esc(owner) +
+            "' WHERE `hash`='" + esc(norm(hash)) + "' AND (`mycoinid` IS NULL OR `mycoinid`='')",
+            function () { cb && cb(null); });   // best-effort: never let bookkeeping break the settlement pass
+    }
+
+    /** The remembered lock coin in the shape htlc.refund() consumes, or null if we never saw it. */
+    function rememberedLockCoin(hash, cb) {
+        if (!hash) return cb(null, null);
+        read("SELECT `mycoinid`,`mycoinamount`,`mycointoken`,`mycoinowner`,`mytimelock` FROM `swaps` WHERE `hash`='" +
+            esc(norm(hash)) + "' LIMIT 1", function (e, rs) {
+            if (e || !rs.length || !rs[0].MYCOINID) return cb(null, null);
+            var r = rs[0];
+            cb(null, {
+                coinid: r.MYCOINID,
+                // BOTH fields, matching a real coin: a token coin carries amount (raw, token-scaled) AND
+                // tokenamount (the human value). coinAmount prefers tokenamount, which is what we stored.
+                tokenamount: r.MYCOINAMOUNT,
+                amount: r.MYCOINAMOUNT,
+                tokenid: r.MYCOINTOKEN,
+                // Port 3 is carried so this coin is valid for checkExpiredMinima too, which drops a coin whose
+                // timelock will not parse — silently, which is the very failure this record exists to prevent.
+                state: [{ port: 0, data: r.MYCOINOWNER },
+                        { port: 3, data: String(Number(r.MYTIMELOCK)) },
+                        { port: 5, data: norm(hash) }]
+            });
+        });
+    }
+
     function setSwapStatus(hash, status, cb) {
         write("UPDATE `swaps` SET `status`='" + esc(status) + "',`updated`=" + now() + " WHERE `hash`='" + esc(norm(hash)) + "'", cb);
     }
@@ -237,6 +288,7 @@
         logEvent: logEvent, hasEvent: hasEvent, getEvents: getEvents,
         insertMyHtlc: insertMyHtlc, getRequest: getRequest,
         upsertSwap: upsertSwap, setSwapStatus: setSwapStatus, setSwapContractId: setSwapContractId,
+        rememberLockCoin: rememberLockCoin, rememberedLockCoin: rememberedLockCoin,
         getSwap: getSwap, deleteSwap: deleteSwap, allSwaps: allSwaps, activeHashes: activeHashes,
         upsertOpenTrade: upsertOpenTrade, openTrades: openTrades, tradeByHash: tradeByHash, markTradeExecuted: markTradeExecuted,
         markTradeRefunded: markTradeRefunded, recentTrades: recentTrades, executedTrades: executedTrades
