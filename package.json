@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.17.29",
+  "version": "0.17.30",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -160,6 +160,6 @@
     "qrcode-generator": "^2.0.4",
     "sql.js": "^1.13.0"
   },
-  "parlonsNode": "0.2.120",
-  "parlonsNodeSha256": "9ad6f9618df4a3d1b0d77d05ac0f110f9bbadd9daf7dc193b9067f76c9937c33"
+  "parlonsNode": "0.2.121",
+  "parlonsNodeSha256": "d74dd8946801ab809c258269d7c0a1cd0825afa8f8ef791c3e06026444133738"
 }
