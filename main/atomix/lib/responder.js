@@ -49,6 +49,23 @@
     /** Strict positive decimal-string check for ON-CHAIN state values that later reach BigInt parsing (parseUnits):
      *  a crafted non-numeric state[1] would otherwise throw inside an async MDS callback and wedge the poll loop. */
     function validDec(s) { return /^[0-9]+(\.[0-9]+)?$/.test(String(s == null ? '' : s).trim()); }
+    /** EXACT decimal compare of a vs b×c (-1/0/1). The accept-gates compared the taker's requested amount against
+     *  amount×price as a DOUBLE product, and 44.4×0.99 = 43.955999999999996 < the exactly-priced 43.956 the taker
+     *  (native, BigDecimal) computed — so a take sitting exactly ON the published price was silently declined every
+     *  poll until it refunded at timelock (live 2026-10-05). Exactly-priced takes are the COMMON case, not an edge.
+     *  Scaled-BigInt compare, exact at any length; a non-plain-decimal input (scientific notation) falls back to
+     *  the old float compare, which is never worse than before. */
+    function cmpAmtMul(a, b, c) {
+        var re = /^[0-9]+(\.[0-9]+)?$/, as = String(a).trim(), bs = String(b).trim(), cs = String(c).trim();
+        if (!re.test(as) || !re.test(bs) || !re.test(cs)) {
+            var f = num(a) - num(b) * num(c); return f < 0 ? -1 : f > 0 ? 1 : 0;
+        }
+        function parse(s) { var i = s.indexOf('.'); return i < 0 ? [BigInt(s), 0] : [BigInt(s.slice(0, i) + s.slice(i + 1)), s.length - i - 1]; }
+        var A = parse(as), B = parse(bs), C2 = parse(cs);
+        var av = A[0], bv = B[0] * C2[0], d = A[1] - (B[1] + C2[1]);
+        if (d < 0) av *= 10n ** BigInt(-d); else bv *= 10n ** BigInt(d);
+        return av < bv ? -1 : av > bv ? 1 : 0;
+    }
 
     // ============================ accept-guards (the fund-safety boundary) ============================
     /** Taker SELLS mxUSDT to me (they locked mxUSDT wanting USDT). Auto-lock only if it fits an enabled BID tranche:
@@ -58,16 +75,17 @@
         if (!p || !p.en) return false;
         var giveRaw = H.stateAt(coin, 1);                          // USDT they requested, I'd pay (ON-CHAIN, hostile)
         if (!validDec(giveRaw)) return false;                      // non-numeric → decline (never reach BigInt parse)
-        var recvMinima = num(H.coinAmount(coin));                  // mxUSDT the taker locked, I receive
+        var recvRaw = H.coinAmount(coin);                          // mxUSDT the taker locked, I receive
+        var recvMinima = num(recvRaw);
         var giveUsdt = num(giveRaw);
         if (recvMinima <= 0 || giveUsdt <= 0) return false;        // 0-request = malformed take, decline (gas waste)
         if (validPos(p.min) && recvMinima < p.min) return false;
-        if (!p.bids.length) return validPos(p.sell) && giveUsdt <= recvMinima * p.sell;   // legacy scalar
+        if (!p.bids.length) return validPos(p.sell) && cmpAmtMul(giveRaw, recvRaw, p.sell) <= 0;   // legacy scalar
         for (var i = 0; i < p.bids.length; i++) {
             var t = p.bids[i];
             if (!validPos(t.p) || !validPos(t.a)) continue;
             if (recvMinima > t.a) continue;                       // per-take cap
-            if (giveUsdt <= recvMinima * t.p) return true;
+            if (cmpAmtMul(giveRaw, recvRaw, t.p) <= 0) return true;   // EXACT: I pay ≤ received × price
         }
         return false;
     }
@@ -80,16 +98,17 @@
         if (!c.tokenContract || String(c.tokenContract).toLowerCase() !== EO.NET.usdt.toLowerCase()) return false;
         var p = pair(order);
         if (!p || !p.en) return false;
-        var giveMinima = num(D.formatUnits(c.requestAmount, 18));                 // mxUSDT I'd give
-        var recvUsdt = num(D.formatUnits(c.amount, decimalsOf(c.tokenContract))); // USDT I'd receive
+        var giveRaw = D.formatUnits(c.requestAmount, 18);                 // mxUSDT I'd give
+        var recvRaw = D.formatUnits(c.amount, decimalsOf(c.tokenContract)); // USDT I'd receive
+        var giveMinima = num(giveRaw);
         if (giveMinima <= 0) return false;
         if (validPos(p.min) && giveMinima < p.min) return false;
-        if (!p.asks.length) return validPos(p.buy) && recvUsdt >= giveMinima * p.buy;   // legacy scalar
+        if (!p.asks.length) return validPos(p.buy) && cmpAmtMul(recvRaw, giveRaw, p.buy) >= 0;   // legacy scalar
         for (var i = 0; i < p.asks.length; i++) {
             var t = p.asks[i];
             if (!validPos(t.p) || !validPos(t.a)) continue;
             if (giveMinima > t.a) continue;                       // per-take cap
-            if (recvUsdt >= giveMinima * t.p) return true;
+            if (cmpAmtMul(recvRaw, giveRaw, t.p) >= 0) return true;   // EXACT: I receive ≥ given × price
         }
         return false;
     }

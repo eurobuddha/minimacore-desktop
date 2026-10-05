@@ -1,7 +1,7 @@
 {
   "main/atomix.js": {
-    "mtime": 1790887870.3834906,
-    "ast_hash": "7e681d943b059eed26c5c54a99cc5f7d",
+    "mtime": 1789649445.518609,
+    "ast_hash": "4cf5dbaddff6f6101f193ed075eed053",
     "semantic_hash": ""
   },
   "main/atomix/crypto/ax_eth.js": {
@@ -75,8 +75,8 @@
     "semantic_hash": "eea384592a17a2787f91121011662afb"
   },
   "main/atomix/lib/inspect.js": {
-    "mtime": 1790887303.6314018,
-    "ast_hash": "048bbf73d2c2821647e13873fb6d65b5",
+    "mtime": 1789939251.1063528,
+    "ast_hash": "b47b677748c549a498cb87f6cdde1b0d",
     "semantic_hash": ""
   },
   "main/atomix/lib/maker.js": {
@@ -130,13 +130,13 @@
     "semantic_hash": "95d6054536197628570c8b81c1bb5e2d"
   },
   "main/atomix/lib/settle.js": {
-    "mtime": 1790887303.6272752,
-    "ast_hash": "8752c0b057332f2cee1d57da72db8c31",
+    "mtime": 1789649445.476126,
+    "ast_hash": "e5a6f02f82ec7f3bce53cc46018d1b4f",
     "semantic_hash": ""
   },
   "main/atomix/lib/swapdb.js": {
-    "mtime": 1790887303.623124,
-    "ast_hash": "069b0d169bd328f41ab4ccf00dc7597c",
+    "mtime": 1789649445.4791634,
+    "ast_hash": "e687b89f584791536a1785a002b200a3",
     "semantic_hash": ""
   },
   "main/atomix/lib/swapplan.js": {
@@ -385,8 +385,8 @@
     "semantic_hash": "55ece262a691f9306e477b69ade2adc6"
   },
   "package.json": {
-    "mtime": 1791154664.873049,
-    "ast_hash": "d5306f7ed667f050e6dd7a8b3ef014e5",
+    "mtime": 1790782206.6254866,
+    "ast_hash": "675387795513b6e6a473dc0eba4a4167",
     "semantic_hash": ""
   },
   "preflight-portmap.mjs": {
@@ -430,8 +430,8 @@
     "semantic_hash": "7eb39b558543121dabbde03be33e8d22"
   },
   "scripts/atomix-unit.js": {
-    "mtime": 1790887870.3841934,
-    "ast_hash": "aa76658794fefd8594a03e1af4f0a43d",
+    "mtime": 1789649445.5194397,
+    "ast_hash": "d653cb42e1a2638a2e44b9b5a7aca141",
     "semantic_hash": ""
   },
   "scripts/casino-glue-test.js": {
@@ -739,6 +739,11 @@
     "ast_hash": "849a395953535d0e725ebedc62a0f111",
     "semantic_hash": ""
   },
+  "config.js": {
+    "mtime": 1790774450.340079,
+    "ast_hash": "0dbe025fc0f7f22963d0f43894ed17e1",
+    "semantic_hash": ""
+  },
   "main/nodelog.js": {
     "mtime": 1789649509.5960197,
     "ast_hash": "afee1ca05c1d1971a2d92e722f4baf81",
@@ -790,8 +795,8 @@
     "semantic_hash": ""
   },
   "scripts/resync-host-test.cjs": {
-    "mtime": 1790887671.6715002,
-    "ast_hash": "81c1a28ce8b96fc8db2883eaf140a50d",
+    "mtime": 1790774494.266028,
+    "ast_hash": "7a80a8b78d62c9c9b22efd88b3b70cda",
     "semantic_hash": ""
   },
   "main/loginitem.js": {
