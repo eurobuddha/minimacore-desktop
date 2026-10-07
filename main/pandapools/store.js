@@ -396,7 +396,7 @@ var Store = (function () {
         cb=cb||function(){};
         if(!ready||!recoveryReady||!p||!p.address||!p.opk||!p.oadr||!p.tok||!p.kmin){cb(false);return;}
         var a=esc(p.address.toLowerCase()),script=p.covenantScript||p.script||Covenant.script(p.opk,p.oadr,p.tok,p.kmin);
-        var uses=ReserveRecovery.integer(p.minimumOwnerUses,262144)?Number(p.minimumOwnerUses):-1,hold=p.signingStateUnverified===true?1:0,insertHold=p.signingStateUnverified===false?0:1;
+        var uses=ReserveRecovery.integer(p.minimumOwnerUses,268435456)?Number(p.minimumOwnerUses):-1,hold=p.signingStateUnverified===true?1:0,insertHold=p.signingStateUnverified===false?0:1;
         var vals="'"+a+"','"+esc(p.mxaddress||"")+"','"+esc(p.opk)+"','"+esc(p.oadr)+"','"+esc(p.tok)+"',"+(ReserveRecovery.integer(p.tokDecimals,44)?Number(p.tokDecimals):8)+",'"+esc(String(p.kmin))+"','"+esc(script)+"',"+uses+","+insertHold;
         // No DELETE gap. Existing recipes remain intact if a write fails or another context records them.
         MDS.sql("INSERT INTO pp_ownpools (address,mx,opk,oadr,tok,tdec,kmin,script,opkuses,signing_unverified) SELECT "+vals+" WHERE NOT EXISTS (SELECT 1 FROM pp_ownpools WHERE address='"+a+"')",function(){
@@ -438,7 +438,7 @@ var Store = (function () {
     }
     // Called only after the owner's explicit current-wallet/other-signers attestation.
     function ownAcknowledge(opk,uses,cb){
-        if(!recoveryReady||!/^0x[0-9a-fA-F]{64}$/.test(opk)||!ReserveRecovery.integer(uses,262143)){cb(false);return;}
+        if(!recoveryReady||!/^0x[0-9a-fA-F]{64}$/.test(opk)||!ReserveRecovery.integer(uses,268435455)){cb(false);return;}
         var k=opk.toLowerCase();
         ownAll(function(ps,ok){
             var matching=ps.filter(function(p){return p.opk.toLowerCase()===k;});

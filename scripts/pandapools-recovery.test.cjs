@@ -178,3 +178,26 @@ test('one card per pool, carrying BOTH identifiers and the retire action',async(
  assert(desktopCard.includes('data-ppconfirm'));assert(!desktopCard.includes('data-ppwd'));
  }finally{h.close();}
 });
+
+test('block-mode keys reach the real signing boundary and recovery confirmation',async()=>{
+ const h=await harness();try{
+  const uses=2342219,base=standard(h,[coin(1),coin(2,tok)]);
+  h.set(q=>q==='keys'||q.startsWith('keys action:list')?good([{publickey:opk,uses,size:128,depth:4,modifier:'0x40'}]):base(q));
+  assert.equal(await invoke(h.c.ReserveRecovery.checkSignature,[hash(1)],'auto'),null);
+  h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);
+  assert.equal(await invoke(h.c.ReserveRecovery.confirmKey,opk),true);
+  const ps=await invoke(h.c.Store.ownAll);assert.equal(ps[0].minimumOwnerUses,uses);assert.equal(ps[0].signingStateUnverified,false);
+  assert.equal(await invoke(h.c.ReserveRecovery.checkSignature,[hash(1)],opk),null);
+ }finally{h.close();}
+});
+test('block-mode support preserves legacy exhaustion and restored-key quarantine',async()=>{
+ const h=await harness();try{
+  const base=standard(h,[coin(1)]);
+  h.set(q=>q==='keys'||q.startsWith('keys action:list')?good([{publickey:opk,uses:262144,size:64,depth:3}]):base(q));
+  assert.notEqual(await invoke(h.c.ReserveRecovery.checkSignature,[hash(1)],'auto'),null);
+  assert.equal(await invoke(h.c.ReserveRecovery.confirmKey,opk),false);
+  h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);
+  h.set(q=>q==='keys'||q.startsWith('keys action:list')?good([{publickey:opk,uses:2342219,size:128,depth:4}]):base(q));
+  assert.notEqual(await invoke(h.c.ReserveRecovery.checkSignature,[hash(1)],'auto'),null);
+ }finally{h.close();}
+});

@@ -993,7 +993,7 @@ var PoolMgr = (function () {
                 var k = arr[i];
                 if (k && String(k.publickey || "").toLowerCase() === want && k.uses !== undefined) {
                     var mod = parseModifier(k.modifier);
-                    cb(ReserveRecovery.integer(k.uses,262144) ? Number(k.uses) : null, mod === null ? -1 : mod);
+                    cb(ReserveRecovery.integer(k.uses,268435456) ? Number(k.uses) : null, mod === null ? -1 : mod, ReserveRecovery.capacityOfRow(k));
                     return;
                 }
             }

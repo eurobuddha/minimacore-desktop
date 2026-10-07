@@ -3,13 +3,30 @@
  * Recovery never regenerates keys, estimates historic leaf use, signs, or posts transactions.
  * Requires the existing Decimal, Covenant, Curve, Store and PoolMgr modules at call time. */
 var ReserveRecovery = (function () {
-    var NOTICE = "Keep ONE of these: a current MinimaCore wallet backup (restores the owner key and its signature counter \u2014 recovery just works), or this pool recipe plus your seed phrase (the recipe records which key the pool uses and what it had spent; recovery then ends with one node command that sets the counter). A seed phrase ALONE is not enough. Coin proofs expire; the recipe does not.";
+    var NOTICE = "Keep ONE of these: a current MinimaCore wallet backup (restores the owner key and its signature counter \u2014 recovery just works), or this pool recipe plus your seed phrase (the recipe records which key the pool uses and what it had spent; recovery then ends with one node command that sets the counter). Restore in the SAME key mode that created the pool: classic and block-mode seeds derive different owner keys. Close or migrate classic pools from a classic node before changing mode. A seed phrase ALONE is not enough. Coin proofs expire; the recipe does not.";
     function key(v) { return String(v || "").toLowerCase(); }
     function hex(v) { return typeof v === "string" && /^0x(?:[0-9a-fA-F]{2})+$/.test(v); }
     function hash(v) { return typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v); }
     function truth(v) { return v === true || v === "true"; }
     function good(j) { return !!j && truth(j.status) && !truth(j.pending); }
     function integer(v, max) { return (typeof v === "number" || typeof v === "string" && /^\d+$/.test(v)) && isFinite(Number(v)) && Number(v) >= 0 && Math.floor(Number(v)) === Number(v) && Number(v) <= max; }
+    // Legacy keys are 64x3 Winternitz trees (262,144 one-time signatures). Nodes running
+    // -blockaskeyuses (minima-core 1.1.2.31+) mint 128x4 trees (268,435,456) and a key's `uses`
+    // tracks the chain tip BLOCK NUMBER, so exhaustion must be judged against the key's OWN
+    // capacity (size^depth from its row), never the legacy literal - the legacy bound would brand
+    // every healthy block-mode key as spent and freeze ALL signing.
+    var LEGACY_TREE_USES = 262144, MAX_TREE_USES = 268435456;
+    function capacityOfRow(row) {
+        if (!row || !integer(row.size, 100000) || !integer(row.depth, 8)) return LEGACY_TREE_USES;
+        var size = Number(row.size), depth = Number(row.depth);
+        if (size <= 1 || depth <= 0) return LEGACY_TREE_USES;
+        var cap = 1;
+        // Clamped at 128^4: upstream briefly built 192x4 trees (never released). A clamped
+        // capacity under-reports such a key and its uses beyond the parse bound read as
+        // unreadable - both fail CLOSED, the right direction for a signing guard.
+        for (var d = 0; d < depth; d++) { cap *= size; if (cap > MAX_TREE_USES) return MAX_TREE_USES; }
+        return cap;
+    }
     function rows(j) { return good(j) && Array.isArray(j.response) ? j.response : null; }
     function local(q, cb) { MDS.cmd(q, cb); }
     // Reuse ActivityChain's once-only, bounded callback wrapper. No timed-out operation is retried here.
@@ -20,7 +37,7 @@ var ReserveRecovery = (function () {
     }
     function validRecipe(e) {
         if (!e || !hash(e.addr) || !hash(e.opk) || !hash(e.oadr) || !hash(e.tok) || !integer(e.dec,44)) return false;
-        if (e.opkuses !== undefined && !integer(e.opkuses,262144)) return false;
+        if (e.opkuses !== undefined && !integer(e.opkuses,MAX_TREE_USES)) return false;
         if (typeof e.kmin !== "string" || e.kmin.length > 80 || !/^\d+(?:\.\d+)?$/.test(e.kmin)) return false;
         try {
             if (!new Decimal(e.kmin).gt(0) || !new Decimal(e.kmin).lt(Covenant.MININUMBER_MAX)) return false;
@@ -33,7 +50,7 @@ var ReserveRecovery = (function () {
     function pool(e) { return {address:e.addr,mxaddress:e.mx||"",opk:e.opk,oadr:e.oadr,tok:e.tok,tokDecimals:Number(e.dec),kmin:e.kmin,covenantScript:e.script,script:e.script,minimumOwnerUses:e.opkuses===undefined?-1:Number(e.opkuses)}; }
     function entry(p) {
         var e = {addr:p.address,mx:p.mxaddress||"",opk:p.opk,oadr:p.oadr,tok:p.tok,dec:p.tokDecimals==null?8:p.tokDecimals,kmin:String(p.kmin),script:p.covenantScript||p.script||Covenant.script(p.opk,p.oadr,p.tok,p.kmin)};
-        if (integer(p.minimumOwnerUses,262144)) e.opkuses=Number(p.minimumOwnerUses);
+        if (integer(p.minimumOwnerUses,MAX_TREE_USES)) e.opkuses=Number(p.minimumOwnerUses);
         return e;
     }
     function coinFor(p,c) {
@@ -197,7 +214,7 @@ var ReserveRecovery = (function () {
                 if(i===recipes.length){cb({json:JSON.stringify({pandapools_backup:3,recovery_notice:NOTICE,pools:out},null,2)});return;}
                 var p=recipes[i++],e=entry(p);out.push(e);
                 PoolMgr.readKeyUses(p.opk,function(uses,kidx){
-                    if(integer(uses,262144)){
+                    if(integer(uses,MAX_TREE_USES)){
                         e.opkuses=Math.max(Number(uses),p.minimumOwnerUses||0);p.minimumOwnerUses=e.opkuses;
                         if(height>0)e.atblock=height;
                         if(Number(uses)<e.opkuses)e.signing_warning="Node counter is below a recorded count.";
@@ -232,7 +249,7 @@ var ReserveRecovery = (function () {
     function keyRows(j){var r=j&&j.response;return good(j)?(Array.isArray(r)?r:r&&Array.isArray(r.keys)?r.keys:null):null;}
     function checkedKeys(wanted,j,ps){
         var rs=keyRows(j),missing={};wanted.forEach(function(k){if(k)missing[key(k)]=true;});
-        if(rs)rs.forEach(function(r){if(r&&integer(r.uses,262143))delete missing[key(r.publickey)];});
+        if(rs)rs.forEach(function(r){if(r&&integer(r.uses,MAX_TREE_USES)&&Number(r.uses)<capacityOfRow(r))delete missing[key(r.publickey)];});
         ps.forEach(function(p){if(wanted.map(key).indexOf(key(p.opk))<0)return;
             if(classifySigning(p,rs)!==null)missing[key(p.opk)]=true;
         });return Object.keys(missing);
@@ -248,9 +265,13 @@ var ReserveRecovery = (function () {
         if(!Array.isArray(rs))return "NODE_UNREADABLE";                     // no key list ⇒ we know NOTHING
         var row=rs.filter(function(r){return key(r.publickey)===key(p.opk);})[0];
         if(!row)return "KEY_ABSENT";                                        // parsed fine, key is not here
-        if(!integer(row.uses,262144))return "NODE_UNREADABLE";              // present but unparsable is still unknown
+        // The parse bound is the LARGEST tree's capacity: a corrupt legacy counter in
+        // (262144, 268435456] reads KEY_EXHAUSTED rather than NODE_UNREADABLE - both fail
+        // closed, and for the common cause (a block-mode number on a legacy-shape row)
+        // "exhausted" is the actionable answer.
+        if(!integer(row.uses,MAX_TREE_USES))return "NODE_UNREADABLE";       // present but unparsable is still unknown
         var uses=Number(row.uses);
-        if(uses>=262144)return "KEY_EXHAUSTED";                             // every one-time signature spent
+        if(uses>=capacityOfRow(row))return "KEY_EXHAUSTED";                 // every one-time signature spent
         if(p.minimumOwnerUses>=0&&uses<p.minimumOwnerUses)return "COUNTER_REGRESSED";
         if(typeof Store!=="undefined"&&Store.confirmationFailed(p.opk))return "CONFIRMATION_UNSAVED";
         if(p.signingStateUnverified)return "SIGNING_QUARANTINED";
@@ -267,7 +288,7 @@ var ReserveRecovery = (function () {
             case "NODE_UNREADABLE": return "PandaPools could not read this node's key list, so it does not know "
                 + "whether this key can sign. This says nothing about the key itself — do not change anything "
                 + "about your wallet on the strength of this message. Nothing was posted."+tail;
-            case "KEY_EXHAUSTED": return "This owner key has used all 262,144 of its one-time signatures and can "
+            case "KEY_EXHAUSTED": return "This owner key has used all of its one-time signatures and can "
                 + "never sign again. Any funds still held under it cannot be moved."+tail;
             case "COUNTER_REGRESSED": return "This node says the pool's owner key has used "+nodeUses+" one-time "
                 + "signatures, but your saved recipe recorded "+floor+". Signing here would reuse a signature and "
@@ -355,7 +376,7 @@ var ReserveRecovery = (function () {
         Store.kvSet("recovery_archive",url,function(){Store.kvGet("recovery_archive",function(saved,ok){cb(ok!==false&&saved===url);});});
     }
     function confirmKey(opk,cb){
-        PoolMgr.readKeyUses(opk,function(uses){if(!integer(uses,262143)){cb(false);return;}Store.ownAcknowledge(opk,Number(uses),cb);});
+        PoolMgr.readKeyUses(opk,function(uses,kidx,capacity){if(!integer(uses,MAX_TREE_USES)||!(Number(uses)<capacity)){cb(false);return;}Store.ownAcknowledge(opk,Number(uses),cb);});
     }
     // Mirror core txnsign:auto: only actual simple script rows supply automatic signing keys.
     function checkSignature(ids,signer,cb){
@@ -379,5 +400,5 @@ var ReserveRecovery = (function () {
             });
         }call(local,"checkmode",function(j){if(!j||!j.response||j.response.writemode!==true){cb("Enable PandaPools WRITE mode in MiniHub before signing; deferred signature approvals are not supported.");return;}input(0);});
     }
-    return {restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
+    return {capacityOfRow:capacityOfRow,restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
 })();
