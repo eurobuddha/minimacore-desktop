@@ -15,14 +15,27 @@ REMOTE_DIR="/var/www/html/pandaapps"
 FEED="pandaapps/minimacore-desktop.json"
 SHA=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
 SIZE=$(stat -f%z "$DMG")
+# Keep the CI artifact and publish the notarized installer under its own immutable name.
+SIGNED_DMG="${DMG%.dmg}-notarized.dmg"
+if [ -e "$SIGNED_DMG" ]; then
+  cmp -s "$DMG" "$SIGNED_DMG" || { echo "conflicting local signed artifact: $SIGNED_DMG"; exit 1; }
+else
+  cp -p "$DMG" "$SIGNED_DMG"
+fi
+DMG="$SIGNED_DMG"
 echo "== GitHub release v$VER"
 if gh release view "v$VER" -R "$REPO" > /dev/null 2>&1; then
-  gh release upload "v$VER" "$DMG" --clobber -R "$REPO"
+  REMOTE_SHA=$(gh api "repos/$REPO/releases/tags/v$VER" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((a.get("digest") or "unknown" for a in d["assets"] if a["name"]==sys.argv[1]), ""))' "$(basename "$DMG")")
+  case "$REMOTE_SHA" in
+    "") gh release upload "v$VER" "$DMG" -R "$REPO" ;;
+    "sha256:$SHA") echo "identical notarized installer already published" ;;
+    *) echo "conflicting published artifact; refusing to replace it"; exit 1 ;;
+  esac
 else
   gh release create "v$VER" "$DMG" --title "minimaCore Desktop $VER" --notes "$NOTES
 sha256 $SHA" -R "$REPO"
 fi
-FILE_URL="https://github.com/$REPO/releases/download/v$VER/minimaCore-$VER-arm64.dmg"
+FILE_URL="https://github.com/$REPO/releases/download/v$VER/minimaCore-$VER-arm64-notarized.dmg"
 echo "== feed"
 mkdir -p pandaapps
 python3 - "$VER" "$NOTES" "$FILE_URL" "$SHA" "$SIZE" "$FEED" <<'PY'
