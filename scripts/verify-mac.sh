@@ -35,6 +35,9 @@ echo "$ASSESS" | grep -q 'Notarized Developer ID' || { echo "FAIL: Gatekeeper do
 echo "ok: spctl accepts the app (Notarized Developer ID)"
 
 echo "== dmg: $DMG"
+DINFO=$(codesign -dv --verbose=2 "$DMG" 2>&1 || true)
+echo "$DINFO" | grep -q 'Authority=Developer ID Application' || { echo "FAIL: dmg container not signed with Developer ID Application"; exit 1; }
+codesign --verify --strict "$DMG" && echo "ok: dmg container signature verified"
 xcrun stapler validate "$DMG" > /dev/null && echo "ok: notarization ticket stapled to the dmg" \
   || { echo "FAIL: no ticket stapled to the dmg — run scripts/notarize-dmg.sh"; exit 1; }
 DASSESS=$(spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 || true)
