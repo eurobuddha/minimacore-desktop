@@ -119,6 +119,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/fetch-parlons-node-jar.sh
 
+      # The keets sidecar's node_modules are never in git: exact-pinned install from the committed lockfile.
+      - name: Install keets sidecar deps
+        shell: bash
+        run: bash scripts/fetch-keets-sidecar.sh
+
       - name: Build installer
         shell: bash
         run: npx electron-builder ${{ matrix.ebflag }} --publish never

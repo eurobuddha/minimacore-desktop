@@ -16,7 +16,7 @@
  * as a persisted -seed arg.
  */
 (function (root) {
-  var MANAGED = ["data", "basefolder", "port", "rpc", "rpcenable", "rpcpassword", "daemon", "seed", "anyseed"];
+  var MANAGED = ["data", "basefolder", "port", "rpc", "rpcenable", "rpcpassword", "daemon", "seed", "anyseed", "keetssidecar", "keetsnode"];
 
   var GROUPS = [
     { group: "Node role & P2P networking", items: [
@@ -33,7 +33,11 @@
       { flag: "p2pnodes",         type: "value", label: "P2P nodes / list URL (-p2pnodes)", help: "List of nodes, or a URL to a peers file, used when your peers list is empty.", def: "https://spartacusrex.com/minimapeers.txt" },
       { flag: "connect",          type: "value", label: "Manual connect list (-connect)",  help: "Disable P2P and connect only to this host:port list.", def: "" },
       { flag: "slavenode",        type: "value", label: "Slave node (-slavenode)",         help: "Connect to this node only; accept only TxBlock messages.", def: "" },
-      { flag: "allowgenmessage",  type: "bool",  label: "Allow simple messages (-allowgenmessage)", help: "Allow simple messages sent from peers.", def: false }
+      { flag: "allowgenmessage",  type: "bool",  label: "Allow simple messages (-allowgenmessage)", help: "Allow simple messages sent from peers.", def: false },
+      { flag: "keets",            type: "bool",  label: "keets transport (-keets)",        help: "Hyperswarm/HyperDHT transport: this node becomes dialable by its Noise pubkey even behind NAT (no port forwarding). Runs the bundled sidecar; classic TCP peers are unaffected.", def: true },
+      { flag: "keetsbootstrap",   type: "value", label: "keets bootstrap list (-keetsbootstrap)", help: "HyperDHT bootstrap host:port list. Blank = the baked-in owner-run 7-node fleet.", def: "" },
+      { flag: "keetsconnect",     type: "value", label: "keets connect pubkeys (-keetsconnect)", help: "Comma-separated keets public keys to dial directly (pin your home node).", def: "" },
+      { flag: "keetsmaxconns",    type: "int",   label: "keets max connections (-keetsmaxconns)", help: "Max concurrent keets links (node default 6).", def: "" }
     ]},
     { group: "Sync & storage", items: [
       { flag: "nosyncibd",        type: "bool",  label: "Skip heavy IBD (-nosyncibd)",     help: "Don't sync the full initial block download — light client follows the tip fast.", def: true },

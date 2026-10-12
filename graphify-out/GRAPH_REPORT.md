@@ -1,21 +1,21 @@
-# Graph Report - minimacore-desktop  (2026-10-01)
+# Graph Report - minimacore-desktop  (2026-10-07)
 
 ## Corpus Check
-- 156 files · ~354,503 words
+- 156 files · ~355,058 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2983 nodes · 6295 edges · 159 communities (141 shown, 18 thin omitted)
+- 2985 nodes · 6303 edges · 160 communities (142 shown, 18 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 585 edges (avg confidence: 0.6)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ace98180`
+- Built from commit: `3f4b1896`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- waitSign
+- poolmgr.js
 - app.js
 - atomix-unit.js
 - ui.js
@@ -52,7 +52,7 @@
 - htlc.js
 - main.js
 - pandapools.js
-- portmap.js
+- PortMapper
 - vestr.js
 - peg.js
 - renderer/mail.js
@@ -82,7 +82,7 @@
 - ethTokensLoad
 - hex.js
 - trading.js
-- book.js
+- portmap.js
 - build
 - identity.js
 - identitywatch.js
@@ -144,19 +144,19 @@
 - ethSendReview
 - termcomplete.js
 - beginHunt
-- poolmgr.js
+- sqlEsc
 - pinMinimaSend
 - init
 - pandapools/loader.js
-- address
+- createPool
 - panels-test.cjs
-- rpcCall
+- gated
 - casinoart.js
 - minimaCore Desktop 0.16.39 activity parity review
 - dependencies
 - loginitem-test.cjs
 - Review — minimaCore Desktop 0.16.87
-- atomix/service.js
+- init
 - el
 - createAnchor
 - Open-offer keepalive — APK 0.7.2 / MDS 2.9.2 / desktop integration branch
@@ -166,6 +166,7 @@
 - REVIEW-0.16.54.md
 - resync-host-test.cjs
 - devDependencies
+- atomix/service.js
 
 ## God Nodes (most connected - your core abstractions)
 1. `el()` - 76 edges
@@ -182,23 +183,23 @@
 ## Surprising Connections (you probably didn't know these)
 - `withServer()` --indirect_call--> `resolve()`  [INFERRED]
   scripts/rpc-test.cjs → main/casino.js
-- `casinoRefresh()` --indirect_call--> `p()`  [INFERRED]
-  renderer/casino.js → main/atomix.js
-- `ppMineHtml()` --indirect_call--> `p()`  [INFERRED]
-  renderer/pools.js → main/atomix.js
-- `ppPairRows()` --indirect_call--> `p()`  [INFERRED]
-  renderer/pools.js → main/atomix.js
-- `showTokenDetail()` --indirect_call--> `k()`  [INFERRED]
-  renderer/app.js → main/pandapools/curve.js
+- `lpGet()` --indirect_call--> `t()`  [INFERRED]
+  main/pandapools/store.js → preflight-portmap.mjs
+- `harness()` --indirect_call--> `t()`  [INFERRED]
+  scripts/pandapools-recovery.test.cjs → preflight-portmap.mjs
+- `gateSell()` --indirect_call--> `deal()`  [INFERRED]
+  main/atomix/lib/responder.js → renderer/casino.js
+- `gateBuy()` --indirect_call--> `deal()`  [INFERRED]
+  main/atomix/lib/responder.js → renderer/casino.js
 
 ## Import Cycles
 - None detected.
 
-## Communities (159 total, 18 thin omitted)
+## Communities (160 total, 18 thin omitted)
 
-### Community 0 - "waitSign"
-Cohesion: 0.50
-Nodes (5): countSigs(), findTxn(), onNewBlock(), pendingMsg(), waitSign()
+### Community 0 - "poolmgr.js"
+Cohesion: 0.12
+Nodes (21): collectCanSign(), collectDecide(), collectRemaining(), collectSweep(), countSigs(), ensureTrackedAll(), ensureTrackedForSwap(), errOf() (+13 more)
 
 ### Community 1 - "app.js"
 Cohesion: 0.06
@@ -213,16 +214,16 @@ Cohesion: 0.10
 Nodes (68): activeSwap(), activityTab(), amtField(), banner(), bidiInput(), bootErrorCard(), ccy(), clean() (+60 more)
 
 ### Community 4 - "pandapools/service.js"
-Cohesion: 0.08
-Nodes (65): acquireGlobalSignLockSvc(), annKeySvc(), bestMinimaCoinSvc(), checkPostSvc(), cleanForeign(), clearSignWatchdogSvc(), covScript(), decCmp() (+57 more)
+Cohesion: 0.06
+Nodes (77): derivePools(), done(), finishScan(), fund(), gatherOwned(), gatherRegistry(), group(), parseScripts() (+69 more)
 
 ### Community 5 - "main/casino.js"
 Cohesion: 0.07
 Nodes (55): balance(), buildMds(), C(), cancel(), cgame(), claimTimeout(), cmnum(), cnorm() (+47 more)
 
 ### Community 6 - "node-manager.js"
-Cohesion: 0.07
-Nodes (27): alive(), { app }, commandOf(), config, { createNodeLog }, EventEmitter, fs, killPid() (+19 more)
+Cohesion: 0.06
+Nodes (36): alive(), { app }, commandOf(), config, { createNodeLog }, EventEmitter, fs, killPid() (+28 more)
 
 ### Community 7 - "main/mail.js"
 Cohesion: 0.06
@@ -246,7 +247,7 @@ Nodes (45): accept(), addMsg(), allDeals(), apply(), applyPropose(), approxEq(),
 
 ### Community 12 - "casino/engine.js"
 Cohesion: 0.13
-Nodes (42): addMultipleInputs(), cancelBet(), claimTimeout(), coinAmount(), coinsAtContract(), coinTok(), createBet(), decAdd() (+34 more)
+Nodes (43): addMultipleInputs(), balance(), cancelBet(), claimTimeout(), coinAmount(), coinsAtContract(), coinTok(), createBet() (+35 more)
 
 ### Community 13 - "config.js"
 Cohesion: 0.12
@@ -258,7 +259,7 @@ Nodes (18): applyIcon(), balBreakdown(), balCardHtml(), cmd(), decSub(), enhance
 
 ### Community 15 - "reserve-recovery.js"
 Cohesion: 0.12
-Nodes (45): allowedArchive(), backup(), browserArchive(), call(), cancelPoolTransactions(), checkedKeys(), checkSignature(), classifyKeys() (+37 more)
+Nodes (46): allowedArchive(), backup(), browserArchive(), call(), cancelPoolTransactions(), capacityOfRow(), checkedKeys(), checkSignature() (+38 more)
 
 ### Community 16 - "files"
 Cohesion: 0.05
@@ -281,8 +282,8 @@ Cohesion: 0.08
 Nodes (67): ax6(), axAgo(), axApplyLook(), axBestLine(), axCcyName(), axCcyOf(), axChip(), axCleanNum() (+59 more)
 
 ### Community 21 - "shop.js"
-Cohesion: 0.07
-Nodes (36): advanceStatus(), capSeen(), coinAmount(), coinsAt(), config, crypto, emitter, EventEmitter (+28 more)
+Cohesion: 0.08
+Nodes (26): capSeen(), coinAmount(), coinsAt(), config, crypto, emitter, EventEmitter, hexToText() (+18 more)
 
 ### Community 22 - "pools.js"
 Cohesion: 0.09
@@ -294,7 +295,7 @@ Nodes (39): AX(), balances(), book(), bookScan(), coins(), computeQuote(), ethBa
 
 ### Community 24 - "responder.js"
 Cohesion: 0.14
-Nodes (33): acceptTakerBuyMinima(), acceptTakerSellMinima(), addDec(), addIncoming(), cpBurstFull(), decimalsOf(), doScanIncoming(), ensureAllowance() (+25 more)
+Nodes (34): acceptTakerBuyMinima(), acceptTakerSellMinima(), addDec(), addIncoming(), cmpAmtMul(), cpBurstFull(), decimalsOf(), doScanIncoming() (+26 more)
 
 ### Community 25 - "settle.js"
 Cohesion: 0.17
@@ -317,8 +318,8 @@ Cohesion: 0.07
 Nodes (5): hypot(), max(), maxOrMin(), min(), sqrt()
 
 ### Community 30 - "elliptic.js"
-Cohesion: 0.07
-Nodes (3): "node_modules/hash.js/lib/hash/sha/256.js"(), "node_modules/hash.js/lib/hash/sha/512.js"(), "node_modules/hmac-drbg/lib/hmac-drbg.js"()
+Cohesion: 0.06
+Nodes (5): "node_modules/hash.js/lib/hash/ripemd.js"(), "node_modules/hash.js/lib/hash/sha/1.js"(), "node_modules/hash.js/lib/hash/sha/256.js"(), "node_modules/hash.js/lib/hash/sha/512.js"(), "node_modules/hmac-drbg/lib/hmac-drbg.js"()
 
 ### Community 31 - "mail-store.js"
 Cohesion: 0.15
@@ -342,15 +343,11 @@ Nodes (24): { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shel
 
 ### Community 36 - "pandapools.js"
 Cohesion: 0.09
-Nodes (27): activity(), activityLabels(), { app }, buildMds(), config, { createContext, ALL_FILES }, currentBlock(), emitter (+19 more)
-
-### Community 37 - "portmap.js"
-Cohesion: 0.15
-Nodes (12): defaultRoute(), dgram, EventEmitter, { execFile }, isPrivateIp(), RFC-1918, lanIp(), os (+4 more)
+Nodes (23): activity(), activityLabels(), { app }, buildMds(), config, { createContext, ALL_FILES }, currentBlock(), emitter (+15 more)
 
 ### Community 38 - "vestr.js"
-Cohesion: 0.16
-Nodes (25): blockHeightForDate(), calculate(), coinAmount(), collect(), contractFromCoin(), create(), crypto, emitter (+17 more)
+Cohesion: 0.15
+Nodes (26): blockHeightForDate(), calculate(), coinAmount(), collect(), contractFromCoin(), create(), crypto, emitter (+18 more)
 
 ### Community 39 - "peg.js"
 Cohesion: 0.15
@@ -390,7 +387,7 @@ Nodes (16): addr, assert, asyncStandard(), fs, good(), harness(), invoke(), load
 
 ### Community 48 - "s"
 Cohesion: 0.16
-Nodes (13): "node_modules/hash.js/lib/hash/ripemd.js"(), "node_modules/hash.js/lib/hash/sha/1.js"(), "node_modules/js-sha3/src/sha3.js"(), balance(), aggregateInfo(), createPreview(), D(), statement() (+5 more)
+Nodes (14): "node_modules/js-sha3/src/sha3.js"(), aggregateInfo(), createPreview(), D(), statement(), myPools(), pairInfo(), pairPoolsFor() (+6 more)
 
 ### Community 49 - "casino/service.js"
 Cohesion: 0.21
@@ -456,9 +453,9 @@ Nodes (14): ETH_TOKENS_FILE(), ethAddToken(), ethCleanSymbol(), ethDecodeSymbol(
 Cohesion: 0.24
 Nodes (7): byKey(), forCoinLabel(), forSwap(), isTerminalSwap(), loadKey(), visibleIn(), withinWindow()
 
-### Community 67 - "book.js"
-Cohesion: 0.18
-Nodes (14): derivePools(), done(), finishScan(), fund(), gatherOwned(), gatherRegistry(), group(), parseScripts() (+6 more)
+### Community 67 - "portmap.js"
+Cohesion: 0.21
+Nodes (10): defaultRoute(), dgram, EventEmitter, { execFile }, isPrivateIp(), RFC-1918, lanIp(), os (+2 more)
 
 ### Community 68 - "build"
 Cohesion: 0.17
@@ -533,12 +530,12 @@ Cohesion: 0.22
 Nodes (6): casino, cfg, mem, OPEN_BET, path, sent
 
 ### Community 87 - "buildAndPost"
-Cohesion: 0.17
-Nodes (24): addAnnounceState(), buildAndPost(), buildCreate(), buildMigrate(), buildRouted(), close(), createPool(), deposit() (+16 more)
+Cohesion: 0.32
+Nodes (17): addAnnounceState(), buildAndPost(), buildCreate(), buildMigrate(), buildRouted(), close(), deposit(), ensureTracked() (+9 more)
 
 ### Community 88 - "mailcrypto.js"
-Cohesion: 0.15
-Nodes (16): boxPkOf(), crypto, deriveIdentity(), deriveIdentityDomain(), hkdf32(), idBytes(), ikmFromSeed(), isValidPublicId() (+8 more)
+Cohesion: 0.16
+Nodes (15): boxPkOf(), crypto, deriveIdentity(), deriveIdentityDomain(), hkdf32(), idBytes(), ikmFromSeed(), isValidPublicId() (+7 more)
 
 ### Community 89 - "digitsToString"
 Cohesion: 0.32
@@ -641,36 +638,40 @@ Cohesion: 0.16
 Nodes (17): ensureRpcOverride(), ETH_RPC_FILE(), ethAddrChecksumOk(), ethAmbiguousBroadcast(), ethCapGas(), ethGasNow(), ethGasScaledRpc(), ethPrivateHost() (+9 more)
 
 ### Community 133 - "termcomplete.js"
-Cohesion: 0.25
-Nodes (14): addParamItems(), cmds(), commandBrief(), docsFor(), getCmd(), helpBrief(), helpFull(), helpStore() (+6 more)
+Cohesion: 0.24
+Nodes (13): addParamItems(), commandBrief(), docsFor(), getCmd(), helpBrief(), helpFull(), helpStore(), item() (+5 more)
 
 ### Community 134 - "beginHunt"
-Cohesion: 0.18
-Nodes (16): beginHunt(), fingerprintOf(), huntKeys(), keyRowsOf(), keyTotalOf(), kidxUsable(), loadHuntState(), mintsNeeded() (+8 more)
+Cohesion: 0.22
+Nodes (14): beginHunt(), fingerprintOf(), huntKeys(), keyRowsOf(), keyTotalOf(), loadHuntState(), parseModifier(), provenForeign() (+6 more)
 
-### Community 135 - "poolmgr.js"
-Cohesion: 0.12
-Nodes (27): acquireGlobalSignLock(), clearWatchdog(), coinAmt(), collectCanSign(), collectDecide(), collectRemaining(), collectSweep(), forceReleaseActiveSign() (+19 more)
+### Community 135 - "sqlEsc"
+Cohesion: 0.20
+Nodes (12): acquireGlobalSignLock(), coinAmt(), lockedMap(), lockTable(), pruneLocks(), releaseIds(), reserveLocks(), selectCoinsAttempt() (+4 more)
 
 ### Community 136 - "pinMinimaSend"
 Cohesion: 0.14
 Nodes (9): crypto, decrypt(), deriveKey(), encrypt(), pinMinimaSend(), assert, backup, mail (+1 more)
 
 ### Community 137 - "init"
-Cohesion: 0.17
-Nodes (24): backfillStep(), currentBlock(), depthForGap(), init(), nextFloorTarget(), nodeCmd(), pay(), processCoins() (+16 more)
+Cohesion: 0.16
+Nodes (25): backfillStep(), currentBlock(), depthForGap(), init(), nextFloorTarget(), nodeCmd(), pay(), processCoins() (+17 more)
 
 ### Community 138 - "pandapools/loader.js"
 Cohesion: 0.33
 Nodes (5): ALL_FILES, createContext(), fs, path, vm
 
+### Community 139 - "createPool"
+Cohesion: 0.50
+Nodes (4): address(), send(), createPool(), deriveAddress()
+
 ### Community 140 - "panels-test.cjs"
 Cohesion: 0.10
 Nodes (10): assert, fs, NOOP_API, PANELS, path, R, selectorsOf(), SHARED_TOKENS (+2 more)
 
-### Community 141 - "rpcCall"
-Cohesion: 0.20
-Nodes (10): runner(), http, rpcCall(), timeoutFor(), WRITE_PREFIXES, assert, net, { rpcCall } (+2 more)
+### Community 141 - "gated"
+Cohesion: 0.31
+Nodes (9): clearWatchdog(), forceReleaseActiveSign(), gated(), pendingCount(), releaseGlobalSignLock(), releaseSign(), scheduleWatchdog(), startNextSign() (+1 more)
 
 ### Community 142 - "casinoart.js"
 Cohesion: 0.44
@@ -692,9 +693,9 @@ Nodes (6): assert, fs, li, os, path, test
 Cohesion: 0.20
 Nodes (7): Hunk classification — the claim this release rests on, Keeping it byte-identical, Not done here, Review — minimaCore Desktop 0.16.87, Two traps in the catch-up itself, Validation, Why this was necessary
 
-### Community 147 - "atomix/service.js"
-Cohesion: 0.56
-Nodes (8): configureEngines(), getBalances(), log(), logOnce(), notifyLog(), poll(), reloadShared(), tryBoot()
+### Community 147 - "init"
+Cohesion: 0.33
+Nodes (10): advanceStatus(), init(), looksLikeMinimaAddress(), placeOrder(), randomId(), reply(), retryPayment(), sendMerchMessage() (+2 more)
 
 ### Community 148 - "el"
 Cohesion: 0.15
@@ -728,25 +729,29 @@ Nodes (5): assert, fs, path, ROOT, test
 Cohesion: 0.40
 Nodes (5): electron, electron-builder, devDependencies, electron, electron-builder
 
+### Community 158 - "atomix/service.js"
+Cohesion: 0.56
+Nodes (8): configureEngines(), getBalances(), log(), logOnce(), notifyLog(), poll(), reloadShared(), tryBoot()
+
 ## Knowledge Gaps
-- **589 isolated node(s):** `{ EventEmitter }`, `path`, `fs`, `{ rpcCall }`, `{ createContext }` (+584 more)
+- **589 isolated node(s):** `name`, `productName`, `version`, `description`, `author` (+584 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `p()` connect `p` to `atomix-unit.js`, `ethSendReview`, `main/casino.js`, `pandapools/service.js`, `activity-chain.js`, `rpcCall`, `reserve-recovery.js`, `atomix.js`, `pools.js`, `pandapools.js`, `vestr.js`, `peg.js`, `renderer/casino.js`, `s`, `d`, `ethTokensLoad`, `k`, `init`, `actionOnPool`, `buildAndPost`, `"node_modules/bn.js/lib/bn.js"`?**
-  _High betweenness centrality (0.194) - this node is a cross-community bridge._
-- **Why does `k()` connect `k` to `ui.js`, `book.js`, `pandapools/service.js`, `node-manager.js`, `config-keys-test.cjs`, `activity-chain.js`, `curve.js`, `config.js`, `showTokenDetail`, `reserve-recovery.js`, `atomix/service.js`, `d`, `store.js`?**
-  _High betweenness centrality (0.126) - this node is a cross-community bridge._
-- **Why does `showTokenDetail()` connect `showTokenDetail` to `app.js`, `k`, `boot`, `el`, `showHistoryDetail`?**
-  _High betweenness centrality (0.060) - this node is a cross-community bridge._
+- **Why does `p()` connect `p` to `atomix-unit.js`, `ethSendReview`, `main/casino.js`, `pandapools/service.js`, `node-manager.js`, `activity-chain.js`, `createPool`, `reserve-recovery.js`, `atomix.js`, `pools.js`, `pandapools.js`, `vestr.js`, `peg.js`, `renderer/casino.js`, `s`, `d`, `ethTokensLoad`, `k`, `init`, `actionOnPool`, `"node_modules/bn.js/lib/bn.js"`?**
+  _High betweenness centrality (0.196) - this node is a cross-community bridge._
+- **Why does `k()` connect `k` to `ui.js`, `pandapools/service.js`, `node-manager.js`, `beginHunt`, `config-keys-test.cjs`, `activity-chain.js`, `curve.js`, `config.js`, `showTokenDetail`, `reserve-recovery.js`, `d`, `store.js`, `atomix/service.js`?**
+  _High betweenness centrality (0.119) - this node is a cross-community bridge._
+- **Why does `s()` connect `s` to `pandapools.js`, `k`, `init`, `activity-chain.js`, `otc.js`, `casino/engine.js`, `"node_modules/bn.js/lib/bn.js"`, `atomix-ui.js`, `createAnchor`, `p`, `settle.js`, `elliptic.js`?**
+  _High betweenness centrality (0.059) - this node is a cross-community bridge._
 - **Are the 30 inferred relationships involving `p()` (e.g. with `ingest()` and `createContext()`) actually correct?**
   _`p()` has 30 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 2 inferred relationships involving `esc()` (e.g. with `app.js` and `axSwapRows()`) actually correct?**
   _`esc()` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `{ EventEmitter }`, `path`, `fs` to the rest of the system?**
+- **What connects `name`, `productName`, `version` to the rest of the system?**
   _589 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.06205673758865248 - nodes in this community are weakly interconnected._
+- **Should `poolmgr.js` be split into smaller, more focused modules?**
+  _Cohesion score 0.12307692307692308 - nodes in this community are weakly interconnected._

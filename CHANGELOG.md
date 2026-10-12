@@ -7,6 +7,21 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.17.35] — keets: the node is dialable by pubkey, even behind NAT
+
+- **keets transport bundled and ON by default (minima kind).** The node now also speaks
+  Hyperswarm/HyperDHT: it announces on the keets topic and becomes dialable by its Noise
+  public key with **no port forwarding** — the DHT hole-punches in. Classic TCP peers are
+  completely unaffected, and the toggle (`keets transport` in the params editor) turns it off.
+- Ships the keets sidecar (`resources/keets-sidecar`, hyperswarm 4.17.2 exact-pinned) and runs
+  it with the app's **own Electron binary** as the node runtime (`-keetsnode` +
+  `ELECTRON_RUN_AS_NODE`) — no system Node.js dependency. Bootstrap defaults to the
+  owner-run 7-node HyperDHT fleet baked into the jar; `-keetsbootstrap` overrides.
+- `resources/minima.jar` rebuilt from minima-core `main` (`cad065feb7`: keets transport +
+  `-keetsnode`). New params: `keets`, `keetsbootstrap`, `keetsconnect`, `keetsmaxconns`
+  (sidecar path + runtime are app-managed). The Parlons kind refuses all keets flags — its
+  embedded node line doesn't know them yet.
+
 ## [0.17.13] — PandaPools: say what recovery actually needs
 - Engine re-copied from PandaPools MiniDapp **0.6.28**, mirroring native 0.9.61. The recovery notice said *"a seed or recipe alone is insufficient"*, which reads as though seed **plus** recipe were also insufficient. It is not. It now names the two working routes — a current MinimaCore wallet backup, **or** the pool recipe plus your seed phrase — and states plainly the part that is true: a seed phrase **alone** is not enough.
 - Wording only; no behaviour change. 32 PandaPools tests pass; donor byte-parity and the digest manifest verify.

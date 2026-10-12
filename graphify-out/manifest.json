@@ -120,9 +120,9 @@
     "semantic_hash": "66c294c83d5f436b6fa453e16d6a4a1e"
   },
   "main/atomix/lib/responder.js": {
-    "mtime": 1788962332.6233268,
-    "ast_hash": "bb2c594b8c4c989147821283e3993381",
-    "semantic_hash": "bb2c594b8c4c989147821283e3993381"
+    "mtime": 1791205599.449165,
+    "ast_hash": "9aeb23f26f3014678453b677b877017f",
+    "semantic_hash": ""
   },
   "main/atomix/lib/rhino_shim.js": {
     "mtime": 1784480767.210798,
@@ -310,8 +310,8 @@
     "semantic_hash": "eebd003c8e61fcd2c5edece417f45717"
   },
   "main/pandapools/poolmgr.js": {
-    "mtime": 1790080166.8709319,
-    "ast_hash": "247a691246b619cf08ae23060f7e3a18",
+    "mtime": 1791276035.9804127,
+    "ast_hash": "5b92af758fcbacc7bf11d9b6426a1c30",
     "semantic_hash": ""
   },
   "main/pandapools/router.js": {
@@ -330,8 +330,8 @@
     "semantic_hash": "371320886b6347557ccbdb1aa5338be6"
   },
   "main/pandapools/store.js": {
-    "mtime": 1790080166.875245,
-    "ast_hash": "a25a0eb5c7c94c3915f73f03b8c7209e",
+    "mtime": 1791276035.9815388,
+    "ast_hash": "3e785cb2e98cc2db37775dfe0447e06a",
     "semantic_hash": ""
   },
   "main/portmap.js": {
@@ -385,8 +385,8 @@
     "semantic_hash": "55ece262a691f9306e477b69ade2adc6"
   },
   "package.json": {
-    "mtime": 1791154664.873049,
-    "ast_hash": "d5306f7ed667f050e6dd7a8b3ef014e5",
+    "mtime": 1791650804.0538871,
+    "ast_hash": "aa832814829146a40faacdea2bdbf809",
     "semantic_hash": ""
   },
   "preflight-portmap.mjs": {
@@ -455,8 +455,8 @@
     "semantic_hash": "30f2595a20d73a425ee1c541d2a0bebe"
   },
   ".github/workflows/desktop-build.yml": {
-    "mtime": 1790244639.9302437,
-    "ast_hash": "4b32cf998f29b7ec8467b9b8f9703355",
+    "mtime": 1791643872.511937,
+    "ast_hash": "0531868b71125209cc7bf5aaa3d58da7",
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
@@ -560,9 +560,9 @@
     "semantic_hash": ""
   },
   "scripts/notarize-dmg.sh": {
-    "mtime": 1788539118.0067837,
-    "ast_hash": "462fc6d29ecd8b6d6a5dcd5546fc4312",
-    "semantic_hash": "462fc6d29ecd8b6d6a5dcd5546fc4312"
+    "mtime": 1791471216.9742746,
+    "ast_hash": "a300b1eb1c0fad9da3c4d67ce198480b",
+    "semantic_hash": ""
   },
   "scripts/publish-desktop-platforms.sh": {
     "mtime": 1788811874.2758136,
@@ -570,9 +570,9 @@
     "semantic_hash": "e05d23db69bacb269cb6c64b1c54b6eb"
   },
   "scripts/publish-desktop.sh": {
-    "mtime": 1788781895.28538,
-    "ast_hash": "2b86626ebce359fa7dd4c28f9688db02",
-    "semantic_hash": "2b86626ebce359fa7dd4c28f9688db02"
+    "mtime": 1791395648.0964084,
+    "ast_hash": "f067feec77582f0e546b071ce4642a97",
+    "semantic_hash": ""
   },
   "scripts/release-desktop.sh": {
     "mtime": 1789508224.648718,
@@ -580,8 +580,8 @@
     "semantic_hash": ""
   },
   "scripts/verify-mac.sh": {
-    "mtime": 1789508218.9171298,
-    "ast_hash": "fe363056cc3b6a0ee8f34b80e2f4868c",
+    "mtime": 1791471518.2552238,
+    "ast_hash": "a2f62340e64caf018ff1b14a2f4a3e1b",
     "semantic_hash": ""
   },
   "main/pandapools/activity-chain.js": {
@@ -620,8 +620,8 @@
     "semantic_hash": "02aa01ab0276a8f61a0b385f667a8548"
   },
   "main/pandapools/reserve-recovery.js": {
-    "mtime": 1790153169.6451695,
-    "ast_hash": "268db60db7dc402aff2b49dc320e80f1",
+    "mtime": 1791276035.9795833,
+    "ast_hash": "5bd0b4fa4d04b653bf17e5e298b9880b",
     "semantic_hash": ""
   },
   "scripts/pandapools-recovery-lifecycle.test.cjs": {
@@ -630,8 +630,8 @@
     "semantic_hash": "c73b2d371d937d1e13c4526b1ead1c43"
   },
   "scripts/pandapools-recovery.test.cjs": {
-    "mtime": 1790331450.4798324,
-    "ast_hash": "cdfd36bf7c31bf130a1009ef0b4fc94f",
+    "mtime": 1791376208.6976135,
+    "ast_hash": "947ef4b2b198bfc1c65948a2761b271a",
     "semantic_hash": ""
   },
   "REVIEW-0.16.52.md": {
@@ -715,8 +715,8 @@
     "semantic_hash": ""
   },
   "scripts/pandapools-parity.manifest.json": {
-    "mtime": 1790153169.6980467,
-    "ast_hash": "4a4a09a8741a94174103911135b1154b",
+    "mtime": 1791376208.7718565,
+    "ast_hash": "e612959a12899c5aea5eac1841b231b5",
     "semantic_hash": ""
   },
   "scripts/netfetch-test.cjs": {

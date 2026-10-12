@@ -23,7 +23,9 @@ const LOG_MAX_LINES = 800;
 // The stock RPC ones are replaced by the node's loopback admin RPC (-Dparlons.node.rpc=true), which the
 // app's RPC client reaches unchanged on basePort+4 (it ignores the Basic auth header).
 const PARLONS_REFUSED = new Set(["rpc", "rpcenable", "rpcpassword", "rpccrlf", "seed", "anyseed", "dbpassword",
-  "clean", "genesis", "test", "solo", "testchainlength", "daemon", "noshutdownhook", "jnlp", "help"]);
+  "clean", "genesis", "test", "solo", "testchainlength", "daemon", "noshutdownhook", "jnlp", "help",
+  // parlons-node.jar embeds a Minima line without keets — an unknown flag kills its startup
+  "keets", "keetssidecar", "keetsnode", "keetsbootstrap", "keetsconnect", "keetsmaxconns"]);
 // A NAME, never a bare IP - see main/config.js megammrHost. The fork ships an empty node list, so this
 // is the one peer a fresh install has; if it moves, that install has no way onto the network at all.
 const PARLONS_DEFAULT_ROOTNODE = "eurobuddha.com:9001";
@@ -214,6 +216,16 @@ class NodeManager extends EventEmitter {
       if (v === true) args.push("-" + k);
       else if (v === false || v === "" || v == null) continue;
       else args.push("-" + k, String(v));
+    }
+
+    // keets transport: app-managed sidecar path + runtime. The jar's KeetsManager sets
+    // ELECTRON_RUN_AS_NODE=1 on the child, so our own Electron binary IS the node runtime —
+    // no system node needed.
+    if (params.keets) {
+      const sidecar = app.isPackaged
+        ? path.join(process.resourcesPath, "keets-sidecar", "index.js")
+        : path.join(__dirname, "..", "resources", "keets-sidecar", "index.js");
+      args.push("-keetssidecar", sidecar, "-keetsnode", process.execPath);
     }
 
     // Additional raw args, appended verbatim (quote-aware split).
