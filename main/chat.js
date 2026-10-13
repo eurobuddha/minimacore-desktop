@@ -10,6 +10,7 @@
  * minima kind only — the Parlons kind has no keets (node-manager PARLONS_REFUSED).
  */
 const EventEmitter = require("events");
+const crypto = require("crypto");
 const config = require("./config");
 const node = require("./node-manager");
 const { rpcCall } = require("./rpc");
@@ -64,7 +65,13 @@ async function pollOnce() {
 
       // control messages: consumed, never stored or notified
       if (m.state === "read") {
-        store.markPeerRead(msg.from, m.ts || Date.now());
+        // prefer the referenced message's own timestamp (peer clocks drift)
+        let upto = m.ts || Date.now();
+        if (m.ref) {
+          const target = store.thread(msg.from).find(x => x.msgid === m.ref);
+          if (target && target.ts) upto = target.ts;
+        }
+        store.markPeerRead(msg.from, upto);
         await nodeCmd("keets action:ack id:" + msg.id);
         emitter.emit("update");
         continue;
@@ -80,8 +87,9 @@ async function pollOnce() {
       }
       if (m.state === "payaddr-req") {
         await nodeCmd("keets action:ack id:" + msg.id);
+        // contacts only: answering strangers links the chat identity to the wallet
         const last = payAddrReplied.get(msg.from) || 0;
-        if (Date.now() - last > 10 * 60 * 1000) {
+        if (store.getContact(msg.from) && Date.now() - last > 10 * 60 * 1000) {
           payAddrReplied.set(msg.from, Date.now());
           try {
             const ga = await nodeCmd("getaddress");
@@ -165,7 +173,9 @@ function mediaDir() {
 }
 /** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. */
 async function fetchMedia(ref) {
-  const f = path.join(mediaDir(), Buffer.from(ref).toString("hex").slice(0, 40) + ".jpg");
+  // key by a hash of the FULL ref — a prefix slice collides for every photo on one drive
+  const key = crypto.createHash("sha256").update(ref).digest("hex").slice(0, 40);
+  const f = path.join(mediaDir(), key + ".jpg");
   if (!fs.existsSync(f)) {
     await nodeCmd("keets action:fetch url:" + ref + " file:" + f);
   }
@@ -237,7 +247,7 @@ function thread(pubkey) {
   const latestIn = [...msgs].reverse().find(m => m.incoming);
   if (latestIn && store.metaGet("receipt:" + pubkey) !== latestIn.msgid) {
     store.metaSet("receipt:" + pubkey, latestIn.msgid);
-    const payload = schema.chatEncodeTyped("", "", { state: "read" });
+    const payload = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "read" })), { ref: latestIn.msgid }));
     nodeCmd("keets action:send to:" + pubkey + " datahex:" + hexOf(payload)).catch(() => {});
   }
   return msgs;

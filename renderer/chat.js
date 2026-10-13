@@ -76,9 +76,21 @@
     const img = D.el("chatLbImg");
     let scale = 1, tx = 0, ty = 0, dragging = false, lx = 0, ly = 0;
     const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
-    const close = () => { lb.remove(); document.removeEventListener("keydown", onKey); };
+    const onMove = (e) => {
+      if (!dragging) return;
+      tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply();
+    };
+    const onUp = () => { dragging = false; };
+    const close = () => {
+      lb.remove();
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
     const onKey = (e) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", onKey);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     D.el("chatLbClose").onclick = close;
     lb.onclick = (e) => { if (e.target === lb) close(); };
     lb.onwheel = (e) => {
@@ -89,11 +101,6 @@
     };
     img.ondblclick = () => { scale = scale > 1.01 ? 1 : 2.5; if (scale === 1) { tx = 0; ty = 0; } apply(); };
     img.onmousedown = (e) => { dragging = true; lx = e.clientX; ly = e.clientY; e.preventDefault(); };
-    window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply();
-    });
-    window.addEventListener("mouseup", () => { dragging = false; });
   }
 
   // ---- modals (same overlay/modal classes the rest of the app uses) --------
@@ -288,15 +295,19 @@
         <button class="btn btn--outline btn--full" id="chatAttPhoto">📷 Photo</button>
         <button class="btn btn--outline btn--full" id="chatAttPay">💸 Send payment</button>
         <button class="btn btn--outline btn--full" id="chatAttAddr">🏷 Request their pay address</button></div>`;
+      let settle = null;
       const p = modalWithRead("Attach", inner, "Close", () => null);
+      const closeMenu = () => { const ov = D.el("chatOv"); if (ov) { ov.remove(); } if (settle) settle(); };
+      // modalWithRead resolves only via its own buttons; option handlers settle through closeMenu
+      const settled = new Promise((r) => { settle = r; });
       D.el("chatAttPhoto").onclick = async () => {
-        D.el("chatOv").remove();
+        closeMenu();
         try { const r = await D.api.chatSendImage(sel); if (r) D.toast(r.via === "direct" ? "Photo delivered" : "Photo stored at a mailbox", "ok"); }
         catch (e) { D.toast("Photo failed: " + (e.message || e), "err"); }
         await refreshThreads(); renderContacts(); await renderMsgs(true);
       };
       D.el("chatAttPay").onclick = async () => {
-        D.el("chatOv").remove();
+        closeMenu();
         const addr = await D.api.chatPayAddr(sel);
         if (!addr) {
           await D.api.chatRequestPayAddr(sel).catch(() => {});
@@ -310,11 +321,11 @@
         await refreshThreads(); renderContacts(); await renderMsgs(true);
       };
       D.el("chatAttAddr").onclick = async () => {
-        D.el("chatOv").remove();
+        closeMenu();
         await D.api.chatRequestPayAddr(sel).catch(() => {});
         D.toast("Address requested — arrives automatically", "ok");
       };
-      await p;
+      await Promise.race([p, settled]);
     };
     D.el("chatText").onkeydown = (ev) => { if (ev.key === "Enter") doSend(); };
     D.el("chatAddrBtn").onclick = contactAddressModal;
