@@ -15,11 +15,15 @@ const node = require("./node-manager");
 const { rpcCall } = require("./rpc");
 const store = require("./chat-store");
 const schema = require("./chatschema");
+const fs = require("fs");
+const path = require("path");
+const { app } = require("electron");
 
 const POLL_MS = 5000;
 
 const emitter = new EventEmitter();
 let pollTimer = null;
+const payAddrReplied = new Map();   // peer -> last auto-reply ms (10-min cooldown)
 let polling = false;
 let myinfo = null;      // { pubkey, drive } from `keets action:info`
 let lastErr = "";
@@ -57,10 +61,42 @@ async function pollOnce() {
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
       const m = schema.chatDecode(msg.message);
+
+      // control messages: consumed, never stored or notified
+      if (m.state === "read") {
+        store.markPeerRead(msg.from, m.ts || Date.now());
+        await nodeCmd("keets action:ack id:" + msg.id);
+        emitter.emit("update");
+        continue;
+      }
+      if (m.state === "payaddr") {
+        if (/^(0x|Mx)[0-9A-Za-z]+$/.test(m.addr)) {
+          store.addContact(msg.from, m.name || undefined);
+          store.metaSet("payaddr:" + msg.from, m.addr);
+        }
+        await nodeCmd("keets action:ack id:" + msg.id);
+        emitter.emit("update");
+        continue;
+      }
+      if (m.state === "payaddr-req") {
+        await nodeCmd("keets action:ack id:" + msg.id);
+        const last = payAddrReplied.get(msg.from) || 0;
+        if (Date.now() - last > 10 * 60 * 1000) {
+          payAddrReplied.set(msg.from, Date.now());
+          try {
+            const ga = await nodeCmd("getaddress");
+            const payload = schema.chatEncodeTyped("", "", { state: "payaddr", addr: ga.miniaddress });
+            await nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(payload));
+          } catch (e) { /* node busy — they can re-request */ }
+        }
+        continue;
+      }
+
       const msgid = m.id || msg.id;
       const isNew = store.addMessage({
         msgid, pubkey: msg.from, incoming: true,
         body: m.body, name: m.name, ref: m.ref,
+        state: m.state, amt: m.amt, tokname: m.tokname, txid: m.txid,
         ts: m.ts || parseInt(msg.ts) || Date.now(),
         via: msg.via, read: false
       });
@@ -69,7 +105,9 @@ async function pollOnce() {
         if (!store.getContact(msg.from)) store.addContact(msg.from, m.name || msg.from);
         fresh++;
         lastName = m.name || (store.getContact(msg.from) || {}).name || msg.from;
-        lastPreview = m.body;
+        lastPreview = m.state === "image" ? "📷 Photo"
+                    : m.state === "payment" ? "💸 " + m.amt + " " + (m.tokname || "Minima")
+                    : m.body;
       }
       // ack ONLY after the durable store write — this module owns the inbox
       await nodeCmd("keets action:ack id:" + msg.id);
@@ -119,6 +157,63 @@ async function send(toPubkey, text) {
   return store.thread(to).find(m => m.msgid === msgid);
 }
 
+// ---- media ------------------------------------------------------------------
+function mediaDir() {
+  const d = path.join(app.getPath("userData"), "chatimg");
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+/** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. */
+async function fetchMedia(ref) {
+  const f = path.join(mediaDir(), Buffer.from(ref).toString("hex").slice(0, 40) + ".jpg");
+  if (!fs.existsSync(f)) {
+    await nodeCmd("keets action:fetch url:" + ref + " file:" + f);
+  }
+  return "data:image/jpeg;base64," + fs.readFileSync(f).toString("base64");
+}
+/** Publish a local image file to our media drive and send it as a photo message. */
+async function sendImageFile(to, filePath) {
+  const name = "/chat/img-" + Date.now() + path.extname(filePath).toLowerCase();
+  const pub = await nodeCmd("keets action:publish path:" + name + " file:" + filePath);
+  const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "", { state: "image", ref: pub.url });
+  return sendTyped(to, payload, { state: "image", ref: pub.url, body: "" });
+}
+
+// ---- payments ---------------------------------------------------------------
+function payAddrOf(pubkey) { return store.metaGet("payaddr:" + pubkey) || ""; }
+async function requestPayAddr(to) {
+  const payload = schema.chatEncodeTyped("", "", { state: "payaddr-req" });
+  await nodeCmd("keets action:send to:" + to + " datahex:" + hexOf(payload));
+}
+async function sendPayment(to, amount) {
+  const addr = payAddrOf(to);
+  if (!addr) { await requestPayAddr(to); throw new Error("No pay address yet — requested it over chat, try again shortly"); }
+  if (!/^[0-9]+(\.[0-9]+)?$/.test("" + amount)) throw new Error("Invalid amount");
+  const txp = await nodeCmd("send address:" + addr + " amount:" + amount);
+  const txid = (txp && txp.txpowid) ? "" + txp.txpowid : "";
+  const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "",
+      { state: "payment", amt: "" + amount, tokname: "Minima", txid, addr });
+  return sendTyped(to, payload, { state: "payment", amt: "" + amount, tokname: "Minima", txid, body: "" });
+}
+
+/** Shared write-before-send for typed messages. */
+async function sendTyped(to, payload, fields) {
+  const msgid = JSON.parse(payload).id;
+  store.addMessage(Object.assign({ msgid, pubkey: to, incoming: false, name: "", ref: "",
+    ts: Date.now(), via: "", read: true, status: "sending" }, fields));
+  emitter.emit("update");
+  try {
+    const r = await nodeCmd("keets action:send to:" + to + " datahex:" + hexOf(payload));
+    store.setStatus(msgid, { via: r.delivered, status: r.delivered === "direct" ? "delivered" : "mailboxed" });
+  } catch (e) {
+    store.setStatus(msgid, { status: "failed", error: e.message });
+    emitter.emit("update");
+    throw e;
+  }
+  emitter.emit("update");
+  return store.thread(to).find(m => m.msgid === msgid);
+}
+
 // ---- renderer API ---------------------------------------------------------
 function threads() {
   // one row per contact, merged with contact names; contacts with no messages still show
@@ -135,7 +230,18 @@ function threads() {
   for (const r of Object.values(byPk)) { r.name = r.pubkey; out.push(r); }   // messages from non-contacts
   return out.sort((a, b) => ((b.last && b.last.ts) || 0) - ((a.last && a.last.ts) || 0));
 }
-function thread(pubkey) { store.markThreadRead(pubkey); return store.thread(pubkey); }
+function thread(pubkey) {
+  store.markThreadRead(pubkey);
+  const msgs = store.thread(pubkey);
+  // read receipt to the peer (blue ticks their side), deduped on the newest incoming id
+  const latestIn = [...msgs].reverse().find(m => m.incoming);
+  if (latestIn && store.metaGet("receipt:" + pubkey) !== latestIn.msgid) {
+    store.metaSet("receipt:" + pubkey, latestIn.msgid);
+    const payload = schema.chatEncodeTyped("", "", { state: "read" });
+    nodeCmd("keets action:send to:" + pubkey + " datahex:" + hexOf(payload)).catch(() => {});
+  }
+  return msgs;
+}
 function addContact(pubkey, name) {
   const pk = ("" + pubkey).trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(pk)) throw new Error("pubkey must be 0x + 64 hex");
@@ -147,4 +253,5 @@ function unreadCount() { return store.unreadCount(); }
 function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubkey : "", lastError: lastErr, unread: store.unreadCount() }; }
 
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
-  threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner };
+  threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner,
+  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf };

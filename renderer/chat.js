@@ -13,6 +13,7 @@
   let sel = null;            // selected contact pubkey
   let threads = [];
   let booted = false;
+  const mediaCache = {};   // ref -> data url
 
   function h(s) { return D.esc("" + (s == null ? "" : s)); }
 
@@ -33,6 +34,7 @@
   }
   function tick(m) {
     if (m.incoming) return "";
+    if (m.peerread) return ` <span class="chat-tick--read">✓✓</span>`;
     if (m.status === "failed") return " ✗";
     if (m.status === "delivered" || m.via === "direct") return " ✓✓";
     if (m.status === "mailboxed" || m.via === "mailbox") return " ✓";
@@ -60,6 +62,38 @@
   }
   async function refreshThreads() {
     try { threads = await D.api.chatThreads(); } catch (e) { threads = []; }
+  }
+
+  // ---- lightbox: full-size photo, wheel zoom, drag pan, double-click toggle --
+  function lightbox(dataUrl, caption) {
+    document.body.insertAdjacentHTML("beforeend",
+      `<div class="chat-lightbox" id="chatLb">
+        <img id="chatLbImg" alt="photo" src="${dataUrl}" />
+        ${caption ? `<div class="chat-lightbox__cap">${h(caption)}</div>` : ""}
+        <button class="chat-lightbox__close" id="chatLbClose">✕</button>
+      </div>`);
+    const lb = D.el("chatLb");
+    const img = D.el("chatLbImg");
+    let scale = 1, tx = 0, ty = 0, dragging = false, lx = 0, ly = 0;
+    const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+    const close = () => { lb.remove(); document.removeEventListener("keydown", onKey); };
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    D.el("chatLbClose").onclick = close;
+    lb.onclick = (e) => { if (e.target === lb) close(); };
+    lb.onwheel = (e) => {
+      e.preventDefault();
+      scale = Math.max(1, Math.min(6, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      if (scale === 1) { tx = 0; ty = 0; }
+      apply();
+    };
+    img.ondblclick = () => { scale = scale > 1.01 ? 1 : 2.5; if (scale === 1) { tx = 0; ty = 0; } apply(); };
+    img.onmousedown = (e) => { dragging = true; lx = e.clientX; ly = e.clientY; e.preventDefault(); };
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply();
+    });
+    window.addEventListener("mouseup", () => { dragging = false; });
   }
 
   // ---- modals (same overlay/modal classes the rest of the app uses) --------
@@ -153,6 +187,7 @@
             Messages deliver instantly when your contact is online,<br>and wait safely at a mailbox when they're not.</div>
           </div>
           <div class="chat-sendrow" id="chatSendRow" hidden>
+            <button class="chat-attachbtn" id="chatAttachBtn" title="Attach">📎</button>
             <input class="chat-input" id="chatText" placeholder="Message" autocomplete="off" />
             <button class="chat-sendbtn" id="chatSendBtn" title="Send">➤</button>
           </div>
@@ -247,6 +282,40 @@
     D.el("chatNewBtn").onclick = newChatModal;
     D.el("chatIdBtn").onclick = identityModal;
     D.el("chatSendBtn").onclick = doSend;
+    D.el("chatAttachBtn").onclick = async () => {
+      if (!sel) return;
+      const inner = `<div class="seg" style="flex-direction:column;gap:8px">
+        <button class="btn btn--outline btn--full" id="chatAttPhoto">📷 Photo</button>
+        <button class="btn btn--outline btn--full" id="chatAttPay">💸 Send payment</button>
+        <button class="btn btn--outline btn--full" id="chatAttAddr">🏷 Request their pay address</button></div>`;
+      const p = modalWithRead("Attach", inner, "Close", () => null);
+      D.el("chatAttPhoto").onclick = async () => {
+        D.el("chatOv").remove();
+        try { const r = await D.api.chatSendImage(sel); if (r) D.toast(r.via === "direct" ? "Photo delivered" : "Photo stored at a mailbox", "ok"); }
+        catch (e) { D.toast("Photo failed: " + (e.message || e), "err"); }
+        await refreshThreads(); renderContacts(); await renderMsgs(true);
+      };
+      D.el("chatAttPay").onclick = async () => {
+        D.el("chatOv").remove();
+        const addr = await D.api.chatPayAddr(sel);
+        if (!addr) {
+          await D.api.chatRequestPayAddr(sel).catch(() => {});
+          D.toast("No pay address yet — requested it over chat, try again shortly", "err");
+          return;
+        }
+        const amt = await D.showPrompt("Send Minima to " + addr, "", "amount", { message: "This sends real Minima from this node's wallet." });
+        if (!amt) return;
+        try { await D.api.chatSendPayment(sel, amt.trim()); D.toast("Payment sent", "ok"); }
+        catch (e) { D.toast("Payment failed: " + (e.message || e), "err"); }
+        await refreshThreads(); renderContacts(); await renderMsgs(true);
+      };
+      D.el("chatAttAddr").onclick = async () => {
+        D.el("chatOv").remove();
+        await D.api.chatRequestPayAddr(sel).catch(() => {});
+        D.toast("Address requested — arrives automatically", "ok");
+      };
+      await p;
+    };
     D.el("chatText").onkeydown = (ev) => { if (ev.key === "Enter") doSend(); };
     D.el("chatAddrBtn").onclick = contactAddressModal;
     D.el("chatRenameBtn").onclick = async () => {

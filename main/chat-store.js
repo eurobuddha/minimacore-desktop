@@ -85,6 +85,15 @@ function markThreadRead(pubkey) {
   return ch;
 }
 function unreadCount() { ensureLoaded(); return Object.values(mem.messages).filter(m => m.incoming && !m.read).length; }
+/** Read receipt from the peer: our outgoing messages up to uptoTs are peer-read. */
+function markPeerRead(pubkey, uptoTs) {
+  ensureLoaded(); let ch = false;
+  for (const m of Object.values(mem.messages)) {
+    if (m.pubkey === pubkey && !m.incoming && !m.peerread && (m.ts || 0) <= uptoTs) { m.peerread = true; ch = true; }
+  }
+  if (ch) persistSoon();
+  return ch;
+}
 function setStatus(msgid, patch) {
   ensureLoaded();
   const m = mem.messages[msgid];
@@ -116,5 +125,5 @@ function metaSet(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 
 function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
 
-module.exports = { addMessage, threadRows, thread, deleteThread, markThreadRead, unreadCount, setStatus,
+module.exports = { addMessage, threadRows, thread, deleteThread, markThreadRead, unreadCount, setStatus, markPeerRead,
   contacts, addContact, getContact, removeContact, metaGet, metaSet, clear };

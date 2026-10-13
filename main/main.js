@@ -262,6 +262,16 @@ ipcMain.handle("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name)
 ipcMain.handle("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
 ipcMain.handle("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
 ipcMain.handle("mcd:chatStatus", () => chat.status());
+ipcMain.handle("mcd:chatMedia", (_e, ref) => chat.fetchMedia(ref));
+ipcMain.handle("mcd:chatSendPayment", (_e, to, amount) => chat.sendPayment(to, amount));
+ipcMain.handle("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
+ipcMain.handle("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
+ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
+  const r = await dialog.showOpenDialog(win, { title: "Send a photo",
+    filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }], properties: ["openFile"] });
+  if (r.canceled || !r.filePaths.length) return null;
+  return chat.sendImageFile(to, r.filePaths[0]);
+});
 ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo));
 ipcMain.handle("mcd:mailRequestPayaddr", (_e, peer) => mail.requestPayaddr(peer));
 ipcMain.handle("mcd:mailResolvePayaddr", (_e, peer) => mail.resolvePayaddr(peer));
