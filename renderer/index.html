@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="app.css" />
   <link rel="stylesheet" href="mail.css" />   <!-- the Mail panel, scoped to .mailapp -->
+  <link rel="stylesheet" href="chat.css" />   <!-- the KeetChat panel, scoped to .chatapp -->
   <link rel="stylesheet" href="pools.css" />  <!-- the PandaPools panel, scoped to .ppapp -->
   <link rel="stylesheet" href="casino.css" /> <!-- the P2P Chance panel, scoped to .czapp -->
   <link rel="stylesheet" href="atomix-ui.css" /> <!-- the AtomiX panel, scoped to .axapp -->
@@ -30,6 +31,8 @@
         <button class="tab" data-view="send">Send</button>
         <button class="tab" data-view="webwallet">Web Wallet</button>
         <button class="tab" data-view="mail">Mail<span class="tab-badge" id="mailBadge" hidden></span></button>
+        <!-- KeetChat: minima kind only (keets doesn't exist on the parlons kind); unhidden by boot(). -->
+        <button class="tab" data-view="chat" id="chatTab" hidden>Chat<span class="tab-badge" id="chatBadge" hidden></span></button>
         <button class="tab" data-view="pandapools">Pools</button>
         <button class="tab" data-view="atomix">AtomiX</button>
         <button class="tab" data-view="ethwallet">ETH Wallet</button>
@@ -74,6 +77,10 @@
 
       <section class="view" id="view-mail">
         <div id="mailBody"></div>
+      </section>
+
+      <section class="view" id="view-chat">
+        <div id="chatBody"></div>
       </section>
 
       <section class="view" id="view-pandapools">
@@ -173,6 +180,7 @@
   <script src="tokenicons.js"></script>
   <script src="mailicons.js"></script>
   <script src="mail.js"></script>
+  <script src="chat.js"></script>
   <script src="poolcalc.js"></script>
   <script src="casinoart.js"></script>
   <script src="casino.js"></script>

@@ -140,6 +140,8 @@ async function boot() {
   api.onParlonsIncoming(() => selectTab("parlons"));
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
+  api.onChat(onChatUpdate);
+  api.onChatFocus(() => { selectTab("chat"); ChatPanel.focusLatest(); });
   api.onPandapools(onPandapoolsUpdate);
   api.onAtomix(onAtomixUpdate);
   api.onEthWallet(onEthWalletUpdate);
@@ -152,6 +154,9 @@ async function boot() {
 
   // Casino is opt-in (18+). Reveal its tab only when enabled in Settings; otherwise it stays hidden.
   const ctab = el("casinoTab"); if (ctab) ctab.hidden = !CFG.casinoEnabled;
+
+  // Chat rides the keets transport, which only exists on the minima kind.
+  const chtab = el("chatTab"); if (chtab) chtab.hidden = CFG.nodeKind !== "minima";
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -791,6 +796,7 @@ function renderActive() {
   else if (activeView === "send") renderSend();
   else if (activeView === "webwallet") renderWebWallet();
   else if (activeView === "mail") renderMail();
+  else if (activeView === "chat") renderChat();
   else if (activeView === "pandapools") renderPandapools();
   else if (activeView === "atomix") renderAtomix();
   else if (activeView === "ethwallet") renderEthWallet();
@@ -1288,6 +1294,19 @@ async function refreshMailBadge() {
   const b = el("mailBadge"); if (!b) return;
   b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
 }
+// ---- KeetChat — the panel lives in renderer/chat.js (keets transport; main/chat.js owns the inbox) --------
+ChatPanel.init({ api, esc, el, toast, copy, showPrompt, showConfirm });
+function renderChat() {
+  if (!running) { el("chatBody").innerHTML = `<div class="empty">Start your node to use Chat.</div>`; return; }
+  ChatPanel.render();
+}
+function onChatUpdate() { ChatPanel.onUpdate(); refreshChatBadge(); }
+async function refreshChatBadge() {
+  const n = await ChatPanel.badge();
+  const b = el("chatBadge"); if (!b) return;
+  b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
+}
+ChatPanel.badgeChanged = refreshChatBadge;
 // ---- PandaPools — the panel lives in renderer/pools.js (APK parity, its own palette) ----------------------
 // The old panel was ~740 lines here in the desktop's generic TERMINAL styling. app.js keeps only the wiring;
 // every engine call, validation, confirm dialog and busy guard moved across verbatim.

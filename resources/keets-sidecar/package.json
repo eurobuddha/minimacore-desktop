@@ -1,17 +1,20 @@
 {
-  "name": "sidecar",
-  "version": "1.0.0",
-  "description": "",
+  "name": "keets-sidecar",
+  "version": "1.2.0",
+  "description": "keets sidecar — bridges Hyperswarm/HyperDHT peer streams to the local Minima node, hosts media over Hyperdrive, and sends/receives pubkey-addressed messages with mailbox store-and-forward (runs on node and bare)",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "bare-fs": "4.4.7",
+    "bare-http1": "4.6.2",
+    "bare-path": "3.0.0",
+    "bare-process": "4.2.2",
+    "bare-tcp": "2.0.4",
+    "corestore": "6.18.4",
     "hyperdht": "6.34.1",
-    "hyperswarm": "4.17.2"
+    "hyperdrive": "11.13.4",
+    "hyperswarm": "4.17.2",
+    "sodium-universal": "5.0.1"
   }
 }

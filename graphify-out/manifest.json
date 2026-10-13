@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "main/node-manager.js": {
-    "mtime": 1790774420.028288,
-    "ast_hash": "2d4a68c7605c96c614f2aa053410bac1",
+    "mtime": 1791830964.1147099,
+    "ast_hash": "6f98fd7d8f97ee510444b3e5250a9a09",
     "semantic_hash": ""
   },
   "main/pandapools.js": {
@@ -385,8 +385,8 @@
     "semantic_hash": "55ece262a691f9306e477b69ade2adc6"
   },
   "package.json": {
-    "mtime": 1791650804.0538871,
-    "ast_hash": "aa832814829146a40faacdea2bdbf809",
+    "mtime": 1791831096.789308,
+    "ast_hash": "8337308a621fd9728d36e568e08394e4",
     "semantic_hash": ""
   },
   "preflight-portmap.mjs": {
@@ -400,9 +400,9 @@
     "semantic_hash": ""
   },
   "renderer/params.js": {
-    "mtime": 1784242655.4947648,
-    "ast_hash": "ceec85feab22a048028f9af434158f13",
-    "semantic_hash": "ceec85feab22a048028f9af434158f13"
+    "mtime": 1791830948.163186,
+    "ast_hash": "7f147021d0a4023a47b318aed06e5e99",
+    "semantic_hash": ""
   },
   "renderer/qrcode.js": {
     "mtime": 1784047335.5763817,
@@ -455,13 +455,13 @@
     "semantic_hash": "30f2595a20d73a425ee1c541d2a0bebe"
   },
   ".github/workflows/desktop-build.yml": {
-    "mtime": 1791643872.511937,
-    "ast_hash": "0531868b71125209cc7bf5aaa3d58da7",
+    "mtime": 1791831107.5096042,
+    "ast_hash": "a3ea3881f55ca8dc9a641b0542178c07",
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1790153184.8025632,
-    "ast_hash": "1f2f2451432e56ff6f859d3c31fb1c37",
+    "mtime": 1791831009.4337049,
+    "ast_hash": "386d527899aa2e46218f8887629be1c4",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -802,6 +802,26 @@
   "scripts/loginitem-test.cjs": {
     "mtime": 1790782206.628795,
     "ast_hash": "b5024cfc3dda965a8dc5ac18d78cc28a",
+    "semantic_hash": ""
+  },
+  "resources/keets-sidecar/index.js": {
+    "mtime": 1791830890.113296,
+    "ast_hash": "b7d26c4682ca251e0f202e91669f0c39",
+    "semantic_hash": ""
+  },
+  "resources/keets-sidecar/package.json": {
+    "mtime": 1791830890.11357,
+    "ast_hash": "9459975446bd7e2f0b8e76adb247b0ed",
+    "semantic_hash": ""
+  },
+  "scripts/fetch-keets-sidecar.sh": {
+    "mtime": 1791831088.447252,
+    "ast_hash": "5130426b901c5880c296e7fd1ebfc798",
+    "semantic_hash": ""
+  },
+  "scripts/keets-test.cjs": {
+    "mtime": 1791831035.5220897,
+    "ast_hash": "73fb14f2d28fcd0030390615091cd600",
     "semantic_hash": ""
   }
 }

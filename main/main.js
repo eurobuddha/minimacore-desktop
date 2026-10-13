@@ -19,6 +19,7 @@ const netfetch = require("./netfetch");
 const histDb = require("./history-db");
 const faucet = require("./faucet");
 const mail = require("./mail");
+const chat = require("./chat");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const ethwallet = require("./ethwallet");
@@ -197,6 +198,7 @@ ipcMain.handle("mcd:setNodeKind", async (_e, kind) => {
   const k = kind === "minima" ? "minima" : "parlons";
   if (k === "parlons") { const why = node.parlonsBlocker(); if (why) throw new Error(why); }
   config.save({ nodeKind: k });
+  chat.stopLoop();   // keets (and so chat) only exists on the minima kind; restart re-gates it
   await node.restart();
   return node.snapshot();
 });
@@ -247,6 +249,19 @@ ipcMain.handle("mcd:mailOutbox", () => mail.outbox());
 ipcMain.handle("mcd:mailSent", () => mail.sent());
 ipcMain.handle("mcd:mailStatus", () => mail.status());
 ipcMain.handle("mcd:mailBackfill", () => mail.startBackfill());
+
+// KeetChat — pubkey-addressed E2E messages over the keets transport (main/chat.js owns
+// the sidecar inbox; renderer reads/writes through these only). minima kind only.
+ipcMain.handle("mcd:chatInit", async () => { await chat.init(); return chat.myIdentity(); });
+ipcMain.handle("mcd:chatIdentity", () => chat.myIdentity());
+ipcMain.handle("mcd:chatSetName", (_e, n) => { chat.setName(n); return chat.myIdentity(); });
+ipcMain.handle("mcd:chatThreads", () => chat.threads());
+ipcMain.handle("mcd:chatThread", (_e, pk) => chat.thread(pk));
+ipcMain.handle("mcd:chatSend", (_e, to, text) => chat.send(to, text));
+ipcMain.handle("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name));
+ipcMain.handle("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
+ipcMain.handle("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
+ipcMain.handle("mcd:chatStatus", () => chat.status());
 ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo));
 ipcMain.handle("mcd:mailRequestPayaddr", (_e, peer) => mail.requestPayaddr(peer));
 ipcMain.handle("mcd:mailResolvePayaddr", (_e, peer) => mail.resolvePayaddr(peer));
@@ -307,6 +322,18 @@ mail.emitter.on("incoming", (info) => {
     n.show();
   } catch (e) { /* notifications are best-effort */ }
 });
+// KeetChat: updates -> renderer; OS notification on fresh incoming when unfocused
+chat.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:chat"); });
+chat.emitter.on("incoming", (info) => {
+  try {
+    if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
+    const title = info.count > 1 ? "KeetChat" : (info.name || "KeetChat");
+    const body = info.count > 1 ? info.count + " new messages" : (info.preview || "New message");
+    const n = new Notification({ title, body, silent: false });
+    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:chat-focus"); } });
+    n.show();
+  } catch (e) { /* notifications are best-effort */ }
+});
 // miniMall: order feed → renderer; OS notification on a new incoming order (vendor) when unfocused
 shop.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:shop"); });
 shop.emitter.on("incoming", (info) => {
@@ -320,6 +347,7 @@ shop.emitter.on("incoming", (info) => {
 });
 let mailStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); shop.startLoop().catch(() => {}); } });
+node.on("status", (s) => { if (s.state === "running") chat.startLoop(); });
 
 // PandaPools (AMM) — read model + actions; the AMM logic is the reused MDS core (main/pandapools/*).
 ipcMain.handle("mcd:ppPools", () => pandapools.pools());

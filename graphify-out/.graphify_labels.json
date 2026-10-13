@@ -157,6 +157,14 @@
   "155": "REVIEW-0.16.54.md",
   "156": "resync-host-test.cjs",
   "157": "devDependencies",
-  "158": "atomix/service.js",
-  "159": "validate.js"
+  "158": "index.js",
+  "159": "keets-sidecar/package.json",
+  "160": "nodeCmd",
+  "161": "backfillStep",
+  "162": "keets-test.cjs",
+  "163": "mailbackup.js",
+  "164": "importBackup",
+  "165": "archivedThreads",
+  "166": "shopcrypto.js",
+  "167": "fetch-keets-sidecar.sh"
 }
