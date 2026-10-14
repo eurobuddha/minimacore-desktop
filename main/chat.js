@@ -22,6 +22,53 @@ const { app } = require("electron");
 
 const POLL_MS = 5000;
 
+/*
+ * Companion fan-out — the desktop twin of the Android KEETS NOTIFY broadcast.
+ * A companion chat app on this machine (e.g. Parlons Desktop) registers by
+ * writing <node data folder>/keets-companions.json:
+ *   [{ "url": "http://127.0.0.1:<port>/keets", "token": "<hex>" }]
+ * Every drained message (real AND the read/payaddr controls, never payaddr-req)
+ * is POSTed there pre-ack with the x-keets-token header. One-shot, best-effort:
+ * a companion that is down misses the event; this app's KeetChat keeps the
+ * durable copy. The file anchors in the NODE's data dir because both apps can
+ * find that without any new configuration.
+ */
+let companionsCache = { mtime: 0, list: [] };
+function companions() {
+  try {
+    const f = path.join(node.dataDir(), "keets-companions.json");
+    const st = fs.statSync(f);
+    if (st.mtimeMs !== companionsCache.mtime) {
+      const list = JSON.parse(fs.readFileSync(f, "utf8"));
+      companionsCache = { mtime: st.mtimeMs, list: Array.isArray(list) ? list.filter((c) => c && typeof c.url === "string" && c.url.startsWith("http://127.0.0.1")) : [] };
+    }
+  } catch (e) {
+    companionsCache = { mtime: 0, list: [] };
+  }
+  return companionsCache.list;
+}
+
+function fanout(msg, m) {
+  const list = companions();
+  if (!list.length) return;
+  const body = JSON.stringify({ event: "KEETS", data: {
+    id: m.id || msg.id, from: msg.from, ts: m.ts || parseInt(msg.ts) || Date.now(),
+    payload: msg.payload, message: m.legacy ? msg.message : m.body,
+    name: m.name, ref: m.ref, state: m.state || "", via: msg.via
+  }});
+  for (const c of list) {
+    try {
+      const u = new URL(c.url);
+      const req = require("http").request({ host: u.hostname, port: u.port, path: u.pathname,
+        method: "POST", timeout: 3000,
+        headers: { "Content-Type": "application/json", "x-keets-token": c.token || "" } });
+      req.on("error", () => {});
+      req.on("timeout", () => req.destroy());
+      req.end(body);
+    } catch (e) { /* best-effort */ }
+  }
+}
+
 const emitter = new EventEmitter();
 let pollTimer = null;
 const payAddrReplied = new Map();   // peer -> last auto-reply ms (10-min cooldown)
@@ -72,6 +119,7 @@ async function pollOnce() {
           if (target && target.ts) upto = target.ts;
         }
         store.markPeerRead(msg.from, upto);
+        fanout(msg, m);
         await nodeCmd("keets action:ack id:" + msg.id);
         emitter.emit("update");
         continue;
@@ -80,6 +128,7 @@ async function pollOnce() {
         if (/^(0x|Mx)[0-9A-Za-z]+$/.test(m.addr)) {
           store.addContact(msg.from, m.name || undefined);
           store.metaSet("payaddr:" + msg.from, m.addr);
+          fanout(msg, m);
         }
         await nodeCmd("keets action:ack id:" + msg.id);
         emitter.emit("update");
@@ -117,6 +166,7 @@ async function pollOnce() {
                     : m.state === "payment" ? "💸 " + m.amt + " " + (m.tokname || "Minima")
                     : m.body;
       }
+      if (isNew) fanout(msg, m);
       // ack ONLY after the durable store write — this module owns the inbox
       await nodeCmd("keets action:ack id:" + msg.id);
     }
