@@ -233,11 +233,14 @@ function mediaDir() {
 }
 /** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. */
 async function fetchMedia(ref) {
-  // key by a hash of the FULL ref — a prefix slice collides for every photo on one drive
+  // An inbound ref is attacker-adjacent data: no whitespace (would inject
+  // command params) and the extension comes from an ALLOWLIST match, never a
+  // raw slice (a crafted "extension" with ../ walked out of mediaDir).
+  if (!/^keets:\/\/\S+$/.test(ref)) throw new Error("bad media ref");
   const key = crypto.createHash("sha256").update(ref).digest("hex").slice(0, 40);
-  // mime from the published path's extension (strip the ?hash= query)
   const clean = ref.split("?")[0].toLowerCase();
-  const ext = clean.slice(clean.lastIndexOf("."));
+  const m2 = clean.match(/\.(ogg|m4a|wav|png|jpe?g)$/);
+  const ext = m2 ? m2[0] : ".jpg";
   const mime = ext === ".png" ? "image/png"
              : ext === ".ogg" ? "audio/ogg"
              : ext === ".m4a" ? "audio/mp4"
@@ -247,6 +250,10 @@ async function fetchMedia(ref) {
   if (!fs.existsSync(f)) {
     await nodeCmd("keets action:fetch url:" + ref + " file:" + f);
   }
+  // 16MB mesh files exist; a >8MB base64 data: URL stalls main + the DOM.
+  if (!fs.existsSync(f)) throw new Error("fetch failed");
+  if (fs.statSync(f).size > 8 * 1024 * 1024) throw new Error("media too large to inline");
+  if (fs.statSync(f).size === 0) { fs.unlinkSync(f); throw new Error("fetch failed"); }
   return "data:" + mime + ";base64," + fs.readFileSync(f).toString("base64");
 }
 /** Publish a local image file to our media drive and send it as a photo message. */

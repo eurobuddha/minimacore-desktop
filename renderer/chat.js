@@ -260,17 +260,19 @@
         d.innerHTML = `<div class="chat-bubble__body" style="cursor:pointer">▶ 🎤 Voice note · ${h(dur)}</div>` + meta;
         box.appendChild(d);
         const bodyEl = d.firstChild;
-        bodyEl.onclick = async () => {
+        const playOnce = async () => {
           bodyEl.onclick = null;
           bodyEl.style.opacity = ".6";
           try {
             const u = await D.api.chatMedia(m.ref);
             bodyEl.outerHTML = `<audio controls autoplay src="${u}" style="max-width:240px;height:34px"></audio>`;
           } catch (e) {
-            bodyEl.textContent = "🎤 Voice note — not available yet";
+            bodyEl.textContent = "🎤 Voice note — not available yet (tap to retry)";
             bodyEl.style.opacity = "1";
+            bodyEl.onclick = playOnce;   // a transient failure must stay tappable
           }
         };
+        bodyEl.onclick = playOnce;
       } else {
         d.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div>` +
           (m.ref ? `<div class="chat-bubble__attach" title="Click to copy the full link">📎 Attachment</div>` : "") +
