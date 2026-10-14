@@ -244,14 +244,43 @@
       const d = document.createElement("div");
       d.className = "chat-bubble " + (m.incoming ? "chat-bubble--in" : "chat-bubble--out");
       const when = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      d.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div>` +
-        (m.ref ? `<div class="chat-bubble__attach" title="Click to copy the full link">📎 Attachment</div>` : "") +
-        `<div class="chat-bubble__meta">${h(when)}${h(tick(m))}</div>`;
-      if (m.ref) {
-        const a = d.querySelector(".chat-bubble__attach");
-        a.onclick = async () => { await D.copy(m.ref); D.toast("Link copied", "ok"); };
+      const meta = `<div class="chat-bubble__meta">${h(when)}${h(tick(m))}</div>`;
+      if (m.state === "image" && m.ref) {
+        // photo: thumb loads lazily, click for the lightbox
+        d.innerHTML = `<div class="chat-bubble__body" style="opacity:.6">📷 loading…</div>` + meta;
+        box.appendChild(d);
+        D.api.chatMedia(m.ref).then((u) => {
+          d.firstChild.outerHTML =
+            `<img src="${u}" alt="photo" style="max-width:260px;max-height:260px;border-radius:10px;cursor:zoom-in" />`;
+          d.querySelector("img").onclick = () => lightbox(u, m.body);
+        }).catch(() => { d.firstChild.textContent = "📷 Photo — not available yet"; });
+      } else if (m.state === "audio" && m.ref) {
+        // voice note: body is "M:SS|waveformhex" — show the duration, fetch on play
+        const dur = (m.body || "").split("|")[0] || "";
+        d.innerHTML = `<div class="chat-bubble__body" style="cursor:pointer">▶ 🎤 Voice note · ${h(dur)}</div>` + meta;
+        box.appendChild(d);
+        const bodyEl = d.firstChild;
+        bodyEl.onclick = async () => {
+          bodyEl.onclick = null;
+          bodyEl.style.opacity = ".6";
+          try {
+            const u = await D.api.chatMedia(m.ref);
+            bodyEl.outerHTML = `<audio controls autoplay src="${u}" style="max-width:240px;height:34px"></audio>`;
+          } catch (e) {
+            bodyEl.textContent = "🎤 Voice note — not available yet";
+            bodyEl.style.opacity = "1";
+          }
+        };
+      } else {
+        d.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div>` +
+          (m.ref ? `<div class="chat-bubble__attach" title="Click to copy the full link">📎 Attachment</div>` : "") +
+          meta;
+        if (m.ref) {
+          const a = d.querySelector(".chat-bubble__attach");
+          a.onclick = async () => { await D.copy(m.ref); D.toast("Link copied", "ok"); };
+        }
+        box.appendChild(d);
       }
-      box.appendChild(d);
     }
     if (scroll) box.scrollTop = box.scrollHeight;
   }

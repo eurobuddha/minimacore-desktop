@@ -172,6 +172,7 @@ async function pollOnce() {
         fresh++;
         lastName = m.name || (store.getContact(msg.from) || {}).name || msg.from;
         lastPreview = m.state === "image" ? "📷 Photo"
+                    : m.state === "audio" ? "🎤 Voice note"
                     : m.state === "payment" ? "💸 " + m.amt + " " + (m.tokname || "Minima")
                     : m.body;
       }
@@ -234,11 +235,19 @@ function mediaDir() {
 async function fetchMedia(ref) {
   // key by a hash of the FULL ref — a prefix slice collides for every photo on one drive
   const key = crypto.createHash("sha256").update(ref).digest("hex").slice(0, 40);
-  const f = path.join(mediaDir(), key + ".jpg");
+  // mime from the published path's extension (strip the ?hash= query)
+  const clean = ref.split("?")[0].toLowerCase();
+  const ext = clean.slice(clean.lastIndexOf("."));
+  const mime = ext === ".png" ? "image/png"
+             : ext === ".ogg" ? "audio/ogg"
+             : ext === ".m4a" ? "audio/mp4"
+             : ext === ".wav" ? "audio/wav"
+             : "image/jpeg";
+  const f = path.join(mediaDir(), key + ext);
   if (!fs.existsSync(f)) {
     await nodeCmd("keets action:fetch url:" + ref + " file:" + f);
   }
-  return "data:image/jpeg;base64," + fs.readFileSync(f).toString("base64");
+  return "data:" + mime + ";base64," + fs.readFileSync(f).toString("base64");
 }
 /** Publish a local image file to our media drive and send it as a photo message. */
 async function sendImageFile(to, filePath) {
