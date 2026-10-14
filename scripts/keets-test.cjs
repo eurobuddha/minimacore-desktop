@@ -26,15 +26,24 @@ test('params.js: user keets flags in the manifest, sidecar/runtime app-managed',
   }
 });
 
-test('node-manager.js: Parlons refuses every keets flag; minima kind wires sidecar + runtime', () => {
+test('node-manager.js: both kinds wire keets; only sidecar/runtime stay app-managed', () => {
   const src = fs.readFileSync(path.join(ROOT, 'main/node-manager.js'), 'utf8');
   const refused = src.match(/const PARLONS_REFUSED = new Set\(\[([\s\S]*?)\]\)/)[1];
-  for (const f of KEETS_FLAGS) {
+  // 0.18.6: the pinned jar (0.2.124+) embeds the keets Minima line, so -keets and the
+  // user tuning flags flow through to the Parlons kind; only the app-managed pair is refused.
+  for (const f of ['keetssidecar', 'keetsnode']) {
     assert.ok(refused.includes('"' + f + '"'), `PARLONS_REFUSED must include "${f}"`);
+  }
+  for (const f of ['"keets"', '"keetsbootstrap"', '"keetsconnect"', '"keetsmaxconns"']) {
+    assert.ok(!refused.includes(f), `PARLONS_REFUSED must NOT include ${f} (jar is keets-capable)`);
   }
   assert.ok(src.includes('"-keetssidecar"') && src.includes('"-keetsnode"'),
     'buildArgs must pass -keetssidecar and -keetsnode');
-  assert.ok(src.includes('keets-sidecar'), 'buildArgs must point at the bundled keets-sidecar');
+  // the parlons branch appends the same app-managed pair inside -Dparlons.node.args
+  const parlons = src.match(/buildParlonsArgs\(cfg, dataDir\) \{([\s\S]*?)\n  \}/)[1];
+  assert.ok(parlons.includes('-keetssidecar') && parlons.includes('-keetsnode')
+      && parlons.includes('keets-sidecar'),
+    'buildParlonsArgs must wire the bundled sidecar + Electron runtime');
 });
 
 test('resources: sidecar bundle present, jar contains the keets classes', () => {

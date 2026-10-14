@@ -198,7 +198,7 @@ ipcMain.handle("mcd:setNodeKind", async (_e, kind) => {
   const k = kind === "minima" ? "minima" : "parlons";
   if (k === "parlons") { const why = node.parlonsBlocker(); if (why) throw new Error(why); }
   config.save({ nodeKind: k });
-  chat.stopLoop();   // keets (and so chat) only exists on the minima kind; restart re-gates it
+  chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
   await node.restart();
   return node.snapshot();
 });
@@ -251,7 +251,7 @@ ipcMain.handle("mcd:mailStatus", () => mail.status());
 ipcMain.handle("mcd:mailBackfill", () => mail.startBackfill());
 
 // KeetChat — pubkey-addressed E2E messages over the keets transport (main/chat.js owns
-// the sidecar inbox; renderer reads/writes through these only). minima kind only.
+// the sidecar inbox; renderer reads/writes through these only). Both node kinds.
 ipcMain.handle("mcd:chatInit", async () => { await chat.init(); return chat.myIdentity(); });
 ipcMain.handle("mcd:chatIdentity", () => chat.myIdentity());
 ipcMain.handle("mcd:chatSetName", (_e, n) => { chat.setName(n); return chat.myIdentity(); });
