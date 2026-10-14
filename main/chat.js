@@ -34,9 +34,17 @@ const POLL_MS = 5000;
  * find that without any new configuration.
  */
 let companionsCache = { mtime: 0, list: [] };
+let statusDataDir = null;   // the node's VERSIONED data dir from `status` - the
+                            // same path a companion discovers via the RPC, so
+                            // both sides anchor on one answer
+async function refreshCompanionsDir() {
+  if (statusDataDir) return;
+  try { statusDataDir = (await nodeCmd("status")).data || null; } catch (e) { }
+}
 function companions() {
   try {
-    const f = path.join(node.dataDir(), "keets-companions.json");
+    if (!statusDataDir) return [];
+    const f = path.join(statusDataDir, "keets-companions.json");
     const st = fs.statSync(f);
     if (st.mtimeMs !== companionsCache.mtime) {
       const list = JSON.parse(fs.readFileSync(f, "utf8"));
@@ -105,6 +113,7 @@ async function pollOnce() {
   polling = true;
   try {
     if (!myinfo) await init();
+    await refreshCompanionsDir();
     const inbox = await nodeCmd("keets action:inbox");
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
