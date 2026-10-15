@@ -7,7 +7,8 @@
  * are maxima_chat_v1-compatible JSON (chatschema.js) so Parlons-native peers parse
  * them unchanged once parlons-node gains the keets transport.
  *
- * minima kind only — the Parlons kind has no keets (node-manager PARLONS_REFUSED).
+ * minima kind only: on the parlons kind the jar's own KeetsChatBridge is the
+ * drainer (single-drainer rule), so this module stays off there.
  */
 const EventEmitter = require("events");
 const crypto = require("crypto");
@@ -33,6 +34,11 @@ const POLL_MS = 5000;
  * durable copy. The file anchors in the NODE's data dir because both apps can
  * find that without any new configuration.
  */
+// strict parse: startsWith("http://127.0.0.1") would admit 127.0.0.1.evil.com
+function isLoopbackUrl(u) {
+  try { const p = new URL(u); return p.protocol === "http:" && p.hostname === "127.0.0.1"; }
+  catch (e) { return false; }
+}
 let companionsCache = { mtime: 0, list: [] };
 let statusDataDir = null;   // the node's VERSIONED data dir from `status` - the
                             // same path a companion discovers via the RPC, so
@@ -48,7 +54,7 @@ function companions() {
     const st = fs.statSync(f);
     if (st.mtimeMs !== companionsCache.mtime) {
       const list = JSON.parse(fs.readFileSync(f, "utf8"));
-      companionsCache = { mtime: st.mtimeMs, list: Array.isArray(list) ? list.filter((c) => c && typeof c.url === "string" && c.url.startsWith("http://127.0.0.1")) : [] };
+      companionsCache = { mtime: st.mtimeMs, list: Array.isArray(list) ? list.filter((c) => c && typeof c.url === "string" && isLoopbackUrl(c.url)) : [] };
     }
   } catch (e) {
     companionsCache = { mtime: 0, list: [] };
@@ -134,8 +140,9 @@ async function pollOnce() {
         continue;
       }
       if (m.state === "payaddr") {
-        if (/^(0x|Mx)[0-9A-Za-z]+$/.test(m.addr)) {
-          store.addContact(msg.from, m.name || undefined);
+        // contacts only: a control message must never create a contact, or any
+        // stranger can plant a payee row with their address
+        if (store.getContact(msg.from) && /^(0x|Mx)[0-9A-Za-z]+$/.test(m.addr)) {
           store.metaSet("payaddr:" + msg.from, m.addr);
           fanout(msg, m);
         }
@@ -201,6 +208,9 @@ function startLoop() {
 function stopLoop() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   myinfo = null;
+  // a restarted node may run a different version = different data dir
+  statusDataDir = null;
+  companionsCache = { mtime: 0, list: [] };
 }
 
 // ---- sending --------------------------------------------------------------
