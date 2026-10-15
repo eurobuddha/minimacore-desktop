@@ -9,6 +9,9 @@
  *
  * minima kind only: on the parlons kind the jar's own KeetsChatBridge is the
  * drainer (single-drainer rule), so this module stays off there.
+ * Single-drainer exclusion: the embedded node NEVER runs with -mdsenable -
+ * the fork's MDS keets poller would be a second acker. If MDS is ever added
+ * to the desktop node params, this module must stand down first.
  */
 const EventEmitter = require("events");
 const crypto = require("crypto");
@@ -162,6 +165,13 @@ async function pollOnce() {
             await nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(payload));
           } catch (e) { /* node busy — they can re-request */ }
         }
+        continue;
+      }
+
+      // unknown states: a future control type must never become a garbage
+      // chat row (the keetchat 0.2.1 lesson) - ack + consume
+      if (!m.legacy && !["", "image", "audio", "payment"].includes(m.state)) {
+        await nodeCmd("keets action:ack id:" + msg.id);
         continue;
       }
 
