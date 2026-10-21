@@ -1,6 +1,6 @@
 {
   "name": "keets-sidecar",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "keets sidecar \u2014 bridges Hyperswarm/HyperDHT peer streams to the local Minima node, hosts media over Hyperdrive, and sends/receives pubkey-addressed messages with mailbox store-and-forward (runs on node and bare)",
   "main": "index.js",
   "license": "MIT",

@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.19] — never wait on a dial that will fail
+
+- **Keets sidecar 1.2.6.** A direct dial to a peer that cannot be reached (two devices on one
+  router, or an asymmetric NAT) used to block for up to 15 s before the mailbox was tried. The
+  direct dial now races the mailbox: after 1.5 s the message is also stored at the recipient's
+  primary mailbox (which pushes it at once), and a peer whose last dial failed within 10 minutes
+  goes mailbox-first with no grace. Receivers dedupe by message id, so a message that arrives by
+  both paths is stored once.
+- Inbox poll 5 s → 1.5 s, so a pushed message shows within about two seconds.
+
+
 ## [0.18.18] — instant keets delivery on the same Wi-Fi, double ticks that mean delivered
 
 - **Keets sidecar 1.2.5.** Two devices behind one router cannot hole-punch each other, so every

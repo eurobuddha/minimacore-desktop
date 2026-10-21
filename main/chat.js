@@ -26,7 +26,7 @@ const fs = require("fs");
 const path = require("path");
 const { app } = require("electron");
 
-const POLL_MS = 5000;
+const POLL_MS = 1500;   // loopback node command; the sidecar pushes, we must not lag it
 
 /*
  * Companion fan-out — the desktop twin of the Android KEETS NOTIFY broadcast.

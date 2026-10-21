@@ -23,6 +23,8 @@ const path = IS_BARE ? require('bare-path') : require('path')
 const DIAL_TIMEOUT = 15000
 const POLL = 45 * 1000
 const SUB_RETRY_MIN = 5000
+const DIRECT_GRACE = 1500            // how long a direct dial gets before the mailbox is also tried
+const DIAL_FAIL_MEMORY = 10 * 60 * 1000  // a peer that failed to dial recently goes mailbox-first (0 grace)
 const SUB_RETRY_MAX = 60000
 
 /** The mailbox a recipient and its senders both pick first: stable across nodes
@@ -38,6 +40,7 @@ function hex (b) { return b.toString('hex') }
 
 module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes }) {
   const inboxdir = path.join(keetsdir, 'inbox')
+  const dialFailed = new Map()   // peer pk -> last failed direct dial (ms)
   fs.mkdirSync(inboxdir, { recursive: true })
 
   function saveInbox (msg) {
@@ -161,15 +164,32 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
       conn.on('error', () => {})
     },
 
-    // send to a keets pubkey: direct if online, else sealed to a mailbox
+    // send to a keets pubkey: direct if online, else sealed to a mailbox.
+    // 1.2.6: never wait on a dial that is going to fail. The direct dial races the
+    // mailbox: after DIRECT_GRACE (0 for a peer whose last dial failed recently) the
+    // message is ALSO stored at the recipient's primary mailbox, which pushes it to a
+    // subscribed recipient at once. Both apps dedupe by message id, so a message that
+    // arrives twice is stored once. `delivered` reports whichever path completed first.
     async send (tohex, payload) {
       if (payload.length > wire.MAX_PAYLOAD) throw new Error('payload over ' + wire.MAX_PAYLOAD + ' bytes — use media for big content')
+      const to = tohex.replace(/^0x/i, '').toLowerCase()
+      const recentFail = (dialFailed.get(to) || 0) > Date.now() - DIAL_FAIL_MEMORY
+      const direct = sendDirect(to, payload).then(
+        () => { dialFailed.delete(to); return { delivered: 'direct' } },
+        (e) => { dialFailed.set(to, Date.now()); throw e })
+      const grace = recentFail ? 0 : DIRECT_GRACE
+      let viaMailbox = null
+      const mailbox = new Promise((resolve, reject) => {
+        const t = setTimeout(() => {
+          viaMailbox = sendViaMailbox(to, payload).then((mb) => ({ delivered: 'mailbox', mailbox: mb }))
+          viaMailbox.then(resolve, reject)
+        }, grace)
+        direct.then(() => { if (!viaMailbox) clearTimeout(t) }, () => {})
+      })
       try {
-        await sendDirect(tohex, payload)
-        return { delivered: 'direct' }
+        return await Promise.any([direct, mailbox])
       } catch (e) {
-        const mb = await sendViaMailbox(tohex, payload)
-        return { delivered: 'mailbox', mailbox: mb }
+        throw (e && e.errors && e.errors[e.errors.length - 1]) || e
       }
     },
 
