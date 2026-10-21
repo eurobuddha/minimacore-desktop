@@ -7,7 +7,7 @@
  * are maxima_chat_v1-compatible JSON (chatschema.js) so Parlons-native peers parse
  * them unchanged once parlons-node gains the keets transport.
  *
- * Both node kinds (0.18.16+): the Parlons kind launches the jar with
+ * Both node kinds (0.18.17+): the Parlons kind launches the jar with
  * -Dparlons.node.keetschat=off (node-manager), so its KeetsChatBridge stands down
  * and this module is the one drainer there too. Keets chats come into KeetChat,
  * Parlons chats stay in Parlons.

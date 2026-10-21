@@ -279,7 +279,7 @@ class NodeManager extends EventEmitter {
       "-Dparlons.relay.port=" + (cfg.contribute ? "shared" : "0"),
       "-Dparlons.panel.port=" + this.panelPort(),
       "-Dparlons.gateway.port=" + (cfg.basePort + 584),
-      // KeetChat lives in THIS app's Chat tab on both kinds (0.18.16+): the jar's own keets
+      // KeetChat lives in THIS app's Chat tab on both kinds (0.18.17+): the jar's own keets
       // bridge must stand down or two drainers would steal the inbox from each other.
       // Parlons keeps Parlons (Maxima) chats; keets chats come into KeetChat.
       "-Dparlons.node.keetschat=off"

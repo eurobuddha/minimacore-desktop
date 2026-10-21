@@ -155,7 +155,7 @@ async function boot() {
   // Casino is opt-in (18+). Reveal its tab only when enabled in Settings; otherwise it stays hidden.
   const ctab = el("casinoTab"); if (ctab) ctab.hidden = !CFG.casinoEnabled;
 
-  // KeetChat rides the keets transport, which both node kinds run (0.18.16+).
+  // KeetChat rides the keets transport, which both node kinds run (0.18.17+).
   const chtab = el("chatTab"); if (chtab) chtab.hidden = false;
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have

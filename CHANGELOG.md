@@ -7,7 +7,7 @@ matching [GitHub Release](../../releases).
 
 ---
 
-## [0.18.16] — KeetChat on both node kinds: keets chats come into KeetChat, Parlons chats stay in Parlons
+## [0.18.17] — KeetChat on both node kinds, styled like the phone: keets chats come into KeetChat, Parlons chats stay in Parlons
 
 - **The Chat tab is no longer hidden on the Parlons kind.** Until now the Parlons Node jar drained the
   keets inbox into Parlons (keets contacts showed up as Parlons threads, and anything its bridge did
@@ -19,6 +19,14 @@ matching [GitHub Release](../../releases).
   Parlons stays there as history but new keets messages arrive in the Chat tab.
 - `parlonsNode` pin 0.2.129 → 0.2.130. Tests: `scripts/keets-test.cjs` asserts the switch is passed,
   `chat.startLoop` no longer gates on kind and the renderer no longer hides the tab.
+- **The Chat tab now looks exactly like the Pandamonium / BlackBear phone chat** (renderer/chat.js +
+  chat.css rebuilt from the phone layouts): the "My address & QR" row, the thread list with the HSV
+  avatars and blue unread badge, the blue new-chat FAB, the thread toolbar with its ⋮ menu, 14dp
+  bubbles (outlined incoming, Minima-blue outgoing) with the phone's text ticks and light-blue read
+  ticks, date pills, voice notes drawn with the WaveformView geometry, photos opening the black
+  viewer, payment bubbles whose "Tap for txid" shows the full txid, and the pill input bar with the
+  paperclip and mini send FAB. Light mode follows the app's own theme switch (`data-theme="light"`)
+  with the phone's day palette.
 
 ## [0.17.35] — keets: the node is dialable by pubkey, even behind NAT
 
