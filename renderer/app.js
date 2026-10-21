@@ -155,8 +155,8 @@ async function boot() {
   // Casino is opt-in (18+). Reveal its tab only when enabled in Settings; otherwise it stays hidden.
   const ctab = el("casinoTab"); if (ctab) ctab.hidden = !CFG.casinoEnabled;
 
-  // Chat rides the keets transport, which only exists on the minima kind.
-  const chtab = el("chatTab"); if (chtab) chtab.hidden = CFG.nodeKind !== "minima";
+  // KeetChat rides the keets transport, which both node kinds run (0.18.16+).
+  const chtab = el("chatTab"); if (chtab) chtab.hidden = false;
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.

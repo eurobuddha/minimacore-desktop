@@ -4,7 +4,7 @@
  * and delivery ticks (🕓 sending, ✓ held at a mailbox, ✓✓ delivered direct). All state
  * lives in the main process (main/chat.js drains the sidecar inbox; chat-store.js is
  * the history); this file only renders and calls the mcd:chat* IPC surface. Scoped to
- * .chatapp (chat.css). minima kind only — app.js hides the tab for the parlons kind.
+ * .chatapp (chat.css). Both node kinds since 0.18.16 (the Parlons kind runs the jar with its own keets bridge off).
  */
 /* global ChatPanel, qrcode */
 (function () {

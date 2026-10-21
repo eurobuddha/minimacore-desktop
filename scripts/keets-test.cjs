@@ -46,6 +46,19 @@ test('node-manager.js: both kinds wire keets; only sidecar/runtime stay app-mana
     'buildParlonsArgs must wire the bundled sidecar + Electron runtime');
 });
 
+test('0.18.16: KeetChat is this app\'s on BOTH kinds - the jar\'s keets bridge is told to stand down', () => {
+  const nm = fs.readFileSync(path.join(ROOT, 'main/node-manager.js'), 'utf8');
+  const parlons = nm.match(/buildParlonsArgs\(cfg, dataDir\) \{([\s\S]*?)\n  \}/)[1];
+  assert.ok(parlons.includes('"-Dparlons.node.keetschat=off"'),
+    'buildParlonsArgs must pass -Dparlons.node.keetschat=off (single-drainer rule: this app drains)');
+  const chat = fs.readFileSync(path.join(ROOT, 'main/chat.js'), 'utf8');
+  const start = chat.match(/function startLoop\(\) \{([\s\S]*?)\n\}/)[1];
+  assert.ok(!/kind\(\) === "parlons"/.test(start), 'chat.startLoop must not gate on the parlons kind any more');
+  const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+  assert.ok(!/chatTab"\); if \(chtab\) chtab\.hidden = CFG\.nodeKind/.test(app),
+    'renderer must not hide the Chat tab by node kind');
+});
+
 test('resources: sidecar bundle present, jar contains the keets classes', () => {
   assert.ok(fs.existsSync(path.join(ROOT, 'resources/keets-sidecar/index.js')), 'sidecar index.js bundled');
   assert.ok(fs.existsSync(path.join(ROOT, 'resources/keets-sidecar/node_modules/hyperswarm')), 'hyperswarm bundled');

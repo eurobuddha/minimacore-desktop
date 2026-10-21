@@ -278,7 +278,11 @@ class NodeManager extends EventEmitter {
       // Parlons clients over by their greeting), so the mapping the app already holds is the only one.
       "-Dparlons.relay.port=" + (cfg.contribute ? "shared" : "0"),
       "-Dparlons.panel.port=" + this.panelPort(),
-      "-Dparlons.gateway.port=" + (cfg.basePort + 584)
+      "-Dparlons.gateway.port=" + (cfg.basePort + 584),
+      // KeetChat lives in THIS app's Chat tab on both kinds (0.18.16+): the jar's own keets
+      // bridge must stand down or two drainers would steal the inbox from each other.
+      // Parlons keeps Parlons (Maxima) chats; keets chats come into KeetChat.
+      "-Dparlons.node.keetschat=off"
     ];
     if (cfg.network === "custom" && cfg.customConnect) args.push("-Dparlons.node.connect=" + cfg.customConnect);
     else if (!params.p2prootnode && !params.connect) args.push("-Dparlons.node.rootnode=" + (cfg.peers || PARLONS_DEFAULT_ROOTNODE));

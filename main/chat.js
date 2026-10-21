@@ -7,8 +7,10 @@
  * are maxima_chat_v1-compatible JSON (chatschema.js) so Parlons-native peers parse
  * them unchanged once parlons-node gains the keets transport.
  *
- * minima kind only: on the parlons kind the jar's own KeetsChatBridge is the
- * drainer (single-drainer rule), so this module stays off there.
+ * Both node kinds (0.18.16+): the Parlons kind launches the jar with
+ * -Dparlons.node.keetschat=off (node-manager), so its KeetsChatBridge stands down
+ * and this module is the one drainer there too. Keets chats come into KeetChat,
+ * Parlons chats stay in Parlons.
  * Single-drainer exclusion: the embedded node NEVER runs with -mdsenable -
  * the fork's MDS keets poller would be a second acker. If MDS is ever added
  * to the desktop node params, this module must stand down first.
@@ -211,7 +213,6 @@ async function pollOnce() {
 
 function startLoop() {
   if (pollTimer) return;
-  if (node.kind && node.kind() === "parlons") return;   // no keets on the parlons kind
   pollTimer = setInterval(() => { pollOnce().catch(() => {}); }, POLL_MS);
   pollOnce().catch(() => {});
 }

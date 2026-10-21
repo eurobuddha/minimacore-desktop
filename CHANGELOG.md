@@ -7,6 +7,19 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.16] — KeetChat on both node kinds: keets chats come into KeetChat, Parlons chats stay in Parlons
+
+- **The Chat tab is no longer hidden on the Parlons kind.** Until now the Parlons Node jar drained the
+  keets inbox into Parlons (keets contacts showed up as Parlons threads, and anything its bridge did
+  not understand was dropped). The desktop's own KeetChat (`main/chat.js`, `chat.json` store) is now
+  the one drainer on BOTH kinds, with photos, voice notes, payments and read receipts.
+- The Parlons kind launches the jar with **`-Dparlons.node.keetschat=off`**, the new switch in
+  **Parlons Node 0.2.130** that keeps its `KeetsChatBridge` down (single-drainer rule: two drainers
+  steal from each other). Parlons keeps its Maxima chats; a keets-only contact already sitting in
+  Parlons stays there as history but new keets messages arrive in the Chat tab.
+- `parlonsNode` pin 0.2.129 → 0.2.130. Tests: `scripts/keets-test.cjs` asserts the switch is passed,
+  `chat.startLoop` no longer gates on kind and the renderer no longer hides the tab.
+
 ## [0.17.35] — keets: the node is dialable by pubkey, even behind NAT
 
 - **keets transport bundled and ON by default (minima kind).** The node now also speaks
