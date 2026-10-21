@@ -26,10 +26,11 @@ function sha256 (buf) {
   return out
 }
 
-const FETCH_TIMEOUT = 30000
+const { readMedia } = require('./media-read')
 
 module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) {
-  const store = new Corestore(path.join(keetsdir, 'store'))
+  let store = null
+  let storeOpening = null
 
   // dedicated identity for media replication, derived from the node seed — and a
   // dedicated DHT node: sharing the main swarm's DHT node proved flaky (replication
@@ -41,7 +42,12 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
   swarm.on('connection', (conn) => {
     console.log('keets media conn: 0x' + conn.remotePublicKey.toString('hex'))
     conn.on('error', () => {})
-    store.replicate(conn)
+    readyStore().then(current => {
+      if (!conn.destroyed) current.replicate(conn)
+    }).catch(error => {
+      console.error('keets media storage unavailable: ' + error.message)
+      conn.destroy()
+    })
   })
 
   const pinsfile = path.join(keetsdir, 'pins.json')
@@ -50,23 +56,88 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
   const savePins = () => fs.writeFileSync(pinsfile, JSON.stringify(pins))
 
   const drives = new Map() // hex key -> Hyperdrive
-  let ownDrive = null
+  const ownedDrives = new Map()
 
-  async function own () {
-    if (!ownDrive) {
-      ownDrive = new Hyperdrive(store.namespace('media'))
-      await ownDrive.ready()
-      drives.set(ownDrive.key.toString('hex'), ownDrive)
-      swarm.join(ownDrive.discoveryKey, { server: true, client: true })
+  // Corestore is a ReadyResource: a failed open closes the instance permanently.
+  // Retry by reopening the SAME directory, never by clearing it or replacing keys.
+  // Share one opening promise, like own(), so concurrent uploads cannot race locks.
+  async function readyStore () {
+    if (storeOpening) return storeOpening
+    if (store && !store.closing) return store
+    const opening = (async () => {
+      const scopes = [...ownedDrives.keys()]
+      const keys = [...drives.keys()]
+      if (store) {
+        // Old replication streams belong to the closed store. Reconnect just the
+        // media swarm; the separate node/message swarm remains untouched.
+        for (const drive of drives.values()) await swarm.leave(drive.discoveryKey)
+        for (const connection of swarm.connections) connection.destroy()
+        await store.close()
+      }
+      drives.clear()
+      ownedDrives.clear()
+      const current = new Corestore(path.join(keetsdir, 'store'))
+      store = current
+      try {
+        await current.ready()
+        // Re-advertise hosted/mirrored drives even when a chat upload triggered
+        // recovery, without waiting for a later /info or Salon visit.
+        for (const scope of scopes) await openOwn(current, scope)
+        for (const key of new Set([...keys, ...pins])) {
+          try {
+            const drive = await openDrive(current, key)
+            if (pins.includes(key)) drive.download('/').catch(() => {})
+          } catch (error) {
+            console.error('keets media restore failed: ' + error.message)
+          }
+        }
+        return current
+      } catch (error) {
+        // Preserve the initial cause (e.g. ELOCKED) instead of masking it with
+        // "The corestore is closed" on every later request.
+        console.error('keets media storage open failed: ' + error.message)
+        await current.close()
+        throw error
+      }
+    })()
+    storeOpening = opening
+    try { return await opening } finally {
+      if (storeOpening === opening) storeOpening = null
     }
-    return ownDrive
+  }
+
+  async function own (scope = 'media') {
+    // Public Salon links must never reveal the drive key used by chat attachments.
+    if (scope !== 'media' && scope !== 'salon') throw new Error('invalid media scope')
+    return openOwn(await readyStore(), scope)
+  }
+
+  function openOwn (current, scope) {
+    if (!ownedDrives.has(scope)) {
+      const opening = (async () => {
+        const drive = new Hyperdrive(current.namespace(scope))
+        await drive.ready()
+        if (current !== store || current.closing) throw new Error('Media storage restarted; try again')
+        drives.set(drive.key.toString('hex'), drive)
+        swarm.join(drive.discoveryKey, { server: true, client: true })
+        return drive
+      })()
+      ownedDrives.set(scope, opening)
+      opening.catch(() => { if (ownedDrives.get(scope) === opening) ownedDrives.delete(scope) })
+    }
+    return ownedDrives.get(scope)
   }
 
   async function getDrive (keyhex) {
+    return openDrive(await readyStore(), keyhex)
+  }
+
+  async function openDrive (current, keyhex) {
     let drive = drives.get(keyhex)
     if (!drive) {
-      drive = new Hyperdrive(store, Buffer.from(keyhex, 'hex'))
+      drive = new Hyperdrive(current, Buffer.from(keyhex, 'hex'))
       await drive.ready()
+      if (current !== store || current.closing) throw new Error('Media storage restarted; try again')
       drives.set(keyhex, drive)
       // client to fetch, server to re-seed what we hold (organic mirroring)
       swarm.join(drive.discoveryKey, { server: true, client: true })
@@ -82,11 +153,11 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
 
   return {
     swarm,
-    store,
+    get store () { return store },
 
     async publish (pathname, buf) {
-      const drive = await own()
       if (!pathname.startsWith('/')) pathname = '/' + pathname
+      const drive = await own(pathname.startsWith('/salon/') ? 'salon' : 'media')
       await drive.put(pathname, buf)
       const hash = sha256(buf).toString('hex')
       return {
@@ -98,27 +169,16 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
       }
     },
 
-    async fetch (url) {
+    async fetch (url, maxBytes) {
       const { key, path: p, hash } = parseUrl(url)
       const drive = await getDrive(key)
-      // retry until the deadline: the publisher's DHT announce may land after our
-      // first lookup round, so one flush+get pass is not enough
-      const deadline = Date.now() + FETCH_TIMEOUT
-      let buf = null
-      while (true) {
-        const done = drive.findingPeers()
-        swarm.flush().then(done, done)
-        buf = await drive.get(p, { wait: true })
-        if (buf) break
-        if (Date.now() > deadline) throw new Error('not found after ' + (FETCH_TIMEOUT / 1000) + 's — no reachable peer holds ' + url)
-        await new Promise((r) => setTimeout(r, 2000))
-      }
+      const buf = await readMedia(drive, swarm, p, maxBytes)
       if (hash && sha256(buf).toString('hex') !== hash) throw new Error('hash mismatch — content does not match url')
       return buf
     },
 
-    async list () {
-      const drive = await own()
+    async list (scope) {
+      const drive = await own(scope)
       const out = []
       for await (const file of drive.list('/')) {
         out.push({ path: file.key, size: file.value && file.value.blob ? file.value.blob.byteLength : 0 })
@@ -127,8 +187,8 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
     },
 
     async remove (pathname) {
-      const drive = await own()
       if (!pathname.startsWith('/')) pathname = '/' + pathname
+      const drive = await own(pathname.startsWith('/salon/') ? 'salon' : 'media')
       await drive.del(pathname)
     },
 
@@ -154,7 +214,8 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
       for (const k of pins) {
         getDrive(k).then(d => d.download('/').catch(() => {})).catch(() => {})
       }
-      return { drive: '0x' + drive.key.toString('hex'), pins: pins.length }
+      const salon = await own('salon')
+      return { drive: '0x' + drive.key.toString('hex'), salondrive: '0x' + salon.key.toString('hex'), pins: pins.length }
     }
   }
 }

@@ -68,8 +68,13 @@ module.exports = function startApi ({ port, token, mypub, media, messages, versi
     }
 
     if (req.method === 'GET' && pathname === '/info') {
-      const st = await media.start() // idempotent: returns own drive key
-      return send(res, 200, { pubkey: '0x' + mypub, drive: st.drive, apiport: port, version })
+      // The pubkey is the keets identity — the Chat "my address" sheet needs it and must
+      // NOT depend on the media drive being ready. media.start() can throw (a Hyperdrive
+      // whose key is null, a half-opened store); when it does, still return the pubkey so
+      // `keets action:info` succeeds and the app doesn't stick on "Node starting".
+      let st = {}
+      try { st = await media.start() } catch (e) {} // idempotent; on failure keep st={} and return the pubkey only (the error stays server-side)
+      return send(res, 200, { pubkey: '0x' + mypub, drive: st.drive || null, salondrive: st.salondrive || null, apiport: port, version, boundedMedia: true })
     }
 
     if (pathname === '/media' || pathname.startsWith('/media/')) {
@@ -86,7 +91,9 @@ module.exports = function startApi ({ port, token, mypub, media, messages, versi
           if (!m) return send(res, 400, { error: 'need ?url=keets://... or /media/<drivekey>/<path>' })
           url = 'keets://' + m[1] + m[2] + (query.hash ? '?hash=' + query.hash : '')
         }
-        const buf = await media.fetch(url)
+        // empty/absent -> default cap; otherwise the value is range-validated in readMedia()
+        const maxBytes = (query.maxbytes === undefined || query.maxbytes === '') ? undefined : Number(query.maxbytes)
+        const buf = await media.fetch(url, maxBytes)
         const ext = url.split('?')[0].split('.').pop().toLowerCase()
         return send(res, 200, buf, TYPES[ext] || 'application/octet-stream')
       }
@@ -96,7 +103,7 @@ module.exports = function startApi ({ port, token, mypub, media, messages, versi
       }
     }
 
-    if (req.method === 'GET' && pathname === '/files') return send(res, 200, await media.list())
+    if (req.method === 'GET' && pathname === '/files') return send(res, 200, await media.list(query.scope))
 
     if (req.method === 'POST' && pathname === '/pin') {
       const j = JSON.parse(body.toString())

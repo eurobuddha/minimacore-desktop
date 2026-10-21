@@ -144,6 +144,13 @@ async function pollOnce() {
         emitter.emit("update");
         continue;
       }
+      if (m.state === "delivered") {
+        // the peer stored our message (0.18.18+): single tick -> double tick
+        if (m.ref) store.setStatus(m.ref, { status: "delivered" });
+        await nodeCmd("keets action:ack id:" + msg.id);
+        emitter.emit("update");
+        continue;
+      }
       if (m.state === "payaddr") {
         // contacts only: a control message must never create a contact, or any
         // stranger can plant a payee row with their address
@@ -186,8 +193,14 @@ async function pollOnce() {
         via: msg.via, read: false
       });
       if (isNew) {
-        // contact auto-created, named by the sender's self-declared name (else full pubkey)
-        if (!store.getContact(msg.from)) store.addContact(msg.from, m.name || msg.from);
+        // contact auto-created, named by the sender's self-declared name (else full pubkey);
+        // an auto-learned name FOLLOWS the sender until the user renames it by hand (0.18.18+)
+        const c = store.getContact(msg.from);
+        if (!c) store.addContact(msg.from, m.name || msg.from, undefined, true);
+        else if (c.auto && m.name && c.name !== m.name) store.addContact(msg.from, m.name, undefined, true);
+        // tell the sender we stored it: their single tick becomes a double tick
+        const rcpt = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "delivered" })), { ref: msgid }));
+        nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(rcpt)).catch(() => {});
         fresh++;
         lastName = m.name || (store.getContact(msg.from) || {}).name || msg.from;
         lastPreview = m.state === "image" ? "📷 Photo"

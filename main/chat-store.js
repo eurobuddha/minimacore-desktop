@@ -106,10 +106,13 @@ function setStatus(msgid, patch) {
 // contacts — pubkey is the keets pubkey (0x + 64 hex, stored and shown IN FULL);
 // maximapk reserved for the Parlons interop era
 function contacts() { ensureLoaded(); return Object.values(mem.contacts); }
-function addContact(pubkey, name, maximapk) {
+function addContact(pubkey, name, maximapk, auto) {
   ensureLoaded();
   const c = mem.contacts[pubkey] || { pubkey };
   if (name !== undefined && name !== null && name !== "") c.name = name;
+  // auto=true: the name came from the sender, not the user - it may follow later names.
+  // A user-given name (auto omitted/false) clears the flag and sticks.
+  c.auto = auto === true;
   if (!c.name) c.name = pubkey;
   if (maximapk) c.maximapk = maximapk;
   mem.contacts[pubkey] = c;

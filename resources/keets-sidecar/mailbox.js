@@ -9,6 +9,11 @@
 //   fetch: the recipient dials in; its Noise key IS the proof of ownership — the
 //          mailbox hands over everything addressed to conn.remotePublicKey and
 //          deletes each message on ack.
+//   fetch with sub:true (1.2.5+): same, but the connection STAYS OPEN as a live
+//          subscription — every later store for that recipient is pushed down it at
+//          once ({t:'stored'}), so delivery is instant instead of waiting for the
+//          recipient's next poll. The mailbox answers {t:'done', sub:true} so an old
+//          client (or a client talking to an old mailbox) can tell the difference.
 // Caps: 256KB/message (wire.MAX_PAYLOAD + envelope), 16MB/recipient, 1GB total,
 // 30-day TTL (hourly sweep). Untrusted commodity storage — anyone can run one.
 //
@@ -38,6 +43,26 @@ const TTL = 30 * 24 * 3600 * 1000
 
 const maildir = path.join(DATADIR, 'mail')
 fs.mkdirSync(maildir, { recursive: true })
+
+// live subscribers: recipient pk (hex) -> Set of authenticated connections
+const subs = new Map()
+function subscribe (pk, conn) {
+  if (!subs.has(pk)) subs.set(pk, new Set())
+  subs.get(pk).add(conn)
+  conn.on('close', () => {
+    const set = subs.get(pk)
+    if (set) { set.delete(conn); if (!set.size) subs.delete(pk) }
+  })
+}
+function pushStored (pk, id, sealed) {
+  const set = subs.get(pk)
+  if (!set) return 0
+  let n = 0
+  for (const c of set) {
+    try { wire.writeFrame(c, { t: 'stored', id, sealed: sealed.toString('base64') }); n++ } catch (e) {}
+  }
+  return n
+}
 
 // persistent identity
 const seedfile = path.join(DATADIR, 'keypair')
@@ -90,6 +115,7 @@ const server = dht.createServer((conn) => {
   let claimedPk = null
   let nonce = null
   let authedPk = null
+  let wantSub = false
   conn.on('data', (d) => {
     try {
       if (!routed) {
@@ -118,9 +144,11 @@ const server = dht.createServer((conn) => {
       const id = wire.sha256(sealed).slice(0, 16).toString('hex')
       fs.writeFileSync(path.join(rdir, id + '.bin'), sealed)
       wire.writeFrame(conn, { t: 'ok' })
+      pushStored(f.to, id, sealed)   // a subscribed recipient gets it now, not next poll
     } else if (f.t === 'fetch') {
       if (!/^[0-9a-f]{64}$/.test(f.pk)) return wire.writeFrame(conn, { t: 'err', e: 'bad pk' })
       claimedPk = f.pk
+      wantSub = f.sub === true
       const n = Buffer.alloc(32)
       sodium.randombytes_buf(n)
       nonce = n.toString('hex')
@@ -135,7 +163,12 @@ const server = dht.createServer((conn) => {
         if (!file.endsWith('.bin')) continue
         wire.writeFrame(conn, { t: 'stored', id: file.slice(0, -4), sealed: fs.readFileSync(path.join(rdir, file)).toString('base64') })
       }
-      wire.writeFrame(conn, { t: 'done' })
+      if (wantSub) {
+        subscribe(authedPk, conn)
+        wire.writeFrame(conn, { t: 'done', sub: true })
+      } else {
+        wire.writeFrame(conn, { t: 'done' })
+      }
     } else if (f.t === 'ack') {
       if (!authedPk || !/^[0-9a-f]{32}$/.test(f.id)) return
       try { fs.unlinkSync(path.join(maildir, authedPk, f.id + '.bin')) } catch (e) {}

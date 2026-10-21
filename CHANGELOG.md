@@ -7,6 +7,21 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.18] — instant keets delivery on the same Wi-Fi, double ticks that mean delivered
+
+- **Keets sidecar 1.2.5.** Two devices behind one router cannot hole-punch each other, so every
+  desktop → phone message fell back to a mailbox that the phone polled every five minutes
+  (measured 1–5 min across one desk). The recipient now holds a live subscription to its primary
+  mailbox and the mailbox pushes each stored message at once; senders store at that primary
+  first. Poll fallback 5 min → 45 s. `resources/keets-sidecar` synced to the keets repo (1.2.5,
+  adds `media-read.js`).
+- **Delivered receipts.** When this app stores a message it tells the sender (`state:"delivered"`),
+  and it applies the same receipt from Pandamonium 2.0.35+: one tick → two ticks when the message
+  actually lands, not only when the thread is opened.
+- **Contact names follow the sender** until you rename a contact yourself (auto-learned names are
+  flagged in `chat.json`; a user-given name clears the flag and sticks).
+
+
 ## [0.18.17] — KeetChat on both node kinds, styled like the phone: keets chats come into KeetChat, Parlons chats stay in Parlons
 
 - **The Chat tab is no longer hidden on the Parlons kind.** Until now the Parlons Node jar drained the

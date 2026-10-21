@@ -6,6 +6,12 @@
 // nodes; the recipient fetches on its next start and every POLL thereafter, proving
 // ownership simply by dialing the mailbox with its own Noise key.
 //
+// 1.2.5 — instant store-and-forward: every recipient has a PRIMARY mailbox (chosen
+// from its pubkey, so sender and recipient agree without talking). Senders store
+// there first; the recipient keeps one live subscription to it and the mailbox pushes
+// each stored message the moment it lands. Polling (now 45 s, all mailboxes) remains
+// the fallback for old mailboxes, old senders and dropped subscriptions.
+//
 // Inbox = one JSON file per message under <keetsdir>/inbox; apps read/ack via the API.
 
 const wire = require('./wire')
@@ -15,7 +21,18 @@ const fs = IS_BARE ? require('bare-fs') : require('fs')
 const path = IS_BARE ? require('bare-path') : require('path')
 
 const DIAL_TIMEOUT = 15000
-const POLL = 5 * 60 * 1000
+const POLL = 45 * 1000
+const SUB_RETRY_MIN = 5000
+const SUB_RETRY_MAX = 60000
+
+/** The mailbox a recipient and its senders both pick first: stable across nodes
+ *  because it depends only on the recipient key and the (sorted) mailbox list. */
+function primaryMailbox (pkhex, mailboxes) {
+  if (!mailboxes.length) return null
+  const sorted = [...mailboxes].map(m => m.replace(/^0x/i, '').toLowerCase()).sort()
+  const n = parseInt(pkhex.replace(/^0x/i, '').slice(0, 8), 16) >>> 0
+  return sorted[n % sorted.length]
+}
 
 function hex (b) { return b.toString('hex') }
 
@@ -93,10 +110,15 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
   }
 
   async function sendViaMailbox (tohex, payload) {
-    const sealed = wire.seal(keyPair, Buffer.from(tohex.replace(/^0x/i, ''), 'hex'), payload)
+    const to = tohex.replace(/^0x/i, '').toLowerCase()
+    const sealed = wire.seal(keyPair, Buffer.from(to, 'hex'), payload)
     let lasterr = new Error('no mailboxes configured')
-    // random order spreads load across the mailbox fleet
-    for (const mb of [...mailboxes].sort(() => Math.random() - 0.5)) {
+    // the recipient's primary first (it is subscribed there - instant push), then the
+    // rest in random order so load still spreads when the primary is unreachable
+    const primary = primaryMailbox(to, mailboxes)
+    const order = [...mailboxes].filter(m => m.replace(/^0x/i, '').toLowerCase() !== primary).sort(() => Math.random() - 0.5)
+    if (primary) order.unshift(primary)
+    for (const mb of order) {
       try {
         const s = await dialService(mb)
         try {
@@ -195,6 +217,49 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
       fs.unlinkSync(path.join(inboxdir, id + '.json'))
     },
 
+    /** Live subscription to our primary mailbox: stored messages arrive as pushes.
+     *  Reconnects with backoff; an old mailbox (no sub:true in done) is retried slowly
+     *  while the poll covers it. Never throws. */
+    async subscribeLoop () {
+      const me = hex(keyPair.publicKey)
+      const primary = primaryMailbox(me, mailboxes)
+      if (!primary) return
+      let wait = SUB_RETRY_MIN
+      let announced = false
+      while (true) {
+        try {
+          const s = await dialService(primary)
+          try {
+            s.send({ t: 'fetch', pk: me, sub: true })
+            const ch = await s.next()
+            if (!ch || ch.t !== 'challenge') throw new Error('no challenge from mailbox')
+            s.send({ t: 'proof', sig: wire.signFetch(keyPair, ch.nonce) })
+            let live = false
+            while (true) {
+              const f = await s.next()
+              if (!f) break                                   // connection closed
+              if (f.t === 'done') {
+                if (!f.sub) throw new Error('mailbox has no push support')
+                live = true; wait = SUB_RETRY_MIN
+                if (!announced) { announced = true; console.log('keets mail: subscribed to mailbox ' + primary + ' (push)') }
+                continue
+              }
+              if (f.t !== 'stored') continue
+              try {
+                const sealed = Buffer.from(f.sealed, 'base64')
+                const m = wire.unseal(keyPair, sealed)
+                const id = hex(wire.sha256(sealed).slice(0, 16))
+                saveInbox({ id, from: m.from, ts: m.ts, payload: m.payload.toString('base64'), via: live ? 'mailbox-push' : 'mailbox', received: Date.now() })
+              } catch (e) { console.log('keets mail: dropped bad sealed msg: ' + e.message) }
+              wire.writeFrame(s.conn, { t: 'ack', id: f.id })
+            }
+          } finally { s.close() }
+        } catch (e) { /* unreachable / old mailbox / dropped - back off and retry */ }
+        await new Promise(r => setTimeout(r, wait))
+        wait = Math.min(SUB_RETRY_MAX, wait * 2)
+      }
+    },
+
     start () {
       const poll = () => this.fetchMail().then(
         (n) => { if (n) console.log('keets mail: fetched ' + n + ' stored message(s)') },
@@ -202,6 +267,8 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
       )
       setTimeout(poll, 10000) // after the swarm is up
       setInterval(poll, POLL)
+      setTimeout(() => this.subscribeLoop(), 12000)
     }
   }
 }
+module.exports.primaryMailbox = primaryMailbox
