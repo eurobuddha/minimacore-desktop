@@ -96,7 +96,7 @@ contextBridge.exposeInMainWorld("mcd", {
   chatRemoveContact: (pk) => ipcRenderer.invoke("mcd:chatRemoveContact", pk),
   chatStatus: () => ipcRenderer.invoke("mcd:chatStatus"),
   chatMedia: (ref) => ipcRenderer.invoke("mcd:chatMedia", ref),
-  chatSendPayment: (to, amount) => ipcRenderer.invoke("mcd:chatSendPayment", to, amount),
+  chatSendPayment: (to, amount, token) => ipcRenderer.invoke("mcd:chatSendPayment", to, amount, token),
   chatRequestPayAddr: (to) => ipcRenderer.invoke("mcd:chatRequestPayAddr", to),
   chatPayAddr: (to) => ipcRenderer.invoke("mcd:chatPayAddr", to),
   chatSendImage: (to) => ipcRenderer.invoke("mcd:chatSendImage", to),

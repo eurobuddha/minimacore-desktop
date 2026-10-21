@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.20] — MxUSD payments in KeetChat
+
+- The in-chat payment now asks **Minima or MxUSD**. MxUSD (token id
+  `0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90`) is sent with the node's
+  `send … tokenid:` and travels on the existing payment wire fields (`tok`, `tokname`), which every
+  KeetChat and Parlons renderer already showed; only the send path had Minima hard-coded.
+
+
 ## [0.18.19] — never wait on a dial that will fail
 
 - **Keets sidecar 1.2.6.** A direct dial to a peer that cannot be reached (two devices on one

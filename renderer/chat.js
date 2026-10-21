@@ -430,9 +430,13 @@
       D.toast("No pay address yet — requested it over chat, try again shortly", "err");
       return;
     }
-    const amt = await D.showPrompt("Send Minima to " + addr, "", "amount", { message: "This sends real Minima from this node's wallet." });
+    const token = await dialog({ title: "Send payment", body: `<div class="chat-dialog__msg">Which currency? Both are sent from this node's wallet to the contact's pay address.</div>`,
+      actions: [{ label: "Cancel", value: null }, { label: "MxUSD", value: "mxusd" }, { label: "Minima", value: "minima" }] });
+    if (!token) return;
+    const label = token === "mxusd" ? "MxUSD" : "Minima";
+    const amt = await D.showPrompt("Send " + label + " to " + addr, "", "amount", { message: "This sends real " + label + " from this node's wallet." });
     if (!amt) return;
-    try { await D.api.chatSendPayment(sel, amt.trim()); D.toast("Payment sent", "ok"); }
+    try { await D.api.chatSendPayment(sel, amt.trim(), token); D.toast(label + " payment sent", "ok"); }
     catch (e) { D.toast("Payment failed: " + (e.message || e), "err"); }
     await refreshThreads(); renderContacts(); await renderMsgs(true);
   }

@@ -304,15 +304,24 @@ async function requestPayAddr(to) {
   const payload = schema.chatEncodeTyped("", "", { state: "payaddr-req" });
   await nodeCmd("keets action:send to:" + to + " datahex:" + hexOf(payload));
 }
-async function sendPayment(to, amount) {
+// The currencies a chat payment can carry. MxUSD is the Minima dollar-pegged token; the wire
+// (tok/tokname) and every renderer already carried it, only the send path hard-coded Minima.
+const PAY_TOKENS = {
+  minima: { id: "0x00", name: "Minima" },
+  mxusd: { id: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", name: "MxUSD" }
+};
+async function sendPayment(to, amount, token) {
+  const tk = PAY_TOKENS[(token || "minima").toLowerCase()];
+  if (!tk) throw new Error("Unknown currency");
   const addr = payAddrOf(to);
   if (!addr) { await requestPayAddr(to); throw new Error("No pay address yet — requested it over chat, try again shortly"); }
   if (!/^[0-9]+(\.[0-9]+)?$/.test("" + amount)) throw new Error("Invalid amount");
-  const txp = await nodeCmd("send address:" + addr + " amount:" + amount);
+  const cmd = "send address:" + addr + " amount:" + amount + (tk.id === "0x00" ? "" : " tokenid:" + tk.id);
+  const txp = await nodeCmd(cmd);
   const txid = (txp && txp.txpowid) ? "" + txp.txpowid : "";
-  const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "",
-      { state: "payment", amt: "" + amount, tokname: "Minima", txid, addr });
-  return sendTyped(to, payload, { state: "payment", amt: "" + amount, tokname: "Minima", txid, body: "" });
+  const fields = { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, addr };
+  const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "", fields);
+  return sendTyped(to, payload, { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, body: "" });
 }
 
 /** Shared write-before-send for typed messages. */
