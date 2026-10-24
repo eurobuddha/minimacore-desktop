@@ -20,6 +20,8 @@ const IS_BARE = typeof Bare !== 'undefined'
 const fs = IS_BARE ? require('bare-fs') : require('fs')
 const path = IS_BARE ? require('bare-path') : require('path')
 
+const POLL_SUBSCRIBED = 10 * 60 * 1000 // push is live: the poll only catches mail parked at non-primary mailboxes
+const CLOSE_GRACE = 2000 // ms to let a final frame flush before destroy
 const DIAL_TIMEOUT = 15000
 const POLL = 45 * 1000
 const SUB_RETRY_MIN = 5000
@@ -56,7 +58,7 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
     return new Promise((resolve, reject) => {
       const conn = dht.connect(Buffer.from(pkhex.replace(/^0x/i, ''), 'hex'))
       const timer = setTimeout(() => { conn.destroy(); reject(new Error('dial timeout ' + pkhex)) }, DIAL_TIMEOUT)
-      conn.on('error', (e) => { clearTimeout(timer); reject(e) })
+      conn.on('error', (e) => { clearTimeout(timer); conn.destroy(); reject(e) })
       conn.once('open', () => {
         conn.write(Buffer.concat([wire.MAGIC, Buffer.from([wire.SVC_MSG])]))
         const feed = wire.frameReader()
@@ -88,7 +90,13 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
           conn,
           send: (obj) => wire.writeFrame(conn, obj),
           next: () => queued.length ? Promise.resolve(queued.shift()) : new Promise((r) => waiting.push(r)),
-          close: () => conn.end()
+          // end() alone half-closes: when the far side never ends too, the stream and its UDP
+          // socket stayed open forever (~160 leaked sockets/hour from mail polls, measured
+          // 2026-10-24 on the Fold and desktop). Say goodbye, then always destroy.
+          close: () => {
+            try { conn.end() } catch (e) {}
+            setTimeout(() => conn.destroy(), CLOSE_GRACE).unref?.()
+          }
         }
       })
     })
@@ -134,6 +142,14 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
     }
     throw lasterr
   }
+
+  // suspend/resume (Bare app suspension): no mailbox timer, no live subscription while
+  // suspended; mail keeps waiting in the mailbox and is fetched on resume.
+  let suspended = false
+  let pollTimer = null
+  let liveStream = null
+  let subLive = false
+  let wakeSub = null
 
   return {
     // inbound KTS1/0x01 connection on the main server (magic already consumed)
@@ -248,7 +264,9 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
       let announced = false
       while (true) {
         try {
+          if (suspended) await new Promise(r => { wakeSub = r })
           const s = await dialService(primary)
+          liveStream = s
           try {
             s.send({ t: 'fetch', pk: me, sub: true })
             const ch = await s.next()
@@ -260,7 +278,7 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
               if (!f) break                                   // connection closed
               if (f.t === 'done') {
                 if (!f.sub) throw new Error('mailbox has no push support')
-                live = true; wait = SUB_RETRY_MIN
+                live = true; subLive = true; wait = SUB_RETRY_MIN
                 if (!announced) { announced = true; console.log('keets mail: subscribed to mailbox ' + primary + ' (push)') }
                 continue
               }
@@ -273,8 +291,9 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
               } catch (e) { console.log('keets mail: dropped bad sealed msg: ' + e.message) }
               wire.writeFrame(s.conn, { t: 'ack', id: f.id })
             }
-          } finally { s.close() }
+          } finally { liveStream = null; subLive = false; s.close() }
         } catch (e) { /* unreachable / old mailbox / dropped - back off and retry */ }
+        if (suspended) continue                                // resume restarts at once
         await new Promise(r => setTimeout(r, wait))
         wait = Math.min(SUB_RETRY_MAX, wait * 2)
       }
@@ -285,10 +304,34 @@ module.exports = function createMessages ({ keetsdir, dht, keyPair, mailboxes })
         (n) => { if (n) console.log('keets mail: fetched ' + n + ' stored message(s)') },
         () => {}
       )
-      setTimeout(poll, 10000) // after the swarm is up
-      setInterval(poll, POLL)
+      // Self-scheduling: every 45 s while the push subscription is down, every 10 min while it is live.
+      const loop = () => {
+        pollTimer = null
+        if (suspended) return
+        poll()
+        pollTimer = setTimeout(loop, subLive ? POLL_SUBSCRIBED : POLL)
+      }
+      this._loop = loop
+      this._poll = poll
+      pollTimer = setTimeout(loop, 10000) // after the swarm is up
       setTimeout(() => this.subscribeLoop(), 12000)
-    }
+    },
+
+    suspend () {
+      if (suspended) return
+      suspended = true
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+      if (liveStream) liveStream.close()
+    },
+
+    resume () {
+      if (!suspended) return
+      suspended = false
+      if (this._loop && !pollTimer) this._loop()     // fetch at once, then follow the cadence
+      if (wakeSub) { const w = wakeSub; wakeSub = null; w() }
+    },
+
+    isSuspended () { return suspended }
   }
 }
 module.exports.primaryMailbox = primaryMailbox

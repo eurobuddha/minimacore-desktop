@@ -14,7 +14,7 @@
 // Keep every require specifier a string literal so bare-pack can preresolve them.
 
 const IS_BARE = typeof Bare !== 'undefined'
-const VERSION = '1.2.6'
+const VERSION = '1.2.8'
 
 // On bare an uncaught error ABORTS the host process — inside a bare-kit worklet that
 // takes the whole Android app down with SIGABRT (proven on-device 2026-10-13, missing
@@ -227,6 +227,25 @@ setTimeout(() => {
     (e) => console.log('keets diag: ping ' + b.host + ':' + b.port + ' FAILED: ' + (e && e.message))
   )
 }, 20000)
+
+// App suspension (bare-kit Worklet.suspend/resume from the phone's battery policy): stop both
+// swarms (their DHT ticks, keepalives and discovery) and the mailbox timer/subscription, so a
+// suspended sidecar makes no network traffic and no timer wakeups. The loopback API keeps
+// answering. Resume reconnects and fetches any mail stored meanwhile.
+if (IS_BARE) {
+  Bare.on('suspend', () => {
+    console.log('keets: suspending')
+    messages.suspend()
+    swarm.suspend().catch(e => console.log('keets: swarm suspend failed: ' + e.message))
+    media.swarm.suspend().catch(e => console.log('keets: media suspend failed: ' + e.message))
+  })
+  Bare.on('resume', () => {
+    console.log('keets: resuming')
+    swarm.resume().catch(e => console.log('keets: swarm resume failed: ' + e.message))
+    media.swarm.resume().catch(e => console.log('keets: media resume failed: ' + e.message))
+    messages.resume()
+  })
+}
 
 // exit when the parent Minima node dies (its end of our stdin pipe closes).
 // NEVER under bare: a worklet's fd 0 is /dev/null, which EOFs instantly — this very
