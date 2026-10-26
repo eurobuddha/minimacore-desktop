@@ -344,6 +344,58 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       const lost = "counterparty withdrew your 4.95 USDT and reclaimed their 5 mxUSDT at the timelock — our claim never posted";
       assert.equal(atomix._lastFailureNote([{ event: "SWAP_LOST", note: lost }, { event: "MINIMA_CLAIM_FAILED", note }]), lost);
     });
+    // ---- 0.18.25: swap-status visibility on the Activity row (engine 0.1.39 / native 0.1.84) ----
+    // Live 2026-10-26: a maker silently declined a buy and the taker read "waiting" for two hours. The row now
+    // carries the engine's own projection (settle.visibility) plus what the renderer needs for "Refund now".
+    {
+      const { createContext } = require("../main/atomix/loader");
+      const inert = { minidappuid: "", cmd(c, cb) { if (cb) cb({ status: false }); }, sql(q, cb) { if (cb) cb({ status: true, rows: [] }); },
+        net: { GET(u, cb) { cb({}); }, POST(u, d, cb) { cb({}); } }, notify() {}, log() {}, init() {} };
+      const VA = createContext(inert).AX;
+      const NOW = 2000000000, HASH = "ab".repeat(32), TX = "0x" + "cd".repeat(32), MAKER = "0x" + "ef".repeat(64);
+      const sw = { hash: HASH, role: "INITIATOR", direction: "ERC20_TO_MINIMA", sellToken: "USDT", sellAmount: "50.5",
+        buyToken: "mxUSDT", buyAmount: "50", status: "STARTED", myTimelock: NOW + 600, myLegIsMinima: false, created: 1, updated: 2 };
+      const evs = [   // newest first, as getEvents returns them
+        { event: "REFUND_SENT", note: TX }, { event: "MAKER_TIMEOUT", note: "" },
+        { event: "MAKER_NOTICE", note: "declined|Maker wallet: TOO_MANY_COINS — it consolidates automatically and retries.", date: 5 },
+        { event: "MAKER_NOTICE", note: "retrying|older", date: 4 },
+        { event: "TAKE_SENT", note: MAKER }, { event: "HTLC_STARTED", note: "0x" + "12".repeat(32) } ];
+      ok("Activity row projects deadlines, the latest maker notice, the timeout and the refund tx IN FULL", () => {
+        const row = atomix._projectRow(VA, sw, evs, NOW, 0);
+        assert.ok(row.vis, "an initiator row carries vis");
+        assert.equal(row.vis.blocks, false);
+        assert.equal(row.vis.respondBy, NOW + 600 - VA.htlc.CP_SECS_CHECK);
+        assert.equal(row.vis.refundAt, NOW + 600);
+        assert.deepEqual([row.vis.notice.state, row.vis.notice.reason], ["declined", "Maker wallet: TOO_MANY_COINS — it consolidates automatically and retries."]);
+        assert.equal(row.vis.timedOut, true);
+        assert.equal(row.vis.refundSent, TX, "refund tx must be the whole hash");
+        assert.ok(row.vis.steps.indexOf("Maker notified") >= 0 && row.vis.steps.indexOf("Refund sent") >= 0);
+        assert.equal(row.detail, VA.inspect.statusDetail(row), "the plain-language line is unchanged");
+      });
+      ok("Refund now: closed until the contract accepts it (cur > refundAt), then open", () => {
+        assert.deepEqual([atomix._projectRow(VA, sw, [], NOW + 600, 0).vis.refundOpen, atomix._projectRow(VA, sw, [], NOW + 601, 0).vis.refundOpen], [false, true]);
+        assert.equal(atomix._projectRow(VA, sw, [], NOW, 0).vis.canRefund, true);
+        assert.equal(atomix._projectRow(VA, { ...sw, status: "REFUNDED" }, [], NOW, 0).vis.canRefund, false);
+        assert.equal(atomix._projectRow(VA, { ...sw, status: "REFUNDED" }, [], NOW, 0).vis.refunded, true);
+      });
+      ok("a Minima-first lock counts in BLOCKS against the chain tip", () => {
+        const m = atomix._projectRow(VA, { ...sw, myLegIsMinima: true, myTimelock: 150 }, [], NOW, 151).vis;
+        assert.deepEqual([m.blocks, m.cur, m.respondBy, m.refundOpen], [true, 151, 150 - VA.htlc.CP_BLOCKS_CHECK, true]);
+        assert.equal(atomix._projectRow(VA, { ...sw, myLegIsMinima: true, myTimelock: 150 }, [], NOW, 0).vis.refundOpen, false, "unknown tip → closed");
+      });
+      ok("a maker (RESPONDER) row carries no swap-status block", () => {
+        assert.equal(atomix._projectRow(VA, { ...sw, role: "RESPONDER" }, evs, NOW, 0).vis, null);
+      });
+      ok("Refund now is wired end to end (main IPC + preload + renderer)", () => {
+        const rd = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+        assert.ok(/ipcMain\.handle\("mcd:axRefundNow", \(_e, hash\) => atomix\.refundNow\(hash\)\)/.test(rd("main/main.js")));
+        assert.ok(/axRefundNow: \(hash\) => ipcRenderer\.invoke\("mcd:axRefundNow", hash\)/.test(rd("main/preload.js")));
+        assert.ok(/api\.axRefundNow\(hash\)/.test(rd("renderer/atomix-ui.js")));
+      });
+      await okA("refundNow refuses a non-hash before touching the engine", async () => {
+        await assert.rejects(() => atomix.refundNow("x'; DROP"), /not a swap hash/);
+      });
+    }
     // ---- 0.17.27: the lock-coin record must be CRASH-DURABLE, like the secret ----
     ok("the lock-coin write is in the synchronous-flush class, matched against the SQL swapdb really emits", () => {
       // The sqlite image is debounced 400ms. `mycoinid` is the only durable route to a refund once the lock

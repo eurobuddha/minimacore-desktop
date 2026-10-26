@@ -28,6 +28,9 @@
     // TIMELOCK window is spent — drop it (else junk handshakes accumulate an eth_call per entry per poll, forever).
     var INCOMING_TTL_MS = 2 * AX.htlc.TIMELOCK_SECS * 1000, INCOMING_MAX = 128;
     var C = null, cpInFlight = {}, incoming = {};   // cpInFlight: hash → reserved coinids csv; incoming: hash → {h,t}
+    // decline reporting (native 0.1.84): takerOf = normHash → the taker's AUTHENTICATED comms id from the sealed
+    // handshake (where a notice goes back to); noticesSent = normHash → count (each notice is a signed send).
+    var takerOf = {}, noticesSent = {}, MAX_NOTICES_PER_HASH = 3;
     var _now = function () { return Date.now(); };
     function nowUnix() { return Math.floor(_now() / 1000); }
 
@@ -212,6 +215,7 @@
     function pruneIncoming() {
         var now = _now();
         for (var k in incoming) { if (now - incoming[k].t > INCOMING_TTL_MS) delete incoming[k]; }
+        for (var t in takerOf) { if (!incoming[t]) { delete takerOf[t]; delete noticesSent[t]; } }   // bounded with the queue
     }
 
     /** Re-seed `incoming` from persisted EXECUTING SELL OTC deals (native SwapEngine re-arm). The in-memory set is
@@ -229,12 +233,16 @@
 
     function scanIncomingBuys(block, next) {
         if (!ready()) return next();
-        rearmOtc(function () { doScanIncoming(block, next); });
+        keepWallet(function () { rearmOtc(function () { doScanIncoming(block, next); }); });
     }
     function doScanIncoming(block, next) {
-        // Scan the TAKE sentinel for LADDER buy-take handshakes ONLY if I have a live published order + identity.
-        // OTC buy-takes arrive as queued `incoming` hashes (from EXECUTE / rearmOtc) and are processed regardless.
-        var doScan = C.myIdentity && myOrder();
+        // Scan the TAKE sentinel for LADDER buy-take handshakes if I have a live published order + identity, and
+        // for MAKER NOTICES if I am a taker with a started buy waiting on a maker (0.1.39 — before this a taker
+        // never read the channel, so a decline could not reach it). OTC buy-takes arrive as queued `incoming`
+        // hashes (from EXECUTE / rearmOtc) and are processed regardless.
+        if (!C.myIdentity) return processQueue();
+        if (myOrder()) return scanTake(true);
+        takerWaiting(function (waiting) { if (waiting) scanTake(false); else processQueue(); });
         function processQueue() {
             pruneIncoming();
             var hashes = [];
@@ -247,23 +255,40 @@
                 F.each(hashes, function (hash, j, nx) { processIncomingBuy(hash, block, ethNow, nx); }, next);
             });
         }
-        if (!doScan) return processQueue();
-        var addr = TR.active().takeAddr;
-        AX.mds.cmd('coinnotify action:add address:' + addr, function () {
-            AX.mds.cmd('coins simplestate:true order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
-                var coins = (r && r.response instanceof Array) ? r.response : [];
-                for (var i = 0; i < coins.length; i++) {
-                    var blob = AX.htlc.stateAt(coins[i], 99);
-                    if (!blob) continue;
-                    try {
-                        var opened = ID.openValid(C.myIdentity, String(blob).replace(/^0x/i, ''));
-                        if (!opened) continue;
-                        var msg = JSON.parse(AX.hex.utf8Decode(opened.plaintext));
-                        if (msg && msg.hash && msg.to === C.myIdentity.publicId()) addIncoming(msg.hash);
-                    } catch (e) { }
-                }
-                processQueue();
+        function scanTake(maker) {
+            var addr = TR.active().takeAddr, notices = [];
+            AX.mds.cmd('coinnotify action:add address:' + addr, function () {
+                AX.mds.cmd('coins simplestate:true order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
+                    var coins = (r && r.response instanceof Array) ? r.response : [];
+                    for (var i = 0; i < coins.length; i++) {
+                        var blob = AX.htlc.stateAt(coins[i], 99);
+                        if (!blob) continue;
+                        try {
+                            var opened = ID.openValid(C.myIdentity, String(blob).replace(/^0x/i, ''));
+                            if (!opened) continue;
+                            var msg = JSON.parse(AX.hex.utf8Decode(opened.plaintext));
+                            if (!msg || !msg.hash || msg.to !== C.myIdentity.publicId()) continue;
+                            var authed = sameId(opened.fromPublicId, msg.from);   // the sealed signer IS the claimed sender
+                            if (msg.notice != null) { if (authed) notices.push({ hash: msg.hash, from: opened.fromPublicId, state: String(msg.notice), reason: msg.reason }); continue; }
+                            if (!maker) continue;
+                            addIncoming(msg.hash);
+                            if (authed) takerOf[normHash(msg.hash)] = opened.fromPublicId;
+                        } catch (e) { }
+                    }
+                    // Notices are informational (settle.onMakerNotice); sequential, then the buy queue as before.
+                    F.each(notices, function (n, j, nx) {
+                        if (!AX.settle || !AX.settle.onMakerNotice) return nx();
+                        AX.settle.onMakerNotice(n.hash, n.from, n.state, n.reason, function () { nx(); });
+                    }, function () { processQueue(); });
+                });
             });
+        }
+    }
+    function sameId(a, b) { return !!a && !!b && String(a).replace(/^0x/i, '').toLowerCase() === String(b).replace(/^0x/i, '').toLowerCase(); }
+    /** A started buy of mine (ETH-first initiator) still waiting on its maker — only those can get a notice. */
+    function takerWaiting(cb) {
+        DB.allSwaps(function (e, all) {
+            cb(!e && (all || []).some(function (s) { return s && s.role === 'INITIATOR' && s.status === DB.ST_STARTED && !s.myLegIsMinima; }));
         });
     }
 
@@ -278,10 +303,17 @@
                 ops().getContract(EO.contractId(hash), function (e3, c) {
                     if (e3 || !c) return next();                              // USDT lock not visible yet → retry (TTL-pruned)
                     if (c.withdrawn || c.refunded) { delete incoming[normHash(hash)]; return next(); }
-                    if (!c.receiver || String(c.receiver).toLowerCase() !== String(C.ethAddr).toLowerCase()) return next();  // foreign/stale
-                    if (c.timelock - ethNow < Number(AX.htlc.CP_SECS_CHECK)) return next();   // their USDT lock too close to timeout
+                    // Every skip below RECORDS its reason and tells the taker (recordDecline) — the gates themselves
+                    // are unchanged. Live 2026-10-26: these were bare `return next()`s and a taker waited two hours.
+                    if (!c.receiver || String(c.receiver).toLowerCase() !== String(C.ethAddr).toLowerCase())   // foreign/stale
+                        return recordDecline(hash, 'Maker declined: your USDT lock pays ' + (c.receiver || 'nobody') + ', not this maker\'s ' + C.ethAddr + '.', true, next);
+                    if (c.timelock - ethNow < Number(AX.htlc.CP_SECS_CHECK))   // their USDT lock too close to timeout
+                        return recordDecline(hash, 'Maker declined: your USDT lock expires at ' + isoUnix(c.timelock) + ', less than '
+                            + Math.round(Number(AX.htlc.CP_SECS_CHECK) / 60) + ' min away — too close to its timeout to lock safely.', true, next);
                     gateBuy(c, hash, !!c.otc, function (ok) {   // OTC deal-match OR ladder-fit gate
-                        if (!ok || cpBurstFull(hash)) return next();
+                        if (!ok) return recordDecline(hash, buyDeclineReason(c, !!c.otc), !c.otc || !!(AX.otc && AX.otc.ready()), next);
+                        if (cpBurstFull(hash)) return recordDecline(hash, 'Maker busy: already locking ' + CP_LOCK_BURST
+                            + ' other buys — it retries on the next block.', false, next);
                         lockMinimaCounterLeg(c, block, next);
                     });
                 });
@@ -298,6 +330,51 @@
         cb(!!myOrder() && acceptTakerBuyMinima(myOrder(), c));
     }
 
+    /** Why gateBuy said no, in the taker's terms (reporting only — re-derives, never decides). */
+    function buyDeclineReason(c, otc) {
+        if (otc) return AX.otc && AX.otc.ready() ? 'Maker declined: no agreed OTC deal matches this lock.'
+                                                 : 'Maker\'s OTC desk is not running yet — it retries.';
+        var order = myOrder(), label = TR.active().coinLabel;
+        if (!order) return 'Maker declined: this maker has no live order right now.';
+        if (!c.tokenContract || String(c.tokenContract).toLowerCase() !== EO.NET.usdt.toLowerCase())
+            return 'Maker declined: your lock pays token ' + (c.tokenContract || 'unknown') + ', not USDT ' + EO.NET.usdt + '.';
+        var p = pair(order);
+        if (!p || !p.en) return 'Maker declined: this maker is not selling ' + label + ' right now.';
+        var give = D.formatUnits(c.requestAmount, 18), recv = D.formatUnits(c.amount, decimalsOf(c.tokenContract));
+        if (!(num(give) > 0)) return 'Maker declined: your lock asks for no ' + label + '.';
+        if (validPos(p.min) && num(give) < p.min) return 'Maker declined: you asked for ' + give + ' ' + label + ', below this maker\'s minimum of ' + p.min + '.';
+        var levels = p.asks.length ? p.asks.map(function (t) { return t.p + ' up to ' + t.a; }).join(', ') : (p.buy + ' (any size)');
+        return 'Maker declined: you pay ' + recv + ' USDT for ' + give + ' ' + label + '; none of this maker\'s asks fits (price up to size: ' + levels + ').';
+    }
+    function isoUnix(t) { return new Date(Number(t) * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC'); }
+
+    /** Maker: record WHY a buy was not locked, once per (hash, reason) via the events log, and tell the taker
+     *  (sealed, on the TAKE channel, at most MAX_NOTICES_PER_HASH per hash). fin = never (declined) vs retrying.
+     *  Reporting only — never changes what happens to funds. cb() always. */
+    function recordDecline(hash, reason, fin, cb) {
+        cb = cb || function () {};
+        if (!hash || !reason) return cb();
+        DB.getEvents(hash, function (e, evs) {
+            if (e) return cb();
+            for (var i = 0; i < evs.length; i++) if (evs[i].event === DB.EV_DECLINED && evs[i].note === reason) return cb();
+            log('[AtomiX] buy ' + hash + ' not locked: ' + reason);
+            DB.logEvent(hash, DB.EV_DECLINED, '', '', reason, function () {
+                sendNotice(hash, fin ? 'declined' : 'retrying', reason);
+                onChanged(); cb();
+            });
+        });
+    }
+    function sendNotice(hash, state, reason) {
+        var k = normHash(hash), to = takerOf[k], n = noticesSent[k] || 0;
+        if (!to || !C || !C.myIdentity || !AX.take || n >= MAX_NOTICES_PER_HASH) return;
+        noticesSent[k] = n + 1;
+        try {
+            AX.take.notice(C.myIdentity, to, C.myIdentity.publicId(), hash, state, reason, function (err) {
+                if (err) log('[AtomiX] notice not sent for ' + hash + ': ' + (err.message || err));
+            });
+        } catch (ex) { log('[AtomiX] notice not sent for ' + hash + ': ' + ex.message); }
+    }
+
     /** [Minima] Lock the mxUSDT counter-leg (block + CP_BLOCKS) from largest-first reserved coins. next(). */
     var lastCoinDecline = 0;
     function lockMinimaCounterLeg(c, block, next) {
@@ -312,13 +389,15 @@
                     lastCoinDecline = Date.now();
                     notify('Buy request declined', e.message + ' Hashlock: ' + hash);
                 }
-                return next();
+                return recordDecline(hash, 'Maker wallet: ' + e.message + ' — it consolidates automatically and retries.', false, next);
             }
-            if (actTok !== TR.active().tokenId) return next();
+            if (actTok !== TR.active().tokenId)
+                return recordDecline(hash, 'Maker switched market while locking — it retries.', false, next);
             var picked = selectCoins(coins, reqMinimaHuman);
             if (!picked.ids.length) {
                 notify('Buy request declined', 'Not enough free ' + TR.active().coinLabel + ' to fill ' + reqMinimaHuman);
-                return next();
+                return recordDecline(hash, 'Maker wallet: not enough free ' + TR.active().coinLabel + ' to fill ' + reqMinimaHuman
+                    + ' — it retries as its coins free up.', false, next);
             }
             reserveHash(hash, picked.ids.join(','));
             var swap = { hash: hash, role: 'RESPONDER', direction: 'ERC20_TO_MINIMA', sellToken: TR.active().coinLabel,
@@ -333,8 +412,12 @@
                 function (eL, txpowid) {
                     if (eL) {
                         // a build failure (no POSTED: tag) provably didn't broadcast → drop the row so it can retry
-                        if (String(eL.message).indexOf('POSTED:') !== 0) DB.deleteSwap(hash, function () {});
-                        releaseHash(hash); return next();
+                        if (String(eL.message).indexOf('POSTED:') !== 0) {
+                            DB.deleteSwap(hash, function () {});
+                            releaseHash(hash);
+                            return recordDecline(hash, 'Maker lock failed: ' + eL.message + ' — it retries on the next block.', false, next);
+                        }
+                        releaseHash(hash); return next();   // may have broadcast — the swap row is the dedup
                     }
                     DB.logEvent(hash, DB.EV_CPSENT, 'minima', reqMinimaHuman, txpowid, function () {
                         delete incoming[normHash(hash)];
@@ -366,6 +449,50 @@
     }
     function addDec(a, b) { return D.sub(a, D.sub('0', b)); }   // a + b via a - (0 - b)
 
+    // ---- wallet keeper: keep the active token's coins inside the band the engine can trade with ----
+    // Every sell take lands as a new coin, so a busy maker fragments until the safe coin read (53 tokens / 200
+    // MINIMA, htlc.guardedCoins) refuses and EVERY buy is declined (live 2026-10-26: 56 MxUSD coins). Merge well
+    // before that; split when a single coin would serialise concurrent takes. Same commands as native AtomiX's
+    // manual Wallet tools (MinimaHtlc.consolidateCoins / splitCoins). A split makes 10 coins, merging stops at 30,
+    // so the two can never chase each other.
+    var KEEP_MERGE_ABOVE = 30, KEEP_MERGE_ABOVE_MINIMA = 120, KEEP_MERGE_INPUTS = 20;
+    var KEEP_SPLIT_BELOW = 2, KEEP_SPLIT_INTO = 10, KEEP_GAP_MS = 120000;
+    var keepBusy = false, keepLast = 0;
+    /** Pure: what (if anything) to run for this settled balance. null = wallet is fine. */
+    function keepPlan(b, tokenId, myAddr) {
+        if (!b || !isHexTok(tokenId) || Number(b.unconfirmed) !== 0) return null;   // only ever act on a settled wallet
+        var minima = String(tokenId).toLowerCase() === '0x00';
+        if (b.coins > (minima ? KEEP_MERGE_ABOVE_MINIMA : KEEP_MERGE_ABOVE))
+            return { kind: 'merge', cmd: 'consolidate tokenid:' + tokenId + ' coinage:3 maxcoins:' + KEEP_MERGE_INPUTS + ' maxsigs:5',
+                why: b.coins + ' coins (keeping it at or below ' + (minima ? KEEP_MERGE_ABOVE_MINIMA : KEEP_MERGE_ABOVE) + ')' };
+        if (b.coins < KEEP_SPLIT_BELOW && Number(b.sendable) >= KEEP_SPLIT_INTO && myAddr)
+            return { kind: 'split', cmd: 'send amount:' + b.sendable + ' address:' + myAddr + ' tokenid:' + tokenId
+                + ' split:' + KEEP_SPLIT_INTO + ' coinage:1 mine:true',
+                why: b.coins + ' coin holding ' + b.sendable + ' (two takes cannot share one coin)' };
+        return null;
+    }
+    function isHexTok(t) { return /^0x[0-9a-fA-F]+$/.test(String(t || '')); }
+    /** Runs at most one merge/split, never while a counter-leg lock holds coins; never waits for it (next() now). */
+    function keepWallet(next) {
+        if (keepBusy || Object.keys(cpInFlight).length || _now() - keepLast < KEEP_GAP_MS) return next();
+        var tok = TR.active().tokenId;
+        H.tokenBalance(tok, function (e, b) {
+            var plan = e ? null : keepPlan(b, tok, C && C.myMinimaAddr);
+            if (!plan || keepBusy || Object.keys(cpInFlight).length) return next();
+            keepBusy = true; keepLast = _now();
+            var label = TR.active().coinLabel, title = plan.kind === 'merge' ? 'Merging ' + label + ' coins' : 'Splitting ' + label + ' coins';
+            log('[AtomiX] wallet keeper: ' + plan.kind + ' — ' + plan.why + ' — ' + plan.cmd);
+            AX.mds.cmdR(plan.cmd, function (err, resp) {
+                keepBusy = false; keepLast = _now();
+                var id = resp && (resp.txpowid || (resp.txpow && resp.txpow.txpowid)) || '';
+                if (err) { log('[AtomiX] wallet keeper ' + plan.kind + ' failed: ' + err.message); notify(title + ' failed', err.message); }
+                else { log('[AtomiX] wallet keeper ' + plan.kind + ' posted ' + id); notify(title, plan.why + '. Coins stay in your wallet.' + (id ? ' txpow ' + id : '')); }
+            });
+            next();
+        });
+    }
+    function log(s) { try { if (g.MDS && g.MDS.log) g.MDS.log(s); } catch (e) { } }
+
     // ---- burst + reservation ----
     function cpBurstFull(hash) { return Object.keys(cpInFlight).length >= CP_LOCK_BURST && !(hash in cpInFlight); }
     function reserveHash(hash, coinCsv) { cpInFlight[hash] = coinCsv || ''; }
@@ -390,8 +517,10 @@
         configure: configure, ready: ready,
         acceptTakerSellMinima: acceptTakerSellMinima, acceptTakerBuyMinima: acceptTakerBuyMinima,
         onSellTake: onSellTake, scanIncomingBuys: scanIncomingBuys, processIncomingBuy: processIncomingBuy, addIncoming: addIncoming,
-        _reset: function () { cpInFlight = {}; incoming = {}; EO._resetApprovals(); }, _setNow: function (fn) { _now = fn; EO._setNow(fn); },
-        _selectCoins: selectCoins, _incoming: function () { return incoming; }, pruneIncoming: pruneIncoming,
+        recordDecline: recordDecline, buyDeclineReason: buyDeclineReason, MAX_NOTICES_PER_HASH: MAX_NOTICES_PER_HASH,
+        _takerOf: function () { return takerOf; },
+        _reset: function () { cpInFlight = {}; incoming = {}; takerOf = {}; noticesSent = {}; EO._resetApprovals(); }, _setNow: function (fn) { _now = fn; EO._setNow(fn); },
+        _selectCoins: selectCoins, keepPlan: keepPlan, keepWallet: keepWallet, _resetKeeper: function () { keepBusy = false; keepLast = 0; }, _incoming: function () { return incoming; }, pruneIncoming: pruneIncoming,
         CP_LOCK_BURST: CP_LOCK_BURST, INCOMING_TTL_MS: INCOMING_TTL_MS, INCOMING_MAX: INCOMING_MAX
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

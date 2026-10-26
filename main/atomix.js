@@ -478,16 +478,39 @@ async function swaps() {
   // The newest *_FAILED event's reason rides on the row (`lastFail`) so statusDetail can say "Claim FAILING — …"
   // instead of "claiming now" while attempts are being refused. Engine 0.1.31 writes one such event per distinct
   // reason; before it, a claim could fail ~45 times over two hours with the row still reading "claiming".
-  const rows = [];
-  for (const s of shown) {
-    const row = { hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
-      sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status,
-      created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId };
-    row.lastFail = lastFailureNote(await p(cb => A.swapdb.getEvents(s.hash, cb)).catch(() => []));
-    row.detail = A.inspect.statusDetail(row);
-    rows.push(row);
-  }
+  const rows = [], nowSecs = Math.floor(Date.now() / 1000);
+  for (const s of shown) rows.push(projectRow(A, s, await p(cb => A.swapdb.getEvents(s.hash, cb)).catch(() => []), nowSecs, tip));
   return jclone(rows);
+}
+/** One Activity row. `vis` (engine 0.1.39, settle.visibility) is the swap-status block for a swap I started —
+ *  steps done, the maker's respond-by deadline, its latest sealed notice, the timeout, the refund tx IN FULL —
+ *  plus what the renderer needs to draw the "Refund now" button: `cur` (now, in the deadline's own unit: chain
+ *  tip for a Minima-first lock, unix secs for an ETH-first one) and `refundOpen` (the contract / node accepts
+ *  the refund only once cur > refundAt). null for a maker row. */
+function projectRow(A, s, events, nowSecs, tip) {
+  const row = { hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
+    sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status,
+    created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId };
+  row.lastFail = lastFailureNote(events);
+  row.detail = A.inspect.statusDetail(row);
+  const vis = A.settle.visibility(s, events);
+  if (vis) {
+    vis.cur = vis.blocks ? (Number(tip) || 0) : nowSecs;
+    vis.refundOpen = vis.cur > vis.refundAt;
+    vis.canRefund = s.status === "STARTED" || s.status === "ERROR";
+  }
+  row.vis = vis;
+  return row;
+}
+/** "Refund now" (engine settle.refundNow): answers exactly when the refund opens, or clears the retry window and
+ *  runs a settlement pass now (the service's own overlap-guarded poll). Resolves { msg, opened }. */
+async function refundNow(hash) {
+  const h = String(hash || "");
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(h)) throw new Error("not a swap hash: " + h);
+  const A = AX();
+  const r = await withTimeout(new Promise(res => A.settle.refundNow(h, (msg, opened) => res({ msg: String(msg), opened: !!opened }))), 30000, "refund check");
+  emitter.emit("update");
+  return r;
 }
 /** getEvents rows arrive newest-first; the reason of the newest *_FAILED or SWAP_LOST event, or "" when the newest
  *  settlement event is a success (a later SUBMITTED/COLLECT/EXPIRED supersedes an earlier failure). */
@@ -1096,7 +1119,7 @@ async function ethSetRpc(url) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, status,
-  book, quote, swapPreview, swapExecute, swaps, exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
+  book, quote, swapPreview, swapExecute, swaps, refundNow, exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute,
   makerCfg, makerPreview, makerSave, makerPublish, makerWithdraw, switchCurrency,
   otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
@@ -1106,6 +1129,7 @@ module.exports = {
   _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,
   _buildMds: buildMds,   // test-only: the MDS shim, so the cmd reply normalisation can be asserted
   _lastFailureNote: lastFailureNote,   // test-only: the Activity row's failure projection
+  _projectRow: projectRow,             // test-only: the whole Activity row incl. the swap-status block
   _FUND_DURABLE_WRITE: FUND_DURABLE_WRITE,   // test-only: asserted against the SQL swapdb.js really emits
   _publishSendWithRetry: publishSendWithRetry,
   _ctx: () => ctx, _fire: fire,

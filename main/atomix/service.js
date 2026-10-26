@@ -59,7 +59,8 @@ function configureEngines() {
         rpc: RPC, ethPriv: CTX.eth.privKey, ethAddr: CTX.eth.address,
         myMinimaPk: CTX.htlc.publickey, myMinimaAddr: CTX.htlc.miniaddress,
         notify: notifyLog,
-        onSwapsChanged: function () { }   // service has no UI to refresh; the UI polls its own SQL
+        onSwapsChanged: function () { },  // service has no UI to refresh; the UI polls its own SQL
+        kick: function () { poll(); }     // settle.refundNow: an immediate, overlap-guarded pass
     });
     AX.maker.configure({
         identity: AX.boot.activeIdentity(CTX), myMinimaPk: CTX.htlc.publickey, ethAddr: CTX.eth.address,
@@ -186,4 +187,12 @@ MDS.init(function (msg) {
     if (msg.event === 'inited') { tryBoot(); }
     else if (msg.event === 'NEWBLOCK') { if (!READY) tryBoot(); else poll(); }
     else if (msg.event === 'MDS_TIMER_60SECONDS') { if (!READY) tryBoot(); else poll(); }   // backstop between blocks
+    // The page's "Refund now" (lib/app.js): the page only answers WHEN; once the refund is open it asks the
+    // engine here to clear its retry window and run a pass now. Private (same-dapp) messages only.
+    else if (msg.event === 'MDSCOMMS' && READY && msg.data && !msg.data.public) {
+        try {
+            var m = JSON.parse(msg.data.message || '{}');
+            if (m && m.ax === 'refundNow' && m.hash) AX.settle.refundNow(String(m.hash), function (txt) { log('refund now ' + m.hash + ': ' + txt); });
+        } catch (e) { }
+    }
 });

@@ -114,10 +114,13 @@
             runMinimaChecks(block, function () {
                 confirmPendingMinima(function () {
                 runEthChecks(block, function () {
+                noteTimeouts(block, function () {
                     // MAKER buy-take discovery (TAKE-sentinel handshakes → lock the mxUSDT counter-leg), if the
-                    // responder is live on this instance (needs a published order); a no-op on a taker-only instance.
+                    // responder is live on this instance (needs a published order). The same TAKE scan also delivers
+                    // maker notices for MY started buys, so it runs for a taker with such a swap too (0.1.39).
                     if (AX.responder && AX.responder.ready()) AX.responder.scanIncomingBuys(block, cb);
                     else cb();
+                });
                 });
                 });
             });
@@ -459,7 +462,21 @@
         var key = 'refundE:' + hash;
         if (!ethRetryDue(key) || inflight[key]) return next();
         inflight[key] = true; markEthAttempt(key);
-        ops().refund(cid, function (e) { if (e && e.busy) delete ethAttempt[key]; delete inflight[key]; next(); });
+        ops().refund(cid, function (e, tx) {
+            if (e && e.busy) delete ethAttempt[key];
+            delete inflight[key];
+            if (e || !tx) return next();
+            // Say so the moment it is broadcast (native 0.1.84): the user may be watching the clock for exactly
+            // this. Once per swap; terminal status still comes ONLY from the contract flag (F1).
+            log('[AtomiX] refund SENT ' + hash + ' tx=' + tx);
+            DB.hasEvent(hash, DB.EV_REFUND_SENT, function (eH, have) {
+                if (have) return next();
+                DB.logEvent(hash, DB.EV_REFUND_SENT, '', '', String(tx), function () {
+                    notify('Refund sent', 'Returning your tokens to ' + C.ethAddr + ' — tx ' + tx);
+                    onChanged(); next();
+                });
+            });
+        });
     }
 
     function confirmEthWithdrawn(hash, swap, next) {
@@ -564,10 +581,138 @@
         });
     }
 
+    // ============================ swap-status visibility (native SwapEngine 0.1.84) ============================
+    // Live 2026-10-26: a maker declined a buy ("too many coins") in silence; the taker saw "started" for two hours
+    // and could neither learn why nor act. Now the maker SENDS every decline reason (responder.recordDecline), the
+    // taker records it here, gets its deadlines + one timeout notice, and can ask for the refund by hand.
+    // Informational only: nothing below changes what the engine does with funds.
+    var NOTICE_RETRYING = 'retrying', NOTICE_DECLINED = 'declined';
+    function sameId(a, b) { return !!a && !!b && String(a).replace(/^0x/i, '').toLowerCase() === String(b).replace(/^0x/i, '').toLowerCase(); }
+
+    /** When things happen for a swap I initiated, or null. Unix seconds for an ETH-first lock, blocks for a
+     *  Minima-first one: the maker must lock its counter-leg by respondBy (its own half-window guard refuses
+     *  after that), and my lock refunds after refundAt. */
+    function deadlines(s) {
+        if (!s || s.role !== 'INITIATOR' || !(Number(s.myTimelock) > 0)) return null;
+        var t = Number(s.myTimelock);
+        return s.myLegIsMinima ? { blocks: true, respondBy: t - Number(H.CP_BLOCKS_CHECK), refundAt: t }
+                               : { blocks: false, respondBy: t - Number(H.CP_SECS_CHECK), refundAt: t };
+    }
+    function clock(unix) { return new Date(Number(unix) * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC'); }
+
+    /** Taker: a sealed notice arrived on the TAKE channel (fromPublicId = the AUTHENTICATED sealed sender).
+     *  Accepted only for MY initiator swap, only from the maker comms id recorded in TAKE_SENT; deduped per
+     *  (state, reason). cb(isNew). */
+    function onMakerNotice(hash, fromPublicId, state, reason, cb) {
+        cb = cb || function () {};
+        if (!hash || !fromPublicId) return cb(false);
+        DB.getSwap(hash, function (e, s) {
+            if (e || !s || s.role !== 'INITIATOR') return cb(false);
+            DB.getEvents(hash, function (e2, evs) {
+                if (e2) return cb(false);
+                var maker = null, i;
+                for (i = 0; i < evs.length; i++) if (evs[i].event === DB.EV_TAKE_SENT) maker = evs[i].note;
+                if (!sameId(maker, fromPublicId)) return cb(false);
+                var st = state === NOTICE_DECLINED ? NOTICE_DECLINED : NOTICE_RETRYING;
+                var why = AX.take.cleanReason(reason), note = st + '|' + why;
+                for (i = 0; i < evs.length; i++) if (evs[i].event === DB.EV_MAKER_NOTICE && evs[i].note === note) return cb(false);
+                DB.logEvent(hash, DB.EV_MAKER_NOTICE, '', '', note, function () {
+                    log('[AtomiX] maker notice ' + hash + ': ' + note);
+                    notify(st === NOTICE_DECLINED ? 'Maker declined your swap' : 'Maker is retrying your swap',
+                        why + (st === NOTICE_DECLINED ? ' Your lock refunds automatically at its timelock.' : '') + ' Swap ' + hash);
+                    onChanged(); cb(true);
+                });
+            });
+        });
+    }
+
+    /** Taker: once the maker's respond-by deadline passes with my swap still STARTED, say so ONCE, with when the
+     *  refund opens. Device clock for the ETH case (a notice, not a fund decision). done(). */
+    function noteTimeouts(block, done) {
+        DB.allSwaps(function (e, all) {
+            if (e) return done();
+            var now = nowUnix();
+            F.each(all || [], function (s, i, next) {
+                var d = s && s.status === DB.ST_STARTED ? deadlines(s) : null;
+                if (!d || (d.blocks ? block : now) < d.respondBy) return next();
+                DB.hasEvent(s.hash, DB.EV_TIMEOUT, function (e2, have) {
+                    if (e2 || have) return next();
+                    DB.logEvent(s.hash, DB.EV_TIMEOUT, '', '', '', function () {
+                        var when = d.blocks ? 'block ' + d.refundAt : clock(d.refundAt), h = '0x' + DB.norm(s.hash);
+                        log('[AtomiX] maker timeout ' + h + ' — refund opens after ' + when);
+                        notify('Maker did not respond in time', 'Your ' + s.sellAmount + ' ' + TR.labelForToken(s.sellToken) + ' refunds automatically after '
+                            + when + ', app open or not. Swap ' + h);
+                        onChanged(); next();
+                    });
+                });
+            }, function () { done(); });
+        });
+    }
+
+    /** The user asked for the refund now. cb(message, opened): exactly when the contract accepts it if not yet;
+     *  otherwise clear the retry windows and run a settlement pass at once (ctx.kick — the host's overlap-guarded
+     *  poll — else poll()). Unconfigured (the MiniDapp page) it only answers; the page then asks the service. */
+    function refundNow(hash, cb) {
+        DB.getSwap(hash, function (e, s) {
+            if (e || !s) return cb('No such swap on this device.', false);
+            if (s.status === DB.ST_REFUNDED || s.status === DB.ST_COMPLETE) return cb('This swap is already ' + s.status.toLowerCase() + '.', false);
+            var d = deadlines(s);
+            if (!d) return cb('Only a swap you started has a refund of your own lock.', false);
+            function go() {
+                delete ethAttempt['refundE:' + s.hash]; delete ethAttempt['refundM:' + s.hash]; delete ethAttempt['refundScan:' + s.hash];
+                if (C && C.kick) C.kick(); else if (ready()) poll();
+                cb('Refunding now — you\'ll get a notification with the transaction id.', true);
+            }
+            if (d.blocks) return H.currentBlock(function (eB, b) {
+                // the node accepts the refund only once block > timelock (sweepExpiredMinima / checkExpiredMinima)
+                if (eB || !(b > d.refundAt)) return cb('Your lock refunds after block ' + d.refundAt + (b > 0 ? ' (' + (d.refundAt - b + 1)
+                    + ' blocks, about ' + Math.ceil((d.refundAt - b + 1) * H.MINIMA_BLOCK_TIME / 60) + ' min, from now).' : '.') + ' It then refunds automatically.', false);
+                go();
+            });
+            function ethNow(k) { if (C && C.rpc) C.rpc.latestBlockTimestamp(function (eT, t) { k(eT ? nowUnix() : t); }); else k(nowUnix()); }
+            ethNow(function (now) {
+                // the vault accepts refund() only once chain time > timelock (checkEthContractBody)
+                if (!(now > d.refundAt)) return cb('The Ethereum contract only accepts a refund after ' + clock(d.refundAt) + ' ('
+                    + Math.ceil((d.refundAt - now + 1) / 60) + ' min from now). It then refunds automatically, app open or not.', false);
+                go();
+            });
+        });
+    }
+
+    /** Card projection for one swap I started: deadlines, steps done, latest maker notice, timeout, refund tx.
+     *  events = getEvents/statusEvents rows (newest first). null for a swap I did not start. Pure. */
+    function visibility(s, events) {
+        var d = deadlines(s);
+        if (!d) return null;
+        var v = { blocks: d.blocks, respondBy: d.respondBy, refundAt: d.refundAt, steps: [], notice: null,
+            timedOut: false, refundSent: '', refunded: s.status === DB.ST_REFUNDED };
+        var started = false, told = false;
+        (events || []).forEach(function (ev) {
+            if (ev.event === DB.EV_STARTED) started = true;
+            else if (ev.event === DB.EV_TAKE_SENT) told = true;
+            else if (ev.event === DB.EV_TIMEOUT) v.timedOut = true;
+            else if (ev.event === DB.EV_REFUND_SENT && !v.refundSent) v.refundSent = String(ev.note || '');
+            else if (ev.event === DB.EV_MAKER_NOTICE && !v.notice) {
+                var n = String(ev.note || ''), bar = n.indexOf('|');
+                v.notice = { state: bar < 0 ? n : n.slice(0, bar), reason: bar < 0 ? '' : n.slice(bar + 1), at: Number(ev.date) || 0 };
+            }
+        });
+        if (started) v.steps.push('Locked your ' + s.sellAmount + ' ' + s.sellToken);
+        if (told) v.steps.push('Maker notified');
+        if (s.status === DB.ST_CLAIMING || s.status === DB.ST_COMPLETE) v.steps.push('Maker locked — claiming');
+        if (s.status === DB.ST_COMPLETE) v.steps.push('Complete');
+        if (v.refundSent) v.steps.push('Refund sent');
+        if (v.refunded) v.steps.push('Refunded');
+        return v;
+    }
+
     AX.settle = {
         configure: configure, ready: ready, poll: poll,
         amountTokenOk: amountTokenOk, stripReqToken: stripReqToken, decimalsOf: decimalsOf,
+        deadlines: deadlines, onMakerNotice: onMakerNotice, noteTimeouts: noteTimeouts, refundNow: refundNow, visibility: visibility,
+        NOTICE_RETRYING: NOTICE_RETRYING, NOTICE_DECLINED: NOTICE_DECLINED,
         _setNow: function (fn) { _now = fn; }, _reset: function () { ethAttempt = {}; inflight = {}; lastFail = {}; },
+        _ethAttempt: function () { return ethAttempt; },
         ETH_RETRY_SECS: ETH_RETRY_SECS
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -17,15 +17,30 @@
 
     /** Taker → maker: seal the hashlock to the maker's publicId and post it to the take channel. cb(err). */
     function send(me, makerPublicId, myPublicId, hash, cb) {
+        post(me, makerPublicId, { to: makerPublicId, from: myPublicId, hash: hash }, 'take send: ', cb);
+    }
+
+    /** Maker → taker on the same channel (native SwapTake.notice, 0.1.84): why a buy was not locked
+     *  (state = retrying | declined). The taker accepts it only from the maker it notified, for its own swap; it
+     *  never moves funds. cb(err). */
+    function notice(me, takerPublicId, myPublicId, hash, state, reason, cb) {
+        post(me, takerPublicId, { to: takerPublicId, from: myPublicId, hash: hash, notice: state, reason: cleanReason(reason) }, 'notice send: ', cb);
+    }
+
+    function post(me, toPublicId, obj, what, cb) {
         var blob;
-        try {
-            var j = JSON.stringify({ to: makerPublicId, from: myPublicId, hash: hash });
-            blob = ID.seal(me, makerPublicId, H.utf8(j));
-        } catch (e) { return cb(new Error('take send: ' + e.message)); }
+        try { blob = ID.seal(me, toPublicId, H.utf8(JSON.stringify(obj))); }
+        catch (e) { return cb(new Error(what + e.message)); }
         var state = { '99': '0x' + blob };
         M.cmdR('send amount:0.000000001 address:' + address() + ' tokenid:0x00 state:' + JSON.stringify(state),
             function (err) { cb(err); });
     }
 
-    AX.take = { address: address, send: send };
+    /** A notice reason as shown to a user: control chars → space, trimmed, at most 240 chars (native cleanReason). */
+    function cleanReason(r) {
+        var t = String(r == null ? '' : r).replace(/[\x00-\x1f\x7f]/g, ' ').trim();
+        return t.length > 240 ? t.substring(0, 240) : t;
+    }
+
+    AX.take = { address: address, send: send, notice: notice, cleanReason: cleanReason };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

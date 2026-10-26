@@ -141,11 +141,25 @@
                 cb(null, hash);                               // leg placed — report before the (async) handshake
                 if (!hooks.me || !maker.cid) { if (hooks.onNote) hooks.onNote('buy-started-no-contact'); return; }
                 var myPub = hooks.myPublicId || hooks.me.publicId();   // keep the sealed "from" consistent with the sender
-                AX.take.send(hooks.me, maker.cid, myPub, hash, function (te) {
-                    if (hooks.onNote) hooks.onNote(te ? ('buy-notify-failed:' + te.message) : 'buy-notified');
+                // Record WHO was told first: a maker notice is accepted only from this comms id (settle.onMakerNotice).
+                noteTakeSent(hash, maker.cid, function () {
+                    AX.take.send(hooks.me, maker.cid, myPub, hash, function (te) {
+                        if (hooks.onNote) hooks.onNote(te ? ('buy-notify-failed:' + te.message) : 'buy-notified');
+                    });
                 });
             });
         }
+    }
+
+    /** Taker: remember which maker comms id I told about this lock — the only sender whose notice I accept
+     *  (native SwapEngine.noteTakeSent, 0.1.84). Once per hash. cb(). */
+    function noteTakeSent(hash, makerPublicId, cb) {
+        cb = cb || function () {};
+        if (!hash || !makerPublicId) return cb();
+        DB.hasEvent(hash, DB.EV_TAKE_SENT, function (e, have) {
+            if (e || have) return cb();
+            DB.logEvent(hash, DB.EV_TAKE_SENT, '', '', String(makerPublicId), function () { cb(); });
+        });
     }
 
     // ---- confirmMyLock: is MY first leg visible on-chain yet? (gates the next sweep leg / halts on a dropped leg) ----
@@ -183,7 +197,7 @@
     AX.engine = {
         configure: configure, ready: ready,
         startSell: startSell, startBuy: startBuy, startLeg: startLeg, executeOtc: executeOtc,
-        confirmMyLock: confirmMyLock, ensureAllowance: ensureAllowance,
+        confirmMyLock: confirmMyLock, ensureAllowance: ensureAllowance, noteTakeSent: noteTakeSent,
         _setNow: function (fn) { _now = fn; EO._setNow(fn); }, _resetApprovals: function () { EO._resetApprovals(); },
         MAX_UINT: MAX_UINT, HTLC_SCAN_DEPTH: HTLC_SCAN_DEPTH
     };

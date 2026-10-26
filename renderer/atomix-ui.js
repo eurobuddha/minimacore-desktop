@@ -680,9 +680,34 @@
           <div class="ax-l1 mono">${esc(s.sellamount)} ${esc(axTok(s.selltoken))} → ${esc(s.buyamount)} ${esc(axTok(s.buytoken))}</div>
           <div class="ax-l2">${meta}${cp}</div>
           ${s.detail ? `<div class="ax-l2">${esc(s.detail)}</div>` : ""}
+          ${axVisHtml(s)}
         </div>
         <span class="ax-st">${esc(axStatusLabel(s.status))}</span></div>`;
     }).join("");
+  }
+  // Swap-status block for a swap I started (engine 0.1.39 / native 0.1.84 — live 2026-10-26 a taker saw "waiting"
+  // for two hours while the maker silently declined): steps done, the maker's deadline, its latest notice, when
+  // the refund opens, a "Refund now" button (disabled with a countdown until it opens) and the refund tx IN FULL.
+  function axVisHtml(s) {
+    const v = s.vis;
+    if (!v) return "";
+    const waiting = s.status === "STARTED";
+    const when = (t) => v.blocks ? "block " + t : new Date(t * 1000).toLocaleString();
+    const left = (t) => { const d = t - v.cur + 1;
+      if (v.blocks) return v.cur ? d + (d === 1 ? " block" : " blocks") : "a few blocks";
+      return d >= 3600 ? Math.floor(d / 3600) + "h " + Math.ceil((d % 3600) / 60) + "m" : Math.ceil(d / 60) + " min"; };
+    const out = [];
+    if (v.steps && v.steps.length) out.push(`<div class="ax-l2">✓ ${v.steps.map(esc).join(" · ✓ ")}</div>`);
+    if (waiting && !v.timedOut && v.cur < v.respondBy) out.push(`<div class="ax-l2">Maker must respond by ${esc(when(v.respondBy))}</div>`);
+    if (v.notice) out.push(`<div class="ax-l2">${v.notice.state === "declined" ? "Maker declined: " : "Maker is retrying: "}${esc(v.notice.reason)}</div>`);
+    if (v.canRefund && (v.timedOut || v.cur >= v.respondBy) && !v.refundSent)
+      out.push(`<div class="ax-l2">Refund opens ${esc(when(v.refundAt + (v.blocks ? 1 : 0)))} — automatic, app open or not</div>`);
+    if (v.refundSent) out.push(`<div class="ax-l2">Refund sent: <span class="mono" data-axcopy="${esc(v.refundSent)}" style="cursor:copy;word-break:break-all" title="Click to copy">${esc(v.refundSent)}</span></div>`);
+    if (v.refunded) out.push(`<div class="ax-l2">Refunded</div>`);
+    if (v.canRefund) out.push(v.refundOpen
+      ? `<button class="ax-btn ax-btn--sm ax-btn--fill" data-axrefund="${esc(s.hash)}">Refund now</button>`
+      : `<button class="ax-btn ax-btn--sm" disabled>Refund now (opens in ${esc(left(v.refundAt))})</button>`);
+    return out.join("");
   }
   // RESPONDER makes the market, INITIATOR takes it. Same mapping the CSV export uses, so the tab and the
   // exported file never disagree about which side you were.
@@ -698,6 +723,12 @@
     // Copy the FULL counterparty without also opening the inspect modal the row click triggers.
     document.querySelectorAll("#axBody [data-axcopy]").forEach(n => n.onclick = (e) => {
       e.stopPropagation(); copy(n.dataset.axcopy); });
+    document.querySelectorAll("#axBody [data-axrefund]").forEach(b => b.onclick = async (e) => {
+      e.stopPropagation();
+      const hash = b.dataset.axrefund;
+      const r = await api.axRefundNow(hash).catch(err => ({ msg: "Refund check failed: " + (err.message || err) }));
+      showAxReport(hash, [r.msg, "Swap " + hash]);
+    });
     document.querySelectorAll("#axBody [data-axhash]").forEach(r => r.onclick = async () => {
       toast("Checking…");
       const lines = await api.axInspect(r.dataset.axhash).catch(e => ["Check failed: " + (e.message || e)]);

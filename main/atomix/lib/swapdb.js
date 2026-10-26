@@ -28,6 +28,13 @@
     // with the plain-language reason as its note, when a swap is finalised as lost (settle.finalizeMinimaLost /
     // finalizeEthLost). 2026-09-15: such a row read "claiming" for two days.
     var EV_LOST = 'SWAP_LOST';
+    // Swap-status visibility (native 0.1.84 SwapDb, SAME strings). Live 2026-10-26: a maker declined a buy in
+    // silence and the taker saw "started" for two hours. None of these gates anything — display + dedupe only.
+    var EV_TAKE_SENT = 'TAKE_SENT';        // taker: buy handshake sent (note = maker comms id)
+    var EV_MAKER_NOTICE = 'MAKER_NOTICE';  // taker: sealed notice from that maker (note = state|reason)
+    var EV_DECLINED = 'BUY_DECLINED';      // maker: why I did not lock (note = reason)
+    var EV_TIMEOUT = 'MAKER_TIMEOUT';      // taker: the maker's respond-by deadline passed
+    var EV_REFUND_SENT = 'REFUND_SENT';    // taker: my ETH refund broadcast (note = tx hash)
     // ---- UX swap status ----
     var ST_STARTED = 'STARTED', ST_LOCKED = 'LOCKED', ST_CLAIMING = 'CLAIMING',
         ST_COMPLETE = 'COMPLETE', ST_REFUNDED = 'REFUNDED', ST_ERROR = 'ERROR';
@@ -124,6 +131,17 @@
                 if (e) return cb(e);
                 cb(null, rs.map(function (r) { return { event: r.EVENT, token: r.TOKEN, amount: r.AMOUNT, note: r.TXNHASH, date: Number(r.EVENTDATE) }; }));
             });
+    }
+
+    /** Every swap-status event in ONE query, newest first, grouped: { normHash: [{event, note, date}] }. The
+     *  Activity cards need them for every shown swap; one SELECT beats one getEvents per row per refresh. */
+    function statusEvents(cb) {
+        read("SELECT `hash`,`event`,`txnhash`,`eventdate` FROM `events` WHERE `event` IN ('" + [EV_STARTED, EV_TAKE_SENT,
+            EV_MAKER_NOTICE, EV_TIMEOUT, EV_REFUND_SENT].join("','") + "') ORDER BY `eventdate` DESC", function (e, rs) {
+            var out = {};
+            rs.forEach(function (r) { var k = norm(r.HASH); (out[k] = out[k] || []).push({ event: r.EVENT, note: r.TXNHASH, date: Number(r.EVENTDATE) }); });
+            cb(e, out);
+        });
     }
 
     // ================= myhtlc (what I requested when initiating) =================
@@ -280,12 +298,13 @@
         EV_MINIMA_CLAIM_SUBMITTED: EV_MINIMA_CLAIM_SUBMITTED, EV_MINIMA_REFUND_SUBMITTED: EV_MINIMA_REFUND_SUBMITTED,
         EV_MINIMA_CLAIM_FAILED: EV_MINIMA_CLAIM_FAILED, EV_MINIMA_REFUND_FAILED: EV_MINIMA_REFUND_FAILED,
         EV_LOST: EV_LOST,
+        EV_TAKE_SENT: EV_TAKE_SENT, EV_MAKER_NOTICE: EV_MAKER_NOTICE, EV_DECLINED: EV_DECLINED, EV_TIMEOUT: EV_TIMEOUT, EV_REFUND_SENT: EV_REFUND_SENT,
         EV_STARTED: EV_STARTED, EV_CPSENT: EV_CPSENT, EV_COLLECT: EV_COLLECT, EV_EXPIRED: EV_EXPIRED, EV_MISMATCH: EV_MISMATCH,
         ST_STARTED: ST_STARTED, ST_LOCKED: ST_LOCKED, ST_CLAIMING: ST_CLAIMING, ST_COMPLETE: ST_COMPLETE, ST_REFUNDED: ST_REFUNDED, ST_ERROR: ST_ERROR,
         MT_OPEN: MT_OPEN, MT_EXECUTED: MT_EXECUTED, MT_REFUNDED: MT_REFUNDED,
         init: init, norm: norm,
         insertSecret: insertSecret, getSecret: getSecret,
-        logEvent: logEvent, hasEvent: hasEvent, getEvents: getEvents,
+        logEvent: logEvent, hasEvent: hasEvent, getEvents: getEvents, statusEvents: statusEvents,
         insertMyHtlc: insertMyHtlc, getRequest: getRequest,
         upsertSwap: upsertSwap, setSwapStatus: setSwapStatus, setSwapContractId: setSwapContractId,
         rememberLockCoin: rememberLockCoin, rememberedLockCoin: rememberedLockCoin,
