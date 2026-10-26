@@ -6,7 +6,7 @@
 // token the node/app already holds; also written to <keetsdir>/apitoken, mode 0600).
 // CORS is open so MiniDapp webviews can call it directly — the token is the gate.
 //
-//   GET    /info                         -> { pubkey, drive, apiport, version }
+//   GET    /info                         -> { pubkey, drive, apiport, version, dht }
 //   POST   /media/<path>   (raw bytes)   -> { url, drive, path, hash, size }   host a file
 //   GET    /media?url=keets://...        -> the bytes (fetched P2P, then re-seeded)
 //   GET    /files                        -> own drive listing
@@ -27,7 +27,7 @@ const TYPES = {
   mp3: 'audio/mpeg', ogg: 'audio/ogg', json: 'application/json', txt: 'text/plain'
 }
 
-module.exports = function startApi ({ port, token, mypub, media, messages, version }) {
+module.exports = function startApi ({ port, token, mypub, media, messages, version, dhtInfo }) {
   function send (res, code, body, type) {
     const buf = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body))
     res.writeHead(code, {
@@ -74,7 +74,18 @@ module.exports = function startApi ({ port, token, mypub, media, messages, versi
       // `keets action:info` succeeds and the app doesn't stick on "Node starting".
       let st = {}
       try { st = await media.start() } catch (e) {} // idempotent; on failure keep st={} and return the pubkey only (the error stays server-side)
-      return send(res, 200, { pubkey: '0x' + mypub, drive: st.drive || null, salondrive: st.salondrive || null, apiport: port, version, boundedMedia: true })
+      return send(res, 200, { pubkey: '0x' + mypub, drive: st.drive || null, salondrive: st.salondrive || null, apiport: port, version, boundedMedia: true, privateSharing: true, dht: dhtInfo ? dhtInfo() : null })
+    }
+
+    if (req.method === 'POST' && pathname === '/private-forget') {
+      const j = JSON.parse(body.toString())
+      return send(res, 200, await media.forgetPrivate(j.url))
+    }
+
+    if (req.method === 'POST' && pathname === '/private-sharing') {
+      const j = JSON.parse(body.toString())
+      if (j.sharing !== 'true' && j.sharing !== 'false') return send(res, 400, { error: 'Invalid sharing state' })
+      return send(res, 200, await media.privateSharing(j.url, j.sharing === 'true'))
     }
 
     if (pathname === '/media' || pathname.startsWith('/media/')) {

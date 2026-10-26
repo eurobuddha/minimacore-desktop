@@ -37,7 +37,12 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
   // handshakes stall when the main keypair's bridge churns on the same UDX socket,
   // seen 2026-10-13); one swarm per DHT node is the pattern Keet itself ships.
   const mediaSeed = sha256(Buffer.concat([seed, Buffer.from('keets-media-v1')]))
-  const dht = new DHT(bootstrap && bootstrap.length ? { bootstrap } : {})
+  // Media rides its own DHT node, but routing duty belongs to the main node alone: a second
+  // adaptive node doubled the lookups a reachable phone answered. Client-only still connects,
+  // announces drives and replicates both ways.
+  const dhtOpts = bootstrap && bootstrap.length ? { bootstrap, ephemeral: true } : { ephemeral: true }
+  if (IS_BARE) dhtOpts.connectionKeepAlive = 20000   // phone: same 20 s keepalive as the main node
+  const dht = new DHT(dhtOpts)
   const swarm = new Hyperswarm({ dht, keyPair: DHT.keyPair(mediaSeed), maxPeers: maxconns })
   swarm.on('connection', (conn) => {
     console.log('keets media conn: 0x' + conn.remotePublicKey.toString('hex'))
@@ -49,6 +54,57 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
       conn.destroy()
     })
   })
+
+  // Private files have independent Corestores: closing one stops replication of
+  // its historical blocks as well as discovery, without closing the chat drive.
+  const privateFile = path.join(keetsdir, 'private-transfers.json')
+  let privateRecords = {}
+  try { privateRecords = JSON.parse(fs.readFileSync(privateFile, 'utf8')) } catch (e) { if (e.code !== 'ENOENT') throw e }
+  const privateOpen = new Map()
+  let privateQueue = Promise.resolve()
+  const serial = fn => {
+    const job = privateQueue.then(async () => {
+      try { return { value: await fn() } } catch (error) { return { error } }
+    })
+    privateQueue = job.then(() => {})
+    return job.then(result => { if (result.error) throw result.error; return result.value })
+  }
+  const savePrivate = () => { fs.writeFileSync(privateFile + '.tmp', JSON.stringify(privateRecords)); fs.renameSync(privateFile + '.tmp', privateFile) }
+  const privateId = pathname => { const m = /^\/private\/([a-f0-9]{32})\/(manifest|[0-9]+)$/.exec(pathname); return m && m[1] }
+  async function openPrivate (slot, record) {
+    if (privateOpen.has(slot)) return privateOpen.get(slot)
+    const isolated = new Corestore(path.join(keetsdir, 'private-stores', slot))
+    try {
+      await isolated.ready()
+      const drive = new Hyperdrive(isolated, record.own ? undefined : Buffer.from(record.key, 'hex'))
+      await drive.ready()
+      if (record.key && record.key !== drive.key.toString('hex')) throw new Error('private drive identity changed')
+      record.key = drive.key.toString('hex')
+      const entry = { store: isolated, drive }
+      privateOpen.set(slot, entry)
+      for (const connection of swarm.connections) if (!connection.destroyed) isolated.replicate(connection)
+      swarm.join(drive.discoveryKey, { server: true, client: true })
+      savePrivate()
+      return entry
+    } catch (e) { const entry = privateOpen.get(slot); if (entry) await swarm.leave(entry.drive.discoveryKey); privateOpen.delete(slot); await isolated.close(); throw e }
+  }
+  swarm.on('connection', connection => {
+    for (const entry of privateOpen.values()) if (!entry.store.closing) entry.store.replicate(connection)
+  })
+  function privateDrive (id, key, own) {
+    return serial(async () => {
+      let slot = own ? 'o-' + id : Object.keys(privateRecords).find(k => privateRecords[k].key === key)
+      if (!slot) slot = 'r-' + key
+      let record = privateRecords[slot]
+      if (!record) {
+        if (Object.keys(privateRecords).length >= 128) throw new Error('private transfer storage limit reached')
+        record = privateRecords[slot] = { id, key, own, sharing: true }
+      }
+      if (record.id !== id) throw new Error('private transfer identity mismatch')
+      if (!record.sharing) throw new Error('File sharing stopped; choose Share again')
+      return (await openPrivate(slot, record)).drive
+    })
+  }
 
   const pinsfile = path.join(keetsdir, 'pins.json')
   let pins = []
@@ -157,7 +213,8 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
 
     async publish (pathname, buf) {
       if (!pathname.startsWith('/')) pathname = '/' + pathname
-      const drive = await own(pathname.startsWith('/salon/') ? 'salon' : 'media')
+      const id = privateId(pathname)
+      const drive = id ? await privateDrive(id, null, true) : await own(pathname.startsWith('/salon/') ? 'salon' : 'media')
       await drive.put(pathname, buf)
       const hash = sha256(buf).toString('hex')
       return {
@@ -171,12 +228,51 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
 
     async fetch (url, maxBytes) {
       const { key, path: p, hash } = parseUrl(url)
-      const drive = await getDrive(key)
+      const id = privateId(p)
+      const drive = id ? await privateDrive(id, key, false) : await getDrive(key)
       const buf = await readMedia(drive, swarm, p, maxBytes)
       if (hash && sha256(buf).toString('hex') !== hash) throw new Error('hash mismatch — content does not match url')
       return buf
     },
 
+    async privateSharing (url, sharing) {
+      const { key, path: pathname } = parseUrl(url)
+      const id = privateId(pathname)
+      if (!id || !pathname.endsWith('/manifest') || typeof sharing !== 'boolean') throw new Error('Invalid private sharing request')
+      return await serial(async () => {
+        const slot = Object.keys(privateRecords).find(k => privateRecords[k].key === key && privateRecords[k].id === id)
+        if (!slot) throw new Error('Legacy shared drive: send this file again with updated Keets')
+        const record = privateRecords[slot]
+        record.sharing = sharing
+        savePrivate() // persist pause intent before closing sockets
+        if (sharing) await openPrivate(slot, record)
+        else {
+          const entry = privateOpen.get(slot)
+          if (entry) {
+            await swarm.leave(entry.drive.discoveryKey)
+            await entry.store.close()
+            privateOpen.delete(slot)
+          }
+        }
+        return { sharing }
+      })
+    },
+    async forgetPrivate (url) {
+      const { key, path: pathname } = parseUrl(url)
+      const id = privateId(pathname)
+      if (!id || !pathname.endsWith('/manifest')) throw new Error('Invalid private removal request')
+      return await serial(async () => {
+        const slot = Object.keys(privateRecords).find(k => privateRecords[k].key === key && privateRecords[k].id === id)
+        if (!slot) return { forgotten: true }
+        if (!/^(o-[a-f0-9]{32}|r-[a-f0-9]{64})$/.test(slot)) throw new Error('Invalid private transfer state')
+        if (privateRecords[slot].sharing || privateOpen.has(slot)) throw new Error('Stop sharing before removing this transfer')
+        fs.rmSync(path.join(keetsdir, 'private-stores', slot), { recursive: true, force: true })
+        delete privateRecords[slot]
+        savePrivate()
+        return { forgotten: true }
+      })
+    },
+    async closePrivate () { for (const entry of privateOpen.values()) await entry.store.close(); privateOpen.clear() },
     async list (scope) {
       const drive = await own(scope)
       const out = []
@@ -210,6 +306,12 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
     pinsList () { return pins.map(k => '0x' + k) },
 
     async start () {
+      await serial(async () => {
+        for (const [slot, record] of Object.entries(privateRecords)) {
+          if (!/^(o-[a-f0-9]{32}|r-[a-f0-9]{64})$/.test(slot) || !/^[a-f0-9]{32}$/.test(record.id) || (record.key && !/^[a-f0-9]{64}$/.test(record.key))) throw new Error('Invalid private transfer state')
+          if (record.sharing) await openPrivate(slot, record)
+        }
+      })
       const drive = await own()
       for (const k of pins) {
         getDrive(k).then(d => d.download('/').catch(() => {})).catch(() => {})

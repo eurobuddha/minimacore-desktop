@@ -14,7 +14,7 @@
 // Keep every require specifier a string literal so bare-pack can preresolve them.
 
 const IS_BARE = typeof Bare !== 'undefined'
-const VERSION = '1.2.8'
+const VERSION = '1.2.12'
 
 // On bare an uncaught error ABORTS the host process — inside a bare-kit worklet that
 // takes the whole Android app down with SIGABRT (proven on-device 2026-10-13, missing
@@ -41,6 +41,11 @@ const PORT = parseInt(arg('port', '9001'))
 const DATADIR = arg('datadir', '.')
 const TOPIC = arg('topic', 'minima-mainnet-keets-v1')
 const MAXCONNS = parseInt(arg('maxconns', '6'))
+// DHT duty. 'routing' (default, unchanged behaviour): the main DHT node is adaptive and becomes a
+// full routing node once the network shows it is directly reachable, supporting the network for
+// everyone. 'client': it never routes others' lookups (still connects, announces and receives);
+// a phone passes this on battery when the user picked "DHT relay: on when plugged in".
+const DHT_MODE = arg('dht-mode', 'routing') === 'client' ? 'client' : 'routing'
 const CONNECT = arg('connect', '').split(',').filter(Boolean)
 const APIPORT = parseInt(arg('apiport', String(PORT + 5)))
 // default store-and-forward mailboxes: the publicIPnodes fleet's keets-mailbox daemons
@@ -106,6 +111,28 @@ function preamble (remotePubKey, initiator) {
   return Buffer.concat([frame, payload])
 }
 
+// Traffic on open peer connections only (each connection's own UDX stream), so DHT lookups and
+// announces = node total minus this.
+function streamStats (swarmRef) {
+  const out = { connections: 0, txPackets: 0, rxPackets: 0, txBytes: 0, rxBytes: 0 }
+  try {
+    for (const c of swarmRef.connections) {
+      const s = c.rawStream
+      if (!s) continue
+      out.connections++
+      out.txPackets += s.packetsTransmitted || 0; out.rxPackets += s.packetsReceived || 0
+      out.txBytes += s.bytesTransmitted || 0; out.rxBytes += s.bytesReceived || 0
+    }
+  } catch (e) {}
+  return out
+}
+
+function udxStats (udx) {
+  try {
+    return { txPackets: udx.packetsTransmitted, rxPackets: udx.packetsReceived, txBytes: udx.bytesTransmitted, rxBytes: udx.bytesReceived }
+  } catch (e) { return null }
+}
+
 // --- swarm ----------------------------------------------------------------
 // Liveness heartbeat for the first minute (on-device debugging: if these stop,
 // the event loop is blocked in whatever step was logged last).
@@ -116,7 +143,24 @@ const hb = setInterval(() => {
 }, 5000)
 
 console.log('keets step: creating swarm')
-const dht = new DHT(BOOTSTRAP.length ? { bootstrap: BOOTSTRAP } : {})
+// Phone (Bare) tuning, measured 2026-10-26: the main DHT node was ~90% of the app's packets.
+// - keepalive on each peer connection every 20 s instead of 5 s (still inside mobile NAT timeouts);
+// - the announcer pings its relay nodes every 6 s instead of 3 s. It re-announces after 100 ping
+//   rounds, so this also moves the re-announce from ~5 to ~10 min, safely inside the 20 min that
+//   other nodes keep an announcement (hyperdht defaultMaxAge). Only the announcer pauses 3000 ms.
+// Desktop (Node) keeps the library defaults.
+const PHONE_KEEPALIVE_MS = 20000
+const PHONE_ANNOUNCE_PING_MS = 6000
+if (IS_BARE) {
+  const Sleeper = require('hyperdht/lib/sleeper')
+  const pause = Sleeper.prototype.pause
+  Sleeper.prototype.pause = function (ms) { return pause.call(this, ms === 3000 ? PHONE_ANNOUNCE_PING_MS : ms) }
+}
+const dhtOpts = BOOTSTRAP.length ? { bootstrap: BOOTSTRAP } : {}
+if (IS_BARE) dhtOpts.connectionKeepAlive = PHONE_KEEPALIVE_MS
+if (DHT_MODE === 'client') dhtOpts.ephemeral = true
+const dht = new DHT(dhtOpts)
+console.log('keets dht mode: ' + DHT_MODE)
 const swarm = new Hyperswarm({ dht, keyPair })
 console.log('keets step: swarm created')
 
@@ -203,7 +247,11 @@ console.log('keets sidecar up — pubkey:0x' + mypub + ' topic:' + TOPIC + ' nod
 // --- loopback API for apps (media hosting + messaging) ---------------------
 // token also written to a file so host apps that own the datadir can pick it up
 fs.writeFileSync(path.join(keetsdir, 'apitoken'), TOKEN + '\n', { mode: 0o600 })
-require('./api')({ port: APIPORT, token: TOKEN, mypub, media, messages, version: VERSION })
+require('./api')({ port: APIPORT, token: TOKEN, mypub, media, messages, version: VERSION,
+  dhtInfo: () => ({ mode: DHT_MODE, routing: !swarm.dht.ephemeral, firewalled: swarm.dht.firewalled, mediaRouting: !media.swarm.dht.ephemeral,
+    // cumulative UDP traffic since start, per DHT node (all of its sockets and connections)
+    traffic: { main: udxStats(swarm.dht.udx), media: udxStats(media.swarm.dht.udx),
+      mainPeers: streamStats(swarm), mediaPeers: streamStats(media.swarm) } }) })
 media.start().then(
   (st) => console.log('keets media up — drive:' + st.drive + ' pins:' + st.pins),
   (e) => console.error('keets media failed: ' + e.message)
