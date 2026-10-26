@@ -14,7 +14,7 @@
 // Keep every require specifier a string literal so bare-pack can preresolve them.
 
 const IS_BARE = typeof Bare !== 'undefined'
-const VERSION = '1.2.12'
+const VERSION = '1.2.15'
 
 // On bare an uncaught error ABORTS the host process — inside a bare-kit worklet that
 // takes the whole Android app down with SIGABRT (proven on-device 2026-10-13, missing
@@ -26,6 +26,7 @@ if (IS_BARE) {
 
 const Hyperswarm = require('hyperswarm')
 const DHT = require('hyperdht')
+const diagSnapshot = require('./diag')   // read-only counters, see diag.js
 const sodium = require('sodium-universal')
 const net = IS_BARE ? require('bare-tcp') : require('net')
 const fs = IS_BARE ? require('bare-fs') : require('fs')
@@ -174,7 +175,15 @@ let svcConns = 0
 const SVC_MAX = 16
 
 function bridge (conn, publicKey, initiator, replay) {
+  // An accepted link can die while we peek its first bytes (the remote's swarm dedupes or gives
+  // up). Bridging a dead stream counts it forever — its 'close' already fired — and after
+  // MAXCONNS of those every new link is refused at the cap (1.2.14 diag on the Fold, 2026-10-26).
+  if (conn.destroyed || conn.destroying) {
+    diagSnapshot.bridgeDead()
+    return
+  }
   if (conns >= MAXCONNS) {
+    diagSnapshot.bridgeCapped()
     conn.destroy()
     return
   }
@@ -193,9 +202,14 @@ function bridge (conn, publicKey, initiator, replay) {
     conn.pipe(tcp)
     tcp.pipe(conn)
   })
-  conn.on('error', () => tcp.destroy())
+  let closer = null
+  const opened = Date.now()
+  tcp.on('close', () => { if (!closer) closer = 'LOCAL' })
+  conn.on('end', () => { if (!closer) closer = 'REMOTE-end' })
+  conn.on('error', (e) => { if (!closer) closer = 'REMOTE-err:' + ((e && e.code) || 'error'); tcp.destroy() })
   tcp.on('error', () => conn.destroy())
   conn.on('close', () => {
+    diagSnapshot.bridgeClosed(closer || '?', Date.now() - opened)
     conns--
     tcp.destroy()
     console.log('peer closed pubkey:' + pk + ' conns:' + conns)
@@ -213,6 +227,7 @@ swarm.on('connection', (conn, info) => {
   // Deployed pre-1.2.0 peers never send the magic, so they route to the bridge unchanged.
   let buf = Buffer.alloc(0)
   const timer = setTimeout(() => { done(); bridge(conn, info.publicKey, false, buf) }, 15000)
+  conn.once('close', () => clearTimeout(timer))
   function done () { clearTimeout(timer); conn.removeListener('data', ondata) }
   function ondata (d) {
     buf = Buffer.concat([buf, d])
@@ -251,7 +266,8 @@ require('./api')({ port: APIPORT, token: TOKEN, mypub, media, messages, version:
   dhtInfo: () => ({ mode: DHT_MODE, routing: !swarm.dht.ephemeral, firewalled: swarm.dht.firewalled, mediaRouting: !media.swarm.dht.ephemeral,
     // cumulative UDP traffic since start, per DHT node (all of its sockets and connections)
     traffic: { main: udxStats(swarm.dht.udx), media: udxStats(media.swarm.dht.udx),
-      mainPeers: streamStats(swarm), mediaPeers: streamStats(media.swarm) } }) })
+      mainPeers: streamStats(swarm), mediaPeers: streamStats(media.swarm) },
+    diag: diagSnapshot() }) })
 media.start().then(
   (st) => console.log('keets media up — drive:' + st.drive + ' pins:' + st.pins),
   (e) => console.error('keets media failed: ' + e.message)
