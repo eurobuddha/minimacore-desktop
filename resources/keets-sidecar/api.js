@@ -48,7 +48,12 @@ module.exports = function startApi ({ port, token, mypub, media, messages, versi
       if (len > MAX_BODY) { req.destroy(); return }
       chunks.push(d)
     })
-    req.on('end', () => handle(req, res, Buffer.concat(chunks)).catch((e) => send(res, 500, { error: e.message })))
+    req.on('end', () => handle(req, res, Buffer.concat(chunks)).catch((e) => {
+      // the apps hide this text from the user; the log must not. The token (a header) is never
+      // logged; the path may carry a filename and a JSON parse error quotes a snippet of the body.
+      console.error('keets api ' + req.method + ' ' + req.url.split('?')[0] + ' failed: ' + e.message)
+      send(res, 500, { error: e.message })
+    }))
     req.on('error', () => {})
   })
 

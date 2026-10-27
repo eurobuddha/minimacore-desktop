@@ -208,6 +208,25 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
     return drive
   }
 
+  // Hyperswarm dials a peer it found on a topic 4 times (~40 s, lib/retry-timer.js) and then
+  // leaves it alone until the topic's own refresh, every 10 minutes, finds it again. Two phones
+  // whose hole-punch failed once (the other side asleep, mid network change, CGNAT) therefore
+  // stay apart for up to 10 min however often the user taps Resume: a fetch only WAITS for peers
+  // (readMedia → swarm.flush()). Proven on the Fold 2026-10-27: a file transfer did nothing for
+  // 25 minutes, then completed in seconds once a refresh re-dialed the sender. A fetch is an
+  // explicit ask, so a drive with no connected peer refreshes its topic now: the exhausted peer
+  // was dropped from swarm.peers (no retry timer → GC on close), so the lookup re-creates it
+  // with fresh attempts and dials. Not awaited here: readMedia's swarm.flush() waits for the
+  // refresh inside its own 30 s deadline (a lookup on a bad network can take that long alone).
+  // A drive just attached to a live connection reports no peer until its channel pairs, so the
+  // first fetch there spends one needless lookup; sequential block fetches coalesce on
+  // discovery._currentRefresh and skip it entirely once a peer is up.
+  function wakeDrive (drive) {
+    if (drive.core.peers.length) return
+    const discovery = swarm.status(drive.discoveryKey)
+    if (discovery) discovery.refresh().catch(() => {})
+  }
+
   function parseUrl (url) {
     const m = /^keets:\/\/([0-9a-fA-F]{64})(\/[^?#]*)(?:[?#]hash=([0-9a-fA-F]{64}))?$/.exec(url)
     if (!m) throw new Error('bad keets:// url')
@@ -237,6 +256,7 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
       const { key, path: p, hash } = parseUrl(url)
       const id = privateId(p)
       const drive = id ? await privateDrive(id, key, false) : await getDrive(key)
+      wakeDrive(drive)
       const buf = await readMedia(drive, swarm, p, maxBytes)
       if (hash && sha256(buf).toString('hex') !== hash) throw new Error('hash mismatch — content does not match url')
       return buf
@@ -248,6 +268,10 @@ module.exports = function createMedia ({ keetsdir, seed, bootstrap, maxconns }) 
       if (!id || !pathname.endsWith('/manifest') || typeof sharing !== 'boolean') throw new Error('Invalid private sharing request')
       return await serial(async () => {
         const slot = Object.keys(privateRecords).find(k => privateRecords[k].key === key && privateRecords[k].id === id)
+        // A transfer from before per-transfer storage (1.2.12) has no record: nothing serves it, so
+        // stopping it is already true. Refusing made the apps' delivery tick retry every 5 s forever
+        // and blocked Remove for those files (Fold 2026-10-27).
+        if (!slot && !sharing) return { sharing: false }
         if (!slot) throw new Error('Legacy shared drive: send this file again with updated Keets')
         const record = privateRecords[slot]
         record.sharing = sharing
