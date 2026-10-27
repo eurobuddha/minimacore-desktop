@@ -14,7 +14,7 @@
 // Keep every require specifier a string literal so bare-pack can preresolve them.
 
 const IS_BARE = typeof Bare !== 'undefined'
-const VERSION = '1.2.15'
+const VERSION = '1.3.1'
 
 // On bare an uncaught error ABORTS the host process — inside a bare-kit worklet that
 // takes the whole Android app down with SIGABRT (proven on-device 2026-10-13, missing
@@ -47,11 +47,19 @@ const MAXCONNS = parseInt(arg('maxconns', '6'))
 // everyone. 'client': it never routes others' lookups (still connects, announces and receives);
 // a phone passes this on battery when the user picked "DHT relay: on when plugged in".
 const DHT_MODE = arg('dht-mode', 'routing') === 'client' ? 'client' : 'routing'
+// --serve (1.3.0, fleet boxes): this ONE process is also the box's public DHT bootstrap
+// node (fixed --dht-port, non-ephemeral from the start, never firewalled) and its keets
+// mailbox (a second HyperDHT server on the mailbox keypair from <--mailbox-dir>/keypair).
+// Replaces the separate hyperdht-bootstrap + keets-mailbox daemons for new boxes.
+const SERVE = process.argv.includes('--serve')
+const DHT_PORT = parseInt(arg('dht-port', '49737'))
+const PUBLIC_HOST = arg('public-host', '')
 const CONNECT = arg('connect', '').split(',').filter(Boolean)
 const APIPORT = parseInt(arg('apiport', String(PORT + 5)))
 // default store-and-forward mailboxes: the publicIPnodes fleet's keets-mailbox daemons
 // (deployed 2026-10-13, UDP 49738). Untrusted sealed storage — they cannot read, alter
-// or forge messages. Anyone can run one; --mailboxes prepends/overrides.
+// or forge messages. Anyone can run one. --mailboxes REPLACES this list (1.3.0: the node
+// passes the signed, fetched list from eurobuddha.com/keets/mailboxes.json; absent = these).
 const DEFAULT_MAILBOXES = [
   '7f84f689d4477395d7c4a2493852a56fe646a8d05a94ce8b0a1baae34ac5d1df', // sally
   '9161e165df60ee780776363143701a82a2e8fb3792a0eea58577b1e4adbb35fd', // eurobuddha
@@ -60,11 +68,15 @@ const DEFAULT_MAILBOXES = [
   '5febd9d332b310ec8a0baa0eacb53dc82e86f9ed77e0954fd494e2ede010693d', // vigilance
   '7e63777e3a53a97363b7b6faa16af6d08a315ecca40b76f8352165c52e139221'  // megammr
 ]
-const MAILBOXES = arg('mailboxes', '').split(',').filter(Boolean).concat(DEFAULT_MAILBOXES)
-const BOOTSTRAP = arg('bootstrap', '').split(',').filter(Boolean).map(s => {
+const MAILBOX_ARG = arg('mailboxes', '').split(',').filter(Boolean).map(m => m.replace(/^0x/i, '').toLowerCase())
+const MAILBOXES = MAILBOX_ARG.length ? MAILBOX_ARG : DEFAULT_MAILBOXES
+// --bootstrap none = a private DHT with no upstream (tests; a serve node that IS the root)
+const BOOTSTRAP_ARG = arg('bootstrap', '')
+const BOOTSTRAP = BOOTSTRAP_ARG === 'none' ? [] : BOOTSTRAP_ARG.split(',').filter(Boolean).map(s => {
   const ix = s.lastIndexOf(':')
   return { host: s.slice(0, ix), port: parseInt(s.slice(ix + 1)) }
 })
+const MAILBOX_DIR = arg('mailbox-dir', path.join(DATADIR, 'keets-mailbox'))
 
 // env on desktop (never argv — visible in ps); --token only inside a bare-kit worklet,
 // whose arguments live in process memory, not /proc cmdline.
@@ -157,11 +169,18 @@ if (IS_BARE) {
   const pause = Sleeper.prototype.pause
   Sleeper.prototype.pause = function (ms) { return pause.call(this, ms === 3000 ? PHONE_ANNOUNCE_PING_MS : ms) }
 }
-const dhtOpts = BOOTSTRAP.length ? { bootstrap: BOOTSTRAP } : {}
+const dhtOpts = (BOOTSTRAP.length || BOOTSTRAP_ARG === 'none') ? { bootstrap: BOOTSTRAP } : {}
 if (IS_BARE) dhtOpts.connectionKeepAlive = PHONE_KEEPALIVE_MS
 if (DHT_MODE === 'client') dhtOpts.ephemeral = true
+if (SERVE) {
+  // what DHT.bootstrapper() does, minus the empty bootstrap list: a routing node from the
+  // first tick (no 20-min adaptive wait, no drop back to ephemeral), pinned to --dht-port
+  // so the address clients have listed is the one we answer on.
+  Object.assign(dhtOpts, { port: DHT_PORT, anyPort: false, ephemeral: false, firewalled: false })
+}
 const dht = new DHT(dhtOpts)
-console.log('keets dht mode: ' + DHT_MODE)
+if (SERVE && PUBLIC_HOST) dht._nat.add(PUBLIC_HOST, DHT_PORT)
+console.log('keets dht mode: ' + (SERVE ? 'serve (bootstrap+mailbox) udp:' + DHT_PORT + (PUBLIC_HOST ? ' host:' + PUBLIC_HOST : '') : DHT_MODE))
 const swarm = new Hyperswarm({ dht, keyPair })
 console.log('keets step: swarm created')
 
@@ -169,6 +188,10 @@ console.log('keets step: swarm created')
 const wire = require('./wire')
 const media = require('./media')({ keetsdir, seed, bootstrap: BOOTSTRAP, maxconns: 8 })
 const messages = require('./messages')({ keetsdir, dht, keyPair, mailboxes: MAILBOXES })
+// Private parent/worklet IPC; never exposed to network peers or the HTTP API.
+if (IS_BARE && typeof BareKit !== 'undefined') require('./worklet-lifecycle')(BareKit, media)
+// serve mode: the box's own mailbox rides the same DHT on its own (published) keypair.
+const mailbox = SERVE ? require('./mailbox').createMailbox({ datadir: MAILBOX_DIR, dht }) : null
 
 let conns = 0
 let svcConns = 0
@@ -257,13 +280,19 @@ for (const pk of CONNECT) {
   swarm.joinPeer(Buffer.from(pk.replace(/^0x/i, ''), 'hex'))
 }
 
-console.log('keets sidecar up — pubkey:0x' + mypub + ' topic:' + TOPIC + ' node:127.0.0.1:' + PORT)
+console.log('keets sidecar up — pubkey:0x' + mypub + ' topic:' + TOPIC + ' node:127.0.0.1:' + PORT + ' mailboxes:' + MAILBOXES.length)
+if (mailbox) {
+  mailbox.listen().catch((e) => console.error('keets mailbox failed to listen: ' + e.message))
+}
 
 // --- loopback API for apps (media hosting + messaging) ---------------------
 // token also written to a file so host apps that own the datadir can pick it up
 fs.writeFileSync(path.join(keetsdir, 'apitoken'), TOKEN + '\n', { mode: 0o600 })
 require('./api')({ port: APIPORT, token: TOKEN, mypub, media, messages, version: VERSION,
-  dhtInfo: () => ({ mode: DHT_MODE, routing: !swarm.dht.ephemeral, firewalled: swarm.dht.firewalled, mediaRouting: !media.swarm.dht.ephemeral,
+  dhtInfo: () => ({ mode: SERVE ? 'serve' : DHT_MODE, routing: !swarm.dht.ephemeral, firewalled: swarm.dht.firewalled, mediaRouting: !media.swarm.dht.ephemeral,
+    mailboxes: MAILBOXES.map(m => '0x' + m),
+    // fleet box: the bootstrap address to list and the mailbox pubkey to sign into the list
+    serve: mailbox ? { dhtPort: DHT_PORT, publicHost: PUBLIC_HOST || null, mailboxPubkey: '0x' + mailbox.pubkey, store: mailbox.maildir } : null,
     // cumulative UDP traffic since start, per DHT node (all of its sockets and connections)
     traffic: { main: udxStats(swarm.dht.udx), media: udxStats(media.swarm.dht.udx),
       mainPeers: streamStats(swarm), mediaPeers: streamStats(media.swarm) },

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// keets mailbox daemon — store-and-forward for offline keets nodes. Runs on any
-// public-IP box (our bootstrap fleet runs one each); node runtime only.
+// keets mailbox — store-and-forward for offline keets nodes. Runs on any public-IP box:
+// standalone (`node mailbox.js`, our original fleet daemons) or INSIDE the sidecar
+// (`index.js --serve`, 1.3.0+) as a second HyperDHT server on the same DHT instance.
 //
 // It is a plain HyperDHT server speaking the KTS1/0x01 message protocol (see wire.js):
 //   store: anyone may deposit a sealed box addressed to a recipient pubkey — the
@@ -17,167 +18,187 @@
 // Caps: 256KB/message (wire.MAX_PAYLOAD + envelope), 16MB/recipient, 1GB total,
 // 30-day TTL (hourly sweep). Untrusted commodity storage — anyone can run one.
 //
-// Usage: node mailbox.js --datadir /var/lib/keets-mailbox [--bootstrap host:port,...]
+// Standalone usage: node mailbox.js --datadir /var/lib/keets-mailbox [--port 49738] [--bootstrap host:port,...]
+// Embedded usage:   const mb = require('./mailbox').createMailbox({ datadir, dht }); mb.listen()
 
+const IS_BARE = typeof Bare !== 'undefined'
 const DHT = require('hyperdht')
 const sodium = require('sodium-universal')
-const fs = require('fs')
-const path = require('path')
+const fs = IS_BARE ? require('bare-fs') : require('fs')
+const path = IS_BARE ? require('bare-path') : require('path')
 const wire = require('./wire')
-
-function arg (name, def) {
-  const i = process.argv.indexOf('--' + name)
-  return i > -1 && process.argv[i + 1] !== undefined ? process.argv[i + 1] : def
-}
-const DATADIR = arg('datadir', '.')
-const PORT = parseInt(arg('port', '0')) // fixed UDP bind port (open it in the firewall); 0 = ephemeral
-const BOOTSTRAP = arg('bootstrap', '').split(',').filter(Boolean).map(s => {
-  const ix = s.lastIndexOf(':')
-  return { host: s.slice(0, ix), port: parseInt(s.slice(ix + 1)) }
-})
 
 const MSG_CAP = wire.MAX_PAYLOAD + 4096
 const RECIPIENT_CAP = 16 * 1024 * 1024
 const TOTAL_CAP = 1024 * 1024 * 1024
 const TTL = 30 * 24 * 3600 * 1000
 
-const maildir = path.join(DATADIR, 'mail')
-fs.mkdirSync(maildir, { recursive: true })
+/** A mailbox on an existing DHT: persistent identity at <datadir>/keypair (the published
+ *  mailbox pubkey), mail at <datadir>/mail/<recipient>/<id>.bin. listen() binds the server. */
+function createMailbox ({ datadir, dht }) {
+  const maildir = path.join(datadir, 'mail')
+  fs.mkdirSync(maildir, { recursive: true })
 
-// live subscribers: recipient pk (hex) -> Set of authenticated connections
-const subs = new Map()
-function subscribe (pk, conn) {
-  if (!subs.has(pk)) subs.set(pk, new Set())
-  subs.get(pk).add(conn)
-  conn.on('close', () => {
+  // live subscribers: recipient pk (hex) -> Set of authenticated connections
+  const subs = new Map()
+  function subscribe (pk, conn) {
+    if (!subs.has(pk)) subs.set(pk, new Set())
+    subs.get(pk).add(conn)
+    conn.on('close', () => {
+      const set = subs.get(pk)
+      if (set) { set.delete(conn); if (!set.size) subs.delete(pk) }
+    })
+  }
+  function pushStored (pk, id, sealed) {
     const set = subs.get(pk)
-    if (set) { set.delete(conn); if (!set.size) subs.delete(pk) }
-  })
-}
-function pushStored (pk, id, sealed) {
-  const set = subs.get(pk)
-  if (!set) return 0
-  let n = 0
-  for (const c of set) {
-    try { wire.writeFrame(c, { t: 'stored', id, sealed: sealed.toString('base64') }); n++ } catch (e) {}
-  }
-  return n
-}
-
-// persistent identity
-const seedfile = path.join(DATADIR, 'keypair')
-let seed
-if (fs.existsSync(seedfile)) {
-  seed = fs.readFileSync(seedfile)
-} else {
-  seed = Buffer.alloc(32)
-  sodium.randombytes_buf(seed)
-  fs.writeFileSync(seedfile, seed, { mode: 0o600 })
-}
-const keyPair = DHT.keyPair(seed)
-
-function dirSize (dir) {
-  let n = 0
-  try { for (const f of fs.readdirSync(dir)) n += fs.statSync(path.join(dir, f)).size } catch (e) {}
-  return n
-}
-function totalSize () {
-  let n = 0
-  try { for (const d of fs.readdirSync(maildir)) n += dirSize(path.join(maildir, d)) } catch (e) {}
-  return n
-}
-
-function sweep () {
-  const cutoff = Date.now() - TTL
-  for (const d of (fs.existsSync(maildir) ? fs.readdirSync(maildir) : [])) {
-    const rdir = path.join(maildir, d)
-    for (const f of fs.readdirSync(rdir)) {
-      const p = path.join(rdir, f)
-      try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p) } catch (e) {}
+    if (!set) return 0
+    let n = 0
+    for (const c of set) {
+      try { wire.writeFrame(c, { t: 'stored', id, sealed: sealed.toString('base64') }); n++ } catch (e) {}
     }
-    try { if (!fs.readdirSync(rdir).length) fs.rmdirSync(rdir) } catch (e) {}
+    return n
   }
-}
-setInterval(sweep, 3600 * 1000)
-sweep()
 
-const dhtOpts = {}
-if (PORT) dhtOpts.port = PORT
-if (BOOTSTRAP.length) dhtOpts.bootstrap = BOOTSTRAP
-const dht = new DHT(dhtOpts)
-const server = dht.createServer((conn) => {
-  conn.on('error', () => {})
-  let routed = false
-  let head = Buffer.alloc(0)
-  const feed = wire.frameReader()
-  // fetch auth state: clients dial with ephemeral keys, so ownership of a recipient
-  // pubkey is proven by signing our nonce — only then do stored messages flow / acks delete.
-  let claimedPk = null
-  let nonce = null
-  let authedPk = null
-  let wantSub = false
-  conn.on('data', (d) => {
-    try {
-      if (!routed) {
-        head = Buffer.concat([head, d])
-        if (head.length < 5) return
-        if (!head.slice(0, 4).equals(wire.MAGIC) || head[4] !== wire.SVC_MSG) { conn.destroy(); return }
-        routed = true
-        conn.write(Buffer.from([wire.ACK]))
-        d = head.slice(5)
-        if (!d.length) return
-      }
-      for (const f of feed(d)) handle(f)
-    } catch (e) { conn.destroy() }
-  })
+  // persistent identity
+  const seedfile = path.join(datadir, 'keypair')
+  let seed
+  if (fs.existsSync(seedfile)) {
+    seed = fs.readFileSync(seedfile)
+  } else {
+    seed = Buffer.alloc(32)
+    sodium.randombytes_buf(seed)
+    fs.writeFileSync(seedfile, seed, { mode: 0o600 })
+  }
+  const keyPair = DHT.keyPair(seed)
+  // the published identity, readable by the host (the fleet jar prints it in its banner)
+  fs.writeFileSync(path.join(datadir, 'pubkey'), '0x' + keyPair.publicKey.toString('hex') + '\n')
 
-  function handle (f) {
-    if (f.t === 'store') {
-      const sealed = Buffer.from(f.sealed, 'base64')
-      if (!/^[0-9a-f]{64}$/.test(f.to) || sealed.length > MSG_CAP) {
-        return wire.writeFrame(conn, { t: 'err', e: 'bad store' })
+  function dirSize (dir) {
+    let n = 0
+    try { for (const f of fs.readdirSync(dir)) n += fs.statSync(path.join(dir, f)).size } catch (e) {}
+    return n
+  }
+  function totalSize () {
+    let n = 0
+    try { for (const d of fs.readdirSync(maildir)) n += dirSize(path.join(maildir, d)) } catch (e) {}
+    return n
+  }
+
+  function sweep () {
+    const cutoff = Date.now() - TTL
+    for (const d of (fs.existsSync(maildir) ? fs.readdirSync(maildir) : [])) {
+      const rdir = path.join(maildir, d)
+      for (const f of fs.readdirSync(rdir)) {
+        const p = path.join(rdir, f)
+        try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p) } catch (e) {}
       }
-      const rdir = path.join(maildir, f.to)
-      if (dirSize(rdir) + sealed.length > RECIPIENT_CAP) return wire.writeFrame(conn, { t: 'err', e: 'recipient box full' })
-      if (totalSize() + sealed.length > TOTAL_CAP) return wire.writeFrame(conn, { t: 'err', e: 'mailbox full' })
-      fs.mkdirSync(rdir, { recursive: true })
-      const id = wire.sha256(sealed).slice(0, 16).toString('hex')
-      fs.writeFileSync(path.join(rdir, id + '.bin'), sealed)
-      wire.writeFrame(conn, { t: 'ok' })
-      pushStored(f.to, id, sealed)   // a subscribed recipient gets it now, not next poll
-    } else if (f.t === 'fetch') {
-      if (!/^[0-9a-f]{64}$/.test(f.pk)) return wire.writeFrame(conn, { t: 'err', e: 'bad pk' })
-      claimedPk = f.pk
-      wantSub = f.sub === true
-      const n = Buffer.alloc(32)
-      sodium.randombytes_buf(n)
-      nonce = n.toString('hex')
-      wire.writeFrame(conn, { t: 'challenge', nonce })
-    } else if (f.t === 'proof') {
-      if (!claimedPk || !nonce || !wire.verifyFetch(claimedPk, nonce, f.sig)) {
-        return wire.writeFrame(conn, { t: 'err', e: 'bad proof' })
-      }
-      authedPk = claimedPk
-      const rdir = path.join(maildir, authedPk)
-      for (const file of (fs.existsSync(rdir) ? fs.readdirSync(rdir) : [])) {
-        if (!file.endsWith('.bin')) continue
-        wire.writeFrame(conn, { t: 'stored', id: file.slice(0, -4), sealed: fs.readFileSync(path.join(rdir, file)).toString('base64') })
-      }
-      if (wantSub) {
-        subscribe(authedPk, conn)
-        wire.writeFrame(conn, { t: 'done', sub: true })
+      try { if (!fs.readdirSync(rdir).length) fs.rmdirSync(rdir) } catch (e) {}
+    }
+  }
+  setInterval(sweep, 3600 * 1000)
+  sweep()
+
+  function handle (conn) {
+    conn.on('error', () => {})
+    let routed = false
+    let head = Buffer.alloc(0)
+    const feed = wire.frameReader()
+    // fetch auth state: clients dial with ephemeral keys, so ownership of a recipient
+    // pubkey is proven by signing our nonce — only then do stored messages flow / acks delete.
+    let claimedPk = null
+    let nonce = null
+    let authedPk = null
+    let wantSub = false
+    conn.on('data', (d) => {
+      try {
+        if (!routed) {
+          head = Buffer.concat([head, d])
+          if (head.length < 5) return
+          if (!head.slice(0, 4).equals(wire.MAGIC) || head[4] !== wire.SVC_MSG) { conn.destroy(); return }
+          routed = true
+          conn.write(Buffer.from([wire.ACK]))
+          d = head.slice(5)
+          if (!d.length) return
+        }
+        for (const f of feed(d)) frame(f)
+      } catch (e) { conn.destroy() }
+    })
+
+    function frame (f) {
+      if (f.t === 'store') {
+        const sealed = Buffer.from(f.sealed, 'base64')
+        if (!/^[0-9a-f]{64}$/.test(f.to) || sealed.length > MSG_CAP) {
+          return wire.writeFrame(conn, { t: 'err', e: 'bad store' })
+        }
+        const rdir = path.join(maildir, f.to)
+        if (dirSize(rdir) + sealed.length > RECIPIENT_CAP) return wire.writeFrame(conn, { t: 'err', e: 'recipient box full' })
+        if (totalSize() + sealed.length > TOTAL_CAP) return wire.writeFrame(conn, { t: 'err', e: 'mailbox full' })
+        fs.mkdirSync(rdir, { recursive: true })
+        const id = wire.sha256(sealed).slice(0, 16).toString('hex')
+        fs.writeFileSync(path.join(rdir, id + '.bin'), sealed)
+        wire.writeFrame(conn, { t: 'ok' })
+        pushStored(f.to, id, sealed)   // a subscribed recipient gets it now, not next poll
+      } else if (f.t === 'fetch') {
+        if (!/^[0-9a-f]{64}$/.test(f.pk)) return wire.writeFrame(conn, { t: 'err', e: 'bad pk' })
+        claimedPk = f.pk
+        wantSub = f.sub === true
+        const n = Buffer.alloc(32)
+        sodium.randombytes_buf(n)
+        nonce = n.toString('hex')
+        wire.writeFrame(conn, { t: 'challenge', nonce })
+      } else if (f.t === 'proof') {
+        if (!claimedPk || !nonce || !wire.verifyFetch(claimedPk, nonce, f.sig)) {
+          return wire.writeFrame(conn, { t: 'err', e: 'bad proof' })
+        }
+        authedPk = claimedPk
+        const rdir = path.join(maildir, authedPk)
+        for (const file of (fs.existsSync(rdir) ? fs.readdirSync(rdir) : [])) {
+          if (!file.endsWith('.bin')) continue
+          wire.writeFrame(conn, { t: 'stored', id: file.slice(0, -4), sealed: fs.readFileSync(path.join(rdir, file)).toString('base64') })
+        }
+        if (wantSub) {
+          subscribe(authedPk, conn)
+          wire.writeFrame(conn, { t: 'done', sub: true })
+        } else {
+          wire.writeFrame(conn, { t: 'done' })
+        }
+      } else if (f.t === 'ack') {
+        if (!authedPk || !/^[0-9a-f]{32}$/.test(f.id)) return
+        try { fs.unlinkSync(path.join(maildir, authedPk, f.id + '.bin')) } catch (e) {}
       } else {
-        wire.writeFrame(conn, { t: 'done' })
+        wire.writeFrame(conn, { t: 'err', e: 'mailboxes only store/fetch' })
       }
-    } else if (f.t === 'ack') {
-      if (!authedPk || !/^[0-9a-f]{32}$/.test(f.id)) return
-      try { fs.unlinkSync(path.join(maildir, authedPk, f.id + '.bin')) } catch (e) {}
-    } else {
-      wire.writeFrame(conn, { t: 'err', e: 'mailboxes only store/fetch' })
     }
   }
-})
 
-server.listen(keyPair).then(() => {
-  console.log('keets mailbox up — pubkey:0x' + keyPair.publicKey.toString('hex') + ' store:' + maildir)
-})
+  const server = dht.createServer(handle)
+  return {
+    keyPair,
+    pubkey: keyPair.publicKey.toString('hex'),
+    maildir,
+    handle,
+    listen: () => server.listen(keyPair).then(() => {
+      console.log('keets mailbox up — pubkey:0x' + keyPair.publicKey.toString('hex') + ' store:' + maildir)
+    })
+  }
+}
+
+module.exports = { createMailbox }
+
+// --- standalone daemon (the original fleet units) ---------------------------
+if (!IS_BARE && require.main === module) {
+  function arg (name, def) {
+    const i = process.argv.indexOf('--' + name)
+    return i > -1 && process.argv[i + 1] !== undefined ? process.argv[i + 1] : def
+  }
+  const DATADIR = arg('datadir', '.')
+  const PORT = parseInt(arg('port', '0')) // fixed UDP bind port (open it in the firewall); 0 = ephemeral
+  const BOOTSTRAP = arg('bootstrap', '').split(',').filter(Boolean).map(s => {
+    const ix = s.lastIndexOf(':')
+    return { host: s.slice(0, ix), port: parseInt(s.slice(ix + 1)) }
+  })
+  const dhtOpts = {}
+  if (PORT) dhtOpts.port = PORT
+  if (BOOTSTRAP.length) dhtOpts.bootstrap = BOOTSTRAP
+  createMailbox({ datadir: DATADIR, dht: new DHT(dhtOpts) }).listen()
+}
