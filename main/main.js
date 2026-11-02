@@ -388,17 +388,39 @@ ipcMain.handle("mcd:ppListRetired", () => pandapools.listRetired());
 ipcMain.handle("mcd:ppPendingCollect", () => pandapools.pendingCollect());
 ipcMain.handle("mcd:ppArchiveSettings", (_e, url) => pandapools.archiveSettings(url));
 ipcMain.handle("mcd:ppConfirmSigning", (_e, opk, attested) => pandapools.confirmSigning(opk, attested));
-ipcMain.handle("mcd:ppSaveBackup", async (_e, json) => {
-  const r = await dialog.showSaveDialog(win, { defaultPath: "pandapools-backup.json", filters: [{ name: "PandaPools backup", extensions: ["json"] }] });
-  if (r.canceled || !r.filePath) return { canceled: true };
-  fs.writeFileSync(r.filePath, String(json || ""), "utf8");
-  return { canceled: false, path: r.filePath };
+ipcMain.handle("mcd:ppCompleteBackupRequired",()=>pandapools.completeBackupRequired());
+ipcMain.handle("mcd:ppSaveBackup", async (_e, password) => {
+  return pandapools.completeBackup(password,async bytes=>{
+    const r=await dialog.showSaveDialog(win,{defaultPath:'pandapools-full-'+Date.now()+'.ppbackup',filters:[{name:'Encrypted pool + node backup',extensions:['ppbackup']}]});
+    if(r.canceled||!r.filePath)return {canceled:true};
+    await fs.promises.writeFile(r.filePath,bytes,{mode:0o600});
+    const B=require('./pandapools/combined-backup'),st=await fs.promises.stat(r.filePath);
+    if(st.size!==bytes.length||await B.sha(await fs.promises.readFile(r.filePath))!==await B.sha(bytes))throw Error('BACKUP_NOT_VERIFIED: saved bytes differ. Choose another location.');
+    return {canceled:false,path:r.filePath};
+  });
 });
-ipcMain.handle("mcd:ppLoadBackup", async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "PandaPools backup", extensions: ["json"] }] });
-  if (r.canceled || !r.filePaths.length) return { canceled: true };
-  try { if (fs.statSync(r.filePaths[0]).size > 8 * 1024 * 1024) throw new Error("That file is too large to be a PandaPools backup."); } catch (e) { return { canceled: false, error: e.message }; }
-  return { canceled: false, json: fs.readFileSync(r.filePaths[0], "utf8") };
+ipcMain.handle("mcd:ppLoadBackup", async (_e, password, extractNode) => {
+  const r=await dialog.showOpenDialog(win,{properties:['openFile'],filters:[{name:'PandaPools backup',extensions:['ppbackup','json']}]});
+  if(r.canceled||!r.filePaths.length)return {canceled:true};
+  const B=require('./pandapools/combined-backup'),file=r.filePaths[0],st=await fs.promises.stat(file);
+  if(st.size>B.MAX_FILE)throw Error('BACKUP_TOO_LARGE');
+  const bytes=await fs.promises.readFile(file);
+  if(bytes.subarray(0,4).toString('ascii')!=='MVLT'){
+    if(bytes.length>4*1024*1024||extractNode)throw Error('This is a legacy pool-only file; no node backup is included.');
+    return {canceled:false,json:bytes.toString('utf8')};
+  }
+  const opened=await B.open(password,bytes);await pandapools.validateCompleteRecipes(opened.poolJson);
+  if(extractNode){
+    const chosen=await dialog.showSaveDialog(win,{defaultPath:'pandapools-node-recovery-'+Date.now()+'.bak',filters:[{name:'Native node backup',extensions:['bak']}]});
+    if(chosen.canceled||!chosen.filePath){opened.node.fill(0);return {canceled:true};}
+    try{
+      await fs.promises.writeFile(chosen.filePath,opened.node,{mode:0o600});
+      if((await fs.promises.stat(chosen.filePath)).size!==opened.node.length||await B.sha(await fs.promises.readFile(chosen.filePath))!==opened.manifest.nodeSha256)throw Error('NODE_EXPORT_NOT_VERIFIED');
+      // Shown deliberately for the user's native restore flow, never logged or persisted as plaintext.
+      return {canceled:false,nodePassword:opened.manifest.nodePassword,path:chosen.filePath};
+    }finally{opened.node.fill(0);}
+  }
+  opened.node.fill(0);return {canceled:false,json:opened.poolJson,combined:true};
 });
 pandapools.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:pandapools"); });
 let ppStarted = false;

@@ -215,7 +215,7 @@ var PoolMgr = (function () {
     }
 
     /** txnbasics → txncheck gate (valid.scripts + validamounts + valid.mmrproofs) → txnpost → txndelete. */
-    function finalize(txid, done) {
+    function finalize(txid, done, inputs) {
         MDS.cmd("txnbasics id:" + txid, function (rb) {
             if (!rb || rb.status !== true) { MDS.cmd("txndelete id:" + txid); done.fail("txnbasics failed" + errOf(rb)); return; }
             MDS.cmd("txncheck id:" + txid, function (rc) {
@@ -231,12 +231,15 @@ var PoolMgr = (function () {
                             : "the amounts don't balance — nothing was posted");
                     return;
                 }
+                PoolInputClaims.post(inputs,txid,function(saved){
+                    if(!saved){MDS.cmd("txndelete id:"+txid);done.fail("Could not persist input claims. Nothing was posted.");return;}
                 MDS.cmd("txnpost id:" + txid, function (rp) {
                     if (rp && rp.status === true && !isPending(rp)) {
                         var posted = extractTxpowid(rp, txid);
                         ActivityChain.rememberSubmission(rp, posted, function () { MDS.cmd("txndelete id:" + txid); done.ok(posted); });
                     }
                     else { MDS.cmd("txndelete id:" + txid); done.fail("post rejected" + errOf(rp)); }
+                });
                 });
             });
         });
@@ -252,11 +255,15 @@ var PoolMgr = (function () {
                 ACTIVE_SIGN = { owner: owner, heartbeat: heartbeat };
                 scheduleWatchdog();
                 var gdone = gated(done, owner, heartbeat);
+                PoolInputClaims.check(inputs,function(q,cb){MDS.cmd(q,cb);},function(available){
+                if(!available){gdone.fail("An input is already submitted, or input reservation storage is unavailable. Wait for confirmation and refresh.");return;}
+
                 runChain(cmds, txid, function (ok, res) {
                     if (!ok) { gdone.fail("building the transaction failed" + errOf(res)); return; }
                     signAll(txid, signers, 0,
-                        function () { finalize(txid, gdone); },
+                        function () { finalize(txid, gdone, inputs); },
                         function (msg) { MDS.cmd("txndelete id:" + txid); gdone.fail(msg); }, inputs);
+                });
                 });
             });
         });
@@ -469,7 +476,11 @@ var PoolMgr = (function () {
     }
 
     // ================================================================ CREATE
-    function createPool(tokenid, tokDecimals, x0Raw, y0Raw, done) {   // done.created(pool,txpowid), done.fail
+    function createPool(tokenid,tokDecimals,x0Raw,y0Raw,done){
+        if(!Store.combinedBackupReady){done.fail('BACKUP_REQUIRED: complete backup verification is unavailable.');return;}
+        Store.combinedBackupReady(function(ok){if(!ok){done.fail('BACKUP_REQUIRED: save and verify the encrypted pool + node backup before creating another pool.');return;}createPoolBackedUp(tokenid,tokDecimals,x0Raw,y0Raw,done);});
+    }
+    function createPoolBackedUp(tokenid, tokDecimals, x0Raw, y0Raw, done) {   // done.created(pool,txpowid), done.fail
         var x0 = PP.dec(x0Raw), y0 = PP.dec(y0Raw);
         if (x0.lte(0) || y0.lte(0)) { done.fail("both reserves must be greater than zero"); return; }
         var y0c = y0.toDP(tokDecimals, D.ROUND_DOWN);   // reserve must be an achievable coin amount
@@ -583,7 +594,11 @@ var PoolMgr = (function () {
     }
 
     // ================================================================ MIGRATE (reset floor, new addr)
-    function migrate(p, newXRaw, newYRaw, done) {   // done.created(newPool,txpowid), done.fail
+    function migrate(p,newXRaw,newYRaw,done){
+        if(!Store.combinedBackupReady){done.fail('BACKUP_REQUIRED: complete backup verification is unavailable.');return;}
+        Store.combinedBackupReady(function(ok){if(!ok){done.fail('BACKUP_REQUIRED: save and verify the encrypted pool + node backup before migrating.');return;}migrateBackedUp(p,newXRaw,newYRaw,done);});
+    }
+    function migrateBackedUp(p, newXRaw, newYRaw, done) {   // done.created(newPool,txpowid), done.fail
         if (!Curve.funded(p)) { done.fail("pool has no live reserves"); return; }
         var newX = PP.dec(newXRaw), newY = PP.dec(newYRaw);
         if (newX.lte(0) || newY.lte(0)) { done.fail("enter the new reserves"); return; }

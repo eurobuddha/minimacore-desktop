@@ -431,7 +431,9 @@
   async function renderPpMyLP() {
     const host = el("ppBody");
     try { PP_MINE=await api.ppMyPools(); PP_RETIRED=await api.ppListRetired().catch(()=>[]); PP_COLLECT=await api.ppPendingCollect().catch(()=>[]); } catch(e) {host.innerHTML=`${ppHeader("mylp")}<div class="pp-empty">${esc(e.message)}</div>`;wirePpHeader();return;}
+    const backupRequired=await api.ppCompleteBackupRequired().catch(()=>true);
     host.innerHTML = `${ppHeader("mylp")}
+      ${backupRequired ? '<div class="pp-note">Complete encrypted backup required. Use Back up below before creating or migrating another pool.</div>' : ''}
       <div class="pp-desc">Pools you created on this device. Keep-fresh maintains their reserves automatically — <b>leave this app running</b> so your pools stay live for everyone.</div>
       <div class="pp-note">Anyone on the network can trade against your pools; you earn the 0.50% fee on every swap that routes through them.</div>
       <div class="pp-seg"><button class="pp-btn pp-btn--fill" id="ppCreateBtn">＋ Create a pool</button><button class="pp-btn" id="ppCollectBtn">Collect to wallet</button></div>
@@ -480,37 +482,47 @@
   }
   let ppBackupBusy = false;
   async function showPpBackup() {
-    if (ppBackupBusy) return;                                        // async fetch → guard against a double-click stacking modals
-    ppBackupBusy = true;
-    const prog = showProgress("Preparing backup…", "Snapshotting your pools' current reserve coins…");
-    let r; try { r = await api.ppBackup(); } catch (e) { prog.close(); ppBackupBusy = false; toast("Backup failed: " + e.message, "err"); return; }
-    prog.close();
-    ppBackupBusy = false;
-    if (r && r.empty) { toast("No pools to back up yet — create one first.", "err"); return; }
-    if(!r||r.error||!r.json){toast(r&&r.error||"Backup could not be created.","err");return;}
-    const json = r.json;
-    document.body.insertAdjacentHTML("beforeend", `<div class="overlay ppapp" id="ppbOv"><div class="pp-modal">
-      <div class="pp-modt">Your pool backup</div>
-      <div class="pp-desc">Save this public recipe alongside your latest complete MinimaCore wallet backup. Proof snapshots expire; later recovery may need a synced MegaMMR archive.</div>
-      <textarea class="pp-input" id="ppbTa" readonly style="min-height:150px;font-family:monospace;font-size:11px">${esc(json)}</textarea>
-      <div class="pp-seg" style="margin-top:10px"><button class="pp-btn" id="ppbCopy">Copy</button><button class="pp-btn pp-btn--fill" id="ppbSave">Save file</button></div>
-      <button class="pp-btn" id="ppbClose" style="margin-top:8px">Done</button></div></div>`); ppApplyStyle();
-    const ov = el("ppbOv"); const close = () => { if (ov) ov.remove(); };
-    el("ppbClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "ppbOv") close(); };
-    el("ppbCopy").onclick = () => { copy(json); toast("Copied ✓", "ok"); };
-    el("ppbSave").onclick = async () => { try { const s = await api.ppSaveBackup(json); if (s && !s.canceled) toast("Saved ✓", "ok"); } catch (e) { toast("Save failed: " + e.message, "err"); } };
+    if(ppBackupBusy||el('ppbOv'))return;
+    document.body.insertAdjacentHTML('beforeend',`<div class="overlay ppapp" id="ppbOv"><div class="pp-modal">
+      <div class="pp-modt">Required encrypted backup</div>
+      <div class="pp-desc">Save one file containing your pools and the native node backup, including wallet keys. Use at least 12 characters, ideally random words. Keep the password safe; there is no password reset. The saved file is checked before another pool can be created.</div>
+      <input type="password" autocomplete="off" class="pp-input" id="ppbPass" placeholder="Backup password" />
+      <input type="password" autocomplete="off" class="pp-input" id="ppbAgain" placeholder="Repeat password" />
+      <div class="pp-desc" id="ppbStatus"></div><div class="pp-seg"><button class="pp-btn" id="ppbCancel">Cancel</button><button class="pp-btn pp-btn--fill" id="ppbSave">Create and save</button></div></div></div>`);ppApplyStyle();
+    const close=()=>{el('ppbPass').value='';el('ppbAgain').value='';el('ppbOv').remove();};
+    el('ppbCancel').onclick=()=>{if(!ppBackupBusy)close();};
+    el('ppbSave').onclick=async()=>{
+      if(ppBackupBusy)return;let pass=el('ppbPass').value;
+      if(Array.from(pass).length<12||new TextEncoder().encode(pass).length>1024||pass!==el('ppbAgain').value){el('ppbStatus').textContent='Use at least 12 characters and enter the same password twice.';return;}
+      el('ppbPass').value='';el('ppbAgain').value='';ppBackupBusy=true;el('ppbStatus').textContent='Creating, encrypting and verifying the complete backup…';
+      try{const r=await api.ppSaveBackup(pass);if(r.canceled){el('ppbStatus').textContent='Save cancelled. Backup remains required.';return;}
+        close();toast('Encrypted pool + node backup saved and verified. Keep it off this device.','ok');renderPandapools();
+      }catch(e){if(el('ppbStatus'))el('ppbStatus').textContent=e.message||'Backup failed. Try again.';}
+      finally{pass=null;ppBackupBusy=false;}
+    };
   }
   async function showPpRestore() {
     document.body.insertAdjacentHTML("beforeend", `<div class="overlay ppapp" id="pprOv"><div class="pp-modal">
       <div class="pp-modt">Restore pools</div>
       <div class="pp-desc">Restore public pool recipes and verify reserves on this node. Expired proofs need a synced MegaMMR archive. Owner signing stays paused until you confirm current wallet signing state.</div>
-      <textarea class="pp-input" id="pprTa" placeholder="…paste backup JSON here" style="min-height:130px;font-family:monospace;font-size:11px"></textarea>
+      <input type="password" autocomplete="off" class="pp-input" id="pprPass" placeholder="Combined backup password (blank for old JSON)" /><textarea class="pp-input" id="pprTa" placeholder="…paste backup JSON here" style="min-height:130px;font-family:monospace;font-size:11px"></textarea>
       <div class="pp-desc" id="pprStatus" style="margin-top:6px"></div>
-      <div class="pp-seg" style="margin-top:8px"><button class="pp-btn" id="pprFile">Load file</button><button class="pp-btn pp-btn--fill" id="pprGo">Restore</button></div>
+      <div class="pp-seg" style="margin-top:8px"><button class="pp-btn" id="pprFile">Load file</button><button class="pp-btn" id="pprNode">Extract node backup</button><button class="pp-btn pp-btn--fill" id="pprGo">Restore</button></div>
       <button class="pp-btn" id="pprCancel" style="margin-top:8px">Cancel</button></div></div>`); ppApplyStyle();
     const ov = el("pprOv"); const close = () => { if (ov) ov.remove(); };
     el("pprCancel").onclick = close; ov.onclick = (e) => { if (e.target.id === "pprOv") close(); };
-    el("pprFile").onclick = async () => { try { const f = await api.ppLoadBackup(); if (f && f.error) { toast(f.error, "err"); return; } if (f && !f.canceled && el("pprTa")) el("pprTa").value = f.json || ""; } catch (e) {} };
+    el("pprFile").onclick = async () => { try { const f = await api.ppLoadBackup(el("pprPass").value); if (f && f.error) { toast(f.error, "err"); return; } if (f && !f.canceled && el("pprTa")) el("pprTa").value = f.json || ""; } catch (e) { if(el("pprStatus"))el("pprStatus").textContent=e.message||"Could not read backup."; } };
+    el("pprNode").onclick = async () => {
+      try {
+        const result=await api.ppLoadBackup(el("pprPass").value,true);
+        el("pprPass").value='';
+        if(!result||result.canceled)return;
+        const status=el("pprStatus");if(!status)return;
+        status.textContent='Node backup saved. Restore this .bak through MinimaCore’s node restore flow, using the password below. Then reopen the combined file to recover the pool recipes. An old backup still requires verification of current signing state.';
+        const secret=document.createElement('input');secret.type='password';secret.readOnly=true;secret.autocomplete='off';secret.className='pp-input';secret.value=result.nodePassword;status.appendChild(secret);
+        const reveal=document.createElement('button');reveal.className='pp-btn';reveal.textContent='Show restore password';reveal.onclick=()=>{secret.type=secret.type==='password'?'text':'password';};status.appendChild(reveal);
+      }catch(e){if(el("pprStatus"))el("pprStatus").textContent=e.message||'Could not extract node backup.';}
+    };
     let busy = false;
     el("pprGo").onclick = async () => {
       if (busy) return;
@@ -687,7 +699,7 @@
       if (!okc) { busy = false; return; }
       close();
       const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
-      try { await api.ppCreate(t.tokenid, t.dec, String(minima), uStr); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); }
+      try { await api.ppCreate(t.tokenid, t.dec, String(minima), uStr); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); showPpBackup(); }
       catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
       finally { busy = false; }
     };
@@ -731,7 +743,7 @@
       if (!okc) { busy = false; return; }
       close();
       const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
-      try { await api.ppCreate(t.tokenid, t.dec, x0, y0); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); }
+      try { await api.ppCreate(t.tokenid, t.dec, x0, y0); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); showPpBackup(); }
       catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
       finally { busy = false; }
     };
@@ -771,7 +783,7 @@
         if (!okc) return;
         close();
         const prog = showProgress("Migrating…", "Posting to the chain…");
-        try { await api.ppMigrate(addr, a, b); prog.close(); toast("Migrated ✓", "ok"); renderPandapools(); }
+        try { await api.ppMigrate(addr, a, b); prog.close(); toast("Migrated ✓", "ok"); renderPandapools(); showPpBackup(); }
         catch (e) { prog.close(); toast("Migrate failed: " + e.message, "err"); }
       });
   }

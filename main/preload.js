@@ -165,7 +165,8 @@ contextBridge.exposeInMainWorld("mcd", {
   ppArchiveSettings: (url) => ipcRenderer.invoke("mcd:ppArchiveSettings", url),
   ppConfirmSigning: (opk, attested) => ipcRenderer.invoke("mcd:ppConfirmSigning", opk, attested),
   ppSaveBackup: (json) => ipcRenderer.invoke("mcd:ppSaveBackup", json),
-  ppLoadBackup: () => ipcRenderer.invoke("mcd:ppLoadBackup"),
+  ppCompleteBackupRequired: () => ipcRenderer.invoke("mcd:ppCompleteBackupRequired"),
+  ppLoadBackup: (password, extractNode) => ipcRenderer.invoke("mcd:ppLoadBackup", password, extractNode),
   onPandapools: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:pandapools", h); return () => ipcRenderer.removeListener("mcd:pandapools", h); },
 
   // AtomiX (atomic swaps)

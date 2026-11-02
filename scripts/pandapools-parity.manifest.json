@@ -2,7 +2,7 @@
   "_comment": "Digests of the PandaPools engine files copied verbatim from the MDS MiniDapp. Regenerate ONLY with `node scripts/pandapools-parity-manifest.cjs --update` beside a deliberate engine re-copy. Desktop-only runtime differences belong in loader.js / sqlshim.js / main/pandapools.js, never here.",
   "donor": {
     "root": "../../mds/pandapools-mds",
-    "mdsVersion": "0.6.32",
+    "mdsVersion": "0.6.34",
     "gitSha": "e6498c4ed12937dd171fa4e40e3df5b03d1d8e15"
   },
   "files": {
@@ -27,8 +27,8 @@
       "bytes": 8324
     },
     "store.js": {
-      "sha256": "84a79841c6bf297aa539771a45b021f90cfdf6a7f2263a34479ed122a983059f",
-      "bytes": 30520
+      "sha256": "d209ff1cf7aa66b9211112a8b7fee4f1c66821dee180e79bba94d7ef3c72fc68",
+      "bytes": 31719
     },
     "history.js": {
       "sha256": "97b2e9d6b46e8171627b8c9594564cf30a63abd6bd9f1a9aaa34f10828beb808",
@@ -51,16 +51,28 @@
       "bytes": 19119
     },
     "poolmgr.js": {
-      "sha256": "7f283159a188579fb23d9ff3e8c42b73d8a908542def6c677c9e94db63bf7d32",
-      "bytes": 76202
+      "sha256": "0b48f4474d1eb082864b244091430339cce0339dbe7d4dfd7155690cadbba263",
+      "bytes": 77542
     },
     "reserve-recovery.js": {
-      "sha256": "8f5dd6c6e6cca2851674331c362c0a107510090c9e71fe101096214d03938794",
-      "bytes": 30631
+      "sha256": "ed2036cf2b98ac2e5ae18a47ec99b26b87c31aee9bb008630b798117db9d1112",
+      "bytes": 30469
     },
     "service.js": {
-      "sha256": "700ff5ddedf6096563401dc32d035545f432b5b974b54d3fbe3196460045373d",
-      "bytes": 54043
+      "sha256": "66ab86534e643ea805908c58fcdaad3ed48c5399597b006d59d2eb793a38ad31",
+      "bytes": 54536
+    },
+    "combined-backup.js": {
+      "sha256": "a26de27739c77716db2d99ace88b54944c82ca82d46639c8a9972ff9cceb8561",
+      "bytes": 6764
+    },
+    "full-backup.js": {
+      "sha256": "4c15741dc7e7b61d4c196b4cf0781821d76d75b328e631cc179fa19a267aece3",
+      "bytes": 3170
+    },
+    "input-claims.js": {
+      "sha256": "b3b0abe1d30fc67284d7424c68b2ac77feb039ad3863e5974ae83aef80761de9",
+      "bytes": 2770
     }
   }
 }

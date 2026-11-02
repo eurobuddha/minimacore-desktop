@@ -654,7 +654,40 @@ async function confirmSigning(opk,attested) {
   const active=ctx;return new Promise(resolve=>active.ReserveRecovery.confirmKey(opk,ok=>{emitter.emit("update");resolve(ok);}));
 }
 
+// Full backups are captured and encrypted in main; renderer never receives node bytes or its inner password.
+let completeBackupBusy=false;
+async function completeBackup(password,save){
+  await init();
+  if(completeBackupBusy)throw Error('BACKUP_BUSY: another backup is running.');
+  completeBackupBusy=true;const active=ctx,epoch=contextEpoch;
+  const Bundle=require('./pandapools/combined-backup'),Full=require('./pandapools/full-backup');
+  const base=node.dataDir();
+  try{
+    const captured=await Full.capture({
+      cmd:async command=>{if(active!==ctx||epoch!==contextEpoch)throw Error('WALLET_CHANGED');const r=await nodeCmd(command);if(active!==ctx||epoch!==contextEpoch)throw Error('WALLET_CHANGED');return r;},
+      backup:async()=>{const r=await backup();if(!r.json)throw Error(r.error||'No saved pools.');return r.json;},
+      makeNode:async(name,inner)=>{const r=await nodeCmd('backup file:'+name+' password:'+inner+' confirm:'+inner);if(!r||r.status!==true||r.pending)throw Error('NODE_BACKUP_FAILED: check node storage and permissions.');},
+      readNode:async name=>{const file=path.join(base,name),st=await fs.promises.lstat(file);if(!st.isFile()||st.size<32||st.size>Bundle.MAX_NODE)throw Error('NODE_BACKUP_SIZE');return fs.promises.readFile(file);},
+      deleteNode:name=>fs.promises.unlink(path.join(base,name))
+    },password);
+    if(active!==ctx||epoch!==contextEpoch)throw Error('WALLET_CHANGED');
+    const result=await save(captured.encrypted);
+    if(!result||result.canceled)return {canceled:true};
+    if(active!==ctx||epoch!==contextEpoch)throw Error('WALLET_CHANGED');
+    const ok=await new Promise(resolve=>active.Store.recordCombinedBackup(captured.json,resolve));
+    if(!ok)throw Error('BACKUP_NOT_VERIFIED: pool list changed or verification could not be recorded. Save another backup.');
+    emitter.emit('update');return result;
+  }finally{completeBackupBusy=false;password=null;}
+}
+async function validateCompleteRecipes(json){
+  await init();const parsed=JSON.parse(json);
+  if(!parsed||!Array.isArray(parsed.pools)||!parsed.pools.length||parsed.pools.some(p=>!ctx.ReserveRecovery.validRecipe(p)))throw Error('BACKUP_POOL_RECIPES_INVALID');
+  return true;
+}
+async function completeBackupRequired(){await init();return new Promise(resolve=>ctx.Store.combinedBackupReady(ok=>resolve(!ok)));}
+
 module.exports = {
+  completeBackup, completeBackupRequired, validateCompleteRecipes,
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,

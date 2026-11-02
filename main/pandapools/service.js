@@ -575,13 +575,18 @@ function checkPostSvc(txid, cmds, cb) {
             var heartbeat = typeof setInterval==="function" ? setInterval(function () { touchGlobalSignLockSvc(owner); }, SIGN_LOCK_HEARTBEAT_MS) : null;
             ACTIVE_SIGN = { owner: owner, heartbeat: heartbeat };
             scheduleSignWatchdogSvc();
+            var ids=cmds.filter(function(q){return q.indexOf("txninput ")===0;}).map(function(q){var m=q.match(/coinid:(0x[0-9a-fA-F]+)/);return m?m[1]:"";});
+            PoolInputClaims.check(ids,function(q,cb){MDS.cmd(q,cb);},function(available){if(!available){finishSignSvc(cb,false,owner,heartbeat);return;}
             runCmds(cmds, 0, function (okChain) {
                 if (!okChain) { finishSignSvc(cb, false, owner, heartbeat); return; }
                 MDS.cmd("txncheck id:" + txid, function (rc) {
                     var resp = rc ? rc.response : null, v = resp ? resp.valid : null;
                     if (!(v && truthy(v.scripts) && truthy(resp.validamounts) && truthy(v.mmrproofs))) { finishSignSvc(cb, false, owner, heartbeat); return; }
-                    MDS.cmd("txnpost id:" + txid, function (rp) { finishSignSvc(cb, !!(rp && rp.status === true), owner, heartbeat); });
+                        PoolInputClaims.post(ids,txid,function(saved){if(!saved){finishSignSvc(cb,false,owner,heartbeat);return;}
+                            MDS.cmd("txnpost id:"+txid,function(rp){finishSignSvc(cb,!!(rp&&rp.status===true&&!rp.pending),owner,heartbeat);});
+                        });
                 });
+            });
             });
         });
     });

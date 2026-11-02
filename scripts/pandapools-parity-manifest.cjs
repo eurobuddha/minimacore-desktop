@@ -25,7 +25,7 @@ const donor = process.env.PP_MDS_ROOT || path.resolve(root, '../../mds/pandapool
 // deliberately NOT here — they are where the runtime differences are allowed to live.
 const FILES = ['decimal.js', 'covenant.js', 'curve.js', 'router.js', 'book.js', 'store.js', 'history.js',
   'statement.js', 'sha3.js', 'receipt-recovery.js', 'activity-chain.js', 'poolmgr.js', 'reserve-recovery.js',
-  'service.js'];
+  'service.js', 'combined-backup.js', 'full-backup.js', 'input-claims.js'];
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 

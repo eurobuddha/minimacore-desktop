@@ -481,7 +481,28 @@ var Store = (function () {
         });
     }
 
+    // Coverage survives cancellation/restart. Only a verified combined file may record it.
+    function backupCoverage(ps){return 'combined-v1\n'+ps.map(function(p){return String(p.address).toLowerCase();}).sort().join('\n');}
+    var combinedPersistenceFailed=false;
+    function combinedBackupReady(cb){
+        if(combinedPersistenceFailed){cb(false);return;}
+        ownAll(function(ps,ok){if(!ok){cb(false);return;}if(!ps.length){cb(true);return;}
+            kvGet('combined_backup_coverage_v1',function(value,readOk){cb(readOk===true&&value===backupCoverage(ps));});
+        });
+    }
+    function recordCombinedBackup(json,cb){
+        ownAll(function(ps,ok){
+            if(!ok||!ps.length||ReserveRecovery.verifyExport(json,ps,0)){cb(false);return;}
+            var coverage=backupCoverage(ps);
+            kvSet('combined_backup_coverage_v1',coverage,function(saved){
+                if(!saved){cb(false);return;}
+                persistRecovery(function(durable){combinedPersistenceFailed=!durable;if(!durable){cb(false);return;}combinedBackupReady(cb);});
+            });
+        });
+    }
+
     return {
+        combinedBackupReady: combinedBackupReady, recordCombinedBackup: recordCombinedBackup,
         init: init, isReady: function () { return ready; },
         lpRecord: lpRecord, lpUpdateFeeBase: lpUpdateFeeBase, lpRemove: lpRemove, lpGet: lpGet,
         actRecord: actRecord, actRecordFailed: actRecordFailed, actList: actList, actSetStatus: actSetStatus,

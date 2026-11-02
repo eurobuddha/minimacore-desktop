@@ -76,6 +76,7 @@ function asyncStandard(h, cs, opts) {
     if (q.startsWith('newscript ')) return reply(good({ address: addr }));
     if (q.startsWith('getaddress')) return reply(good({ address: hash(500) }));
     if (q.startsWith('balance ')) return reply(good([{ coins: cs.length }]));
+    if (q.startsWith('coins checkmempool:true coinid:')) return reply(good(cs.concat(o.wallet || []).filter(x => q.includes(x.coinid))));
     if (q.startsWith('coins coinid:')) return reply(good(cs.filter(x => q.includes(x.coinid))));
     if (q.startsWith('coins address:')) return reply(good(cs.filter(x => q.toLowerCase().includes((x.address || '').toLowerCase()))));
     if (q.startsWith('coins ')) return reply(good(o.wallet || []));   // coins relevant:true sendable:true
@@ -152,10 +153,11 @@ test('pp_coinlocks primary-key contention prevents two selections reserving one 
 test('two concurrent closes serialise — the second chain never starts before the first posts', async () => {
   const h = await harness();
   try {
-    h.set(asyncStandard(h, [coin(1), coin(2, tok)]));
+    h.set(asyncStandard(h, [coin(1), coin(2, tok),coin(3,'0x00','10',hash(200)),coin(4,tok,'10',hash(200))]));
+    const secondPool={...h.pool(),address:hash(200),coinidM:hash(3),coinidT:hash(4)};
     const results = await Promise.all([
       new Promise(r => h.c.PoolMgr.close(h.pool(), { ok: id => r({ ok: id }), fail: m => r({ fail: m }) })),
-      new Promise(r => h.c.PoolMgr.close(h.pool(), { ok: id => r({ ok: id }), fail: m => r({ fail: m }) })),
+      new Promise(r => h.c.PoolMgr.close(secondPool, { ok: id => r({ ok: id }), fail: m => r({ fail: m }) })),
     ]);
     assert.equal(results.filter(x => x.ok).length, 2, 'both closes should complete: ' + JSON.stringify(results));
 
@@ -233,4 +235,16 @@ test('funding selection never picks a coin at the pool owner payout address', as
     assert(!inputs.some(q => q.includes(ownerCoin.coinid)),
       'a coin at $OADR was selected as funding — excl must carry p.oadr, not just p.address');
   } finally { h.close(); }
+});
+
+
+test('two closes of the same reserve produce only one signature and one post', async()=>{
+ const h=await harness();try{
+   h.set(asyncStandard(h,[coin(1),coin(2,tok)]));
+   const close=()=>new Promise(r=>h.c.PoolMgr.close(h.pool(),{ok:id=>r({ok:id}),fail:m=>r({fail:m})}));
+   const result=await Promise.all([close(),close()]);
+   assert.equal(result.filter(r=>r.ok).length,1);assert.equal(result.filter(r=>r.fail).length,1);
+   assert.equal(h.trace.filter(q=>q.startsWith('txnsign ')).length,1);
+   assert.equal(h.trace.filter(q=>q.startsWith('txnpost ')).length,1);
+ }finally{h.close();}
 });
