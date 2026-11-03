@@ -177,17 +177,17 @@ var PoolMgr = (function () {
     }
 
     /** Sign `signers` (["auto"] and/or a hex owner pubkey) in order; each may pend and resume on NEWBLOCK. */
-    function signAll(txid, signers, idx, onDone, onFail, inputs) {
+    function signAll(txid, signers, idx, onDone, onFail, inputs, recovery) {
         if(idx>=signers.length){onDone();return;}
         var pk=signers[idx];
         ReserveRecovery.checkSignature(inputs,pk,function(error){
             if(error){onFail(error);return;}
             MDS.cmd("txnsign id:"+txid+" publickey:"+pk,function(res){
-                if(res&&res.status===true&&!isPending(res)){signAll(txid,signers,idx+1,onDone,onFail,inputs);return;}
+                if(res&&res.status===true&&!isPending(res)){signAll(txid,signers,idx+1,onDone,onFail,inputs,recovery);return;}
                 if(isPending(res)){MDS.cmd("txndelete id:"+txid,function(){onFail("Signature unexpectedly queued. Transaction cancelled; deny its pending approval in MiniHub and enable WRITE mode.");});return;}
                 onFail("signing failed"+errOf(res));
             });
-        });
+        },recovery);
     }
 
     /** Register a txid whose sign is pending user approval; resumes via onNewBlock when the sig populates. */
@@ -231,7 +231,7 @@ var PoolMgr = (function () {
                             : "the amounts don't balance — nothing was posted");
                     return;
                 }
-                PoolInputClaims.post(inputs,txid,function(saved){
+                function broadcast(){ PoolInputClaims.post(inputs,txid,function(saved){
                     if(!saved){MDS.cmd("txndelete id:"+txid);done.fail("Could not persist input claims. Nothing was posted.");return;}
                 MDS.cmd("txnpost id:" + txid, function (rp) {
                     if (rp && rp.status === true && !isPending(rp)) {
@@ -240,7 +240,8 @@ var PoolMgr = (function () {
                     }
                     else { MDS.cmd("txndelete id:" + txid); done.fail("post rejected" + errOf(rp)); }
                 });
-                });
+                }); }
+                if(done.beforePost) done.beforePost(txid,broadcast,done.fail); else broadcast();
             });
         });
     }
@@ -255,6 +256,7 @@ var PoolMgr = (function () {
                 ACTIVE_SIGN = { owner: owner, heartbeat: heartbeat };
                 scheduleWatchdog();
                 var gdone = gated(done, owner, heartbeat);
+                gdone.beforePost = done.beforePost;
                 PoolInputClaims.check(inputs,function(q,cb){MDS.cmd(q,cb);},function(available){
                 if(!available){gdone.fail("An input is already submitted, or input reservation storage is unavailable. Wait for confirmation and refresh.");return;}
 
@@ -262,7 +264,7 @@ var PoolMgr = (function () {
                     if (!ok) { gdone.fail("building the transaction failed" + errOf(res)); return; }
                     signAll(txid, signers, 0,
                         function () { finalize(txid, gdone, inputs); },
-                        function (msg) { MDS.cmd("txndelete id:" + txid); gdone.fail(msg); }, inputs);
+                        function (msg) { MDS.cmd("txndelete id:" + txid); gdone.fail(msg); }, inputs, done.recovery);
                 });
                 });
             });
@@ -695,8 +697,8 @@ var PoolMgr = (function () {
                     cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(PP.dec(p.reserveM)) + " address:" + p.oadr + " storestate:false");
                     cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(PP.dec(p.reserveT)) + " address:" + p.oadr + tokArg + " storestate:false");
                     // no wallet funding inputs → only the owner signature is needed
-                    buildAndPost(txid, cmds, [p.opk], { ok: done.ok, fail: function (message) {
-                        if (!retried && message && message.indexOf("already spent") >= 0) { retried = true; attempt(); return; }
+                    buildAndPost(txid, cmds, [p.opk], { recovery:done.recovery, beforePost: done.beforePost, ok: done.ok, fail: function (message) {
+                        if (!done.noRetry && !retried && message && message.indexOf("already spent") >= 0) { retried = true; attempt(); return; }
                         done.fail(message);
                     } });
                 }, done.fail);
@@ -714,12 +716,15 @@ var PoolMgr = (function () {
     // coins move so token grain is exact. done.nothing() if nothing sendable yet (a close still confirming).
     function forwardOwnerFunds(oadr, done) {   // done.forwarded(txpowid,coins), done.nothing(), done.fail(msg)
         if (!oadr) { done.fail("no owner address"); return; }
-        MDS.cmd("coins relevant:true sendable:true address:" + oadr, function (res) {
+        MDS.cmd("coins relevant:true sendable:true checkmempool:true coinage:3 address:" + oadr, function (res) {
             var arr = (res && res.status && Array.isArray(res.response)) ? res.response : null;
             if (!arr || !arr.length) { done.nothing(); return; }
+            if(done.recoveryExpected && arr.length!==done.recoveryExpected){done.nothing();return;}
             var coinids = [], byTok = {}, order = [];
             for (var i = 0; i < arr.length; i++) {
                 var c = arr[i];
+                if(done.recoveryExpected && (!c || c.spent!==false || String(c.address).toLowerCase()!==oadr.toLowerCase()
+                        || !/^0x[0-9a-fA-F]{64}$/.test(c.coinid||'') || (Array.isArray(c.state)?c.state.length: c.state&&Object.keys(c.state).length))){done.fail("Unexpected payout coin; collection stopped.");return;}
                 if (!c || c.spent === true) continue;
                 var tid = c.tokenid || "", cid = c.coinid || "";
                 if (!tid || !cid) continue;
@@ -730,6 +735,10 @@ var PoolMgr = (function () {
                 else byTok[tid] = byTok[tid].plus(a);
             }
             if (!coinids.length) { done.nothing(); return; }
+            if(done.recovery){
+                var token=String(done.recovery.pool.tok).toLowerCase();
+                if(!order.some(function(t){return PP.isMinima(t);})||!order.some(function(t){return t.toLowerCase()===token;})){done.nothing();return;}
+            }
             MDS.cmd("getaddress", function (j) {   // fresh DEFAULT-64 address (getaddress, not newaddress)
                 var dest = (j && j.response) ? (j.response.address || "") : "";
                 if (!dest) { done.fail("could not get a wallet address"); return; }
@@ -741,10 +750,12 @@ var PoolMgr = (function () {
                     cmds.push("txnoutput id:" + txid + " amount:" + PP.amt(byTok[tid]) + " address:" + dest + tokArg + " storestate:false");
                 });
                 var n = coinids.length;
-                buildAndPost(txid, cmds, ["auto"], {
+                function submit(){buildAndPost(txid, cmds, done.recovery?[done.recovery.pool.opk]:["auto"], {
+                    recovery:done.recovery, beforePost:done.beforePost,
                     ok: function (txpowid) { done.forwarded(txpowid, n); },
                     fail: done.fail
-                });
+                });}
+                if(done.beforeBuild)done.beforeBuild(submit,done.fail);else submit();
             });
         });
     }

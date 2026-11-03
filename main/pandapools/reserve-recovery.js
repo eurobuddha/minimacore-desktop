@@ -31,7 +31,7 @@ var ReserveRecovery = (function () {
     function local(q, cb) { MDS.cmd(q, cb); }
     // Reuse ActivityChain's once-only, bounded callback wrapper. No timed-out operation is retried here.
     function call(source, q, cb) {
-        var ended = false, timer = typeof setTimeout==="function" ? setTimeout(function () { finish(null); }, 30000) : null;
+        var ended = false, timer = typeof setTimeout==="function" ? setTimeout(function () { finish(null); }, /^(?:balance address:.* megammr:true|megammrsync action:proofs)/.test(q) ? 120000 : 30000) : null;
         function finish(j) { if (ended) return; ended = true; if(timer!==null)clearTimeout(timer); cb(good(j) ? j : null); }
         try { source(q, finish); } catch (e) { finish(null); }
     }
@@ -125,11 +125,13 @@ var ReserveRecovery = (function () {
         function snapshots(i){if(i===2){live(function(){fromArchive(local,true);});return;}var data=snapshot&&(i===0?snapshot.cm:snapshot.ct);if(!data){snapshots(i+1);return;}checked(data,i===0?"0x00":p.tok,null,function(){snapshots(i+1);});}
         function nextSource(isLocal){if(isLocal&&archive)fromArchive(archive,false);else finish(false);}
         function fromArchive(source,isLocal){
+            var original=source;
+            source=function(q,done){original(q,function(j){if(!good(j)&&j&&typeof j.error==="string")notes.push(j.error);done(j);});};
             call(source,"status",function(j){
                 if(!j||!j.response||!truth(j.response.megammr)){if(!isLocal)notes.push("Archive unavailable or not a MegaMMR node.");nextSource(isLocal);return;}
                 var found={address:p.address,tok:p.tok,kmin:p.kmin,coinidM:hints.coinidM,coinidT:hints.coinidT};
                 read(source,found,true,512,function(coins){
-                    if(!fill(found,coins)){notes.push("Archive coin lookup failed.");nextSource(isLocal);return;}
+                    if(!fill(found,coins)){notes.push("Archive coin lookup failed. "+String(coins&&coins.error||""));nextSource(isLocal);return;}
                     function leg(i){
                         if(i===2){live(function(){nextSource(isLocal);});return;}
                         var id=i===0?found.coinidM:found.coinidT,token=i===0?"0x00":p.tok;
@@ -343,16 +345,38 @@ var ReserveRecovery = (function () {
             && !/\.(?:local|localhost|internal)$/i.test(m[1]) && (!m[2] || Number(m[2])>0&&Number(m[2])<65536);
     }
     function allowedArchive(q){return q==="status" || /^(?:balance|coins) address:0x[0-9a-fA-F]{64} megammr:true$/.test(q) || /^coins coinid:0x[0-9a-fA-F]{64} megammr:true$/.test(q) || /^coinexport coinid:0x[0-9a-fA-F]{64}$/.test(q);}
+    // Native node adapter for the pinned archive. Mirrors Android MegaArchive.Session.
+    // This command fetches public proofs only; receiving-node coincheck/import remains authoritative.
     function configuredArchive(cb){
-        Store.kvGet("recovery_archive",function(url,ok){
-            if(ok===false||!validEndpoint(url)){cb(null);return;}
-            var base=url.replace(/\/$/,"")+"/";
-            cb(function(q,done){
-                if(!allowedArchive(q)){done(null);return;}
-                var target=base+encodeURIComponent(q);
-                if(MDS.archiveGET){MDS.archiveGET(target,done);return;}
-                browserArchive(target,done);
-            });
+        var address=null,coins=[],proofs={};
+        cb(function(q,done){
+            if(!allowedArchive(q)){done({status:false,error:"ARCHIVE_COMMAND_REFUSED"});return;}
+            if(q==="status"){done({status:true,response:{megammr:true}});return;}
+            var match=q.match(/^balance address:(0x[0-9a-fA-F]{64}) megammr:true$/);
+            if(match){
+                address=null;coins=[];proofs={};
+                local("megammrsync action:proofs address:"+match[1],function(r){
+                    var list=good(r)&&r.response&&r.response.proofs;
+                    if(!Array.isArray(list)||list.length>512){done({status:false,error:"ARCHIVE_UNAVAILABLE: Update your node to a version supporting proof-only recovery. If the node is already current, check its connection to eurobuddha.com:9001. "+String(r&&r.error||"")});return;}
+                    var total=0,seen={};
+                    for(var i=0;i<list.length;i++){
+                        var item=list[i],c=item&&item.coin;
+                        if(!c||!hash(c.coinid)||key(c.address)!==key(match[1])||c.spent!==false||seen[key(c.coinid)]||!proof(item.data)){
+                            done({status:false,error:"ARCHIVE_PROOF_IDENTITY: invalid reserve proof response."});return;
+                        }
+                        total+=item.data.length;if(total>240000){done({status:false,error:"ARCHIVE_REPLY_LIMIT"});return;}
+                        seen[key(c.coinid)]=true;coins.push(c);proofs[key(c.coinid)]=item.data;
+                    }
+                    address=match[1];done({status:true,response:[{coins:coins.length}]});
+                });return;
+            }
+            if(!address){done({status:false,error:"ARCHIVE_QUERY_ORDER"});return;}
+            if(q==="coins address:"+address+" megammr:true"){done({status:true,response:coins});return;}
+            match=q.match(/^coins coinid:(0x[0-9a-fA-F]{64}) megammr:true$/);
+            if(match){done({status:true,response:coins.filter(function(c){return key(c.coinid)===key(match[1]);})});return;}
+            match=q.match(/^coinexport coinid:(0x[0-9a-fA-F]{64})$/);
+            if(match&&proofs[key(match[1])]){done({status:true,response:{data:proofs[key(match[1])]}});return;}
+            done({status:false,error:"ARCHIVE_COIN_MISSING"});
         });
     }
     // Browser transport: bound bytes while reading and cancel the request, not just its callback.
@@ -379,7 +403,7 @@ var ReserveRecovery = (function () {
         PoolMgr.readKeyUses(opk,function(uses,kidx,capacity){if(!integer(uses,MAX_TREE_USES)||!(Number(uses)<capacity)){cb(false);return;}Store.ownAcknowledge(opk,Number(uses),cb);});
     }
     // Mirror core txnsign:auto: only actual simple script rows supply automatic signing keys.
-    function checkSignature(ids,signer,cb){
+    function checkSignature(ids,signer,cb,recovery){
         var addresses={},signers=[];
         if(!ids.length||ids.length>64||!(signer==="auto"||hash(signer))){cb("Invalid signing inputs.");return;}
         if(signer!=="auto")signers.push(signer);
@@ -388,11 +412,26 @@ var ReserveRecovery = (function () {
             if(!hash(ids[i])){cb("Invalid signing input ID.");return;}
             call(local,"coins coinid:"+ids[i],function(j){var cs=rows(j),c=cs&&cs.length===1&&cs[0];
                 if(!c||c.spent!==false||key(c.coinid)!==key(ids[i])||!hash(c.address)){cb("Could not verify a current signing input.");return;}
+                if(recovery){
+                    var p=recovery.pool,expected=recovery.stage==="close"?p.address:p.oadr;
+                    if(key(c.address)!==key(expected)||signer!==p.opk||["close","forward"].indexOf(recovery.stage)<0
+                            || recovery.stage==="close"&&key(c.tokenid)!=="0x00"&&key(c.tokenid)!==key(p.tok)) {cb("Recovery input or signer changed. Nothing signed.");return;}
+                }
                 if(signer==="auto")addresses[key(c.address)]=true;input(i+1);
             });
         }
         function script(as,i){
-            if(i===as.length){ensureKeys(signers,function(n,missing){cb(missing.length?"Owner signing is paused or the current signing key could not be verified.":null);});return;}
+            if(i===as.length){
+                if(recovery){
+                    var p=recovery.pool;
+                    if(!p||p.minimumOwnerUses<0||signers.length!==1||key(signers[0])!==key(p.opk)){cb("Recovery signing state is incomplete.");return;}
+                    call(local,"keys",function(j){
+                        var checked={opk:p.opk,minimumOwnerUses:p.minimumOwnerUses,signingStateUnverified:false};
+                        var reason=classifySigning(checked,keyRows(j));cb(reason?signingMessage(reason,p.opk,null,p.minimumOwnerUses,p.address):null);
+                    });return;
+                }
+                ensureKeys(signers,function(n,missing){cb(missing.length?"Owner signing is paused or the current signing key could not be verified.":null);});return;
+            }
             call(local,"scripts address:"+as[i],function(j){var r=j&&j.response;
                 if(!r||key(r.address)!==as[i]||typeof r.simple!=="boolean"){cb("Could not identify the input signing key.");return;}
                 if(r.simple){if(!hash(r.publickey)){cb("Invalid input signing key.");return;}if(signers.map(key).indexOf(key(r.publickey))<0)signers.push(r.publickey);}

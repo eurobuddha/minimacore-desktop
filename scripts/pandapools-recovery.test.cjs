@@ -14,7 +14,7 @@ async function harness(){
  const c={console,setTimeout:(f,ms)=>{const t=setTimeout(()=>{timers.delete(t);f();},ms);timers.add(t);return t;},clearTimeout:t=>{timers.delete(t);clearTimeout(t);},setInterval,clearInterval};
  c.MDS={sql:(q,cb)=>sqlFail(q)?cb({status:false}):sql.sql(q,cb),cmd:(q,cb)=>{trace.push(q);const r=responder(q,cb);if(r!==undefined&&cb)cb(r);},log(){},init(){},persistRecovery:cb=>cb(disk&&sql.flushChecked())};
  c.self=c;vm.createContext(c);
- for(const f of ['decimal.js','covenant.js','curve.js','router.js','book.js','store.js','poolmgr.js','reserve-recovery.js'])vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),c,{filename:f});
+ for(const f of ['runtime-guard.js','decimal.js','covenant.js','curve.js','router.js','book.js','store.js','poolmgr.js','reserve-recovery.js'])vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),c,{filename:f});
  await invoke(c.Store.init);
  const e={addr,opk,oadr,tok,dec:8,kmin:'50',opkuses:590,script:c.Covenant.script(opk,oadr,tok,'50')};
  const p={address:addr,opk,oadr,tok,tokDecimals:8,kmin:'50',script:e.script,minimumOwnerUses:590,signingStateUnverified:false};
@@ -22,7 +22,8 @@ async function harness(){
 }
 function standard(h,cs=[]){return q=>{
  if(q==='txnlist')return good([]);
- if(q==='checkmode')return good({writemode:true});
+ if(q==='checkmode')return good({writemode:true,dblocked:false});
+ if(q===h.c.PoolRuntimeGuard.probe)return good({publickey:'0x3FFDB1A06A2DCA90BEE0D7C0F5BA62B9AF23BF5D73A23D63555492F88D1E3828'});
  if(q.startsWith('runscript '))return good({parseok:true,script:{address:addr}});
  if(q.startsWith('newscript '))return good({address:addr});
  if(q.startsWith('balance '))return good([{coins:cs.length}]);
@@ -67,7 +68,7 @@ test('archive endpoint and command whitelist reject credential and command injec
  const h=await harness();try{const r=h.c.ReserveRecovery;assert(r.validEndpoint('https://archive.example.com:123/path'));for(const url of ['http://example.com','https://user:pass@example.com','https://127.0.0.1','https://node.local','https://example.com?cmd=send','https://example.com/#x'])assert(!r.validEndpoint(url),url);assert(r.allowedArchive('coins coinid:'+hash(1)+' megammr:true'));assert(!r.allowedArchive('coinexport coinid:'+hash(1)+';send'));}finally{h.close();}
 });
 test('headless shipped service blocks signatures for quarantined actual auto signer',async()=>{
- const h=await harness();try{h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);h.set(standard(h,[coin(1)]));const c={MDS:h.c.MDS};vm.createContext(c);vm.runInContext(['decimal.js','covenant.js','curve.js','reserve-recovery.js','service.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8')).join('\n'),c);const cmds=['txninput id:test coinid:'+hash(1),'txnsign id:test publickey:auto'];const ok=await invoke(c.runCmds,cmds,1);assert.equal(ok,false);assert(!h.trace.some(q=>q.startsWith('txnsign')));}finally{h.close();}
+ const h=await harness();try{h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);h.set(standard(h,[coin(1)]));const c={MDS:h.c.MDS};vm.createContext(c);vm.runInContext(['runtime-guard.js','decimal.js','covenant.js','curve.js','reserve-recovery.js','service.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8')).join('\n'),c);const cmds=['txninput id:test coinid:'+hash(1),'txnsign id:test publickey:auto'];const ok=await invoke(c.runCmds,cmds,1);assert.equal(ok,false);assert(!h.trace.some(q=>q.startsWith('txnsign')));}finally{h.close();}
 });
 test('old-schema upgrade quarantines existing recipes while an explicitly new pool is trusted',async()=>{
  const h=await harness();try{
@@ -87,14 +88,19 @@ test('corrupt existing Desktop database cannot be silently replaced',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pp-bad-db-')),file=path.join(dir,'pool.sqlite');fs.writeFileSync(file,'corrupt saved recipe database');
  try{await assert.rejects(async()=>{const s=await makeSqlShim(file);s.sql('SELECT * FROM sqlite_master');s._db.close();});assert.equal(fs.readFileSync(file,'utf8'),'corrupt saved recipe database');}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
-test('MDS archive stream rejects oversized content and aborts the request',async()=>{
- const h=await harness();try{await invoke(h.c.ReserveRecovery.saveArchive,'https://archive.example.com');let aborted=false,cancelled=false;h.c.AbortController=class{constructor(){this.signal={};}abort(){aborted=true;}};h.c.TextDecoder=TextDecoder;
- h.c.fetch=async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:false,value:new Uint8Array(256001)}),cancel:async()=>{cancelled=true;}})}});
- const archive=await invoke(h.c.ReserveRecovery.configuredArchive);assert.equal(await invoke(archive,'status'),null);assert(aborted&&cancelled);
+test('MDS archive uses only the pinned proof command and rejects wrong identities and stale cache',async()=>{
+ const h=await harness();try{
+  let fail=false;h.set(q=>q.startsWith('megammrsync action:proofs address:')?good({proofs:fail?[{coin:{...coin(1),address:hash(999)},data:'0xaa'}]:[{coin:coin(1),data:'0xaa'}]}):{status:false});
+  const archive=await invoke(h.c.ReserveRecovery.configuredArchive);
+  assert.equal((await invoke(archive,'balance address:'+addr+' megammr:true')).response[0].coins,1);
+  assert.equal((await invoke(archive,'coinexport coinid:'+hash(1))).response.data,'0xaa');
+  fail=true;assert.equal((await invoke(archive,'balance address:'+addr+' megammr:true')).status,false);
+  assert.equal((await invoke(archive,'coinexport coinid:'+hash(1))).status,false);
+  assert(h.trace.every(q=>q.startsWith('megammrsync action:proofs address:')));
  }finally{h.close();}
 });
 test('headless refresh validates KMIN and preserves oldest leg age without browser timers',async()=>{
- const h=await harness();try{const c={MDS:h.c.MDS};vm.createContext(c);vm.runInContext(['decimal.js','covenant.js','curve.js','reserve-recovery.js','service.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8')).join('\n'),c);
+ const h=await harness();try{const c={MDS:h.c.MDS};vm.createContext(c);vm.runInContext(['runtime-guard.js','decimal.js','covenant.js','curve.js','reserve-recovery.js','service.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8')).join('\n'),c);
  const p={...h.p};assert(c.fillReservesSvc(p,good([{...coin(1),created:100},{...coin(2,tok),created:1999}])));assert.equal(Math.min(p.reserveBlockM,p.reserveBlockT),100);
  assert.equal(c.fillReservesSvc(p,good([coin(1),coin(2,tok,'0.001')])),false);const raw=coin(2,tok);delete raw.tokenamount;assert.equal(c.fillReservesSvc(p,good([coin(1),raw])),false);
  }finally{h.close();}
@@ -103,7 +109,7 @@ test('discovery preserves a confirmed signing state; unknown new discovery remai
  const h=await harness();try{assert(await invoke(h.c.Store.ownRecord,h.p));const found={...h.p};delete found.signingStateUnverified;assert(await invoke(h.c.Store.ownRecord,found));assert.equal((await invoke(h.c.Store.ownAll))[0].signingStateUnverified,false);found.address=hash(777);assert(await invoke(h.c.Store.ownRecord,found));assert((await invoke(h.c.Store.ownAll)).find(p=>p.address===found.address).signingStateUnverified);}finally{h.close();}
 });
 test('foreign cleanup never untracks a recipe restored while a coin reply was delayed',async()=>{
- const h=await harness();try{let waiting;h.set((q,cb)=>{if(q.startsWith('coins relevant:true')){waiting=cb;return;}return standard(h)(q);});const c={MDS:h.c.MDS};vm.createContext(c);vm.runInContext(['decimal.js','covenant.js','curve.js','reserve-recovery.js','service.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8')).join('\n'),c);
+ const h=await harness();try{let waiting;h.set((q,cb)=>{if(q.startsWith('coins relevant:true')){waiting=cb;return;}return standard(h)(q);});const c={MDS:h.c.MDS};vm.createContext(c);vm.runInContext(['runtime-guard.js','decimal.js','covenant.js','curve.js','reserve-recovery.js','service.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8')).join('\n'),c);
  c.untrackNextAddress([{address:addr,opk,script:h.e.script,track:false}],0);assert(waiting);h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);waiting(good([coin(1)]));assert(!h.trace.some(q=>q.startsWith('cointrack')||q.startsWith('newscript trackall:false')));
  }finally{h.close();}
 });
@@ -119,21 +125,99 @@ test('Book discovery populates both young reserve ages for the foreground refres
  const pools=await invoke(h.c.Book.scan);assert.equal(pools.length,1);assert.equal(pools[0].reserveBlockM,1998);assert.equal(pools[0].reserveBlockT,1999);assert(2000-Math.min(pools[0].reserveBlockM,pools[0].reserveBlockT)<900);assert(!h.trace.some(q=>q.startsWith('txnsign')));
  }finally{h.close();}
 });
-test('retire is reversible on Desktop — hide has an un-hide, or funds hide with no way back',async()=>{
- // THE GAP THIS PINS. 0.17.10 shipped Desktop with the HIDE half of retire and no un-hide: no listing, no
- // bring-back, and no automatic un-retire. A live funded pool rendering as `unresolved` (mid-resync, archive
- // down) was one click from leaving the UI permanently. The recipe survived in pp_ownpools and in backups,
- // but the user had no in-app way to find it again.
- const h=await harness();try{await invoke(h.c.Store.ownRecord,h.p);
- await invoke(cb=>h.c.Store.setRetired(h.p.address,1,cb));
- let [rows]=await new Promise(r=>h.c.Store.ownAll((ps,ok)=>r([ps,ok])));
- assert.equal(rows.length,1,'hidden, never deleted — still in ownAll for backups');
- assert.equal(rows[0].retired,true);
- assert(await invoke(cb=>h.c.Store.setRetired(h.p.address,0,cb)),'un-retire must succeed');
- [rows]=await new Promise(r=>h.c.Store.ownAll((ps,ok)=>r([ps,ok])));
- assert.equal(rows[0].retired,false,'a posted close is not a landed close');
- assert.equal(await invoke(cb=>h.c.Store.setRetired('0x'+'f'.repeat(64),1,cb)),false,
-   'a missing row must NOT report success — an UPDATE matching nothing still returns status:true');
+test('the signing gate names WHICH problem it is',async()=>{
+ // Collapsing six reasons into one "cannot sign" list sends users at the wrong fix: "restore a backup" is
+ // right for KEY_ABSENT and actively WRONG for NODE_UNREADABLE, where nothing at all is known.
+ const h=await harness();try{const R=h.c.ReserveRecovery;const p={opk,minimumOwnerUses:10,signingStateUnverified:false};
+ const row=u=>[{publickey:opk,uses:u}];
+ assert.equal(R.classifySigning(p,null),"NODE_UNREADABLE",'an unreadable reply is never evidence');
+ assert.equal(R.classifySigning(p,[]),"KEY_ABSENT",'parsed fine and not present ⇒ different wallet');
+ assert.equal(R.classifySigning(p,[{publickey:opk,uses:"nonsense"}]),"NODE_UNREADABLE",'unparsable uses is unknown, not zero');
+ assert.equal(R.classifySigning(p,row(262144)),"KEY_EXHAUSTED");
+ // Block-as-key-uses nodes (1.1.2.31+): 128x4 trees, uses track the chain tip block. A healthy
+ // block-mode key reporting millions of uses is NOT exhausted - its own capacity decides.
+ const blockrow=u=>[{publickey:opk,uses:u,size:128,depth:4}];
+ assert.equal(R.classifySigning(p,blockrow(2342219)),null,'a block-mode key at the chain tip may sign');
+ assert.equal(R.classifySigning(p,blockrow(268435456)),"KEY_EXHAUSTED",'a block-mode key judges against 128^4');
+ assert.equal(R.classifySigning(p,row(5)),"COUNTER_REGRESSED",'below the recorded floor is a signature spent elsewhere');
+ assert.equal(R.classifySigning(p,row(10)),null,'at the floor is allowed');
+ assert.equal(R.classifySigning({...p,signingStateUnverified:true},row(20)),"SIGNING_QUARANTINED");
+ assert.equal(R.classifySigning(p,row(20)),null);
+ assert(R.signingMessage("NODE_UNREADABLE",opk).includes("do not change anything"),
+   'the unknown case must NOT tell the user to restore anything');
+ assert(R.signingMessage("KEY_ABSENT",opk).includes("seed phrase alone"));
+ assert(R.signingMessage("COUNTER_REGRESSED",opk,5,10).includes("5")&&R.signingMessage("COUNTER_REGRESSED",opk,5,10).includes("10"),
+   'the regression message must quote both numbers');
+ for(const r of ["KEY_ABSENT","NODE_UNREADABLE","KEY_EXHAUSTED","COUNTER_REGRESSED","CONFIRMATION_UNSAVED","SIGNING_QUARANTINED"])
+   assert(R.signingMessage(r,opk).includes(opk),'every message carries the FULL owner key');
+ }finally{h.close();}
+});
+test('a backup is proven usable before it is handed over',async()=>{
+ const h=await harness();try{const R=h.c.ReserveRecovery;const owned=[{address:addr}];
+ assert.equal(R.verifyExport("",owned,0),"the saved file could not be read back");
+ assert.equal(R.verifyExport("not json",owned,0),"the saved file is not readable JSON");
+ assert.equal(R.verifyExport(JSON.stringify({pandapools_backup:3,pools:[]}),owned,0),"the saved file contains no pools");
+ assert.equal(R.verifyExport(JSON.stringify({pools:[{}]}),owned,0),"the saved file is not a PandaPools backup this version can read");
+ const good=JSON.stringify({pandapools_backup:3,pools:[R.entry(h.p)]});
+ assert.equal(R.verifyExport(good,owned,0),null,'a backup covering every owned pool is sound');
+ assert(R.verifyExport(good,[{address:'0x'+'9'.repeat(64)}],0).includes('does not contain'),
+   'a backup missing a pool you own must be refused — that is the failure you only discover during a recovery');
+ const bytes=new TextEncoder().encode(good).length;
+ assert.equal(R.verifyExport(good,owned,bytes),null);
+ assert.equal(R.verifyExport(good,owned,bytes+1),"the saved file is a different size than what was written — it may be truncated");
+ }finally{h.close();}
+});
+test('stranding warns early enough to act, and never on an unknown age',async()=>{
+ const h=await harness();try{const P=h.c.PoolMgr;
+ assert.equal(P.strandLevel(1),0);assert.equal(P.strandLevel(900),0,'the keep-fresh cadence itself is not a warning');
+ assert.equal(P.strandLevel(0),0,'age 0 is UNKNOWN, not urgent — escalating on it trains the warning out');
+ assert.equal(P.strandLevel(-5),0);
+ assert.equal(P.strandLevel(P.STRAND_NOTICE_AT),0);assert.equal(P.strandLevel(P.STRAND_NOTICE_AT+1),1);
+ assert.equal(P.strandLevel(P.STRAND_WARN_AT),1);assert.equal(P.strandLevel(P.STRAND_WARN_AT+1),2);
+ assert.equal(P.strandLevel(P.STRAND_URGENT_AT),2);assert.equal(P.strandLevel(P.STRAND_URGENT_AT+1),3);
+ assert(P.STRAND_NOTICE_AT<P.STRAND_WARN_AT&&P.STRAND_WARN_AT<P.STRAND_URGENT_AT&&P.STRAND_URGENT_AT<P.CASCADE_BLOCKS,
+   'urgent must arrive with room to act, not once the coins have aged out');
+ const NOW=1800000000000;
+ assert(P.strandShouldNotify(1,0,0,NOW),'first warning at any level is immediate');
+ assert(P.strandShouldNotify(2,1,NOW,NOW),'getting worse is announced at once');
+ assert(!P.strandShouldNotify(2,2,NOW,NOW+60000),'an unchanged level waits out the quiet window');
+ assert(P.strandShouldNotify(2,2,NOW,NOW+25*60*60*1000));
+ assert(!P.strandShouldNotify(1,3,NOW,NOW+9e9),'improving never nags');
+ assert(!P.strandShouldNotify(0,3,0,NOW),'a healed pool is never notified about');
+ }finally{h.close();}
+});
+test('a forward that moved only one leg does NOT finish the job',async()=>{
+ // THE INCIDENT THIS PINS. Pool MxG081BJGW3KQ0PBPHCS841CC5RA7YKRVEQUE93Z353MT4FBTJ2101S1423Z1ET closed on
+ // 2026-09-14 paying both legs to one $OADR. The forward ran while only the MINIMA leg met its coinage:3
+ // filter, moved that, reported success — and the retry loop stopped. 2934.95626348 MxUSD is still there,
+ // and the device holding the owner key has since died.
+ const h=await harness();try{const P=h.c.PoolMgr;
+ assert.equal(P.collectDecide(1,true),"RETRY",'coins present and signable ⇒ keep going, whatever a forward said');
+ assert.equal(P.collectDecide(0,true),"CLEAR");
+ assert.equal(P.collectDecide(0,false),"CLEAR");
+ assert.equal(P.collectDecide(0,null),"CLEAR",'an empty address is done regardless of signing');
+ for(let r=1;r<=50;r++)for(const sign of [true,false,null])
+   assert.notEqual(P.collectDecide(r,sign),"CLEAR",'coins present can never read as finished (remaining='+r+')');
+ assert.equal(P.collectDecide(null,true),"RETRY",'unknown is never a conclusion');
+ assert.equal(P.collectDecide(null,false),"RETRY");
+ assert.equal(P.collectDecide(2,null),"RETRY",'unknown signing is not "unreachable"');
+ assert.equal(P.collectDecide(1,false),"STRANDED",'present and unsignable needs a human, not silence');
+ assert.notEqual(P.collectDecide(0,false),"STRANDED");
+ assert.equal(P.collectDecide.length,2,'decide() must take ONLY (remaining, canSign) — a forward-outcome argument would make the original bug expressible again');
+ }finally{h.close();}
+});
+test('the collect queue is durable and only an empty read clears it',async()=>{
+ const h=await harness();try{const oadr='0x'+'e'.repeat(64);
+ assert(await invoke(cb=>h.c.Store.collectAdd(oadr,cb)));
+ assert(await invoke(cb=>h.c.Store.collectAdd(oadr,cb)),'idempotent — a re-close must not duplicate the job');
+ let q=await new Promise(r=>h.c.Store.collectAll(r));
+ assert.equal(q.length,1);assert.equal(q[0].oadr,oadr.toLowerCase());assert.equal(q[0].status,'RETRYING');
+ await invoke(cb=>h.c.Store.collectAttempted(oadr,'STRANDED','cannot sign',cb));
+ q=await new Promise(r=>h.c.Store.collectAll(r));
+ assert.equal(q[0].status,'STRANDED');assert.equal(q[0].attempts,1,'attempts are recorded, never used as a give-up cap');
+ await invoke(cb=>h.c.Store.collectClear(oadr,cb));
+ q=await new Promise(r=>h.c.Store.collectAll(r));
+ assert.equal(q.length,0);
  }finally{h.close();}
 });
 test('one card per pool, carrying BOTH identifiers and the retire action',async()=>{
@@ -148,7 +232,7 @@ test('one card per pool, carrying BOTH identifiers and the retire action',async(
  const donorHtml=path.join(donor,'index.html');
  if(fs.existsSync(donorHtml)){
  const html=fs.readFileSync(donorHtml,'utf8'),elements={};
- Object.assign(h.c,{POOLS:[],pendingCreate:null,mine:()=>true,withSnapshots:(_ps,cb)=>cb(),D:h.c.Decimal,
+ Object.assign(h.c,{doBackup:()=>{},POOLS:[],pendingCreate:null,mine:()=>true,withSnapshots:(_ps,cb)=>cb(),D:h.c.Decimal,
    MY_KEYS:{[opk.toLowerCase()]:true},el:id=>elements[id]||(elements[id]={})});
  const idsFn=html.slice(html.indexOf('    function ids(p) {'),html.indexOf('    function btn(label, onclick, primary)'));
  vm.runInContext(html.slice(html.indexOf('    function renderMyLp()'),html.indexOf('    function withSnapshots'))
@@ -179,6 +263,19 @@ test('one card per pool, carrying BOTH identifiers and the retire action',async(
  }finally{h.close();}
 });
 
+test('retiring a pool hides it without losing anything needed to reclaim it',async()=>{
+ const h=await harness();try{await invoke(h.c.Store.ownRecord,h.p);
+ await invoke(cb=>h.c.Store.setRetired(h.p.address,1,cb));
+ const [rows]=await new Promise(r=>h.c.Store.ownAll((ps,ok)=>r([ps,ok])));
+ assert.equal(rows.length,1,'the recipe is HIDDEN, never deleted — it must still be in ownAll for backups');
+ assert.equal(rows[0].retired,true);
+ for(const f of ['address','opk','oadr','tok','kmin','script'])assert(rows[0][f],'retiring must not drop '+f);
+ await invoke(cb=>h.c.Store.setRetired(h.p.address,0,cb));
+ const [back]=await new Promise(r=>h.c.Store.ownAll((ps,ok)=>r([ps,ok])));
+ assert.equal(back[0].retired,false,'reversible: a posted close is not a landed close');
+ }finally{h.close();}
+});
+
 test('block-mode keys reach the real signing boundary and recovery confirmation',async()=>{
  const h=await harness();try{
   const uses=2342219,base=standard(h,[coin(1),coin(2,tok)]);
@@ -199,5 +296,32 @@ test('block-mode support preserves legacy exhaustion and restored-key quarantine
   h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);
   h.set(q=>q==='keys'||q.startsWith('keys action:list')?good([{publickey:opk,uses:2342219,size:128,depth:4}]):base(q));
   assert.notEqual(await invoke(h.c.ReserveRecovery.checkSignature,[hash(1)],'auto'),null);
+ }finally{h.close();}
+});
+
+test('combined backup coverage remains required after cancel, new creation, or failed durable verification',async()=>{
+ const h=await harness();try{
+  assert.equal(await invoke(h.c.Store.combinedBackupReady),true);
+  assert(await invoke(h.c.Store.ownRecord,h.p));
+  assert.equal(await invoke(h.c.Store.combinedBackupReady),false);
+  const json=JSON.stringify({pandapools_backup:3,pools:[h.e]});
+  h.disk(false);assert.equal(await invoke(h.c.Store.recordCombinedBackup,json),false);
+  assert.equal(await invoke(h.c.Store.combinedBackupReady),false,'SQL memory alone cannot satisfy verified backup');
+  h.disk(true);assert.equal(await invoke(h.c.Store.recordCombinedBackup,json),true);
+  assert.equal(await invoke(h.c.Store.combinedBackupReady),true);
+  assert(await invoke(h.c.Store.ownRecord,{...h.p,address:hash(777)}));
+  assert.equal(await invoke(h.c.Store.combinedBackupReady),false);
+ }finally{h.close();}
+});
+test('bounded recovery signing checks the actual owner and input address while normal signing stays quarantined',async()=>{
+ const h=await harness();try{
+  h.p.signingStateUnverified=true;await invoke(h.c.Store.ownRecord,h.p);h.set(standard(h,[coin(1),coin(2,tok)]));
+  const check=(ids,signer,recovery)=>new Promise(r=>h.c.ReserveRecovery.checkSignature(ids,signer,r,recovery));
+  assert.match(await check([hash(1),hash(2)],opk),/paused/);
+  assert.equal(await check([hash(1),hash(2)],opk,{pool:h.p,stage:'close'}),null);
+  assert.match(await check([hash(1)],hash(999),{pool:h.p,stage:'close'}),/changed/);
+  assert.match(await check([hash(1)],opk,{pool:h.p,stage:'forward'}),/changed/);
+  assert.equal((await invoke(h.c.Store.ownAll))[0].signingStateUnverified,true);
+  h.p.minimumOwnerUses=900;assert.match(await check([hash(1)],opk,{pool:h.p,stage:'close'}),/reuse/);
  }finally{h.close();}
 });

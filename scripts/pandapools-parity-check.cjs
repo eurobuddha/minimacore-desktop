@@ -13,7 +13,7 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const donor = process.env.PP_MDS_ROOT || path.resolve(root, '../../mds/pandapools-mds');
-const files = ['decimal.js','covenant.js','curve.js','router.js','book.js','store.js','history.js','statement.js','sha3.js','receipt-recovery.js','activity-chain.js','poolmgr.js','reserve-recovery.js','service.js', 'combined-backup.js', 'full-backup.js', 'input-claims.js'];
+const files = ['decimal.js','covenant.js','curve.js','router.js','book.js','store.js','history.js','statement.js','sha3.js','receipt-recovery.js','activity-chain.js','poolmgr.js','reserve-recovery.js','service.js', 'combined-backup.js', 'full-backup.js', 'input-claims.js', 'runtime-guard.js', 'rescue-flow.js'];
 
 // Fail loudly rather than vacuously when the donor tree is absent — a silent ENOENT would let drift ship.
 if (!fs.existsSync(path.join(donor, 'poolmgr.js'))) {

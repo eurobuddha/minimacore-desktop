@@ -36,6 +36,7 @@ async function harness() {
 
   // The REAL shim surface, and the REAL loader context — so the sandbox itself is under test.
   const mds = {
+    poolDesktop:true,
     sql: (q, cb) => sql.sql(q, cb),
     cmd: (q, cb) => { trace.push(q); const r = responder(q, cb); if (r !== undefined && cb) cb(r); },
     log() {}, init() {}, historyPageMax: 512,
@@ -68,7 +69,7 @@ function asyncStandard(h, cs, opts) {
     // Some engine calls are fire-and-forget (e.g. MDS.cmd("txndelete id:…") with no callback).
     const reply = (r) => { if (cb) setTimeout(() => cb(r), 0); };
     if (q === 'txnlist') return reply(good([]));
-    if (q === 'checkmode') return reply(good({ writemode: true }));
+    if (q === 'checkmode') return reply(good({ writemode: true, dblocked:false }));
     if (q === 'status') return reply(good({ megammr: false }));
     if (q === 'keys' || q.startsWith('keys action:list')) return reply(good([{ publickey: opk, uses: 846, modifier: '0x40' }]));
     if (q.startsWith('scripts address:')) return reply(good({ address: q.split(':')[1], simple: true, publickey: opk }));

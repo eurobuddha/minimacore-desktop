@@ -11,6 +11,8 @@
  * inlined here. It shares the `pp_feed` / `pp_kv` SQL tables with the page's store.js (same MDS database).
  */
 
+PoolRuntimeGuard.install();
+
 var SENTINEL = "0x50414E4441504F4F4C53";     // "PANDAPOOLS"
 var FEED_MAX = 100;
 var READY = false;
@@ -148,10 +150,13 @@ MDS.init(function (msg) {
         // One-time cleanup (parity with native 0.9.14): stop tracking the unspendable sentinel. We used to
         // `coinnotify action:add` it, which made the node retain every dust beacon ever posted there (they never
         // spend) into an ever-growing set. Discovery now reads the recent chain via a depth-bounded scan instead.
-        MDS.cmd("coinnotify action:remove address:" + SENTINEL, function () {});
-        ensureTables(function () { READY = true; MDS.log("PandaPools service ready"); retrackOwn(); cleanForeign(); scan(); });
+        PoolRuntimeGuard.check(function (error) {
+            if (error) { READY = false; MDS.log("PandaPools paused: " + error); return; }
+            MDS.cmd("coinnotify action:remove address:" + SENTINEL, function () {});
+            ensureTables(function () { READY = true; MDS.log("PandaPools service ready"); retrackOwn(); cleanForeign(); scan(); });
+        });
     }
-    if (msg.event === "NEWBLOCK") { if (READY) scan(); }
+    if (msg.event === "NEWBLOCK") { PoolRuntimeGuard.check(function(error) { if(error) { READY=false; MDS.log("PandaPools paused: "+error); return; } if(READY) scan(); else ensureTables(function(){ READY=true; retrackOwn(); cleanForeign(); scan(); }); }); }
 });
 
 function ensureTables(cb) {

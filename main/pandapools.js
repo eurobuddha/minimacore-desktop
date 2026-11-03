@@ -54,6 +54,7 @@ function nodeCmd(cmd) { return runner(cmd); }
 function buildMds() {
   const epoch=contextEpoch, storage=sqlShim;
   return {
+    poolDesktop: true, // MiniHub WRITE/block-mode requirement is enforced in the MDS runtime.
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
     cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}runner(command).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { if (cb) cb({ status: false }); }); },
