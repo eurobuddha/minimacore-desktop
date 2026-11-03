@@ -232,13 +232,16 @@ var PoolMgr = (function () {
                     return;
                 }
                 function broadcast(){ PoolInputClaims.post(inputs,txid,function(saved){
-                    if(!saved){MDS.cmd("txndelete id:"+txid);done.fail("Could not persist input claims. Nothing was posted.");return;}
+                    if(!saved){MDS.cmd("txndelete id:"+txid);PoolInputClaims.release(inputs,txid,function(){done.fail("Could not persist input claims. Nothing was posted.");});return;}
                 MDS.cmd("txnpost id:" + txid, function (rp) {
                     if (rp && rp.status === true && !isPending(rp)) {
                         var posted = extractTxpowid(rp, txid);
                         ActivityChain.rememberSubmission(rp, posted, function () { MDS.cmd("txndelete id:" + txid); done.ok(posted); });
                     }
-                    else { MDS.cmd("txndelete id:" + txid); done.fail("post rejected" + errOf(rp)); }
+                    else { MDS.cmd("txndelete id:" + txid);
+                        /* status:false and not pending = the node refused it; nothing was broadcast, so free the inputs. */
+                        if (rp && rp.status === false && !isPending(rp)) PoolInputClaims.release(inputs, txid, function () { done.fail("post rejected" + errOf(rp)); });
+                        else done.fail("post rejected" + errOf(rp)); }
                 });
                 }); }
                 if(done.beforePost) done.beforePost(txid,broadcast,done.fail); else broadcast();

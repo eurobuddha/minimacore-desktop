@@ -587,8 +587,11 @@ function checkPostSvc(txid, cmds, cb) {
                 MDS.cmd("txncheck id:" + txid, function (rc) {
                     var resp = rc ? rc.response : null, v = resp ? resp.valid : null;
                     if (!(v && truthy(v.scripts) && truthy(resp.validamounts) && truthy(v.mmrproofs))) { finishSignSvc(cb, false, owner, heartbeat); return; }
-                        PoolInputClaims.post(ids,txid,function(saved){if(!saved){finishSignSvc(cb,false,owner,heartbeat);return;}
-                            MDS.cmd("txnpost id:"+txid,function(rp){finishSignSvc(cb,!!(rp&&rp.status===true&&!rp.pending),owner,heartbeat);});
+                        PoolInputClaims.post(ids,txid,function(saved){if(!saved){PoolInputClaims.release(ids,txid,function(){finishSignSvc(cb,false,owner,heartbeat);});return;}
+                            MDS.cmd("txnpost id:"+txid,function(rp){var ok=!!(rp&&rp.status===true&&!rp.pending);
+                                /* Refused by the node (status:false, not pending): nothing was broadcast, so free the inputs. */
+                                if(rp&&rp.status===false&&!rp.pending){PoolInputClaims.release(ids,txid,function(){finishSignSvc(cb,false,owner,heartbeat);});return;}
+                                finishSignSvc(cb,ok,owner,heartbeat);});
                         });
                 });
             });
