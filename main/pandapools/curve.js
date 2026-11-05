@@ -40,11 +40,9 @@ var PP = (function () {
         return false;
     }
 
-    function shorten(s) {
-        if (!s) return "";
-        if (s.length <= 16) return s;
-        return s.substring(0, 8) + "…" + s.substring(s.length - 6);
-    }
+    /** RULE 1: an identifier (txpowid, pool address, token id) is shown WHOLE. It was 8…6; the name stays
+     *  so every caller is fixed here at once. */
+    function shorten(s) { return s ? String(s) : ""; }
 
     function clampDec(d) {
         d = parseInt(d, 10);
@@ -82,8 +80,7 @@ var PP = (function () {
     function tokenLabel(p) {
         if (p.tokName && p.tokName !== "" && (!p.tok || p.tokName.toLowerCase() !== p.tok.toLowerCase()))
             return p.tokName;
-        var h = (p.tok && p.tok.indexOf("0x") === 0) ? p.tok.substring(2) : (p.tok || "");
-        return h.length > 8 ? h.substring(0, 8) + "…" : h;
+        return p.tok || "";   // RULE 1: an unnamed token is named by its WHOLE id (was the first 8 hex + …)
     }
 
     /** Plain string for display (trailing zeros stripped). */

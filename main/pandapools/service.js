@@ -431,7 +431,7 @@ function labelOf(token, tid) {
     }
     return short(tid);
 }
-function short(s) { s = (s && s.indexOf("0x") === 0) ? s.substring(2) : (s || ""); return s.length > 8 ? s.substring(0, 8) + "…" : s; }
+function short(s) { return s || ""; }   // RULE 1: an unnamed token is named by its WHOLE id (was the first 8 hex + …)
 function isFunded(p) { return p.reserveM && p.reserveT && decCmp(p.reserveM, "0") > 0 && decCmp(p.reserveT, "0") > 0; }
 
 function done(pools) {
