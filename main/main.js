@@ -301,6 +301,60 @@ ipcMain.handle("mcd:shopAdvance", (_e, ref, status) => shop.advanceStatus(ref, s
 ipcMain.handle("mcd:shopReply", (_e, ref, text) => shop.reply(ref, text));
 ipcMain.handle("mcd:shopScan", () => shop.scanOnce());
 ipcMain.handle("mcd:shopInvalidate", () => { shop.invalidateIdentity(); return true; });
+// Chat backup (.kbak) — the same file the bears write (apks/base ChatBackup.java): keets keypair +
+// every chat contact and message. The keypair never reaches the renderer; addresses travel IN FULL.
+const chatbackup = require("./chatbackup");
+const chatStore = require("./chat-store");
+let pendingChatBackup = null;
+const keetsKeypairFile = () => path.join(node.dataDir(), "keets", "keypair");
+ipcMain.handle("mcd:chatExportBackup", async (_e, pass) => {
+  if (typeof pass !== "string" || pass.length < 8) throw new Error("Use a password of at least 8 characters.");
+  let keypair = null;
+  try { keypair = fs.readFileSync(keetsKeypairFile()); } catch (e) { /* keets never ran: chats only */ }
+  try { await chat.init(); } catch (e) { /* node down: the manifest's address stays blank */ }
+  const all = chatStore.all(), payaddr = {};
+  for (const [k, v] of Object.entries(all.meta)) if (k.startsWith("payaddr:")) payaddr[k.slice(8)] = v;
+  const file = chatbackup.exportBackup(pass, { keypair, keetsPubkey: chat.myIdentity().pubkey, chatName: all.meta.myname || "",
+    contacts: all.contacts, messages: all.messages, payaddr });
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  const r = await dialog.showSaveDialog(win, { defaultPath: "keets-chat-backup-" + stamp + ".kbak", filters: [{ name: "Chat backup", extensions: ["kbak"] }] });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  fs.writeFileSync(r.filePath, file);
+  return { canceled: false, path: r.filePath, contacts: all.contacts.length, messages: all.messages.length };
+});
+ipcMain.handle("mcd:chatOpenBackup", async (_e, pass) => {
+  if (typeof pass !== "string" || !pass) throw new Error("Enter the backup's password.");
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "Chat backup", extensions: ["kbak"] }, { name: "All files", extensions: ["*"] }] });
+  if (r.canceled || !r.filePaths.length) return { canceled: true };
+  if (fs.statSync(r.filePaths[0]).size > chatbackup.MAX_FILE) throw new Error("That file is too large to be a chat backup.");
+  let opened;
+  try { opened = chatbackup.openBackup(pass, fs.readFileSync(r.filePaths[0])); }
+  catch (e) { throw new Error(e.message === "BAD_PASSWORD" ? "Wrong password, or this is not a chat backup." : e.message); }
+  pendingChatBackup = opened;
+  try { await chat.init(); } catch (e) { /* node down */ }
+  return { canceled: false, keetsPubkey: opened.manifest.keetsPubkey || "", maxAddress: opened.manifest.maxAddress || "",
+    current: chat.myIdentity().pubkey, contacts: opened.contacts.length, messages: opened.messages.length, hasMax: opened.hasMax };
+});
+ipcMain.handle("mcd:chatApplyBackup", async () => {
+  const b = pendingChatBackup; pendingChatBackup = null;
+  if (!b) throw new Error("Open the backup again.");
+  // The sidecar reads its keypair only at spawn: stop the node, write, start.
+  chat.stopLoop();
+  await node.stop();
+  if (b.keypair) {
+    fs.mkdirSync(path.dirname(keetsKeypairFile()), { recursive: true });
+    const tmp = keetsKeypairFile() + ".restore";
+    fs.writeFileSync(tmp, b.keypair, { mode: 0o600 });
+    fs.renameSync(tmp, keetsKeypairFile());
+  }
+  const payaddr = {};
+  for (const c of b.contacts) if (c.payaddr) payaddr[c.pubkey] = c.payaddr;
+  chatStore.mergeBackup(b.contacts, b.messages, payaddr, b.manifest.chatName || "");
+  chat.forgetIdentity();
+  await node.start();   // status "running" restarts the chat loop
+  return true;
+});
+
 // backup: keys stay in main; the renderer only supplies the passphrase and triggers the file dialog.
 ipcMain.handle("mcd:mailExportBackup", async (_e, passphrase) => {
   if (typeof passphrase !== "string" || passphrase.length < 8) throw new Error("Use a passphrase of at least 8 characters.");

@@ -125,11 +125,16 @@
     const body = `${me.pubkey ? qrHtml(me.pubkey) : `<div class="chat-dialog__msg">Node starting — try again in a moment.</div>`}
       <div class="chat-dialog__mono" id="chatMyAddr">${h(me.pubkey || "")}</div>
       <input id="chatMyName" placeholder="Your display name" value="${h(me.name || "")}" maxlength="40" />`;
-    const v = await dialog({ title: "My address & QR", body, actions: [
+    const v = await dialog({ title: "My address & QR", body: body
+      + `<div class="chat-dialog__msg" style="margin-top:12px">Chat backup: one encrypted file with this address and every contact and message — the same file the phone apps make.</div>`, actions: [
+      { label: "Back up chats", value: () => ({ backup: true }) },
+      { label: "Restore chats", value: () => ({ restore: true }) },
       { label: "Copy", value: () => ({ copy: true }) },
       { label: "Cancel", value: null },
       { label: "Save", value: (ov) => ({ name: ov.querySelector("#chatMyName").value.trim() }) }] });
     if (v && v.copy) { await D.copy(me.pubkey); D.toast("Address copied", "ok"); return; }
+    if (v && v.backup) return backupChats();
+    if (v && v.restore) return restoreChats();
     if (v && v.name !== undefined) { me = await D.api.chatSetName(v.name); render(); }
   }
 
@@ -182,6 +187,47 @@
 
   // ---- shell -------------------------------------------------------------------------
   const EMPTY_LIST = "No chats yet.\n\nStart one by pasting your friend's address. Messages are end-to-end encrypted and need no server: delivered instantly when they're online, held safely for them when they're not.";
+  async function backupChats() {
+    const pass = await D.showPrompt("Back up chats", "", "Password (at least 8 characters)", { password: true, ok: "Next",
+      message: "Anyone with the file and this password can read your chats and speak as you. Without the password the file cannot be opened." });
+    if (pass == null) return;
+    if (pass.length < 8) { D.toast("Use at least 8 characters.", "err"); return; }
+    const again = await D.showPrompt("Back up chats", "", "Type the password again", { password: true, ok: "Save" });
+    if (again == null) return;
+    if (again !== pass) { D.toast("The two passwords do not match", "err"); return; }
+    try {
+      const r = await D.api.chatExportBackup(pass);
+      if (!r.canceled) D.toast("Chat backup saved: " + r.contacts + " contacts, " + r.messages + " messages", "ok");
+    } catch (e) { D.toast("Chat backup failed: " + (e.message || e), "err"); }
+  }
+
+  async function restoreChats() {
+    const pass = await D.showPrompt("Restore chats", "", "Backup password", { password: true, ok: "Choose file" });
+    if (pass == null) return;
+    let r;
+    try { r = await D.api.chatOpenBackup(pass); } catch (e) { D.toast(("" + (e.message || e)).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "err"); return; }
+    if (r.canceled) return;
+    const none = "(none)";
+    // One scrolling body: every address in full, then the RESTORE box, reachable at any window size.
+    const body = `<div style="max-height:60vh;overflow:auto">
+        <div class="chat-dialog__msg">Keets address in the backup:</div><div class="chat-dialog__mono">${h(r.keetsPubkey || none)}</div>
+        <div class="chat-dialog__msg">This computer's keets address now:</div><div class="chat-dialog__mono">${h(r.current || none)}</div>
+        <div class="chat-dialog__msg">• This computer's current keets address is REPLACED. It is gone unless you saved a chat backup of it.<br>
+        • ${r.contacts} contacts and ${r.messages} messages are added; chats already here are kept.<br>
+        • Stop the node on the old device first. Two nodes on one address take each other's messages.<br>
+        ${r.hasMax ? "• The backup's MAX# identity is for the phone apps; this computer keeps no MAX# chat, so it is not restored here.<br>" : ""}
+        • The node restarts.</div>
+        <input id="chatRestoreWord" placeholder="type RESTORE" autocomplete="off" /></div>`;
+    const v = await dialog({ title: "Replace this computer's chat identity?", body, actions: [
+      { label: "Cancel", value: null },
+      { label: "Restore", danger: true, value: (ov) => ov.querySelector("#chatRestoreWord").value.trim().toUpperCase() }] });
+    if (v == null) return;
+    if (v !== "RESTORE") { D.toast("Not confirmed - nothing was changed.", "err"); return; }
+    D.toast("Restoring — the node restarts", "ok");
+    try { await D.api.chatApplyBackup(); me = { pubkey: "", name: "" }; booted = false; await boot(); await refreshThreads(); render(); D.toast("Chat backup restored", "ok"); }
+    catch (e) { D.toast("Restore failed: " + (e.message || e), "err"); }
+  }
+
   function shell() {
     return `<div class="chatapp"><div class="chat-shell">
       <aside class="chat-side">

@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.35] — Chat backup
+
+- KeetChat → **My address & QR → Back up chats / Restore chats**: one encrypted `.kbak` file with this
+  computer's keets chat address (the sidecar keypair) and every chat contact and message. It is the same file
+  the bears (PandaBear / BlackBear / Pandamonium 2.2.10) write, so chats move between phone and desktop in
+  either direction. Restore shows every address in full, needs RESTORE typed, merges chats (rows already
+  here win), replaces the keets address and restarts the node. A phone backup's MAX# identity is not used
+  here (this app has no MAX# chat).
+
 ## [0.18.20] — MxUSD payments in KeetChat
 
 - The in-chat payment now asks **Minima or MxUSD**. MxUSD (token id

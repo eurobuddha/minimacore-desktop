@@ -126,7 +126,22 @@ function removeContact(pubkey) { ensureLoaded(); delete mem.contacts[pubkey]; pe
 function metaGet(k) { ensureLoaded(); return mem.meta[k]; }
 function metaSet(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 
+/** Everything, for a chat backup: { messages:[...], contacts:[...], meta:{...} }. */
+function all() { ensureLoaded(); return { messages: Object.values(mem.messages), contacts: Object.values(mem.contacts), meta: Object.assign({}, mem.meta) }; }
+/** Restore merge: rows already here win; flushed to disk before returning. */
+function mergeBackup(contacts, messages, payaddr, myname) {
+  ensureLoaded();
+  for (const c of contacts) if (c && c.pubkey && !mem.contacts[c.pubkey]) mem.contacts[c.pubkey] = { pubkey: c.pubkey, name: c.name || c.pubkey, auto: false, ...(c.maximapk ? { maximapk: c.maximapk } : {}) };
+  for (const m of messages) if (m && m.msgid && !mem.messages[m.msgid]) mem.messages[m.msgid] = m;
+  for (const [pk, a] of Object.entries(payaddr || {})) if (a && !mem.meta["payaddr:" + pk]) mem.meta["payaddr:" + pk] = a;
+  if (myname && !mem.meta.myname) mem.meta.myname = myname;
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, "chat.json.tmp");
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
+  fs.renameSync(tmp, filePath());
+}
 function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
 
 module.exports = { addMessage, threadRows, thread, deleteThread, markThreadRead, unreadCount, setStatus, markPeerRead,
-  contacts, addContact, getContact, removeContact, metaGet, metaSet, clear };
+  contacts, addContact, getContact, removeContact, metaGet, metaSet, clear, all, mergeBackup };

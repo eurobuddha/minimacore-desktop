@@ -117,6 +117,8 @@ function myIdentity() {
   return { pubkey: myinfo ? myinfo.pubkey : "", name: store.metaGet("myname") || "" };
 }
 function setName(n) { store.metaSet("myname", ("" + (n || "")).trim()); }
+/** A restored chat backup replaced the keets keypair: ask the sidecar again on the next init(). */
+function forgetIdentity() { myinfo = null; }
 
 // ---- inbox drain ----------------------------------------------------------
 async function pollOnce() {
@@ -382,4 +384,4 @@ function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubke
 
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
   threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner,
-  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf };
+  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity };
