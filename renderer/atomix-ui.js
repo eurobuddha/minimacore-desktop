@@ -338,7 +338,6 @@
     else if (r) { toast(`✓ ${r.ok}/${r.of} leg${r.of === 1 ? "" : "s"} locked — watching for the counterparty.${r.stopped ? " " + r.stopped : ""}`, "ok"); axAmt = ""; }
     if (activeView() === "atomix" && axView === "swap") renderAxSwap();
   }
-  function axShort(pk) { pk = String(pk || ""); return pk.length < 14 ? pk : pk.slice(0, 8) + "…" + pk.slice(-6); }
 
   // ---- Market (donor marketTab: order book · your market editor/actions · market history) ----
   async function renderAxMarket() {
@@ -408,7 +407,7 @@
   function axDepthHalf(row, isBid) {
     if (!row) return `<div class="ax-half${isBid ? " bid" : ""}"><span class="ax-sz">—</span></div>`;
     const take = !row.mine && row.cap > 0;
-    const tag = row.mine ? `<span class="ax-tag you">you</span>` : `<span class="ax-tag">${idHtml(row.signer, axShort(row.signer))}</span>`;
+    const tag = row.mine ? `<span class="ax-tag you">you</span>` : `<span class="ax-tag">${idHtml(row.signer, String(row.signer))}</span>`;
     return `<div class="ax-half${isBid ? " bid" : ""}${take ? " takeable" : ""}"${take ? ` data-take="${isBid ? "bid" : "ask"}"` : ""}>`
       + `<span class="top"><span class="ax-px ${isBid ? "bidpx" : "askpx"}">${fmtPx(row.p)}</span><span class="ax-sz">${fmtAbbrev(row.cap)}</span></span>${tag}</div>`;
   }

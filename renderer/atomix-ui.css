@@ -241,7 +241,7 @@
 .axapp .bidpx { color: var(--ax-in); }
 .axapp .askpx { color: var(--ax-red); }
 .axapp .ax-sz { font-size: 12px; color: var(--ax-dim); }
-.axapp .ax-tag { font-size: 10px; color: var(--ax-dim2); font-family: var(--ax-mono); }
+.axapp .ax-tag { font-size: 10px; color: var(--ax-dim2); font-family: var(--ax-mono); overflow-wrap: anywhere; word-break: break-all; }   /* RULE 1: the full maker key wraps, never shortened */
 .axapp .ax-tag.you { color: var(--ax-accent); font-weight: 700; }
 .axapp .ax-chart { display: block; width: 100%; height: 180px; }   /* the bitmap is sized from this box at draw time */
 
