@@ -412,7 +412,8 @@
     function checkEthContractFor(swap, next) {
         var hash = swap.hash, cid = EO.contractId(hash);
         ops().getContract(cid, function (e, gc) {
-            if (e || !gc) return next();                    // the ETH leg isn't locked yet
+            if (e) return next();
+            if (!gc) return finalizeIfNeverLocked(swap, next);   // the ETH leg isn't locked (yet?)
             harvestEthPreimage(hash, gc, function () { checkEthContractBody(swap, hash, cid, gc, next); });
         });
     }
@@ -444,6 +445,122 @@
                     next();
                 });
             } else next();
+    }
+
+    /** Past my timelock by this much, a lock that never landed can be told apart from one that is merely slow:
+     *  my own refund window has been open an hour, so a contract that ever existed would still read back. */
+    var NEVER_LOCKED_MARGIN_SECS = 60 * 60, neverLockedPair = 0;
+    function ownEthLockPending(st) { return st === DB.ST_STARTED || st === DB.ST_LOCKED; }
+
+    /** Port of native SwapEngine.finalizeIfNeverLocked (AtomiX 0.1.93–0.1.95). A row whose OWN Ethereum lock never
+     *  landed (reverted, dropped, or never sent) stays STARTED (ETH-first initiator) or LOCKED (responder: the
+     *  counter-leg row is written LOCKED before newContract) forever, and shows as a live swap that never clears
+     *  (desktop, 2026-11-05: a maker's 58.615613 USDT newContract reverted on 29 Oct and the row sat LOCKED a week).
+     *  Once chain time is past my timelock + 1h, neverLockedEvidence must hold on TWO independent built-in endpoints;
+     *  only then is the row finalized: the ETH_NEVER_LOCKED evidence event FIRST, then ERROR. Any read failure or
+     *  disagreement leaves it as it is; the next endpoint pair is tried after the retry window. */
+    function finalizeIfNeverLocked(s, next) {
+        if (!s || s.myLegIsMinima || !(Number(s.myTimelock) > 0) || !ownEthLockPending(s.status)) return next();
+        var notBefore = Number(s.myTimelock) + NEVER_LOCKED_MARGIN_SECS, key = 'neverLocked:' + s.hash;
+        if (nowUnix() <= notBefore || !ethRetryDue(key)) return next();
+        markEthAttempt(key);
+        function finish(evidence) {
+            DB.getSwap(s.hash, function (eG, cur) {
+                if (eG || !cur || !ownEthLockPending(cur.status)) return next();
+                function mark() {
+                    DB.setSwapStatus(s.hash, DB.ST_ERROR, function () {
+                        log('[AtomiX] swap ' + s.hash + ': ETH lock never landed — ' + evidence);
+                        onChanged(); next();
+                    });
+                }
+                // Evidence BEFORE status: an ERROR row without it would leave nothing to re-check it by.
+                if (evidence === 'recorded') return mark();
+                DB.logEvent(s.hash, DB.EV_NEVER_LOCKED, 'ETH', '', evidence, function (eL) { if (eL) return next(); mark(); });
+            });
+        }
+        DB.hasEvent(s.hash, DB.EV_NEVER_LOCKED, function (eH, recorded) {
+            if (eH) return next();
+            if (recorded) return finish('recorded');
+            ethLockTx(s.hash, function (lockTx) {
+                neverLockedEvidence(C.rpc, EO.contractId(s.hash), notBefore, neverLockedPair++, lockTx, C.ethAddr,
+                    function (ev) { if (ev == null) return next(); finish(ev); });
+            });
+        });
+    }
+
+    /** The tx hash of my own Ethereum lock: EV_STARTED (initiator) or EV_CPSENT (responder) on an "ETH:" token.
+     *  null if none was ever recorded (newContract threw, or the answer was lost). */
+    function ethLockTx(hash, cb) {
+        DB.getEvents(hash, function (e, evs) {
+            if (e || !evs) return cb(null);
+            for (var i = 0; i < evs.length; i++) {
+                var r = evs[i];
+                if ((r.event === DB.EV_STARTED || r.event === DB.EV_CPSENT) && r.token && String(r.token).indexOf('ETH') === 0
+                    && /^0x[0-9a-f]{64}$/i.test(String(r.note || ''))) return cb(r.note);
+            }
+            cb(null);
+        });
+    }
+
+    /** Native SwapEngine.neverLockedEvidence: evidence that contract cid does not exist and never will, from two
+     *  consecutive FALLBACKS entries starting at pair. EACH endpoint must show, in this order:
+     *   1. a latest block whose time is past notBefore;
+     *   2. if a lock tx was recorded: eth_getTransactionByHash null, or mined with a receipt of status 0x0
+     *      (a pending or successful tx refuses);
+     *   3. wallet's pending nonce equal to its latest nonce (nothing of mine waiting to mine);
+     *   4. a zero-owner getContract pinned to the block read in 1 (not "latest", so 1 and 4 are one block).
+     *  cb(null) on any failure, unreadable or malformed answer, a not-yet-late chain, a missing wallet, or a contract. */
+    function neverLockedEvidence(rpc, cid, notBefore, pair, lockTx, wallet, cb) {
+        if (!wallet || !rpc || typeof rpc.callOn !== 'function') return cb(null);
+        var eps = AX.ethrpc.FALLBACKS, big = AX.ethrpc.hexToBig, EH = AX.ethhtlc;
+        var ev = 'getContract ' + cid + ' returned no contract on', i = 0;
+        (function step() {
+            if (i >= 2) return cb(ev + ', both past timelock + ' + NEVER_LOCKED_MARGIN_SECS + 's (' + notBefore + ')');
+            var ep = eps[((pair + i) % eps.length + eps.length) % eps.length];
+            function fail(why) { log('[AtomiX] never-locked check ' + cid + ' on ' + ep + ': ' + why); cb(null); }
+            rpc.callOn(ep, 'eth_getBlockByNumber', ['latest', false], function (e1, b) {
+                if (e1) return fail(e1.message);
+                var num, ts;
+                try { num = big(b.number); ts = Number(big(b.timestamp)); } catch (x) { return fail('bad block header'); }
+                if (!(num > 0n) || !(ts > 0)) return fail('bad block header');
+                if (ts <= notBefore) return cb(null);
+                lockTxNote(function (txNote) {
+                    nonce('pending', function (pend) { nonce('latest', function (lat) {
+                        if (pend !== lat) return cb(null);
+                        var call = EH.getContractCall(cid);
+                        rpc.callOn(ep, 'eth_call', [{ to: call.to, data: call.data }, '0x' + num.toString(16)], function (e4, ret) {
+                            if (e4) return fail(e4.message);
+                            if (!/^0x[0-9a-f]{768}$/i.test(String(ret))) return fail('malformed getContract reply');
+                            if (EH.decodeGetContract(cid, ret) != null) return cb(null);
+                            ev += (i === 0 ? ' ' : ' and ') + ep + ' at block ' + num.toString() + ' (time ' + ts + '; ' + txNote + '; '
+                                + wallet + ' nonce ' + lat.toString() + ' with nothing pending)';
+                            i++; step();
+                        });
+                    }); });
+                });
+            });
+            function lockTxNote(k) {
+                if (!lockTx) return k('no lock tx recorded');
+                rpc.callOn(ep, 'eth_getTransactionByHash', [lockTx], function (e2, tx) {
+                    if (e2) return fail(e2.message);
+                    if (tx == null) return k('lock tx ' + lockTx + ' unknown');
+                    if (typeof tx !== 'object' || !tx.blockNumber) return cb(null);   // pending
+                    rpc.callOn(ep, 'eth_getTransactionReceipt', [lockTx], function (e3, rc) {
+                        if (e3) return fail(e3.message);
+                        if (!rc || typeof rc !== 'object' || rc.status !== '0x0') return cb(null);
+                        k('lock tx ' + lockTx + ' reverted (status 0x0)');
+                    });
+                });
+            }
+            function nonce(tag, k) {
+                rpc.callOn(ep, 'eth_getTransactionCount', [wallet, tag], function (e5, r) {
+                    if (e5) return fail(e5.message);
+                    var n; try { n = big(r); } catch (x) { return fail('bad nonce'); }
+                    if (r == null || r === '') return fail('no nonce');
+                    k(n);
+                });
+            }
+        })();
     }
 
     // F1: broadcast (retryable, ack-only) vs. confirmation (terminal, from the contract flag on a later cycle).

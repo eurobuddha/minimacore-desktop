@@ -28,6 +28,7 @@
     // with the plain-language reason as its note, when a swap is finalised as lost (settle.finalizeMinimaLost /
     // finalizeEthLost). 2026-09-15: such a row read "claiming" for two days.
     var EV_LOST = 'SWAP_LOST';
+    var EV_NEVER_LOCKED = 'ETH_NEVER_LOCKED';   // my own ETH lock never landed: two endpoints showed no contract past timelock + 1h (note = evidence); native SwapDb
     // Swap-status visibility (native 0.1.84 SwapDb, SAME strings). Live 2026-10-26: a maker declined a buy in
     // silence and the taker saw "started" for two hours. None of these gates anything — display + dedupe only.
     var EV_TAKE_SENT = 'TAKE_SENT';        // taker: buy handshake sent (note = maker comms id)
@@ -297,7 +298,7 @@
     AX.swapdb = {
         EV_MINIMA_CLAIM_SUBMITTED: EV_MINIMA_CLAIM_SUBMITTED, EV_MINIMA_REFUND_SUBMITTED: EV_MINIMA_REFUND_SUBMITTED,
         EV_MINIMA_CLAIM_FAILED: EV_MINIMA_CLAIM_FAILED, EV_MINIMA_REFUND_FAILED: EV_MINIMA_REFUND_FAILED,
-        EV_LOST: EV_LOST,
+        EV_LOST: EV_LOST, EV_NEVER_LOCKED: EV_NEVER_LOCKED,
         EV_TAKE_SENT: EV_TAKE_SENT, EV_MAKER_NOTICE: EV_MAKER_NOTICE, EV_DECLINED: EV_DECLINED, EV_TIMEOUT: EV_TIMEOUT, EV_REFUND_SENT: EV_REFUND_SENT,
         EV_STARTED: EV_STARTED, EV_CPSENT: EV_CPSENT, EV_COLLECT: EV_COLLECT, EV_EXPIRED: EV_EXPIRED, EV_MISMATCH: EV_MISMATCH,
         ST_STARTED: ST_STARTED, ST_LOCKED: ST_LOCKED, ST_CLAIMING: ST_CLAIMING, ST_COMPLETE: ST_COMPLETE, ST_REFUNDED: ST_REFUNDED, ST_ERROR: ST_ERROR,

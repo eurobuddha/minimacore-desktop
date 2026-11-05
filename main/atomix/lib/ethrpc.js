@@ -81,6 +81,10 @@
         });
     };
 
+    /** One call on ONE named endpoint, no fallback and no stickiness — for evidence that must come from a
+     *  specific, independent node (settle's never-locked check). cb(err, result). */
+    Rpc.prototype.callOn = function (url, method, params, cb) { this._callOnce(url, method, params, cb); };
+
     Rpc.prototype.callStr = function (method, params, cb) {
         this.call(method, params, function (e, r) { cb(e, e ? null : (r == null ? null : String(r))); });
     };
