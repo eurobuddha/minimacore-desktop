@@ -15,8 +15,21 @@
     'use strict';
     var AX = g.AX = g.AX || {};
 
+    /** The single-command boundary (Android CommandSafety, PandaSafety.commandFailure): the node splits a command on ';'
+     *  and runs every piece, so a peer value carrying ';' would run commands of its own (security review 30 Oct). */
+    function unsafe(command) {
+        if (typeof command !== 'string' || !command.replace(/\s/g, '')) return 'Empty node command.';
+        if (command.length > 100000) return 'Node command is too large.';
+        if (/[;\x00-\x1f\x7f]/.test(command)) return 'Unsafe command data. Nothing was sent to the node.';
+        return null;
+    }
+
     /** cmd(command, cb(fullResult)). */
-    function cmd(command, cb) { g.MDS.cmd(command, function (r) { cb(r); }); }
+    function cmd(command, cb) {
+        var bad = unsafe(command);
+        if (bad) return cb({ status: false, error: bad });
+        g.MDS.cmd(command, function (r) { cb(r); });
+    }
 
     /** cmdR(command, cb(err, response)) — err is null on status:true OR pending:true.
      *
@@ -35,6 +48,8 @@
     }
 
     function rawCmdR(command, cb) {
+        var bad = unsafe(command);
+        if (bad) return cb(new Error(bad), null, { status: false, error: bad });
         g.MDS.cmd(command, function (r) {
             if (r && (r.status === true || r.pending === true)) cb(null, r.response, r);
             // The node's own explanation for a declined command lives under `message`, not `error`: send.java
@@ -108,7 +123,7 @@
     }
 
     AX.mds = {
-        cmd: cmd, cmdR: cmdR, sql: sql, netGet: netGet, netPost: netPost, netText: netText,
+        cmd: cmd, cmdR: cmdR, unsafe: unsafe, sql: sql, netGet: netGet, netPost: netPost, netText: netText,
         kvInit: kvInit, kvGet: kvGet, kvSet: kvSet, kvDel: kvDel, esc: esc,
         ethLockInit: ethLockInit, ethLockAcquire: ethLockAcquire, ethLockRelease: ethLockRelease
     };

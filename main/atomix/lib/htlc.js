@@ -307,7 +307,9 @@
                 'txninput id:' + id + ' coinid:' + coinid,
                 'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + NOTIFY_AMOUNT + ' address:' + NOTIFY
             ];
-            if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + change + ' address:' + myAddress);
+            // storestate:false (APK 0.1.97): only output 0, the notify, must keep state (VERIFYOUT ... TRUE); the coin paid to me
+            // is a plain wallet coin, or stateless-only wallets (PandaPools, PandaDEX) cannot spend what the swap delivered
+            if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + change + ' address:' + myAddress + ' storestate:false');
             seq.push('txnstate id:' + id + ' port:100 value:' + secret);
             seq.push('txnstate id:' + id + ' port:101 value:' + hash);
             seq.push('txnstate id:' + id + ' port:102 value:[' + owner + ']');
@@ -469,7 +471,7 @@
             var seq = [
                 'txncreate id:' + id,
                 'txninput id:' + id + ' coinid:' + coinid,
-                'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + amount + ' address:' + myAddress,
+                'txnoutput id:' + id + ' tokenid:' + tokenid + ' amount:' + amount + ' address:' + myAddress + ' storestate:false',   // a plain wallet coin back
                 'txnsign id:' + id + ' publickey:' + owner,
                 'txnbasics id:' + id, 'txncheck id:' + id,
                 'txnpost id:' + id + ' mine:true txndelete:true'
