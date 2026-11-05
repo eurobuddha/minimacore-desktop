@@ -18,7 +18,7 @@
     }
     return "";
   }
-  function shortId(id) { id = String(id || ""); return id.length > 12 ? id.slice(0, 6) + "…" + id.slice(-4) : id; }
+  function shortId(id) { return String(id || ""); }   // RULE 1: the whole token/coin/tx id (was 6…4); name kept for its callers
 
   // token.name may be a plain string OR an object {name,url,icon,ticker,webvalidate,...}
   function meta(token) { return (token && typeof token === "object" && token.name && typeof token.name === "object") ? token.name : null; }

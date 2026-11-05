@@ -129,8 +129,8 @@ const NOOP_API = new Proxy({}, { get: () => () => Promise.resolve([]) });
 const DEPS = (over) => Object.assign({
   api: NOOP_API,
   esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
-  el: () => null, toast() {}, copy() {}, short: (s, n) => String(s).slice(0, n),
-  TOK: { shortId: (t) => String(t).slice(0, 10), tidyAmount: (a) => String(a), tokenName: (t, id) => String(id) },
+  el: () => null, toast() {}, copy() {}, short: (s) => String(s),
+  TOK: { shortId: (t) => String(t), tidyAmount: (a) => String(a), tokenName: (t, id) => String(id) },
   showConfirm: async () => false, showProgress: () => ({ close() {} }), tryCmd: async () => [],
   PoolCalc: { form: () => ({ el: {}, render() {} }) }, MINIMA: "0x00",
   running: () => true, activeView: () => "pandapools"
@@ -470,7 +470,7 @@ function axPanel() {
 const AX_DEPS = (over) => Object.assign({
   api: NOOP_API,
   esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
-  el: () => null, toast() {}, copy() {}, TOK: { shortId: (t) => String(t).slice(0, 10) },
+  el: () => null, toast() {}, copy() {}, TOK: { shortId: (t) => String(t) },
   showConfirm: async () => false, showPrompt: async () => null, relTime: () => "just now",
   idHtml: (v) => `<span class="idcopy" data-copy="${v}">${v}</span>`,
   running: () => true, activeView: () => "atomix"

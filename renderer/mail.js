@@ -44,14 +44,10 @@
   function reset() { ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
 
   // ---------------------------------------------------------------- identity, names, avatars
-  /** 0x + first 8 + … + last 6 — the APK's shortKey. NEVER used where the whole value must be copyable:
-   *  every shortened id in this panel sits on an element whose click copies the complete string. */
+  /** A peer's key for display: the WHOLE key (RULE 1). It was 0x + 8…6; .mm-key wraps it. */
   function shortKey(id) {
     var s = String(id || "");
-    if (!s) return "";
-    var h = s.replace(/^0x/i, "");
-    if (h.length <= 14) return s;
-    return "0x" + h.slice(0, 8) + "…" + h.slice(-6);
+    return s;   // RULE 1: the whole key (it used to be 0x + 8…6); the name was kept so call sites stay put
   }
   /**
    * Who wrote this. Contact name first, then the sender's own declared name off the message, then the short key

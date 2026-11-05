@@ -79,19 +79,19 @@ async function copy(text) {
   toast(ok ? "Copied ✓" : "Copy failed — select the text and press ⌘C", ok ? "ok" : "err");
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function short(s, n) { s = String(s || ""); return s.length > (n || 18) ? s.slice(0, (n || 18)) + "…" : s; }
+function short(s) { return String(s || ""); }   // RULE 1: every caller passes an identifier (tx/coin id, address, key, state) - shown WHOLE
 /**
- * idHtml(value, shown) — a shortened identifier that is still COPYABLE IN FULL (RULE 1).
+ * idHtml(value, shown) — an identifier shown and COPYABLE IN FULL (RULE 1).
  *
  * An address, coin id or txid exists to be pasted somewhere. Rendering `0xb126…b652` with no way back to the
  * whole string destroys the only thing it was for. Where the layout genuinely cannot carry 64 characters,
  * this keeps the full value exactly one click away — data-copy holds it complete, the delegated handler in
- * boot() copies it, and the tooltip shows it. `shown` defaults to the 8…6 form used across the app.
+ * boot() copies it, and the tooltip shows it. `shown` defaults to the whole value (it was 8…6 until 0.18.38).
  */
 function idHtml(value, shown) {
   const v = String(value == null ? "" : value);
   if (!v) return "";
-  const disp = shown || (v.length < 16 ? v : v.slice(0, 8) + "…" + v.slice(-6));
+  const disp = shown || v;   // RULE 1: the whole value by default; .idcopy wraps it
   return `<span class="idcopy" data-copy="${esc(v)}" title="${esc(v)}\n(click to copy)">${esc(disp)}</span>`;
 }
 
@@ -2962,8 +2962,7 @@ let vestrBusy = {};
 const VESTR_GRACE = [["None (continuous)", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
 
 function vFmt(v) { const n = Number(v); return isNaN(n) ? "0" : n.toLocaleString(undefined, { maximumFractionDigits: 8 }); }
-function vTok(tid) { if (tid === "0x00") return "MINIMA"; return (vestrTokMap && vestrTokMap[tid]) || (String(tid).slice(0, 8) + "…"); }
-function vShort(a) { a = String(a || ""); return a.length > 16 ? a.slice(0, 8) + "…" + a.slice(-4) : a; }
+function vTok(tid) { if (tid === "0x00") return "MINIMA"; return (vestrTokMap && vestrTokMap[tid]) || String(tid); }   // RULE 1: an unnamed token shows its whole id
 
 function onVestrUpdate() {
   if (vestrUpdateTimer) clearTimeout(vestrUpdateTimer);

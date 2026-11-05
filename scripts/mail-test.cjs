@@ -189,13 +189,13 @@ test("an inbox row names the sender from the message when they are not a saved c
   assert.ok(html.includes("mm-unread") && html.includes("mm-udot"), "unread is bold + the orange dot");
 });
 
-test("a peer with no declared name falls back to the short key, never a bare id", async () => {
+test("a peer with no declared name falls back to their WHOLE key (RULE 1)", async () => {
   const P = panel(), dom = fakeDom();
   const msg = { frompublickey: PEER, topublickey: ME, fromname: "", incoming: true, subject: "", message: "gm", date: Date.now(), type: "text" };
   P.MailPanel.init(deps(dom, baseApi({ mailThreads: async () => [{ hashref: "h2", unread: 0, last: msg, other: PEER }] })));
   await P.MailPanel.render();
   const html = dom.nodes.mailBody.innerHTML;
-  assert.ok(/0xabababab…ababab/.test(html), "shortened, and the row still opens the full thread");
+  assert.ok(html.includes(PEER) && !html.includes("…"), "the whole key, never 0x + 8…6");
   assert.ok(html.includes("(no subject)") && html.includes("mm-none"), "an empty subject reads as italic (no subject)");
 });
 
