@@ -51,5 +51,36 @@ var PoolInputClaims = (function(){
             if(MDS.persistRecovery)MDS.persistRecovery(function(){cb(true);});else cb(true);
         });
     }
-    return {load:load,check:check,post:post,release:release,blocked:blocked};
+    /* Review 7 Nov (C-1): an uncertain post held its inputs FOREVER (no release path), so a BOOK/POOL take that never
+     * mined kept the user's funding coins, order coins and pool reserves unusable in the app. Two-phase sweep, run from a
+     * service tick: a claim first SEEN at least SWEEP_MS ago whose coin the node still reports UNSPENT and NOT in the
+     * mempool was provably never posted — it is released. Spent, in-mempool or unreadable claims stay held. */
+    var SWEEP_MS=10*60000,firstSeen={};
+    function sweepUnposted(cmd,nowMs,cb){
+        cb=cb||function(){};nowMs=nowMs||Date.now();
+        table(function(ok){if(!ok){cb(0);return;}
+            MDS.sql('SELECT coinid,handle FROM pp_posted_inputs',function(r){
+                if(!r||r.status!==true||!Array.isArray(r.rows)){cb(0);return;}
+                var rows=r.rows,at=0,freed=0,live={};
+                function next(){
+                    if(at>=rows.length){for(var k in firstSeen)if(!live[k])delete firstSeen[k];cb(freed);return;}
+                    var id=String(rows[at].COINID||rows[at].coinid||'').toLowerCase();at++;
+                    if(!valid(id)){next();return;}
+                    live[id]=true;
+                    if(!firstSeen[id]){firstSeen[id]=nowMs;next();return;}
+                    if(nowMs-firstSeen[id]<SWEEP_MS){next();return;}
+                    cmd('coins checkmempool:true coinid:'+id,function(c){
+                        var rs=c&&c.status===true&&!c.pending&&c.response,coin=Array.isArray(rs)&&rs.length===1?rs[0]:null;
+                        if(!coin||String(coin.coinid).toLowerCase()!==id||coin.spent!==false){next();return;}
+                        MDS.sql("DELETE FROM pp_posted_inputs WHERE coinid='"+id+"'",function(d){
+                            if(d&&d.status===true){delete held[id];delete owner[id];delete firstSeen[id];freed++;}
+                            next();
+                        });
+                    });
+                }
+                next();
+            });
+        });
+    }
+    return {load:load,check:check,post:post,release:release,blocked:blocked,sweepUnposted:sweepUnposted};
 })();

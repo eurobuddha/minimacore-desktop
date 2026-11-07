@@ -19,6 +19,34 @@
 
     var HTLC_ADDRESS = 'MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G';
     var HTLC_ADDRESS_HEX = '0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A';   // the same address as the node reports it
+
+    // SECURITY (review 7 Nov, HTLC v1.3 — mirror of APK 0.2.6/0.2.7): v1.2 plus ASSERT HEX(secret) EQ secret ASSERT
+    // LEN(secret) EQ 32, before the secret is used. The HEX type check first: for a STRING, LEN counts characters while
+    // SHA2 hashes UTF-8 bytes, so a 32-character, 48-byte string passed LEN alone (0.1.52); EQ across types throws. (The
+    // refund branch above it is unchanged.) The maker's counter-leg of a USDT-paid take locks here, and
+    // only for a taker whose handshake says htlc:'1.3'. Every scan, claim and refund covers BOTH addresses.
+    // VERBATIM from native MinimaHtlc.HTLC_SCRIPT_V13 — do not reformat.
+    var HTLC_SCRIPT_V13 =
+        'LET version=1.3 LET owner=PREVSTATE(0) LET requestamount=PREVSTATE(1) LET requesttoken=PREVSTATE(2) ' +
+        'LET timelock=PREVSTATE(3) LET counterparty=PREVSTATE(4) LET hash=PREVSTATE(5) LET ownerethkey=PREVSTATE(6) ' +
+        'IF SIGNEDBY(owner) AND (@BLOCK GT timelock) THEN RETURN TRUE ENDIF LET secret=STATE(100) ' +
+        'ASSERT HEX(secret) EQ secret ASSERT LEN(secret) EQ 32 ' +
+        'ASSERT SIGNEDBY(counterparty) AND (SHA2(secret) EQ hash) ASSERT STATE(101) EQ hash ' +
+        'ASSERT STATE(102) EQ STRING(owner) ASSERT STATE(103) EQ STRING(counterparty) ' +
+        'RETURN VERIFYOUT(@INPUT 0xFFEEDD9999 0.0001 @TOKENID TRUE)';
+    var HTLC_ADDRESS_V13 = 'MxG0832NN9BNMM4FG9JQWHANJ47R1Y723VK1KKA3R6WTT63Y6JSERYYEMT9PTA7';
+    var HTLC_ADDRESS_V13_HEX = '0x62BDD2BBDAC47C133D4A2ABCC87D86A710FF40D28A1ECD2EF4C3A9A7C76EB575';
+    /** Every covenant a swap lock can sit at (script, Mx address, 0x address). */
+    var COVENANTS = [
+        { script: HTLC_SCRIPT, mx: HTLC_ADDRESS, hex: HTLC_ADDRESS_HEX },
+        { script: HTLC_SCRIPT_V13, mx: HTLC_ADDRESS_V13, hex: HTLC_ADDRESS_V13_HEX }
+    ];
+    var ADDRESSES = [HTLC_ADDRESS, HTLC_ADDRESS_V13];
+    function isHtlcAddress(a) {
+        var u = String(a || '').toUpperCase();
+        for (var i = 0; i < COVENANTS.length; i++) if (u === COVENANTS[i].mx.toUpperCase() || u === COVENANTS[i].hex.toUpperCase()) return true;
+        return false;
+    }
     var NOTIFY = '0xFFEEDD9999';
     var NOTIFY_AMOUNT = '0.0001';
     var MINIMA_BLOCK_TIME = 50;                 // seconds
@@ -27,6 +55,10 @@
     var CP_BLOCKS_CHECK = 72;                   // responder half-window guard
     var TIMELOCK_SECS = 7200;                   // first ETH leg
     var CP_SECS = 1800;                         // second ETH leg
+    // SECURITY (review 7 Nov): the initiator never reveals its secret into a counter-leg whose refund opens sooner
+    var REVEAL_MIN_SECS = 600, REVEAL_MIN_BLOCKS = 12;
+    // SECURITY (review 7 Nov, CRITICAL): v1.2 cannot require a 32-byte secret → makers decline ETH-first buys until HTLC v1.3
+    var ETH_FIRST_PAUSED = true;
     var CP_SECS_CHECK = 3600;                   // responder half-window guard
 
     /** Register the covenant so its address resolves + reads coins, and pick/persist the swap identity key.
@@ -84,23 +116,46 @@
      * — the Casino donor's verified-registration pattern. cb(err, registeredNow).
      */
     function ensureScript(cb) {
-        M.cmdR('scripts address:' + HTLC_ADDRESS, function (err, row) {
-            if (!err && registeredAt(row)) return cb(null, false);   // a status:false / unknown address reads as absent
-            registerScript(function (e2) { cb(e2, !e2); });
-        });
+        var registered = false;
+        AX.flow.each(COVENANTS, function (cv, i, next) {
+            M.cmdR('scripts address:' + cv.mx, function (err, row) {
+                if (!err && registeredAt(row, cv)) return next();   // a status:false / unknown address reads as absent
+                registerOne(cv, function (e2) { if (e2) return cb(e2); registered = true; next(); });
+            });
+        }, function () { cb(null, registered); });
     }
     function registerScript(cb) {
-        M.cmdR('newscript trackall:false script:"' + HTLC_SCRIPT + '"', function (err, resp) {
+        AX.flow.each(COVENANTS, function (cv, i, next) {
+            registerOne(cv, function (e) { if (e) return cb(e); next(); });
+        }, function () { cb(null); });
+    }
+    function registerOne(cv, cb) {
+        M.cmdR('newscript trackall:false script:"' + cv.script + '"', function (err, resp) {
             if (err) return cb(err);
-            if (!registeredAt(resp)) return cb(new Error('covenant registration not confirmed by the node (newscript returned '
-                + ((resp && (resp.miniaddress || resp.address)) || 'no address') + ', expected ' + HTLC_ADDRESS + ')'));
+            if (!registeredAt(resp, cv)) return cb(new Error('covenant registration not confirmed by the node (newscript returned '
+                + ((resp && (resp.miniaddress || resp.address)) || 'no address') + ', expected ' + cv.mx + ')'));
             cb(null);
         });
     }
-    function registeredAt(row) {
+    function registeredAt(row, cv) {
         if (!row) return false;
+        cv = cv || COVENANTS[0];
         var mx = String(row.miniaddress || '').toUpperCase(), hex = String(row.address || '').toUpperCase();
-        return mx === HTLC_ADDRESS.toUpperCase() || hex === HTLC_ADDRESS_HEX.toUpperCase();
+        return mx === cv.mx.toUpperCase() || hex === cv.hex.toUpperCase();
+    }
+    /** Run one bounded coins query per HTLC address (each coinnotify-added first) and return all rows. A failed read
+     *  of either address is an error, so a settlement scan never reads "none" from half a picture. */
+    function acrossAddresses(build, cb) {
+        var all = [], failed = null;
+        AX.flow.each(ADDRESSES, function (a, i, next) {
+            M.cmd('coinnotify action:add address:' + a, function () {
+                M.cmdR(build(a), function (err, resp) {
+                    if (err) { failed = err; return next(); }
+                    if (Array.isArray(resp)) for (var k = 0; k < resp.length; k++) all.push(resp[k]);
+                    next();
+                });
+            });
+        }, function () { cb(failed, failed ? [] : all); });
     }
     /** Run a build-and-post `attempt(done)` with the covenant verified first, and — if txncheck still says the
      *  witness carries no script for an input (err.code SCRIPT_MISSING: the row vanished between the read and
@@ -173,7 +228,10 @@
     /** True iff v is a plain non-negative decimal amount (no space/letter that could inject a parameter). */
     function isDecimal(v) { return v != null && /^[0-9]+(\.[0-9]+)?$/.test(String(v).trim()); }
 
-    /** Read a coin state value by port, handling both {"port":val} simplestate and [{port,data}] shapes. */
+    /** Read a coin state value by port, handling both {"port":val} simplestate and [{port,data}] shapes.
+     *  SECURITY (review 7 Nov, mirror of APK 0.2.8): fund-deciding scans ask for the ARRAY and this returns the FIRST
+     *  entry for a port, the one KISS reads. A transaction can carry a port twice (proven on a -test chain) and
+     *  simplestate's object keeps the LAST, so a lock could show this app one timelock/key while enforcing another. */
     function stateAt(coin, port) {
         var st = coin && coin.state;
         if (!st) return null;
@@ -183,6 +241,16 @@
         }
         var v = st[String(port)];
         return (v == null || v === '') ? null : v;
+    }
+
+    /** SECURITY (review 7 Nov, mirror of APK 0.2.9): can the HTLC script run on this lock at all? Its prelude reads ports
+     *  0-6 and evaluates IF SIGNEDBY(owner) AND (@BLOCK GT timelock) on every path; KISS does not short-circuit AND,
+     *  aborts on an absent port and throws on a non-HEX key or non-NUMBER timelock. Such a lock can be neither claimed
+     *  nor refunded, so answering it with USDT loses the USDT. KISS types values from their text, as checked here. */
+    function lockSpendable(coin) {
+        for (var p = 0; p <= 6; p++) { var v = stateAt(coin, p); if (v == null || String(v) === '') return false; }
+        return /^0x[0-9A-Fa-f]+$/.test(String(stateAt(coin, 0))) && /^[0-9]+$/.test(String(stateAt(coin, 3)))
+            && /^0x[0-9A-Fa-f]+$/.test(String(stateAt(coin, 4))) && /^0x[0-9A-Fa-f]{64}$/.test(String(stateAt(coin, 5)));
     }
 
     // ---- Minima-leg operations (port of MinimaHtlc.java) ----
@@ -353,7 +421,7 @@
             seq.push('txnstate id:' + id + ' port:5 value:' + p.hashlock);
             seq.push('txnstate id:' + id + ' port:6 value:' + p.ownerEthKey);
             seq.push('txnstate id:' + id + ' port:7 value:' + p.otc);
-            seq.push('txnoutput id:' + id + ' amount:' + amount + ' address:' + HTLC_ADDRESS + ' tokenid:' + p.tokenId + ' storestate:true');
+            seq.push('txnoutput id:' + id + ' amount:' + amount + ' address:' + (p.htlc13 ? HTLC_ADDRESS_V13 : HTLC_ADDRESS) + ' tokenid:' + p.tokenId + ' storestate:true');
             if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' amount:' + change + ' address:' + p.myAddress + ' tokenid:' + p.tokenId + ' storestate:false');
             seq.push('txnsign id:' + id + ' publickey:auto');
             seq.push('txnbasics id:' + id, 'txncheck id:' + id);
@@ -448,12 +516,10 @@
     /** ALL open HTLC coins of the ACTIVE token (the network-wide market feed — native scanAllHtlcCoins).
      *  Bounded depth: the HTLC address is a shared, potentially heavy sink. cb(err, arr). */
     function scanAllHtlcCoins(coinageMin, depth, cb) {
-        M.cmd('coinnotify action:add address:' + HTLC_ADDRESS, function () {
-            M.cmdR('coins coinage:' + coinageMin + ' tokenid:' + AX.trading.active().tokenId +
-                ' simplestate:true depth:' + depth + ' address:' + HTLC_ADDRESS, function (err, resp) {
-                cb(err, (!err && Array.isArray(resp)) ? resp : []);
-            });
-        });
+        var tok = AX.trading.active().tokenId;
+        acrossAddresses(function (a) {
+            return 'coins coinage:' + coinageMin + ' tokenid:' + tok + ' depth:' + depth + ' address:' + a;
+        }, cb);
     }
 
     /** REFUND: owner (state[0]) reclaims the whole coin after the timelock; sign with the owner key. cb(err, txpowid). */
@@ -487,12 +553,10 @@
         if (!isHex(value)) return cb(new Error('scan: non-hex state value'));   // MA-19: value is interpolated into the coins command
         // SETTLEMENT scan: NO tokenid filter — the state: value (a unique hashlock or my pubkey) already scopes the
         // reply, and dropping the token filter lets a claim/refund find an in-flight coin in EITHER currency.
-        M.cmd('coinnotify action:add address:' + HTLC_ADDRESS, function () {
-            M.cmdR('coins coinage:' + coinageMin + ' simplestate:true state:' + normKey(value) +
-                ' address:' + HTLC_ADDRESS + ' depth:' + depth + (megammr ? ' megammr:true' : ''), function (err, resp) {
-                cb(err, (!err && Array.isArray(resp)) ? resp : []);
-            });
-        });
+        acrossAddresses(function (a) {
+            return 'coins coinage:' + coinageMin + ' state:' + normKey(value) +
+                ' address:' + a + ' depth:' + depth + (megammr ? ' megammr:true' : '');
+        }, cb);
     }
     /** Open HTLC coins for one hashlock (state[5]). */
     function scanByHash(hash, coinageMin, depth, cb) { scanState(hash, coinageMin, depth, cb); }
@@ -509,17 +573,18 @@
      *  could return a multi-MB reply). cb(err, arr). */
     function scanNotifySecret(hash, depth, cb) {
         M.cmd('coinnotify action:add address:' + NOTIFY, function () {
-            M.cmdR('coins simplestate:true depth:' + depth + ' state:' + normKey(hash) + ' address:' + NOTIFY,
+            M.cmdR('coins depth:' + depth + ' state:' + normKey(hash) + ' address:' + NOTIFY,
                 function (err, resp) { cb(err, (!err && Array.isArray(resp)) ? resp : []); });
         });
     }
 
     AX.htlc = {
-        SCRIPT: HTLC_SCRIPT, ADDRESS: HTLC_ADDRESS, NOTIFY: NOTIFY, NOTIFY_AMOUNT: NOTIFY_AMOUNT,
+        SCRIPT: HTLC_SCRIPT, ADDRESS: HTLC_ADDRESS, SCRIPT_V13: HTLC_SCRIPT_V13, ADDRESS_V13: HTLC_ADDRESS_V13,
+        ADDRESS_V13_HEX: HTLC_ADDRESS_V13_HEX, ADDRESSES: ADDRESSES, isHtlcAddress: isHtlcAddress, NOTIFY: NOTIFY, NOTIFY_AMOUNT: NOTIFY_AMOUNT,
         MINIMA_BLOCK_TIME: MINIMA_BLOCK_TIME, TIMELOCK_BLOCKS: TIMELOCK_BLOCKS, CP_BLOCKS: CP_BLOCKS,
-        CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK,
+        CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK, REVEAL_MIN_SECS: REVEAL_MIN_SECS, REVEAL_MIN_BLOCKS: REVEAL_MIN_BLOCKS, ETH_FIRST_PAUSED: ETH_FIRST_PAUSED,
         setup: setup, ensureScript: ensureScript, purgeStaleTxns: purgeStaleTxns, ADDRESS_HEX: HTLC_ADDRESS_HEX,
-        loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
+        loadKeys: loadKeys, normKey: normKey, stateAt: stateAt, lockSpendable: lockSpendable,
         isHex: isHex, isHexOrMinima: isHexOrMinima, isDecimal: isDecimal,
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         tokenBalance: tokenBalance, myRelevantCoins: myRelevantCoins, confirmationDepth: confirmationDepth,

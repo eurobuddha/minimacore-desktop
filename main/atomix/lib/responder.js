@@ -31,6 +31,8 @@
     // decline reporting (native 0.1.84): takerOf = normHash → the taker's AUTHENTICATED comms id from the sealed
     // handshake (where a notice goes back to); noticesSent = normHash → count (each notice is a signed send).
     var takerOf = {}, noticesSent = {}, MAX_NOTICES_PER_HASH = 3;
+    // HTLC v1.3 (review 7 Nov): hashes whose taker handshake said htlc:'1.3' — bounded with the incoming queue
+    var htlc13 = {};
     var _now = function () { return Date.now(); };
     function nowUnix() { return Math.floor(_now() / 1000); }
 
@@ -76,6 +78,7 @@
     function acceptTakerSellMinima(order, coin) {
         var p = pair(order);
         if (!p || !p.en) return false;
+        if (AX.peg && AX.peg.jumpPending && (AX.peg.jumpPending() || AX.peg.pegOutdated())) return false;   // review 7 Nov: peg may be priced off an outdated MEXC mid
         var giveRaw = H.stateAt(coin, 1);                          // USDT they requested, I'd pay (ON-CHAIN, hostile)
         if (!validDec(giveRaw)) return false;                      // non-numeric → decline (never reach BigInt parse)
         var recvRaw = H.coinAmount(coin);                          // mxUSDT the taker locked, I receive
@@ -95,6 +98,7 @@
     /** Taker BUYS mxUSDT from me (they locked USDT wanting mxUSDT). Auto-lock only if it fits an enabled ASK tranche:
      *  within the cap AND the USDT I'd receive ≥ (mxUSDT given × tranche price), meeting my minimum. */
     function acceptTakerBuyMinima(order, c) {
+        if (AX.peg && AX.peg.jumpPending && (AX.peg.jumpPending() || AX.peg.pegOutdated())) return false;   // review 7 Nov: peg may be priced off an outdated MEXC mid
         // REAL USDT ONLY: the ETH HTLC vault is multi-token, so a taker could lock a WORTHLESS ERC20 as the paying
         // leg. Native rejects this via pairFor(c.tokenContract) (its allowlist returns null for a non-USDT token);
         // this is the same gate lockEthCounterLeg + otcVerifyBuy already enforce — never drop it on the buy path.
@@ -123,7 +127,7 @@
     function onSellTake(coin, block, next) {
         if (!ready()) return next();
         var hash = H.stateAt(coin, 5), reqTokenAddr = stripReqToken(H.stateAt(coin, 2));
-        if (!hash) return next();
+        if (!/^0x[0-9A-Fa-f]{64}$/.test(String(hash || ''))) return next();   // SECURITY (review 7 Nov): 32-byte hashlocks only
         // active-currency token only (a stale take of the OTHER currency after a switch would misprice)
         if (String(TR.active().tokenId).toLowerCase() !== String(coin.tokenid || '0x00').toLowerCase()) return next();
         var timelock = Number(H.stateAt(coin, 3)) || 0;
@@ -216,6 +220,7 @@
         var now = _now();
         for (var k in incoming) { if (now - incoming[k].t > INCOMING_TTL_MS) delete incoming[k]; }
         for (var t in takerOf) { if (!incoming[t]) { delete takerOf[t]; delete noticesSent[t]; } }   // bounded with the queue
+        for (var h13 in htlc13) { if (!incoming[h13]) delete htlc13[h13]; }
     }
 
     /** Re-seed `incoming` from persisted EXECUTING SELL OTC deals (native SwapEngine re-arm). The in-memory set is
@@ -258,7 +263,7 @@
         function scanTake(maker) {
             var addr = TR.active().takeAddr, notices = [];
             AX.mds.cmd('coinnotify action:add address:' + addr, function () {
-                AX.mds.cmd('coins simplestate:true order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
+                AX.mds.cmd('coins order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
                     var coins = (r && r.response instanceof Array) ? r.response : [];
                     for (var i = 0; i < coins.length; i++) {
                         var blob = AX.htlc.stateAt(coins[i], 99);
@@ -272,6 +277,7 @@
                             if (msg.notice != null) { if (authed) notices.push({ hash: msg.hash, from: opened.fromPublicId, state: String(msg.notice), reason: msg.reason }); continue; }
                             if (!maker) continue;
                             addIncoming(msg.hash);
+                            if (msg.htlc === '1.3') htlc13[normHash(msg.hash)] = true;
                             if (authed) takerOf[normHash(msg.hash)] = opened.fromPublicId;
                         } catch (e) { }
                     }
@@ -310,10 +316,20 @@
                     if (c.timelock - ethNow < Number(AX.htlc.CP_SECS_CHECK))   // their USDT lock too close to timeout
                         return recordDecline(hash, 'Maker declined: your USDT lock expires at ' + isoUnix(c.timelock) + ', less than '
                             + Math.round(Number(AX.htlc.CP_SECS_CHECK) / 60) + ' min away — too close to its timeout to lock safely.', true, next);
+                    // SECURITY (review 7 Nov, CRITICAL, mirror of APK 0.2.6): HTLC v1.2 checks SHA2(secret) EQ hash on a secret of
+                    // ANY length; the vault's withdraw takes exactly 32 bytes. On an ETH-first take the TAKER makes the secret, so a
+                    // 40-byte one would claim a v1.2 counter-leg my USDT withdraw can never match. Answer only a taker that can
+                    // claim at HTLC v1.3 (which requires 32 bytes), and lock there.
+                    if (AX.htlc.ETH_FIRST_PAUSED && !htlc13[normHash(hash)]) return recordDecline(hash, 'Maker declined: your AtomiX is too old for this maker — update it to buy with USDT (HTLC v1.3). Your USDT refunds after its timelock.', true, next);
                     gateBuy(c, hash, !!c.otc, function (ok) {   // OTC deal-match OR ladder-fit gate
                         if (!ok) return recordDecline(hash, buyDeclineReason(c, !!c.otc), !c.otc || !!(AX.otc && AX.otc.ready()), next);
                         if (cpBurstFull(hash)) return recordDecline(hash, 'Maker busy: already locking ' + CP_LOCK_BURST
                             + ' other buys — it retries on the next block.', false, next);
+                        // R4-6 (mirror of APK 0.2.3): a new liability never rests on one RPC's word — retried next cycle
+                        if (AX.settle && AX.settle.secondEndpointAgrees) return AX.settle.secondEndpointAgrees(EO.contractId(hash), c, function (ok) {
+                            if (!ok) return next();
+                            lockMinimaCounterLeg(c, block, next);
+                        });
                         lockMinimaCounterLeg(c, block, next);
                     });
                 });
@@ -408,7 +424,8 @@
                 onChanged();
                 H.lockFromCoins({ coinids: picked.ids, totalSelected: picked.sum, amount: reqMinimaHuman,
                     requestAmount: reqMinimaHuman, reqToken: 'minima', receiverPubkey: receiverPubkey, ownerEthKey: C.ethAddr,
-                    hashlock: hash, timelockBlock: timelock, otc: 'FALSE', myPubkey: C.myMinimaPk, tokenId: actTok, myAddress: C.myMinimaAddr },
+                    hashlock: hash, timelockBlock: timelock, otc: 'FALSE', myPubkey: C.myMinimaPk, tokenId: actTok, myAddress: C.myMinimaAddr,
+                    htlc13: !!htlc13[normHash(hash)] },
                 function (eL, txpowid) {
                     if (eL) {
                         // a build failure (no POSTED: tag) provably didn't broadcast → drop the row so it can retry
@@ -519,7 +536,8 @@
         onSellTake: onSellTake, scanIncomingBuys: scanIncomingBuys, processIncomingBuy: processIncomingBuy, addIncoming: addIncoming,
         recordDecline: recordDecline, buyDeclineReason: buyDeclineReason, MAX_NOTICES_PER_HASH: MAX_NOTICES_PER_HASH,
         _takerOf: function () { return takerOf; },
-        _reset: function () { cpInFlight = {}; incoming = {}; takerOf = {}; noticesSent = {}; EO._resetApprovals(); }, _setNow: function (fn) { _now = fn; EO._setNow(fn); },
+        _reset: function () { cpInFlight = {}; incoming = {}; takerOf = {}; noticesSent = {}; htlc13 = {}; EO._resetApprovals(); },
+        _htlc13: function () { return htlc13; }, _setNow: function (fn) { _now = fn; EO._setNow(fn); },
         _selectCoins: selectCoins, keepPlan: keepPlan, keepWallet: keepWallet, _resetKeeper: function () { keepBusy = false; keepLast = 0; }, _incoming: function () { return incoming; }, pruneIncoming: pruneIncoming,
         CP_LOCK_BURST: CP_LOCK_BURST, INCOMING_TTL_MS: INCOMING_TTL_MS, INCOMING_MAX: INCOMING_MAX
     };

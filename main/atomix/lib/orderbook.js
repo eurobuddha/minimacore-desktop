@@ -19,6 +19,7 @@
     function publish(me, order, cb) {
         order.ts = nowMs();
         order.cid = me.publicId();
+        order.asksNeedHtlc13 = !!AX.htlc.ETH_FIRST_PAUSED;   // review 7 Nov (HTLC v1.3): asks go out as bal.m13, v1.3 takers only
         var msg = H.utf8(O.canonicalJson(order));
         var sig = S.signDetached(msg, me.signSk);
         var state = { '1': '0x' + H.to(me.signPk), '2': '0x' + H.to(sig), '99': '0x' + H.to(msg) };
@@ -39,7 +40,7 @@
     function scan(cb) {
         var addr = sentinel();
         M.cmd('coinnotify action:add address:' + addr, function () {
-            M.cmd('coins simplestate:true order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
+            M.cmd('coins order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
                 var coins = (r && r.response instanceof Array) ? r.response : [];
                 var book = {};
                 for (var i = 0; i < coins.length; i++) {

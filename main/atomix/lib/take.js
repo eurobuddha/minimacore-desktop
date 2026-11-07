@@ -14,10 +14,12 @@
 
     /** The active currency's TAKE sentinel — distinct from the order-book + OTC channels. */
     function address() { return TR.active().takeAddr; }
+    var HTLC = '1.3';
 
     /** Taker → maker: seal the hashlock to the maker's publicId and post it to the take channel. cb(err). */
     function send(me, makerPublicId, myPublicId, hash, cb) {
-        post(me, makerPublicId, { to: makerPublicId, from: myPublicId, hash: hash }, 'take send: ', cb);
+        // htlc:'1.3' (review 7 Nov): this taker finds and claims a counter-leg at the HTLC v1.3 address too
+        post(me, makerPublicId, { to: makerPublicId, from: myPublicId, hash: hash, htlc: HTLC }, 'take send: ', cb);
     }
 
     /** Maker → taker on the same channel (native SwapTake.notice, 0.1.84): why a buy was not locked
@@ -42,5 +44,5 @@
         return t.length > 240 ? t.substring(0, 240) : t;
     }
 
-    AX.take = { address: address, send: send, notice: notice, cleanReason: cleanReason };
+    AX.take = { address: address, send: send, notice: notice, cleanReason: cleanReason, HTLC: HTLC };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

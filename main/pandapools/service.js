@@ -156,6 +156,9 @@ MDS.init(function (msg) {
             ensureTables(function () { READY = true; MDS.log("PandaPools service ready"); retrackOwn(); cleanForeign(); scan(); });
         });
     }
+    // review 7 Nov (R2-3, native 0.9.84/0.9.87; same sweep as pandadex-mds 0.4.23): free posted-input claims whose
+    // post provably never happened (two-phase: held >= 10 min, the coin unspent and NOT in the mempool). Read-only on the node.
+    if (msg.event === "NEWBLOCK" && typeof PoolInputClaims !== "undefined") PoolInputClaims.sweepUnposted(function (q, cb) { MDS.cmd(q, cb); }, Date.now());
     if (msg.event === "NEWBLOCK") { PoolRuntimeGuard.check(function(error) { if(error) { READY=false; MDS.log("PandaPools paused: "+error); return; } if(READY) scan(); else ensureTables(function(){ READY=true; retrackOwn(); cleanForeign(); scan(); }); }); }
 });
 
@@ -591,6 +594,8 @@ function checkPostSvc(txid, cmds, cb) {
                             MDS.cmd("txnpost id:"+txid,function(rp){var ok=!!(rp&&rp.status===true&&!rp.pending);
                                 /* Refused by the node (status:false, not pending): nothing was broadcast, so free the inputs. */
                                 if(rp&&rp.status===false&&!rp.pending){PoolInputClaims.release(ids,txid,function(){finishSignSvc(cb,false,owner,heartbeat);});return;}
+                                // review 7 Nov (D-1, native 0.9.83): keep-fresh recreated the reserves — the saved hints follow them
+                                if(ok){ReserveRecovery.rememberPosted(rp,function(){finishSignSvc(cb,true,owner,heartbeat);});return;}
                                 finishSignSvc(cb,ok,owner,heartbeat);});
                         });
                 });
