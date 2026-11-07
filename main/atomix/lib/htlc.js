@@ -20,20 +20,22 @@
     var HTLC_ADDRESS = 'MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G';
     var HTLC_ADDRESS_HEX = '0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A';   // the same address as the node reports it
 
-    // SECURITY (review 7 Nov, HTLC v1.3 — mirror of APK 0.2.6): v1.2 plus ONE line, ASSERT LEN(secret) EQ 32, before the
-    // secret is used (the refund branch above it is unchanged). The maker's counter-leg of a USDT-paid take locks here, and
+    // SECURITY (review 7 Nov, HTLC v1.3 — mirror of APK 0.2.6/0.2.7): v1.2 plus ASSERT HEX(secret) EQ secret ASSERT
+    // LEN(secret) EQ 32, before the secret is used. The HEX type check first: for a STRING, LEN counts characters while
+    // SHA2 hashes UTF-8 bytes, so a 32-character, 48-byte string passed LEN alone (0.1.52); EQ across types throws. (The
+    // refund branch above it is unchanged.) The maker's counter-leg of a USDT-paid take locks here, and
     // only for a taker whose handshake says htlc:'1.3'. Every scan, claim and refund covers BOTH addresses.
     // VERBATIM from native MinimaHtlc.HTLC_SCRIPT_V13 — do not reformat.
     var HTLC_SCRIPT_V13 =
         'LET version=1.3 LET owner=PREVSTATE(0) LET requestamount=PREVSTATE(1) LET requesttoken=PREVSTATE(2) ' +
         'LET timelock=PREVSTATE(3) LET counterparty=PREVSTATE(4) LET hash=PREVSTATE(5) LET ownerethkey=PREVSTATE(6) ' +
         'IF SIGNEDBY(owner) AND (@BLOCK GT timelock) THEN RETURN TRUE ENDIF LET secret=STATE(100) ' +
-        'ASSERT LEN(secret) EQ 32 ' +
+        'ASSERT HEX(secret) EQ secret ASSERT LEN(secret) EQ 32 ' +
         'ASSERT SIGNEDBY(counterparty) AND (SHA2(secret) EQ hash) ASSERT STATE(101) EQ hash ' +
         'ASSERT STATE(102) EQ STRING(owner) ASSERT STATE(103) EQ STRING(counterparty) ' +
         'RETURN VERIFYOUT(@INPUT 0xFFEEDD9999 0.0001 @TOKENID TRUE)';
-    var HTLC_ADDRESS_V13 = 'MxG0855DQH577SS5FE1N756PJSQMR301NDHVV9FW7QCGUNQ3TWAFNYUKVR0Q79H';
-    var HTLC_ADDRESS_V13_HEX = '0xA56EA2539F9C2BDC1B9CA6CCF9AB6C600DDB1FFD2F91F4C87AFA1F64A7DEBEA7';
+    var HTLC_ADDRESS_V13 = 'MxG0832NN9BNMM4FG9JQWHANJ47R1Y723VK1KKA3R6WTT63Y6JSERYYEMT9PTA7';
+    var HTLC_ADDRESS_V13_HEX = '0x62BDD2BBDAC47C133D4A2ABCC87D86A710FF40D28A1ECD2EF4C3A9A7C76EB575';
     /** Every covenant a swap lock can sit at (script, Mx address, 0x address). */
     var COVENANTS = [
         { script: HTLC_SCRIPT, mx: HTLC_ADDRESS, hex: HTLC_ADDRESS_HEX },
