@@ -237,6 +237,8 @@
         // byte-exact, but the ETH leg coerces it to 32 bytes (b32 keeps the last 32), so a 0x00‖H lock got an ETH
         // counter-leg on H the taker could withdraw while my Minima claim could never match. 32 bytes only.
         if (!/^0x[0-9A-Fa-f]{64}$/.test(String(hash))) return next();
+        // SECURITY (review 7 Nov, mirror of APK 0.2.9): never answer or claim a lock its own script cannot run.
+        if (!H.lockSpendable(coin)) return next();
         var reqTokenAddr = stripReqToken(H.stateAt(coin, 2));
         DB.getSecret(hash, function (e, secret) {
             if (e) return next();

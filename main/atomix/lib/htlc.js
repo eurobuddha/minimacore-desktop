@@ -243,6 +243,16 @@
         return (v == null || v === '') ? null : v;
     }
 
+    /** SECURITY (review 7 Nov, mirror of APK 0.2.9): can the HTLC script run on this lock at all? Its prelude reads ports
+     *  0-6 and evaluates IF SIGNEDBY(owner) AND (@BLOCK GT timelock) on every path; KISS does not short-circuit AND,
+     *  aborts on an absent port and throws on a non-HEX key or non-NUMBER timelock. Such a lock can be neither claimed
+     *  nor refunded, so answering it with USDT loses the USDT. KISS types values from their text, as checked here. */
+    function lockSpendable(coin) {
+        for (var p = 0; p <= 6; p++) { var v = stateAt(coin, p); if (v == null || String(v) === '') return false; }
+        return /^0x[0-9A-Fa-f]+$/.test(String(stateAt(coin, 0))) && /^[0-9]+$/.test(String(stateAt(coin, 3)))
+            && /^0x[0-9A-Fa-f]+$/.test(String(stateAt(coin, 4))) && /^0x[0-9A-Fa-f]{64}$/.test(String(stateAt(coin, 5)));
+    }
+
     // ---- Minima-leg operations (port of MinimaHtlc.java) ----
 
     /** Fresh 32-byte secret + its SHA2 (SHA256) hashlock, the same way the bridge does. cb(err, {secret, hash}). */
@@ -574,7 +584,7 @@
         MINIMA_BLOCK_TIME: MINIMA_BLOCK_TIME, TIMELOCK_BLOCKS: TIMELOCK_BLOCKS, CP_BLOCKS: CP_BLOCKS,
         CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK, REVEAL_MIN_SECS: REVEAL_MIN_SECS, REVEAL_MIN_BLOCKS: REVEAL_MIN_BLOCKS, ETH_FIRST_PAUSED: ETH_FIRST_PAUSED,
         setup: setup, ensureScript: ensureScript, purgeStaleTxns: purgeStaleTxns, ADDRESS_HEX: HTLC_ADDRESS_HEX,
-        loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
+        loadKeys: loadKeys, normKey: normKey, stateAt: stateAt, lockSpendable: lockSpendable,
         isHex: isHex, isHexOrMinima: isHexOrMinima, isDecimal: isDecimal,
         generateSecret: generateSecret, verifyPreimage: verifyPreimage, currentBlock: currentBlock, grain: grain, maybeGrain: maybeGrain,
         tokenBalance: tokenBalance, myRelevantCoins: myRelevantCoins, confirmationDepth: confirmationDepth,
