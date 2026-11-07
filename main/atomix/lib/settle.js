@@ -290,7 +290,9 @@
     /** SECURITY (review 7 Nov, mirror of APK 0.2.3): the same contract must read identically on a second, independent
      *  endpoint (the primary is endpoints[0]); no second answer = skip this cycle. cb(boolean). */
     function secondEndpointAgrees(cid, seen, cb) {
-        var eps = ((C.rpc && C.rpc.endpoints) || []).slice(1, 4), i = 0;
+        // R4-3/R4-4 (mirror of APK 0.2.5): TWO distinct, explicitly named endpoints must each return the identical
+        // contract — independent of which one served the first read; a stale or lying node is outvoted (up to five asked)
+        var eps = ((C.rpc && C.rpc.endpoints) || []).slice(0, 5), i = 0, agree = 0;
         function same(a, b) {
             function eq(x, y) { return x != null && y != null && String(x).toLowerCase() === String(y).toLowerCase(); }
             return eq(a.owner, b.owner) && eq(a.receiver, b.receiver) && eq(a.tokenContract, b.tokenContract) && eq(a.hashlock, b.hashlock)
@@ -300,11 +302,12 @@
         (function tryNext() {
             if (i >= eps.length) return cb(false);
             ops().getContractOn(eps[i++], cid, function (e, c) {
-                if (e) return tryNext();          // unreachable endpoint → ask the next one
-                cb(!!c && same(seen, c));         // absent or different → do not act this cycle
+                if (!e && c && same(seen, c) && ++agree >= 2) return cb(true);
+                tryNext();
             });
         })();
     }
+
     /** R2-1 (review 7 Nov, mirror of APK 0.1.99): the secret is still mine only if I initiated and no claim/withdraw of
      *  mine has carried it yet. cb(boolean). */
     function secretStillMine(sw, hash, cb) {
@@ -892,7 +895,7 @@
 
     AX.settle = {
         configure: configure, ready: ready, poll: poll,
-        amountTokenOk: amountTokenOk, stripReqToken: stripReqToken, decimalsOf: decimalsOf,
+        secondEndpointAgrees: secondEndpointAgrees, amountTokenOk: amountTokenOk, stripReqToken: stripReqToken, decimalsOf: decimalsOf,
         deadlines: deadlines, onMakerNotice: onMakerNotice, noteTimeouts: noteTimeouts, refundNow: refundNow, visibility: visibility,
         NOTICE_RETRYING: NOTICE_RETRYING, NOTICE_DECLINED: NOTICE_DECLINED,
         _setNow: function (fn) { _now = fn; }, _reset: function () { ethAttempt = {}; inflight = {}; lastFail = {}; },

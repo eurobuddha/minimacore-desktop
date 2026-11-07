@@ -320,6 +320,11 @@
                         if (!ok) return recordDecline(hash, buyDeclineReason(c, !!c.otc), !c.otc || !!(AX.otc && AX.otc.ready()), next);
                         if (cpBurstFull(hash)) return recordDecline(hash, 'Maker busy: already locking ' + CP_LOCK_BURST
                             + ' other buys — it retries on the next block.', false, next);
+                        // R4-6 (mirror of APK 0.2.3): a new liability never rests on one RPC's word — retried next cycle
+                        if (AX.settle && AX.settle.secondEndpointAgrees) return AX.settle.secondEndpointAgrees(EO.contractId(hash), c, function (ok) {
+                            if (!ok) return next();
+                            lockMinimaCounterLeg(c, block, next);
+                        });
                         lockMinimaCounterLeg(c, block, next);
                     });
                 });
