@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-latest
             platform: mac
             ebflag: --mac --arm64
           - os: windows-latest
