@@ -1,9 +1,9 @@
 {
   "_comment": "Digests of the PandaPools engine files copied verbatim from the MDS MiniDapp. Regenerate ONLY with `node scripts/pandapools-parity-manifest.cjs --update` beside a deliberate engine re-copy. Desktop-only runtime differences belong in loader.js / sqlshim.js / main/pandapools.js, never here.",
   "donor": {
-    "root": "../../mds/pandapools-mds",
-    "mdsVersion": "0.6.39",
-    "gitSha": "fb2d605e7c5a01fd1368d30f1bf3a3ea5de8b056"
+    "root": "../../../../../../../Users/eurobuddha/Projects/minima/mds/pandapools-mds",
+    "mdsVersion": "0.6.42",
+    "gitSha": "c2a5051c09ead93febd3f08fab3ceea005f1d8a1"
   },
   "files": {
     "decimal.js": {
@@ -51,28 +51,28 @@
       "bytes": 19119
     },
     "poolmgr.js": {
-      "sha256": "72a3f3062fccde9b5d98081dce259b1662b518a49c416e8fee4ac4a8c40b4772",
-      "bytes": 79155
+      "sha256": "c0c023d4b6b7643c7a43bb51c15b344a95f3ceb63619417ee7716ef76af8e915",
+      "bytes": 79388
     },
     "reserve-recovery.js": {
-      "sha256": "b955c6bb9baf07045f6080695be39e958f80df0f08248027068dba0b15025455",
-      "bytes": 33844
+      "sha256": "4baa784387ffa3ed81ac7031ac0108f78f80b412af4b41850589e1165b0f342d",
+      "bytes": 36100
     },
     "service.js": {
-      "sha256": "1e89934a27f15cae1583bcf06fc5785c254a725cfd447875a8a9ddbf3fdcf225",
-      "bytes": 55296
+      "sha256": "98f94e271edbc220ee6c5ea85324153f33c6c2b2fef4ee2037e77b87b61ffe7f",
+      "bytes": 55969
     },
     "combined-backup.js": {
       "sha256": "a26de27739c77716db2d99ace88b54944c82ca82d46639c8a9972ff9cceb8561",
       "bytes": 6764
     },
     "full-backup.js": {
-      "sha256": "4c15741dc7e7b61d4c196b4cf0781821d76d75b328e631cc179fa19a267aece3",
-      "bytes": 3170
+      "sha256": "c75a1d18570130bb9c4f9c8443a6269832ca8849ad3c39c65b743145d27e4c34",
+      "bytes": 3472
     },
     "input-claims.js": {
-      "sha256": "79b0a4a9dad68621f3ae2ab8db5050d231bbbc88817f869fe1929ed4224f6d68",
-      "bytes": 3844
+      "sha256": "1555df26f13eac9d95dbb60709b19d3f3ef7d1468c5f04290f10432ce84512f7",
+      "bytes": 5897
     },
     "runtime-guard.js": {
       "sha256": "3791e7cfb3c5e3bb863da51afdb9855c71edc896158d92a2cf49c5acbb15ff63",

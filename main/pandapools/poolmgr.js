@@ -236,7 +236,10 @@ var PoolMgr = (function () {
                 MDS.cmd("txnpost id:" + txid, function (rp) {
                     if (rp && rp.status === true && !isPending(rp)) {
                         var posted = extractTxpowid(rp, txid);
-                        ActivityChain.rememberSubmission(rp, posted, function () { MDS.cmd("txndelete id:" + txid); done.ok(posted); });
+                        ActivityChain.rememberSubmission(rp, posted, function () {
+                            // review 7 Nov (D-1, native 0.9.83): the saved reserve hints follow the reserves this post created
+                            ReserveRecovery.rememberPosted(rp, function () { MDS.cmd("txndelete id:" + txid); done.ok(posted); });
+                        });
                     }
                     else { MDS.cmd("txndelete id:" + txid);
                         /* status:false and not pending = the node refused it; nothing was broadcast, so free the inputs. */

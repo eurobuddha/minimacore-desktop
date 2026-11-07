@@ -51,6 +51,7 @@ var ReserveRecovery = (function () {
     function entry(p) {
         var e = {addr:p.address,mx:p.mxaddress||"",opk:p.opk,oadr:p.oadr,tok:p.tok,dec:p.tokDecimals==null?8:p.tokDecimals,kmin:String(p.kmin),script:p.covenantScript||p.script||Covenant.script(p.opk,p.oadr,p.tok,p.kmin)};
         if (integer(p.minimumOwnerUses,MAX_TREE_USES)) e.opkuses=Number(p.minimumOwnerUses);
+        if (p.retired===true) e.retired=true;   // review 7 Nov (R2-4): lets the owner-key check tell closed pools apart
         return e;
     }
     function coinFor(p,c) {
@@ -108,6 +109,38 @@ var ReserveRecovery = (function () {
     function readReserves(p,cb){savedHints(p,function(){read(local,p,false,512,function(j){
         var ok=fill(p,j)&&complete(p);if(ok)Store.ownRememberReserves(p,function(){cb(true);});else cb(false);
     });});}
+    /* Review 7 Nov (D-1, mirror of native 0.9.83 OwnPoolStore.rememberPosted): my own refresh/deposit/migrate/create
+     * recreate a pool's reserves. txnpost's reply carries the new coin ids (fixed before mining); record them as the
+     * saved hints so a later read still finds the reserves by id when dust coins at the pool address push the count
+     * past the bounded read. Hints are an accelerator, never authority: every read still checks the coins it gets.
+     * Only recipes already saved are updated. */
+    function postedReserves(reply,pools){
+        var r=reply&&reply.response;if(r&&r.txpow)r=r.txpow;
+        var outs=r&&r.body&&r.body.txn&&r.body.txn.outputs,found=[];
+        if(!Array.isArray(outs))return found;
+        (pools||[]).forEach(function(p){
+            if(!p||!hash(p.address))return;
+            var m=null,t=null;
+            outs.forEach(function(o){
+                if(!o||key(o.address)!==key(p.address))return;
+                if(key(o.tokenid)==="0x00")m=o.coinid;else if(hash(p.tok)&&key(o.tokenid)===key(p.tok))t=o.coinid;
+            });
+            if(hash(m)&&hash(t))found.push({address:key(p.address),m:key(m),t:key(t)});
+        });
+        return found;
+    }
+    function rememberPosted(reply,cb){   // cb(ok) always fires: the post already happened, bookkeeping never fails it
+        cb=cb||function(){};
+        MDS.sql("SELECT address,tok FROM pp_ownpools",function(r){
+            if(!r||r.status!==true||!Array.isArray(r.rows)){cb(false);return;}
+            var hits=postedReserves(reply,r.rows.map(function(x){return {address:x.ADDRESS||x.address,tok:x.TOK||x.tok};})),at=0,ok=true;
+            function next(){
+                if(at===hits.length){if(hits.length&&MDS.persistRecovery)MDS.persistRecovery(function(d){cb(ok&&d!==false);});else cb(ok);return;}
+                var h=hits[at++];
+                MDS.sql("UPDATE pp_ownpools SET lastcoinm='"+h.m+"',lastcoint='"+h.t+"' WHERE LOWER(address)='"+h.address+"'",function(u){if(!u||u.status!==true)ok=false;next();});
+            }next();
+        });
+    }
     function proof(data){return typeof data==="string" && data.length<=32000 && hex(data);}
     function recover(p,snapshot,archive,cb){
         var ended=false,notes=[],hints={address:p.address,coinidM:p.coinidM,coinidT:p.coinidT};
@@ -439,5 +472,5 @@ var ReserveRecovery = (function () {
             });
         }call(local,"checkmode",function(j){if(!j||!j.response||j.response.writemode!==true){cb("Enable PandaPools WRITE mode in MiniHub before signing; deferred signature approvals are not supported.");return;}input(0);});
     }
-    return {capacityOfRow:capacityOfRow,restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
+    return {postedReserves:postedReserves,rememberPosted:rememberPosted,capacityOfRow:capacityOfRow,restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
 })();

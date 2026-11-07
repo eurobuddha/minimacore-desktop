@@ -10,6 +10,9 @@
         if(!mode)throw Error('KEY_MODE_UNKNOWN');
         recipes.pools.forEach(function(p){
             var row=rows.find(function(r){return String(r.publickey).toLowerCase()===String(p.opk).toLowerCase();});
+            // Review 7 Nov (R2-4, native 0.9.86): a CLOSED pool whose owner key belongs to another wallet no longer makes every
+            // backup here unverifiable forever. Its recipe still travels in the bundle; live pools must still have their key.
+            if(!row&&p.retired===true)return;
             if(!row||!counter(row.uses)||Number(row.uses)<Number(p.opkuses)||Number(row.size)!==Number(first.size)||Number(row.depth)!==Number(first.depth))throw Error('OWNER_KEYS_MISSING: the node does not contain every pool owner key with its recorded signing state.');
         });
         return {wallet:first.publickey.toLowerCase(),mode:mode};
