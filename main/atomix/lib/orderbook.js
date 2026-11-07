@@ -19,6 +19,7 @@
     function publish(me, order, cb) {
         order.ts = nowMs();
         order.cid = me.publicId();
+        order.asksNeedHtlc13 = !!AX.htlc.ETH_FIRST_PAUSED;   // review 7 Nov (HTLC v1.3): asks go out as bal.m13, v1.3 takers only
         var msg = H.utf8(O.canonicalJson(order));
         var sig = S.signDetached(msg, me.signSk);
         var state = { '1': '0x' + H.to(me.signPk), '2': '0x' + H.to(sig), '99': '0x' + H.to(msg) };
@@ -29,7 +30,7 @@
     /** publishFresh: stamp the sendable balance (contract-locked coins excluded), then publish. */
     function publishFresh(me, order, cb) {
         M.cmdR('balance tokenid:' + TR.active().tokenId, function (err, r) {
-            if (!err && r && r[0]) order.minimaAvail = AX.htlc.ETH_FIRST_PAUSED ? 0 : (Number(r[0].sendable) || 0);   // review 7 Nov: no asks while paused
+            if (!err && r && r[0]) order.minimaAvail = Number(r[0].sendable) || 0;
             publish(me, order, cb);
         });
     }

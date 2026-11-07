@@ -79,7 +79,10 @@
             if (p.asks.length) j.asks = p.asks.map(function (l) { return { p: l.p, a: l.a }; });
             pairs[sym] = j;
         }
-        return { mpk: o.mpk, eth: o.eth, cid: o.cid, ts: o.ts, bal: { m: o.minimaAvail, u: o.usdtAvail }, pairs: pairs };
+        // HTLC v1.3 (review 7 Nov, mirror of APK 0.2.6): asks this maker answers only for v1.3 takers travel as bal.m13 with
+        // bal.m 0, so an older client (no funds = no asks) never offers a take this maker would decline.
+        var bal = o.asksNeedHtlc13 ? { m: 0, m13: o.minimaAvail, u: o.usdtAvail } : { m: o.minimaAvail, u: o.usdtAvail };
+        return { mpk: o.mpk, eth: o.eth, cid: o.cid, ts: o.ts, bal: bal, pairs: pairs };
     }
     function fromJson(j) {
         var o = make();
@@ -89,7 +92,10 @@
         // key makes the order un-tradeable, not fatal.
         if (o.mpk && !isHex(o.mpk)) o.mpk = '';
         if (o.eth && !isHex(o.eth)) o.eth = '';
-        if (j.bal) { o.minimaAvail = finite(Number(j.bal.m)); o.usdtAvail = finite(Number(j.bal.u)); }
+        if (j.bal) {
+            o.asksNeedHtlc13 = j.bal.m13 != null;
+            o.minimaAvail = finite(Number(o.asksNeedHtlc13 ? j.bal.m13 : j.bal.m)); o.usdtAvail = finite(Number(j.bal.u));
+        }
         var jp = j.pairs || {};
         for (var sym in jp) {
             var v = jp[sym], p = pair(v.en, v.buy, v.sell, v.min);
