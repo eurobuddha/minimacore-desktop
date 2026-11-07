@@ -29,7 +29,7 @@
     /** publishFresh: stamp the sendable balance (contract-locked coins excluded), then publish. */
     function publishFresh(me, order, cb) {
         M.cmdR('balance tokenid:' + TR.active().tokenId, function (err, r) {
-            if (!err && r && r[0]) order.minimaAvail = Number(r[0].sendable) || 0;
+            if (!err && r && r[0]) order.minimaAvail = AX.htlc.ETH_FIRST_PAUSED ? 0 : (Number(r[0].sendable) || 0);   // review 7 Nov: no asks while paused
             publish(me, order, cb);
         });
     }

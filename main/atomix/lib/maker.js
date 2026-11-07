@@ -126,6 +126,9 @@
      *  SAFE (trim to the best tranche only), never open. Single/no ladder → publish as-is. cb(order). */
     function clampAsks(o, cb) {
         var p = o.pairs[SYM];
+        // review 7 Nov (R3-3, mirror of APK 0.2.4): while ETH-first (USDT-paid) takes are paused, advertise no asks — a
+        // taker would lock USDT, be declined and pay gas to refund
+        if (p && AX.htlc.ETH_FIRST_PAUSED) { O.trimAsks(p, 0); return cb(o); }
         if (!p || !p.en || p.asks.length < 2) return cb(o);
         AX.htlc.tokenBalance(TR.active().tokenId, function (err, balance) {
             if (err) { O.trimAsks(p, 1); return cb(o); }               // fail SAFE, not open
