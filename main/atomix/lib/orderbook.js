@@ -40,7 +40,7 @@
     function scan(cb) {
         var addr = sentinel();
         M.cmd('coinnotify action:add address:' + addr, function () {
-            M.cmd('coins simplestate:true order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
+            M.cmd('coins order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
                 var coins = (r && r.response instanceof Array) ? r.response : [];
                 var book = {};
                 for (var i = 0; i < coins.length; i++) {

@@ -228,7 +228,10 @@
     /** True iff v is a plain non-negative decimal amount (no space/letter that could inject a parameter). */
     function isDecimal(v) { return v != null && /^[0-9]+(\.[0-9]+)?$/.test(String(v).trim()); }
 
-    /** Read a coin state value by port, handling both {"port":val} simplestate and [{port,data}] shapes. */
+    /** Read a coin state value by port, handling both {"port":val} simplestate and [{port,data}] shapes.
+     *  SECURITY (review 7 Nov, mirror of APK 0.2.8): fund-deciding scans ask for the ARRAY and this returns the FIRST
+     *  entry for a port, the one KISS reads. A transaction can carry a port twice (proven on a -test chain) and
+     *  simplestate's object keeps the LAST, so a lock could show this app one timelock/key while enforcing another. */
     function stateAt(coin, port) {
         var st = coin && coin.state;
         if (!st) return null;
@@ -505,7 +508,7 @@
     function scanAllHtlcCoins(coinageMin, depth, cb) {
         var tok = AX.trading.active().tokenId;
         acrossAddresses(function (a) {
-            return 'coins coinage:' + coinageMin + ' tokenid:' + tok + ' simplestate:true depth:' + depth + ' address:' + a;
+            return 'coins coinage:' + coinageMin + ' tokenid:' + tok + ' depth:' + depth + ' address:' + a;
         }, cb);
     }
 
@@ -541,7 +544,7 @@
         // SETTLEMENT scan: NO tokenid filter — the state: value (a unique hashlock or my pubkey) already scopes the
         // reply, and dropping the token filter lets a claim/refund find an in-flight coin in EITHER currency.
         acrossAddresses(function (a) {
-            return 'coins coinage:' + coinageMin + ' simplestate:true state:' + normKey(value) +
+            return 'coins coinage:' + coinageMin + ' state:' + normKey(value) +
                 ' address:' + a + ' depth:' + depth + (megammr ? ' megammr:true' : '');
         }, cb);
     }
@@ -560,7 +563,7 @@
      *  could return a multi-MB reply). cb(err, arr). */
     function scanNotifySecret(hash, depth, cb) {
         M.cmd('coinnotify action:add address:' + NOTIFY, function () {
-            M.cmdR('coins simplestate:true depth:' + depth + ' state:' + normKey(hash) + ' address:' + NOTIFY,
+            M.cmdR('coins depth:' + depth + ' state:' + normKey(hash) + ' address:' + NOTIFY,
                 function (err, resp) { cb(err, (!err && Array.isArray(resp)) ? resp : []); });
         });
     }

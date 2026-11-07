@@ -171,7 +171,7 @@
     function scanBoard(cb) {
         var addr = TR.active().otcBoardAddr, myId = C ? C.identity.publicId() : null;
         M.cmd('coinnotify action:add address:' + addr, function () {
-            M.cmd('coins simplestate:true order:desc depth:72 address:' + addr, function (r) {
+            M.cmd('coins order:desc depth:72 address:' + addr, function (r) {
                 var coins = (r && r.response instanceof Array) ? r.response : [], best = {};
                 for (var i = 0; i < coins.length; i++) {
                     var o = verifyOfferCoin(coins[i]); if (!o) continue;
@@ -340,7 +340,7 @@
         if (!ready()) return cb();
         var addr = TR.active().otcChatAddr;
         M.cmd('coinnotify action:add address:' + addr, function () {
-            M.cmd('coins simplestate:true order:desc depth:72 address:' + addr, function (r) {
+            M.cmd('coins order:desc depth:72 address:' + addr, function (r) {
                 var coins = (r && r.response instanceof Array) ? r.response : [];
                 F.each(coins, function (coin, i, n) {
                     var blob = AX.htlc.stateAt(coin, 99);

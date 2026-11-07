@@ -263,7 +263,7 @@
         function scanTake(maker) {
             var addr = TR.active().takeAddr, notices = [];
             AX.mds.cmd('coinnotify action:add address:' + addr, function () {
-                AX.mds.cmd('coins simplestate:true order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
+                AX.mds.cmd('coins order:desc depth:' + SCAN_DEPTH + ' address:' + addr, function (r) {
                     var coins = (r && r.response instanceof Array) ? r.response : [];
                     for (var i = 0; i < coins.length; i++) {
                         var blob = AX.htlc.stateAt(coins[i], 99);
