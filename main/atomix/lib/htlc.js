@@ -27,6 +27,10 @@
     var CP_BLOCKS_CHECK = 72;                   // responder half-window guard
     var TIMELOCK_SECS = 7200;                   // first ETH leg
     var CP_SECS = 1800;                         // second ETH leg
+    // SECURITY (review 7 Nov): the initiator never reveals its secret into a counter-leg whose refund opens sooner
+    var REVEAL_MIN_SECS = 600, REVEAL_MIN_BLOCKS = 12;
+    // SECURITY (review 7 Nov, CRITICAL): v1.2 cannot require a 32-byte secret → makers decline ETH-first buys until HTLC v1.3
+    var ETH_FIRST_PAUSED = true;
     var CP_SECS_CHECK = 3600;                   // responder half-window guard
 
     /** Register the covenant so its address resolves + reads coins, and pick/persist the swap identity key.
@@ -517,7 +521,7 @@
     AX.htlc = {
         SCRIPT: HTLC_SCRIPT, ADDRESS: HTLC_ADDRESS, NOTIFY: NOTIFY, NOTIFY_AMOUNT: NOTIFY_AMOUNT,
         MINIMA_BLOCK_TIME: MINIMA_BLOCK_TIME, TIMELOCK_BLOCKS: TIMELOCK_BLOCKS, CP_BLOCKS: CP_BLOCKS,
-        CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK,
+        CP_BLOCKS_CHECK: CP_BLOCKS_CHECK, TIMELOCK_SECS: TIMELOCK_SECS, CP_SECS: CP_SECS, CP_SECS_CHECK: CP_SECS_CHECK, REVEAL_MIN_SECS: REVEAL_MIN_SECS, REVEAL_MIN_BLOCKS: REVEAL_MIN_BLOCKS, ETH_FIRST_PAUSED: ETH_FIRST_PAUSED,
         setup: setup, ensureScript: ensureScript, purgeStaleTxns: purgeStaleTxns, ADDRESS_HEX: HTLC_ADDRESS_HEX,
         loadKeys: loadKeys, normKey: normKey, stateAt: stateAt,
         isHex: isHex, isHexOrMinima: isHexOrMinima, isDecimal: isDecimal,

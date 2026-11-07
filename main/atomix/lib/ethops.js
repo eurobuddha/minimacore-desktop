@@ -55,9 +55,15 @@
                 });
             },
             /** Full contract state by id (eth_call getContract). cb(err, Contract|null); null = no such contract. */
-            getContract: function (contractId, cb) {
+            getContract: function (contractId, cb) { this.getContractOn(null, contractId, cb); },
+            /** SECURITY (review 7 Nov): the same read on ONE named endpoint (null = the normal failover chain), so a
+             *  reveal or a new liability can be cross-checked against a second, independent node. */
+            getContractOn: function (endpoint, contractId, cb) {
                 var call = EH.getContractCall(contractId);
-                rpc.ethCall(NET.htlc, call.data, function (e, ret) {
+                var read = endpoint
+                    ? function (k) { rpc.callOn(endpoint, 'eth_call', [{ to: NET.htlc, data: call.data }, 'latest'], k); }
+                    : function (k) { rpc.ethCall(NET.htlc, call.data, k); };
+                read(function (e, ret) {
                     if (e) return cb(e);
                     if (!/^0x[0-9a-f]{768}$/i.test(String(ret))) return cb(new Error('Incomplete or malformed getContract reply'));
                     for (var i = 0, indexes = [8, 9, 11]; i < indexes.length; i++) {

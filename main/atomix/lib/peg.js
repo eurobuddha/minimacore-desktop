@@ -19,10 +19,11 @@
     var SYM = O.SYM;
 
     var PARITY_MID = 1.0;
-    var DEPTH_URL = 'https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20';
+    var DEPTH_URL = 'https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=50';
     var BOOK_URL = 'https://api.mexc.com/api/v3/ticker/bookTicker?symbol=MINIMAUSDT';
     var FRESH_MS = 5 * 60000, FETCH_GAP_MS = 30000, MIN_REPRICE_GAP_MS = 3 * 60000;
-    var JUMP_FRACTION = 0.5, DEPTH_MIN_USDT = 25;
+    // SECURITY (review 7 Nov, mirror of APK 0.2.1): >3% moves held until same-side reads hold 60 s; 100 USDT depth
+    var JUMP_FRACTION = 0.03, CONFIRM_MS = 60000, DEPTH_MIN_USDT = 100, suspectAtMs = 0;
     var STALE_WIDEN_FULL_MS = 90 * 60000, MAX_WIDEN = 10.0, HARD_STALE_MS = 12 * 60 * 60000;
 
     var PEG_OFF = 0, PEG_APPLIED = 1, PEG_STALE = 2, PEG_WIDE = 3;
@@ -41,9 +42,14 @@
         if (price <= 0) { var lp = Number(saved.lastPrice) || 0; if (lp > 0 && isFinite(lp)) price = lp; }
     }
     /** Currency switch: wipe the cached price + freshness so a MINIMA peg can't price off mxUSDT's parity 1.0. */
-    function resetForSwitch() { price = 0; bid = 0; ask = 0; goodAtMs = 0; suspect = 0; firstTryMs = 0; lastTryMs = 0; appliedMid = 0; lastError = null; }
+    function resetForSwitch() { price = 0; bid = 0; ask = 0; goodAtMs = 0; suspect = 0; suspectAtMs = 0; firstTryMs = 0; lastTryMs = 0; appliedMid = 0; lastError = null; }
 
-    function fresh() { return price > 0 && ageMs() <= FRESH_MS; }
+    function fresh() { return price > 0 && ageMs() <= FRESH_MS && !(suspect > 0); }
+    /** A >3% MEXC move is being confirmed: the published peg may be priced off an outdated mid (review 7 Nov). */
+    function jumpPending() { return suspect > 0; }
+    /** R3-2 (review 7 Nov): the applied peg was priced off a mid more than JUMP_FRACTION from the current price (a
+     *  confirmed move not yet republished) — takes are declined until it is. */
+    function pegOutdated() { return appliedMid > 0 && price > 0 && Math.abs(appliedMid - price) / price > JUMP_FRACTION; }
     function source() { return TR.active().pricingParity ? 'Parity' : 'MEXC'; }
     function state() { return { price: price, bid: bid, ask: ask, ageMs: ageMs(), fresh: fresh(), error: lastError }; }
 
@@ -159,8 +165,11 @@
         var m = (a + b) / 2;
         if (!(m > 0) || !isFinite(m)) { lastError = 'bad price'; return cb(new Error('bad price'), null); }
         if (TR.active().pricingParity) return cb(null, null);   // switched to a parity currency mid-fetch → drop
-        if (price > 0 && Math.abs(m - price) / price > JUMP_FRACTION) {   // suspect glitch → need a 2nd agreeing read
-            if (!(suspect > 0 && Math.abs(m - suspect) / suspect < 0.10)) { suspect = m; lastError = 'suspect jump'; return cb(null, null); }
+        if (price > 0 && Math.abs(m - price) / price > JUMP_FRACTION) {   // suspect move → held until same-side reads hold CONFIRM_MS
+            var nowMs = _now(), sameSide = suspect > 0 && (m - price > 0) === (suspect - price > 0);
+            if (!sameSide) suspectAtMs = nowMs;
+            suspect = m;
+            if (!sameSide || nowMs - suspectAtMs < CONFIRM_MS) { lastError = 'suspect jump — held until it holds for 60 s'; return cb(null, null); }
         }
         suspect = 0; price = m; bid = b; ask = a; goodAtMs = _now(); lastError = null;
         cb(null, { lastOk: goodAtMs, lastPrice: m });
@@ -169,9 +178,10 @@
     AX.peg = {
         PEG_OFF: PEG_OFF, PEG_APPLIED: PEG_APPLIED, PEG_STALE: PEG_STALE, PEG_WIDE: PEG_WIDE,
         FRESH_MS: FRESH_MS, HARD_STALE_MS: HARD_STALE_MS, MAX_WIDEN: MAX_WIDEN,
-        init: init, resetForSwitch: resetForSwitch, source: source, state: state, fresh: fresh, appliedMid: function () { return appliedMid; },
+        jumpPending: jumpPending, pegOutdated: pegOutdated, init: init, resetForSwitch: resetForSwitch, source: source, state: state, fresh: fresh, appliedMid: function () { return appliedMid; },
         applyPeg: applyPeg, shouldReprice: shouldReprice, armSafe: armSafe, wideningFactor: wideningFactor, fetch: fetch,
         _setNow: function (fn) { _now = fn; }, _setPrice: function (p, age) { price = p; goodAtMs = p > 0 ? (_now() - (age || 0)) : 0; },
-        _reset: function () { resetForSwitch(); lastTryMs = 0; }
+        _reset: function () { resetForSwitch(); lastTryMs = 0; },
+        _unpace: function () { lastTryMs = 0; }
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

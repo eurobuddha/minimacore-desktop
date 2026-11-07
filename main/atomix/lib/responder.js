@@ -76,6 +76,7 @@
     function acceptTakerSellMinima(order, coin) {
         var p = pair(order);
         if (!p || !p.en) return false;
+        if (AX.peg && AX.peg.jumpPending && (AX.peg.jumpPending() || AX.peg.pegOutdated())) return false;   // review 7 Nov: peg may be priced off an outdated MEXC mid
         var giveRaw = H.stateAt(coin, 1);                          // USDT they requested, I'd pay (ON-CHAIN, hostile)
         if (!validDec(giveRaw)) return false;                      // non-numeric → decline (never reach BigInt parse)
         var recvRaw = H.coinAmount(coin);                          // mxUSDT the taker locked, I receive
@@ -95,6 +96,7 @@
     /** Taker BUYS mxUSDT from me (they locked USDT wanting mxUSDT). Auto-lock only if it fits an enabled ASK tranche:
      *  within the cap AND the USDT I'd receive ≥ (mxUSDT given × tranche price), meeting my minimum. */
     function acceptTakerBuyMinima(order, c) {
+        if (AX.peg && AX.peg.jumpPending && (AX.peg.jumpPending() || AX.peg.pegOutdated())) return false;   // review 7 Nov: peg may be priced off an outdated MEXC mid
         // REAL USDT ONLY: the ETH HTLC vault is multi-token, so a taker could lock a WORTHLESS ERC20 as the paying
         // leg. Native rejects this via pairFor(c.tokenContract) (its allowlist returns null for a non-USDT token);
         // this is the same gate lockEthCounterLeg + otcVerifyBuy already enforce — never drop it on the buy path.
@@ -123,7 +125,7 @@
     function onSellTake(coin, block, next) {
         if (!ready()) return next();
         var hash = H.stateAt(coin, 5), reqTokenAddr = stripReqToken(H.stateAt(coin, 2));
-        if (!hash) return next();
+        if (!/^0x[0-9A-Fa-f]{64}$/.test(String(hash || ''))) return next();   // SECURITY (review 7 Nov): 32-byte hashlocks only
         // active-currency token only (a stale take of the OTHER currency after a switch would misprice)
         if (String(TR.active().tokenId).toLowerCase() !== String(coin.tokenid || '0x00').toLowerCase()) return next();
         var timelock = Number(H.stateAt(coin, 3)) || 0;
@@ -310,6 +312,10 @@
                     if (c.timelock - ethNow < Number(AX.htlc.CP_SECS_CHECK))   // their USDT lock too close to timeout
                         return recordDecline(hash, 'Maker declined: your USDT lock expires at ' + isoUnix(c.timelock) + ', less than '
                             + Math.round(Number(AX.htlc.CP_SECS_CHECK) / 60) + ' min away — too close to its timeout to lock safely.', true, next);
+                    // SECURITY (review 7 Nov, CRITICAL, mirror of APK 0.2.0): HTLC v1.2 checks SHA2(secret) EQ hash on a secret of
+                    // ANY length; the vault's withdraw takes exactly 32 bytes. On an ETH-first take the TAKER makes the secret, so a
+                    // 40-byte one claims my Minima counter-leg and my USDT withdraw can never match. Paused until HTLC v1.3.
+                    if (AX.htlc.ETH_FIRST_PAUSED) return recordDecline(hash, 'Maker declined: buys paid in USDT are paused on this maker until HTLC v1.3 (the v1.2 script cannot require a 32-byte secret). Your USDT refunds after its timelock.', true, next);
                     gateBuy(c, hash, !!c.otc, function (ok) {   // OTC deal-match OR ladder-fit gate
                         if (!ok) return recordDecline(hash, buyDeclineReason(c, !!c.otc), !c.otc || !!(AX.otc && AX.otc.ready()), next);
                         if (cpBurstFull(hash)) return recordDecline(hash, 'Maker busy: already locking ' + CP_LOCK_BURST

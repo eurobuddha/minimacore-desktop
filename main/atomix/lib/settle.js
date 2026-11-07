@@ -233,6 +233,10 @@
     function checkCanSwapCoin(coin, block, next) {
         var hash = H.stateAt(coin, 5);
         if (!hash) return next();
+        // SECURITY (review 7 Nov, CRITICAL, mirror of APK 0.1.98): the hashlock is counterparty-chosen. KISS compares it
+        // byte-exact, but the ETH leg coerces it to 32 bytes (b32 keeps the last 32), so a 0x00‖H lock got an ETH
+        // counter-leg on H the taker could withdraw while my Minima claim could never match. 32 bytes only.
+        if (!/^0x[0-9A-Fa-f]{64}$/.test(String(hash))) return next();
         var reqTokenAddr = stripReqToken(H.stateAt(coin, 2));
         DB.getSecret(hash, function (e, secret) {
             if (e) return next();
@@ -249,6 +253,15 @@
                 if (got !== String(expTok).toLowerCase()) {
                     return logMismatchOnce(hash, 'minima', 'wrong token locked to me', next);
                 }
+                // SECURITY (review 7 Nov, mirror of APK 0.1.98): claiming reveals my secret. As the initiator, never into a
+                // counter-leg whose refund opens within REVEAL_MIN_BLOCKS — its owner could race it with a refund and use the
+                // secret on my first leg. My own first leg refunds instead (no trade, no loss). A responder is never blocked.
+                // R2-1 (mirror of APK 0.1.99): once a claim/withdraw of mine carried the secret it is public — a retry is never blocked.
+                var left = (Number(H.stateAt(coin, 3)) || 0) - block;
+                secretStillMine(sw, hash, function (mine) {
+                if (mine && left < AX.htlc.REVEAL_MIN_BLOCKS) {
+                    return logMismatchOnce(hash, 'minima', 'counter-leg refund opens in ' + left + ' blocks — not revealing the secret', next);
+                }
                 DB.getRequest(hash, function (e2, req) {
                     if (req && !amountTokenOk([req.reqAmount, req.reqToken], H.coinAmount(coin), reqTokenAddr, false)) {
                         return logMismatchOnce(hash, 'minima', 'counterparty amount/token mismatch', next);
@@ -261,6 +274,7 @@
                             H.claim(coin, hash, secret, C.myMinimaAddr, function (eC, txpowid) {
                                 if (eC) return reportFailure('claim', hash, coin, eC, next);   // stamp stays unless reportFailure clears it
                                 delete lastFail['claimM:' + hash];
+                                markSecretOut(sw, hash, function () { });   // R3-1: only once the claim was really posted
                                 DB.logEvent(hash, DB.EV_MINIMA_CLAIM_SUBMITTED, coin.tokenid || '0x00', H.coinAmount(coin), txpowid, function () {
                                     onChanged(); next();
                                 });
@@ -268,7 +282,41 @@
                         });
                     });
                 });
+                });
             });
+        });
+    }
+
+    /** SECURITY (review 7 Nov, mirror of APK 0.2.3): the same contract must read identically on a second, independent
+     *  endpoint (the primary is endpoints[0]); no second answer = skip this cycle. cb(boolean). */
+    function secondEndpointAgrees(cid, seen, cb) {
+        var eps = ((C.rpc && C.rpc.endpoints) || []).slice(1, 4), i = 0;
+        function same(a, b) {
+            function eq(x, y) { return x != null && y != null && String(x).toLowerCase() === String(y).toLowerCase(); }
+            return eq(a.owner, b.owner) && eq(a.receiver, b.receiver) && eq(a.tokenContract, b.tokenContract) && eq(a.hashlock, b.hashlock)
+                && eq(a.amount, b.amount) && eq(a.requestAmount, b.requestAmount) && Number(a.timelock) === Number(b.timelock)
+                && !!a.withdrawn === !!b.withdrawn && !!a.refunded === !!b.refunded;
+        }
+        (function tryNext() {
+            if (i >= eps.length) return cb(false);
+            ops().getContractOn(eps[i++], cid, function (e, c) {
+                if (e) return tryNext();          // unreachable endpoint → ask the next one
+                cb(!!c && same(seen, c));         // absent or different → do not act this cycle
+            });
+        })();
+    }
+    /** R2-1 (review 7 Nov, mirror of APK 0.1.99): the secret is still mine only if I initiated and no claim/withdraw of
+     *  mine has carried it yet. cb(boolean). */
+    function secretStillMine(sw, hash, cb) {
+        if (!sw || sw.role !== 'INITIATOR') return cb(false);
+        DB.hasEvent(hash, DB.EV_SECRET_OUT, function (e, out) { cb(e ? true : !out); });   // R3-1: a DB error keeps the margin (fail closed)
+    }
+    /** Logged just BEFORE the first claim/withdraw carries my secret. cb(). */
+    function markSecretOut(sw, hash, cb) {
+        if (!sw || sw.role !== 'INITIATOR') return cb();
+        DB.hasEvent(hash, DB.EV_SECRET_OUT, function (e, out) {
+            if (e || out) return cb();
+            DB.logEvent(hash, DB.EV_SECRET_OUT, '', '', '', function () { cb(); });
         });
     }
 
@@ -433,7 +481,22 @@
                                 return logMismatchOnce(hash, 'ETH:' + gc.tokenContract, 'counterparty amount/token mismatch', next);
                             }
                         }
-                        broadcastEthWithdraw(cid, hash, secret, next);
+                        // SECURITY (review 7 Nov, CRITICAL, mirror of APK 0.1.98): withdraw() puts my secret in public calldata, even
+                        // when it reverts. As the initiator, never into a counter-leg whose refund opens within REVEAL_MIN_SECS
+                        // (chain time; an RPC failure skips this cycle). A responder's secret is already public — never blocked.
+                        secretStillMine(swap, hash, function (mine) {
+                            if (!mine) return broadcastEthWithdraw(cid, hash, secret, next);   // responder, or already public (R2-1)
+                            C.rpc.latestBlockTimestamp(function (eT, chainNow) {
+                                if (eT || !(Number(chainNow) > 0)) return next();
+                                var left = Number(gc.timelock) - Number(chainNow);
+                                if (!(left >= AX.htlc.REVEAL_MIN_SECS)) return logMismatchOnce(hash, 'eth', 'counter-leg refund opens in ' + left + 's — not revealing the secret', next);
+                                // review 7 Nov (mirror of APK 0.2.3): one RPC's word never decides a reveal
+                                secondEndpointAgrees(cid, gc, function (ok) {
+                                    if (!ok) return next();
+                                    broadcastEthWithdraw(cid, hash, secret, next, swap);
+                                });
+                            });
+                        });
                     });
                 });
             } else if (iAmSender) {
@@ -564,7 +627,7 @@
     }
 
     // F1: broadcast (retryable, ack-only) vs. confirmation (terminal, from the contract flag on a later cycle).
-    function broadcastEthWithdraw(cid, hash, secret, next) {
+    function broadcastEthWithdraw(cid, hash, secret, next, sw) {
         var key = 'wdEth:' + hash;
         if (!ethRetryDue(key) || inflight[key]) return next();
         inflight[key] = true; markEthAttempt(key);
@@ -572,7 +635,11 @@
             onChanged();
             // ETH_BUSY (the cross-instance lock deferred us) provably did NOT broadcast → clear the retry stamp so
             // the NEXT poll retries promptly instead of waiting out ETH_RETRY_SECS. Confirmed on-chain, not here.
-            ops().withdraw(cid, secret, function (e) { if (e && e.busy) delete ethAttempt[key]; delete inflight[key]; next(); });
+            ops().withdraw(cid, secret, function (e) {
+                if (e && e.busy) delete ethAttempt[key]; delete inflight[key];
+                if (!e && sw) return markSecretOut(sw, hash, next);   // R3-1: only once it was really broadcast
+                next();
+            });
         });
     }
     function broadcastEthRefund(cid, hash, next) {

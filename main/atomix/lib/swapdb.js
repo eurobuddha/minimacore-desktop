@@ -21,6 +21,7 @@
     // hash permanently poisons the REAL claim (mutual-refund grief). EV_MISMATCH never gates anything.
     var EV_MISMATCH = 'CPTXN_MISMATCH';
     var EV_MINIMA_CLAIM_SUBMITTED = 'MINIMA_CLAIM_SUBMITTED', EV_MINIMA_REFUND_SUBMITTED = 'MINIMA_REFUND_SUBMITTED';
+    var EV_SECRET_OUT = 'SECRET_REVEALED';   // initiator: my secret went out in a claim/withdraw (the reveal margin no longer applies)
     // A claim/refund attempt the node refused — note = the reason (one row per distinct reason). Never gates
     // anything; it exists so a failing settlement is VISIBLE while there is still time to act.
     var EV_MINIMA_CLAIM_FAILED = 'MINIMA_CLAIM_FAILED', EV_MINIMA_REFUND_FAILED = 'MINIMA_REFUND_FAILED';
@@ -296,7 +297,7 @@
     }
 
     AX.swapdb = {
-        EV_MINIMA_CLAIM_SUBMITTED: EV_MINIMA_CLAIM_SUBMITTED, EV_MINIMA_REFUND_SUBMITTED: EV_MINIMA_REFUND_SUBMITTED,
+        EV_MINIMA_CLAIM_SUBMITTED: EV_MINIMA_CLAIM_SUBMITTED, EV_SECRET_OUT: EV_SECRET_OUT, EV_MINIMA_REFUND_SUBMITTED: EV_MINIMA_REFUND_SUBMITTED,
         EV_MINIMA_CLAIM_FAILED: EV_MINIMA_CLAIM_FAILED, EV_MINIMA_REFUND_FAILED: EV_MINIMA_REFUND_FAILED,
         EV_LOST: EV_LOST, EV_NEVER_LOCKED: EV_NEVER_LOCKED,
         EV_TAKE_SENT: EV_TAKE_SENT, EV_MAKER_NOTICE: EV_MAKER_NOTICE, EV_DECLINED: EV_DECLINED, EV_TIMEOUT: EV_TIMEOUT, EV_REFUND_SENT: EV_REFUND_SENT,
