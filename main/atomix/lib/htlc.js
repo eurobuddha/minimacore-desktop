@@ -309,6 +309,25 @@
      * Funds from ANY of my 64 default addresses (refund owner pinned via state[0]); grains when tokenId is mxUSDT.
      * cb(err, txpowid). NOTE: like native, a returned txpowid is the mempool id — NOT the eventual on-chain id.
      */
+    /**
+     * Port 253 of every new lock: the RECEIVER's simple address, RETURN SIGNEDBY(<port 4 key>) — mirror of native
+     * MinimaHtlc 0.2.32. No contract reads it (v1.2/v1.3 read ports 0-6, and 100-103 at claim), so the HTLC address is
+     * unchanged. A node keeps a coin and notices its spend when a state value equals an address it tracks, so the
+     * receiver's node holds the lock as it is mined and sees the claim or refund (no phantom balance after a hand
+     * import). The CLEAN address: nodes track a cleaned script (hex uppercased) and a counter-leg key read off the
+     * Ethereum contract is lowercase. Never changes CP_BLOCKS / CP_SECS_CHECK.
+     */
+    var RECEIVER_ADDRESS_PORT = 253;
+    /** cb(address | null), exactly once; null = the node cannot say, and the lock goes out in today's format. */
+    function receiverAddress(pk, cb) {
+        var done = false;
+        M.cmdR('runscript script:"RETURN SIGNEDBY(' + pk + ')"', function (err, resp) {
+            if (done) return; done = true;
+            var a = (!err && resp && resp.clean && resp.clean.address) || '';
+            cb(/^0x[0-9a-fA-F]{64}$/.test(a) ? a : null);
+        });
+    }
+
     function lock(p, cb) {
         // MA-19: reject non-hex/non-decimal before building the send (receiverPubkey comes from a peer order).
         if (!isHex(p.receiverPubkey)) return cb(new Error('lock: non-hex counterparty key'));
@@ -318,13 +337,16 @@
         if (!isDecimal(p.requestAmount)) return cb(new Error('lock: non-decimal request amount'));
         var amount = maybeGrain(p.amount, p.tokenId);
         if (!isDecimal(amount))       return cb(new Error('lock: non-decimal amount'));
-        var state = {
-            '0': p.myPubkey, '1': p.requestAmount, '2': '[' + p.reqToken + ']', '3': p.timelockBlock,
-            '4': p.receiverPubkey, '5': p.hashlock, '6': p.ownerEthKey, '7': p.otc
-        };
-        var send = 'send amount:' + amount + ' mine:true address:' + HTLC_ADDRESS +
-            ' state:' + JSON.stringify(state) + ' tokenid:' + p.tokenId;
-        M.cmdR(send, function (err, resp) { cb(err, err ? '' : (resp ? (resp.txpowid || '') : '')); });
+        receiverAddress(p.receiverPubkey, function (receiverAddr) {
+            var state = {
+                '0': p.myPubkey, '1': p.requestAmount, '2': '[' + p.reqToken + ']', '3': p.timelockBlock,
+                '4': p.receiverPubkey, '5': p.hashlock, '6': p.ownerEthKey, '7': p.otc
+            };
+            if (receiverAddr) state[String(RECEIVER_ADDRESS_PORT)] = receiverAddr;
+            var send = 'send amount:' + amount + ' mine:true address:' + HTLC_ADDRESS +
+                ' state:' + JSON.stringify(state) + ' tokenid:' + p.tokenId;
+            M.cmdR(send, function (err, resp) { cb(err, err ? '' : (resp ? (resp.txpowid || '') : '')); });
+        });
     }
 
     /** Run a list of node commands in sequence; cb(err, lastResponse). A failing step short-circuits (the caller
@@ -410,6 +432,7 @@
         var amount = maybeGrain(p.amount, p.tokenId), change = AX.dec.sub(p.totalSelected, amount);
         if (!isDecimal(amount)) return cb(new Error('lock: non-decimal amount'));
         if (AX.dec.gt0(change) && !isDecimal(change)) return cb(new Error('lock: non-decimal change'));
+        receiverAddress(p.receiverPubkey, function (receiverAddr) {
         withScript(function (done) {
             var id = txnId(), seq = ['txncreate id:' + id];
             for (var i = 0; i < p.coinids.length; i++) seq.push('txninput id:' + id + ' coinid:' + p.coinids[i]);
@@ -421,6 +444,7 @@
             seq.push('txnstate id:' + id + ' port:5 value:' + p.hashlock);
             seq.push('txnstate id:' + id + ' port:6 value:' + p.ownerEthKey);
             seq.push('txnstate id:' + id + ' port:7 value:' + p.otc);
+            if (receiverAddr) seq.push('txnstate id:' + id + ' port:' + RECEIVER_ADDRESS_PORT + ' value:' + receiverAddr);
             seq.push('txnoutput id:' + id + ' amount:' + amount + ' address:' + (p.htlc13 ? HTLC_ADDRESS_V13 : HTLC_ADDRESS) + ' tokenid:' + p.tokenId + ' storestate:true');
             if (AX.dec.gt0(change)) seq.push('txnoutput id:' + id + ' amount:' + change + ' address:' + p.myAddress + ' tokenid:' + p.tokenId + ' storestate:false');
             seq.push('txnsign id:' + id + ' publickey:auto');
@@ -433,6 +457,7 @@
                 });
             });
         }, cb);
+        });
     }
 
     // Native 0.1.46–0.1.52: fresh balance preflight, strict validation and compact bounded wallet reads.
