@@ -57,6 +57,11 @@ function log(line) {
   const entry = new Date().toISOString().slice(11, 19) + " " + line;
   LOG_RING.push(entry); if (LOG_RING.length > 200) LOG_RING.shift();
   console.log("[atomix]", line);
+  // an identity halt is kept ON DISK (15 Nov: a halt fired and its reason was lost with the console): the line
+  // carries the full public key / ETH addresses, never a private key
+  if (/IDENTITY MISMATCH|AtomiX halted/.test(line)) {
+    try { fs.appendFileSync(path.join(dir(), "atomix-identity.log"), new Date().toISOString() + " " + line + "\n", { mode: 0o600 }); } catch (e) { /* the console still has it */ }
+  }
 }
 
 // The order book publishes / tombstones by SENDing a 1-nano MINIMA coin that carries the signed order in state.

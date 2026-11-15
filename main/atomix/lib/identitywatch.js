@@ -65,15 +65,27 @@
         });
     }
 
+    /** A key list that can PROVE "not owned": every key the node says it has (keys.total) came back, well-formed.
+     *  A list without .complete (an older loader) counts as complete only when non-empty — the previous rule. */
+    function complete(keys) { return !!(keys && keys.length && (keys.complete === undefined ? true : keys.complete)); }
+
     function checkMinima(ctx, next) {
         var mine = ctx.htlc.publickey;
         if (!mine) return next();
+        var want = H.normKey(mine);
         H.loadKeys(function (err, keys) {
-            if (err || !keys || !keys.length) return next();          // cannot verify — never halt on this
-            var owned = keys.indexOf(H.normKey(mine)) >= 0;
-            state.minimaMismatch = !owned;
-            state.orphanedPk = owned ? '' : mine;
-            next();
+            if (err || !complete(keys)) return next();                // cannot verify — never halt on this
+            if (keys.indexOf(want) >= 0) { state.minimaMismatch = false; state.orphanedPk = ''; return next(); }
+            // "not owned" from ONE read is not enough to halt: read again at once, and halt only if a second
+            // complete list also lacks the key (an incomplete or failed second read leaves the verdict untouched)
+            H.loadKeys(function (err2, keys2) {
+                if (err2 || !complete(keys2)) return next();
+                var owned = keys2.indexOf(want) >= 0;
+                state.minimaMismatch = !owned;
+                state.orphanedPk = owned ? '' : mine;
+                state.keysRead = keys2.length; state.keysTotal = keys2.total === undefined ? null : keys2.total;
+                next();
+            });
         });
     }
 
@@ -82,18 +94,23 @@
         if (!have) return next();
         // Same derivation as boot (seedrandom modifier:ethbridge), but the key is turned into an address and
         // dropped — never assigned back into ctx, so nothing can swap a funded wallet out mid-swap.
-        M.cmdR('seedrandom modifier:ethbridge', function (err, r) {
-            if (err || !r || !r.seedrandom) return next();            // node busy / READ-only — cannot verify
-            var addr;
-            try {
-                var p = String(r.seedrandom);
-                addr = E.addressFromPriv(p.indexOf('0x') === 0 ? p : '0x' + p);
-            } catch (e) { return next(); }
-            var same = String(addr).toLowerCase() === String(have).toLowerCase();
-            state.ethMismatch = !same;
-            state.staleEth = same ? '' : have;
-            state.nodeEth = same ? '' : addr;
-            next();
+        function derive(cb2) {
+            M.cmdR('seedrandom modifier:ethbridge', function (err, r) {
+                if (err || !r || !r.seedrandom) return cb2(null);         // node busy / READ-only — cannot verify
+                try { var p = String(r.seedrandom); cb2(String(E.addressFromPriv(p.indexOf('0x') === 0 ? p : '0x' + p))); }
+                catch (e) { cb2(null); }
+            });
+        }
+        var same = function (a) { return String(a).toLowerCase() === String(have).toLowerCase(); };
+        derive(function (addr) {
+            if (!addr) return next();
+            if (same(addr)) { state.ethMismatch = false; state.staleEth = ''; state.nodeEth = ''; return next(); }
+            // one differing derivation is not enough: derive again, halt only if it gives the SAME other address
+            derive(function (addr2) {
+                if (!addr2 || String(addr2).toLowerCase() !== String(addr).toLowerCase()) return next();
+                state.ethMismatch = true; state.staleEth = have; state.nodeEth = addr2;
+                next();
+            });
         });
     }
 
@@ -101,7 +118,11 @@
         if (!halted()) { state.alarmRaised = false; return; }
         if (state.alarmRaised) return;
         state.alarmRaised = true;
-        var msg = 'IDENTITY MISMATCH — halting new trades. ' + summary();
+        // every value in FULL (owner rule: a shortened key or address cannot be checked or pasted)
+        var msg = 'IDENTITY MISMATCH — halting new trades. ' + summary() +
+            (state.minimaMismatch ? ' Published Minima key ' + state.orphanedPk + ' is not in the node\'s key list (' +
+                state.keysRead + ' read, node total ' + (state.keysTotal === null ? 'not reported' : state.keysTotal) + ', confirmed by two reads).' : '') +
+            (state.ethMismatch ? ' ETH wallet in use ' + state.staleEth + ', node derives ' + state.nodeEth + ' (confirmed by two derivations).' : '');
         if (glob.MDS && MDS.log) MDS.log('[AtomiX] ' + msg);
         if (glob.MDS && MDS.notify) MDS.notify('AtomiX halted — wallet mismatch. Rescue funds and reinstall.');
     }
@@ -111,6 +132,7 @@
         state.minimaMismatch = false; state.ethMismatch = false;
         state.orphanedPk = ''; state.staleEth = ''; state.nodeEth = '';
         state.lastCheckMs = 0; state.inFlight = false; state.alarmRaised = false;
+        state.keysRead = 0; state.keysTotal = null;
     }
     function _setMismatch(minima, eth) { state.minimaMismatch = !!minima; state.ethMismatch = !!eth; }
 

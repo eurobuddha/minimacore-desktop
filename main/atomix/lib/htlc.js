@@ -201,7 +201,14 @@
             if (err) return cb(err);
             var keys = (r && r.keys) || r || [];
             var out = [];
+            if (!Array.isArray(keys)) keys = [];                 // a string / odd reply is not a key list
             for (var i = 0; i < keys.length; i++) out.push(normKey(keys[i].publickey || keys[i]));
+            // .total = the node's own key count; .complete = every key it says it has came back. IdentityWatch only
+            // calls a key "not owned" from a COMPLETE list (a short reply once halted a healthy install)
+            var total = r && r.total !== undefined && r.total !== null && isFinite(Number(r.total)) ? Number(r.total) : null;
+            out.total = total;
+            out.complete = out.length > 0 && (total === null || out.length >= total) &&
+                out.every(function (k) { return /^[0-9A-F]+$/.test(k) && k.length >= 32; });
             cb(null, out);
         });
     }
