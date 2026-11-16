@@ -116,9 +116,16 @@
                 saveState(function () { cb(null); });
             });
         }
-        // manual: publish as-is (or tombstone if empty)
+        // manual: publish as-is (or tombstone if empty). A confirmed manual publish is LIVE again: clear the withdrawn
+        // flag a tombstone set (15 Nov: only the pegged path cleared it, so a live manual market stayed "Offline ·
+        // market withdrawn" on screen while takers could trade it)
         if (!o.pairs[SYM].bids.length && !o.pairs[SYM].asks.length) return tombstone(avail, cb);
-        doPublish(o, cb);
+        doPublish(o, function (err) {
+            if (err) return cb(err);
+            if (!stateCache.withdrawn) return cb(null);
+            stateCache.withdrawn = false;
+            saveState(function () { cb(null); });
+        });
     }
     /** BACKING CLAMP (native SwapEngine.checkLadderCoins): before publishing a MULTI-tranche ask ladder,
      *  advertise only the largest PREFIX of ask tranches whose CUMULATIVE size the total free balance covers —
