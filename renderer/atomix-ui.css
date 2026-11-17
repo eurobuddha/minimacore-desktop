@@ -232,7 +232,7 @@
 .axapp .ax-depth.best { background: var(--ax-surface2); font-weight: 700; }
 .axapp .ax-depth .divider { color: var(--ax-dim2); font-family: var(--ax-mono); flex: none; }
 .axapp .ax-half { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.axapp .ax-half .top { display: flex; justify-content: space-between; gap: 8px; }
+.axapp .ax-half .top { display: flex; justify-content: flex-start; gap: 8px; }   /* the size sits beside its price on BOTH sides (space-between threw the offer's size to the far edge) */
 .axapp .ax-half.bid .top { flex-direction: row-reverse; }
 .axapp .ax-half.bid { align-items: flex-end; }
 .axapp .ax-half.takeable { cursor: pointer; }
