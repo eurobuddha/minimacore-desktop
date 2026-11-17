@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.60] — the node starts again after a pid reuse
+
+- `reclaimStaleNode`: the pid in `node.pid` counts as "our node from an earlier launch" only while that pid still runs our jar. Pids are reused — DexiconPro (same code) hit it on 17 Nov 2026: the pidfile's pid had become a macOS XPC service, the start reported "port in use by ThemeWidgetControlViewService" and the node was never launched, with no log line. A refused start is now logged. Source fix; no installer cut yet.
+
 ## [0.18.59] — PandaPools parity manifest
 
 - Same build as 0.18.58 plus the regenerated `scripts/pandapools-parity.manifest.json` (the committed digest of the vendored engine files, which CI verifies without the donor repo). 0.18.58 re-vendored `reserve-recovery.js` and `store.js` from pandapools-mds 0.6.44 without updating the manifest, so its CI matrix failed on all three platforms; v0.18.58 is not released.

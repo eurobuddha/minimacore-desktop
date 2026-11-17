@@ -326,19 +326,24 @@ class NodeManager extends EventEmitter {
     const cfg = config.load();
     const port = cfg.basePort, dataDir = cfg.dataFolder || config.defaultDataFolder();
     const candidates = new Map();   // pid → command
+    const isOurs = (cmd) => /(minima|parlons-node)\.jar/.test(cmd)
+      && (cmd.includes(dataDir) || cmd.includes("-port " + port) || cmd.includes("-Dparlons.node.port=" + port));
     try {
       const pf = JSON.parse(fs.readFileSync(this.pidfilePath(), "utf8"));
-      if (pf && pf.pid && alive(pf.pid)) candidates.set(pf.pid, commandOf(pf.pid));
+      // A pid from an earlier launch is only "our node" while that pid still runs OUR jar. Pids are reused: on
+      // 17 Nov 2026 DexiconPro's pidfile pid had become a macOS XPC service, this code reported "port in use by
+      // ThemeWidgetControlViewService" and the node was never started - silently, without a log line.
+      if (pf && pf.pid && alive(pf.pid) && isOurs(commandOf(pf.pid))) candidates.set(pf.pid, commandOf(pf.pid));
       else try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
     } catch (e) { /* no pidfile */ }
     for (const pid of listeners(port)) if (!candidates.has(pid)) candidates.set(pid, commandOf(pid));
     if (candidates.has(process.pid)) candidates.delete(process.pid);
-    const isOurs = (cmd) => /(minima|parlons-node)\.jar/.test(cmd)
-      && (cmd.includes(dataDir) || cmd.includes("-port " + port) || cmd.includes("-Dparlons.node.port=" + port));
     for (const [pid, cmd] of candidates) {
       if (!isOurs(cmd)) {
         this.portOwner = { pid, command: cmd || "(unknown)" };
-        return "port " + port + " is in use by " + (cmd ? cmd.slice(0, 120) : "another program") + " (pid " + pid + ") — choose another base port in Settings, or stop that program";
+        const why = "port " + port + " is in use by " + (cmd ? cmd.slice(0, 120) : "another program") + " (pid " + pid + ") — choose another base port in Settings, or stop that program";
+        this.log("[app] node NOT started: " + why);
+        return why;
       }
       this.log("[app] a node from an earlier launch is still running (pid " + pid + ") — stopping it before starting");
       try { await Promise.race([rpcCall(this.rpcPort(), config.rpcSecret(), "quit"), sleep(8000)]); } catch (e) {}
