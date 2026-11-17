@@ -157,7 +157,12 @@
         return el('div', {}, [
             el('div', { class: 'hdr' }, [
                 el('div', { class: 'brand', text: 'AtomiX' }),
-                el('button', { class: 'pill accent', text: ccy(), onclick: switchCurrency }),
+                // 'ccy', not just 'pill accent': that is the SAME class the Mainnet status pill below
+                // carries, so the switch was dressed as a badge and people did not try it. The ⇄ and the
+                // border are what mark it as a control; the glow is a bonus and is dropped entirely under
+                // prefers-reduced-motion, which is why neither of them moves. (native 0.1.65)
+                el('button', { class: 'pill accent ccy', text: ccy(), onclick: switchCurrency,
+                               'aria-label': 'Trading ' + ccy() + '. Tap to switch to ' + TR.other().coinLabel + '.' }),
                 el('button', { class: 'pill', text: AX.ui.dark ? '☾' : '☀', onclick: toggleTheme }),
                 el('button', { class: 'pill', text: '?', onclick: welcomeDialog }),
                 el('span', { class: 'pill accent' }, [el('span', { class: 'dot' }), document.createTextNode('Mainnet')])
@@ -416,10 +421,14 @@
             if (!row) return el('div', { class: 'half' + (isBid ? ' bid' : '') }, [el('span', { class: 'sz', text: '—' })]);
             var cap = B.levelCap(row.maker, row.level, isBid);
             var mine = B.isMine(row.maker, myId());
+            // the two halves mirror each other round the divider: size, price │ price, size (the bid used to read price, size,
+            // which put its size against the divider instead of its price)
+            var px = el('span', { class: 'mono px ' + (isBid ? 'bidpx' : 'askpx'), text: AX.fmt.px(row.level.p) });
+            var sz = el('span', { class: 'sz', text: AX.fmt.abbrev(row.level.a) });
             return el('div', { class: 'half' + (isBid ? ' bid' : ''), onclick: function () { if (!mine && cap > 0) AX.ui.onTake && AX.ui.onTake(row.maker, isBid); } }, [
-                el('span', { class: 'mono px ' + (isBid ? 'bidpx' : 'askpx'), text: AX.fmt.px(row.level.p) }),
+                isBid ? sz : px,
                 document.createTextNode(' '),
-                el('span', { class: 'sz', text: AX.fmt.abbrev(row.level.a) }),
+                isBid ? px : sz,
                 el('div', { class: 'tag' + (mine ? ' you' : ''), text: mine ? 'you' : AX.fmt.shorten(row.maker.signerPk) })
             ]);
         }
@@ -671,12 +680,17 @@
 
     // ---- ACTIVITY ----
     function activityTab() {
-        var list = S.swaps || [];
+        // History for the SELECTED market only (plus any still-actionable swap in the other one — TR.visibleIn).
+        // Unscoped this listed both currencies at once, so switching to MINIMA still showed the dollar history:
+        // the rows carry their market in selltoken/buytoken, the list just never read it.
+        var all = S.swaps || [], list = [], now = Date.now(), tip = Number(AX.ui.block) || 0;
+        for (var vi = 0; vi < all.length; vi++) if (TR.visibleIn(all[vi], TR.active(), tip, now)) list.push(all[vi]);
         var hdrKids = [el('div', { class: 'brand', style: 'font-size:16px;flex:1', text: 'Your swaps' })];
-        if (list.length) hdrKids.push(el('button', { class: 'pill', text: '⬇ Export CSV',
+        // Export stays ALL currencies (it is an accounting export), so it is offered whenever any swap exists.
+        if (all.length) hdrKids.push(el('button', { class: 'pill', text: '⬇ Export CSV',
             onclick: function () { AX.ui.onExportCsv && AX.ui.onExportCsv(); } }));
         var wrap = el('div', {}, [el('div', { class: 'hdr', style: 'display:flex;align-items:center;gap:8px' }, hdrKids)]);
-        if (!list.length) { wrap.appendChild(el('div', { class: 'empty', text: 'No swaps yet — your completed and refunded swaps will appear here.' })); return wrap; }
+        if (!list.length) { wrap.appendChild(el('div', { class: 'empty', text: 'No ' + ccy() + ' swaps yet — your completed and refunded swaps will appear here.' })); return wrap; }
         list.forEach(function (sw) {
             wrap.appendChild(el('div', { class: 'card tight', style: 'cursor:pointer',
                 onclick: function () { AX.ui.onSwapDetail && AX.ui.onSwapDetail(sw.hash); } }, [
@@ -684,11 +698,44 @@
                     el('div', { class: 'mono', style: 'flex:1;font-size:14px', text: sw.sellamount + ' ' + tok(sw.selltoken) + ' → ' + sw.buyamount + ' ' + tok(sw.buytoken) }),
                     el('span', { class: 'status ' + sw.status.toLowerCase(), text: statusLabel(sw.status) })
                 ]),
-                el('div', { class: 'statusline', text: AX.inspect.statusDetail(sw) }),
+                el('div', { class: 'statusline', text: AX.inspect.statusDetail(sw) })
+            ].concat(visLines(sw), [
                 el('div', { class: 'statusline dim', style: 'font-size:11px', text: 'Tap to inspect both legs live' })
-            ]));
+            ])));
         });
         return wrap;
+    }
+    /** Swap-status visibility for a swap I started (0.1.39, native 0.1.84): steps done, the maker's deadline, its
+     *  latest notice, when the refund opens, a "Refund now" button, and the refund tx IN FULL. sw.vis comes from
+     *  settle.visibility (app.refreshSwaps). Countdowns re-read on each render (the 90s refresh). */
+    function visLines(sw) {
+        var v = sw.vis, out = [];
+        if (!v) return out;
+        var now = Math.floor(Date.now() / 1000), tip = Number(AX.ui.block) || 0, waiting = sw.status === 'STARTED';
+        var cur = v.blocks ? tip : now;
+        function when(t) { return v.blocks ? 'block ' + t : new Date(t * 1000).toLocaleString(); }
+        function left(t) {
+            var d = t - cur + 1;
+            if (v.blocks) return tip ? d + (d === 1 ? ' block' : ' blocks') : 'a few blocks';
+            return d >= 3600 ? Math.floor(d / 3600) + 'h ' + Math.ceil((d % 3600) / 60) + 'm' : Math.ceil(d / 60) + ' min';
+        }
+        function line(text, cls, style) { return el('div', { class: 'statusline' + (cls ? ' ' + cls : ''), style: style || '', text: text }); }
+        if (v.steps.length) out.push(line('✓ ' + v.steps.join('  ·  ✓ ')));
+        if (waiting && !v.timedOut && cur < v.respondBy) out.push(line('Maker must respond by ' + when(v.respondBy)));
+        if (v.notice) out.push(line((v.notice.state === 'declined' ? 'Maker declined: ' : 'Maker is retrying: ') + v.notice.reason, v.notice.state === 'declined' ? '' : 'dim'));
+        if ((waiting || sw.status === 'ERROR') && (v.timedOut || cur >= v.respondBy) && !v.refundSent)
+            out.push(line('Refund opens ' + when(v.refundAt + (v.blocks ? 1 : 0)) + ' — automatic, app open or not'));
+        if (v.refundSent) out.push(line('Refund sent: ' + v.refundSent, 'mono', 'word-break:break-all;user-select:all'));
+        if (v.refunded) out.push(line('Refunded', 'ok'));
+        if (waiting || sw.status === 'ERROR') {
+            var open = cur > v.refundAt;
+            var btn = { class: 'pill' + (open ? ' accent' : ''), style: 'margin-top:8px' + (open ? '' : ';opacity:.55'),
+                text: open ? 'Refund now' : 'Refund now (opens in ' + left(v.refundAt) + ')',
+                onclick: function (e) { e.stopPropagation(); if (open && AX.ui.onRefundNow) AX.ui.onRefundNow(sw.hash); } };
+            if (!open) btn.disabled = 'disabled';
+            out.push(el('button', btn));
+        }
+        return out;
     }
     function statusLabel(s) { return { STARTED: 'waiting', LOCKED: 'locked', CLAIMING: 'claiming', COMPLETE: 'complete', REFUNDED: 'refunded', ERROR: 'error' }[s] || s.toLowerCase(); }
 
