@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.58] — PandaPools upkeep: review fixes
+
+- Review of the automatic upkeep: a reserve re-check of a recipe this node already holds no longer pauses owner signing for it (engine `reserve-recovery.js` from pandapools-mds 0.6.44); `autoUpkeep` retries next cycle instead of giving up when a restore is already running or storage is unavailable; the manual "Confirm wallet state" passes the chain tip, so it works for a restored block-mode key.
+
 ## [0.18.57] — PandaPools: pool upkeep is automatic
 
 - Parity with native Dexicon 0.2.95 / 0.3.61 and PandaPools MDS 0.6.43. In `main/pandapools.js` (`autoUpkeep`, every scan cycle): a saved pool whose reserves this node cannot see recovers itself — once per session per pool, silently: re-track the covenant, verify and import both reserve coins (local node, then the archive); the service's keep-fresh then recreates them young so every light node sees the pool again. Only a pool whose owner key this node holds.

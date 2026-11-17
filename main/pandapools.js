@@ -606,7 +606,7 @@ async function collectToWallet() {
   }), 240000, "Collecting timed out — check your balance; you can retry from My LP.");
 }
 
-// ---- 0.18.57: the daily pool upkeep is automatic (parity with APK 0.2.95 / MDS 0.6.43) ----
+// ---- 0.18.57/0.18.58: the daily pool upkeep is automatic (parity with APK 0.2.95 / MDS 0.6.43) ----
 // A saved pool whose reserves this node cannot see recovers itself — once per session per pool, one per cycle,
 // silently: re-track the covenant, verify and import both reserve coins (local node, then the archive); the
 // service's keep-fresh then recreates them young. Only a pool whose owner key this node holds (readKeyUses
@@ -624,7 +624,11 @@ function autoUpkeep(tip) {
       const live = POOLS.find(function (p) { return p.address && p.address.toLowerCase() === a && active.ReserveRecovery.complete(p); });
       if (!live && !recovering && !AUTO_RECOVERED[a]) {
         AUTO_RECOVERED[a] = true; recovering = true;
-        active.PoolMgr.readKeyUses(r.opk, function (uses) { if (uses !== null) recoverSaved(r.address).catch(function () {}); });
+        active.PoolMgr.readKeyUses(r.opk, function (uses) {
+          if (uses === null) return;                                   // not this node's key: a foreign recipe keeps its card
+          if (recoveryBusy) { delete AUTO_RECOVERED[a]; return; }      // a restore is running (the key read is async): retry next cycle
+          recoverSaved(r.address).catch(function () { delete AUTO_RECOVERED[a]; });   // e.g. storage unavailable: retry next cycle
+        });
       }
       if ((r.signingStateUnverified || active.Store.confirmationFailed(r.opk)) && !AUTO_CONFIRMED[k]) {
         AUTO_CONFIRMED[k] = true;
@@ -681,7 +685,7 @@ async function archiveSettings(url) {
 }
 async function confirmSigning(opk,attested) {
   await init();if(attested!==true||typeof opk!=="string"||!/^0x[0-9a-fA-F]{64}$/.test(opk))return false;
-  const active=ctx;return new Promise(resolve=>active.ReserveRecovery.confirmKey(opk,ok=>{emitter.emit("update");resolve(ok);}));
+  const active=ctx;return new Promise(resolve=>active.ReserveRecovery.confirmKey(opk,ok=>{emitter.emit("update");resolve(ok);},lastTip));   // block-mode: the tip counts too
 }
 
 // Full backups are captured and encrypted in main; renderer never receives node bytes or its inner password.

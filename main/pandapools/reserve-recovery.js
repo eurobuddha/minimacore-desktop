@@ -181,7 +181,12 @@ var ReserveRecovery = (function () {
         call(local,"runscript script:"+Covenant.scriptArg(e.script),function(j){
             var r=j&&j.response;
             if(!r||!truth(r.parseok)||!r.script||key(r.script.address)!==key(e.addr)){cb(false,e.addr+"\nCovenant address did not verify.");return;}
-            var p=pool(e);p.signingStateUnverified=true;
+            var p=pool(e);
+            // A recipe this node already holds keeps its own signing state: re-checking its reserves (the card's
+            // button or the automatic pass) is not a wallet restore and must not pause a key the owner has confirmed.
+            // A recipe new to this node starts held, as before (0.6.44).
+            Store.ownAll(function(ps){var ex=(ps||[]).filter(function(x){return key(x.address)===key(e.addr);})[0];
+            p.signingStateUnverified=!ex||ex.signingStateUnverified!==false;
             Store.ownRecord(p,function(saved){
                 if(!saved){cb(false,e.addr+"\nCould not save the recipe and signing hold. Nothing imported.");return;}
                 if(integer(e.kidx,2048))PoolMgr.rememberKidx(e.opk,Number(e.kidx));
@@ -190,6 +195,7 @@ var ReserveRecovery = (function () {
                     if(!tracked){cb(false,e.addr+"\nCould not track covenant; recipe retained.");return;}
                     savedHints(p,function(){recover(p,e,archive,function(ok,detail){if(!ok){cb(false,detail);return;}Store.ownRecord(p,function(persisted){cb(!!persisted,detail+(persisted?"":"\nCould not save verified reserve IDs."));});});});
                 });
+            });
             });
         });
     }
@@ -204,7 +210,7 @@ var ReserveRecovery = (function () {
         if(!root||!integer(root.pandapools_backup,3)||Number(root.pandapools_backup)<1||!Array.isArray(root.pools)||!root.pools.length||root.pools.length>500){cb({restored:0,total:0,warn:"Unsupported or empty pool backup."});return;}
         var i=0,ok=0,details=[];
         function next(){
-            if(i===root.pools.length){cb({restored:ok,total:i,regen:0,details:details,warn:"Owner signing is paused for restored recipes. Confirm the latest complete wallet signing state before spending. "+NOTICE});return;}
+            if(i===root.pools.length){cb({restored:ok,total:i,regen:0,details:details,warn:"A recipe new to this node starts with owner signing paused until this wallet\'s signing state is confirmed; a block-mode key confirms itself from the chain tip."+NOTICE});return;}
             restoreOne(root.pools[i++],archive,function(verified,detail){if(verified)ok++;details.push(detail);if(progress)progress(detail);next();});
         }cancelPoolTransactions(function(ok){if(ok)next();else cb({restored:0,total:root.pools.length,warn:"Could not cancel existing pool transactions. Recovery did not start; clear pending PandaPools actions and retry."});});
     }
