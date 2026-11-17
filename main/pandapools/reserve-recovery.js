@@ -432,8 +432,23 @@ var ReserveRecovery = (function () {
         url=String(url||"").trim();if(url&&!validEndpoint(url)){cb(false);return;}
         Store.kvSet("recovery_archive",url,function(){Store.kvGet("recovery_archive",function(saved,ok){cb(ok!==false&&saved===url);});});
     }
-    function confirmKey(opk,cb){
-        PoolMgr.readKeyUses(opk,function(uses,kidx,capacity){if(!integer(uses,MAX_TREE_USES)||!(Number(uses)<capacity)){cb(false);return;}Store.ownAcknowledge(opk,Number(uses),cb);});
+    // 0.6.43: is it safe to sign with this key again? Legacy 64^3 keys sign leaf uses+1, so the counter must
+    // have caught up with the recorded floor. Block-mode 128^4 keys (-blockaskeyuses) sign leaf
+    // max(chainBlock, uses+1): every earlier signature used a leaf at most equal to the tip of its day, so once
+    // the tip has passed the floor no leaf can repeat whatever a restored counter says. Mirrors KeyUses.counterSafe.
+    function counterSafe(uses,floor,capacity,chainBlock){
+        if(!integer(uses,MAX_TREE_USES)||Number(uses)>=capacity)return false;
+        if(Number(uses)>=Number(floor))return true;
+        return capacity>=MAX_TREE_USES&&Number(chainBlock)>Number(floor);
+    }
+    /** @param chainBlock the current tip (0 = unknown: legacy rule only). @param blockModeOnly true from the
+     *  automatic path: a legacy key is never confirmed without the owner's attestation. */
+    function confirmKey(opk,cb,chainBlock,blockModeOnly){
+        PoolMgr.readKeyUses(opk,function(uses,kidx,capacity){
+            if(!integer(uses,MAX_TREE_USES)||!(Number(uses)<capacity)){cb(false);return;}
+            if(blockModeOnly&&!(capacity>=MAX_TREE_USES)){cb(false);return;}
+            Store.ownAcknowledge(opk,Number(uses),cb,capacity,Number(chainBlock)||0);
+        });
     }
     // Mirror core txnsign:auto: only actual simple script rows supply automatic signing keys.
     function checkSignature(ids,signer,cb,recovery){
@@ -472,5 +487,5 @@ var ReserveRecovery = (function () {
             });
         }call(local,"checkmode",function(j){if(!j||!j.response||j.response.writemode!==true){cb("Enable PandaPools WRITE mode in MiniHub before signing; deferred signature approvals are not supported.");return;}input(0);});
     }
-    return {postedReserves:postedReserves,rememberPosted:rememberPosted,capacityOfRow:capacityOfRow,restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
+    return {postedReserves:postedReserves,rememberPosted:rememberPosted,capacityOfRow:capacityOfRow,counterSafe:counterSafe,restore:restore,backup:backup, verifyExport: verifyExport,entry:entry,readCurrent:readCurrent,readReserves:readReserves,recover:recover,validRecipe:validRecipe,complete:complete,fill:fill,coinFor:coinFor,integer:integer,ensureKeys:ensureKeys,classifyKeys:classifyKeys,classifySigning:classifySigning,signingMessage:signingMessage,checkSignature:checkSignature,configuredArchive:configuredArchive,validEndpoint:validEndpoint,allowedArchive:allowedArchive,saveArchive:saveArchive,confirmKey:confirmKey,notice:NOTICE};
 })();

@@ -437,21 +437,25 @@ var Store = (function () {
         });
     }
     // Called only after the owner's explicit current-wallet/other-signers attestation.
-    function ownAcknowledge(opk,uses,cb){
+    function ownAcknowledge(opk,uses,cb,capacity,chainBlock){
+        capacity=capacity||262144;chainBlock=Number(chainBlock)||0;
         if(!recoveryReady||!/^0x[0-9a-fA-F]{64}$/.test(opk)||!ReserveRecovery.integer(uses,268435455)){cb(false);return;}
         var k=opk.toLowerCase();
         ownAll(function(ps,ok){
             var matching=ps.filter(function(p){return p.opk.toLowerCase()===k;});
-            if(!ok||!matching.length||matching.some(function(p){return p.minimumOwnerUses>uses;})){cb(false);return;}
+            if(!ok||!matching.length||matching.some(function(p){return !ReserveRecovery.counterSafe(uses,p.minimumOwnerUses,capacity,chainBlock);})){cb(false);return;}
             failedConfirmations[k]=true;
             function fail(){MDS.sql("UPDATE pp_ownpools SET signing_unverified=1 WHERE LOWER(opk)='"+esc(k)+"'",function(){persistRecovery(function(){cb(false);});});}
-            MDS.sql("UPDATE pp_ownpools SET signing_unverified=0,opkuses="+Number(uses)+" WHERE LOWER(opk)='"+esc(k)+"' AND opkuses<="+Number(uses),function(r){
+            // the floor is the HIGHEST counter ever seen for the key: a block-mode confirmation from the chain tip
+            // may carry a lower node counter, and must not pull the floor down to it.
+            MDS.sql("UPDATE pp_ownpools SET signing_unverified=0,opkuses=CASE WHEN opkuses>"+Number(uses)+" THEN opkuses ELSE "+Number(uses)+" END WHERE LOWER(opk)='"+esc(k)+"'",function(r){
                 if(!r||r.status!==true){fail();return;}
                 persistRecovery(function(saved){
                     if(!saved){fail();return;}
                     ownAll(function(current,readOk){
                         var same=current.filter(function(p){return p.opk.toLowerCase()===k;});
-                        if(!readOk||same.length!==matching.length||!same.every(function(p){return !p.signingStateUnverified&&p.minimumOwnerUses===Number(uses);})){fail();return;}
+                        var floors={};matching.forEach(function(p){floors[p.address.toLowerCase()]=Math.max(Number(uses),Number(p.minimumOwnerUses)||0);});
+                        if(!readOk||same.length!==matching.length||!same.every(function(p){return !p.signingStateUnverified&&p.minimumOwnerUses===floors[p.address.toLowerCase()];})){fail();return;}
                         delete failedConfirmations[k];cb(true);
                     });
                 });

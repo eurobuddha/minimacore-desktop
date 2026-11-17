@@ -250,6 +250,7 @@ function runCycle(tip) {
     ctx.Store.knownAddrsAdd(addresses);
     scanning = false;                 // reset BEFORE emitting, so a throwing update-listener can't leave it wedged
     emitter.emit("update");
+    try { autoUpkeep(tip); } catch (e) {}   // 0.18.57: own pools recover + block-mode keys confirm by themselves
     // 2) background engine — service.js does its own discovery snapshot + feed + keep-fresh + re-announce.
     try { if (serviceHandler) serviceHandler({ event: "NEWBLOCK" }); } catch (e) {}
     // 3) resume any pending signature (harmless on a full-RPC node), then verify pending CREATEs.
@@ -603,6 +604,34 @@ async function collectToWallet() {
       });
     });
   }), 240000, "Collecting timed out — check your balance; you can retry from My LP.");
+}
+
+// ---- 0.18.57: the daily pool upkeep is automatic (parity with APK 0.2.95 / MDS 0.6.43) ----
+// A saved pool whose reserves this node cannot see recovers itself — once per session per pool, one per cycle,
+// silently: re-track the covenant, verify and import both reserve coins (local node, then the archive); the
+// service's keep-fresh then recreates them young. Only a pool whose owner key this node holds (readKeyUses
+// answers null for a foreign key). A restored block-mode owner key (128^4 tree) is confirmed from the chain
+// tip (ReserveRecovery.counterSafe); a legacy key keeps the renderer's attestation button.
+const AUTO_RECOVERED = {}, AUTO_CONFIRMED = {};
+function autoUpkeep(tip) {
+  if (!ctx || !tip) return; const active = ctx;
+  active.Store.ownAll(function (recipes, ok) {
+    if (ok === false || !recipes || active !== ctx) return;
+    let recovering = recoveryBusy;
+    recipes.forEach(function (r) {
+      if (r.retired || !r.address || !r.opk) return;
+      const a = r.address.toLowerCase(), k = r.opk.toLowerCase();
+      const live = POOLS.find(function (p) { return p.address && p.address.toLowerCase() === a && active.ReserveRecovery.complete(p); });
+      if (!live && !recovering && !AUTO_RECOVERED[a]) {
+        AUTO_RECOVERED[a] = true; recovering = true;
+        active.PoolMgr.readKeyUses(r.opk, function (uses) { if (uses !== null) recoverSaved(r.address).catch(function () {}); });
+      }
+      if ((r.signingStateUnverified || active.Store.confirmationFailed(r.opk)) && !AUTO_CONFIRMED[k]) {
+        AUTO_CONFIRMED[k] = true;
+        active.ReserveRecovery.confirmKey(r.opk, function (confirmed) { if (confirmed) emitter.emit("update"); }, tip, true);
+      }
+    });
+  });
 }
 
 async function scanNow() { await init(); return new Promise(function (r) { ctx.Book.scan(function (ps) { POOLS = ps || []; emitter.emit("update"); r(pools()); }); }); }

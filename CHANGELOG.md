@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.57] — PandaPools: pool upkeep is automatic
+
+- Parity with native Dexicon 0.2.95 / 0.3.61 and PandaPools MDS 0.6.43. In `main/pandapools.js` (`autoUpkeep`, every scan cycle): a saved pool whose reserves this node cannot see recovers itself — once per session per pool, silently: re-track the covenant, verify and import both reserve coins (local node, then the archive); the service's keep-fresh then recreates them young so every light node sees the pool again. Only a pool whose owner key this node holds.
+- A restored block-mode owner key (128^4 tree) is confirmed from the chain tip with no button: it signs leaf max(tip, uses+1), so once the tip has passed the recorded floor no leaf can repeat (`ReserveRecovery.counterSafe`). Legacy keys keep the attestation button. A confirmation never lowers the recorded floor.
+- Vendored engine files `reserve-recovery.js` and `store.js` re-synced from pandapools-mds 0.6.43 (parity check: 19 byte-identical files).
+
 ## [0.18.35] — Chat backup
 
 - KeetChat → **My address & QR → Back up chats / Restore chats**: one encrypted `.kbak` file with this
