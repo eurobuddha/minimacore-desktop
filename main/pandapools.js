@@ -720,7 +720,31 @@ async function validateCompleteRecipes(json){
 }
 async function completeBackupRequired(){await init();return new Promise(resolve=>ctx.Store.combinedBackupReady(ok=>resolve(!ok)));}
 
+/**
+ * Before the WALLET consolidates. Core's `consolidate` chooses its own input coins, so it can pick a coin that belongs
+ * to a pool owner key; if that key cannot safely sign (its one-time-signature counter is unknown, regressed or spent)
+ * signing with it could expose the key. PandaPools on Android refuses the consolidation in that case
+ * (OwnerKeyRecovery.checkConsolidation); this is the same rule on the same engine's own classification.
+ * Resolves null when it is safe, otherwise the reason in the engine's own words. Fails closed.
+ */
+async function consolidationCheck() {
+  const STOP = "Nothing consolidated: ";
+  try { await withTimeout(init(), 15000, "PandaPools is still starting"); }
+  catch (e) { return STOP + "could not check your pool owner keys (" + ((e && e.message) || e) + "). Try again in a moment."; }
+  if (!ctx) return STOP + "could not check your pool owner keys. Try again in a moment.";
+  return withTimeout(new Promise(function (resolve) {
+    ctx.Store.ownAll(function (recipes) {
+      var keys = (recipes || []).map(function (p) { return p && p.opk; }).filter(Boolean);
+      if (!keys.length) { resolve(null); return; }                      // no pools of ours: nothing to protect
+      ctx.ReserveRecovery.classifyKeys(keys, function (blocked) {
+        resolve(blocked && blocked.length ? STOP + "your wallet holds a pool owner key that cannot sign.\n\n" + blocked[0].message : null);
+      });
+    });
+  }), 15000, "the key check timed out").catch(function (e) { return STOP + "could not verify your wallet keys (" + ((e && e.message) || e) + ")."; });
+}
+
 module.exports = {
+  consolidationCheck,
   completeBackup, completeBackupRequired, validateCompleteRecipes,
   emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
