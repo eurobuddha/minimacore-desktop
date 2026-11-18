@@ -297,3 +297,21 @@ test("a send failure is explained in words, not dumped as an IPC stack", () => {
   const leaky = raw.filter((a) => /\be\.message\b|\berr\.message\b|String\(e\)/.test(a));
   assert.deepEqual(leaky, [], "every error toast goes through errText: " + leaky.join(" | "));
 });
+
+test("Android Mail address, link and signed beacon interoperate byte for byte", async () => {
+  const codec = require("../main/mailaddress");
+  const keys = require("../main/mailcrypto");
+  const sodium = await keys.ready();
+  const id = await keys.deriveIdentity("test-fixture-only-mail-address-A");
+  const words = "reunion-sting-lazy-tornado-liberty-bubble";
+  assert.equal(codec.phrase(id.publicId), words);
+  assert.equal(codec.direct(words + "\n" + codec.link(id.publicId)), id.publicId);
+  assert.equal(codec.direct(codec.link(id.publicId).replace("reunion", "lemon")), null);
+  const card = codec.card(sodium, id);
+  assert.equal(card.sig, "27c067e038ba079f96ff07b42e0c26e49ee5a91db0963edf364e846192aec8479bde0782bd70c669e956ba3d3f4d6f4a3cad5b4c6fd61f955794690536d5ca05");
+  const coin = { address: codec.ADDRESS, tokenid: "0x00", state: { 0: codec.tag(words), 1: id.publicId, 2: "0x" + card.sig } };
+  const run = async cmd => { assert.ok(cmd.endsWith("depth:1500")); return { status: true, response: [coin] }; };
+  assert.deepEqual(await codec.find(run, sodium, words, 1500), card);
+  coin.state[2] = "0x" + "00".repeat(64);
+  assert.equal(await codec.find(run, sodium, words, 1500), null);
+});

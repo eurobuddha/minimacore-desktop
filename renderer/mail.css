@@ -204,3 +204,7 @@
 .mailapp .mm-seg button[aria-pressed="true"] { background: var(--mm-accent); color: var(--mm-on-accent); font-weight: 700; }
 
 .mailapp :focus-visible { outline: 2px solid var(--mm-accent); outline-offset: -2px; }
+
+.mailapp .mm-self { flex: 1; font-size: 13px; overflow-wrap: anywhere; }
+#view-mail .mail-address-entry fieldset { border: 0; margin: 1em 0; padding: 0; }
+#view-mail .mail-address-entry .mm-word-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .5em; }

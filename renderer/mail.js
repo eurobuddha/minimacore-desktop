@@ -127,6 +127,7 @@
   // ---------------------------------------------------------------- shell
   function header() {
     return '<div class="mm-bar"><span class="mm-brand">MINIMA <i>MAIL</i></span>'
+      + (ID && ID.words ? '<span class="mm-self">you · ' + D.esc(ID.words) + '</span>' : '')
       + '<button class="mm-ibtn" type="button" id="mmTheme" aria-label="Theme" title="Light / dark">' + g.micon("theme") + "</button>"
       + '<button class="mm-ibtn" type="button" id="mmMore" aria-label="About Minima Mail" title="About">' + g.micon("dots") + "</button></div>"
       + '<div class="mm-tabs" role="tablist" id="mmTabs">' + FOLDERS.map(function (f) {
@@ -231,8 +232,9 @@
         : '<div class="mm-empty">Nothing sent yet.</div>';
     }
     if (f === "contacts") {
-      if (!CONTACTS.length) return '<div class="mm-empty">No contacts yet.\nAdd someone\'s Mail key to start.</div>';
-      return '<div class="mm-list">' + CONTACTS.map(function (c) {
+      var add = '<button class="mm-tbtn" id="mmAddContact" type="button">Add contact</button>';
+      if (!CONTACTS.length) return add + '<div class="mm-empty">No contacts yet.</div>';
+      return add + '<div class="mm-list">'  + CONTACTS.map(function (c) {
         var nm = c.username || shortKey(c.publicId);
         return '<button class="mm-row" type="button" data-contact="' + D.esc(c.publicId) + '" style="border-bottom:0">'
           + avatar(c.publicId, nm, 44)
@@ -247,6 +249,10 @@
   function identityBody() {
     var pid = (ID && ID.publicId) || "";
     return '<div class="mm-id">' + avatar(pid, ID && ID.name, 72)
+      + (ID && ID.words ? '<div class="mm-idkey">' + D.esc(ID.words) + '</div>'
+        + '<button class="mm-tbtn" id="mmWords" type="button">Copy address words</button>'
+        + '<button class="mm-tbtn" id="mmLink" type="button">Copy contact link</button>'
+        + '<button class="mm-tbtn" id="mmPublish" type="button">' + (ID.published ? "Stop publishing address" : "Publish my address") + '</button>' : '')
       + '<div class="mm-qr" id="mmQr"></div>'
       + '<div class="mm-idcap">Have someone scan this, or share your key:</div>'
       + '<div class="mm-idkey" id="mmShare" title="Click to copy">' + D.esc(pid || "(connecting to your node…)") + "</div>"
@@ -351,6 +357,14 @@
       + "</div>";
     wireShell(host);
     if (f === "key") drawQr();
+    var add = D.el("mmAddContact");
+    if (add) add.onclick = async function () {
+      var value = await enterAddress();
+      if (!value) return;
+      var name = await D.showPrompt("Contact name", "", "Name");
+      if (!name) return;
+      try { await D.api.mailAddContact(value, name.trim()); render(); } catch (e) { D.toast(errText(e), "err"); }
+    };
     if (f === "settings") wireSettings(host);
     host.querySelectorAll("[data-peer]").forEach(function (r) {
       r.onclick = function (e) {
@@ -375,6 +389,59 @@
     var fab = D.el("mmFab"); if (fab) fab.onclick = function () { openCompose(null); };
   }
 
+  // Desktop counterpart of Android AddressWordEntry. Exact words win over unique prefixes.
+  async function enterAddress() {
+    const dictionary = await D.api.mailAddressWords();
+    const overlay = document.createElement("div");
+    overlay.className = "overlay mail-address-entry";
+    overlay.innerHTML = '<form class="modal"><div class="modal__title">Mail address</div>'
+      + '<textarea class="field__input" rows="2" aria-label="Contact link or Mail key" placeholder="Paste a contact link or Mail key"></textarea>'
+      + '<fieldset><legend>Or enter six address words</legend><div class="mm-word-grid"></div></fieldset>'
+      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">Cancel</button>'
+      + '<button type="submit" class="btn btn--primary">Use address</button></div></form>';
+    const form = overlay.querySelector("form"), raw = form.querySelector("textarea");
+    const grid = form.querySelector(".mm-word-grid"), status = form.querySelector('[role="status"]');
+    const boxes = [], choices = document.createElement("datalist");
+    choices.id = "mmAddressOptions"; grid.append(choices);
+    for (const word of dictionary) { const option = document.createElement("option"); option.value = word; choices.append(option); }
+    function complete(value) {
+      const word = value.trim().toLowerCase();
+      if (!word || dictionary.includes(word)) return word;
+      const matches = dictionary.filter(item => item.startsWith(word));
+      return matches.length === 1 ? matches[0] : "";
+    }
+    for (let i = 0; i < 6; i++) {
+      const box = document.createElement("input");
+      box.className = "field__input"; box.setAttribute("list", choices.id); box.autocomplete = "off";
+      box.setAttribute("aria-label", "Address word " + (i + 1)); box.placeholder = String(i + 1);
+      box.oninput = () => { raw.value = ""; status.textContent = ""; };
+      box.onblur = () => { const word = complete(box.value); if (word) box.value = word; };
+      box.onpaste = event => {
+        const parts = event.clipboardData.getData("text").trim().split(/[\s-]+/);
+        if (parts.length < 2) return;
+        event.preventDefault();
+        const start = parts.length === 6 ? 0 : i;
+        if (start + parts.length > 6) { status.textContent = "Enter six address words."; return; }
+        raw.value = ""; parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
+      };
+      grid.append(box); boxes.push(box);
+    }
+    raw.oninput = () => { if (raw.value) boxes.forEach(box => { box.value = ""; }); };
+    const previous = document.activeElement;
+    D.el("view-mail").append(overlay); raw.focus();
+    return new Promise(resolve => {
+      const done = value => { overlay.remove(); if (previous?.isConnected) previous.focus(); resolve(value); };
+      form.onsubmit = event => {
+        event.preventDefault();
+        if (raw.value.trim()) { done(raw.value.trim()); return; }
+        const values = boxes.map(box => complete(box.value)), bad = values.findIndex(w => !dictionary.includes(w));
+        if (bad >= 0) { status.textContent = "Check word " + (bad + 1); boxes[bad].focus(); return; }
+        done(values.join("-"));
+      };
+      form.querySelector('button[type="button"]').onclick = () => done(null);
+      overlay.onkeydown = e => { if (e.key === "Escape") done(null); };
+    });
+  }
   function wireShell(host) {
     host.querySelectorAll("#mmTabs button").forEach(function (b) {
       b.onclick = function () { VIEW = b.dataset.f; PEER = null; render(); };
@@ -406,7 +473,18 @@
     D.api.appVersion().then(function (v) { var e = D.el("mmVer"); if (e && v) e.textContent = "v" + v; }).catch(function () {});
   }
 
+  async function toggleAddress(key, enabled) {
+    if (enabled && !await D.showConfirm("Keep this address discoverable?",
+        "Your node publishes a signed public card and renews it when needed. Each post spends one nano-Minima and a signing operation.", "Enable")) return;
+    try { ID = await D.api.mailPublishAddress(key, enabled); render(); }
+    catch (e) { D.toast(errText(e), "err"); }
+  }
   function drawQr() {
+    if (ID && ID.words) {
+      D.el("mmWords").onclick = () => D.copy(ID.words);
+      D.el("mmLink").onclick = () => D.copy(ID.link);
+      D.el("mmPublish").onclick = () => toggleAddress(ID.publicId, !ID.published);
+    }
     try {
       if (typeof g.qrcode === "undefined" || !ID || !ID.publicId) return;
       D.api.mailShare().then(function (share) {
@@ -470,8 +548,8 @@
       + '<span class="mm-t">New message</span>'
       + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "Send</button></div>"
       + '<div class="mm-f"><span class="mm-lab">To</span>'
-      + '<input class="mm-monoin" id="mmTo" placeholder="0x… Mail key" autocomplete="off" spellcheck="false" value="' + D.esc(c.to) + '" />'
-      + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "Scan</button>"
+      + '<textarea rows="1" class="mm-monoin" id="mmTo" placeholder="Six words, contact link or Mail key" autocomplete="off" spellcheck="false">' + D.esc(c.to) + '</textarea>'
+      + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmEnterWords">Enter words</button><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "Scan</button>"
       + '<button class="mm-outchip" type="button" id="mmPick" aria-label="Pick a contact">' + g.micon("contacts") + "</button></span></div>"
       + '<div class="mm-f"><span class="mm-lab">Subject</span>'
       + '<input id="mmSubj" placeholder="(optional — subjects make their own thread)" autocomplete="off" value="' + D.esc(c.subject) + '" /></div>'
@@ -490,27 +568,30 @@
         return { label: ct.username || shortKey(ct.publicId), onclick: function () { D.el("mmTo").value = ct.publicId; keep(); } };
       }));
     };
+    D.el("mmEnterWords").onclick = async function () {
+      const value = await enterAddress(); if (value) { D.el("mmTo").value = value; keep(); }
+    };
     D.el("mmScan").onclick = async function () {
       var v = await D.scanQR("Scan a Mail key").catch(function () { return null; });
       if (v) { D.el("mmTo").value = String(v).split("|")[0].trim(); keep(); }
     };
     D.el("mmPhoto").onclick = function () { D.el("mmFile").click(); };
     D.el("mmFile").onchange = function (e) { if (e.target.files[0]) composeImage(e.target.files[0]); };
-    D.el("mmFunds").onclick = function () {
+    D.el("mmFunds").onclick = async function () {
       var to = D.el("mmTo").value.trim();
       if (!to) { D.toast("Add a recipient first.", "err"); return; }
-      sendFunds(to);
+      try { await sendFunds(await D.api.mailResolveAddress(to)); } catch (e) { D.toast(errText(e), "err"); }
     };
     D.el("mmDoSend").onclick = doSend;
   }
   async function doSend() {
-    var to = D.el("mmTo").value.trim().split("|")[0];
+    var to = D.el("mmTo").value.trim();
     var subject = D.el("mmSubj").value.trim();
     var body = D.el("mmBodyIn").value.trim();
-    if (!/^0x[0-9A-Fa-f]{130}$/.test(to)) { D.toast("That doesn't look like a valid Mail key.", "err"); return; }
     if (!body) { D.toast("Write a message first.", "err"); return; }
     var btn = D.el("mmDoSend"); btn.disabled = true;
     try {
+      to = await D.api.mailResolveAddress(to);
       await D.api.mailSend(to, { message: body, subject: subject });
       COMPOSE = null;
       openThread(to, subject, "");
@@ -547,10 +628,10 @@
     render();
   }
   async function composeImage(file) {
-    var to = D.el("mmTo").value.trim().split("|")[0];
-    if (!/^0x[0-9A-Fa-f]{130}$/.test(to)) { D.toast("Add a valid recipient first.", "err"); return; }
+    var to = D.el("mmTo").value.trim();
     var subject = D.el("mmSubj").value.trim();
     try {
+      to = await D.api.mailResolveAddress(to);
       var b64 = await compressImage(file);
       await D.api.mailSend(to, { message: "", subject: subject, type: "image", image: b64 });
       COMPOSE = null; openThread(to, subject, "");
@@ -618,12 +699,14 @@
     ]);
   }
   function contactMenu(peer) {
+    var published = !!CONTACTS.find(c => c.publicId === peer && c.published);
     D.showActionSheet(nameFor(peer, null), [
       { label: "Send a message", onclick: function () { openCompose({ to: peer }); } },
       { label: "Rename", onclick: async function () {
         var n = await D.showPrompt("Rename contact", "", "Name"); if (n == null) return;
         await D.api.mailRenameContact(peer, String(n).trim()); render();
       } },
+      { label: published ? "Stop relaying address" : "Relay signed address", onclick: () => toggleAddress(peer, !published) },
       { label: "Copy Mail key", onclick: function () { D.copy(peer); D.toast("Copied ✓", "ok"); } },
       { label: "Remove", danger: true, onclick: async function () {
         if (!await D.showConfirm("Remove this contact?", "Their messages stay; only the saved name goes.", "Remove", true)) return;

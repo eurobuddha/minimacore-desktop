@@ -239,6 +239,9 @@ ipcMain.handle("mcd:keyReuse", (_e, addrs) => {
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
 ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });
+ipcMain.handle("mcd:mailAddressWords", () => require("./mailaddress").words);
+ipcMain.handle("mcd:mailResolveAddress", (_e, value) => mail.resolveRecipient(value));
+ipcMain.handle("mcd:mailPublishAddress", (_e, key, enabled) => mail.setPublication(key, enabled === true));
 ipcMain.handle("mcd:mailShare", () => mail.shareString());
 ipcMain.handle("mcd:mailThreads", () => mail.threads());
 ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));

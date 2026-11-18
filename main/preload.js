@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld("mcd", {
   // minimaMail (on-chain encrypted messaging; keys stay in main)
   mailInit: () => ipcRenderer.invoke("mcd:mailInit"),
   mailSetName: (n) => ipcRenderer.invoke("mcd:mailSetName", n),
+  mailAddressWords: () => ipcRenderer.invoke("mcd:mailAddressWords"),
+  mailResolveAddress: value => ipcRenderer.invoke("mcd:mailResolveAddress", value),
+  mailPublishAddress: (key, enabled) => ipcRenderer.invoke("mcd:mailPublishAddress", key, enabled),
   mailShare: () => ipcRenderer.invoke("mcd:mailShare"),
   mailThreads: () => ipcRenderer.invoke("mcd:mailThreads"),
   mailThread: (h) => ipcRenderer.invoke("mcd:mailThread", h),
