@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.129] — Dexicon ② Pools, the comparison round (Phase 3d)
+
+- Every screen and state of room ② was captured in Dexicon dark and light at 932x704 and 1440x900 and read beside the Fold and phone captures.
+- **Collect withdrawn funds to my wallet** is now the first line of Back up / restore pools, where the phone has it, and no longer a button of its own on My LP. The same call after the same question.
+- **Wallet**: each balance card has its token mark, as on the phone.
+- Kept different from the phone on purpose: "click to copy" where the phone says "tap"; Add liquidity keeps the desktop's two amounts (the engine call takes both) and shows what the pool price pairs with the MINIMA typed; Close says the reserves pass through the pool's owner address, which is how the desktop engine pays out; a balance opens the wallet's own coins dialog; the old panel's second look ("Original") is gone, Dexicon's own light theme takes its place.
+- The checks that need a node are listed in the plan, section 9.
+
 ## [0.18.128] — Dexicon ② Pools, Activity, and pool operations everywhere they are counted (Phase 3d)
 
 - **Activity** in room ②: My activity (every swap, create, add, migrate and close you sent, newest first, with its state, the transaction id whole, when it was sent and when it was last checked; a failure in plain words with whether funds moved) and All pools (every pool's transactions this node holds, then the older unverified observations, marked as such). Show more loads the rest.

@@ -546,7 +546,7 @@
     const sum = lpSummary(S.mine), n = (S.retired || []).length;
     $("ppLp").innerHTML = `<div class="dx-card pp-card pp-sum"><div class="pp-fl">YOUR LIQUIDITY</div><div class="pp-sum__v">${esc(sum.value)}</div><div class="pp-sum__s">${esc(sum.sub)}</div></div>
       ${S.backupDue ? `<div class="dx-card pp-card pp-card--warn"><b class="pp-ct">Complete encrypted backup required</b><div class="pp-note">Before another pool can be created or migrated, save one encrypted file with your pools and this node's backup. Your pools are not at risk meanwhile; this is the engine's rule so that a new pool can always be recovered.</div><div class="pp-acts">${lpBtn("Back up now", "pptool", "backup", "pp-fill")}</div></div>` : ""}
-      <div class="pp-tools" id="ppTools">${lpBtn("+  CREATE A POOL", "pptool", "create", "pp-fill")}${lpBtn("BACK UP / RESTORE POOLS", "pptool", "recovery", "pp-out")}${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}${lpBtn("COLLECT WITHDRAWN FUNDS TO MY WALLET", "pptool", "collect", "pp-out")}</div>
+      <div class="pp-tools" id="ppTools">${lpBtn("+  CREATE A POOL", "pptool", "create", "pp-fill")}${lpBtn("BACK UP / RESTORE POOLS", "pptool", "recovery", "pp-out")}${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}</div>
       ${collectHtml()}${mineHtml()}
       ${n ? `<div class="dx-card pp-card"><div class="pp-sum__s">${n} closed pool(s) kept for recovery</div><div class="pp-note">Their recipes are still saved and still go into your backups: they are just out of the way. If a close never actually landed, the pool reappears here on its own.</div><div class="pp-acts">${lpBtn("Show closed pools", "pptool", "closed")}</div></div>` : ""}
       <div class="pp-note pp-note--foot">Pools you created on this node. PandaPools keeps their reserves fresh by itself: leave this app and the node running so your pools stay live for everyone. Anyone on the network can trade against them; you earn the 0.50% fee on every swap that routes through them.</div>`;
@@ -610,7 +610,7 @@
     $("ppWal").innerHTML = `<div class="dx-card pp-card pp-wal"><div class="pp-fl"><b>AVAILABLE TO POOL</b></div><div class="pp-note">Sendable balances below. Funds locked in your pools show as LOCKED.</div>
         <div class="pp-recv"${S.addr ? ` data-copy="${esc(S.addr)}" title="Click to copy"` : ""}>${S.addr ? "Receive:  " + esc(S.addr) : "…"}</div><div class="pp-hint">click to copy your receive address</div>
         <button class="pp-link pp-link--row" data-ppwal="minima"${C.gate.on ? " disabled" : ""}>Consolidate MINIMA coins</button><button class="pp-link pp-link--row" data-ppwal="mxusd"${C.gate.on ? " disabled" : ""}>Consolidate MxUSD coins</button><button class="pp-link pp-link--row" data-ppwal="check">Check node connection</button></div>`
-      + (!S.bal ? `<div class="pp-line">Loading balances…</div>` : !list.length ? `<div class="pp-line">No balances yet.</div>` : list.map((b, i) => { const c = walletCard(b, balName(b), ago); return `<button class="dx-card pp-card pp-bal" data-ppbal="${i}"><span class="dx-row"><b class="pp-bal__n">${esc(c.name)}</b><span class="pp-bal__r"><b>${esc(c.amount)}</b><small>${esc(c.coins)}</small></span></span>${b.tokenid === MINIMA || isMxusd(b.tokenid) ? "" : `<span class="pp-ids">Token: ${esc(b.tokenid)}</span>`}<span class="pp-bal__l">${esc(c.line)}</span></button>`; }).join(""));
+      + (!S.bal ? `<div class="pp-line">Loading balances…</div>` : !list.length ? `<div class="pp-line">No balances yet.</div>` : list.map((b, i) => { const c = walletCard(b, balName(b), ago); return `<button class="dx-card pp-card pp-bal" data-ppbal="${i}"><span class="dx-row"><span class="pp-bal__h"><img class="pp-bal__ic" alt="" src="${b.tokenid === MINIMA ? "minima-mark.svg" : esc(D.TOK.identiconDataUri(b.tokenid))}"><b class="pp-bal__n">${esc(c.name)}</b></span><span class="pp-bal__r"><b>${esc(c.amount)}</b><small>${esc(c.coins)}</small></span></span>${b.tokenid === MINIMA || isMxusd(b.tokenid) ? "" : `<span class="pp-ids">Token: ${esc(b.tokenid)}</span>`}<span class="pp-bal__l">${esc(c.line)}</span></button>`; }).join(""));
   }
   async function walletAct(what) {
     if (what === "check") { const b = await D.tryCmd("block"); return say(nodeCheck(D.running(), b && (b.block != null ? b.block : b), await api().ppStatus().catch(() => null)), "note"); }
@@ -717,12 +717,13 @@
   }
   /** BACK UP / RESTORE POOLS (MyLpView.showRecoveryMenu): the tools, one per line; the one chosen opens when the list closes */
   function recoveryMenu() {
-    const items = [["backup", "Back up my pools to a file"], ["restore", "Restore pools from a file"], ["archive", "Archive connection"], ["guide", "How recovery works"]]; let choice = "";
+    const items = [["collect", "Collect withdrawn funds to my wallet"], ["backup", "Back up my pools to a file"], ["restore", "Restore pools from a file"], ["archive", "Archive connection"], ["guide", "How recovery works"]]; let choice = "";
     return form("Pool recovery", `<div class="pp-menu">${items.map((x) => `<button class="dx-btn" data-pick="${x[0]}">${x[1]}</button>`).join("")}</div>`, "", () => true,
       (d) => d.addEventListener("click", (e) => { const b = e.target.closest("[data-pick]"); if (b) { choice = b.dataset.pick; d.querySelector('[data-x="0"]').click(); } })).then(() => choice);
   }
   async function recoveryTools() {
     const choice = await recoveryMenu();
+    if (choice === "collect") return Act.collect(api(), ui);
     if (choice === "backup") return backupDialog(false);
     if (choice === "restore") return restoreDialog();
     if (choice === "archive") return archiveDialog();
@@ -758,7 +759,6 @@
     if (ds.ppcalc != null) return calc(ds.ppcalc);
     if (ds.pptool === "calc") return calc("");
     if (ds.pptool === "statement") return act(() => Act.statement(api(), ui));
-    if (ds.pptool === "collect") return act(() => Act.collect(api(), ui));
     if (ds.pptool === "closed") return act(closedPools);
     if (ds.pptool === "create") return act(() => createAct("open"));
     if (ds.ppcreate) return act(() => createAct(ds.ppcreate));

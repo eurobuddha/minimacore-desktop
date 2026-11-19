@@ -230,6 +230,8 @@ test("My LP: every outcome says what happened, whether funds moved and what to d
   assert.equal(PP.needsMigrate({ kratio: 1.85 }), true); assert.equal(PP.needsMigrate({ kratio: 1.84 }), false);
   const pp = src("dexicon-pp.js");
   assert.match(pp, /const act = \(fn\) => D\.money\(/, "every My LP action passes Dexicon's one gate");
+  assert.match(pp, /if \(choice === "collect"\) return Act\.collect\(api\(\), ui\);/, "Collect is in the recovery tools, as on the phone, and runs inside the gate the tools were opened under");
+  assert.match(pp, /if \(ds\.pptool === "recovery"\) return act\(recoveryTools\);/);
   assert.match(pp, /ppMyPools\(\)\.then\(\(m\) => \{ S\.mine = m \|\| \[\]; S\.mineErr = ""; \}, \(e\) => \{ S\.mineErr = bare\(e\); \}\)/, "saved pools that cannot be read are said, never shown as none");
 });
 
