@@ -313,3 +313,15 @@ test("Settings holds the desktop's own items in the shell's style, and no second
   for (const id of ["updCard", "updCheck", "updGet", "setKindApply", "setHeap", "kuAudit", "setClearHist", "chanceLeft"]) assert.ok(body.includes(id), id + " kept");
   assert.ok(!/—/.test(body.slice(0, body.indexOf("const drawUpdate"))), "no em dash in the Settings text");
 });
+
+// ---- key-mode audit (0.18.94+) ----
+test("M5: a node stopped for the wrong key mode puts one message over the whole window, with nothing to dismiss it", () => {
+  const added = [], els = { shell: { inert: false } };
+  const { showKeyModeBlock } = lift(["showKeyModeBlock"], { esc: (x) => String(x).replace(/</g, "&lt;"), el: (id) => els[id] || null,
+    document: { body: { insertAdjacentHTML: (_w, h) => { added.push(h); els.keyModeBlock = {}; } } } });
+  showKeyModeBlock("The node is running with block keys <b>"); showKeyModeBlock("again");
+  assert.equal(added.length, 1, "once");
+  assert.ok(added[0].includes('role="alertdialog"') && added[0].includes("running with block keys &lt;b>") && !/<button/.test(added[0]), "the words, escaped, and no button");
+  assert.equal(els.shell.inert, true, "nothing underneath can be used");
+  assert.ok(/function onStatus\(s\) \{\n  if \(s\.keyModeAlert\) showKeyModeBlock\(s\.keyModeAlert\);/.test(app), "shown on the first status that carries it");
+});

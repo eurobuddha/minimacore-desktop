@@ -167,7 +167,16 @@ function paintKeyMode(mode) {
   if (mode) KEYMODE.mode = mode;
   el("trayMode").textContent = KEYMODE.mode === "block" ? "Block key uses · low-RAM node" : "Classic mode";
 }
+// The running node was found in the other key mode and stopped (main/node-manager.js verifyKeyMode): the message
+// stays over the whole window, with nothing to dismiss it. Quitting the app is the way on.
+function showKeyModeBlock(msg) {
+  if (el("keyModeBlock")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="keyModeBlock" data-modal><div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="kmbTitle">
+    <div class="modal__title" id="kmbTitle">Node stopped: wrong key mode</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(msg)}</div></div></div>`);
+  el("shell").inert = true;
+}
 function onStatus(s) {
+  if (s.keyModeAlert) showKeyModeBlock(s.keyModeAlert);
   paintKeyMode(s.keyMode);
   paintFooter(s);
   nodeState = s.state;

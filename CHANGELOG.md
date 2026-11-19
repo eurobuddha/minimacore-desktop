@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.94] — Key mode: the folder marker at every start, and the running node's real mode checked
+
+Security audit of the key mode, part 2.
+
+- A block wallet's data folder is marked (`minimacore-keymode.txt`) at every start, before the node is launched, not only when the mode is first recorded. Before, a block install whose data folder was changed to an empty folder started once with no marker, was refused as "classic" on the second start, and would have started classic if `config.json` was later lost.
+- The folder and the record are checked in both directions and never settled silently: a lost config reads the mode back from the folder; an older config put back over a block wallet reads block (or is refused if it says classic); a config that says block over a folder with unmarked node data is refused and the folder is not marked. A block wallet whose marker file was deleted after the node made its data cannot be told from a classic folder, so it is refused too, and the message says so: restore from the seed phrase in a fresh install.
+- After the node answers, its real key mode is read from the node itself before the app calls it "running" (`verifyKeyMode`): the `keys` list gives each key's shape, 64 x 3 for classic and 128 x 4 for block. `keys` only lists; it does not sign and does not create a key. Keys of the other kind, or of both kinds: the node is stopped at once, a message covers the whole window, and the node is not started again until the app is quit and reopened. No keys yet or no answer: asked again on the next tick, never guessed.
+- A classic wallet's node that prints the node's own boot line for block mode ("Using NEW Block number as key uses keys!") is killed on that line, before the wallet is loaded and before any RPC could answer.
+- `scripts/keymode-test.cjs`: 25 tests; `scripts/core-screens-test.cjs`: 22.
+
 ## [0.18.93] — Key mode: one gate on the finished start command
 
 Security audit of the key mode (0.18.88), part 1: every route round the start gate.

@@ -130,6 +130,9 @@ class NodeManager extends EventEmitter {
     this.wasMapped = false;
     this.lastNetRestart = 0;
     this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
+    this.rpc = (cmd) => rpcCall(this.rpcPort(), config.rpcSecret(), cmd);   // this node's RPC (the tests put a stand-in here too)
+    this.keyModeChecked = false;  // the running node's keys were read and are of the recorded mode (once per start)
+    this.keyModeAlert = "";       // the running node was found in the OTHER mode and stopped: no start until the app is reopened
     // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
     // not from `status` (the chain is up well before the account has attached to the relays).
     this.parlons = { ready: false, error: "", version: "", cape: false };
@@ -398,6 +401,8 @@ class NodeManager extends EventEmitter {
     this.lastError = null;
     this.fatalHint = "";
     this.parlons = { ready: false, error: "", version: "", cape: false };
+    this.keyModeChecked = false;
+    if (this.keyModeAlert) { this.lastError = this.keyModeAlert; this.log("[app] node NOT started: " + this.keyModeAlert); this.setState("error"); return; }
     // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
     // jar that cannot run it is REFUSED, never started classic (that would add classic keys to it for good).
     const keyWhy = this.keyModeProblem();
@@ -407,6 +412,12 @@ class NodeManager extends EventEmitter {
     const args = this.buildArgs();
     const argvWhy = keymode.argvProblem(args, config.load().keyMode, this.dataDir());
     if (argvWhy) { this.lastError = argvWhy; this.log("[app] node NOT started: " + argvWhy); this.setState("error"); return; }
+    // A block wallet's folder always says so before the node touches it: a folder changed to an empty one had no
+    // marker, was read as classic on the next start (locked out), and a lost config would have started it classic.
+    if (config.load().keyMode === "block") {
+      try { keymode.markBlockFolder(this.dataDir()); }
+      catch (e) { this.lastError = "The data folder could not be marked as a block key wallet (" + e.message + "). The node was not started."; this.log("[app] node NOT started: " + this.lastError); this.setState("error"); return; }
+    }
     this.setState("starting");
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
@@ -466,8 +477,35 @@ class NodeManager extends EventEmitter {
       const iv = setInterval(() => { if (!this.proc) finish(); }, 300);
       const finish = () => { clearTimeout(t); clearTimeout(t2); clearTimeout(deadline); clearInterval(iv); res(); };
     });
-    try { await rpcCall(this.rpcPort(), config.rpcSecret(), "quit"); } catch (e) { /* fall through to signals */ }
+    try { await this.rpc("quit"); } catch (e) { /* fall through to signals */ }
     await gone;
+  }
+
+  /**
+   * Is the RUNNING node in the wallet's recorded key mode? A flag name inside the jar does not prove the node
+   * (the Parlons wrapper above all) acted on it, so its own keys are read once it answers: `keys` lists them
+   * with their shape and neither signs nor creates one. Keys of the other kind: the node is stopped at once and
+   * is not started again in this run. No keys yet, or no answer: asked again on the next health tick.
+   * Returns false when the node was stopped.
+   */
+  async verifyKeyMode() {
+    if (this.keyModeChecked || this.keyModeAlert) return !this.keyModeAlert;
+    const mode = config.load().keyMode;
+    let seen = "";
+    try { seen = keymode.keysMode(await this.rpc("keys")); } catch (e) { return true; }
+    if (!seen) return true;
+    if (seen === mode) { this.keyModeChecked = true; this.log("[app] key mode verified on the running node: " + mode); return true; }
+    await this.keyModeMismatch(seen === "mixed" ? "The wallet in this node holds keys of both kinds, classic and block" : "The node is running with " + seen + " keys", mode, false);
+    return false;
+  }
+  async keyModeMismatch(what, mode, now) {
+    this.keyModeAlert = what + ", but this wallet is recorded as a " + mode + " key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. "
+      + "Do not start it again as it is: each start in the wrong mode can add more keys of the other kind to the wallet. Your seed phrase still controls your funds. Quit the app and ask for help before going on.";
+    this.log("[app] KEY MODE MISMATCH, stopping the node: " + this.keyModeAlert);
+    this.fatalHint = this.keyModeAlert;
+    if (now) { try { this.proc && this.proc.kill("SIGKILL"); } catch (e) {} return; }   // before the wallet is open: nothing to close cleanly
+    await this.stop();
+    this.lastError = this.keyModeAlert; this.setState("error");
   }
 
   async restart() { await this.stop(); await this.start(); }
@@ -478,7 +516,7 @@ class NodeManager extends EventEmitter {
     const poll = async () => {
       if (!this.proc) return;
       try {
-        const j = await rpcCall(this.rpcPort(), config.rpcSecret(), "status");
+        const j = await this.rpc("status");
         const r = (j && j.response) || {};
         const prev = this.health || {};
         this.health = {
@@ -499,7 +537,7 @@ class NodeManager extends EventEmitter {
         // that inbound actually works, since routers can accept a port mapping and still not open it.
         if (config.load().contribute && this.healthTick++ % 3 === 0) {
           try {
-            const n = await rpcCall(this.rpcPort(), config.rpcSecret(), "network");
+            const n = await this.rpc("network");
             const nr = (n && n.response) || {};
             const p2p = (nr.details && nr.details.p2p) || {};
             const conns = Array.isArray(nr.connections) ? nr.connections : [];
@@ -517,6 +555,9 @@ class NodeManager extends EventEmitter {
             this.health.p2pAddress = p2p.address || "";
           } catch (e) { /* keep the carried values */ }
         }
+        // Before the app calls the node "running" (which starts every module on it): are its keys of the recorded mode?
+        if (!this.keyModeChecked && !(await this.verifyKeyMode())) return;
+        if (!this.proc || this.state === "stopping") return;
         if (this.state !== "running") this.setState("running");
         else this.emit("status", this.snapshot());
       } catch (e) { /* still booting or busy — keep the current state */ }
@@ -531,7 +572,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
@@ -556,6 +597,10 @@ class NodeManager extends EventEmitter {
     for (let l of String(line).split("\n")) {
       if (!l.trim()) continue;
       try { this.watchParlonsLine(l); } catch (e) {}
+      // The node says so itself, as it opens its databases and before it loads the wallet: block mode is ON.
+      // For a classic wallet that is the forbidden start, caught earlier than any RPC could answer.
+      if (l.includes("Using NEW Block number as key uses") && this.proc && !this.keyModeAlert && config.load().keyMode !== "block")
+        this.keyModeMismatch("The node started in block key mode", config.load().keyMode, true);
       // The two boot-time deaths a person cannot read out of a stack trace: another node still holds
       // the H2 databases, or the port. Say so in the Node tab, in words, with the way out.
       if (/Database may be already in use|locked by another process|Address already in use|BindException/i.test(l)) {

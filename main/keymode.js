@@ -154,6 +154,18 @@ function childEnv(env) {
 }
 
 /**
+ * The key mode a RUNNING node's wallet shows, from the reply to `keys` (a list: it never signs and never
+ * creates a key). Every key says its own shape: 64 x 3 is classic, 128 x 4 is block (TreeKey.createDefault).
+ * "classic" | "block" | "mixed" (keys of both kinds) | "" (no key of either shape yet, or no usable reply).
+ */
+function keysMode(reply) {
+  const keys = reply && reply.response && Array.isArray(reply.response.keys) ? reply.response.keys : [];
+  const has = (size, depth) => keys.some(k => k && Number(k.size) === size && Number(k.depth) === depth);
+  const classic = has(64, 3), block = has(128, 4);
+  return classic && block ? "mixed" : classic ? "classic" : block ? "block" : "";
+}
+
+/**
  * Why the node must NOT be started ("" = it may). o = { mode, supported, folderMode, extraArgs, params, confFile }.
  * Every refusal is the same rule: never start a wallet in a mode other than the one it was made in.
  */
@@ -161,7 +173,9 @@ function startProblem(o) {
   if (o.mode !== "classic" && o.mode !== "block")
     return "No wallet has been set up yet. Choose New Wallet or Restore Wallet first.";
   if (o.folderMode && o.folderMode !== o.mode)
-    return "The data folder holds a " + o.folderMode + " key wallet, but this install is set up for " + o.mode + " keys. The node was not started, because that would add keys of the other kind to the wallet for good. Set the data folder back in Startup Params.";
+    return o.mode === "block"
+      ? "The data folder holds node data that is not marked as a block key wallet, and this install is set up for block keys. The node was not started, because starting a classic wallet with block keys mixes the two kinds for good. If this is another wallet's folder, set the data folder back in Startup Params. If it is this wallet's own folder and its file " + MARKER + " was removed, the app cannot tell and will not guess: restore the wallet from its seed phrase in a fresh install."
+      : "The data folder holds a block key wallet, but this install is set up for classic keys. The node was not started, because that would add keys of the other kind to the wallet for good. Set the data folder back in Startup Params.";
   if (o.mode === "block" && !o.supported)
     return "This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with.";
   const arg = PARAMS.keyModeArg(o.extraArgs);
@@ -175,4 +189,4 @@ function startProblem(o) {
   return "";
 }
 
-module.exports = { jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, argvProblem, nodeTokens, childEnv, readZipEntry, MARKER };
+module.exports = { jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, argvProblem, keysMode, nodeTokens, childEnv, readZipEntry, MARKER };

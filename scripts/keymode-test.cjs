@@ -214,10 +214,12 @@ test("no wallet yet, or a key-mode flag smuggled into a saved config: no start",
 const { EventEmitter } = require("events");
 /** A start that runs every step but java: a stand-in child, no stale-node search, no RPC polling. Returns the spawn calls. */
 function fakeJava(m) {
-  const calls = [], real = { spawnFn: m.spawnFn, startHealth: m.startHealth, reclaimStaleNode: m.reclaimStaleNode };
-  m.spawnFn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); p.pid = 0; p.kill = () => {}; return p; };
+  const calls = [], real = { spawnFn: m.spawnFn, startHealth: m.startHealth, reclaimStaleNode: m.reclaimStaleNode, rpc: m.rpc };
+  m.rpc = async () => { throw new Error("test: no RPC"); };   // never a real node's port
+  m.spawnFn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); p.pid = 0; p.kill = (sig) => { calls.killed = sig; }; calls.proc = p; return p; };
   m.startHealth = () => {}; m.reclaimStaleNode = async () => "";
-  calls.restore = () => { Object.assign(m, real); m.proc = null; m.state = "stopped"; };
+  calls.realHealth = () => { m.startHealth = real.startHealth; };
+  calls.restore = () => { m.stopHealth(); Object.assign(m, real); m.proc = null; m.state = "stopped"; m.keyModeAlert = ""; m.keyModeChecked = false; };
   return calls;
 }
 const KINDS = ["minima", "parlons"];
@@ -322,4 +324,127 @@ test("H2c: the node is started without MINIMA_*, PARLONS_* and JVM option variab
   assert.ok(passed && passed.PATH === process.env.PATH, "an explicit environment, with the ordinary variables");
   assert.ok(!Object.keys(passed).some(k => /^(minima_|parlons_)/i.test(k) || /java_tool_options/i.test(k)), Object.keys(passed).filter(k => /minima|parlons|java/i.test(k)).join(","));
   calls.restore();
+});
+
+// ---- 0.18.94: the folder marker in both directions (H4) and the running node's real mode (M5) ----
+const marker = (dir) => path.join(dir, keymode.MARKER);
+const writeConfig = (o) => fs.writeFileSync(path.join(USERDATA, "config.json"), JSON.stringify(o));
+
+test("H4: a block wallet whose data folder is changed to an empty one is marked at start, before java, and is not locked out on the next start", async () => {
+  for (const nodeKind of KINDS) {
+    freshInstall(); config.recordKeyMode("block");
+    const moved = path.join(USERDATA, "moved"); fs.mkdirSync(moved);
+    config.save({ nodeKind, setupDone: true, walletDone: true, dataFolder: moved });
+    const m = manager(true), calls = fakeJava(m);
+    let markedAtSpawn = null; const spawnFn = m.spawnFn; m.spawnFn = (...a) => { markedAtSpawn = fs.existsSync(marker(moved)); return spawnFn(...a); };
+    assert.equal(fs.existsSync(marker(moved)), false);
+    await m.start();
+    assert.equal(calls.length, 1, m.lastError || ""); assert.equal(markedAtSpawn, true, "the folder says block before the node touches it");
+    calls.restore();
+    fs.mkdirSync(path.join(moved, "1.1")); fs.writeFileSync(path.join(moved, "1.1", "wallet.db"), "x");   // what the first run leaves
+    assert.equal(m.keyModeProblem(), "", "second start: not refused as classic");
+    // the config is lost: the folder still says block, so the wallet cannot start classic
+    writeConfig({ dataFolder: moved, walletDone: true, setupDone: true, nodeKind });
+    assert.equal(config.load().keyMode, "block");
+    assert.ok(/-blockaskeyuses true -lowram true/.test(flat(m.buildArgs())));
+  }
+});
+
+test("H4: config lost, config restored from an older copy, marker deleted: the folder and the record never disagree silently", async () => {
+  // an older config (before the mode existed: no keyMode, wallet done) put back over a block wallet
+  freshInstall(); config.recordKeyMode("block"); makeNodeData();
+  writeConfig({ setupDone: true, walletDone: true });
+  assert.equal(config.load().keyMode, "block", "the marker outranks 'a finished wallet with no record is classic'");
+  // an older config that says classic, put back over a block wallet: refused
+  writeConfig({ setupDone: true, walletDone: true, keyMode: "classic", nodeKind: "minima" });
+  const m = manager(true); let calls = fakeJava(m);
+  await m.start();
+  assert.equal(calls.length, 0); assert.ok(/holds a block key wallet, but this install is set up for classic keys/.test(m.lastError), m.lastError);
+  calls.restore();
+  // an older config that says block, put back over a classic wallet's folder: refused, and the folder is NOT marked
+  freshInstall(); makeNodeData(); writeConfig({ setupDone: true, walletDone: true, keyMode: "block", nodeKind: "minima" });
+  calls = fakeJava(m); await m.start();
+  assert.equal(calls.length, 0); assert.ok(/not marked as a block key wallet/.test(m.lastError), m.lastError);
+  assert.equal(fs.existsSync(marker(dataDir())), false, "a refused start writes no marker");
+  calls.restore();
+  // the marker deleted from a block wallet that has data: the app cannot tell it from a classic folder, so it refuses and does not re-mark
+  freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind: "minima", setupDone: true, walletDone: true }); makeNodeData();
+  fs.unlinkSync(marker(dataDir()));
+  calls = fakeJava(m); await m.start();
+  assert.equal(calls.length, 0); assert.ok(/will not guess/.test(m.lastError), m.lastError);
+  assert.equal(fs.existsSync(marker(dataDir())), false);
+  calls.restore();
+  // the marker deleted before the node ever made data (an empty folder): put back at start
+  freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind: "minima", setupDone: true }); fs.unlinkSync(marker(dataDir()));
+  calls = fakeJava(m); await m.start();
+  assert.equal(calls.length, 1, m.lastError || ""); assert.equal(fs.existsSync(marker(dataDir())), true);
+  calls.restore();
+  // the other direction: a classic wallet's start never writes a marker
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true });
+  calls = fakeJava(m); await m.start();
+  assert.equal(calls.length, 1, m.lastError || ""); assert.equal(fs.existsSync(marker(dataDir())), false);
+  calls.restore();
+});
+
+const keysReply = (...shapes) => ({ status: true, response: { keys: shapes.map(([size, depth]) => ({ size, depth, uses: 1, maxuses: size ** depth, publickey: "0x00" })), total: shapes.length } });
+test("M5: the key shapes in the node's own reply say which mode it runs in", () => {
+  assert.equal(keymode.keysMode(keysReply([64, 3], [64, 3])), "classic");
+  assert.equal(keymode.keysMode(keysReply([128, 4])), "block");
+  assert.equal(keymode.keysMode(keysReply([64, 3], [128, 4])), "mixed");
+  assert.equal(keymode.keysMode(keysReply(["64", "3"])), "classic", "numbers sent as text");
+  for (const r of [keysReply(), keysReply([32, 2]), null, {}, { status: false, error: "x" }, { response: { keys: "no" } }]) assert.equal(keymode.keysMode(r), "", JSON.stringify(r));
+});
+
+test("M5: a node found running in the other key mode is stopped at once, is never called running, and is not started again", async () => {
+  const cases = [["classic", [[128, 4]], /running with block keys/], ["block", [[64, 3], [64, 3]], /running with classic keys/], ["classic", [[64, 3], [128, 4]], /keys of both kinds/]];
+  for (const nodeKind of KINDS) for (const [mode, shapes, re] of cases) {
+    freshInstall(); config.recordKeyMode(mode); config.save({ nodeKind, setupDone: true, walletDone: true });
+    const m = manager(true), calls = fakeJava(m), sent = [], states = [];
+    m.rpc = async (c) => { sent.push(c); if (c === "quit") { setImmediate(() => calls.proc.emit("exit", 0, null)); return { status: true }; } return c === "keys" ? keysReply(...shapes) : { status: true, response: { chain: { block: 5 } } }; };
+    const onStatus = (s) => states.push(s.state); m.on("status", onStatus);
+    calls.realHealth();
+    await m.start();
+    for (let i = 0; i < 200 && !(m.state === "error" && !m.proc); i++) await new Promise(r => setTimeout(r, 10));
+    m.off("status", onStatus);
+    assert.equal(m.state, "error", nodeKind + " " + mode); assert.equal(m.proc, null, "the node is gone");
+    assert.ok(!states.includes("running"), "never called running, so no module started on it: " + states.join(","));
+    assert.ok(re.test(m.lastError) && /stopped at once/.test(m.lastError), m.lastError);
+    assert.equal(m.snapshot().keyModeAlert, m.lastError, "the window is told");
+    assert.deepEqual([...new Set(sent)].sort(), ["keys", "quit", "status"], "the check only lists keys: nothing signs, nothing creates a key");
+    const before = calls.length; await m.start();
+    assert.equal(calls.length, before, "and it is not started again in this run"); assert.equal(m.state, "error");
+    calls.restore();
+  }
+});
+
+test("M5: a node in the recorded mode runs; no keys yet or no answer is asked again, never guessed", async () => {
+  for (const [mode, shape] of [["classic", [64, 3]], ["block", [128, 4]]]) {
+    freshInstall(); config.recordKeyMode(mode); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
+    const m = manager(true), calls = fakeJava(m), sent = [];
+    let reply = () => { throw new Error("not up yet"); };
+    m.rpc = async (c) => { sent.push(c); if (c === "keys") return reply(); return { status: true, response: {} }; };
+    await m.start();
+    assert.equal(await m.verifyKeyMode(), true); assert.equal(m.keyModeChecked, false, "no answer: not verified, not stopped");
+    reply = () => keysReply();
+    assert.equal(await m.verifyKeyMode(), true); assert.equal(m.keyModeChecked, false, "no keys yet: asked again");
+    reply = () => keysReply(shape, shape);
+    assert.equal(await m.verifyKeyMode(), true); assert.equal(m.keyModeChecked, true);
+    const n = sent.length; await m.verifyKeyMode(); assert.equal(sent.length, n, "once verified it is not asked again in this run");
+    assert.ok(m.proc && !m.keyModeAlert && !sent.includes("quit"));
+    calls.restore();
+  }
+});
+
+test("M5: the node's own boot line 'block mode is on' stops a classic wallet's node before any RPC", async () => {
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
+  const m = manager(true), calls = fakeJava(m);
+  await m.start();
+  calls.proc.stdout.emit("data", "Minima @ 19/11/2026 : Using NEW Block number as key uses keys!\n");
+  assert.equal(calls.killed, "SIGKILL"); assert.ok(/started in block key mode/.test(m.keyModeAlert), m.keyModeAlert);
+  calls.restore();
+  freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
+  const c2 = fakeJava(m); await m.start();
+  c2.proc.stdout.emit("data", "Using NEW Block number as key uses keys!\n");
+  assert.equal(c2.killed, undefined, "a block wallet's node says the same line and runs on"); assert.equal(m.keyModeAlert, "");
+  c2.restore();
 });
