@@ -170,8 +170,12 @@
     dxMine: async () => ({ orders: DXS === "empty" ? [] : [{ coinid: PK("E1"), orderId: PK("E2"), sell: true, price: "0.0039", minima: "750", pending: "" }], pending: [] }),
     dxCommand: async (a) => {
       if (a.op !== "sql") return { status: true };
-      if (/k='myorders'/.test(a.query)) return { status: true, rows: [{ V: JSON.stringify(DXS === "empty" ? [] : [{ orderId: "f3a91c07d2b84e65", side: "buy", price: "0.0029", amount: "2000", remaining: "1250.5", coins: [PK("C1")], address: PK("D1"), seq: 1763560000, status: "live" }]) }] };
-      if (/fill_/.test(a.query)) return { status: true, rows: DX_FILLS.map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) };
+      if (/k IN \(/.test(a.query)) return { status: true, rows: DXS === "empty" ? [] : [
+        { K: "myorders", V: JSON.stringify([{ orderId: "0xf3a91c07d2b84e65", side: "buy", price: "0.0029", amount: "2000", remaining: "1250.5", coins: [PK("C1")], address: PK("D1"), seq: 1763560000, expiry: Math.floor(now / 1000) + 79200, status: "live" }]) },
+        { K: "pending_takes", V: JSON.stringify({ "0x9c1f02ab77d3e456": { order: { orderId: "0x9c1f02ab77d3e456", side: "sell", price: "0.00316983" }, plan: { filled: "500" }, sent: now - 42000 } }) },
+        { K: "mm_config", V: JSON.stringify(Q.get("dxmm") === "1" ? { enabled: true, peg: true } : {}) }, { K: "mm_status", V: Q.get("dxmm") === "1" ? "6 rungs live · last reprice 14s ago" : "" },
+        { K: "mm_feed", V: JSON.stringify({ line: "MEXC MINIMA/USDT mid 0.00315 · 4s old" }) }] };
+      if (/fill_/.test(a.query)) return { status: true, rows: (DXS === "empty" ? [] : DX_FILLS).map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) };
       return { status: true, rows: [] };
     },
     parlonsStatus: async () => ({ ready: false }), portmapStatus: async () => ({})
@@ -211,6 +215,8 @@
           const f = (Q.get("dxf") || "").split(":");
           if (f.length === 3 && el("dxPrice")) { el(f[0] === "sell" ? "dxSell" : "dxBuy").click(); el("dxPrice").value = f[1]; el("dxAmount").value = f[2]; el("dxPrice").oninput(); }
           if (Q.get("dxdlg") === "1") el("dxCta2").click();
+          if (Q.get("dxsub") === "1") document.querySelector('[data-sub="1"]').click();
+          if (Q.get("dxfill") === "1") document.querySelector("[data-fill]").click();
         }, 500);
       }
       if (Q.get("expand") === "1") el("walHead").click();

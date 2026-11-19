@@ -6,7 +6,7 @@
  * The page is the TAKER's engine: ui/app.js builds, signs and sends FAST takes, voids the ones never answered, places,
  * edits and cancels FAST orders. No other JavaScript implementation of that exists, so the page runs unchanged in a
  * hidden, sandboxed frame (dxroom://exchange/, opaque origin, no window.mcd) and the native Exchange screens
- * (renderer/dexicon-ui.js) drive it through the short list of actions at the bottom of this file.
+ * (renderer/dexicon-ui.js) drive it through the short list of actions at the bottom of this file. Only its market maker dialogs are ever seen.
  *
  *   MDS.cmd / MDS.sql / MDS.comms.solo  -> postMessage to the shell -> window.mcd.dxCommand (main/dexicon.js: the
  *                                          verb allow-list, the engine's own store, packets to the one service)
@@ -156,8 +156,17 @@
     addRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.addRelay(a.url); },
     removeRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.removeRelay(a.url); },
     discover: function () { DexiconFast.discover(); },
-    refresh: function () { send("REFRESH"); DexiconFast.refresh(); }
+    refresh: function () { send("REFRESH"); DexiconFast.refresh(); },
+    // The market maker's own dialogs (ui/maker.js, the mirror of the Android MarketMaker): the frame is shown over the
+    // native screen while one of them is open, and nothing of the page but the dialog is ever visible (style below).
+    makerOpen: function (a) { theme(a); DexiconMaker.open(); },
+    makerStop: function () { DexiconMaker.stop(); },
+    makerReview: function (a) { theme(a); DexiconMaker.review(); }
   };
+  function theme(a) { try { localStorage.setItem("dexicon_theme", a && a.light ? "DAYLIGHT" : "ONYX"); applyTheme(); } catch (e) { } }
+  var style = document.createElement("style");
+  style.textContent = "html,body{background:transparent!important}.topbar,main>:not(dialog){display:none!important}";
+  (document.head || document.documentElement).appendChild(style);
   /** The page's own test for "this order trades on the chain now" (ui/pd_app.js place): pools, else book orders. */
   function chainCrosses(a) {
     var block = Number(state.block || 0), comp = PandaComposite.plan(state.book || [], state.pools || [], !!a.buy, a.amount, a.price, block), plan;
@@ -186,7 +195,7 @@
       ready: !!(window.DexiconFast && DexiconFast.myId()), idError: window.DexiconFast ? String(DexiconFast.myIdError() || "") : "",
       notice: s ? String(s.textContent || "") : "", kind: s ? String(s.className || "").replace(/^notice\s*/, "") : "",
       log: log && !log.hidden ? Array.prototype.map.call(log.children, function (c) { return String(c.textContent || ""); }) : [],
-      trading: !!(b && b.classList.contains("busy")),
+      trading: !!(b && b.classList.contains("busy")), dialog: !!document.querySelector("dialog[open]"),
       relays: Array.prototype.map.call(rows, function (r) {
         var u = r.querySelector(".url"), m = r.querySelector(".meta"), dot = r.querySelector("b");
         return { url: u ? u.textContent : "", meta: m ? m.textContent : "", state: dot ? dot.className : "", found: r.classList.contains("discovered") };

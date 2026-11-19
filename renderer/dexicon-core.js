@@ -226,8 +226,51 @@
     return t || "It did not go through, and no reason was given. Look at Activity before trying again.";
   }
 
-  // ---- what the screens may ask for: the page's nine actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
-  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh"];
+  // ---- fills (Orders › My fills, History, the CSV) ----
+  /** The exact MxUSD leg of a fill: the maker's record knows received / paid, the taker's gave / got (TradeExport.row). */
+  function fillUsd(f) {
+    const buy = f.side === "buy", maker = f.role === "maker";
+    const u = dec(maker ? (buy ? f.paid : f.received) : (buy ? f.gave : f.got));
+    return u && u.v > 0n ? u : mul(dec(f.filled) || zero, dec(f.price) || zero);
+  }
+  /** A fill's state in plain words. "settling" is posted and waiting for a block: it is not done. */
+  function fillState(f) {
+    return f.status === "done" ? { chip: "DONE", tone: "ok", text: "in block " + (f.block || "?") }
+      : f.status === "lost" ? { chip: "LOST", tone: "bad", text: "not in a block after 2 hours: the coins were not spent" }
+      : { chip: "WAITING", tone: "live", text: "co-signed and posted, waiting for a block: not final yet" };
+  }
+  /** Net of SETTLED fills only: signed MINIMA and MxUSD, and the counts (HistoryTab.render). */
+  function netSettled(fills) {
+    let mp = zero, mn = zero, up_ = zero, un = zero, done = 0;
+    for (const f of fills || []) {
+      if (f.status !== "done") continue;
+      done++;
+      const m = dec(f.filled) || zero, u = fillUsd(f);
+      if (f.side === "buy") { mp = add(mp, m); un = add(un, u); } else { mn = add(mn, m); up_ = add(up_, u); }
+    }
+    const signed = (pos, neg) => { const c = cmp(pos, neg); return c === 0 ? { sign: 0, text: "0" } : c > 0 ? { sign: 1, text: "+" + str(sub(pos, neg)) } : { sign: -1, text: "−" + str(sub(neg, pos)) }; };
+    return { minima: signed(mp, mn), mxusd: signed(up_, un), done, count: (fills || []).length };
+  }
+  const CSV_HEADER = "timestamp_utc,block,side,role,minima_delta,mxusd_delta,minima_amount,price,mxusd_notional,order_id,txpowid,proceeds_coinids,counterparty,status";
+  /** The Android export, column for column (TradeExport.java): other tools read these names. Cells that a spreadsheet
+   *  would run as a formula are quoted with a leading apostrophe. */
+  function csv(fills) {
+    const cell = (v) => { let t = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(t) && !/^-?[0-9.]+$/.test(t)) t = "'" + t; return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const rows = (fills || []).map(f => {
+      const buy = f.side === "buy", m = dec(f.filled) || zero, u = fillUsd(f), price = dec(f.price);
+      return [new Date((Number(f.ts) || 0) * 1000).toISOString().replace(/\.\d+Z$/, "Z"), f.block || "", buy ? "BUY" : "SELL", f.role === "maker" ? "MAKER" : "TAKER",
+        (buy ? "" : "-") + str(m), (buy ? "-" : "") + str(u), str(m), price ? str(price) : "", str(u), f.orderId || "", f.txpowid || "", (f.coins || []).join(" "), f.maker || f.taker || f.counterparty || "", f.status || ""].map(cell).join(",");
+    });
+    return [CSV_HEADER].concat(rows).join("\n") + "\n";
+  }
+  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  /** "TODAY · 19 NOV" / "18 NOV" (local time), for the day headers of History and Activity */
+  function dayLabel(ms, nowMs) { const d = new Date(ms), n = new Date(nowMs), t = d.getDate() + " " + MONTHS[d.getMonth()]; return (d.toDateString() === n.toDateString() ? "TODAY · " : "") + t + (d.getFullYear() === n.getFullYear() ? "" : " " + d.getFullYear()); }
+  /** How long ago, in whole units cut down (Util.ago) */
+  function ago(ms) { const s = Math.floor(Math.max(0, ms) / 1000); if (s < 60) return s + "s ago"; const m = Math.floor(s / 60); if (m < 60) return m + (m === 1 ? " minute ago" : " minutes ago"); const h = Math.floor(m / 60); if (h < 24) return h + (h === 1 ? " hour ago" : " hours ago"); const d = Math.floor(h / 24); return d + (d === 1 ? " day ago" : " days ago"); }
+
+  // ---- what the screens may ask for: the page's twelve actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
+  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"];
   const OPS = ["cmd", "sql", "comms", "net"];
   /** A request from the page's frame, or null when it is not one the shell forwards. */
   function bridgeCall(m) {
@@ -242,6 +285,6 @@
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

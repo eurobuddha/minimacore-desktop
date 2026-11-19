@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.102] — Dexicon ③ Exchange: Orders and History (Phase 3b, part 3)
+
+- **Orders**, as the Android screen (`OrdersTab.java`): OPEN and MY FILLS. Open shows the market maker card, takes that were signed and sent and still wait for the maker ("Not traded yet"), FAST orders (remaining, of how much, backing coins, expiry, sequence) and on-chain orders, each with change-price and cancel behind a review that says what the node signs. Every identifier is whole and copies on click. This cancel is the Exchange's own "cancel order"; there is still no manual cancel of an AtomiX swap.
+- **The market maker.** The card is native; its dialogs (set up / edit the ladder, the auto-cross warning, the stuck-trade review) are the MiniDapp page's own, which `ui/maker.js` wrote as the mirror of the Android dialog. The hidden frame is shown over the screen only while one of those dialogs is open; a style in `mds.js` hides everything else of the page, always. Three more page actions: `makerOpen`, `makerStop`, `makerReview` (twelve in all).
+- **My fills and History** say the truth about a trade's state: a fill that is co-signed and posted but not yet in a block is **WAITING** ("not final yet"), never done; **DONE** names its block; **LOST** says the coins were not spent. The phone shows a waiting fill without a badge; the desktop marks it, on the owner's rule that posted is not done.
+- **History**, as `HistoryTab.java`: the net of settled trades only (exact MxUSD leg of each fill), counts, day groups, one line per fill, a click for the full facts and identifiers, and **Export CSV** with the Android export's columns, name for name (`TradeExport.java`), values whole. AtomiX swaps stay listed in room ① until 3c.
+- Tests: 23 in `scripts/dexicon-ui.test.cjs` (fill states, the net, the CSV against the Android header, day headers, the market maker actions through `mds.js`).
+
 ## [0.18.101] — Dexicon ③ Exchange: Trade (Phase 3b, part 2)
 
 The Trade screen of the Exchange room, drawn as the Android client draws it (`TradeView.java`), over the engine hosted in 0.18.99.

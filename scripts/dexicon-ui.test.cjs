@@ -174,7 +174,7 @@ test("a refusal is shown in the words it came in, whoever refused", () => {
 });
 
 test("nothing outside the allow-list leaves the Exchange screens", () => {
-  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh"]);
+  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"]);
   for (const act of ["send", "consolidate", "eval", "txnsign", "__proto__", "constructor", ""]) assert.throws(() => C.driveCall(1, act, {}), /not an action of the Exchange screens/, act);
   assert.deepEqual(C.driveCall(7, "place", { buy: true }), { dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true } } });
   // from the page's frame: only the four bridge ops, each rebuilt from its named fields (nothing else rides along)
@@ -195,7 +195,7 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   const tradeBtn = { classList: { contains: () => false }, textContent: "" };
   el("trade").querySelector = () => tradeBtn;
   const listeners = {};
-  const win = { console: { log() {}, error() {} }, document: { getElementById: el, querySelectorAll: () => [], head: {}, createElement: () => ({}) }, navigator: {}, setInterval() {}, JSON, Object, Array, String, Number, Promise, Error,
+  const win = { console: { log() {}, error() {} }, document: { getElementById: el, querySelectorAll: () => [], querySelector: () => null, head: {}, createElement: () => ({}) }, navigator: {}, setInterval() {}, JSON, Object, Array, String, Number, Promise, Error,
     parent: { postMessage: (m) => sent.push(m) }, addEventListener: (t, f) => { listeners[t] = f; },
     // the page's own globals the driver calls (ui/pd_app.js, ui/app.js), recorded
     state: { block: 100, book: [], pools: [] }, chooseSide: (b) => calls.push("side:" + b), preview: () => calls.push("preview"), place: () => { calls.push("place"); if (win.pageAsks) calls.push("confirmed:" + win.confirm(win.pageAsks)); },
@@ -203,6 +203,9 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
     DexiconFast: { setMode: (f) => calls.push("fast:" + f), refreshPreview() {}, cancelOrder: (id) => calls.push("cancelFast:" + id + ":" + win.confirm("?")), editOrder: (id) => calls.push("editFast:" + id + ":" + win.prompt("?")),
       addRelay: (u) => calls.push("addRelay:" + u), removeRelay() {}, discover() {}, refresh() {}, myId: () => "id", myIdError: () => "" },
     PandaComposite: { plan: () => ({}), isEmpty: () => !win.crosses, poolCount: () => (win.crosses ? 1 : 0) }, PandaBook: { plan: () => ({ takes: [] }) } };
+  win.DexiconMaker = { open: () => calls.push("mmOpen"), stop: () => calls.push("mmStop:" + win.confirm("?")), review: () => calls.push("mmReview") };
+  win.localStorage = { setItem: (k, v) => calls.push("ls:" + k + "=" + v), getItem: () => null }; win.applyTheme = () => {};
+  win.document.createElement = () => ({}); win.document.head = { appendChild: (el_) => { win.pageStyle = el_.textContent; } };
   win.window = win; win.parent.window = win.parent;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/mds.js"), "utf8"), win);
   const say = (data) => listeners.message({ source: win.parent, data });
@@ -248,6 +251,11 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   say({ dxRoom: 1, drive: { id: 11, act: "editChain", args: { coinid: "0xAB12", price: "0.0035" } } });
   say({ dxRoom: 1, drive: { id: 12, act: "cancelChain", args: { coinid: "0xAB12'); alert(1); ('" } } });
   assert.deepEqual(calls, ["cancelFast:f3a91c07d2b84e65:true", "edit:0xAB12:0.0035"], "an id that is not an id is refused");
+  // the market maker's own dialogs are the only part of the page ever shown: everything else is hidden by the bridge's style
+  assert.match(win.pageStyle, /main>:not\(dialog\)\{display:none!important\}/);
+  calls.length = 0;
+  say({ dxRoom: 1, drive: { id: 13, act: "makerOpen", args: { light: true } } }); say({ dxRoom: 1, drive: { id: 14, act: "makerStop", args: {} } });
+  assert.deepEqual(calls, ["ls:dexicon_theme=DAYLIGHT", "mmOpen", "mmStop:true"], "the dialog opens in Dexicon's current theme; Stop was confirmed on the native screen");
   // a packet the host refuses comes back to the page as the service's own ERROR, not as silence
   let told = null; win.MDS.init((m) => { told = m; });
   const comms = sent.filter(m => m.name === "room.dex" && m.args.op === "comms").pop();
@@ -290,4 +298,48 @@ test("the page's relay traffic passes the host's allow-list: the engine's relays
   assert.equal(net.calls.length, before, "a refused URL never reaches the network");
   host.stop();
   assert.deepEqual(M.leaks, [], "the real rpcCall and the real network were never reached");
+});
+
+// ---------------------------------------------------------------- Orders and History (0.18.102)
+const FILLS = [
+  { role: "taker", orderId: "0xa81b", side: "buy", price: "0.00316983", filled: "1200", gave: "3.803796", got: "1200", txpowid: "0x7A", coins: ["0xC8", "0xC9"], maker: "0xD7", ts: 1763560000, status: "settling" },
+  { role: "maker", orderId: "0xf3a9", side: "buy", price: "0.0029", filled: "749.5", received: "749.5", paid: "2.17355", txpowid: "0x7B", coins: ["0xCA"], taker: "0xD8", ts: 1763550000, block: 2428031, status: "done" },
+  { role: "taker", orderId: "0xc2d4", side: "sell", price: "0.0031", filled: "300", gave: "300", got: "0.93", txpowid: "0x7C", coins: [], maker: "0xD9", ts: 1763470000, status: "lost" },
+  { role: "taker", orderId: "0xe5f6", side: "sell", price: "0.0032", filled: "1000", gave: "1000", got: "3.2", txpowid: "0x7D", coins: ["0xCB"], maker: "=HYPERLINK(1)", ts: 1763460000, block: 2427000, status: "done" }];
+
+test("a fill that is posted and waiting for a block is not done", () => {
+  assert.deepEqual(C.fillState(FILLS[0]), { chip: "WAITING", tone: "live", text: "co-signed and posted, waiting for a block: not final yet" });
+  assert.deepEqual(C.fillState(FILLS[1]), { chip: "DONE", tone: "ok", text: "in block 2428031" });
+  assert.equal(C.fillState(FILLS[2]).chip, "LOST"); assert.match(C.fillState(FILLS[2]).text, /the coins were not spent/);
+  assert.equal(C.fillState({ status: "" }).chip, "WAITING", "an unknown state is never shown as done");
+});
+
+test("History: the net counts settled fills only, with the exact MxUSD leg of each", () => {
+  const n = C.netSettled(FILLS);
+  assert.deepEqual([n.count, n.done], [4, 2]);
+  assert.deepEqual(n.minima, { sign: -1, text: "−250.5" }, "+749.5 bought, 1000 sold; the waiting and the lost fill are not counted");
+  assert.deepEqual(n.mxusd, { sign: 1, text: "+1.02645" }, "-2.17355 paid, +3.2 received");
+  assert.equal(C.fmt(C.fillUsd(FILLS[0])), "3.803796", "the taker's record: what it gave");
+  assert.equal(C.fmt(C.fillUsd({ side: "sell", role: "maker", filled: "10", price: "0.003" })), "0.03", "no recorded leg: amount x price, exact");
+  assert.deepEqual(C.netSettled([]).minima, { sign: 0, text: "0" });
+});
+
+test("the CSV is the Android export column for column, values whole", () => {
+  const lines = C.csv(FILLS).trim().split("\n");
+  assert.equal(lines[0], "timestamp_utc,block,side,role,minima_delta,mxusd_delta,minima_amount,price,mxusd_notional,order_id,txpowid,proceeds_coinids,counterparty,status");
+  assert.equal(C.CSV_HEADER, lines[0]);
+  const android = path.join(__dirname, "../../../apks/dexicon/app/src/main/java/com/eurobuddha/dexicon/TradeExport.java");   // beside this repo on the owner's machine; not in CI
+  if (fs.existsSync(android)) assert.ok(fs.readFileSync(android, "utf8").replace(/"\s*\+\s*"/g, "").includes(C.CSV_HEADER), "the same header as TradeExport.java");
+  assert.equal(lines[1], "2025-11-19T13:46:40Z,,BUY,TAKER,1200,-3.803796,1200,0.00316983,3.803796,0xa81b,0x7A,0xC8 0xC9,0xD7,settling");
+  assert.equal(lines[2], "2025-11-19T11:00:00Z,2428031,BUY,MAKER,749.5,-2.17355,749.5,0.0029,2.17355,0xf3a9,0x7B,0xCA,0xD8,done");
+  assert.equal(lines[3].split(",").slice(2, 6).join(","), "SELL,TAKER,-300,0.93");
+  assert.match(lines[4], /,'=HYPERLINK\(1\),done$/, "a cell a spreadsheet would run is defused; a negative number is left a number");
+});
+
+test("day headers and ages", () => {
+  const now = new Date(2026, 10, 19, 15, 0).getTime();
+  assert.equal(C.dayLabel(new Date(2026, 10, 19, 0, 5).getTime(), now), "TODAY · 19 NOV");
+  assert.equal(C.dayLabel(new Date(2026, 10, 18, 23, 59).getTime(), now), "18 NOV");
+  assert.equal(C.dayLabel(new Date(2025, 11, 31).getTime(), now), "31 DEC 2025");
+  assert.deepEqual([C.ago(59999), C.ago(60000), C.ago(7199999), C.ago(86400000 * 2)], ["59s ago", "1 minute ago", "1 hour ago", "2 days ago"], "cut down, never rounded up");
 });
