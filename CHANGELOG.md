@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.81] — Wallet: token rows reorder
+
+- Token rows on the Wallet tab can be put in any order: drag a row, or focus it and press Alt+Up or Alt+Down (Up and Down alone walk the rows). Minima stays first. The order is saved on this computer and is replayed as the phone does it: tokens still held keep their saved place, a token received since goes to the end, and a token no longer held drops out.
+- While a row is being dragged the 15 second refresh of the list waits, so the row is not pulled from under the pointer.
+
 ## [0.18.80] — Wallet: the coins dialog and coin detail; Split and Consolidate move into it
 
 - Clicking a token on the Wallet tab opens the phone's coins dialog: "<token> coins", the exact sendable, locked and confirmed figures, then every coin the node holds for it with its amount and its whole coin id. A coin that is locked in a contract carries a LOCKED chip (a pool reserve or a registry beacon is named too). Under the list: the coin count, how many are locked, and the sum of the coins, with a warning if that sum is not the confirmed balance. "Copy token ID" copies the whole id and leaves the dialog open.

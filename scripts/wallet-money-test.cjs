@@ -174,3 +174,12 @@ test("Split and Consolidate live in the token's coins dialog, wired to the same 
   assert.equal((app.match(/split:\$\{n\}/g) || []).length, 1, "one place issues a split");
   assert.ok(!/sendModes|tok-tool|consolidate-btn/.test(app), "no second route on the rows or the Send screen");
 });
+
+test("token order: Minima pinned first, the saved order replayed for tokens still held, new tokens at the end", () => {
+  const tokenOrder = new Function('const MINIMA = "0x00";' + source("tokenOrder") + "; return tokenOrder;")();
+  assert.deepEqual(tokenOrder(null, ["0xAA", "0x00", "0xBB"]), ["0x00", "0xAA", "0xBB"], "nothing saved: Minima first, then as the node listed them");
+  assert.deepEqual(tokenOrder("0xBB,0xAA", ["0x00", "0xAA", "0xBB", "0xCC"]), ["0x00", "0xBB", "0xAA", "0xCC"], "a token just received is appended, never lost");
+  assert.deepEqual(tokenOrder("0xBB,0x00,0xBB,0xGONE", ["0x00", "0xAA", "0xBB"]), ["0x00", "0xBB", "0xAA"], "Minima cannot be moved; duplicates and tokens no longer held are ignored");
+  assert.deepEqual(tokenOrder("0xBB", ["0xAA", "0xBB"]), ["0xBB", "0xAA"], "a wallet with no Minima row");
+  assert.ok(/store\("walletOrder"/.test(app) && /dragstart/.test(app) && /if \(WAL_DRAG\) return;/.test(app), "saved; the 15 s rebuild waits for a drag to end");
+});

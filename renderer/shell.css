@@ -186,6 +186,8 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 #balList .balrow:has(.bal-breakdown) { min-height: 67px; }
 #balList .balrow:hover { background: var(--surface2); }
 #balList .balrow:focus-visible { outline-offset: -2px; }
+#balList .balrow[draggable="true"] { -webkit-user-drag: element; }
+#balList .balrow--drag { opacity: .45; }
 #balList .tok-wrap { flex: 0 0 40px; margin-right: 12px; }
 #balList .tok-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--surface2); }
 #balList .tok-icon--native { background: #fff; padding: 6px; object-fit: contain; }

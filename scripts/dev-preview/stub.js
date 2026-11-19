@@ -4,7 +4,7 @@
  * talks to a node. Not shipped (package.json "build.files" lists main/ and renderer/ only).
  *
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
- *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none
+ *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
  */
 "use strict";
 (function () {
@@ -12,7 +12,7 @@
   const now = Date.now();
   // the node's own format (Java Date.toString()), with a zone name JavaScript cannot parse: the shell must not need to
   const BLOCK_TIME = "Thu Jul 16 14:54:04 BST 2026";
-  try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); } catch (e) {}
+  try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); localStorage.removeItem("walletOrder"); if (Q.get("tokens")) localStorage.setItem("walletOrder", Q.get("tokens")); } catch (e) {}
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
   const NFT = "0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8";
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";

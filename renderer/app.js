@@ -1007,6 +1007,7 @@ function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshT
 // ---- Wallet tab (Pandamonium's BalanceView / BalanceAdapter) ---------------
 async function renderBalances() {
   const host = el("balList");
+  if (WAL_DRAG) return;                                  // a row is being dragged: the 15 s rebuild waits for the drop
   if (!running) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = waitHtml(); return; }
   let bal = await tryCmd("balance");
   // a failed read is not an empty wallet: no old total above it, and no zero row
@@ -1023,8 +1024,10 @@ async function renderBalances() {
   // The list is rebuilt every 15 s. Keyboard focus stays where it was: the same token's row.
   const was = host.contains(document.activeElement) ? document.activeElement.closest(".balrow") : null;
   const wasTid = was && was.dataset.tokenid;
-  host.innerHTML = bal.map(balCardHtml).join("");
+  const order = tokenOrder(store("walletOrder"), bal.map(b => b.tokenid || MINIMA));
+  host.innerHTML = order.map(t => balCardHtml(BAL_BY_TID[t])).join("");
   if (was) { const row = [...host.querySelectorAll(".balrow")].find(r => r.dataset.tokenid === wasTid); if (row) row.focus(); }
+  initTokenOrder(host);
   host.querySelectorAll(".balrow").forEach(row => {
     row.onclick = () => { const b = BAL_BY_TID[row.dataset.tokenid]; if (b) showCoins(b); };
     row.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); row.click(); } };
@@ -1034,6 +1037,44 @@ async function renderBalances() {
 let BAL_BY_TID = {};       // tokenid → last balance row, so a row click can open its dialog without refetching
 let BAL_AT = 0;            // when the last `balance` reply landed: the breakdown's "updated ..."
 let WAL_MINIMA = null;     // the MINIMA balance row behind "Total balance" (null: not read)
+let WAL_DRAG = null;       // the token row being dragged
+
+// The saved token order, as the phone's TokenOrder.decode: Minima is pinned first, then the saved ids that
+// are still held (each once), then anything new at the end, so a token just received never goes missing.
+function tokenOrder(saved, present) {
+  const order = present.includes(MINIMA) ? [MINIMA] : [];
+  for (const t of String(saved || "").split(",")) if (present.includes(t) && !order.includes(t)) order.push(t);
+  for (const t of present) if (!order.includes(t)) order.push(t);
+  return order;
+}
+// Token rows drag into a new order, or move with Alt+Up / Alt+Down; Up / Down walk the rows. Minima stays first.
+// A token that is no longer held drops out of the saved order when the order is next saved, as on the phone.
+function initTokenOrder(host) {
+  const rows = () => [...host.querySelectorAll(".balrow")];
+  const save = () => store("walletOrder", rows().map(r => r.dataset.tokenid).filter(t => t !== MINIMA).join(","));
+  rows().forEach(r => {
+    if (r.dataset.tokenid === MINIMA) return;
+    r.draggable = true;
+    r.title = "Drag to reorder, or Alt+Up / Alt+Down";
+    r.addEventListener("dragstart", (e) => { WAL_DRAG = r; r.classList.add("balrow--drag"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", r.dataset.tokenid); });
+    r.addEventListener("dragend", () => { r.classList.remove("balrow--drag"); WAL_DRAG = null; save(); });
+    r.addEventListener("dragover", (e) => {
+      if (!WAL_DRAG || WAL_DRAG === r) return;
+      e.preventDefault();
+      const box = r.getBoundingClientRect();
+      host.insertBefore(WAL_DRAG, e.clientY < box.top + box.height / 2 ? r : r.nextSibling);
+    });
+  });
+  host.ondragover = (e) => { if (WAL_DRAG) e.preventDefault(); };   // a drop anywhere on the list lands where the row already is
+  host.onkeydown = (e) => {
+    const r = e.target.closest(".balrow"); if (!r || e.target !== r || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const all = rows(), up = e.key === "ArrowUp", to = all[all.indexOf(r) + (up ? -1 : 1)];
+    if (!e.altKey) { if (to) to.focus(); return; }
+    if (r.dataset.tokenid === MINIMA || !to || to.dataset.tokenid === MINIMA) return;
+    host.insertBefore(r, up ? to : to.nextSibling); r.focus(); save();
+  };
+}
 
 /** Display only: at most six decimals, cut off and never rounded up (the phone's Format.summaryAmount).
  *  The exact figure is in the token's coins dialog. A real balance is never shown as zero. */
