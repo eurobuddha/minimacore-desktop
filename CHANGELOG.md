@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.125] — Dexicon ② Pools, backup, restore and recovery (Phase 3d)
+
+- **Back up / restore pools** on My LP opens the recovery tools: Back up my pools to a file (the encrypted pool and node backup, password typed twice, at least 12 characters), Restore pools from a file (Load file, Extract node backup, Restore), Archive connection, How recovery works. Each makes the old panel's call with the same arguments.
+- **When the engine requires a backup**, My LP says so at the top with Back up now. This is the engine's own rule before another pool can be created or migrated; the screen reads it and never works around it.
+- A refused backup or restore is said in plain words, without the internal code, and says that nothing was saved or restored. The saved file's whole path is shown.
+- The typed password leaves the fields before the save starts and is never kept.
+- Not on the desktop, because its engine has no such call: the phone's "Check a backup file", "Recover & withdraw (one-time exit)" and "Recover on existing wallet". Restore and Check for reserves cover the reserve check; nothing was removed that the old panel had.
+
 ## [0.18.124] — Dexicon ② Pools, My LP (Phase 3d)
 
 - **My LP**: the phone's summary card (your MINIMA reserves, or "No pools yet", or that saved pools need a reserve check), then each of your pools with its liquidity, value, pool price, fees earned, price since open, impermanent loss, age and floor headroom. Pool address and owner key are shown whole, labelled, one click to copy.

@@ -207,6 +207,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.122 | 3d | Room ② and Swap: `renderer/dexicon-pp.js` (Core / Act / screens, as `dexicon-ax.js`) over the same `ppQuote` then `ppSwap(quoteId)`; the five PandaPools tabs in `DexCore.ROOMS`; one gate `DexCore.money` for rooms ①, ② and ③; glue read-only additions `status()` and `lastNodeFailure()` (`mcd:ppStatus`, `mcd:ppWhy`); the old panel no longer drawn; `scripts/dexicon-pp.test.cjs` | |
 | 0.18.123 | 3d | Pools list: `poolCard` / `combinedCard` / `poolsSummary` over `ppPools`, `ppAggregate`, `ppScan`; addresses whole with `data-copy` | |
 | 0.18.124 | 3d | My LP: `lpSummary` / `lpRows`; `Act.deposit` / `withdraw` / `collect` / `collectNow` / `recover` / `retire` / `unretire` / `confirmSigning` / `statement` over the old panel's calls (`ppDeposit`, `ppClose`, `ppCollect`, `ppRecoverSaved`, `ppRetirePool`, `ppConfirmSigning`, `ppStatement` then `exportCsv`), each behind `DexCore.money`; the calculator is `renderer/poolcalc.js` unchanged | |
+| 0.18.125 | 3d | Backup, restore, recovery: `Act.backup` (`ppSaveBackup(password)` after `backupProblem`), `loadFile` / `extractNode` (`ppLoadBackup(password[, true])`), `restore` (`ppRestore(json)`), `archiveGet` / `archiveSave`; `ppCompleteBackupRequired` read and said; `plainCode` strips internal codes | |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";

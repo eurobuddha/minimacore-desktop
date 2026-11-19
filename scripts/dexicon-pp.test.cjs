@@ -43,8 +43,10 @@ function oldPanel(api, confirm) {
   const mk = (id) => ({ id, value: "", checked: false, textContent: "", innerHTML: "", innerText: "", disabled: false, dataset: {}, style: {}, scrollTop: 0, type: "",
     setAttribute() {}, getAttribute: () => null, querySelector: () => null, insertAdjacentHTML() {}, appendChild() {}, contains: () => false, remove() {},
     querySelectorAll: (sel) => { const m = /^\[data-([a-z]+)\]$/.exec(sel); if (!m || !(m[1] in CARD)) return []; return [btn[m[1]] = { dataset: { [m[1]]: CARD[m[1]] } }]; } });
-  const el = (id) => els[id] || (els[id] = mk(id));
-  const document = { getElementById: el, querySelectorAll: () => [], querySelector: () => null, body: mk("body"), documentElement: mk("html"), createElement: () => mk("new"), activeElement: null };
+  // an overlay exists only between the insertAdjacentHTML that makes it and its remove(): the old panel asks "is it open?"
+  const open = new Set(), el = (id) => (/Ov$/.test(id) && !open.has(id) ? null : els[id] || (els[id] = Object.assign(mk(id), /Ov$/.test(id) ? { remove() { open.delete(id); } } : {})));
+  const bodyEl = Object.assign(mk("body"), { insertAdjacentHTML(_p, html) { for (const m of String(html).matchAll(/id="(\w+Ov)"/g)) open.add(m[1]); } });
+  const document = { getElementById: el, querySelectorAll: () => [], querySelector: () => null, body: bodyEl, documentElement: mk("html"), createElement: () => mk("new"), activeElement: null };
   const ctx = vm.createContext({ window: null, document, localStorage: { getItem: () => null, setItem() {} }, setTimeout, clearTimeout, console, Date, Math, Number, String, JSON, Promise, isFinite, parseFloat, parseInt, TextEncoder, Array,
     getComputedStyle: () => ({ getPropertyValue: () => "" }) });
   ctx.window = ctx;
@@ -229,6 +231,51 @@ test("My LP: every outcome says what happened, whether funds moved and what to d
   const pp = src("dexicon-pp.js");
   assert.match(pp, /const act = \(fn\) => D\.money\(/, "every My LP action passes Dexicon's one gate");
   assert.match(pp, /ppMyPools\(\)\.then\(\(m\) => \{ S\.mine = m \|\| \[\]; S\.mineErr = ""; \}, \(e\) => \{ S\.mineErr = bare\(e\); \}\)/, "saved pools that cannot be read are said, never shown as none");
+});
+
+// ---- backup, restore, recovery ----
+const PASS = "correct horse battery staple";
+test("backup: the old panel's password rule, then ppSaveBackup(password) and nothing else", async () => {
+  for (const [p1, p2] of [[PASS, PASS], ["short", "short"], [PASS, PASS + "x"], ["", ""], ["x".repeat(1025), "x".repeat(1025)], ["ééééééééééé", "ééééééééééé"], ["éééééééééééé", "éééééééééééé"]]) {
+    const o = await oldMylp({ ppSaveBackup: { canceled: false, path: "/tmp/b.ppbackup" } }, true);
+    const was = await o.press(async () => { await o.p.el("ppBackupBtn").onclick(); o.p.el("ppbPass").value = p1; o.p.el("ppbAgain").value = p2; return o.p.el("ppbSave").onclick(); });
+    const r = recorder({ ppSaveBackup: { canceled: false, path: "/tmp/b.ppbackup" } }), res = await PP.Act.backup(r.api, p1, p2);
+    assert.deepEqual(r.money(), was, JSON.stringify([p1.length, p2.length]));
+    assert.equal(!!res.bad, !was.length, "refused exactly when the old panel refused");
+    if (was.length) assert.deepEqual(was, [["ppSaveBackup", [p1]]]);
+  }
+  const cancelled = await PP.Act.backup(recorder({ ppSaveBackup: { canceled: true } }).api, PASS, PASS);
+  assert.match(cancelled.bad, /^Save cancelled\. No file was written, and the backup is still required\.$/);
+  const failed = await PP.Act.backup(recorder({ ppSaveBackup: new Error("Error invoking remote method 'mcd:ppSaveBackup': Error: BACKUP_NOT_VERIFIED: saved bytes differ. Choose another location.") }).api, PASS, PASS);
+  assert.match(failed.bad, /^The backup was not saved: The file that was written is not the same/); assert.ok(!/BACKUP_NOT_VERIFIED|mcd:/.test(failed.bad));
+  assert.equal(PP.plainCode("MODE_UNAVAILABLE: Cannot verify node permission and wallet lock state. Retry when the node is ready."), "Cannot verify node permission and wallet lock state. Retry when the node is ready.");
+  assert.equal(PP.plainCode("BACKUP_TOO_LARGE"), "That file is too large to be a PandaPools backup. Nothing was read from it.");
+});
+test("restore: Load file, Extract node backup and Restore make the old panel's calls with the same arguments", async () => {
+  const json = '{"pandapools_backup":3,"pools":[]}', answers = { ppLoadBackup: (pw, node) => (node ? { canceled: false, nodePassword: "np", path: "/tmp/n.bak" } : { canceled: false, json }), ppRestore: { restored: 1, total: 2, details: ["a 3 USDT", "b"], warn: "w" } };
+  const o = await oldMylp(answers, true);
+  const was = await o.press(async () => { await o.p.el("ppRestoreBtn").onclick(); o.p.el("pprPass").value = PASS; await o.p.el("pprFile").onclick(); await o.p.el("pprGo").onclick(); o.p.el("pprPass").value = PASS; await o.p.el("pprNode").onclick(); });
+  const r = recorder(answers), f = await PP.Act.loadFile(r.api, PASS), res = await PP.Act.restore(r.api, f.json), node = await PP.Act.extractNode(r.api, PASS);
+  assert.deepEqual(r.money(), was);
+  assert.deepEqual(was, [["ppLoadBackup", [PASS]], ["ppRestore", [json]], ["ppLoadBackup", [PASS, true]]]);
+  assert.equal(res.text, "Verified reserves for 1 of 2 pools.\na 3 MxUSD\n\nb\nw"); assert.equal(res.all, false);
+  assert.deepEqual(node, { nodePassword: "np", path: "/tmp/n.bak" });
+  const none = recorder({}); assert.match((await PP.Act.restore(none.api, "  ")).bad, /^Paste a backup, or load a file\. Nothing was restored\.$/); assert.deepEqual(none.log, [], "nothing typed asks the engine nothing");
+  assert.equal(await PP.Act.loadFile(recorder({ ppLoadBackup: { canceled: true } }).api, ""), null);
+  assert.match((await PP.Act.loadFile(recorder({ ppLoadBackup: new Error("This is a legacy pool-only file; no node backup is included.") }).api, "")).bad, /Nothing was restored\.$/);
+});
+test("recovery archive: read with no argument, saved with the address as typed, as the old panel; a refusal says nothing was saved", async () => {
+  const answers = { ppArchiveSettings: (url) => (url === undefined ? "https://old.example" : true) }, o = await oldMylp(answers, true);
+  const was = await o.press(async () => { await o.p.el("ppArchiveBtn").onclick(); o.p.el("ppaUrl").value = "https://archive.example"; return o.p.el("ppaSave").onclick(); });
+  const r = recorder(answers); assert.equal(await PP.Act.archiveGet(r.api), "https://old.example"); assert.deepEqual(await PP.Act.archiveSave(r.api, "https://archive.example"), {});
+  assert.deepEqual(r.money(), was); assert.deepEqual(was, [["ppArchiveSettings", []], ["ppArchiveSettings", ["https://archive.example"]]]);
+  assert.match((await PP.Act.archiveSave(recorder({ ppArchiveSettings: false }).api, "http://x")).bad, /^Not saved\. Use a public HTTPS hostname/);
+});
+test("the backup-required rule is the engine's: the screen reads it, says it, and never works around it", () => {
+  const pp = src("dexicon-pp.js");
+  assert.match(pp, /want\.backupDue = \(\) => api\(\)\.ppCompleteBackupRequired\(\)\.catch\(\(\) => true\)/, "a read that fails counts as due, as in the old panel");
+  assert.match(pp, /Complete encrypted backup required/); assert.match(pp, /p1\.value = p2\.value = ""/, "the typed password leaves the fields before the save starts");
+  assert.ok(!/localStorage[^;]*pass/i.test(pp), "no password is kept");
 });
 
 // ---- Pools ----

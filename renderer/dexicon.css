@@ -366,3 +366,5 @@ input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outlin
 .pp-fld { display: block; margin-top: 10px; } .pp-fld b { font: 700 10.5px/15px var(--dx-sans); color: var(--dx-dim); letter-spacing: .04em; } .pp-fld .dx-in { margin-top: 3px; font-family: var(--dx-mono); }
 .pp-bad { margin-top: 8px; font: 400 12.5px/18px var(--dx-sans); color: var(--dx-red); } .pp-bad:empty { display: none; }
 .pp-calc { --accent: var(--dx-accent); --surface: var(--dx-surface); --surface2: var(--dx-surface2); --border: var(--dx-border); --border-light: var(--dx-border); --heading: var(--dx-text); --text: var(--dx-text); --dim: var(--dx-dim); --dim2: var(--dx-dim2); color: var(--dx-text); }
+.pp-menu { display: flex; flex-direction: column; gap: 8px; } .pp-menu .dx-btn { flex: 0 0 auto; min-height: 44px; text-align: left; padding-left: 14px; font-weight: 400; }
+.pp-dlg .dx-in { margin-top: 8px; } .pp-ta { min-height: 120px; font: 400 11px/16px var(--dx-mono); resize: vertical; }

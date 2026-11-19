@@ -110,6 +110,24 @@
   const recoveryResult = (r) => "Verified reserves for " + r.restored + " of " + r.total + " pools.\n" + (r.details || []).join("\n\n") + "\n" + (r.warn || "");
   const CLOSE_TO_OWNER = "to the pool's owner address on this node. PandaPools then moves them into your wallet by itself; if they have not arrived after a few blocks, use Collect withdrawn funds. Do that before you restore your seed on another node.";
 
+  // ---- backup, restore, recovery (CombinedBackupUi.java, MyLpView.showRecoveryMenu; the old panel's dialogs) ----
+  /** Why a backup password is not taken ("" = it is): the old panel's rule, at least 12 characters, at most 1024 bytes, typed twice. */
+  const backupProblem = (pass, again) => (Array.from(String(pass)).length < 12 || new TextEncoder().encode(String(pass)).length > 1024 || pass !== again ? "Use at least 12 characters and enter the same password twice. Nothing was saved." : "");
+  /** A backup or restore refusal without its internal code: the sentence after the code, or plain words for a bare code. */
+  function plainCode(raw) {
+    raw = bare(raw);
+    if (/BACKUP_NOT_VERIFIED/.test(raw)) return "The file that was written is not the same as the backup that was made, so it does not count as saved. Save it again in another place.";
+    if (/BACKUP_TOO_LARGE/.test(raw)) return "That file is too large to be a PandaPools backup. Nothing was read from it.";
+    if (/NODE_EXPORT_NOT_VERIFIED/.test(raw)) return "The node backup that was written is not the same as the one in the file, so do not use it. Extract it again to another place.";
+    const m = /^[A-Z][A-Z0-9_]{3,}:\s*(.+)$/.exec(raw);
+    return mx(m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : raw) || "No reason was given.";
+  }
+  const BACKUP_INTRO = "Save one file containing your pools and the native node backup, including wallet keys. Use at least 12 characters, ideally random words. Keep the password safe; there is no password reset. The saved file is checked before another pool can be created.";
+  const RESTORE_INTRO = "Restore public pool recipes and verify reserves on this node. Expired proofs need a synced MegaMMR archive. Owner signing stays paused until you confirm current wallet signing state.";
+  const NODE_EXTRACTED = "Node backup saved. Restore this .bak through MinimaCore's node restore flow, using the password below. Then reopen the combined file to recover the pool recipes. An old backup still requires verification of current signing state.";
+  const ARCHIVE_INTRO = "Optional public HTTPS MegaMMR RPC endpoint for current proofs. Your node verifies every proof. Leave empty for local MegaMMR or backup proofs.";
+  const GUIDE = "Keep the latest complete MinimaCore wallet backup and this pool recipe. Proofs expire. A seed or recipe alone is insufficient.\n\nSaved recipes identify pools even when a light node no longer sees their coins. Restore verifies local reserves, then backup proofs, then current proofs from a synced MegaMMR archive. Missing reserves remain visible and are never reported as recovered.\n\nRestore does not regenerate keys or estimate past signature use. Confirm signing only with current complete wallet state and no other signing copies. Keep-fresh requires the app and node to remain running; it cannot guarantee availability while offline.";
+
   /** An error as the bridge gives it, without the bridge's own wrapping. */
   const bare = (e) => String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
   /**
@@ -204,6 +222,34 @@
       try { const ok = await api.ppConfirmSigning(opk, true); ui.say(ok ? "Confirmation saved. Owner signing is enabled for this pool." : "Not confirmed: signing stays paused. The owner key is missing, used up or below a recorded count.", ok ? "note" : "error"); return ok; }
       catch (e) { ui.say("Not confirmed: " + mx(bare(e)) + ". Signing stays paused.", "error"); return null; }
     },
+    // ---- backup, restore, recovery: each returns { bad } (why nothing was done, for the dialog) or its result ----
+    /** Create and save: the password rule, then ppSaveBackup(password). */
+    async backup(api, pass, again) {
+      const bad = backupProblem(pass, again); if (bad) return { bad };
+      try { const r = await api.ppSaveBackup(pass); return r && r.canceled ? { bad: "Save cancelled. No file was written, and the backup is still required." } : { path: (r && r.path) || "" }; }
+      catch (e) { return { bad: "The backup was not saved: " + plainCode(e) + " Try again." }; }
+    },
+    /** Load file: ppLoadBackup(password) → the pool recipes as text. null = the file picker was closed. */
+    async loadFile(api, pass) {
+      try { const f = await api.ppLoadBackup(pass); return f && f.error ? { bad: plainCode(f.error) } : !f || f.canceled ? null : { json: f.json || "" }; }
+      catch (e) { return { bad: "The backup could not be read: " + plainCode(e) + " Nothing was restored." }; }
+    },
+    /** Extract node backup: ppLoadBackup(password, true) → where the .bak was written and its password. */
+    async extractNode(api, pass) {
+      try { const r = await api.ppLoadBackup(pass, true); return !r || r.canceled ? null : { nodePassword: r.nodePassword, path: r.path || "" }; }
+      catch (e) { return { bad: "The node backup was not extracted: " + plainCode(e) }; }
+    },
+    /** Restore: ppRestore(the recipes text). A reserve check only: nothing is signed. */
+    async restore(api, json) {
+      json = String(json || "").trim(); if (!json) return { bad: "Paste a backup, or load a file. Nothing was restored." };
+      try { const r = await api.ppRestore(json); return { text: mx(recoveryResult(r)), all: r.restored === r.total && !!r.total }; }
+      catch (e) { return { bad: "The restore did not finish: " + plainCode(e) + " Nothing was signed." }; }
+    },
+    async archiveGet(api) { return api.ppArchiveSettings(); },
+    async archiveSave(api, url) {
+      try { return (await api.ppArchiveSettings(url)) ? {} : { bad: "Not saved. Use a public HTTPS hostname without credentials, query or fragment." }; }
+      catch (e) { return { bad: "Not saved: " + plainCode(e) }; }
+    },
     /** Export statement: ppStatement() (it tops up the history first) → exportCsv(csv, "pandapools-statement.csv"). */
     async statement(api, ui) {
       let r; try { r = await api.ppStatement(); } catch (e) { ui.say("The statement was not built: " + mx(bare(e)) + ". No file was written.", "error"); return null; }
@@ -214,14 +260,14 @@
     }
   };
 
-  const core = { cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [] };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
@@ -239,7 +285,7 @@
     const want = { pools: () => api().ppPools(), acts: () => api().ppActivity() };
     if (tab === "swap") { want.bal = () => D.tryCmd("balance"); want.market = () => api().ppMarket(); }
     if (tab === "pools" && S.combined) want.agg = () => api().ppAggregate();
-    if (tab === "mylp") { want.retired = () => api().ppListRetired(); want.collect = () => api().ppPendingCollect(); }
+    if (tab === "mylp") { want.retired = () => api().ppListRetired(); want.collect = () => api().ppPendingCollect(); want.backupDue = () => api().ppCompleteBackupRequired().catch(() => true); }   // unknown counts as due, as in the old panel
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled" && got[i].value != null) S[k] = got[i].value; });
     if (tab === "mylp") await api().ppMyPools().then((m) => { S.mine = m || []; S.mineErr = ""; }, (e) => { S.mineErr = bare(e); });   // a read that fails is said, never shown as "no pools"
@@ -378,7 +424,8 @@
     if (S.mineErr) { $("ppLp").innerHTML = `<div class="dx-state dx-state--error" role="alert">Your saved pools could not be read: ${esc(mx(S.mineErr))}. They are not lost: nothing was changed. This screen tries again by itself.</div>`; return; }
     const sum = lpSummary(S.mine), n = (S.retired || []).length;
     $("ppLp").innerHTML = `<div class="dx-card pp-card pp-sum"><div class="pp-fl">YOUR LIQUIDITY</div><div class="pp-sum__v">${esc(sum.value)}</div><div class="pp-sum__s">${esc(sum.sub)}</div></div>
-      <div class="pp-tools" id="ppTools">${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}${lpBtn("COLLECT WITHDRAWN FUNDS TO MY WALLET", "pptool", "collect", "pp-out")}</div>
+      ${S.backupDue ? `<div class="dx-card pp-card pp-card--warn"><b class="pp-ct">Complete encrypted backup required</b><div class="pp-note">Before another pool can be created or migrated, save one encrypted file with your pools and this node's backup. Your pools are not at risk meanwhile; this is the engine's rule so that a new pool can always be recovered.</div><div class="pp-acts">${lpBtn("Back up now", "pptool", "backup", "pp-fill")}</div></div>` : ""}
+      <div class="pp-tools" id="ppTools">${lpBtn("BACK UP / RESTORE POOLS", "pptool", "recovery", "pp-out")}${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}${lpBtn("COLLECT WITHDRAWN FUNDS TO MY WALLET", "pptool", "collect", "pp-out")}</div>
       ${collectHtml()}${mineHtml()}
       ${n ? `<div class="dx-card pp-card"><div class="pp-sum__s">${n} closed pool(s) kept for recovery</div><div class="pp-note">Their recipes are still saved and still go into your backups: they are just out of the way. If a close never actually landed, the pool reappears here on its own.</div><div class="pp-acts">${lpBtn("Show closed pools", "pptool", "closed")}</div></div>` : ""}
       <div class="pp-note pp-note--foot">Pools you created on this node. PandaPools keeps their reserves fresh by itself: leave this app and the node running so your pools stay live for everyone. Anyone on the network can trade against them; you earn the 0.50% fee on every swap that routes through them.</div>`;
@@ -401,6 +448,61 @@
   async function closedPools() {
     const list = S.retired || [];
     if (await D.dialog("Closed pools", list.map(poolIds).join("\n\n"), "Bring back")) await Act.unretire(api(), ui, list);
+  }
+
+  // ---- backup, restore and the recovery tools ----
+  const pwd = (name, ph) => `<input class="dx-in" type="password" autocomplete="off" name="${name}" placeholder="${esc(ph)}" aria-label="${esc(ph)}">`;
+  /** The encrypted pool + node backup. forced: said after a create or a migrate, when the engine now requires it. true = saved. */
+  async function backupDialog(forced) {
+    const got = await form(forced ? "Back up now: required" : "Required encrypted backup", `<div class="pp-note">${forced ? "Your new pool is on its way to the chain. " : ""}${esc(BACKUP_INTRO)}</div>${pwd("p1", "Backup password")}${pwd("p2", "Repeat password")}<div class="pp-note" data-st></div>`, "Create and save",
+      async (d) => {
+        const p1 = d.querySelector("[name=p1]"), p2 = d.querySelector("[name=p2]"), pass = p1.value, again = p2.value;
+        if (!backupProblem(pass, again)) { p1.value = p2.value = ""; d.querySelector("[data-st]").textContent = "Creating, encrypting and checking the complete backup…"; }
+        const r = await Act.backup(api(), pass, again); d.querySelector("[data-st]").textContent = "";
+        return r.bad || r;
+      });
+    if (!got) { if (forced) say("The backup was not saved. Your pool is not affected, but another pool cannot be created or migrated until the backup is saved: use Back up now.", "note"); return false; }
+    say("Encrypted pool and node backup saved and checked. Keep the file off this device, with its password." + (got.path ? " Saved as " + got.path : ""), "note");
+    return true;
+  }
+  function restoreDialog() {
+    return form("Restore pools", `<div class="pp-note">${esc(RESTORE_INTRO)}</div>${pwd("pw", "Combined backup password (blank for an old JSON file)")}
+      <textarea class="dx-in pp-ta" name="json" placeholder="…or paste the backup JSON here" aria-label="Backup JSON" spellcheck="false"></textarea><div class="pp-note" data-st role="status"></div>
+      <div class="pp-acts"><button class="dx-btn" data-ppr="file">Load file</button><button class="dx-btn" data-ppr="node">Extract node backup</button><button class="dx-btn dx-btn--go" data-ppr="go">Restore</button></div>`, "", () => true, (d) => {
+      const st = d.querySelector("[data-st]"), pw = d.querySelector("[name=pw]"), ta = d.querySelector("[name=json]"); let busy = false;
+      d.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-ppr]"); if (!b || busy) return;
+        busy = true;
+        try {
+          if (b.dataset.ppr === "file") { const f = await Act.loadFile(api(), pw.value); if (f && f.bad) st.textContent = f.bad; else if (f) { ta.value = f.json; st.textContent = "File read. Nothing is restored yet: press Restore."; } }
+          else if (b.dataset.ppr === "node") {
+            const r = await Act.extractNode(api(), pw.value); pw.value = "";
+            if (r && r.bad) st.textContent = r.bad;
+            else if (r) { st.textContent = NODE_EXTRACTED + (r.path ? "\n\n" + r.path : ""); const row = document.createElement("div"); row.className = "pp-acts"; row.innerHTML = `<input class="dx-in" type="password" readonly autocomplete="off" aria-label="Node restore password"><button class="dx-btn">Show restore password</button>`;
+              row.firstChild.value = r.nodePassword; row.lastChild.onclick = () => { row.firstChild.type = row.firstChild.type === "password" ? "text" : "password"; }; st.appendChild(row); }
+          } else { st.textContent = "Restoring: checking each pool's reserves on this node…"; const r = await Act.restore(api(), ta.value); st.textContent = r.bad || r.text; if (!r.bad) load(S.tab).then(paint, paint); }
+        } finally { busy = false; }
+      });
+    });
+  }
+  async function archiveDialog() {
+    let current; try { current = await Act.archiveGet(api()); } catch (e) { return say("The archive setting could not be read: " + plainCode(e), "error"); }
+    const ok = await form("Recovery archive", `<div class="pp-note">${esc(ARCHIVE_INTRO)}</div><input class="dx-in" type="url" name="url" value="${esc(current || "")}" placeholder="https://archive.example.com" aria-label="Archive address" autocomplete="off" spellcheck="false">`, "Save",
+      async (d) => { const r = await Act.archiveSave(api(), d.querySelector("[name=url]").value); return r.bad || true; });
+    if (ok) say("Recovery archive saved.", "note");
+  }
+  /** BACK UP / RESTORE POOLS (MyLpView.showRecoveryMenu): the tools, one per line; the one chosen opens when the list closes */
+  function recoveryMenu() {
+    const items = [["backup", "Back up my pools to a file"], ["restore", "Restore pools from a file"], ["archive", "Archive connection"], ["guide", "How recovery works"]]; let choice = "";
+    return form("Pool recovery", `<div class="pp-menu">${items.map((x) => `<button class="dx-btn" data-pick="${x[0]}">${x[1]}</button>`).join("")}</div>`, "", () => true,
+      (d) => d.addEventListener("click", (e) => { const b = e.target.closest("[data-pick]"); if (b) { choice = b.dataset.pick; d.querySelector('[data-x="0"]').click(); } })).then(() => choice);
+  }
+  async function recoveryTools() {
+    const choice = await recoveryMenu();
+    if (choice === "backup") return backupDialog(false);
+    if (choice === "restore") return restoreDialog();
+    if (choice === "archive") return archiveDialog();
+    if (choice === "guide") return D.dialog("How pool recovery works", GUIDE, "");
   }
 
   // ---- the room ----
@@ -429,6 +531,8 @@
     if (ds.pptool === "statement") return act(() => Act.statement(api(), ui));
     if (ds.pptool === "collect") return act(() => Act.collect(api(), ui));
     if (ds.pptool === "closed") return act(closedPools);
+    if (ds.pptool === "recovery") return act(recoveryTools);
+    if (ds.pptool === "backup") return act(() => backupDialog(false));
     if (ds.ppcollectnow) return act(() => Act.collectNow(api(), ui));
     if (ds.ppconfirm) return act(() => Act.confirmSigning(api(), ui, ds.ppconfirm));
     if (ds.pprecover) return act(async () => { say("Checking local reserves and current archive proofs. No transaction is signed.", "note"); await Act.recover(api(), ui, ds.pprecover); S.said = null; });
