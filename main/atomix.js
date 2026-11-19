@@ -605,7 +605,8 @@ async function swaps() {
 function projectRow(A, s, events, nowSecs, tip) {
   const row = { hash: s.hash, role: s.role, direction: s.direction, selltoken: s.sellToken,
     sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status,
-    created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId };
+    created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId,
+    timelock: s.myTimelock, legIsMinima: !!s.myLegIsMinima };   // 0.18.132: my own lock's deadline (a block for a Minima lock, unix seconds for an Ethereum one), for the halt card and the node-stopped notice
   row.lastFail = lastFailureNote(events);
   row.detail = A.inspect.statusDetail(row);
   const vis = A.settle.visibility(s, events);

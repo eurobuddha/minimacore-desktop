@@ -179,7 +179,7 @@ test("a swap's card: maker-side swaps are named as such, a swap waiting for its 
   const maker = AX.swapItem(Object.assign({}, base, { role: "RESPONDER", status: "LOCKED", direction: "MINIMA_TO_ERC20", selltoken: AX.MXUSD, buytoken: "USDT", vis: null }));
   assert.equal(maker.title, "AtomiX · your market filled"); assert.equal(maker.sub, "maker · you locked · waiting for the taker to claim"); assert.equal(maker.refund, null);
   assert.equal(AX.swapItem(Object.assign({}, base, { status: "ERROR", vis: null })).chip, "FAILED");
-  assert.match(AX.HIDE_ASK(false), /hiding doesn't touch them.*Check now and Refund now/);
+  assert.match(AX.HIDE_ASK(false), /hiding doesn't touch them.*Check now, Refund now and Unhide/);
 });
 test("the launch rule: MxUSD mode says nothing; MINIMA mode stays, with the reason, while something of the user's is live there", () => {
   assert.equal(AX.launch("mxusdt", [], false, false), null);
@@ -409,22 +409,57 @@ test("halt: the glue reports the engine's verdict whole, only after two complete
   assert.equal(_haltFrom(w), null, "two derivations that disagree with each other halt nothing");
   assert.equal(_haltFrom(null), null); assert.equal(_haltFrom({ halted() { throw new Error("x"); } }), null);
 });
-test("the halt card: what stopped, what keeps settling, every key whole, rescue before anything else, and no reset is offered", () => {
-  const h = { summary: "", minimaMismatch: true, ethMismatch: true, orphanedPk: PK("A1"), staleEth: ETH, nodeEth: TO }, c = AX.haltCard(h, 2);
-  assert.equal(c.title, "⛔  Wallet mismatch: AtomiX is halted"); assert.match(c.why, /Swaps already in flight keep settling/);
-  assert.equal(c.details, "Minima identity: ORPHANED\n  in use    " + PK("A1") + "\n  your node does not own it\n\nETH wallet: STALE\n  in use    " + ETH + "\n  node now  " + TO);
-  assert.match(c.warn, /for 2 unsettled swaps .* Do NOT quit or restart the app before you have exported that key/); assert.match(c.warn, /ask for help before you restore or reset anything\.$/);
-  assert.deepEqual(c.tools.map((t) => t[0]), ["key", "sweep"]);
-  const m = AX.haltCard({ minimaMismatch: true, ethMismatch: false, orphanedPk: PK("A1") }, 1);
-  assert.deepEqual(m.tools, [], "no stale ETH key: nothing to export or sweep"); assert.match(m.warn, /for 1 unsettled swap are/); assert.ok(!/quit or restart/.test(m.warn));
+// 0.18.132 (M3, M4, M5): what the screens say about a hidden swap, a halt and a stopped node is true
+const SW = (o) => Object.assign({ hash: PK("51"), role: "INITIATOR", direction: "MINIMA_TO_ERC20", selltoken: "mxUSDT", sellamount: "50", buytoken: "USDT", buyamount: "49.5", status: "STARTED", created: 1, timelock: 2417900, legIsMinima: true }, o);
+test("M3: a hidden swap is always reachable: History lists every finished swap and every hidden one, with Unhide", () => {
+  const live = SW({ hash: PK("51") }), hiddenLive = SW({ hash: PK("52"), created: 2 }), done = SW({ hash: PK("53"), status: "COMPLETE", created: 3 });
+  const list = AX.historyList([live, hiddenLive, done], new Set([PK("52")]));
+  assert.deepEqual(list.map((x) => x.hash), [PK("52"), PK("53")], "the hidden swap in flight first, then the finished one; a visible swap in flight stays in Activity");
+  assert.match(AX.HIDE_ASK(false), /It stays in History, with Check now, Refund now and Unhide\.$/); assert.match(AX.HIDE_ASK(true), /Check now and Unhide/);
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.match(src, /historyList\(swaps, S\.hidden\)[^\n]*swapCard\(x, false, S\.hidden\.has\(x\.hash\)\)/, "History draws them with the Unhide button");
+  assert.match(src, /data-axunhide="\$\{esc\(it\.hash\)\}"/); assert.match(src, /if \(ds\.axunhide\) \{ S\.hidden\.delete\(ds\.axunhide\)/);
+});
+test("M4: the halt card is written from the facts: which key, what still settles, which swaps cannot and their deadlines, and no instruction without a tool", () => {
+  const takerSell = SW({}), takerBuy = SW({ hash: PK("54"), direction: "ERC20_TO_MINIMA", selltoken: "USDT", sellamount: "101", buytoken: "mxUSDT", buyamount: "100", timelock: 1795000000, legIsMinima: false });
+  const makerBuys = SW({ hash: PK("55"), role: "RESPONDER", selltoken: "USDT", sellamount: "20", buytoken: "mxUSDT", buyamount: "20", timelock: 1795003600, legIsMinima: false }), done = SW({ hash: PK("56"), status: "REFUNDED" });
+  const m = AX.haltCard({ minimaMismatch: true, ethMismatch: false, orphanedPk: PK("A1") }, [takerSell, takerBuy, makerBuys, done]);
+  assert.equal(m.title, "⛔  Wallet mismatch: AtomiX is halted"); assert.match(m.which, /^The Minima key AtomiX saved is not one this node owns\. The Ethereum wallet still matches\.$/);
+  assert.ok(!/keep settling: that part is safe/.test(JSON.stringify(m)), "the false reassurance is gone");
+  assert.match(m.settles, /Does NOT settle until this node owns the key again: any Minima-side step under the orphaned key/);
+  assert.equal(m.count, "3 unfinished swaps:"); assert.deepEqual(m.stuck.map((x) => x.hash), [PK("51"), PK("54"), PK("55")], "every hash whole, the finished swap left out");
+  assert.match(m.stuck[0].text, /^Your 50 MxUSD lock CANNOT be refunded under the orphaned key\..* Your lock's deadline: block 2417900\.$/);
+  assert.match(m.stuck[1].text, /^The 100 MxUSD locked to you CANNOT be claimed by this node\. Your USDT is refunded on Ethereum at its deadline, by itself\. Your lock's deadline: 2026-11-18 \d\d:\d\d:\d\d UTC\.$/);
+  assert.match(m.stuck[2].text, /^The taker's 20 MxUSD CANNOT be claimed by this node\. If the taker claims your USDT, that MxUSD is forfeited at the taker's timelock\./);
+  assert.deepEqual(m.tools, [["axgo", "activity", "Open Activity"]], "a Minima-only halt has a tool, and it is the one the text names");
+  assert.ok(!/Rescue what you need FIRST/.test(JSON.stringify(m))); assert.match(m.todo.join(" "), /Follow each swap listed here in Activity \(Check now, Refund now\)\. Ask for help before you restore or reset anything/);
+  assert.equal(m.details, "Minima identity: ORPHANED\n  in use    " + PK("A1") + "\n  your node does not own it");
+  const e = AX.haltCard({ minimaMismatch: false, ethMismatch: true, staleEth: ETH, nodeEth: TO }, [takerBuy]);
+  assert.match(e.settles, /^Still settles: every Minima-side step, by itself\. The Ethereum side of each swap settles only while this app keeps running/);
+  assert.equal(e.todo[0], "Do NOT quit or restart the app."); assert.deepEqual(e.tools.map((t) => t[1]), ["key", "sweep", "activity"]);
+  assert.equal(e.details, "ETH wallet: STALE\n  in use    " + ETH + "\n  node now  " + TO);
+  const b = AX.haltCard({ minimaMismatch: true, ethMismatch: true, orphanedPk: PK("A1"), staleEth: ETH, nodeEth: TO }, []);
+  assert.match(b.which, /^Both /); assert.equal(b.count, "No unfinished swap."); assert.deepEqual(b.tools.map((t) => t[1]), ["key", "sweep"]);
+  assert.equal(AX.haltCard({ minimaMismatch: true }, null).count, "Your swaps have not been read yet.");
   const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
   assert.ok(!/axInvalidate/.test(src), "the screens never reset the AtomiX store");
   assert.match(src, /if \(halted\(\)\) return say\("Halted: this node no longer owns the keys AtomiX uses here\. Nothing was sent\./, "no take while halted");
   assert.ok(!/halted\(\)[^\n]*ax(refund|check)/.test(src), "Refund now and Check now are never gated: settlement is not frozen");
+  // the deadline comes from the engine's own row
+  const row = require("../main/atomix")._projectRow({ inspect: { statusDetail: () => "" }, settle: { visibility: () => null } }, { hash: PK("51"), status: "STARTED", myTimelock: 2417900, myLegIsMinima: true }, [], 0, 0);
+  assert.equal(row.timelock, 2417900); assert.equal(row.legIsMinima, true);
 });
-test("market offline: said only when the node is not running and a market was being kept on the book", () => {
-  assert.equal(AX.offline(true, true), ""); assert.equal(AX.offline(false, false), "");
-  assert.match(AX.offline(false, true), /^Market offline: your Minima node isn't running.* You were not filled by this.* Start the node/);
+test("M5: a stopped node: the unfinished swaps are counted from the list and the user is told to start the node now, with the nearest deadline", () => {
+  assert.equal(AX.offline(true, true, []), ""); assert.equal(AX.offline(false, false, []), "");
+  const a = SW({}), b = SW({ hash: PK("57"), timelock: 2417800 }), c = SW({ hash: PK("58"), timelock: 1795000000, legIsMinima: false }), done = SW({ hash: PK("59"), status: "COMPLETE", timelock: 5 });
+  const t = AX.offline(false, true, [a, b, c, done]);
+  assert.match(t, /^Market offline: your Minima node isn't running.* You were not filled by this\. 3 swaps are not finished\..* LOSES that claim if the node stays off past its deadline\. Start the node now\. Nearest deadline of your own locks: block 2417800 \(Minima\) and 2026-11-18 \d\d:\d\d:\d\d UTC \(Ethereum\)\./);
+  assert.ok(!/are refunded at their deadline once the node runs/.test(t), "the false promise is gone");
+  assert.match(AX.offline(false, true, []), /None of your swaps is unfinished\./); assert.match(AX.offline(false, true, null), /have not been read yet: if one is not finished, start the node now/);
+  assert.match(AX.stoppedNote([SW({ status: "ERROR" })]), /^1 swap is not finished/, "a swap in ERROR may still hold a lock");
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.match(src, /if \(!D\.running\(\)\) \{ const sw = await api\(\)\.axSwaps\(\)/, "the list is read from the engine's store with the node off");
+  assert.match(src, /offline\(D\.running\(\), pref\("dexicon_ax_market_live"\) === "1", S\.swaps\)/);
 });
 
 // 0.18.118 (H2): the room's money actions that had no in-flight state of their own

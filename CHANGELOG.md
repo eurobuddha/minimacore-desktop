@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.132] — Dexicon ① MxUSD: hidden swaps, the halt card and the node-stopped notice say what is true (review M3, M4, M5)
+
+- **A hidden swap can always be found again.** Hide removed a swap's card from Swap and Activity and promised "It stays in History", but History listed finished swaps only, so a hidden swap still in flight was shown nowhere. History now lists every finished swap and every hidden one, with Check now, Refund now and a new **Unhide**.
+- **The halt card says what is true.** It said "Swaps already in flight keep settling: that part is safe to leave running". That is false for the Minima side of a swap under a key the node no longer owns: it cannot be claimed or refunded until the node owns that key again, and a maker swap whose taker claims is forfeited at the timelock. The card now says which key no longer matches (Minima, Ethereum, or both), what still settles and what does not, lists each unfinished swap with its full hash, what cannot happen for it and its lock's deadline, and gives only instructions that have a button: Export the stale ETH key, Sweep, Open Activity. "Rescue what you need FIRST" with no tool under it is gone.
+- **The node-stopped notices say what is at stake.** "Swaps already locked are refunded at their deadline once the node runs" was wrong for a swap waiting on this node's claim. Both notices now count the unfinished swaps (read from AtomiX's own store, which works with the node off), say that a claim is lost if the node stays off past its deadline, say to start the node now, and give the nearest deadline of your own locks.
+- Each swap row from the glue now carries its own lock's deadline (`timelock`, `legIsMinima`).
+
 ## [0.18.131] — Dexicon ① MxUSD: a take's outcome is said truthfully (review M2)
 
 - **"Nothing was locked" is said only when that is known.** After a take, the alert said it for any error. A Minima send can time out at 180 s and still post, and an Ethereum broadcast can fail after it went out. Now only a refusal known to come before any lock says it (the quote expired, the market was withdrawn, the maker left the reviewed book, AtomiX held or halted, the engine not ready). Every other outcome says **"No lock was confirmed. Look at In progress before trying again."**

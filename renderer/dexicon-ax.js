@@ -126,7 +126,24 @@
       chip: running ? "LIVE" : complete ? "DONE" : refunded ? "REFUNDED" : "FAILED", tone: running ? "live" : complete ? "ok" : "bad", lines, refund, ids };
   }
   const HIDE_ASK = (maker) => "This only removes the card from Swap and Activity. If any funds were locked on-chain they still refund by themselves at the timelock: hiding doesn't touch them. "
-    + (maker ? "It stays in History with Check now; your own lock returns by itself after its timelock." : "It stays in History, with Check now and Refund now.");
+    + (maker ? "It stays in History with Check now and Unhide; your own lock returns by itself after its timelock." : "It stays in History, with Check now, Refund now and Unhide.");
+  /** History (0.18.132): every finished swap AND every hidden one, finished or not. A hidden swap that still needs the
+   *  app running or the user's attention is always reachable here, with Check now, Refund now and Unhide. */
+  const historyList = (swaps, hidden) => (swaps || []).filter((x) => terminal(x) || hidden.has(x.hash)).sort((a, b) => (terminal(a) - terminal(b)) || (b.created - a.created));
+  /** not finished: neither complete nor refunded (a swap in ERROR may still hold a lock) */
+  const unfinished = (swaps) => (swaps || []).filter((s) => s.status !== "COMPLETE" && s.status !== "REFUNDED");
+  const deadline = (s) => (!(Number(s.timelock) > 0) ? "" : s.legIsMinima ? "block " + s.timelock : new Date(Number(s.timelock) * 1000).toISOString().replace(".000Z", " UTC").replace("T", " "));
+  /** The nearest deadlines of my own locks among swaps: one per chain (a block cannot be compared with a time). */
+  function nearest(swaps) {
+    const m = swaps.filter((s) => s.legIsMinima && Number(s.timelock) > 0).sort((a, b) => a.timelock - b.timelock)[0], e = swaps.filter((s) => !s.legIsMinima && Number(s.timelock) > 0).sort((a, b) => a.timelock - b.timelock)[0];
+    return [m ? deadline(m) + " (Minima)" : "", e ? deadline(e) + " (Ethereum)" : ""].filter(Boolean).join(" and ");
+  }
+  /** What a stopped node means for the swaps in the list (0.18.132, M5). swaps null: the list was never read. */
+  function stoppedNote(swaps) {
+    if (swaps == null) return "Your swaps have not been read yet: if one is not finished, start the node now.";
+    const u = unfinished(swaps), near = nearest(u); if (!u.length) return "None of your swaps is unfinished.";
+    return u.length + (u.length === 1 ? " swap is" : " swaps are") + " not finished. While the node is off nothing on Minima can be claimed or refunded: a swap waiting for this node's claim LOSES that claim if the node stays off past its deadline. Start the node now." + (near ? " Nearest deadline of your own locks: " + near + "." : "");
+  }
 
   /**
    * The launch rule (DoorHost.applyLaunchRule): the room is for MxUSD; it stays in MINIMA mode with a banner while a
@@ -223,21 +240,41 @@
   const COIN_CAP = { minima: 200, mxusdt: 53 };
   const coinWarn = (currency, coins) => (COIN_CAP[currency] && Number(coins) > COIN_CAP[currency] ? coins + " " + ccyName(currency) + " coins: AtomiX buys are being declined. Consolidate." : "");
 
-  /** The halt card's words (DoorsTab.paintRescue), for the desktop: h = axStatus().halt, unsettled = swaps not finished. */
-  function haltCard(h, unsettled) {
-    const d = [];
+  /**
+   * The halt card (0.18.132, M4), from the facts. h = axStatus().halt; swaps = axSwaps() rows, or null when not read.
+   * Minima key orphaned: no Minima-side step under that key can be signed (a claim of coins locked to it, a refund of
+   * coins it locked) until this node owns the key again; the Ethereum side still works. Ethereum wallet stale: the
+   * key in use lives in memory only, so the Ethereum side works exactly as long as the app keeps running.
+   * tools: [attribute, value, label]; every instruction on the card has one of them, or a button on a swap's card.
+   */
+  function haltCard(h, swaps) {
+    const d = [], both = h.minimaMismatch && h.ethMismatch, u = unfinished(swaps);
     if (h.minimaMismatch) d.push("Minima identity: ORPHANED\n  in use    " + h.orphanedPk + "\n  your node does not own it");
     if (h.ethMismatch) d.push("ETH wallet: STALE\n  in use    " + h.staleEth + "\n  node now  " + h.nodeEth);
+    const eth = h.ethMismatch ? "only while this app keeps running (the stale Ethereum key is held in memory; it is made again from the node's seed at every start and is never stored)" : "by itself";
+    const stuck = u.map((s) => {
+      const coin = tok(tok(s.selltoken) === "USDT" ? s.buytoken : s.selltoken), mine = tok(s.selltoken) !== "USDT", maker = s.role === "RESPONDER", dl = deadline(s);
+      const text = !h.minimaMismatch ? "Its Ethereum side settles only while this app keeps running."
+        : mine ? "Your " + s.sellamount + " " + coin + " lock CANNOT be refunded under the orphaned key. If the other side claims it, the swap completes: your USDT is claimed on Ethereum " + eth + "."
+        : maker ? "The taker's " + s.buyamount + " " + coin + " CANNOT be claimed by this node. If the taker claims your USDT, that " + coin + " is forfeited at the taker's timelock. If the taker does not, your USDT is refunded on Ethereum " + eth + "."
+        : "The " + s.buyamount + " " + coin + " locked to you CANNOT be claimed by this node. Your USDT is refunded on Ethereum at its deadline, " + eth + ".";
+      return { hash: s.hash, text: text + (dl ? " Your lock's deadline: " + dl + "." : "") };
+    });
+    const todo = [];
+    if (h.ethMismatch) todo.push("Do NOT quit or restart the app.", "Export the stale ETH key now (button below) and keep it safe: only your OLD node seed could rebuild it.", "When the swaps listed here have finished or refunded, sweep what is left to the node wallet (button below).");
+    if (h.minimaMismatch) todo.push((u.length ? "Follow each swap listed here in Activity (Check now, Refund now)." : "Nothing of yours is waiting on the orphaned key.") + " Ask for help before you restore or reset anything: the desktop has no tool that brings the old key back while keeping this AtomiX store, and restoring a seed sets this store, with its claim secrets, aside.");
     return { title: "⛔  Wallet mismatch: AtomiX is halted",
-      why: "Your node's seed no longer matches the keys AtomiX is holding. Trading, publishing and new swaps are stopped. Swaps already in flight keep settling: that part is safe to leave running.",
+      which: both ? "Both the Minima key and the Ethereum wallet no longer match this node." : h.minimaMismatch ? "The Minima key AtomiX saved is not one this node owns. The Ethereum wallet still matches." : "The Ethereum wallet in use is not the one this node derives. The Minima key still matches.",
+      why: "Trading, publishing and new swaps are stopped; the engine refuses them.",
+      settles: h.minimaMismatch ? "Still settles: the Ethereum side of each swap (claiming USDT, refunding USDT you locked), " + eth + ". Does NOT settle until this node owns the key again: any Minima-side step under the orphaned key."
+        : "Still settles: every Minima-side step, by itself. The Ethereum side of each swap settles " + eth + ".",
       details: d.join("\n\n"),
-      warn: "⚠  The claim secrets for " + unsettled + " unsettled swap" + (unsettled === 1 ? "" : "s") + " are in this app's AtomiX store"
-        + (h.ethMismatch ? ", and the stale ETH key is held only while the app runs: it is made again from the node's seed at every start and is never stored, so only your OLD node seed could rebuild it. Do NOT quit or restart the app before you have exported that key and moved its funds" : "")
-        + ". Rescue what you need FIRST. The desktop has no reset for this yet: after the rescue, ask for help before you restore or reset anything.",
-      tools: h.ethMismatch ? [["key", "Export the stale ETH key"], ["sweep", "↑  Sweep funds to the node wallet"]] : [] };
+      count: swaps == null ? "Your swaps have not been read yet." : u.length ? u.length + " unfinished swap" + (u.length === 1 ? "" : "s") + ":" : "No unfinished swap.",
+      stuck, todo,
+      tools: (h.ethMismatch ? [["axw", "key", "Export the stale ETH key"], ["axw", "sweep", "↑  Sweep funds to the node wallet"]] : []).concat(u.length ? [["axgo", "activity", "Open Activity"]] : []) };
   }
   /** Market offline (MakerService.maybeOfflineAlert): the node is not running while a market or OTC offer was being kept on the book. */
-  const offline = (nodeRunning, wasLive) => (!nodeRunning && wasLive ? "Market offline: your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this, and swaps already locked are refunded at their deadline once the node runs. Start the node: your market is published again by itself." : "");
+  const offline = (nodeRunning, wasLive, swaps) => (!nodeRunning && wasLive ? "Market offline: your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. " + stoppedNote(swaps) + " Once the node runs, your market is published again by itself." : "");
 
   // ======================================================================== Act: the money actions, no DOM
   // ui = { confirm(title, text, okLabel) → Promise<bool>, say(text, kind) }. Every function here makes the SAME
@@ -336,7 +373,7 @@
   /** One at a time (0.18.118): while fn runs, a second call does nothing. For the money actions that had no
    *  in-flight state of their own: a double click on Refund now or on a wallet action started it twice. */
   function oneAtATime() { let on = false; return async (fn) => { if (on) return; on = true; try { return await fn(); } finally { on = false; } }; }
-  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
+  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -379,7 +416,8 @@
     S.at = Date.now();
     const fresh = await api().axStatus().catch(() => null); if (fresh) S.st = fresh;
     D.repaintStrip();
-    if (!D.running() || !S.st.ready) return;
+    if (!S.st.ready) return;
+    if (!D.running()) { const sw = await api().axSwaps().catch(() => null); if (sw) S.swaps = sw; return; }   // the engine's own store: what is unfinished is known with the node off
     const want = { swaps: () => api().axSwaps() };
     if (tab !== "shared") { want.book = () => api().axBook(); want.mc = () => api().axMakerCfg(); }   // a book scan is slow: only where a book is shown
     if (tab === "market" || tab === "shared") want.mh = () => api().axMarketHistory();
@@ -395,9 +433,9 @@
   // ---- what stands above every screen of the room ----
   function banners() {
     const out = [];
-    const off = offline(D.running(), pref("dexicon_ax_market_live") === "1");
+    const off = offline(D.running(), pref("dexicon_ax_market_live") === "1", S.swaps);
     if (off) out.push(`<div class="dx-card ax-alert" role="alert"><b class="ax-t14">Market offline</b><div class="ax-dim">${esc(off.replace(/^Market offline: y/, "Y"))}</div><button class="dx-btn ax-btn--s" data-axstart="1">Start the node</button></div>`);
-    else if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and nothing can settle. Start it and AtomiX comes back by itself.</div>`);
+    else if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and nothing can settle. ${esc(stoppedNote(S.swaps))}</div>`);
     if (halted()) out.push(haltHtml());
     else if (!S.st.ready) out.push(`<div class="dx-card ax-big"><b class="ax-t14">Setting up AtomiX…</b><div class="ax-dim">Preparing your Ethereum wallet and swap keys on this node, then reading the market. The first start takes a minute or two.</div></div>`);
     const l = S.st.ready ? launch(S.st.currency, S.swaps, makerLive(S.mc, S.book), null) : null;
@@ -406,20 +444,21 @@
     return out.join("");
   }
   function haltHtml() {
-    const h = haltCard(S.st.halt, (S.swaps || []).filter((x) => !terminal(x)).length);
-    return `<div class="dx-card ax-big ax-halt" role="alert"><b class="ax-halt__t">${esc(h.title)}</b><div class="ax-dim">${esc(h.why)}</div><pre class="ax-halt__d" data-copy="${esc(h.details)}" title="Click to copy the recovery details">${esc(h.details)}</pre><div class="ax-bad">${esc(h.warn)}</div>`
-      + h.tools.map((t) => `<button class="dx-btn ax-rescue" data-axw="${t[0]}">${esc(t[1])}</button>`).join("") + `</div>`;
+    const h = haltCard(S.st.halt, S.swaps);
+    return `<div class="dx-card ax-big ax-halt" role="alert"><b class="ax-halt__t">${esc(h.title)}</b><div class="ax-dim">${esc(h.which)} ${esc(h.why)}</div><pre class="ax-halt__d" data-copy="${esc(h.details)}" title="Click to copy the recovery details">${esc(h.details)}</pre>`
+      + `<div class="ax-line">${esc(h.settles)}</div><div class="ax-bad">${esc(h.count)}</div>` + h.stuck.map((x) => idLine("swap", x.hash) + `<div class="ax-line">${esc(x.text)}</div>`).join("")
+      + h.todo.map((t) => `<div class="ax-bad">${esc(t)}</div>`).join("") + h.tools.map((t) => `<button class="dx-btn ax-rescue" data-${t[0]}="${t[1]}">${esc(t[2])}</button>`).join("") + `</div>`;
   }
   const why = (key, title, text) => { const open = pref("dexicon_fold_" + key) === "1"; return `<button class="ax-why${open ? " ax-why--open" : ""}" data-axwhy="${key}" aria-expanded="${open}"><span class="dx-label">${esc(title)} ${open ? "▾" : "▸"}</span>${open ? `<span class="ax-why__t">${esc(text)}</span>` : ""}</button>`; };
   const idLine = (label, value) => `<div class="dx-id" data-copy="${esc(value)}" title="Click to copy">${esc(label)} ${esc(value)}</div>`;
 
   /** A swap's card: the same one on Swap (IN PROGRESS), in Activity and in History. */
-  function swapCard(s, hideable) {
+  function swapCard(s, hideable, unhide) {
     const it = swapItem(s, S.answers[s.hash]);
     return `<div class="dx-card ax-swap"><div class="dx-row"><b class="ax-t13">${esc(it.title)}</b><span class="dx-row"><span class="dx-chip" data-tone="${it.tone}">${it.chip}</span>${hideable ? `<button class="ax-x" data-axhide="${esc(it.hash)}" aria-label="Hide this swap's card">✕</button>` : ""}</span></div>`
       + `<div class="ax-amt">${esc(it.amount)}</div><div class="ax-dim">${esc(D.relTime ? D.relTime(it.created) + " · " : "")}${esc(it.sub)}</div>`
       + it.lines.map((l) => `<div class="ax-line">${esc(l)}</div>`).join("") + it.ids.map((x) => idLine(x[0], x[1])).join("")
-      + `<div class="ax-acts"><button class="dx-btn" data-axcheck="${esc(it.hash)}">Check now</button>${it.refund ? `<button class="dx-btn${it.refund.enabled ? " dx-btn--go" : ""}" data-axrefund="${esc(it.hash)}"${it.refund.enabled ? "" : " disabled"}>${esc(it.refund.label)}</button>` : ""}</div></div>`;
+      + `<div class="ax-acts"><button class="dx-btn" data-axcheck="${esc(it.hash)}">Check now</button>${unhide ? `<button class="dx-btn" data-axunhide="${esc(it.hash)}">Unhide</button>` : ""}${it.refund ? `<button class="dx-btn${it.refund.enabled ? " dx-btn--go" : ""}" data-axrefund="${esc(it.hash)}"${it.refund.enabled ? "" : " disabled"}>${esc(it.refund.label)}</button>` : ""}</div></div>`;
   }
   async function checkNow(hash) {
     const lines = await Act.inspect(api(), hash);
@@ -738,6 +777,7 @@
     if (ds.axrefresh) { S.book = null; paint(); return load(S.tab).then(paint, paint); }
     if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
+    if (ds.axunhide) { S.hidden.delete(ds.axunhide); pref("dexicon_ax_hidden", [...S.hidden].join(",")); return paint(); }
     if (ds.axrefund) return one(async () => { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); });
     if (ds.axcsv) return Act.exportCsv(api(), ui);
     if (ds.axstart) return D.start();
@@ -758,7 +798,7 @@
       const list = swaps.filter((x) => !S.hidden.has(x.hash)).sort((a, b) => (terminal(a) - terminal(b)) || (b.created - a.created));
       return list.length ? `<div class="dx-day">ATOMIX SWAPS · USDT ⇄ ${esc(c)}</div>` + list.map((x) => swapCard(x, true)).join("") : "";
     }
-    if (tab === "history") { const list = swaps.filter(terminal).sort((a, b) => b.created - a.created); return list.length ? `<div class="dx-day">ATOMIX SWAPS · USDT ⇄ ${esc(c)}</div>` + list.map((x) => swapCard(x, false)).join("") : ""; }
+    if (tab === "history") { const list = historyList(swaps, S.hidden); return list.length ? `<div class="dx-day">ATOMIX SWAPS · USDT ⇄ ${esc(c)}</div>` + list.map((x) => swapCard(x, false, S.hidden.has(x.hash))).join("") : ""; }
     if (tab === "assets") {
       const w = S.wallet, b = (w && w.bals) || {}, m = b.meta, warn = coinWarn(S.st.currency, m && m.coins), addr = S.st.eth || (w && w.addr) || "";
       const locked = m ? Math.max(0, (Number(m.confirmed) || 0) - (Number(m.sendable) || 0)) : 0;
