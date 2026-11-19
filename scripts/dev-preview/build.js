@@ -28,13 +28,18 @@ if (process.argv.includes("--shots")) {
   if (!chrome) { console.error("no Chrome, Chromium, Edge or Brave found"); process.exit(1); }
   // the Fold is 932 x 704 dp at 2.625 px per dp; a tray app and the two window-width checks ride along
   const set = [
-    ["wallet", "view=balances&tray=0"], ["apps", "view=apps&tray=0"], ["node", "view=node&tray=0"],
+    ["wallet", "view=balances&tray=0"], ["wallet-expanded", "view=balances&tray=0&expand=1"],
+    ["wallet-empty", "view=balances&tray=0&bal=empty&expand=1"], ["wallet-failed", "view=balances&tray=0&bal=fail"],
+    ["wallet-1440x900", "view=balances&tray=0", 1440, 900, 1], ["wallet-expanded-1440x900", "view=balances&tray=0&expand=1", 1440, 900, 1],
+    ["apps", "view=apps&tray=0"], ["node", "view=node&tray=0"],
     ["tray", "view=node&tray=1"], ["overflow", "view=balances&tray=0&menu=1"], ["ethwallet", "view=ethwallet&tray=0"],
     ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"],
     ["stopped", "view=balances&tray=0&state=stopped"], ["shutdown", "view=balances&tray=0&shutdown=1"], ["apps-hidden", "view=apps&tray=0&hidden=mail"],
     ["wide-1440x900", "view=balances&tray=1", 1440, 900, 1], ["narrow-680", "view=balances&tray=1", 680, 704, 2]
   ];
+  const only = (process.argv.find(a => a.startsWith("--only=")) || "").slice(7);   // --only=wallet captures the names that start with it
   for (const dark of [true, false]) for (const [name, query, w = 932, h = 704, scale = 2.625] of set) {
+    if (only && !name.startsWith(only)) continue;
     const file = path.join(here, "shots", (dark ? "dark-" : "light-") + name + ".png");
     execFileSync(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--screenshot=" + file, `--window-size=${w},${h}`,
       "--force-device-scale-factor=" + scale, "--virtual-time-budget=5000", "--allow-file-access-from-files",

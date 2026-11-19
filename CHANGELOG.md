@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.79] — Wallet: the phone's header and token rows
+
+- The Wallet tab's header is the phone's: "Total balance" with an arrow at the right. The row opens and closes one line that says what the figure is made of: confirmed, locked, unconfirmed, the coin count and how long ago it was read. It is closed by default.
+- Each token row is the phone's row and nothing else: the icon with its validated badge, the name, the spendable amount, and one faint line with what the amount leaves out ("5 coins", "locked 20 · 20 coins", "unconfirmed 4.25"). The line is left out when there is nothing to say. Amounts on the list are cut to six decimals and never rounded up; an amount smaller than that shows as "<0.000001", never as 0. The exact figures are one click away on the token.
+- Split and Consolidate are no longer buttons on the rows, and the "Consolidate N spendable coins" button is gone from them too. Both are still on the Send screen, unchanged, and move into the token's coins dialog in the next version.
+- A wallet that holds nothing shows a Minima row at 0, as the phone does. A balance that could not be read still says so, with no figure above it.
+- New test file `scripts/wallet-money-test.cjs`: it runs the Send, Split and Consolidate handlers taken from the app against a stand-in node and pins the exact command each sends for a set of inputs, every check that stops a send (a pasted address carrying extra parameters, a bad amount, an amount over the spendable figure, an address the node cannot check, a declined review), and that Consolidate refuses when a pool owner key cannot safely sign. The expected strings were recorded from 0.18.78 before any screen was changed.
+- Dev preview: fixtures for locked and unconfirmed amounts, a long token name, a zero balance, an empty wallet and a failed read; `--only=<name>` captures part of the set.
+
 ## [0.18.78] — shell review: the menu everywhere, hidden apps still count, nothing stale
 
 - The overflow button was hidden inside a tray app (Mail, ETH Wallet and the rest) and on Send, Receive, Logs, Terminal and Settings, so from those screens there was no route to Logs, Terminal, Settings or Shutdown, and the "Update" marker disappeared. It now stays in the bar on every screen.

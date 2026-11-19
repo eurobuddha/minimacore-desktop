@@ -4,6 +4,7 @@
  * talks to a node. Not shipped (package.json "build.files" lists main/ and renderer/ only).
  *
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
+ *   Wallet: &bal=empty|fail  &expand=1
  */
 "use strict";
 (function () {
@@ -17,14 +18,20 @@
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";
   const PK = (n) => "0x" + (n + "C4E8A1F09B37D25E6A8C0F1B3D5E7A9C2E4F6081A3B5C7D9E0F2A4B6C8D0E2F4").slice(0, 64);
   const tok = (name, ticker) => ({ name: { name, ticker, description: "Fixture token" }, decimals: 8, scale: 0 });
-  const balance = [
-    { token: "Minima", tokenid: "0x00", confirmed: "1250.75", unconfirmed: "0", sendable: "1250.75", coins: "4", total: "1000000000" },
-    { token: tok("MxUSD", "MxUSD"), tokenid: MXUSD, confirmed: "320.5", unconfirmed: "0", sendable: "300.5", coins: "3", total: "1000000" },
+  const LONG = "0x9C2B7E4D1A6F3058B2C4D6E8F0A1B3C5D7E9F1A2B4C6D8E0F2A4B6C8D0E2F4A6";
+  const ZERO = "0x3E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C";
+  // ?bal=empty (a wallet that holds nothing), ?bal=fail (the read failed); otherwise the full set:
+  // locked amounts, an unconfirmed amount, a long token name, a zero balance, a figure past six decimals
+  const balance = Q.get("bal") === "empty" ? [] : [
+    { token: "Minima", tokenid: "0x00", confirmed: "1262.75", unconfirmed: "0", sendable: "1250.750000123456", coins: "5", total: "1000000000" },
+    { token: tok("MxUSD", "MxUSD"), tokenid: MXUSD, confirmed: "320.5", unconfirmed: "4.25", sendable: "300.5", coins: "3", total: "1000000" },
+    { token: tok("The Meridian Harbour Lighthouse Preservation Society Commemorative Membership Token, Second Series", "MHLPS"), tokenid: LONG, confirmed: "20", unconfirmed: "0", sendable: "0", coins: "20", total: "5000" },
+    { token: tok("Quiet Ledger", "QL"), tokenid: ZERO, confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0", total: "100" },
     { token: { name: { name: "Harbour Print 7" }, decimals: 0 }, tokenid: NFT, confirmed: "1", unconfirmed: "0", sendable: "1", coins: "1", total: "1" }
   ];
   const keys = { keys: [{ publickey: PK("A1"), uses: 37, maxuses: 262144 }, { publickey: PK("B2"), uses: 12, maxuses: 262144 }], total: 2, maxuses: 37 };
   const cmds = {
-    balance: () => balance,
+    balance: () => { if (Q.get("bal") === "fail") throw new Error("preview: the balance read failed"); return balance; },
     coins: () => [1, 2, 3, 4].map(i => ({ coinid: PK("C" + i), amount: "312.6875", tokenid: "0x00", address: PK("D1"), miniaddress: ADDR })),
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
     newaddress: () => ({ address: PK("D2"), miniaddress: ADDR }),
@@ -43,7 +50,11 @@
     health: { version: "1.0.45.14", block: 2428089, time: BLOCK_TIME, connections: 8, incoming: 6, locked: false, megammr: false, acceptingInLinks: null, p2pAddress: "" }
   };
   const fixtures = {
-    cmd: async (c) => { const f = cmds[String(c).split(" ")[0]]; return f ? { status: true, response: f() } : { status: false, error: "preview: no fixture for " + c }; },
+    cmd: async (c) => {
+      const f = cmds[String(c).split(" ")[0]];
+      try { return f ? { status: true, response: f(String(c)) } : { status: false, error: "preview: no fixture for " + c }; }
+      catch (e) { return { status: false, error: e.message }; }
+    },
     clip: async () => true,
     getConfig: async () => ({ setupDone: true, walletDone: true, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: {}, params: {}, megammrHost: "megammr.example:9001", heapMb: 0, openAtLogin: false, walletMode: "new" }),
     saveConfig: async (p) => Object.assign(await fixtures.getConfig(), p),
@@ -87,6 +98,7 @@
       if (Q.get("tray") === "0") setTray(false, true);
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
+      if (Q.get("expand") === "1") el("walHead").click();
       if (Q.get("menu") === "1") { openMenu(); document.activeElement.blur(); }
     } catch (e) { document.title = "PREVIEW ERROR " + e.message; console.error(e); }
   }, 300));

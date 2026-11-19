@@ -572,6 +572,7 @@ function initShell() {
   el("backBtn").onclick = () => selectTab(lastTabView);
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
+  el("walHead").onclick = toggleWalBreakdown;
   el("stopStart").onclick = () => { toast("Starting the node…"); api.nodeStart(); };
 
   // tray
@@ -677,7 +678,7 @@ function paintAppsCounts() {
 // Faucet's address, the footer's key uses, the Node dashboard). Each is read again when it is next shown.
 const NO_FIGURE = "–";
 function resetWalletFigures() {
-  el("walTotal").textContent = NO_FIGURE;
+  el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown();
   el("faucetBody").innerHTML = "";
   FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {};
 }
@@ -1003,56 +1004,73 @@ function startRefresh() {
 }
 function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshTimer = null; }
 
-// ---- Balances --------------------------------------------------------------
+// ---- Wallet tab (Pandamonium's BalanceView / BalanceAdapter) ---------------
 async function renderBalances() {
   const host = el("balList");
-  if (!running) { el("walTotal").textContent = NO_FIGURE; host.innerHTML = waitHtml(); return; }
-  const bal = await tryCmd("balance");
-  BAL_AT = Date.now();                                   // drives the "updated Ns ago" stamp
-  // a failed read is not an empty wallet: no old total above it, and no "No coins yet"
-  if (!bal) { el("walTotal").textContent = NO_FIGURE; host.innerHTML = `<div class="empty">The balance could not be read. It is read again every 15 seconds.</div>`; return; }
-  if (!bal.length) { el("walTotal").textContent = "0"; host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
+  if (!running) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = waitHtml(); return; }
+  let bal = await tryCmd("balance");
+  // a failed read is not an empty wallet: no old total above it, and no zero row
+  if (!bal) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = `<div class="empty">The balance could not be read. It is read again every 15 seconds.</div>`; return; }
+  BAL_AT = Date.now();                                   // drives the breakdown's "updated ..."
+  // The phone always shows a Minima row, at 0 for a wallet that holds nothing yet.
+  if (!bal.length) bal = [{ token: "Minima", tokenid: MINIMA, confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0" }];
   BAL_BY_TID = {};
   for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
   // "Total balance" is the MINIMA headline, the same sendable figure its row shows.
-  el("walTotal").textContent = TOK.tidyAmount((BAL_BY_TID[MINIMA] || {}).sendable || "0");
-  // Consolidate only merges SPENDABLE coins (a send-to-self of signable coins) — locked/watch-only UTXOs
-  // can't be touched. balance.coins counts them all, so gate the nudge on the sendable count instead: one
-  // query, grouped by token. (Minima e.g. can show 14 total coins but only 5 spendable.)
-  SENDABLE_COUNT = {};
-  try {
-    const sc = await tryCmd("coins relevant:true sendable:true") || [];
-    for (const c of sc) { const t = c.tokenid || MINIMA; SENDABLE_COUNT[t] = (SENDABLE_COUNT[t] || 0) + 1; }
-  } catch (e) { /* nudge just won't show if we can't count — safe default */ }
-  // The list is rebuilt every 15 s. Keyboard focus stays where it was: the same token's row, or the same button on it.
-  const stops = (r) => [r, ...r.querySelectorAll("button")];
+  WAL_MINIMA = BAL_BY_TID[MINIMA] || { confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0" };
+  el("walTotal").textContent = summaryAmount(WAL_MINIMA.sendable || "0");
+  paintWalBreakdown();
+  // The list is rebuilt every 15 s. Keyboard focus stays where it was: the same token's row.
   const was = host.contains(document.activeElement) ? document.activeElement.closest(".balrow") : null;
-  const wasTid = was && was.dataset.tokenid, wasStop = was ? stops(was).indexOf(document.activeElement) : -1;
+  const wasTid = was && was.dataset.tokenid;
   host.innerHTML = bal.map(balCardHtml).join("");
-  if (was) { const row = [...host.querySelectorAll(".balrow")].find(r => r.dataset.tokenid === wasTid); if (row) (stops(row)[wasStop] || row).focus(); }
-  host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async (e) => {
-    e.stopPropagation();                                 // don't also open the detail modal
-    const tid = btn.dataset.tokenid;
-    if (!validTok(tid)) return;
-    const label = btn.textContent; btn.disabled = true; btn.textContent = "Consolidating…";
-    try { if (!await consolidateToken(tid, TOK.tokenName((BAL_BY_TID[tid] || {}).token, tid))) { btn.disabled = false; btn.textContent = label; } }
-    catch (e2) { toast("Consolidate failed: " + e2.message, "err"); btn.disabled = false; btn.textContent = label; }
-  });
-  // Split / Consolidate on every token: open the Send tab on that form with this token already chosen.
-  host.querySelectorAll(".tok-tool").forEach(btn => btn.onclick = (e) => {
-    e.stopPropagation();                                 // not the detail modal
-    SEND_PRESELECT = btn.dataset.tokenid; SEND_MODE_NEXT = btn.dataset.tool; selectTab("send");
-  });
-  // Whole card opens the rich token-detail modal (the consolidate button stops propagation above).
-  host.querySelectorAll(".card[data-tokenid]").forEach(card => {
-    card.onclick = () => { const b = BAL_BY_TID[card.dataset.tokenid]; if (b) showTokenDetail(b); };
-    card.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === card) { e.preventDefault(); card.click(); } };
+  if (was) { const row = [...host.querySelectorAll(".balrow")].find(r => r.dataset.tokenid === wasTid); if (row) row.focus(); }
+  host.querySelectorAll(".balrow").forEach(row => {
+    row.onclick = () => { const b = BAL_BY_TID[row.dataset.tokenid]; if (b) showTokenDetail(b); };
+    row.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); row.click(); } };
   });
   enhanceTokenIcons(host);
 }
-let BAL_BY_TID = {};       // tokenid → last balance row, so a card click can open the modal without refetching
-let SENDABLE_COUNT = {};   // tokenid → count of SPENDABLE coins (what consolidate can actually merge)
-let BAL_AT = 0;            // when the last `balance` reply landed — the breakdown's "updated Ns ago"
+let BAL_BY_TID = {};       // tokenid → last balance row, so a row click can open its dialog without refetching
+let BAL_AT = 0;            // when the last `balance` reply landed: the breakdown's "updated ..."
+let WAL_MINIMA = null;     // the MINIMA balance row behind "Total balance" (null: not read)
+
+/** Display only: at most six decimals, cut off and never rounded up (the phone's Format.summaryAmount).
+ *  The exact figure is in the token's coins dialog. A real balance is never shown as zero. */
+function summaryAmount(s) {
+  s = String(s == null ? "" : s).trim();
+  const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(s);
+  if (!s || !m) return s || "0";
+  const int = (m[2] || "0").replace(/^0+(?=\d)/, ""), frac = m[3] || "";
+  if (/^0*$/.test(int + frac)) return "0";
+  const cut = frac.slice(0, 6).replace(/0+$/, "");
+  if (int === "0" && !cut) return m[1] ? ">-0.000001" : "<0.000001";
+  return m[1] + int + (cut ? "." + cut : "");
+}
+/** "now", "31 minutes ago", "1 hour ago", "3 days ago": how the phone says how long ago. */
+function since(ms) {
+  const d = Math.max(0, Date.now() - ms), n = (v, unit) => v + " " + unit + (v === 1 ? "" : "s") + " ago";
+  if (d < 60000) return "now";
+  if (d < 3600000) return n(Math.floor(d / 60000), "minute");
+  if (d < 86400000) return n(Math.floor(d / 3600000), "hour");
+  return n(Math.floor(d / 86400000), "day");
+}
+function coinCount(n) { n = parseInt(n, 10) || 0; return n + (n === 1 ? " coin" : " coins"); }
+
+/** What makes up the header number, behind the expand arrow (collapsed by default, as the phone). */
+function paintWalBreakdown() {
+  const b = WAL_MINIMA, box = el("walBreakdown");
+  box.textContent = !b ? "Node not connected"
+    : `confirmed ${summaryAmount(b.confirmed || "0")}  ·  locked ≈ ${summaryAmount(decSub(b.confirmed || "0", b.sendable || "0"))}`
+      + `  ·  unconfirmed ${summaryAmount(b.unconfirmed || "0")}  ·  ${coinCount(b.coins)}  ·  updated ${since(BAL_AT)}  ·  click a token for coins`;
+}
+function toggleWalBreakdown() {
+  const box = el("walBreakdown"), show = box.hidden;
+  paintWalBreakdown();
+  box.hidden = !show;
+  el("walHead").setAttribute("aria-expanded", show ? "true" : "false");
+  el("walHead").setAttribute("aria-label", show ? "Hide balance details" : "Show balance details");
+}
 
 /** Is this balance row a 1-of-1 NFT? (non-Minima, total supply 1, no fractional decimals) */
 function isNftBal(b) {
@@ -1060,75 +1078,39 @@ function isNftBal(b) {
     && (!b.token || !b.token.decimals || String(b.token.decimals) === "0");
 }
 
-// One balance card: token icon (identicon → real icon over) + name + amounts + coin count + consolidate nudge.
+// One token row, as the phone's view_balance_row: icon tile with the validated badge, name, amount, and one
+// faint line with whatever the amount leaves out ("4 coins", "locked 20 · 20 coins"). Nothing else.
 function balCardHtml(b) {
-  const isNative = b.tokenid === MINIMA || !b.tokenid;
-  const name = TOK.tokenName(b.token, b.tokenid);
-  const coins = parseInt(b.coins, 10) || 0;
-  const cached = ICON_CACHE.get(b.tokenid);
+  const tid = b.tokenid || MINIMA, isNative = tid === MINIMA;
+  const cached = ICON_CACHE.get(tid);
   let iconCell;
   if (isNative) {
     iconCell = `<span class="tok-wrap"><img class="tok-icon tok-icon--native" src="icons/minima.svg" alt=""><span class="tok-badge">✓</span></span>`;
   } else {
-    const identicon = TOK.identiconDataUri(b.tokenid);
+    const identicon = TOK.identiconDataUri(tid);
     const res = TOK.resolveIcon(TOK.pickIconField(b.token));
     const src = (cached && cached.icon) || res.data || identicon;
     const showBadge = cached && cached.valid;
-    iconCell = `<span class="tok-wrap" data-tokenid="${esc(b.tokenid)}" data-identicon="${esc(identicon)}"`
+    iconCell = `<span class="tok-wrap" data-tokenid="${esc(tid)}" data-identicon="${esc(identicon)}"`
       + (res.data ? ` data-icon-data="${esc(res.data)}"` : "")
       + (res.remote ? ` data-icon-remote="${esc(res.remote)}"` : "")
       + (TOK.webvalidateUrl(b.token) ? ` data-webv="1"` : "")
       + `><img class="tok-icon" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
   }
-  // Nudge on SPENDABLE coins only — consolidate can't merge locked ones, so counting them would offer to
-  // consolidate coins that can't be touched (e.g. 14 total but 5 spendable → no useful consolidation).
-  const spendCoins = SENDABLE_COUNT[b.tokenid || MINIMA] || 0;
-  const nudge = spendCoins >= 10
-    ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" >Consolidate ${spendCoins} spendable coins</button>`
-    : "";
-  // Headline = SENDABLE — what the user can actually spend. `confirmed` (total incl. coins locked in
-  // scripts/pools) was misleading: it made a $2-spendable wallet read as $600. Locked = confirmed − sendable,
-  // shown as a small muted line only when there is a locked portion.
+  // The amount is SENDABLE: what can be spent. `confirmed` also counts coins locked in scripts and pools.
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0";   // balance.java always emits both; guard so a malformed row can't blank the whole list
-  const locked = decSub(confirmed, sendable);
-  const nft = isNftBal(b);
-  const sub = nft ? "Spendable · NFT" : "Spendable";
-  // Laid out as the phone's view_balance_row: icon tile, then name and amount sharing the row half and
-  // half, the details as a faint caption beneath.
-  const tick = TOK.ticker(b.token) || "";
-  return `<div class="card card--token balrow" data-tokenid="${esc(b.tokenid || MINIMA)}" tabindex="0" role="button">
+  const positive = (v) => /[1-9]/.test(String(v || "")) && !String(v).startsWith("-");
+  const locked = decSub(confirmed, sendable), parts = [];
+  if (positive(locked)) parts.push("locked " + summaryAmount(locked));
+  if (positive(b.unconfirmed)) parts.push("unconfirmed " + summaryAmount(b.unconfirmed));
+  if (parseInt(b.coins, 10) > 0) parts.push(coinCount(b.coins));
+  return `<div class="balrow" data-tokenid="${esc(tid)}" tabindex="0" role="button">
     ${iconCell}
     <div class="balrow__main">
-    <div class="balrow__top"><span class="balrow__name">${esc(name)}</span><span class="balrow__amt">${esc(TOK.tidyAmount(sendable))}</span></div>
-    <div class="bal-breakdown">${esc(sub)}${tick ? " " + esc(tick) : ""}  ·  ${esc(balBreakdown(b, confirmed, locked, coins))}</div>
+    <div class="balrow__top"><span class="balrow__name">${esc(TOK.tokenName(b.token, tid))}</span><span class="balrow__amt">${esc(summaryAmount(sendable))}</span></div>
+    ${parts.length ? `<div class="bal-breakdown">${esc(parts.join("  ·  "))}</div>` : ""}
     </div>
-    ${nft || !(Number(sendable) > 0) ? "" : `<div class="bal-tools">
-      <button class="btn btn--sm btn--outline tok-tool" data-tool="split" data-tokenid="${esc(b.tokenid || MINIMA)}" title="Split some of this into several equal coins, so you can make several sends without waiting for change">Split</button>
-      ${spendCoins >= 2 ? `<button class="btn btn--sm btn--outline tok-tool" data-tool="consolidate" data-tokenid="${esc(b.tokenid || MINIMA)}" title="Merge this token's ${spendCoins} spendable coins into fewer, larger ones">Consolidate</button>` : ""}
-    </div>`}
-    ${nudge}
   </div>`;
-}
-
-/**
- * The full balance breakdown — parity with the PandaPools native app 0.9.20 and AtomiX, whose whole point is
- * that the displayed numbers are never a black box.
- *
- * EVERY figure shows, zeros included. Previously `locked` and `pending` appeared only when non-zero, so a
- * wallet with everything committed to a pool or a script showed a spendable figure and nothing at all
- * explaining where the rest had gone.
- *
- * The headline stays SENDABLE for the reason given above — this only adds the context around it. `locked` is
- * confirmed − sendable and is shown with "≈" because it is derived, not node-supplied.
- */
-function balBreakdown(b, confirmed, locked, coins) {
-  const ago = BAL_AT ? `${Math.max(0, Math.round((Date.now() - BAL_AT) / 1000))}s ago` : "never";
-  return `confirmed ${TOK.tidyAmount(confirmed)}`
-    + `  ·  locked ≈ ${TOK.tidyAmount(locked)}`
-    + `  ·  unconfirmed ${TOK.tidyAmount(b.unconfirmed || "0")}`
-    + `  ·  ${coins} coin${coins === 1 ? "" : "s"}`
-    + `  ·  updated ${ago}`
-    + `  ·  click for coins`;
 }
 
 // After paint: swap in real icons (inline data → now; http/ipfs → SSRF-guarded main fetch) + validation badge

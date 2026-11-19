@@ -66,8 +66,10 @@
 
       <main class="main" id="main">
       <section class="view view--active" id="view-balances">
-        <div class="wal-head"><span>Total balance</span></div>
+        <!-- The whole header row shows or hides the breakdown, as the phone's (collapsed by default). -->
+        <button class="wal-head" id="walHead" aria-expanded="false" aria-controls="walBreakdown" aria-label="Show balance details"><span>Total balance</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6z"/></svg></button>
         <div class="wal-total"><span class="wal-total__n" id="walTotal">0</span><span class="eyebrow">MINIMA</span></div>
+        <div class="wal-breakdown" id="walBreakdown" hidden></div>
         <div class="wal-actions">
           <button class="btn btn--primary" id="walSend">Send</button>
           <button class="btn btn--outline" id="walReceive">Receive</button>

@@ -166,8 +166,14 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .menu__item--update { color: var(--orange); }
 
 /* ---------------------------------------------------------------- Wallet tab (view_wallet_balance) */
-.wal-head { padding: 20px 16px 0; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim); }
-.wal-total { display: flex; align-items: flex-end; padding: 5px 16px 0; }
+.wal-head { display: flex; align-items: center; width: 100%; padding: 18px 16px 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: 400 13px/22px var(--sans); letter-spacing: .018em; color: var(--dim); }
+.wal-head span { flex: 1 1 0; }
+.wal-head svg { flex: 0 0 22px; width: 22px; height: 22px; fill: var(--dim2); }
+.wal-head[aria-expanded="true"] svg { transform: rotate(180deg); }
+.wal-head:focus-visible { outline-offset: -2px; }
+.wal-breakdown { padding: 6px 16px 0; font: 400 12px/1.25 var(--sans); letter-spacing: .018em; color: var(--dim2); white-space: pre-wrap; user-select: text; }
+.wal-total { display: flex; align-items: flex-end; padding: 3px 16px 0; }
 .wal-total__n { flex: 1 1 auto; min-width: 0; font-size: 26px; font-weight: 400; line-height: 36px;
   color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; user-select: text; }
 .wal-total .eyebrow { margin: 0 0 9px 8px; }
@@ -175,8 +181,9 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .wal-actions .btn { flex: 1 1 0; min-height: 42px; height: 42px; font-size: 16px; font-weight: 400; }
 .wal-eyebrow { padding: 18px 16px 8px; line-height: 16px; }
 /* token rows (view_balance_row): surface rows edge to edge, hairline between */
-#balList .balrow { display: flex; align-items: center; min-height: 67px; margin: 0; padding: 11px 16px; cursor: pointer;
+#balList .balrow { display: flex; align-items: center; min-height: 63px; margin: 0; padding: 11px 16px; cursor: pointer;
   background: var(--surface); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+#balList .balrow:has(.bal-breakdown) { min-height: 67px; }
 #balList .balrow:hover { background: var(--surface2); }
 #balList .balrow:focus-visible { outline-offset: -2px; }
 #balList .tok-wrap { flex: 0 0 40px; margin-right: 12px; }
@@ -189,12 +196,6 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .balrow__amt { flex: 1 1 0; min-width: 0; font-size: 15px; font-weight: 400; line-height: 20px; letter-spacing: .03em; color: var(--text);
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #balList .bal-breakdown { margin-top: 3px; font: 400 11px/15px var(--sans); color: var(--dim2); white-space: pre-wrap; }
-#balList > .card:not(.balrow) { margin: 0 16px; }
-/* desktop extras on a row: Split / Consolidate sit at its right end, so the row keeps the phone's height */
-#balList .balrow { position: relative; }
-#balList .bal-tools { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); margin: 0; }
-#balList .balrow:has(.bal-tools) .bal-breakdown { padding-right: 200px; }
-#balList .consolidate-btn { flex: 0 0 auto; margin-left: 12px; }
 
 /* ---------------------------------------------------------------- Apps tab (view_apps, view_apps_internal_row) */
 .apps-help { padding: 16px 16px 8px; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim2); }

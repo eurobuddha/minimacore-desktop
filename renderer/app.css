@@ -371,5 +371,3 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .toast--copy:hover { border-color: var(--fg); }
 
 /* Split / Consolidate on every token in the wallet */
-.bal-tools { display: flex; gap: 8px; margin-top: 8px; }
-.bal-tools .btn { flex: 0 0 auto; }
