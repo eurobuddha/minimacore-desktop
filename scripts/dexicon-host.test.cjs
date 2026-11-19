@@ -386,6 +386,7 @@ test("H3: txnpost never answered (the node went away): recorded as unknown, the 
     assert.equal(f.status, "unknown"); assert.match(f.K, /^fill_unanswered_/); assert.deepEqual(f.spent, [COIN]); assert.deepEqual(f.coins, [OUT]);
     assert.equal((await orderNow(b.host)).remaining, "60", "not backed again at full size while the fill's fate is unknown");
     assert.equal(msgs(b.net), 0, "neither 'taken' nor 'refused' is claimed");
+    assert.equal((await b.host.activeWork()).unknown, 1, "0.18.142: counted for the Quit and Shutdown warnings");
     await b.host.stop(); await b.host.start(); await M.until(() => b.host.status().ready);   // a restart in between: the record is on disk
     assert.equal((await orderNow(b.host)).remaining, "60");
     if (!mined) { f.ts -= 601; const K = f.K; delete f.K; await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + K + "', '" + JSON.stringify(f) + "')"); }
@@ -767,7 +768,7 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   const { host, ctx } = await boot();
   const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
   const list = (dx) => restore.activeWorkList(Object.assign({}, quiet, dx === undefined ? {} : { dexicon: dx }));
-  assert.deepEqual(await host.activeWork(), { ready: true, orders: [], pending: 0, takes: 0 });
+  assert.deepEqual(await host.activeWork(), { ready: true, orders: [], pending: 0, takes: 0, unknown: 0 });
   assert.deepEqual(list(await host.activeWork()), []);
   assert.deepEqual(list(undefined), [], "a caller that does not ask Dexicon is unchanged");
   assert.match(list(null)[0], /^Dexicon could not be asked/);
@@ -777,7 +778,7 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   vm.runInContext(`PDService.book = [{ coinid: "${coin}", orderId: "0x01", ownerPk: PDService.identity.publickey, wantAddr: PDService.identity.address, sell: true, price: PandaDEX.d("0.01"), minima: PandaDEX.d("5"), created: PDService.block, fillable: true }]`, ctx);
   await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"t1\":{\"sent\":1,\"mine\":[]}}')");
   const w = await host.activeWork();
-  assert.deepEqual(w, { ready: true, orders: [coin], pending: 0, takes: 1 });
+  assert.deepEqual(w, { ready: true, orders: [coin], pending: 0, takes: 1, unknown: 0 });
   const l = list(w);
   assert.equal(l.length, 2);
   assert.ok(l[0].includes(coin), "the order's coin id in full");
@@ -1049,7 +1050,7 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
   assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", async (e, a) => {') && main.includes("  return dexicon.command(a);\n});"));
-  assert.ok(main.includes('ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));') && /read\(api\.dxWork\(\)\)/.test(app), "the Shutdown warning asks for takes awaiting an answer; a failed read is null");
+  assert.ok(/const inFlightWork = async \(\) => \(\{[^\n]*\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\)/.test(main) && /api\.inFlight\("shutdown"\)/.test(app), "the Shutdown and Quit warnings ask for takes awaiting an answer; a failed read is null (0.18.142: main/inflight.js)");
   // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
   assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
@@ -1057,7 +1058,7 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   assert.ok(!/api\.\w*Invalidate\(/.test(app), "the renderer's chain only clears the screen");
   assert.ok(main.includes("dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });"), "a failed read is null, which refuses");
   assert.ok(/try \{ dexicon\.flush\(\); \} catch \(err\) \{\}/.test(main));
-  for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "dxWork", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
+  for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "inFlight", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
   const host = fs.readFileSync(path.join(M.root, "main/dexicon.js"), "utf8");
   assert.ok(!/require\("(http|https|net|child_process)"\)/.test(host), "the host opens no socket of its own");
   assert.equal((host.match(/rpcCall\(/g) || []).length, 1, "one way to the node: rpcCall");

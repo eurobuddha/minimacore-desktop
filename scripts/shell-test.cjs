@@ -129,31 +129,10 @@ test("tab selection: where a view sits decides what the shell wears", () => {
   assert.equal(viewOfTab("history"), "history");
 });
 
-test("Shutdown names what is in flight, and says so when it could not be read", () => {
-  const { shutdownWarning } = lift(["SWAP_DONE", "shutdownWarning"]);
-  const now = 1800000000000;
-  const idle = shutdownWarning([{ status: "COMPLETE" }, { status: "REFUNDED" }, { status: "ERROR" }], { cfg: {}, state: {} }, [{ type: "STATUS" }, { confirmed: true, ts: now }], now);
-  assert.equal(idle.title, "Shut down the node?");
-  assert.ok(!/in progress|switched on|not confirmed|Could not/.test(idle.message), "an idle wallet gets the plain question");
-  const busy = shutdownWarning([{ status: "STARTED" }, { status: "COMPLETE" }], { cfg: { pegEnable: true }, state: {} }, [{ confirmed: false, ts: now - 60000 }, { confirmed: false, ts: now - 7200000 }, { failed: true, ts: now }], now);
-  assert.equal(busy.title, "Shut down with trades in flight?");
-  assert.ok(/1 AtomiX swap is in progress\. A swap in progress cannot settle while the node is stopped and can time out/.test(busy.message));
-  assert.ok(/Your AtomiX market is switched on/.test(busy.message));
-  assert.ok(/1 pool transaction sent in the last hour is not confirmed yet/.test(busy.message), "old and failed rows are not pending");
-  assert.ok(/3 AtomiX swaps are in progress/.test(shutdownWarning([{ status: "A" }, { status: "B" }, { status: "C" }], {}, [], now).message));
-  assert.ok(!/switched on/.test(shutdownWarning([], { cfg: { pegEnable: true }, state: { withdrawn: true } }, [], now).message), "a withdrawn market is not live");
-  // 0.18.109: a Dexicon take sent and not yet answered cannot be voided while the node is stopped
-  const quiet = [[], { cfg: {}, state: {} }, [], now];
-  assert.equal(shutdownWarning(...quiet, { ready: true, orders: [], pending: 0, takes: 0 }).title, "Shut down the node?");
-  const one = shutdownWarning(...quiet, { ready: true, orders: [], pending: 0, takes: 1 });
-  assert.equal(one.title, "Shut down with trades in flight?");
-  assert.ok(/1 Dexicon trade is sent and not yet answered\. While the node is stopped it cannot be voided, so the other side could still complete it later at the price you signed/.test(one.message), one.message);
-  assert.ok(/3 Dexicon trades are sent and not yet answered/.test(shutdownWarning(...quiet, { ready: false, hasStore: true, takes: 3 }).message), "counted from the store while the chain is still being read");
-  assert.ok(/Could not be checked: Dexicon trades waiting for an answer/.test(shutdownWarning(...quiet, null).message), "a failed read is not shown as idle");
-  assert.ok(/Could not be checked: Dexicon trades/.test(shutdownWarning(...quiet, { ready: false, hasStore: true }).message), "a store that is there and an engine that is not");
-  assert.ok(!/Dexicon trade/.test(shutdownWarning(...quiet, { ready: false, hasStore: false }).message), "never used: nothing to say");
-  const blind = shutdownWarning(null, null, null, now);
-  assert.ok(/Could not be checked: AtomiX swaps, your AtomiX market, pool operations/.test(blind.message), "a failed read is never shown as idle");
+test("Shutdown asks the main process what is in flight (the Quit warning's own source), and a stopped node shows a strip with Start", () => {
+  // the words themselves, and "could not be checked", are pinned in scripts/inflight-test.cjs (main/inflight.js says them for Shutdown and Quit alike)
+  assert.ok(/const w = await Promise\.race\(\[api\.inFlight\("shutdown"\)\.catch\(\(\) => null\)/.test(app) && !/function shutdownWarning|api\.ppWork|api\.dxWork/.test(app), "one source: no second copy of the warning in the window");
+  assert.ok(/\|\| \{ title: "Shut down the node\?", message: "Could not be checked: /.test(app), "no answer from the main process is said, never shown as idle");
   assert.ok(/id="stopBar"[^>]*hidden/.test(html) && /id="stopStart"/.test(html) && /api\.nodeStart\(\)/.test(app), "a stopped node shows a strip with Start");
 });
 

@@ -6,7 +6,7 @@
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
 const testProfile = require("./testprofile");   // FIRST: a TEST copy moves userData and its keychain names before anything reads them
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, nativeTheme, shell, Notification, session, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, nativeTheme, shell, Notification, session, clipboard, powerMonitor } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const config = require("./config");
@@ -14,6 +14,7 @@ const node = require("./node-manager");
 const portmap = require("./portmap");
 const rpc = require("./rpc");
 const restore = require("./restore");   // backup-file restore rules (key mode first)
+const inflight = require("./inflight");   // what a Shutdown or a Quit would interrupt, said once for both
 const { pinMinimaSend } = require("./sendpin");
 const updater = require("./updater");
 const loginitem = require("./loginitem");   // "Open at login" — OS login item (mac/win) or XDG autostart (linux)   // app updates from the minimaCore store feed (the jar itself ships with the app)
@@ -116,7 +117,9 @@ function createWindow() {
   win.webContents.on("will-navigate", (e, url) => { if (!String(url).startsWith("file://")) e.preventDefault(); });
   // On macOS the app/node already stays running after closing its window. Keep the call
   // receiver alive too; explicit Quit still closes it through the existing graceful shutdown.
-  win.on("close", e => { if (process.platform === "darwin" && !quitting) { e.preventDefault(); win.hide(); } });
+  // Elsewhere closing the window quits the app: the quit is asked for while the window is still there, so the
+  // Quit warning (before-quit) has a window to be answered in, and "Stay open" leaves it as it was.
+  win.on("close", e => { if (quitting) return; e.preventDefault(); if (process.platform === "darwin") win.hide(); else app.quit(); });
   win.on("closed", () => { win = null; });
 }
 
@@ -246,6 +249,11 @@ ipcMain.handle("mcd:nodeStart", async () => { await node.start(); return node.sn
 // Stop whatever node holds our port/data folder (an earlier launch's), then start. Same reclaim as every start.
 ipcMain.handle("mcd:nodeReclaim", async () => { await node.stop(); await node.start(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snapshot(); });
+// What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
+// and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
+const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
+  dexicon: await dexicon.activeWork().catch(() => null), casino: config.load().casinoEnabled ? casino.open() : null, casinoOn: !!config.load().casinoEnabled });
+ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now()); return { title: w.title, message: w.message, any: w.any }; });
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());
@@ -511,7 +519,6 @@ ipcMain.handle("mcd:ppPendingCollect", () => pandapools.pendingCollect());
 ipcMain.handle("mcd:ppArchiveSettings", (_e, url) => pandapools.archiveSettings(url));
 ipcMain.handle("mcd:ppConfirmSigning", (_e, opk, attested) => pandapools.confirmSigning(opk, attested));
 ipcMain.handle("mcd:ppCompleteBackupRequired",()=>pandapools.completeBackupRequired());
-ipcMain.handle("mcd:ppWork", () => pandapools.activeWork().catch(() => null));   // for the Shutdown warning: null = could not be checked
 ipcMain.handle("mcd:ppStatus", () => pandapools.status());
 ipcMain.handle("mcd:ppWhy", () => pandapools.lastNodeFailure());   // the node's last refusal of a pool command: { verb, error, at } or null
 ipcMain.handle("mcd:ppSaveBackup", async (_e, password) => {
@@ -632,7 +639,6 @@ ipcMain.handle("mcd:engineSetAside", (_e, which) => {
   if (node.state === "running") eng.startLoop();
   return kept;
 });
-ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));   // for the Shutdown warning: takes awaiting an answer (null: could not be read)
 // No mcd:dxInvalidate: a window cannot move the store aside, and a wallet replacement does not wait for a window
 // to say so (walletReplaced, below).
 dexicon.emitter.on("comms", (message) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", message); });   // service → screens
@@ -763,17 +769,41 @@ process.on("exit", () => { try { node.killNow(); } catch (e) {} });
 
 app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhere */ if (process.platform !== "darwin") app.quit(); });
 
-let quitting = false;
-app.on("before-quit", async (e) => {
+// QUIT (0.18.142). Three ways in: the user (Quit in the tray or the menu, Cmd-Q, closing the window off the Mac), the
+// system (logout, restart, power off), and the app itself after it has stopped the node (the second pass, below).
+//  - A user's quit with work in flight, or with an engine that could not be asked, is ASKED first, in the same words
+//    as the Shutdown warning (main/inflight.js). "Stay open" leaves everything as it was.
+//  - A quit the system asked for is never held behind a question nobody may be there to answer. It goes on, and what
+//    was in flight is written to the log. (This app has no updater that quits it: an update is downloaded and shown
+//    in the Downloads folder, and the user installs it.)
+//  - Either way the node is then stopped through node.stop(): every engine first finishes what it has at the node,
+//    each within its own bound and 30 s in all (0.18.117), so a transaction posted in the last second is recorded.
+let quitting = false, quitAsking = false, systemQuit = false;
+app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit = true; }); } catch (e) { /* Windows: session-end below */ } });
+app.on("browser-window-created", (_e, w) => { w.on("session-end", () => { systemQuit = true; }); w.on("query-session-end", () => { systemQuit = true; }); });
+app.on("before-quit", (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
   try { dexicon.flush(); } catch (err) {}      // and the Dexicon store (orders, takes and fills are already sync-flushed)
   try { casino.flush(); } catch (err) {}       // casino keychain writes are sync; no-op, kept for symmetry
   try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;
-  // Always go through node.stop(), even with no node process: it also releases the router port mapping,
-  // which can outlive the node (e.g. the node died on its own). Both halves are bounded, so quit stays fast.
-  e.preventDefault(); quitting = true;
-  try { await node.stop(); } catch (err) {}
-  app.quit();
+  e.preventDefault();
+  if (quitAsking) { if (win && !win.isDestroyed()) { win.show(); win.focus(); } return; }   // a second Quit while the question is open: show it
+  quitAsking = true;
+  (async () => {
+    const go = await inflight.decideQuit({ os: systemQuit, stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
+      ask: async (w) => {
+        if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: "Minima Core", message: w.title, detail: w.message });
+        return r.response === 0 || systemQuit;   // the system asked while the question was open: it is not held
+      } }).catch(() => true);
+    quitAsking = false;
+    if (!go) return;
+    // Always go through node.stop(), even with no node process: it also releases the router port mapping,
+    // which can outlive the node (e.g. the node died on its own). Both halves are bounded, so quit stays fast.
+    quitting = true;
+    try { await node.stop(); } catch (err) {}
+    app.quit();
+  })();
 });

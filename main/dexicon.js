@@ -462,13 +462,16 @@ function makeHost(opts = {}) {
     // writes BEFORE it sends. Read from the store, so they are counted whether or not any screen is open.
     const kv = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
     const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
+    // 0.18.142: fills of this node's orders whose txnpost was never answered (service.desktop.js POST UNANSWERED): the
+    // chain decides which way they went, and the engine can only read that while it runs. For the Quit and Shutdown warnings.
+    const unknown = () => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k LIKE 'fill_%'"); if (!r.status) throw new Error(r.error); return r.rows.filter(x => { try { return JSON.parse(x.V || x.v || "{}").status === "unknown"; } catch (e) { return false; } }).length; };
     if (!ctx || !ctx.DX || !ctx.DX.restingReady()) {
       const w = { ready: false, hasStore: anyStore(), waitedMs: timer && startedAt ? Date.now() - startedAt : 0 };   // waitedMs: main/restore.js lets the user go on after two minutes of this
-      if (sqlShim && ctx && ctx.DX && ctx.DX.ready()) { try { w.takes = takes(); } catch (e) {} }   // the FAST half is up: its takes are known even while the chain is still being read
+      if (sqlShim && ctx && ctx.DX && ctx.DX.ready()) { try { w.takes = takes(); w.unknown = unknown(); } catch (e) {} }   // the FAST half is up: its takes are known even while the chain is still being read
       return w;
     }
     const m = mine();
-    return { ready: true, orders: m.orders.map(o => String(o.coinid)), pending: m.pending.length, takes: takes() };
+    return { ready: true, orders: m.orders.map(o => String(o.coinid)), pending: m.pending.length, takes: takes(), unknown: unknown() };
   }
 
   // ---- the command bridge: what a Dexicon screen (the MiniDapp page's MDS) may ask for ----

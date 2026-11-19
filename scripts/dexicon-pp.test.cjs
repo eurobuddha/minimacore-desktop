@@ -524,13 +524,12 @@ test("the Shutdown warning and the restore gate count pool operations truthfully
   const list = restore.activeWorkList({ atomix: ax, pools: [{ type: "SWAP", txpowid: PK("71"), confirmed: false, failed: false }, { type: "SWAP", txpowid: PK("72"), confirmed: true }] });
   assert.ok(list.some((l) => l.includes("1 PandaPools transaction still waiting to confirm: " + PK("71"))), "the id whole");
   const main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), app = src("app.js");
-  assert.match(main, /pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\)/); assert.match(main, /ipcMain\.handle\("mcd:ppWork", \(\) => pandapools\.activeWork\(\)\.catch\(\(\) => null\)\)/);
-  assert.match(app, /read\(api\.axMakerCfg\(\)\), read\(api\.ppWork\(\)\), read\(api\.dxWork\(\)\)/);
-  // the Shutdown warning itself, lifted from app.js: null = could not be checked; a recent unconfirmed row is counted
-  const sw = new Function(/const SWAP_DONE = [^\n]*\n/.exec(app)[0] + /function shutdownWarning\(swaps, maker, pool, nowMs, dex\) \{[\s\S]*?\n\}/.exec(app)[0] + "; return shutdownWarning;")();
-  assert.match(sw([], { cfg: {}, state: {} }, null, Date.now(), { ready: true, takes: 0 }).message, /Could not be checked: pool operations\./);
-  assert.match(sw([], { cfg: {}, state: {} }, [{ type: "SWAP", confirmed: false, failed: false, ts: Date.now() - 1000 }], Date.now(), { ready: true, takes: 0 }).message, /^1 pool transaction sent in the last hour is not confirmed yet/);
-  assert.equal(sw([], { cfg: {}, state: {} }, [], Date.now(), { ready: true, takes: 0 }).title, "Shut down the node?");
+  assert.equal((main.match(/pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\)/g) || []).length, 2, "the restore gate and the Shutdown / Quit warning both ask the engine's own activeWork");
+  // the Shutdown and Quit warning (main/inflight.js): null = could not be checked; a recent unconfirmed row is counted
+  const { inFlight } = require("../main/inflight.js"), idle = { atomix: ax, dexicon: { ready: true, takes: 0 } };
+  assert.match(inFlight(Object.assign({ pools: null }, idle), "shutdown", Date.now()).message, /^Could not be checked: pool operations \(PandaPools has not started\)\./);
+  assert.match(inFlight(Object.assign({ pools: [{ type: "SWAP", confirmed: false, failed: false, ts: Date.now() - 1000 }] }, idle), "shutdown", Date.now()).message, /^1 pool transaction sent in the last hour is not confirmed yet/);
+  assert.equal(inFlight(Object.assign({ pools: [] }, idle), "shutdown", Date.now()).title, "Shut down the node?");
 });
 
 // ---- 0.18.137: the wallet-restore gate and pools ----

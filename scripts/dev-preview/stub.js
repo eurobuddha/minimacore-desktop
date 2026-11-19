@@ -264,6 +264,7 @@
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
     // Dexicon (main/dexicon.js read model). ?dxs=notready|norelay|relaydown|empty|taking|failed
     dxWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0 }),
+    inFlight: async () => ({ any: false, title: "Shut down the node?", message: "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again." }),
     dxStatus: async () => DXS === "notready" ? { version: "0.0.91", started: false, ready: false, restingReady: false, publicId: null, block: 0, relays: [], price: { mid: 0, ageMs: null, label: "" }, log: [] }
       : { version: "0.0.91", started: true, ready: true, restingReady: true, publicId: PK("5D"), block: 2428089, relays: DXS === "norelay" ? [] : DX_RELAYS, price: { mid: 0.00315, ageMs: 4000, label: "live", source: "MEXC" }, log: [] },
     dxBook: async () => DXS === "empty" || DXS === "norelay" ? { fast: [], book: [], poolAsks: [], poolBids: [], pools: [] } : DX_BOOK,

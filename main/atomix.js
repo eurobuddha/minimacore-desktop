@@ -310,12 +310,22 @@ function gateEngine(c) {
 function activeWorkFrom(A, tip, now) {
   return p(cb => A.swapdb.allSwaps(cb)).then(async all => {
     const st = (s) => s && (s.status || s.STATUS);
-    const swaps = (all || []).filter(s => !A.trading.isTerminalSwap(s) || (st(s) === "ERROR" && A.trading.withinWindow(s, tip, now))).map(s => String(s.hash || s.HASH));
+    const open = (all || []).filter(s => !A.trading.isTerminalSwap(s) || (st(s) === "ERROR" && A.trading.withinWindow(s, tip, now))), swaps = open.map(s => String(s.hash || s.HASH));
+    // 0.18.142, for the Quit and Shutdown warnings: when the first of these swaps' OWN locks times out, as a clock
+    // time. An Ethereum lock's limit is unix seconds; a Minima lock's is a block, so its time is an estimate from the
+    // tip (50 s a block) and is said as "about". null: not known (no limit recorded, or a block limit with no tip yet).
+    let nearestMs = null, nearestApprox = false;
+    for (const s of open) {
+      const tl = Number(s.myTimelock !== undefined ? s.myTimelock : s.mytimelock) || 0; if (tl <= 0) continue;
+      const blocks = !!(s.myLegIsMinima !== undefined ? s.myLegIsMinima : Number(s.mylegminima)); if (blocks && !(tip > 0)) continue;
+      const at = blocks ? now + (tl - tip) * 50000 : tl * 1000;
+      if (nearestMs === null || at < nearestMs) { nearestMs = at; nearestApprox = blocks; }
+    }
     let maker = false;
     try { const o = A.maker.currentOrder(); maker = !!o && Object.keys(o.pairs || {}).some(k => { const pr = o.pairs[k]; return !!(pr && pr.en && ((pr.bids || []).length || (pr.asks || []).length)); }); } catch (e) { maker = true; }   // unreadable: not assumed absent
     const deals = await p(cb => A.otc.allDeals(cb)).catch(() => []);
     const offer = A.otc.myOffer();
-    return { ready: true, swaps, maker, otcOffer: !!(offer && offer.enable),
+    return { ready: true, swaps, nearestMs, nearestApprox, maker, otcOffer: !!(offer && offer.enable),
       otcDeals: (deals || []).filter(d => d && d.status !== "EXPIRED" && d.status !== "REJECTED" && d.status !== "COMPLETE").length };
   });
 }

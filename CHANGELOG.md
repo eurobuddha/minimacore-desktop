@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.142] — Quit warns when work is in flight, from the same source as Shutdown
+
+- **Found**: Shutdown warned about swaps and trades in flight; Quit did not. Quit in the tray or the menu, Cmd-Q, or closing the window on Windows and Linux stopped the node with no question, whatever was running.
+- **Quit now asks first when something is in flight**, each thing named in plain words with what quitting does: AtomiX swaps not finished ("cannot settle while the app is closed and can time out at 14:35", the nearest time limit of their locks; "at about" when it is worked out from a block number), a market on the book, OTC availability, open OTC deals, pool transactions not yet confirmed, Exchange trades sent and not yet answered, fills of your Exchange orders whose outcome is not known yet, Exchange orders waiting for a block, P2P Chance bets still open. Buttons: "Quit anyway" and "Stay open" (Enter and Esc stay open). With nothing in flight there is no question.
+- **"Could not be checked" is said truthfully.** An engine that has not started, a store that could not be opened or a read that gave no answer in 5 seconds is named, and the question is asked: it is never read as "nothing in flight".
+- **A quit the system asks for is never held behind a question** (logout, restart, power off): it goes on, and what was in flight is written to the log. The same for a quit with the node already shut down by the user (that question was asked then). This app has no updater that quits it: an update is downloaded and shown in the Downloads folder.
+- **Every quit still lets the engines finish first**: the node is stopped through the same bounded drain as before (0.18.117; each engine's own bound, 30 s in all), so a transaction posted in the last second is recorded.
+- **One source for both warnings** (`main/inflight.js`), fed by each engine's own `activeWork()`: Shutdown no longer builds its own from other reads, so the two cannot disagree. Shutdown gains what only Quit's source knew: OTC availability and deals, Exchange fills with an unknown outcome and orders waiting for a block, P2P Chance bets, the nearest time limit.
+- Off the Mac, closing the window asks through the same quit while the window is still open; "Stay open" leaves it as it was. On the Mac closing the window still only hides it.
+
 ## [0.18.141] — The old AtomiX and Pools panels are removed, after a written parity audit
 
 - **`docs/DEXICON_PARITY_AUDIT.md`**: every screen, button, dialog, setting, state and message of the old AtomiX panel (120 items) and the old Pools panel (117 items), with where each is in Dexicon rooms ① and ② or the shared screens. Both sides were read in full.

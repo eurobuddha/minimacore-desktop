@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeStatus: () => ipcRenderer.invoke("mcd:nodeStatus"),
   nodeStart: () => ipcRenderer.invoke("mcd:nodeStart"),
   nodeStop: () => ipcRenderer.invoke("mcd:nodeStop"),
+  inFlight: (how) => ipcRenderer.invoke("mcd:inFlight", how),   // what a Shutdown ("shutdown") or a Quit ("quit") would interrupt: { title, message, any }
   nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
   nodeReclaim: () => ipcRenderer.invoke("mcd:nodeReclaim"),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
@@ -180,7 +181,6 @@ contextBridge.exposeInMainWorld("mcd", {
   ppConfirmSigning: (opk, attested) => ipcRenderer.invoke("mcd:ppConfirmSigning", opk, attested),
   ppSaveBackup: (json) => ipcRenderer.invoke("mcd:ppSaveBackup", json),
   ppCompleteBackupRequired: () => ipcRenderer.invoke("mcd:ppCompleteBackupRequired"),
-  ppWork: () => ipcRenderer.invoke("mcd:ppWork"),
   ppStatus: () => ipcRenderer.invoke("mcd:ppStatus"),
   ppWhy: () => ipcRenderer.invoke("mcd:ppWhy"),
   ppLoadBackup: (password, extractNode) => ipcRenderer.invoke("mcd:ppLoadBackup", password, extractNode),
@@ -235,7 +235,6 @@ contextBridge.exposeInMainWorld("mcd", {
   dxBook: () => ipcRenderer.invoke("mcd:dxBook"),
   dxMine: () => ipcRenderer.invoke("mcd:dxMine"),
   dxCommand: (a) => ipcRenderer.invoke("mcd:dxCommand", a),
-  dxWork: () => ipcRenderer.invoke("mcd:dxWork"),
   dxSkipWarning: () => ipcRenderer.invoke("mcd:dxSkipWarning"),
   dxSkipCheck: () => ipcRenderer.invoke("mcd:dxSkipCheck"),
   engineSetAside: (which) => ipcRenderer.invoke("mcd:engineSetAside", which),

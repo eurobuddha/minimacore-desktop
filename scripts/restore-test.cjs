@@ -136,7 +136,7 @@ test("M1: AtomiX's own read models say what is in flight (the engine's real swap
   const A = (o) => Object.assign({ trading, swapdb: { allSwaps: (cb) => cb(null, rows) }, maker: { currentOrder: () => null },
     otc: { allDeals: (cb) => cb(null, []), myOffer: () => ({ enable: false }) } }, o);
   let w = await atomix._activeWorkFrom(A(), 100, now);
-  assert.deepEqual(w, { ready: true, swaps: [HASH, "0x03"], maker: false, otcOffer: false, otcDeals: 0 }, "unfinished, and an error still inside its timelock; finished and long-dead rows do not block");
+  assert.deepEqual(w, { ready: true, swaps: [HASH, "0x03"], nearestMs: (secs + 3600) * 1000, nearestApprox: false, maker: false, otcOffer: false, otcDeals: 0 }, "unfinished, and an error still inside its timelock; finished and long-dead rows do not block");
   w = await atomix._activeWorkFrom(A({ maker: { currentOrder: () => ({ pairs: { USDT: { en: true, bids: [{ p: 1, a: 1 }], asks: [] } } }) },
     otc: { allDeals: (cb) => cb(null, [{ status: "AGREED" }, { status: "COMPLETE" }, { status: "EXPIRED" }]), myOffer: () => ({ enable: true }) } }), 100, now);
   assert.ok(w.maker && w.otcOffer && w.otcDeals === 1);
