@@ -368,3 +368,13 @@ input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outlin
 .pp-calc { --accent: var(--dx-accent); --surface: var(--dx-surface); --surface2: var(--dx-surface2); --border: var(--dx-border); --border-light: var(--dx-border); --heading: var(--dx-text); --text: var(--dx-text); --dim: var(--dx-dim); --dim2: var(--dx-dim2); color: var(--dx-text); }
 .pp-menu { display: flex; flex-direction: column; gap: 8px; } .pp-menu .dx-btn { flex: 0 0 auto; min-height: 44px; text-align: left; padding-left: 14px; font-weight: 400; }
 .pp-dlg .dx-in { margin-top: 8px; } .pp-ta { min-height: 120px; font: 400 11px/16px var(--dx-mono); resize: vertical; }
+/* create a pool: the four steps */
+.pp-steps { display: flex; gap: 6px; margin: 4px 0 12px; padding: 0; list-style: none; }
+.pp-steps li { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--dx-border); border-radius: 10px; background: var(--dx-surface); color: var(--dx-dim); font: 400 12px/16px var(--dx-sans); }
+.pp-steps b { flex: 0 0 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--dx-surface2); font: 700 11px/1 var(--dx-sans); }
+.pp-steps span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-steps li[aria-current] { border-color: var(--dx-accent); color: var(--dx-text); font-weight: 700; } .pp-steps li[aria-current] b { background: var(--dx-accent); color: var(--dx-on-accent); }
+.pp-steps li[data-done="true"] b { background: color-mix(in srgb, var(--dx-in) 22%, transparent); color: var(--dx-in); }
+.pp-check { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 2px; font: 400 13px/19px var(--dx-sans); cursor: pointer; } .pp-check input { flex: 0 0 auto; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--dx-accent); }
+.pp-info { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12.5px/19px var(--dx-mono); color: var(--dx-text); } .pp-info:empty { display: none; }
+@media (max-width: 599px) { .pp-steps span { display: none; } .pp-steps li[aria-current] span { display: inline; } .pp-steps li:not([aria-current]) { flex: 0 0 auto; } }

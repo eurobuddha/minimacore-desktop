@@ -233,6 +233,64 @@ test("My LP: every outcome says what happened, whether funds moved and what to d
   assert.match(pp, /ppMyPools\(\)\.then\(\(m\) => \{ S\.mine = m \|\| \[\]; S\.mineErr = ""; \}, \(e\) => \{ S\.mineErr = bare\(e\); \}\)/, "saved pools that cannot be read are said, never shown as none");
 });
 
+// ---- create a pool (four steps) and migrate ----
+const newCreate = async (answers, confirm, fn) => { const r = recorder(Object.assign({ ppWhy: null, ppMarketToken: { usdt: MXUSD } }, answers)), u = ui(confirm); const o = await PP.Act.createOpen(r.api, async (c) => (c === "balance" ? BAL : null)); const res = o.none ? null : await fn(r.api, u, o); return { calls: r.money(), said: u.said, o, res }; };
+for (const c of [{ name: "1.90 MxUSD at the market price", u: "1.90" }, { name: "more MxUSD than the wallet holds", u: "301" }, { name: "more than the MINIMA covers", u: "20" , bal: "100" }, { name: "nothing typed", u: "" }, { name: "letters", u: "1.9o" }]) for (const confirm of [true, false]) {
+  test(`create, priced, ${c.name}, ${confirm ? "confirmed" : "closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
+    const answers = { ppCreateAnchor: { price: "0.0032", source: "MEXC market" }, ppCreate: { txpowid: PK("75") }, ppSaveBackup: { canceled: true } };
+    const o = await oldMylp(answers, confirm);
+    const was = await o.press(async () => { await o.p.el("ppCreateBtn").onclick(); await o.p.settle(); o.p.el("ppcU").value = c.u; return o.p.el("ppcGo").onclick(); });
+    const now = await newCreate(answers, confirm, (api, u, op) => PP.Act.createPriced(api, u, op.t, op.minimaAvail, op.anchor.price, op.anchor.source, c.u));
+    assert.deepEqual(now.calls, was);
+    const sent = c.u === "1.90" && confirm;
+    assert.deepEqual(now.calls, sent ? [["ppCreateAnchor", []], ["ppCreate", [MXUSD, 8, "593.75", "1.90"]]] : [["ppCreateAnchor", []]], sent ? "MINIMA derived from the price, rounded up to the 6-decimal grain as before; the amount as typed" : "nothing is created");
+  });
+}
+for (const c of [{ name: "both amounts and the box ticked", x: "100", y: "0.56", ack: true }, { name: "the box not ticked", x: "100", y: "0.56", ack: false }, { name: "one amount missing", x: "100", y: "", ack: true }]) for (const confirm of [true, false]) {
+  test(`create, no market price, ${c.name}, ${confirm ? "confirmed" : "closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
+    const answers = { ppCreateAnchor: null, ppCreatePreview: { ok: true, price: "0.0056", kmin: "56" }, ppCreate: { txpowid: PK("75") }, ppSaveBackup: { canceled: true } };
+    const o = await oldMylp(answers, confirm);
+    const was = await o.press(async () => { await o.p.el("ppCreateBtn").onclick(); await o.p.settle(); o.p.el("ppcX").value = c.x; o.p.el("ppcY").value = c.y; o.p.el("ppcAck").checked = c.ack; return o.p.el("ppcGo").onclick(); });
+    const now = await newCreate(answers, confirm, (api, u, op) => { assert.equal(op.anchor, null); return PP.Act.createManual(api, u, op.t, c.x, c.y, c.ack); });
+    assert.deepEqual(now.calls, was);
+    const ok = c.ack && c.y;
+    assert.deepEqual(now.calls, !ok ? [["ppCreateAnchor", []]] : [["ppCreateAnchor", []], ["ppCreatePreview", [8, "100", "0.56"]]].concat(confirm ? [["ppCreate", [MXUSD, 8, "100", "0.56"]]] : []));
+  });
+}
+test("create: without MxUSD nothing is asked of the engine beyond the old panel's reads; the engine's backup rule and a key that was not made are said in plain words", async () => {
+  const noUsd = recorder({ ppMarketToken: { usdt: MXUSD } }), o = await PP.Act.createOpen(noUsd.api, async () => [{ tokenid: "0x00", sendable: "5000" }, { tokenid: MXUSD, sendable: "0" }, { tokenid: PK("EE"), sendable: "9", token: { name: { name: "USDT" } } }]);
+  assert.deepEqual(o, { none: true }, "a token that only calls itself USDT cannot be pooled as MxUSD"); assert.deepEqual(noUsd.money(), []);
+  for (const [msg, re] of [["BACKUP_REQUIRED: save and verify the encrypted pool + node backup before creating another pool.", /^Creating the pool was not done and no funds moved\. Before another pool can be created/], ["could not mint an owner key (grant this app write access to create pools)", /^Creating the pool was not done and no funds moved: the node did not make the new key/]]) {
+    const n = await newCreate({ ppCreateAnchor: { price: "0.0032", source: "MEXC market" }, ppCreate: new Error("Error invoking remote method 'mcd:ppCreate': Error: " + msg) }, true, (api, u, op) => PP.Act.createPriced(api, u, op.t, op.minimaAvail, op.anchor.price, op.anchor.source, "1.90"));
+    assert.match(n.said[n.said.length - 1][0], re); assert.equal(n.said[n.said.length - 1][1], "error"); assert.match(n.res.err, /BACKUP_REQUIRED|mint/);
+  }
+  const ok = await newCreate({ ppCreateAnchor: { price: "0.0032", source: "MEXC market" }, ppCreate: { txpowid: PK("75") } }, true, (api, u, op) => PP.Act.createPriced(api, u, op.t, op.minimaAvail, op.anchor.price, op.anchor.source, "1.90"));
+  assert.match(ok.said[ok.said.length - 1][0], /^Pool submitted: 593\.75 MINIMA \+ 1\.90 MxUSD\..*do not submit it again\. Now save the backup\.$/);
+});
+test("create is four steps, and the fourth is the forced backup; the old panel opened the same backup after a create and after a migrate", () => {
+  assert.deepEqual(PP.STEPS, ["Before you start", "Amounts", "Review", "Back up"]);
+  const pp = src("dexicon-pp.js"), old = src("pools.js");
+  assert.match(old, /await api\.ppCreate\(t\.tokenid, t\.dec, String\(minima\), uStr\); prog\.close\(\); toast\("Pool created ✓", "ok"\); renderPandapools\(\); showPpBackup\(\);/);
+  assert.match(old, /await api\.ppMigrate\(addr, a, b\); prog\.close\(\); toast\("Migrated ✓", "ok"\); renderPandapools\(\); showPpBackup\(\);/);
+  assert.match(pp, /c\.step = 4; paint\(\);\n\s+await backupDialog\(true\); leaveCreate\(\);/, "after a create that was sent: step 4, the backup");
+  assert.match(pp, /if \(r && !r\.err\) await backupDialog\(true\);/, "after a migrate that was sent: the backup");
+  assert.match(pp, /c\.step = \/BACKUP_REQUIRED\/\.test\(\(r && r\.err\) \|\| ""\) \? 1 : 2; if \(c\.step === 1\) S\.backupDue = true;/, "the engine's refusal sends the flow back to the owed backup, never past it");
+  assert.match(pp, /if \(!\$\("ppcAck1"\) \|\| !\$\("ppcAck1"\)\.checked\) return say\(/, "step 1 is acknowledged before the amounts");
+  assert.equal(PP.derive(1.9, 0.0032), 593.75); assert.equal(PP.derive(1, 3), 0.333334, "up to the grain, as the engine's create rule");
+  const info = PP.createInfo({ name: "MxUSD", avail: 300.5 }, 100, "0.0032", "MEXC market", "20");
+  assert.equal(info.ok, false); assert.ok(info.lines.some((l) => /^⚠ Not enough MINIMA: reduce MxUSD to 0\.32 or less\.$/.test(l)));
+  assert.equal(PP.createInfo({ name: "MxUSD", avail: 300.5 }, 5000, "0.0032", "MEXC market", "1.90").ok, true);
+});
+for (const c of [{ name: "both reserves", a: "50000", b: "160" }, { name: "one missing", a: "50000", b: "" }, { name: "zero", a: "0", b: "160" }]) for (const confirm of [true, false]) {
+  test(`migrate, ${c.name}, ${confirm ? "confirmed" : "closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
+    const answers = { ppMigrate: { txpowid: PK("76") }, ppSaveBackup: { canceled: true } }, o = await oldMylp(answers, confirm);
+    const was = await o.press(() => { o.p.btn.ppmig.onclick(); o.p.el("pp2A").value = c.a; o.p.el("pp2B").value = c.b; return o.p.el("pp2Go").onclick(); });
+    const r = recorder(Object.assign({ ppWhy: null }, answers)), u = ui(confirm); await PP.Act.migrate(r.api, u, MINE, c.a, c.b);
+    assert.deepEqual(r.money(), was);
+    assert.deepEqual(r.money(), c.name === "both reserves" && confirm ? [["ppMigrate", [MINE.address, "50000", "160"]]] : []);
+  });
+}
+
 // ---- backup, restore, recovery ----
 const PASS = "correct horse battery staple";
 test("backup: the old panel's password rule, then ppSaveBackup(password) and nothing else", async () => {

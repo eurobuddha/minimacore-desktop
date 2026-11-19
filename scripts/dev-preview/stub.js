@@ -239,7 +239,7 @@
     ppQuote: async (t, d, a) => ppQuote(t, d, a),
     ppSwap: async () => (PPS === "swapfail" ? ppFail("Could not identify the input signing key.") : { txpowid: FAKE_PK("7001"), totalIn: "250", totalOut: "0.79833" }),
     ppWhy: async () => (PPS === "swapfail" ? { verb: "txnsign", error: "No keys found for the coin's address", at: Date.now() } : PPS === "mintfail" ? { verb: "newaddress", error: "MiniDAPP does not have WRITE permission", at: Date.now() } : null),
-    ppCreate: async () => (PPS === "backup" ? ppFail("BACKUP_REQUIRED: save and verify the encrypted pool + node backup before creating another pool.") : PPS === "mintfail" ? ppFail("could not mint an owner key (grant this app write access to create pools)") : { txpowid: FAKE_PK("7005") }),
+    ppCreate: async () => (PPS === "backup" || PPS === "backup2" ? ppFail("BACKUP_REQUIRED: save and verify the encrypted pool + node backup before creating another pool.") : PPS === "mintfail" ? ppFail("could not mint an owner key (grant this app write access to create pools)") : { txpowid: FAKE_PK("7005") }),
     ppDeposit: async () => ({ txpowid: FAKE_PK("7006") }), ppMigrate: async () => (PPS === "backup" ? ppFail("BACKUP_REQUIRED: save and verify the encrypted pool + node backup before migrating.") : { txpowid: FAKE_PK("7007") }), ppClose: async () => ({ txpowid: FAKE_PK("7008") }),
     ppCollect: async () => (PPS === "stranded" ? { coins: 0, foreign: 1, stranded: true } : { coins: 2, foreign: 0, cleared: true }),
     ppPendingCollect: async () => (PPS === "collect" || PPS === "stranded" ? [{ oadr: FAKE_PK("0A7"), status: PPS === "stranded" ? "STRANDED" : "PENDING", lastError: PPS === "stranded" ? "No key in this wallet signs for this address." : "" }] : []),
@@ -320,7 +320,7 @@
       if (view === "pandapools") setTimeout(() => {   // ?ppf=<amount>  ?ppdir=buy  ?ppin=<selector>=<text>|…  ?ppdo=<selector>|<selector>…  (one step every 450 ms)
         if (Q.get("ppdir") === "buy" && el("ppFlip")) el("ppFlip").click();
         if (Q.get("ppf") && el("ppAmt")) { el("ppAmt").value = Q.get("ppf"); el("ppAmt").oninput(); }
-        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.lastIndexOf("="), n = document.querySelector(kv.slice(0, i)); if (n) { n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };
+        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.lastIndexOf("="), n = document.querySelector(kv.slice(0, i)); if (n) { if (n.type === "checkbox") n.checked = true; else n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };
         const step = (i) => setTimeout(() => { type(); if (i < steps.length) { const n = document.querySelector(steps[i]); if (n) n.click(); step(i + 1); } }, 450);
         step(0);
       }, 700);

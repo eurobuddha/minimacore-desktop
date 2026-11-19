@@ -208,6 +208,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.123 | 3d | Pools list: `poolCard` / `combinedCard` / `poolsSummary` over `ppPools`, `ppAggregate`, `ppScan`; addresses whole with `data-copy` | |
 | 0.18.124 | 3d | My LP: `lpSummary` / `lpRows`; `Act.deposit` / `withdraw` / `collect` / `collectNow` / `recover` / `retire` / `unretire` / `confirmSigning` / `statement` over the old panel's calls (`ppDeposit`, `ppClose`, `ppCollect`, `ppRecoverSaved`, `ppRetirePool`, `ppConfirmSigning`, `ppStatement` then `exportCsv`), each behind `DexCore.money`; the calculator is `renderer/poolcalc.js` unchanged | |
 | 0.18.125 | 3d | Backup, restore, recovery: `Act.backup` (`ppSaveBackup(password)` after `backupProblem`), `loadFile` / `extractNode` (`ppLoadBackup(password[, true])`), `restore` (`ppRestore(json)`), `archiveGet` / `archiveSave`; `ppCompleteBackupRequired` read and said; `plainCode` strips internal codes | |
+| 0.18.126 | 3d | Create in four steps (`STEPS`, `Act.createOpen` / `createPriced` / `createManual`: `ppCreateAnchor`, `ppCreatePreview`, `ppCreate(tokenid, decimals, x, y)` with the old `derive`), then the forced backup; `Act.migrate` (`ppMigrate(address, a, b)`), then the backup; BACKUP_REQUIRED returns the flow to the owed backup | |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";

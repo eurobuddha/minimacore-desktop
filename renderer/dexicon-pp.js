@@ -110,6 +110,39 @@
   const recoveryResult = (r) => "Verified reserves for " + r.restored + " of " + r.total + " pools.\n" + (r.details || []).join("\n\n") + "\n" + (r.warn || "");
   const CLOSE_TO_OWNER = "to the pool's owner address on this node. PandaPools then moves them into your wallet by itself; if they have not arrived after a few blocks, use Collect withdrawn funds. Do that before you restore your seed on another node.";
 
+  // ---- create a pool, in PandaPools' four steps (MyLpView.openCreate → createFormPriced | createFormManual → confirmCreate → forceBackupAfterCreate) ----
+  const STEPS = ["Before you start", "Amounts", "Review", "Back up"];
+  /** Token decimals, read defensively (the old panel's ppSafeDec): a wrong value is refused by the engine at create. */
+  const safeDec = (token) => { const d = parseInt(token && token.decimals, 10); return Number.isFinite(d) && d >= 0 && d <= 18 ? d : 8; };
+  /** What a pool can be made with (the old panel's showPpCreate): sendable MINIMA, and the market-fed token (MxUSD) when some is sendable. */
+  function createTokens(bal, usdtId) {
+    let minimaAvail = 0; const toks = [], fed = (tid) => !!tid && !!usdtId && tid.toLowerCase() === String(usdtId).toLowerCase();
+    for (const b of bal || []) {
+      const tid = b.tokenid || "", avail = parseFloat(b.sendable) || 0;
+      if (tid === MINIMA) { minimaAvail = avail; continue; }
+      if (tid && avail > 0 && fed(tid)) toks.push({ tokenid: tid, name: tokLabel(tid, b.token && b.token.name && (b.token.name.name || b.token.name)), dec: safeDec(b.token), avail });
+    }
+    return { minimaAvail, toks };
+  }
+  /** MINIMA = token ÷ price, rounded UP to the 6-decimal grain: the engine's own create rule, and the argument it is given (the old panel's derive) */
+  const derive = (u, p) => Math.ceil((u / p) * 1e6) / 1e6;
+  /** The priced form's lines (the old panel's update): the price, what you have, what the amount needs, and why it cannot go. */
+  function createInfo(t, minimaAvail, price, source, uRaw) {
+    const p = parseFloat(price); if (!(p > 0)) return { lines: ["Fetching the MINIMA price…"], ok: false };
+    const cap = Math.min(minimaAvail * p, t.avail), L = ["Price: " + cut(price, 8) + " " + t.name + " per MINIMA (" + source + ")", "You have: " + cut(String(minimaAvail), 6) + " MINIMA · " + cut(String(t.avail), 6) + " " + t.name];
+    if (!amountOk(uRaw)) { L.push("Enter the " + t.name + " amount to provide (max ≈ " + cut(cap.toFixed(9), 6) + ")."); return { lines: L, ok: false }; }
+    const u = parseFloat(uRaw), minima = derive(u, p);
+    L.push("MINIMA required:  " + minima, "Total pool value:  ≈ US$ " + cut((u * 2).toFixed(9), 2));
+    if (minima > minimaAvail) L.push("⚠ Not enough MINIMA: reduce " + t.name + " to " + cut(cap.toFixed(9), 6) + " or less.");
+    if (u > t.avail) L.push("⚠ You only have " + cut(String(t.avail), 6) + " " + t.name + ".");
+    return { lines: L, ok: minima <= minimaAvail && u <= t.avail, minima };
+  }
+  const BEFORE_CREATE = ["This app and its node must run regularly.\n\nYour pool's reserve coins have to be recreated about every 900 blocks, roughly twice a day. PandaPools does that by itself while the app and the node run. If it cannot, other wallets stop finding your pool, and after about 1700 blocks its coins drop out of the chain's recent window and can only be recovered through a MegaMMR archive.",
+    "Save the backup and keep your wallet seed safe.\n\nRight after the pool is created you are asked to save one encrypted file with your pools and this node's backup. Until it is saved and checked, another pool cannot be created or migrated. Keep it off this device."];
+  const CREATE_ACK = "I understand: I must keep this app running, save the backup and keep my wallet seed safe.";
+  const MANUAL_WARN = (name) => "No market price is available (MEXC is unreachable and there are no live MINIMA / " + name + " pools to match). You are setting the OPENING PRICE yourself: set it to the true market rate, or arbitrageurs will correct it at your expense.";
+  const MANUAL_ACK = "I understand I'm setting the opening price with no market to check it against.";
+
   // ---- backup, restore, recovery (CombinedBackupUi.java, MyLpView.showRecoveryMenu; the old panel's dialogs) ----
   /** Why a backup password is not taken ("" = it is): the old panel's rule, at least 12 characters, at most 1024 bytes, typed twice. */
   const backupProblem = (pass, again) => (Array.from(String(pass)).length < 12 || new TextEncoder().encode(String(pass)).length > 1024 || pass !== again ? "Use at least 12 characters and enter the same password twice. Nothing was saved." : "");
@@ -147,6 +180,11 @@
   }
 
   // ======================================================================== Act: the money actions, no DOM
+  async function create(api, ui, t, x, y) {
+    const since = Date.now();
+    try { const r = await api.ppCreate(t.tokenid, t.dec, x, y); ui.say("Pool submitted: " + x + " MINIMA + " + y + " " + t.name + ". It is confirming on-chain (usually 1 to 3 blocks) and appears in My LP by itself: do not submit it again. Now save the backup.", "note"); return r || {}; }
+    catch (e) { ui.say(await why(api, "Creating the pool", e, since), "error"); return { err: bare(e) }; }
+  }
   // ui = { confirm(title, text, okLabel) → Promise<bool>, say(text, kind) }. Every function here makes the SAME
   // window.mcd calls, with the same arguments, behind the same guards, in the same order, as renderer/pools.js.
   /** why a call failed, with the node's own last answer when it came during the call */
@@ -222,6 +260,44 @@
       try { const ok = await api.ppConfirmSigning(opk, true); ui.say(ok ? "Confirmation saved. Owner signing is enabled for this pool." : "Not confirmed: signing stays paused. The owner key is missing, used up or below a recorded count.", ok ? "note" : "error"); return ok; }
       catch (e) { ui.say("Not confirmed: " + mx(bare(e)) + ". Signing stays paused.", "error"); return null; }
     },
+    // ---- create and migrate ----
+    /** Step 1 of create reads what the old panel read, in its order: balance, the market-fed token, then the price anchor.
+     *  { none: true } = no MxUSD to pool; else { t, minimaAvail, anchor } (anchor null = no market price: the manual form). */
+    async createOpen(api, tryCmd) {
+      const bal = (await tryCmd("balance")) || []; let usdt = "";
+      try { const mt = await api.ppMarketToken(); usdt = (mt && mt.usdt) || ""; } catch (e) {}
+      const c = createTokens(bal, usdt); if (!c.toks.length) return { none: true };
+      let a = null; try { a = await api.ppCreateAnchor(); } catch (e) {}
+      return { t: c.toks[0], minimaAvail: c.minimaAvail, anchor: a && a.price ? { price: a.price, source: a.source || "market" } : null };
+    },
+    /** The priced form's Create: the same checks, the same question, then ppCreate(token id, decimals, String(MINIMA derived), the amount as typed). */
+    async createPriced(api, ui, t, minimaAvail, price, source, uStr) {
+      const p = parseFloat(price);
+      if (!(p > 0)) { ui.say("There is no price yet. Refresh the price and try again. Nothing was sent.", "note"); return null; }
+      if (!amountOk(uStr)) { ui.say("Enter the " + t.name + " amount (a positive number). Nothing was sent.", "note"); return null; }
+      const u = parseFloat(uStr), minima = derive(u, p);
+      if (minima > minimaAvail || u > t.avail) { ui.say("Not enough balance for that amount. Nothing was sent.", "note"); return null; }
+      if (!await ui.confirm("Create this pool?", "MINIMA / " + t.name + " pool\n\n" + minima + " MINIMA  +  " + uStr + " " + t.name + "\nOpens at " + cut(price, 8) + " " + t.name + " per MINIMA  (matches " + source + ")\n\nThe 0.5% swap fee goes to liquidity providers. This posts an on-chain transaction; you can withdraw the liquidity later as the pool's owner.", "Create")) return null;
+      return create(api, ui, t, String(minima), uStr);
+    },
+    /** The manual form (no market price): both amounts, the acknowledgement, ppCreatePreview, the question, then ppCreate(token id, decimals, x, y). */
+    async createManual(api, ui, t, x0, y0, ack) {
+      if (!amountOk(x0) || !amountOk(y0)) { ui.say("Enter both reserves (positive numbers). Nothing was sent.", "note"); return null; }
+      if (!ack) { ui.say("Tick the box to confirm you are setting the opening price. Nothing was sent.", "note"); return null; }
+      const pv = await api.ppCreatePreview(t.dec, x0, y0).catch(() => ({ ok: false }));
+      const line = pv && pv.ok ? "⚠ No market price available: YOU are setting the opening price at " + cut(pv.price, 8) + " " + t.name + " per MINIMA.\n" : "";
+      if (!await ui.confirm("Create MINIMA / " + t.name + " pool?", x0 + " MINIMA  +  " + y0 + " " + t.name + "\n" + line + "\nThe 0.5% swap fee goes to liquidity providers. This posts an on-chain transaction; you can withdraw the liquidity later as the pool's owner.", "Create")) return null;
+      return create(api, ui, t, x0, y0);
+    },
+    /** Migrate (the old panel's sheet): both new reserves, the question, then ppMigrate(address, a, b). */
+    async migrate(api, ui, p, a, b) {
+      const name = tokLabel(p.tok, p.tokName);
+      if (!amountOk(a) || !amountOk(b)) { ui.say("Enter both new reserves. Nothing was sent.", "note"); return null; }
+      if (!await ui.confirm("Migrate this pool?", "A new pool opens at a fresh address with " + a + " MINIMA / " + b + " " + name + ", taken from your wallet. The old pool's reserves go to its owner address on this node; PandaPools then moves them into your wallet by itself, or use Collect withdrawn funds.\n\nOld pool: " + p.address, "Migrate")) return null;
+      const since = Date.now();
+      try { const r = await api.ppMigrate(p.address, a, b); ui.say("Migration sent: the new pool is confirming on-chain and the old reserves are on their way back. Follow it in Activity. Now save the backup: it must cover the new pool.", "note"); return r || {}; }
+      catch (e) { ui.say(await why(api, "Migrating the pool", e, since), "error"); return { err: bare(e) }; }
+    },
     // ---- backup, restore, recovery: each returns { bad } (why nothing was done, for the dialog) or its result ----
     /** Create and save: the password rule, then ppSaveBackup(password). */
     async backup(api, pass, again) {
@@ -260,14 +336,14 @@
     }
   };
 
-  const core = { backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
@@ -294,7 +370,7 @@
   /** the engine's scans say "update": passive parts only, never under someone typing (the old panel's "frozen tab" rule) */
   function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (visible()) load(S.tab).then(paint, paint); }, 400); }
   function tick() { if (D && visible() && !typing() && !C.gate.on && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
-  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
+  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
   /** what stands above every screen of the room: the node, the engine, the last thing said */
   function banners() {
@@ -414,18 +490,19 @@
       const r = Number(p.kratio), warn = needsMigrate(p), pct = isFinite(r) && r > 0 ? Math.max(4, Math.min(100, r / 2 * 100)) : 0;
       return `<div class="dx-card pp-card"><b class="pp-ct">MINIMA / ${esc(name)}</b>${ids}${hold}${lpRows(p).map((x) => kv(x[0], esc(x[1]), x[2] ? "pp-" + x[2] : "")).join("")}
         ${pct ? `<div class="pp-health"><div class="pp-kv"><span>Floor headroom</span><span class="${warn ? "pp-warn" : "pp-dimv"}">${warn ? "migrate soon" : "healthy"}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
-        <div class="pp-acts pp-acts--3">${lpBtn(warn ? "Add (full)" : "Add", "ppadd", p.address)}${lpBtn("Close", "ppclose", p.address)}</div>
+        <div class="pp-acts">${lpBtn(warn ? "Add (full)" : "Add", "ppadd", p.address)}${lpBtn("Migrate", "ppmig", p.address, warn ? "dx-btn--go" : "")}${lpBtn("Close", "ppclose", p.address)}</div>
         <button class="pp-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</button></div>`;
     }).join("");
   }
   function paintMylp() {
     $("ppTop").innerHTML = banners();
     if (!up()) { $("ppLp").innerHTML = ""; return; }
+    if (S.create) return paintCreate();
     if (S.mineErr) { $("ppLp").innerHTML = `<div class="dx-state dx-state--error" role="alert">Your saved pools could not be read: ${esc(mx(S.mineErr))}. They are not lost: nothing was changed. This screen tries again by itself.</div>`; return; }
     const sum = lpSummary(S.mine), n = (S.retired || []).length;
     $("ppLp").innerHTML = `<div class="dx-card pp-card pp-sum"><div class="pp-fl">YOUR LIQUIDITY</div><div class="pp-sum__v">${esc(sum.value)}</div><div class="pp-sum__s">${esc(sum.sub)}</div></div>
       ${S.backupDue ? `<div class="dx-card pp-card pp-card--warn"><b class="pp-ct">Complete encrypted backup required</b><div class="pp-note">Before another pool can be created or migrated, save one encrypted file with your pools and this node's backup. Your pools are not at risk meanwhile; this is the engine's rule so that a new pool can always be recovered.</div><div class="pp-acts">${lpBtn("Back up now", "pptool", "backup", "pp-fill")}</div></div>` : ""}
-      <div class="pp-tools" id="ppTools">${lpBtn("BACK UP / RESTORE POOLS", "pptool", "recovery", "pp-out")}${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}${lpBtn("COLLECT WITHDRAWN FUNDS TO MY WALLET", "pptool", "collect", "pp-out")}</div>
+      <div class="pp-tools" id="ppTools">${lpBtn("+  CREATE A POOL", "pptool", "create", "pp-fill")}${lpBtn("BACK UP / RESTORE POOLS", "pptool", "recovery", "pp-out")}${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}${lpBtn("COLLECT WITHDRAWN FUNDS TO MY WALLET", "pptool", "collect", "pp-out")}</div>
       ${collectHtml()}${mineHtml()}
       ${n ? `<div class="dx-card pp-card"><div class="pp-sum__s">${n} closed pool(s) kept for recovery</div><div class="pp-note">Their recipes are still saved and still go into your backups: they are just out of the way. If a close never actually landed, the pool reappears here on its own.</div><div class="pp-acts">${lpBtn("Show closed pools", "pptool", "closed")}</div></div>` : ""}
       <div class="pp-note pp-note--foot">Pools you created on this node. PandaPools keeps their reserves fresh by itself: leave this app and the node running so your pools stay live for everyone. Anyone on the network can trade against them; you earn the 0.50% fee on every swap that routes through them.</div>`;
@@ -448,6 +525,62 @@
   async function closedPools() {
     const list = S.retired || [];
     if (await D.dialog("Closed pools", list.map(poolIds).join("\n\n"), "Bring back")) await Act.unretire(api(), ui, list);
+  }
+
+  // ---- create a pool: four steps on the screen (1 before you start, 2 amounts, 3 review, 4 back up) ----
+  const stepBar = (n) => `<ol class="pp-steps" aria-label="Step ${n} of 4">${STEPS.map((t, i) => `<li${i + 1 === n ? ' aria-current="step"' : ""} data-done="${i + 1 < n}"><b>${i + 1}</b><span>${t}</span></li>`).join("")}</ol>`;
+  const check = (id, text, on) => `<label class="pp-check"><input type="checkbox" id="${id}"${on ? " checked" : ""}><span>${esc(text)}</span></label>`;
+  function paintCreate() {
+    const c = S.create, host = $("ppLp"), busy = C.gate.on ? " disabled" : "";
+    const key = c.step + ":" + S.backupDue;
+    if (host.dataset.step === key) { if (c.step === 2) paintCreateInfo(); return; }   // a step is drawn once: never redrawn under someone typing or ticking
+    host.dataset.step = key;
+    const head = `<div class="dx-title"><h2>Create a pool</h2><button class="dx-btn dx-btn--side" data-ppcreate="cancel"${c.step > 2 ? " disabled" : ""}>Cancel</button></div>${stepBar(c.step)}`;
+    if (c.step === 1) host.innerHTML = head + (S.backupDue
+      ? `<div class="dx-card pp-card pp-card--warn"><b class="pp-ct">First, the backup of the pools you already have</b><div class="pp-note">The last step of creating a pool is saving the encrypted backup, and that step is still owed. Another pool cannot be created until it is saved and checked. Nothing is wrong with your pools.</div><div class="pp-acts"><button class="dx-btn pp-fill" data-pptool="backup"${busy}>Back up now</button></div></div>`
+      : `<div class="dx-card pp-card"><b class="pp-ct">Two things this pool will need from you</b>${BEFORE_CREATE.map((t, i) => `<div class="pp-note"><b>${i + 1}.  </b>${esc(t)}</div>`).join("")}${check("ppcAck1", CREATE_ACK, c.ack1)}<div class="pp-acts"><button class="dx-btn pp-fill" data-ppcreate="next"${busy}>Continue</button></div></div>`);
+    else if (c.step === 2 && c.anchor) host.innerHTML = head + `<div class="dx-card pp-card"><b class="pp-ct">MINIMA / ${esc(c.t.name)} pool</b><label class="pp-fld"><b>${esc(c.t.name)} to provide  (≈ US$)</b><input class="dx-in" id="ppcU" inputmode="decimal" autocomplete="off" placeholder="e.g. 1.90" value="${esc(c.u || "")}"></label>
+        <pre class="pp-info" id="ppcInfo" role="status"></pre><div class="pp-acts"><button class="dx-btn" data-ppcreate="price"${busy}>↻  Price</button><button class="dx-btn pp-fill" data-ppcreate="go"${busy}>Review</button></div></div>`;
+    else if (c.step === 2) host.innerHTML = head + `<div class="dx-card pp-card"><b class="pp-ct">MINIMA / ${esc(c.t.name)} pool</b><div class="pp-bad">${esc(MANUAL_WARN(c.t.name))}</div>${fld("MINIMA to deposit", "x", "e.g. 100", c.x)}${fld(c.t.name + " to deposit", "y", "e.g. 0.56", c.y)}
+        <pre class="pp-info" id="ppcInfo" role="status"></pre>${check("ppcAck", MANUAL_ACK, false)}<div class="pp-acts"><button class="dx-btn pp-fill" data-ppcreate="go"${busy}>Review</button></div></div>`;
+    else host.innerHTML = head + `<div class="dx-card pp-card"><b class="pp-ct">${c.step === 3 ? "Review, then the pool is posted" : "Save the backup"}</b><div class="pp-note">${c.step === 3 ? "Read the question and choose Create. Nothing is sent before that." : "The pool is on its way to the chain. Save the encrypted backup now: it is the last step, and another pool cannot be created before it."}</div></div>`;
+    if (c.step === 2) { host.oninput = (e) => { if (e.target.id === "ppcU") c.u = e.target.value.trim(); if (e.target.name === "x") c.x = e.target.value.trim(); if (e.target.name === "y") c.y = e.target.value.trim(); S.said = null; $("ppTop").innerHTML = banners(); paintCreateInfo(); }; paintCreateInfo(); }
+    else host.oninput = null;
+  }
+  async function paintCreateInfo() {
+    const c = S.create, info = $("ppcInfo"); if (!c || !info) return;
+    if (c.anchor) { info.textContent = createInfo(c.t, c.minimaAvail, c.anchor.price, c.anchor.source, c.u || "").lines.join("\n"); return; }
+    if (!amountOk(c.x || "") || !amountOk(c.y || "")) { info.textContent = "Enter both amounts to see the opening price."; return; }
+    const x = c.x, y = c.y, pv = await api().ppCreatePreview(c.t.dec, x, y).catch(() => ({ ok: false }));
+    if (S.create === c && c.x === x && c.y === y && $("ppcInfo")) $("ppcInfo").textContent = pv && pv.ok ? "Opening price:  " + cut(pv.price, 8) + " " + c.t.name + " per MINIMA\nProduct floor (KMIN):  " + pv.kmin : mx((pv && pv.msg) || "Enter both amounts.");
+  }
+  const leaveCreate = () => { S.create = null; const h = $("ppLp"); if (h) { delete h.dataset.step; h.oninput = null; } };
+  async function createAct(what) {
+    const c = S.create;
+    if (what === "open") {
+      const o = await Act.createOpen(api(), D.tryCmd);
+      if (o.none) return void D.dialog("Get MxUSD first", "PandaPools creates MINIMA / MxUSD pools: the pair with a live market price, so a pool always opens at the true rate. Your wallet holds no sendable MxUSD; receive some first, then create a pool.", "");
+      S.create = Object.assign({ step: 1, ack1: false }, o); S.said = null; return;
+    }
+    if (!c) return;
+    if (what === "cancel") return leaveCreate();
+    if (what === "next") { if (!$("ppcAck1") || !$("ppcAck1").checked) return say("Tick the box to confirm you understand. Nothing was sent.", "note"); c.ack1 = true; c.step = 2; S.said = null; return; }
+    if (what === "price") { $("ppcInfo").textContent = "Refreshing the price…"; try { const m = await api().ppMarket(); if (m && m.mid) c.anchor = { price: m.mid, source: "MEXC market" }; } catch (e) {} return paintCreateInfo(); }
+    if (what === "go") {
+      const ack = !!($("ppcAck") && $("ppcAck").checked);
+      c.step = 3; paint();
+      const r = c.anchor ? await Act.createPriced(api(), ui, c.t, c.minimaAvail, c.anchor.price, c.anchor.source, c.u || "") : await Act.createManual(api(), ui, c.t, c.x || "", c.y || "", ack);
+      if (!r || r.err) { c.step = /BACKUP_REQUIRED/.test((r && r.err) || "") ? 1 : 2; if (c.step === 1) S.backupDue = true; return; }
+      c.step = 4; paint();
+      await backupDialog(true); leaveCreate();
+    }
+  }
+  async function migrateSheet(p) {
+    const name = tokLabel(p.tok, p.tokName);
+    const got = await form("Migrate pool", `<div class="pp-note">Migrate resets the pool at a fresh address with the KMIN floor recomputed for the new size. Your current reserves return to you and the new reserves are taken from your wallet. The amounts below keep the same size.</div>${fld("New MINIMA reserve", "a", "", whole(p.reserveM))}${fld("New " + name + " reserve", "b", "", whole(p.reserveT))}`, "Migrate", (d) => ({ a: val(d, "a"), b: val(d, "b") }));
+    if (!got) return;
+    const r = await Act.migrate(api(), ui, p, got.a, got.b);
+    if (r && !r.err) await backupDialog(true);
   }
 
   // ---- backup, restore and the recovery tools ----
@@ -531,6 +664,9 @@
     if (ds.pptool === "statement") return act(() => Act.statement(api(), ui));
     if (ds.pptool === "collect") return act(() => Act.collect(api(), ui));
     if (ds.pptool === "closed") return act(closedPools);
+    if (ds.pptool === "create") return act(() => createAct("open"));
+    if (ds.ppcreate) return act(() => createAct(ds.ppcreate));
+    if (ds.ppmig) { const p = pool(ds.ppmig); return p ? act(() => migrateSheet(p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }
     if (ds.pptool === "recovery") return act(recoveryTools);
     if (ds.pptool === "backup") return act(() => backupDialog(false));
     if (ds.ppcollectnow) return act(() => Act.collectNow(api(), ui));

@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.126] — Dexicon ② Pools, create a pool in four steps, and Migrate (Phase 3d)
+
+- **Create a pool** on My LP, in four steps shown on the screen: 1 Before you start (what a pool needs from you: the app and node running, the backup; tick to go on), 2 Amounts (the MxUSD to provide; the MINIMA is worked out from the MEXC or live-pool price, with what you have and what is missing), 3 Review ("Create this pool?"), 4 Back up (the encrypted backup, asked for right after the pool is posted).
+- **The forced backup is the engine's rule.** While a backup is owed, step 1 says so and offers Back up now. If the engine refuses a create because the backup is owed, the screen says no funds moved and goes back to that step.
+- With no market price and no live pool to match, the manual form is shown with its warning: both amounts, the opening price they give, and a box to tick, as before.
+- **Migrate** on each pool (the filled button once the pool is near its floor): the two new reserves, the question, then the backup again, because it must cover the new pool.
+- The engine is called exactly as before: the same price anchor, the same MINIMA derived from the price (up to the 6-decimal grain, the engine's own create rule), the amount as typed.
+- Not run on a node.
+
 ## [0.18.125] — Dexicon ② Pools, backup, restore and recovery (Phase 3d)
 
 - **Back up / restore pools** on My LP opens the recovery tools: Back up my pools to a file (the encrypted pool and node backup, password typed twice, at least 12 characters), Restore pools from a file (Load file, Extract node backup, Restore), Archive connection, How recovery works. Each makes the old panel's call with the same arguments.
