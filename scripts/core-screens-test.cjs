@@ -14,9 +14,9 @@ function source(name) {
   const code = m[1].replace(/\s+\/\/.*$/, "");
   return /\{$/.test(code) ? app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2) : m[1];
 }
-function lift(names, env) {
+function lift(names, env, prelude, extra) {
   env = Object.assign({ MINIMA_PARAMS: PARAMS }, env || {});
-  return new Function(...Object.keys(env), names.map(source).join("\n") + "; return { " + names.join(", ") + " };")(...Object.values(env));
+  return new Function(...Object.keys(env), (prelude || "") + names.map(source).join("\n") + "; return { " + names.concat(extra || []).join(", ") + " };")(...Object.values(env));
 }
 
 test("Startup Params: a titled sub screen, opened from the menu and from the Node tab; the old wizard is not", () => {
@@ -121,10 +121,130 @@ test("every megammrsync screen confirms first, and a replaced wallet drops the o
 
 test("the seed phrase is read only on request, shown only on its screen, and never stored or logged", () => {
   const body = source("renderBackup");
-  assert.equal((app.match(/tryCmd\("vault"\)/g) || []).length <= 2, true);
   assert.ok(/\$\("bkShow"\)\.onclick = async[\s\S]*?seedFrom\(await tryCmd\("vault"\)\)/.test(body), "vault runs when Show seed phrase is pressed");
   assert.ok(app.includes('if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";'), "leaving the screen removes the words from the page");
   assert.ok(!/console\.\w+\([^)]*(phrase|seed|pw\b|password)/i.test(app), "nothing logs a phrase or a password");
   assert.ok(!/saveConfig\(\{[^}]*(phrase|seed|password)/i.test(app), "nothing saves one");
   assert.ok(!/localStorage|\bstore\(/.test(body), "and the hub keeps nothing in browser storage");
+});
+
+// ---- first run (0.18.87) ----
+const WordEntry = require("../renderer/wordentry.js");
+const FAKE24 = "test only void abandon ".repeat(6).trim();   // NOT a seed: four list words, repeated
+
+test("word boxes: Minima's own 2048 words, each word checked, pasted text split as the phone splits it", () => {
+  assert.equal(WordEntry.WORDS.length, 2048);
+  assert.equal(new Set(WordEntry.WORDS).size, 2048);
+  assert.deepEqual([WordEntry.WORDS[0], WordEntry.WORDS[2047]], ["abandon", "zoo"]);
+  assert.deepEqual(WordEntry.splitPasted("1. Test\n2) ONLY, void.abandon"), ["test", "only", "void", "abandon"]);
+  assert.equal(WordEntry.letters("Te5t!"), "tet");
+  assert.deepEqual(WordEntry.matches("", 8), []);
+  assert.deepEqual(WordEntry.matches("acco", 2), ["account"], "one match: the box completes it");
+  assert.equal(WordEntry.matches("ab", 8).length, 8);
+  assert.equal(WordEntry.join(FAKE24.split(" ")), FAKE24);
+  assert.equal(WordEntry.join(FAKE24.split(" ").slice(1)), null, "23 words are not a phrase");
+  assert.equal(WordEntry.join(FAKE24.split(" ").slice(1).concat("zzq")), null, "nor are 24 with one that is not a word");
+  assert.equal(WordEntry.minimaForm(" Test  only\nVOID abandon "), "TEST ONLY VOID ABANDON", "capitals, single spaces: what BIP39.cleanSeedPhrase returns");
+});
+
+test("a free-form phrase is refused when the node cannot carry it or it is list words with a mistake", () => {
+  const why = WordEntry.anyPhraseProblem;
+  assert.equal(why("not a real phrase, just a test!"), null);
+  assert.ok(why("too short"));
+  assert.ok(why("-starts with a dash and is long"));
+  for (const ch of ['"', ";", ":", "[", "]", "{", "}", "\\", "\n", "\t"]) assert.ok(why("a fake phrase " + ch + " for the test"), JSON.stringify(ch) + " is refused");
+  assert.ok(why(FAKE24.replace("void", "voidd")), "list words with one mistake belong in the boxes");
+  assert.equal(why(FAKE24), null, "list words only: allowed, and the app then asks which form");
+  assert.ok(WordEntry.allListWords(FAKE24) && !WordEntry.allListWords("test only void") && !WordEntry.allListWords(FAKE24 + " zzq"));
+});
+
+const flowPrelude = "let CFG = cfg0, RESTORE = null, waitingForNode = false, postBootStarted = true, running = false;\n";
+function flow(opts) {
+  opts = opts || {};
+  const log = [], toasts = [], saved = [];
+  const env = {
+    cfg0: Object.assign({ network: "mainnet", megammrHost: "megammr.example:9001", walletDone: false }, opts.cfg),
+    api: {
+      saveConfig: async (p) => { log.push("save:" + Object.keys(p).sort().join(",")); saved.push(p); return Object.assign({}, env.cfg0, ...saved); },
+      nodeStart: async () => { log.push("nodeStart"); }, nodeRestart: async () => { log.push("nodeRestart"); },
+      cmd: async (c) => { log.push("cmd:" + c); return opts.cmdFails ? { status: false, error: "node says no" } : { status: true, response: {} }; },
+      clip: async () => true
+    },
+    toast: (m, k) => toasts.push((k || "") + ":" + m), ipcError: (e) => String(e && e.message || e), esc: (x) => String(x),
+    showStarting: () => log.push("showStarting"), showSetup: () => log.push("launcher"), hideSetup: () => log.push("hideSetup"), renderActive: () => log.push("renderActive"),
+    walletReplaced: async () => log.push("walletReplaced"), postBootNewSeed: () => {},
+    frScreen: () => ({ set innerHTML(v) {}, className: "" }),
+    el: (id) => opts.els && opts.els[id] || (opts.els = opts.els || {}, opts.els[id] = { onclick: null, style: {}, textContent: "", insertAdjacentHTML() {} }),
+    WordEntry: Object.assign({}, WordEntry, { create: () => ({ phrase: () => opts.typed, problem: () => "Word 3 is empty or not one of the 2048 words.", isAnyPhrase: () => false, clear() {} }) })
+  };
+  const fns = lift(["cmd", "resyncCommand", "seedMismatch", "frStart", "postBootRestore", "confirmNewSeed"], env, flowPrelude,
+    ["state: () => ({ RESTORE, waitingForNode, postBootStarted, CFG })", "setRestore: (r) => { RESTORE = r; }"]);
+  return { log, toasts, saved, fns, els: () => opts.els };
+}
+
+test("New Wallet: the config is saved, then the node starts; the wallet is not marked done and nothing of a seed is saved", async () => {
+  const h = flow();
+  await h.fns.frStart(null);
+  assert.deepEqual(h.log, ["save:megammrHost,setupDone,walletDone,walletMode", "showStarting", "nodeStart"]);
+  assert.deepEqual(h.saved[0], { setupDone: true, walletMode: "new", walletDone: false, megammrHost: "megammr.example:9001" });
+  assert.equal(h.fns.state().postBootStarted, false, "the post-boot wallet step is armed for this start");
+  const solo = flow({ cfg: { network: "solo" } });
+  await solo.fns.frStart(null);
+  assert.equal(solo.saved[0].walletDone, true, "a solo network has no seed step, as before");
+});
+
+test("Restore Wallet: the seed is held in memory only, applied after the node is up, then cleared", async () => {
+  const h = flow();
+  const R = { seed: WordEntry.minimaForm(FAKE24), keyuses: "2000", host: "other.example:9001" };
+  await h.fns.frStart(R);
+  assert.equal(h.saved[0].walletMode, "restore");
+  assert.equal(h.saved[0].megammrHost, "other.example:9001");
+  assert.ok(!JSON.stringify(h.saved).toUpperCase().includes("VOID"), "the config save carries no word of the seed");
+  assert.equal(h.fns.state().RESTORE, R);
+  h.log.length = 0;
+  await h.fns.postBootRestore();
+  assert.deepEqual(h.log, [`cmd:megammrsync action:resync host:other.example:9001 phrase:"${R.seed}" anyphrase:true keyuses:2000`,
+    "walletReplaced", "save:megammrHost,walletDone", "hideSetup", "renderActive"], "the 0.18.84 command, then the old identities dropped, then walletDone");
+  assert.equal(h.fns.state().RESTORE, null, "the seed is cleared from memory");
+  assert.ok(!JSON.stringify(h.saved).toUpperCase().includes("VOID"));
+});
+
+test("Restore Wallet: a failed megammrsync never marks the wallet done", async () => {
+  const h = flow({ cmdFails: true });
+  h.fns.setRestore({ seed: WordEntry.minimaForm(FAKE24), keyuses: "1", host: "megammr.example:9001" });
+  await h.fns.postBootRestore();
+  assert.ok(!h.log.some(l => l.startsWith("save:")) && !h.log.includes("walletReplaced") && !h.log.includes("hideSetup"));
+  assert.ok(h.fns.state().RESTORE, "kept for Retry");
+  h.els().rBack.onclick();
+  assert.equal(h.fns.state().RESTORE, null, "Back drops it");
+});
+
+test("New Wallet: the wallet opens only after the node's words are typed back", async () => {
+  const seed = WordEntry.minimaForm(FAKE24);
+  let h = flow({ typed: null });
+  h.fns.confirmNewSeed(seed); await h.els().frGo.onclick();
+  assert.deepEqual(h.saved, [], "boxes not filled: nothing saved"); assert.equal(h.toasts.length, 1);
+  h = flow({ typed: FAKE24.replace("void", "zoo") });
+  h.fns.confirmNewSeed(seed); await h.els().frGo.onclick();
+  assert.deepEqual(h.saved, [], "a wrong word: nothing saved"); assert.ok(/Word 3 /.test(h.toasts[0]));
+  h = flow({ typed: FAKE24 });
+  h.fns.confirmNewSeed(seed); await h.els().frGo.onclick();
+  assert.deepEqual(h.saved, [{ walletDone: true }]);
+  assert.deepEqual(h.log.slice(-2), ["hideSetup", "renderActive"]);
+  assert.equal(h.fns.seedMismatch(seed, FAKE24 + " zoo"), "Word 25 is not the word of this wallet. Check what you wrote down.");
+});
+
+test("first run is the phone's launcher; the seed screens keep the words out of storage, logs and config", () => {
+  const launcher = source("showSetup");
+  for (const w of ["MINIMA CORE", ">New Wallet<", ">Restore Wallet<", ">Startup Params<"]) assert.ok(launcher.includes(w), w);
+  for (const fn of ["showSetup", "frRestore", "resolveSeed", "frStart", "postBootNewSeed", "confirmNewSeed", "postBootRestore"]) {
+    const src = source(fn);
+    assert.ok(!/console\.|localStorage|\bstore\(/.test(src), fn + " logs nothing and stores nothing in the browser");
+    assert.ok(!/saveConfig\(\{[^}]*(seed|phrase|keyuses)/i.test(src), fn + " saves no seed");
+  }
+  assert.ok(source("hideSetup").includes('el("setupBody").innerHTML = ""'), "closing the layer removes the words from the page");
+  assert.ok(/postBootNewSeed[\s\S]*?tryCmd\("vault"\)/.test(app) && source("confirmNewSeed").includes("seedMismatch(phrase, typed)"));
+  assert.ok(html.includes('<script src="wordentry.js"></script>') && !html.includes("Set up your node"));
+  const stub = fs.readFileSync(path.join(ROOT, "scripts", "dev-preview", "stub.js"), "utf8");
+  assert.ok(stub.includes('const FAKE_SEED = "TEST ONLY VOID ABANDON ".repeat(6).trim();'), "the preview's seed is four words repeated: plainly not a wallet");
 });

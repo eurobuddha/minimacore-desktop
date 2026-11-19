@@ -7,6 +7,20 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.87] — First run: the phone's launcher, seed screen and word boxes
+
+- A new install opens on the phone's launcher: the Minima mark, "MINIMA CORE", and three buttons: New Wallet, Restore Wallet, Startup Params. It replaces the "Set up your node" dialog. Startup Params opens the same screen as in the app, with Save only, and returns to the launcher.
+- New Wallet starts the node, then shows "Your recovery seed" in the phone's orange-edged card. The next screen has the words typed back, one box per word, and the wallet opens only when they are this wallet's words; a wrong word is named by its position. Before, a tick box was enough.
+- Restore Wallet is the phone's "Restore & resync": the seed in 24 boxes, key uses, and the MegaMMR node. The node is started and the seed applied with the same `megammrsync` command as before. The key uses field starts empty, so a number has to be typed.
+- The word boxes are the phone's: each box accepts only one of Minima's 2048 words, completes a word once it is certain, offers matches, turns green or red, and counts ("7 of 24 words"). A pasted phrase is spread over the boxes and removed from the clipboard; numbers, commas and line breaks between words do not matter. "Hide words" masks them.
+- "My phrase is not 24 list words" takes a free-form phrase, typed twice, with the phone's warning. It is refused when it is too short, starts with "-", holds a character the node cannot carry, or looks like list words with a mistake. A phrase made only of list words asks whether to use Minima's form or exactly what was typed.
+- Words typed in the boxes are sent in Minima's own form (capitals, single spaces), so a wallet restored from words typed in lower case is the wallet those words made everywhere else. Before, lower-case words in the setup dialog made a different, empty wallet.
+- "Rebuild wallet from seed phrase" under Backup & Recovery uses the same boxes.
+- The seed is held in memory while it is needed and nowhere else: not in the config, not in any log, not in browser storage. Closing the first-run layer removes the words from the page.
+- If the node fails to start during first run there is now a Back button; a failed restore offers Retry or Back.
+- Wording that differs from the phone: "on your computer" for "in your pocket"; "I've saved it. Proceed" (no dash); the confirm screen is headed "Confirm your seed", because here it checks the words instead of setting them. The phone's Language button is left out: the desktop has no translations yet.
+- Dev preview: `?fr=launcher|params|seed|confirm|confirm-typing|restore|restore-any|starting`. The preview's seed is the words TEST ONLY VOID ABANDON, repeated.
+
 ## [0.18.86] — Backup & Recovery: the phone's hub
 
 - "Backup & Recovery" in the menu opens the phone's hub: Create backup, Restore from file, Chat backup, Mail backup, Resync node, Private keys. Each row opens its own screen; Back returns to the hub. While the node is stopped the rows are greyed and the hub says why.

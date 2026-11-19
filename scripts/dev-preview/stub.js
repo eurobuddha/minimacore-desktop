@@ -7,6 +7,7 @@
  *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
  *   Send: &send=filled|review|error
  *   Any screen: &scroll=<px>
+ *   First run: &fr=launcher|params|seed|confirm|confirm-typing|restore|restore-any|starting
  *   Backup & Recovery: &bk=create|restore|resync|keys  &seed=1  &bkdone=1
  *   History: &hist=empty  &hmenu=1  &hdetail=<row>  &chain=checking  &hfilter=1  &hforeign=1
  */
@@ -17,6 +18,8 @@
   // the node's own format (Java Date.toString()), with a zone name JavaScript cannot parse: the shell must not need to
   const BLOCK_TIME = "Thu Jul 16 14:54:04 BST 2026";
   try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); localStorage.removeItem("walletOrder"); localStorage.setItem("histRebuildVer", "1"); localStorage.setItem("histNormVer", "3"); localStorage.setItem("histHideForeign", Q.get("hforeign") === "1" ? "1" : "0"); if (Q.get("tokens")) localStorage.setItem("walletOrder", Q.get("tokens")); } catch (e) {}
+  // NOT A SEED: four list words repeated, so the word boxes accept them. Nothing was ever made from these.
+  const FAKE_SEED = "TEST ONLY VOID ABANDON ".repeat(6).trim();
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
   const NFT = "0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8";
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";
@@ -51,7 +54,7 @@
       return set.filter(x => !/sendable:true/.test(c) || !x._locked).map(x => { const o = Object.assign({}, x); delete o._locked; return o; });
     },
     // Backup & Recovery. The "seed" is 24 words that are plainly not one; the backup path is invented.
-    vault: () => ({ phrase: "PREVIEW FIXTURE NOT REAL ".repeat(6).trim(), locked: false }),
+    vault: () => ({ phrase: FAKE_SEED, locked: false }),
     backup: () => ({ backup: { file: "/Users/preview/Library/Application Support/minimaCore/node-data/minima-backup-20261119-135600.bak" } }),
     megammrsync: () => ({ message: "preview" }),
     checkaddress: () => ({ simple: true }),
@@ -100,7 +103,7 @@
       catch (e) { return { status: false, error: e.message }; }
     },
     clip: async () => true,
-    getConfig: async () => ({ setupDone: true, walletDone: true, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: {}, params: {}, megammrHost: "megammr.example:9001", heapMb: 0, openAtLogin: false, walletMode: "new" }),
+    getConfig: async () => ({ setupDone: !Q.get("fr"), walletDone: !Q.get("fr"), megammrHost: "megammr.example:9001", contribute: false, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: {}, params: {}, heapMb: 0, openAtLogin: false, walletMode: "new" }),
     saveConfig: async (p) => Object.assign(await fixtures.getConfig(), p),
     nodeStatus: async () => status, nodeStart: async () => status, nodeStop: async () => status, nodeRestart: async () => status,
     nodeLogs: async () => ["Minima @ 19/11/2026 13:54:04 [88.7 MB] : Connected to the blockchain", "Minima @ 19/11/2026 13:54:31 [76.1 MB] : Block 2428089 received"],
@@ -139,6 +142,18 @@
   // Drive the shell to the requested state once app.js has booted.
   window.addEventListener("load", () => setTimeout(() => {
     try {
+      // First run: ?fr=launcher|params|seed|confirm|confirm-typing|restore|restore-any|starting
+      const fr = Q.get("fr");
+      if (fr) {
+        const type = (i, v) => { const b = document.querySelectorAll(".we-box")[i]; b.value = v; b.dispatchEvent(new Event("input")); };
+        if (fr === "params") el("frParams").click();
+        if (fr === "starting") { CFG.walletMode = "new"; showStarting(); }
+        if (fr === "seed" || fr.startsWith("confirm")) postBootNewSeed().then(() => { if (fr !== "seed") el("frSaved").click();
+          if (fr === "confirm-typing") { "test only void abandon test only void".split(" ").forEach((w, i) => type(i, w)); type(8, "zzq"); type(9, "ab"); } });
+        if (fr.startsWith("restore")) { el("frRestore").click(); if (fr === "restore-any") document.querySelector('[data-we="any"]').click(); }
+        if (Q.get("scroll")) setTimeout(() => { el("setupBody").scrollTop = parseInt(Q.get("scroll"), 10); }, 500);
+        return;
+      }
       const view = Q.get("view");
       if (view && view !== "balances") selectTab(view);
       if (Q.get("tray") === "1") setTray(true, true);

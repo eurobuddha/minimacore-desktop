@@ -193,202 +193,83 @@ function onStatus(s) {
   wwLiveRender();   // flip the megammr gate live after enable+restart — but NEVER rebuild the form on a routine block tick
 }
 
-// ---- first-run wizard: network + wallet presets + the FULL startup-parameter editor ----
-// P is the working copy of every non-managed minima.jar flag; the presets and the advanced editor both write
-// into it, and it is saved verbatim as config.params. MINIMA_PARAMS is the shared manifest (params.js).
-function showSetup() {
-  el("shell").style.filter = "blur(2px)";
-  const box = el("setupBody");
-  const P = Object.assign({}, MINIMA_PARAMS.defaultParams(), CFG.params || {});
-  const def = CFG.dataFolder || "";
-  // Reopened from the Node tab to look at / tweak an already-working setup → offer a way out. On first run
-  // there is nothing to go back TO (boot() forces this wizard until both are done), so no Cancel there.
-  const canCancel = !!(CFG.setupDone && CFG.walletDone);
-  const title = document.querySelector("#setup .modal__title");
-  if (title) title.textContent = canCancel ? "Node settings" : "Set up your node";
-
-  box.innerHTML = `
-    <div class="view__desc">${canCancel
-      ? "Change how your node starts. Nothing is applied until you press Apply — Cancel discards everything."
-      : "Set up your node. Nothing here leaves this Mac. Every minima.jar startup parameter is editable below."}</div>
-
-    <div class="setup-sec"><div class="setup-sec__h">Network</div>
-      <label class="opt" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network — light client, syncs to the tip in seconds.</span></label>
-      <label class="opt" data-net="solo"><b>Solo / test</b><span>A private local chain that auto-mines — safe for trying things out.</span></label>
-      <label class="opt" data-net="custom"><b>Custom peer</b><span>Connect to a specific host:port you provide.</span></label>
-      <input class="field__input" id="customPeer" placeholder="host:port" style="display:none;margin-top:4px" />
-      <div class="view__desc" style="font-size:11px;margin-top:4px">A network is a preset — it fills the parameters below; tweak anything you like.</div>
-    </div>
-
-    <div class="setup-sec" id="roleSec"><div class="setup-sec__h">Network role</div>
-      <label class="opt" data-role="light"><b>Light wallet — recommended</b><span>Connects out only. Fast start, minimal bandwidth.</span></label>
-      <label class="opt" data-role="contribute"><b>Contribute to the network</b><span>Your node also accepts connections and helps other nodes sync. Asks your router to open your Minima port (UPnP) and keeps ~50 days of block history — a one-time extra download. Many home routers refuse or silently ignore the request, so this isn't guaranteed; you can always forward the port yourself.</span></label>
-    </div>
-
-    <div class="setup-sec" id="walletSec"><div class="setup-sec__h">Wallet</div>
-      <label class="opt sel" data-w="new"><b>New wallet</b><span>Generate a fresh seed on this node. You'll back up the 24 words next.</span></label>
-      <label class="opt" data-w="restore"><b>Restore from seed</b><span>Import an existing seed — 24 BIP39 words or your own passphrase — and fast-sync via MegaMMR.</span></label>
-      <div id="restoreFields" style="display:none">
-        <div class="field" style="margin-top:6px"><div class="field__label">Your seed phrase</div>
-          <textarea class="field__input" id="rSeed" rows="3" placeholder="24 BIP39 words, or any passphrase"></textarea>
-          <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as it was created — it is case- and spacing-sensitive.</div></div>
-        <div class="field"><div class="field__label">Signatures already used (key-uses)</div>
-          <input class="field__input" id="rKeyuses" value="0" inputmode="numeric" /></div>
-        <div class="view__desc" style="color:var(--amber)">⚠ Key-uses must be at least the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds — if unsure, set it higher.</div>
-        <div class="field"><div class="field__label">MegaMMR host (ip:port, must run -megammr)</div>
-          <input class="field__input" id="rHost" value="${esc(CFG.megammrHost)}" /></div>
-      </div>
-    </div>
-
-    <div class="setup-sec"><div class="setup-sec__h">Core</div>
-      <div class="field"><div class="field__label">Data folder (-data / -basefolder)</div>
-        <div class="seg"><input class="field__input" id="dataFolder" placeholder="(default app folder)" value="${esc(def)}" readonly />
-        <button class="btn btn--outline btn--sm" id="pickFolder">Choose…</button></div></div>
-      <div class="field"><div class="field__label">Minima port (-port)</div>
-        <input class="field__input" id="basePort" value="${esc(CFG.basePort)}" inputmode="numeric" /></div>
-      <div class="field"><div class="field__label">RPC port (-rpc)</div>
-        <input class="field__input" id="rpcPort" value="${esc(CFG.rpcPortManual || "")}" placeholder="(auto: Minima port + 4)" inputmode="numeric" /></div>
-    </div>
-
-    <div class="setup-sec"><div class="setup-sec__h">All startup parameters</div>
-      <div id="advParams"></div>
-      <div class="setup-sec__sub" style="margin-top:10px">Additional raw arguments</div>
-      <textarea class="field__input" id="extraArgs" rows="2" placeholder="e.g. -myextra value">${esc(CFG.extraArgs || "")}</textarea>
-      <div class="prow__h">Appended verbatim. Quotes are respected.</div>
-      <div class="setup-sec__sub" style="margin-top:12px">Managed by the app</div>
-      ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${esc(m.note)}</span></div>`).join("")}
-    </div>
-
-    ${canCancel
-      ? `<div class="seg" style="margin-top:12px">
-           <button class="btn btn--outline btn--full" id="setupCancel">Cancel</button>
-           <button class="btn btn--primary btn--full" id="startNode">Apply &amp; restart node</button></div>`
-      : `<button class="btn btn--primary btn--full" id="startNode" style="margin-top:12px">Start node</button>`}`;
-
-  // ---- advanced params editor (rebuilt from P so presets show through) ----
-  function renderAdvanced() {
-    el("advParams").innerHTML = MINIMA_PARAMS.GROUPS.map(g => `
-      <div class="adv-group"><div class="adv-group__h">${esc(g.group)}</div>
-      ${g.items.map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
-    el("advParams").querySelectorAll("[data-flag]").forEach(inp => {
-      const f = inp.dataset.flag;
-      if (inp.type === "checkbox") inp.onchange = () => { P[f] = inp.checked; };
-      else inp.onchange = () => { P[f] = inp.value; };
-    });
-  }
-  function paramControl(it, val) {
-    const id = "p_" + it.flag;
-    if (it.type === "bool") {
-      return `<label class="prow"><input type="checkbox" id="${id}" data-flag="${esc(it.flag)}" ${val === true ? "checked" : ""}/>
-        <span class="prow__l">${esc(it.label)}</span><span class="prow__h">${esc(it.help)}</span></label>`;
-    }
-    const isSecret = it.type === "secret";
-    const shown = isSecret ? "" : (val === true || val == null ? "" : val);
-    const ph = isSecret && val === true ? "•••••••• (stored — leave blank to keep)" : "";
-    const type = isSecret ? "password" : (it.type === "int" ? "text" : "text");
-    return `<div class="field prow"><label class="prow__l" for="${id}">${esc(it.label)}</label>
-      <input class="field__input" id="${id}" type="${type}" data-flag="${esc(it.flag)}" ${isSecret ? 'data-secret="1"' : ''} ${isSecret && val === true ? 'data-set="1"' : ''} value="${esc(shown)}" placeholder="${esc(ph)}" ${it.type === "int" ? 'inputmode="numeric"' : ''}/>
-      <div class="prow__h">${esc(it.help)}</div></div>`;
-  }
-
-  // ---- network preset fills the network-related params in P ----
-  let net = CFG.network || "mainnet", wmode = "new", role = CFG.contribute ? "contribute" : "light";
-  const walletSec = el("walletSec");
-  const applyNet = (n) => {
-    net = n;
-    if (n === "solo") {
-      Object.assign(P, { solo: true, isclient: false, mobile: false, nosyncibd: false, limitbandwidth: false,
-        allowallip: false, p2pnodes: "", connect: "" });
-    } else {
-      Object.assign(P, { solo: false, test: false, genesis: false, allowallip: true });
-      // The network-role preset owns the client/server flags (see params.js) — apply it after the network
-      // preset so switching network keeps the chosen role.
-      Object.assign(P, role === "contribute" ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
-      if (n === "custom") { P.connect = el("customPeer").value.trim(); P.p2pnodes = ""; }
-      else { P.p2pnodes = CFG.peersUrl || MINIMA_PARAMS.defaultParams().p2pnodes; P.connect = ""; }
-    }
-    box.querySelectorAll(".opt[data-net]").forEach(x => x.classList.toggle("sel", x.dataset.net === n));
-    el("customPeer").style.display = n === "custom" ? "" : "none";
-    walletSec.style.display = n === "solo" ? "none" : "";
-    el("roleSec").style.display = n === "solo" ? "none" : "";
-    renderAdvanced();
-  };
-  const applyRole = (r) => {
-    role = r;
-    box.querySelectorAll(".opt[data-role]").forEach(x => x.classList.toggle("sel", x.dataset.role === r));
-    if (net !== "solo") {
-      Object.assign(P, r === "contribute" ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
-      renderAdvanced();
-    }
-  };
-  const selectW = (w) => {
-    wmode = w;
-    box.querySelectorAll(".opt[data-w]").forEach(x => x.classList.toggle("sel", x.dataset.w === w));
-    el("restoreFields").style.display = w === "restore" ? "" : "none";
-  };
-  box.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => applyNet(o.dataset.net));
-  box.querySelectorAll(".opt[data-role]").forEach(o => o.onclick = () => applyRole(o.dataset.role));
-  box.querySelectorAll(".opt[data-w]").forEach(o => o.onclick = () => selectW(o.dataset.w));
-  if (CFG.customConnect) el("customPeer").value = CFG.customConnect;
-  el("customPeer").oninput = () => { if (net === "custom") P.connect = el("customPeer").value.trim(); };
-  el("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) el("dataFolder").value = f; };
-  // Cancel is a pure discard: P is a local working copy and nothing is written outside startNode's handler,
-  // so closing the overlay leaves the config and the running node untouched.
-  const setupCancel = el("setupCancel");
-  if (setupCancel) setupCancel.onclick = () => hideSetup();
-  renderAdvanced();
-  applyNet(net); applyRole(role); selectW("new");   // seed P from the network + role presets, show in editor
-
-  el("startNode").onclick = async () => {
-    const basePort = parseInt(el("basePort").value, 10) || CFG.basePort;
-    const rpcPortManual = el("rpcPort").value.trim();
-    if (net === "custom" && !el("customPeer").value.trim()) { toast("Enter a host:port for the custom peer."); return; }
-    const solo = net === "solo";
-    const walletMode = solo ? "new" : wmode;
-    let host = CFG.megammrHost;
-
-    // A restore holds the seed + key-uses in memory only — applied by megammrsync after the node is up.
-    if (walletMode === "restore") {
-      // anyphrase:true → the node hashes the phrase VERBATIM (seed = SHA(raw bytes)), so pass it faithfully:
-      // strip only leading/trailing whitespace (the textarea's stray newline), never collapse internal spacing
-      // or change case — that would derive a DIFFERENT seed. Any non-empty phrase/length is valid.
-      const seed = el("rSeed").value.trim();
-      const keyuses = parseInt(el("rKeyuses").value, 10);
-      host = el("rHost").value.trim() || CFG.megammrHost;
-      if (!seed) { toast("Enter your seed phrase."); return; }
-      if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
-      if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
-      if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
-      if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
-      RESTORE = { seed, keyuses, host };
-    }
-
-    // collect every advanced control into P (secret: blank + previously-set → keep marker)
-    el("advParams").querySelectorAll("[data-flag]").forEach(inp => {
-      const f = inp.dataset.flag;
-      if (inp.type === "checkbox") { P[f] = inp.checked; return; }
-      const v = inp.value.trim();
-      if (inp.dataset.secret) P[f] = v ? v : (inp.dataset.set ? true : "");
-      else P[f] = v;
-    });
-
-    const walletDone = solo ? true : (walletMode === "restore" ? false : !!CFG.walletDone);
-    const patch = {
-      setupDone: true, network: net, basePort, rpcPortManual, walletMode, walletDone,
-      contribute: role === "contribute" && !solo,
-      dataFolder: el("dataFolder").value || "",
-      customConnect: net === "custom" ? el("customPeer").value.trim() : "",
-      megammrHost: host, params: P, extraArgs: el("extraArgs").value.trim()
-    };
-    CFG = await api.saveConfig(patch);
-    waitingForNode = true;
-    postBootStarted = false;      // let the post-boot wallet step run for this (re)start
-    showStarting();
-    if (running) await api.nodeRestart(); else await api.nodeStart();   // reconfigure = restart to apply
-  };
-  el("setup").style.display = "";
+// ---- first run: the phone's launcher (New Wallet / Restore Wallet / Startup Params) ------------------------
+// The layer covers the window until a wallet exists. Underneath it is the old wizard's logic, in its order:
+// save the config, start the node, and once it runs either show the node's new seed (and have it typed back)
+// or apply the held seed with megammrsync. A seed is held in memory only (RESTORE, or a local in the seed
+// screens) and is never saved, logged or sent anywhere but to this computer's own node.
+function frScreen(title, back, bodyClass) {
+  el("setup").style.display = ""; el("shell").inert = true;
+  el("setupBar").hidden = !title; el("setupTitle").textContent = title || "";
+  el("setupBack").hidden = !back; el("setupBack").onclick = back || null;
+  const body = el("setupBody"); body.className = "fr-body " + (bodyClass || "pscreen"); body.scrollTop = 0;
+  return body;
 }
-function hideSetup() { el("setup").style.display = "none"; el("shell").style.filter = ""; }
+function showSetup() {
+  frScreen("", null, "fr-launch").innerHTML = `
+    <div class="fr-hero">${CORE_MARK.replace("tray__ic", "fr-logo")}
+      <div class="fr-name">MINIMA CORE</div>
+      <p class="fr-intro">Your own node, on your computer.\nChoose how to begin.</p></div>
+    <div class="fr-btns">
+      <button class="btn btn--primary ps-btn ps-btn--main" id="frNew">New Wallet</button>
+      <button class="btn btn--outline ps-btn ps-btn--main" id="frRestore">Restore Wallet</button>
+      <button class="btn btn--outline ps-btn ps-btn--main" id="frParams">Startup Params</button>
+    </div>`;
+  el("frNew").onclick = () => frStart(null);
+  el("frRestore").onclick = () => frRestore();
+  el("frParams").onclick = () => renderParams(frScreen("Startup Params", showSetup), true, showSetup);
+}
+function hideSetup() { el("setup").style.display = "none"; el("setupBody").innerHTML = ""; el("shell").inert = false; }
+
+// Restore Wallet: the phone's "Restore & resync" screen, with one box per word.
+function frRestore() {
+  if (CFG.network === "solo") { toast("A solo network has no MegaMMR node to restore from. Change the network in Startup Params first.", "err"); return; }
+  const body = frScreen("Restore Wallet", showSetup);
+  body.innerHTML = `
+    <h2 class="ps-h">Restore &amp; resync</h2>
+    <p class="ps-intro">Enter your seed phrase, key uses and the address of a Minima MegaMMR node.\n\nEnter key uses above the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds: if unsure, set it higher.</p>
+    <div class="eyebrow ps-label">Seed phrase</div><div id="frWords"></div>
+    <div class="eyebrow ps-label">Key uses</div><input class="field__input ps-field" id="frUses" inputmode="numeric" autocomplete="off" placeholder="0 only if this seed has never signed" />
+    <div class="eyebrow ps-label">MegaMMR node</div><input class="field__input ps-field" id="frHost" autocomplete="off" spellcheck="false" value="${esc(CFG.megammrHost)}" />
+    <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">Proceed</button>`;
+  const words = WordEntry.create(el("frWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
+  el("frGo").onclick = async () => {
+    const seed = await resolveSeed(words); if (!seed) return;
+    const keyuses = el("frUses").value.trim(), host = el("frHost").value.trim() || CFG.megammrHost;
+    const built = resyncCommand({ host, phrase: seed, anyphrase: true, keyuses, needPhrase: true });
+    if (built.error) { toast(built.error, "err"); return; }
+    words.clear();
+    frStart({ seed, keyuses, host });
+  };
+}
+/**
+ * What the boxes hold, as the node must be given it (the phone's SeedEntry.resolve). Boxes: Minima's own form
+ * (capitals, single spaces: what a node generated). A free-form phrase: exactly as typed. A free-form phrase
+ * made only of list words: ASK. Every result is sent with anyphrase:true, so the node hashes exactly this
+ * string. Returns "" (after saying why) when there is nothing usable yet.
+ */
+async function resolveSeed(words) {
+  const typed = words.phrase();
+  if (typed == null) { toast(words.problem(), "err"); return ""; }
+  if (!words.isAnyPhrase()) return WordEntry.minimaForm(typed);
+  if (!WordEntry.allListWords(typed)) return typed.trim();
+  const pick = await new Promise(res => showActionSheet("These are list words", [
+    { label: "Minima's form", onclick: () => res("minima") }, { label: "Exactly as typed", onclick: () => res("typed") }],
+    "A wallet made by Minima uses its own form of the words (capitals, single spaces). Older apps could make a wallet from the words exactly as they were typed. Choose \"Exactly as typed\" only for such a wallet: otherwise you open a different, empty wallet.", () => res("")));
+  return pick === "minima" ? WordEntry.minimaForm(typed) : pick === "typed" ? typed.trim() : "";
+}
+// New Wallet or a restore: save the config, then start the node. restore = { seed, keyuses, host } or null.
+async function frStart(restore) {
+  const solo = CFG.network === "solo";
+  RESTORE = restore;   // memory only: applied by megammrsync after the node is up, then cleared
+  const mode = restore ? "restore" : "new", megammrHost = restore ? restore.host : CFG.megammrHost;
+  const patch = { setupDone: true, walletMode: mode, walletDone: solo, megammrHost };
+  try { CFG = await api.saveConfig(patch); } catch (e) { RESTORE = null; toast(ipcError(e), "err"); return; }
+  waitingForNode = true;
+  postBootStarted = false;      // let the post-boot wallet step run for this start
+  showStarting();
+  if (running) await api.nodeRestart(); else await api.nodeStart();
+}
 
 // ---- Startup Params (the phone's ParamsActivity, over the reconfigure logic the old wizard had) ------------
 // P is the working copy of every non-managed minima.jar flag; the switches, the network preset and the full
@@ -695,9 +576,7 @@ function renderBackup() {
     <button class="btn btn--outline ps-btn" id="bkShow">Show seed phrase</button>
     <div class="eyebrow ps-label bk-gap">Rebuild wallet from seed phrase</div>
     <p class="ps-note ps-note--body">Replace this node's wallet with the one for a seed phrase, then resync from a MegaMMR node. Destructive.</p>
-    <div class="eyebrow ps-label">Seed phrase</div>
-    <textarea class="field__input ps-field" id="bkPhrase" rows="2" autocomplete="off" spellcheck="false" placeholder="your 24 words, separated by spaces"></textarea>
-    <label class="bk-check"><input type="checkbox" id="bkAny"><span>My phrase is not 24 list words. Use it exactly as typed: capital letters, spaces and punctuation all count.</span></label>` +
+    <div class="eyebrow ps-label">Seed phrase</div><div id="bkWords"></div>` +
     field("bkUses", "Key uses", 'inputmode="numeric" placeholder="higher than any previous rebuild of this seed"') + hostField +
     `<button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Rebuild">Rebuild</button><div class="bk-status" id="bkStatus" role="status"></div>`;
   $("bkShow").onclick = async () => {
@@ -707,20 +586,22 @@ function renderBackup() {
     if (!p) { toast("The node did not return a seed phrase.", "err"); return; }
     box.textContent = p; box.hidden = false; $("bkShow").textContent = "Hide seed phrase";
   };
-  $("bkGo").onclick = () => run("bkGo", "Rebuild", built({ host: $("bkHost").value, phrase: $("bkPhrase").value, anyphrase: $("bkAny").checked, keyuses: $("bkUses").value, needPhrase: true }), "Rebuild this wallet?",
-    "Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds.", "Rebuild");
+  const words = WordEntry.create($("bkWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
+  $("bkGo").onclick = async () => { const seed = await resolveSeed(words); if (!seed) return;
+    run("bkGo", "Rebuild", built({ host: $("bkHost").value, phrase: seed, anyphrase: true, keyuses: $("bkUses").value, needPhrase: true }), "Rebuild this wallet?",
+    "Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds.", "Rebuild"); };
 }
 
-// ---- starting / progress overlay -------------------------------------------
+// ---- starting / progress screen ---------------------------------------------
 function showStarting() {
   const restore = CFG.walletMode === "restore";
-  el("setupBody").innerHTML = `
+  frScreen("", null).innerHTML = `
     <div class="setup-progress">
       <div class="spin spin--lg"></div>
       <div class="setup-progress__title" id="startTitle">Starting your node…</div>
       <div class="view__desc" id="startSub">${restore
-        ? "Booting a light client on " + esc(CFG.network) + ", then fast-syncing your seed via MegaMMR."
-        : "Booting a light client and connecting to the " + esc(CFG.network) + " network."}</div>
+        ? "Starting the node on " + esc(CFG.network) + ", then restoring your seed from the MegaMMR node."
+        : "Starting the node and connecting to the " + esc(CFG.network) + " network."}</div>
       <div class="setup-progress__stat" id="startStat">connecting…</div>
     </div>`;
 }
@@ -728,58 +609,92 @@ function updateSetupProgress(s) {
   const stat = el("startStat"); if (!stat) return;
   if (s.state === "starting") stat.textContent = "connecting…";
   else if (s.state === "running" && s.health) stat.textContent = "● " + (s.health.connections || 0) + " peers · block #" + (s.health.block || 0);
-  else if (s.state === "error") { stat.textContent = "⚠ " + (s.lastError || "node error"); stat.style.color = "var(--red)"; }
+  else if (s.state === "error") {
+    stat.textContent = "⚠ " + (s.lastError || "node error"); stat.style.color = "var(--red)";
+    if (!el("startBack")) {   // a way out, to change a port or a parameter and try again
+      stat.insertAdjacentHTML("afterend", `<button class="btn btn--outline ps-btn" id="startBack">Back</button>`);
+      el("startBack").onclick = () => { RESTORE = null; showSetup(); };
+    }
+  }
 }
 
 // ---- post-boot wallet step (runs once the node is running) -----------------
 function seedFrom(v) { return v && (v.phrase || v.seedphrase || v.seed || v.mnemonic) || ""; }
 function runPostBoot() { if (RESTORE) postBootRestore(); else postBootNewSeed(); }
 
-// NEW wallet: reveal the fresh seed for backup, then done — NO resync (a new node just follows the tip).
-function postBootNewSeed() {
-  el("setupBody").innerHTML = `
-    <div class="view__desc">Your node is live. Back up the seed that controls your funds — it never leaves this Mac and is the only way to recover your wallet.</div>
-    <button class="btn btn--outline btn--full" id="revealSeed">Reveal my 24-word seed</button>
-    <div class="addrbox" id="seedBox" style="display:none;white-space:normal;line-height:1.6;letter-spacing:.3px"></div>
-    <label class="opt" id="seedAck" style="display:none"><input type="checkbox"/> <span style="margin:0;color:var(--text)">I've written down my 24 words and stored them safely.</span></label>
-    <button class="btn btn--primary btn--full" id="newGo" style="display:none">Open my wallet</button>`;
-  el("revealSeed").onclick = async () => {
-    const v = await tryCmd("vault");
-    const phrase = seedFrom(v);
-    if (!phrase) { toast("Couldn't read the seed yet — give the node a moment.", "err"); return; }
-    el("seedBox").style.display = ""; el("seedBox").textContent = phrase;
-    el("seedAck").style.display = ""; el("newGo").style.display = "";
-  };
-  el("newGo").onclick = async () => {
-    if (!el("seedAck").querySelector("input").checked) { toast("Tick the box once you've backed up your seed."); return; }
+// NEW wallet: the node made the seed. Show it (the phone's "Your recovery seed"), then have it typed back
+// before the wallet opens. No resync: a new node just follows the tip.
+async function postBootNewSeed() {
+  const body = frScreen("New Wallet", null);
+  body.innerHTML = `
+    <h2 class="ps-h">Your recovery seed</h2>
+    <p class="ps-intro">Write these words down and keep them safe. Anyone with this seed controls your funds, and it cannot be recovered if lost.</p>
+    <div class="seedcard fr-seed" id="frSeed">Reading from the node…</div>
+    <button class="btn btn--primary ps-btn ps-btn--main fr-proceed" id="frSaved" disabled>I've saved it. Proceed</button>`;
+  let phrase = "";
+  for (let i = 0; i < 20 && !phrase && el("frSeed"); i++) {   // the vault answers a moment after the node does
+    phrase = String(seedFrom(await tryCmd("vault")) || "").trim();
+    if (!phrase) await new Promise(r => setTimeout(r, 1500));
+  }
+  if (!el("frSeed")) return;
+  if (!phrase) {
+    el("frSeed").textContent = "The node did not return a seed phrase.";
+    el("frSaved").disabled = false; el("frSaved").textContent = "Try again"; el("frSaved").onclick = postBootNewSeed;
+    return;
+  }
+  el("frSeed").textContent = phrase;
+  el("frSaved").disabled = false;
+  el("frSaved").onclick = () => confirmNewSeed(phrase);
+}
+// The phone's confirm-entry screen: the words are typed back, one box per word, and must be this wallet's.
+function confirmNewSeed(phrase) {
+  const body = frScreen("New Wallet", postBootNewSeed);
+  body.innerHTML = `
+    <h2 class="ps-h">Confirm your seed</h2>
+    <p class="ps-intro">Type in your seed phrase to confirm you have saved it.</p>
+    <div class="eyebrow ps-label">Seed phrase</div><div id="frWords"></div>
+    <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">Proceed</button>`;
+  const words = WordEntry.create(el("frWords"), { clearClipboard: () => api.clip("") });
+  el("frGo").onclick = async () => {
+    const typed = words.phrase();
+    if (typed == null) { toast(words.problem(), "err"); return; }
+    const miss = seedMismatch(phrase, typed);
+    if (miss) { toast(miss, "err"); return; }
     CFG = await api.saveConfig({ walletDone: true });
     hideSetup(); renderActive(); toast("Wallet ready ✓", "ok");
   };
-  el("setup").style.display = "";
+}
+// "" when the typed words are the wallet's seed, else which word to check. Case and spacing are not the point here.
+function seedMismatch(phrase, typed) {
+  const want = WordEntry.splitPasted(phrase), got = WordEntry.splitPasted(typed);
+  for (let i = 0; i < Math.max(want.length, got.length); i++) if (want[i] !== got[i]) return "Word " + (i + 1) + " is not the word of this wallet. Check what you wrote down.";
+  return "";
 }
 
-// RESTORE: node is up — apply the held seed via megammrsync, then done.
+// RESTORE: the node is up. Apply the held seed with megammrsync, then done.
 async function postBootRestore() {
   const { seed, keyuses, host } = RESTORE;
-  el("setupBody").innerHTML = `
+  frScreen("", null).innerHTML = `
     <div class="setup-progress">
       <div class="spin spin--lg"></div>
       <div class="setup-progress__title">Restoring your wallet…</div>
-      <div class="view__desc">Fast-syncing your seed via MegaMMR (${esc(host)}). This usually takes seconds.</div>
+      <div class="view__desc">Restoring your seed from the MegaMMR node (${esc(host)}).</div>
       <div class="setup-progress__stat" id="rStat">resyncing…</div>
     </div>`;
-  el("setup").style.display = "";
   try {
-    await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
+    const built = resyncCommand({ host, phrase: seed, anyphrase: true, keyuses, needPhrase: true });
+    if (built.error) throw new Error(built.error);
+    await cmd(built.cmd);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
+    await walletReplaced();   // seed changed: every identity derived from the old one is dropped
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
-    resetWalletFigures(); api.nodeStatus().then(paintFooter); hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
+    hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
     const st = el("rStat"); if (st) { st.textContent = "⚠ " + e.message; st.style.color = "var(--red)"; }
     el("setupBody").insertAdjacentHTML("beforeend",
-      `<button class="btn btn--primary btn--full" id="rRetry" style="margin-top:10px">Retry</button>`);
+      `<button class="btn btn--primary ps-btn" id="rRetry">Retry</button><button class="btn btn--outline ps-btn" id="rBack">Back</button>`);
     el("rRetry").onclick = () => postBootRestore();
+    el("rBack").onclick = () => { RESTORE = null; showSetup(); };
   }
 }
 
@@ -1786,15 +1701,16 @@ function drawQR(text) {
 
 // ---- shared dialogs + progress/result modals (every panel uses these, not just Mail) ---------------------
 // ---- small reusable dialogs (action sheet / prompt / confirm) --------------
-function showActionSheet(title, items) {
+function showActionSheet(title, items, message, onCancel) {
   const rows = items.map((it, i) => `<button class="btn ${it.danger ? "btn--danger" : "btn--outline"} btn--full" data-i="${i}" style="margin-top:6px">${esc(it.label)}</button>`).join("");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="sheetOv"><div class="modal">
-    <div class="modal__title">${esc(title)}</div>${rows}
+    <div class="modal__title">${esc(title)}</div>${message ? `<div class="view__desc">${esc(message)}</div>` : ""}${rows}
     <button class="btn btn--outline btn--full" id="sheetCancel" style="margin-top:12px">Cancel</button></div></div>`);
   const ov = el("sheetOv"); const close = () => { if (ov) ov.remove(); };
+  const cancel = () => { close(); if (onCancel) onCancel(); };
   ov.querySelectorAll("button[data-i]").forEach(b => b.onclick = () => { close(); const it = items[parseInt(b.dataset.i, 10)]; if (it && it.onclick) it.onclick(); });
-  el("sheetCancel").onclick = close;
-  ov.onclick = (e) => { if (e.target.id === "sheetOv") close(); };
+  el("sheetCancel").onclick = cancel;
+  ov.onclick = (e) => { if (e.target.id === "sheetOv") cancel(); };
 }
 function showPrompt(title, initial, placeholder, opts) {
   opts = opts || {};
