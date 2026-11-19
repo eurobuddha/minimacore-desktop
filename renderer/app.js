@@ -1450,7 +1450,7 @@ async function consolidateToken(tid, name) {
   const why = await api.ppConsolidationCheck();
   if (why) { await showConfirm("Not consolidated", why, "OK", false); return false; }
   await cmd(cmdText);
-  toast("Consolidation submitted ✓ — coins merge over the next blocks.", "ok");
+  toast("Consolidation submitted ✓ Coins merge over the next blocks.", "ok");
   return true;
 }
 let SEND_PRESELECT = null;   // tokenid to preselect in the Send tab (set by the modal's Send action)
@@ -1566,10 +1566,12 @@ async function showTokenDetail(b) {
 const PANDA_SENTINEL = "0x50414E4441504F4F4C53";
 
 // ---- dialogs in the phone's shape: a title, a body, and text buttons along the bottom ----
-// Escape and a click outside close the top one; focus goes back to whatever opened it.
+// Escape and a click outside close the top one; focus goes back to whatever opened it. One of each at a time:
+// asked for again while it is open, it returns null and nothing is added. Tab stays inside (modalTab).
 function openDlg(id, title, bodyHtml, buttonsHtml) {
+  if (document.querySelectorAll("#" + id).length) return null;
   const opener = document.activeElement;
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay overlay--dlg" id="${id}"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="${id}Title" tabindex="-1">
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay overlay--dlg" id="${id}" data-modal><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="${id}Title" tabindex="-1">
     <h2 class="dlg__title" id="${id}Title">${esc(title)}</h2>
     <div class="dlg__body">${bodyHtml}</div>
     <div class="dlg__btns">${buttonsHtml}<span class="dlg__gap"></span><button class="dlg__btn" data-close>Close</button></div></div></div>`);
@@ -1580,6 +1582,19 @@ function openDlg(id, title, bodyHtml, buttonsHtml) {
   root.querySelector(".dlg").focus();
   return { root, close };
 }
+// Tab and Shift+Tab stay inside the dialog on top, when that dialog is one marked data-modal (the coins dialog,
+// a coin's detail, Split, and every confirm). Without this, focus stayed on the button underneath and Enter
+// opened a second copy over the first.
+function modalTab(e) {
+  if (e.key !== "Tab") return;
+  const open = document.querySelectorAll("body > .overlay"), top = open[open.length - 1];
+  if (!top || !top.hasAttribute("data-modal")) return;
+  const stops = [...top.querySelectorAll("button, input, select, textarea, [tabindex]")].filter(n => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
+  const at = stops.indexOf(document.activeElement);
+  if (!stops.length) { e.preventDefault(); return; }
+  if (e.shiftKey ? at <= 0 : at < 0 || at === stops.length - 1) { e.preventDefault(); stops[e.shiftKey ? stops.length - 1 : 0].focus(); }
+}
+document.addEventListener("keydown", modalTab, true);
 
 /**
  * Every coin behind a token balance (the phone's CoinsDialog). ALL relevant coins are listed, the ones locked
@@ -1601,6 +1616,7 @@ async function showCoins(b) {
        <button class="btn btn--outline" id="coinsConsolidate" hidden>Consolidate</button>
      </div>`,
     `<button class="dlg__btn" id="coinsCopyTid">Copy token ID</button>${isNative ? "" : `<button class="dlg__btn" id="coinsTokInfo">Token details</button>`}`);
+  if (!d) return;                                                    // this dialog is already open
   el("coinsCopyTid").onclick = () => copy(tid);                      // the whole token id; the dialog stays open
   if (el("coinsTokInfo")) el("coinsTokInfo").onclick = () => showTokenDetail(b);
   el("coinsSplit").onclick = () => splitDialog(tid, name);
@@ -1688,6 +1704,7 @@ function showCoinDetail(c, sendable) {
         <div class="cd-row__line"><div class="cd-row__v">${esc(v)}</div><button class="dlg__btn dlg__btn--sm" data-i="${i}" aria-label="Copy ${esc(k)}">COPY</button></div></div>`).join("")
       + `<div class="eyebrow cd-raw-h">Raw JSON</div><pre class="cd-raw">${esc(raw)}</pre>`,
     `<button class="dlg__btn" id="coinCopyJson">Copy JSON</button>`);
+  if (!d) return;                                                    // a coin's detail is already open
   d.root.querySelectorAll(".cd-row [data-i]").forEach(b => b.onclick = () => copy(rows[parseInt(b.dataset.i, 10)][1]));
   el("coinCopyJson").onclick = () => copy(raw);
 }
@@ -1695,25 +1712,34 @@ function showCoinDetail(c, sendable) {
 /** Split one token's own coins into equal pieces. The form and its checks are the Send screen's old Split
  *  form (0.18.65), moved here; the token is the one whose coins dialog opened it. */
 function splitDialog(tok, name) {
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="splitOv"><div class="modal">
-    <div class="modal__title">Split ${esc(name)}</div>
+  if (document.querySelectorAll("#splitOv").length) return;          // one Split dialog at a time
+  const opener = document.activeElement;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="splitOv" data-modal><div class="modal" role="dialog" aria-modal="true" aria-labelledby="spTitle">
+    <div class="modal__title" id="spTitle">Split ${esc(name)}</div>
     <div class="view__desc">Split your own coins into equal pieces (useful for parallel sends).</div>
     <div class="field"><div class="field__label">Amount to split</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
-    <div class="field"><div class="field__label">Into how many coins (2–20)</div><input class="field__input" id="spN" value="10" /></div>
+    <div class="field"><div class="field__label">Into how many coins (2 to 20)</div><input class="field__input" id="spN" value="10" /></div>
     <div class="seg"><button class="btn btn--outline btn--full" id="spCancel">Cancel</button><button class="btn btn--primary btn--full" id="spGo">Split</button></div></div></div>`);
-  const close = () => { const o = el("splitOv"); if (o) o.remove(); };
-  el("spCancel").onclick = close;
-  el("splitOv").onclick = (e) => { if (e.target.id === "splitOv") close(); };
-  el("spGo").onclick = async () => {
+  const ov = el("splitOv"), go = el("spGo"), cancel = el("spCancel");
+  let busy = false;                                                  // a split is with the node: no close and no second submit until it answers
+  const close = () => { if (busy) return; ov.remove(); if (opener && opener.isConnected) opener.focus(); };
+  cancel.onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.onkeydown = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  el("spAmt").focus();                                               // focus leaves the Split button underneath; Tab stays in here (modalTab)
+  go.onclick = async () => {
+    if (busy) return;
     const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0;
     if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
-    if (n < 2 || n > 20) { toast("Split into 2–20 coins."); return; }
+    if (n < 2 || n > 20) { toast("Split into 2 to 20 coins."); return; }
     if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
-    el("spGo").disabled = true;
+    busy = true; go.disabled = cancel.disabled = true;
+    let sent = false;
     try { const a = await cmd("getaddress"); const addr = a.miniaddress || a.address;
-      await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Split ✓", "ok"); close(); }
+      await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Split ✓", "ok"); sent = true; }
     catch (e) { toast(e.message, "err"); }
-    el("spGo").disabled = false;
+    busy = false; go.disabled = cancel.disabled = false;             // the buttons held above, not looked up again: after a split the dialog is gone
+    if (sent) close();
   };
 }
 
@@ -1795,16 +1821,26 @@ function showPrompt(title, initial, placeholder, opts) {
     ov.onclick = (e) => { if (e.target.id === "promptOv") done(null); };
   });
 }
+// One question on screen at a time: a second one waits until the first is answered (two at once shared their
+// button ids, so the first one's buttons answered the second). Focus goes to Cancel, Escape is Cancel, Tab stays
+// inside (modalTab), and focus goes back to what asked.
+let CONFIRM_QUEUE = Promise.resolve();
 function showConfirm(title, message, okLabel, danger) {
-  return new Promise((resolve) => {
-    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="confirmOv"><div class="modal">
-      <div class="modal__title">${esc(title)}</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message || "")}</div>
+  const ask = () => new Promise((resolve) => {
+    const opener = document.activeElement;
+    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="confirmOv" data-modal><div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
+      <div class="modal__title" id="cfTitle">${esc(title)}</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message || "")}</div>
       <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="cfCancel">Cancel</button>
         <button class="btn ${danger ? "btn--danger" : "btn--primary"} btn--full" id="cfOk">${esc(okLabel || "OK")}</button></div></div></div>`);
-    const ov = el("confirmOv"); const done = (v) => { if (ov) ov.remove(); resolve(v); };
+    const ov = el("confirmOv"); const done = (v) => { ov.remove(); if (opener && opener.isConnected) opener.focus(); resolve(v); };
     el("cfOk").onclick = () => done(true); el("cfCancel").onclick = () => done(false);
-    ov.onclick = (e) => { if (e.target.id === "confirmOv") done(false); };
+    ov.onclick = (e) => { if (e.target === ov) done(false); };
+    ov.onkeydown = (e) => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
+    el("cfCancel").focus();
   });
+  const answer = CONFIRM_QUEUE.then(ask);
+  CONFIRM_QUEUE = answer.then(() => {}, () => {});
+  return answer;
 }
 
 // ---- QR scanner (webcam via BarcodeDetector, or a QR image / paste) ---------
@@ -2142,17 +2178,17 @@ function tradeCounter(r) {
   return { amt: String(d[tid]).replace(/^-/, ""), name: TOK.tokenName(coin && coin.token, tid) };
 }
 function showHistoryDetail(r) {
-  const timeStr = r.time ? new Date(r.time).toLocaleString() : "—";
+  const timeStr = r.time ? new Date(r.time).toLocaleString() : "unknown";
   const lbl = labelFor(r.counterparty);
-  const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "—";
-  const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "—";
+  const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "unknown";
+  const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "none";
   // Each coin: amount + token → address, with the coinid and any state variables when present.
   const bd = (list) => (list && list.length ? list.map(c => {
     let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${idHtml(c.address, short(c.address, 16))}`;
     if (c.coinid) line += ` <span class="hist-dim">${idHtml(c.coinid, short(c.coinid, 12))}</span>`;
     if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(short(String(s.data), 40))}</span>`).join("");
     return line;
-  }).join("<br>") : "—");
+  }).join("<br>") : "none");
   const isTrade = r.kind === "buy" || r.kind === "sell";
   const tc = isTrade ? tradeCounter(r) : null;
   const kind = isTrade ? (r.kind === "buy" ? "Bought MINIMA" : "Sold MINIMA")
@@ -2928,13 +2964,13 @@ function sendForm() {
       el("sGo").disabled = true; el("sGo").textContent = "Sending…";
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
-        if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return; }
+        if (!chk) { toast("Couldn't validate the address (node busy?). Not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return; }
         // Review before it leaves. Every OTHER send in this app confirms first — minimaMail pay, ETH send,
         // AtomiX swap, the PandaPools actions, Vestr — and this is the one people use most. The recipient is
         // shown IN FULL so a mistyped or clipboard-swapped address has somewhere to be caught.
         const tname = tokOf(tok).name || (tok === MINIMA ? "MINIMA" : tok);
         if (!await showConfirm(`Send ${amt} ${tname}?`,
-              `To\n${to}\n\nAmount\n${amt} ${tname}\n\nCheck the address above — this sends real funds and cannot be undone.`,
+              `To\n${to}\n\nAmount\n${amt} ${tname}\n\nCheck the address above. This sends real funds and cannot be undone.`,
               "Send now", false)) {
           el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return;
         }

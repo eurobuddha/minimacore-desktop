@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.92] — Split dialog and confirms: one at a time, focus inside, and plain wording
+
+Review of 0.18.80 to 0.18.84.
+
+- Split dialog: focus moves into it when it opens and returns to the Split button when it closes; Tab stays inside. Before, focus stayed on the button underneath, so Enter or Space put a second, unwired copy over the first. Only one can be open.
+- While a split is with the node the dialog cannot be closed (Cancel, a click outside, Escape) and cannot be sent again, so it cannot be reopened for a second split. After a successful split nothing is looked up on the closed dialog (that threw an error before).
+- The coins dialog and a coin's detail open once each, and keep Tab inside.
+- Every confirm (the Consolidate question, the Send review and the rest of the app's): one on screen at a time, a second waits for the first to be answered. Two at once used to share button ids, so the first one's buttons answered the second. Focus starts on Cancel, Escape is Cancel, Tab stays inside, and focus returns to what asked.
+- Wording, no dashes: "Check the address above. This sends real funds and cannot be undone."; "Couldn't validate the address (node busy?). Not sending."; "Consolidation submitted ✓ Coins merge over the next blocks."; "Into how many coins (2 to 20)"; an empty field in a transaction's detail reads "unknown" or "none".
+- Receive was checked: it has no helper text, so nothing claims one fixed address. None was added; the screen is full at the Fold's height.
+
 ## [0.18.91] — Wallet list and coins dialog: no frozen list, no guessed "sendable", no false sum warning
 
 Review of 0.18.79 to 0.18.81.

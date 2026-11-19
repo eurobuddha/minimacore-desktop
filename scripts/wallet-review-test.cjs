@@ -141,3 +141,118 @@ test("coins dialog footer: the sum is checked against a fresh confirmed + unconf
   assert.equal(d.foot.warn, false);
   assert.ok(!/[—–≠]/.test(source("coinsFootText")));
 });
+
+// ---- 7. dialogs: one at a time, focus inside, nothing closes or re-sends while a split is with the node ----
+// A page where an element exists only while its overlay is on it, as in the app (el() of a removed id is null).
+function dom() {
+  let ids = {}, focused = null;
+  const overlays = [];
+  const mk = (id) => ({ id, value: "", disabled: false, isConnected: true, tabIndex: 0, onclick: null, onkeydown: null, focus() { focused = this; }, getClientRects: () => [1],
+    hasAttribute: () => true, querySelector: () => mk(""), querySelectorAll: () => [] });
+  const document = {
+    get activeElement() { return focused; },
+    body: { insertAdjacentHTML(where, html) {
+      const mine = {}; for (const m of html.matchAll(/id="([A-Za-z]+)"/g)) mine[m[1]] = mk(m[1]);
+      const root = mine[/id="([A-Za-z]+)"/.exec(html)[1]]; root.html = html;
+      root.remove = () => { root.isConnected = false; overlays.splice(overlays.indexOf(root), 1); for (const k of Object.keys(mine)) { mine[k].isConnected = false; if (ids[k] === mine[k]) delete ids[k]; } };
+      Object.assign(ids, mine); overlays.push(root);
+    } },
+    querySelectorAll: (sel) => (sel === "body > .overlay" ? overlays.slice() : overlays.filter(o => "#" + o.id === sel))
+  };
+  return { document, el: (id) => ids[id] || null, overlays, focus: (n) => { focused = n; }, focused: () => focused };
+}
+const flush = () => new Promise(r => setImmediate(r));
+
+function splitPage() {
+  const d = dom(), sent = [], toasts = [];
+  let release = null;
+  const env = { document: d.document, el: d.el, esc, toast: (m, k) => toasts.push((k || "") + ":" + m),
+    validAmt: (a) => /^[0-9]*\.?[0-9]+$/.test(a) && parseFloat(a) > 0, validTok: () => true,
+    cmd: async (c) => { if (c === "getaddress") return { miniaddress: "MxOWN" }; sent.push(c); await new Promise((res, rej) => { release = { ok: res, fail: () => rej(new Error("node says no")) }; }); return {}; } };
+  const splitDialog = new Function(...Object.keys(env), 'const MINIMA = "0x00";\n' + source("splitDialog") + "; return splitDialog;")(...Object.values(env));
+  return { d, sent, toasts, splitDialog, node: () => release };
+}
+
+test("Split dialog: one at a time, focus moves into it, and it cannot be closed or sent twice while the node has the split", async () => {
+  const s = splitPage(), opener = { isConnected: true, focus() { s.d.focus(this); } };
+  s.d.focus(opener);
+  s.splitDialog("0x00", "Minima"); s.splitDialog("0x00", "Minima");            // Enter pressed twice on the button underneath
+  assert.equal(s.d.overlays.length, 1, "no second overlay with the same ids");
+  assert.equal(s.d.focused(), s.d.el("spAmt"), "focus is in the dialog, not on the Split button under it");
+  const ov = s.d.el("splitOv"), go = s.d.el("spGo"), cancel = s.d.el("spCancel");
+  assert.ok(/data-modal/.test(ov.html) && /role="dialog" aria-modal="true"/.test(ov.html));
+  s.d.el("spAmt").value = "10"; s.d.el("spN").value = "4";
+  const first = go.onclick(); await flush();
+  assert.deepEqual(s.sent, ["send address:MxOWN amount:10 split:4"]);
+  assert.equal(go.disabled && cancel.disabled, true);
+  cancel.onclick(); ov.onclick({ target: ov }); ov.onkeydown({ key: "Escape", stopPropagation() {} });
+  assert.equal(s.d.overlays.length, 1, "Cancel, a click outside and Escape do nothing while the split is in flight");
+  await go.onclick(); s.splitDialog("0x00", "Minima"); await flush();
+  assert.equal(s.sent.length, 1, "no second split from a second press or a reopened dialog");
+  s.node().ok(); await first;                                                  // threw here before: el("spGo") of a removed dialog is null
+  assert.equal(s.d.overlays.length, 0, "closed after the node accepted");
+  assert.equal(s.d.el("spGo"), null); assert.equal(s.d.focused(), opener, "focus goes back to what opened it");
+  assert.deepEqual(s.toasts, ["ok:Split ✓"]);
+});
+
+test("Split dialog: a refused split leaves the form open and usable; Escape closes it when nothing is in flight", async () => {
+  const s = splitPage();
+  s.splitDialog("0x00", "Minima");
+  const ov = s.d.el("splitOv"), go = s.d.el("spGo");
+  s.d.el("spAmt").value = "10"; s.d.el("spN").value = "1";
+  await go.onclick();
+  assert.deepEqual(s.toasts, [":Split into 2 to 20 coins."], "plain words, no dash");
+  s.d.el("spN").value = "4";
+  const run = go.onclick(); await flush(); s.node().fail(); await run;
+  assert.equal(s.d.overlays.length, 1); assert.equal(go.disabled, false); assert.equal(s.toasts[1], "err:node says no");
+  ov.onkeydown({ key: "Escape", stopPropagation() {} });
+  assert.equal(s.d.overlays.length, 0);
+});
+
+test("confirm: one question at a time, focus on Cancel, Escape declines, focus goes back", async () => {
+  const d = dom(), opener = { isConnected: true, focus() { d.focus(this); } };
+  d.focus(opener);
+  const showConfirm = new Function("document", "el", "esc", "let CONFIRM_QUEUE = Promise.resolve();\n" + source("showConfirm") + "; return showConfirm;")(d.document, d.el, esc);
+  const a = showConfirm("Consolidate Minima?", "first", "Consolidate"), b = showConfirm("Send 5 Minima?", "second", "Send now");
+  await flush();
+  assert.equal(d.overlays.length, 1, "the second question waits; before, it shared the first one's button ids");
+  assert.ok(d.overlays[0].html.includes("Consolidate Minima?") && /data-modal/.test(d.overlays[0].html));
+  assert.equal(d.focused(), d.el("cfCancel"), "Enter on a fresh question cancels; it does not press what is underneath");
+  d.el("cfOk").onclick();
+  assert.equal(await a, true);
+  await flush();
+  assert.equal(d.overlays.length, 1); assert.ok(d.overlays[0].html.includes("Send 5 Minima?"), "now the second is asked, with its own buttons");
+  d.el("confirmOv").onkeydown({ key: "Escape", stopPropagation() {} });
+  assert.equal(await b, false);
+  assert.equal(d.overlays.length, 0); assert.equal(d.focused(), opener);
+});
+
+test("coins dialog and coin detail: asked for twice, opened once; Tab stays inside the dialog on top", () => {
+  const d = dom();
+  const f = new Function("document", "el", "esc", source("openDlg") + "\n" + source("modalTab") + "; return { openDlg, modalTab };")(d.document, d.el, esc);
+  const one = f.openDlg("coinsDlg", "Minima coins", "", "");
+  assert.ok(one && one.root); assert.equal(f.openDlg("coinsDlg", "Minima coins", "", ""), null); assert.equal(d.overlays.length, 1);
+  assert.ok(f.openDlg("coinDlg", "Coin", "", "")); assert.equal(f.openDlg("coinDlg", "Coin", "", ""), null); assert.equal(d.overlays.length, 2);
+  for (const fn of ["showCoins", "showCoinDetail"]) assert.ok(/if \(!d\) return;/.test(source(fn)), fn + " stops when its dialog is already open");
+
+  const stop = (name, over) => Object.assign({ name, disabled: false, tabIndex: 0, getClientRects: () => [1], focus() { d.focus(this); } }, over);
+  const a = stop("a"), b = stop("b"), c = stop("c"), off = stop("off", { disabled: true }), hiddenOne = stop("hidden", { getClientRects: () => [] }), panel = stop("panel", { tabIndex: -1 });
+  const top = d.overlays[1]; top.querySelectorAll = () => [panel, a, off, b, hiddenOne, c];
+  const tab = (shift) => { let stopped = false; f.modalTab({ key: "Tab", shiftKey: !!shift, preventDefault() { stopped = true; } }); return stopped; };
+  d.focus(c); assert.equal(tab(), true); assert.equal(d.focused(), a, "Tab on the last stop goes to the first");
+  assert.equal(tab(true), true); assert.equal(d.focused(), c, "Shift+Tab on the first goes to the last");
+  d.focus(b); assert.equal(tab(), false, "in the middle the browser moves focus itself");
+  d.focus({ name: "the Split button underneath" }); assert.equal(tab(), true); assert.equal(d.focused(), a, "focus outside the dialog is brought in");
+  top.hasAttribute = () => false; d.focus(c); assert.equal(tab(), false, "a dialog on top that is not one of these is left alone");
+});
+
+// ---- 8. wording: no long or short dash in what these screens say ----
+test("wording: Wallet, coins dialog, Split, Receive, Send and History text has no em or en dash", () => {
+  const code = app.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const cut = (from, to, after) => { const a = code.indexOf(from), b = code.indexOf(to, after ? code.indexOf(after, a) : a); assert.ok(a > 0 && b > a, from); return code.slice(a, b); };
+  for (const [from, to, after] of [["async function renderBalances()", "function showActionSheet("], ["function showConfirm(", "CONFIRM_QUEUE = answer"], ["async function renderHistory()", "async function exportHistory()"], ["async function renderSend()", "\n}", "function sendForm()"]])
+    assert.deepEqual(cut(from, to, after).split("\n").filter(l => /[—–]/.test(l)), [], from);
+  const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");
+  assert.ok(!/[—–]/.test(html.slice(html.indexOf('id="view-balances"'), html.indexOf('id="view-webwallet"'))));
+  assert.ok(!/current address/i.test(app + html), "Receive does not claim one fixed address");
+});
