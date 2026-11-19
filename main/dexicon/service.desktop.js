@@ -17,6 +17,12 @@
  *   NO VAULT    retireOldIdentity never reads `vault action:seed` (the donor does, once, to cancel orders signed by a
  *               pre-0.0.4x seed-phrase identity). This store never held such an identity; orders of an identity that is
  *               no longer this node's expire on their own.
+ *   FOREIGN     (0.18.106) retireOldIdentity REFUSES to go READY on a store whose recorded public identity is not the
+ *   STORE       one this wallet derives: here the identity is always the node's own derivation, so a different one
+ *               means the wallet under the app was replaced (a restore, a resync, another data folder) and the store's
+ *               orders belong to the old wallet. Going on would re-back them with the NEW wallet's coins while they
+ *               still pay the OLD wallet's address. The host moves the store aside (MDS.foreignStore) and starts
+ *               clean. Until the check has passed the RESTING engine is not booted either (STORE_MINE).
  *   RETRY       PDService.boot() is tried again (once a minute) while the resting engine is not ready: the MiniDapp
  *               gets one `inited` per node start, this host gets one per app start.
  *   READ MODEL  DX (bottom of the file): ready / publicId / book / mine for the screens, and a relay book poll to feed
@@ -60,6 +66,7 @@ var ticks = 0, myAddresses = {}, coinLocks = {};   // coinid -> unix ms the lock
 var LOCK_MS = 180000;
 var TICKING = false, tickStartedMs = 0, TICK_WATCHDOG_MS = 120000;
 var lastPdBootMs = 0;
+var STORE_MINE = false;   // FOREIGN STORE (header): true once the store is known to be this wallet's
 
 function log(s) { MDS.log('[dexicon] ' + s); }
 function logOnce(s) { if (s !== lastBootLog) { lastBootLog = s; log(s); } }
@@ -78,14 +85,17 @@ function tryBoot() {
           identitySeed(function (err, seed) {
             BOOTING = false;
             if (err || !seed) { logOnce('boot waiting: ' + (err ? err.message : 'no derived seed (pending/locked?)') + '; retrying'); return; }
-            ME = AX.identity.fromSeed(seed, IDENTITY_CONTEXT);
-            RELAY = new AX.relay.Client(AX.relay.mdsTransport(AX.mds));
-            AX.prng.init(function (pe) { if (pe) log('PRNG init failed: ' + pe.message + ' — sealed replies will fail until it succeeds'); });
-            loadRelays(function () {
-                retireOldIdentity(function () {
+            var me = AX.identity.fromSeed(seed, IDENTITY_CONTEXT);
+            retireOldIdentity(me, function (mine) {
+                if (!mine) return;   // another wallet's store, or one that could not be read: never READY on it
+                ME = me; STORE_MINE = true;
+                RELAY = new AX.relay.Client(AX.relay.mdsTransport(AX.mds));
+                AX.prng.init(function (pe) { if (pe) log('PRNG init failed: ' + pe.message + ' — sealed replies will fail until it succeeds'); });
+                loadRelays(function () {
                     AX.mds.kvSet('publicId', ME.publicId(), function () {});
                     READY = true;
                     log('booted — publicId ' + ME.publicId() + '; relays: ' + RELAY.relays.length);
+                    pdBoot();
                     refreshAddresses(function () { tick(function () {}); });
                 });
             });
@@ -117,16 +127,18 @@ function identitySeed(cb) {
     });
 }
 
-/** NO VAULT (header): an identity change is logged; the old identity's orders expire on their own. */
-function retireOldIdentity(done) {
-    AX.mds.kvGet('publicId', '', function (old) {
-        if (!old || String(old).toLowerCase() === ME.publicId().toLowerCase()) return done();
-        AX.maker.load(AX.mds, function (e0, list) {
-            var live = (list || []).filter(function (o) { return o.status === 'live'; });
-            if (!live.length) return done();
-            log('identity changed — ' + live.length + ' order(s) signed by ' + old + ' expire on their own');
-            done();
-        });
+/** NO VAULT, FOREIGN STORE (header). done(true) only when the store is this wallet's: it records no public identity
+ *  yet (a new store), or the one `me` is. A store of another identity: the host is told (it moves the store aside and
+ *  starts an empty engine) and done(false). A store that cannot be READ is not taken for a new one: done(false), and
+ *  the boot is tried again. Read with sql, not kvGet: kvGet answers a failed read with its default. */
+function retireOldIdentity(me, done) {
+    AX.mds.sql("SELECT v FROM ax_kv WHERE k='publicId'", function (r) {
+        var row = r && r.status && r.rows && r.rows.length ? r.rows[0] : null, old = row ? String(row.V || row.v || '') : '';
+        if (!r || !r.status) { logOnce('boot waiting: the store could not be read (' + ((r && r.error) || 'no reply') + '), so it is not known whose it is; retrying'); return done(false); }
+        if (!old || old.toLowerCase() === me.publicId().toLowerCase()) return done(true);
+        log('NOT STARTING on this store: it was written by trading identity ' + old + ' and this wallet derives ' + me.publicId() + '. Its orders belong to the old wallet and are left to expire on their own.');
+        MDS.foreignStore(old, me.publicId());
+        done(false);
     });
 }
 
@@ -402,6 +414,7 @@ function pdBoot() {
 /** The FAST maker (this file) and the vendored PandaDEX RESTING engine (PDService) share one MDS.init. */
 function pdEvent(msg) {
     try {
+        if (!STORE_MINE) return;   // FOREIGN STORE (header): the resting engine reads its ladder and orders from the store too
         if (msg.event === 'inited' || msg.event === 'MDS_TIMER_10SECONDS') pdBoot();
         else if (msg.event === 'NEWBLOCK') PDService.cmd('block', function (result) { var tip = PandaSafety.tipBlock(result); if (tip > 0) { PDService.block = tip; PDService.refresh(); } });
         else if (msg.event === 'MDSCOMMS' && msg.data && !msg.data.public) {

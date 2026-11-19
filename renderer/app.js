@@ -533,12 +533,10 @@ function resyncCommand(o) {
 }
 // The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is
 // dropped and nothing the old wallet said stays on screen.
+// The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
+// node.onWalletReplaced, 0.18.106): that must not depend on this window being open. Here only the screen is cleared.
 async function walletReplaced() {
-  try { await api.mailInvalidate(); } catch (e) {} resetMailState();
-  try { await api.ppInvalidate(); } catch (e) {} resetPpState();
-  try { await api.axInvalidate(); } catch (e) {} resetAxState();
-  try { await api.dxInvalidate(); } catch (e) {}   // the Dexicon store is moved aside (never deleted) and its engine starts empty
-  try { await api.casinoInvalidate(); } catch (e) {}
+  resetMailState(); resetPpState(); resetAxState();
   resetWalletFigures(); api.nodeStatus().then(paintFooter);
 }
 // A backup password as the node can carry it (the phone's rule): letters and numbers only. A quote used to

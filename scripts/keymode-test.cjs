@@ -472,6 +472,41 @@ test("M2: megammrsync ends with the node shutting down; that is not an error, an
   }
 });
 
+// ---- 0.18.106: a megammrsync that replaces the wallet resets the identity-bound stores in the MAIN process, node stopped ----
+test("a wallet-replacing megammrsync calls onWalletReplaced after the old node is gone and before the new one is spawned; a chain-only resync does not", async () => {
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true, walletDone: true });
+  const m = manager(true); let calls = fakeJava(m);
+  const seen = []; m.onWalletReplaced = async () => { await new Promise(r => setImmediate(r)); seen.push({ proc: !!m.proc, state: m.state, javas: calls.length }); };
+  const answers = () => { m.rpc = async (c) => { if (c === "quit") { setImmediate(() => calls.proc.emit("exit", 0, null)); return { status: true }; } return { status: true, response: {} }; }; };
+  try {
+    await m.start(); answers();
+    await m.runResync("megammrsync action:resync host:megammr.example:9001");
+    assert.deepEqual(seen, [], "the wallet stays: nothing is reset"); assert.equal(calls.length, 2);
+    for (const cmd of ['megammrsync action:resync host:megammr.example:9001 phrase:"ONE TWO THREE" keyuses:1000', "megammrsync action:resync host:megammr.example:9001 file:wallet.bak password:abc"]) {
+      seen.length = 0; const before = calls.length; answers();
+      await m.runResync(cmd);
+      assert.deepEqual(seen, [{ proc: false, state: "stopped", javas: before }], "reset once, with the node stopped and no new java yet: " + cmd);
+      assert.equal(calls.length, before + 1, "then the node is started");
+    }
+    // refused by the node: the wallet is as it was, nothing is reset
+    seen.length = 0; m.rpc = async () => ({ status: false, error: "Could not connect to host" });
+    await m.runResync('megammrsync action:resync host:megammr.example:9001 phrase:"ONE TWO THREE"');
+    assert.deepEqual(seen, []);
+    // no answer (the result is not known), node still there: reset all the same, and nothing is restarted
+    let n = calls.length; m.rpc = async () => { throw new Error("RPC timeout"); };
+    await assert.rejects(m.runResync('megammrsync action:resync host:megammr.example:9001 phrase:"ONE TWO THREE"'), /may still be resyncing/);
+    assert.equal(seen.length, 1); assert.equal(calls.length, n);
+    // no answer and the node gone: reset BEFORE it is started again
+    seen.length = 0; n = calls.length; m.rpc = async () => { calls.proc.emit("exit", 1, null); throw new Error("socket hang up"); };
+    await assert.rejects(m.runResync('megammrsync action:resync host:megammr.example:9001 phrase:"ONE TWO THREE"'), /result is not known/);
+    assert.deepEqual(seen.map(x => [x.proc, x.javas]), [[false, n]]); assert.equal(calls.length, n + 1);
+    // a reset that fails does not stop the node from coming back, and is said in the log
+    answers(); m.onWalletReplaced = async () => { throw new Error("Dexicon: store busy"); }; n = calls.length;
+    assert.equal((await m.runResync('megammrsync action:resync host:megammr.example:9001 phrase:"ONE TWO THREE"')).status, true);
+    assert.equal(calls.length, n + 1); assert.ok(m.logs.some(l => /WALLET REPLACED, but not every old store could be set aside: Dexicon: store busy/.test(l)));
+  } finally { m.onWalletReplaced = null; calls.restore(); }
+});
+
 test("M2: the restart is refused like any start when the start command is wrong; a refused or unanswered megammrsync restarts nothing", async () => {
   freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
   const m = manager(true); let calls = fakeJava(m);

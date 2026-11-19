@@ -310,7 +310,7 @@ test("P2P Chance left the app: no tab, no screen, no way to start a game — onl
   assert.deepEqual(calls, ["mcd:casino", "mcd:casinoInvalidate", "mcd:casinoOpen"], "the IPC surface is status + wallet-reset only");
   assert.ok(/delete patch\.casinoEnabled/.test(main), "the renderer cannot switch the settle-only gate");
   // 0.18.86: the wallet-reset chains share walletReplaced() (scripts/core-screens-test.cjs pins who calls it)
-  assert.ok(/async function walletReplaced\(\) \{[\s\S]*?api\.casinoInvalidate\(\)/.test(app), "every wallet-reset chain still drops the cached identity");
+  assert.ok(/node\.onWalletReplaced = async \(\) => \{[\s\S]*?casino\.invalidate\(\)/.test(main), "every wallet reset still drops the cached identity (0.18.106: in the main process, inside the resync)");
 });
 
 // ------------------------------------------------------------------ the AtomiX panel, headless

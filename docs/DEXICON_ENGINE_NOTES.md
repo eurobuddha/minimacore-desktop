@@ -15,7 +15,7 @@ way is listed at the end and in `PANDAMONIUM_DESKTOP_PLAN.md` section 9.
 | Loader | `main/dexicon/loader.js` | DexiconPro's, without its two injected hooks |
 | Host | `main/dexicon.js` | DexiconPro's `main/dexicon.js` + the `room.dex` part of `main/rooms.js`, as the public build |
 | Store | `userData/dexicon/dexicon.sqlite` | new; the SQL shim is `main/pandapools/sqlshim.js` (the one DexiconPro uses) |
-| IPC | `mcd:dxStatus`, `mcd:dxBook`, `mcd:dxMine`, `mcd:dxCommand`, `mcd:dxInvalidate`, event `mcd:dexicon` | `main/main.js`, `main/preload.js` |
+| IPC | `mcd:dxStatus`, `mcd:dxBook`, `mcd:dxMine`, `mcd:dxCommand`, event `mcd:dexicon` (`mcd:dxInvalidate` removed in 0.18.106) | `main/main.js`, `main/preload.js` |
 
 The donor working tree had uncommitted changes only under `graphify-out/` and untracked notes; none in the engine. The
 copy was taken from the commit (`git archive HEAD`), not from the working tree.
@@ -172,14 +172,30 @@ Writes to the money-state rows (`fill_*`, `pending_takes`, `void_takes`, `mm_cro
 written to disk at once; everything else within 400 ms (the shim's pause). FAST order sequence numbers are clock
 times, so an order republished after a crash still supersedes its older copy.
 
-**A wallet reset or restore.** Before it: the main process refuses the replacement while Dexicon has on-chain orders
-(named by coin id in full), placements waiting for a block, or takes not yet answered, and also when the engine
-cannot be asked (`main/restore.js` `activeWorkList`, fed by `dexicon.activeWork()`). FAST orders do not block it: they
-lock nothing and lapse by themselves. After it: `dexicon.invalidate()` (the renderer's `walletReplaced` chain,
-`mcd:dxInvalidate`) stops the engine, **moves `dexicon.sqlite` aside as `dexicon.sqlite-legacy-keys-YYYYMMDD`** (a
-second on the same day gets `-2`; `main/restore.js` `moveAside`; never deleted), and starts an empty engine on the new
-wallet's identity. The old engine's late callbacks reach neither the node nor the new store (epoch guard, tested). If
-the move fails, Dexicon stays stopped and says so in its log.
+**A wallet reset or restore (rewritten for 0.18.106).** Before it: the main process refuses the replacement while
+Dexicon has on-chain orders (named by coin id in full), placements waiting for a block, or takes not yet answered, and
+also when the engine cannot be asked (`main/restore.js` `activeWorkList`, fed by `dexicon.activeWork()`). FAST orders
+do not block it: they lock nothing and lapse by themselves.
+
+After it, four independent lines, none of which needs the window:
+
+1. `node-manager.runResync` stops the node, calls `node.onWalletReplaced` (`main/main.js`: minimaMail, PandaPools,
+   AtomiX, Dexicon with `hold`, P2P Chance) and only then starts the node. `dexicon.invalidate()` moves
+   `dexicon.sqlite` aside as `dexicon.sqlite-legacy-keys-YYYYMMDD` (a second on the same day gets `-2`; never deleted).
+   The same when the node never answered the resync (result unknown).
+2. `dexicon.stop()` drops the engine whenever the node is not "running", so no engine carries an identity across a
+   node start. Other ways to another wallet (another data folder, a crash in the middle) meet line 3.
+3. At every boot the service compares `ax_kv.publicId` with the identity this wallet derives
+   (`retireOldIdentity`). Different: not READY, the on-chain engine not booted, the store moved aside by the host
+   (`MDS.foreignStore`), an empty engine started, both identities logged in full.
+4. While a move aside is owed and fails, `init()` opens no store: Dexicon stays stopped, `dxStatus().problem` says why
+   (the Dexicon screens show it), and the move is tried again every tick.
+
+The old engine's late callbacks reach neither the node nor the new store (epoch guard, tested).
+
+Not covered by line 3: a store with no recorded `publicId` (the engine never reached READY on it). AtomiX and
+PandaPools have line 1 only, plus their own guards (AtomiX IdentityWatch, PandaPools signing holds); a data-folder
+change does not reset them.
 
 Open point: a restore that goes back to the SAME wallet also moves the store aside. The file is kept, so nothing is
 lost, but putting it back is a manual step today.
@@ -196,7 +212,7 @@ lost, but putting it back is a manual step today.
 | Timers: the node sends `MDS_TIMER_10SECONDS` and pushes `NEWBLOCK` per block; the service scope has no `setTimeout` | a 10 s interval in the host; the block is **polled** on that interval, so a block is seen up to 10 s late and several blocks arrive as one event | the engine takes the tip from `block` itself, so a merged event loses nothing; `setTimeout` exists in the vm but the engine never calls it |
 | `MDS.notify` | the host's `notify` event (no OS notification is raised yet) | 3b decides what to show |
 | `MDS.load` | path-jailed to `main/dexicon/` | a stray file there fails the parity gate |
-| `inited` once per node start | once per app start, plus a retry of `PDService.boot()` once a minute while the resting engine is not ready | a node that was slow at the first try does not leave the Exchange dead |
+| `inited` once per node start | once per node start too since 0.18.106 (the engine is dropped when the node stops), plus a retry of `PDService.boot()` once a minute while the resting engine is not ready | a node that was slow at the first try does not leave the Exchange dead |
 | Price: `resting/price.js` over `MDS.net.GET` (MEXC depth, then MEXC bookTicker), and since 0.0.90 `AX.ladder.feed(PandaPrice)`: when neither MEXC call returns JSON, MEXC's own MINIMA/USDT ticker from `https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc` | the same files, the same three URLs; the host allows GET to `api.mexc.com` and to that one CoinGecko path, nothing else | a MEXC answer (even a thin or crossed book) stands and CoinGecko is not asked; the fallback read is aged from CoinGecko's fetch time; `dxStatus().price.source` is `MEXC` or `MEXC via CoinGecko` |
 
 ## The command bridge (`mcd:dxCommand`)

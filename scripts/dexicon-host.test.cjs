@@ -79,7 +79,9 @@ test("nothing is sent before start, and stop ends the timer and the block watch"
   assert.equal(node.seen.length, n, "stopped: the timer sends nothing more");
   assert.equal(host.status().started, false);
   await host.start(); await M.until(() => node.seen.length > n);
-  assert.equal(node.seen.filter(c => c.startsWith("seedrandom")).length, 1, "started again on the same engine: the identity is not derived twice");
+  await M.until(() => host.status().ready);
+  assert.equal(node.seen.filter(c => c.startsWith("seedrandom")).length, 2, "the node that starts may hold another wallet: a start never reuses the identity the stopped node gave (0.18.106)");
+  assert.notEqual(host._ctx(), null);
 });
 
 test("the net allow-list: https, the engine's own relay list and the MiniDapp's price source, nothing else", async () => {
@@ -319,11 +321,83 @@ test("a wallet reset moves the store aside (never deleted) and starts empty; the
   assert.equal(cold.status().started, false, "a reset does not start an engine the node has not started");
 });
 
-test("a different seed gives a different identity; the old store's orders are not carried over", async () => {
-  const dir = tmp();
-  const a = await boot({ dir, node: { seed: "one" } }); const idA = a.host.status().publicId; a.host.stop();
-  const b = await boot({ dir: tmp(), node: { seed: "two" } });
-  assert.notEqual(b.host.status().publicId, idA);
+// 0.18.106 (HIGH): the wallet was replaced and nothing invalidated the store (the window was closed, runResync threw,
+// the app crashed, or the move aside failed). The engine must not trade the old wallet's orders on the new wallet.
+const LIVE_ORDER = (address) => ({ orderId: "0x" + "1".repeat(32), side: "sell", price: "0.0123", amount: "100", remaining: "100", coins: ["0x" + "C0".repeat(32)], scripts: [], address, seq: Date.now(), expiry: Math.floor(Date.now() / 1000) + 3600, status: "live" });
+async function oldWalletStore(dir) {
+  const a = await boot({ dir, node: { seed: "one" } }), id = a.host.status().publicId;
+  await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([LIVE_ORDER(a.node.ADDRESS)]) + "')");
+  await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('mm_config', '{\"enabled\":true,\"peg\":true}')");
+  a.host.stop();   // as the node stopping does: the store is on disk
+  return { id, bytes: fs.readFileSync(path.join(dir, "dexicon.sqlite")) };
+}
+const legacy = (dir) => fs.readdirSync(dir).filter(f => /^dexicon\.sqlite-legacy-keys-\d{8}(-\d+)?$/.test(f));
+
+test("another wallet under an un-invalidated store: the engine does not go READY on it; the store is moved aside and it starts clean", async () => {
+  const dir = tmp(), old = await oldWalletStore(dir);
+  assert.deepEqual(legacy(dir), []);
+  // the SAME folder, a node that now holds another wallet (seed two): what a missed dxInvalidate used to leave behind
+  const node = M.mockNode({ seed: "two" }), net = M.mockNet(), logs = [];
+  const host = makeHost({ runner: node.run, dataDir: dir, net, tickMs: 40, quiet: true }); node.attach(host); hosts.push(host);
+  host.emitter.on("log", l => logs.push(l));
+  const readyOnOld = []; host.emitter.on("update", () => { const s = host.status(); if (s.ready && s.publicId !== null) readyOnOld.push(s.publicId); });
+  await host.start();
+  await M.until(() => host.status().ready && host.status().restingReady);
+  const idB = host.status().publicId;
+  assert.notEqual(idB, old.id, "a different seed gives a different identity");
+  const kept = legacy(dir);
+  assert.equal(kept.length, 1, "the old wallet's store is moved aside under its dated name");
+  assert.ok(fs.readFileSync(path.join(dir, kept[0])).equals(old.bytes), "byte for byte: never deleted, never written to by the new wallet");
+  assert.deepEqual(await sql(host, "SELECT k FROM ax_kv WHERE k IN ('myorders','mm_config')"), [], "the old store's orders and ladder are not carried over");
+  assert.deepEqual((await sql(host, "SELECT v FROM ax_kv WHERE k='publicId'")).map(r => r.V), [idB]);
+  assert.ok(logs.some(l => l.includes("NOT STARTING on this store") && l.includes(old.id) && l.includes(idB)), "said loudly, both identities in full:\n" + logs.join("\n"));
+  // nothing of the old wallet's order reached a relay or the node from the new wallet
+  await new Promise(r => setTimeout(r, 300));   // several ticks, a maker refresh among them at this tick length
+  assert.ok(!net.calls.some(c => /^POST .*\/dex\/publish/.test(c)), "no order was published:\n" + net.calls.filter(c => /^POST/.test(c)).join("\n"));
+  assert.ok(!node.seen.some(c => /^(txn|send)/.test(c) || c.includes("C0".repeat(32))), "no transaction was built over the old order's coins");
+  assert.equal(host.status().problem, "");
+  // the same wallet again (an ordinary restart): nothing is moved
+  host.stop();
+  const again = await boot({ dir, node: { seed: "two" } });
+  assert.equal(again.host.status().publicId, idB); assert.equal(legacy(dir).length, 1, "a restart on the same wallet moves nothing aside");
+});
+
+test("the old store cannot be moved aside: the engine does not start on it, says why, and starts clean once it can", async () => {
+  if (process.getuid && process.getuid() === 0) return;   // root ignores the folder permission this test uses
+  // (1) found at boot by the identity check
+  const dir = tmp(), old = await oldWalletStore(dir);
+  const node = M.mockNode({ seed: "two" }), net = M.mockNet();
+  const host = makeHost({ runner: node.run, dataDir: dir, net, tickMs: 40, quiet: true }); node.attach(host); hosts.push(host);
+  fs.chmodSync(dir, 0o555);   // rename out of this folder now fails
+  try {
+    await host.start();
+    await M.until(() => host.status().problem !== "");
+    assert.match(host.status().problem, /could not be moved aside .*so Dexicon is not running: it must not trade on another wallet's records/);
+    assert.ok(host.status().problem.includes(path.join(dir, "dexicon.sqlite")), "the file is named in full");
+    const n = node.seen.length;
+    await new Promise(r => setTimeout(r, 300));   // seven ticks of retrying
+    assert.equal(host.status().ready, false); assert.equal(host._ctx(), null, "no engine exists on that store");
+    assert.equal(node.seen.length, n, "and nothing more is asked of the node");
+    assert.ok(!net.calls.some(c => /^POST/.test(c)));
+    assert.ok(fs.readFileSync(path.join(dir, "dexicon.sqlite")).equals(old.bytes), "the store itself is untouched");
+  } finally { fs.chmodSync(dir, 0o755); }
+  await M.until(() => host.status().ready && host.status().restingReady);   // by itself, at the next tick
+  assert.equal(host.status().problem, ""); assert.equal(legacy(dir).length, 1);
+  assert.deepEqual(await sql(host, "SELECT k FROM ax_kv WHERE k='myorders'"), []);
+  // (2) the same when the main process's own invalidate() cannot move it: it throws, stays owed, and no later start opens the store
+  const dir2 = tmp(); await oldWalletStore(dir2);
+  const node2 = M.mockNode({ seed: "two" });
+  const host2 = makeHost({ runner: node2.run, dataDir: dir2, net: M.mockNet(), tickMs: 40, quiet: true }); node2.attach(host2); hosts.push(host2);
+  fs.chmodSync(dir2, 0o555);
+  try {
+    assert.throws(() => host2.invalidate({ hold: true }), /could not be moved aside/);
+    assert.equal(host2.status().started, false, "held: it starts with the node, not before");
+    await host2.start();   // the node is "running" again
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(host2.status().ready, false); assert.equal(node2.seen.length, 0, "not even the identity is asked for while the old store is in the way");
+  } finally { fs.chmodSync(dir2, 0o755); }
+  await M.until(() => host2.status().ready);
+  assert.equal(legacy(dir2).length, 1);
 });
 
 test("a populated copy of the store survives a restart unchanged", async () => {
@@ -336,21 +410,21 @@ test("a populated copy of the store survives a restart unchanged", async () => {
   await sql(first.host, "CREATE TABLE IF NOT EXISTS pp_posted_inputs (coinid varchar(160) primary key, handle varchar(160))");   // the engine's own DDL (resting/input-claims.js)
   await sql(first.host, "INSERT INTO pp_posted_inputs (coinid,handle) VALUES ('0x" + "ab".repeat(32) + "','dex_1')");
   const VOLATILE = ["mm_feed"];   // the feed line carries the time it was written
-  first.host.stop();
   const was = await dump(first.host, VOLATILE);
+  first.host.stop();
   assert.ok(was.ax_kv.length >= 8 && was.pp_posted_inputs.length === 1 && was.my_coins.length === 1);
   // the COPY: another folder, another host, as after an app restart or a move to this app
   const dir2 = tmp();
   fs.copyFileSync(path.join(first.dir, "dexicon.sqlite"), path.join(dir2, "dexicon.sqlite"));
   const second = await boot({ dir: dir2 });
   await new Promise(r => setTimeout(r, 500));   // a dozen service ticks over it: ladder pass, void sweep, settle, block refresh
-  second.host.stop();
-  assert.deepEqual(await dump(second.host, VOLATILE), was, "every table, every row, as it was");
   assert.equal(second.host.status().relays[0], "https://relay.example/dex-relay", "the user's relay list is the one in use");
+  assert.deepEqual(await dump(second.host, VOLATILE), was, "every table, every row, as it was");
+  second.host.stop();
   // and it is on disk, not only in memory
   const third = await boot({ dir: dir2 });
-  third.host.stop();
   assert.deepEqual(await dump(third.host, VOLATILE), was);
+  third.host.stop();
   assert.ok(!fs.readdirSync(dir2).some(f => /legacy-keys/.test(f)), "a restart moves nothing aside");
 });
 
@@ -377,15 +451,18 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   assert.deepEqual(await cold.activeWork(), { ready: false, hasStore: false });
 });
 
-test("the app wiring: started and stopped with the node, in the reset chain, flushed on quit, one bridge", () => {
+test("the app wiring: started and stopped with the node, reset by the MAIN process before the node restarts, flushed on quit, one bridge", () => {
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
   assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));'));
-  assert.ok(main.includes('ipcMain.handle("mcd:dxInvalidate", () => { dexicon.invalidate(); return true; });'));
+  // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
+  assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
+  const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
+  for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })", "casino.invalidate()"]) assert.ok(hook.includes(call), "the main-process reset: " + call);
+  assert.ok(!/api\.\w*Invalidate\(/.test(app), "the renderer's chain only clears the screen");
   assert.ok(main.includes("dexicon: await dexicon.activeWork().catch(() => null) });"), "a failed read is null, which refuses");
   assert.ok(/try \{ dexicon\.flush\(\); \} catch \(err\) \{\}/.test(main));
-  for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "dxInvalidate", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
-  assert.ok(/async function walletReplaced\(\) \{[\s\S]*?api\.dxInvalidate\(\)[\s\S]*?\n\}/.test(app), "the renderer's reset chain calls it");
+  for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
   const host = fs.readFileSync(path.join(M.root, "main/dexicon.js"), "utf8");
   assert.ok(!/require\("(http|https|net|child_process)"\)/.test(host), "the host opens no socket of its own");
   assert.equal((host.match(/rpcCall\(/g) || []).length, 1, "one way to the node: rpcCall");

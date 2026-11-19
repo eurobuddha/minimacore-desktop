@@ -200,6 +200,22 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
 const walletWork = async () => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activity().catch(() => null),
   casino: config.load().casinoEnabled ? casino.open() : null, dexicon: await dexicon.activeWork().catch(() => null) });
+// The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
+// MAIN process while the node is stopped and before it is started again, so it does not depend on the window being
+// open, and no engine ticks on the new wallet with the old wallet's records. Every identity-bound store is set aside
+// (never deleted), each on its own: one that fails does not stop the others, and all failures are reported together.
+// The renderer's own reset chain (app.js walletReplaced) now only clears what is on screen.
+node.onWalletReplaced = async () => {
+  const failed = [];
+  const each = async (name, fn) => { try { await fn(); } catch (e) { failed.push(name + ": " + ((e && e.message) || e)); } };
+  await each("minimaMail", () => mail.invalidateIdentity());
+  await each("PandaPools", () => pandapools.invalidate());
+  await each("AtomiX", () => atomix.invalidate());
+  await each("Dexicon", () => dexicon.invalidate({ hold: true }));   // it starts with the node, on the new wallet
+  await each("P2P Chance", () => casino.invalidate());
+  node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon and P2P Chance were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
+  if (failed.length) throw new Error(failed.join("; "));
+};
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
   running: node.state === "running", run: (c) => node.runResync(c), work: walletWork }));
@@ -570,7 +586,8 @@ ipcMain.handle("mcd:dxStatus", () => dexicon.status());
 ipcMain.handle("mcd:dxBook", () => dexicon.book());
 ipcMain.handle("mcd:dxMine", () => dexicon.mine());
 ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));
-ipcMain.handle("mcd:dxInvalidate", () => { dexicon.invalidate(); return true; });
+// No mcd:dxInvalidate: a window cannot move the store aside, and a wallet replacement does not wait for a window
+// to say so (walletReplaced, below).
 dexicon.emitter.on("comms", (message) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", message); });   // service → screens
 dexicon.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", null); });           // a new block, or a wallet reset
 node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });

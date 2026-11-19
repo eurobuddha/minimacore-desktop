@@ -518,18 +518,31 @@ class NodeManager extends EventEmitter {
    * before java, the node's real mode once it answers). A refused command leaves the node as it was.
    */
   async runResync(cmd) {
+    const restore = require("./restore"), replaces = restore.replacesWalletFromPhrase(cmd) || restore.loadsBackupFile(cmd);
     this.resyncing = true; this.emit("status", this.snapshot());
     try {
       let j;
       try { j = await this.rpc(cmd); }
       catch (e) {
+        // The result is not known: the wallet may be another one already, or become one. Everything bound to the old
+        // identity is set aside NOW, by the main process, whatever the window does next.
+        await this.walletReplaced(replaces);
         if (this.proc) throw new Error(e.message + ". The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.");
         await this.start();
         throw new Error("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.");
       }
-      if (j && j.status === true) await this.restart();
+      // The wallet was replaced: the node is stopped, the old identity's stores are set aside, and only then is the
+      // node started again. No engine meets the new wallet with the old wallet's records, not even for one tick.
+      if (j && j.status === true) { await this.stop(); await this.walletReplaced(replaces); await this.start(); }
       return j;
     } finally { this.resyncing = false; this.emit("status", this.snapshot()); }
+  }
+  /** A megammrsync that puts another wallet under the app (phrase: or file:) has run, or may have. main.js sets
+   *  onWalletReplaced: every identity-bound store is invalidated there, in the main process. Never throws: a store
+   *  that could not be set aside is said in the log, and its engine refuses to start on it by itself. */
+  async walletReplaced(replaces) {
+    if (!replaces || typeof this.onWalletReplaced !== "function") return;
+    try { await this.onWalletReplaced(); } catch (e) { this.log("[app] WALLET REPLACED, but not every old store could be set aside: " + ((e && e.message) || e)); }
   }
 
   // ---- health ----

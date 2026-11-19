@@ -144,6 +144,7 @@ const DexUI = (() => {
   /** What stops trading right now, in plain words (empty: nothing does). */
   function blocker() {
     if (node.state !== "running") return "The node is stopped, so nothing here can trade. Start it and Dexicon comes back by itself.";
+    if (st && st.problem) return st.problem;   // the engine host's own plain sentence (a store that could not be moved aside)
     if (!st || !st.started || !st.ready) return "Dexicon is still starting: it is reading this wallet's trading identity from the node. Nothing can be sent yet.";
     if (Page.state.idError) return "The trading identity could not be read: " + Page.state.idError;
     if (!Page.state.ready && !Page.stub) return "Dexicon is still starting. Nothing can be sent yet.";

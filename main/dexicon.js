@@ -19,7 +19,11 @@
  * MAKER_* packet refusal, the hard-coded RELAY_HOSTS, the cockpit's merged book / ladder editor / create / edit /
  * cancelOne / chain(). The engine's AtomiX doors are never loaded (main/dexicon/service.desktop.js).
  * ADDED: an epoch guard (a wallet replaced under a running engine: the old context's late callbacks reach neither
- * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted). The own-order refusal
+ * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted).
+ * WALLET SAFETY (0.18.106): the engine never outlives the node it derived its identity from (stop() drops the whole
+ * context; every node start derives the identity again and the service checks the store against it); a store written
+ * by another identity is moved aside before anything trades on it; while a move aside is owed and fails, the store is
+ * not opened at all. The own-order refusal
  * on LIMIT of 0.18.99 is gone: since engine 0.0.91 the planners route past own orders (docs/DEXICON_ENGINE_NOTES.md (a)).
  */
 const { EventEmitter } = require("events");
@@ -69,7 +73,9 @@ function makeHost(opts = {}) {
   const tickMs = opts.tickMs || TICK_MS;
   let dataDir = opts.dataDir || null;
   let ctx = null, sqlShim = null, serviceHandler = null, ready = false, initPromise = null, timer = null;
-  let epoch = 0;   // bumped by invalidate(): everything built before it is disowned
+  let epoch = 0;   // bumped by drop(): everything built before it is disowned
+  let asideOwed = false;   // the store on disk belongs to another wallet: it is moved aside before any store is opened
+  let problem = "";        // why Dexicon is not running although the node is, in plain words (status().problem)
   let runner = opts.runner || ((cmd) => {
     const config = require("./config"), node = require("./node-manager");
     return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
@@ -140,6 +146,15 @@ function makeHost(opts = {}) {
       // the service's packets (STATE / ERROR / POSTED, fill, ladder) go to the screens, as MDS.comms does in the MiniDapp
       comms: { solo(message, cb) { if (live()) emitter.emit("comms", String(message)); if (cb) cb(toVm({ status: true })); } },
       notify(msg) { if (live()) emitter.emit("notify", String(msg)); },
+      /** The service found that this store was written by another trading identity (service.desktop.js
+       *  retireOldIdentity): it has not gone READY. The store is moved aside and an empty engine starts. */
+      foreignStore(old, now) {
+        if (!live()) return;
+        log("WALLET CHANGED under Dexicon: the store belongs to trading identity " + old + ", this wallet is " + now + ". The store is being moved aside (never deleted); nothing was traded on it.");
+        const again = !!timer;
+        asideOwed = true; drop(); emitter.emit("update");
+        if (again) init().catch(() => {});   // a failed move is tried again by the timer; the store is not opened before it worked
+      },
       persistRecovery(cb) { cb(live() && !!storage.flushChecked()); },
       log(msg) { log(String(msg)); },
       init(cb) { serviceHandler = cb; }
@@ -154,14 +169,35 @@ function makeHost(opts = {}) {
     const mine = epoch;
     initPromise = (async () => {
       fs.mkdirSync(dir(), { recursive: true });
+      if (asideOwed) aside();   // throws while it cannot be moved: the engine does not start on another wallet's store
       const shim = await makeSqlShim(storePath());
       if (mine !== epoch) return;   // the wallet was replaced while the store was opening: drop it, write nothing
       sqlShim = shim;
       ctx = createContext(buildMds());
       ready = true;
       fire("inited");
-    })().catch(e => { if (mine === epoch) { initPromise = null; ready = false; ctx = null; sqlShim = null; serviceHandler = null; } log("init failed: " + e.message); throw e; });
+    })().catch(e => { if (mine === epoch) { initPromise = null; ready = false; ctx = null; sqlShim = null; serviceHandler = null; } if (lastInitError !== e.message) { lastInitError = e.message; log("init failed: " + e.message); } throw e; });
     return initPromise;
+  }
+  let lastInitError = "";
+  /** Move the store aside under its dated name (main/restore.js moveAside; never deleted). Returns the kept path, ""
+   *  when there was no file. Throws, with `problem` set, while the move fails: asideOwed stays, so nothing opens it. */
+  function aside() {
+    try {
+      const kept = require("./restore").moveAside(storePath());
+      asideOwed = false; problem = "";
+      if (kept) log("the old wallet's Dexicon store is kept as " + kept);
+      return kept;
+    } catch (e) {
+      problem = "The old wallet's Dexicon store could not be moved aside (" + e.message + "), so Dexicon is not running: it must not trade on another wallet's records. Free the file " + storePath() + " (close what holds it, or check the folder's permissions); Dexicon tries again by itself.";
+      throw new Error(problem);
+    }
+  }
+  /** Disown the engine: its late callbacks reach neither the node nor a store (epoch), what it wrote is on disk. */
+  function drop() {
+    epoch++;
+    flush();
+    ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
   }
 
   // NEWBLOCK for the RESTING engine (the node pushes it to a MiniDapp; here the timer looks for a new tip)
@@ -177,30 +213,34 @@ function makeHost(opts = {}) {
     if (timer.unref) timer.unref();
     return init().then(() => { if (timer) blockWatch(); }, () => {});
   }
-  /** Stop with the node: no timer, no block watch, the store written out. The engine's state stays for the next start. */
-  function stop() { if (timer) { clearInterval(timer); timer = null; } flush(); }
+  /** Stop with the node: no timer, no block watch, the store written out, and the engine itself dropped. The engine
+   *  holds an identity derived from the node that just stopped; the node that starts next may hold another wallet (a
+   *  restore, a resync, another data folder), so the next start() builds a new engine that derives it again and checks
+   *  the store against it. */
+  function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (ctx || initPromise) { drop(); emitter.emit("update"); } else flush();
+  }
   function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
 
   /**
    * The wallet under the app was replaced (main/restore.js): the identity (seedrandom of the OLD seed), the orders it
    * signed and the fills it recorded belong to the old wallet. The store is MOVED ASIDE as
    * dexicon.sqlite-legacy-keys-YYYYMMDD, never deleted, and the engine starts again empty for the new wallet.
-   * Returns the kept file's path ("" when there was none).
+   * Returns the kept file's path ("" when there was none). Called by the MAIN process (main.js walletReplaced, from
+   * node-manager's runResync) while the node is stopped, with hold: the engine then starts with the node, not before.
+   * If the move fails this throws, and the move stays owed: no later start opens the store until it has worked.
    */
-  function invalidate() {
-    const wasRunning = !!timer;
-    epoch++;                       // disown the old context and any init still opening the old store, BEFORE the teardown
+  function invalidate(o) {
+    const again = !!timer && !(o && o.hold);
     if (timer) { clearInterval(timer); timer = null; }
-    flush();
-    ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
+    drop();                        // disown the old context and any init still opening the old store, BEFORE the move
+    asideOwed = true;
     emitter.emit("update");
     let kept = "";
-    try { kept = require("./restore").moveAside(storePath()); if (kept) log("wallet replaced: the old Dexicon store is kept as " + kept); }
-    catch (e) {   // stays stopped until the next node start: the new wallet must not trade on the old wallet's records
-      log("wallet replaced: the old Dexicon store could not be moved aside (" + e.message + "); Dexicon is stopped");
-      throw new Error("The old Dexicon store could not be moved aside (" + e.message + "). Dexicon is stopped.");
-    }
-    if (wasRunning) start();
+    try { kept = aside(); }
+    catch (e) { log("wallet replaced: " + e.message); if (again) start(); throw e; }
+    if (again) start();
     return kept;
   }
 
@@ -208,7 +248,7 @@ function makeHost(opts = {}) {
   const plain = (v) => JSON.parse(JSON.stringify(v));   // out of the engine's vm realm
 
   function status() {
-    const s = { version: ENGINE_VERSION, started: !!timer, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
+    const s = { version: ENGINE_VERSION, started: !!timer, problem, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
       price: { mid: 0, ageMs: null, label: "", source: "" }, log: LOG.slice(-20) };
     try {
       if (!ctx || !ctx.DX) return s;

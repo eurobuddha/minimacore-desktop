@@ -122,7 +122,11 @@ test("every megammrsync screen confirms first, and a replaced wallet drops the o
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refuse, confirm, run, remember the host, drop identities: in that order");
   assert.equal((body.match(/megammrsync action/g) || []).length, 0, "no screen builds its own megammrsync");
   const w = source("walletReplaced");
-  for (const call of ["mailInvalidate", "resetMailState", "ppInvalidate", "resetPpState", "axInvalidate", "resetAxState", "casinoInvalidate", "resetWalletFigures"]) assert.ok(w.includes(call), call);
+  for (const call of ["resetMailState", "resetPpState", "resetAxState", "resetWalletFigures"]) assert.ok(w.includes(call), call);
+  // 0.18.106: the stores are reset by the main process inside the resync (node.onWalletReplaced), not by this window
+  assert.ok(!/api\.\w*Invalidate\(/.test(w), "the window resets no store");
+  const mainJs = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), hook = mainJs.slice(mainJs.indexOf("node.onWalletReplaced = async () => {"), mainJs.indexOf("// Restore from a backup FILE"));
+  for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })", "casino.invalidate()"]) assert.ok(hook.includes(call), call);
 });
 
 test("the seed phrase is read only on request, shown only on its screen, and never stored or logged", () => {
