@@ -65,3 +65,12 @@ test("shell text: sentence case and no em dash", () => {
   const chrome = html.slice(html.indexOf('<div class="shell"'), html.indexOf('<main class="main"'));
   assert.ok(!chrome.includes("—"), "no em dash in the shell markup");
 });
+
+test("tray order: Minima Core pinned, saved ids kept once, unknown ids dropped, new apps appended", () => {
+  const trayOrder = new Function(app.match(/function trayOrder\(saved, ids\) \{[\s\S]+?\n\}/)[0] + "; return trayOrder;")();
+  const ids = ["core", "mail", "ethwallet", "vestr", "parlons"];
+  assert.deepEqual(trayOrder(null, ids), ids, "nothing saved: the default order");
+  assert.deepEqual(trayOrder("parlons,mail", ids), ["core", "parlons", "mail", "ethwallet", "vestr"]);
+  assert.deepEqual(trayOrder("vestr,core,vestr,casino,mail", ids), ["core", "vestr", "mail", "ethwallet", "parlons"], "core cannot be moved; duplicates and removed apps are ignored");
+  assert.ok(/shellOrder/.test(app) && /dragstart/.test(app) && /altKey/.test(app), "saved, draggable, and movable by keyboard");
+});

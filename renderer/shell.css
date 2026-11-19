@@ -131,6 +131,8 @@
 img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .tray__name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tray__row--sel, .tray__row--sel:hover { background: var(--tray-accent); color: var(--tray-bg); }
+.tray__row[draggable="true"] { -webkit-user-drag: element; }
+.tray__row--drag { opacity: .45; }
 .tray__mode { font-size: 11px; font-weight: 500; line-height: 15px; color: var(--tray-muted); padding-top: 12px; }
 .tray-scrim { display: none; }
 /* narrow windows: the tray overlays the screen under a scrim, as on the phone */

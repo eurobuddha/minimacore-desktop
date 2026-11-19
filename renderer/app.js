@@ -520,6 +520,14 @@ function store(key, value) {    // shell preferences only (tray open, order, hid
   try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) {}
   return null;
 }
+// The saved tray order, as PandamoniumOrder.decode: Minima Core is pinned first, then the saved ids that
+// still exist (each once), then any app the saved order has never seen, in the default order.
+function trayOrder(saved, ids) {
+  const order = [ids[0]];
+  for (const id of String(saved || "").split(",")) if (ids.indexOf(id) > 0 && !order.includes(id)) order.push(id);
+  for (const id of ids) if (!order.includes(id)) order.push(id);
+  return order;
+}
 function viewOfTab(tab) { return tab === "wallet" ? "balances" : tab === "dexicon" ? dexView : tab; }
 
 function selectTab(view) {
@@ -566,6 +574,7 @@ function initShell() {
     selectTab(r.dataset.app === "core" ? lastTabView : r.dataset.app);
     if (NARROW.matches) setTray(false);
   });
+  initTrayOrder(list);
   el("trayBtn").onclick = () => setTray(el("tray").hidden);
   el("trayScrim").onclick = () => setTray(false);
   setTray(!NARROW.matches && store("shellTray") === "1", true);
@@ -596,6 +605,37 @@ function initShell() {
 // First paint of the shell state without rendering a view (boot() renders once the node is up).
 function selectTabQuiet() { el("shell").dataset.tab = "wallet"; paintTraySelection(); }
 
+// Tray rows can be dragged into a new order, or moved with Alt+Up / Alt+Down; Up / Down walk the rows.
+// Minima Core stays first. The rows are MOVED, never rebuilt, so the unread counts on them survive.
+function initTrayOrder(list) {
+  const row = (id) => list.querySelector(`.tray__row[data-app="${id}"]`);
+  for (const id of trayOrder(store("shellOrder"), TRAY_APPS.map(a => a.id))) list.appendChild(row(id));
+  const save = () => store("shellOrder", [...list.children].map(r => r.dataset.app).filter(id => id !== "core").join(","));
+  let dragged = null;
+  list.querySelectorAll(".tray__row").forEach(r => {
+    if (r.dataset.app === "core") return;
+    r.draggable = true;
+    r.title = "Drag to reorder, or Alt+Up / Alt+Down";
+    r.addEventListener("dragstart", (e) => { dragged = r; r.classList.add("tray__row--drag"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", r.dataset.app); });
+    r.addEventListener("dragend", () => { r.classList.remove("tray__row--drag"); dragged = null; save(); });
+    r.addEventListener("dragover", (e) => {
+      if (!dragged || dragged === r) return;
+      e.preventDefault();
+      const box = r.getBoundingClientRect();
+      list.insertBefore(dragged, e.clientY < box.top + box.height / 2 ? r : r.nextSibling);
+    });
+  });
+  list.addEventListener("dragover", (e) => { if (dragged) e.preventDefault(); });   // a drop anywhere on the list lands where the row already is
+  list.addEventListener("keydown", (e) => {
+    const r = e.target.closest(".tray__row"); if (!r || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const rows = [...list.children].filter(x => !x.hidden), i = rows.indexOf(r), up = e.key === "ArrowUp";
+    const to = rows[i + (up ? -1 : 1)];
+    if (!e.altKey) { if (to) to.focus(); return; }
+    if (r.dataset.app === "core" || !to || to.dataset.app === "core") return;
+    list.insertBefore(r, up ? to : to.nextSibling); r.focus(); save();
+  });
+}
 function setTray(open, quiet) {
   el("tray").hidden = !open;
   el("trayScrim").hidden = !open;                      // CSS shows the scrim only when the tray overlays

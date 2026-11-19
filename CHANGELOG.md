@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.70] — the app tray can be reordered
+
+- Drag a tray row to a new place, or focus it and press Alt+Up / Alt+Down. Up / Down alone walk the rows. Minima Core stays first, as on the phone. The order is saved and comes back on the next launch; an app added by a later version joins at the end.
+- The rows are moved, never rebuilt, so the Mail and miniMall unread counts on them are not lost by a reorder.
+- Tests: `scripts/shell-test.cjs` covers the saved-order rule (pinned first, each saved id once, removed apps ignored, new apps appended).
+
 ## [0.18.69] — the Pandamonium shell
 
 Phase 1 of the Pandamonium overhaul. The app now wears Pandamonium's shell; every existing screen still works, in a new place. No money path is touched.

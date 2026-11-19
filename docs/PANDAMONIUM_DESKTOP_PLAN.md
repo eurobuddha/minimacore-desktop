@@ -152,6 +152,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.66 | 0 | Identifiers in full (ETH Wallet card), MxUSD label in miniMall, Vestr address whole |
 | 0.18.67 | 0 | One signing queue for the whole app, under `rpcCall` |
 | 0.18.69 | 1 | The shell: Pandamonium tokens, toolbar, six tabs, footer, app tray (pushes the screen aside), overflow menu, host bar, system light/dark; existing views moved into their places; dev preview under scripts/dev-preview |
+| 0.18.70 | 1 | Tray rows reorder by drag or Alt+Up / Alt+Down; Minima Core pinned; order saved |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";
