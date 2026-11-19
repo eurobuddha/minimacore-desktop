@@ -195,7 +195,7 @@ function buildMds() {
         netfetch.postText(String(url), String(data)).then(text => cb(text == null ? {} : { response: text }), () => cb({}));
       }
     },
-    notify(msg) { log("notify: " + msg); emitter.emit("notify", String(msg)); },
+    notify(msg) { log("notify: " + msg); emitter.emit("notify", String(msg)); emitter.emit("update"); },   // 0.18.130: a halt (and every other notice) redraws the screens at once
     log(msg) { log(String(msg)); emitter.emit("update"); },
     init(cb) { serviceHandler = cb; }
     // .load is attached by loader.createContext (path-jailed file loader for service.js's own manifest)
@@ -225,6 +225,7 @@ async function init() {
     if (gen !== generation) { try { shim.flush(); } catch (e) {} return; }   // invalidated mid-init → drop it
     sqlShim = shim;
     ctx = createContext(buildMds());
+    gateEngine(ctx);
     if (gen !== generation) { ctx = null; sqlShim = null; return; }           // invalidated during context build
     ready = true;
     fire("inited");            // service.js tryBoot: trust preflight → vault/seedrandom → engines → poll.
@@ -268,6 +269,23 @@ async function quiet(maxMs = 10000) {
 function release() { if (!held) return; held = false; log("released"); if (heldLoop) startLoop(); }
 /** A screen's action that can sign or lock: refused while held. */
 const whileHeld = (fn) => (...a) => (held ? Promise.reject(new Error(HELD)) : fn(...a));
+// HALT (0.18.130): the identity watch says this node no longer owns the keys AtomiX saved. Whatever is locked under
+// the saved key then cannot be refunded, so nothing that creates a NEW liability may start: a take, a publish, an OTC
+// offer, proposal, accept or counter. The verdict is read from the engine at the moment of the call, never from a
+// screen's copy of it. Claims, refunds, Check now, Refund now, both withdrawals, a reject and every read are NEVER
+// gated (owner rule: a halt never freezes settlement).
+const HALTED = "AtomiX is halted: this node no longer owns the keys AtomiX saved. Nothing was sent, published or locked.";
+function haltedNow(c = ctx) { try { return !!(c && c.AX && c.AX.identitywatch && c.AX.identitywatch.halted()); } catch (e) { return false; } }
+const whileHalted = (fn) => (...a) => (haltedNow() ? Promise.reject(new Error(HALTED)) : fn(...a));
+/** The engine locks leg 1 of an agreed OTC deal BY ITSELF when the LP's ACCEPT arrives in the service poll
+ *  (lib/otc.js apply → executeDeal → service.js onExecute → AX.engine.executeOtc, looked up at call time), with no
+ *  screen and no glue action involved. Refused here while halted: executeDeal takes the error as a failed execute and
+ *  puts the deal back to AGREED with no hash, no secret, no swap row and no lock. */
+function gateEngine(c) {
+  const eng = c && c.AX && c.AX.engine; if (!eng || !eng.executeOtc) return;
+  const run = eng.executeOtc;
+  eng.executeOtc = (deal, cb) => (haltedNow(c) ? cb(new Error(HALTED)) : run(deal, cb));
+}
 
 /**
  * What a wallet replacement would strand, from the engine's own read models (main/restore.js activeWorkList):
@@ -343,7 +361,8 @@ function status() {
 function AX() { if (!ctx || !ctx.READY) throw new Error("AtomiX engine not booted yet"); return ctx.AX; }
 function vmCtx() { return ctx.CTX; }
 function withTimeout(promise, ms, what) {
-  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(what + " timed out")), ms))]);
+  let t;   // cleared when the race is over (a timer left running kept a finished test, and a quitting app, waiting)
+  return Promise.race([promise, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(what + " timed out")), ms); })]).finally(() => clearTimeout(t));
 }
 // Publish, withdraw and switch give up after 60 s, but the engine's `send` may then still be QUEUED behind another
 // signer (main/noderun.js) and would sign later, after the user was told it failed; a retry would then sign twice.
@@ -518,6 +537,7 @@ async function swapExecute(quoteId) {
   // can still lock the coin / broadcast, so a "timed out" retry would DOUBLE-lock. Let the leg run to its real
   // callback; the engine's own record-before-broadcast + F1 make a slow leg safe.
   const startLeg = (signerPk, sellMinima, minima, usdt) => {
+    if (haltedNow()) return Promise.reject(new Error(HALTED));   // a halt raised between two parts of a sweep stops the next part
     const maker = makerObj(stash.book, signerPk);   // the FROZEN maker record (mpk/eth/cid from review time)
     if (!maker) return Promise.reject(new Error("maker vanished from the reviewed book"));
     return p(cb => A.engine.startLeg(maker, "USDT", sellMinima, minima, usdt, legHooks(A, signerPk, sellMinima, fresh), cb));
@@ -848,6 +868,7 @@ async function otcDealAction(ref, action, amount, price) {
   const A = AX();
   const d = await p(cb => A.otc.getDeal(ref, cb));
   if (!d) throw new Error("deal not found");
+  if ((action === "accept" || action === "counter") && haltedNow()) throw new Error(HALTED);   // a reject is never gated
   if (action === "accept") await p(cb => A.otc.accept(d, e => cb(e)));
   else if (action === "reject") await p(cb => A.otc.reject(d, e => cb(e)));
   else if (action === "counter") await p(cb => A.otc.counter(d, String(amount), String(price), e => cb(e)));
@@ -1211,10 +1232,10 @@ async function ethSetRpc(url) {
 
 module.exports = {
   emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, quiet, status, activeWork, _activeWorkFrom: activeWorkFrom,
-  book, quote, swapPreview, swapExecute: whileHeld(swapExecute), swaps, refundNow: whileHeld(refundNow), exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
+  book, quote, swapPreview, swapExecute: whileHeld(whileHalted(swapExecute)), swaps, refundNow: whileHeld(refundNow), exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute: whileHeld(sendExecute),
-  makerCfg, makerPreview, makerSave: whileHeld(makerSave), makerPublish: whileHeld(makerPublish), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),
-  otc, otcGoLive: whileHeld(otcGoLive), otcWithdraw: whileHeld(otcWithdraw), otcPropose: whileHeld(otcPropose), otcDealAction: whileHeld(otcDealAction),
+  makerCfg, makerPreview, makerSave: whileHeld(whileHalted(makerSave)), makerPublish: whileHeld(whileHalted(makerPublish)), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),
+  otc, otcGoLive: whileHeld(whileHalted(otcGoLive)), otcWithdraw: whileHeld(otcWithdraw), otcPropose: whileHeld(whileHalted(otcPropose)), otcDealAction: whileHeld(otcDealAction),
   ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute: whileHeld(ethSendExecute), ethSetRpc,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
   // test-only: the publish-send coin pin (scripts/atomix-unit.js) — drive it with _setRunner
@@ -1225,6 +1246,7 @@ module.exports = {
   _FUND_DURABLE_WRITE: FUND_DURABLE_WRITE,   // test-only: asserted against the SQL swapdb.js really emits
   _publishSendWithRetry: publishSendWithRetry, _makerStep: makerStep,
   _ctx: () => ctx, _fire: fire, _haltFrom: haltFrom,
+  _setCtx: (c) => { ctx = c; }, _gateEngine: gateEngine, _lastQuotes: () => lastQuotes, HALTED,   // test-only: the halt gate (scripts/dexicon-ax.test.cjs)
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,
     ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,

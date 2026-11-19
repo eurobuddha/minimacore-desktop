@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.130] — Dexicon ① MxUSD: the halt is enforced by the glue and the engine's own lock (review H1)
+
+- **A halt is now enforced where the money moves, not only on the screen.** The identity halt exists for when the node's keys no longer match the ones AtomiX saved: anything locked under the saved key then cannot be refunded. Until now only the screen refused, from a copy of the halt state up to 60 s old. The glue (`main/atomix.js`) now reads the engine's verdict at the moment of every call that creates a new liability and refuses it in plain words: a take (and each further part of a sweep), Save & publish, Publish, OTC Go live, an OTC offer, an OTC accept and an OTC counter.
+- **An agreed OTC deal no longer locks by itself while halted.** When an LP's ACCEPT of an earlier proposal arrived in the engine's own poll, the engine locked leg 1 with no screen involved, halted or not. The glue now refuses that lock at the engine's `executeOtc`; the engine takes it as a failed execute and puts the deal back to AGREED with no secret, no swap row and no lock.
+- **Never refused by a halt** (a halt never freezes settlement): claims, refunds, Check now, Refund now, withdrawing the market, withdrawing OTC availability, rejecting a deal, and every read.
+- A halt now redraws the screens at once (the engine's notice raises an update as well as a notification).
+- **Engine copy brought level with atomix-mds 0.1.60 (03d5665).** `main/atomix/lib/maker.js` and `lib/peg.js` were two donor releases behind (0.1.59 spread setting, 0.1.60 randomised sizes, both 18 Nov; the desktop copy was 0.1.57). Both are file copies; a config with no spread and no rand, which is every config the desktop writes, gives exactly the ladder it gave before. The parity check passes again (40 files).
+- Known limit, unchanged engine behaviour: an agreed deal refused this way is retried by the engine every 10 minutes and is refused each time while the halt lasts.
+
 ## [0.18.129] — Dexicon ② Pools, the comparison round (Phase 3d)
 
 - Every screen and state of room ② was captured in Dexicon dark and light at 932x704 and 1440x900 and read beside the Fold and phone captures.

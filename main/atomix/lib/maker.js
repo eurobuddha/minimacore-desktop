@@ -6,7 +6,7 @@
  *
  * Config lives in kv (async), loaded into plain objects — keys are PER-CURRENCY (suffix `_<currency.key>`), the
  * native 0.1.5 market-memory: switching currency parks one market's config and restores the other's, no bleed:
- *   maker_cfg_<ccy>   = { pegEnable, step, size, bias, reprice, levels, min, manualEnable }
+ *   maker_cfg_<ccy>   = { pegEnable, step, size, bias, reprice, levels, min, manualEnable, spread, rand, randSeed }
  *   maker_manual_<ccy>= { bids:[{p,a}], asks:[{p,a}] }   (used when pegEnable=false)
  *   peg_state_<ccy>   = { lastMid, withdrawn, wide, lastOk, lastPrice }   (runtime; commitPeg advances it)
  * The service RE-LOADS these + the active currency every poll (loadConfig is cheap) so a UI edit / withdraw /
@@ -76,7 +76,7 @@
         var c = cfgCache || {}, s = stateCache || {};
         return { enable: !!c.pegEnable, step: num(c.step, 0), size: num(c.size, 0),
             askSize: num(c.askSize, num(c.size, 0)), bidSize: num(c.bidSize, num(c.size, 0)),   // independent per-side sizes (0 = don't publish that side)
-            bias: num(c.bias, 0), reprice: num(c.reprice, 1), levels: num(c.levels, 1), min: num(c.min, 0),
+            bias: num(c.bias, 0), reprice: num(c.reprice, 1), levels: num(c.levels, 1), min: num(c.min, 0), spread: num(c.spread, 0), rand: num(c.rand, 0), randSeed: num(c.randSeed, 1),
             lastMid: s.lastMid, withdrawn: !!s.withdrawn, wide: !!s.wide };
     }
 

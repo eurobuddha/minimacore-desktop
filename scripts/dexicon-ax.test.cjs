@@ -5,6 +5,8 @@
 // Nothing here reaches a node, Ethereum or the network: any call that is not a recorded stand-in throws.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path"), vm = require("vm");
+require("./dexicon-mock.cjs");   // FIRST: the real rpcCall and the real network throw from here on
+const os = require("os");
 const R = path.join(__dirname, "..", "renderer");
 const AX = require("../renderer/dexicon-ax.js"), C = require("../renderer/dexicon-core.js");
 
@@ -436,4 +438,87 @@ test("Refund now and the wallet actions run one at a time: a second click while 
   await assert.rejects(one(async () => { throw new Error("x"); })); await one(async () => { runs++; }); assert.equal(runs, 3, "also after a failure");
   const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
   assert.match(src, /if \(ds\.axrefund\) return one\(/); assert.match(src, /if \(ds\.axw\) return one\(/);
+});
+
+// ---- 0.18.130 (H1): the halt is enforced by the glue and at the engine's own leg-1 lock, not by the screen ----
+/** A stand-in engine for the glue: `halted` is read live; every other thing the glue touches is recorded. */
+function fakeEngine(o = {}) {
+  const st = { halted: !!o.halted, touched: [] }, t = (n, v) => (...a) => { st.touched.push(n); return typeof v === "function" ? v(...a) : v; };
+  const cbOk = (n, val) => t(n, (...a) => a[a.length - 1](null, val));
+  const AXE = { identitywatch: { halted: () => st.halted },
+    book: { scan: cbOk("book.scan", {}), makerLive: () => true }, boot: { activeIdentity: () => ({ publicId: () => "me" }) },
+    engine: { startLeg: t("engine.startLeg", (maker, sym, sell, minima, usdt, hooks, cb) => { if (o.onLeg) o.onLeg(st); cb(null, "0xhash" + st.touched.length); }), confirmMyLock: (h, leg, cb) => cb(true) },
+    maker: { saveConfig: t("maker.saveConfig", (c, m, cb) => cb()), refreshPeg: t("maker.refreshPeg", (cb) => cb()), publish: t("maker.publish", (av, cb) => cb()), tombstone: t("maker.tombstone", (av, cb) => cb()) },
+    otc: { setMyOffer: t("otc.setMyOffer"), publishOffer: t("otc.publishOffer", (cb) => cb()), propose: t("otc.propose", (...a) => a[a.length - 1]()), getDeal: (ref, cb) => cb(null, { ref }),
+      accept: t("otc.accept", (d, cb) => cb()), counter: t("otc.counter", (d, a, p, cb) => cb()), reject: t("otc.reject", (d, cb) => cb()) },
+    settle: { refundNow: t("settle.refundNow", (h, cb) => cb("asked", true)) } };
+  return { st, ctx: { READY: true, AX: AXE, CTX: {} } };
+}
+test("H1: while halted the glue refuses every action that creates a new liability, reading the engine's verdict at the call; settlement, withdrawals and a reject are never refused", async () => {
+  const atomix = require("../main/atomix"), F = fakeEngine({ halted: true }), LP = { cid: "c", mpk: PK("B1"), eth: ETH };
+  atomix._setCtx(F.ctx);
+  try {
+    atomix._lastQuotes().q1 = { model: { mode: "single", sell: true, minima: "1", usdt: "1", maker: PK("D1") }, book: { [PK("D1")]: {} }, at: Date.now() };
+    for (const [name, call] of [["swapExecute", () => atomix.swapExecute("q1")], ["makerSave", () => atomix.makerSave({}, {})], ["makerPublish", () => atomix.makerPublish()],
+      ["otcGoLive", () => atomix.otcGoLive(1, 1)], ["otcPropose", () => atomix.otcPropose(LP, "SELL", "1", "1")], ["otc accept", () => atomix.otcDealAction("r", "accept")], ["otc counter", () => atomix.otcDealAction("r", "counter", "1", "1")]])
+      await assert.rejects(call(), { message: atomix.HALTED }, name + " is refused while halted");
+    assert.deepEqual(F.st.touched, [], "and nothing of the engine was touched: no quote consumed, no config saved, no offer armed");
+    assert.ok(atomix._lastQuotes().q1, "the frozen quote is not consumed by a refusal");
+    assert.match(atomix.HALTED, /^AtomiX is halted: .* Nothing was sent, published or locked\.$/);
+    // never gated (owner rule: a halt never freezes settlement)
+    assert.deepEqual(await atomix.refundNow("0x" + "ab".repeat(32)), { msg: "asked", opened: true });
+    assert.deepEqual(await atomix.otcDealAction("r", "reject"), { ok: true });
+    await atomix.otcWithdraw();
+    assert.deepEqual(F.st.touched, ["settle.refundNow", "otc.reject", "otc.setMyOffer", "otc.publishOffer"]);
+    // the verdict is live: the moment the engine says it is no longer halted, the same call goes through
+    F.st.halted = false; F.st.touched.length = 0;
+    assert.deepEqual(await atomix.swapExecute("q1"), { ok: 1, of: 1, hashes: ["0xhash2"] });
+    // a halt raised between two parts of a sweep stops the next part
+    const G = fakeEngine({ onLeg: (st) => { st.halted = true; } }); atomix._setCtx(G.ctx);
+    const leg = (n) => ({ maker: { signerPk: PK("D" + n) }, minima: "1", usdt: "1" });
+    atomix._lastQuotes().q2 = { model: { mode: "sweep", sell: true, plan: { legs: [leg(1), leg(2)] } }, book: { [PK("D1")]: {}, [PK("D2")]: {} }, at: Date.now() };
+    const r = await atomix.swapExecute("q2");
+    assert.equal(r.ok, 1); assert.equal(r.of, 2); assert.match(r.stopped, /Sweep stopped at part 2: AtomiX is halted/);
+    assert.equal(G.st.touched.filter((x) => x === "engine.startLeg").length, 1, "part 2 never reached the engine");
+  } finally { atomix._setCtx(null); }
+});
+test("H1: an LP's ACCEPT arriving in the service poll locks nothing while halted: the engine's own executeDeal is refused at its leg-1 lock and the deal goes back to AGREED", async () => {
+  const atomix = require("../main/atomix"), { createContext } = require("../main/atomix/loader"), { makeSqlShim } = require("../main/pandapools/sqlshim");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-halt-")), seen = [], notes = [];
+  try {
+    const shim = await makeSqlShim(path.join(dir, "atomix.sqlite"));
+    const mds = { minidappuid: "", cmd: (c, cb) => { seen.push(String(c)); cb({ status: false, error: "mock node: nothing may be sent in this test" }); }, sql: (q, cb) => shim.sql(q, cb),
+      net: { GET() { throw new Error("TEST LEAK: network"); }, POST() { throw new Error("TEST LEAK: network"); } }, notify: (m) => notes.push(String(m)), log() {}, init() {} };
+    const run = async (gated) => {
+      const c = createContext(mds), A = c.AX; if (gated) atomix._gateEngine(c);
+      // service.js wires the execute exactly so (asserted below); the engine is configured as after a boot
+      A.engine.configure({ rpc: {}, ethPriv: "0x01", ethAddr: ETH, myMinimaPk: PK("A1") });
+      A.otc.configure({ identity: { publicId: () => "me" }, myMinimaPk: PK("A1"), ethAddr: ETH, notify: (t, b) => notes.push(t + ": " + b), onExecute: (deal, cb) => A.engine.executeOtc(deal, cb) });
+      A.otc._setExecToken("tok" + gated); A.identitywatch._setMismatch(true, false);
+      const P = (fn) => new Promise((res) => fn((e, v) => res(v)));
+      await P((cb) => A.otc.initDb(cb));
+      const ref = "ref" + gated;
+      await P((cb) => A.otc.upsertDeal({ ref, role: "INSTIGATOR", peerCommsId: "lp", peerMinimaPk: PK("B1"), peerEthAddr: TO, side: "BUY", amount: "10", price: "1", status: "AGREED", whoseTurn: "ME", currency: "mxusdt" }, cb));
+      seen.length = 0; notes.length = 0;
+      await new Promise((res) => A.otc.executeDeal({ ref, role: "INSTIGATOR" }, res));
+      await new Promise((r) => setTimeout(r, 50));
+      return { deal: await P((cb) => A.otc.getDeal(ref, cb)), seen: seen.slice(), notes: notes.slice() };
+    };
+    const open = await run(0);
+    assert.ok(open.seen.length > 0, "without the gate the engine starts the lock while halted (the finding): " + open.seen.join(" | "));
+    const shut = await run(1);
+    assert.deepEqual(shut.seen, [], "with the gate nothing reaches the node: no secret, no lock, no EXECUTE message");
+    assert.equal(shut.deal.status, "AGREED"); assert.equal(shut.deal.hash, "", "the deal is not left half-recorded");
+    assert.ok(shut.notes.some((n) => n.indexOf("OTC execute failed: AtomiX is halted") === 0), shut.notes.join(" | "));
+    shim.flush();
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const glue = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8"), svc = fs.readFileSync(path.join(__dirname, "..", "main", "atomix", "service.js"), "utf8");
+  assert.match(glue, /ctx = createContext\(buildMds\(\)\);\n    gateEngine\(ctx\);/, "every engine the glue builds is gated before it is started");
+  assert.match(svc, /onExecute: function \(deal, cb\) \{ AX\.engine\.executeOtc\(deal, cb\); \}/, "the engine looks executeOtc up at call time: the gate depends on it");
+});
+test("H1: a halt redraws the screens at once: the engine's notice raises an update, not only a notification", () => {
+  const atomix = require("../main/atomix"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-note-")); let n = 0; const on = () => n++;
+  atomix._setDataDir(dir); atomix.emitter.on("update", on);
+  try { atomix._buildMds().notify("AtomiX halted — wallet mismatch. Rescue funds and reinstall."); assert.equal(n, 1); }
+  finally { atomix.emitter.off("update", on); fs.rmSync(dir, { recursive: true, force: true }); }
 });
