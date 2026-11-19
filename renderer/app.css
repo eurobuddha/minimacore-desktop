@@ -1,19 +1,6 @@
 /* app.css — a few desktop-only additions on top of the reused pandapools style.css (same tokens). */
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
-/* Desktop shell: full-window flex column. Overrides the leftover PandaPools centering
-   (style.css `.shell { max-width:640px; margin:0 auto; padding:16px }`) so the app fills the window. */
-.shell { height: 100vh; display: flex; flex-direction: column; max-width: none; margin: 0; padding: 0; }
-/* min-height:0 lets .main scroll INTERNALLY instead of expanding and pushing the header/tabs off-screen. */
-.main { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; }
-.hdr { -webkit-app-region: drag; padding-left: 78px; }        /* clear the mac traffic lights */
-.hdr button { -webkit-app-region: no-drag; }
-.hdr__spacer { flex: 1 1 auto; }
-
-.statuschip { cursor: pointer; border: 0; font: inherit; }
-.statuschip[data-state="running"] { color: var(--green); }
-.statuschip[data-state="starting"], .statuschip[data-state="stopping"] { color: var(--amber); }
-.statuschip[data-state="error"], .statuschip[data-state="stopped"] { color: var(--red); }
 
 .qrbox { display: flex; justify-content: center; padding: 10px 0 14px; }
 .qrbox img { width: 200px; height: 200px; image-rendering: pixelated; border-radius: 8px; background: #fff; padding: 8px; }
@@ -31,64 +18,9 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 /* thin, unobtrusive scrollbars; the tab strip scrolls with no visible bar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.20); background-clip: padding-box; }
-.tabs { scrollbar-width: none; }
-.tabs::-webkit-scrollbar { height: 0; width: 0; display: none; }
 
-/* Header — give the chrome weight + a hairline */
-.hdr { align-items: center; padding-top: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0)); }
-.hdr__logo { font-size: 15px; letter-spacing: .2px; }
-.hdr__ver { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; color: var(--dim);
-  margin-left: 9px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 100px;
-  align-self: center; -webkit-app-region: no-drag; user-select: text; }
 
-/* Tabs — flush, animated active underline, comfortable hit area */
-.tabs { position: relative; margin: 0; padding: 2px 10px 0; border-bottom: 1px solid var(--border); }
-.tab { padding: 12px 13px; font-size: 11px; letter-spacing: .7px; border-bottom-width: 2px; }
-.tab:hover { color: var(--text); }
 
-/* Sliding active-tab underline (horizontal strip). JS sets width + translateX; CSS animates the slide.
-   Lives inside .tabs so it scrolls with the strip. Hidden in the wide nav-rail (see @media below). */
-.tab-ink { position: absolute; left: 0; bottom: 0; width: 0; height: 2px; background: var(--accent);
-  border-radius: 2px 2px 0 0; box-shadow: 0 0 9px -1px var(--accent); opacity: 0; pointer-events: none;
-  transition: transform .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1), opacity .15s;
-  will-change: transform, width; }
-@media (prefers-reduced-motion: reduce) { .tab-ink { transition: opacity .15s; } }
-
-/* When the window is too narrow for all tabs, the row scrolls horizontally. Fades + arrow chips make the
-   off-screen tabs discoverable (the scrollbar is hidden), and selectTab() scrolls the active tab into view. */
-.tabs-wrap { position: relative; }
-.tabs-wrap::before, .tabs-wrap::after {
-  content: ""; position: absolute; top: 0; bottom: 1px; width: 34px; pointer-events: none; z-index: 2;
-  opacity: 0; transition: opacity .15s;
-}
-.tabs-wrap::before { left: 0; background: linear-gradient(90deg, var(--bg) 30%, transparent); }
-.tabs-wrap::after { right: 0; background: linear-gradient(270deg, var(--bg) 30%, transparent); }
-.tabs-wrap.can-l::before { opacity: 1; }
-.tabs-wrap.can-r::after { opacity: 1; }
-.tabs-arrow {
-  position: absolute; top: 0; bottom: 1px; width: 26px; z-index: 3; display: none;
-  align-items: center; justify-content: center; padding: 0 0 2px;
-  border: none; background: var(--bg); color: var(--dim); font-size: 20px; line-height: 1; cursor: pointer;
-}
-.tabs-arrow:hover { color: var(--accent); }
-.tabs-arrow--l { left: 0; }
-.tabs-arrow--r { right: 0; }
-.tabs-wrap.can-l .tabs-arrow--l { display: flex; }
-.tabs-wrap.can-r .tabs-arrow--r { display: flex; }
-
-/* Layout rhythm */
-.main { padding: 18px 16px 26px; }
-.view__title { font-size: 22px; letter-spacing: -.3px; margin-bottom: 12px; }
-
-/* Cards — soft elevation + hover, rounder */
-.card { border-radius: 12px; padding: 15px 16px;
-  box-shadow: 0 1px 1px rgba(0,0,0,.30), 0 10px 26px -16px rgba(0,0,0,.65);
-  transition: border-color .15s, transform .12s ease, box-shadow .15s; }
-.card:hover { border-color: var(--border-light); }
-.card__title { font-size: 13px; text-transform: uppercase; letter-spacing: .9px; color: var(--dim); margin-bottom: 10px; }
 
 /* Balance rows — bigger amount, aligned icon */
 #balList .card .kv:first-child { align-items: center; }
@@ -99,14 +31,10 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 
 /* History rows — hover affordance, roomier */
 .row { padding: 12px 6px; border-radius: 8px; transition: background .12s; }
-.row:hover { background: rgba(255,255,255,.03); }
+.row:hover { background: var(--surface); }
 .row__glyph { font-size: 18px; }
 .row__l1 { font-size: 14.5px; }
 
-/* Buttons — subtle depth + press feedback */
-.btn { border-radius: 9px; transition: all .13s ease; }
-.btn:active { transform: translateY(1px); }
-.btn--primary { box-shadow: 0 4px 14px -6px var(--accent); }
 
 /* Copyable address / seed — never overflow */
 .addrbox { border-radius: 10px; }
@@ -143,8 +71,6 @@ select.field__input { appearance: none; -webkit-appearance: none; cursor: pointe
 select.field__input option { background: var(--surface2); color: var(--text); }
 
 /* ---- minimaMail ---- */
-.tab-badge { display: inline-block; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 8px;
-  background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; vertical-align: middle; }
 /* The Mail panel's styles moved to mail.css (scoped .mailapp / .mm-*, APK palette). .mail-ver stays:
    the AtomiX and Parlons headers wear it, and #view-minimall owns .mail-thread further down. */
 .mail-ver { font-size: 11px; font-weight: 600; color: var(--dim); vertical-align: middle; }
@@ -256,112 +182,39 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .chip--lock { background: var(--surface2); color: var(--dim); padding: 2px 8px; font-size: 10px; }
 .spin--sm { font-size: 12px; color: var(--dim); padding: 8px 0; }
 
-/* ============================================================================
-   TERMINAL OVERHAUL (loads last → wins). Black/white/orange · Manrope + mono ·
-   hairline-precise, dense, sharp 4px radius. Outline-M cornerstone.
-   ========================================================================== */
-body { font-family: var(--sans); }
-.view__title, .card__title, .mail-top__title, .setup-sec__h, .modal__title, .tokd-name,
-.setup-progress__title { font-family: var(--sans); }
-.kv__v, .kv__k, .row__l2, .row__r, .bamt, .coin-amt, .coin-row__sub, .tokd-id, .mid,
-.field__input, .prow--managed .prow__l, .status, .hdr__status, .logbox, .termout, .logsout,
-.addrbox__addr, #recvAddr, #setAddr, #setSeed { font-family: var(--mono); }
 
-/* Header — thin, brand mark + wordmark in Manrope, hairline rule, node pulse */
-.hdr { background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
-  padding-top: 10px; padding-bottom: 10px; }
-.hdr__logo { display: flex; align-items: center; gap: 9px; font-family: var(--sans);
-  font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--heading); }
-.hdr__logo b { font-weight: 700; }
-.hdr__logo .omark { width: 20px; height: 18px; color: var(--logo-ink); display: block; flex: 0 0 auto; }
-.hdr__style { color: var(--dim); }
-.hdr__style:hover { color: var(--accent); }
-.statuschip { font-family: var(--mono); font-size: 11px; letter-spacing: .02em; border: 1px solid var(--border);
-  border-radius: 100px; padding: 4px 11px; background: var(--surface); display: inline-flex; align-items: center; gap: 7px; }
-.statuschip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
-  box-shadow: 0 0 8px currentColor; animation: mcd-pulse 2.6s infinite; }
-@keyframes mcd-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
 
-/* Tabs — tight tracked mono, orange active underline with glow */
-.tabs { padding: 2px 10px 0; }
-.tab { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; padding: 12px 12px 13px; border-bottom-width: 2px; }
-.tab--active { color: var(--accent); border-bottom-color: transparent; box-shadow: none; }
-.tabs-arrow:hover { color: var(--accent); }
 
-/* Views — Manrope titles, tighter rhythm */
-.main { padding: 16px 16px 24px; position: relative; }
-.view__title { font-size: 20px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 12px; }
-.view__desc { font-size: 12.5px; }
-.view__sub { font-size: 10px; letter-spacing: .16em; color: var(--dim2); }
-
-/* Cards / panels — flat hairline with a whisper of top-highlight, sharp radius */
-.card, .swapbox { border-radius: var(--radius); padding: 14px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.03); transition: border-color .13s; }
-.card:hover { border-color: var(--border-light); transform: none; }
-.card--accent { border-left: 2px solid var(--accent); }
-.card__title { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim2); font-weight: 600; margin-bottom: 10px; }
-
-/* Buttons — no more solid orange slabs. Primary = hairline orange + soft fill, fills on hover. */
-.btn { border-radius: var(--radius); font-family: var(--mono); font-size: 12px; letter-spacing: .12em; font-weight: 600;
-  padding: 11px 16px; transition: all .13s ease; box-shadow: none; }
-.btn:active { transform: translateY(1px); }
-.btn--primary { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent);
-  box-shadow: none; }
-.btn--primary:hover { background: var(--accent); color: var(--on-accent); filter: none;
-  box-shadow: 0 0 22px -6px var(--accent); }
-.btn--outline { background: none; color: var(--accent); border-color: var(--accent); }
-.btn--full { padding: 13px; }
+/* Identifiers, hashes and node output stay monospace (the phone's MonoBlock); everything else is Manrope. */
+.coin-row__sub, .tokd-id, .hist-dim, .logbox, .termout, .logsout, .addrbox__addr, #recvAddr, #setAddr, #setSeed { font-family: var(--mono); }
 
 /* KV rows / fields / chips / inputs — hairline + orange focus */
-.kv { font-size: 12.5px; }
-.field__input { border-radius: var(--radius); font-size: 14px; }
+.field__input { border-radius: var(--radius); }
 .field__input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-.field__label { font-size: 10px; letter-spacing: .16em; }
-.chip { border-radius: var(--radius); }
 .chip--active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
-.statuschip[data-state="running"] { color: var(--green); }
 
 /* Modals — sharp, hairline, Manrope title */
-.modal, .modal.setup { border-radius: var(--radius); }
+.modal, .modal.setup { border-radius: var(--radius-card); }
 .modal__title { font-size: 16px; letter-spacing: -.01em; }
 .opt { border-radius: var(--radius); } .opt.sel { border-color: var(--accent); }
-.token-pick { border-radius: var(--radius); font-family: var(--mono); }
+.token-pick { border-radius: var(--radius); }
 
 /* Rows — hover tick */
 .row:hover { background: var(--surface); }
 .row:hover .row__glyph { color: var(--accent); }
 
-/* Balances — keep spendable-first sizing, tabular numerals, tighter icon radius */
-#balList .card .kv:first-child .kv__v { font-size: 17px; font-weight: 700; font-family: var(--mono); }
-.kv .tok-icon { border-radius: 6px; box-shadow: none; }
-.tok-icon { border-radius: 6px; }
-.card--token:hover { border-color: var(--accent); }
-
-/* Token detail — sharp large icon */
-.tok-icon--lg { border-radius: 12px; }
 .chip--spend { background: var(--green-bg); color: var(--green); border-color: var(--green); }
 .chip--lock { background: var(--surface2); color: var(--dim); }
 
 /* Address / seed — orange mono */
 #recvAddr, #setAddr, #setSeed, .addrbox__addr { color: var(--accent); }
 
-/* Outline-M watermark — the cornerstone motif, TILED as a subtle background texture */
-.main::before {
-  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  opacity: var(--wm-opacity, .05); background: var(--dim);
-  -webkit-mask: url("minima-tile.svg") repeat; mask: url("minima-tile.svg") repeat;
-  -webkit-mask-size: 66px 66px; mask-size: 66px 66px;
-}
-:root[data-theme="light"] { --wm-opacity: .06; }
-.main > * { position: relative; z-index: 1; }
 
 /* Empty / loading — outline mark, slowly turning */
 .spin, .empty { font-family: var(--sans); }
 .omark-load { width: 84px; height: 76px; color: var(--accent); display: block; margin: 0 auto 12px;
   animation: mcd-spin 9s linear infinite; opacity: .9; }
 
-/* Scrollbar thumb adapts to light theme */
-:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(22,24,28,.18); background-clip: padding-box; }
 
 /* Manrope for the Minima coin glyph fallback tile stays; outline mark injected in JS */
 .tok-omark { color: var(--logo-ink); }
@@ -392,53 +245,7 @@ body { font-family: var(--sans); }
 .hist-dirs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
 .hist-dirs .btn { border-radius: 100px; padding: 5px 12px; }
 
-/* Balances → dense terminal rows: list with hairline dividers, not boxed cards */
-#balList .card, #balList .card--token { background: transparent; border: none; border-radius: 0;
-  box-shadow: none; border-bottom: 1px solid var(--border); padding: 13px 8px; margin: 0; }
-#balList .card:hover, #balList .card--token:hover { background: var(--surface); border-bottom-color: var(--border); }
-#balList .card:last-child { border-bottom: none; }
-#balList .card .kv { padding: 1px 0; }
-#balList .card .kv:first-child .kv__v { font-size: 16px; }
-#balList .bal-meta { margin-top: 3px; }
-/* accent watermark hint on hover: a faint orange left-tick */
-#balList .card--token { position: relative; }
-#balList .card--token:hover::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px;
-  width: 2px; background: var(--accent); border-radius: 2px; }
 
-/* ============================================================================
-   Adaptive wide layout — at >=900px the top tab strip becomes a left nav rail.
-   The header spans the top; rail + main sit side by side beneath it. No markup
-   change: CSS grid re-places the existing .hdr / .tabs-wrap / .main by area.
-   ========================================================================== */
-@media (min-width: 900px) {
-  .shell {
-    display: grid;
-    grid-template-columns: 212px minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    grid-template-areas: "hdr hdr" "rail main";
-  }
-  .hdr  { grid-area: hdr; }
-  .main { grid-area: main; min-height: 0; }
-  .tabs-wrap { grid-area: rail; min-height: 0; border-right: 1px solid var(--border);
-    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent); }
-
-  /* the horizontal tab row → a vertical rail */
-  .tabs { flex-direction: column; align-items: stretch; gap: 1px; height: 100%;
-    overflow-y: auto; overflow-x: hidden; padding: 12px 10px; border-bottom: none; }
-  .tab { width: 100%; display: flex; align-items: center; justify-content: flex-start;
-    text-align: left; padding: 11px 12px; border-bottom-width: 0; border-radius: var(--radius); }
-  .tab:hover { background: var(--surface); color: var(--text); }
-  .tab--active { color: var(--accent); background: var(--accent-bg);
-    border-bottom-color: transparent; box-shadow: inset 2px 0 0 var(--accent); }
-
-  /* horizontal-scroll chrome + the sliding underline don't apply in rail mode */
-  .tab-ink,
-  .tabs-arrow,
-  .tabs-wrap::before,
-  .tabs-wrap::after { display: none !important; }
-
-  :root[data-theme="light"] .tabs-wrap { background: linear-gradient(180deg, rgba(22,24,28,.02), transparent); }
-}
 
 /* AtomiX moved to renderer/atomix-ui.css, scoped to .axapp (0.17.21). */
 
@@ -552,9 +359,6 @@ body { font-family: var(--sans); }
 .parlons-strip { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 8px; font-size: 12px; color: var(--dim); }
 .parlons-strip .addr { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; cursor: pointer; color: var(--text); }
 
-/* update pill next to the version: only when the store feed has a newer build */
-.hdr__update { cursor: pointer; border: 1px solid var(--accent); color: var(--accent); background: transparent; margin-left: 6px; }
-.hdr__update:hover { background: var(--accent); color: #fff; }
 
 /* RULE 1 — a shortened identifier must still be copyable IN FULL (idHtml + the delegated handler in boot()).
    Looks like the value it stands for, advertises that it is clickable, and never gets selected by accident. */

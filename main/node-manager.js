@@ -121,7 +121,7 @@ class NodeManager extends EventEmitter {
     this.state = "stopped";       // stopped | starting | running | stopping | error
     this.lastError = null;
     this.logs = [];
-    this.health = null;           // { block, version, connections, incoming, acceptingInLinks, p2pAddress }
+    this.health = null;           // { block, time, version, connections, incoming, acceptingInLinks, p2pAddress }
     this.healthTimer = null;
     this.healthTick = 0;
     this.startedTs = 0;
@@ -454,6 +454,7 @@ class NodeManager extends EventEmitter {
         this.health = {
           version: r.version || "",
           block: (r.chain && r.chain.block) || 0,
+          time: (r.chain && r.chain.time) || "",   // the tip block's time, for the footer's "block @ time"
           connections: (r.network && r.network.connected) || 0,
           locked: !!r.locked,
           megammr: !!r.megammr,   // GeneralParams.IS_MEGAMMR — gates the Web Wallet tab

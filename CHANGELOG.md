@@ -7,6 +7,20 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.69] — the Pandamonium shell
+
+Phase 1 of the Pandamonium overhaul. The app now wears Pandamonium's shell; every existing screen still works, in a new place. No money path is touched.
+
+- **Look.** Pandamonium's own colours, type and corners (`apks/base` `colors.xml`, `values-night/colors.xml`, `type.xml`, `themes.xml`): orange `#FF4A2B`, dark `#0F1114` / light `#F4F5F7`, Manrope, cards 16, controls 12, buttons 13, sentence case. The grain overlay, the watermark, the mono chrome and the wide-window nav rail are gone.
+- **Theme follows the system.** There is no theme button and no Appearance card any more; the saved `theme` setting is no longer read. Mail's own light/dark button is hidden for the same reason.
+- **Toolbar, tabs, footer.** Tray button, "Minima Core" over "Pandamonium", overflow button. Six tabs with the phone's icons: Wallet, Dexicon, History, Apps, Chat, Node. Footer: a status dot and "Key uses: N" on the left (the phone's text for a classic-key node), "block @ time" on the right. The node pill and the version badge left the header; the node's state is in the footer and the Node tab.
+- **App tray.** MinimaMail, ETH Wallet, Minima Vestr, Minima Faucet, miniMall, Web Wallet and Parlons open from the tray, under the phone's dark host bar; "Minima Core" returns to the tabs. The tray pushes the screen aside and stays open (remembered); below 720 px wide it overlays, as on the phone. Mail and miniMall show their unread counts on their rows, and the tray button carries a dot while the tray is closed.
+- **Overflow menu.** Logs, Terminal, Backup & Recovery, Startup Params, Shutdown, Settings. An "Update to X" item appears at the top when the store feed has a newer build.
+- **Where things went.** Balances is the Wallet tab, with Total balance and Send / Receive buttons; Receive and Send are screens with a back arrow. AtomiX and Pools share the Dexicon tab for now. The Faucet card left Settings and is its own screen. Apps lists the integrated apps.
+- **Window.** Opens at 932 x 732 with the standard title bar (the Mac's inset traffic lights sat where the tray button is). The node status now carries the tip block's time.
+- **Dev preview.** `node scripts/dev-preview/build.js [--shots]` opens the renderer in a plain browser against a stubbed `window.mcd` with invented data, so layouts can be checked without starting a node. Not shipped.
+- Tests: `scripts/shell-test.cjs` pins the six tabs, the tray order, the menu, the badges and the exact tokens.
+
 ## [0.18.68] — P2P Chance removed
 
 - **P2P Chance (the peer-to-peer coin flip / dice / roulette module) is no longer part of the app.** The tab, the game screens, the Settings card that enabled it, the 18+ gate and the MINIMA / MxUSD currency choice are gone, with `renderer/casino.js`, `renderer/casinoart.js` and `renderer/casino.css`. No new game can be created or taken from this app.

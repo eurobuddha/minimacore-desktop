@@ -5,7 +5,7 @@
  * the IPC handlers here, which proxy to the local RPC using the main-held secret. On launch we start the
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, Notification, session, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, nativeTheme, shell, Notification, session, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const config = require("./config");
@@ -63,10 +63,12 @@ require("./parlons-calls").install({
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 540, height: 840, minWidth: 440, minHeight: 640,
-    title: "minimaCore",
-    backgroundColor: "#0A0A0F",
-    titleBarStyle: "hiddenInset",
+    // Pandamonium on the unfolded Fold is 932 x 704 dp: the reference the shell is built to. The standard
+    // title bar is kept (no hiddenInset): the shell's own toolbar has the tray button where the Mac's
+    // traffic lights would sit. The background is Pandamonium's core_bg for the system theme.
+    width: 932, height: 732, minWidth: 440, minHeight: 640,
+    title: "Minima Core",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0F1114" : "#F4F5F7",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

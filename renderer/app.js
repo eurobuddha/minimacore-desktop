@@ -96,24 +96,20 @@ function idHtml(value, shown) {
 }
 
 // ---- theme -----------------------------------------------------------------
-// TERMINAL identity: dark default + light toggle. Legacy stored themes (current/original-*) → dark.
-const THEMES = ["dark", "light"];
-function applyTheme(t) {
-  document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+// The theme follows the system, as Pandamonium does: there is no toggle. style.css switches its tokens on
+// prefers-color-scheme; data-theme is kept in step for the panels that key their own palettes on it
+// (mail.css, chat.css). The old saved "theme" config value is no longer read.
+const SYSTEM_LIGHT = window.matchMedia("(prefers-color-scheme: light)");
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", SYSTEM_LIGHT.matches ? "light" : "dark");
 }
-function cycleTheme() {
-  CFG.theme = (CFG.theme === "light") ? "dark" : "light";
-  applyTheme(CFG.theme); api.saveConfig({ theme: CFG.theme });
-}
+SYSTEM_LIGHT.addEventListener("change", applyTheme);
 
 // ---- boot ------------------------------------------------------------------
 async function boot() {
   CFG = await api.getConfig();
-  applyTheme(CFG.theme || "current");
-  el("themeBtn").onclick = cycleTheme;
-  el("nodePill").onclick = () => selectTab("node");
-  document.querySelectorAll(".tab").forEach(b => b.onclick = () => selectTab(b.dataset.view));
-  initTabScroll();
+  applyTheme();
+  initShell();
   // RULE 1, app-wide: anything rendered with a shortened identifier carries the COMPLETE value in
   // data-copy, and one click puts that complete value on the clipboard. Delegated from the document so it
   // works for every view without each render path having to remember to wire it. It REPLACES the old
@@ -127,12 +123,12 @@ async function boot() {
     const n = e.target && e.target.closest && e.target.closest("[data-copy]");
     if (n && n.dataset.copy) { e.preventDefault(); e.stopPropagation(); copy(n.dataset.copy); }
   }, true);
-  api.appVersion().then(v => { const e = el("hdrVer"); if (e && v) e.textContent = "v" + v; }).catch(() => {});
-  // App updates: the store feed is checked in the main process; the pill appears when a newer build exists.
+  api.appVersion().then(v => { APP_VERSION = v || ""; }).catch(() => {});
+  // App updates: the store feed is checked in the main process; the menu gains an "Update" item when a newer build exists.
   const refreshUpdatePill = async () => {
-    try { const u = await api.updateStatus(); const b = el("hdrUpdate"); if (!b) return; b.hidden = !u.available; if (u.available) b.textContent = "Update " + u.version; } catch (e) {}
+    try { const u = await api.updateStatus(); const b = el("hdrUpdate"); if (!b) return; b.hidden = !u.available; if (u.available) b.textContent = "Update to " + u.version; el("moreBtn").classList.toggle("bar__more--update", !!u.available); } catch (e) {}
   };
-  el("hdrUpdate").addEventListener("click", () => { selectTab("settings"); setTimeout(() => { const c = el("updCard"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); }, 200); });
+  el("hdrUpdate").addEventListener("click", () => openSettingsAt("updCard"));
   if (api.onOpenUpdate) api.onOpenUpdate(() => el("hdrUpdate").click());
   refreshUpdatePill(); setTimeout(refreshUpdatePill, 15_000); setInterval(refreshUpdatePill, 60_000);   // the first feed check runs ~8 s after launch
 
@@ -163,14 +159,7 @@ async function boot() {
 }
 
 function onStatus(s) {
-  const pill = el("nodePill");
-  pill.dataset.state = s.state;
-  let label = s.state;
-  if (s.state === "running" && s.health) label = "● " + (s.health.connections || 0) + " peers"
-    + (s.contribute && s.health.incoming ? " · " + s.health.incoming + " in" : "") + " · #" + (s.health.block || 0);
-  else if (s.state === "starting") label = "starting…";
-  else if (s.state === "error") label = "error";
-  pill.textContent = label;
+  paintFooter(s);
   if (s.health && s.health.block) {                                      // both APK-parity headers carry the tip
     PoolsPanel.setBlock(s.health.block);
     AtomixPanel.setBlock(s.health.block);
@@ -503,69 +492,171 @@ function showRestoreOverlay() {
   el("setup").style.display = "";
 }
 
-// ---- tabs / refresh --------------------------------------------------------
+// ---- the shell: Pandamonium's toolbar, six tabs, app tray, overflow menu and footer ----------------------
+// selectTab(view) is still the one way to show a screen. Where the screen sits decides what the shell wears:
+//   a TAB screen      toolbar (tray button, titles, menu) + tab strip + footer
+//   a SUB screen      a back arrow and the screen's title, as the phone's own Receive / Send / Logs / Terminal
+//   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
+const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
+const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings" };
+// The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
+// (Future Cash Next, Minima Explorer, Entropy, KeyUses) get a row when their phase builds them: no dead rows.
+const TRAY_APPS = [
+  { id: "core", name: "Minima Core" },
+  { id: "mail", name: "MinimaMail", icon: "icons/mail.png", badge: "mailBadge" },
+  { id: "ethwallet", name: "ETH Wallet", icon: "icons/ethwallet.png" },
+  { id: "vestr", name: "Minima Vestr", icon: "icons/vestr.png" },
+  { id: "faucet", name: "Minima Faucet", icon: "icons/faucet.svg" },
+  { id: "minimall", name: "miniMall", icon: "icons/minimall.png", badge: "shopBadge" },
+  { id: "webwallet", name: "Web Wallet", icon: "minima-mark.svg" },
+  { id: "parlons", name: "Parlons", icon: "icons/parlons.png" }
+];
+const CORE_MARK = '<svg class="tray__ic" viewBox="0 0 105 100" aria-hidden="true"><path d="M84.16,26.77L79.52,48.44L73.58,22.29L52.79,13.38L47.17,39.59L42.21,8.86L21.42,0L0,100H22.71L29.27,69.27L34.23,100H56.98L62.56,73.8L68.5,100H91.21L105,35.63L84.16,26.77Z"/></svg>';
+const NARROW = window.matchMedia("(max-width: 719px)");   // below this the tray overlays, as on the phone
+let lastTabView = "balances";   // where Back returns to, and where "Minima Core" in the tray lands
+let dexView = "atomix";         // which of the two panels the Dexicon tab last showed
+let APP_VERSION = "";
+function store(key, value) {    // shell preferences only (tray open, order, hidden); never anything that matters
+  try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) {}
+  return null;
+}
+function viewOfTab(tab) { return tab === "wallet" ? "balances" : tab === "dexicon" ? dexView : tab; }
+
 function selectTab(view) {
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   activeView = view;
-  const active = document.querySelector('.tab[data-view="' + view + '"]');
-  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab--active", b.dataset.view === view));
+  const tab = TAB_OF[view];
+  const mode = tab ? "tabs" : SUB_TITLE[view] ? "sub" : "app";
+  if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; }
+  el("shell").dataset.mode = mode;
+  el("shell").dataset.tab = tab || "";
+  el("barPage").textContent = SUB_TITLE[view] || "";
+  document.querySelectorAll(".tab").forEach(b => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("tab--active", on); b.setAttribute("aria-selected", on ? "true" : "false"); b.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll(".dexswitch__b").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view ? "true" : "false"));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("view--active", v.id === "view-" + view));
-  positionTabInk();
-  // Bring the active tab into view when the row is scrolled (block:nearest so the page never scrolls).
-  if (active) { try { active.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" }); } catch (e) { active.scrollIntoView(); } setTimeout(updateTabScroll, 250); }
+  paintTraySelection();
+  closeMenu();
   renderActive();
 }
 
-// ---- narrow-width tab scrolling: fades + arrow chips + wheel, since all 10 tabs can overflow at 440px ----
-function updateTabScroll() {
-  const tabs = el("tabs"), wrap = el("tabsWrap");
-  if (!tabs || !wrap) return;
-  const max = tabs.scrollWidth - tabs.clientWidth;
-  wrap.classList.toggle("can-l", tabs.scrollLeft > 1);
-  wrap.classList.toggle("can-r", tabs.scrollLeft < max - 1);
-  el("tabsArrowL").hidden = !wrap.classList.contains("can-l");
-  el("tabsArrowR").hidden = !wrap.classList.contains("can-r");
-  positionTabInk();
+function initShell() {
+  // tabs: click, and the arrow keys move along the strip (one tab stop, as a tablist should be)
+  const tabs = [...document.querySelectorAll(".tab")];
+  tabs.forEach(b => b.onclick = () => selectTab(viewOfTab(b.dataset.tab)));
+  el("tabs").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const shown = tabs.filter(b => !b.hidden), i = shown.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = shown[(i + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
+    e.preventDefault(); next.focus(); next.click();
+  });
+  document.querySelectorAll(".dexswitch__b").forEach(b => b.onclick = () => selectTab(b.dataset.view));
+  el("backBtn").onclick = () => selectTab(lastTabView);
+  el("walSend").onclick = () => selectTab("send");
+  el("walReceive").onclick = () => selectTab("receive");
+
+  // tray
+  const list = el("trayList");
+  list.innerHTML = TRAY_APPS.map(a => `<button class="tray__row" data-app="${a.id}">${a.icon ? `<img class="tray__ic" src="${a.icon}" alt="">` : CORE_MARK}<span class="tray__name">${esc(a.name)}</span>${a.badge ? `<span class="tab-badge" id="${a.badge}" hidden></span>` : ""}</button>`).join("");
+  list.querySelectorAll(".tray__row").forEach(r => r.onclick = () => {
+    selectTab(r.dataset.app === "core" ? lastTabView : r.dataset.app);
+    if (NARROW.matches) setTray(false);
+  });
+  el("trayBtn").onclick = () => setTray(el("tray").hidden);
+  el("trayScrim").onclick = () => setTray(false);
+  setTray(!NARROW.matches && store("shellTray") === "1", true);
+  NARROW.addEventListener("change", () => { if (NARROW.matches) setTray(false, true); });
+
+  // overflow menu
+  el("moreBtn").onclick = () => (el("moreMenu").hidden ? openMenu() : closeMenu());
+  el("moreMenu").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    closeMenu(); menuAction(b.dataset.act);
+  });
+  el("moreMenu").addEventListener("keydown", (e) => {
+    const items = [...el("moreMenu").querySelectorAll(".menu__item:not([hidden])")], i = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); items[(i + items.length - 1) % items.length].focus(); }
+    else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
+    else if (e.key === "End") { e.preventDefault(); items[items.length - 1].focus(); }
+    else if (e.key === "Tab") closeMenu();
+  });
+  document.addEventListener("mousedown", (e) => { if (!el("moreMenu").hidden && !e.target.closest("#moreMenu, #moreBtn")) closeMenu(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!el("moreMenu").hidden) { closeMenu(); el("moreBtn").focus(); }
+    else if (NARROW.matches && !el("tray").hidden) { setTray(false); el("trayBtn").focus(); }
+  });
+  selectTabQuiet();
 }
-// Sliding orange underline that tracks the active tab in the horizontal strip. In the wide
-// nav-rail (>=900px) the active marker is a CSS inset-shadow bar instead, so the ink hides.
-function positionTabInk() {
-  const tabs = el("tabs");
-  if (!tabs) return;
-  const ink = tabs.querySelector(".tab-ink");
-  if (!ink) return;
-  const active = tabs.querySelector(".tab--active");
-  if (!active || (window.matchMedia && window.matchMedia("(min-width: 900px)").matches)) {
-    ink.style.opacity = "0";
-    return;
-  }
-  ink.style.opacity = "1";
-  ink.style.width = active.offsetWidth + "px";
-  ink.style.transform = "translateX(" + active.offsetLeft + "px)";
+// First paint of the shell state without rendering a view (boot() renders once the node is up).
+function selectTabQuiet() { el("shell").dataset.tab = "wallet"; paintTraySelection(); }
+
+function setTray(open, quiet) {
+  el("tray").hidden = !open;
+  el("trayScrim").hidden = !open;                      // CSS shows the scrim only when the tray overlays
+  el("shell").classList.toggle("shell--tray", open);
+  el("trayBtn").setAttribute("aria-expanded", open ? "true" : "false");
+  if (!NARROW.matches && !quiet) store("shellTray", open ? "1" : "0");   // remembered for the push-aside tray
+  paintTrayDot();
 }
-function initTabScroll() {
-  const tabs = el("tabs");
-  if (!tabs) return;
-  if (!tabs.querySelector(".tab-ink")) {
-    const ink = document.createElement("div");
-    ink.className = "tab-ink";
-    tabs.appendChild(ink);
+function paintTraySelection() {
+  const sel = el("shell").dataset.mode === "app" ? activeView : "core";
+  document.querySelectorAll(".tray__row").forEach(r => {
+    const on = r.dataset.app === sel;
+    r.classList.toggle("tray__row--sel", on);
+    if (on) r.setAttribute("aria-current", "page"); else r.removeAttribute("aria-current");
+  });
+}
+// Mail and miniMall count their unread on their tray rows. With the tray closed those rows are out of
+// sight, so the tray button carries a dot while either count is showing.
+function paintTrayDot() {
+  const any = ["mailBadge", "shopBadge"].some(id => { const b = el(id); return b && !b.hidden; });
+  el("trayDot").hidden = !any || !el("tray").hidden;
+}
+function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
+function closeMenu() { el("moreMenu").hidden = true; el("moreBtn").setAttribute("aria-expanded", "false"); }
+function openSettingsAt(cardId) {
+  selectTab("settings");
+  setTimeout(() => { const c = el(cardId); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); }, 200);
+}
+async function menuAction(act) {
+  if (act === "logs" || act === "terminal" || act === "settings") selectTab(act);
+  else if (act === "backup") openSettingsAt("bkCard");
+  else if (act === "params") showSetup();
+  else if (act === "shutdown") {
+    if (!await showConfirm("Shut down the node?", "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again from the Node tab.", "Shut down", true)) return;
+    toast("Shutting down the node…");
+    try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
   }
-  const by = () => Math.max(120, Math.round(tabs.clientWidth * 0.7));
-  el("tabsArrowL").onclick = () => tabs.scrollBy({ left: -by(), behavior: "smooth" });
-  el("tabsArrowR").onclick = () => tabs.scrollBy({ left: by(), behavior: "smooth" });
-  // Vertical mouse-wheel → horizontal scroll (trackpads already scroll sideways; this covers a plain wheel).
-  tabs.addEventListener("wheel", (e) => {
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && tabs.scrollWidth > tabs.clientWidth) {
-      tabs.scrollLeft += e.deltaY; e.preventDefault();
-    }
-  }, { passive: false });
-  tabs.addEventListener("scroll", updateTabScroll, { passive: true });
-  window.addEventListener("resize", updateTabScroll);
-  updateTabScroll();
-  // Manrope/Geist load async → tab widths change after first paint; reposition the ink once they settle.
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionTabInk);
+}
+
+// Footer, as the phone's: a dot and the key line on the left, "block @ time" on the right. This node uses
+// classic keys, so the left reads "Key uses: N" (the phone's own text when block-as-key-uses is off).
+let FOOT_KEYS = null, FOOT_KEYS_AT = 0;
+function clock(t) { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString("en-GB", { hour12: false }) : ""; }
+function paintFooter(s) {
+  const h = s.health || {}, up = s.state === "running";
+  el("footDot").dataset.state = s.state || "";
+  el("footL").textContent = up ? (FOOT_KEYS == null ? "Awaiting blocks…" : "Key uses: " + FOOT_KEYS)
+    : s.state === "error" ? "Node error" : s.state === "stopped" ? "Node stopped" : "Awaiting blocks…";
+  const at = clock(h.time);
+  el("footR").textContent = up && h.block ? h.block + (at ? " @ " + at : "") : "";
+  if (up && Date.now() - FOOT_KEYS_AT > 60000) {       // one read-only `keys` a minute at most
+    FOOT_KEYS_AT = Date.now();
+    tryCmd("keys").then(k => { const n = maxKeyUses(k); if (n != null) { FOOT_KEYS = n; if (running) el("footL").textContent = "Key uses: " + n; } });
+  }
+}
+// `keys` reports the most-used key as response.maxuses (what the phone shows); older jars only list the keys.
+function maxKeyUses(k) {
+  if (!k) return null;
+  if (k.maxuses != null && !Array.isArray(k)) return k.maxuses;
+  const arr = Array.isArray(k) ? k : k.keys;
+  return Array.isArray(arr) && arr.length ? keysInfo(k).used : null;
 }
 // ===================== Web Wallet (local, MegaMMR-gated) =====================
 // Access a wallet straight from a seed phrase, backed by the LOCAL -megammr node. The seed is passed to main
@@ -801,6 +892,8 @@ function renderActive() {
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
   else if (activeView === "settings") renderSettings();
+  else if (activeView === "apps") renderApps();
+  else if (activeView === "faucet") renderFaucet();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
 function startRefresh() {
@@ -818,6 +911,8 @@ async function renderBalances() {
   if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
   BAL_BY_TID = {};
   for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
+  // "Total balance" is the MINIMA headline, the same sendable figure its row shows.
+  el("walTotal").textContent = TOK.tidyAmount((BAL_BY_TID[MINIMA] || {}).sendable || "0");
   // Consolidate only merges SPENDABLE coins (a send-to-self of signable coins) — locked/watch-only UTXOs
   // can't be touched. balance.coins counts them all, so gate the nudge on the sendable count instead: one
   // query, grouped by token. (Minima e.g. can show 14 total coins but only 5 spendable.)
@@ -841,9 +936,9 @@ async function renderBalances() {
     SEND_PRESELECT = btn.dataset.tokenid; SEND_MODE_NEXT = btn.dataset.tool; selectTab("send");
   });
   // Whole card opens the rich token-detail modal (the consolidate button stops propagation above).
-  host.querySelectorAll(".card[data-tokenid]").forEach(card => card.onclick = () => {
-    const b = BAL_BY_TID[card.dataset.tokenid];
-    if (b) showTokenDetail(b);
+  host.querySelectorAll(".card[data-tokenid]").forEach(card => {
+    card.onclick = () => { const b = BAL_BY_TID[card.dataset.tokenid]; if (b) showTokenDetail(b); };
+    card.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === card) { e.preventDefault(); card.click(); } };
   });
   enhanceTokenIcons(host);
 }
@@ -865,7 +960,7 @@ function balCardHtml(b) {
   const cached = ICON_CACHE.get(b.tokenid);
   let iconCell;
   if (isNative) {
-    iconCell = `<span class="tok-wrap"><img class="tok-icon tok-icon--native" src="minima-mark.svg" alt=""><span class="tok-badge">✓</span></span>`;
+    iconCell = `<span class="tok-wrap"><img class="tok-icon tok-icon--native" src="icons/minima.svg" alt=""><span class="tok-badge">✓</span></span>`;
   } else {
     const identicon = TOK.identiconDataUri(b.tokenid);
     const res = TOK.resolveIcon(TOK.pickIconField(b.token));
@@ -881,7 +976,7 @@ function balCardHtml(b) {
   // consolidate coins that can't be touched (e.g. 14 total but 5 spendable → no useful consolidation).
   const spendCoins = SENDABLE_COUNT[b.tokenid || MINIMA] || 0;
   const nudge = spendCoins >= 10
-    ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" style="margin-top:8px;width:100%">Consolidate ▸ ${spendCoins} spendable coins into fewer</button>`
+    ? `<button class="btn btn--sm btn--outline consolidate-btn" data-tokenid="${esc(b.tokenid)}" >Consolidate ${spendCoins} spendable coins</button>`
     : "";
   // Headline = SENDABLE — what the user can actually spend. `confirmed` (total incl. coins locked in
   // scripts/pools) was misleading: it made a $2-spendable wallet read as $600. Locked = confirmed − sendable,
@@ -890,10 +985,15 @@ function balCardHtml(b) {
   const locked = decSub(confirmed, sendable);
   const nft = isNftBal(b);
   const sub = nft ? "Spendable · NFT" : "Spendable";
-  return `<div class="card card--token" data-tokenid="${esc(b.tokenid || MINIMA)}">
-    <div class="kv"><span class="kv__k">${iconCell}${esc(name)}</span><span class="kv__v">${esc(TOK.tidyAmount(sendable))}</span></div>
-    <div class="kv bal-sub"><span class="kv__k">${sub}</span><span class="kv__v">${esc(TOK.ticker(b.token) || "")}</span></div>
-    <div class="bal-breakdown">${esc(balBreakdown(b, confirmed, locked, coins))}</div>
+  // Laid out as the phone's view_balance_row: icon tile, then name and amount sharing the row half and
+  // half, the details as a faint caption beneath.
+  const tick = TOK.ticker(b.token) || "";
+  return `<div class="card card--token balrow" data-tokenid="${esc(b.tokenid || MINIMA)}" tabindex="0" role="button">
+    ${iconCell}
+    <div class="balrow__main">
+    <div class="balrow__top"><span class="balrow__name">${esc(name)}</span><span class="balrow__amt">${esc(TOK.tidyAmount(sendable))}</span></div>
+    <div class="bal-breakdown">${esc(sub)}${tick ? " " + esc(tick) : ""}  ·  ${esc(balBreakdown(b, confirmed, locked, coins))}</div>
+    </div>
     ${nft || !(Number(sendable) > 0) ? "" : `<div class="bal-tools">
       <button class="btn btn--sm btn--outline tok-tool" data-tool="split" data-tokenid="${esc(b.tokenid || MINIMA)}" title="Split some of this into several equal coins, so you can make several sends without waiting for change">Split</button>
       ${spendCoins >= 2 ? `<button class="btn btn--sm btn--outline tok-tool" data-tool="consolidate" data-tokenid="${esc(b.tokenid || MINIMA)}" title="Merge this token's ${spendCoins} spendable coins into fewer, larger ones">Consolidate</button>` : ""}
@@ -1298,7 +1398,7 @@ function showPayResult(ok, message, txid, ambiguous) {
 MailPanel.init({
   api, esc, el, toast, copy, short, relTime,
   showPrompt, showConfirm, showActionSheet, scanQR,
-  cycleTheme, TOK
+  TOK
 });
 function renderMail() {
   if (!running) { el("mailBody").innerHTML = `<div class="empty">Start your node to use Mail.</div>`; return; }
@@ -1310,6 +1410,7 @@ async function refreshMailBadge() {
   const n = await MailPanel.badge();
   const b = el("mailBadge"); if (!b) return;
   b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
+  paintTrayDot();
 }
 // ---- KeetChat — the panel lives in renderer/chat.js (keets transport; main/chat.js owns the inbox) --------
 ChatPanel.init({ api, esc, el, toast, copy, showPrompt, showConfirm });
@@ -1870,6 +1971,40 @@ function renderTerminal() {
 }
 
 // ---- Settings --------------------------------------------------------------
+// ---- Apps tab: the phone's "Internal" list, one row per tray app ----
+function renderApps() {
+  el("appsList").innerHTML = TRAY_APPS.map(a => `<div class="apps-row">
+    ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
+    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}</div><div class="apps-row__state">${a.id === "core" ? "Always on" : "In app drawer"}</div></div>
+  </div>`).join("");
+}
+// ---- Minima Faucet (a tray app; the card used to sit in Settings) ----
+async function renderFaucet() {
+  const host = el("faucetBody");
+  if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
+  if (el("faucetGo")) return;                           // already drawn: keep what the user typed and the last answer
+  const addr = await tryCmd("getaddress");
+  const fullAddr = (addr && (addr.miniaddress || addr.address)) || "";
+  host.innerHTML = `
+    <div class="card"><div class="card__title">Minima Faucet</div>
+      <div class="view__desc">Request a tiny amount of Minima to your address. It is enough to get started and to send MinimaMail.</div>
+      <div class="field"><div class="field__label">Your address</div>
+        <div class="seg"><input class="field__input" id="faucetAddr" placeholder="Mx… or 0x…" value="${esc(fullAddr)}" />
+          <button class="btn btn--outline btn--sm" id="faucetMine">My address</button></div></div>
+      <button class="btn btn--primary btn--full" id="faucetGo">Request Minima</button>
+      <div class="status" id="faucetStatus"></div>
+    </div>`;
+  el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
+  el("faucetGo").onclick = async () => {
+    const addr = el("faucetAddr").value.trim();
+    if (!validAddr(addr)) { toast("Enter a valid Mx… / 0x… address.", "err"); return; }
+    const btn = el("faucetGo"), st = el("faucetStatus");
+    btn.disabled = true; btn.textContent = "Requesting…"; st.textContent = "Contacting the faucet…"; st.className = "status status--dim";
+    try { const r = await api.faucet(addr); st.textContent = r.message; st.className = "status " + (r.status ? "status--ok" : "status--err"); toast(r.message, r.status ? "ok" : "err"); }
+    catch (e) { st.textContent = "Faucet error."; st.className = "status status--err"; }
+    btn.disabled = false; btn.textContent = "Request Minima";
+  };
+}
 async function renderSettings() {
   const host = el("settingsBody");
   if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
@@ -1884,7 +2019,7 @@ async function renderSettings() {
   host.innerHTML = `
     <div class="card"><div class="card__title">Node</div>
       <div class="view__desc">${kind === "parlons"
-        ? "This is the <b>Parlons Node</b>: a full Minima node plus your Parlons account (chat, calls, payments) under this node's seed, and a Maxima relay when you contribute. The Parlons tab is your account."
+        ? "This is the <b>Parlons Node</b>: a full Minima node plus your Parlons account (chat, calls, payments) under this node's seed, and a Maxima relay when you contribute. Parlons, in the app tray, is your account."
         : "This is the <b>plain Minima node</b>. The Parlons Node is the same node plus your Parlons account under this seed — same chain, same wallet, same data folder."}</div>
       <label class="prow"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span class="prow__l">Parlons Node — node + your Parlons account (recommended)</span></label>
       <label class="prow"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span class="prow__l">Plain Minima node — no Parlons account</span></label>
@@ -1904,14 +2039,6 @@ async function renderSettings() {
       <button class="btn btn--outline btn--full" id="setReveal" style="margin-top:8px">Reveal seed phrase</button>
       <div class="addrbox" id="setSeed" style="display:none;white-space:normal;line-height:1.6"></div>
       <button class="btn btn--outline btn--full" id="setRestore">Restore from a different seed…</button>
-    </div>
-    <div class="card"><div class="card__title">Faucet — get free Minima</div>
-      <div class="view__desc">Request a tiny amount of Minima to your address — enough to get started and send minimaMail.</div>
-      <div class="field"><div class="field__label">Your address</div>
-        <div class="seg"><input class="field__input" id="faucetAddr" placeholder="Mx… or 0x…" value="${esc(fullAddr === "—" ? "" : fullAddr)}" />
-          <button class="btn btn--outline btn--sm" id="faucetMine">My address</button></div></div>
-      <button class="btn btn--outline btn--full" id="faucetGo">Request Minima</button>
-      <div class="status" id="faucetStatus"></div>
     </div>
     <div class="card"><div class="card__title">Resync chain</div>
       <div class="view__desc">Re-fetch the chain and your coins from a MegaMMR host (seconds). Use if the node is stuck or behind — with just a host, your seed, keys and key-uses are left untouched.</div>
@@ -1941,13 +2068,13 @@ async function renderSettings() {
       <div class="status" id="kuAuditStatus"></div>
       <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse — automatically when you open this panel, and when you tap the button. Nothing else leaves your node.</div>
     </div>
-    <div class="card"><div class="card__title">Backup</div>
+    <div class="card" id="bkCard"><div class="card__title">Backup</div>
       <div class="view__desc">Writes an encrypted recovery backup into the node's data folder. Your seed phrase (above) is the ultimate backup.</div>
       <div class="field"><input class="field__input" id="bkPw" type="password" placeholder="backup password" /></div>
       <button class="btn btn--outline btn--full" id="setBackup">Create encrypted backup</button>
     </div>
     <div class="card"><div class="card__title">Address labels</div>
-      ${labelKeys.length ? labelKeys.map(a => `<div class="kv"><span class="kv__k" style="word-break:break-all">${esc(labels[a])} <span style="color:var(--dim2);font-size:11px">${esc(short(a, 24))}</span></span><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("") : `<div class="view__desc">No labels yet. Name an address in the Receive tab.</div>`}
+      ${labelKeys.length ? labelKeys.map(a => `<div class="kv"><span class="kv__k" style="word-break:break-all">${esc(labels[a])} <span style="color:var(--dim2);font-size:11px">${esc(short(a, 24))}</span></span><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("") : `<div class="view__desc">No labels yet. Name an address on the Receive screen.</div>`}
     </div>
     <div class="card"><div class="card__title">History</div>
       <div class="view__desc">Your transaction history is stored locally (the node prunes old data). Clear it if you switch wallets.</div>
@@ -1958,25 +2085,12 @@ async function renderSettings() {
       <button class="btn btn--sm btn--outline" id="diagGo">Run</button>
       <pre class="logbox" id="diagOut"></pre>
     </div>
-    <div class="card"><div class="card__title">Appearance</div>
-      <button class="btn btn--outline btn--full" id="setTheme">Theme: ${esc(CFG.theme)}</button>
-    </div>
     <div class="card"><div class="card__title">Open at login</div>
       <div class="view__desc">Start minimaCore — and so your node — when you log in to this computer. It opens to the tray on Mac. Uses the OS login items on Mac and Windows and the autostart folder on Linux.</div>
       <button class="btn btn--outline btn--full" id="setAutostart">${CFG.openAtLogin ? "Stop opening at login" : "Open at login"}</button>
     </div>
     <div id="chanceLeft"></div>`;
   el("setAddr").onclick = () => copy(fullAddr);
-  el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
-  el("faucetGo").onclick = async () => {
-    const addr = el("faucetAddr").value.trim();
-    if (!validAddr(addr)) { toast("Enter a valid Mx… / 0x… address.", "err"); return; }
-    const btn = el("faucetGo"), st = el("faucetStatus");
-    btn.disabled = true; btn.textContent = "Requesting…"; st.textContent = "Contacting the faucet…"; st.className = "status status--dim";
-    try { const r = await api.faucet(addr); st.textContent = r.message; st.className = "status " + (r.status ? "status--ok" : "status--err"); toast(r.message, r.status ? "ok" : "err"); }
-    catch (e) { st.textContent = "Faucet error."; st.className = "status status--err"; }
-    btn.disabled = false; btn.textContent = "Request Minima";
-  };
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
     if (u.error && !u.available) b.textContent = "Could not read the feed (" + u.error + "). Running v" + u.running + ".";
@@ -2001,7 +2115,7 @@ async function renderSettings() {
       CFG = await api.saveConfig({ heapMb });
       await api.setNodeKind(want);
       CFG = await api.getConfig();
-      stat.textContent = want === "parlons" ? "Parlons Node starting — see the Parlons tab." : "Plain Minima node starting.";
+      stat.textContent = want === "parlons" ? "Parlons Node starting. Open Parlons from the app tray." : "Plain Minima node starting.";
       toast("Node restarting…", "ok");
     } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
     el("setKindApply").disabled = false;
@@ -2058,7 +2172,6 @@ async function renderSettings() {
   });
   el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
   el("diagGo").onclick = async () => { const c = el("diagCmd").value.trim(); if (!c) return; try { const r = await api.cmd(c); el("diagOut").textContent = JSON.stringify(r, null, 2); } catch (e) { el("diagOut").textContent = e.message; } };
-  el("setTheme").onclick = () => { cycleTheme(); renderSettings(); };
   el("setAutostart").onclick = async () => {
     const on = !CFG.openAtLogin;
     CFG = await api.saveConfig({ openAtLogin: on });
@@ -2676,7 +2789,7 @@ async function onShopUpdate() {
   }, 350);
 }
 async function refreshShopBadge() {
-  try { const n = await api.shopNewCount(); const b = el("shopBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; } catch (e) {}
+  try { const n = await api.shopNewCount(); const b = el("shopBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; paintTrayDot(); } catch (e) {}
 }
 
 async function renderMiniMall() {

@@ -1,7 +1,9 @@
 /* ============================================================================
-   minimaCore — TERMINAL identity. Official Minima Brand Guidelines 2022 palette,
-   pared to BLACK / WHITE / ORANGE. Manrope (brand face) + Geist Mono (numerals).
-   The outline logo mark is the cornerstone motif. Dark is default; light is the toggle.
+   Minima Core Desktop: the Pandamonium look. Every colour, radius and type size
+   below is Pandamonium's own (apks/base res/values/{colors,dimens,type,themes}.xml
+   and values-night/colors.xml). 1 dp = 1 CSS px, 1 sp = 1 CSS px. The theme follows
+   the system (prefers-color-scheme), as the phone does. The shell itself (toolbar,
+   tabs, tray, menu, footer) is in shell.css.
    ========================================================================== */
 @font-face{font-family:"Manrope";font-style:normal;font-weight:200 800;font-display:swap;
   src:url("fonts/Manrope-variable.woff2") format("woff2");}
@@ -9,55 +11,58 @@
   src:url("fonts/GeistMono-variable.woff2") format("woff2");}
 
 :root {
-    /* TERMINAL · Dark (default) — Minima dark black ground, orange signal */
-    --bg: #0D0E10;            /* Minima "dark black" */
-    --surface: #16181C;       /* Minima "core black" */
-    --surface2: #1E2126;      /* toward "contrast black" #363A3F */
-    --border: rgba(145,145,157,.16);      /* hairlines in Minima core grey */
-    --border-light: rgba(145,145,157,.30);
-    --text: #F4F4F5;
-    --heading: #FFFFFF;
-    --dim: #91919D;           /* Minima core grey */
-    --dim2: #5A5E66;
-    --muted: #91919D;
-    --green: #46D28A; --green-bg: rgba(70,210,138,.14);
-    --red: #F0616D;   --red-bg: rgba(240,97,109,.14);
-    --amber: #E0B24A; --amber-bg: rgba(224,178,74,.14);
-    --accent: #FF7358;                    /* Minima core orange 80% tint (UI-sanctioned) */
-    --accent-strong: #FF512F;             /* core orange (logo colour) */
-    --accent-hover: #D63110;              /* dark orange — rollover on orange buttons */
-    --accent-bg: rgba(255,115,88,.14);
-    --on-accent: #160B06;
-    --logo-ink: #FFFFFF;                  /* the outline mark's ink stroke on dark */
-    --grain: .04;
-    --radius: 4px;
+    color-scheme: dark;
+    /* brand constants, identical in light and dark */
+    --orange: #FF4A2B;            /* minima_orange */
+    --orange-pressed: #E43C20;    /* minima_orange_pressed */
+    --blue: #2F6BF6;              /* minima_blue */
+    /* values-night/colors.xml */
+    --bg: #0F1114;                /* core_bg */
+    --surface: #16181C;           /* core_surface */
+    --surface2: #1C2026;          /* core_surface_variant */
+    --border: #262A31;            /* core_outline */
+    --text: #F4F6F8;              /* core_text */
+    --dim: #9AA0A8;               /* core_text_mid */
+    --dim2: #5E646D;              /* core_text_faint */
+    --green: #34C759;             /* status_good */
+    --amber: #FFB020;             /* status_warn */
+    --red: #FF5A3D;               /* status_bad */
+    --green-bg: rgba(52,199,89,.14); --amber-bg: rgba(255,176,32,.14); --red-bg: rgba(255,90,61,.14);
+    /* names the existing views already use */
+    --border-light: var(--border);
+    --heading: var(--text);
+    --muted: var(--dim);
+    --accent: var(--orange);
+    --accent-strong: var(--orange);
+    --accent-hover: var(--orange-pressed);
+    --accent-bg: rgba(255,74,43,.12);
+    --on-accent: #FFFFFF;         /* on_primary */
+    --logo-ink: var(--text);
+    /* one corner system: cards 16, controls 12, buttons 13 */
+    --radius-card: 16px;
+    --radius: 12px;
+    --radius-btn: 13px;
     --sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "Geist Mono", ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
     --chrome-font: var(--sans);
 }
-
-/* TERMINAL · Light — Minima paper (core grey 10% tint / white), orange darkened for contrast */
-:root[data-theme="light"] {
-    --bg: #F4F4F5;            /* Minima core grey 10% tint */
+/* values/colors.xml (light) */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #F4F5F7;
     --surface: #FFFFFF;
-    --surface2: #F9F9FA;
-    --border: rgba(22,24,28,.13);
-    --border-light: rgba(22,24,28,.26);
-    --text: #16181C;
-    --heading: #0D0E10;
-    --dim: #6F6F7A;
-    --dim2: #A7A7B0;
-    --muted: #6F6F7A;
-    --green: #17A05C; --green-bg: rgba(23,160,92,.12);
-    --red: #D6323F;   --red-bg: rgba(214,50,63,.10);
-    --amber: #A87B1E; --amber-bg: rgba(168,123,30,.12);
-    --accent: #D63110;                    /* dark orange reads on light */
-    --accent-strong: #FF512F;
-    --accent-hover: #B0270C;
-    --accent-bg: rgba(214,49,16,.09);
-    --on-accent: #FFFFFF;
-    --logo-ink: #16181C;
-    --grain: .02;
+    --surface2: #F0F2F4;
+    --border: #E4E7EB;
+    --text: #14171B;
+    --dim: #5B616B;
+    --dim2: #9CA2AB;
+    --green: #1F9D48;
+    --amber: #B8791A;
+    --red: #D33B22;
+    --green-bg: rgba(31,157,72,.12); --amber-bg: rgba(184,121,26,.12); --red-bg: rgba(211,59,34,.10);
+    --accent-bg: rgba(255,74,43,.10);
+  }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -66,68 +71,37 @@ body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--sans);
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 15px;
+    line-height: 1.45;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     font-variant-numeric: tabular-nums;
 }
-/* fixed grain overlay — kills banding on the near-black ground + adds terminal texture */
-body::after {
-    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none; opacity: var(--grain, .04);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-.shell { max-width: 640px; margin: 0 auto; padding: 16px; }
-
-/* Header */
-.hdr {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 0 16px; border-bottom: 1px solid var(--border);
-    flex-wrap: wrap; gap: 10px;
-}
-.hdr__logo { display: flex; align-items: baseline; gap: 10px; }
-.hdr__mark { color: var(--accent); font-size: 20px; }
-.hdr__title { font-family: var(--chrome-font); font-size: 18px; font-weight: 700; color: var(--accent); }
-.hdr__sub { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; }
-.hdr__style { color: var(--accent); font-family: var(--chrome-font); font-size: 11px; font-weight: 700; letter-spacing: 1px; cursor: pointer; user-select: none; }
-.hdr__wallet { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.hdr__status { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
-
-/* Tabs */
-.tabs { display: flex; gap: 2px; margin: 14px 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
-.tab {
-    background: none; border: none; color: var(--dim); font-family: var(--chrome-font);
-    font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
-    padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
-    transition: color .15s, border-color .15s;
-}
-.tab:hover { color: var(--text); }
-.tab--active { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* Views */
 .view { display: none; padding: 8px 0 24px; }
 .view--active { display: block; }
-.view__title { font-size: 19px; font-weight: 700; margin-bottom: 2px; color: var(--heading); }
+.view__title { font-size: 18px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 12px; color: var(--heading); }
 .view__desc { color: var(--dim); font-size: 13px; margin-bottom: 16px; }
-.view__sub { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 18px 0 8px; }
+.view__sub { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--dim2); margin: 18px 0 8px; }
 
 /* Cards */
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px; margin-bottom: 12px; }
 .card--accent { border-left: 3px solid var(--accent); }
 .card--amber { border-color: var(--amber); }
-.card__title { font-size: 15px; font-weight: 700; color: var(--heading); margin-bottom: 6px; }
+/* a card's own heading is the phone's section eyebrow ("TOKENS", "NODE"): small, spaced, faint */
+.card__title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--dim2); margin-bottom: 10px; }
 .tok-wrap { position: relative; display: inline-block; vertical-align: middle; margin-right: 9px; }
-.tok-icon { display: block; width: 28px; height: 28px; border-radius: 6px; object-fit: cover; background: var(--surface2); }
+.tok-icon { display: block; width: 28px; height: 28px; border-radius: 10px; object-fit: cover; background: var(--surface2); }
 .tok-icon--native { background: #fff; object-fit: contain; padding: 3px; }   /* official black-on-white Minima mark on its white tile */
 .tok-badge {   /* web-validation tick — as in Minima Core / the official wallets */
     position: absolute; bottom: -3px; right: -3px; width: 15px; height: 15px; border-radius: 50%;
     background: var(--green); color: #fff; font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
     border: 2px solid var(--surface); box-sizing: content-box;
 }
-.kv { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 13px; }
+.kv { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
 .kv__k { color: var(--dim); }
-.kv__v { color: var(--text); font-family: var(--mono); text-align: right; word-break: break-word; }
+.kv__v { color: var(--text); font-weight: 600; text-align: right; word-break: break-word; }
 .kv__v--green { color: var(--green); }
 .kv__v--amber { color: var(--amber); }
 .kv__v--red { color: var(--red); }
@@ -154,31 +128,35 @@ body::after {
 }
 .input::placeholder { color: var(--dim2); }
 .field { display: block; margin-bottom: 12px; }
-.field__label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 5px; }
+.field__label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--dim2); margin-bottom: 6px; }
 .field__input {
     width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
-    color: var(--heading); font-family: var(--mono); font-size: 16px; padding: 11px 13px; outline: none;
+    color: var(--heading); font-family: var(--sans); font-size: 15px; padding: 12px 14px; outline: none;
 }
+.field__input::placeholder { color: var(--dim2); }
 .field__input:focus { border-color: var(--accent); }
 .field__input[readonly] { color: var(--dim); }
 
-/* Buttons */
+/* Buttons: Widget.MinimaCore.Button (13 radius, 48 high, Label 15, sentence case; drawn Regular on the phone). Primary is solid
+   Minima orange; outlined is a hairline with the normal text colour. */
 .btn {
-    display: inline-block; font-family: var(--chrome-font); font-size: 13px; font-weight: 700; letter-spacing: 1px;
-    text-transform: uppercase; padding: 12px 18px; border: 1px solid var(--border); border-radius: var(--radius);
-    cursor: pointer; background: var(--surface2); color: var(--text); transition: all .15s;
+    display: inline-flex; align-items: center; justify-content: center; text-align: center;
+    font-family: var(--sans); font-size: 15px; font-weight: 400; letter-spacing: .01em; line-height: 1.2;
+    min-height: 48px; padding: 8px 22px; border: 1px solid var(--border); border-radius: var(--radius-btn);
+    cursor: pointer; background: transparent; color: var(--text); transition: background .13s, border-color .13s, color .13s;
 }
-.btn:hover { border-color: var(--dim); }
+.btn:hover { border-color: var(--dim2); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn--primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.btn--primary:hover { filter: brightness(1.08); }
-.btn--full { width: 100%; margin-top: 12px; padding: 14px; }
+.btn--primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn--full { width: 100%; margin-top: 12px; }
 .btn--ghost { background: none; color: var(--dim); }
-.btn--sm { padding: 6px 12px; font-size: 11px; }
-.btn--outline { background: none; color: var(--accent); border-color: var(--accent); }
+.btn--sm { min-height: 36px; padding: 6px 14px; font-size: 13px; font-weight: 500; }
+.btn--outline { background: none; color: var(--text); border-color: var(--border); }
+.btn--outline:hover { border-color: var(--orange); }
 
 .actions { display: flex; gap: 8px; margin-top: 12px; }
-.actions .btn { flex: 1; text-align: center; padding: 10px; }
+.actions .btn { flex: 1; }
 
 /* Status line */
 .status { margin-top: 10px; font-family: var(--mono); font-size: 12px; min-height: 16px; word-break: break-word; }
@@ -189,16 +167,11 @@ body::after {
 
 /* Chips / toggles */
 .chip {
-    font-family: var(--chrome-font); font-size: 12px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
-    padding: 6px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); color: var(--dim); cursor: pointer;
+    font-family: var(--sans); font-size: 13px; font-weight: 600;
+    padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--dim); cursor: pointer;
 }
 .chip--active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
 .chip-row { display: flex; gap: 8px; margin-bottom: 12px; }
-
-.statuschip { font-family: var(--chrome-font); font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 100px; }
-.statuschip--warn { color: var(--amber); background: var(--amber-bg); border: 1px solid var(--amber); }
-.statuschip--ok { color: var(--green); background: var(--green-bg); border: 1px solid var(--green); }
-.statuschip--err { color: var(--red); background: var(--red-bg); border: 1px solid var(--red); }
 
 /* Health bar */
 .health { margin-top: 10px; }
@@ -213,8 +186,8 @@ body::after {
 .row__mid { flex: 1; min-width: 0; }
 .row__l1 { font-size: 14px; font-weight: 600; color: var(--text); }
 .row__l1--green { color: var(--green); } .row__l1--red { color: var(--red); }
-.row__l2 { font-size: 12px; color: var(--dim); font-family: var(--mono); word-break: break-word; }
-.row__r { font-size: 11px; color: var(--dim); font-family: var(--mono); text-align: right; }
+.row__l2 { font-size: 12px; color: var(--dim); word-break: break-word; }
+.row__r { font-size: 12px; color: var(--dim); text-align: right; }
 
 .empty { text-align: center; color: var(--dim); padding: 40px 12px; font-size: 14px; }
 
@@ -231,16 +204,13 @@ body::after {
 
 /* Modals */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 18px; }
-.modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; max-width: 420px; width: 100%; max-height: 88vh; overflow-y: auto; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 20px; max-width: 420px; width: 100%; max-height: 88vh; overflow-y: auto; }
 .modal__title { font-size: 17px; font-weight: 700; color: var(--heading); margin-bottom: 6px; }
 .modal__desc { font-size: 13px; color: var(--dim); margin-bottom: 14px; line-height: 1.5; }
 .modal__note { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 8px; white-space: pre-wrap; line-height: 1.5; }
 .modal__actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
-.token-pick { display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); cursor: pointer; font-family: var(--mono); font-size: 13px; }
+.token-pick { display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); cursor: pointer; font-family: var(--sans); font-size: 14px; }
 .token-pick:hover { border-color: var(--accent); }
-
-.footer { display: flex; justify-content: center; gap: 8px; padding: 18px 0 8px; margin-top: 12px; border-top: 1px solid var(--border-light); font-family: var(--chrome-font); font-size: 11px; color: var(--dim); flex-wrap: wrap; }
-.footer__sep { color: var(--border); }
 
 ::-webkit-scrollbar { width: 7px; height: 7px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

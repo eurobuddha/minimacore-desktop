@@ -3,60 +3,79 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; font-src 'self';" />
-  <title>minimaCore</title>
+  <title>Minima Core</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="shell.css" />   <!-- the Pandamonium shell: toolbar, tabs, tray, menu, footer -->
   <link rel="stylesheet" href="mail.css" />   <!-- the Mail panel, scoped to .mailapp -->
   <link rel="stylesheet" href="chat.css" />   <!-- the KeetChat panel, scoped to .chatapp -->
   <link rel="stylesheet" href="pools.css" />  <!-- the PandaPools panel, scoped to .ppapp -->
   <link rel="stylesheet" href="atomix-ui.css" /> <!-- the AtomiX panel, scoped to .axapp -->
 </head>
 <body>
-  <div class="shell" id="shell">
-    <header class="hdr" id="hdr">
-      <div class="hdr__logo"><svg class="omark" viewBox="0 0 50 45.09" aria-hidden="true"><path fill="currentColor" d="M40.09,12.07l-2.21,9.77L35.06,10,25.14,6l-2.67,11.8L20.11,4,10.2,0,0,45.09H10.82L14,31.26l2.36,13.83H27.13l2.67-11.8h0l2.82,11.8H43.44l6.56-29ZM10,44.09H1.25L10.92,1.37l8,3.24ZM14.53,28.7l5-22.14L21.9,20.4l-5,22.14Zm11.8,15.39H17.56L25.86,7.4l8,3.25Zm6.79-1.21L30.3,31.08l4.26-18.83,2.82,11.8Zm9.52,1.21H33.87L40.8,13.44l8,3.24Z"/></svg><span>minima<b>Core</b></span></div>
-      <span class="hdr__ver" id="hdrVer" title="App version"></span>
-      <button class="hdr__ver hdr__update" id="hdrUpdate" title="A newer minimaCore is available" hidden></button>
-      <div class="hdr__spacer"></div>
-      <button class="statuschip" id="nodePill" title="Node status">starting…</button>
-      <button class="hdr__style" id="themeBtn" title="Theme">◐</button>
-    </header>
+  <div class="shell" id="shell" data-mode="tabs">
+    <!-- The app tray. On the phone it slides over the screen; here it pushes the screen aside (it overlays
+         below 720 px, as on the phone). Rows are built by app.js from TRAY_APPS, in the saved order. -->
+    <aside class="tray" id="tray" aria-label="Apps" hidden>
+      <div class="tray__title">Minima Core</div>
+      <div class="tray__sub">Pandamonium</div>
+      <div class="tray__list" id="trayList"></div>
+      <div class="tray__mode" id="trayMode">Classic mode</div>
+    </aside>
+    <div class="tray-scrim" id="trayScrim" hidden></div>
 
-    <div class="tabs-wrap" id="tabsWrap">
-      <button class="tabs-arrow tabs-arrow--l" id="tabsArrowL" tabindex="-1" aria-label="Scroll tabs left" hidden>‹</button>
-      <nav class="tabs" id="tabs">
-        <button class="tab tab--active" data-view="balances">Balances</button>
-        <button class="tab" data-view="receive">Receive</button>
-        <button class="tab" data-view="send">Send</button>
-        <button class="tab" data-view="webwallet">Web Wallet</button>
-        <button class="tab" data-view="mail">Mail<span class="tab-badge" id="mailBadge" hidden></span></button>
-        <!-- KeetChat: both node kinds run keets (0.18.17+); unhidden by boot(). -->
-        <button class="tab" data-view="chat" id="chatTab" hidden>Chat<span class="tab-badge" id="chatBadge" hidden></span></button>
-        <button class="tab" data-view="pandapools">Pools</button>
-        <button class="tab" data-view="atomix">AtomiX</button>
-        <button class="tab" data-view="ethwallet">ETH Wallet</button>
-        <button class="tab" data-view="minimall">miniMall<span class="tab-badge" id="shopBadge" hidden></span></button>
-        <button class="tab" data-view="parlons">Parlons</button>
-        <button class="tab" data-view="vestr">Vestr</button>
-        <button class="tab" data-view="history">History</button>
-        <button class="tab" data-view="terminal">Terminal</button>
-        <button class="tab" data-view="logs">Logs</button>
-        <button class="tab" data-view="settings">Settings</button>
-        <button class="tab" data-view="node">Node</button>
+    <div class="stage">
+      <header class="bar" id="bar">
+        <button class="bar__btn bar__tray" id="trayBtn" aria-label="Apps" aria-controls="tray" aria-expanded="false"><svg viewBox="0 0 19 14" aria-hidden="true"><path d="M0 0h19v2H0zM0 6h19v2H0zM0 12h19v2H0z"/></svg><span class="bar__dot" id="trayDot" hidden></span></button>
+        <button class="bar__btn bar__back" id="backBtn" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
+        <div class="bar__titles"><div class="bar__brand">Minima Core</div><div class="bar__sub">Pandamonium</div></div>
+        <h1 class="bar__page" id="barPage"></h1>
+        <button class="bar__btn bar__more" id="moreBtn" aria-label="More" aria-haspopup="menu" aria-controls="moreMenu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
+        <!-- The phone's overflow menu, in the phone's order, minus its phone-only items and what has no
+             desktop function yet (Reset Minima, Language). Settings is the desktop's own addition. -->
+        <div class="menu" id="moreMenu" role="menu" aria-label="More" hidden>
+          <button class="menu__item menu__item--update" role="menuitem" id="hdrUpdate" hidden></button>
+          <button class="menu__item" role="menuitem" data-act="logs">Logs</button>
+          <button class="menu__item" role="menuitem" data-act="terminal">Terminal</button>
+          <button class="menu__item" role="menuitem" data-act="backup">Backup &amp; Recovery</button>
+          <button class="menu__item" role="menuitem" data-act="params">Startup Params</button>
+          <button class="menu__item" role="menuitem" data-act="shutdown">Shutdown</button>
+          <button class="menu__item" role="menuitem" data-act="settings">Settings</button>
+        </div>
+      </header>
+
+      <!-- Tab icons: Pandamonium's own vectors (apks/base res/drawable), path data unchanged. -->
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Minima Core">
+        <button class="tab tab--active" role="tab" aria-selected="true" data-tab="wallet"><span class="tab__in"><svg class="tab__ic" viewBox="0 0 105 100" aria-hidden="true"><path d="M84.16,26.77L79.52,48.44L73.58,22.29L52.79,13.38L47.17,39.59L42.21,8.86L21.42,0L0,100H22.71L29.27,69.27L34.23,100H56.98L62.56,73.8L68.5,100H91.21L105,35.63L84.16,26.77Z"/></svg><span class="tab__l">Wallet</span></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="dexicon"><span class="tab__in"><svg class="tab__ic" viewBox="0.5 0 120 120" aria-hidden="true"><path d="M90.5,0H30.5V30H90.5V90H120.5V30V0H90.5Z"/><path d="M0.5,0L30.5,30V0H0.5Z"/><path d="M90.5,90L120.5,120V90H90.5Z"/><path d="M60.5,60H0.5V120H60.5V60Z"/></svg><span class="tab__l">Dexicon</span></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="history"><span class="tab__in"><svg class="tab__ic" viewBox="0 0 160 160" aria-hidden="true"><path d="M81.67,138.33V128.17L117,92.83L127.17,103L91.83,138.33H81.67ZM21.67,103.83V96.17H70.83V103.83H21.67ZM133.67,96.5L123.5,86.33L128.33,81.5C129,80.83 129.86,80.5 130.92,80.5C131.97,80.5 132.89,80.83 133.67,81.5L138.5,86.33C139.17,87.11 139.5,88.03 139.5,89.08C139.5,90.14 139.17,91 138.5,91.67L133.67,96.5ZM21.67,76.5V68.83H98.67V76.5H21.67ZM21.67,49.17V41.67H98.67V49.17H21.67Z"/></svg><span class="tab__l">History</span></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="apps"><span class="tab__in"><svg class="tab__ic" viewBox="0.5 0 120 120" aria-hidden="true"><path d="M120.5,0H90.5V30H120.5V0Z"/><path d="M30.5,0H0.5V30H30.5V0Z"/><path d="M75.5,0H45.5V30H75.5V0Z"/><path d="M120.5,45H90.5V75H120.5V45Z"/><path d="M30.5,45H0.5V75H30.5V45Z"/><path d="M75.5,45H45.5V75H75.5V45Z"/><path d="M120.5,90H90.5V120H120.5V90Z"/><path d="M30.5,90H0.5V120H30.5V90Z"/><path d="M75.5,90H45.5V120H75.5V90Z"/></svg><span class="tab__l">Apps</span></span></button>
+        <!-- Chat rides the keets transport, which both node kinds run (0.18.17+); unhidden by boot(). -->
+        <button class="tab" role="tab" aria-selected="false" data-tab="chat" id="chatTab" hidden><span class="tab__in"><svg class="tab__ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2zM20,16H5.17L4,17.17V4h16V16z"/></svg><span class="tab__l">Chat</span><span class="tab-badge" id="chatBadge" hidden></span></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="node"><span class="tab__in"><svg class="tab__ic" viewBox="0 0 200 200" aria-hidden="true"><path d="M100,0C44.77,0,0,44.77,0,100s44.77,100,100,100,100-44.77,100-100S155.23,0,100,0Z"/></svg><span class="tab__l">Node</span></span></button>
       </nav>
-      <button class="tabs-arrow tabs-arrow--r" id="tabsArrowR" tabindex="-1" aria-label="Scroll tabs right" hidden>›</button>
-    </div>
 
-    <main class="main" id="main">
+      <!-- Temporary holder (until Phase 3): the existing AtomiX and Pools panels share the Dexicon tab. -->
+      <div class="dexswitch" id="dexSwitch" role="group" aria-label="Dexicon">
+        <button class="dexswitch__b" data-view="atomix" aria-pressed="true">AtomiX</button>
+        <button class="dexswitch__b" data-view="pandapools" aria-pressed="false">Pools</button>
+      </div>
+
+      <main class="main" id="main">
       <section class="view view--active" id="view-balances">
-        <div class="view__title">Balances</div>
+        <div class="wal-head"><span>Total balance</span></div>
+        <div class="wal-total"><span class="wal-total__n" id="walTotal">0</span><span class="eyebrow">MINIMA</span></div>
+        <div class="wal-actions">
+          <button class="btn btn--primary" id="walSend">Send</button>
+          <button class="btn btn--outline" id="walReceive">Receive</button>
+        </div>
+        <div class="eyebrow wal-eyebrow">Tokens</div>
         <div id="balList"></div>
       </section>
 
       <section class="view" id="view-receive">
-        <div class="view__title">Receive</div>
         <div class="card">
-          <div class="view__desc">Your address — share it to receive MINIMA or tokens.</div>
+          <div class="view__desc">Your address. Share it to receive MINIMA or tokens.</div>
           <div id="qr" class="qrbox"></div>
           <div class="addrbox" id="recvAddr" title="Click to copy">…</div>
           <button class="btn btn--outline btn--full" id="newAddrBtn">New address</button>
@@ -64,7 +83,6 @@
       </section>
 
       <section class="view" id="view-send">
-        <div class="view__title">Send</div>
         <div class="card" id="sendCard"></div>
       </section>
 
@@ -107,7 +125,6 @@
       </section>
 
       <section class="view" id="view-history">
-        <div class="view__title">History</div>
         <div class="seg" id="histActions"></div>
         <div id="histFilter"></div>
         <div id="histList"></div>
@@ -115,8 +132,7 @@
       </section>
 
       <section class="view" id="view-terminal">
-        <div class="view__title">Terminal</div>
-        <div class="view__desc" style="color:var(--amber)">Commands run against your live node immediately — there is no confirmation guard.</div>
+        <div class="view__desc" style="color:var(--amber)">Commands run against your live node immediately. There is no confirmation step.</div>
         <pre class="logbox termout" id="termOut"></pre>
         <div class="termwrap">
           <div class="termsug" id="termSug" style="display:none"></div>
@@ -130,8 +146,7 @@
       </section>
 
       <section class="view" id="view-logs">
-        <div class="view__title">Logs</div>
-        <div class="view__desc">Live node output — watch what happens after a Terminal command.</div>
+        <div class="view__desc">Live node output. Watch what happens after a Terminal command.</div>
         <pre class="logbox logsout" id="logsBox"></pre>
         <div class="seg" style="margin-top:8px">
           <label class="chip" id="logsFollowChip" style="cursor:pointer"><input type="checkbox" id="logsFollow" checked style="vertical-align:middle;margin-right:5px">Follow</label>
@@ -141,19 +156,32 @@
       </section>
 
       <section class="view" id="view-settings">
-        <div class="view__title">Settings</div>
         <div id="settingsBody"></div>
       </section>
 
+      <section class="view" id="view-apps">
+        <div class="apps-help">Switch integrated apps on or off. Apps you turn off leave the app drawer until you turn them back on.</div>
+        <div class="apps-list" id="appsList"></div>
+      </section>
+
+      <section class="view" id="view-faucet">
+        <div id="faucetBody"></div>
+      </section>
+
       <section class="view" id="view-node">
-        <div class="view__title">Node</div>
         <div class="card" id="nodeCard"></div>
         <div class="card">
           <div class="card__title">Log</div>
           <pre class="logbox" id="logbox"></pre>
         </div>
       </section>
-    </main>
+      </main>
+
+      <footer class="foot" id="foot">
+        <span class="foot__l"><i class="foot__dot" id="footDot"></i><span id="footL">Awaiting blocks…</span></span>
+        <span class="foot__r" id="footR"></span>
+      </footer>
+    </div>
   </div>
 
   <!-- first-run node setup wizard -->
