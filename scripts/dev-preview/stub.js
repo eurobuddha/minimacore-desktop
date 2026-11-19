@@ -7,6 +7,7 @@
  *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
  *   Send: &send=filled|review|error
  *   Any screen: &scroll=<px>
+ *   Key mode: &block=1 (the node can run block keys)  &mode=block|classic  &state=refused  &pick=block|classic
  *   First run: &fr=launcher|params|seed|confirm|confirm-typing|restore|restore-any|starting
  *   Backup & Recovery: &bk=create|restore|resync|keys  &seed=1  &bkdone=1
  *   History: &hist=empty  &hmenu=1  &hdetail=<row>  &chain=checking  &hfilter=1  &hforeign=1
@@ -103,6 +104,9 @@
       catch (e) { return { status: false, error: e.message }; }
     },
     clip: async () => true,
+    // key mode: ?block=1 = a node that can run block keys; &mode=block|classic = the wallet's recorded mode
+    keyMode: async () => ({ mode: Q.get("mode") || (Q.get("fr") ? "" : "classic"), supported: Q.get("block") === "1" }),
+    recordKeyMode: async (m) => m,
     getConfig: async () => ({ setupDone: !Q.get("fr"), walletDone: !Q.get("fr"), megammrHost: "megammr.example:9001", contribute: false, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: {}, params: {}, heapMb: 0, openAtLogin: false, walletMode: "new" }),
     saveConfig: async (p) => Object.assign(await fixtures.getConfig(), p),
     nodeStatus: async () => status, nodeStart: async () => status, nodeStop: async () => status, nodeRestart: async () => status,
@@ -150,7 +154,8 @@
         if (fr === "starting") { CFG.walletMode = "new"; showStarting(); }
         if (fr === "seed" || fr.startsWith("confirm")) postBootNewSeed().then(() => { if (fr !== "seed") el("frSaved").click();
           if (fr === "confirm-typing") { "test only void abandon test only void".split(" ").forEach((w, i) => type(i, w)); type(8, "zzq"); type(9, "ab"); } });
-        if (fr.startsWith("restore")) { el("frRestore").click(); if (fr === "restore-any") document.querySelector('[data-we="any"]').click(); }
+        if (fr.startsWith("restore")) { el("frRestore").click(); if (fr === "restore-any") document.querySelector('[data-we="any"]').click();
+          if (Q.get("pick")) document.querySelector('.modeq [data-mode="' + Q.get("pick") + '"]').click(); }
         if (Q.get("scroll")) setTimeout(() => { el("setupBody").scrollTop = parseInt(Q.get("scroll"), 10); }, 500);
         return;
       }
@@ -158,7 +163,9 @@
       if (view && view !== "balances") selectTab(view);
       if (Q.get("tray") === "1") setTray(true, true);
       if (Q.get("tray") === "0") setTray(false, true);
+      if (Q.get("mode")) onStatus(Object.assign({}, status, { keyMode: Q.get("mode") }));
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
+      if (Q.get("state") === "refused") onStatus(Object.assign({}, status, { state: "error", health: null, keyMode: "block", lastError: "This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with." }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
       if (Q.get("expand") === "1") el("walHead").click();
       // History: ?hmenu=1 opens its options, ?hdetail=<n> the n-th row's detail (&chain=checking: no answer yet), ?hfilter=1 the filter, ?hforeign=1 hides foreign rows

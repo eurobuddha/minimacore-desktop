@@ -17,6 +17,8 @@ const config = require("./config");
 const portmap = require("./portmap");
 const { rpcCall } = require("./rpc");
 const { createNodeLog } = require("./nodelog");
+const keymode = require("./keymode");
+const PARAMS = require("../renderer/params.js");
 
 const LOG_MAX_LINES = 800;
 // Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
@@ -169,6 +171,21 @@ class NodeManager extends EventEmitter {
       : path.join(__dirname, "..", "resources", name);
   }
 
+  /**
+   * THE one answer to "can the bundled node run a block-as-key-uses wallet?", for whichever jar this node
+   * kind runs. Read from the jar itself, once (main/keymode.js). False for both jars shipped today.
+   */
+  blockKeysSupported() { return keymode.jarSupportsBlock(this.jarPath()); }
+
+  /** Why the node must not start with the wallet's recorded key mode ("" = it may). See keymode.startProblem. */
+  keyModeProblem() {
+    const cfg = config.load();
+    let confText = "";
+    if (cfg.params && cfg.params.conf) { try { confText = fs.readFileSync(String(cfg.params.conf), "utf8"); } catch (e) { /* the node reports a missing file itself */ } }
+    return keymode.startProblem({ mode: cfg.keyMode, supported: this.blockKeysSupported(),
+      folderMode: keymode.folderKeyMode(cfg.dataFolder || config.defaultDataFolder()), extraArgs: cfg.extraArgs, confText });
+  }
+
   /** "parlons" (parlons-node.jar: node + Parlons account + relay when contributing) or "minima". */
   kind() { return config.load().nodeKind === "minima" ? "minima" : "parlons"; }
 
@@ -230,8 +247,11 @@ class NodeManager extends EventEmitter {
       args.push("-keetssidecar", sidecar, "-keetsnode", process.execPath);
     }
 
-    // Additional raw args, appended verbatim (quote-aware split).
-    for (const tok of tokenizeArgs(cfg.extraArgs)) args.push(tok);
+    // The wallet's key mode: -blockaskeyuses -lowram for a block wallet, neither for a classic one.
+    args.push(...keymode.startFlags(cfg.keyMode));
+
+    // Additional raw args, appended verbatim (quote-aware split). Never a key-mode flag (start() refuses those first).
+    for (const tok of tokenizeArgs(cfg.extraArgs)) if (!PARAMS.keyModeArg(tok)) args.push(tok);
     return args;
   }
 
@@ -253,8 +273,10 @@ class NodeManager extends EventEmitter {
       else if (v === false || v === "" || v == null) continue;
       else flags.push("-" + k, q(v));
     }
+    flags.push(...keymode.startFlags(cfg.keyMode));   // the wallet's key mode (see buildArgs)
     for (const tok of tokenizeArgs(cfg.extraArgs)) {
       const key = tok.replace(/^-+/, "").toLowerCase();
+      if (PARAMS.keyModeArg(tok)) continue;
       if (tok.startsWith("-") && PARLONS_REFUSED.has(key)) continue;
       flags.push(/\s/.test(tok) ? q(tok) : tok);
     }
@@ -376,6 +398,10 @@ class NodeManager extends EventEmitter {
     this.lastError = null;
     this.fatalHint = "";
     this.parlons = { ready: false, error: "", version: "", cape: false };
+    // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
+    // jar that cannot run it is REFUSED, never started classic (that would add classic keys to it for good).
+    const keyWhy = this.keyModeProblem();
+    if (keyWhy) { this.lastError = keyWhy; this.log("[app] node NOT started: " + keyWhy); this.setState("error"); return; }
     this.setState("starting");
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
@@ -501,7 +527,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 

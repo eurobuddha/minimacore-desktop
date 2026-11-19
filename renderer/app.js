@@ -14,6 +14,8 @@ let nodeState = "";          // the node's last reported state, for the "stopped
 let waitingForNode = false;
 let activeView = "balances";
 let refreshTimer = null;
+let KEYMODE = { mode: "", supported: false };   // the wallet's key mode ("classic" | "block" | "" before a wallet) and whether this node can run block keys
+let FR_CLASSIC = false;      // first run, block-capable node only: the Classic mode switch (off = block key uses)
 let RESTORE = null;          // {seed, keyuses, host} held in memory for a pending restore — NEVER persisted
 let postBootStarted = false; // guard: run the post-boot wallet step (new backup / restore resync) once
 const ICON_CACHE = new Map();// tokenid → { icon: dataURI|null, valid: bool|null } — survives the 15s refresh
@@ -109,6 +111,7 @@ SYSTEM_LIGHT.addEventListener("change", applyTheme);
 // ---- boot ------------------------------------------------------------------
 async function boot() {
   CFG = await api.getConfig();
+  try { KEYMODE = (await api.keyMode()) || KEYMODE; } catch (e) {}
   applyTheme();
   initShell();
   // RULE 1, app-wide: anything rendered with a shortened identifier carries the COMPLETE value in
@@ -159,7 +162,13 @@ async function boot() {
   if (s.state === "stopped") api.nodeStart();
 }
 
+// The tray's bottom line, as the phone's drawer: the mode this wallet really runs in.
+function paintKeyMode(mode) {
+  if (mode) KEYMODE.mode = mode;
+  el("trayMode").textContent = KEYMODE.mode === "block" ? "Block key uses · low-RAM node" : "Classic mode";
+}
 function onStatus(s) {
+  paintKeyMode(s.keyMode);
   paintFooter(s);
   nodeState = s.state;
   // A node the user shut down: say so on every screen, with the way back. (At launch the node is "stopped" for a moment too.)
@@ -229,18 +238,44 @@ function frRestore() {
     <h2 class="ps-h">Restore &amp; resync</h2>
     <p class="ps-intro">Enter your seed phrase, key uses and the address of a Minima MegaMMR node.\n\nEnter key uses above the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds: if unsure, set it higher.</p>
     <div class="eyebrow ps-label">Seed phrase</div><div id="frWords"></div>
+    ${modeQuestionHtml()}
     <div class="eyebrow ps-label">Key uses</div><input class="field__input ps-field" id="frUses" inputmode="numeric" autocomplete="off" placeholder="0 only if this seed has never signed" />
     <div class="eyebrow ps-label">MegaMMR node</div><input class="field__input ps-field" id="frHost" autocomplete="off" spellcheck="false" value="${esc(CFG.megammrHost)}" />
     <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">Proceed</button>`;
   const words = WordEntry.create(el("frWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
+  wireModeQuestion(body);
   el("frGo").onclick = async () => {
+    const km = restoreMode(body); if (km.error) { toast(km.error, "err"); return; }
     const seed = await resolveSeed(words); if (!seed) return;
     const keyuses = el("frUses").value.trim(), host = el("frHost").value.trim() || CFG.megammrHost;
     const built = resyncCommand({ host, phrase: seed, anyphrase: true, keyuses, needPhrase: true });
     if (built.error) { toast(built.error, "err"); return; }
     words.clear();
-    frStart({ seed, keyuses, host });
+    frStart({ seed, keyuses, host, mode: km.mode });
   };
+}
+// "Which mode were these words used in?" Shown only when this node can run block keys; otherwise every wallet is classic.
+function modeQuestionHtml() {
+  if (!KEYMODE.supported) return "";
+  return `<div class="eyebrow ps-label">Which kind of wallet were these words used in?</div>
+    <div class="modeq" role="radiogroup" aria-label="Which kind of wallet were these words used in?">
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>Block key uses</b><span>A wallet made in Pandamonium on a phone, or made new in this app.</span></button>
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>Classic</b><span>A wallet made in an older Minima Core, in MinimaClassic, or with Classic mode switched on.</span></button>
+    </div>
+    <p class="ps-note">The same 24 words give different addresses in each mode. If you choose the wrong one, the wallet opens with no funds in it. Nothing is lost: restore again and choose the other.</p>`;
+}
+function wireModeQuestion(host) {
+  host.querySelectorAll(".modeq .opt").forEach(o => o.onclick = () => host.querySelectorAll(".modeq .opt").forEach(x => { const on = x === o; x.classList.toggle("sel", on); x.setAttribute("aria-checked", on ? "true" : "false"); }));
+}
+// The mode a restore runs in, or { error }. A node without block keys: classic, no question. An install whose
+// mode is already recorded can only restore words of that mode: the mode is never switched.
+function restoreMode(host) {
+  if (!KEYMODE.supported) return { mode: "classic" };
+  const picked = host.querySelector('.modeq .opt[aria-checked="true"]');
+  if (!picked) return { error: "Choose which kind of wallet these words were used in." };
+  const mode = picked.dataset.mode;
+  if (KEYMODE.mode && KEYMODE.mode !== mode) return { error: "This install holds a " + KEYMODE.mode + " key wallet, and that cannot be changed. Words used in a " + mode + " key wallet would open an empty wallet here. Restore them on a fresh install." };
+  return { mode };
 }
 /**
  * What the boxes hold, as the node must be given it (the phone's SeedEntry.resolve). Boxes: Minima's own form
@@ -261,6 +296,11 @@ async function resolveSeed(words) {
 // New Wallet or a restore: save the config, then start the node. restore = { seed, keyuses, host } or null.
 async function frStart(restore) {
   const solo = CFG.network === "solo";
+  // The key mode is recorded ONCE, here, before the node first starts for this wallet. A recorded mode is kept;
+  // otherwise a restore uses the mode its words were used in, and a new wallet is block unless the node cannot
+  // run block keys or Classic mode was switched on. A refusal (the mode is already the other one) stops here.
+  const want = KEYMODE.mode || (restore ? restore.mode : (KEYMODE.supported && !FR_CLASSIC ? "block" : "classic"));
+  try { KEYMODE.mode = await api.recordKeyMode(want); } catch (e) { toast(ipcError(e), "err"); return; }
   RESTORE = restore;   // memory only: applied by megammrsync after the node is up, then cleared
   const mode = restore ? "restore" : "new", megammrHost = restore ? restore.host : CFG.megammrHost;
   const patch = { setupDone: true, walletMode: mode, walletDone: solo, megammrHost };
@@ -292,6 +332,8 @@ function applyNetPreset(P, net, server, customPeer, peersUrl) {
 // What Save writes, or why it cannot. f = { net, server, basePort, rpcPort, dataFolder, customPeer, extraArgs, P }.
 function paramsPatch(f, cfg) {
   if (f.net === "custom" && !f.customPeer) return { error: "Enter a host:port for the custom peer." };
+  const keyArg = MINIMA_PARAMS.keyModeArg(f.extraArgs);
+  if (keyArg) return { error: keyArg + " cannot be set here. The wallet's key mode sets it." };
   return { patch: {
     network: f.net, basePort: parseInt(f.basePort, 10) || cfg.basePort, rpcPortManual: f.rpcPort,
     contribute: !!f.server && f.net !== "solo", dataFolder: f.dataFolder || "",
@@ -314,6 +356,7 @@ function renderParams(host, firstRun, done) {
   host.innerHTML = `
     <h2 class="ps-h">Startup parameters</h2>
     <p class="ps-intro">Configure how the node starts. Changes take effect when the node restarts.</p>
+    ${firstRun && KEYMODE.supported && !KEYMODE.mode ? psSwitch("pClassic", "Classic mode", FR_CLASSIC, "On: the wallet is made with classic keys. Off (default): block key uses on a low-RAM node (-blockaskeyuses -lowram); classic mode uses more RAM.\n\nThis is chosen once, before the wallet exists, and cannot be changed afterwards. The same seed produces different addresses in each mode: to restore a wallet, choose the mode it was made in.") : ""}
     ${psSwitch("pServer", "Server mode (-server)", !!CFG.contribute, "Accept incoming connections instead of client-only. Needs a reachable port (router forward / hotspot).")}
     ${psSwitch("pMega", "MegaMMR (-megammr)", P.megammr === true, "Keep the full Mega MMR so this node can serve seed resyncs. Uses significantly more RAM and storage.")}
     <div class="ps-sw"><span class="ps-sw__t">RPC (-rpcenable)</span><span class="ps-sw__on">Always on</span></div>
@@ -324,7 +367,7 @@ function renderParams(host, firstRun, done) {
     ${psSwitch("pKeets", "Keets transport (-keets)", P.keets === true, "On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart.")}
     <div class="eyebrow ps-label">Extra arguments (advanced)</div>
     <textarea class="field__input ps-field" id="extraArgs" rows="2" spellcheck="false" placeholder="-p2pnodes host:port -txpowdbstore 3 …">${esc(CFG.extraArgs || "")}</textarea>
-    <p class="ps-note ps-note--gap">Space-separated flags passed to the node at boot, after the parameters below. Quotes are respected.</p>
+    <p class="ps-note ps-note--gap">Space-separated flags passed to the node at boot, after the parameters below. Quotes are respected. -blockaskeyuses and -lowram are not allowed here: the wallet's key mode sets them.</p>
     <details class="ps-adv"><summary>All parameters</summary>
       <div class="setup-sec"><div class="setup-sec__h">Network</div>
         <label class="opt" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network.</span></label>
@@ -388,6 +431,7 @@ function renderParams(host, firstRun, done) {
     sw.setAttribute("aria-checked", sw.getAttribute("aria-checked") === "true" ? "false" : "true");
     if (sw.id === "pMega") P.megammr = isOn("pMega");
     else if (sw.id === "pKeets") P.keets = isOn("pKeets");
+    else if (sw.id === "pClassic") FR_CLASSIC = isOn("pClassic");   // kept for this first run only; recorded when the wallet is made
     else if (sw.id === "pServer" && net !== "solo") Object.assign(P, isOn("pServer") ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     renderAdvanced();
   });
@@ -576,7 +620,7 @@ function renderBackup() {
     <button class="btn btn--outline ps-btn" id="bkShow">Show seed phrase</button>
     <div class="eyebrow ps-label bk-gap">Rebuild wallet from seed phrase</div>
     <p class="ps-note ps-note--body">Replace this node's wallet with the one for a seed phrase, then resync from a MegaMMR node. Destructive.</p>
-    <div class="eyebrow ps-label">Seed phrase</div><div id="bkWords"></div>` +
+    <div class="eyebrow ps-label">Seed phrase</div><div id="bkWords"></div>` + modeQuestionHtml() +
     field("bkUses", "Key uses", 'inputmode="numeric" placeholder="higher than any previous rebuild of this seed"') + hostField +
     `<button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Rebuild">Rebuild</button><div class="bk-status" id="bkStatus" role="status"></div>`;
   $("bkShow").onclick = async () => {
@@ -587,7 +631,9 @@ function renderBackup() {
     box.textContent = p; box.hidden = false; $("bkShow").textContent = "Hide seed phrase";
   };
   const words = WordEntry.create($("bkWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
-  $("bkGo").onclick = async () => { const seed = await resolveSeed(words); if (!seed) return;
+  wireModeQuestion(host);
+  $("bkGo").onclick = async () => { const km = restoreMode(host); if (km.error) { toast(km.error, "err"); return; }
+    const seed = await resolveSeed(words); if (!seed) return;
     run("bkGo", "Rebuild", built({ host: $("bkHost").value, phrase: seed, anyphrase: true, keyuses: $("bkUses").value, needPhrase: true }), "Rebuild this wallet?",
     "Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds.", "Rebuild"); };
 }
@@ -945,13 +991,14 @@ function blockTime(t) {
 function paintFooter(s) {
   const h = s.health || {}, up = s.state === "running";
   el("footDot").dataset.state = s.state || "";
-  el("footL").textContent = up ? (FOOT_KEYS == null ? "Awaiting blocks…" : "Key uses: " + FOOT_KEYS)
+  const keyLabel = KEYMODE.mode === "block" ? "Last key block: " : "Key uses: ";   // the phone's two wordings
+  el("footL").textContent = up ? (FOOT_KEYS == null ? "Awaiting blocks…" : keyLabel + FOOT_KEYS)
     : s.state === "error" ? "Node error" : s.state === "stopped" ? "Node stopped" : "Awaiting blocks…";
   const at = clock(h.time);
   el("footR").textContent = up && h.block ? h.block + (at ? " @ " + at : "") : "";
   if (up && Date.now() - FOOT_KEYS_AT > 60000) {       // one read-only `keys` a minute at most
     FOOT_KEYS_AT = Date.now();
-    tryCmd("keys").then(k => { const n = maxKeyUses(k); if (n != null) { FOOT_KEYS = n; if (running) el("footL").textContent = "Key uses: " + n; } });
+    tryCmd("keys").then(k => { const n = maxKeyUses(k); if (n != null) { FOOT_KEYS = n; if (running) el("footL").textContent = keyLabel + n; } });
   }
 }
 // `keys` reports the most-used key as response.maxuses (what the phone shows); older jars only list the keys.

@@ -179,6 +179,13 @@ ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
 });
+// Key mode (main/keymode.js). The renderer may ASK for a mode when a wallet is created or restored; config
+// records it once and refuses any later change. Block is refused outright on a jar that cannot run it.
+ipcMain.handle("mcd:keyMode", () => ({ mode: config.load().keyMode, supported: node.blockKeysSupported() }));
+ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
+  if (mode === "block" && !node.blockKeysSupported()) throw new Error("The node in this version of the app cannot run a block key wallet.");
+  return config.recordKeyMode(mode === "block" ? "block" : "classic");
+});
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -202,6 +209,9 @@ ipcMain.handle("mcd:parlonsOpenExternal", () => parlons.openExternal());
 ipcMain.handle("mcd:setNodeKind", async (_e, kind) => {
   const k = kind === "minima" ? "minima" : "parlons";
   if (k === "parlons") { const why = node.parlonsBlocker(); if (why) throw new Error(why); }
+  // A block wallet cannot move to a node jar that does not know block keys: say so before anything is saved.
+  if (config.load().keyMode === "block" && !require("./keymode").jarSupportsBlock(path.join(path.dirname(node.jarPath()), k === "parlons" ? "parlons-node.jar" : "minima.jar")))
+    throw new Error("This wallet uses block key uses, and that node cannot run it.");
   config.save({ nodeKind: k });
   chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
   await node.restart();
@@ -643,6 +653,7 @@ app.whenReady().then(() => {
   // (incl. a stale pre-0.1.1 config with setupDone but no wallet step), the renderer runs onboarding and
   // calls nodeStart when the user finishes — otherwise the node would silently start before any choice.
   const c = config.load();
+  if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
   updater.start();

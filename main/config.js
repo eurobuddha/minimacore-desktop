@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const PARAMS = require("../renderer/params.js");   // shared minima.jar param manifest (dual CJS/global)
+const keymode = require("./keymode");
 
 const KEYCHAIN_SERVICE = "com.eurobuddha.minimacore.rpc";
 const KEYCHAIN_ACCOUNT = "minima";
@@ -48,6 +49,9 @@ const DEFAULTS = {
   setupDone: false,          // node wizard completed
   walletDone: false,         // seed onboarding (new/restore) completed
   walletMode: "new",         // "new" (boot+connect) | "restore" (post-boot megammrsync). Seed is NEVER persisted.
+  keyMode: "",               // "classic" | "block": the wallet's key mode, recorded ONCE by recordKeyMode() when the
+                             // wallet is created or restored ("" = no wallet yet). save() never takes it from a patch
+                             // and nothing changes a recorded value. See main/keymode.js.
   dataFolder: "",            // -data (empty → default under userData)
   network: "mainnet",        // mainnet | solo | custom  (a preset that fills the params below)
   customConnect: "",         // host:port for network=custom (folds into params.connect)
@@ -86,6 +90,11 @@ function load() {
   // default only ever helps fresh installs, and every existing one keeps pointing at 31.125.188.214, which
   // is the Pi and has been reassigned. Matched exactly, so a host the user deliberately set is never touched.
   if (merged.megammrHost === "31.125.188.214:9001") merged.megammrHost = DEFAULTS.megammrHost;
+  // Key mode. A recorded value is final. With none recorded, the install is whatever its data already is: a
+  // folder marked block is block; any other node data, or a finished wallet, is classic (every wallet made
+  // before the mode existed). No data and no wallet: "", and first run records the choice.
+  if (merged.keyMode !== "classic" && merged.keyMode !== "block")
+    merged.keyMode = keymode.folderKeyMode(merged.dataFolder || defaultDataFolder()) || (j.walletDone ? "classic" : "");
   // params: keep ONLY flags in the current manifest — a saved value wins, otherwise the default. This adds
   // any newly-supported flag and DROPS ones we've removed (e.g. the MDS flags minimaCore has no layer for),
   // so a stale config can never resurrect a flag we no longer expose.
@@ -109,6 +118,7 @@ function sanitisePatch(cfg) {
   for (const k of Object.keys(cfg || {})) {
     // Drop LOUDLY. A silent drop is what turned the 0.16.97 casinoDollar regression into a "broken button":
     // the setting could never persist, nothing threw, and nothing said why.
+    if (k === "keyMode") continue;   // never from a patch: recordKeyMode() is its only writer
     if (!(k in DEFAULTS)) { console.warn("[config] ignoring unknown config key '" + k + "' — add it to DEFAULTS if it should persist"); continue; }
     const v = cfg[k], want = typeof DEFAULTS[k];
     if (k === "params" || k === "labels") { if (v && typeof v === "object" && !Array.isArray(v)) out[k] = v; continue; }
@@ -130,7 +140,10 @@ function save(patch) {
   // Work on a COPY: the secret-marker rewrite below replaces values in cfg.params, and mutating the caller's
   // object (the live IPC argument) is a side effect no caller asks for.
   const cfg = sanitisePatch(patch);
-  if (cfg.params) cfg.params = Object.assign({}, cfg.params);
+  // The wallet's key mode sets -blockaskeyuses and -lowram. Refused here, so no save path can store them.
+  const arg = PARAMS.keyModeArg(cfg.extraArgs);
+  if (arg) throw new Error(arg + " cannot be set in the extra arguments. The wallet's key mode sets it.");
+  if (cfg.params) { cfg.params = Object.assign({}, cfg.params); for (const f of PARAMS.KEY_MODE_FLAGS) delete cfg.params[f]; }
   const cur = load();
   // Route secret params (passwords / DSNs) to the Keychain; store only a boolean "set" marker in config.
   if (cfg.params) {
@@ -147,6 +160,26 @@ function save(patch) {
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(merged, null, 2));
   return merged;
+}
+
+/**
+ * Record the wallet's key mode, ONCE, before the node first starts for a new or restored wallet. Asking again
+ * for the mode already recorded is fine; asking for the other one is refused. An install whose data folder
+ * already holds a wallet has its mode from load() and so can only ever be "recorded" as what it is: there is
+ * no path from classic to block, or back.
+ */
+function recordKeyMode(mode) {
+  if (mode !== "classic" && mode !== "block") throw new Error("Unknown key mode.");
+  const cur = load();
+  if (cur.keyMode) {
+    if (cur.keyMode !== mode) throw new Error("This wallet's key mode is " + cur.keyMode + " and cannot be changed.");
+  } else {
+    if (mode === "block") keymode.markBlockFolder(cur.dataFolder || defaultDataFolder());   // the folder says so before the config does
+    cur.keyMode = mode;
+  }
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
+  return mode;
 }
 
 /**
@@ -226,4 +259,4 @@ function setSecret(value, account) {
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }
 
-module.exports = { load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+module.exports = { load, save, recordKeyMode, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

@@ -113,7 +113,21 @@
   var ROLE_CONTRIBUTE = { server: true,  isclient: false, mobile: false, desktop: false, nosyncibd: false, limitbandwidth: true };
   var ROLE_LIGHT      = { server: false, isclient: true,  mobile: true,  desktop: false, nosyncibd: true,  limitbandwidth: true };
 
-  var API = { GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+  // The wallet's key mode owns these two (main/keymode.js): they are never a parameter and never an extra argument.
+  var KEY_MODE_FLAGS = ["blockaskeyuses", "lowram"];
+  /** The first key-mode flag in a free-text argument string ("-lowram"), or "". Quotes, case, extra dashes and =value do not hide one. */
+  function keyModeArg(extra) {
+    var toks = String(extra == null ? "" : extra).split(/\s+/);
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i].replace(/["']/g, "");
+      if (t.charAt(0) !== "-") continue;
+      var name = t.replace(/^-+/, "").split("=")[0].toLowerCase();
+      if (KEY_MODE_FLAGS.indexOf(name) >= 0) return "-" + name;
+    }
+    return "";
+  }
+
+  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;

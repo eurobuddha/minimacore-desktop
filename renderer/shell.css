@@ -426,7 +426,8 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
   font: 400 17px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; user-select: text; }
 .seedcard[hidden] { display: none; }
 /* ---------------------------------------------------------------- first run (launcher_activity, newwallet_activity, restorewallet_activity) */
-.firstrun { position: fixed; inset: 0; z-index: 900; display: flex; flex-direction: column; background: var(--bg); }
+/* above the shell's tray, scrim and menu (30 to 35), below the dialogs (.overlay, 40) and the toast (50) */
+.firstrun { position: fixed; inset: 0; z-index: 38; display: flex; flex-direction: column; background: var(--bg); }
 .fr-bar { flex: 0 0 65px; display: flex; align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); }
 .fr-bar[hidden] { display: none; }
 .fr-bar .bar__back[hidden] { display: none; }
@@ -447,7 +448,6 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .firstrun .setup-progress { padding-top: 120px; }
 .firstrun .setup-progress .ps-btn { max-width: 360px; margin-left: auto; margin-right: auto; }
 @media (prefers-color-scheme: dark) { .fr-logo { fill: #FFFFFF; } }
-.toast { z-index: 1100; }
 /* one box per word (the phone's WordEntry) */
 .we-top { display: flex; gap: 6px; }
 .we-btn { flex: 1 1 0; min-height: 40px; padding: 0 14px; border: 0; border-radius: 4px; background: var(--border); color: var(--text); font: 400 14px/20px var(--sans); cursor: pointer; }
@@ -467,3 +467,7 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .we-anyf { margin-top: 8px; padding: 8px; }
 .we-toggle { display: block; margin: 0; padding: 10px 0 4px; border: 0; background: none; color: var(--text); font: 400 13px/18px var(--sans); cursor: pointer; text-align: left; }
 .we-toggle:hover { text-decoration: underline; }
+/* the key mode question on a restore (block-capable node only) */
+.modeq .opt { width: 100%; text-align: left; background: none; font-family: var(--sans); color: var(--text); padding: 12px 14px; margin: 0 0 8px; cursor: pointer; }
+.modeq .opt b { font-weight: 600; font-size: 15px; } .modeq .opt span { font-size: 13px; }
+.modeq .opt.sel { border-color: var(--orange); background: var(--surface2); }

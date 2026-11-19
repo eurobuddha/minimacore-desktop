@@ -158,14 +158,16 @@ test("a free-form phrase is refused when the node cannot carry it or it is list 
   assert.ok(WordEntry.allListWords(FAKE24) && !WordEntry.allListWords("test only void") && !WordEntry.allListWords(FAKE24 + " zzq"));
 });
 
-const flowPrelude = "let CFG = cfg0, RESTORE = null, waitingForNode = false, postBootStarted = true, running = false;\n";
+const flowPrelude = "let CFG = cfg0, RESTORE = null, waitingForNode = false, postBootStarted = true, running = false, KEYMODE = km0, FR_CLASSIC = classic0;\n";
 function flow(opts) {
   opts = opts || {};
   const log = [], toasts = [], saved = [];
   const env = {
     cfg0: Object.assign({ network: "mainnet", megammrHost: "megammr.example:9001", walletDone: false }, opts.cfg),
+    km0: Object.assign({ mode: "", supported: false }, opts.km), classic0: !!opts.classic,
     api: {
       saveConfig: async (p) => { log.push("save:" + Object.keys(p).sort().join(",")); saved.push(p); return Object.assign({}, env.cfg0, ...saved); },
+      recordKeyMode: async (m) => { log.push("record:" + m); if (opts.recordRefused) throw new Error("This wallet's key mode is classic and cannot be changed."); return m; },
       nodeStart: async () => { log.push("nodeStart"); }, nodeRestart: async () => { log.push("nodeRestart"); },
       cmd: async (c) => { log.push("cmd:" + c); return opts.cmdFails ? { status: false, error: "node says no" } : { status: true, response: {} }; },
       clip: async () => true
@@ -177,7 +179,7 @@ function flow(opts) {
     el: (id) => opts.els && opts.els[id] || (opts.els = opts.els || {}, opts.els[id] = { onclick: null, style: {}, textContent: "", insertAdjacentHTML() {} }),
     WordEntry: Object.assign({}, WordEntry, { create: () => ({ phrase: () => opts.typed, problem: () => "Word 3 is empty or not one of the 2048 words.", isAnyPhrase: () => false, clear() {} }) })
   };
-  const fns = lift(["cmd", "resyncCommand", "seedMismatch", "frStart", "postBootRestore", "confirmNewSeed"], env, flowPrelude,
+  const fns = lift(["cmd", "resyncCommand", "seedMismatch", "frStart", "postBootRestore", "confirmNewSeed", "modeQuestionHtml", "restoreMode"], env, flowPrelude,
     ["state: () => ({ RESTORE, waitingForNode, postBootStarted, CFG })", "setRestore: (r) => { RESTORE = r; }"]);
   return { log, toasts, saved, fns, els: () => opts.els };
 }
@@ -185,7 +187,7 @@ function flow(opts) {
 test("New Wallet: the config is saved, then the node starts; the wallet is not marked done and nothing of a seed is saved", async () => {
   const h = flow();
   await h.fns.frStart(null);
-  assert.deepEqual(h.log, ["save:megammrHost,setupDone,walletDone,walletMode", "showStarting", "nodeStart"]);
+  assert.deepEqual(h.log, ["record:classic", "save:megammrHost,setupDone,walletDone,walletMode", "showStarting", "nodeStart"]);
   assert.deepEqual(h.saved[0], { setupDone: true, walletMode: "new", walletDone: false, megammrHost: "megammr.example:9001" });
   assert.equal(h.fns.state().postBootStarted, false, "the post-boot wallet step is armed for this start");
   const solo = flow({ cfg: { network: "solo" } });
@@ -247,4 +249,53 @@ test("first run is the phone's launcher; the seed screens keep the words out of 
   assert.ok(html.includes('<script src="wordentry.js"></script>') && !html.includes("Set up your node"));
   const stub = fs.readFileSync(path.join(ROOT, "scripts", "dev-preview", "stub.js"), "utf8");
   assert.ok(stub.includes('const FAKE_SEED = "TEST ONLY VOID ABANDON ".repeat(6).trim();'), "the preview's seed is four words repeated: plainly not a wallet");
+});
+
+// ---- key mode in the screens (0.18.88); main/keymode.js and the config rules are in scripts/keymode-test.cjs ----
+test("the key mode is recorded before the config is saved and before the node starts, in both capability states", async () => {
+  const first = async (opts, restore) => { const h = flow(opts); await h.fns.frStart(restore || null); return h; };
+  assert.equal((await first({ km: { supported: false } })).log[0], "record:classic", "a node without block keys: every new wallet is classic");
+  assert.equal((await first({ km: { supported: false }, classic: true })).log[0], "record:classic");
+  let h = await first({ km: { supported: true } });
+  assert.deepEqual(h.log, ["record:block", "save:megammrHost,setupDone,walletDone,walletMode", "showStarting", "nodeStart"], "a capable node: new wallets are block, recorded first");
+  assert.equal(h.fns.state().CFG.keyMode, undefined, "the renderer never puts the mode in a config patch");
+  assert.equal((await first({ km: { supported: true }, classic: true })).log[0], "record:classic", "the Classic mode switch");
+  const R = (mode) => ({ seed: "NOT A REAL SEED", keyuses: "1", host: "megammr.example:9001", mode });
+  assert.equal((await first({ km: { supported: true } }, R("classic"))).log[0], "record:classic", "a restore uses the mode its words were used in");
+  assert.equal((await first({ km: { supported: true }, classic: true }, R("block"))).log[0], "record:block");
+  assert.equal((await first({ km: { supported: true, mode: "classic" } }, R("block"))).log[0], "record:classic", "a mode already recorded is the one asked for again");
+  h = await first({ km: { supported: true }, recordRefused: true }, R("block"));
+  assert.deepEqual(h.log, ["record:block"], "a refusal stops everything: no save, no node start");
+  assert.equal(h.fns.state().RESTORE, null, "and no seed is held");
+  assert.equal(h.toasts.length, 1);
+});
+
+test("the mode question and the Classic switch exist only when the node can run block keys", () => {
+  const off = flow({ km: { supported: false, mode: "classic" } }), on = flow({ km: { supported: true } });
+  assert.equal(off.fns.modeQuestionHtml(), "", "no question, no dead switch");
+  assert.deepEqual(off.fns.restoreMode(null), { mode: "classic" });
+  assert.ok(/Which kind of wallet were these words used in\?/.test(on.fns.modeQuestionHtml()) && /different addresses in each mode/.test(on.fns.modeQuestionHtml()));
+  const host = (picked) => ({ querySelector: () => picked ? { dataset: { mode: picked } } : null });
+  assert.ok(on.fns.restoreMode(host(null)).error, "it must be answered");
+  assert.deepEqual(on.fns.restoreMode(host("block")), { mode: "block" });
+  assert.deepEqual(on.fns.restoreMode(host("classic")), { mode: "classic" });
+  const fixed = flow({ km: { supported: true, mode: "classic" } });
+  assert.deepEqual(fixed.fns.restoreMode(host("classic")), { mode: "classic" });
+  assert.ok(/cannot be changed/.test(fixed.fns.restoreMode(host("block")).error), "an existing install is never switched: the other mode's words are refused");
+  const params = source("renderParams");
+  assert.ok(params.includes('firstRun && KEYMODE.supported && !KEYMODE.mode ? psSwitch("pClassic", "Classic mode", FR_CLASSIC'), "the switch: first run, capable node, no wallet yet; off by default");
+  assert.ok(/let FR_CLASSIC = false;/.test(app));
+  for (const fn of ["frRestore", "renderBackup"]) assert.ok(source(fn).includes("modeQuestionHtml()") && source(fn).includes("restoreMode("), fn + " asks");
+  assert.ok(source("frRestore").indexOf("restoreMode(") < source("frRestore").indexOf("resolveSeed("), "asked before the words are read");
+});
+
+test("Startup Params refuses -blockaskeyuses and -lowram; the tray line shows the true mode", () => {
+  const { paramsPatch } = lift(["paramsPatch"]);
+  const P = PARAMS.defaultParams();
+  for (const x of ["-lowram", "-txpowdbstore 3 -blockaskeyuses"]) assert.ok(/cannot be set here/.test(paramsPatch({ net: "mainnet", extraArgs: x, P }, { basePort: 9001 }).error), x);
+  const els = { trayMode: { textContent: "" } };
+  const k = lift(["paintKeyMode"], { el: (id) => els[id] }, 'let KEYMODE = { mode: "", supported: false };\n');
+  k.paintKeyMode("classic"); assert.equal(els.trayMode.textContent, "Classic mode");
+  k.paintKeyMode("block"); assert.equal(els.trayMode.textContent, "Block key uses · low-RAM node");
+  k.paintKeyMode(undefined); assert.equal(els.trayMode.textContent, "Block key uses · low-RAM node", "a status without the mode changes nothing");
 });

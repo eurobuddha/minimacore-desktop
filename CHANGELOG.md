@@ -7,6 +7,22 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.88] — Key mode: recorded once, never switched, and nothing visible until the node supports it
+
+Nothing changes for any wallet today. The node jars this build ships cannot run block-as-key-uses, so every wallet is classic and no new control appears. This release puts the rules in place for the day the jars can (see `docs/JAR_PROOF.md`).
+
+- One function answers whether the bundled node supports `-blockaskeyuses`: it reads the flag's name out of the node jar's own parameter list, once, for whichever jar the chosen node kind runs. With today's jars the answer is no.
+- The wallet's key mode ("classic" or "block") is recorded once in the config, before the node first starts for a new or restored wallet. An install that already holds node data, or a finished wallet, and has no record is classic for good; that is written down at the next launch. Nothing changes a recorded mode: saving settings cannot, and asking to record the other mode is refused.
+- The node gets `-blockaskeyuses -lowram` only for a block wallet on a jar that supports it. A classic wallet gets neither.
+- The node is refused a start, with the reason shown as the node's error, when: the wallet is block and this jar cannot run it (a downgrade; starting it classic would add classic keys to the wallet for good); the data folder holds a wallet of the other mode; no wallet has been set up; or a key-mode flag is in the extra arguments or in a `-conf` file.
+- A block wallet's data folder carries a small marker file, so a lost config cannot turn it classic and a classic install pointed at that folder will not start on it.
+- `-blockaskeyuses` and `-lowram` are refused in Extra arguments, on the screen and again when the config is saved. They are not in the parameter editor.
+- Switching between the Parlons Node and the plain node is refused for a block wallet if the other jar cannot run it.
+- Shown only when the node supports block keys: Startup Params on first run has the phone's "Classic mode" switch (off by default, so new wallets are block), and restoring from a seed asks which kind of wallet the words were used in. The same 24 words give different addresses in each mode; the wrong choice opens an empty wallet. On an install that already has a wallet, words of the other mode are refused, because the install is never switched.
+- The tray's bottom line shows the wallet's real mode: "Classic mode" or "Block key uses · low-RAM node". The footer reads "Last key block" for a block wallet.
+- New `scripts/keymode-test.cjs` covers both capability states by injecting the capability; the jars are only read. `npm run test:wallet` (and so CI) now also runs it and `scripts/core-screens-test.cjs`.
+- Dev preview: `&block=1` (a node that can run block keys), `&mode=block`, `&state=refused`.
+
 ## [0.18.87] — First run: the phone's launcher, seed screen and word boxes
 
 - A new install opens on the phone's launcher: the Minima mark, "MINIMA CORE", and three buttons: New Wallet, Restore Wallet, Startup Params. It replaces the "Set up your node" dialog. Startup Params opens the same screen as in the app, with Save only, and returns to the launcher.
