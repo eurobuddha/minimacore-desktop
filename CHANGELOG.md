@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.80] — Wallet: the coins dialog and coin detail; Split and Consolidate move into it
+
+- Clicking a token on the Wallet tab opens the phone's coins dialog: "<token> coins", the exact sendable, locked and confirmed figures, then every coin the node holds for it with its amount and its whole coin id. A coin that is locked in a contract carries a LOCKED chip (a pool reserve or a registry beacon is named too). Under the list: the coin count, how many are locked, and the sum of the coins, with a warning if that sum is not the confirmed balance. "Copy token ID" copies the whole id and leaves the dialog open.
+- Clicking a coin opens its detail, as the phone: coin id, amount, token amount, token id, address, mini address, whether it is sendable, created, age, MMR entry, spent, store state and state, each in full with its own Copy, then the coin's raw JSON and "Copy JSON".
+- Split and Consolidate are two buttons in that dialog. Split opens the same form the Send screen had (amount, how many coins from 2 to 20) for the token whose dialog it is. Consolidate runs the same function as before: it asks first, checks the pool owner keys, and refuses if one cannot safely sign. Split is offered when the token has a spendable amount and is not a one-of-one; Consolidate when it has at least two spendable coins. The commands sent are unchanged (`scripts/wallet-money-test.cjs`).
+- The Send screen no longer has the Send / Split / Consolidate switch.
+- The older token page (description, supply, decimals, website, validation link) is kept behind "Token details" in the dialog, for tokens other than Minima. The phone has no such page. Its own coin list is removed: the dialog is that list.
+- A coins read that fails says so in the dialog; it is not shown as "No coins for this token."
+- Wording differs from the phone in two places because the shell rule bans the long dash: "Coin, sendable" / "Coin, locked" and "no, locked in a contract".
+
 ## [0.18.79] — Wallet: the phone's header and token rows
 
 - The Wallet tab's header is the phone's: "Total balance" with an arrow at the right. The row opens and closes one line that says what the figure is made of: confirmed, locked, unconfirmed, the coin count and how long ago it was read. It is closed by default.

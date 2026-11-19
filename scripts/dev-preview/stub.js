@@ -4,7 +4,7 @@
  * talks to a node. Not shipped (package.json "build.files" lists main/ and renderer/ only).
  *
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
- *   Wallet: &bal=empty|fail  &expand=1
+ *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none
  */
 "use strict";
 (function () {
@@ -23,7 +23,7 @@
   // ?bal=empty (a wallet that holds nothing), ?bal=fail (the read failed); otherwise the full set:
   // locked amounts, an unconfirmed amount, a long token name, a zero balance, a figure past six decimals
   const balance = Q.get("bal") === "empty" ? [] : [
-    { token: "Minima", tokenid: "0x00", confirmed: "1262.75", unconfirmed: "0", sendable: "1250.750000123456", coins: "5", total: "1000000000" },
+    { token: "Minima", tokenid: "0x00", confirmed: "1262.750000123456", unconfirmed: "0", sendable: "1250.750000123456", coins: "5", total: "1000000000" },
     { token: tok("MxUSD", "MxUSD"), tokenid: MXUSD, confirmed: "320.5", unconfirmed: "4.25", sendable: "300.5", coins: "3", total: "1000000" },
     { token: tok("The Meridian Harbour Lighthouse Preservation Society Commemorative Membership Token, Second Series", "MHLPS"), tokenid: LONG, confirmed: "20", unconfirmed: "0", sendable: "0", coins: "20", total: "5000" },
     { token: tok("Quiet Ledger", "QL"), tokenid: ZERO, confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0", total: "100" },
@@ -32,7 +32,20 @@
   const keys = { keys: [{ publickey: PK("A1"), uses: 37, maxuses: 262144 }, { publickey: PK("B2"), uses: 12, maxuses: 262144 }], total: 2, maxuses: 37 };
   const cmds = {
     balance: () => { if (Q.get("bal") === "fail") throw new Error("preview: the balance read failed"); return balance; },
-    coins: () => [1, 2, 3, 4].map(i => ({ coinid: PK("C" + i), amount: "312.6875", tokenid: "0x00", address: PK("D1"), miniaddress: ADDR })),
+    // every relevant coin of the asked token; `sendable:true` leaves out the ones locked in a contract. ?coins=fail|none
+    coins: (c) => {
+      if (Q.get("coins") === "fail") throw new Error("preview: the coins read failed");
+      if (Q.get("coins") === "none") return [];
+      const tid = (/tokenid:(0x[0-9A-Fa-f]+)/.exec(c) || [])[1] || "0x00", native = tid === "0x00";
+      const coin = (i, amount, locked) => Object.assign({ coinid: PK("C" + i + tid.slice(2, 6)), amount: native ? amount : "0.00000000000000000000000000000000000001", tokenid: tid,
+        address: locked ? PK("9F") : PK("D1"), miniaddress: locked ? "MxG08LOCKEDCONTRACTADDRESS00F1XTURE0000000000000000000000000000" : ADDR,
+        storestate: true, spent: false, mmrentry: String(40 + i), created: String(2427000 + i * 97), age: String(1089 - i * 97),
+        state: locked ? [{ port: 0, type: 2, data: PK("A1") }, { port: 1, type: 1, data: "2429000" }] : [], _locked: locked }, native ? {} : { tokenamount: amount });
+      const set = native ? [coin(1, "600.250000123456"), coin(2, "400.5"), coin(3, "250"), coin(4, "10", true), coin(5, "2", true)]
+        : tid === MXUSD ? [coin(1, "200.5"), coin(2, "100"), coin(3, "20", true)]
+        : tid === LONG ? Array.from({ length: 20 }, (_, i) => coin(i + 1, "1", true)) : tid === NFT ? [coin(1, "1")] : [];
+      return set.filter(x => !/sendable:true/.test(c) || !x._locked).map(x => { const o = Object.assign({}, x); delete o._locked; return o; });
+    },
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
     newaddress: () => ({ address: PK("D2"), miniaddress: ADDR }),
     keys: () => keys,
@@ -79,7 +92,7 @@
     ewStatus: async () => ({ ready: true }),
     ewBalances: async () => ({ address: "0x4B1D9E27A6C0F3581E2D7B9A4C6E8F0A1B3D5C7E", eth: "0.0425", tokens: [
       { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", balance: "125.5", decimals: 6 }] }),
-    ewTokens: async () => [],
+    ewTokens: async () => [], ppPools: async () => [],
     shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
     vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
@@ -99,6 +112,12 @@
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
       if (Q.get("expand") === "1") el("walHead").click();
+      // ?dlg=coins[:n] opens the coins dialog of the n-th token row; ?dlg=coin[:n] goes on to its first coin; ?dlg=split
+      const dlg = (Q.get("dlg") || "").split(":");
+      if (dlg[0]) setTimeout(() => {
+        document.querySelectorAll(".balrow")[parseInt(dlg[1], 10) || 0].click();
+        setTimeout(() => { if (dlg[0] === "coin") document.querySelector(".coin-row" + (dlg[2] ? ":nth-child(" + dlg[2] + ")" : "")).click(); if (dlg[0] === "split") el("coinsSplit").click(); }, 250);
+      }, 250);
       if (Q.get("menu") === "1") { openMenu(); document.activeElement.blur(); }
     } catch (e) { document.title = "PREVIEW ERROR " + e.message; console.error(e); }
   }, 300));

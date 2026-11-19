@@ -197,6 +197,47 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #balList .bal-breakdown { margin-top: 3px; font: 400 11px/15px var(--sans); color: var(--dim2); white-space: pre-wrap; }
 
+/* ---------------------------------------------------------------- dialogs (the phone's AlertDialog: title, body, text buttons) */
+.overlay--dlg { padding: 24px; }
+.dlg { width: 100%; max-width: 560px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface2); border-radius: 28px; box-shadow: var(--menu-shadow); }
+.dlg:focus { outline: none; }
+.dlg__title { flex: 0 0 auto; margin: 0; padding: 22px 24px 14px; font-size: 20px; font-weight: 600; line-height: 28px; color: var(--text); overflow-wrap: anywhere; }
+.dlg__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 4px 0; background: var(--surface); }
+.dlg__btns { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 14px 16px 16px; }
+.dlg__gap { flex: 1 1 0; }
+.dlg__btn { min-height: 40px; padding: 0 12px; border: 0; border-radius: 20px; background: none; color: var(--orange); cursor: pointer;
+  font: 500 14px/20px var(--sans); letter-spacing: .01em; }
+.dlg__btn:hover { background: var(--accent-bg); }
+.dlg__btn--sm { min-height: 36px; padding: 0 10px; font-size: 11px; flex: 0 0 auto; margin: -9px 0 0 4px; }
+/* the coins behind a token (dialog_wallet_coins, view_coin_row) */
+.coins-head { padding: 0 16px 10px; font: 400 13px/18px var(--sans); letter-spacing: .018em; color: var(--dim); white-space: pre-wrap; user-select: text; }
+.coins-status { padding: 14px 16px; font-size: 15px; line-height: 20px; letter-spacing: .03em; color: var(--dim2); }
+.coins-status--warn { color: var(--amber); }
+.coins-status--bad { color: var(--red); }
+.coin-row { padding: 12px 16px; border-top: 1px solid var(--border); cursor: pointer; }
+.coin-row:first-child { border-top: 0; }
+.coin-row:hover { background: var(--surface2); }
+.coin-row:focus-visible { outline-offset: -2px; }
+.coin-row__top { display: flex; align-items: center; gap: 8px; }
+.coin-amt { flex: 1 1 0; min-width: 0; font-size: 15px; line-height: 20px; letter-spacing: .03em; color: var(--text); overflow-wrap: anywhere; }
+.coin-chip { flex: 0 0 auto; padding: 3px 9px; border-radius: 999px; background: var(--surface2); color: var(--dim); font-size: 10px; font-weight: 700; line-height: 14px; letter-spacing: .06em; }
+.coin-chip--locked { color: var(--amber); margin-left: 4px; }
+.coin-row:hover .coin-chip { background: var(--border); }
+.coin-row__cid { margin-top: 4px; font: 400 11px/16px var(--mono); color: var(--dim2); overflow-wrap: anywhere; word-break: break-all; }
+.coins-foot { padding: 12px 16px 4px; font: 400 13px/1.25 var(--sans); letter-spacing: .018em; color: var(--dim2); white-space: pre-wrap; user-select: text; }
+.coins-foot--warn { color: var(--amber); }
+.coins-tools { display: flex; gap: 12px; padding: 14px 16px 16px; }
+.coins-tools .btn { flex: 1 1 0; min-height: 44px; font-size: 15px; font-weight: 400; }
+/* one coin (dialog_coin_detail, view_coin_detail_row) */
+#coinDlg .dlg__body { padding: 4px 20px 16px; }
+.cd-row { padding: 8px 0; }
+.cd-row .eyebrow { margin-bottom: 3px; }
+.cd-row__line { display: flex; align-items: flex-start; }
+.cd-row__v { flex: 1 1 0; min-width: 0; font: 400 12px/18px var(--mono); color: var(--text); overflow-wrap: anywhere; word-break: break-all; white-space: pre-wrap; user-select: text; }
+.cd-raw-h { margin: 16px 0 6px; }
+.cd-raw { margin: 0; padding: 12px; border-radius: 10px; background: var(--surface2); font: 400 11.5px/17px var(--mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; user-select: text; }
+
 /* ---------------------------------------------------------------- Apps tab (view_apps, view_apps_internal_row) */
 .apps-help { padding: 16px 16px 8px; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim2); }
 .apps-row { display: flex; align-items: center; padding: 13px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }

@@ -26,7 +26,7 @@ let termIdx = -1;
 let SUG_ITEMS = [];          // current autocomplete suggestions (from TermComplete.suggest)
 let SUG_SEL = 0;             // highlighted suggestion index
 const SUG_MAX = 40;          // dropdown row cap
-let SEND_TOKENS = [];        // [{tokenid, name, sendable}] for the Send/Split/Consolidate token dropdowns
+let SEND_TOKENS = [];        // [{tokenid, name, sendable}] for the Send token dropdown
 
 function tokenOptions() {
   return SEND_TOKENS.map(t => `<option value="${esc(t.tokenid)}">${esc(t.name)}${t.tokenid !== MINIMA ? " · " + t.tokenid : ""}</option>`).join("");
@@ -1026,7 +1026,7 @@ async function renderBalances() {
   host.innerHTML = bal.map(balCardHtml).join("");
   if (was) { const row = [...host.querySelectorAll(".balrow")].find(r => r.dataset.tokenid === wasTid); if (row) row.focus(); }
   host.querySelectorAll(".balrow").forEach(row => {
-    row.onclick = () => { const b = BAL_BY_TID[row.dataset.tokenid]; if (b) showTokenDetail(b); };
+    row.onclick = () => { const b = BAL_BY_TID[row.dataset.tokenid]; if (b) showCoins(b); };
     row.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); row.click(); } };
   });
   enhanceTokenIcons(host);
@@ -1142,7 +1142,6 @@ function applyIcon(w, e) {
 }
 
 // ---- Token detail modal (rich, mirrors the official/utxoWallet token view) --
-let SEND_MODE_NEXT = null;   // "split" | "consolidate": the Send tab opens on that form (set by a token card's button)
 /** Consolidate one token's coins: say what will happen, check the pool owner keys, then run the node's own command.
  *  The confirmation and the owner-key check are PandaPools' (WalletTools.showConsolidate, checkConsolidation). */
 async function consolidateToken(tid, name) {
@@ -1238,7 +1237,6 @@ async function showTokenDetail(b) {
     ${safeLinkRow("Website", website)}
     ${safeLinkRow("Validation", webv)}
     ${extraRows}
-    ${coins ? `<div class="view__sub tokd-coins-hdr" id="tokdCoinsHdr">▸ Coins (${coins})</div><div id="tokdCoins" hidden></div>` : ""}
     <div class="seg" style="margin-top:12px">
       <button class="btn btn--outline btn--full" id="tokdReceive">Receive</button>
       <button class="btn btn--primary btn--full" id="tokdSend">Send ${esc(tick || name)}</button>
@@ -1247,11 +1245,12 @@ async function showTokenDetail(b) {
   </div></div>`);
 
   const close = () => { const o = el("tokDetail"); if (o) o.remove(); };
+  const leave = () => { close(); const c = el("coinsDlg"); if (c) c.remove(); };   // opened from the coins dialog: going to Send or Receive closes both
   el("tokdClose").onclick = close;
   el("tokDetail").onclick = (e) => { if (e.target.id === "tokDetail") close(); };
   el("tokdId").onclick = () => copy(tid);
-  el("tokdReceive").onclick = () => { close(); selectTab("receive"); };
-  el("tokdSend").onclick = () => { close(); SEND_PRESELECT = tid; selectTab("send"); };
+  el("tokdReceive").onclick = () => { leave(); selectTab("receive"); };
+  el("tokdSend").onclick = () => { leave(); SEND_PRESELECT = tid; selectTab("send"); };
   enhanceTokenIcons(el("tokDetail"));   // swap in the real icon + validated badge (reused path)
 
   // Decimals (tokens only) — best-effort background enrich, never blocks the modal.
@@ -1263,74 +1262,148 @@ async function showTokenDetail(b) {
       if (box && dec != null && dec !== "") { box.querySelector(".kv__v").textContent = String(dec); box.hidden = false; }
     }).catch(() => {});
   }
-
-  // Per-coin list — lazy on first expand (coins has no count-cap; keep the modal light).
-  if (coins) {
-    let loaded = false;
-    el("tokdCoinsHdr").onclick = async () => {
-      const box = el("tokdCoins"), hdr = el("tokdCoinsHdr");
-      const open = box.hidden;
-      box.hidden = !open;
-      hdr.textContent = (open ? "▾" : "▸") + ` Coins (${coins})`;
-      if (open && !loaded) { loaded = true; await loadCoinList(tid, isNative, box); }
-    };
-  }
 }
 
 /** The shared PandaPools discovery beacon address ("PANDAPOOLS" in hex). Dust coins here are registry
  *  beacons, not spendable liquidity — worth naming so they don't read as unexplained locked funds. */
 const PANDA_SENTINEL = "0x50414E4441504F4F4C53";
 
+// ---- dialogs in the phone's shape: a title, a body, and text buttons along the bottom ----
+// Escape and a click outside close the top one; focus goes back to whatever opened it.
+function openDlg(id, title, bodyHtml, buttonsHtml) {
+  const opener = document.activeElement;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay overlay--dlg" id="${id}"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="${id}Title" tabindex="-1">
+    <h2 class="dlg__title" id="${id}Title">${esc(title)}</h2>
+    <div class="dlg__body">${bodyHtml}</div>
+    <div class="dlg__btns">${buttonsHtml}<span class="dlg__gap"></span><button class="dlg__btn" data-close>Close</button></div></div></div>`);
+  const root = el(id);
+  const close = () => { if (!root.isConnected) return; root.remove(); if (opener && opener.isConnected) opener.focus(); };
+  root.onclick = (e) => { if (e.target === root || e.target.closest("[data-close]")) close(); };
+  root.onkeydown = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  root.querySelector(".dlg").focus();
+  return { root, close };
+}
+
 /**
- * Every coin the node holds for this token — the answer to "why is confirmed bigger than sendable".
- *
- * Nothing is capped and no coinid is elided: this is an audit view, and a truncated id can't be looked up.
- * The whole list is copyable, and each coin is tagged with WHY it isn't spendable where we can tell —
- * (pool) for a PandaPools covenant reserve, (beacon) for registry dust.
+ * Every coin behind a token balance (the phone's CoinsDialog). ALL relevant coins are listed, the ones locked
+ * in a contract included, because seeing what makes confirmed larger than sendable is the point. No coin id
+ * is shortened. A coin opens its full detail. Split and Consolidate, the desktop's own, are two buttons here.
  */
-async function loadCoinList(tid, isNative, box) {
-  if (!validTok(tid)) { box.innerHTML = `<div class="view__desc">Invalid token id.</div>`; return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
-  box.innerHTML = `<div class="spin spin--sm">Loading coins…</div>`;
+async function showCoins(b) {
+  const tid = b.tokenid || MINIMA, isNative = tid === MINIMA, name = TOK.tokenName(b.token, tid);
+  const sendable = b.sendable || "0", confirmed = b.confirmed || "0", locked = decSub(confirmed, sendable);
+  const head = `sendable ${TOK.tidyAmount(sendable)}` + (locked !== "0" ? `  ·  locked ${TOK.tidyAmount(locked)}` : "") + `  ·  confirmed ${TOK.tidyAmount(confirmed)}`;
+  const canSplit = !isNftBal(b) && Number(sendable) > 0;
+  const d = openDlg("coinsDlg", name + " coins",
+    `<div class="coins-head">${esc(head)}</div>
+     <div class="coins-status" id="coinsStatus">Reading coins…</div>
+     <div class="coins-list" id="coinsList" hidden></div>
+     <div class="coins-foot" id="coinsFoot" hidden></div>
+     <div class="coins-tools" id="coinsTools"${canSplit ? "" : " hidden"}>
+       <button class="btn btn--outline" id="coinsSplit"${canSplit ? "" : " hidden"} title="Split some of this into several equal coins, so you can make several sends without waiting for change">Split</button>
+       <button class="btn btn--outline" id="coinsConsolidate" hidden>Consolidate</button>
+     </div>`,
+    `<button class="dlg__btn" id="coinsCopyTid">Copy token ID</button>${isNative ? "" : `<button class="dlg__btn" id="coinsTokInfo">Token details</button>`}`);
+  el("coinsCopyTid").onclick = () => copy(tid);                      // the whole token id; the dialog stays open
+  if (el("coinsTokInfo")) el("coinsTokInfo").onclick = () => showTokenDetail(b);
+  el("coinsSplit").onclick = () => splitDialog(tid, name);
+  el("coinsConsolidate").onclick = async () => {
+    const btn = el("coinsConsolidate"); btn.disabled = true;
+    try { await consolidateToken(tid, name); }
+    catch (e) { toast(e.message, "err"); }
+    btn.disabled = false;
+  };
+  const status = (text, kind) => { const s = el("coinsStatus"); if (!s) return; s.textContent = text; s.className = "coins-status" + (kind ? " coins-status--" + kind : ""); s.hidden = false; };
+  if (!validTok(tid)) { status("Invalid token ID. Refresh the balance before sending.", "bad"); return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
+  if (!running) { status("Node not started. No coin data yet.", "warn"); return; }
+  // Two reads: every relevant coin, then the sendable ones. The node's coin JSON carries no "sendable" flag,
+  // so the LOCKED chips come from the difference. If the second read fails there are no chips, not no list.
+  let all, sendableIds = null;
+  try { all = await cmd(`coins relevant:true tokenid:${tid} simplestate:false`) || []; }
+  catch (e) { if (d.root.isConnected) status("Coins query failed: " + (e.message || String(e)), "bad"); return; }   // a failed read is not an empty wallet
+  try { sendableIds = new Set((await cmd(`coins relevant:true sendable:true tokenid:${tid} simplestate:false`) || []).map(c => c.coinid)); } catch (e) {}
+  // Pool covenant addresses this install knows about, so a reserve coin can be named as such.
+  const poolAddrs = new Set();
   try {
-    const all = await cmd(`coins relevant:true tokenid:${tid} order:desc`) || [];
-    // Which coinids are spendable — the node's own sendable gate (isAddressSimple + RETURN TRUE).
-    let sendableIds = new Set();
-    try { const s = await cmd(`coins relevant:true sendable:true tokenid:${tid}`) || []; for (const c of s) sendableIds.add(c.coinid); } catch (e) {}
-    if (!all.length) { box.innerHTML = `<div class="view__desc">No coins.</div>`; return; }
-    // Pool covenant addresses this install knows about, so a reserve coin can be named as such.
-    let poolAddrs = new Set();
-    try {
-      for (const p of (await api.ppPools()) || []) {
-        if (p.address) poolAddrs.add(String(p.address).toLowerCase());
-        if (p.mxaddress) poolAddrs.add(String(p.mxaddress).toLowerCase());
-      }
-    } catch (e) { /* Pools engine not up — coins still list, just without the (pool) tag */ }
-    const tagOf = (c) => {
-      const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
-      if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="chip chip--pool">pool</span>`;
-      if (ad === PANDA_SENTINEL.toLowerCase()) return `<span class="chip chip--beacon">beacon</span>`;
-      return "";
-    };
-    box.innerHTML = all.map(c => {
-      const amt = TOK.tidyAmount(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
-      const spend = sendableIds.has(c.coinid);
-      const cid = String(c.coinid || "");
-      const bits = [];
-      if (c.created) bits.push("block " + esc(String(c.created)));
-      if (c.age != null) bits.push("age " + esc(String(c.age)));
-      return `<div class="coin-row" data-cid="${esc(cid)}" title="click to copy coin id">
-        <div class="coin-row__top"><span class="coin-amt">${esc(amt)}</span>
-          <span class="chip ${spend ? "chip--spend" : "chip--lock"}">${spend ? "spendable" : "🔒 locked"}</span>${tagOf(c)}</div>
-        <div class="coin-row__sub coin-row__cid">${esc(cid)}${bits.length ? " · " + bits.join(" · ") : ""}</div>
-      </div>`;
-    }).join("") + `<div class="view__desc coin-copyall" title="copy every coin id">copy all ${all.length} coin${all.length === 1 ? "" : "s"}</div>`;
-    box.querySelectorAll(".coin-row[data-cid]").forEach(r => r.onclick = () => copy(r.dataset.cid));
-    const ca = box.querySelector(".coin-copyall");
-    if (ca) ca.onclick = () => copy(all.map(c =>
-      `${TOK.tidyAmount(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"))}\n${c.coinid || ""}`).join("\n"));
-  } catch (e) {
-    box.innerHTML = `<div class="view__desc">Couldn't load coins: ${esc(e.message || String(e))}</div>`;
-  }
+    for (const p of (await api.ppPools()) || []) {
+      if (p.address) poolAddrs.add(String(p.address).toLowerCase());
+      if (p.mxaddress) poolAddrs.add(String(p.mxaddress).toLowerCase());
+    }
+  } catch (e) { /* Pools engine not up: coins still list, without the pool tag */ }
+  if (!d.root.isConnected) return;                                   // closed while the node was answering
+  if (!all.length) { status("No coins for this token."); return; }
+  const amountOf = (c) => String(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
+  const isSendable = (c) => !sendableIds || sendableIds.has(c.coinid);   // unknown counts as sendable: no chip
+  const tagOf = (c) => {
+    const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
+    if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="coin-chip">POOL</span>`;
+    if (ad === PANDA_SENTINEL.toLowerCase()) return `<span class="coin-chip">BEACON</span>`;
+    return "";
+  };
+  const list = el("coinsList");
+  list.innerHTML = all.map((c, i) => `<div class="coin-row" data-i="${i}" tabindex="0" role="button">
+      <div class="coin-row__top"><span class="coin-amt">${esc(TOK.tidyAmount(amountOf(c)))}</span>${isSendable(c) ? "" : `<span class="coin-chip coin-chip--locked">LOCKED</span>`}${tagOf(c)}</div>
+      <div class="coin-row__cid">${esc(String(c.coinid || ""))}</div>
+    </div>`).join("");
+  list.querySelectorAll(".coin-row").forEach(r => {
+    r.onclick = () => { const c = all[parseInt(r.dataset.i, 10)]; showCoinDetail(c, isSendable(c)); };
+    r.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); r.click(); } };
+  });
+  el("coinsStatus").hidden = true; list.hidden = false;
+  // The footer cross-checks the coins against the balance the Wallet tab is showing.
+  let sum = "0"; for (const c of all) { try { sum = decAdd(sum, amountOf(c)); } catch (e) {} }
+  const lockedCount = all.filter(c => !isSendable(c)).length, foot = el("coinsFoot");
+  const differs = absCmp(sum, confirmed) !== 0;
+  foot.textContent = coinCount(all.length) + (sendableIds ? `  ·  Locked: ${lockedCount}` : "") + `  ·  sum ${TOK.tidyAmount(sum)}`
+    + (differs ? `\n⚠ sum ≠ confirmed (${TOK.tidyAmount(confirmed)})` : "");
+  foot.classList.toggle("coins-foot--warn", differs);
+  foot.hidden = false;
+  // Consolidate merges SPENDABLE coins only, so it is offered when there are at least two of them.
+  if (sendableIds && all.filter(c => sendableIds.has(c.coinid)).length >= 2) { el("coinsConsolidate").hidden = false; el("coinsTools").hidden = false; }
+}
+
+/** Everything the node knows about one coin (the phone's CoinDetailDialog). No value is shortened and each
+ *  has its own Copy: an id that comes out of here must go back into `coins coinid:` byte for byte. */
+function showCoinDetail(c, sendable) {
+  const state = (c.state == null || (Array.isArray(c.state) ? !c.state.length : (typeof c.state === "object" ? !Object.keys(c.state).length : c.state === "")))
+    ? "(none)" : (typeof c.state === "string" ? c.state : JSON.stringify(c.state, null, 2));
+  const rows = [["Coin ID", c.coinid], ["Amount", c.amount], ["Token amount", c.tokenamount], ["Token ID", c.tokenid], ["Address", c.address],
+    ["Mini address", c.miniaddress], ["Sendable", sendable ? "yes" : "no, locked in a contract"], ["Created", c.created], ["Age", c.age],
+    ["MMR entry", c.mmrentry], ["Spent", c.spent], ["Store state", c.storestate], ["State", state]]
+    .filter(([, v]) => v != null && String(v) !== "" && String(v) !== "null").map(([k, v]) => [k, String(v)]);
+  const raw = JSON.stringify(c, null, 2);
+  const d = openDlg("coinDlg", sendable ? "Coin, sendable" : "Coin, locked",
+    rows.map(([k, v], i) => `<div class="cd-row"><div class="eyebrow">${esc(k)}</div>
+        <div class="cd-row__line"><div class="cd-row__v">${esc(v)}</div><button class="dlg__btn dlg__btn--sm" data-i="${i}" aria-label="Copy ${esc(k)}">COPY</button></div></div>`).join("")
+      + `<div class="eyebrow cd-raw-h">Raw JSON</div><pre class="cd-raw">${esc(raw)}</pre>`,
+    `<button class="dlg__btn" id="coinCopyJson">Copy JSON</button>`);
+  d.root.querySelectorAll(".cd-row [data-i]").forEach(b => b.onclick = () => copy(rows[parseInt(b.dataset.i, 10)][1]));
+  el("coinCopyJson").onclick = () => copy(raw);
+}
+
+/** Split one token's own coins into equal pieces. The form and its checks are the Send screen's old Split
+ *  form (0.18.65), moved here; the token is the one whose coins dialog opened it. */
+function splitDialog(tok, name) {
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="splitOv"><div class="modal">
+    <div class="modal__title">Split ${esc(name)}</div>
+    <div class="view__desc">Split your own coins into equal pieces (useful for parallel sends).</div>
+    <div class="field"><div class="field__label">Amount to split</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
+    <div class="field"><div class="field__label">Into how many coins (2–20)</div><input class="field__input" id="spN" value="10" /></div>
+    <div class="seg"><button class="btn btn--outline btn--full" id="spCancel">Cancel</button><button class="btn btn--primary btn--full" id="spGo">Split</button></div></div></div>`);
+  const close = () => { const o = el("splitOv"); if (o) o.remove(); };
+  el("spCancel").onclick = close;
+  el("splitOv").onclick = (e) => { if (e.target.id === "splitOv") close(); };
+  el("spGo").onclick = async () => {
+    const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0;
+    if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
+    if (n < 2 || n > 20) { toast("Split into 2–20 coins."); return; }
+    if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
+    el("spGo").disabled = true;
+    try { const a = await cmd("getaddress"); const addr = a.miniaddress || a.address;
+      await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Split ✓", "ok"); close(); }
+    catch (e) { toast(e.message, "err"); }
+    el("spGo").disabled = false;
+  };
 }
 
 // ---- Receive ---------------------------------------------------------------
@@ -2397,21 +2470,8 @@ async function renderSend() {
     ticker: (b.tokenid || MINIMA) === MINIMA ? "MINIMA" : (TOK.ticker(b.token) || "") }));
   if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima", sendable: "0", ticker: "MINIMA" });
   SEND_TOKENS.sort((a, b) => (a.tokenid === MINIMA ? -1 : b.tokenid === MINIMA ? 1 : 0));
-  card.innerHTML = `
-    <div class="seg" id="sendModes">
-      <button class="btn btn--sm btn--primary" data-mode="send">Send</button>
-      <button class="btn btn--sm btn--outline" data-mode="split">Split</button>
-      <button class="btn btn--sm btn--outline" data-mode="consolidate">Consolidate</button>
-    </div>
-    <div id="sendForm"></div>`;
-  const modes = card.querySelectorAll("#sendModes .btn");
-  let mode = SEND_MODE_NEXT || "send"; SEND_MODE_NEXT = null;
-  const paint = () => {
-    modes.forEach(b => b.className = "btn btn--sm " + (b.dataset.mode === mode ? "btn--primary" : "btn--outline"));
-    sendForm(mode);
-  };
-  modes.forEach(b => b.onclick = () => { mode = b.dataset.mode; paint(); });
-  paint();
+  card.innerHTML = `<div id="sendForm"></div>`;
+  sendForm("send");
 }
 function sendForm(mode) {
   const f = el("sendForm");
@@ -2459,38 +2519,6 @@ function sendForm(mode) {
         toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
       } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send";
-    };
-  } else if (mode === "split") {
-    f.innerHTML = `
-      <div class="view__desc">Split your own coins into equal pieces (useful for parallel sends).</div>
-      <div class="field"><div class="field__label">Token</div><select class="field__input" id="spTok">${tokenOptions()}</select></div>
-      <div class="field"><div class="field__label">Amount to split</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
-      <div class="field"><div class="field__label">Into how many coins (2–20)</div><input class="field__input" id="spN" value="10" /></div>
-      <button class="btn btn--primary btn--full" id="spGo">Split</button>`;
-    { const pre = SEND_PRESELECT; SEND_PRESELECT = null; if (pre) el("spTok").value = pre; }
-    el("spGo").onclick = async () => {
-      const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0, tok = el("spTok").value;
-      if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
-      if (n < 2 || n > 20) { toast("Split into 2–20 coins."); return; }
-      if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
-      el("spGo").disabled = true;
-      try { const a = await cmd("getaddress"); const addr = a.miniaddress || a.address;
-        await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Split ✓", "ok"); }
-      catch (e) { toast(e.message, "err"); }
-      el("spGo").disabled = false;
-    };
-  } else {
-    f.innerHTML = `
-      <div class="view__desc">Merge many small coins of one token into fewer, larger coins.</div>
-      <div class="field"><div class="field__label">Token</div><select class="field__input" id="coTok">${tokenOptions()}</select></div>
-      <button class="btn btn--primary btn--full" id="coGo">Consolidate</button>`;
-    { const pre = SEND_PRESELECT; SEND_PRESELECT = null; if (pre) el("coTok").value = pre; }
-    el("coGo").onclick = async () => {
-      const tok = el("coTok").value || MINIMA;
-      el("coGo").disabled = true;
-      try { await consolidateToken(tok, (SEND_TOKENS.find(x => x.tokenid === tok) || {}).name || tok); }
-      catch (e) { toast(e.message, "err"); }
-      el("coGo").disabled = false;
     };
   }
 }

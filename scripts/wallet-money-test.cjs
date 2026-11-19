@@ -67,8 +67,8 @@ async function driveSend(h, { to, amt, tok, max }) {
   await h.el("sGo").onclick();
 }
 async function driveSplit(h, { amt, n, tok }) {
-  h.fns.sendForm("split");
-  h.el("spTok").value = tok; h.el("spAmt").value = amt; h.el("spN").value = n;
+  h.fns.splitDialog(tok, "the token");                 // opened from the token's coins dialog (0.18.80)
+  h.el("spAmt").value = amt; h.el("spN").value = n;
   await h.el("spGo").onclick();
 }
 
@@ -163,4 +163,14 @@ test("Consolidate: asks first, then checks the pool owner keys, and refuses when
   h = harness();
   assert.equal(await h.fns.consolidateToken("0x00 burn:1", "Minima"), false);
   assert.deepEqual(h.log, [], "a token id that is not clean hex never reaches a command");
+});
+
+test("Split and Consolidate live in the token's coins dialog, wired to the same handlers", () => {
+  const coins = app.slice(app.indexOf("async function showCoins(b)"), app.indexOf("function showCoinDetail"));
+  assert.ok(/el\("coinsSplit"\)\.onclick = \(\) => splitDialog\(tid, name\)/.test(coins));
+  assert.ok(/await consolidateToken\(tid, name\)/.test(coins), "Consolidate goes through the ask-first, key-checking function");
+  assert.ok(!/cmd\(`?"?consolidate/.test(coins) && !/send address/.test(coins), "the dialog itself builds no fund-moving command");
+  assert.equal((app.match(/cmd\(cmdText\)/g) || []).length, 1, "one place issues consolidate");
+  assert.equal((app.match(/split:\$\{n\}/g) || []).length, 1, "one place issues a split");
+  assert.ok(!/sendModes|tok-tool|consolidate-btn/.test(app), "no second route on the rows or the Send screen");
 });
