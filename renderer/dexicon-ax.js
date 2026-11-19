@@ -204,13 +204,19 @@
       warn: both && bb >= ba ? "Crossed: best bid " + fmtPx(bb) + " is at or above best ask " + fmtPx(ba) + ". You would sell cheaper than you buy." : "",
       bids: bids.length ? bids.length + " lvl · best " + fmtPx(bb) + " · " + abbrev(sum(bids)) + " " + ccy : "none", asks: asks.length ? asks.length + " lvl · best " + fmtPx(ba) + " · " + abbrev(sum(asks)) + " " + ccy : "none" };
   }
+  /** The price line above YOUR OFFER, as the phone writes it: "Parity mid 1  (bid 1 / ask 1)  ·  16s ago". Under parity
+   *  the bid and the ask ARE the mid; for MEXC the engine keeps only the mid, so no bid or ask is written. */
+  function midLine(source, mid, lastOk, now) {
+    const age = Number(lastOk) > 0 ? Math.max(0, Math.floor((now - Number(lastOk)) / 1000)) : null;
+    return source + " mid " + fmtPx(mid) + (source === "Parity" ? "  (bid " + fmtPx(mid) + " / ask " + fmtPx(mid) + ")" : "") + (age == null ? "" : "  ·  " + (age < 120 ? age + "s" : Math.floor(age / 60) + " min") + " ago");
+  }
   /** YOUR OFFER at a glance (MarketTab.renderMyOffer), from the maker's read model and my own levels in the book. */
   function offerState(mc, book, src) {
     const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || {}, rows = [];
     for (const [side, name] of [["asks", "ASK"], ["bids", "BID"]]) for (const r of (book && book[side]) || []) if (r.mine) rows.push(name + "  " + fmtPx(r.p) + "   " + abbrev(r.cap));
     const set = c.step > 0 || (man.bids || []).length > 0 || (man.asks || []).length > 0, live = rows.length > 0 && !st.withdrawn;
     return { live, rows: live ? rows : [], text: !mc ? "…" : st.withdrawn ? "Withdrawn: your offer is off the book, or leaving it within about a block." : live ? "Live" + (c.pegEnable ? " · pegged to " + src : "") + " · kept on the book while this app and the node run."
-      : set ? "Saved, not on the book. Publish puts it there." : "Off: edit your order, then Publish.", ago: mc && mc.lastPublishMs ? mc.lastPublishMs : 0 };
+      : set ? "Saved, not on the book. Publish puts it there." : "Off — edit your order, then Publish.", ago: mc && mc.lastPublishMs ? mc.lastPublishMs : 0 };
   }
   /** An OTC deal's state in words (OtcTab.dealStatus). */
   function dealStatus(d) {
@@ -386,7 +392,7 @@
   /** One at a time (0.18.118): while fn runs, a second call does nothing. For the money actions that had no
    *  in-flight state of their own: a double click on Refund now or on a wallet action started it twice. */
   function oneAtATime() { let on = false; return async (fn) => { if (on) return; on = true; try { return await fn(); } finally { on = false; } }; }
-  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, rungSize, lpPick, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
+  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, rungSize, lpPick, makerForm, ladderSummary, midLine, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -462,7 +468,9 @@
       + `<div class="ax-line">${esc(h.settles)}</div><div class="ax-bad">${esc(h.count)}</div>` + h.stuck.map((x) => idLine("swap", x.hash) + `<div class="ax-line">${esc(x.text)}</div>`).join("")
       + h.todo.map((t) => `<div class="ax-bad">${esc(t)}</div>`).join("") + h.tools.map((t) => `<button class="dx-btn ax-rescue" data-${t[0]}="${t[1]}">${esc(t[2])}</button>`).join("") + `</div>`;
   }
-  const why = (key, title, text) => { const open = pref("dexicon_fold_" + key) === "1"; return `<button class="ax-why${open ? " ax-why--open" : ""}" data-axwhy="${key}" aria-expanded="${open}"><span class="dx-label">${esc(title)} ${open ? "▾" : "▸"}</span>${open ? `<span class="ax-why__t">${esc(text)}</span>` : ""}</button>`; };
+  /** An explainer card. Market and OTC open theirs until it is folded, as the phone shows them (the wide captures of 19 Nov); Swap's stays folded until opened. */
+  const whyOpen = (key) => { const v = pref("dexicon_fold_" + key); return v === "1" || (v == null && key !== "swap"); };
+  const why = (key, title, text) => { const open = whyOpen(key); return `<button class="ax-why${open ? " ax-why--open" : ""}" data-axwhy="${key}" aria-expanded="${open}"><span class="dx-label">${esc(title)} ${open ? "▾" : "▸"}</span>${open ? `<span class="ax-why__t">${esc(text)}</span>` : ""}</button>`; };
   const idLine = (label, value) => `<div class="dx-id" data-copy="${esc(value)}" title="Click to copy">${esc(label)} ${esc(value)}</div>`;
 
   /** A swap's card: the same one on Swap (IN PROGRESS), in Activity and in History. */
@@ -593,8 +601,8 @@
     const c = ccy(), b = S.book, mc = S.mc, o = offerState(mc, b, src()), mid = mc && mc.state && (mc.state.lastMid || mc.state.lastPrice), warn = coinWarn(S.st.currency, S.bals && S.bals.meta && S.bals.meta.coins);
     const out = [banners(), why("market", "YOUR AtomiX MARKET", WHY_MARKET)];
     if (!D.running() || !S.st.ready) return out.join("");
-    out.push(`<div class="ax-sub ax-sub--tight">The live USDT ⇄ ${esc(c)} order book. Tap a level to take it on the Swap page, or publish your own offer.</div>`);
-    if (mid > 0) out.push(`<div class="ax-mono11">${src()} mid ${fmtPx(mid)}</div>`);
+    out.push(`<div class="ax-sub ax-sub--tight">The live USDT ⇄ ${esc(c)} order book. Tap a level to take it, use the Swap page, or publish your own offer.</div>`);
+    if (mid > 0) out.push(`<div class="ax-mono11">${esc(midLine(src(), mid, mc.state.lastOk, Date.now()))}</div>`);
     if (warn) out.push(`<button class="ax-warnpill" data-axgo="assets">${esc(warn)}</button>`);
     out.push(`<div class="dx-card"><div class="dx-label">YOUR OFFER · USDT ⇄ ${esc(c)}</div><div class="ax-offer" data-live="${o.live}">${esc(o.text)}</div>${o.rows.length ? `<pre class="ax-mono11">${esc(o.rows.join("\n"))}\n(USDT per ${esc(c)})</pre>` : ""}${o.ago ? `<div class="ax-line">Last publish ${agoMin(o.ago)}</div>` : ""}</div>`);
     out.push(`<div class="dx-row ax-obh"><b class="ax-t16">Order book  ·  ${b ? b.scanned || 0 : "…"} live</b><button class="dx-pill ax-refresh" data-axrefresh="1">Refresh</button></div>`);
@@ -705,12 +713,12 @@
   // ---- OTC (OtcTab.java) ----
   const WHY_OTC = "Negotiate a custom size and price directly with a liquidity provider (LP), then settle as the same trustless HTLC swap as everything else in ①: each side locks, the secret releases both, and a stalled deal refunds. Go live with your own availability and other people can propose deals to you; this app answers and settles while it is running.";
   function otcHtml() {
-    const c = ccy(), o = S.otc, out = [banners(), why("otc", "OTC: A PRIVATE DEAL", WHY_OTC)];
+    const c = ccy(), o = S.otc, out = [banners(), why("otc", "OTC — A PRIVATE DEAL", WHY_OTC)];
     if (!D.running() || !S.st.ready) return out.join("");
     const my = (o && o.myOffer) || {}, live = !!my.enable, dr = S.otcDraft || (o ? (S.otcDraft = { sell: my.sellSize || "", buy: my.buySize || "" }) : { sell: "", buy: "" }), dis = S.busy || halted() ? " disabled" : "";
     out.push(`<div class="dx-label ax-sec">MY AVAILABILITY</div><div class="dx-card">
-      <label class="ax-fld"><b>I SELL up to</b><input class="dx-in ax-in" id="otcSell" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.sell)}"></label>
-      <label class="ax-fld"><b>I BUY up to</b><input class="dx-in ax-in" id="otcBuy" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.buy)}"></label>
+      <label class="ax-fld"><b>I SELL up to</b><input class="dx-in ax-in ax-in--line" id="otcSell" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.sell)}"></label>
+      <label class="ax-fld"><b>I BUY up to</b><input class="dx-in ax-in ax-in--line" id="otcBuy" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.buy)}"></label>
       <div class="ax-offer" data-live="${live}">${live ? "● Live: LPs can negotiate with you" : "○ Off"}</div>
       <div class="ax-acts"><button class="dx-btn ax-go" data-axotc="live"${dis}>${live ? "Update" : "Go live"}</button>${live ? `<button class="dx-btn" data-axotc="withdraw"${S.busy ? " disabled" : ""}>Withdraw</button>` : ""}</div></div>`);
     out.push(`<div class="dx-label ax-sec">LIQUIDITY PROVIDERS</div>`);
@@ -782,7 +790,7 @@
   /** every money action of the room passes Dexicon's one gate (DexCore.money, 0.18.122): one at a time across rooms 1, 2 and 3 */
   const one = (fn) => D.money(fn);
   async function click0(ds) {
-    if (ds.axwhy) { pref("dexicon_fold_" + ds.axwhy, pref("dexicon_fold_" + ds.axwhy) === "1" ? "0" : "1"); return paint(); }
+    if (ds.axwhy) { pref("dexicon_fold_" + ds.axwhy, whyOpen(ds.axwhy) ? "0" : "1"); return paint(); }
     if (ds.axgo) return D.go(ds.axgo);
     if (ds.axslip) { if (ds.axslip === "custom") return customSlip(); S.slip = Number(ds.axslip); pref("dexicon_ax_slip", ds.axslip); paint(); return preview(); }
     if (ds.axcheck) return checkNow(ds.axcheck);

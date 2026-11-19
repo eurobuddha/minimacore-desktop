@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.134] — Dexicon ① MxUSD: Market and OTC beside the wide captures
+
+- Market and OTC were built from phone-size captures, because two Fold captures were mislabelled. The real wide captures (19 Nov) were read beside the regenerated dev-preview shots, and the differences fixed:
+- **Market**: the line under the explainer reads as the phone's ("Tap a level to take it, use the Swap page, or publish your own offer."); the price line carries the bid, the ask and its age under parity ("Parity mid 1  (bid 1 / ask 1)  ·  16s ago"); an empty offer reads "Off — edit your order, then Publish."; in the book, a maker's key sits at the outer edge of its half (a bid's at the left, an offer's at the right) with size and price against the divider.
+- **OTC**: the explainer is titled "OTC — A PRIVATE DEAL"; the two availability fields are a line, not a box.
+- The explainer cards of Market and OTC are open until folded, as the phone shows them.
+- Kept different on purpose: the explainers say "this app answers while it is running", where the phone says it answers in the background with Dexicon closed (true of the phone, not of a desktop app); for MEXC no bid or ask is written beside the mid (the engine keeps the mid only).
+
 ## [0.18.133] — Dexicon ① MxUSD: OTC rows by id, and the low findings (review M6 and lows)
 
 - **OTC: a button can no longer send your offer to a different LP.** The Buy / Sell buttons of the LP list named a row by its position. The engine replaces the list while the screen is not redrawn under a field in use, so a click on row 2 could propose to another LP, whose ACCEPT then locks by itself. Each button now names the LP by its id and the sizes its card showed; the row is looked up again at the click and once more after the terms dialog, and if the LP left or changed its sizes nothing is sent and the list is redrawn.

@@ -278,7 +278,7 @@ test("YOUR OFFER: live only with my own levels on the book and not withdrawn; sa
   assert.equal(live.live, true); assert.match(live.text, /^Live · pegged to Parity · /); assert.deepEqual(live.rows, ["ASK  1.015   1.2k", "BID  0.985   100"]);
   assert.match(AX.offerState({ cfg: { step: 1 }, state: { withdrawn: true } }, book, "MEXC").text, /^Withdrawn: /);
   assert.match(AX.offerState({ cfg: { step: 1 }, state: {} }, { bids: [], asks: [] }, "MEXC").text, /^Saved, not on the book/);
-  assert.match(AX.offerState({ cfg: {}, manual: { bids: [], asks: [] }, state: {} }, { bids: [], asks: [] }, "MEXC").text, /^Off: edit your order, then Publish\.$/);
+  assert.match(AX.offerState({ cfg: {}, manual: { bids: [], asks: [] }, state: {} }, { bids: [], asks: [] }, "MEXC").text, /^Off — edit your order, then Publish\.$/);
   assert.equal(AX.offerState(null, null, "MEXC").text, "…");
 });
 test("the 'buys declined' warning uses the engine's own read limits", () => {
@@ -640,4 +640,22 @@ test("lows: no private busy gate: the label is set and cleared in one place (try
   assert.equal((src.match(/S\.busy = /g) || []).length, 2, "only busyWhile writes it");
   assert.match(src, /const busyWhile = async \(label, fn\) => \{ S\.busy = label; try \{ return await fn\(\); \} finally \{ S\.busy = false; \} \};/);
   assert.match(src, /if \(r && !r\.err\) \{ S\.otc = null; S\.otcDraft = null; pref\("dexicon_ax_market_live", "0"\); \}/);
+});
+
+// ---- 0.18.134: Market and OTC beside the wide (Fold) captures of 19 Nov ----
+test("wide layout: the phone's own words and order on Market and OTC (its long dashes kept), the explainers open until folded, keys at the outer edges", () => {
+  assert.equal(AX.midLine("Parity", 1, 1000, 17000), "Parity mid 1  (bid 1 / ask 1)  ·  16s ago");
+  assert.equal(AX.midLine("MEXC", 0.004321, 0, 5), "MEXC mid 0.004321", "no bid or ask is invented for MEXC, and no age without a stamp");
+  assert.equal(AX.offerState({ cfg: {}, manual: { bids: [], asks: [] }, state: {} }, { bids: [], asks: [] }, "Parity").text, "Off — edit your order, then Publish.");
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"), css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8");
+  assert.match(src, /order book\. Tap a level to take it, use the Swap page, or publish your own offer\./);
+  assert.match(src, /why\("otc", "OTC — A PRIVATE DEAL", WHY_OTC\)/); assert.match(src, /why\("market", "YOUR AtomiX MARKET", WHY_MARKET\)/);
+  assert.match(src, /return v === "1" \|\| \(v == null && key !== "swap"\);/, "Market's and OTC's explainers are open until folded");
+  const order = ["YOUR AtomiX MARKET", "The live USDT ⇄", "midLine(src()", "YOUR OFFER · USDT ⇄", "Order book  ·  ", "data-axrefresh", "ax-spread", "ax-legend", "data-axmk=\"edit\"", "data-axmk=\"publish\"", "data-axmk=\"withdraw\""].map((t) => src.indexOf(t, src.indexOf("function marketHtml")));
+  assert.deepEqual(order, order.slice().sort((a, b) => a - b), "Market in the phone's order"); assert.ok(order.every((i) => i > 0));
+  const otc = ["OTC — A PRIVATE DEAL", "MY AVAILABILITY", "I SELL up to", "I BUY up to", "○ Off", "Go live", "LIQUIDITY PROVIDERS", "MY DEALS"].map((t) => src.indexOf(t, src.indexOf("function otcHtml")));
+  assert.deepEqual(otc, otc.slice().sort((a, b) => a - b), "OTC in the phone's order"); assert.ok(otc.every((i) => i > 0));
+  assert.match(src, /placeholder="max \$\{esc\(c\)\} \(blank = off\)"/);
+  assert.match(css, /\.ax-half--bid \.ax-tag \{ align-self: flex-start; text-align: left; \} \.ax-half:not\(\.ax-half--bid\) \.ax-tag \{ align-self: flex-end; text-align: right; \}/);
+  assert.match(css, /\.ax-in--line \{[^}]*border-width: 0 0 1px;/);
 });

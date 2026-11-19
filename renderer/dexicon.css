@@ -275,6 +275,10 @@ button.dx-pill { cursor: pointer; }
 .ax-sz { font: 400 12px/16px var(--dx-mono); color: var(--dx-dim); }
 .ax-tag { max-width: 100%; font: 400 9px/13px var(--dx-mono); color: var(--dx-dim2); overflow-wrap: anywhere; cursor: copy; user-select: text; } .ax-half--bid .ax-tag { text-align: right; }
 .ax-tag--you { color: var(--ax-acc); cursor: default; }
+/* the maker key sits at the outer edge of its half, as on the phone: a bid's at the left, an offer's at the right (0.18.134) */
+.ax-half--bid .ax-tag { align-self: flex-start; text-align: left; } .ax-half:not(.ax-half--bid) .ax-tag { align-self: flex-end; text-align: right; }
+/* OTC availability: the phone's fields are a line, not a box */
+.ax-in--line { padding-left: 2px; border-width: 0 0 1px; border-radius: 0; background: none; font-size: 14px; }
 .ax-div { flex: 0 0 auto; padding: 0 8px; font: 400 14px/20px var(--dx-sans); color: var(--dx-dim2); }
 .ax-mbtns { display: flex; gap: 6px; margin: 14px 0 10px; } .ax-mbtns .dx-btn { min-height: 48px; border: 0; border-radius: 14px; font-size: 12.5px; }
 .dx-btn.ax-go { background: var(--ax-acc); color: var(--ax-ink); }
