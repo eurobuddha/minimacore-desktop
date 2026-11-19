@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.131] — Dexicon ① MxUSD: a take's outcome is said truthfully (review M2)
+
+- **"Nothing was locked" is said only when that is known.** After a take, the alert said it for any error. A Minima send can time out at 180 s and still post, and an Ethereum broadcast can fail after it went out. Now only a refusal known to come before any lock says it (the quote expired, the market was withdrawn, the maker left the reviewed book, AtomiX held or halted, the engine not ready). Every other outcome says **"No lock was confirmed. Look at In progress before trying again."**
+- **A buy in several parts now says why a part did not start.** The reasons were dropped ("0 of N parts locked"); the glue now returns them and the alert shows each one.
+- The alert no longer says "nothing was spent". When an approval of USDT was sent, it says that it costs gas.
+
 ## [0.18.130] — Dexicon ① MxUSD: the halt is enforced by the glue and the engine's own lock (review H1)
 
 - **A halt is now enforced where the money moves, not only on the screen.** The identity halt exists for when the node's keys no longer match the ones AtomiX saved: anything locked under the saved key then cannot be refunded. Until now only the screen refused, from a copy of the halt state up to 60 s old. The glue (`main/atomix.js`) now reads the engine's verdict at the moment of every call that creates a new liability and refuses it in plain words: a take (and each further part of a sweep), Save & publish, Publish, OTC Go live, an OTC offer, an OTC accept and an OTC counter.

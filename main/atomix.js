@@ -565,9 +565,12 @@ async function swapExecute(quoteId) {
   } else {
     // donor startSweepBuy: buy legs fire back-to-back (nonce-serialized by ethtx)
     const results = await Promise.allSettled(legs.map(l => startLeg(l.maker.signerPk, false, l.minima, l.usdt)));
-    for (const r of results) if (r.status === "fulfilled") hashes.push(r.value);
+    // 0.18.131: why a part did not start is carried to the screen (it was dropped: "0 of N", no reason). A part that
+    // failed may still have sent an approval or a lock: the screen never says "nothing was spent" for it.
+    const reasons = [];
+    results.forEach((r, i) => { if (r.status === "fulfilled") hashes.push(r.value); else reasons.push("part " + (i + 1) + ": " + ((r.reason && r.reason.message) || r.reason)); });
     emitter.emit("update");
-    return { ok: hashes.length, of: legs.length, hashes };
+    return { ok: hashes.length, of: legs.length, hashes, reasons };
   }
   emitter.emit("update");
   return { ok: hashes.length, of: legs.length, hashes };

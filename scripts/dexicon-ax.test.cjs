@@ -93,7 +93,7 @@ test("take: every outcome says what happened, whether anything was locked, and w
   const all = AX.takeResult({ ok: 2, of: 2, hashes: [] }), part = AX.takeResult({ ok: 1, of: 3, hashes: [], stopped: "Sweep stopped at part 2: maker vanished from the reviewed book" });
   assert.match(all.text, /^2 of 2 parts locked\. Nothing is swapped yet/); assert.equal(all.kind, "note");
   assert.match(part.text, /^1 of 3 parts locked\. Sweep stopped at part 2/); assert.equal(part.kind, "error");
-  assert.match(AX.takeResult({ ok: 0, of: 1, hashes: [] }).text, /Nothing was locked and nothing was spent/);
+  assert.equal(AX.takeResult({ ok: 0, of: 1, hashes: [] }).text, "0 of 1 part locked. No lock was confirmed. Look at In progress before trying again.");
   assert.match(AX.takeResult({ err: "That quote has expired — review the swap again." }).text, /Nothing was locked\.$/);
   assert.match(AX.takeResult(null).text, /Look at Activity before trying again/);
 });
@@ -521,4 +521,38 @@ test("H1: a halt redraws the screens at once: the engine's notice raises an upda
   atomix._setDataDir(dir); atomix.emitter.on("update", on);
   try { atomix._buildMds().notify("AtomiX halted — wallet mismatch. Rescue funds and reinstall."); assert.equal(n, 1); }
   finally { atomix.emitter.off("update", on); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- 0.18.131 (M2): "Nothing was locked" only for a refusal known to come before any lock ----
+test("M2: only a known pre-lock refusal says nothing was locked; every other outcome says no lock was confirmed, with the real reasons, and never that nothing was spent", async () => {
+  const atomix = require("../main/atomix"), UNSURE = /No lock was confirmed\. Look at In progress before trying again\.$/;
+  // the glue's and the engine's own refusals, as they arrive over IPC
+  const engine = fs.readFileSync(path.join(__dirname, "..", "main", "atomix", "lib", "engine.js"), "utf8"), glue = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8");
+  for (const known of ["That quote has expired — review the swap again.", "maker vanished from the reviewed book", "that market was just withdrawn — refreshing the book, try again in a moment", "Not ready", "AtomiX engine not booted yet"]) {
+    assert.ok(engine.includes(known) || glue.includes(known), "still the source's words: " + known);
+    assert.match(AX.takeResult({ err: "Error invoking remote method 'mcd:axSwap': Error: " + known }).text, /Nothing was locked\.$/, known);
+  }
+  assert.match(AX.takeResult({ err: atomix.HALTED }).text, /Nothing was locked\.$/);
+  assert.match(AX.takeResult({ err: "AtomiX is stopped while the wallet is being replaced. It starts again by itself." }).text, /Nothing was locked\.$/);
+  // not known: a send that timed out may still post; a broadcast may have gone out
+  for (const unsure of ["cmd failed: send amount:5 … — timed out after 180000ms", "eth_sendRawTransaction failed on all rpcs", "book scan timed out"]) {
+    const t = AX.takeResult({ err: unsure }).text; assert.match(t, UNSURE, unsure); assert.ok(!/Nothing was locked/.test(t));
+  }
+  // a buy sweep: the reasons the glue now carries, and no claim that nothing was spent
+  const F = fakeEngine(); let n = 0;
+  F.ctx.AX.engine.startLeg = (maker, sym, sell, minima, usdt, hooks, cb) => (++n === 1 ? cb(new Error("Approving USDT spend — try the buy again in ~30s")) : cb(new Error("eth_sendRawTransaction failed on all rpcs")));
+  atomix._setCtx(F.ctx);
+  try {
+    const leg = (k) => ({ maker: { signerPk: PK("D" + k) }, minima: "1", usdt: "1" });
+    atomix._lastQuotes().q3 = { model: { mode: "sweep", sell: false, plan: { legs: [leg(1), leg(2)] } }, book: { [PK("D1")]: {}, [PK("D2")]: {} }, at: Date.now() };
+    const r = await atomix.swapExecute("q3");
+    assert.deepEqual(r, { ok: 0, of: 2, hashes: [], reasons: ["part 1: Approving USDT spend — try the buy again in ~30s", "part 2: eth_sendRawTransaction failed on all rpcs"] });
+    const t = AX.takeResult(r).text;
+    assert.match(t, /^0 of 2 parts locked\. part 1: Approving USDT spend .*\. part 2: eth_sendRawTransaction failed on all rpcs\. An approval of USDT was sent to Ethereum and costs gas\. No lock was confirmed/);
+  } finally { atomix._setCtx(null); }
+  assert.match(AX.takeResult({ ok: 0, of: 2, hashes: [], reasons: ["part 1: that market was just withdrawn — refreshing the book, try again in a moment", "part 2: maker vanished from the reviewed book"] }).text, /Nothing was locked\.$/);
+  assert.match(AX.takeResult({ ok: 0, of: 2, hashes: [], stopped: "Sweep stopped at part 1: cmd failed: send — timed out" }).text, UNSURE);
+  assert.match(AX.takeResult({ ok: 1, of: 2, hashes: [], reasons: ["part 2: socket hang up"] }).text, /^1 of 2 parts locked\. part 2: socket hang up\. Nothing is swapped yet.* For the rest: No lock was confirmed/);
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.ok(!/nothing was spent/i.test(src), "the screens never claim nothing was spent");
 });

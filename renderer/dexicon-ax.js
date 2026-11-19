@@ -61,12 +61,20 @@
     return { title: sell ? "Sell " + cut(p.filledMinima) + " " + ccy + " in " + parts : "Buy ≈ " + cut(p.filledMinima) + " " + ccy + " for ≈ " + cut(p.totalUsdt) + " USDT in " + parts, text: L.join("\n"), ok: n > 1 ? "Start sweep" : "Start swap" };
   }
   /** What a finished axSwap call means, in the alert's three parts: what happened, were you filled, what to do. */
+  /** A refusal KNOWN to come before any lock or send (main/atomix.js swapExecute, whileHeld, whileHalted; the engine's
+   *  startLeg and ready()). Any other failure may have left something on a chain: a Minima `send` can time out at 180 s
+   *  and still post, an Ethereum broadcast can fail after it went out. */
+  const PRELOCK = /quote has expired|market was just withdrawn|maker vanished from the reviewed book|AtomiX is stopped while the wallet|AtomiX is halted|engine not booted yet|^Not ready$/;
+  const prelock = (t) => PRELOCK.test(String(t == null ? "" : t).replace(/^.*?Error: /, "").replace(/^(Sweep stopped at part \d+|part \d+): /, ""));
+  const UNSURE = "No lock was confirmed. Look at In progress before trying again.";
   function takeResult(r) {
     if (!r) return { kind: "error", text: "The swap gave no answer. Look at Activity before trying again: a part may have been locked." };
-    if (r.err) return { kind: "error", text: mx(r.err) + " Nothing was locked." };
-    const all = r.ok === r.of && !r.stopped;
-    return { kind: all ? "note" : "error", text: r.ok + " of " + r.of + (r.of === 1 ? " part" : " parts") + " locked." + (r.stopped ? " " + mx(r.stopped) + "." : "")
-      + (r.ok ? " Nothing is swapped yet: each locked part completes when its maker locks the other side, or is refunded by itself at its timelock. Follow it below or in Activity." : " Nothing was locked and nothing was spent.") };
+    if (r.err) return { kind: "error", text: mx(r.err) + (prelock(r.err) ? " Nothing was locked." : " " + UNSURE) };
+    const why = (r.stopped ? [r.stopped] : []).concat(r.reasons || []), all = r.ok === r.of && !why.length;
+    const gas = why.some((t) => /Approving USDT/.test(t)) ? " An approval of USDT was sent to Ethereum and costs gas." : "";
+    return { kind: all ? "note" : "error", text: r.ok + " of " + r.of + (r.of === 1 ? " part" : " parts") + " locked." + (why.length ? " " + why.map(mx).join(". ") + "." : "")
+      + (r.ok ? " Nothing is swapped yet: each locked part completes when its maker locks the other side, or is refunded by itself at its timelock. Follow it below or in Activity." + (why.length && !why.every(prelock) ? " For the rest: " + UNSURE : "")
+        : why.length && why.every(prelock) ? " Nothing was locked." : gas + " " + UNSURE) };
   }
 
   /** YOUR SWAP (DoorsTab.paintStages). rows: { state: "done"|"active"|"pending"|"warn", text }. */
@@ -328,7 +336,7 @@
   /** One at a time (0.18.118): while fn runs, a second call does nothing. For the money actions that had no
    *  in-flight state of their own: a double click on Refund now or on a wallet action started it twice. */
   function oneAtATime() { let on = false; return async (fn) => { if (on) return; on = true; try { return await fn(); } finally { on = false; } }; }
-  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
+  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
