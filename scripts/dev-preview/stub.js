@@ -5,6 +5,7 @@
  *
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
  *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
+ *   Send: &send=filled|review|error
  */
 "use strict";
 (function () {
@@ -46,6 +47,7 @@
         : tid === LONG ? Array.from({ length: 20 }, (_, i) => coin(i + 1, "1", true)) : tid === NFT ? [coin(1, "1")] : [];
       return set.filter(x => !/sendable:true/.test(c) || !x._locked).map(x => { const o = Object.assign({}, x); delete o._locked; return o; });
     },
+    checkaddress: () => ({ simple: true }),
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
     keys: () => keys,
     scripts: () => [],
@@ -111,6 +113,13 @@
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
       if (Q.get("expand") === "1") el("walHead").click();
+      // ?send=filled|review|error fills the Send form, opens its review, or shows what a pasted address with extra parameters gets
+      if (Q.get("send")) setTimeout(() => {
+        el("sTok").value = MXUSD; el("sTok").onchange(); el("sAmt").value = "25.5";
+        el("sTo").value = ADDR + (Q.get("send") === "error" ? " burn:100" : ""); el("sTo").oninput();
+        if (Q.get("send") === "review") el("sGo").click();
+        if (Q.get("send") === "error") setTimeout(() => el("sGo").click(), 2400);   // late, so the message is still up when the capture is taken
+      }, 250);
       // ?dlg=coins[:n] opens the coins dialog of the n-th token row; ?dlg=coin[:n] goes on to its first coin; ?dlg=split
       const dlg = (Q.get("dlg") || "").split(":");
       if (dlg[0]) setTimeout(() => {

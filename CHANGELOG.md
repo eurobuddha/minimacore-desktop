@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.83] — Send: the phone's screen, the same send
+
+- The Send screen is laid out as the phone's, in the phone's order and words: Token, the "sendable" figure for it, Amount with Max, To address, "Send Funds". The phone's Scan button is left out (no camera flow on the desktop screen).
+- The address field wraps, so a pasted address can be read from end to end before sending. Enter does not add a line.
+- Nothing about how a send is checked or built has changed. The handler is the 0.18.78 one, character for character apart from the button's label: the address, amount and token checks (a pasted address carrying extra parameters is refused), the check against the spendable figure, the node's `checkaddress`, the review that shows the whole address, then the same `send` command. `scripts/wallet-money-test.cjs` passes on the same recorded strings.
+- The token list still shows each token's whole id beside its name, where the phone shows the name alone: two tokens can carry the same name.
+- The review and the messages keep their existing wording.
+
 ## [0.18.82] — Receive: the phone's screen; Get Address no longer mints a key
 
 - **Receive no longer creates a key on every press.** The button ran the node's `newaddress`, which makes the node generate and store a new key each time it is pressed. It is now the phone's "Get Address" and runs `getaddress`: the node hands back one of the wallet's existing default addresses and creates nothing. Coins sent to addresses made earlier with the old button are unaffected: those keys stay in the wallet. Nothing else in the app used `newaddress` from this screen; address labels are keyed by the address shown and work as before.

@@ -151,7 +151,7 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 /* Coin list: why a coin isn't spendable. Full coinids, so they must wrap rather than elide. */
 .field__hint { color: var(--dim); font-size: 12px; margin-top: 4px; }
 /* keep the Send "Max" button compact next to the amount input (the base .seg .btn is flex:1) */
-#sendForm .seg #sMax { flex: 0 0 auto; padding: 0 14px; }
+
 
 .modal--token { max-width: 440px; }
 .tokd-hero { text-align: center; margin-bottom: 14px; }

@@ -2525,26 +2525,34 @@ async function renderSend() {
   if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima", sendable: "0", ticker: "MINIMA" });
   SEND_TOKENS.sort((a, b) => (a.tokenid === MINIMA ? -1 : b.tokenid === MINIMA ? 1 : 0));
   card.innerHTML = `<div id="sendForm"></div>`;
-  sendForm("send");
+  sendForm();
 }
-function sendForm(mode) {
+// The phone's Send screen (view_wallet_send): Token, sendable, Amount with Max, To address, Send Funds. The
+// phone's Scan button is left out. The checks and the command below are the desktop's own, unchanged since 0.18.78.
+function sendForm() {
   const f = el("sendForm");
-  if (mode === "send") {
-    // Preselect the token if we arrived from a token-detail modal's "Send" action.
+  {
+    // Preselect the token if we arrived from a token page's "Send" action.
     const preselect = SEND_PRESELECT; SEND_PRESELECT = null;
     f.innerHTML = `
-      <div class="field"><div class="field__label">To address</div><input class="field__input" id="sTo" placeholder="Mx… or 0x…" /></div>
-      <div class="field"><div class="field__label">Amount</div>
-        <div class="seg"><input class="field__input" id="sAmt" placeholder="0.0" /><button class="btn btn--outline btn--sm" id="sMax" type="button">Max</button></div>
-        <div class="field__hint" id="sAvail"></div></div>
-      <div class="field"><div class="field__label">Token</div><select class="field__input" id="sTok">${tokenOptions()}</select></div>
-      <button class="btn btn--primary btn--full" id="sGo">Send</button>`;
+      <label class="eyebrow" for="sTok">Token</label>
+      <select class="send-tok" id="sTok">${tokenOptions()}</select>
+      <div class="send-avail" id="sAvail"></div>
+      <label class="eyebrow" for="sAmt">Amount</label>
+      <div class="send-line"><input class="send-in" id="sAmt" placeholder="0.0" inputmode="decimal" autocomplete="off" /><button class="btn btn--outline" id="sMax" type="button">Max</button></div>
+      <label class="eyebrow" for="sTo">To address</label>
+      <div class="send-line"><textarea class="send-in" id="sTo" rows="1" placeholder="Mx… or 0x…" autocomplete="off" spellcheck="false"></textarea></div>
+      <button class="btn btn--primary send-go" id="sGo">Send Funds</button>`;
+    // The address wraps so a pasted one can be read end to end before sending; Enter does not add a line.
+    const grow = () => { const t = el("sTo"); t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; };
+    el("sTo").oninput = grow;
+    el("sTo").onkeydown = (e) => { if (e.key === "Enter") e.preventDefault(); };
     if (preselect) el("sTok").value = preselect;
     const tokOf = (tid) => SEND_TOKENS.find(x => x.tokenid === tid) || {};
     const sendableOf = (tid) => tokOf(tid).sendable || "0";
     const refreshAvail = () => {
       const t = tokOf(el("sTok").value);
-      el("sAvail").textContent = "Available: " + TOK.tidyAmount(t.sendable || "0") + (t.ticker ? " " + t.ticker : "");
+      el("sAvail").textContent = "sendable " + TOK.tidyAmount(t.sendable || "0");
     };
     el("sTok").onchange = refreshAvail;
     el("sMax").onclick = () => { el("sAmt").value = TOK.tidyAmount(sendableOf(el("sTok").value)); };
@@ -2559,7 +2567,7 @@ function sendForm(mode) {
       el("sGo").disabled = true; el("sGo").textContent = "Sending…";
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
-        if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send"; return; }
+        if (!chk) { toast("Couldn't validate the address (node busy?) — not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return; }
         // Review before it leaves. Every OTHER send in this app confirms first — minimaMail pay, ETH send,
         // AtomiX swap, the PandaPools actions, Vestr — and this is the one people use most. The recipient is
         // shown IN FULL so a mistyped or clipboard-swapped address has somewhere to be caught.
@@ -2567,12 +2575,12 @@ function sendForm(mode) {
         if (!await showConfirm(`Send ${amt} ${tname}?`,
               `To\n${to}\n\nAmount\n${amt} ${tname}\n\nCheck the address above — this sends real funds and cannot be undone.`,
               "Send now", false)) {
-          el("sGo").disabled = false; el("sGo").textContent = "Send"; return;
+          el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return;
         }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
         toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
       } catch (e) { toast(e.message, "err"); }
-      el("sGo").disabled = false; el("sGo").textContent = "Send";
+      el("sGo").disabled = false; el("sGo").textContent = "Send Funds";
     };
   }
 }

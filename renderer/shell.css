@@ -212,6 +212,26 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .recv__label { width: 100%; max-width: 360px; margin-top: 28px; }
 .recv__label:empty { display: none; }
 
+/* ---------------------------------------------------------------- Send (view_wallet_send) */
+#view-send { padding: 16px; }
+#sendCard { background: none; border: 0; border-radius: 0; padding: 0; margin: 0; }
+#sendForm { display: flex; flex-direction: column; }
+#sendForm > .eyebrow { margin: 20px 0 6px; line-height: 16px; }
+#sendForm > .eyebrow:first-child { margin-top: 0; }
+.send-tok { width: 100%; min-height: 48px; padding: 6px 34px 6px 12px; border: 0; border-radius: 10px; background-color: var(--surface2); color: var(--text);
+  font: 400 15px/20px var(--sans); letter-spacing: .03em; appearance: none; -webkit-appearance: none; cursor: pointer; text-overflow: ellipsis;
+  background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 21px, calc(100% - 14px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
+.send-tok option { background: var(--surface2); color: var(--text); }
+.send-avail { margin-top: 6px; font: 400 12px/1.2 var(--sans); letter-spacing: .018em; color: var(--dim2); overflow-wrap: anywhere; user-select: text; min-height: 14px; }
+.send-line { display: flex; align-items: flex-end; }
+.send-in { flex: 1 1 0; min-width: 0; min-height: 44px; margin: 0 4px; padding: 10px 0 9px; border: 0; border-bottom: 1px solid var(--dim); border-radius: 0; background: none; color: var(--text);
+  font: 400 15px/24px var(--sans); letter-spacing: .03em; resize: none; overflow: hidden; overflow-wrap: anywhere; word-break: break-all; display: block; }
+.send-in::placeholder { color: var(--dim2); }
+.send-in:focus, .send-in:focus-visible { outline: none; border-bottom: 2px solid var(--orange); padding-bottom: 8px; }
+.send-line .btn { flex: 0 0 auto; min-height: 44px; margin-left: 8px; padding: 0 16px; font-size: 15px; font-weight: 400; }
+.send-go { width: 100%; min-height: 52px; margin-top: 28px; font-size: 15px; font-weight: 400; }
+
 /* ---------------------------------------------------------------- dialogs (the phone's AlertDialog: title, body, text buttons) */
 .overlay--dlg { padding: 24px; }
 .dlg { width: 100%; max-width: 560px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden;

@@ -61,7 +61,7 @@ function harness(opts) {
 
 // ---- the drivers: how a user fills each screen today. Only these change when a screen moves. ----
 async function driveSend(h, { to, amt, tok, max }) {
-  h.fns.sendForm("send");
+  h.fns.sendForm();
   h.el("sTok").value = tok; h.el("sTo").value = to;
   if (max) h.el("sMax").onclick(); else h.el("sAmt").value = amt;
   await h.el("sGo").onclick();
