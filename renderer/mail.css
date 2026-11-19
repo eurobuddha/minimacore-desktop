@@ -222,3 +222,7 @@
 .mailapp .mm-reader { padding: 18px; }
 .mailapp .mm-reader-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 19px; color: var(--mm-text); }
 .mailapp .mm-reader-sender { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 12px; padding: 0; border: 0; background: none; color: var(--mm-dim); font: inherit; font-size: 11px; cursor: copy; }
+
+#view-mail #mmToWords { gap: 3px; }
+#view-mail #mmCompactTo { flex: 1; min-width: 0; text-align: left; font: inherit; font-size: 13px; color: var(--mm-text); background: transparent; border: 0; padding: 4px 0; overflow-wrap: anywhere; cursor: pointer; }
+#view-mail #mmCompactTo[hidden], #view-mail .mm-chips[hidden] { display: none; }

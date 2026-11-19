@@ -426,13 +426,13 @@
         if (!event.isComposing && !String(event.inputType).startsWith("delete") && prefix &&
             (prefix.length >= 4 || dictionary.includes(prefix))) {
           const matches = dictionary.filter(w => w.startsWith(prefix));
-          if (matches.length === 1) { box.value = matches[0]; advance(); }
+          if (matches.length === 1) { box.value = matches[0]; advance(); changed(true); return; }
         }
         changed();
       };
       box.onkeydown = event => {
         if ((event.key === " " || event.key === "Enter") && dictionary.includes(box.value.toLowerCase())) {
-          event.preventDefault(); advance(); changed();
+          event.preventDefault(); advance(); changed(true);
         }
       };
       box.onpaste = event => {
@@ -446,7 +446,7 @@
         const start = parts.length === 6 ? 0 : i;
         if (start + parts.length > 6) { box.value = ""; changed(); box.setCustomValidity("Enter six address words."); box.reportValidity(); box.setCustomValidity(""); return; }
         parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
-        boxes[Math.min(5, start + parts.length)].focus(); changed();
+        boxes[Math.min(5, start + parts.length)].focus(); changed(true);
       };
       grid.append(box); boxes.push(box);
     }
@@ -622,6 +622,7 @@
       + '<span class="mm-t">New message</span>'
       + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "Send</button></div>"
       + '<div class="mm-f"><span class="mm-lab">To</span>'
+      + '<button id="mmCompactTo" type="button" hidden></button>'
       + '<div class="mm-word-grid" id="mmToWords"></div>'
       + '<textarea rows="1" class="mm-monoin" id="mmTo" placeholder="Six words, contact link or Mail key" autocomplete="off" spellcheck="false">' + D.esc(c.to) + '</textarea>'
       + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmEnterWords">Enter words</button><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "Scan</button>"
@@ -637,23 +638,30 @@
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
     const raw = D.el("mmTo"), grid = D.el("mmToWords"), toggle = D.el("mmEnterWords");
     const status = D.el("mmLookup"), retry = D.el("mmRetryLookup");
+    const compact = D.el("mmCompactTo"), chips = toggle.parentElement;
     const actions = ["mmDoSend", "mmPhoto", "mmFunds"].map(id => D.el(id));
     let revision = 0, resolved = "", sending = false;
     const { boxes } = addressBoxes(grid, dictionary, wordsChanged, useRaw);
     (c.words || []).forEach((word, i) => { boxes[i].value = word; });
-    function mode(asRaw) {
-      raw.hidden = !asRaw; grid.hidden = asRaw;
+    function mode(asRaw, folded = false) {
+      compact.hidden = !folded; chips.hidden = folded;
+      compact.textContent = folded ? raw.value : "";
+      raw.hidden = !asRaw || folded; grid.hidden = asRaw || folded;
       toggle.textContent = asRaw ? "Enter words" : "Link or Mail key";
       toggle.disabled = !dictionary.length;
     }
     function useRaw(text) { mode(true); raw.value = text; raw.focus(); keep(); check(); }
-    function wordsChanged() {
+    function wordsChanged(accepted) {
       const parts = boxes.map(box => box.value.toLowerCase());
-      raw.value = parts.every(word => dictionary.includes(word)) ? parts.join("-") : "";
+      raw.value = accepted && parts.every(word => dictionary.includes(word)) ? parts.join("-") : "";
+      if (raw.value) {
+        mode(false, true);
+        compact.focus();
+      }
       keep(); check();
     }
     function keep() {
-      Object.assign(c, { to: raw.value, words: boxes.map(box => box.value), raw: !raw.hidden,
+      Object.assign(c, { to: raw.value, words: boxes.map(box => box.value), raw: !raw.hidden, collapsed: !compact.hidden,
         subject: D.el("mmSubj").value, body: D.el("mmBodyIn").value });
     }
     async function check() {
@@ -675,7 +683,11 @@
     }
     raw.oninput = () => { keep(); check(); };
     D.el("mmSubj").oninput = D.el("mmBodyIn").oninput = keep;
-    mode(!dictionary.length || (c.raw ?? Boolean(c.to)));
+    mode(!dictionary.length || (c.raw ?? Boolean(c.to)), !!c.collapsed);
+    compact.onclick = () => {
+      mode(false); wordsChanged(false);
+      boxes[0].focus(); boxes[0].select();
+    };
     retry.onclick = check;
     check();
     D.el("mmCancel").onclick = function () { COMPOSE = null; VIEW = "inbox"; render(); };
