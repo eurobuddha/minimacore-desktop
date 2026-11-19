@@ -36,7 +36,9 @@
   /** A custom slippage entry: the percent the panel would keep, or null (0.1 to 50, one decimal). */
   const slipOf = (text) => { const n = parseFloat(text); return isFinite(n) && n >= 0.1 && n <= 50 ? Math.round(n * 10) / 10 : null; };
   const roleLabel = (r) => (r === "RESPONDER" ? "maker" : r === "INITIATOR" ? "taker" : String(r || "").toLowerCase());
-  const terminal = (s) => s.status === "COMPLETE" || s.status === "REFUNDED" || s.status === "ERROR";
+  /** Finished: complete, refunded, or in ERROR with its timelock window closed. A swap in ERROR whose window is still
+   *  open (inWindow, the engine's rule) may hold a lock that can be refunded: it stays In progress, with Refund now. */
+  const terminal = (s) => s.status === "COMPLETE" || s.status === "REFUNDED" || (s.status === "ERROR" && !s.inWindow);
 
   function bestLine(sell, price, cap, ccy, depth, makers) {
     if (!(price > 0)) return "No live makers on the book right now.";
@@ -92,7 +94,7 @@
     const st = tok(sw.selltoken), bt = tok(sw.buytoken), a = sw.status === "LOCKED" || sw.status === "CLAIMING" ? 3 : sw.status === "COMPLETE" ? 5 : 2;
     const leg = (i) => (i < a ? "done" : i === a ? "active" : "pending");
     if (sw.status === "REFUNDED") rows.push({ state: "warn", text: "Timed out: " + sw.sellamount + " " + st + " refunded" });
-    else if (sw.status === "ERROR") rows.push({ state: "warn", text: "Stopped: see the swap below for what happened" });
+    else if (sw.status === "ERROR") rows.push({ state: "warn", text: sw.inWindow ? "Stopped with an error: see it under In progress (in History if you hid it)" : "Stopped with an error: see it in Activity for what happened" });
     else rows.push({ state: leg(1), text: "Locked your " + sw.sellamount + " " + st }, { state: leg(2), text: "Counterparty locks their side" }, { state: leg(3), text: "Claim your " + sw.buyamount + " " + bt }, { state: leg(4), text: "Swap complete" });
     return { rows, which: sw.sellamount + " " + st + "  →  " + sw.buyamount + " " + bt + "   ·   " + roleLabel(sw.role), check: terminal(sw) ? "" : sw.hash, more };
   }
@@ -106,6 +108,7 @@
       : (st === "STARTED" ? "waiting for the maker" : running ? "claiming" : complete ? (buy === "USDT" ? "at your Ethereum address" : "in your wallet") : refunded ? "maker didn't lock · " + sell + " back" : error ? "failed" : String(st || "").toLowerCase());
     const lines = [];
     if (s.detail) lines.push(mx(s.detail));
+    if (error && s.inWindow) lines.push("Stopped with an error. If a lock was made it can still be refunded: this stays here, with Refund now, until its deadline has passed.");
     let refund = null;
     if (v) {
       const when = (t) => (v.blocks ? "block " + t : new Date(t * 1000).toLocaleString());
@@ -154,7 +157,9 @@
   function launch(currency, swaps, makerLive, otcLive) {
     if (currency !== "minima" || swaps == null || makerLive == null) return null;
     const swap = (swaps || []).some((s) => !terminal(s)) || !!otcLive, live = !!makerLive;
-    if (!swap && !live) return { idle: true, text: "AtomiX is in MINIMA mode: this room quotes USDT ⇄ MINIMA. Nothing of yours is live there. Use the ⇄ pill to go back to MxUSD." };
+    // idle says only what was checked: the swaps, my levels on the book, and (when the engine reported it) my OTC availability
+    if (!swap && !live) return { idle: true, text: "AtomiX is in MINIMA mode: this room quotes USDT ⇄ MINIMA. " + (otcLive == null ? "None of your swaps there is unfinished and your MINIMA market is not on the book; OTC was not checked: look at the OTC tab."
+      : "None of your swaps there is unfinished, your MINIMA market is not on the book and your OTC availability is off.") + " Use the ⇄ pill to go back to MxUSD." };
     return { idle: false, text: "Opened in MINIMA mode: " + (swap && live ? "a USDT ⇄ MINIMA swap or OTC deal is in flight and your MINIMA market is live" : swap ? "a USDT ⇄ MINIMA swap or OTC deal is in flight" : "your MINIMA market is live")
       + ". Dexicon never switches a live market by itself. Use the ⇄ pill to go back to MxUSD when you are ready." };
   }
@@ -176,6 +181,12 @@
     for (let i = 0; i < clampLevels(levels); i++) out.push({ bid: fmtPx(quoted * (1 - (i + 1) * st / 100)), ask: fmtPx(quoted * (1 + (i + 1) * st / 100)) });
     return out;
   }
+  /** A rung's size as the editor writes it from the size field: the number as typed, in plain decimals. Never six
+   *  significant figures and never an exponent (0.18.133; the old panel passed the size through the price format: 1234567.89 became "1.23457e+6"). */
+  const rungSize = (text) => { const t = String(text == null ? "" : text).trim(); return /^(\d+\.?\d*|\.\d+)$/.test(t) && Number(t) > 0 ? t : ""; };
+  /** The OTC LP a button was drawn for (0.18.133, M6): found by its id in the board as it is NOW, and only if it still
+   *  offers the sizes that were on the button's card. null: it left, or its terms changed; nothing may be sent. */
+  const lpPick = (board, cid, sell, buy) => (board || []).find((x) => String(x.cid) === String(cid) && String(x.sell) === String(sell) && String(x.buy) === String(buy)) || null;
   /** What Save & publish sends, from the editor's fields. get(name) is a field's text, on(name) a switch.
    *  { withdraw: true } when Enabled is off, else { cfg, manual } exactly as the panel built them. */
   function makerForm(get, on) {
@@ -280,6 +291,8 @@
   // ui = { confirm(title, text, okLabel) → Promise<bool>, say(text, kind) }. Every function here makes the SAME
   // window.mcd calls, with the same arguments, behind the same guards, in the same order, as renderer/atomix-ui.js.
   const fail = (e) => ({ err: String((e && e.message) || e) });
+  const refused = (e) => /AtomiX is halted|AtomiX is stopped while the wallet/.test(String(e));   // the glue refused before anything was saved or sent
+  const RETRY = " While it runs, AtomiX publishes the saved order again by itself: at the next reprice, or within 30 minutes.";
   const Act = {
     /** axQuote (freeze) → review → axSwap(the frozen quote's id). */
     async take(api, ui, sell, amt, slip, ccy) {
@@ -303,14 +316,14 @@
     /** Publish: the saved order as it is (axMakerPublish). */
     async makerPublish(api, ui) {
       const r = await api.axMakerPublish().catch(fail);
-      ui.say(r && r.err ? "Your market was NOT published: " + mx(r.err) + ". What was on the book before is unchanged." : "Your market was sent to the book. Nothing is traded yet: it trades when someone takes a level, and this app answers by itself while it runs.", r && r.err ? "error" : "note");
+      ui.say(r && r.err ? (refused(r.err) ? "Your market was NOT published: " + mx(r.err) : "Your market is NOT on the book yet: " + mx(r.err) + ". What was on the book before is unchanged." + RETRY) : "Your market was sent to the book. Nothing is traded yet: it trades when someone takes a level, and this app answers by itself while it runs.", r && r.err ? "error" : "note");
       return r;
     },
     /** Save & publish: Enabled off withdraws (axMakerWithdraw); else axMakerSave(cfg, manual). form = makerForm(…). */
     async makerSave(api, ui, form) {
       if (form.withdraw) { const r = await api.axMakerWithdraw().catch(fail); ui.say(r && r.err ? "Your market was NOT withdrawn: " + mx(r.err) + ". It may still be on the book." : "Market withdrawn: your offer leaves the book within about a block. A take already in flight still settles.", r && r.err ? "error" : "note"); return r; }
       const r = await api.axMakerSave(form.cfg, form.manual).catch(fail);
-      ui.say(r && r.err ? "Your order was NOT published: " + mx(r.err) + ". Open the editor to see what was saved before trying again." : "Your order was saved and sent to the book. Nothing is traded yet: it trades when someone takes a level.", r && r.err ? "error" : "note");
+      ui.say(r && r.err ? (refused(r.err) ? "Your order was NOT saved and NOT published: " + mx(r.err) : "Your order was SAVED but is not on the book yet: " + mx(r.err) + "." + RETRY + " To stop that, withdraw the market.") : "Your order was saved and sent to the book. Nothing is traded yet: it trades when someone takes a level.", r && r.err ? "error" : "note");
       return r;
     },
     async makerWithdraw(api, ui) {
@@ -327,7 +340,7 @@
     },
     async otcWithdraw(api, ui) {
       const r = await api.axOtcWithdraw().catch(fail);
-      ui.say(r && r.err ? "Your availability may still be on the board: " + mx(r.err) : "Availability withdrawn. A deal already agreed still settles.", r && r.err ? "error" : "note");
+      ui.say(r && r.err ? "Your availability may still be on the board: " + mx(r.err) : r && r.posted === false ? "Your availability is switched off in this app. Nothing was posted to the board, because AtomiX is halted: an entry already on the board ages out by itself, and no proposal is answered meanwhile." : "Availability withdrawn. A deal already agreed still settles.", r && r.err || (r && r.posted === false) ? "error" : "note");
       return r;
     },
     async otcPropose(api, ui, lp, side, amount, price) {
@@ -373,7 +386,7 @@
   /** One at a time (0.18.118): while fn runs, a second call does nothing. For the money actions that had no
    *  in-flight state of their own: a double click on Refund now or on a wallet action started it twice. */
   function oneAtATime() { let on = false; return async (fn) => { if (on) return; on = true; try { return await fn(); } finally { on = false; } }; }
-  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
+  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, rungSize, lpPick, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -438,7 +451,7 @@
     else if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and nothing can settle. ${esc(stoppedNote(S.swaps))}</div>`);
     if (halted()) out.push(haltHtml());
     else if (!S.st.ready) out.push(`<div class="dx-card ax-big"><b class="ax-t14">Setting up AtomiX…</b><div class="ax-dim">Preparing your Ethereum wallet and swap keys on this node, then reading the market. The first start takes a minute or two.</div></div>`);
-    const l = S.st.ready ? launch(S.st.currency, S.swaps, makerLive(S.mc, S.book), null) : null;
+    const l = S.st.ready ? launch(S.st.currency, S.swaps, makerLive(S.mc, S.book), S.st.otcOffer == null ? null : !!S.st.otcOffer || !!(S.otc && S.otc.deals && S.otc.deals.length)) : null;
     if (l) out.push(`<div class="ax-launch" role="status">${esc(l.text)}</div>`);
     if (S.said) out.push(`<div class="dx-state dx-state--${S.said.kind}" role="alert">${esc(S.said.text)}</div>`);
     return out.join("");
@@ -526,15 +539,14 @@
     $("axSellB").onclick = () => setSide(true); $("axBuyB").onclick = () => setSide(false); $("axFlip").onclick = () => setSide(!S.sell);
     for (const [id, name] of [["axSend", "send"], ["axRecv", "recv"]]) $(id).oninput = () => { S.typed = $(id).value ? name : null; S.said = null; mirror(); if (!$(id).value) { $("axPlan").textContent = ""; } preview(); paintReview(); };
     $("axReview").onclick = () => D.money(async () => {
-      if (S.busy) return;
       if (halted()) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was sent.", "error");
-      S.busy = true; paintReview();
-      const r = await Act.take(api(), ui, S.sell, amount(), S.slip, ccy());
-      S.busy = false;
+      const r = await busyWhile(true, () => { paintReview(); return Act.take(api(), ui, S.sell, amount(), S.slip, ccy()); });
       if (r && !r.err) { S.typed = null; $("axSend").value = ""; $("axRecv").value = ""; $("axPlan").textContent = ""; }
       load("swap").then(paint, paint);
     });
   }
+  /** The label a button shows while its action runs. Not a gate: every money action is behind D.money (DexCore.money). */
+  const busyWhile = async (label, fn) => { S.busy = label; try { return await fn(); } finally { S.busy = false; } };
   const paintReview = () => { const b = $("axReview"); if (b) { b.disabled = S.busy || halted(); b.dataset.dim = amount() ? "0" : "1"; b.textContent = S.busy ? "Starting…" : "Review swap"; } };
   function paintSwap() {
     const c = ccy(), b = S.book || {}, p = price(), ready = D.running() && S.st.ready, bals = S.bals || { minima: "—", usdt: "—", eth: "—" };
@@ -646,12 +658,12 @@
       const L = clampLevels(val("mkLevels")), size = n0(val("mkSize")), px = ladderPrices(midOver != null ? midOver : val("mkMid"), val("mkStep"), val("mkBias"), L);
       for (let i = 0; i < RUNGS; i++) {
         const bp = $("mkBidP" + i), ap = $("mkAskP" + i), ba = $("mkBidA" + i), aa = $("mkAskA" + i);
-        if (i < L) { if (px[i]) { bp.value = px[i].bid; ap.value = px[i].ask; } if (size > 0) { if (!ba.value) ba.value = fmtPx(size); if (!aa.value) aa.value = fmtPx(size); } }
+        if (i < L) { if (px[i]) { bp.value = px[i].bid; ap.value = px[i].ask; } if (size > 0) { if (!ba.value) ba.value = rungSize(val("mkSize")); if (!aa.value) aa.value = rungSize(val("mkSize")); } }
         else bp.value = ap.value = ba.value = aa.value = "";
       }
       showLevels(); summary();
     };
-    const seed = () => { const L = clampLevels(val("mkLevels")), size = n0(val("mkSize")); for (let i = 0; i < RUNGS; i++) $("mkBidA" + i).value = $("mkAskA" + i).value = i < L && size > 0 ? fmtPx(size) : ""; summary(); };
+    const seed = () => { const L = clampLevels(val("mkLevels")), size = n0(val("mkSize")); for (let i = 0; i < RUNGS; i++) $("mkBidA" + i).value = $("mkAskA" + i).value = i < L && size > 0 ? rungSize(val("mkSize")) : ""; summary(); };
     const pegUi = () => { $("mkMid").disabled = on("peg"); };
     const refreshPeg = async () => {
       const pv = await api().axMakerPreview({ pegEnable: true, step: n0(val("mkStep")), askSize: n0(val("mkSize")), bidSize: n0(val("mkSize")), bias: n0(val("mkBias")), levels: n0(val("mkLevels")) || 1, reprice: n0(val("mkReprice")) || 1, min: n0(val("mkMin")) }, {}).catch(() => null);
@@ -665,14 +677,14 @@
     const b = body();
     b.oninput = (e) => { const t = e.target; if (!t || t.tagName !== "INPUT") return; if (t.id !== "mkBias") numIn(t);   // the skew may be negative
       if (["mkMid", "mkStep", "mkBias", "mkLevels"].includes(t.id)) reprice(on("peg") && oracle > 0 ? oracle : undefined); else if (t.id === "mkSize") seed(); else summary(); };
-    const done = () => { clearInterval(S.pegTimer); S.editing = false; S.busy = false; b.oninput = null; b.innerHTML = ""; render("market", b); };
+    const done = () => { clearInterval(S.pegTimer); S.editing = false; b.oninput = null; b.innerHTML = ""; render("market", b); };
     $("mkSave").onclick = () => D.money(async () => {
-      if (S.busy) return;
       if (halted() && on("enabled")) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was published.", "error");
-      S.busy = "save"; $("mkSave").disabled = true; $("mkSave").textContent = "Saving…";
-      await Act.makerSave(api(), ui, makerForm(get, on)); done();
+      const form = makerForm(get, on);   // read before anything can close the editor
+      await busyWhile("save", () => { const b = $("mkSave"); if (b) { b.disabled = true; b.textContent = "Saving…"; } return Act.makerSave(api(), ui, form); });
+      if (S.editing) done(); else load("market").then(paint, paint);   // Close during the save left the editor already: the save's outcome is said on Market
     });
-    $("mkWithdraw").onclick = () => D.money(async () => { if (S.busy) return; S.busy = "withdraw"; const r = await Act.makerWithdraw(api(), ui); S.busy = false; if (r) done(); });
+    $("mkWithdraw").onclick = () => D.money(async () => { const r = await busyWhile("withdraw", () => Act.makerWithdraw(api(), ui)); if (r && S.editing) done(); });
     $("mkCancel").onclick = () => { S.said = null; done(); };
     pegUi(); showLevels(); if (n0(val("mkSize")) > 0) reprice(); summary(); if (on("peg")) poll();
   }
@@ -685,10 +697,8 @@
   async function marketAct(what) {
     if (what === "edit") { S.editing = true; S.said = null; return paint(); }
     return D.money(async () => {
-      if (S.busy) return;
-      S.busy = what; paint();
-      if (what === "publish") await Act.makerPublish(api(), ui); else await Act.makerWithdraw(api(), ui);
-      S.busy = false; load("market").then(paint, paint);
+      await busyWhile(what, () => { paint(); return what === "publish" ? Act.makerPublish(api(), ui) : Act.makerWithdraw(api(), ui); });
+      load("market").then(paint, paint);
     });
   }
 
@@ -706,9 +716,9 @@
     out.push(`<div class="dx-label ax-sec">LIQUIDITY PROVIDERS</div>`);
     if (!o) out.push(`<div class="ax-dim">Reading the OTC board…</div>`);
     else if (!o.board.length) out.push(`<div class="ax-dim">No OTC LPs online right now.</div>`);
-    else o.board.forEach((lp, i) => {
+    else o.board.forEach((lp) => {
       const sides = [Number(lp.sell) > 0 ? "sells up to " + lp.sell + " " + c : "", Number(lp.buy) > 0 ? "buys up to " + lp.buy + " " + c : ""].filter(Boolean).join("   ·   ");
-      out.push(`<div class="dx-card"><b class="ax-t13">${esc(sides || "no size offered")}</b>${idLine("LP id", lp.cid)}<div class="ax-acts">${Number(lp.sell) > 0 ? `<button class="dx-btn ax-go" data-axlp="${i}" data-side="SELL"${dis}>Buy ${esc(c)}</button>` : ""}${Number(lp.buy) > 0 ? `<button class="dx-btn" data-axlp="${i}" data-side="BUY"${dis}>Sell ${esc(c)}</button>` : ""}</div></div>`);
+      out.push(`<div class="dx-card"><b class="ax-t13">${esc(sides || "no size offered")}</b>${idLine("LP id", lp.cid)}<div class="ax-acts">${Number(lp.sell) > 0 ? `<button class="dx-btn ax-go" data-axlp="${esc(lp.cid)}" data-sell="${esc(lp.sell)}" data-buy="${esc(lp.buy)}" data-side="SELL"${dis}>Buy ${esc(c)}</button>` : ""}${Number(lp.buy) > 0 ? `<button class="dx-btn" data-axlp="${esc(lp.cid)}" data-sell="${esc(lp.sell)}" data-buy="${esc(lp.buy)}" data-side="BUY"${dis}>Sell ${esc(c)}</button>` : ""}</div></div>`);
     });
     out.push(`<div class="dx-label ax-sec">MY DEALS</div>`);
     if (o && !o.deals.length) out.push(`<div class="ax-dim">No OTC deals yet.</div>`);
@@ -721,15 +731,19 @@
   const terms = (title, text, okLabel, amount, price, cap) => form(title, `<pre>${esc(text)}</pre><label class="ax-fld"><b>${esc(ccy())} amount${cap != null ? " (at most " + esc(cap) + ")" : ""}</b><input class="dx-in ax-in" name="a" inputmode="decimal" autocomplete="off" value="${esc(amount || "")}"></label><label class="ax-fld"><b>Price (USDT per ${esc(ccy())})</b><input class="dx-in ax-in" name="p" inputmode="decimal" autocomplete="off" value="${esc(price || "")}"></label>`,
     okLabel, (d) => { const a = d.querySelector("[name=a]").value.trim(), p_ = d.querySelector("[name=p]").value.trim(); return termsProblem(a, p_, cap) || { amount: a, price: p_ }; }, (d) => { d.oninput = (e) => { if (e.target.tagName === "INPUT") numIn(e.target); }; });
   async function otcAct(ds) {
-    if (S.busy) return;
     if (halted() && !(ds.axotc === "withdraw" || ds.axdeal === "reject")) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was sent.", "error");
-    const o = S.otc || { board: [], deals: [] }, c = ccy(), run = async (fn) => { S.busy = true; paint(); await fn(); S.busy = false; S.otcDraft = ds.axotc ? null : S.otcDraft; load("otc").then(paint, paint); };
+    const o = S.otc || { board: [], deals: [] }, c = ccy(), run = async (fn) => { await busyWhile(true, () => { paint(); return fn(); }); S.otcDraft = ds.axotc ? null : S.otcDraft; load("otc").then(paint, paint); };
     if (ds.axotc === "live") return run(() => Act.otcGoLive(api(), ui, $("otcSell").value, $("otcBuy").value));
     if (ds.axotc === "withdraw") return run(() => Act.otcWithdraw(api(), ui));
     if (ds.axlp != null) {
-      const lp = o.board[Number(ds.axlp)]; if (!lp) return;
+      // the row is found by the LP's id in the board as it is now, with the sizes its card showed (the list is replaced
+      // by engine updates while the screen is not redrawn under a focused field: an index could name another LP)
+      const GONE = "That LP's offer changed or left the board while this screen was open. Nothing was sent. The list is redrawn: look again.";
+      const lp = lpPick(o.board, ds.axlp, ds.sell, ds.buy); if (!lp) { say(GONE, "error"); return load("otc").then(paint, paint); }
       const buy = ds.side === "SELL", t = await terms(buy ? "Buy " + c : "Sell " + c, (buy ? "You buy " + c + " from this LP and pay USDT on Ethereum." : "You sell " + c + " to this LP and receive USDT on Ethereum.") + " This sends an offer only: nothing is locked until the LP accepts and the swap starts.\n\nLP id\n" + lp.cid, "Send offer", "", "", buy ? lp.sell : lp.buy);
-      return t ? run(() => Act.otcPropose(api(), ui, lp, ds.side, t.amount, t.price)) : null;
+      if (!t) return null;
+      if (!lpPick((S.otc || {}).board, ds.axlp, ds.sell, ds.buy)) { say(GONE, "error"); return load("otc").then(paint, paint); }   // again: the terms dialog was open meanwhile
+      return run(() => Act.otcPropose(api(), ui, lp, ds.side, t.amount, t.price));
     }
     if (ds.axdeal === "counter") {
       const d = o.deals.find((x) => x.ref === ds.ref); if (!d) return;
@@ -862,7 +876,8 @@
   /** The ⇄ pill (MainActivity.switchCurrencyDialog): the panel's confirm, then the engine's switch. */
   async function switchCurrency() {
     if (!D || S.switching || !S.st.ready) return;
-    if (await D.money(async () => { S.switching = true; D.repaintStrip(); await Act.switchCurrency(api(), ui, S.st.currency); S.switching = false; return true; }) !== true) return; S.typed = null; S.book = null; S.mc = null; S.wallet = null; S.bals = null;
+    if (await D.money(async () => { S.switching = true; D.repaintStrip(); let r = null; try { r = await Act.switchCurrency(api(), ui, S.st.currency); } finally { S.switching = false; } if (r && !r.err) { S.otc = null; S.otcDraft = null; pref("dexicon_ax_market_live", "0"); }   // the switch withdrew the market and disarmed OTC: neither the old board nor "a market was live" carries over
+      return true; }) !== true) return; S.typed = null; S.book = null; S.mc = null; S.wallet = null; S.bals = null;
     if (onShared()) return reload();
     const b = body(); if (b && SCREENS[S.tab] && b.dataset.tab === S.tab) { b.innerHTML = ""; render(S.tab, b); } else load("").then(D.repaintStrip, D.repaintStrip);
   }

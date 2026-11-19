@@ -350,6 +350,7 @@ function status() {
     currency: ctx && ctx.AX ? ctx.AX.trading.active().key : null,
     block: lastTip,
     halt: booted && ctx.AX ? haltFrom(ctx.AX.identitywatch) : null,
+    otcOffer: booted && ctx.AX ? !!(ctx.AX.otc.myOffer() || {}).enable : null,   // 0.18.133: my OTC availability, for the MINIMA-mode banner
     log: LOG_RING.slice(-30)
   };
 }
@@ -607,6 +608,9 @@ function projectRow(A, s, events, nowSecs, tip) {
     sellamount: s.sellAmount, buytoken: s.buyToken, buyamount: s.buyAmount, status: s.status,
     created: s.created, updated: s.updated, counterparty: s.counterparty, contractId: s.contractId,
     timelock: s.myTimelock, legIsMinima: !!s.myLegIsMinima };   // 0.18.132: my own lock's deadline (a block for a Minima lock, unix seconds for an Ethereum one), for the halt card and the node-stopped notice
+  // 0.18.133: a swap in ERROR is not finished while its timelock window is open (a lock may still be refundable):
+  // the engine's own rule, as in activeWorkFrom. Unreadable: not assumed finished.
+  try { row.inWindow = !!A.trading.withinWindow(s, tip, nowSecs * 1000); } catch (e) { row.inWindow = true; }
   row.lastFail = lastFailureNote(events);
   row.detail = A.inspect.statusDetail(row);
   const vis = A.settle.visibility(s, events);
@@ -857,8 +861,11 @@ async function otcGoLive(sellSize, buySize) {
 async function otcWithdraw() {
   const A = AX();
   A.otc.setMyOffer(false, 0, 0);
+  // 0.18.133: while halted the engine posts nothing (lib/otc.js publishOffer returns at once) and answers as if it
+  // had: the screen is told, so it does not say the board entry was withdrawn. The offer is disarmed here either way.
+  const posted = !haltedNow();
   await p(cb => A.otc.publishOffer(e => cb(e)));
-  emitter.emit("update"); return { ok: true };
+  emitter.emit("update"); return { ok: true, posted };
 }
 async function otcPropose(lp, side, amount, price) {
   const A = AX();

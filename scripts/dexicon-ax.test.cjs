@@ -188,7 +188,7 @@ test("the launch rule: MxUSD mode says nothing; MINIMA mode stays, with the reas
   assert.match(AX.launch("minima", [{ status: "COMPLETE" }], true, false).text, /your MINIMA market is live\./);
   assert.match(AX.launch("minima", [{ status: "STARTED" }], true, false).text, /is in flight and your MINIMA market is live/);
   const idle = AX.launch("minima", [{ status: "REFUNDED" }], false, false);
-  assert.equal(idle.idle, true); assert.match(idle.text, /Nothing of yours is live there\. Use the ⇄ pill/);
+  assert.equal(idle.idle, true); assert.match(idle.text, /None of your swaps there is unfinished, your MINIMA market is not on the book and your OTC availability is off\. Use the ⇄ pill/);
   assert.equal(AX.makerLive({ state: { withdrawn: false } }, { bids: [{ mine: true }], asks: [] }), true);
   assert.equal(AX.makerLive({ state: { withdrawn: true } }, { bids: [{ mine: true }], asks: [] }), false);
   assert.equal(AX.makerLive(null, null), null);
@@ -259,8 +259,8 @@ for (const confirm of [true, false]) test(`Publish and Withdraw (${confirm ? "co
   assert.deepEqual(rp.money(), ro.money()); assert.deepEqual(rp.money(), [["axMakerPublish", []]]);
 });
 test("a publish, save or withdrawal that fails says it was NOT done, and what stands", async () => {
-  for (const [act, args, re] of [["makerPublish", [], /^Your market was NOT published: publish timed out\. What was on the book before is unchanged\.$/], ["makerWithdraw", [], /^Your market was NOT withdrawn: .* It may still be on the book\.$/],
-    ["makerSave", [{ cfg: {}, manual: {} }], /^Your order was NOT published: /], ["makerSave", [{ withdraw: true }], /^Your market was NOT withdrawn: /]]) {
+  for (const [act, args, re] of [["makerPublish", [], /^Your market is NOT on the book yet: publish timed out\. What was on the book before is unchanged\. While it runs, AtomiX publishes the saved order again by itself/], ["makerWithdraw", [], /^Your market was NOT withdrawn: .* It may still be on the book\.$/],
+    ["makerSave", [{ cfg: {}, manual: {} }], /^Your order was SAVED but is not on the book yet: publish timed out\. While it runs, AtomiX publishes the saved order again by itself: at the next reprice, or within 30 minutes\. To stop that, withdraw the market\.$/], ["makerSave", [{ withdraw: true }], /^Your market was NOT withdrawn: /]]) {
     const u = ui(true); const boom = async () => { throw new Error("publish timed out"); }; await AX.Act[act]({ axMakerPublish: boom, axMakerWithdraw: boom, axMakerSave: boom }, u, ...args);
     const last = u.said[u.said.length - 1]; assert.match(last[0], re); assert.equal(last[1], "error");
   }
@@ -590,4 +590,54 @@ test("M2: only a known pre-lock refusal says nothing was locked; every other out
   assert.match(AX.takeResult({ ok: 1, of: 2, hashes: [], reasons: ["part 2: socket hang up"] }).text, /^1 of 2 parts locked\. part 2: socket hang up\. Nothing is swapped yet.* For the rest: No lock was confirmed/);
   const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
   assert.ok(!/nothing was spent/i.test(src), "the screens never claim nothing was spent");
+});
+
+// ---- 0.18.133 (M6 and the lows) ----
+test("M6: an OTC LP's button names the LP by its id and its sizes; a row that moved, changed or left sends nothing", () => {
+  const A = { cid: "lp-A", mpk: PK("B1"), eth: ETH, sell: 500, buy: 0 }, B = { cid: "lp-B", mpk: PK("B2"), eth: TO, sell: 900, buy: 100 };
+  // drawn as [A, B]; the engine replaced the list with [B, A] while a field had the focus: the button of row 0 is still A's
+  assert.equal(AX.lpPick([B, A], "lp-A", "500", "0"), A, "found by id, wherever it now is (an index would have named B)");
+  assert.equal(AX.lpPick([B], "lp-A", "500", "0"), null, "the LP left: nothing");
+  assert.equal(AX.lpPick([{ ...A, sell: 50 }], "lp-A", "500", "0"), null, "the same LP with other sizes: nothing");
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.ok(!/data-axlp="\$\{i\}"/.test(src) && !/o\.board\[Number\(ds\.axlp\)\]/.test(src), "no row is named by its position");
+  assert.match(src, /data-axlp="\$\{esc\(lp\.cid\)\}" data-sell="\$\{esc\(lp\.sell\)\}" data-buy="\$\{esc\(lp\.buy\)\}" data-side="SELL"/);
+  assert.equal((src.match(/lpPick\(/g) || []).length, 2, "checked at the click and again after the terms dialog");
+});
+test("lows: an OTC withdrawal while halted says nothing was posted; a failed save says the order is saved and will be published again; a refusal says nothing was saved", async () => {
+  const u = ui(true); await AX.Act.otcWithdraw({ axOtcWithdraw: async () => ({ ok: true, posted: false }) }, u);
+  assert.match(u.said[0][0], /^Your availability is switched off in this app\. Nothing was posted to the board, because AtomiX is halted/); assert.equal(u.said[0][1], "error");
+  const v = ui(true); await AX.Act.otcWithdraw({ axOtcWithdraw: async () => ({ ok: true, posted: true }) }, v); assert.match(v.said[0][0], /^Availability withdrawn\./);
+  const atomix = require("../main/atomix"), F = fakeEngine({ halted: true }); atomix._setCtx(F.ctx);
+  try { assert.deepEqual(await atomix.otcWithdraw(), { ok: true, posted: false }); F.st.halted = false; assert.deepEqual(await atomix.otcWithdraw(), { ok: true, posted: true }); } finally { atomix._setCtx(null); }
+  const w = ui(true); await AX.Act.makerSave({ axMakerSave: async () => { throw new Error(atomix.HALTED); } }, w, { cfg: {}, manual: {} });
+  assert.match(w.said[0][0], /^Your order was NOT saved and NOT published: AtomiX is halted/);
+});
+test("lows: a swap in ERROR whose window is open is not finished: it stays In progress with Refund now, and the banners count it", () => {
+  const open = SW({ status: "ERROR", inWindow: true, vis: { blocks: true, cur: 10, refundAt: 5, respondBy: 3, canRefund: true, refundOpen: true, steps: [] } }), shut = SW({ status: "ERROR", inWindow: false });
+  assert.equal(AX.terminal(open), false); assert.equal(AX.terminal(shut), true);
+  const it = AX.swapItem(open); assert.equal(it.terminal, false); assert.deepEqual(it.refund, { label: "Refund now", enabled: true });
+  assert.ok(it.lines.some((l) => /^Stopped with an error\. If a lock was made it can still be refunded/.test(l)));
+  const st = AX.stages(true, "MxUSD", true, { minima: "1" }, [open], Date.now());
+  assert.equal(st.check, open.hash, "Check now is offered for it"); assert.ok(st.rows.some((r) => /^Stopped with an error: see it under In progress/.test(r.text)));
+  assert.ok(!/see the swap below/.test(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8")));
+  assert.equal(AX.launch("minima", [open], false, false).idle, false, "MINIMA mode is not called idle over it");
+  assert.match(AX.launch("minima", [], false, null).text, /OTC was not checked: look at the OTC tab/, "what was not read is not asserted");
+  assert.equal(AX.launch("minima", [], false, true).idle, false, "a live OTC availability keeps the room in MINIMA mode");
+  const A = { inspect: { statusDetail: () => "" }, settle: { visibility: () => null }, trading: { withinWindow: (s, tip, now) => tip < s.myTimelock } };
+  assert.equal(require("../main/atomix")._projectRow(A, { status: "ERROR", myTimelock: 100 }, [], 0, 50).inWindow, true);
+  assert.equal(require("../main/atomix")._projectRow(A, { status: "ERROR", myTimelock: 100 }, [], 0, 150).inWindow, false);
+});
+test("lows: a rung's size is the number as typed: not six significant figures, not an exponent (the old panel's fmtPx(size) did both; parity ends here on purpose)", () => {
+  assert.equal(AX.rungSize("1234567.89"), "1234567.89"); assert.equal(AX.fmtPx(1234567.89), "1.23457e+6", "what the old editor wrote");
+  assert.equal(AX.rungSize("0.000000123"), "0.000000123"); assert.equal(AX.rungSize("250"), "250"); assert.equal(AX.rungSize("abc"), ""); assert.equal(AX.rungSize("0"), "");
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.ok(!/fmtPx\(size\)/.test(src), "no size passes through the price format");
+});
+test("lows: no private busy gate: the label is set and cleared in one place (try/finally) and closing the editor does not clear it; a switch clears OTC and the offline flag", () => {
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.ok(!/if \(S\.busy\) return/.test(src), "DexCore.money is the gate");
+  assert.equal((src.match(/S\.busy = /g) || []).length, 2, "only busyWhile writes it");
+  assert.match(src, /const busyWhile = async \(label, fn\) => \{ S\.busy = label; try \{ return await fn\(\); \} finally \{ S\.busy = false; \} \};/);
+  assert.match(src, /if \(r && !r\.err\) \{ S\.otc = null; S\.otcDraft = null; pref\("dexicon_ax_market_live", "0"\); \}/);
 });

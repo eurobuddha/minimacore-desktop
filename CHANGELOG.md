@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.133] — Dexicon ① MxUSD: OTC rows by id, and the low findings (review M6 and lows)
+
+- **OTC: a button can no longer send your offer to a different LP.** The Buy / Sell buttons of the LP list named a row by its position. The engine replaces the list while the screen is not redrawn under a field in use, so a click on row 2 could propose to another LP, whose ACCEPT then locks by itself. Each button now names the LP by its id and the sizes its card showed; the row is looked up again at the click and once more after the terms dialog, and if the LP left or changed its sizes nothing is sent and the list is redrawn.
+- **A swap in ERROR is not called finished while its lock could still be refunded.** It stays under In progress, with Refund now, until its timelock window has closed (the engine's own rule). The MINIMA-mode banner and the stopped-node count include it.
+- **The MINIMA-mode banner is computed.** "Nothing of yours is live there" was asserted without looking at OTC. It now says what was checked: your swaps, your levels on the book, and your OTC availability (reported by the engine); a live OTC availability keeps the room in MINIMA mode.
+- **OTC Withdraw while halted** no longer says "Availability withdrawn": the engine posts nothing while halted, and the screen says so.
+- **A failed Save & publish** no longer says "NOT published" as if nothing stood: the order is saved, and AtomiX publishes a saved order again by itself (at the next reprice, or within 30 minutes). A refusal (halted, wallet being replaced) says nothing was saved.
+- **Rung sizes are written as typed.** The editor filled each rung's size through the price format: six significant figures, and an exponent from a million up (1234567.89 became "1.23457e+6"). The old panel did the same; that was a defect, and the two now differ in this one case on purpose.
+- Closing the editor during a save no longer re-enables the buttons mid-action: the busy label is set and cleared in one place and every money action is behind Dexicon's one gate.
+- "See the swap below" is no longer said where no card is drawn.
+- A currency switch clears the OTC list and the "a market was live" flag (the switch withdraws the market and disarms OTC).
+
 ## [0.18.132] — Dexicon ① MxUSD: hidden swaps, the halt card and the node-stopped notice say what is true (review M3, M4, M5)
 
 - **A hidden swap can always be found again.** Hide removed a swap's card from Swap and Activity and promised "It stays in History", but History listed finished swaps only, so a hidden swap still in flight was shown nowhere. History now lists every finished swap and every hidden one, with Check now, Refund now and a new **Unhide**.
