@@ -205,3 +205,83 @@ test("the old panel is still in the tree, untouched by room ①, and is no longe
   assert.ok(!/AtomixPanel\.render\(/.test(app), "nothing asks the old panel to draw");
   assert.ok(html.indexOf('src="dexicon-ax.js"') < html.indexOf('src="dexicon-ui.js"'));
 });
+
+// ---- Market: the maker's order ----
+const MC = { cfg: { pegEnable: false, step: 1, levels: 3, size: 100, bias: 0, reprice: 1, min: 5 }, manual: { bids: [], asks: [] }, state: { withdrawn: false }, lastPublishMs: 0 };
+const MAKER_ANSWERS = () => ({ axStatus: { ready: true, currency: "mxusdt" }, axBook: BOOK, axSwaps: [], axWallet: null, axMarketHistory: { chart: [], recent: [] }, axMakerCfg: MC,
+  axMakerPreview: { ok: true, mid: 0, source: "Parity" }, axMakerSave: { ok: true }, axMakerPublish: { ok: true }, axMakerWithdraw: { ok: true } });
+async function oldEditor(confirm) {
+  const r = recorder(MAKER_ANSWERS()), p = oldPanel(r.api, confirm);
+  p.P._setView("market"); await p.P.render(); await p.settle();
+  p.el("axEdit").onclick(); await p.settle();
+  return { r, p };
+}
+const FORMS = [
+  { name: "a manual ladder, two rungs a side", on: { enabled: true, peg: false }, f: { step: "1", size: "100", bias: "0", reprice: "1", levels: "2", min: "5", bidP0: "0.99", bidA0: "100", bidP1: "0.98", bidA1: "250.5", askP0: "1.01", askA0: "100", askP1: "1.02", askA1: "80" } },
+  { name: "pegged, size and step set", on: { enabled: true, peg: true }, f: { step: "0.5", size: "40", bias: "-2", reprice: "", levels: "9", min: "", bidP0: "0.995", bidA0: "40", askP0: "1.005", askA0: "40" } },
+  { name: "pegged but no size: the peg is not armed", on: { enabled: true, peg: true }, f: { step: "1", size: "", bias: "", reprice: "2", levels: "0", min: "1", bidP0: "0.9", bidA0: "10" } },
+  { name: "rungs with a price and no amount, or text, are left out", on: { enabled: true, peg: false }, f: { step: "1", size: "5", levels: "3", bidP0: "0.99", bidA0: "", bidP1: "abc", bidA1: "5", askP0: "1.01", askA0: "7" } },
+  { name: "Enabled is off: the market is withdrawn, nothing is saved", on: { enabled: false, peg: true }, f: { step: "1", size: "100", levels: "3", bidP0: "0.99", bidA0: "100" } }
+];
+const OLD_ID = (n) => ({ step: "axStep", size: "axSize", bias: "axBias", reprice: "axReprice", levels: "axLevels", min: "axMin" }[n] || "ax" + n[0].toUpperCase() + n.slice(1));   // bidP0 → axBidP0
+for (const c of FORMS) test(`Save & publish, ${c.name}: the same call and the same cfg and ladder as the old editor`, async () => {
+  const { r, p } = await oldEditor(true);
+  for (const [k, v] of Object.entries(c.f)) p.el(OLD_ID(k)).value = v;
+  for (const [id, on] of [["axEnabled", c.on.enabled], ["axPegToggle", c.on.peg]]) p.el(id).classList.toggle("on", on);
+  await p.el("axSave").onclick(); await p.settle();
+  const rn = recorder(MAKER_ANSWERS());
+  await AX.Act.makerSave(rn.api, ui(true), AX.makerForm((n) => c.f[n] || "", (n) => c.on[n]));
+  assert.deepEqual(rn.money(), r.money());
+  assert.equal(rn.money().length, 1); assert.equal(rn.money()[0][0], c.on.enabled ? "axMakerSave" : "axMakerWithdraw");
+});
+test("the editor's prices from mid, step and skew are the old editor's, rung for rung", async () => {
+  for (const [mid, step, bias, levels] of [["1", "1", "0", "3"], ["0.00332683", "0.5", "-2", "6"], ["1.0004", "2.5", "35", "2"], ["1", "1", "0", "0"], ["", "1", "0", "3"], ["1", "0", "0", "3"]]) {
+    const { p } = await oldEditor(true);
+    for (let i = 0; i < 6; i++) for (const k of ["axBidP", "axAskP", "axBidA", "axAskA"]) p.el(k + i).value = "";
+    p.el("axStep").value = step; p.el("axBias").value = bias; p.el("axLevels").value = levels; p.el("axSize").value = ""; p.el("axMid").value = mid; p.el("axMid").fire("input");
+    const old = []; for (let i = 0; i < 6; i++) if (p.el("axBidP" + i).value) old.push({ bid: p.el("axBidP" + i).value, ask: p.el("axAskP" + i).value });
+    assert.deepEqual(AX.ladderPrices(mid, step, bias, levels), old, [mid, step, bias, levels].join(" / "));
+  }
+});
+for (const confirm of [true, false]) test(`Publish and Withdraw (${confirm ? "confirmed" : "closed"}): axMakerPublish at once, axMakerWithdraw only after the old confirm`, async () => {
+  const { r, p } = await oldEditor(confirm);
+  await p.el("axWithdraw").onclick(); await p.settle();
+  const old = r.money();
+  const rn = recorder(MAKER_ANSWERS()), u = ui(confirm);
+  await AX.Act.makerWithdraw(rn.api, u);
+  assert.deepEqual(rn.money(), old); assert.deepEqual(rn.money(), confirm ? [["axMakerWithdraw", []]] : []);
+  assert.equal(u.said[0][1], p.said.find((x) => x[0] === "confirm")[1], "the same question");
+  const ro = recorder(MAKER_ANSWERS()), po = oldPanel(ro.api, confirm);
+  po.P._setView("market"); await po.P.render(); await po.settle(); await po.el("axPublish").onclick(); await po.settle();
+  const rp = recorder(MAKER_ANSWERS()); await AX.Act.makerPublish(rp.api, ui(confirm));
+  assert.deepEqual(rp.money(), ro.money()); assert.deepEqual(rp.money(), [["axMakerPublish", []]]);
+});
+test("a publish, save or withdrawal that fails says it was NOT done, and what stands", async () => {
+  for (const [act, args, re] of [["makerPublish", [], /^Your market was NOT published: publish timed out\. What was on the book before is unchanged\.$/], ["makerWithdraw", [], /^Your market was NOT withdrawn: .* It may still be on the book\.$/],
+    ["makerSave", [{ cfg: {}, manual: {} }], /^Your order was NOT published: /], ["makerSave", [{ withdraw: true }], /^Your market was NOT withdrawn: /]]) {
+    const u = ui(true); const boom = async () => { throw new Error("publish timed out"); }; await AX.Act[act]({ axMakerPublish: boom, axMakerWithdraw: boom, axMakerSave: boom }, u, ...args);
+    const last = u.said[u.said.length - 1]; assert.match(last[0], re); assert.equal(last[1], "error");
+  }
+});
+test("the editor's summary: the spread, and a crossed ladder is said before anything is published", () => {
+  const ok = AX.ladderSummary({ bids: [{ p: 0.99, a: 100 }, { p: 0.98, a: 50 }], asks: [{ p: 1.01, a: 100 }] }, "MxUSD");
+  assert.equal(ok.crossed, false); assert.equal(ok.spread, "spread 0.02 · 2%"); assert.equal(ok.bids, "2 lvl · best 0.99 · 150 MxUSD"); assert.equal(ok.asks, "1 lvl · best 1.01 · 100 MxUSD");
+  const x = AX.ladderSummary({ bids: [{ p: 1.02, a: 1 }], asks: [{ p: 1.01, a: 1 }] }, "MxUSD");
+  assert.equal(x.crossed, true); assert.match(x.warn, /^Crossed: best bid 1\.02 is at or above best ask 1\.01\./);
+  assert.equal(AX.ladderSummary({ bids: [], asks: [] }, "MxUSD").spread, "—");
+});
+test("YOUR OFFER: live only with my own levels on the book and not withdrawn; saved, off and withdrawn are told apart", () => {
+  const book = { bids: [{ p: 0.985, cap: 100, mine: true }, { p: 0.99, cap: 5, mine: false }], asks: [{ p: 1.015, cap: 1200, mine: true }] };
+  const live = AX.offerState({ cfg: { step: 1, pegEnable: true }, state: {}, lastPublishMs: 5 }, book, "Parity");
+  assert.equal(live.live, true); assert.match(live.text, /^Live · pegged to Parity · /); assert.deepEqual(live.rows, ["ASK  1.015   1.2k", "BID  0.985   100"]);
+  assert.match(AX.offerState({ cfg: { step: 1 }, state: { withdrawn: true } }, book, "MEXC").text, /^Withdrawn: /);
+  assert.match(AX.offerState({ cfg: { step: 1 }, state: {} }, { bids: [], asks: [] }, "MEXC").text, /^Saved, not on the book/);
+  assert.match(AX.offerState({ cfg: {}, manual: { bids: [], asks: [] }, state: {} }, { bids: [], asks: [] }, "MEXC").text, /^Off: edit your order, then Publish\.$/);
+  assert.equal(AX.offerState(null, null, "MEXC").text, "…");
+});
+test("the 'buys declined' warning uses the engine's own read limits", () => {
+  const htlc = fs.readFileSync(path.join(__dirname, "..", "main", "atomix", "lib", "htlc.js"), "utf8");
+  assert.ok(htlc.includes(`=== '0x00' ? ${AX.COIN_CAP.minima} : ${AX.COIN_CAP.mxusdt};`), "COIN_CAP equals guardedCoins' cap");
+  assert.equal(AX.coinWarn("mxusdt", 53), ""); assert.equal(AX.coinWarn("mxusdt", 54), "54 MxUSD coins: AtomiX buys are being declined. Consolidate.");
+  assert.equal(AX.coinWarn("minima", 200), ""); assert.match(AX.coinWarn("minima", 201), /^201 MINIMA coins/); assert.equal(AX.coinWarn("mxusdt", undefined), "");
+});

@@ -138,6 +138,47 @@
     return mine && !st.withdrawn;
   }
 
+  // ---- the maker's order editor (the panel's axWireMakerEditor; AtomiX editOrderDialog) ----
+  const RUNGS = 6;
+  const n0 = (v) => Number(v) || 0;
+  const clampLevels = (v) => Math.max(1, Math.min(RUNGS, Math.floor(n0(v)) || 1));
+  /** The prices the editor writes into the visible rungs from mid, step % and skew % (skew is held to ±20 %). */
+  function ladderPrices(mid, step, bias, levels) {
+    const m = n0(mid), st = n0(step), quoted = m * (1 + Math.max(-20, Math.min(20, n0(bias))) / 100), out = [];
+    if (!(m > 0 && st > 0)) return out;
+    for (let i = 0; i < clampLevels(levels); i++) out.push({ bid: fmtPx(quoted * (1 - (i + 1) * st / 100)), ask: fmtPx(quoted * (1 + (i + 1) * st / 100)) });
+    return out;
+  }
+  /** What Save & publish sends, from the editor's fields. get(name) is a field's text, on(name) a switch.
+   *  { withdraw: true } when Enabled is off, else { cfg, manual } exactly as the panel built them. */
+  function makerForm(get, on) {
+    if (!on("enabled")) return { withdraw: true };
+    const rows = (side) => { const out = []; for (let i = 0; i < RUNGS; i++) out.push({ p: n0(get(side + "P" + i)), a: n0(get(side + "A" + i)) }); return out.filter((l) => l.p > 0 && l.a > 0); };
+    const step = n0(get("step")), size = n0(get("size"));
+    return { cfg: { pegEnable: on("peg") && step > 0 && size > 0, step, size, askSize: size, bidSize: size, bias: n0(get("bias")), reprice: n0(get("reprice")) || 1, levels: clampLevels(get("levels")), min: n0(get("min")) },
+      manual: { asks: rows("ask"), bids: rows("bid") } };
+  }
+  /** The editor's summary of what is typed: the spread, or that the ladder is crossed. */
+  function ladderSummary(manual, ccy) {
+    const { asks, bids } = manual, sum = (a) => a.reduce((t, l) => t + l.a, 0);
+    const ba = asks.length ? Math.min(...asks.map((l) => l.p)) : 0, bb = bids.length ? Math.max(...bids.map((l) => l.p)) : 0, both = asks.length && bids.length;
+    return { crossed: !!both && bb >= ba, spread: !both ? "—" : ba - bb > 0 ? "spread " + fmtPx(ba - bb) + " · " + cut((ba - bb) / bb * 100, 1) + "%" : "⚠ crossed",
+      warn: both && bb >= ba ? "Crossed: best bid " + fmtPx(bb) + " is at or above best ask " + fmtPx(ba) + ". You would sell cheaper than you buy." : "",
+      bids: bids.length ? bids.length + " lvl · best " + fmtPx(bb) + " · " + abbrev(sum(bids)) + " " + ccy : "none", asks: asks.length ? asks.length + " lvl · best " + fmtPx(ba) + " · " + abbrev(sum(asks)) + " " + ccy : "none" };
+  }
+  /** YOUR OFFER at a glance (MarketTab.renderMyOffer), from the maker's read model and my own levels in the book. */
+  function offerState(mc, book, src) {
+    const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || {}, rows = [];
+    for (const [side, name] of [["asks", "ASK"], ["bids", "BID"]]) for (const r of (book && book[side]) || []) if (r.mine) rows.push(name + "  " + fmtPx(r.p) + "   " + abbrev(r.cap));
+    const set = c.step > 0 || (man.bids || []).length > 0 || (man.asks || []).length > 0, live = rows.length > 0 && !st.withdrawn;
+    return { live, rows: live ? rows : [], text: !mc ? "…" : st.withdrawn ? "Withdrawn: your offer is off the book, or leaving it within about a block." : live ? "Live" + (c.pegEnable ? " · pegged to " + src : "") + " · kept on the book while this app and the node run."
+      : set ? "Saved, not on the book. Publish puts it there." : "Off: edit your order, then Publish.", ago: mc && mc.lastPublishMs ? mc.lastPublishMs : 0 };
+  }
+  // The engine reads at most this many coins of a token before it refuses (main/atomix/lib/htlc.js guardedCoins): a maker
+  // over it declines every buy until the coins are merged (AtomixConsolidate.warning).
+  const COIN_CAP = { minima: 200, mxusdt: 53 };
+  const coinWarn = (currency, coins) => (COIN_CAP[currency] && Number(coins) > COIN_CAP[currency] ? coins + " " + ccyName(currency) + " coins: AtomiX buys are being declined. Consolidate." : "");
+
   // ======================================================================== Act: the money actions, no DOM
   // ui = { confirm(title, text, okLabel) → Promise<bool>, say(text, kind) }. Every function here makes the SAME
   // window.mcd calls, with the same arguments, behind the same guards, in the same order, as renderer/atomix-ui.js.
@@ -162,11 +203,30 @@
       if (r && r.err) ui.say("The market was not switched: " + mx(r.err), "error");
       return r;
     },
+    /** Publish: the saved order as it is (axMakerPublish). */
+    async makerPublish(api, ui) {
+      const r = await api.axMakerPublish().catch(fail);
+      ui.say(r && r.err ? "Your market was NOT published: " + mx(r.err) + ". What was on the book before is unchanged." : "Your market was sent to the book. Nothing is traded yet: it trades when someone takes a level, and this app answers by itself while it runs.", r && r.err ? "error" : "note");
+      return r;
+    },
+    /** Save & publish: Enabled off withdraws (axMakerWithdraw); else axMakerSave(cfg, manual). form = makerForm(…). */
+    async makerSave(api, ui, form) {
+      if (form.withdraw) { const r = await api.axMakerWithdraw().catch(fail); ui.say(r && r.err ? "Your market was NOT withdrawn: " + mx(r.err) + ". It may still be on the book." : "Market withdrawn: your offer leaves the book within about a block. A take already in flight still settles.", r && r.err ? "error" : "note"); return r; }
+      const r = await api.axMakerSave(form.cfg, form.manual).catch(fail);
+      ui.say(r && r.err ? "Your order was NOT published: " + mx(r.err) + ". Open the editor to see what was saved before trying again." : "Your order was saved and sent to the book. Nothing is traded yet: it trades when someone takes a level.", r && r.err ? "error" : "note");
+      return r;
+    },
+    async makerWithdraw(api, ui) {
+      if (!await ui.confirm("Withdraw your market?", "Your order is tombstoned so peers stop trading against it.", "Withdraw")) return null;
+      const r = await api.axMakerWithdraw().catch(fail);
+      ui.say(r && r.err ? "Your market was NOT withdrawn: " + mx(r.err) + ". It may still be on the book." : "Market withdrawn: your offer leaves the book within about a block. A take already in flight still settles.", r && r.err ? "error" : "note");
+      return r;
+    },
     async refundNow(api, ui, hash) { const r = await api.axRefundNow(hash).catch((e) => ({ msg: "Refund check failed: " + ((e && e.message) || e) })); return mx(r.msg); },
     async inspect(api, hash) { return (await api.axInspect(hash).catch((e) => ["Check failed: " + ((e && e.message) || e)])).map(mx); }
   };
 
-  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive };
+  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -209,6 +269,7 @@
     D.repaintStrip();
     if (!D.running() || !S.st.ready) return;
     const want = { book: () => api().axBook(), swaps: () => api().axSwaps(), mc: () => api().axMakerCfg() };
+    if (tab === "market") want.mh = () => api().axMarketHistory();
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled") S[k] = got[i].value; });
     api().axWallet().then((w) => { if (w) { S.wallet = w; S.bals = w.bals; paint(); } }).catch(() => {});
@@ -344,16 +405,144 @@
     S.slip = n; pref("dexicon_ax_slip", String(n)); paint(); preview();
   }
 
+  // ---- Market (MarketTab.java) ----
+  const WHY_MARKET = "Here you are the maker: publish a ladder of prices at which you sell and buy the active coin against ERC20 USDT. Takers lock their side first; this app answers automatically while it is running, so keep it open and the node online. Peg the ladder to the live price and it reprices itself; if the price feed fails, it is withdrawn for safety. Withdraw takes your offer off the book in about a block. One market at a time: the ⇄ pill switches it.";
+  const src = () => ((S.book ? S.book.pricingParity : S.st.currency === "mxusdt") ? "Parity" : "MEXC");
+  const agoMin = (ms) => { const m = Math.floor(Math.max(0, Date.now() - Number(ms)) / 60000); return m < 1 ? "less than a minute ago" : m + " min ago"; };
+  function half(row, bid) {
+    if (!row) return `<div class="ax-half${bid ? " ax-half--bid" : ""}"><span class="ax-q"><span class="ax-sz">—</span></span></div>`;
+    const take = !row.mine && row.cap > 0, q = bid ? `<span class="ax-sz">${abbrev(row.cap)}</span><span class="ax-px">${fmtPx(row.p)}</span>` : `<span class="ax-px">${fmtPx(row.p)}</span><span class="ax-sz">${abbrev(row.cap)}</span>`;
+    const tag = row.mine ? `<span class="ax-tag ax-tag--you">you</span>` : `<span class="ax-tag" data-copy="${esc(row.signer)}" title="Maker key. Click to copy">${esc(row.signer)}</span>`;
+    return `<div class="ax-half${bid ? " ax-half--bid" : ""}">${take ? `<button class="ax-q" data-axtake="${bid ? "bid" : "ask"}" aria-label="${bid ? "Sell " : "Buy "}${esc(ccy())} at ${fmtPx(row.p)} USDT">${q}</button>` : `<span class="ax-q">${q}</span>`}${tag}</div>`;
+  }
+  function marketHtml() {
+    const c = ccy(), b = S.book, mc = S.mc, o = offerState(mc, b, src()), mid = mc && mc.state && (mc.state.lastMid || mc.state.lastPrice), warn = coinWarn(S.st.currency, S.bals && S.bals.meta && S.bals.meta.coins);
+    const out = [banners(), why("market", "YOUR AtomiX MARKET", WHY_MARKET)];
+    if (!D.running() || !S.st.ready) return out.join("");
+    out.push(`<div class="ax-sub ax-sub--tight">The live USDT ⇄ ${esc(c)} order book. Tap a level to take it on the Swap page, or publish your own offer.</div>`);
+    if (mid > 0) out.push(`<div class="ax-mono11">${src()} mid ${fmtPx(mid)}</div>`);
+    if (warn) out.push(`<button class="ax-warnpill" data-axgo="assets">${esc(warn)}</button>`);
+    out.push(`<div class="dx-card"><div class="dx-label">YOUR OFFER · USDT ⇄ ${esc(c)}</div><div class="ax-offer" data-live="${o.live}">${esc(o.text)}</div>${o.rows.length ? `<pre class="ax-mono11">${esc(o.rows.join("\n"))}\n(USDT per ${esc(c)})</pre>` : ""}${o.ago ? `<div class="ax-line">Last publish ${agoMin(o.ago)}</div>` : ""}</div>`);
+    out.push(`<div class="dx-row ax-obh"><b class="ax-t16">Order book  ·  ${b ? b.scanned || 0 : "…"} live</b><button class="dx-pill ax-refresh" data-axrefresh="1">Refresh</button></div>`);
+    if (!b || (!b.bids.length && !b.asks.length)) out.push(`<div class="ax-dim">${b ? "No live orders yet. Publish one, or wait for a counterparty." : "Reading the book…"}</div>`);
+    else {
+      if (b.bestBid && b.bestAsk) out.push(`<div class="ax-spread">spread ${fmtPx(b.bestAsk - b.bestBid)} USDT  ·  USDT per ${esc(c)}, size in ${esc(c)}</div>`);
+      out.push(`<div class="ax-legend"><span>SELL ${esc(c)} (bid)</span><span>BUY ${esc(c)} (ask)</span></div>`);
+      for (let i = 0, n = Math.min(Math.max(b.bids.length, b.asks.length), 12); i < n; i++) out.push(`<div class="ax-depth${i === 0 ? " ax-depth--best" : ""}">${half(b.bids[i], true)}<span class="ax-div">│</span>${half(b.asks[i], false)}</div>`);
+    }
+    out.push(`<div class="ax-mbtns"><button class="dx-btn" data-axmk="edit">Edit my order</button><button class="dx-btn ax-go" data-axmk="publish"${S.busy || halted() ? " disabled" : ""}>${S.busy === "publish" ? "Publishing…" : "Publish"}</button><button class="dx-btn" data-axmk="withdraw"${S.busy ? " disabled" : ""}>${S.busy === "withdraw" ? "Withdrawing…" : "Withdraw"}</button></div>`);
+    const mh = S.mh || { chart: [], recent: [] }; let ex = 0, op = 0; (mh.recent || []).forEach((t) => { if (t.status === "EXECUTED") ex++; else if (t.status === "OPEN") op++; });
+    out.push(`<div class="dx-card ax-chartcard"><div class="dx-label">MARKET HISTORY · PRICE ONLY</div><canvas id="axChart" class="ax-chart"></canvas><div class="ax-line">last ${mh.chart.length ? fmtPx(mh.chart[mh.chart.length - 1].price) : "—"} · ${ex} filled · ${op} open. Every swap this node saw on the book, no back-fill. The list is in Activity › Market history.</div></div>`);
+    return out.join("");
+  }
+  function drawChart(canvas, data) {
+    const cv = canvas && canvas.getContext && canvas.getContext("2d"); if (!cv) return;
+    const dpr = Math.max(1, window.devicePixelRatio || 1), w = canvas.clientWidth || 640, h = canvas.clientHeight || 180;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); cv.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const padL = 56, padR = 8, padT = 8, padB = 16, css = getComputedStyle(canvas), ACC = css.getPropertyValue("--ax-acc").trim() || "#F7931A", DIM = css.getPropertyValue("--dx-dim2").trim() || "#6F7583";
+    cv.clearRect(0, 0, w, h); cv.font = '11px "JetBrains Mono", ui-monospace, monospace'; cv.fillStyle = DIM;
+    if (!data || data.length < 2) { cv.fillText(!data || !data.length ? "Collecting market data…" : "need 2+ trades to chart", padL, h / 2); return; }
+    let minP = Infinity, maxP = -Infinity, minB = Infinity, maxB = -Infinity;
+    data.forEach((t) => { minP = Math.min(minP, t.price); maxP = Math.max(maxP, t.price); minB = Math.min(minB, t.createdBlock); maxB = Math.max(maxB, t.createdBlock); });
+    if (maxP <= minP) maxP = minP + Math.max(minP * 0.001, 1e-9); if (maxB <= minB) maxB = minB + 1;
+    const px = (bk) => padL + ((bk - minB) / (maxB - minB)) * (w - padL - padR), py = (v) => padT + (1 - (v - minP) / (maxP - minP)) * (h - padT - padB);
+    cv.strokeStyle = DIM; cv.lineWidth = 1; cv.beginPath(); cv.moveTo(padL, padT); cv.lineTo(padL, h - padB); cv.lineTo(w - padR, h - padB); cv.stroke();
+    cv.fillText(fmtPx(maxP), 2, padT + 9); cv.fillText(fmtPx(minP), 2, h - padB);
+    cv.strokeStyle = ACC; cv.lineWidth = 2; cv.beginPath(); data.forEach((t, i) => { const x = px(t.createdBlock), y = py(t.price); if (i === 0) cv.moveTo(x, y); else cv.lineTo(x, y); }); cv.stroke();
+    cv.fillStyle = ACC; data.forEach((t) => { cv.beginPath(); cv.arc(px(t.createdBlock), py(t.price), 2.5, 0, Math.PI * 2); cv.fill(); });
+  }
+  // the editor: Enabled and Peg switches, mid · step · levels · size · skew · reprice, six rungs (bids left, asks right), the minimum
+  const sw = (id, on, label) => `<label class="ax-tog"><span>${label}</span><button class="ax-switch" id="${id}" role="switch" aria-checked="${on}"><i></i></button></label>`;
+  const fld = (label, id, val) => `<label class="ax-fld"><b>${label}</b><input class="dx-in ax-in" id="${id}" inputmode="decimal" autocomplete="off" value="${esc(val == null ? "" : val)}"></label>`;
+  function editorHtml() {
+    const mc = S.mc || {}, c = mc.cfg || {}, st = mc.state || {}, man = mc.manual || { bids: [], asks: [] }, cc = ccy();
+    const asks = (man.asks || []).slice().sort((x, y) => x.p - y.p), bids = (man.bids || []).slice().sort((x, y) => y.p - x.p), peg = c.step > 0 ? !!c.pegEnable : true;
+    const cell = (id, v, ph, cls) => `<input class="ax-rin ${cls}" id="${id}" inputmode="decimal" autocomplete="off" placeholder="${ph}" aria-label="${ph}" value="${esc(v == null ? "" : v)}">`;
+    let rows = "";
+    for (let i = 0; i < RUNGS; i++) { const bl = bids[i] || {}, al = asks[i] || {}; rows += `<div class="ax-mrow" id="mkRow${i}">${cell("mkBidA" + i, bl.a, "bid size", "")}${cell("mkBidP" + i, bl.p, "bid price", "ax-rin--bid")}<span class="ax-div">│</span>${cell("mkAskP" + i, al.p, "ask price", "ax-rin--ask")}${cell("mkAskA" + i, al.a, "ask size", "")}</div>`; }
+    return `<div id="axTop">${banners()}</div><h2 class="ax-h2">Your order · USDT ⇄ ${esc(cc)}</h2>
+      <div class="dx-card"><div class="ax-togs">${sw("mkEnabled", !st.withdrawn, "Enabled")}${sw("mkPeg", peg, "Peg → " + src())}<span class="ax-mono11" id="mkOracle">${peg ? "fetching " + src() + " price…" : "peg off"}</span></div>
+        <div class="ax-flds">${fld("mid", "mkMid", "")}${fld("step %", "mkStep", c.step != null ? c.step : "1")}${fld("levels", "mkLevels", c.levels != null ? c.levels : "3")}${fld("size", "mkSize", c.size != null ? c.size : c.askSize != null ? c.askSize : "")}${fld("skew %", "mkBias", c.bias != null ? c.bias : "0")}${fld("reprice %", "mkReprice", c.reprice != null ? c.reprice : "1")}</div>
+        <div class="ax-line">Pegged: prices follow the ${src()} mid. Size fills every rung; any amount or price can be edited. Only the chosen number of levels is published.</div>
+        <div class="ax-legend"><span>BIDS · you buy ${esc(cc)}</span><span>ASKS · you sell ${esc(cc)}</span></div>
+        <div class="ax-mhdr"><span>amount · price</span><span>price · amount</span></div>${rows}
+        <div class="ax-spread ax-spread--mid" id="mkSpread">—</div>
+        ${fld("Min trade · " + esc(cc), "mkMin", c.min != null ? c.min : "")}
+        <div class="ax-mono11" id="mkPrev"></div>
+        <button class="ax-cta" id="mkSave">Save &amp; publish</button>
+        <div class="ax-mbtns"><button class="dx-btn" id="mkWithdraw">Withdraw market</button><button class="dx-btn" id="mkCancel">Close the editor</button></div></div>`;
+  }
+  function bindEditor() {
+    const val = (id) => { const e = $(id); return e ? e.value : ""; }, isOn = (id) => { const e = $(id); return !!e && e.getAttribute("aria-checked") === "true"; };
+    const get = (n) => val("mk" + n[0].toUpperCase() + n.slice(1)), on = (n) => isOn(n === "enabled" ? "mkEnabled" : "mkPeg");
+    const manual = () => { const f = makerForm(get, () => true); return f.manual; };
+    let oracle = 0;
+    const summary = () => { const m = ladderSummary(manual(), ccy()); $("mkSpread").textContent = m.spread; $("mkSpread").dataset.bad = m.crossed; $("mkPrev").dataset.bad = m.crossed; $("mkPrev").textContent = m.warn || "BIDS  " + m.bids + "\nASKS  " + m.asks; };
+    const showLevels = () => { const L = clampLevels(val("mkLevels")); for (let i = 0; i < RUNGS; i++) $("mkRow" + i).hidden = i >= L; };
+    /** prices from mid · step · skew for the visible rungs; hidden rungs are emptied so they are not published; only EMPTY sizes are filled */
+    const reprice = (midOver) => {
+      const L = clampLevels(val("mkLevels")), size = n0(val("mkSize")), px = ladderPrices(midOver != null ? midOver : val("mkMid"), val("mkStep"), val("mkBias"), L);
+      for (let i = 0; i < RUNGS; i++) {
+        const bp = $("mkBidP" + i), ap = $("mkAskP" + i), ba = $("mkBidA" + i), aa = $("mkAskA" + i);
+        if (i < L) { if (px[i]) { bp.value = px[i].bid; ap.value = px[i].ask; } if (size > 0) { if (!ba.value) ba.value = fmtPx(size); if (!aa.value) aa.value = fmtPx(size); } }
+        else bp.value = ap.value = ba.value = aa.value = "";
+      }
+      showLevels(); summary();
+    };
+    const seed = () => { const L = clampLevels(val("mkLevels")), size = n0(val("mkSize")); for (let i = 0; i < RUNGS; i++) $("mkBidA" + i).value = $("mkAskA" + i).value = i < L && size > 0 ? fmtPx(size) : ""; summary(); };
+    const pegUi = () => { $("mkMid").disabled = on("peg"); };
+    const refreshPeg = async () => {
+      const pv = await api().axMakerPreview({ pegEnable: true, step: n0(val("mkStep")), askSize: n0(val("mkSize")), bidSize: n0(val("mkSize")), bias: n0(val("mkBias")), levels: n0(val("mkLevels")) || 1, reprice: n0(val("mkReprice")) || 1, min: n0(val("mkMin")) }, {}).catch(() => null);
+      if (!pv || !$("mkOracle")) return;
+      oracle = pv.mid || 0;
+      $("mkOracle").textContent = pv.mid > 0 ? (pv.source || ccy()) + " · mid " + fmtPx(pv.mid) + (pv.fresh ? "" : " (stale)") + (pv.wide ? " · WIDE" : "") : "waiting for " + (pv.source || "market") + " price…";
+      if (on("peg")) { $("mkMid").value = pv.mid > 0 ? fmtPx(pv.mid) : ""; if (pv.mid > 0) reprice(pv.mid); }
+    };
+    const poll = () => { clearInterval(S.pegTimer); refreshPeg(); S.pegTimer = setInterval(() => { if ($("mkOracle") && isOn("mkPeg")) refreshPeg(); else clearInterval(S.pegTimer); }, 2500); };
+    for (const id of ["mkEnabled", "mkPeg"]) $(id).onclick = () => { $(id).setAttribute("aria-checked", String(!isOn(id))); if (id === "mkPeg") { pegUi(); if (isOn(id)) poll(); else { clearInterval(S.pegTimer); $("mkOracle").textContent = "peg off"; reprice(); } } };
+    const b = body();
+    b.oninput = (e) => { const t = e.target; if (!t || t.tagName !== "INPUT") return; if (t.id !== "mkBias") numIn(t);   // the skew may be negative
+      if (["mkMid", "mkStep", "mkBias", "mkLevels"].includes(t.id)) reprice(on("peg") && oracle > 0 ? oracle : undefined); else if (t.id === "mkSize") seed(); else summary(); };
+    const done = () => { clearInterval(S.pegTimer); S.editing = false; S.busy = false; b.oninput = null; b.innerHTML = ""; render("market", b); };
+    $("mkSave").onclick = async () => {
+      if (S.busy) return;
+      if (halted() && on("enabled")) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was published.", "error");
+      S.busy = "save"; $("mkSave").disabled = true; $("mkSave").textContent = "Saving…";
+      await Act.makerSave(api(), ui, makerForm(get, on)); done();
+    };
+    $("mkWithdraw").onclick = async () => { if (S.busy) return; S.busy = "withdraw"; const r = await Act.makerWithdraw(api(), ui); S.busy = false; if (r) done(); };
+    $("mkCancel").onclick = () => { S.said = null; done(); };
+    pegUi(); showLevels(); if (n0(val("mkSize")) > 0) reprice(); summary(); if (on("peg")) poll();
+  }
+  function paintMarket() {
+    const b = body();
+    if (S.editing) { if (!$("mkSave")) { b.innerHTML = editorHtml(); bindEditor(); } else $("axTop").innerHTML = banners(); return; }
+    b.innerHTML = marketHtml();
+    if ($("axChart")) setTimeout(() => { try { drawChart($("axChart"), (S.mh || {}).chart); } catch (e) {} }, 0);
+  }
+  async function marketAct(what) {
+    if (what === "edit") { S.editing = true; S.said = null; return paint(); }
+    if (S.busy) return;
+    S.busy = what; paint();
+    if (what === "publish") await Act.makerPublish(api(), ui); else await Act.makerWithdraw(api(), ui);
+    S.busy = false; load("market").then(paint, paint);
+  }
+
   // ---- the room ----
-  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap } };
+  const none = () => "", noop = () => {};
+  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap }, market: { skeleton: none, bind: noop, paint: paintMarket, whole: true } };
   function render(tab, host) {
     if (!D) return;
     const scr = SCREENS[tab]; if (!scr) { host.dataset.tab = tab; host.onclick = null; host.innerHTML = `<div class="dx-state dx-state--note" role="status">This screen of the room is not built in this version yet.</div>`; S.tab = tab; return; }
-    if (host.dataset.tab !== tab || !host.firstChild) { host.dataset.tab = tab; host.innerHTML = scr.skeleton(); host.onclick = click; S.said = null; scr.bind(); $("main").scrollTop = 0; }
+    if (host.dataset.tab !== tab || (!host.firstChild && !scr.whole)) { host.dataset.tab = tab; clearInterval(S.pegTimer); S.editing = false; host.oninput = null; host.innerHTML = scr.skeleton(); host.onclick = click; S.said = null; scr.bind(); $("main").scrollTop = 0; }
     S.tab = tab; host.dataset.axccy = S.st.currency || "";
     paint(); load(tab).then(paint, paint);
   }
-  function paint() { const b = body(), scr = SCREENS[S.tab]; if (!b || !scr || b.dataset.tab !== S.tab || !b.firstChild) return; b.dataset.axccy = S.st.currency || ""; scr.paint(); }
+  function paint() {
+    const b = body(), scr = SCREENS[S.tab]; if (!b || !scr || b.dataset.tab !== S.tab || (!b.firstChild && !scr.whole)) return;
+    if (scr.whole && typing() && !S.editing) return;   // a screen drawn whole is never redrawn under someone typing
+    b.dataset.axccy = S.st.currency || ""; scr.paint();
+  }
   /** once a minute while a screen of the room is open (the phone's REFRESH_MS), never under someone typing */
   function tick() { if (D && SCREENS[S.tab] && visible() && !typing() && !S.busy && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
   async function click(e) {
@@ -363,6 +552,9 @@
     if (ds.axgo) return D.go(ds.axgo);
     if (ds.axslip) { if (ds.axslip === "custom") return customSlip(); S.slip = Number(ds.axslip); pref("dexicon_ax_slip", ds.axslip); paint(); return preview(); }
     if (ds.axcheck) return checkNow(ds.axcheck);
+    if (ds.axmk) return marketAct(ds.axmk);
+    if (ds.axrefresh) { S.book = null; paint(); return load(S.tab).then(paint, paint); }
+    if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
     if (ds.axrefund) { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return load(S.tab).then(paint, paint); }
   }

@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.112] — Dexicon ① MxUSD: Market (Phase 3c)
+
+- **Market** (`MarketTab.java`): the fold "YOUR AtomiX MARKET", the reference mid, YOUR OFFER at a glance (live, saved, withdrawn or off, with the user's own levels and the last publish), "Order book · N live" with Refresh, the spread, the SELL (bid) / BUY (ask) legend and the mirrored ladder with every maker key whole (click copies) and the user's own levels marked "you"; Edit my order, Publish, Withdraw; the price chart of the market's history.
+- **Tap a level to take it**: as in the old panel, the tap opens Swap on the right side (a bid is where you sell, an ask where you buy); the amount, the frozen quote and the review are Swap's. The phone's per-level take dialog is not built: it takes from one named maker, which the desktop glue has no call for.
+- **The editor** keeps every field of the old one (Enabled, Peg, mid, step %, levels, size, skew %, reprice %, six rungs, the minimum, the crossed-ladder warning). Save & publish sends `axMakerSave(cfg, manual)` built exactly as before, or `axMakerWithdraw` when Enabled is off; Publish is `axMakerPublish`; Withdraw asks the old question first. The tests drive the old editor on a stand-in page and compare the call, the cfg and the ladder for five forms, and the prices written from mid, step and skew for six inputs.
+- **"Buys declined" warning**: when the wallet holds more coins of the traded token than the engine reads (53, or 200 for MINIMA: `main/atomix/lib/htlc.js`), the Market screen says so in red and leads to Assets. A test holds the two numbers to the engine file.
+- A publish, save or withdrawal that fails says it was NOT done and what stands. Nothing is published while the identity is halted.
+
 ## [0.18.111] — Dexicon ① MxUSD: the room, the ⇄ pill and Swap (Phase 3c)
 
 - **Room ① of Dexicon is AtomiX as the phone draws it.** The room gets its own bottom bar (Swap, Market, OTC, Activity, Assets, Settings) and the ⇄ currency pill in the status strip, and opens on Swap at every start. `renderer/dexicon-ax.js` draws it over the engine the desktop already runs: the same `window.mcd` AtomiX calls, the same `userData/atomix.sqlite`, nothing re-keyed. The old panel (`renderer/atomix-ui.js`) is no longer drawn; the file stays until the 3e parity audit. Market and OTC arrive in the next two versions; until then each of those two tabs says it is not built in this version.
