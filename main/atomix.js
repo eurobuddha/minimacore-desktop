@@ -105,7 +105,7 @@ const AX_PUBLISH_MIN_COINAGE = 5;
  */
 async function pinPublishSend(command, exclude) {
   if (!AX_PUBLISH_SEND.test(command)) return command;
-  const pinned = await pinMinimaSend(runner, command, { minCoinage: AX_PUBLISH_MIN_COINAGE, exclude });
+  const pinned = await pinMinimaSend(runner, command, { minCoinage: AX_PUBLISH_MIN_COINAGE, exclude, owner: "atomix" });   // owner: coins another part of the app holds are left out (main/reserve.js)
   if (pinned === command) {
     log("publish-send pin: no sendable signable MINIMA coin >= " + AX_PUBLISH_AMOUNT
         + " (coinage >= " + AX_PUBLISH_MIN_COINAGE + ") — sending unpinned");

@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.144] — Coin reservation: `send` is kept away from held coins (MINIMA and tokens), `consolidate` waits, and each engine is shown only coins it can use
+
+- **A `send` that lets the node choose its coins** (an AtomiX lock, an order or OTC publish, a pool or Dexicon send, Mail, miniMall, Vestr, the wallet's Send and Split) is, while another part of the app holds a coin of that token, pinned with `fromaddress:` to an address none of whose coins is held and whose coins cover the amount. `main/sendpin.js` does it (`pinSend`), now for tokens too, in token units and exact 44-decimal arithmetic. With no coin of that token held the command goes out byte for byte as before, with no extra read.
+- **If the free coins cannot cover it, nothing is signed**: "Not enough free funds: 100 MINIMA is held for a live Dexicon order (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: 60 MINIMA, and no single address holds the 60 this send needs. Nothing was signed." `fromaddress:` is the only coin choice `send` has, and it names an address: a free coin at the same address as a held one cannot be sent until the held one is free. This is a stated limit.
+- **A `send` its caller already pinned** (`fromaddress:`) is refused when a coin at that address is held. The existing MINIMA pin (`pinMinimaSend`, used by Mail, miniMall, Vestr, the Web Wallet, the wallet and AtomiX's publish) leaves held addresses out as well.
+- **`consolidate` is refused while another part of the app holds a coin of that token**, saying what holds it: core's `consolidate` picks its own coins (the largest, by address) and has no way to leave one out. `dryrun:true` passes. AtomiX's own tidy-up consolidation is refused the same way and tries again later, as it does after any failure.
+- **Each engine chooses among coins it can use**: an engine's read of its own wallet coins (`coins relevant:true … tokenid:`) leaves out the coins another owner holds. The wallet's reads are not changed, and a look at one coin or one address never is.
+- **A `;` chain** that holds a `send` or a `consolidate` is refused while coins are held (it cannot be pinned inside a chain).
+- Still to come: the coins of live Dexicon orders (nothing holds a coin without a transaction yet), and the Wallet's display.
+
 ## [0.18.143] — One coin reservation under every signer: a coin named for one transaction is refused to the others
 
 - **Found**: AtomiX, PandaPools, the Dexicon engine and the wallet's own commands each chose coins from the one wallet without knowing of each other. The signing queue (0.18.107) keeps their signatures apart in time, not their coins: one engine chose a coin and another chose the same coin before the first had posted. The loser got a rejected transaction, a fill reported "taken" that never mined, or a swap whose lock was dropped.

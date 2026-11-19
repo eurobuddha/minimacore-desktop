@@ -31,7 +31,12 @@ const DEAD_BLOCKS = 12;
 const SWEEP_READS = 25;            // coins asked of the node per sweep, round robin: a fragmented wallet is never listed
 const SETTLES = new Set(["atomix", "casino"]);   // owners whose transactions settle against a deadline
 const TXN_WHY = { atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet" };
-const WATCH = /(?:^|;)\s*(?:txncreate|txninput|txnpost|txndelete)\b/i;
+const HOLD_WHY = { dexicon: "Dexicon" };
+const WATCH = /(?:^|;)\s*(?:txncreate|txninput|txnpost|txndelete|send|consolidate|coins)\b/i;
+const MXUSD = "0x7d39745fbd29049be29850b55a18bf550e4d442f930f86266e34193d89042a90";
+const tokenName = (t) => (lc(t) === "0x00" ? "MINIMA" : lc(t) === MXUSD ? "MxUSD" : "of token " + t);
+/** An engine's own choice of inputs: its wallet coins of one token. Not a look at one coin or one address. */
+const CHOICE_READ = (c) => /^\s*coins\b/i.test(c) && /\brelevant:true\b/i.test(c) && /\btokenid:/i.test(c) && !/\b(?:coinid|address):/i.test(c);
 
 const lc = (s) => String(s == null ? "" : s).toLowerCase();
 const verbOf = (c) => lc((/^\s*(\w+)/.exec(c) || [])[1]);
@@ -111,7 +116,7 @@ function createRegistry(o = {}) {
   // ---- records ----
   function tx(id, owner, posted) { let t = txOf.get(id); if (!t) { t = { owner, posted: !!posted, coins: new Set() }; txOf.set(id, t); } return t; }
   function unlink(k) { const r = txns.get(k); if (!r) return; txns.delete(k); const t = txOf.get(r.txn); if (t) { t.coins.delete(k); if (!t.coins.size && t.posted) txOf.delete(r.txn); } }
-  function describe(r) { return r.why || TXN_WHY[r.owner] || "another part of the app"; }
+  function describe(r) { return r.why || (r.txn ? TXN_WHY[r.owner] : HOLD_WHY[r.owner]) || "another part of the app"; }
   /** The record that keeps `coin` from `owner`, or null. A transaction's claim is said before a hold. */
   function foreign(owner, coin) {
     const k = lc(coin), t = txns.get(k), h = holds.get(k);
@@ -187,8 +192,55 @@ function createRegistry(o = {}) {
       else if (t && !t.coins.size) txOf.delete(id);
     }
   }
-  function one(owner, c, send) {
+  /** "an AtomiX swap and a live Dexicon order": what holds these records, each said once. */
+  function whys(recs) { const said = [...new Set(recs.map(describe))]; return said.length > 1 ? said.slice(0, -1).join(", ") + " and " + said[said.length - 1] : said[0] || "another part of the app"; }
+  /**
+   * `send`. Nothing held by anyone else: forwarded exactly as before. Otherwise it is kept to an address none of whose
+   * coins is held (main/sendpin.js; `fromaddress:` is the only coin choice `send` has), or refused before signing.
+   */
+  async function sendCmd(owner, c, send) {
+    if (!others(owner)) return send(c);
+    const held = (id) => foreign(owner, id);
+    const no = (why) => { log("refused: `send` of " + owner + ": " + why); return refusal("send", why); };
+    const from = param(c, "fromaddress");
+    if (from) {   // the caller pinned it: the node may take any coin at that address
+      const tok = param(c, "tokenid") || "0x00";
+      let at = null; try { at = rows(await send("coins relevant:true tokenid:" + tok + " address:" + from)); } catch (e) {}
+      const by = (at || []).map(x => held(x.coinid)).filter(Boolean);
+      if (by.length) return no("Not sent: the address this send takes its coins from holds coin " + by[0].coinid + ", held for " + whys(by) + ". Nothing was signed.");
+      return send(c);
+    }
+    const { pinSend, fromUnits, toUnits } = require("./sendpin");
+    const p = await pinSend(send, c, { held, tokens: true });
+    if (!p.blocked) return send(c);   // no coin of this token is held: exactly as it came
+    if (p.pinned) return send(p.command);
+    const name = tokenName(p.token);
+    return no("Not enough free funds: " + fromUnits(p.heldUnits) + " " + name + " is held for " + whys(p.held)
+      + " (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: " + fromUnits(p.freeUnits) + " " + name
+      + (p.freeUnits >= toUnits(p.need) ? ", and no single address holds the " + p.need + " this send needs" : "") + ". Nothing was signed.");
+  }
+  /** `consolidate`: core picks its own coins (the largest, by address) and cannot leave one out. Refused while another owner holds a coin of that token. */
+  function consolidateCmd(owner, c, send) {
+    if (/\bdryrun:true\b/i.test(c)) return send(c);
+    const tok = lc(param(c, "tokenid")), by = [];
+    for (const r of [...txns.values(), ...holds.values()]) if (r.owner !== owner && (r.tokenid == null || lc(r.tokenid) === tok)) by.push(r);
+    if (!by.length) return send(c);
+    const why = "Nothing consolidated: " + by.length + " coin" + (by.length === 1 ? " is" : "s are") + " held for " + whys(by) + ", and consolidating chooses its own coins and could take " + (by.length === 1 ? "it" : "one of them") + ". Try again when " + (by.length === 1 ? "it is" : "they are") + " free. Nothing was signed.";
+    log("refused: `consolidate` of " + owner + ": " + why);
+    return Promise.resolve(refusal("consolidate", why));
+  }
+  /** An engine's read of its own wallet coins: what another owner holds is left out, so it chooses among coins it can use. */
+  async function coinsRead(owner, c, send, opts) {
+    const r = await send(c);
+    if (owner === "wallet" || (opts && opts.unfiltered) || !CHOICE_READ(c) || !rows(r) || !others(owner)) return r;
+    const free = r.response.filter(x => !foreign(owner, x && x.coinid));
+    return free.length === r.response.length ? r : Object.assign({}, r, { response: free });
+  }
+  function one(owner, c, send, opts) {
     const v = verbOf(c);
+    if (v === "coins") return coinsRead(owner, c, send, opts);
+    if (v === "send") return sendCmd(owner, c, send);
+    if (v === "consolidate") return consolidateCmd(owner, c, send);
     if (v === "txninput") return input(owner, c, send);
     if (v === "txnpost") return post(owner, c, send);
     if (v === "txndelete") return del(c, send);
@@ -199,20 +251,24 @@ function createRegistry(o = {}) {
    * Every node command of the app. owner: who asks ("" = the wallet). send(cmd) forwards to the node and resolves
    * with its reply. Resolves with the node's reply, or with a refusal in the node's own failure shape.
    */
-  async function guard(owner, command, send) {
+  async function guard(owner, command, send, opts) {
     const c = String(command);
     if (!WATCH.test(c)) return send(c);   // nearly everything: one test, nothing else
     if (opening) await opening;
     owner = owner || "wallet";
-    if (c.indexOf(";") < 0) return one(owner, c.trim(), send);
+    if (c.indexOf(";") < 0) return one(owner, c.trim(), send, opts);
     // a `;` chain (the terminal): refused whole when one of its inputs is held; then recorded part by part from its reply
     const ps = c.split(";").map(s => s.trim()).filter(Boolean);
     for (const p of ps) if (verbOf(p) === "txninput" && isCoin(lc(param(p, "coinid")))) {
       const why = await blocked(owner, param(p, "id"), lc(param(p, "coinid")), send);
       if (why) { log("refused: a chained command of " + owner + ": " + why); return refusal("txninput", why); }
     }
+    if (ps.some(p => /^(?:send|consolidate)$/.test(verbOf(p))) && others(owner)) {
+      const why = "Not sent: coins are held for " + whys([...txns.values(), ...holds.values()].filter(r => r.owner !== owner)) + ", and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.";
+      log("refused: a chained command of " + owner + ": " + why); return refusal(verbOf(ps.find(p => /^(?:send|consolidate)$/.test(verbOf(p)))), why);
+    }
     const reply = await send(c), each = Array.isArray(reply) ? reply : [];
-    ps.forEach((p, i) => { const r = each[i]; if (r) one(owner, p, async () => r).catch(() => {}); });   // the same bookkeeping, fed the node's own answers
+    ps.forEach((p, i) => { const r = each[i]; if (r && /^txn/.test(verbOf(p))) one(owner, p, async () => r).catch(() => {}); });   // the same bookkeeping, fed the node's own answers
     return reply;
   }
 

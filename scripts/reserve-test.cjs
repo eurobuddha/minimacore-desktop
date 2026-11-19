@@ -258,3 +258,134 @@ test("thousands of coins: commands stay quick and nothing is listed", async () =
   assert.ok(ms < 8000, "took " + ms + " ms");
   assert.equal(node.saw(/^coins (?!coinid:)/).length, 0);
 });
+
+// ---- 0.18.144: send, consolidate, and what an engine is shown ----
+const { MXUSD } = require("./reserve-model.cjs");
+const { pinSend, pinMinimaSend, toUnits, fromUnits } = require("../main/sendpin");
+const ORDER = "a live Dexicon order";
+const hold = (reg, ...ids) => reg.setHolds("dexicon", ids.map(c => ({ coinid: c, why: ORDER })));
+
+test("with nothing held by anyone else, a send, a consolidate and a coins read pass byte for byte and cost no extra read", async () => {
+  const { node, as, reg } = rig(wallet3());
+  hold(reg, coinId(1));
+  for (const c of ["send amount:60 address:" + ADDR(9), "send amount:1 address:" + ADDR(9) + " tokenid:" + MXUSD + ' state:{"0":"0x01"}', "consolidate tokenid:0x00", "coins relevant:true sendable:true tokenid:0x00"]) {
+    node.seen.length = 0;
+    await as("dexicon")(c);   // the holder itself
+    assert.deepEqual(node.seen, [c]);
+  }
+  const lone = rig(wallet3());
+  await lone.as("wallet")("send amount:60 address:" + ADDR(9));
+  assert.deepEqual(lone.node.seen, ["send amount:60 address:" + ADDR(9)]);
+});
+
+test("a send that lets the node choose is pinned away from a held coin, or refused before signing with the reason", async () => {
+  const { node, as, reg } = rig(wallet3());
+  hold(reg, coinId(1));   // 100 at address 1 backs a live order; free: 50 at address 2, 10 at address 3
+  const r = await as("atomix")("send amount:40 mine:true address:" + ADDR(7) + ' state:{"0":"0x01"} tokenid:0x00');
+  assert.equal(r.status, true);
+  assert.deepEqual(r.response.inputs, [coinId(2)], "the node took the free coin");
+  assert.match(node.seen[node.seen.length - 1], new RegExp(" tokenid:0x00 fromaddress:" + ADDR(2) + "$"));
+  // 60 would need the held coin (the node alone would have taken coin 1: the only one that covers)
+  node.dropMempool(); node.seen.length = 0;
+  const no = await as("wallet")("send amount:60 address:" + ADDR(9));
+  assert.equal(no.status, false); assert.equal(no.reserved, true);
+  assert.equal(no.error, "Not enough free funds: 100 MINIMA is held for a live Dexicon order (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: 60 MINIMA, and no single address holds the 60 this send needs. Nothing was signed.");
+  assert.equal(node.saw(/^send /).length, 0, "the send never reached the node");
+  assert.equal(node.mempool.size, 0);
+  const all = await as("pandapools")("send amount:500 address:" + ADDR(9));
+  assert.match(all.error, /Free: 60 MINIMA\. Nothing was signed\.$/);
+});
+
+test("a token send is pinned the same way (MxUSD), in token units", async () => {
+  const usd = [{ coinid: coinId(11), amount: "30", address: ADDR(1), tokenid: MXUSD }, { coinid: coinId(12), amount: "7.5", address: ADDR(2), tokenid: MXUSD }];
+  const { node, as, reg } = rig(wallet3().concat(usd));
+  hold(reg, coinId(11));
+  const ok = await as("atomix")("send amount:7.5 mine:true address:" + ADDR(7) + " tokenid:" + MXUSD);
+  assert.deepEqual(ok.response.inputs, [coinId(12)]);
+  node.dropMempool();
+  const no = await as("atomix")("send amount:7.50000001 mine:true address:" + ADDR(7) + " tokenid:" + MXUSD);
+  assert.match(no.error, /^Not enough free funds: 30 MxUSD is held for a live Dexicon order .* Free: 7\.5 MxUSD\. Nothing was signed\.$/);
+  // MINIMA is untouched by an MxUSD hold: no MINIMA coin is held, so the send goes out as it came
+  node.seen.length = 0;
+  await as("wallet")("send amount:60 address:" + ADDR(9));
+  assert.equal(node.seen[node.seen.length - 1], "send amount:60 address:" + ADDR(9));
+});
+
+test("a free coin that shares an address with a held coin is not sendable while it is held; a caller's own fromaddress: is checked", async () => {
+  const { node, as, reg } = rig([{ coinid: coinId(1), amount: "100", address: ADDR(1) }, { coinid: coinId(2), amount: "50", address: ADDR(1) }, { coinid: coinId(3), amount: "10", address: ADDR(3) }]);
+  hold(reg, coinId(1));
+  const no = await as("wallet")("send amount:20 address:" + ADDR(9));
+  assert.match(no.error, /^Not enough free funds: 150 MINIMA is held .* Free: 10 MINIMA\. Nothing was signed\.$/);
+  const pinned = await as("wallet")("send amount:5 address:" + ADDR(9) + " fromaddress:" + ADDR(1));
+  assert.equal(pinned.error, "Not sent: the address this send takes its coins from holds coin " + coinId(1) + ", held for a live Dexicon order. Nothing was signed.");
+  assert.equal((await as("wallet")("send amount:5 address:" + ADDR(9) + " fromaddress:" + ADDR(3))).status, true);
+  assert.equal(node.saw(/^send /).length, 1);
+});
+
+test("the pin every caller already uses leaves held addresses out too, and says nothing new when nothing is held", async () => {
+  const node = makeNode(wallet3());
+  const none = await pinMinimaSend(node.run, "send amount:60 address:" + ADDR(9), { held: () => null });
+  assert.equal(none, "send amount:60 address:" + ADDR(9) + " fromaddress:" + ADDR(1));
+  const heldOne = (id) => (id === coinId(1) ? { coinid: id, owner: "dexicon", why: ORDER } : null);
+  assert.equal(await pinMinimaSend(node.run, "send amount:40 address:" + ADDR(9), { held: heldOne }), "send amount:40 address:" + ADDR(9) + " fromaddress:" + ADDR(2));
+  assert.equal(await pinMinimaSend(node.run, "send amount:60 address:" + ADDR(9), { held: heldOne }), "send amount:60 address:" + ADDR(9), "no free address covers: left for the guard to refuse");
+  const p = await pinSend(node.run, "send multi:[\"" + ADDR(8) + ":20\",\"" + ADDR(9) + ":25.5\"] burn:0.5", { held: heldOne });
+  assert.equal(p.need, "46"); assert.equal(p.command.endsWith(" fromaddress:" + ADDR(2)), true);
+  assert.equal(fromUnits(toUnits("0.00000000000000000000000000000000000000000001")), "0.00000000000000000000000000000000000000000001", "44 decimals, exact");
+});
+
+test("consolidate is refused while another owner holds a coin of that token, saying what holds it", async () => {
+  const { node, as, reg } = rig(wallet3().concat([{ coinid: coinId(11), amount: "30", address: ADDR(1), tokenid: MXUSD }]));
+  hold(reg, coinId(1));
+  const no = await as("wallet")("consolidate tokenid:0x00");
+  assert.equal(no.error, "Nothing consolidated: 1 coin is held for a live Dexicon order, and consolidating chooses its own coins and could take it. Try again when it is free. Nothing was signed.");
+  assert.equal((await as("atomix")("consolidate tokenid:0x00 coinage:3 maxcoins:20 maxsigs:5")).reserved, true, "AtomiX's own tidy-up too");
+  assert.equal(node.saw(/^consolidate /).length, 0);
+  assert.equal((await as("wallet")("consolidate tokenid:" + MXUSD)).reserved, true, "before the sweep has read the coin its token is unknown: refused");
+  await reg.sweep(node.run);
+  assert.notEqual((await as("wallet")("consolidate tokenid:" + MXUSD)).reserved, true, "known to be MINIMA: MxUSD may be consolidated");
+  assert.equal((await as("wallet")("consolidate tokenid:0x00 dryrun:true")).status, true);
+  assert.equal((await as("dexicon")("consolidate tokenid:0x00")).status, true, "the holder itself");
+  reg.setHolds("dexicon", []);
+  node.dropMempool();
+  assert.equal((await as("wallet")("consolidate tokenid:0x00")).status, true, "free again");
+});
+
+test("an engine's own read of its wallet coins leaves out what another owner holds; the wallet, and a look at one coin, see everything", async () => {
+  const { node, as, reg } = rig(wallet3());
+  hold(reg, coinId(1));
+  const ids = async (owner, c, o) => (await reg.guard(owner, c, node.run, o)).response.map(x => x.coinid);
+  assert.deepEqual(await ids("atomix", "coins relevant:true sendable:true tokenid:0x00 coinage:1 checkmempool:true"), [coinId(2), coinId(3)]);
+  assert.deepEqual(await ids("pandapools", "coins relevant:true sendable:true tokenid:0x00"), [coinId(2), coinId(3)]);
+  assert.deepEqual(await ids("dexicon", "coins relevant:true checkmempool:true tokenid:0x00"), [coinId(1), coinId(2), coinId(3)], "the holder sees its own");
+  assert.deepEqual(await ids("wallet", "coins relevant:true sendable:true tokenid:0x00"), [coinId(1), coinId(2), coinId(3)]);
+  assert.deepEqual(await ids("atomix", "coins relevant:true sendable:true tokenid:0x00", { unfiltered: true }), [coinId(1), coinId(2), coinId(3)]);
+  assert.deepEqual(await ids("atomix", "coins coinid:" + coinId(1)), [coinId(1)]);
+  assert.deepEqual(await ids("atomix", "coins relevant:true"), [coinId(1), coinId(2), coinId(3)], "not a choice of inputs: untouched");
+  void as;
+});
+
+test("nothing waits when every free coin is held: each command fails at once with the reason, and a claim still goes through", async () => {
+  const { node, as, reg } = rig(wallet3().concat([HTLC]));
+  hold(reg, coinId(1), coinId(2), coinId(3));
+  const t0 = Date.now();
+  const got = await Promise.all([
+    build(as("atomix"), "lock", [coinId(1)]),
+    build(as("pandapools"), "pp", [coinId(2), coinId(3)]),
+    as("wallet")("send amount:1 address:" + ADDR(9)),
+    as("atomix")("send amount:1 mine:true address:" + ADDR(7) + " tokenid:0x00"),
+    as("wallet")("consolidate tokenid:0x00"),
+    as("wallet")("txncreate id:t;txninput id:t coinid:" + coinId(1) + ";send amount:1 address:" + ADDR(9))
+  ]);
+  assert.ok(Date.now() - t0 < 1000);
+  assert.match(got[0].error, /^Coin 0x0{63}1 is held for a live Dexicon order\. Nothing was signed\.$/);
+  assert.match(got[1].error, /^Coin 0x0{63}2 is held/);
+  assert.match(got[2].error, /^Not enough free funds: 160 MINIMA is held for a live Dexicon order .* Free: 0 MINIMA\. Nothing was signed\.$/);
+  assert.match(got[3].error, /^Not enough free funds/);
+  assert.match(got[4].error, /^Nothing consolidated: 3 coins are held/);
+  assert.equal(got[5].reserved, true);
+  assert.equal(node.saw(/^(send|consolidate|txnsign|txnpost) /).length, 0, "nothing was signed or sent");
+  assert.equal((await build(as("atomix"), "axswap_claim", [HTLC.coinid])).ok, true, "the claim spends the HTLC coin itself");
+  assert.equal((await build(as("atomix"), "axswap_refund", [HTLC.coinid], { noPost: true })).ok, true);
+  assert.equal((await as("wallet")("txncreate id:u;send amount:1 address:" + ADDR(9))).error, "Not sent: coins are held for an AtomiX swap and a live Dexicon order, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.");
+});
