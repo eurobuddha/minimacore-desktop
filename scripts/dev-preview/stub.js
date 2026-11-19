@@ -27,6 +27,7 @@
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";
   const PK = (n) => "0x" + (n + "C4E8A1F09B37D25E6A8C0F1B3D5E7A9C2E4F6081A3B5C7D9E0F2A4B6C8D0E2F4").slice(0, 64);
   // AtomiX fixtures. Every address, key and hash is whole and plainly not real (FA4E… = "fake").
+  try { localStorage.setItem("dexicon_ax_market_live", Q.get("axlive") === "1" ? "1" : "0"); } catch (e) {}
   const AXS = Q.get("axs") || "", AX_MINIMA = AXS === "minima" || AXS === "idle";
   const FAKE_ETH = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0001", FAKE_ETH2 = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002", FAKE_TX = "0x" + "FA4E00".repeat(10) + "0001";
   const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);

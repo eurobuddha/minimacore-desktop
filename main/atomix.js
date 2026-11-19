@@ -280,6 +280,20 @@ function invalidate() {
   startLoop();
 }
 
+/**
+ * The identity watch's verdict, for the screens' halt card (main/atomix/lib/identitywatch.js; the engine itself
+ * already refuses new liabilities while halted). Read only: null unless the watch says HALTED, which it does only
+ * after two complete reads agree. Every key and address is passed whole.
+ */
+function haltFrom(watch) {
+  try {
+    if (!watch || !watch.halted()) return null;
+    const v = watch.verdict() || {};
+    return { summary: String(watch.summary() || ""), minimaMismatch: !!v.minimaMismatch, ethMismatch: !!v.ethMismatch,
+      orphanedPk: String(v.orphanedPk || ""), staleEth: String(v.staleEth || ""), nodeEth: String(v.nodeEth || "") };
+  } catch (e) { return null; }
+}
+
 /** Engine status for the renderer header: booted?, identity, block, active currency, recent log lines. */
 function status() {
   const booted = !!(ctx && ctx.READY);
@@ -289,6 +303,7 @@ function status() {
     minimaPk: booted && ctx.CTX && ctx.CTX.htlc ? ctx.CTX.htlc.publickey : null,
     currency: ctx && ctx.AX ? ctx.AX.trading.active().key : null,
     block: lastTip,
+    halt: booted && ctx.AX ? haltFrom(ctx.AX.identitywatch) : null,
     log: LOG_RING.slice(-30)
   };
 }
@@ -1181,7 +1196,7 @@ module.exports = {
   _projectRow: projectRow,             // test-only: the whole Activity row incl. the swap-status block
   _FUND_DURABLE_WRITE: FUND_DURABLE_WRITE,   // test-only: asserted against the SQL swapdb.js really emits
   _publishSendWithRetry: publishSendWithRetry, _makerStep: makerStep,
-  _ctx: () => ctx, _fire: fire,
+  _ctx: () => ctx, _fire: fire, _haltFrom: haltFrom,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,
     ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,

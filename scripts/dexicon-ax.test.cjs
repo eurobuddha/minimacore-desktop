@@ -383,3 +383,44 @@ test("the CSV is the old panel's file, byte for byte: the same column names in t
   const none = recorder({ axExportSwaps: [] }), u = ui(true); await AX.Act.exportCsv(none.api, u);
   assert.deepEqual(none.log.map((x) => x[0]), ["axExportSwaps"], "no file is asked for when there is nothing to write");
 });
+
+// ---- halted, and market offline ----
+/** The engine's own identity watch (main/atomix/lib/identitywatch.js, verbatim) with a stand-in node. */
+function watchWith(keyReads, ethReads) {
+  const g = { AX: { htlc: { normKey: (k) => String(k).toLowerCase(), loadKeys: (cb) => { const r = keyReads.shift(); if (!r) return cb(new Error("no read")); const keys = r.keys.map((k) => k.toLowerCase()); keys.complete = r.complete; keys.total = r.keys.length; cb(null, keys); } },
+    mds: { cmdR: (_c, cb) => { const a = ethReads.shift(); cb(a ? null : new Error("busy"), a ? { seedrandom: a } : null); } }, eth: { addressFromPriv: (p) => "0xaddr-of-" + p.replace(/^0x/, "") }, ethops: {} }, console };
+  g.globalThis = g; vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "main", "atomix", "lib", "identitywatch.js"), "utf8"), g);
+  return g.AX.identitywatch;
+}
+const check = (w, ctx) => new Promise((res) => { w.forceNext(); w.check(ctx, res); });
+test("halt: the glue reports the engine's verdict whole, only after two complete reads agree; one short read halts nothing", async () => {
+  const { _haltFrom } = require("../main/atomix"), MINE = PK("A1"), ctx = { htlc: { publickey: MINE }, eth: { address: "0xaddr-of-old" } };
+  let w = watchWith([{ keys: [MINE, PK("A2")], complete: true }], ["0xold"]); await check(w, ctx);
+  assert.equal(_haltFrom(w), null, "a healthy install");
+  w = watchWith([{ keys: [PK("A2")], complete: false }], ["0xold"]); await check(w, ctx);
+  assert.equal(_haltFrom(w), null, "an incomplete key list proves nothing");
+  w = watchWith([{ keys: [PK("A2")], complete: true }, { keys: [MINE], complete: true }], ["0xold"]); await check(w, ctx);
+  assert.equal(_haltFrom(w), null, "the second read owned the key: no halt on a single read");
+  w = watchWith([{ keys: [PK("A2")], complete: true }, { keys: [PK("A2")], complete: true }], ["0xnew", "0xnew"]); await check(w, ctx);
+  assert.deepEqual(_haltFrom(w), { summary: "Your Minima key AND your ETH wallet no longer match this node.", minimaMismatch: true, ethMismatch: true, orphanedPk: MINE, staleEth: "0xaddr-of-old", nodeEth: "0xaddr-of-new" });
+  w = watchWith([{ keys: [MINE], complete: true }], ["0xnew", "0xother"]); await check(w, ctx);
+  assert.equal(_haltFrom(w), null, "two derivations that disagree with each other halt nothing");
+  assert.equal(_haltFrom(null), null); assert.equal(_haltFrom({ halted() { throw new Error("x"); } }), null);
+});
+test("the halt card: what stopped, what keeps settling, every key whole, rescue before anything else, and no reset is offered", () => {
+  const h = { summary: "", minimaMismatch: true, ethMismatch: true, orphanedPk: PK("A1"), staleEth: ETH, nodeEth: TO }, c = AX.haltCard(h, 2);
+  assert.equal(c.title, "⛔  Wallet mismatch: AtomiX is halted"); assert.match(c.why, /Swaps already in flight keep settling/);
+  assert.equal(c.details, "Minima identity: ORPHANED\n  in use    " + PK("A1") + "\n  your node does not own it\n\nETH wallet: STALE\n  in use    " + ETH + "\n  node now  " + TO);
+  assert.match(c.warn, /for 2 unsettled swaps .* Do NOT quit or restart the app before you have exported that key/); assert.match(c.warn, /ask for help before you restore or reset anything\.$/);
+  assert.deepEqual(c.tools.map((t) => t[0]), ["key", "sweep"]);
+  const m = AX.haltCard({ minimaMismatch: true, ethMismatch: false, orphanedPk: PK("A1") }, 1);
+  assert.deepEqual(m.tools, [], "no stale ETH key: nothing to export or sweep"); assert.match(m.warn, /for 1 unsettled swap are/); assert.ok(!/quit or restart/.test(m.warn));
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.ok(!/axInvalidate/.test(src), "the screens never reset the AtomiX store");
+  assert.match(src, /if \(halted\(\)\) return say\("Halted: this node no longer owns the keys AtomiX uses here\. Nothing was sent\./, "no take while halted");
+  assert.ok(!/halted\(\)[^\n]*ax(refund|check)/.test(src), "Refund now and Check now are never gated: settlement is not frozen");
+});
+test("market offline: said only when the node is not running and a market was being kept on the book", () => {
+  assert.equal(AX.offline(true, true), ""); assert.equal(AX.offline(false, false), "");
+  assert.match(AX.offline(false, true), /^Market offline: your Minima node isn't running.* You were not filled by this.* Start the node/);
+});

@@ -213,6 +213,22 @@
   const COIN_CAP = { minima: 200, mxusdt: 53 };
   const coinWarn = (currency, coins) => (COIN_CAP[currency] && Number(coins) > COIN_CAP[currency] ? coins + " " + ccyName(currency) + " coins: AtomiX buys are being declined. Consolidate." : "");
 
+  /** The halt card's words (DoorsTab.paintRescue), for the desktop: h = axStatus().halt, unsettled = swaps not finished. */
+  function haltCard(h, unsettled) {
+    const d = [];
+    if (h.minimaMismatch) d.push("Minima identity: ORPHANED\n  in use    " + h.orphanedPk + "\n  your node does not own it");
+    if (h.ethMismatch) d.push("ETH wallet: STALE\n  in use    " + h.staleEth + "\n  node now  " + h.nodeEth);
+    return { title: "⛔  Wallet mismatch: AtomiX is halted",
+      why: "Your node's seed no longer matches the keys AtomiX is holding. Trading, publishing and new swaps are stopped. Swaps already in flight keep settling: that part is safe to leave running.",
+      details: d.join("\n\n"),
+      warn: "⚠  The claim secrets for " + unsettled + " unsettled swap" + (unsettled === 1 ? "" : "s") + " are in this app's AtomiX store"
+        + (h.ethMismatch ? ", and the stale ETH key is held only while the app runs: it is made again from the node's seed at every start and is never stored, so only your OLD node seed could rebuild it. Do NOT quit or restart the app before you have exported that key and moved its funds" : "")
+        + ". Rescue what you need FIRST. The desktop has no reset for this yet: after the rescue, ask for help before you restore or reset anything.",
+      tools: h.ethMismatch ? [["key", "Export the stale ETH key"], ["sweep", "↑  Sweep funds to the node wallet"]] : [] };
+  }
+  /** Market offline (MakerService.maybeOfflineAlert): the node is not running while a market or OTC offer was being kept on the book. */
+  const offline = (nodeRunning, wasLive) => (!nodeRunning && wasLive ? "Market offline: your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this, and swaps already locked are refunded at their deadline once the node runs. Start the node: your market is published again by itself." : "");
+
   // ======================================================================== Act: the money actions, no DOM
   // ui = { confirm(title, text, okLabel) → Promise<bool>, say(text, kind) }. Every function here makes the SAME
   // window.mcd calls, with the same arguments, behind the same guards, in the same order, as renderer/atomix-ui.js.
@@ -307,7 +323,7 @@
     async inspect(api, hash) { return (await api.axInspect(hash).catch((e) => ["Check failed: " + ((e && e.message) || e)])).map(mx); }
   };
 
-  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN };
+  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -357,6 +373,7 @@
     if (tab === "otc") want.otc = () => api().axOtc();
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled") S[k] = got[i].value; });
+    const ml = makerLive(S.mc, S.book); if (tab !== "shared" && ml != null) pref("dexicon_ax_market_live", ml || (S.otc && S.otc.myOffer && S.otc.myOffer.enable) ? "1" : "0");
     api().axWallet().then((w) => { if (w) { S.wallet = w; S.bals = w.bals; paint(); } }).catch(() => {});
   }
   function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (onShared() && D.where().shown) load("shared").then(paint, paint); else if (visible()) load(S.tab).then(paint, paint); else api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, 400); }
@@ -365,12 +382,20 @@
   // ---- what stands above every screen of the room ----
   function banners() {
     const out = [];
-    if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and nothing can settle. Start it and AtomiX comes back by itself.</div>`);
+    const off = offline(D.running(), pref("dexicon_ax_market_live") === "1");
+    if (off) out.push(`<div class="dx-card ax-alert" role="alert"><b class="ax-t14">Market offline</b><div class="ax-dim">${esc(off.replace(/^Market offline: y/, "Y"))}</div><button class="dx-btn ax-btn--s" data-axstart="1">Start the node</button></div>`);
+    else if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and nothing can settle. Start it and AtomiX comes back by itself.</div>`);
+    if (halted()) out.push(haltHtml());
     else if (!S.st.ready) out.push(`<div class="dx-card ax-big"><b class="ax-t14">Setting up AtomiX…</b><div class="ax-dim">Preparing your Ethereum wallet and swap keys on this node, then reading the market. The first start takes a minute or two.</div></div>`);
     const l = S.st.ready ? launch(S.st.currency, S.swaps, makerLive(S.mc, S.book), null) : null;
     if (l) out.push(`<div class="ax-launch" role="status">${esc(l.text)}</div>`);
     if (S.said) out.push(`<div class="dx-state dx-state--${S.said.kind}" role="alert">${esc(S.said.text)}</div>`);
     return out.join("");
+  }
+  function haltHtml() {
+    const h = haltCard(S.st.halt, (S.swaps || []).filter((x) => !terminal(x)).length);
+    return `<div class="dx-card ax-big ax-halt" role="alert"><b class="ax-halt__t">${esc(h.title)}</b><div class="ax-dim">${esc(h.why)}</div><pre class="ax-halt__d" data-copy="${esc(h.details)}" title="Click to copy the recovery details">${esc(h.details)}</pre><div class="ax-bad">${esc(h.warn)}</div>`
+      + h.tools.map((t) => `<button class="dx-btn ax-rescue" data-axw="${t[0]}">${esc(t[1])}</button>`).join("") + `</div>`;
   }
   const why = (key, title, text) => { const open = pref("dexicon_fold_" + key) === "1"; return `<button class="ax-why${open ? " ax-why--open" : ""}" data-axwhy="${key}" aria-expanded="${open}"><span class="dx-label">${esc(title)} ${open ? "▾" : "▸"}</span>${open ? `<span class="ax-why__t">${esc(text)}</span>` : ""}</button>`; };
   const idLine = (label, value) => `<div class="dx-id" data-copy="${esc(value)}" title="Click to copy">${esc(label)} ${esc(value)}</div>`;
@@ -698,6 +723,7 @@
     if (ds.axhide) return hide(ds.axhide);
     if (ds.axrefund) { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); }
     if (ds.axcsv) return Act.exportCsv(api(), ui);
+    if (ds.axstart) return D.start();
     if (ds.axw) return walletAct(ds.axw);
     if (ds.axswitch) return switchCurrency();
     if (ds.axabout) return void D.dialog("About AtomiX", ABOUT, "");
@@ -719,7 +745,7 @@
     if (tab === "assets") {
       const w = S.wallet, b = (w && w.bals) || {}, m = b.meta, warn = coinWarn(S.st.currency, m && m.coins), addr = S.st.eth || (w && w.addr) || "";
       const locked = m ? Math.max(0, (Number(m.confirmed) || 0) - (Number(m.sendable) || 0)) : 0;
-      return `<div class="dx-card"><div class="dx-row"><span class="dx-label">ETHEREUM</span><span class="dx-row"><button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">Copy</button><button class="dx-info" data-axw="info" aria-label="About this Ethereum wallet">i</button></span></div>
+      return (halted() ? haltHtml() : "") + `<div class="dx-card"><div class="dx-row"><span class="dx-label">ETHEREUM</span><span class="dx-row"><button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">Copy</button><button class="dx-info" data-axw="info" aria-label="About this Ethereum wallet">i</button></span></div>
           <div class="ax-ethbal">USDT ${esc(w ? b.usdt : "…")} · ETH ${esc(w ? b.eth : "…")}</div><div class="dx-addr" data-copy="${esc(addr)}" title="Your Ethereum wallet address. Click to copy">${esc(addr)}</div>
           ${b.ethErr ? `<div class="ax-bad">The Ethereum balance could not be read: ${esc(b.ethErr)}. The amounts above are not known; nothing is lost. Try Refresh.</div>` : ""}
           <div class="ax-wbtns"><button class="dx-btn" data-axw="refresh">↻  Refresh</button><button class="dx-btn" data-axw="fund">⤓  Fund / QR</button><button class="dx-btn" data-axw="send">↑  Send</button><button class="dx-btn ax-key" data-axw="key">Export key</button></div></div>`
@@ -746,6 +772,7 @@
       return void form("Receive / Fund · Ethereum", `<div class="dx-addr" data-copy="${esc(addr)}" title="Click to copy">${esc(addr)}</div>${qr}<div class="dx-sub dx-sub--sans">Same address on all EVM networks: fund it with Ethereum ETH and USDT. A little ETH pays the gas for swaps and sends.</div><button class="dx-btn ax-copy" data-copy="${esc(addr)}">Copy address</button>`, "");
     }
     if (what === "send") return sendDialog("");
+    if (what === "sweep") return sendDialog((S.st.halt && S.st.halt.nodeEth) || "");   // the rescue: the recipient is this node's own current Ethereum address
     if (what === "key") {
       const pk = await Act.exportKey(api(), ui); if (pk === null) return;
       if (!pk) return say("The Ethereum wallet is not ready yet. No key was shown.", "note");

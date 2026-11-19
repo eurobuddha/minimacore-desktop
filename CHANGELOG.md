@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.115] — Dexicon ① MxUSD: the halt card, the rescue tools and Market offline (Phase 3c)
+
+- **The halt card** (`DoorsTab.paintRescue`). The engine's identity watch has always stopped new liabilities when the node no longer owns AtomiX's keys; the old desktop panel never showed it. `main/atomix.js` `status()` now carries the watch's verdict (`halt`, read only, null unless halted; every key and address whole), and room ① shows the card above Swap, Market and OTC and above the wallet in Assets: what stopped, that swaps in flight keep settling, the orphaned Minima key, the stale and the current Ethereum address, and the rescue before anything else.
+- **Rescue tools**, when the Ethereum wallet is the stale one: Export the stale ETH key (the ordinary warning, then the key) and Sweep funds to the node wallet (the ordinary Send dialog with the node's current address filled in; the engine's checks and the review apply). The card says the stale key lives only while the app runs and must be exported before the app is quit or restarted.
+- **While halted** Review swap, Publish, Save & publish, Go live, a proposal, Accept and Counter are refused on the screen with the reason. Refund now, Check now, Withdraw and Reject are never gated: settlement is not frozen.
+- **Not built: a reset.** The phone offers "Start fresh"; the desktop has no call that forgets an orphaned identity without setting the swap store (and its claim secrets) aside, so the card offers none and says to ask for help after the rescue. `mcd:axInvalidate` is not used by any screen.
+- **Halt rule unchanged and now pinned from the screens' side**: the engine's own `identitywatch.js` is run against a stand-in node; one short or single read reports nothing, two complete reads that agree report the halt.
+- **Market offline**: when the node is not running and a market or OTC availability was being kept on the book, room ① says so, says the user was not filled by it, and offers Start the node.
+
 ## [0.18.114] — Dexicon ① MxUSD: AtomiX in Activity, History, Assets and Settings (Phase 3c)
 
 - **Activity, Assets and Settings are one screen each, in rooms ① and ③**, and now hold AtomiX as the phone's do.

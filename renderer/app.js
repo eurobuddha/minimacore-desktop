@@ -3226,7 +3226,7 @@ AtomixPanel.init({
 api.appVersion().then(v => AtomixPanel.setVersion(v)).catch(() => {});
 // Room ① of Dexicon draws AtomiX now (renderer/dexicon-ax.js) over the same window.mcd calls. The panel above is
 // no longer rendered; it stays, initialised, until the 3e parity audit.
-DexAx.init({ api, copy, relTime, consolidateToken, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where });
+DexAx.init({ api, copy, relTime, consolidateToken, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
 function resetAxState() { AtomixPanel.reset(); DexAx.reset(); }
 

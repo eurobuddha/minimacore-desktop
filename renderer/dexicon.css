@@ -303,3 +303,10 @@ button.dx-pill { cursor: pointer; }
 .ax-maxrow { display: flex; align-items: center; gap: 8px; } .ax-maxrow .dx-in { flex: 1; }
 .ax-dlg .dx-seg button[aria-pressed="true"] { background: var(--ax-acc); color: var(--ax-ink); }
 .dx-card .ax-slip { flex-wrap: wrap; }
+/* halted (DoorsTab.paintRescue) and market offline */
+.dx-card.ax-halt { margin: 0 0 10px; border-color: color-mix(in srgb, var(--dx-red) 55%, transparent); }
+.ax-halt__t { display: block; font: 700 18px/25px var(--dx-sans); color: var(--dx-red); }
+.ax-halt__d { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/18px var(--dx-mono); color: var(--dx-text); user-select: text; cursor: copy; }
+.ax-halt .ax-bad { margin: 14px 0; }
+.ax-rescue { display: block; width: 100%; min-height: 48px; margin-top: 8px; border: 0; border-radius: 14px; font-weight: 400; }
+.dx-card.ax-alert { border-color: color-mix(in srgb, var(--ax-warn) 60%, transparent); }
