@@ -410,15 +410,25 @@ function onlyOwnOrders(data) {
     return !!why;
 }
 
-/** RETRY (header): the resting engine's boot, again while it is not ready, at most once a minute.
- *  ponytail: paced by the clock, not by the boot's own end (PDService.boot has no callback); a boot slower than a
- *  minute would overlap its retry. Its steps are loads and idempotent registrations. */
+/** RETRY (header): the resting engine's boot, again while it is not ready, at most once a minute, and never while a
+ *  boot is still running (0.18.110). PDService.boot has no callback, so its end is read from what it does: it ends
+ *  READY, or it tells an ERROR and stops (the wrapper below). A boot that does neither for 5 minutes (a node command
+ *  that never came back) is given up on, loudly, and the next one may start. */
+var pdBootingSince = 0, PD_BOOT_STUCK_MS = 300000;
 function pdBoot() {
-    if (PDService.ready) return;
     var now = Date.now();
+    if (PDService.ready) { pdBootingSince = 0; return; }
+    if (pdBootingSince > 0) {
+        if (now - pdBootingSince < PD_BOOT_STUCK_MS) return;   // still running: a second one would run every step twice, side by side
+        log('the on-chain engine\'s start has not finished after ' + (PD_BOOT_STUCK_MS / 60000) + ' minutes; starting it again');
+    }
     if (lastPdBootMs > 0 && now - lastPdBootMs < 60000) return;
-    lastPdBootMs = now; PDService.boot();
+    lastPdBootMs = now; pdBootingSince = now; PDService.boot();
 }
+(function () {   // a boot that fails says so through PDService.tell('ERROR', …) and returns: that boot is over
+    var tell = PDService.tell;
+    PDService.tell = function (type) { if (type === 'ERROR' && !PDService.ready) pdBootingSince = 0; return tell.apply(PDService, arguments); };
+})();
 
 /** The FAST maker (this file) and the vendored PandaDEX RESTING engine (PDService) share one MDS.init. */
 function pdEvent(msg) {

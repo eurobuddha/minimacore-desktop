@@ -12,7 +12,7 @@ way is listed at the end and in `PANDAMONIUM_DESKTOP_PLAN.md` section 9.
 |---|---|---|
 | Engine, 38 files | `main/dexicon/{lib,crypto,vendor,resting}/` | byte for byte from `mds/dexicon` 0.0.91, branch `security/2026-11-07`, commit `9a95eb114ad35d3e18692a60c248529762fd72d5` (0.18.98 to 0.18.104: 37 files of 0.0.89, `500dd24344a3739472eccbefb0c684bed2aa2930`); gate: `scripts/dexicon-parity-manifest.cjs` (CI) and `scripts/dexicon-parity-check.cjs` (donor) |
 | Service | `main/dexicon/service.desktop.js` | hand mirror of the donor's `service.js`; its header lists every difference |
-| Loader | `main/dexicon/loader.js` | DexiconPro's, without its two injected hooks |
+| Loader | `main/dexicon/loader.js` | DexiconPro's, without its two injected hooks. The vm gives the engine its own scope, **not a confinement** (its header, corrected in 0.18.110) |
 | Host | `main/dexicon.js` | DexiconPro's `main/dexicon.js` + the `room.dex` part of `main/rooms.js`, as the public build |
 | Store | `userData/dexicon/dexicon.sqlite` | new; the SQL shim is `main/pandapools/sqlshim.js` (the one DexiconPro uses) |
 | IPC | `mcd:dxStatus`, `mcd:dxBook`, `mcd:dxMine`, `mcd:dxCommand`, event `mcd:dexicon` (`mcd:dxInvalidate` removed in 0.18.106) | `main/main.js`, `main/preload.js` |
@@ -195,6 +195,12 @@ The old engine's late callbacks reach neither the node nor the new store (epoch 
 it had already queued behind another signer is dropped in the queue (0.18.107: one `AbortController` per epoch, its
 signal on every `rpcCall`, aborted by `stop()` and `invalidate()`); one the node was already given cannot be recalled.
 
+A Dexicon that cannot be checked (0.18.110): a damaged store, or an engine that is not ready two minutes after the
+node started, no longer refuses a replacement for ever. `activeWork()` gives `waitedMs`; `restore.activeWorkList`
+names what cannot be checked; when that is the only thing in the way the screen may ask to go on
+(`restore.DEX_SKIP_WARNING`), and `mcd:dxSkipCheck` checks again in the main process, logs the choice and leaves the
+Dexicon check out for two minutes. Lines 1 to 4 then run as always, so the damaged store is kept aside.
+
 Not covered by line 3: a store with no recorded `publicId` (the engine never reached READY on it). AtomiX and
 PandaPools have line 1 only, plus their own guards (AtomiX IdentityWatch, PandaPools signing holds); a data-folder
 change does not reset them.
@@ -214,7 +220,7 @@ lost, but putting it back is a manual step today.
 | Timers: the node sends `MDS_TIMER_10SECONDS` and pushes `NEWBLOCK` per block; the service scope has no `setTimeout` | a 10 s interval in the host; the block is **polled** on that interval, so a block is seen up to 10 s late and several blocks arrive as one event | the engine takes the tip from `block` itself, so a merged event loses nothing; `setTimeout` exists in the vm but the engine never calls it |
 | `MDS.notify` | the host's `notify` event (no OS notification is raised yet) | 3b decides what to show |
 | `MDS.load` | path-jailed to `main/dexicon/` | a stray file there fails the parity gate |
-| `inited` once per node start | once per node start too since 0.18.106 (the engine is dropped when the node stops), plus a retry of `PDService.boot()` once a minute while the resting engine is not ready | a node that was slow at the first try does not leave the Exchange dead |
+| `inited` once per node start | once per node start too since 0.18.106 (the engine is dropped when the node stops), plus a retry of `PDService.boot()` once a minute while the resting engine is not ready, never beside a boot still running (0.18.110; a boot that never ends is given up on after 5 minutes) | a node that was slow at the first try does not leave the Exchange dead |
 | Price: `resting/price.js` over `MDS.net.GET` (MEXC depth, then MEXC bookTicker), and since 0.0.90 `AX.ladder.feed(PandaPrice)`: when neither MEXC call returns JSON, MEXC's own MINIMA/USDT ticker from `https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc` | the same files, the same three URLs; the host allows GET to `api.mexc.com` and to that one CoinGecko path, nothing else | a MEXC answer (even a thin or crossed book) stands and CoinGecko is not asked; the fallback read is aged from CoinGecko's fetch time; `dxStatus().price.source` is `MEXC` or `MEXC via CoinGecko` |
 
 ## The taker's page and takes awaiting an answer (0.18.109)
@@ -233,11 +239,32 @@ inbox poll, and voids it (spends one of its own coins in it back to the wallet) 
 
 ## The command bridge (`mcd:dxCommand`)
 
-`{ op: "cmd", command }`, `{ op: "sql", query }`, `{ op: "comms", message }`. Ported from DexiconPro's `room.dex`:
+`{ op: "cmd", command }`, `{ op: "sql", query }`, `{ op: "comms", message }`, `{ op: "net", … }`, `{ op: "identity" }`.
+Ported from DexiconPro's `room.dex`.
+
+**It is not a spending boundary.** The hidden page builds, signs and posts its own FAST takes, so `txncreate`,
+`txninput`, `txnoutput`, `txnsign` and `txnpost` must reach it; whoever controls the page can build a spend with them.
+What bounds the page: it is this app's vendored code (digest-pinned), it runs in a sandboxed frame of its own origin
+with no network (CSP `connect-src 'none'`) and no `window.mcd`, and relay data is parsed, never evaluated. The verb
+list keeps out what the page never needs (`send`, `consolidate`, backups, key and password parameters).
+
+Since 0.18.110:
+
+- **SQL is an allow-list** (`dexSql`, `SQL_OK` in `main/dexicon.js`): the `ax_kv` statements of `lib/mdsw.js`
+  (`kvInit`, `kvGet`, `kvSet`, `kvDel`), `SELECT k, v FROM ax_kv WHERE k LIKE '…'`, `… WHERE k IN ('…',…)`, and
+  ``SELECT `json` FROM `fill_state` WHERE `id`=1``. One statement; values are quoted literals. `publicId` cannot be
+  written. Refusals are logged ("refused SQL from a screen").
+- **The identity seed is never an IPC answer.** `seedrandom` is refused on the bridge. `{ op: "identity" }` is answered
+  by `main/main.js`: `dexicon.identitySeed()` (the same one-way derivation the service uses), then
+  `dexicon-room.js` `deliverIdentity` runs `window.__dxIdentity(seed)` in the one `dxroom://exchange/` frame of the
+  asking window; the reply is `{ status: true }` or a reason, never the seed. The page needs the seed because it signs
+  orders and seals takes with the identity made from it. Not proven in Electron (see the plan, section 9).
+
+Verbs and rules:
 
 - Verbs: `balance block checkmode coins getaddress history newscript random scripts status txpow txncheck txncreate
-  txndelete txnexport txnimport txninput txnoutput txnpost txnsign txnview`, plus exactly
-  `seedrandom modifier:dexicon-identity-v1`. **Removed** from DexiconPro's list: `coinexport`, `consolidate`,
+  txndelete txnexport txnimport txninput txnoutput txnpost txnsign txnview`. (`seedrandom` was allowed in its one
+  identity form until 0.18.110.) **Removed** from DexiconPro's list: `coinexport`, `consolidate`,
   `runscript`, `tokens`, `txnbasics`, `txnstate`; the page at 0.0.89 never sends them (its consolidate is a packet to
   the service). If a 3b screen needs one, add it with the line of page code that issues it.
 - Kept: no `;` and no control characters, 300,000 characters at most, no `file:`, `keyuses:`, `privatekey:`,

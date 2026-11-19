@@ -235,3 +235,24 @@ test('a caller with its own bound (ownCap) takes none of the shared four slots, 
     assert.ok(seen.includes('fifth.example.test'), 'and it is released as before');
   } finally { restore(); }
 });
+
+// 0.18.110: the guard matched a mapped IPv4 address only in its dotted spelling. The same address written in hex,
+// or expanded, walked past it: [::ffff:7f00:1] is 127.0.0.1 (the node's RPC), [::ffff:a9fe:a9fe] is 169.254.169.254.
+test('an IPv4 address inside an IPv6 literal is decoded before the check, in every spelling', async () => {
+  const dnsCalls = stubDns([[{ address: '93.184.216.34', family: 4 }]]);
+  try {
+    for (const h of ['[::ffff:7f00:1]', '::ffff:7f00:1', '[::ffff:127.0.0.1]', '[0:0:0:0:0:ffff:7f00:1]', '[0000:0000:0000:0000:0000:ffff:7f00:0001]', '[::FFFF:7F00:1]',
+      '[::ffff:a9fe:a9fe]', '[::ffff:169.254.169.254]', '[::ffff:c0a8:101]', '[::ffff:a00:1]', '[::ffff:ac10:1]', '[::ffff:6440:1]', '[::ffff:0:1]',
+      '[::7f00:1]', '[::127.0.0.1]', '[64:ff9b::7f00:1]', '[64:ff9b::a9fe:a9fe]', '[::1]', '[::]', '[0:0:0:0:0:0:0:1]', '[fe80::1]', '[febf::1]', '[fc00::1]', '[fd12:3456::1]'])
+      assert.strictEqual(await netfetch.isBlockedHost(h), true, 'refused: ' + h);
+    for (const h of ['[::ffff:808:808]', '[::ffff:8.8.8.8]', '[2606:4700:4700::1111]', '[2001:4860:4860::8888]', '[64:ff9b::808:808]'])
+      assert.strictEqual(await netfetch.isBlockedHost(h), false, 'a public address is still allowed: ' + h);
+    assert.strictEqual(dnsCalls.length, 0, 'literals never reach the resolver');
+    // and a NAME that resolves to one of them (the rebinding shape) is refused too
+    stubDns([[{ address: '::ffff:7f00:1', family: 6 }]]);
+    assert.strictEqual(await netfetch.isBlockedHost('mapped.example.test'), true);
+    stubDns([[{ address: '93.184.216.34', family: 4 }, { address: '::ffff:a9fe:a9fe', family: 6 }]]);
+    assert.strictEqual(await netfetch.isBlockedHost('metadata.example.test'), true);
+    assert.strictEqual(await netfetch.fetchJson('https://[::ffff:7f00:1]:9005/status'), null, 'and nothing is fetched from it');
+  } finally { restore(); }
+});

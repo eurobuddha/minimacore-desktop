@@ -89,15 +89,33 @@ const DEX_VERBS = new Set(["balance", "block", "checkmode", "coins", "getaddress
 function dexCommand(c) {
   if (typeof c !== "string" || !c.trim() || c.length > 300000 || /[;\x00-\x1f\x7f]/.test(c)) throw new Error("bad command");
   const verb = c.trim().split(/\s+/)[0].toLowerCase();
-  if (verb === "seedrandom") { if (c.trim() !== "seedrandom modifier:dexicon-identity-v1") throw new Error("only the Dexicon identity derivation"); return c.trim(); }
+  // The identity secret is never an answer on this bridge (0.18.110): main derives it and puts it straight into the
+  // page's own sandboxed frame (identitySeed below, main/dexicon-room.js deliverIdentity).
+  if (verb === "seedrandom") throw new Error("the trading identity is not read through this bridge");
   if (!DEX_VERBS.has(verb)) throw new Error("not available to Dexicon: " + verb);
   if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c)) throw new Error("that parameter is not available to Dexicon");
   if (verb === "txnpost" && /\b(auto|burn|mine)\s*:/i.test(c)) throw new Error("that parameter is not available to Dexicon");   // the page posts plain `txnpost id:`
   return c;
 }
-/** The page's SQL runs on the engine's own store, as page and service share one database in the MiniDapp. */
+/** The page's SQL runs on the engine's own store, as page and service share one database in the MiniDapp. Since
+ *  0.18.110 it is not "any SQL": exactly the statements the page (lib/mdsw.js kv*, ui/app.js, ui/activity.js at
+ *  mds/dexicon 0.0.91) and the native screens (renderer/dexicon-ui.js load) issue, on ax_kv and one read of
+ *  fill_state. One statement, every value a quoted literal. The store's own record of whose it is (publicId) is the
+ *  service's to write. A page statement that is not here is refused and logged: add it with the line that issues it. */
+const SQL_LIT = "'(?:[^']|'')*'";
+const SQL_OK = [
+  "CREATE TABLE IF NOT EXISTS `ax_kv` \\(`k` varchar\\(200\\) NOT NULL PRIMARY KEY, `v` text NOT NULL\\)",
+  "SELECT v FROM ax_kv WHERE k=" + SQL_LIT,
+  "SELECT k, v FROM ax_kv WHERE k LIKE " + SQL_LIT,
+  "SELECT k, v FROM ax_kv WHERE k IN \\(" + SQL_LIT + "(?:," + SQL_LIT + ")*\\)",
+  "MERGE INTO ax_kv \\(k, v\\) KEY\\(k\\) VALUES \\(" + SQL_LIT + ", " + SQL_LIT + "\\)",
+  "DELETE FROM ax_kv WHERE k=" + SQL_LIT,
+  "SELECT `json` FROM `fill_state` WHERE `id`=1"
+].map(p => new RegExp("^" + p + "$"));
 function dexSql(q) {
   if (typeof q !== "string" || !q.trim() || q.length > 1000000) throw new Error("bad query");
+  if (!SQL_OK.some(re => re.test(q))) throw new Error("that statement is not available to Dexicon's screens");
+  if (/^(MERGE INTO ax_kv \(k, v\) KEY\(k\) VALUES \(|DELETE FROM ax_kv WHERE k=)'publicId'/i.test(q)) throw new Error("that record is the engine's own");
   return q;
 }
 
@@ -252,10 +270,23 @@ function makeHost(opts = {}) {
   function blockWatch() {
     Promise.resolve().then(() => runner("block")).then(r => { const t = Number(r && r.response && r.response.block) || 0; if (t > lastTip) { lastTip = t; fire("NEWBLOCK"); emitter.emit("update"); } }, () => {});
   }
+  /** The trading identity's seed for the page, derived here in the main process (the node's one-way derivation, as
+   *  the service's own). It is returned to main.js only, which puts it into the page's sandboxed frame and nowhere
+   *  else: it never travels as an IPC answer, so the app's own window never holds it. Throws when it cannot be read. */
+  async function identitySeed() {
+    if (!ready) throw new Error("Dexicon is still starting");
+    const r = await runner("seedrandom modifier:dexicon-identity-v1", { signal: abort.signal });
+    const v = r && r.status === true && r.pending !== true && r.response ? String(r.response.seedrandom || "") : "";
+    if (!/^0x[0-9A-Fa-f]{64}$/.test(v)) throw new Error((r && (r.error || r.message)) || "the node gave no derived seed (is it locked?)");
+    return v;
+  }
+
+  let startedAt = 0;
   /** Start with the node (main.js calls this once the node is "running": after the wallet exists and the key-mode
    *  gate has passed). Nothing is sent to the node before that. */
   function start() {
     if (timer) return Promise.resolve();
+    startedAt = Date.now();
     timer = setInterval(() => { if (!ready) { init().catch(() => {}); return; } fire("MDS_TIMER_10SECONDS"); blockWatch(); }, tickMs);   // a failed init is tried again
     if (timer.unref) timer.unref();
     return init().then(() => { if (timer) blockWatch(); }, () => {});
@@ -325,7 +356,7 @@ function makeHost(opts = {}) {
     const kv = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
     const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
     if (!ctx || !ctx.DX || !ctx.DX.restingReady()) {
-      const w = { ready: false, hasStore: fs.existsSync(storePath()) };
+      const w = { ready: false, hasStore: fs.existsSync(storePath()), waitedMs: timer && startedAt ? Date.now() - startedAt : 0 };   // waitedMs: main/restore.js lets the user go on after two minutes of this
       if (sqlShim && ctx && ctx.DX && ctx.DX.ready()) { try { w.takes = takes(); } catch (e) {} }   // the FAST half is up: its takes are known even while the chain is still being read
       return w;
     }
@@ -341,7 +372,7 @@ function makeHost(opts = {}) {
     return Promise.resolve().then(() => runner(c, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
   }
   function pageSql(query) {
-    const q = dexSql(query);
+    let q; try { q = dexSql(query); } catch (e) { log("refused SQL from a screen (" + e.message + "): " + String(query).slice(0, 80)); throw e; }
     if (!sqlShim) return Promise.reject(new Error("Dexicon is still starting"));
     const r = sqlShim.sql(q);
     if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(q) && WRITES_NOW.test(q)) { try { sqlShim.flush(); } catch (e) {} }
@@ -377,6 +408,8 @@ function makeHost(opts = {}) {
   }
 
   return { emitter, init, start, stop, flush, invalidate, status, activeWork, book, mine, command, storePath,
+    identitySeed,
+    _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),
     _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _ctx: () => ctx, _fire: fire, _netAllowed: netAllowed };
 }

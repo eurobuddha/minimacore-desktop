@@ -531,6 +531,16 @@ function resyncCommand(o) {
   if (keyuses) cmd += ` keyuses:${keyuses}`;
   return { cmd, resetsWallet: !!phrase };
 }
+// A wallet replacement that is refused ONLY because Dexicon cannot be checked (it never finished starting, or its
+// store is damaged) must not be blocked for ever: the main process says so in the refusal, the user is told what
+// going on means, and the main process checks again before it leaves the Dexicon check out (mcd:dxSkipCheck).
+// Resolves true when the caller may try once more.
+async function offerWithoutDexicon(e) {
+  if (!/Dexicon .*you can go on without this check\./.test(ipcError(e))) return false;
+  let warning; try { warning = await api.dxSkipWarning(); } catch (err) { return false; }
+  if (!await showConfirm("Go on without checking Dexicon?", warning, "Go on without the check", true)) return false;
+  try { await api.dxSkipCheck(); return true; } catch (err) { toast(ipcError(err), "err"); return false; }
+}
 // The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is
 // dropped and nothing the old wallet said stays on screen.
 // The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
@@ -604,8 +614,8 @@ function renderBackup() {
     if (!await showConfirm(title, warning, okLabel, built.resetsWallet)) return;
     const btn = $(btnId), st = $("bkStatus"); btn.disabled = true; btn.textContent = label + "…"; st.textContent = "";
     try {
-      if (built.exec) { const j = await built.exec(); if (!j || j.status !== true) throw new Error((j && j.error) || "the node refused the restore"); }
-      else await cmd(built.cmd);
+      const attempt = async () => { if (built.exec) { const j = await built.exec(); if (!j || j.status !== true) throw new Error((j && j.error) || "the node refused the restore"); } else await cmd(built.cmd); };
+      try { await attempt(); } catch (e) { if (!await offerWithoutDexicon(e)) throw e; await attempt(); }
       CFG = await api.saveConfig({ megammrHost: built.host });
       if (built.resetsWallet) await walletReplaced();
       // The node shut itself down at the end and the main process started it again, through every start check.
@@ -634,7 +644,7 @@ function renderBackup() {
     $("bkGo").onclick = async () => { const f = $("bkFile").value.trim(), picked = host.querySelector('.modeq .opt[aria-checked="true"]');
       const o = { host: $("bkHost").value.trim(), file: f, password: $("bkFilePw").value, mode: picked ? picked.dataset.mode : "" };
       // The main process checks the backup's key mode and builds the command; a refusal comes before the question below.
-      try { $("bkStatus").textContent = ""; await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { $("bkStatus").textContent = ipcError(e); return; }
+      try { $("bkStatus").textContent = ""; await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { if (!await offerWithoutDexicon(e)) { $("bkStatus").textContent = ipcError(e); return; } }
       run("bkGo", "Restore", { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, "Replace this node?",
       "Minima will replace its wallet and chain with " + f + ".\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", "Restore"); };
     return;
@@ -757,7 +767,7 @@ async function postBootRestore() {
   try {
     const built = resyncCommand({ host, phrase: seed, anyphrase: true, keyuses, needPhrase: true });
     if (built.error) throw new Error(built.error);
-    await cmd(built.cmd);
+    try { await cmd(built.cmd); } catch (e) { if (!await offerWithoutDexicon(e)) throw e; await cmd(built.cmd); }
     RESTORE = null;   // clear the seed from memory
     await walletReplaced();   // seed changed: every identity derived from the old one is dropped
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });

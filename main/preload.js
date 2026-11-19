@@ -233,6 +233,8 @@ contextBridge.exposeInMainWorld("mcd", {
   dxMine: () => ipcRenderer.invoke("mcd:dxMine"),
   dxCommand: (a) => ipcRenderer.invoke("mcd:dxCommand", a),
   dxWork: () => ipcRenderer.invoke("mcd:dxWork"),
+  dxSkipWarning: () => ipcRenderer.invoke("mcd:dxSkipWarning"),
+  dxSkipCheck: () => ipcRenderer.invoke("mcd:dxSkipCheck"),
   onDexicon: (fn) => { const h = (_e, message) => fn(message); ipcRenderer.on("mcd:dexicon", h); return () => ipcRenderer.removeListener("mcd:dexicon", h); },
 
   // P2P Chance was removed in 0.18.68; only the settle-only status of bets already on the chain is left.

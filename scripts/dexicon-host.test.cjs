@@ -23,7 +23,8 @@ async function boot(o = {}) {
   await M.until(() => host.status().ready && host.status().restingReady);
   return { host, node, net, dir, ctx: host._ctx() };
 }
-const sql = async (host, query) => { const r = await host.command({ op: "sql", query }); assert.equal(r.status, true, query + " → " + r.error); return r.rows || []; };
+// the tests' own way into the store (any statement); the screens' bridge takes an allow-list (0.18.110, tested below)
+const sql = async (host, query) => { const r = host._sql(query); assert.equal(r.status, true, query + " → " + r.error); return r.rows || []; };
 const dump = async (host, skip) => {
   const out = {};
   for (const t of (await sql(host, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")).map(r => r.NAME))
@@ -126,7 +127,8 @@ test("the command bridge: only the verbs the MiniDapp page issues, one command a
   await refused("txnpost id:a burn:1", /that parameter/);
   await refused("txnsign id:a publickey:auto txnpostauto:true", /that parameter/);
   await refused("txnexport id:a file:/tmp/x", /that parameter/);
-  await refused("seedrandom modifier:other", /only the Dexicon identity derivation/);
+  await refused("seedrandom modifier:other", /not read through this bridge/);
+  await refused("seedrandom modifier:dexicon-identity-v1", /not read through this bridge/);
   await assert.rejects(host.command({ op: "cmd", command: 7 }), /bad command/);
   await assert.rejects(host.command({ op: "run" }), /unknown Dexicon op/);
   await assert.rejects(host.command(null), /unknown Dexicon op/);
@@ -448,13 +450,14 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   assert.ok(l[0].includes(coin), "the order's coin id in full");
   assert.match(l[1], /^1 Dexicon trade sent and not yet answered/);
   const cold = makeHost({ runner: async () => ({ status: false }), dataDir: tmp(), net: M.mockNet(), quiet: true });
-  assert.deepEqual(await cold.activeWork(), { ready: false, hasStore: false });
+  assert.deepEqual(await cold.activeWork(), { ready: false, hasStore: false, waitedMs: 0 });
   // 0.18.109: takes awaiting an answer are counted from the store, with no screen open, and also while the chain is
   // still being read (the FAST half is up, the on-chain half is not); a take being voided counts too
   await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('void_takes', '{\"t2\":{\"mine\":[]},\"t3\":{\"mine\":[]}}')");
   assert.equal((await host.activeWork()).takes, 3);
   vm.runInContext("PDService.ready = false", ctx);
-  assert.deepEqual(await host.activeWork(), { ready: false, hasStore: true, takes: 3 });
+  const half = await host.activeWork();
+  assert.deepEqual([half.ready, half.hasStore, half.takes], [false, true, 3]); assert.ok(half.waitedMs > 0);
   assert.match(list(await host.activeWork())[0], /has not finished starting/, "the restore gate still refuses");
   // the engine's instance number: the screens remake their page frame when it changes
   const e1 = host.status().epoch; host.stop(); await host.start(); await M.until(() => host.status().ready);
@@ -565,17 +568,159 @@ test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an 
   net.held.slice().forEach(h => h.done());
 });
 
+// ---- 0.18.110: the LOW findings ----
+test("the screens' SQL is an allow-list: the page's own statements on ax_kv and one read of fill_state, nothing else", async () => {
+  const { host } = await boot();
+  const logs = []; host.emitter.on("log", l => logs.push(l));
+  const run = (query) => host.command({ op: "sql", query });
+  // every statement the page and the native screens issue (lib/mdsw.js kvInit/kvGet/kvSet/kvDel, ui/app.js, ui/activity.js, renderer/dexicon-ui.js load)
+  const mdsw = fs.readFileSync(path.join(M.root, "main/dexicon/lib/mdsw.js"), "utf8"), ui = fs.readFileSync(path.join(M.root, "renderer/dexicon-ui.js"), "utf8");
+  for (const lit of ["CREATE TABLE IF NOT EXISTS `ax_kv` (`k` varchar(200) NOT NULL PRIMARY KEY, `v` text NOT NULL)", "SELECT v FROM ax_kv WHERE k='", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('", "DELETE FROM ax_kv WHERE k='"]) assert.ok(mdsw.includes(lit), "the engine still writes: " + lit);
+  assert.ok(ui.includes("SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','activity')"));
+  for (const q of ["CREATE TABLE IF NOT EXISTS `ax_kv` (`k` varchar(200) NOT NULL PRIMARY KEY, `v` text NOT NULL)", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"o1\":{\"sent\":1,\"note\":\"it''s; DROP TABLE ax_kv; --\"}}')",
+    "SELECT v FROM ax_kv WHERE k='pending_takes'", "SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%'", "SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','activity')",
+    "DELETE FROM ax_kv WHERE k='ui_alive'", "SELECT `json` FROM `fill_state` WHERE `id`=1"])
+    assert.equal((await run(q)).status, true, q);
+  assert.match((await run("SELECT v FROM ax_kv WHERE k='pending_takes'")).rows[0].V, /it's; DROP TABLE ax_kv; --/, "a quote inside a value is data");
+  const n = logs.length;
+  for (const q of ["SELECT * FROM ax_kv", "SELECT k, v FROM ax_kv", "SELECT name FROM sqlite_master", "DROP TABLE ax_kv", "DELETE FROM ax_kv", "DELETE FROM ax_kv WHERE k='a' OR 1=1", "UPDATE ax_kv SET v='x'",
+    "SELECT v FROM ax_kv WHERE k='a'; DROP TABLE ax_kv", "SELECT v FROM ax_kv WHERE k='a' UNION SELECT orderid FROM my_orders", "MERGE INTO my_orders (`orderid`) KEY(`orderid`) VALUES ('x')", "MERGE INTO maker_state (id, json) KEY(id) VALUES (1, '{}')",
+    "SELECT * FROM my_orders", "INSERT INTO pp_posted_inputs (coinid,handle) VALUES ('0x01','x')", "DELETE FROM pp_posted_inputs", "CREATE TABLE x (a int)", "ATTACH DATABASE '/tmp/x' AS y", "PRAGMA table_info(ax_kv)", "select v from ax_kv where k='a'"])
+    await assert.rejects(run(q), /not available to Dexicon's screens/, q);
+  await assert.rejects(run("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('publicId', '0x00')"), /the engine's own/, "whose store this is: the service's record");
+  await assert.rejects(run("DELETE FROM ax_kv WHERE k='publicId'"), /the engine's own/);
+  assert.ok(logs.length >= n + 20 && logs.slice(n).every(l => /refused SQL from a screen/.test(l)), "each refusal is in Dexicon's log, so a statement a later page needs is seen");
+  assert.equal((await sql(host, "SELECT COUNT(*) AS N FROM ax_kv WHERE k='publicId'"))[0].N, 1, "the record is intact");
+});
+
+test("the trading identity never crosses IPC: the bridge refuses it, the main process puts it into the page's own frame", async () => {
+  const { host, node } = await boot();
+  await assert.rejects(host.command({ op: "cmd", command: "seedrandom modifier:dexicon-identity-v1" }), /not read through this bridge/);
+  await assert.rejects(host.command({ op: "identity" }), /unknown Dexicon op/, "the host itself has no frame to give it to: main.js answers that op");
+  const seed = await host.identitySeed();
+  assert.match(seed, /^0x[0-9a-f]{64}$/);
+  const { deliverIdentity } = require("../main/dexicon-room.js");
+  const ran = [], frame = (url, takes) => ({ url, executeJavaScript: async (code) => { ran.push([url, code]); return takes; } });
+  const sender = (...frames) => ({ mainFrame: { framesInSubtree: frames } });
+  const page = frame("dxroom://exchange/index.html", true);
+  const answer = await deliverIdentity(sender(frame("file:///app/renderer/index.html", true), frame("http://127.0.0.1:9005/panel", true), frame("dxroom://other/index.html", true), page), seed);
+  assert.deepEqual(answer, { status: true }, "the IPC answer says delivered, and carries nothing else");
+  assert.equal(ran.length, 1); assert.equal(ran[0][0], "dxroom://exchange/index.html", "only the page's own frame: not the window, not a webview, not another dxroom host");
+  assert.ok(ran[0][1].includes(JSON.stringify(seed)) && /window\.__dxIdentity\(/.test(ran[0][1]));
+  for (const [s, why] of [[sender(), /is not open/], [sender(frame("file:///x", true)), /is not open/], [sender(page, frame("dxroom://exchange/index.html", true)), /more than one/], [sender(frame("dxroom://exchange/index.html", false)), /did not take/],
+    [sender({ url: "dxroom://exchange/index.html", executeJavaScript: async () => { throw new Error("frame gone " + seed); } }), /could not be put into/], [{}, /is not open/]]) {
+    const r = await deliverIdentity(s, seed); assert.equal(r.status, false); assert.match(r.error, why); assert.ok(!JSON.stringify(r).includes(seed.slice(2, 20)), "never the secret in an answer");
+  }
+  assert.deepEqual(await deliverIdentity(sender(page), "not a seed"), { status: false, error: "no trading identity to deliver" });
+  // the page's side (renderer/dexicon/mds.js): it asks { op: "identity" } and is answered inside its own frame
+  const sent = [], listeners = {}, win = { console: { log() {}, error() {} }, document: { getElementById: () => null, querySelectorAll: () => [], querySelector: () => null, head: { appendChild() {} }, createElement: () => ({}) }, navigator: {}, setInterval() {}, JSON, Object, Array, String, Number, Promise, Error,
+    parent: { postMessage: (m) => sent.push(m) }, addEventListener: (t, f) => { listeners[t] = f; } };
+  win.window = win;
+  vm.runInNewContext(fs.readFileSync(path.join(M.root, "renderer/dexicon/mds.js"), "utf8"), win);
+  let got = null; win.MDS.cmd("seedrandom modifier:dexicon-identity-v1", (r) => { got = r; });
+  assert.equal(JSON.stringify(sent.map(m => [m.name, m.args])), '[["room.dex",{"op":"identity"}]]', "no seedrandom command leaves the frame");
+  listeners.message({ source: win.parent, data: { dxRoom: 1, id: sent[0].id, value: { status: true } } });   // what the window hears: delivered
+  await new Promise(r => setImmediate(r));
+  assert.equal(got, null, "the window's answer carries no seed");
+  assert.equal(win.__dxIdentity(seed), true);
+  assert.equal(got.status, true); assert.equal(got.response.seedrandom, seed);
+  let failed = null; win.MDS.cmd("seedrandom modifier:dexicon-identity-v1", (r) => { failed = r; });
+  listeners.message({ source: win.parent, data: { dxRoom: 1, id: sent[1].id, value: { status: false, error: "the Dexicon page is not open" } } });
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual([failed.status, failed.error], [false, "the Dexicon page is not open"]);
+  const C = require("../renderer/dexicon-core.js");
+  assert.deepEqual(C.bridgeCall({ dxRoom: 1, id: 1, name: "room.dex", args: { op: "identity", command: "x" } }), { kind: "dx", args: { op: "identity" } });
+  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8");
+  assert.ok(/if \(a && a\.op === "identity"\) \{[^\n]*dexicon\.identitySeed\(\)[^\n]*return dexiconRoom\.deliverIdentity\(e\.sender, seed\); \}/.test(main), "main.js: derived in main, delivered into the frame, not returned");
+  assert.ok(node.seen.filter(c => c.startsWith("seedrandom")).length >= 2);
+});
+
+test("a Dexicon that cannot be checked does not block a wallet restore for ever: named, then skippable, and the damaged store is kept aside", async () => {
+  const dir = tmp(); fs.writeFileSync(path.join(dir, "dexicon.sqlite"), "this is not a database, it is a damaged file");
+  const damaged = fs.readFileSync(path.join(dir, "dexicon.sqlite"));
+  const node = M.mockNode(), host = makeHost({ runner: node.run, dataDir: dir, net: M.mockNet(), tickMs: 30, quiet: true }); node.attach(host); hosts.push(host);
+  await host.start(); await new Promise(r => setTimeout(r, 150));
+  const w = await host.activeWork();
+  assert.equal(w.ready, false); assert.equal(w.hasStore, true); assert.ok(w.waitedMs >= 100 && w.waitedMs < 5000, "how long it has been trying: " + w.waitedMs);
+  assert.equal(node.seen.length, 0, "an engine without a store asks the node for nothing");
+  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
+  const list = (dexicon, more) => restore.activeWorkList(Object.assign({}, quiet, { dexicon }, more));
+  // the first two minutes: wait
+  assert.match(list(w)[0], /has not finished starting, so its orders could not be checked\. Wait a moment and try again\.$/);
+  assert.equal(restore.onlyDexiconUnchecked(list(w)), false, "no way round it yet");
+  // after two minutes of it: what cannot be checked is named, and the way on is offered
+  const stuck = Object.assign({}, w, { waitedMs: 3 * 60000 + 5 });
+  assert.match(list(stuck)[0], /^Dexicon has not finished starting after 3 minutes, so its on-chain orders and its trades waiting for an answer cannot be checked\. If it stays like this, you can go on without this check\.$/);
+  assert.equal(restore.onlyDexiconUnchecked(list(stuck)), true);
+  assert.equal(restore.onlyDexiconUnchecked(list(null)), true, "an engine that could not be asked at all");
+  assert.match(list(null)[0], /its store may be damaged/);
+  assert.deepEqual(list(stuck, { skipDexicon: true }), [], "the user chose to go on: the Dexicon check is left out");
+  assert.deepEqual(list(null, { skipDexicon: true }), []);
+  // never a way round work that IS known
+  const swap = { atomix: { ready: true, swaps: ["0x" + "5A".repeat(32)], maker: false, otcOffer: false, otcDeals: 0 } };
+  assert.equal(restore.onlyDexiconUnchecked(list(stuck, swap)), false, "an AtomiX swap in flight still blocks");
+  assert.equal(list(stuck, Object.assign({ skipDexicon: true }, swap)).length, 1);
+  assert.equal(list({ ready: true, orders: ["0x" + "AB".repeat(32)], pending: 0, takes: 0 }, { skipDexicon: true }).length, 1, "a Dexicon that CAN be checked is checked: skip leaves out only the unknown");
+  assert.equal(restore.onlyDexiconUnchecked([]), false);
+  assert.match(restore.DEX_SKIP_WARNING, /kept beside the new one under a dated name\. Nothing is deleted\./);
+  // the replacement itself: the damaged file is moved aside as it is, and Dexicon starts clean
+  host.stop();
+  const kept = host.invalidate({ hold: true });
+  assert.ok(fs.readFileSync(kept).equals(damaged));
+  await host.start(); await M.until(() => host.status().ready && host.status().restingReady);
+  // main.js: the skip is checked again in the main process, lasts two minutes, and is logged
+  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
+  assert.ok(main.includes("if (!restore.onlyDexiconUnchecked(list)) throw new Error(") && main.includes("dexSkipUntil = Date.now() + 120000;") && main.includes("const list = await walletWork(false);"));
+  assert.ok(/async function offerWithoutDexicon\(e\) \{[\s\S]*?showConfirm\("Go on without checking Dexicon\?", warning, "Go on without the check", true\)[\s\S]*?await api\.dxSkipCheck\(\)/.test(app), "the screen warns first, then asks main");
+});
+
+test("the engine's vm is not a confinement, and the loader says so", async () => {
+  const { ctx } = await boot();
+  assert.equal(vm.runInContext("typeof process + typeof require", ctx), "undefinedundefined", "no such NAMES in the engine's scope");
+  assert.equal(vm.runInContext("MDS.log.constructor('return typeof process')()", ctx), "object", "but a host function is one step from the host's Function: the vm confines nothing");
+  const head = fs.readFileSync(path.join(M.root, "main/dexicon/loader.js"), "utf8").split("*/")[0];
+  assert.match(head, /THIS IS NOT A SECURITY BOUNDARY/);
+  assert.ok(!/no require, no process, no fs, no network of its own/.test(head), "the old claim is gone");
+});
+
+test("the on-chain engine's start is not tried again while a start is still running; a failed one is, a minute later", async () => {
+  let hold = true, fail = false; const waiting = [];
+  const node = M.mockNode({ on: (c) => { if (!/^newscript /.test(c)) return null;   /* the start's second node command: nothing else registers a script while idle */ if (fail) return { status: false, error: "node busy" }; if (hold) return new Promise(res => waiting.push(res)); return null; } });
+  const host = makeHost({ runner: node.run, dataDir: tmp(), net: M.mockNet(), tickMs: 25, quiet: true }); node.attach(host); hosts.push(host);
+  await host.start(); await M.until(() => host.status().ready && waiting.length >= 1);   // the first start is at its first node command, and stays there
+  assert.equal(waiting.length, 1);
+  const ctx = host._ctx();
+  vm.runInContext("globalThis.__boots = 0; (function () { var b = PDService.boot; PDService.boot = function () { __boots++; return b.apply(PDService, arguments); }; })()", ctx);
+  const minuteLater = () => vm.runInContext("lastPdBootMs = Date.now() - 61000", ctx);
+  minuteLater(); await new Promise(r => setTimeout(r, 150));   // six timer events, each a minute "later"
+  assert.equal(vm.runInContext("__boots", ctx), 0, "no second start beside the one still running");
+  assert.equal(waiting.length, 1);
+  // that start fails (the engine says so with an ERROR): the next minute's retry runs, once
+  vm.runInContext("lastPdBootMs = Date.now()", ctx);   // that start began "just now"
+  fail = true; hold = false; waiting.shift()({ status: false, error: "node busy" });
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(vm.runInContext("__boots", ctx), 0, "not before a minute has passed");
+  fail = false; minuteLater();
+  await M.until(() => host.status().restingReady);
+  assert.equal(vm.runInContext("__boots", ctx), 1);
+  // a start that never ends at all is given up on after five minutes, and said
+  const logs = []; host.emitter.on("log", l => logs.push(l));
+  vm.runInContext("PDService.ready = false; pdBootingSince = Date.now() - 301000; lastPdBootMs = Date.now() - 61000", ctx);
+  await M.until(() => vm.runInContext("__boots", ctx) === 2);
+  assert.ok(logs.some(l => /start has not finished after 5 minutes; starting it again/.test(l)));
+});
+
 test("the app wiring: started and stopped with the node, reset by the MAIN process before the node restarts, flushed on quit, one bridge", () => {
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
-  assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));'));
+  assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", async (e, a) => {') && main.includes("  return dexicon.command(a);\n});"));
   assert.ok(main.includes('ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));') && /read\(api\.dxWork\(\)\)/.test(app), "the Shutdown warning asks for takes awaiting an answer; a failed read is null");
   // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
   assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
   for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })", "casino.invalidate()"]) assert.ok(hook.includes(call), "the main-process reset: " + call);
   assert.ok(!/api\.\w*Invalidate\(/.test(app), "the renderer's chain only clears the screen");
-  assert.ok(main.includes("dexicon: await dexicon.activeWork().catch(() => null) });"), "a failed read is null, which refuses");
+  assert.ok(main.includes("dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });"), "a failed read is null, which refuses");
   assert.ok(/try \{ dexicon\.flush\(\); \} catch \(err\) \{\}/.test(main));
   for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "dxWork", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
   const host = fs.readFileSync(path.join(M.root, "main/dexicon.js"), "utf8");

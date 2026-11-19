@@ -24,7 +24,8 @@ const chat = require("./chat");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const dexicon = require("./dexicon");
-require("./dexicon-room").register(require("electron"));   // dxroom://exchange/: the Dexicon page for its hidden, sandboxed frame
+const dexiconRoom = require("./dexicon-room");
+dexiconRoom.register(require("electron"));   // dxroom://exchange/: the Dexicon page for its hidden, sandboxed frame
 const ethwallet = require("./ethwallet");
 const shop = require("./shop");
 const casino = require("./casino");
@@ -198,8 +199,8 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
   return config.recordKeyMode(mode === "block" ? "block" : "classic");
 });
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
-const walletWork = async () => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activity().catch(() => null),
-  casino: config.load().casinoEnabled ? casino.open() : null, dexicon: await dexicon.activeWork().catch(() => null) });
+const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activity().catch(() => null),
+  casino: config.load().casinoEnabled ? casino.open() : null, dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
 // MAIN process while the node is stopped and before it is started again, so it does not depend on the window being
 // open, and no engine ticks on the new wallet with the old wallet's records. Every identity-bound store is set aside
@@ -585,7 +586,24 @@ node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted 
 ipcMain.handle("mcd:dxStatus", () => dexicon.status());
 ipcMain.handle("mcd:dxBook", () => dexicon.book());
 ipcMain.handle("mcd:dxMine", () => dexicon.mine());
-ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));
+// { op: "identity" }: the page asks for its trading identity. Derived here, put straight into the page's sandboxed
+// frame (main/dexicon-room.js deliverIdentity), and NOT returned: the answer says only whether it was delivered.
+ipcMain.handle("mcd:dxCommand", async (e, a) => {
+  if (a && a.op === "identity") { let seed; try { seed = await dexicon.identitySeed(); } catch (err) { return { status: false, error: (err && err.message) || "the trading identity could not be read" }; } return dexiconRoom.deliverIdentity(e.sender, seed); }
+  return dexicon.command(a);
+});
+// A wallet replacement blocked ONLY because Dexicon cannot be checked (it never became ready, or its store is
+// damaged): the screen has shown restore.DEX_SKIP_WARNING and the user chose to go on. Checked again here; then the
+// Dexicon check is left out for two minutes. Everything else that blocks a replacement still does.
+let dexSkipUntil = 0;
+ipcMain.handle("mcd:dxSkipWarning", () => restore.DEX_SKIP_WARNING);
+ipcMain.handle("mcd:dxSkipCheck", async () => {
+  const list = await walletWork(false);
+  if (!restore.onlyDexiconUnchecked(list)) throw new Error(list.length ? restore.activeWorkProblem(list) : "Dexicon can be checked now. Try the restore again.");
+  dexSkipUntil = Date.now() + 120000;
+  node.log("[app] the user chose to replace the wallet WITHOUT the Dexicon check: " + list.join(" | "));
+  return true;
+});
 ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));   // for the Shutdown warning: takes awaiting an answer (null: could not be read)
 // No mcd:dxInvalidate: a window cannot move the store aside, and a wallet replacement does not wait for a window
 // to say so (walletReplaced, below).

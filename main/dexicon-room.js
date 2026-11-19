@@ -42,4 +42,24 @@ function register(electron) {
   }));
 }
 
-module.exports = { register, roomFile, CSP };
+/**
+ * Put the trading identity's seed into the page's own frame, and only there (0.18.110). The page (ui/app.js) needs it:
+ * it signs orders and seals takes with the identity made from it, and no other JavaScript does that. Before, the seed
+ * came back as the answer of mcd:dxCommand and was relayed by the app's window, so the window's own page held the
+ * secret. Now the main process finds the dxroom://exchange/ frame among the sender's frames and runs one call in it
+ * (renderer/dexicon/mds.js __dxIdentity); the IPC answer carries no secret. A sandboxed frame of another origin
+ * cannot be read by the window around it. sender = the WebContents that asked; seed = "0x" + 64 hex.
+ * Returns { status: true } or { status: false, error }.
+ */
+async function deliverIdentity(sender, seed) {
+  if (!/^0x[0-9A-Fa-f]{64}$/.test(String(seed))) return { status: false, error: "no trading identity to deliver" };
+  let frames = []; try { frames = (sender && sender.mainFrame && sender.mainFrame.framesInSubtree) || []; } catch (e) {}
+  const page = frames.filter(f => { try { return /^dxroom:\/\/exchange\//.test(String(f.url)); } catch (e) { return false; } });
+  if (page.length !== 1) return { status: false, error: page.length ? "more than one Dexicon page is open" : "the Dexicon page is not open" };
+  try {
+    const took = await page[0].executeJavaScript("typeof window.__dxIdentity === 'function' && window.__dxIdentity(" + JSON.stringify(String(seed)) + ") === true");
+    return took === true ? { status: true } : { status: false, error: "the Dexicon page did not take its trading identity" };
+  } catch (e) { return { status: false, error: "the trading identity could not be put into the Dexicon page" }; }   // never the secret in an error
+}
+
+module.exports = { register, roomFile, CSP, deliverIdentity };

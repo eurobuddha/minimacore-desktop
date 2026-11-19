@@ -83,7 +83,7 @@ test("M1: a seed restore on the general command channel is recognised, and main.
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
   const order = ["requireRunning()", "restore.loadsBackupFile(command)", "restore.replacesWalletFromPhrase(command)", "restore.activeWorkProblem(await walletWork())", "return run(pinned)"].map(x => cmd.indexOf(x));
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refusals first, the node last: " + order);
-  assert.ok(/const walletWork = async \(\) => restore\.activeWorkList\(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activity\(\)\.catch\(\(\) => null\),/.test(main), "asked of the existing read models; a failed read is null, which refuses");
+  assert.ok(/const walletWork = async \(skipDexicon = Date\.now\(\) < dexSkipUntil\) => restore\.activeWorkList\(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activity\(\)\.catch\(\(\) => null\),/.test(main), "asked of the existing read models; a failed read is null, which refuses");
   assert.ok(/work: walletWork \}\)\);/.test(main), "and the backup-file restore asks the same");
 });
 

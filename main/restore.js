@@ -79,6 +79,9 @@ function moveAside(file, now) {
  * rows (null = could not be read), casino = { offers, bets } or null, dexicon = main/dexicon.js activeWork()
  * (undefined = not asked). Identifiers are given in full.
  */
+const DEX_STUCK_MS = 120000;
+/** Said with a Dexicon check that cannot be made. The screens offer the way on when this is all that is left. */
+const DEX_SKIP_HINT = "If it stays like this, you can go on without this check.";
 function activeWorkList(r) {
   const out = [], ax = r && r.atomix, plural = (n, one) => n + " " + one + (n === 1 ? "" : "s");
   if (!ax) out.push("AtomiX could not be asked whether a swap is in flight. Wait a moment and try again.");
@@ -94,8 +97,15 @@ function activeWorkList(r) {
   if (waiting.length) out.push(plural(waiting.length, "PandaPools transaction") + " still waiting to confirm: " + waiting.map(x => x.txpowid).join(", "));
   // Dexicon (main/dexicon.js activeWork). undefined = not asked (the engine is not part of this caller); null = it could not be asked.
   const dx = r && r.dexicon;
-  if (dx === null) out.push("Dexicon could not be asked whether an order or a take is still open. Wait a moment and try again.");
-  else if (dx && !dx.ready) { if (dx.hasStore) out.push("Dexicon has not finished starting, so its orders could not be checked. Wait a moment and try again."); }
+  // A Dexicon that cannot be checked must not block a restore for ever (0.18.110): a damaged store or an engine that
+  // never becomes ready is named, and after two minutes of it (or at once when it could not be asked at all) the
+  // user may go on (r.skipDexicon: main.js, after the screen's warning). The store is moved aside as always.
+  const skip = !!(r && r.skipDexicon);
+  if (dx === null) { if (!skip) out.push("Dexicon could not be asked whether an order or a trade is still open; its store may be damaged. " + DEX_SKIP_HINT); }
+  else if (dx && !dx.ready) {
+    if (dx.hasStore && !skip) out.push(Number(dx.waitedMs) >= DEX_STUCK_MS ? "Dexicon has not finished starting after " + Math.floor(dx.waitedMs / 60000) + " minutes, so its on-chain orders and its trades waiting for an answer cannot be checked. " + DEX_SKIP_HINT
+      : "Dexicon has not finished starting, so its orders could not be checked. Wait a moment and try again.");
+  }
   else if (dx) {
     if (dx.orders && dx.orders.length) out.push(plural(dx.orders.length, "Dexicon order") + " still on the chain, which only this wallet's keys can cancel or collect. Cancel " + (dx.orders.length === 1 ? "it" : "them") + " first: " + dx.orders.join(", "));
     if (dx.pending) out.push(plural(dx.pending, "Dexicon order") + " still waiting for a block.");
@@ -105,6 +115,10 @@ function activeWorkList(r) {
   if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
   return out;
 }
+/** Is the Dexicon check that cannot be made the ONLY thing in the way? (Then, and only then, it may be skipped.) */
+function onlyDexiconUnchecked(list) { return !!list && list.length > 0 && list.every(x => String(x).endsWith(DEX_SKIP_HINT)); }
+/** What the user is told before going on without the Dexicon check. */
+const DEX_SKIP_WARNING = "Dexicon cannot be checked, so the app cannot see whether this wallet still has Dexicon orders on the chain or a trade that was sent and not yet answered.\n\nIf you go on:\n• The Dexicon store is kept beside the new one under a dated name. Nothing is deleted.\n• A Dexicon order of this wallet that is still on the chain can then be cancelled or collected only by restoring this wallet again.\n• A trade that was sent and not answered can no longer be voided by this app.\n\nGo on only if Dexicon stays like this after the app was restarted.";
 function activeWorkProblem(list) {
   return list && list.length ? "This would replace the wallet while work that needs its keys is still open:\n\n• " + list.join("\n• ")
     + "\n\nNothing was changed. Let these finish or withdraw them, then try again. A swap that loses its wallet can be neither claimed nor refunded by this app." : "";
@@ -133,4 +147,5 @@ async function restoreBackup(o, d) {
   return d.run(built.cmd);
 }
 
-module.exports = { isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup };
+module.exports = { isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+  onlyDexiconUnchecked, DEX_SKIP_HINT, DEX_SKIP_WARNING, DEX_STUCK_MS };

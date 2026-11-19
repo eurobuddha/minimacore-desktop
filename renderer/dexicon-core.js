@@ -305,13 +305,14 @@
 
   // ---- what the screens may ask for: the page's twelve actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
   const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"];
-  const OPS = ["cmd", "sql", "comms", "net"];
+  const OPS = ["cmd", "sql", "comms", "net", "identity"];
   /** A request from the page's frame, or null when it is not one the shell forwards. */
   function bridgeCall(m) {
     if (!m || m.dxRoom !== 1 || typeof m.id !== "number") return null;
     if (m.name === "clip" && m.args && typeof m.args.text === "string") return { kind: "clip", text: m.args.text };
     if (m.name !== "room.dex" || !m.args || !OPS.includes(m.args.op)) return null;
     const a = m.args, s = (v) => (typeof v === "string" ? v : "");
+    if (a.op === "identity") return { kind: "dx", args: { op: "identity" } };   // answered inside the page's frame by the main process, never here
     return { kind: "dx", args: a.op === "cmd" ? { op: "cmd", command: s(a.command) } : a.op === "sql" ? { op: "sql", query: s(a.query) } : a.op === "comms" ? { op: "comms", message: s(a.message) }
       : { op: "net", method: a.method === "POST" ? "POST" : "GET", url: s(a.url), body: a.body == null ? null : s(a.body) } };
   }

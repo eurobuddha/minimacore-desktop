@@ -43,15 +43,34 @@ function v4Blocked(ip) {
   if (a >= 224) return true;                             // multicast / reserved
   return false;
 }
+/** The 16 bytes of an IPv6 literal (:: compression and a dotted last part understood), or null. */
+function v6Bytes(addr) {
+  let a = String(addr).toLowerCase().replace(/%.*$/, "");   // a zone id is not part of the address
+  const dotted = a.match(/^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (dotted) { const q = dotted.slice(2).map(Number); if (q.some(n => n > 255)) return null; a = dotted[1] + ((q[0] << 8) | q[1]).toString(16) + ":" + ((q[2] << 8) | q[3]).toString(16); }
+  const halves = a.split("::"); if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [], tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null;
+  const groups = head.concat(new Array(fill).fill("0"), tail);
+  if (groups.length !== 8 || groups.some(g => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  const out = []; for (const g of groups) { const n = parseInt(g, 16); out.push(n >> 8, n & 255); }
+  return out;
+}
 function ipBlocked(addr) {
   if (!addr) return true;
   if (net.isIPv4(addr)) return v4Blocked(addr);
-  const a = addr.toLowerCase();
-  if (a === "::1" || a === "::") return true;            // loopback / unspecified
-  if (a.startsWith("fe80")) return true;                 // link-local
-  if (a.startsWith("fc") || a.startsWith("fd")) return true; // unique-local fc00::/7
-  const m = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);    // mapped v4
-  if (m) return v4Blocked(m[1]);
+  // Decoded, not matched as text: "::ffff:7f00:1" IS 127.0.0.1 and "::ffff:a9fe:a9fe" IS 169.254.169.254, and the
+  // old text match saw only the dotted spelling of a mapped address.
+  const b = v6Bytes(addr);
+  if (!b) return true;                                   // not an address we can read: refused
+  const zero = (from, to) => b.slice(from, to).every(x => x === 0), v4 = () => v4Blocked(b.slice(12).join("."));
+  if (zero(0, 15) && b[15] <= 1) return true;            // :: unspecified, ::1 loopback
+  if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true;   // link-local fe80::/10
+  if ((b[0] & 0xfe) === 0xfc) return true;               // unique-local fc00::/7
+  if (zero(0, 10) && b[10] === 0xff && b[11] === 0xff) return v4();   // IPv4-mapped ::ffff:a.b.c.d, in any spelling
+  if (zero(0, 12)) return v4();                          // IPv4-compatible ::a.b.c.d (deprecated, still routed by some stacks)
+  if (b[0] === 0 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zero(4, 12)) return v4();   // NAT64 64:ff9b::/96
   return false;
 }
 async function isBlockedHost(host) {

@@ -15,12 +15,23 @@
  *   confirm / prompt                    -> a sandboxed frame has no dialogs. The native screen shows the review; the
  *                                          answer is armed for the one driven call and for nothing else. An on-chain
  *                                          trade goes out only when the page's own review text was shown and returned.
+ *   the trading identity                -> `seedrandom modifier:dexicon-identity-v1` is NOT sent over the bridge. The
+ *                                          page asks { op: "identity" }; the main process derives the seed and calls
+ *                                          __dxIdentity inside THIS frame (main/dexicon-room.js). The secret never
+ *                                          passes through the app's window, which only hears "delivered".
  *   the AtomiX doors                    -> not in this app (doors/ and lib/door.js are not served); their hooks are
  *                                          no-ops, so the page never starts a second settlement engine on the ETH key.
  */
 (function () {
   "use strict";
   var seq = 0, waiting = {}, handler = null, lastBlock = 0, answer = null, asked = null;
+  var ID_CMD = "seedrandom modifier:dexicon-identity-v1", idWaiting = [];
+  // Called by the main process, in this frame only (main/dexicon-room.js deliverIdentity).
+  Object.defineProperty(window, "__dxIdentity", { value: function (seed) {
+    var w = idWaiting; idWaiting = [];
+    for (var i = 0; i < w.length; i++) w[i]({ status: true, pending: false, response: { seedrandom: String(seed) } });
+    return true;
+  } });
   var $ = function (id) { return document.getElementById(id); };
 
   function call(name, args) {
@@ -99,6 +110,12 @@
       });
     },
     cmd: function (command, cb) {
+      if (String(command).replace(/^\s+|\s+$/g, "") === ID_CMD) {   // the trading identity: see the header
+        var mine = function (r) { if (cb) cb(r); }, fail = function (why) { var i = idWaiting.indexOf(mine); if (i >= 0) { idWaiting.splice(i, 1); mine({ status: false, error: why }); } };
+        idWaiting.push(mine);
+        call("room.dex", { op: "identity" }).then(function (r) { if (!r || !r.status) fail((r && r.error) || "the trading identity was not delivered"); }, function (e) { fail(e.message); });
+        return;
+      }
       call("room.dex", { op: "cmd", command: String(command) }).then(function (r) { if (cb) cb(r); },
         function (e) { if (cb) cb({ status: false, error: e.message }); });
     },
