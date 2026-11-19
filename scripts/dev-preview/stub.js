@@ -6,6 +6,7 @@
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
  *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
  *   Send: &send=filled|review|error
+ *   Any screen: &scroll=<px>
  *   History: &hist=empty  &hmenu=1  &hdetail=<row>  &chain=checking  &hfilter=1  &hforeign=1
  */
 "use strict";
@@ -159,6 +160,7 @@
         document.querySelectorAll(".balrow")[parseInt(dlg[1], 10) || 0].click();
         setTimeout(() => { if (dlg[0] === "coin") document.querySelector(".coin-row" + (dlg[2] ? ":nth-child(" + dlg[2] + ")" : "")).click(); if (dlg[0] === "split") el("coinsSplit").click(); }, 250);
       }, 250);
+      if (Q.get("scroll")) setTimeout(() => { el("main").scrollTop = parseInt(Q.get("scroll"), 10); }, 500);
       if (Q.get("menu") === "1") { openMenu(); document.activeElement.blur(); }
     } catch (e) { document.title = "PREVIEW ERROR " + e.message; console.error(e); }
   }, 300));

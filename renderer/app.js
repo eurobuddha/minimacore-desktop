@@ -390,6 +390,172 @@ function showSetup() {
 }
 function hideSetup() { el("setup").style.display = "none"; el("shell").style.filter = ""; }
 
+// ---- Startup Params (the phone's ParamsActivity, over the reconfigure logic the old wizard had) ------------
+// P is the working copy of every non-managed minima.jar flag; the switches, the network preset and the full
+// editor all write into it, and it is saved verbatim as config.params. MINIMA_PARAMS is the shared manifest
+// (params.js). Nothing here touches the wallet: no seed, no walletDone, no walletMode.
+// The network preset and the Server switch fill the flags they own (was applyNet / applyRole in the wizard).
+function applyNetPreset(P, net, server, customPeer, peersUrl) {
+  if (net === "solo") {
+    Object.assign(P, { solo: true, isclient: false, mobile: false, nosyncibd: false, limitbandwidth: false,
+      allowallip: false, p2pnodes: "", connect: "" });
+    return P;
+  }
+  Object.assign(P, { solo: false, test: false, genesis: false, allowallip: true });
+  // The Server switch owns the client/server flags (see params.js): applied after the network preset.
+  Object.assign(P, server ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
+  if (net === "custom") { P.connect = customPeer; P.p2pnodes = ""; }
+  else { P.p2pnodes = peersUrl || MINIMA_PARAMS.defaultParams().p2pnodes; P.connect = ""; }
+  return P;
+}
+// What Save writes, or why it cannot. f = { net, server, basePort, rpcPort, dataFolder, customPeer, extraArgs, P }.
+function paramsPatch(f, cfg) {
+  if (f.net === "custom" && !f.customPeer) return { error: "Enter a host:port for the custom peer." };
+  return { patch: {
+    network: f.net, basePort: parseInt(f.basePort, 10) || cfg.basePort, rpcPortManual: f.rpcPort,
+    contribute: !!f.server && f.net !== "solo", dataFolder: f.dataFolder || "",
+    customConnect: f.net === "custom" ? f.customPeer : "", params: f.P, extraArgs: f.extraArgs
+  } };
+}
+function psSwitch(id, title, on, body) {
+  return `<div class="ps-sw"><span class="ps-sw__t" id="${id}L">${esc(title)}</span><button class="switch switch--m2" role="switch" id="${id}" aria-checked="${on ? "true" : "false"}" aria-labelledby="${id}L"></button></div>
+    <p class="ps-note">${esc(body)}</p>`;
+}
+// host: the Startup Params screen, or the first-run layer (firstRun: no wallet yet, so Save only, as the phone).
+function renderParams(host, firstRun, done) {
+  host = host || el("paramsBody");
+  const $ = (id) => host.querySelector("#" + id);
+  const isOn = (id) => $(id).getAttribute("aria-checked") === "true";
+  const P = Object.assign({}, MINIMA_PARAMS.defaultParams(), CFG.params || {});
+  let net = CFG.network || "mainnet";
+  const rpcPort = parseInt(CFG.rpcPortManual, 10) || (CFG.basePort + 4);
+  const plain = CFG.nodeKind === "minima";
+  host.innerHTML = `
+    <h2 class="ps-h">Startup parameters</h2>
+    <p class="ps-intro">Configure how the node starts. Changes take effect when the node restarts.</p>
+    ${psSwitch("pServer", "Server mode (-server)", !!CFG.contribute, "Accept incoming connections instead of client-only. Needs a reachable port (router forward / hotspot).")}
+    ${psSwitch("pMega", "MegaMMR (-megammr)", P.megammr === true, "Keep the full Mega MMR so this node can serve seed resyncs. Uses significantly more RAM and storage.")}
+    <div class="ps-sw"><span class="ps-sw__t">RPC (-rpcenable)</span><span class="ps-sw__on">Always on</span></div>
+    <p class="ps-note">${plain
+      ? `HTTP RPC interface on port ${esc(rpcPort)}. This app talks to its node through it, so it cannot be switched off. Anything that can reach the port can command this node, so it is never started without Basic auth: user minima, password below.`
+      : `RPC interface on port ${esc(rpcPort)}, on this computer only. This app talks to its node through it, so it cannot be switched off. The Parlons Node takes no RPC password.`}</p>
+    ${plain ? `<button class="btn btn--outline ps-btn ps-btn--copy" id="pRpcCopy">Copy RPC password</button>` : ""}
+    ${psSwitch("pKeets", "Keets transport (-keets)", P.keets === true, "On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart.")}
+    <div class="eyebrow ps-label">Extra arguments (advanced)</div>
+    <textarea class="field__input ps-field" id="extraArgs" rows="2" spellcheck="false" placeholder="-p2pnodes host:port -txpowdbstore 3 …">${esc(CFG.extraArgs || "")}</textarea>
+    <p class="ps-note ps-note--gap">Space-separated flags passed to the node at boot, after the parameters below. Quotes are respected.</p>
+    <details class="ps-adv"><summary>All parameters</summary>
+      <div class="setup-sec"><div class="setup-sec__h">Network</div>
+        <label class="opt" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network.</span></label>
+        <label class="opt" data-net="solo"><b>Solo / test</b><span>A private local chain that mines its own blocks. Safe for trying things out.</span></label>
+        <label class="opt" data-net="custom"><b>Custom peer</b><span>Connect to a specific host:port you provide.</span></label>
+        <input class="field__input" id="customPeer" placeholder="host:port" style="display:none;margin-top:4px" value="${esc(CFG.customConnect || "")}" />
+        <div class="ps-note">A network is a preset: it fills the parameters below, and you can still change any of them.</div>
+      </div>
+      <div class="setup-sec"><div class="setup-sec__h">Core</div>
+        <div class="field"><div class="field__label">Data folder (-data / -basefolder)</div>
+          <div class="seg"><input class="field__input" id="dataFolder" placeholder="(default app folder)" value="${esc(CFG.dataFolder || "")}" readonly />
+          <button class="btn btn--outline btn--sm" id="pickFolder">Choose…</button></div></div>
+        <div class="field"><div class="field__label">Minima port (-port)</div>
+          <input class="field__input" id="basePort" value="${esc(CFG.basePort)}" inputmode="numeric" /></div>
+        <div class="field"><div class="field__label">RPC port (-rpc)</div>
+          <input class="field__input" id="rpcPort" value="${esc(CFG.rpcPortManual || "")}" placeholder="(auto: Minima port + 4)" inputmode="numeric" /></div>
+      </div>
+      <div class="setup-sec"><div class="setup-sec__h">Every startup parameter</div>
+        <div id="advParams"></div>
+        <div class="setup-sec__sub" style="margin-top:12px">Managed by the app</div>
+        ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${esc(m.note)}</span></div>`).join("")}
+      </div>
+    </details>
+    <button class="btn btn--outline ps-btn ps-btn--save" id="pSave">Save</button>
+    ${firstRun ? "" : `<button class="btn btn--primary ps-btn ps-btn--main" id="pSaveRestart">Save &amp; Restart Node</button>`}`;
+
+  // ---- the full editor (rebuilt from P so the switches and presets show through) ----
+  function paramControl(it, val) {
+    const id = "p_" + it.flag;
+    if (it.type === "bool") {
+      return `<label class="prow"><input type="checkbox" id="${id}" data-flag="${esc(it.flag)}" ${val === true ? "checked" : ""}/>
+        <span class="prow__l">${esc(it.label)}</span><span class="prow__h">${esc(it.help)}</span></label>`;
+    }
+    const isSecret = it.type === "secret";
+    const shown = isSecret ? "" : (val === true || val == null ? "" : val);
+    const ph = isSecret && val === true ? "•••••••• (stored — leave blank to keep)" : "";
+    return `<div class="field prow"><label class="prow__l" for="${id}">${esc(it.label)}</label>
+      <input class="field__input" id="${id}" type="${isSecret ? "password" : "text"}" data-flag="${esc(it.flag)}" ${isSecret ? 'data-secret="1"' : ''} ${isSecret && val === true ? 'data-set="1"' : ''} value="${esc(shown)}" placeholder="${esc(ph)}" ${it.type === "int" ? 'inputmode="numeric"' : ''}/>
+      <div class="prow__h">${esc(it.help)}</div></div>`;
+  }
+  function renderAdvanced() {
+    $("advParams").innerHTML = MINIMA_PARAMS.GROUPS.map(g => `
+      <div class="adv-group"><div class="adv-group__h">${esc(g.group)}</div>
+      ${g.items.map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
+    $("advParams").querySelectorAll("[data-flag]").forEach(inp => {
+      const f = inp.dataset.flag;
+      if (inp.type === "checkbox") inp.onchange = () => { P[f] = inp.checked; paintSwitches(); };
+      else inp.onchange = () => { P[f] = inp.value; };
+    });
+  }
+  const paintSwitches = () => { $("pMega").setAttribute("aria-checked", P.megammr === true ? "true" : "false"); $("pKeets").setAttribute("aria-checked", P.keets === true ? "true" : "false"); };
+  const applyNet = (n) => {
+    net = n;
+    applyNetPreset(P, net, isOn("pServer"), $("customPeer").value.trim(), CFG.peersUrl);
+    host.querySelectorAll(".opt[data-net]").forEach(x => x.classList.toggle("sel", x.dataset.net === n));
+    $("customPeer").style.display = n === "custom" ? "" : "none";
+    $("pServer").disabled = n === "solo";
+    renderAdvanced();
+  };
+  host.querySelectorAll(".switch--m2").forEach(sw => sw.onclick = () => {
+    sw.setAttribute("aria-checked", sw.getAttribute("aria-checked") === "true" ? "false" : "true");
+    if (sw.id === "pMega") P.megammr = isOn("pMega");
+    else if (sw.id === "pKeets") P.keets = isOn("pKeets");
+    else if (sw.id === "pServer" && net !== "solo") Object.assign(P, isOn("pServer") ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
+    renderAdvanced();
+  });
+  host.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => applyNet(o.dataset.net));
+  $("customPeer").oninput = () => { if (net === "custom") P.connect = $("customPeer").value.trim(); };
+  $("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) $("dataFolder").value = f; };
+  if ($("pRpcCopy")) $("pRpcCopy").onclick = async () => {   // the password goes from the main process to the clipboard; it never reaches this page
+    let ok = false; try { ok = !!(await api.copyRpcPassword()); } catch (e) {}
+    toast(ok ? "RPC password copied" : "Could not copy the RPC password", ok ? "ok" : "err");
+  };
+  // Draw the editor from what is saved. The preset is applied only when the user picks a network or flips a
+  // switch, so opening this screen and pressing Save changes nothing.
+  host.querySelectorAll(".opt[data-net]").forEach(x => x.classList.toggle("sel", x.dataset.net === net));
+  $("customPeer").style.display = net === "custom" ? "" : "none";
+  $("pServer").disabled = net === "solo";
+  renderAdvanced();
+
+  const collect = () => {
+    // every control of the full editor into P (a secret left blank that was already stored keeps its marker)
+    $("advParams").querySelectorAll("[data-flag]").forEach(inp => {
+      const f = inp.dataset.flag;
+      if (inp.type === "checkbox") { P[f] = inp.checked; return; }
+      const v = inp.value.trim();
+      if (inp.dataset.secret) P[f] = v ? v : (inp.dataset.set ? true : "");
+      else P[f] = v;
+    });
+    const r = paramsPatch({ net, server: isOn("pServer"), basePort: $("basePort").value, rpcPort: $("rpcPort").value.trim(),
+      dataFolder: $("dataFolder").value, customPeer: $("customPeer").value.trim(), extraArgs: $("extraArgs").value.trim(), P }, CFG);
+    if (r.error) { toast(r.error, "err"); return null; }
+    return r.patch;
+  };
+  const leave = () => (done ? done() : selectTab(lastTabView));
+  $("pSave").onclick = async () => {
+    const patch = collect(); if (!patch) return;
+    try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
+    toast("Saved - applies when the node restarts", "ok"); leave();
+  };
+  if ($("pSaveRestart")) $("pSaveRestart").onclick = async () => {
+    const patch = collect(); if (!patch) return;
+    if (!await showConfirm("Restart node?", "The node will shut down cleanly and start again with the new parameters. This takes a minute.", "Restart")) return;
+    try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
+    toast("Restarting the node…"); leave();
+    waitingForNode = true;
+    if (running) await api.nodeRestart(); else await api.nodeStart();   // reconfigure = restart to apply
+  };
+}
+// Electron wraps a main-process refusal as "Error invoking remote method 'x': Error: the message".
+function ipcError(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+
 // ---- starting / progress overlay -------------------------------------------
 function showStarting() {
   const restore = CFG.walletMode === "restore";
@@ -504,7 +670,7 @@ function showRestoreOverlay() {
 //   a SUB screen      a back arrow and the screen's title, as the phone's own Receive / Send / Logs / Terminal
 //   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
-const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings" };
+const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params" };
 // The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
 // (Future Cash Next, Minima Explorer, Entropy, KeyUses) get a row when their phase builds them: no dead rows.
 const TRAY_APPS = [
@@ -692,7 +858,7 @@ function openSettingsAt(cardId) {
 async function menuAction(act) {
   if (act === "logs" || act === "terminal" || act === "settings") selectTab(act);
   else if (act === "backup") openSettingsAt("bkCard");
-  else if (act === "params") showSetup();
+  else if (act === "params") selectTab("params");
   else if (act === "shutdown") {
     // Ask the AtomiX and PandaPools glue what is in flight first (their own saved records; no node command).
     const read = (p) => Promise.race([Promise.resolve(p).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]);
@@ -994,6 +1160,7 @@ function renderActive() {
   else if (activeView === "terminal") renderTerminal();
   else if (activeView === "logs") renderLogs();
   else if (activeView === "settings") renderSettings();
+  else if (activeView === "params") renderParams();
   else if (activeView === "apps") renderApps();
   else if (activeView === "faucet") renderFaucet();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
@@ -2877,7 +3044,7 @@ function renderNode(s) {
     toast(turnOn ? "Contributing. Restarting node…" : "Back to light wallet. Restarting node…");
     api.nodeRestart();
   };
-  el("nReconfig").onclick = () => showSetup();
+  el("nReconfig").onclick = () => selectTab("params");
   el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
   const nReclaim = el("nReclaim");
   if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = "Stopping…"; try { await api.nodeReclaim(); toast("Node restarting…", "ok"); } catch (e) { toast(e.message || String(e), "err"); } };

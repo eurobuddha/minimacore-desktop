@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.85] — Startup Params: the phone's screen over the same settings
+
+- "Startup Params" in the menu, and "Reconfigure node" on the Node tab, open the phone's screen instead of the old setup dialog: "Startup parameters", then a switch each for Server mode (-server), MegaMMR (-megammr) and Keets transport (-keets), the Extra arguments box, Save and Save & Restart Node.
+- Save stores the settings for the next start ("Saved - applies when the node restarts"). Save & Restart Node asks first, then restarts the node. Opening the screen and pressing Save changes nothing.
+- The Server switch is the old "Contribute to the network" choice: it sets the same flags and the same router port request.
+- RPC has no switch here: this app talks to its own node over RPC, so it is always on. On the plain Minima node, "Copy RPC password" puts the password on the clipboard from the main process; the page never receives it. The Parlons Node takes no RPC password, so the button is not shown for it.
+- "All parameters" holds what the old dialog had below its presets: the network (mainnet, solo, custom peer), the data folder and ports, and every startup parameter of the node.
+- This screen no longer contains anything about the wallet. Creating or restoring a wallet is not a startup parameter.
+- Left out: the phone's "Resync automatically when unhealthy" switch. The desktop has no health monitor behind it.
+- New tests in `scripts/core-screens-test.cjs`. Dev preview: `?view=params`.
+
 ## [0.18.84] — History: the phone's screen, JSON export and import, chain inclusion
 
 - The History tab is the phone's screen, over the same local store as before (`history.sqlite` is not migrated or rewritten, and how transactions are classified is unchanged). "Minima History" in orange, Sync, the options button, one status line ("11 transactions · synced to block 2428089 · now"), and the search field "Search address, id, token, amount…". It wears the phone's own dark and orange palette in light and dark alike. Search now also matches the amount.

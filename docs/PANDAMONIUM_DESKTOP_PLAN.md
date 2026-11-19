@@ -167,6 +167,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.82 | 2a | Receive as the phone (Scan to receive, QR card, whole address, Copy, Get Address); the button runs `getaddress`, not `newaddress` (no new key per press); label field kept below |
 | 0.18.83 | 2a | Send as the phone (Token, sendable, Amount with Max, To address, Send Funds; no Scan); handler unchanged from 0.18.78 apart from the button label, command strings pinned |
 | 0.18.84 | 2b | History tab as the phone (header, Sync, status line, search incl. amount, rows with YOURS / CONTRACT / EXTERNAL and "Unverified", own dark palette); options: Export JSON, Export CSV, Import / merge (phone and desktop files, never overwrites), Hide foreign contract activity, plus the desktop's filter and copy; detail asks `txpow onchain:` ("Checking chain inclusion…"); store and normalisation untouched |
+| 0.18.85 | 2c | Startup Params as the phone (Server, MegaMMR, Keets switches, extra arguments, Save / Save & Restart Node) over the reconfigure logic; RPC shown as always on with a main-process "Copy RPC password"; network, core fields and the full parameter editor under "All parameters"; no wallet fields on this screen; auto-resync switch left out (nothing behind it) |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";

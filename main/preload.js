@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("mcd", {
   // reliable clipboard write via the MAIN process (the renderer's navigator.clipboard silently rejects when the
   // window isn't focused, leaving stale data on the clipboard while the UI still says "Copied"). Returns true on ok.
   clip: (text) => ipcRenderer.invoke("mcd:clip", text),
+  copyRpcPassword: () => ipcRenderer.invoke("mcd:copyRpcPassword"),
 
   // config
   getConfig: () => ipcRenderer.invoke("mcd:getConfig"),

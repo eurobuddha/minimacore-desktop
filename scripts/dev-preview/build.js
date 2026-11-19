@@ -41,6 +41,7 @@ if (process.argv.includes("--shots")) {
     ["coins-failed", "view=balances&tray=0&dlg=coins&coins=fail"], ["coins-1440x900", "view=balances&tray=0&dlg=coins", 1440, 900, 1],
     ["coin-detail", "view=balances&tray=0&dlg=coin"], ["coin-detail-locked", "view=balances&tray=0&dlg=coin:0:4"], ["coin-detail-1440x900", "view=balances&tray=0&dlg=coin:0:4", 1440, 900, 1],
     ["coins-split", "view=balances&tray=0&dlg=split"],
+    ["params", "view=params&tray=0"], ["params-scroll", "view=params&tray=0&scroll=430"], ["params-1440x900", "view=params&tray=0", 1440, 900, 1],
     ["apps", "view=apps&tray=0"], ["node", "view=node&tray=0"],
     ["tray", "view=node&tray=1"], ["overflow", "view=balances&tray=0&menu=1"], ["ethwallet", "view=ethwallet&tray=0"],
     ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],

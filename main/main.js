@@ -168,6 +168,9 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
 // while the UI still said "Copied"). Coerce nullish to "" so it never writes the string "null"/"undefined".
 ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? "" : String(text)); return true; });
 
+// Startup Params "Copy RPC password": main process to clipboard. The password is never returned to the renderer.
+ipcMain.handle("mcd:copyRpcPassword", () => { clipboard.writeText(config.rpcSecret()); return true; });
+
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {

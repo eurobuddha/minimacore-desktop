@@ -371,3 +371,36 @@ svg.apps-row__ic { fill: #08090B; }
 #view-chat.view--active { display: flex; flex-direction: column; height: 100%; padding: 0; }
 #view-chat #chatBody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 #view-chat #chatBody > .chatapp { flex: 1 1 auto; height: auto; min-height: 0; }
+
+/* ---------------------------------------------------------------- core screens: Startup Params, Backup & Recovery, first run
+   The phone's form screens (params_activity, backup_hub, backup_create, newwallet_activity, restorewallet_activity):
+   24 padding, a Display heading, Body text in core_text_mid, switch rows, FormLabel / FormField, 48 and 52 buttons. */
+.view.pscreen { padding: 24px 24px 40px; }
+.ps-h { margin: 0; font: 400 30px/38px var(--sans); letter-spacing: -.02em; color: var(--text); }
+.ps-intro { margin-top: 10px; font: 400 15px/21px var(--sans); color: var(--dim); }
+.ps-sw { display: flex; align-items: center; min-height: 40px; margin-top: 16px; }
+.ps-intro + .ps-sw { margin-top: 20px; }
+.ps-sw__t { flex: 1 1 0; min-width: 0; font: 400 15px/20px var(--sans); color: var(--text); }
+.ps-sw__on { flex: 0 0 auto; font: 400 13px/18px var(--sans); color: var(--dim2); }
+.ps-note { font: 400 12px/21px var(--sans); color: var(--dim); white-space: pre-line; }
+.ps-note--gap { margin-top: 6px; }
+.ps-label { margin: 18px 0 6px; line-height: 16px; }
+.ps-field { display: block; border: 0; border-radius: 10px; background: var(--surface2); color: var(--text); resize: vertical; }
+textarea.ps-field { min-height: 66px; line-height: 21px; }
+.ps-btn { display: flex; width: 100%; min-height: 48px; margin-top: 12px; }
+.ps-btn--save { margin-top: 20px; }
+.ps-btn--main { min-height: 52px; }
+.ps-btn--copy { margin-top: 6px; }
+.ps-tile { margin-top: 14px; padding: 14px; border-radius: 10px; background: var(--surface2); font: 400 15px/19px var(--sans); color: var(--dim); }
+.ps-adv { margin-top: 18px; border-top: 1px solid var(--border); }
+.ps-adv > summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; font: 400 15px/20px var(--sans); color: var(--text); list-style: none; }
+.ps-adv > summary::-webkit-details-marker { display: none; }
+.ps-adv > summary::after { content: ""; width: 8px; height: 8px; margin: 0 6px 4px auto; border: solid var(--dim); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.ps-adv[open] > summary::after { transform: rotate(225deg); margin-bottom: -4px; }
+/* SwitchMaterial as the phone draws it on these screens: a 34 x 14 track under a 20 thumb */
+.switch--m2 { flex: 0 0 48px; width: 48px; height: 32px; margin-right: 6px; border: 0; background: none; }
+.switch--m2::before { content: ""; position: absolute; top: 9px; left: 7px; width: 34px; height: 14px; border-radius: 7px; background: var(--border); }
+.switch--m2::after { left: 4px; width: 20px; height: 20px; margin-top: -10px; background: var(--text); }
+.switch--m2[aria-checked="true"] { background: none; }
+.switch--m2[aria-checked="true"]::before { background: rgba(255,74,43,.38); }
+.switch--m2[aria-checked="true"]::after { left: 24px; width: 20px; height: 20px; margin-top: -10px; background: var(--orange); }
