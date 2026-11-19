@@ -50,3 +50,16 @@ throwaway data, and served both key modes.
 - AtomiX's swap identity does not survive a mode switch (already a rule: never switch an existing wallet).
 
 Experiment files: scratchpad `jarproof/` (not kept in the repo).
+
+## Owner decision, 19 Nov 2026: the Parlons node stays the base node
+
+The desktop keeps `parlons-node.jar` as its default node (Minima + Maxima + Keets + the Parlons account and relay in
+one). Parlons is not removed. Consequences for block-as-key-uses:
+
+- Block mode for new wallets needs `parlons-node.jar` rebuilt in the `maxima` repo on the 1.1.2.31-euro4 node line.
+- `maxima/node/src/main/java/com/eurobuddha/maxima/node/NodeAccountWallet.java` hard-codes a key's capacity as
+  262144 uses (classic, 64 leaves x 3 levels). That must follow the node's real key shape in block mode.
+- On the desktop the Parlons account's wallet IS the node's wallet (`NodeWallet.java`: "one seed, one signer"); it
+  has no separate key set. (The Parlons phone and cloud apps are different: they carry their own wallet and counter.)
+- The app must verify over RPC, after start, that the running node is in the recorded key mode, and stop if not: a
+  flag name inside the jar does not prove the Parlons wrapper passes it through.
