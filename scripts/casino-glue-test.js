@@ -1,7 +1,10 @@
 /* Headless test for what is left of P2P Chance (removed in 0.18.68) — MOCK runner, no node.
  *
  * main/casino.js is now SETTLE-ONLY glue. This proves, through the real engine files in the real vm:
- *  - nothing runs until startLoop, and main.js only calls startLoop when config.casinoEnabled is already true
+ *  - nothing runs until startLoop; main.js calls startLoop when config.casinoEnabled is already true, and
+ *    otherwise only watch(): read-only looks that start the loop when this wallet has a bet on the covenant
+ *    (a failed look, an unreadable key list or an empty covenant is looked at again, and writes nothing)
+ *  - a short `keys` reply never makes an own bet look foreign (the key cache only grows)
  *  - it can never start anything: no `send`, no take, no offer renewal reaches the node — even in the worst
  *    case, where the cancel marker cannot be saved and service.js's keepalive tries to renew a due offer
  *  - it does settle: an own open offer is withdrawn to the wallet, a taken bet is revealed, an expired pot is
@@ -38,14 +41,14 @@ const precious = () => JSON.stringify([mem[acct("casino_secret_for_0xC0C0")], me
 const PRECIOUS = precious();
 
 const sent = [];   // every command that REACHED the node
-let block = 100, age = 0, scan = "coins";
+let block = 100, age = 0, scan = "coins", keys = [{ publickey: MYPK }];
 casino._setRunner(async (cmd) => {
   sent.push(cmd);
   if (/^block\b/.test(cmd)) return { status: true, response: { block } };
   if (/^newscript\b/.test(cmd)) return { status: true, response: { address: CONTRACT } };
   if (/^scripts address:/.test(cmd)) return { status: true, response: { address: CONTRACT } };
   if (/^scripts\b/.test(cmd)) return { status: true, response: [{ address: WALLET, simple: true }] };
-  if (/^keys\b/.test(cmd)) return { status: true, response: { keys: [{ publickey: MYPK }] } };
+  if (/^keys\b/.test(cmd)) return keys ? { status: true, response: { keys } } : { status: false };
   if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: MYPK, address: WALLET, miniaddress: "MxWALLET" } };
   if (/^coins relevant:true address:/.test(cmd)) return { status: true, response: [   // the hygiene sweep's view
     { coinid: "0xSTRANGERBET", state: st([OTHER, "0xDD"]) },                                 // foreign → untrack
@@ -75,12 +78,30 @@ const starts = () => sent.filter(c => /(^|;)\s*send\b/.test(c) || (/^txnoutput\b
   const gate = mainSrc.slice(mainSrc.indexOf("let casinoStarted = false;"), mainSrc.indexOf('node.on("status", (s) => { if (s.state === "running") startCasinoIfEnabled();'));
   for (const enabled of [false, true]) {
     let started = 0;
-    const c = vm.createContext({ node: { state: "running" }, require: () => ({ load: () => ({ casinoEnabled: enabled }) }), casino: { startLoop() { started++; } } });
+    let watched = 0;
+    const c = vm.createContext({ node: { state: "running" }, require: () => ({ load: () => ({ casinoEnabled: enabled }) }), casino: { startLoop() { started++; }, watch() { watched++; } } });
     vm.runInContext(gate + ";startCasinoIfEnabled();startCasinoIfEnabled();", c);
     assert(started === (enabled ? 1 : 0), "main.js: casinoEnabled " + enabled + " → the loop " + (enabled ? "starts once" : "does NOT start"));
+    assert(watched === (enabled ? 0 : 1), "main.js: casinoEnabled " + enabled + " → " + (enabled ? "no watch" : "one read-only watch instead"));
   }
   assert((mainSrc.match(/casino\.startLoop\(\)/g) || []).length === 1, "main.js has exactly one startLoop call, behind that gate");
   assert(!["create", "take", "setCurrency", "cancel", "reveal", "resolve"].some(k => k in casino), "the glue exports no create / take / currency action");
+
+  // ---- NOT enabled (the old "Disable" only hid the tab): read-only looks; the loop starts only for an own bet ----
+  const looks = () => sent.filter(c => /^coins address:/.test(c)).length;
+  const readOnly = () => sent.every(c => /^(coins address:|keys\b)/.test(c));
+  scan = "fail"; casino.watch(20, 40); await wait(150);
+  assert(looks() > 1 && readOnly() && casino.open() === null, "not enabled, the scan fails: looked again, read-only, nothing started");
+  sent.length = 0; scan = "coins"; keys = null; await wait(150);
+  assert(looks() > 1 && readOnly(), "not enabled, the key list cannot be read: own bets are not read as none; looked again, read-only");
+  sent.length = 0; keys = [{ publickey: "0xC9C9" }]; await wait(150);
+  assert(looks() > 1 && readOnly() && casino.open() === null, "not enabled, only strangers' bets on the covenant: nothing started");
+  sent.length = 0; scan = "empty"; keys = [{ publickey: MYPK }]; await wait(200);
+  assert(looks() > 1 && readOnly() && casino.open() === null, "not enabled, no bets: looked again later, and no write ever reaches the node");
+  secretWritesOk = false; sent.length = 0; scan = "coins"; await wait(300);
+  assert(has(/^newscript\b/) && has(/txnpost id:svc_reveal_/) && casino.open() !== null, "not enabled, but this wallet has bets: the settle loop starts and the taken bet is revealed");
+  assert(starts().length === 0, "…and still nothing that starts a bet");
+  casino.stopLoop(); casino.invalidate(); await wait(50); secretWritesOk = true;
 
   // ---- the refusal rule itself ----
   assert(casino.refused('send amount:10 address:' + CONTRACT + ' tokenid:0x00 state:{"6":"0"}'), "refused: the createBet send");
@@ -120,6 +141,12 @@ const starts = () => sent.filter(c => /(^|;)\s*send\b/.test(c) || (/^txnoutput\b
   await pass();
   assert(!has(/id:timeout_/), "a posted timeout claim is not re-posted on the next block");
 
+  // ---- a short `keys` reply (a healthy node has answered with part of its list) never shrinks the key cache ----
+  block += 1; keys = [{ publickey: "0xC9C9" }];
+  await pass();
+  assert(JSON.stringify(casino.open()) === '{"offers":1,"bets":2}', "a `keys` reply without my key does not make my own bets look foreign");
+  keys = [{ publickey: MYPK }];
+
   // ---- a failed scan is not "nothing open"; a clean empty scan is ----
   block += 1; scan = "fail";
   await pass();
@@ -135,5 +162,7 @@ const starts = () => sent.filter(c => /(^|;)\s*send\b/.test(c) || (/^txnoutput\b
   assert(deleted.every(a => identity.includes(a)), "the only keychain entries ever deleted are the cached identity (wallet reset)");
 
   console.log(process.exitCode ? "\n=== SOME CHECKS FAILED ===" : "\n=== ALL SETTLE-ONLY CHECKS PASSED ===");
+  const card = fs.readFileSync(path.join(__dirname, "..", "renderer/app.js"), "utf8");
+  assert(/bets in play are settled automatically/.test(card) && !/paid out/.test(card.slice(card.indexOf("async function chanceLeftCard"), card.indexOf("// ====", card.indexOf("async function chanceLeftCard")))), "the Settings card says bets are settled, not that they are paid out");
   process.exit(process.exitCode || 0);
 })().catch(e => { console.error("harness error:", e); process.exit(1); });

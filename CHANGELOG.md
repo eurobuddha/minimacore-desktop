@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.74] — P2P Chance: bets are settled even after the old "Disable"
+
+- A wallet that pressed the old "Disable" after betting still has its bets on the chain, but the settle-only loop started only for an install whose saved setting was still on. Such a wallet's open offer stayed takeable, and a taken bet was never revealed, so the taker could claim the whole pot after the 1500-block timeout. Now, when the setting is off, the app looks at the covenant for this wallet's own bets once the node is running. The look is read-only (`coins` and `keys`). If it finds a bet, the settle-only loop starts and the Settings card appears. A failed look or an unreadable key list is repeated after a minute, and a clean "none" once an hour, because a node that is still syncing can show an empty covenant. A wallet with no bets still sends no casino write to the node.
+- The wallet's key list is only ever added to. A short `keys` reply used to replace it, which made the wallet's own bets look like a stranger's until the next full reply. It is dropped only when the wallet itself is reset.
+- The Settings card says bets in play are "settled automatically". It used to say "paid out", which is not true of a lost bet.
+- Tests: `scripts/casino-glue-test.js` covers the read-only looks (failed scan, unreadable keys, strangers' bets only, empty covenant, own bets), the short key list and the card wording.
+
 ## [0.18.73] — shell: fixes from the side-by-side with the Fold
 
 - After comparing each screen with the Fold captures: the toolbar title, the tray heading and the tray rows are Manrope 600 (the phone sets them in its system face at medium weight, which is heavier than Manrope 500), and the "MINIMA" label beside Total balance sits on the figure's baseline.

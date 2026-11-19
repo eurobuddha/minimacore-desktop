@@ -3161,7 +3161,7 @@ async function chanceLeftCard() {
   const n = (k, one, many) => k + " " + (k === 1 ? one : many);
   const parts = []; if (o && o.offers) parts.push(n(o.offers, "open offer", "open offers")); if (o && o.bets) parts.push(n(o.bets, "bet in play", "bets in play"));
   host.innerHTML = !parts.length ? "" : `<div class="card"><div class="card__title">P2P Chance has been removed</div>
-      <div class="view__desc">P2P Chance is no longer part of this app, and no new games can be started. You still have <b>${esc(parts.join(" and "))}</b>. There is nothing you need to do: open offers are withdrawn and their stake returned to your wallet, and bets in play are settled and paid out automatically. Keep the app open with your node running until this card disappears.</div></div>`;
+      <div class="view__desc">P2P Chance is no longer part of this app, and no new games can be started. You still have <b>${esc(parts.join(" and "))}</b>. There is nothing you need to do: open offers are withdrawn and their stake returned to your wallet, and bets in play are settled automatically. Keep the app open with your node running until this card disappears.</div></div>`;
 }
 
 // ============================ Vestr (token vesting — shared covenant 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE) ============================

@@ -2,8 +2,10 @@
  * casino.js — SETTLE-ONLY glue for the removed "P2P Chance" (Zero Edge Casino) module.
  *
  * P2P Chance left the app in 0.18.68: there is no tab, no game screen and no way to create or take a bet.
- * What stays is the part that gets money OUT of bets a wallet already has on the chain. It runs only for an
- * install whose config already says casinoEnabled (main.js gates startLoop on it), and it:
+ * What stays is the part that gets money OUT of bets a wallet already has on the chain. main.js starts it at once
+ * for an install whose config says casinoEnabled. Every other install gets watch(): read-only looks at the covenant
+ * (`coins`, `keys` — no newscript, no engine), which start the same loop only if this wallet has a bet there (the old
+ * "Disable" button only hid the tab, so a wallet can have live bets with casinoEnabled false). The loop:
  *   - reveals as the house and resolves as the player (main/casino/service.js, unchanged, on each new block);
  *   - withdraws the wallet's own untaken offers: it writes the engine's durable cancel marker, and service.js's
  *     keepalive then sends that offer's stake back to the wallet instead of renewing it;
@@ -31,6 +33,7 @@ const CASINO_SCRIPT = 'LET hpk=PREVSTATE(0) LET ha=PREVSTATE(1) LET hc=PREVSTATE
 
 const SCAN_EVERY_MS = 12000;
 const IDLE_EVERY_MS = 60 * 60 * 1000;   // nothing open: one read-only look an hour (see startLoop)
+const WATCH_RETRY_MS = 60 * 1000;        // watch(): the look failed, or the key list was unreadable — look again soon
 const RETRY_BLOCKS = 8;                 // a posted txn mines asynchronously — same cooldown service.js uses
 
 // The one choke point: every command the engine issues passes through the shim. Refuse whatever could put new
@@ -49,7 +52,7 @@ let ctx = null;
 let serviceHandler = null;    // captured by MDS.init (service.js) — WE fire the events
 let ready = false;
 let initPromise = null;
-let timer = null, active = false, loop = 0, lastTip = null;
+let timer = null, active = false, watching = false, loop = 0, lastTip = null;
 let outstanding = null;         // null = not known yet; else { offers, bets } for THIS wallet
 const acted = new Map();        // coinid → tip when we last posted for it
 let generation = 0;
@@ -186,21 +189,45 @@ function startLoop() {
   };
   tick();
 }
-function stopLoop() { active = false; loop++; clearTimeout(timer); timer = null; }
+function stopLoop() { active = false; watching = false; loop++; clearTimeout(timer); timer = null; }
+
+// For an install that is NOT casinoEnabled: does this wallet have a bet on the covenant anyway? Read-only (`coins
+// address:` and `keys`): no newscript, no engine, nothing written. An own bet starts the settle loop. A failed look
+// or an unreadable key list proves nothing, so it is repeated in a minute; a clean "none" is repeated once an hour,
+// because a node that is still syncing can show an empty covenant. A wallet with no bets never gets past this.
+function watch(retryMs = WATCH_RETRY_MS, idleMs = IDLE_EVERY_MS) {
+  if (active || watching) return;
+  watching = true;
+  const id = ++loop;
+  const look = async () => {
+    let next = retryMs;
+    try {
+      const coins = await rawBets();
+      if (!watching || id !== loop) return;
+      if (myKeysCache) {
+        if (coins.some(c => c.amHouse || c.amPlayer)) { watching = false; log("this wallet has P2P Chance bets on the chain: settling them"); startLoop(); return; }
+        next = idleMs;
+      }
+    } catch (e) { /* not known yet */ }
+    if (watching && id === loop) timer = setTimeout(look, next);
+  };
+  look();
+}
 function flush() { /* keychain writes are synchronous; nothing to debounce */ }
 
 /** Wallet/seed restore: the cached casino identity belongs to the OLD seed — drop it and re-init so getaddress
  *  re-derives under the new seed. Bet secrets and history are left exactly as they are. The loop restarts only
- *  if it was running: an install that never enabled P2P Chance still runs nothing. */
+ *  if it was running, the read-only watch only if it was watching: nothing else is started here. This is the one
+ *  place the key cache is dropped (the keys belong to the old wallet). */
 function invalidate() {
-  const was = active;
+  const was = active, wasWatching = watching;
   generation++;
   stopLoop();
   kpDelete("casino_pubkey"); kpDelete("casino_hexaddr"); kpDelete("casino_miniaddr");
   ctx = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null; vmJsonParse = null; myKeysCache = null;
   outstanding = null; acted.clear();
   emitter.emit("update");
-  if (was) startLoop();
+  if (was) startLoop(); else if (wasWatching) watch();
 }
 
 function status() {
@@ -218,8 +245,10 @@ function pcb(fn) { return new Promise((res, rej) => { try { fn((err, val) => err
 const cnorm = (v) => String(v || "").toUpperCase().replace(/^0X/, "");
 const cstate = (arr, p) => { const s = (arr || []).find(v => String(v.port) === String(p)); return s ? s.data : ""; };
 
-// Wallet keys are cached and NEVER degraded to empty on a transient `keys` RPC miss — a poisoned empty set would
+// Wallet keys are cached and NEVER degraded on a transient `keys` RPC miss — a poisoned empty set would
 // mislabel our OWN bets as not-ours and silently drop them from the result pipeline (a real silent-failure cause).
+// A SHORT reply does the same damage (16 Nov: a healthy node answered `keys` with part of its list), so each good
+// read is ADDED to the cache and the cache never shrinks. Only invalidate() (wallet reset) drops it.
 let myKeysCache = null;
 async function loadMyKeys() {
   try {
@@ -227,7 +256,7 @@ async function loadMyKeys() {
     const list = (k && k.response && (Array.isArray(k.response.keys) ? k.response.keys : k.response)) || [];
     const set = new Set();
     (Array.isArray(list) ? list : []).forEach(x => { const pk = cnorm((x && x.publickey) || x); if (pk) set.add(pk); });
-    if (set.size) myKeysCache = set;   // replace only on a good fetch
+    if (set.size) myKeysCache = new Set([...(myKeysCache || []), ...set]);   // union: never replace, never shrink
   } catch (e) { /* keep the last-good cache */ }
   return myKeysCache || new Set();
 }
@@ -241,6 +270,6 @@ async function rawBets() {
 }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, flush, invalidate, status, open, rawBets, refused,
+  emitter, init, startLoop, watch, stopLoop, flush, invalidate, status, open, rawBets, refused,
   _setRunner: (fn) => { runner = fn; }, _ctx: () => ctx, _fire: fire, CONTRACT, CASINO_SCRIPT
 };

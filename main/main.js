@@ -546,8 +546,10 @@ ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
 // P2P Chance was removed in 0.18.68. What is left only SETTLES bets a wallet already has on the chain (reveal,
-// resolve, withdraw its own open offers, claim timeouts — main/casino.js). It runs only for an install whose
-// config already says casinoEnabled; nothing in the app can turn that on any more, so everyone else runs nothing.
+// resolve, withdraw its own open offers, claim timeouts — main/casino.js). It runs at once for an install whose
+// config says casinoEnabled (nothing in the app can turn that on any more). Every other install only LOOKS, read-only,
+// for this wallet's own bets on the covenant — the old "Disable" button only hid the tab, so such a wallet can still
+// have an open offer or a taken bet — and the loop starts only if one is found. No bets: no casino writes at all.
 ipcMain.handle("mcd:casinoOpen", () => casino.open());
 ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
 casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
@@ -555,8 +557,8 @@ let casinoStarted = false;
 function startCasinoIfEnabled() {
   if (casinoStarted) return;
   if (node.state !== "running") return;
-  if (!require("./config").load().casinoEnabled) return;
-  casinoStarted = true; casino.startLoop();
+  casinoStarted = true;
+  if (require("./config").load().casinoEnabled) casino.startLoop(); else casino.watch();
 }
 node.on("status", (s) => { if (s.state === "running") startCasinoIfEnabled(); });
 
