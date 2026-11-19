@@ -23,6 +23,9 @@ Dexicon as it runs inside Pandamonium 2.2.53 (Dexicon v0.3.60), full screen, no 
   `15-dex-pools-pools-s.png`, `16-dex-pools-mylp-s.png`, `17-dex-pools-wallet-s.png`, `18-dex-pools-activity-s.png`,
   `19-dex-exchange-s.png`, `20-dex-ex-orders-s.png`, `21-dex-ex-history-s.png`, `22-dex-activity-s.png`,
   `23-dex-assets-s.png`, `24-dex-settings-s.png`
+  CORRECTION: `09-dex-mxusd-market-s.png` and `10-dex-mxusd-otc-s.png` are mislabelled (they show Exchange Orders
+  and History). The real MxUSD room captures are `09b-dex-mxusd-market-s.png`, `09c-dex-mxusd-market-scrolled-s.png`
+  and `10b-dex-mxusd-otc-s.png` (taken 19 Nov, 2.2.53).
 - Phone-size, in the repo: `docs/reference/pandamonium-2.2.52/light-10…` to `light-37…` and `dark-10`, `dark-20`,
   `dark-30` (Dexicon's own light theme is `light-35`, `-36`, `-37`).
 - Source of the screens: `/Users/eurobuddha/Projects/minima/apks/dexicon` (0.3.62; `Design.java`, `MainActivity.java`,
