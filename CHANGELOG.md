@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.119] — Large takes reach the relay, and a quiet relay is not "down" (review, H4 + M1)
+
+- **H4, the fault.** `main/netfetch.js` refused any POST body over 64K characters. A sealed take is about eight times its transaction (hex inside JSON, hex again in the signed payload, hex again as the sealed blob), so a take of more than about 7.8 KB of transaction never left the app: "no relay accepted the take", after the key uses were spent. The protocol's own limit is 256K (`lib/envelope.js`).
+- **Fix.** `postText` takes `opts.maxBody`, at most 256K; only the Dexicon host passes it, and only for a URL that has passed its relay allow-list. Every other caller keeps 64K. Test: a 12,000 byte take built with the engine's own `seal` and `envelope.msg` is over the old cap, inside the protocol's limit, accepted by the engine's own verifier, and sent with the 256K limit on both paths (the page's take, the service's reply); a non-relay URL is still refused.
+- **M1, the fault.** The hidden page asks a relay to hold a quiet poll for 25 s; the app ends an outbound request after 15 s without a byte. Every quiet poll failed, the relay was marked down, and the Trade screen and the status line said "no relay answers" on a quiet book.
+- **Fix.** The page's bridge (`renderer/dexicon/mds.js`, the one desktop-owned file of the page) cuts a GET's `hold` to 10 s, so a quiet relay answers "nothing new" inside the limit and the page polls again at once. The page files stay verbatim and no connection limit was raised. The "no relay answers" wording now appears only when polls really fail.
+
 ## [0.18.118] — The FAST Trade click signs only what was reviewed, once (review, H1 + H2)
 
 - **H1, the fault.** The review on the Trade screen was planned on the service's relay book (one relay every 10 s); the hidden page signs from its own long-polled book. "BUY 100 from 1 FAST ask, no order is placed" could publish a RESTING order when that ask had left the page's book, and "nothing is traded now" could be an immediate take.

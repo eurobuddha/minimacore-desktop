@@ -425,6 +425,27 @@ test("H1/H2: a reviewed take cannot rest, one money action at a time, and the pa
   assert.equal(page().amount, "37.5");
 });
 
+// 0.18.119 (M1): the page asks for a 25 s hold; netfetch ends a request after 15 s without a byte. Every quiet poll
+// failed, the relay was marked down, and the screens said "no relay answers" on a quiet book.
+test("M1: a long poll's hold is cut below the app's idle limit, so a quiet relay answers in time", () => {
+  const { win, sent } = bridge();
+  const get = (url, method) => { const x = new win.XMLHttpRequest(); x.open(method || "GET", url); x.send(method ? "{}" : null); return sent.filter(m => m.name === "room.dex" && m.args.op === "net").pop().args.url; };
+  const R = "https://relay.example/dex-relay";
+  assert.equal(get(R + "/dex/inbox?pk=ab&since=7&hold=25"), R + "/dex/inbox?pk=ab&since=7&hold=10");
+  assert.equal(get(R + "/dex/book?market=MINIMA%2FMxUSD&since=0&hold=25"), R + "/dex/book?market=MINIMA%2FMxUSD&since=0&hold=10");
+  assert.equal(get(R + "/dex/book?market=x&since=0&hold=0"), R + "/dex/book?market=x&since=0&hold=0", "a plain read is left alone");
+  assert.equal(get(R + "/dex/inbox?pk=ab&since=7&hold=8"), R + "/dex/inbox?pk=ab&since=7&hold=8");
+  assert.equal(get(R + "/dex/msg?hold=25", "POST"), R + "/dex/msg?hold=25", "only a GET is a poll");
+  // the two numbers this rests on: the hold (plus the relay's answer on its way) is under netfetch's idle limit, and
+  // the request is still sorted into the host's POLL lane (main/dexicon.js netGet: hold=[1-9])
+  const hold = Number(/var HOLD_MAX = (\d+);/.exec(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/mds.js"), "utf8"))[1]);
+  const idle = Number(/const READ_TIMEOUT_MS = (\d+);/.exec(fs.readFileSync(path.join(__dirname, "../main/netfetch.js"), "utf8"))[1]);
+  assert.ok(hold * 1000 + 4000 <= idle, hold + " s hold against a " + idle + " ms idle limit");
+  assert.match("x?since=1&hold=" + hold, /[?&]hold=[1-9]/);
+  // and the page's own 25 s is what is being cut (if the page ever asks for less, this guard is no longer needed)
+  assert.match(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/ui/app.js"), "utf8"), /client\.pollInbox\(me\.publicId\(\), 25,/);
+});
+
 test("H1: the Trade ticket plans on the page's book, and says what the click must still find", () => {
   const pageFast = [{ side: "sell", price: "0.0031", minima: "250" }];
   const b = C.tradeBook(BOOK, pageFast);

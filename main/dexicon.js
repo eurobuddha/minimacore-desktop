@@ -139,9 +139,13 @@ function makeHost(opts = {}) {
   const work = makeLane(WORK_LANE, netLimit, () => { if (dropped++ % LOW_MAX === 0) log("more than " + LOW_MAX + " refusals to takers were waiting to be sent: the oldest are dropped (a refusal carries no signature; the taker voids an unanswered take by itself)"); });
   const polls = makeLane(POLL_LANE, netLimit, () => {});
   const OWN = { noRedirect: true, ownCap: true };   // netfetch: no redirects, and none of the shared four slots (this host bounds itself)
+  // A message to a relay may be as large as the protocol allows (lib/envelope.js MAX_MSG_BYTES = 256K characters): a
+  // sealed take is about eight times its transaction, so netfetch's 64K default refused every take over about 7.8 KB
+  // of transaction ("no relay accepted the take", after the key uses were spent). Reached only past netAllowed().
+  const OWN_POST = Object.assign({ maxBody: 256 * 1024 }, OWN);
   /** One relay or price request, in its lane. A GET that asks the relay to hold (a long poll) is a POLL; all else WORK. */
   const netGet = (url, alive) => (/[?&]hold=[1-9]/.test(url) ? polls : work).push(() => (alive() ? net().fetchJson(url, OWN) : null));
-  const netPost = (url, body, alive, low) => work.push(() => (alive() ? net().postText(url, body, OWN) : null), low);
+  const netPost = (url, body, alive, low) => work.push(() => (alive() ? net().postText(url, body, OWN_POST) : null), low);
   let dataDir = opts.dataDir || null;
   let ctx = null, sqlShim = null, serviceHandler = null, ready = false, initPromise = null, timer = null;
   let epoch = 0;   // bumped by drop(): everything built before it is disowned

@@ -28,6 +28,8 @@ const CONNECT_TIMEOUT_MS = 8000;
 const READ_TIMEOUT_MS = 15000;
 const MAX_REDIRECTS = 5;
 const POOL = 4;
+const POST_MAX = 64 * 1024;          // a POST body, in characters: RPC payloads are tiny
+const POST_MAX_ASKED = 256 * 1024;   // the most a caller may ask for (opts.maxBody): the Dexicon protocol's own message limit
 
 // ---- SSRF host guard -------------------------------------------------------
 function v4Blocked(ip) {
@@ -228,10 +230,13 @@ async function fetchJson(url, opts) {
  *  ethUserHosts) — NOT in lib/ethrpc.js, which takes the configured url plus its keyless fallbacks and
  *  relies on ethSetRpc having validated the former. Same SSRF guard + byte cap + bounded pool as GETs,
  *  including the pinned-address connect. POSTs never follow redirects
- *  (a redirected RPC POST is suspect; the pinned endpoints don't redirect). NEVER throws. */
+ *  (a redirected RPC POST is suspect; the pinned endpoints don't redirect). NEVER throws.
+ *  opts.maxBody (0.18.119): a larger body limit, at most 256K characters. Only main/dexicon.js passes it, for a
+ *  message to one of its allow-listed relays: a sealed take is about eight times its transaction's size, and the
+ *  protocol allows 256K (main/dexicon/lib/envelope.js MAX_MSG_BYTES). Everything else keeps 64K. */
 async function postText(url, body, opts) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
-  if (typeof body !== "string" || body.length > 64 * 1024) return null;   // RPC payloads are tiny
+  if (typeof body !== "string" || body.length > Math.min(Math.max(Number(opts && opts.maxBody) || 0, POST_MAX), POST_MAX_ASKED)) return null;
   const shared = !(opts && opts.ownCap);
   if (shared) await acquire();
   try {
@@ -270,4 +275,4 @@ async function postText(url, body, opts) {
   } finally { if (shared) release(); }
 }
 
-module.exports = { tokenIcon, fetchJson, postText, isBlockedHost };
+module.exports = { tokenIcon, fetchJson, postText, isBlockedHost, READ_TIMEOUT_MS };

@@ -256,3 +256,22 @@ test('an IPv4 address inside an IPv6 literal is decoded before the check, in eve
     assert.strictEqual(await netfetch.fetchJson('https://[::ffff:7f00:1]:9005/status'), null, 'and nothing is fetched from it');
   } finally { restore(); }
 });
+
+// 0.18.119 (H4): a POST body was capped at 64K characters for every caller; the Dexicon protocol allows a 256K message.
+test('postText: 64K for everyone, up to 256K only when the caller asks (Dexicon relay messages), never more', async () => {
+  stubDns([[{ address: '93.184.216.34', family: 4 }]]);
+  const seen = stubRequest();
+  try {
+    const body = (n) => 'x'.repeat(n);
+    assert.strictEqual(await netfetch.postText('https://relay.example.test/dex/msg', body(64 * 1024 + 1)), null);
+    assert.strictEqual(seen.length, 0, 'over 64K without asking: refused before any request');
+    await netfetch.postText('https://relay.example.test/dex/msg', body(200000), { ownCap: true, noRedirect: true, maxBody: 256 * 1024 });
+    assert.strictEqual(seen.length, 1, 'a 200K message goes out when the caller asks for the protocol limit');
+    await netfetch.postText('https://relay.example.test/dex/msg', body(256 * 1024), { ownCap: true, maxBody: 256 * 1024 });
+    assert.strictEqual(seen.length, 2, 'exactly the limit');
+    assert.strictEqual(await netfetch.postText('https://relay.example.test/dex/msg', body(256 * 1024 + 1), { ownCap: true, maxBody: 256 * 1024 }), null);
+    assert.strictEqual(await netfetch.postText('https://relay.example.test/dex/msg', body(300000), { ownCap: true, maxBody: 1e9 }), null, 'no caller can ask for more than 256K');
+    assert.strictEqual(await netfetch.postText('https://relay.example.test/dex/msg', body(70000), { maxBody: 1 }), null, 'asking for less does not matter: 64K is the default limit');
+    assert.strictEqual(seen.length, 2);
+  } finally { restore(); }
+});

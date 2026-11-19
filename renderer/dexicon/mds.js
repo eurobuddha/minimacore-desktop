@@ -80,12 +80,18 @@
   } catch (e) { }
 
   // The page's relay transport (lib/relay.js xhrTransport) and its DISCOVER, through the host's relay allow-list.
+  // LONG POLLS (0.18.119): the page asks a relay to hold a quiet poll for 25 s (ui/app.js), but this app's outbound
+  // requests end after 15 s without a byte (main/netfetch.js READ_TIMEOUT_MS). Every quiet poll then failed as
+  // "network", the relay was marked down and the screens said "no relay answers" on a quiet book. The hold is cut to
+  // 10 s here (the service's own is 8): a quiet relay answers "nothing new" in time, and the page polls again at once.
+  var HOLD_MAX = 10;
+  function shortHold(url) { return String(url).replace(/([?&]hold=)(\d+)/, function (m, k, n) { return k + Math.min(Number(n), HOLD_MAX); }); }
   function Xhr() { this.readyState = 0; this.status = 0; this.responseText = ""; this.timeout = 0; }
   Xhr.prototype.open = function (method, url) { this._m = String(method).toUpperCase(); this._u = String(url); this.readyState = 1; };
   Xhr.prototype.setRequestHeader = function () { };
   Xhr.prototype.send = function (body) {
     var x = this, done = function (status, text) { x.status = status; x.responseText = text || ""; x.readyState = 4; if (x.onreadystatechange) x.onreadystatechange(); };
-    call("room.dex", { op: "net", method: x._m, url: x._u, body: body == null ? null : String(body) }).then(function (r) {
+    call("room.dex", { op: "net", method: x._m, url: x._m === "GET" ? shortHold(x._u) : x._u, body: body == null ? null : String(body) }).then(function (r) {
       if (r && r.status) done(200, String(r.response)); else done(0, "");
     }, function () { done(0, ""); });
   };

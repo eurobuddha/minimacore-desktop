@@ -404,6 +404,34 @@ test("H3: txnpost refused at the door (nothing listening): the node provably did
   await M.until(() => msgs(b.net) > 0);   // the refusal
 });
 
+// 0.18.119 (H4): netfetch capped every POST body at 64K characters. A sealed take is about eight times its
+// transaction (hex in JSON, hex again in the signed payload, hex again as the sealed blob), so a take over about
+// 7.8 KB of transaction never left: "no relay accepted the take", after the taker's key uses were spent.
+test("H4: a take of realistic size, built by the engine's own envelope code, is inside the protocol's limit and is sent with that limit", async () => {
+  const posts = [], inner = M.mockNet();
+  const net = { calls: inner.calls, fetchJson: inner.fetchJson, async postText(url, body, opts) { posts.push({ url, len: body.length, opts }); return '{"ok":true}'; } };
+  const { host, ctx } = await boot({ net });
+  const relay = host.status().relays[0];
+  // a two-input, two-signature take: 12,000 bytes of transaction (a Winternitz signature with its proof is several KB)
+  const raw = vm.runInContext(`(function () {
+    var to = AX.identity.fromSeed("0x" + new Array(33).join("a0"), "decks").publicId(), txn = "0x" + new Array(12001).join("ab");
+    var blob = AX.identity.seal(ME, to, AX.hex.utf8(JSON.stringify({ k: "take", orderId: "0x" + new Array(33).join("1"), txn: txn })));
+    return AX.envelope.msg(ME, to, blob, nowS() + 300);
+  })()`, ctx);
+  assert.ok(raw.length > 64 * 1024, "over the old cap: " + raw.length + " characters for a 12,000 byte transaction");
+  assert.ok(raw.length <= ctx.AX.envelope.MAX_MSG_BYTES, "inside the protocol's limit");
+  assert.equal(vm.runInContext("AX.envelope.verify", ctx)(raw, Math.floor(Date.now() / 1000)).ok, true, "a relay running the same rules accepts it");
+  posts.length = 0;
+  // the page's take (renderer/dexicon/mds.js XMLHttpRequest → { op: "net" }) and the service's own reply path
+  assert.deepEqual(await host.command({ op: "net", method: "POST", url: relay + "/dex/msg", body: raw }), { status: true, response: '{"ok":true}' });
+  await new Promise(res => ctx.MDS.net.POST(relay + "/dex/msg", raw, res));
+  assert.equal(posts.length, 2);
+  for (const p of posts) { assert.equal(p.len, raw.length); assert.equal(p.opts.maxBody, ctx.AX.envelope.MAX_MSG_BYTES, "the engine's own message limit, not netfetch's 64K default"); assert.equal(p.opts.ownCap, true); assert.equal(p.opts.noRedirect, true); }
+  // only to a relay of the engine's list: the larger limit is not a way to post anywhere else
+  assert.deepEqual(await host.command({ op: "net", method: "POST", url: "https://evil.example/dex/msg", body: raw }), { status: false, error: "host not allowed" });
+  assert.equal(posts.length, 2);
+});
+
 // 0.18.116 (M2): held around a wallet-replacing megammrsync. Nothing starts it, no screen reaches the node through it,
 // and the store stays where it is: released on the same wallet, it goes on with every record.
 test("hold: the engine is stopped and stays stopped (node status, timer, a screen), the store is not moved; release and start bring it back on the same records", async () => {
