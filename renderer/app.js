@@ -10,6 +10,7 @@ const MINIMA = "0x00";
 
 let CFG = null;
 let running = false;
+let nodeState = "";          // the node's last reported state, for the "stopped" wording
 let waitingForNode = false;
 let activeView = "balances";
 let refreshTimer = null;
@@ -160,6 +161,9 @@ async function boot() {
 
 function onStatus(s) {
   paintFooter(s);
+  nodeState = s.state;
+  // A node the user shut down: say so on every screen, with the way back. (At launch the node is "stopped" for a moment too.)
+  el("stopBar").hidden = !(s.state === "stopped" && !waitingForNode && CFG.setupDone && CFG.walletDone);
   if (s.health && s.health.block) {                                      // both APK-parity headers carry the tip
     PoolsPanel.setBlock(s.health.block);
     AtomixPanel.setBlock(s.health.block);
@@ -177,6 +181,8 @@ function onStatus(s) {
     if (CFG.walletDone) { hideSetup(); renderActive(); }
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
+  // The node went away: the Wallet and Faucet must not keep showing what it last said.
+  if (wasRunning && !running && (activeView === "balances" || activeView === "faucet")) renderActive();
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
@@ -566,6 +572,7 @@ function initShell() {
   el("backBtn").onclick = () => selectTab(lastTabView);
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
+  el("stopStart").onclick = () => { toast("Starting the node…"); api.nodeStart(); };
 
   // tray
   const list = el("trayList");
@@ -659,6 +666,7 @@ function paintTrayDot() {
   const any = ["mailBadge", "shopBadge"].some(id => { const b = el(id); return b && !b.hidden && !b.closest(".tray__row").hidden; });
   el("trayDot").hidden = !any || !el("tray").hidden;
 }
+function waitHtml() { return nodeState === "stopped" ? `<div class="empty">The node is stopped.</div>` : `<div class="spin">Waiting for the node…</div>`; }
 function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
 function closeMenu() { el("moreMenu").hidden = true; el("moreBtn").setAttribute("aria-expanded", "false"); }
 function openSettingsAt(cardId) {
@@ -670,10 +678,38 @@ async function menuAction(act) {
   else if (act === "backup") openSettingsAt("bkCard");
   else if (act === "params") showSetup();
   else if (act === "shutdown") {
-    if (!await showConfirm("Shut down the node?", "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again from the Node tab.", "Shut down", true)) return;
+    // Ask the AtomiX and PandaPools glue what is in flight first (their own saved records; no node command).
+    const read = (p) => Promise.race([Promise.resolve(p).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]);
+    const [swaps, maker, pool] = await Promise.all([read(api.axSwaps()), read(api.axMakerCfg()), read(api.ppActivity())]);
+    const w = shutdownWarning(swaps, maker, pool, Date.now());
+    if (!await showConfirm(w.title, w.message, "Shut down", true)) return;
     toast("Shutting down the node…");
     try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
   }
+}
+// What a Shutdown would interrupt, in plain words. swaps = api.axSwaps(), maker = api.axMakerCfg(), pool =
+// api.ppActivity(); null means that read failed, and the dialog says so instead of looking idle.
+const SWAP_DONE = ["COMPLETE", "REFUNDED", "ERROR"];   // the engine's own "nothing left to claim or refund" (trading.js isTerminalSwap)
+function shutdownWarning(swaps, maker, pool, nowMs) {
+  const busy = [], unread = [];
+  if (!Array.isArray(swaps)) unread.push("AtomiX swaps");
+  else {
+    const n = swaps.filter(s => s && !SWAP_DONE.includes(s.status)).length;
+    if (n) busy.push((n === 1 ? "1 AtomiX swap is" : n + " AtomiX swaps are") + " in progress. A swap in progress cannot settle while the node is stopped and can time out. Start the node again before its time limit.");
+  }
+  if (!maker || typeof maker !== "object") unread.push("your AtomiX market");
+  else if ((maker.cfg || {}).pegEnable || (maker.cfg || {}).manualEnable) {
+    if (!(maker.state || {}).withdrawn) busy.push("Your AtomiX market is switched on. Its orders stay on the book, but a swap someone starts against them is not answered while the node is stopped.");
+  }
+  if (!Array.isArray(pool)) unread.push("pool operations");
+  else {
+    // ponytail: "recent and not confirmed" stands for pending; an old transaction this node never found stays unconfirmed for good
+    const n = pool.filter(r => r && r.type !== "STATUS" && !r.failed && !r.confirmed && nowMs - Number(r.ts || 0) < 3600000).length;
+    if (n) busy.push((n === 1 ? "1 pool transaction" : n + " pool transactions") + " sent in the last hour " + (n === 1 ? "is" : "are") + " not confirmed yet. The app cannot check or finish " + (n === 1 ? "it" : "them") + " while the node is stopped.");
+  }
+  if (unread.length) busy.push("Could not be checked: " + unread.join(", ") + ". Look at the Dexicon tab before you shut down.");
+  const base = "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again.";
+  return { title: busy.length > (unread.length ? 1 : 0) ? "Shut down with trades in flight?" : "Shut down the node?", message: busy.concat(base).join("\n\n") };
 }
 
 // Footer, as the phone's: a dot and the key line on the left, "block @ time" on the right. This node uses
@@ -955,7 +991,7 @@ function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshT
 // ---- Balances --------------------------------------------------------------
 async function renderBalances() {
   const host = el("balList");
-  if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
+  if (!running) { host.innerHTML = waitHtml(); return; }
   const bal = await tryCmd("balance");
   BAL_AT = Date.now();                                   // drives the "updated Ns ago" stamp
   if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
@@ -2049,7 +2085,7 @@ function renderApps() {
 // ---- Minima Faucet (a tray app; the card used to sit in Settings) ----
 async function renderFaucet() {
   const host = el("faucetBody");
-  if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
+  if (!running) { host.innerHTML = waitHtml(); return; }
   if (el("faucetGo")) return;                           // already drawn: keep what the user typed and the last answer
   const addr = await tryCmd("getaddress");
   const fullAddr = (addr && (addr.miniaddress || addr.address)) || "";
@@ -2075,7 +2111,7 @@ async function renderFaucet() {
 }
 async function renderSettings() {
   const host = el("settingsBody");
-  if (!running) { host.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
+  if (!running) { host.innerHTML = waitHtml(); return; }
   const [addr, keys, scripts] = await Promise.all([tryCmd("getaddress"), tryCmd("keys action:list"), tryCmd("scripts")]);
   const ku = keysInfo(keys);
   const kuRows = keyUsesRows(keys, scripts);
@@ -2349,7 +2385,7 @@ async function runKeyAudit(force) {
 // ---- Send ------------------------------------------------------------------
 async function renderSend() {
   const card = el("sendCard");
-  if (!running) { card.innerHTML = `<div class="spin">Waiting for the node…</div>`; return; }
+  if (!running) { card.innerHTML = waitHtml(); return; }
   // token dropdown source — the wallet's held coins/tokens (MINIMA first). No raw token-id typing.
   const bal = await tryCmd("balance") || [];
   SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid), sendable: b.sendable || "0",

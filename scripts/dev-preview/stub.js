@@ -3,7 +3,7 @@
  * browser. FIXTURE DATA ONLY: every address, id, balance, name and message below is invented. It never
  * talks to a node. Not shipped (package.json "build.files" lists main/ and renderer/ only).
  *
- * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1
+ * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
  */
 "use strict";
 (function () {
@@ -62,6 +62,9 @@
     chatInit: async () => ({ pubkey: PK("77"), name: "Preview" }),
     chatThreads: async () => [chatThread(PK("31"), "Mirela Okafor", "See you at the harbour at six.", 2, 5), chatThread(PK("32"), "Jonas Petrov", "Thanks, got it.", 0, 300)],
     chatThread: async () => [], chatStatus: async () => ({ ready: true }),
+    axSwaps: async () => [{ hash: PK("90"), status: "STARTED" }, { hash: PK("91"), status: "COMPLETE" }],
+    axMakerCfg: async () => ({ cfg: { pegEnable: true }, state: { withdrawn: false } }),
+    ppActivity: async () => [{ type: "Pool transaction", confirmed: false, failed: false, ts: now - 120000 }],
     ewStatus: async () => ({ ready: true }),
     ewBalances: async () => ({ address: "0x4B1D9E27A6C0F3581E2D7B9A4C6E8F0A1B3D5C7E", eth: "0.0425", tokens: [
       { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", balance: "125.5", decimals: 6 }] }),
@@ -82,6 +85,8 @@
       if (view && view !== "balances") selectTab(view);
       if (Q.get("tray") === "1") setTray(true, true);
       if (Q.get("tray") === "0") setTray(false, true);
+      if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
+      if (Q.get("shutdown") === "1") menuAction("shutdown");
       if (Q.get("menu") === "1") { openMenu(); document.activeElement.blur(); }
     } catch (e) { document.title = "PREVIEW ERROR " + e.message; console.error(e); }
   }, 300));

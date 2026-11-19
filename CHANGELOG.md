@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.77] — shell review: Shutdown says what it interrupts, and a stopped node looks stopped
+
+- Shutdown (the overflow menu) asked the same plain question whether the wallet was idle or had a swap half way through. Before it asks, it now reads the AtomiX swap list, the saved AtomiX market and the PandaPools activity (the app's own records; no node command) and names what is in flight: the number of AtomiX swaps in progress ("a swap in progress cannot settle while the node is stopped and can time out"), an AtomiX market that is switched on, and pool transactions sent in the last hour that are not confirmed yet. If one of the three cannot be read within 5 seconds the dialog says which could not be checked, instead of looking idle.
+- After a Shutdown the window still looked alive. While the node is stopped, every screen now carries a strip under the bar, "The node is stopped. Balances, swaps, pools, mail and chat are offline until it starts.", with a Start node button. The Wallet and the Faucet are redrawn the moment the node goes away, and read "The node is stopped." where they used to read "Waiting for the node…".
+- Not done: the same warning when the whole app is quit. Quit runs in the main process and is also the path the updater and the operating system's own shutdown use, so a dialog there needs its own change.
+- A PandaPools engine that has not started reports an empty activity list, which the dialog cannot tell from "nothing pending".
+- Tests: `scripts/shell-test.cjs` runs the dialog's wording for an idle wallet, one and several swaps, a live and a withdrawn market, recent, old and failed pool rows, and three failed reads. The dev preview has `&state=stopped` and `&shutdown=1`, with captures of both.
+
 ## [0.18.76] — shell review: block time outside GMT and the US zones
 
 - The node reports the tip's time as Java prints a date, for example `Thu Jul 16 14:54:04 BST 2026`. The shell handed that to JavaScript's date parser, which only knows GMT and the US zone names. On a computer in any other zone (BST, CET, JST and so on) the footer's "@ time" and the Node tab's "Block time" were empty. Both now take the clock and the date from the text itself: the footer shows `14:54:04`, the Node tab `Jul 16, 2026, 14:54:04 BST`. "NO BLOCKS YET" shows as "No blocks yet" on the Node tab and as no time in the footer.

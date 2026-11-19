@@ -127,3 +127,21 @@ test("tab selection: where a view sits decides what the shell wears", () => {
   assert.equal(viewOfTab("dexicon"), "pandapools", "the Dexicon tab reopens the panel it last showed");
   assert.equal(viewOfTab("history"), "history");
 });
+
+test("Shutdown names what is in flight, and says so when it could not be read", () => {
+  const { shutdownWarning } = lift(["SWAP_DONE", "shutdownWarning"]);
+  const now = 1800000000000;
+  const idle = shutdownWarning([{ status: "COMPLETE" }, { status: "REFUNDED" }, { status: "ERROR" }], { cfg: {}, state: {} }, [{ type: "STATUS" }, { confirmed: true, ts: now }], now);
+  assert.equal(idle.title, "Shut down the node?");
+  assert.ok(!/in progress|switched on|not confirmed|Could not/.test(idle.message), "an idle wallet gets the plain question");
+  const busy = shutdownWarning([{ status: "STARTED" }, { status: "COMPLETE" }], { cfg: { pegEnable: true }, state: {} }, [{ confirmed: false, ts: now - 60000 }, { confirmed: false, ts: now - 7200000 }, { failed: true, ts: now }], now);
+  assert.equal(busy.title, "Shut down with trades in flight?");
+  assert.ok(/1 AtomiX swap is in progress\. A swap in progress cannot settle while the node is stopped and can time out/.test(busy.message));
+  assert.ok(/Your AtomiX market is switched on/.test(busy.message));
+  assert.ok(/1 pool transaction sent in the last hour is not confirmed yet/.test(busy.message), "old and failed rows are not pending");
+  assert.ok(/3 AtomiX swaps are in progress/.test(shutdownWarning([{ status: "A" }, { status: "B" }, { status: "C" }], {}, [], now).message));
+  assert.ok(!/switched on/.test(shutdownWarning([], { cfg: { pegEnable: true }, state: { withdrawn: true } }, [], now).message), "a withdrawn market is not live");
+  const blind = shutdownWarning(null, null, null, now);
+  assert.ok(/Could not be checked: AtomiX swaps, your AtomiX market, pool operations/.test(blind.message), "a failed read is never shown as idle");
+  assert.ok(/id="stopBar"[^>]*hidden/.test(html) && /id="stopStart"/.test(html) && /api\.nodeStart\(\)/.test(app), "a stopped node shows a strip with Start");
+});

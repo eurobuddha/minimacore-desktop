@@ -61,6 +61,9 @@
         <button class="dexswitch__b" data-view="pandapools" aria-pressed="false">Pools</button>
       </div>
 
+      <!-- Shown after a Shutdown (or if the node stops on its own): the window must not look alive. -->
+      <div class="stopbar" id="stopBar" role="status" hidden><span>The node is stopped. Balances, swaps, pools, mail and chat are offline until it starts.</span><button class="btn btn--primary btn--sm" id="stopStart">Start node</button></div>
+
       <main class="main" id="main">
       <section class="view view--active" id="view-balances">
         <div class="wal-head"><span>Total balance</span></div>

@@ -113,6 +113,12 @@
   color: var(--dim); font: 600 13px/1 var(--sans); cursor: pointer; }
 .dexswitch__b[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: #fff; }
 
+/* the node is stopped: a strip under the bar on every screen, with Start */
+.stopbar { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface2);
+  border-bottom: 1px solid var(--border); color: var(--text); font-size: 14px; line-height: 20px; letter-spacing: .018em; }
+.stopbar span { flex: 1 1 0; min-width: 0; }
+.stopbar .btn { flex: 0 0 auto; }
+
 /* ---------------------------------------------------------------- footer (activity_main main_footer) */
 .foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 9px 16px; background: var(--surface); border-top: 1px solid var(--border);
