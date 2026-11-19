@@ -43,3 +43,26 @@ test('the existing LF-header parser and UTF-8 POST length remain compatible', as
     });
   }, async port => assert.deepEqual(await rpcCall(port, 'test-only', command), { status: true, response: { ok: true } }));
 });
+
+test('signing commands are serialised process-wide; reads are not held behind them', async () => {
+  const http = require('node:http');
+  const seen = []; let releaseFirst;
+  const server = http.createServer((req, res) => {
+    const cmd = decodeURIComponent(req.url.slice(1)); seen.push(cmd);
+    const reply = () => res.end(JSON.stringify({ status: true, command: cmd }));
+    if (cmd.startsWith('send amount:1')) releaseFirst = reply; else reply();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const first = rpcCall(port, 's', 'send amount:1 address:0x00');
+    const second = rpcCall(port, 's', 'txnsign id:a publickey:auto');
+    const chained = rpcCall(port, 's', 'txncreate id:b;txnsign id:b publickey:auto');
+    await rpcCall(port, 's', 'balance');                       // a read goes straight through
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.deepEqual([...seen].sort(), ['balance', 'send amount:1 address:0x00'], 'the read went through; the second signer has not reached the node yet');
+    releaseFirst();
+    await Promise.all([first, second, chained]);
+    assert.deepEqual(seen.slice(2), ['txnsign id:a publickey:auto', 'txncreate id:b;txnsign id:b publickey:auto'], 'signers ran one at a time, in order');
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});

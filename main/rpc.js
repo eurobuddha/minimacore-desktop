@@ -11,6 +11,7 @@
  * not optional. The renderer NEVER sees this module — it calls through the IPC proxy in main.js.
  */
 const http = require("http");
+const { createNodeRunner } = require("./noderun");
 
 const GET_MAX = 6000;          // command length above which we switch to POST (URL-length safety)
 const READ_TIMEOUT_MS = 30_000;
@@ -25,8 +26,8 @@ function timeoutFor(command) {
   return WRITE_PREFIXES.some(p => c.startsWith(p)) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 
-/** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
-function rpcCall(port, secret, command) {
+/** One HTTP round trip to the node, ungated. Only rpcCall below may call this. */
+function rawCall(port, secret, command) {
   return new Promise((resolve, reject) => {
     const auth = "Basic " + Buffer.from("minima:" + secret).toString("base64");
     const usePost = command.length > GET_MAX;
@@ -68,6 +69,19 @@ function rpcCall(port, secret, command) {
     if (usePost) req.write(command);
     req.end();
   });
+}
+
+// ONE signing queue per node (keyed by RPC port), under every caller. Minima signs with one-time Winternitz leaves:
+// two signing commands in flight at once can be handed the SAME leaf, which leaks that key. Each engine serialised
+// its own signing, but nothing serialised them against each other or against the wallet's own Send. Reads are not
+// queued. The secret is read per call, so a rotated secret is never captured by the queue.
+const runners = new Map();
+
+/** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
+function rpcCall(port, secret, command) {
+  let r = runners.get(port);
+  if (!r) { r = createNodeRunner(null); runners.set(port, r); }
+  return r.run(command, (c) => rawCall(port, secret, c));
 }
 
 module.exports = { rpcCall };
