@@ -446,6 +446,40 @@ test("M1: a long poll's hold is cut below the app's idle limit, so a quiet relay
   assert.match(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/ui/app.js"), "utf8"), /client\.pollInbox\(me\.publicId\(\), 25,/);
 });
 
+// ---------------------------------------------------------------- the low findings (0.18.121)
+test("lows: 'pay at most' is the sum of the engine's per-take round-ups; a ladder Total is cut; a comma is never a number; the page's words reach Orders", () => {
+  // two takes of 0.3 MINIMA at 0.00000005: each costs 0.000000015, which the engine rounds UP to 0.00000002 per transaction
+  const book = C.tradeBook(null, [{ side: "sell", price: "0.00000005", minima: "0.3" }, { side: "sell", price: "0.00000005", minima: "0.3" }]);
+  const buy = C.plan(book, true, "0.00000005", "0.6", C.funds("0", "1", [], []));
+  assert.equal(C.fmt(buy.pay), "0.00000004", "0.00000002 twice, not the round-up of the sum (0.00000003)"); assert.equal(C.fmt(C.up(buy.cost, 8)), "0.00000003");
+  assert.match(C.review(buy, 1).join(" "), /You pay at most 0\.00000004 MxUSD and receive 0\.6 MINIMA/);
+  assert.equal(C.fmt(buy.need), "0.00000004", "and that is what the funds check asks for");
+  const bids = C.tradeBook(null, [{ side: "buy", price: "0.00000005", minima: "0.3" }, { side: "buy", price: "0.00000005", minima: "0.3" }]);
+  const sell = C.plan(bids, false, "0.00000005", "0.6", C.funds("1", "0", [], []));
+  assert.match(C.review(sell, 1).join(" "), /receive at least 0\.00000002 MxUSD/, "0.00000001 twice (each rounded DOWN), not 0.00000003");
+  // the ladder's Total column
+  assert.equal(C.fmt(C.levelTotal({ price: d("0.0031"), total: d("33.3333") })), "0.1033", "0.10333323 cut, not 0.1034");
+  assert.match(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8"), /class="dx-lt">\$\{C\.fmt\(C\.levelTotal\(lv\)\)\}</);
+  // number entry
+  for (const t of ["1,234.5", "1,5", ",", "1.234.5", "1..2"]) assert.match(C.entryProblem(t), /Nothing was changed\.$/, t);
+  for (const t of ["", "1234.5", "0.00000001", "."]) assert.equal(C.entryProblem(t), "", t);
+  const AX = require("../renderer/dexicon-ax.js");
+  assert.deepEqual(["1,5", "1,234.5", "1.2.3", "12.5", "12a"].map(AX.cleanNum), ["", "", "", "12.5", "12"], "room 1: a comma was stripped, so 1,5 was fifteen");
+  // what the page said, for Orders as for Trade
+  assert.deepEqual(C.pageSays({ log: ["BUY 10"], notice: "Ladder not saved: no MEXC price", kind: "error" }, { stage: "Publishing fast order…" }), { lines: ["BUY 10", "Publishing fast order…", "Ladder not saved: no MEXC price"], error: true });
+  assert.deepEqual(C.pageSays({ notice: "Welcome", kind: "" }, {}), { lines: [], error: false }, "idle chatter is not shown");
+  assert.equal(C.pageSays({ notice: "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent.", kind: "error" }, null).error, false);
+  assert.match(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8"), /const says = tab === "orders" \? C\.pageSays\(Page\.state, X\.svc\)/);
+});
+
+test("lows: changing an on-chain order's price takes at most 6 decimals, as placing one does", () => {
+  const { calls, say, reply } = bridge();
+  say({ dxRoom: 1, drive: { id: 1, act: "editChain", args: { coinid: "0xAB12", price: "0.0035001" } } });
+  assert.equal(reply().error, "An on-chain order takes a price of at most 6 decimals. Nothing was changed."); assert.deepEqual(calls, []);
+  say({ dxRoom: 1, drive: { id: 2, act: "editChain", args: { coinid: "0xAB12", price: "0.003501" } } });
+  assert.equal(reply().error, null); assert.deepEqual(calls, ["edit:0xAB12:0.003501"]);
+});
+
 test("M4: what the user reviewed is told to the main process by the app's own window; the frame cannot say it", () => {
   assert.equal(C.bridgeCall({ dxRoom: 1, id: 1, name: "room.dex", args: { op: "reviewed", buy: true, price: "1000", amount: "1000000" } }), null, "the frame's bridge forwards its five ops and nothing else");
   assert.deepEqual(C.OPS, ["cmd", "sql", "comms", "net", "identity"]);
@@ -511,6 +545,18 @@ test("H2: the Trade button takes one click at a time, sends what was reviewed, a
   listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, driven: drives()[1].drive.id, error: "The book changed since you reviewed this. Review it again. Nothing was signed." } });
   await settle();
   assert.match(els.dxLog.innerHTML, /The book changed since you reviewed this/); assert.equal(els.dxAmount.value, "40"); assert.equal(els.dxCta.disabled, false);
+  // 0.18.121: "1,234.5" used to be turned into 1.2345 as it was typed. It is left as typed, said, and nothing can be sent.
+  for (const typed of ["1,234.5", "1,5", "1.234.5"]) {
+    els.dxAmount.value = typed; els.dxAmount.oninput();
+    assert.equal(els.dxAmount.value, typed, "not rewritten into another number"); assert.match(els.dxWarn.textContent, /for example 1234\.5\. Nothing was changed\./); assert.equal(els.dxCta.disabled, true);
+    els.dxCta.onclick(); await settle(); assert.equal(drives().length, 2, "nothing is sent: " + typed);
+  }
+  els.dxAmount.value = "12a.5"; els.dxAmount.oninput(); assert.equal(els.dxAmount.value, "12.5", "letters are still dropped");
+  let prevented = false; els.dxAmount.onkeydown({ key: "Enter", preventDefault() { prevented = true; } }); assert.equal(prevented, true, "Enter in a field never trades");
+  // 0.18.121: a call from the frame says which engine it is for
+  const seen = []; win.mcd.dxCommand = async (a) => { seen.push(a); return { status: true, rows: [] }; };
+  listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, id: 77, name: "room.dex", args: { op: "cmd", command: "block" } } }); await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(seen.filter(a => a.op === "cmd"))), [{ op: "cmd", command: "block", epoch: 1 }]);
 });
 
 test("the page is served from two pinned folders and nowhere else; its frame has no network", () => {

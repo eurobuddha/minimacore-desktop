@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.121] — Dexicon Exchange, the low findings of the review
+
+- **"You pay at most"** is now the sum of what each take can cost. Every take is its own transaction and the engine rounds each one (MxUSD paid up, MxUSD received down, 8 decimals); the screen rounded the total once, which could be less than the sum. The funds check uses the same figure, and "receive at least" is the sum of the round-downs.
+- **The order book's Total column is cut**, not rounded up (4 decimals).
+- **Changing an on-chain order's price** takes at most 6 decimals, as placing one does; the page would have rounded a longer price without asking.
+- **Number entry.** "1,234.5" was turned into 1.2345 as it was typed (the comma became a point and the second point was dropped). A number with a comma or with more than one point is now left as typed, the ticket says "Type the number without a comma: digits and one decimal point, for example 1234.5", and nothing can be sent. The same for the new-price dialog. In room ① a comma was stripped, so "1,5" was fifteen: such an entry is now no amount. Enter in a ticket field never trades.
+- **Bridge calls are bound to their engine.** The hidden page's calls carry the epoch of the engine the frame was made for; the main process refuses one that is for an engine no longer running (also for the identity delivery).
+- **Orders shows what the page said.** The market maker's dialogs are the page's own; their answers (a ladder that was not saved, a refused cancel or price change) appeared only in the Trade log. The last lines are now shown on Orders too.
+- Tests: `scripts/dexicon-ui.test.cjs` (three), `scripts/dexicon-host.test.cjs` (one).
+
 ## [0.18.120] — One Dexicon store per wallet, and the page's signatures are checked in the main process (review, M3 + M4)
 
 - **M3, the fault.** There was one `dexicon.sqlite`. A wallet that was not its owner had it moved aside, so switching the data folder A → B → A set A's store aside for good: A's takes that were sent and not yet answered were never voided.

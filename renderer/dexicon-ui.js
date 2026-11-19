@@ -132,7 +132,8 @@ const DexUI = (() => {
     if (m.driven != null) { const w = Page.waiting[m.driven]; if (w) { delete Page.waiting[m.driven]; w({ error: m.error || "", asked: m.asked || "" }); } return; }
     const call = C.bridgeCall(m); if (!call) return;
     const back = (value, error) => { if (Page.frame) Page.frame.contentWindow.postMessage(error == null ? { dxRoom: 1, id: m.id, value } : { dxRoom: 1, id: m.id, error }, "*"); };
-    (call.kind === "clip" ? api.clip(call.text) : api.dxCommand(call.args)).then(v => back(v), err => back(null, C.refusal(err && err.message)));
+    // the frame speaks for the engine it was made for (Page.epoch): a call from a frame that outlived its engine is refused in main
+    (call.kind === "clip" ? api.clip(call.text) : api.dxCommand(Object.assign({}, call.args, { epoch: Page.epoch }))).then(v => back(v), err => back(null, C.refusal(err && err.message)));
   }
   /** Ask the page for one of its actions. Resolves { error, asked }: error = why nothing was done; asked = the page's
    *  own review text when it wants one confirmed. */
@@ -230,7 +231,11 @@ const DexUI = (() => {
     if (tab === "trade") paintTrade();
     else if (document.activeElement && body.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // never redraw under someone typing
     else {
-      const why = blocker(), top = (why ? `<div class="dx-state" role="status">${esc(why)}</div>` : "") + (X.said ? `<div class="dx-state dx-state--${X.said.kind}" role="alert">${esc(X.said.text)}</div>` : "");
+      // Orders (0.18.121): what the page and the service last said is shown here too. The market maker's dialogs are the
+      // page's own, and what they answer (a ladder that was not saved, a refused cancel or change) was only in the Trade log.
+      const says = tab === "orders" ? C.pageSays(Page.state, X.svc) : { lines: [] };
+      const why = blocker(), top = (why ? `<div class="dx-state" role="status">${esc(why)}</div>` : "") + (X.said ? `<div class="dx-state dx-state--${X.said.kind}" role="alert">${esc(X.said.text)}</div>` : "")
+        + (says.lines.length ? `<div class="dx-state${says.error ? " dx-state--error" : ""}" role="status">${says.lines.slice(-4).map(esc).join("<br>")}</div>` : "");
       body.innerHTML = top + (tab === "orders" ? ordersHtml() : tab === "history" ? historyHtml() : tab === "activity" ? activityHtml() : tab === "assets" ? assetsHtml() : settingsHtml());
     }
   }
@@ -270,7 +275,9 @@ const DexUI = (() => {
   const num = (v) => { const d = C.dec(v); return d && d.v > 0n ? d : null; };
   function bindTrade() {
     const price = $("dxPrice"), amount = $("dxAmount");
-    for (const i of [price, amount]) i.oninput = () => { X.sent = null; const clean = i.value.replace(",", ".").replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"); if (clean !== i.value) i.value = clean; X.said = null; paintTicket(); };
+    // a comma or a second point is never "repaired" into another number (C.entryProblem): the field is left as typed and the ticket says why
+    for (const i of [price, amount]) i.oninput = () => { X.sent = null; if (!C.entryProblem(i.value)) { const clean = i.value.replace(/[^0-9.]/g, ""); if (clean !== i.value) i.value = clean; } X.said = null; paintTicket(); };
+    for (const i of [price, amount]) i.onkeydown = (e) => { if (e.key === "Enter") e.preventDefault(); };   // Enter in a field never trades
     $("dxBuy").onclick = () => { X.buy = true; paintTicket(); };
     $("dxSell").onclick = () => { X.buy = false; paintTicket(); };
     $("dxGroups").onclick = (e) => { const b = e.target.closest("[data-g]"); if (!b) return; X.group = Number(b.dataset.g); pref("dexicon_group", String(X.group)); paintTrade(); };
@@ -306,7 +313,7 @@ const DexUI = (() => {
     const row = (r, ask) => {
       const lv = r.lv, parts = C.amountText(lv.fast, lv.book, lv.pool), shown_ = C.fmtPrice(lv.exact), at = C.GROUPS[X.group] ? C.fmt(lv.price) : C.fmt(lv.exact);
       return `<button class="dx-lrow" data-side="${ask ? "ask" : "bid"}" data-price="${at}" data-cum="${C.fmt(r.cum)}" style="--f:${Math.min(100, r.frac * 100).toFixed(2)}%" aria-label="${ask ? "Ask" : "Bid"} ${shown_}, ${esc(parts.join(", "))} MINIMA${lv.mine ? ", includes your own order" : ""}">`
-        + `<span class="dx-lp">${lv.mine ? "• " : ""}${shown_}</span><span class="dx-la${parts.length > 1 || /[A-Z]/.test(parts[0]) ? " dx-la--tag" : ""}">${parts.map(esc).join("<br>")}</span><span class="dx-lt">${C.fmt(C.up(C.mul(lv.price, lv.total), 4))}</span></button>`;
+        + `<span class="dx-lp">${lv.mine ? "• " : ""}${shown_}</span><span class="dx-la${parts.length > 1 || /[A-Z]/.test(parts[0]) ? " dx-la--tag" : ""}">${parts.map(esc).join("<br>")}</span><span class="dx-lt">${C.fmt(C.levelTotal(lv))}</span></button>`;
     };
     $("dxAsks").innerHTML = C.rows(L.asks).reverse().map(r => row(r, true)).join("");   // best ask just above the centre
     $("dxBids").innerHTML = C.rows(L.bids).map(r => row(r, false)).join("");
@@ -337,27 +344,27 @@ const DexUI = (() => {
     }
     $("dxTotal").textContent = total;
     const short = pl.ok && pl.short.v > 0n;
-    $("dxWarn").textContent = pl.ok === false && pl.why ? pl.why : short ? "Exceeds your free " + (buy ? "MxUSD" : "MINIMA") + " by " + C.fmt(pl.short) + " (free " + C.fmtBal(pl.free) + ")" : "";
+    const typo = C.entryProblem($("dxPrice").value) || C.entryProblem($("dxAmount").value);
+    $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? "Exceeds your free " + (buy ? "MxUSD" : "MINIMA") + " by " + C.fmt(pl.short) + " (free " + C.fmtBal(pl.free) + ")" : "";
     $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.</p>`;
     const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || !!X.busy, dead = !!why && !/No relay answers/.test(why);
     for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
     cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(side + C.fmt(pl.take) + " NOW · FAST") + "<small>instant · " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? "BUY MINIMA" : "SELL MINIMA";
-    cta.disabled = trading || dead || short || !f.known || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
+    cta.disabled = trading || dead || short || !f.known || !!typo || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
     cta2.hidden = !(pl.ok && pl.chain) || trading;
     cta2.innerHTML = esc(side.trim() + " · BOOK / POOL") + "<small>on-chain, about 3 minutes · review first</small>";
-    cta2.disabled = dead || !f.known || trading;
+    cta2.disabled = dead || !f.known || trading || !!typo;
     // the engine's own words: the take's progress, then what the page or the service last said
-    const lines = (Page.state.log || []).slice(), n = Page.state.notice, k = Page.state.kind || "";
-    const stage = X.svc && X.svc.stage; if (stage) lines.push(stage);
-    if (n && /error|posted|pending/.test(k) && lines[lines.length - 1] !== n) lines.push(n);
+    const says = C.pageSays(Page.state, X.svc), lines = says.lines;
     const log = $("dxLog"), mine = X.said;
     log.hidden = !lines.length && !mine;
     log.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join("") + (mine ? `<div class="dx-log__${mine.kind}">${esc(mine.text)}</div>` : "");
-    log.dataset.kind = /error/.test(k) && C.feedbackKind(n) === "error" ? "error" : "";   // "Only your own orders are at this price…" is plan feedback
+    log.dataset.kind = says.error ? "error" : "";   // "Only your own orders are at this price…" is plan feedback
   }
   async function submit(layer) {
     const price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim();
+    const typo = C.entryProblem(price) || C.entryProblem(amount); if (typo) return say(typo, "note");
     if (!num(price) || !num(amount)) return say("Enter a price and an amount.", "note");
     X.said = null;
     const args = { buy: X.buy, price, amount, layer };
@@ -418,6 +425,7 @@ const DexUI = (() => {
       const next = await dialog("New price", (fast ? "FAST order " + id + "\n\nYour node signs the order again at the new price and sends it to every relay. Nothing moves on the chain."
         : "On-chain order, coin " + id + "\n\nYour node signs a transaction that moves the order to the new price. The old price can still be filled until a block confirms it.") + "\n\nMxUSD per MINIMA:", "Sign the new price", { label: "New price, MxUSD per MINIMA", value: price });
       if (next == null) return;
+      if (C.entryProblem(next)) return say(C.entryProblem(next), "note");
       if (!num(next)) return say("Enter a valid new price. Nothing was changed.", "note");
       const r = await drive(fast ? "editFast" : "editChain", fast ? { orderId: id, price: next } : { coinid: id, price: next });
       if (r.error) return say(r.error);

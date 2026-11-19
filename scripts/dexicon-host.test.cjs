@@ -558,6 +558,20 @@ test("M4: this wallet's addresses are its own keys' addresses; a maker's script 
   assert.equal(check({ txn: { inputs: [], outputs: [] }, own: new Set(), orders: [], budget: null, now: 0, F: {} }).ok, false);
 });
 
+// 0.18.121: a call that names its engine is refused by any other engine (a page frame that outlived its engine)
+test("a bridge call bound to an engine that has stopped is refused; the running engine's and an unbound one pass", async () => {
+  const { host } = await boot(), e = host.status().epoch, q = "SELECT v FROM ax_kv WHERE k='relays'";
+  assert.equal((await host.command({ op: "sql", query: q, epoch: e })).status, true);
+  assert.equal((await host.command({ op: "sql", query: q })).status, true, "the native screens' reads carry no epoch");
+  await assert.rejects(host.command({ op: "cmd", command: "txncreate id:old1", epoch: e - 1 }), /belongs to a Dexicon engine that has stopped\. Nothing was done\./);
+  await assert.rejects(host.command({ op: "net", method: "POST", url: host.status().relays[0] + "/dex/msg", body: "{}", epoch: e + 5 }), /engine that has stopped/);
+  assert.throws(() => host.checkEpoch({ op: "identity", epoch: e - 1 }), /engine that has stopped/, "the identity is not delivered to an old frame either (main.js)");
+  await host.stop(); await host.start(); await M.until(() => host.status().ready);
+  assert.notEqual(host.status().epoch, e);
+  await assert.rejects(host.command({ op: "sql", query: q, epoch: e }), /engine that has stopped/, "after a restart the old frame's epoch is no longer the engine's");
+  assert.match(fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), /dexicon\.checkEpoch\(a\); seed = await dexicon\.identitySeed\(\)/);
+});
+
 // 0.18.116 (M2): held around a wallet-replacing megammrsync. Nothing starts it, no screen reaches the node through it,
 // and the store stays where it is: released on the same wallet, it goes on with every record.
 test("hold: the engine is stopped and stays stopped (node status, timer, a screen), the store is not moved; release and start bring it back on the same records", async () => {

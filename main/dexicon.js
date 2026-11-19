@@ -561,8 +561,13 @@ function makeHost(opts = {}) {
   }
   /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message } | { op: "net", method, url, body }
    *  | { op: "reviewed", buy, price, amount } (the native Trade screen only). */
+  /** A call that says which engine it is for (the page frame's: renderer/dexicon-ui.js adds Page.epoch) is refused
+   *  when that engine is no longer the one running (0.18.121). A frame can outlive its engine by a moment, and its
+   *  commands then met the NEXT engine: another wallet's, after a restore. */
+  function checkEpoch(a) { if (a && a.epoch != null && a.epoch !== epoch) throw new Error("this page belongs to a Dexicon engine that has stopped. Nothing was done."); }
   async function command(a) {
     if (held) throw new Error(HELD);   // the page's own txnsign / txnpost included
+    checkEpoch(a);
     const op = a && a.op;
     if (op === "cmd") return pageCmd(a.command);
     if (op === "sql") return pageSql(a.query);
@@ -573,7 +578,7 @@ function makeHost(opts = {}) {
   }
 
   return { emitter, init, start, stop, hold, release, flush, invalidate, status, activeWork, book, mine, command, storePath,
-    identitySeed,
+    identitySeed, checkEpoch,
     _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),
     _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _ctx: () => ctx, _fire: fire, _netAllowed: netAllowed };

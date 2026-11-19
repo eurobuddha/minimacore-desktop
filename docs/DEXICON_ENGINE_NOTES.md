@@ -334,6 +334,10 @@ Since 0.18.110:
   asking window; the reply is `{ status: true }` or a reason, never the seed. The page needs the seed because it signs
   orders and seals takes with the identity made from it. Not proven in Electron (see the plan, section 9).
 
+Since 0.18.121 a call may carry `epoch` (the page frame's always does: `renderer/dexicon-ui.js` adds the epoch of the
+engine the frame was made for). `command()` and the identity delivery refuse a call whose epoch is not the running
+engine's, so a frame that outlives its engine by a moment cannot reach the next one.
+
 Verbs and rules:
 
 - Verbs: `balance block checkmode coins getaddress history newscript random scripts status txpow txncheck txncreate

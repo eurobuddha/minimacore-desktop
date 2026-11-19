@@ -236,7 +236,12 @@
     cancelFast: function (a) { need(HEXID.test(a.orderId), "bad order id"); DexiconFast.cancelOrder(a.orderId); },
     editFast: function (a) { need(HEXID.test(a.orderId) && NUM.test(a.price), "Enter a valid new price."); DexiconFast.editOrder(a.orderId, a.price); },
     cancelChain: function (a) { need(/^0x[0-9A-Fa-f]{1,128}$/.test(a.coinid), "bad coin id"); cancel(a.coinid); },
-    editChain: function (a) { need(/^0x[0-9A-Fa-f]{1,128}$/.test(a.coinid) && NUM.test(a.price), "Enter a valid new price."); editOrder(a.coinid, a.price); },
+    editChain: function (a) {
+      need(/^0x[0-9A-Fa-f]{1,128}$/.test(a.coinid) && NUM.test(a.price), "Enter a valid new price.");
+      // as place: ui/pd_app.js rounds an on-chain price to 6 decimals without asking
+      need((a.price.split(".")[1] || "").length <= 6, "An on-chain order takes a price of at most 6 decimals. Nothing was changed.");
+      editOrder(a.coinid, a.price);
+    },
     addRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.addRelay(a.url); },
     removeRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.removeRelay(a.url); },
     discover: function () { DexiconFast.discover(); },

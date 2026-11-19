@@ -28,7 +28,9 @@
   const cut = (n, dp) => { n = Number(n); if (!isFinite(n)) return String(n); const s = n.toFixed(9), i = s.indexOf("."); return (s.slice(0, i + 1 + (dp == null ? 6 : dp))).replace(/0+$/, "").replace(/\.$/, "") || "0"; };
   /** the panel's ax6: the live estimate, floored to 6 decimals */
   const ax6 = (x) => (isFinite(x) && x > 0 ? String(Math.floor(x * 1e6) / 1e6) : "");
-  const cleanNum = (v) => String(v).replace(/[^0-9.]/g, "");
+  /** A typed amount as a plain number text. A comma or a second point is never read as anything ("" = no amount):
+   *  stripping the comma made "1,5" fifteen (0.18.121; the Exchange ticket's rule is DexCore.entryProblem). */
+  const cleanNum = (v) => (/,|\..*\./.test(String(v)) ? "" : String(v).replace(/[^0-9.]/g, ""));
   /** The coin amount a swap is sized by, from the field that was typed (the panel's two input handlers). */
   const coinAmount = (typedCoin, text, price) => { const c = cleanNum(text); return typedCoin ? c : (price > 0 && Number(c) > 0 ? ax6(Number(c) / price) : ""); };
   /** A custom slippage entry: the percent the panel would keep, or null (0.1 to 50, one decimal). */

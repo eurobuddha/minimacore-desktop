@@ -597,7 +597,7 @@ ipcMain.handle("mcd:dxMine", () => dexicon.mine());
 // { op: "identity" }: the page asks for its trading identity. Derived here, put straight into the page's sandboxed
 // frame (main/dexicon-room.js deliverIdentity), and NOT returned: the answer says only whether it was delivered.
 ipcMain.handle("mcd:dxCommand", async (e, a) => {
-  if (a && a.op === "identity") { let seed; try { seed = await dexicon.identitySeed(); } catch (err) { return { status: false, error: (err && err.message) || "the trading identity could not be read" }; } return dexiconRoom.deliverIdentity(e.sender, seed); }
+  if (a && a.op === "identity") { let seed; try { dexicon.checkEpoch(a); seed = await dexicon.identitySeed(); } catch (err) { return { status: false, error: (err && err.message) || "the trading identity could not be read" }; } return dexiconRoom.deliverIdentity(e.sender, seed); }
   return dexicon.command(a);
 });
 // A wallet replacement blocked ONLY because Dexicon cannot be checked (it never became ready, or its store is

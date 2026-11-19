@@ -125,6 +125,24 @@
     const mid = bestAsk && bestBid ? div(add(bestAsk, bestBid), dec("2"), 8) : bestBid || bestAsk;
     return { asks, bids, count, bestAsk, bestBid, mid, spread: bestAsk && bestBid ? sub(bestAsk, bestBid) : null };
   }
+  /** A ladder row's Total (MxUSD at that level): cut to 4 decimals, never rounded up (it was: 0.18.121). */
+  const levelTotal = (lv) => down(mul(lv.price, lv.total), 4);
+  /** Why a typed number is not taken ("" = it is fine so far). A comma is never read as anything: "1,234.5" used to
+   *  become 1.2345 (the comma turned into a point, the second point dropped). */
+  function entryProblem(text) {
+    const t = String(text == null ? "" : text);
+    if (t.includes(",")) return "Type the number without a comma: digits and one decimal point, for example 1234.5. Nothing was changed.";
+    if ((t.match(/\./g) || []).length > 1) return "A number has one decimal point, for example 1234.5. Nothing was changed.";
+    return "";
+  }
+  /** What the hidden page and the service last said, in their own words, for a screen to show: the take's progress,
+   *  the service's stage, then the page's notice when it is an error, a result or a wait (never its idle chatter). */
+  function pageSays(page, svc) {
+    const lines = ((page && page.log) || []).slice(), n = page && page.notice, k = (page && page.kind) || "";
+    if (svc && svc.stage) lines.push(String(svc.stage));
+    if (n && /error|posted|pending/.test(k) && lines[lines.length - 1] !== n) lines.push(String(n));
+    return { lines, error: /error/.test(k) && feedbackKind(n) === "error" };
+  }
   /** The rows to draw on one side: at most ten from the best price, each with its depth so far. */
   function rows(levels) {
     const top = levels.slice(0, MAX_ROWS); let run = zero;
@@ -185,18 +203,21 @@
     if (!price || !amount || price.v === 0n || amount.v === 0n) return { ok: false, why: "" };
     if (price.s > 8 || amount.s > 8) return { ok: false, why: "At most 8 decimals." };
     const x = crossing(book, buy, price), chain = chainCrosses(book, buy, price);
-    let left = amount, take = zero, cost = zero, n = 0, worst = null;
+    let left = amount, take = zero, cost = zero, pay = zero, get = zero, n = 0, worst = null;
     for (const h of x.hits) {
       if (left.v === 0n) break;
       const t = floorTake(h.amount, min(left, h.amount)); if (t.v === 0n) continue;
       take = add(take, t); cost = add(cost, mul(t, h.price)); left = sub(left, t); n++; worst = h.price;
+      // each take is its own transaction, rounded by the engine on its own (lib/fill.js plan: the taker pays MxUSD
+      // rounded UP, receives MxUSD rounded DOWN, 8 decimals). The sum of the round-ups can exceed the round-up of the sum.
+      pay = add(pay, up(mul(t, h.price), 8)); get = add(get, down(mul(t, h.price), 8));
     }
     // fast: what the page does at the click (ui/app.js place): ANY crossing FAST order means a sweep, never a resting
     // order. A sweep that can take nothing (the minimum remainder) trades nothing: `stuck`.
     const fast = x.hits.length > 0, stuck = fast && take.v === 0n;
-    const need = stuck ? zero : fast ? (buy ? up(cost, 8) : take) : (buy ? up(mul(amount, price), 8) : amount);
+    const need = stuck ? zero : fast ? (buy ? pay : take) : (buy ? up(mul(amount, price), 8) : amount);
     const free = f && f.known ? freeFor(f, buy) : null, short = free ? sub(need, free) : zero;
-    return { ok: true, buy, price, amount, fast, stuck, takes: n, take, worst, cost, rest: fast ? sub(amount, take) : amount, avg: fast && !stuck ? div(cost, take, 8) : null,
+    return { ok: true, buy, price, amount, fast, stuck, takes: n, take, worst, cost, pay, get, rest: fast ? sub(amount, take) : amount, avg: fast && !stuck ? div(cost, take, 8) : null,
       chain, ownOnly: x.ownOnly && !chain, need, free, short, offered: x.offered };
   }
   /** What a reviewed plan tells the page at the click (renderer/dexicon/mds.js ACTS.place): the page signs only when
@@ -223,8 +244,8 @@
       L.push("FAST orders cross this price, but none can be taken in this amount: a partial take must leave at least 1 MINIMA on the maker's order. Nothing would be traded and no order would be placed. Change the amount.");
     } else if (pl.fast) {
       L.push("One click signs and sends: " + side + " " + fmt(pl.take) + " MINIMA from " + pl.takes + " FAST " + (pl.buy ? "ask" : "bid") + (pl.takes === 1 ? "" : "s") + ", best price first, " + (pl.buy ? "never above " : "never below ") + fmtPrice(pl.price) + " MxUSD per MINIMA.");
-      L.push(pl.buy ? "You pay at most " + fmt(up(pl.cost, 8)) + " MxUSD and receive " + fmt(pl.take) + " MINIMA (average " + fmtPrice(pl.avg) + ")."
-                    : "You pay " + fmt(pl.take) + " MINIMA and receive at least " + fmt(down(pl.cost, 8)) + " MxUSD (average " + fmtPrice(pl.avg) + ").");
+      L.push(pl.buy ? "You pay at most " + fmt(pl.pay) + " MxUSD and receive " + fmt(pl.take) + " MINIMA (average " + fmtPrice(pl.avg) + ")."
+                    : "You pay " + fmt(pl.take) + " MINIMA and receive at least " + fmt(pl.get) + " MxUSD (average " + fmtPrice(pl.avg) + ").");
       L.push("Your node signs one transaction per order taken; each maker's node co-signs and posts it. A partial take leaves at least 1 MINIMA on the maker's order or takes it whole.");
       if (pl.rest.v > 0n) L.push("The other " + fmt(pl.rest) + " MINIMA is not traded and no order is placed for it.");
     } else {
@@ -336,6 +357,6 @@
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, expectOf, tradeBook, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, SHARED, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });
