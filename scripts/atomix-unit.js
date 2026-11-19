@@ -7,6 +7,11 @@
  */
 const assert = require("assert");
 const os = require("os"), path = require("path"), fs = require("fs");
+const { testNode, ENGINE_BOOT_SENDS, NAMES } = require("./test-node.cjs");
+// A real node is used ONLY when the caller names one and says it is theirs (scripts/test-node.cjs). Otherwise this
+// suite is hermetic, and no-reach.cjs makes that a fact: from here on a child process or a socket throws and is counted.
+const LIVE = testNode(ENGINE_BOOT_SENDS.concat("Nothing is signed or posted: the swap's start is replaced in the test."));
+const NO_REACH = LIVE ? null : require("./no-reach.cjs").install();
 
 let pass = 0, fail = 0, skipped = 0;
 function ok(name, fn) { try { fn(); pass++; console.log("  ✓", name); } catch (e) { fail++; console.error("  ✗", name, "—", e.message); } }
@@ -58,41 +63,55 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
   });
 
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
-  // This one is NOT hermetic: it reuses the live minimega docker container for the crypto-bearing commands
-  // (vault/seedrandom/newscript/getaddress), because the identity and covenant must derive for real. CI has
-  // no such container, so probe for it and SKIP rather than fail — a skip that says so is honest; counting it
-  // as a failure would train people to ignore a red suite, and counting it as a pass would be a lie.
-  const haveMinimega = await new Promise((res) => {
-    require("child_process").execFile("docker", ["exec", "minimega", "true"], { timeout: 8000 }, (e) => res(!e));
-  });
-  if (!haveMinimega) {
-    skipped++;
-    console.log("  ⊘ frozen quote replay — SKIPPED (no minimega docker container; run it locally for this check)");
-  } else
-  await okA("frozen quote issues a replayable quoteId; replay consumes it", async () => {
-    const atomix = require("../main/atomix");
+  // HERMETIC since 0.18.140. It used to run `docker exec` into a fixed container name for the crypto-bearing
+  // commands; on the owner's machine that container is a wallet with real funds, and this "unit" check read its
+  // seed. Now the engine boots on mockNode() below: a throwaway identity from FAKE values written in this file,
+  // and a book of one order signed by a second throwaway identity. Nothing leaves the process (NO_REACH proves it).
+  // The same check against a real node runs only when the caller names one (scripts/test-node.cjs).
+  const FAKE_SEED = "FAKE TEST SEED - NOT A WALLET - scripts/atomix-unit.js", FAKE_ETH_KEY = "0x" + "11".repeat(32);
+  const FAKE_KEY = "0x" + "C0FFEE".repeat(11).slice(0, 64), FAKE_ADDR = "0x" + "FACADE".repeat(11).slice(0, 64);
+  function mockNode(atomix) {
+    const seen = [], ok = (response) => ({ status: true, pending: false, response });
+    /** One live maker (a second throwaway identity): bids 0.99 and asks 1.01 for 500, built by the engine's own codec. */
+    const makerCoin = () => {
+      const A = atomix._ctx().AX, maker = A.identity.fromSeed("FAKE TEST MAKER - NOT A WALLET", A.trading.active().hkdfContext);
+      const o = A.order.make(); o.mpk = "0x" + "AB".repeat(32); o.eth = "0x" + "cd".repeat(20); o.cid = maker.publicId(); o.ts = Date.now();
+      o.minimaAvail = 1000; o.usdtAvail = 1000; o.pairs.USDT = A.order.pair(true, 1.01, 0.99, 1);
+      o.pairs.USDT.bids.push(A.order.level(0.99, 500)); o.pairs.USDT.asks.push(A.order.level(1.01, 500)); A.order.sanitize(o);
+      const msg = A.hex.utf8(A.order.canonicalJson(o)), sig = A.sodium.signDetached(msg, maker.signSk);
+      return { coinid: "0x" + "0D".repeat(32), state: [{ port: 1, type: 1, data: "0x" + A.hex.to(maker.signPk) }, { port: 2, type: 1, data: "0x" + A.hex.to(sig) }, { port: 99, type: 1, data: "0x" + A.hex.to(msg) }] };
+    };
+    const run = async (cmd) => {
+      cmd = String(cmd); seen.push(cmd);
+      const verb = cmd.split(/\s+/)[0];
+      if (verb === "checkmode") return ok({ writemode: true, dblocked: false });
+      if (cmd === "vault action:seed") return ok({ seed: FAKE_SEED });
+      if (cmd === "seedrandom modifier:ethbridge") return ok({ seedrandom: FAKE_ETH_KEY });
+      if (verb === "random") return ok({ random: "0x" + "5A".repeat(64) });
+      if (verb === "scripts") { const m = /address:(\S+)/.exec(cmd); return ok({ miniaddress: m ? m[1] : "", address: "" }); }   // both swap contracts already registered
+      if (verb === "getaddress") return ok({ miniaddress: "MxFAKETESTADDRESS", address: FAKE_ADDR, publickey: FAKE_KEY });
+      if (verb === "keys") return ok({ keys: [{ publickey: FAKE_KEY }], total: 1 });
+      if (verb === "block") return ok({ block: "1000" });
+      if (/^balance tokenid:0x7D39/i.test(cmd)) return ok([{ confirmed: "100", unconfirmed: "0", sendable: "100", coins: 3 }]);
+      if (verb === "balance" || verb === "txnlist" || verb === "history") return ok([]);
+      if (verb === "coins") return ok(/address:0x5553445453574150\b/.test(cmd) && atomix._ctx() ? [makerCoin()] : []);
+      if (verb === "coinnotify") return ok({});
+      return { status: false, error: "mock node: no answer for " + verb };
+    };
+    return { run, seen };
+  }
+  async function frozenQuoteReplay(atomix, runner) {
     atomix._setDataDir(fs.mkdtempSync(path.join(os.tmpdir(), "axq-")));
-    // a mock node: real vault/seedrandom/newscript/getaddress (so identity+covenant derive) but a FUNDED book +
-    // balance. We reuse the live minimega for the crypto-bearing commands and inject a funded balance + a live
-    // book (the book is already live on minimega); only 'balance' is overridden to report USDT so a BUY quote
-    // passes the affordability gate and FREEZES.
-    const { execFile } = require("child_process");
-    const real = (cmd) => new Promise((res, rej) => execFile("docker", ["exec", "minimega", "curl", "-s", "-m", "60",
-      "http://127.0.0.1:9005/" + encodeURIComponent(cmd)], { maxBuffer: 64 * 1024 * 1024 }, (e, o) => e ? rej(e) : res(JSON.parse(o))));
-    atomix._setRunner(async (cmd) => {
-      if (/^balance tokenid:0x7D39/i.test(cmd)) return { status: true, response: [{ confirmed: "100", unconfirmed: "0", sendable: "100", coins: 3 }] };
-      return real(cmd);
-    });
+    atomix._setRunner(runner);
     await atomix.init();
-    for (let i = 0; i < 60 && !atomix.status().ready; i++) { await new Promise(r => setTimeout(r, 2000)); atomix._fire("MDS_TIMER_60SECONDS"); }
-    assert.ok(atomix.status().ready, "engine booted");
-    // BUY 2 mxUSDT — over the makers' min, and the mock reports USDT balance via... note: BUY affordability
-    // checks the USDT (ERC20) balance, which comes from the ETH RPC not 'balance'. On a fresh wallet that's 0,
-    // so a BUY still can't freeze. A SELL freezes against the mocked mxUSDT balance instead:
+    for (let i = 0; i < 60 && !atomix.status().ready; i++) { await new Promise(r => setTimeout(r, LIVE ? 2000 : 50)); if (LIVE) atomix._fire("MDS_TIMER_60SECONDS"); }
+    assert.ok(atomix.status().ready, "engine booted: " + atomix.status().log.slice(-3).join(" | "));
+    // A SELL freezes against the token balance the runner reports (a BUY is priced against the ERC20 balance,
+    // which comes from the Ethereum RPC, not from the node).
     const q = await atomix.quote(true, "2", 0);
-    assert.ok(q.quoteId, "SELL 2 froze a quoteId (mocked mxUSDT balance): " + JSON.stringify(q).slice(0, 120));
+    assert.ok(q.quoteId, "SELL 2 froze a quoteId: " + JSON.stringify(q).slice(0, 160));
     // replay is single-use: a second execute of the same id must reject "expired"
-    // (we DON'T actually broadcast — stub startLeg so no funds move)
+    // (nothing is broadcast: startLeg is replaced, so no funds move)
     const A = atomix._ctx().AX;
     const origStartLeg = A.engine.startLeg;
     A.engine.startLeg = (maker, sym, sell, minima, usdt, hooks, cb) => cb(null, "0xFAKEHASH");
@@ -103,7 +122,25 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       try { await atomix.swapExecute(q.quoteId); } catch (e) { threw = /expired/i.test(e.message); }
       assert.ok(threw, "second replay of the same quoteId is rejected (single-use freeze)");
     } finally { A.engine.startLeg = origStartLeg; atomix.stopLoop(); atomix.flush(); }
-  });
+  }
+  if (!LIVE) {
+    await okA("frozen quote issues a replayable quoteId; replay consumes it (mock node, fake identity)", async () => {
+      const atomix = require("../main/atomix"), node = mockNode(atomix);
+      await frozenQuoteReplay(atomix, node.run);
+      assert.equal(atomix.status().eth, "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a", "the identity is the one the FAKE key gives (0x11…11), nobody's wallet");
+      for (const c of ["vault action:seed", "seedrandom modifier:ethbridge"]) assert.ok(node.seen.includes(c), "the mock answered " + c);
+      assert.deepEqual(node.seen.filter(c => /^(send|txn(post|sign|create|input|output)|newscript|consolidate)\b/.test(c)), [], "and was never asked to sign, post or register anything");
+    });
+    console.log("  ⊘ frozen quote replay on a REAL node — SKIPPED (no test node named: set " + NAMES + ")");
+  } else {
+    await okA("frozen quote issues a replayable quoteId; replay consumes it (the named test node, a funded balance injected)", async () => {
+      const atomix = require("../main/atomix");
+      await frozenQuoteReplay(atomix, async (cmd) => {
+        if (/^balance tokenid:0x7D39/i.test(cmd)) return { status: true, response: [{ confirmed: "100", unconfirmed: "0", sendable: "100", coins: 3 }] };
+        return LIVE.run(cmd);
+      });
+    });
+  }
 
   // ---- publish-send coin pin: must fund the send, not just be signable ----
   // Live failure (2026-09-14): the wallet held a 1e-44 MINIMA dust coin. `fromaddress:` RESTRICTS inputs to
@@ -300,7 +337,7 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       // The engine kept the old currency for up to a minute; the renderer's stale cache then made the next
       // click a server-side no-op. reloadShared is the donor's own function and a vm global (same access
       // class as the ctx.RPC.setUrl the glue already uses), so call it directly. Structural, because the
-      // engine-driving path needs the minimega container.
+      // engine-driving path is covered by the mock-node check above.
       const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "atomix.js"), "utf8");
       const fn = src.slice(src.indexOf("async function switchCurrency"), src.indexOf("\n}", src.indexOf("async function switchCurrency")));
       assert.ok(/ctx\.reloadShared\s*\(/.test(fn), "switchCurrency must call ctx.reloadShared directly");
@@ -454,7 +491,11 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     });
   }
 
-  const skipNote = skipped ? " (" + skipped + " skipped — needs the minimega container)" : "";
+  if (NO_REACH) ok("the whole suite started no child process and opened no socket; the engine's network calls went to a stand-in", () => {
+    assert.deepEqual(NO_REACH.reached, [], "something tried to leave the process");
+    assert.ok(NO_REACH.net.length > 0, "the engine did ask for the network, and the stand-in answered");
+  });
+  const skipNote = skipped ? " (" + skipped + " skipped)" : "";
   console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" + skipNote : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed" + skipNote);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("UNIT ERROR:", e); process.exit(1); });

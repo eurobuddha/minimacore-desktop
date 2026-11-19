@@ -13,7 +13,9 @@ const path = require("path");
 const PARAMS = require("../renderer/params.js");   // shared minima.jar param manifest (dual CJS/global)
 const keymode = require("./keymode");
 
-const KEYCHAIN_SERVICE = "com.eurobuddha.minimacore.rpc";
+// A TEST profile (main/testprofile.js) has its own service name: under the real one it would read the real install's
+// RPC secret and OVERWRITE its mail and shop identities and P2P Chance preimages with its own node's.
+const KEYCHAIN_SERVICE = "com.eurobuddha.minimacore.rpc" + require("./testprofile").keychainSuffix;
 const KEYCHAIN_ACCOUNT = "minima";
 
 // which manifest flags are secret (stored in the Keychain, never in config.json)

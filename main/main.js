@@ -5,6 +5,7 @@
  * the IPC handlers here, which proxy to the local RPC using the main-held secret. On launch we start the
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
+const testProfile = require("./testprofile");   // FIRST: a TEST copy moves userData and its keychain names before anything reads them
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, nativeTheme, shell, Notification, session, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -71,7 +72,7 @@ function createWindow() {
     // title bar is kept (no hiddenInset): the shell's own toolbar has the tray button where the Mac's
     // traffic lights would sit. The background is Pandamonium's core_bg for the system theme.
     width: 932, height: 732, minWidth: 440, minHeight: 640,
-    title: "Minima Core",
+    title: testProfile.on ? "Minima Core — TEST PROFILE" : "Minima Core",
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0F1114" : "#F4F5F7",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -82,6 +83,11 @@ function createWindow() {
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
+  if (testProfile.on) {   // a TEST copy says so in the title bar, on every screen and on the Dock icon
+    win.on("page-title-updated", (e) => e.preventDefault());
+    win.webContents.on("did-finish-load", () => win.webContents.insertCSS('body::after{content:"TEST PROFILE";position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;background:#B00020;color:#fff;font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.08em;padding:4px 10px;border-radius:0 0 6px 6px;pointer-events:none}').catch(() => {}));
+    try { if (app.dock) app.dock.setBadge("TEST"); } catch (e) {}
+  }
   // The Parlons tab's <webview> may only ever show the account's loopback panel: strip any preload,
   // force isolation, and refuse any other src. External web links open in the OS browser; no guest child windows.
   win.webContents.on("will-attach-webview", (ev, prefs, params) => {
@@ -146,7 +152,7 @@ function setupTray() {
       { type: "separator" },
       { label: "Quit", click: () => app.quit() }
     ]);
-    tray.setToolTip("minimaCore");
+    tray.setToolTip(testProfile.on ? "minimaCore — TEST PROFILE" : "minimaCore");
     tray.setContextMenu(menu());
     node.on("status", () => tray && tray.setContextMenu(menu()));
   } catch (e) { /* tray optional */ }
@@ -745,7 +751,7 @@ app.whenReady().then(() => {
   if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
-  updater.start();
+  if (!testProfile.on) updater.start();   // a TEST copy never reads the update feed or offers an installer
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); else if (win) { win.show(); win.focus(); } });
 });
 

@@ -1,25 +1,20 @@
 /*
- * S2 GATE — the read-model against the LIVE minimega mainnet node (read-only): boot, then book() must show the
- * REAL mainnet order book (the user's live makers), wallet() must return the identity + balances, quote() must
- * freeze a replayable quoteId when liquidity exists, marketHistory()/swaps()/otc()/makerCfg() must return their
- * shapes. No funds move: no swapExecute/send/publish is called.
- * Run: node scripts/atomix-s2-gate.js
+ * S2 GATE — the read-model against a LIVE node: boot, then book() must show the node's real order book, wallet()
+ * must return the identity + balances, quote() must freeze a replayable quoteId when liquidity exists,
+ * marketHistory()/swaps()/otc()/makerCfg() must return their shapes. No swapExecute/send/publish is called.
+ *
+ * Booting READS THE NODE'S SEED. Until 0.18.140 this ran `docker exec` into a fixed container name; on the owner's
+ * machine that container is a wallet with real funds. It now runs ONLY against a node the caller names and says is
+ * theirs (scripts/test-node.cjs). With nothing named it refuses with exit code 1.
+ * Run: AX_TEST_NODE_RPC=… AX_TEST_NODE_I_OWN_THIS=yes node scripts/atomix-s2-gate.js
  */
-const { execFile } = require("child_process");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const { testNode, ENGINE_BOOT_SENDS, NAMES } = require("./test-node.cjs");
 
-function dockerRpc(cmd) {
-  return new Promise((resolve, reject) => {
-    execFile("docker", ["exec", "minimega", "curl", "-s", "-m", "60",
-      "http://127.0.0.1:9005/" + encodeURIComponent(cmd)], { maxBuffer: 64 * 1024 * 1024 },
-      (err, stdout) => {
-        if (err) return reject(err);
-        try { resolve(JSON.parse(stdout)); } catch (e) { reject(new Error("bad RPC JSON")); }
-      });
-  });
-}
+const NODE = testNode(ENGINE_BOOT_SENDS.concat("No swap, send or publish is started by this script."));
+if (!NODE) { console.error("S2 GATE NOT RUN: no test node was named. Set " + NAMES + ". Nothing was sent anywhere."); process.exit(1); }
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra) => {
@@ -30,7 +25,7 @@ const ok = (name, cond, extra) => {
 (async () => {
   const atomix = require("../main/atomix");
   atomix._setDataDir(fs.mkdtempSync(path.join(os.tmpdir(), "atomix-s2-")));
-  atomix._setRunner(dockerRpc);
+  atomix._setRunner(NODE.run);
   await atomix.init();
   for (let i = 0; i < 60 && !atomix.status().ready; i++) { await new Promise(r => setTimeout(r, 2000)); atomix._fire("MDS_TIMER_60SECONDS"); }
   ok("engine booted", atomix.status().ready);
@@ -43,12 +38,12 @@ const ok = (name, cond, extra) => {
 
   const b = await atomix.book();
   // The STRONG assertion: the engine READ + Ed25519-VERIFIED + PARSED the real on-chain book. `makers` (external)
-  // is legitimately 0 here because minimega's OWN identity published every order — the desktop shares that seed.
+  // is legitimately 0 when the node's OWN identity published every order — this engine shares that node's seed.
   ok("book: engine reads+verifies the REAL on-chain book", b.scanned > 0,
     b.scanned + " on-chain orders verified · " + b.makers + " external (own excluded) · bestBid=" + b.bestBid + " bestAsk=" + b.bestAsk);
 
   if (b.bestAsk > 0) {
-    // A BUY quote over the makers' minimum. On a funded wallet this freezes a replayable quoteId; on THIS
+    // A BUY quote over the makers' minimum. On a funded wallet this freezes a replayable quoteId; on a
     // zero-balance node the honest engine result is a plain-words "Need … USDT" — both prove the pipeline
     // (validation + planning) runs correctly. Freeze-replay itself is unit-tested with a funded mock in S5.
     const q = await atomix.quote(false, "2", 4.2);

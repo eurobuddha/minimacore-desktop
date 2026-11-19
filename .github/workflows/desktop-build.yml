@@ -106,9 +106,10 @@ jobs:
       - name: Verify ETH wallet guards
         run: npm run test:ethwallet
 
-      # NOT gate:atomix — the S1/S2 gates boot the engine against a live mainnet node in the minimega docker
-      # container and compare the derived ETH identity with that peer's. There is no such node here, so they
-      # stay a local pre-release step. atomix-unit skips its one container-dependent check and says so.
+      # NOT gate:atomix — the S1/S2 gates boot the engine against a live node the caller must name
+      # (scripts/test-node.cjs: AX_TEST_NODE_RPC + AX_TEST_NODE_I_OWN_THIS=yes; no name, address or port of any
+      # node is written in this repo). There is no such node here, so they stay a local step. atomix-unit is
+      # hermetic since 0.18.140: its engine boots on a mock node and the suite fails if anything leaves the process.
       - name: Verify AtomiX glue
         run: node scripts/atomix-unit.js
 

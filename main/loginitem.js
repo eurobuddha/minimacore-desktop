@@ -28,6 +28,7 @@ function apply(app, on) {
   on = !!on;
   try {
     if (!app.isPackaged) return { ok: false, on, note: "not registered: development build" };
+    if (process.env.MCD_TEST_PROFILE) return { ok: false, on, note: "not registered: TEST profile" };   // the OS list is not kept per profile
     if (process.platform === "linux") {
       const p = linuxAutostartPath();
       if (on) {

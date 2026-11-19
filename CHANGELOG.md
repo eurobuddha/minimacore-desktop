@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.140] — No script can touch a node by accident, and a TEST copy of the app
+
+- **Found**: `scripts/atomix-unit.js` (the "unit" suite, also run by CI) started `docker exec` into a container of a fixed name whenever docker was reachable, and booted the whole AtomiX engine on it: `vault action:seed`, `seedrandom modifier:ethbridge`, `newscript`, `coinnotify`, `txnlist` / `txndelete`. On the owner's machine that name is a wallet with real funds. The two live gates did the same, and `scripts/cdp-eval.js` ran any expression inside whatever app listened on a fixed debugging port.
+- **No name, address or port of any node is written in the repo any more.** A script reaches a node only through `scripts/test-node.cjs`, and only when the caller names it (`AX_TEST_NODE_RPC`, optionally `AX_TEST_NODE_CONTAINER`; no default) and sets `AX_TEST_NODE_I_OWN_THIS=yes`. It first prints in plain words what it will send, the seed read first. Named but not owned: it stops with exit code 2, nothing sent. `cdp-eval.js` takes its port from `AX_TEST_CDP_PORT` under the same rule.
+- **The frozen-quote check is hermetic.** The engine boots on a mock node: a throwaway identity from fake values written in the test (the Ethereum key is `0x11…11`), a book of one order signed by a second throwaway identity. It no longer skips in CI. The same check against a real node remains, behind the variables.
+- **The unit suite fails if anything leaves the process** (`scripts/no-reach.cjs`): a child process or a socket throws and is counted; the engine's network calls go to a stand-in. `scripts/hermetic-test.cjs` runs the suite and the gates with only stand-in `docker`, `curl`, `security` and `java` on PATH and fails if one is started.
+- The live gates, with nothing named, say so and exit 1. The boot gate's expected Ethereum address is now `AX_TEST_NODE_EXPECT_ETH` (optional) instead of one node's address in the code.
+- **`scripts/dev-run.sh`** (new, `docs/DEV_RUN.md`): starts the app from source as a TEST copy. Its own folder (refused if it is, is inside or contains the real `minimaCore` folder, or was not created by the script), its own ports (probed every run, refused if busy), jars never fetched (refused with the copy commands; `--jars <dir>` copies), the sha256 of each jar printed.
+- **What was not kept by folder now has a separate name in a TEST copy** (`main/testprofile.js`): the login keychain service (it held the RPC secret, the mail and shop identities and the P2P Chance preimages under one name: a second copy would have overwritten the real install's), the safeStorage key (through the app name), no login item, no update feed at start. The window title, a tag on every screen and the Dock badge say TEST.
+
 ## [0.18.139] — Dexicon ② Pools lows, and an agreed OTC deal under a halt is ended (review)
 
 - **Messages pointed at a menu entry that does not exist** ("Open Pool recovery and confirm…"). The button is Confirm wallet signing state, on the pool's own card in My LP. The glue's sentence now says so; the engine's own sentences ("confirm it in Pool recovery", vendored and not edited) are put into those words where the desktop shows them (room ② and the wallet's Consolidate refusal).

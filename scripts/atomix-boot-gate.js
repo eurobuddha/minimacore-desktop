@@ -1,40 +1,32 @@
 /*
- * S1 BOOT GATE — boots the desktop AtomiX engine (the verbatim vm build) against a REAL mainnet Classic node
- * (the minimega docker container, RPC in-container at 127.0.0.1:9005) and asserts the engine reaches
- * "booted — settlement + maker/responder + OTC live".
+ * S1 BOOT GATE — boots the desktop AtomiX engine (the verbatim vm build) against a REAL node and asserts the engine
+ * reaches "booted — settlement + maker/responder + OTC live". One boot proves the RPC command shim, the SQL shim
+ * (all 9 tables incl. MERGE/auto_increment translations), the crypto stack, and vault/seedrandom identity derivation.
  *
- * The strongest cross-platform assertion available: minimega ALSO runs the AtomiX MDS build, and both derive
- * their identity from the SAME node seed — so this engine MUST derive ETH address
- * 0x7373cf1ff0677a59e9ec7d327c1de0dd67dd625e, byte-for-byte equal to the MDS peer's. One boot proves the RPC
- * command shim, the SQL shim (all 9 tables incl. MERGE/auto_increment translations), the crypto stack, and
- * vault/seedrandom identity derivation.
+ * IT READS THE NODE'S SEED. Until 0.18.140 it ran `docker exec` into a fixed container name; on the owner's machine
+ * that container is a wallet with real funds. It now runs ONLY against a node the caller names and says is theirs
+ * (scripts/test-node.cjs: AX_TEST_NODE_RPC, optionally AX_TEST_NODE_CONTAINER, and AX_TEST_NODE_I_OWN_THIS=yes).
+ * With nothing named it refuses with exit code 1: the live check is its whole purpose.
  *
- * Run: node scripts/atomix-boot-gate.js   (exits 0 on pass; read-mostly — boot registers the covenant script
- * [idempotent] and reads the seed; no funds move, no maker is configured.)
+ * Optional: AX_TEST_NODE_EXPECT_ETH=0x… — if another AtomiX build runs on the SAME node, both derive their identity
+ * from the same seed, so this engine must derive that build's Ethereum address byte for byte.
+ *
+ * Run: AX_TEST_NODE_RPC=… AX_TEST_NODE_I_OWN_THIS=yes node scripts/atomix-boot-gate.js   (exits 0 on pass)
  */
-const { execFile } = require("child_process");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const { testNode, ENGINE_BOOT_SENDS, NAMES } = require("./test-node.cjs");
 
-const EXPECT_ETH = "0x7373cf1ff0677a59e9ec7d327c1de0dd67dd625e";
-
-function dockerRpc(cmd) {
-  return new Promise((resolve, reject) => {
-    const url = "http://127.0.0.1:9005/" + encodeURIComponent(cmd);
-    execFile("docker", ["exec", "minimega", "curl", "-s", "-m", "60", url],
-      { maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
-        if (err) return reject(err);
-        try { resolve(JSON.parse(stdout)); } catch (e) { reject(new Error("bad RPC JSON: " + String(stdout).slice(0, 120))); }
-      });
-  });
-}
+const EXPECT_ETH = String(process.env.AX_TEST_NODE_EXPECT_ETH || "").toLowerCase();
+const NODE = testNode(ENGINE_BOOT_SENDS.concat("No maker is configured and nothing is locked by this script."));
+if (!NODE) { console.error("S1 BOOT GATE NOT RUN: no test node was named. Set " + NAMES + ". Nothing was sent anywhere."); process.exit(1); }
 
 (async () => {
   const atomix = require("../main/atomix");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "atomix-gate-"));
   atomix._setDataDir(tmp);
-  atomix._setRunner(dockerRpc);
+  atomix._setRunner(NODE.run);
 
   await atomix.init();
   const deadline = Date.now() + 120000;
@@ -52,13 +44,14 @@ function dockerRpc(cmd) {
 
   let fail = false;
   if (!st.ready) { console.error("GATE FAIL: engine never booted"); fail = true; }
-  if (st.eth !== EXPECT_ETH) { console.error("GATE FAIL: derived ETH " + st.eth + " ≠ MDS peer " + EXPECT_ETH); fail = true; }
+  if (EXPECT_ETH && String(st.eth).toLowerCase() !== EXPECT_ETH) { console.error("GATE FAIL: derived ETH " + st.eth + " ≠ AX_TEST_NODE_EXPECT_ETH " + EXPECT_ETH); fail = true; }
+  if (!EXPECT_ETH) console.log("(AX_TEST_NODE_EXPECT_ETH not set: the derived address " + st.eth + " was not compared with another build's)");
   if (!fail) {
-    // fire one NEWBLOCK so a full engine poll (settle+maker+otc+market collector) runs once against mainnet
+    // fire one NEWBLOCK so a full engine poll (settle+maker+otc+market collector) runs once against the node
     atomix._fire("NEWBLOCK");
     await new Promise(r => setTimeout(r, 20000));
     console.log("post-poll log tail:", atomix.status().log.slice(-5).join(" | "));
-    console.log("✅ S1 BOOT GATE PASS — desktop engine live on a real mainnet node, identity byte-identical to the MDS peer");
+    console.log("✅ S1 BOOT GATE PASS — desktop engine live on " + NODE.where + (EXPECT_ETH ? ", identity byte-identical to the expected one" : ""));
   }
   atomix.stopLoop(); atomix.flush();
   process.exit(fail ? 1 : 0);
