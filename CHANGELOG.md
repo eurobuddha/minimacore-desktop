@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.82] — Receive: the phone's screen; Get Address no longer mints a key
+
+- **Receive no longer creates a key on every press.** The button ran the node's `newaddress`, which makes the node generate and store a new key each time it is pressed. It is now the phone's "Get Address" and runs `getaddress`: the node hands back one of the wallet's existing default addresses and creates nothing. Coins sent to addresses made earlier with the old button are unaffected: those keys stay in the wallet. Nothing else in the app used `newaddress` from this screen; address labels are keyed by the address shown and work as before.
+- The screen is the phone's: "Scan to receive", the QR code on its white card, the whole address beneath it, Copy, Get Address. The address is kept while the app runs, so coming back to Receive shows the same one until Get Address is pressed; it is dropped when the node stops or a seed is restored.
+- The desktop's "Label this address" field is kept, below the phone's layout.
+- A failed address read says so and shows no QR code; before, it showed the word "unavailable" as if it were an address, with a copy action on it.
+- `scripts/wallet-money-test.cjs` pins it: opening Receive and pressing Get Address issue `getaddress` only, and no code in the renderer issues `newaddress`.
+
 ## [0.18.81] — Wallet: token rows reorder
 
 - Token rows on the Wallet tab can be put in any order: drag a row, or focus it and press Alt+Up or Alt+Down (Up and Down alone walk the rows). Minima stays first. The order is saved on this computer and is replayed as the phone does it: tokens still held keep their saved place, a token received since goes to the end, and a token no longer held drops out.

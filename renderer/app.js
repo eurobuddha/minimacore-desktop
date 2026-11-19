@@ -680,7 +680,7 @@ const NO_FIGURE = "–";
 function resetWalletFigures() {
   el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown();
   el("faucetBody").innerHTML = "";
-  FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {};
+  FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {}; RECV_ADDR = null;
 }
 function waitHtml() { return nodeState === "stopped" ? `<div class="empty">The node is stopped.</div>` : `<div class="spin">Waiting for the node…</div>`; }
 function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
@@ -1447,25 +1447,38 @@ function splitDialog(tok, name) {
   };
 }
 
-// ---- Receive ---------------------------------------------------------------
+// ---- Receive (Pandamonium's ReceiveView) -----------------------------------
+// "Get Address" asks the node for one of the wallet's existing default addresses (`getaddress`), as the phone
+// does. It used to run `newaddress`, which made the node create and store a new key on every press.
+let RECV_ADDR = null;        // the address on show; kept while the app runs, as the phone keeps it between visits
 async function renderReceive() {
-  const addrEl = el("recvAddr");
-  if (!running) { addrEl.textContent = "waiting for node…"; return; }
+  el("recvCopy").onclick = () => { if (RECV_ADDR) copy(RECV_ADDR); };
+  el("recvGet").onclick = getRecvAddress;
+  if (!running) {
+    RECV_ADDR = null; drawQR(""); el("recvLabelBox").innerHTML = "";
+    el("recvAddr").textContent = nodeState === "stopped" ? "The node is stopped." : "Waiting for the node…";
+    return;
+  }
+  if (RECV_ADDR) setRecv(RECV_ADDR); else await getRecvAddress();
+}
+async function getRecvAddress() {
+  const btn = el("recvGet"); btn.disabled = true;
   const r = await tryCmd("getaddress");
-  setRecv((r && (r.miniaddress || r.address)) || "unavailable");
-  el("newAddrBtn").onclick = async () => { const n = await tryCmd("newaddress"); if (n) { setRecv(n.miniaddress || n.address); toast("New address ✓", "ok"); } };
+  btn.disabled = false;
+  const addr = r && (r.miniaddress || r.address);
+  if (addr) setRecv(addr);
+  else if (RECV_ADDR) toast("The node did not give an address. The one shown is still yours.", "err");
+  else el("recvAddr").textContent = "The address could not be read. Press Get Address to try again.";
 }
 function setRecv(addr) {
-  const addrEl = el("recvAddr");
-  addrEl.textContent = addr; addrEl.onclick = () => copy(addr);
+  RECV_ADDR = addr;
+  el("recvAddr").textContent = addr;
   drawQR(addr);
   renderRecvLabel(addr);
 }
+// The desktop's own addition, under the phone's layout: a name for this address, shown in History and its exports.
 function renderRecvLabel(addr) {
-  const btn = el("newAddrBtn");
-  let box = el("recvLabelBox");
-  if (!box) { box = document.createElement("div"); box.id = "recvLabelBox"; box.style.marginTop = "10px"; btn.parentNode.insertBefore(box, btn); }
-  box.innerHTML = `<div class="field__label">Label this address (optional)</div>
+  el("recvLabelBox").innerHTML = `<label class="field__label" for="recvLabelIn">Label this address (optional)</label>
     <div class="seg"><input class="field__input" id="recvLabelIn" placeholder="e.g. Savings" value="${esc(labelFor(addr))}" />
       <button class="btn btn--outline btn--sm" id="recvLabelSave">Save</button></div>`;
   el("recvLabelSave").onclick = async () => {
@@ -1479,7 +1492,7 @@ function renderRecvLabel(addr) {
 function drawQR(text) {
   const host = el("qr"); host.innerHTML = "";
   if (!text || text.indexOf("0x") === 0 && text.length < 5 || typeof qrcode === "undefined") return;
-  try { const qr = qrcode(0, "M"); qr.addData(text); qr.make(); host.innerHTML = qr.createImgTag(5, 6); }
+  try { const qr = qrcode(0, "M"); qr.addData(text); qr.make(); host.innerHTML = qr.createImgTag(6, 24); host.querySelector("img").alt = "Receive QR code"; }
   catch (e) { /* address too long for one QR — the copyable text still works */ }
 }
 

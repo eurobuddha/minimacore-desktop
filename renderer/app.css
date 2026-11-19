@@ -2,8 +2,6 @@
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 
-.qrbox { display: flex; justify-content: center; padding: 10px 0 14px; }
-.qrbox img { width: 200px; height: 200px; image-rendering: pixelated; border-radius: 8px; background: #fff; padding: 8px; }
 
 .logbox { max-height: 240px; overflow-y: auto; font-family: var(--mono); font-size: 11px;
   color: var(--dim); white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; }
@@ -38,9 +36,9 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 
 /* Copyable address / seed — never overflow */
 .addrbox { border-radius: 10px; }
-#recvAddr, #setAddr, #setSeed { font-family: var(--mono); font-size: 13px; color: var(--accent);
+#setAddr, #setSeed { font-family: var(--mono); font-size: 13px; color: var(--accent);
   word-break: break-all; overflow-wrap: anywhere; cursor: pointer; line-height: 1.5; }
-#recvAddr:hover, #setAddr:hover { border-color: var(--accent); }
+#setAddr:hover { border-color: var(--accent); }
 
 /* Terminal + Logs — fill the available height */
 #view-terminal.view--active, #view-logs.view--active { display: flex; flex-direction: column; height: 100%; }
@@ -173,7 +171,7 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 
 
 /* Identifiers, hashes and node output stay monospace (the phone's MonoBlock); everything else is Manrope. */
-.tokd-id, .hist-dim, .logbox, .termout, .logsout, .addrbox__addr, #recvAddr, #setAddr, #setSeed { font-family: var(--mono); }
+.tokd-id, .hist-dim, .logbox, .termout, .logsout, .addrbox__addr, #setAddr, #setSeed { font-family: var(--mono); }
 
 /* KV rows / fields / chips / inputs — hairline + orange focus */
 .field__input { border-radius: var(--radius); }
@@ -192,7 +190,7 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 
 
 /* Address / seed — orange mono */
-#recvAddr, #setAddr, #setSeed, .addrbox__addr { color: var(--accent); }
+#setAddr, #setSeed, .addrbox__addr { color: var(--accent); }
 
 
 /* Empty / loading — outline mark, slowly turning */

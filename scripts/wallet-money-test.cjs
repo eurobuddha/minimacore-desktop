@@ -23,7 +23,7 @@ function source(name) {
 }
 const CORE = ["validAddr", "validAmt", "validTok", "cmd", "tryCmd", "esc", "short", "absCmp", "consolidateToken"];
 // The names of the screen functions, in one place: they move when a screen is rebuilt, the checks below do not.
-const SCREEN = ["sendForm", "splitDialog", "renderReceive", "setRecv", "renderRecvLabel", "drawQR", "labelFor", "summaryAmount"];
+const SCREEN = ["sendForm", "splitDialog", "renderReceive", "getRecvAddress", "setRecv", "renderRecvLabel", "drawQR", "labelFor", "summaryAmount"];
 
 function harness(opts) {
   opts = opts || {};
@@ -52,7 +52,7 @@ function harness(opts) {
     qrcode: undefined
   };
   const names = CORE.concat(SCREEN.filter(n => new RegExp("\\n(?:async )?function " + n + "\\b").test(app)));
-  const prelude = 'const MINIMA = "0x00"; let SEND_TOKENS = TOKENS; let SEND_PRESELECT = null; let running = true; let CFG = { labels: {} }; let RECV_ADDR = null;\n' +
+  const prelude = 'const MINIMA = "0x00"; let SEND_TOKENS = TOKENS; let SEND_PRESELECT = null; let running = true; let CFG = { labels: {} }; let RECV_ADDR = null; let nodeState = "running";\n' +
     "function tokenOptions() { return ''; }\n";
   const fns = new Function(...Object.keys(env), prelude + names.map(source).join("\n") + "; return { " + names.join(", ") + " };")(...Object.values(env));
   const h = { log, toasts, els, el, fns, asked: [], cmds: () => log.filter(l => l.startsWith("cmd:")).map(l => l.slice(4)) };
@@ -182,4 +182,27 @@ test("token order: Minima pinned first, the saved order replayed for tokens stil
   assert.deepEqual(tokenOrder("0xBB,0x00,0xBB,0xGONE", ["0x00", "0xAA", "0xBB"]), ["0x00", "0xBB", "0xAA"], "Minima cannot be moved; duplicates and tokens no longer held are ignored");
   assert.deepEqual(tokenOrder("0xBB", ["0xAA", "0xBB"]), ["0xBB", "0xAA"], "a wallet with no Minima row");
   assert.ok(/store\("walletOrder"/.test(app) && /dragstart/.test(app) && /if \(WAL_DRAG\) return;/.test(app), "saved; the 15 s rebuild waits for a drag to end");
+});
+
+test("Receive: Get Address reads a default address and never makes the node mint a key", async () => {
+  const h = harness();
+  await h.fns.renderReceive();
+  assert.deepEqual(h.cmds(), ["getaddress"], "opening Receive reads the address once");
+  assert.equal(h.el("recvAddr").textContent, OWN, "the whole address is shown");
+  await h.el("recvGet").onclick(); await h.el("recvGet").onclick(); await h.el("recvGet").onclick();
+  assert.deepEqual(h.cmds(), ["getaddress", "getaddress", "getaddress", "getaddress"], "each press is a read");
+  await h.fns.renderReceive();
+  assert.equal(h.cmds().length, 4, "coming back to the screen shows the address already in hand");
+  assert.ok(!h.cmds().some(c => /newaddress/i.test(c)));
+  const wallet = app.slice(app.indexOf("// ---- Wallet tab"), app.indexOf("// ---- shared dialogs"));
+  assert.ok(!/["`]newaddress/.test(app.replace(/\/\/[^\n]*/g, "")), "nothing in the renderer issues newaddress");
+  assert.ok(wallet.length > 1000);
+  // the label saved from Receive is still keyed by the address on show
+  h.el("recvLabelIn").value = "Savings";
+  let saved = null; h.fns.renderRecvLabel(OWN); h.el("recvLabelIn").value = "Savings";
+  await h.el("recvLabelSave").onclick();
+  assert.ok(h.toasts.some(t => t === "ok:Label saved ✓"));
+  const failing = harness({ fail: ["getaddress"] });
+  await failing.fns.renderReceive();
+  assert.ok(/could not be read/.test(failing.el("recvAddr").textContent), "a failed read says so and shows no address");
 });

@@ -79,11 +79,13 @@
       </section>
 
       <section class="view" id="view-receive">
-        <div class="card">
-          <div class="view__desc">Your address. Share it to receive MINIMA or tokens.</div>
-          <div id="qr" class="qrbox"></div>
-          <div class="addrbox" id="recvAddr" title="Click to copy">…</div>
-          <button class="btn btn--outline btn--full" id="newAddrBtn">New address</button>
+        <div class="recv">
+          <div class="eyebrow">Scan to receive</div>
+          <div class="recv__qr" id="qr"></div>
+          <div class="recv__addr" id="recvAddr"></div>
+          <button class="btn btn--outline" id="recvCopy">Copy</button>
+          <button class="btn btn--outline" id="recvGet">Get Address</button>
+          <div class="recv__label" id="recvLabelBox"></div>
         </div>
       </section>
 

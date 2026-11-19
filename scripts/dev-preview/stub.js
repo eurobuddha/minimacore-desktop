@@ -47,7 +47,6 @@
       return set.filter(x => !/sendable:true/.test(c) || !x._locked).map(x => { const o = Object.assign({}, x); delete o._locked; return o; });
     },
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
-    newaddress: () => ({ address: PK("D2"), miniaddress: ADDR }),
     keys: () => keys,
     scripts: () => [],
     peers: () => ({ peerslist: "203.0.113.24:9001,198.51.100.77:9001" }),

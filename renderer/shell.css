@@ -199,6 +199,19 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #balList .bal-breakdown { margin-top: 3px; font: 400 11px/15px var(--sans); color: var(--dim2); white-space: pre-wrap; }
 
+/* ---------------------------------------------------------------- Receive (view_wallet_receive) */
+#view-receive { padding: 24px; }
+.recv { display: flex; flex-direction: column; align-items: center; }
+.recv > .eyebrow { margin-bottom: 18px; line-height: 16px; }
+.recv__qr { width: 276px; height: 276px; padding: 18px; border-radius: 20px; background: #FFFFFF; }
+.recv__qr img { display: block; width: 240px; height: 240px; image-rendering: pixelated; }
+.recv__addr { align-self: stretch; margin-top: 22px; text-align: center; font: 400 13px/1.2 var(--mono); color: var(--text);
+  overflow-wrap: anywhere; word-break: break-all; user-select: text; min-height: 16px; }
+.recv > .btn { min-height: 48px; padding: 0 24px; font-size: 15px; font-weight: 400; margin-top: 8px; }
+.recv > #recvCopy { margin-top: 20px; }
+.recv__label { width: 100%; max-width: 360px; margin-top: 28px; }
+.recv__label:empty { display: none; }
+
 /* ---------------------------------------------------------------- dialogs (the phone's AlertDialog: title, body, text buttons) */
 .overlay--dlg { padding: 24px; }
 .dlg { width: 100%; max-width: 560px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden;
