@@ -54,7 +54,7 @@ let held = false, heldLoop = false, busy = 0;
 const HELD = "AtomiX is stopped while the wallet is being replaced. It starts again by itself.";
 let runner = (cmd, opts) => {   // opts.signal: see makerStep
   const config = require("./config"), node = require("./node-manager");
-  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, opts);
+  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, Object.assign({ owner: "atomix" }, opts));   // owner: main/reserve.js
 };
 const LOG_RING = [];          // last engine log lines for the renderer/status
 const SCAN_EVERY_MS = 12000;

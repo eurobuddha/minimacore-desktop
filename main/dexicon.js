@@ -184,7 +184,7 @@ function makeHost(opts = {}) {
   // dropped is rejected there and never reaches the node (0.18.107)
   let runner = opts.runner || ((cmd, o) => {
     const config = require("./config"), node = require("./node-manager");
-    return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, o);
+    return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, Object.assign({ owner: "dexicon" }, o));   // owner: main/reserve.js
   });
   let abort = new AbortController();   // one per engine epoch: aborted by drop() (stop, invalidate, a foreign store)
   const LOG = [];
@@ -349,6 +349,7 @@ function makeHost(opts = {}) {
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
     frameTx = new Map(); budget = null; ownCache = null;
     busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
+    if (!opts.runner) require("./reserve").releaseOwner("dexicon");   // its unfinished builds died with it; posted coins and live orders' coins stay held
   }
 
   // NEWBLOCK for the RESTING engine (the node pushes it to a MiniDapp; here the timer looks for a new tip)

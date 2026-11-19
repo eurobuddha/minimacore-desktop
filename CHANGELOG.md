@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.143] — One coin reservation under every signer: a coin named for one transaction is refused to the others
+
+- **Found**: AtomiX, PandaPools, the Dexicon engine and the wallet's own commands each chose coins from the one wallet without knowing of each other. The signing queue (0.18.107) keeps their signatures apart in time, not their coins: one engine chose a coin and another chose the same coin before the first had posted. The loser got a rejected transaction, a fill reported "taken" that never mined, or a swap whose lock was dropped.
+- **`main/reserve.js`, called from `rpcCall`** (`main/rpc.js`): the one function every node command of every caller passes, inside the signing queue. Each engine now names itself on its commands (`owner`: `atomix`, `pandapools`, `dexicon`, `casino`; everything else is `wallet`). Design: `docs/COIN_RESERVATION.md`.
+- **A coin named by `txninput` belongs to that transaction's owner.** Another owner's `txninput` of the same coin is refused before the node sees it, in the node's own failure shape (`status:false`, "Coin 0x… is held for an AtomiX swap. Nothing was signed."), so each engine's own path deletes its transaction; that `txndelete` frees the transaction's other coins. Engines are not edited and sign exactly what they signed before.
+- **Released, always**: by `txndelete` of a transaction that was not posted; when the node refuses the input; when the node rejects the `txnpost` (`status:false`, not pending); when the coin is spent; when a posted transaction is known dead (12 blocks and 10 minutes after the post the coin is still unspent and nothing in the mempool spends it); after 15 minutes for a build never posted or deleted; when the owner's engine stops (its builds); when the wallet is replaced (everything). A `txnpost` that answers ok is not a confirmation: the coin stays held until one of these.
+- **A sweep once a minute** asks the node about the reserved coins only, one coin per read and at most 25 reads a turn, so a wallet of thousands of coins is never listed. A coin spent by a phone or a MiniDapp on the same node leaves the registry there.
+- **Kept across a restart**: `coin-reservations-<wallet id>.json` in the app's data folder, written (temp file, fsync, rename) before the reserving command is forwarded. The wallet id is the SHA-256 of a seed the node derives for this alone, so another wallet opens another file. On a wallet replacement the file is moved aside under a dated name, never deleted.
+- **A claim or a refund is never held up.** Only a plain wallet coin is ever refused: before a refusal the node is asked what the coin is, and an HTLC coin, a pool reserve or a bet is always let through, whoever named it first. If the node cannot say, AtomiX and P2P Chance are let through.
+- Not yet in this version (next ones): `send`, `consolidate`, the coins of live Dexicon orders, and the Wallet's display.
+
 ## [0.18.142] — Quit warns when work is in flight, from the same source as Shutdown
 
 - **Found**: Shutdown warned about swaps and trades in flight; Quit did not. Quit in the tray or the menu, Cmd-Q, or closing the window on Windows and Linux stopped the node with no question, whatever was running.

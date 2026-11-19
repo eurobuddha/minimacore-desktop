@@ -12,6 +12,7 @@
  */
 const http = require("http");
 const { createNodeRunner } = require("./noderun");
+const reserve = require("./reserve");
 
 const GET_MAX = 6000;          // command length above which we switch to POST (URL-length safety)
 const READ_TIMEOUT_MS = 30_000;
@@ -83,11 +84,18 @@ const runners = new Map();
 const lost = (e) => !(e && (e.code === "ECONNREFUSED" || /RPC authentication failed/.test(e.message)));
 
 /** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects).
- *  opts.signal (AbortSignal): a SIGNING command still queued when it aborts is rejected and never reaches the node. */
+ *  opts.signal (AbortSignal): a SIGNING command still queued when it aborts is rejected and never reaches the node.
+ *  opts.owner: who asks ("atomix", "pandapools", "dexicon", "casino"; none = the wallet), for the shared coin
+ *  reservation (main/reserve.js, docs/COIN_RESERVATION.md). Its guard runs here because this is the one function every
+ *  node command of every caller passes, and INSIDE the signing queue: a command is checked against the reservations
+ *  when it is really sent, not when it was queued. A coin another owner holds is refused there, before the node. */
 function rpcCall(port, secret, command, opts) {
   let r = runners.get(port);
   if (!r) { r = createNodeRunner(null, { lost }); runners.set(port, r); }
-  return r.run(command, (c) => rawCall(port, secret, c), opts);
+  const raw = (c) => rawCall(port, secret, c);
+  return r.run(command, (c) => reserve.guard(opts && opts.owner, c, raw, opts), opts);
 }
+/** One read for the reservation's own upkeep (its sweep, its wallet id): never queued, never guarded. */
+const rpcRead = (port, secret, command) => rawCall(port, secret, command);
 
-module.exports = { rpcCall };
+module.exports = { rpcCall, rpcRead };

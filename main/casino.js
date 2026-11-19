@@ -60,7 +60,7 @@ const LOG_RING = [];
 
 let runner = (cmd) => {
   const config = require("./config"), node = require("./node-manager");
-  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, { owner: "casino" });   // owner: main/reserve.js
 };
 
 function log(line) {

@@ -46,7 +46,7 @@ let dataDir = null;
 let contextEpoch=0, quarantineRequired=false;
 
 // swappable node-command runner (overridable in tests via _setRunner) — mirrors mail.js:42-45.
-let runner = (cmd, opts) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd, opts);   // opts.signal: see poolAbort
+let runner = (cmd, opts) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd, Object.assign({ owner: "pandapools" }, opts));   // opts.signal: see poolAbort; owner: main/reserve.js
 // One per contextEpoch (0.18.107): invalidate() aborts it, so a signing command of the old engine still queued in
 // main/noderun.js is never sent. The queue reads only `.aborted`, so this is that one field and not an AbortController
 // (this file is also run inside a bare vm context by its tests, where that global does not exist).

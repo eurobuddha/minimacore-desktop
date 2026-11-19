@@ -34,6 +34,25 @@ const casino = require("./casino");
 const vestr = require("./vestr");
 const webwallet = require("./webwallet");
 const parlons = require("./parlons");
+const reserve = require("./reserve");   // the shared coin reservation (docs/COIN_RESERVATION.md); main/rpc.js calls its guard
+
+// THE COIN RESERVATION FOLLOWS THE NODE. Registered before every engine's own status listener, so its file is being
+// opened before an engine sends its first command (guard waits for the open). Opened per wallet when the node runs,
+// swept once a minute against the node's real coins, closed when the node stops (the builds died with it).
+reserve.onLog = (line) => node.log("[coins] " + line);
+let reserveSweep = null, reserveSweeping = false;
+const reserveRead = (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c);
+node.on("status", (s) => {
+  if (s.state === "running" && !reserveSweep) {
+    reserve.open(app.getPath("userData"), reserveRead);
+    reserveSweep = setInterval(() => {
+      if (reserveSweeping || node.state !== "running") return;
+      reserveSweeping = true;
+      reserve.sweep(reserveRead).catch(() => {}).then(() => { reserveSweeping = false; });
+    }, 60000);
+    if (reserveSweep.unref) reserveSweep.unref();
+  } else if (s.state !== "running" && reserveSweep) { clearInterval(reserveSweep); reserveSweep = null; reserve.close(); }
+});
 
 let win = null;
 let tray = null;
@@ -224,6 +243,7 @@ node.onWalletReplaced = async () => {
   await each("AtomiX", () => atomix.invalidate());
   await each("Dexicon", () => dexicon.invalidate({ hold: true }));   // it starts with the node, on the new wallet
   await each("P2P Chance", () => casino.invalidate());
+  await each("coin reservations", () => reserve.invalidate());   // every reservation belongs to the old wallet's coins
   node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon and P2P Chance were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
   if (failed.length) throw new Error(failed.join("; "));
 };

@@ -175,3 +175,37 @@ test('rpcCall: a queued signer whose caller gave up never reaches the node', asy
     assert.deepEqual(seen, ['send amount:1 address:0x00', 'send amount:3 address:0x00'], 'the abandoned send was never sent; the queue moved on at once');
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 });
+
+test('rpcCall: a coin one owner named for a transaction is refused to another owner before the node (main/reserve.js)', async () => {
+  const http = require('node:http');
+  const seen = [], COIN = '0x' + 'C1'.repeat(32);
+  const server = http.createServer((req, res) => {
+    const cmd = decodeURIComponent(req.url.slice(1)); seen.push(cmd);
+    res.end(JSON.stringify(/^coins /.test(cmd) ? { status: true, response: [{ coinid: COIN, amount: '1', address: '0x' + 'AA'.repeat(32), tokenid: '0x00' }] } : { status: true, command: cmd }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    assert.equal((await rpcCall(port, 's', 'txninput id:ax1 coinid:' + COIN, { owner: 'atomix' })).status, true);
+    const refused = await rpcCall(port, 's', 'txninput id:pp1 coinid:' + COIN, { owner: 'pandapools' });
+    assert.equal(refused.status, false); assert.equal(refused.reserved, true);
+    assert.equal(refused.error, 'Coin ' + COIN + ' is held for an AtomiX swap. Nothing was signed.');
+    assert.equal((await rpcCall(port, 's', 'txninput id:w1 coinid:' + COIN)).reserved, true, 'a call that names no owner is the wallet');
+    assert.deepEqual(seen.filter(c => /^txninput/.test(c)), ['txninput id:ax1 coinid:' + COIN]);
+    await rpcCall(port, 's', 'txndelete id:ax1', { owner: 'atomix' });
+    assert.equal((await rpcCall(port, 's', 'txninput id:pp1 coinid:' + COIN, { owner: 'pandapools' })).status, true, 'released by the txndelete');
+    await rpcCall(port, 's', 'txndelete id:pp1', { owner: 'pandapools' });
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
+
+test('every engine names itself on its node commands, and the registry follows the node', () => {
+  const fs = require('node:fs'), read = (f) => fs.readFileSync(require('node:path').join(__dirname, '..', 'main', f), 'utf8');
+  for (const [f, owner] of [['atomix.js', 'atomix'], ['pandapools.js', 'pandapools'], ['dexicon.js', 'dexicon'], ['casino.js', 'casino']])
+    assert.match(read(f), new RegExp('rpcCall\\(node\\.rpcPort\\(\\), config\\.rpcSecret\\(\\), cmd, (?:Object\\.assign\\()?\\{ owner: "' + owner + '" \\}'), f);
+  const main = read('main.js');
+  assert.match(main, /reserve\.open\(app\.getPath\("userData"\), reserveRead\)/);
+  assert.match(main, /reserve\.close\(\)/);
+  assert.match(main, /await each\("coin reservations", \(\) => reserve\.invalidate\(\)\)/);
+  assert.ok(main.indexOf('reserve.open(') < main.indexOf('atomix.startLoop()'), 'opened before an engine starts');
+  assert.match(read('rpc.js'), /r\.run\(command, \(c\) => reserve\.guard\(opts && opts\.owner, c, raw, opts\), opts\)/);
+});
