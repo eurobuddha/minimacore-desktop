@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.137] — The wallet-restore gate: a store that cannot be opened, and this wallet's own pools (review, high)
+
+- **Found (a)**: a damaged `pandapools.sqlite` fails its integrity check on every start. Room ② then said "starting" for ever without the error, and the restore gate said "wait a moment and try again" for ever. AtomiX had the same dead end with `atomix.sqlite`.
+- **The error is carried and said.** `status()` of PandaPools and of AtomiX now gives why the last start failed. Rooms ② and ① show it in plain words with what to do: restart the app; if it stays, the file is damaged and can be set aside.
+- **Set the store aside and start empty** (a button on that message, after a question): the file is moved aside under a dated name, never deleted, and the engine starts with an empty store. Refused unless the engine's last start failed. For pools the next step is said: restore them from the backup file.
+- **The restore gate can be passed by a deliberate confirm**, as Dexicon's could since 0.18.110: when PandaPools or AtomiX could not open its store, or has still not started after two minutes, the gate names exactly what could not be checked and offers the way on. Known work (a swap in flight, a pool transaction still waiting, an order on the chain) still refuses. On a wallet replacement a pool store that could not be opened is moved aside too; AtomiX's store already was.
+- **Found (b)**: a live pool was neither refused nor warned of when a different wallet was restored. Its reserves would have stayed where only the old wallet's owner keys can withdraw them.
+- **The gate now lists this wallet's own pools that are not put away**, each with its whole address and its reserves, and the user must confirm: "These pools belong to the wallet you are replacing. Their funds can only be withdrawn by that wallet. Close them first, or make sure you have its 24 words and a pool backup."
+- **The same wallet restored again**: the app cannot tell beforehand which wallet a phrase or a backup file holds, so the warning is shown once and says so: if it is the same wallet, nothing changes for the pools (the wallet is compared before and after, since 0.18.116). A chain resync without a phrase or a file does not pass the gate at all.
+- Not done: the dated name still ends in "-legacy-keys-", the name used for a replaced wallet's stores, also for a store set aside because it is damaged.
+
 ## [0.18.136] — Dexicon ② Pools: Add liquidity reviews what is sent (review, high)
 
 - **Found**: the engine takes one figure for an Add, the MINIMA, and works the token side out itself from the pool's ratio when it posts; it refuses a zero MINIMA amount. The screen had two fields. With 100 and nothing, the review and the result said "100 MINIMA and 0 MxUSD" while the pool took the matching MxUSD as well. With nothing and 5, the user confirmed and was then told "enter an amount to add".

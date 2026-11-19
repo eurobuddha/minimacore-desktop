@@ -456,11 +456,19 @@
     if (off) out.push(`<div class="dx-card ax-alert" role="alert"><b class="ax-t14">Market offline</b><div class="ax-dim">${esc(off.replace(/^Market offline: y/, "Y"))}</div><button class="dx-btn ax-btn--s" data-axstart="1">Start the node</button></div>`);
     else if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and nothing can settle. ${esc(stoppedNote(S.swaps))}</div>`);
     if (halted()) out.push(haltHtml());
+    else if (!S.st.ready && S.st.error) out.push(`<div class="dx-state dx-state--error" role="alert">${esc(DexCore.storeError("AtomiX", "swap store", S.st.error, AX_AFTER))} <button class="dx-btn ax-btn--s" data-axaside="1"${DexCore.gate.on ? " disabled" : ""}>Set the store aside and start empty</button></div>`);
     else if (!S.st.ready) out.push(`<div class="dx-card ax-big"><b class="ax-t14">Setting up AtomiX…</b><div class="ax-dim">Preparing your Ethereum wallet and swap keys on this node, then reading the market. The first start takes a minute or two.</div></div>`);
     const l = S.st.ready ? launch(S.st.currency, S.swaps, makerLive(S.mc, S.book), S.st.otcOffer == null ? null : !!S.st.otcOffer || !!(S.otc && S.otc.deals && S.otc.deals.length)) : null;
     if (l) out.push(`<div class="ax-launch" role="status">${esc(l.text)}</div>`);
     if (S.said) out.push(`<div class="dx-state dx-state--${S.said.kind}" role="alert">${esc(S.said.text)}</div>`);
     return out.join("");
+  }
+  const AX_AFTER = "A swap that was unfinished is recorded in that file, with what claims or refunds it: keep the file, and this app will not finish that swap from the empty store.";
+  /** The store that cannot be opened is moved aside (main: mcd:engineSetAside, refused unless the engine's last start failed). */
+  async function setAside() {
+    if (!await D.dialog("Set the swap store aside?", DexCore.SET_ASIDE("AtomiX", AX_AFTER), "Set it aside")) return;
+    const r = await api().engineSetAside("atomix").then((kept) => ({ kept }), fail);
+    say(r.err ? "The swap store was not set aside: " + r.err + ". Nothing was changed." : "The swap store was set aside" + (r.kept ? " and is kept as " + r.kept : "") + ". AtomiX is starting with an empty store.", r.err ? "error" : "note");
   }
   function haltHtml() {
     const h = haltCard(S.st.halt, S.swaps);
@@ -792,6 +800,7 @@
   async function click0(ds) {
     if (ds.axwhy) { pref("dexicon_fold_" + ds.axwhy, whyOpen(ds.axwhy) ? "0" : "1"); return paint(); }
     if (ds.axgo) return D.go(ds.axgo);
+    if (ds.axaside) return one(setAside);
     if (ds.axslip) { if (ds.axslip === "custom") return customSlip(); S.slip = Number(ds.axslip); pref("dexicon_ax_slip", ds.axslip); paint(); return preview(); }
     if (ds.axcheck) return checkNow(ds.axcheck);
     if (ds.axmk) return marketAct(ds.axmk);

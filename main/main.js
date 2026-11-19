@@ -200,7 +200,8 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 });
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
 const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  casino: config.load().casinoEnabled ? casino.open() : null, dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
+  casino: config.load().casinoEnabled ? casino.open() : null, poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
+  dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
 // MAIN process while the node is stopped and before it is started again, so it does not depend on the window being
 // open, and no engine ticks on the new wallet with the old wallet's records. Every identity-bound store is set aside
@@ -607,13 +608,23 @@ ipcMain.handle("mcd:dxCommand", async (e, a) => {
 // damaged): the screen has shown restore.DEX_SKIP_WARNING and the user chose to go on. Checked again here; then the
 // Dexicon check is left out for two minutes. Everything else that blocks a replacement still does.
 let dexSkipUntil = 0;
-ipcMain.handle("mcd:dxSkipWarning", () => restore.DEX_SKIP_WARNING);
+ipcMain.handle("mcd:dxSkipWarning", async () => restore.skipWarning(await walletWork(false)));   // 0.18.137: what stands in the way NOW, word for word (Dexicon alone: its own text)
 ipcMain.handle("mcd:dxSkipCheck", async () => {
   const list = await walletWork(false);
   if (!restore.onlyDexiconUnchecked(list)) throw new Error(list.length ? restore.activeWorkProblem(list) : "Dexicon can be checked now. Try the restore again.");
   dexSkipUntil = Date.now() + 120000;
-  node.log("[app] the user chose to replace the wallet WITHOUT the Dexicon check: " + list.join(" | "));
+  node.log("[app] the user chose to replace the wallet after this warning: " + list.join(" | "));
   return true;
+});
+// A store that cannot be opened (0.18.137): the room shows the error, and the user may have the file moved aside
+// under a dated name (never deleted) so the engine starts on an empty one. Only for an engine whose last start failed.
+ipcMain.handle("mcd:engineSetAside", (_e, which) => {
+  const eng = which === "atomix" ? atomix : which === "pandapools" ? pandapools : null;
+  if (!eng) throw new Error("No such engine.");
+  const kept = eng.setAsideStore();
+  node.log("[app] the " + which + " store could not be opened and was set aside by the user: " + (kept || "(there was no file)"));
+  if (node.state === "running") eng.startLoop();
+  return kept;
 });
 ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));   // for the Shutdown warning: takes awaiting an answer (null: could not be read)
 // No mcd:dxInvalidate: a window cannot move the store aside, and a wallet replacement does not wait for a window

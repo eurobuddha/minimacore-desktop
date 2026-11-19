@@ -82,17 +82,42 @@ function moveAside(file, now) {
 const DEX_STUCK_MS = 120000;
 /** Said with a Dexicon check that cannot be made. The screens offer the way on when this is all that is left. */
 const DEX_SKIP_HINT = "If it stays like this, you can go on without this check.";
+/** Said with a warning that is not a refusal: the user reads it and may go on (0.18.137: this wallet's own live pools). */
+const CONFIRM_HINT = "You can go on after confirming this.";
+/** What is said of this wallet's own pools before another wallet is put in their place. */
+const OWN_POOLS_WARNING = "These pools belong to the wallet you are replacing. Their funds can only be withdrawn by that wallet. Close them first, or make sure you have its 24 words and a pool backup.";
+const SAME_WALLET_NOTE = "The app cannot tell beforehand which wallet you are restoring. If it is this same wallet (the same 24 words), nothing changes for your pools: the wallet is compared before and after, and everything is kept in place.";
 function activeWorkList(r) {
   const out = [], ax = r && r.atomix, plural = (n, one) => n + " " + one + (n === 1 ? "" : "s");
+  // 0.18.137: a check that can NEVER be made must not block a restore for ever, for AtomiX and PandaPools as for
+  // Dexicon (0.18.110). A store that could not be opened (a damaged file fails on every start), or an engine still not
+  // started after two minutes, is named exactly, and the user may then go on by a deliberate confirm (r.skipDexicon,
+  // which since 0.18.137 leaves out every line that ends in a hint, not only Dexicon's). The store is moved aside, never deleted.
+  const skip = !!(r && r.skipDexicon), mins = (ms) => Math.floor(Number(ms) / 60000);
   if (!ax) out.push("AtomiX could not be asked whether a swap is in flight. Wait a moment and try again.");
-  else if (!ax.ready) { if (ax.hasStore) out.push("AtomiX has not finished starting, so its swaps could not be checked. Wait a moment and try again."); }
+  else if (!ax.ready) {
+    if (ax.hasStore && ax.error) { if (!skip) out.push("AtomiX could not open its swap store (" + ax.error + "), so whether a swap is in flight, or a maker order or an OTC deal is open, cannot be checked. " + DEX_SKIP_HINT); }
+    else if (ax.hasStore && Number(ax.waitedMs) >= DEX_STUCK_MS) { if (!skip) out.push("AtomiX has not finished starting after " + mins(ax.waitedMs) + " minutes, so whether a swap is in flight, or a maker order or an OTC deal is open, cannot be checked. " + DEX_SKIP_HINT); }
+    else if (ax.hasStore) out.push("AtomiX has not finished starting, so its swaps could not be checked. Wait a moment and try again.");
+  }
   else {
     if (ax.swaps && ax.swaps.length) out.push(plural(ax.swaps.length, "AtomiX swap") + " still in flight (the app holds what is needed to claim or refund " + (ax.swaps.length === 1 ? "it" : "them") + "): " + ax.swaps.join(", "));
     if (ax.maker) out.push("A live AtomiX maker order. Withdraw it in AtomiX first.");
     if (ax.otcOffer) out.push("A live AtomiX OTC offer. Withdraw it first.");
     if (ax.otcDeals) out.push(plural(ax.otcDeals, "AtomiX OTC deal") + " still open.");
   }
-  if (r && r.pools === null) out.push("PandaPools could not be asked whether a pool transaction is still waiting. Wait a moment and try again.");
+  const ps = (r && r.poolsState) || {};
+  if (r && r.pools === null) {
+    const what = ", so whether a pool transaction is still waiting, and which pools this wallet owns, cannot be checked. ";
+    if (ps.error) { if (!skip) out.push("PandaPools could not open its pool store (" + ps.error + ")" + what + DEX_SKIP_HINT); }
+    else if (Number(ps.waitedMs) >= DEX_STUCK_MS) { if (!skip) out.push("PandaPools has not finished starting after " + mins(ps.waitedMs) + " minutes" + what + DEX_SKIP_HINT); }
+    else out.push("PandaPools could not be asked whether a pool transaction is still waiting. Wait a moment and try again.");
+  }
+  // This wallet's own pools that are not put away (main/pandapools.js ownPools): not a refusal, a warning to confirm.
+  const own = (r && r.ownPools) || [];
+  if (own.length && !skip) out.push(plural(own.length, "PandaPools pool") + " of this wallet " + (own.length === 1 ? "is" : "are") + " still open: "
+    + own.map(p => p.address + " (" + (p.reserveM == null ? "its reserves are not visible to this node just now" : p.reserveM + " MINIMA and " + p.reserveT + " " + p.token) + ")").join(", ")
+    + ". " + OWN_POOLS_WARNING + " " + SAME_WALLET_NOTE + " " + CONFIRM_HINT);
   const waiting = ((r && r.pools) || []).filter(x => x && x.txpowid && x.confirmed === false && !x.failed);
   if (waiting.length) out.push(plural(waiting.length, "PandaPools transaction") + " still waiting to confirm: " + waiting.map(x => x.txpowid).join(", "));
   // Dexicon (main/dexicon.js activeWork). undefined = not asked (the engine is not part of this caller); null = it could not be asked.
@@ -100,7 +125,6 @@ function activeWorkList(r) {
   // A Dexicon that cannot be checked must not block a restore for ever (0.18.110): a damaged store or an engine that
   // never becomes ready is named, and after two minutes of it (or at once when it could not be asked at all) the
   // user may go on (r.skipDexicon: main.js, after the screen's warning). The store is moved aside as always.
-  const skip = !!(r && r.skipDexicon);
   if (dx === null) { if (!skip) out.push("Dexicon could not be asked whether an order or a trade is still open; its store may be damaged. " + DEX_SKIP_HINT); }
   else if (dx && !dx.ready) {
     if (dx.hasStore && !skip) out.push(Number(dx.waitedMs) >= DEX_STUCK_MS ? "Dexicon has not finished starting after " + Math.floor(dx.waitedMs / 60000) + " minutes, so its on-chain orders and its trades waiting for an answer cannot be checked. " + DEX_SKIP_HINT
@@ -115,8 +139,17 @@ function activeWorkList(r) {
   if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
   return out;
 }
-/** Is the Dexicon check that cannot be made the ONLY thing in the way? (Then, and only then, it may be skipped.) */
-function onlyDexiconUnchecked(list) { return !!list && list.length > 0 && list.every(x => String(x).endsWith(DEX_SKIP_HINT)); }
+/** Are checks that cannot be made (and, since 0.18.137, warnings to confirm) the ONLY things in the way? Then, and only
+ *  then, the user may go on. The name is from 0.18.110, when Dexicon's was the only such check. */
+function onlyDexiconUnchecked(list) { return !!list && list.length > 0 && list.every(x => String(x).endsWith(DEX_SKIP_HINT) || String(x).endsWith(CONFIRM_HINT)); }
+/** What the user is told before going on: Dexicon's own text when it is the only thing; otherwise every line that
+ *  stands in the way, word for word, then what going on means. */
+function skipWarning(list) {
+  list = list || [];
+  if (list.length && list.every(x => /^Dexicon /.test(x))) return DEX_SKIP_WARNING;
+  return list.map(x => String(x).replace(" " + DEX_SKIP_HINT, "").replace(" " + CONFIRM_HINT, "")).join("\n\n")
+    + "\n\nIf you go on:\n• A store that could not be opened or checked is kept beside the new one under a dated name. Nothing is deleted.\n• Whatever needs THIS wallet's keys (a pool's reserves, a swap to claim or refund, an order on the chain) can afterwards be reached only by restoring this wallet again.\n\nGo on only if you have this wallet's 24 words.";
+}
 /** What the user is told before going on without the Dexicon check. */
 const DEX_SKIP_WARNING = "Dexicon cannot be checked, so the app cannot see whether this wallet still has Dexicon orders on the chain or a trade that was sent and not yet answered.\n\nIf you go on:\n• The Dexicon store is kept beside the new one under a dated name. Nothing is deleted.\n• A Dexicon order of this wallet that is still on the chain can then be cancelled or collected only by restoring this wallet again.\n• A trade that was sent and not answered can no longer be voided by this app.\n\nGo on only if Dexicon stays like this after the app was restarted.";
 function activeWorkProblem(list) {
@@ -148,4 +181,4 @@ async function restoreBackup(o, d) {
 }
 
 module.exports = { isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
-  onlyDexiconUnchecked, DEX_SKIP_HINT, DEX_SKIP_WARNING, DEX_STUCK_MS };
+  onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };

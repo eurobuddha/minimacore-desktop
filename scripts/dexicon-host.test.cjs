@@ -1006,7 +1006,7 @@ test("a Dexicon that cannot be checked does not block a wallet restore for ever:
   // main.js: the skip is checked again in the main process, lasts two minutes, and is logged
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
   assert.ok(main.includes("if (!restore.onlyDexiconUnchecked(list)) throw new Error(") && main.includes("dexSkipUntil = Date.now() + 120000;") && main.includes("const list = await walletWork(false);"));
-  assert.ok(/async function offerWithoutDexicon\(e\) \{[\s\S]*?showConfirm\("Go on without checking Dexicon\?", warning, "Go on without the check", true\)[\s\S]*?await api\.dxSkipCheck\(\)/.test(app), "the screen warns first, then asks main");
+  assert.ok(/async function offerWithoutDexicon\(e\) \{[\s\S]*?showConfirm\(dexOnly \? "Go on without checking Dexicon\?" : [^\n]*?, warning, dexOnly \? "Go on without the check" : [^\n]*?, true\)[\s\S]*?await api\.dxSkipCheck\(\)/.test(app), "the screen warns first, then asks main");
 });
 
 test("the engine's vm is not a confinement, and the loader says so", async () => {

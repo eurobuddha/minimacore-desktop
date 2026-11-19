@@ -40,6 +40,12 @@
    *  while one is being reviewed, signed or sent, a second click, a held Enter or a button of another room does
    *  nothing. redraw (optional) is called when the gate closes and when it opens again. */
   const gate = { on: false };
+  /**
+   * An engine that cannot start because its store file could not be opened (0.18.137; status().error). Before this the
+   * room said "starting" for ever. In plain words: what happened, what it means, what to do. after = what follows a set-aside.
+   */
+  const storeError = (name, what, error, after) => name + " cannot start: its " + what + " could not be opened (" + String(error).replace(/[.\s]+$/, "") + "). Nothing on the chain is changed by this, but nothing can be read or sent here until it starts. What to do: quit the app and open it again. If this message is still here after that, the file is damaged: set it aside (it is kept under a dated name, never deleted) and " + name + " starts with an empty store. " + after;
+  const SET_ASIDE = (name, after) => "The store file of " + name + " could not be opened. It will be moved aside under a dated name in the app's data folder. Nothing is deleted.\n\n" + name + " then starts with an empty store. " + after + "\n\nDo this only if the message stayed after the app was restarted.";
   async function money(fn, redraw) {
     if (gate.on) return undefined;
     gate.on = true; if (redraw) redraw();
@@ -369,5 +375,5 @@
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
     funds, freeFor, crossing, chainCrosses, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
-    ROOMS, SHARED, TAB_LABEL, gate, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
+    ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

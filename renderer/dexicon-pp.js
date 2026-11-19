@@ -466,9 +466,17 @@
     const out = [];
     if (!D.running()) out.push(`<div class="dx-state" role="status">The node is stopped, so nothing here can trade and your pools are not being kept fresh. Start it and PandaPools comes back by itself. <button class="dx-btn pp-inline" data-ppstart="1">Start the node</button></div>`);
     else if (!S.st) out.push(`<div class="dx-state dx-state--note" role="status">PandaPools could not be read just now. Nothing is lost: this screen tries again by itself.</div>`);
+    else if (!S.st.ready && S.st.error) out.push(`<div class="dx-state dx-state--error" role="alert">${esc(C.storeError("PandaPools", "pool store", S.st.error, PP_AFTER))} <button class="dx-btn pp-inline" data-ppaside="1"${C.gate.on ? " disabled" : ""}>Set the store aside and start empty</button></div>`);
     else if (!S.st.ready) out.push(`<div class="dx-state dx-state--note" role="status">PandaPools is starting: it opens its saved pools and reads the pool registry from the node. Nothing can be sent yet.</div>`);
     if (S.said) out.push(`<div class="dx-state dx-state--${S.said.kind}" role="alert">${esc(S.said.text)}</div>`);
     return out.join("");
+  }
+  const PP_AFTER = "Then restore your pools from your backup file: My LP, Back up / restore pools, Restore pools from a file. Your pools on the chain are not touched meanwhile, but they are not kept fresh until PandaPools knows them again.";
+  /** The store that cannot be opened is moved aside (main: mcd:engineSetAside, refused unless the engine's last start failed). */
+  async function setAside() {
+    if (!await D.dialog("Set the pool store aside?", C.SET_ASIDE("PandaPools", PP_AFTER), "Set it aside")) return;
+    try { const kept = await api().engineSetAside("pandapools"); say("The pool store was set aside" + (kept ? " and is kept as " + kept : "") + ". PandaPools is starting with an empty store: restore your pools from your backup file (My LP, Back up / restore pools).", "note"); }
+    catch (e) { say("The pool store was not set aside: " + bare(e) + ". Nothing was changed.", "error"); }
   }
   const kv = (k, v, cls) => `<div class="pp-kv"><span>${esc(k)}</span><span class="${cls || ""}">${v}</span></div>`;
   /** A pool operation as one line of the strip under Swap (SwapView.activityRow). */
@@ -796,6 +804,7 @@
     const ds = b.dataset;
     if (ds.ppgo) return D.go(ds.ppgo);
     if (ds.ppstart) return D.start();
+    if (ds.ppaside) return act(setAside);
     if (ds.ppmode) { S.combined = ds.ppmode === "combined"; paint(); return load(S.tab).then(paint, paint); }   // the cached pools are drawn at once; a stale answer is simply painted over
     if (ds.ppscan) return scan();
     if (ds.ppall != null) { S.all = ds.ppall === "1"; return paint(); }

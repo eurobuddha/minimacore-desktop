@@ -71,8 +71,23 @@ function noteFail(command, r) {
   if (error) lastFail = { verb: String(command).trim().split(/\s+/)[0].slice(0, 40), error: error, at: Date.now() };
 }
 function lastNodeFailure() { return lastFail; }
-/** For the screens: has the engine started (its saved pools open, the registry scan running)? Read only. */
-function status() { return { ready: !!(ready && ctx), block: lastTip || 0, pools: POOLS.length }; }
+/** For the screens: has the engine started (its saved pools open, the registry scan running)? Read only.
+ *  error (0.18.137): why the last start failed, in the engine's or the store's own words ("" = it did not fail, or it
+ *  has started since); waitedMs: how long it has been trying. A damaged pandapools.sqlite fails its integrity check on
+ *  EVERY start, so without these the room said "starting" for ever and the restore gate never opened. */
+let initError = "", firstTry = 0;
+function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry }; }
+function storeFile() { return path.join(dataDir || app.getPath("userData"), "pandapools.sqlite"); }
+/** A store that cannot be opened is MOVED ASIDE under a dated name (main/restore.js moveAside), never deleted, so the
+ *  engine can start on an empty one; the pools are then restored from the user's backup file. Only when the last start
+ *  failed: a store that opens is never moved. Returns the kept path. The caller starts the engine (startLoop). */
+function setAsideStore() {
+  if (ready || !initError) throw new Error("PandaPools' store is open, so nothing was moved.");
+  if (held) throw new Error(HELD);
+  const kept = require("./restore").moveAside(storeFile());
+  initError = ""; initPromise = null; firstTry = 0; emitter.emit("update");
+  return kept;
+}
 
 function buildMds() {
   const epoch=contextEpoch, storage=sqlShim, signal=poolAbort;
@@ -105,9 +120,9 @@ async function init() {
   if (ready) return;
   if (initPromise) return initPromise;
   const epoch=contextEpoch;
+  if (!firstTry) firstTry = Date.now();
   initPromise = (async function () {
-    const dir = dataDir || app.getPath("userData");
-    const storage = await makeSqlShim(path.join(dir, "pandapools.sqlite"));
+    const storage = await makeSqlShim(storeFile());
     if(epoch!==contextEpoch)throw new Error("Wallet identity changed during pool initialization.");
     sqlShim=storage;
     ctx = createContext(buildMds(), ALL_FILES);                     // loads all reused files; service.js registers via MDS.init
@@ -121,8 +136,8 @@ async function init() {
     }
     ctx.ActivityChain.onChange(function () { emitter.emit("update"); });
     if (serviceHandler) serviceHandler({ event: "inited" });         // boot service.js (coinnotify cleanup + retrackOwn + first scan)
-    ready = true;
-  })().catch(function (e) { if(epoch===contextEpoch){initPromise=null;ready=false;if(ctx&&ctx.ActivityChain)ctx.ActivityChain.stop();ctx=null;serviceHandler=null;} throw e; });         // don't cache a rejection → a transient init failure can retry
+    ready = true; initError = "";
+  })().catch(function (e) { if(epoch===contextEpoch){initError=String((e&&e.message)||e||"it did not start");initPromise=null;ready=false;if(ctx&&ctx.ActivityChain)ctx.ActivityChain.stop();ctx=null;serviceHandler=null;} throw e; });         // don't cache a rejection → a transient init failure can retry
   return initPromise;
 }
 function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best effort */ } }
@@ -146,6 +161,8 @@ async function invalidate() {
     if(!r.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine stopped; resolve storage before restarting.");
     quarantineRequired=false;
   }
+  // a store that could not be opened belongs to the old wallet too: kept under its dated name, and the engine starts empty (0.18.137)
+  if(!storage&&initError){ try{ const kept=require("./restore").moveAside(storeFile()); if(kept){initError="";firstTry=0;} }catch(e){} }
   sqlShim=null;emitter.emit("update");
   if(held){heldLoop=true;return;}   // started by release()
   await init();startLoop();
@@ -361,8 +378,17 @@ function activity() {
  */
 function activeWork() {
   if (ctx) return activity();
-  let has = true; try { has = fs.existsSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}
+  let has = true; try { has = fs.existsSync(storeFile()); } catch (e) {}
   return Promise.resolve(has ? null : []);
+}
+/**
+ * For the restore gate (0.18.137): THIS wallet's own pools that are not put away, each with its whole address and its
+ * reserves as the scan has them. Replacing the wallet with ANOTHER one leaves their reserves where only the old
+ * wallet's owner keys can withdraw them. [] = none, or no pool store; null = they could not be read.
+ */
+function ownPools() {
+  if (!ctx) { let has = true; try { has = fs.existsSync(storeFile()); } catch (e) {} return Promise.resolve(has ? null : []); }
+  return myPools().then(function (list) { return list.map(function (p) { return { address: p.address, token: labelById(p.tok, p.tokName), reserveM: p.unresolved ? null : p.reserveM, reserveT: p.unresolved ? null : p.reserveT }; }); }, function () { return null; });
 }
 function feed() {
   if (!ctx) return Promise.resolve([]);
@@ -840,6 +866,6 @@ module.exports = {
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
-  onNodeRestarted, lastNodeFailure, status, activeWork,
+  onNodeRestarted, lastNodeFailure, status, activeWork, ownPools, setAsideStore,
   _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed,
 };

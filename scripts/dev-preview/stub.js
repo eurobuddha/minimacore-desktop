@@ -205,7 +205,7 @@
     chatThreads: async () => [chatThread(PK("31"), "Mirela Okafor", "See you at the harbour at six.", 2, 5), chatThread(PK("32"), "Jonas Petrov", "Thanks, got it.", 0, 300)],
     chatThread: async () => [], chatStatus: async () => ({ ready: true }),
     // AtomiX, room 1 of Dexicon (main/atomix.js read models). ?axs=empty|noquote|minima|idle|halt|notready|manycoins
-    axStatus: async () => ({ ready: AXS !== "notready", eth: FAKE_ETH, minimaPk: FAKE_PK("A1"), currency: AX_MINIMA ? "minima" : "mxusdt", block: 2428089, log: [],
+    axStatus: async () => ({ ready: AXS !== "notready" && AXS !== "broken", error: AXS === "broken" ? "Pool database integrity check failed." : "", eth: FAKE_ETH, minimaPk: FAKE_PK("A1"), currency: AX_MINIMA ? "minima" : "mxusdt", block: 2428089, log: [],
       halt: AXS === "halt" ? { summary: "Your ETH wallet no longer matches what this node derives.", minimaMismatch: false, ethMismatch: true, orphanedPk: "", staleEth: FAKE_ETH, nodeEth: FAKE_ETH2 } : null }),
     axBook: async () => AXS === "empty" || AXS === "noquote" ? { scanned: 0, makers: 0, bestBid: 0, bestAsk: 0, bidCap: 0, askCap: 0, bids: [], asks: [], currency: "mxusdt", label: "mxUSDT", pricingParity: true } : AX_BOOK,
     axSwaps: async () => (AXS === "empty" || AXS === "idle" ? [] : AX_SWAPS),
@@ -232,7 +232,8 @@
     axExportSwaps: async () => AX_SWAPS.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, sellToken: s.selltoken, sellAmount: s.sellamount, buyToken: s.buytoken, buyAmount: s.buyamount, counterparty: s.counterparty, status: s.status, contractId: s.contractId, created: s.created, minimaTx: "", ethTx: FAKE_TX })),
     axSendMax: async (a) => (a === "eth" ? "0.0419" : "217.912562"), axSendReview: async () => ({ fee: "0.000412" }), axSend: async () => ({ tx: FAKE_TX }), axExportKey: async () => "0x" + "FA4E".repeat(16),
     // PandaPools, room 2 of Dexicon (main/pandapools.js read models and actions)
-    ppStatus: async () => ({ ready: PPS !== "notready", block: 2428089, pools: PP_POOLS.length }),
+    ppStatus: async () => ({ ready: PPS !== "notready" && PPS !== "broken", block: 2428089, pools: PP_POOLS.length, error: PPS === "broken" ? "Pool database integrity check failed." : "" }),
+    engineSetAside: async (which) => "/Users/you/Library/Application Support/minimaCore/" + which + ".sqlite-legacy-keys-20261119",
     ppPools: async () => (PPS === "notready" ? [] : PP_POOLS), ppMyPools: async () => PP_MINE, ppActivity: async () => PP_ACTS, ppWork: async () => (PPS === "notready" ? null : PP_ACTS), ppFeed: async () => PP_FEED,
     ppPairInfo: async () => ({ pools: PP_POOLS.length, depth: "866751.25" }),
     ppAggregate: async () => (PP_POOLS.length ? [{ tok: MXUSD, name: "USDT", count: PP_POOLS.length, totalMinima: "866751.25", totalToken: "2783.56526575", price: "0.00321149", depth: "866751.25" }] : []),

@@ -220,6 +220,7 @@ async function init() {
   if (ready) return;
   if (initPromise) return initPromise;
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
+  if (!firstTry) firstTry = Date.now();
   initPromise = (async () => {
     const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"));
     if (gen !== generation) { try { shim.flush(); } catch (e) {} return; }   // invalidated mid-init → drop it
@@ -227,9 +228,9 @@ async function init() {
     ctx = createContext(buildMds());
     gateEngine(ctx);
     if (gen !== generation) { ctx = null; sqlShim = null; return; }           // invalidated during context build
-    ready = true;
+    ready = true; initError = "";
     fire("inited");            // service.js tryBoot: trust preflight → vault/seedrandom → engines → poll.
-  })().catch(e => { if (gen === generation) { initPromise = null; ready = false; } log("init failed: " + e.message); throw e; });
+  })().catch(e => { if (gen === generation) { initError = String((e && e.message) || e || "it did not start"); initPromise = null; ready = false; } log("init failed: " + e.message); throw e; });
   return initPromise;
 }
 
@@ -305,7 +306,7 @@ function activeWorkFrom(A, tip, now) {
   });
 }
 async function activeWork() {
-  if (!ctx || !ctx.READY) return { ready: false, hasStore: fs.existsSync(path.join(dir(), "atomix.sqlite")) };
+  if (!ctx || !ctx.READY) return { ready: false, hasStore: fs.existsSync(path.join(dir(), "atomix.sqlite")), error: initError, waitedMs: firstTry ? Date.now() - firstTry : 0 };
   return activeWorkFrom(ctx.AX, Number(lastTip) || 0, Date.now());
 }
 
@@ -319,7 +320,7 @@ function invalidate() {
   flush();
   try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); }
   catch (e) { log("wallet replaced: the old swap database could not be moved aside (" + e.message + ")"); }
-  ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null;
+  ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null; initError = ""; firstTry = 0;
   vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
   ethRpcAppliedUrl = null;               // the new boot builds a fresh ctx.RPC → re-apply any saved custom RPC to it
   emitter.emit("update");
@@ -340,11 +341,27 @@ function haltFrom(watch) {
   } catch (e) { return null; }
 }
 
+/**
+ * Why the store could not be opened (0.18.137): atomix.sqlite fails the shim's integrity check on EVERY start when it
+ * is damaged, so the room said "Setting up" for ever and the restore gate never opened. initError is the last failed
+ * start's own words ("" = none); firstTry is when this engine first tried. setAsideStore moves such a store aside
+ * under a dated name (main/restore.js moveAside; NEVER deleted: it may hold what claims or refunds a swap) so the
+ * engine can start on an empty one. Only after a failed start; the caller starts the engine (startLoop).
+ */
+let initError = "", firstTry = 0;
+function setAsideStore() {
+  if (ready || !initError) throw new Error("AtomiX's store is open, so nothing was moved.");
+  if (held) throw new Error(HELD);
+  const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite"));
+  if (kept) log("the swap database could not be opened (" + initError + "); it is kept as " + kept);
+  initError = ""; initPromise = null; firstTry = 0; emitter.emit("update");
+  return kept;
+}
 /** Engine status for the renderer header: booted?, identity, block, active currency, recent log lines. */
 function status() {
   const booted = !!(ctx && ctx.READY);
   return {
-    ready: booted,
+    ready: booted, error: booted ? "" : initError,
     eth: booted && ctx.CTX && ctx.CTX.eth ? ctx.CTX.eth.address : null,
     minimaPk: booted && ctx.CTX && ctx.CTX.htlc ? ctx.CTX.htlc.publickey : null,
     currency: ctx && ctx.AX ? ctx.AX.trading.active().key : null,
@@ -1242,7 +1259,7 @@ async function ethSetRpc(url) {
 }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, quiet, status, activeWork, _activeWorkFrom: activeWorkFrom,
+  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, quiet, status, activeWork, setAsideStore, _activeWorkFrom: activeWorkFrom,
   book, quote, swapPreview, swapExecute: whileHeld(whileHalted(swapExecute)), swaps, refundNow: whileHeld(refundNow), exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute: whileHeld(sendExecute),
   makerCfg, makerPreview, makerSave: whileHeld(whileHalted(makerSave)), makerPublish: whileHeld(whileHalted(makerPublish)), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),

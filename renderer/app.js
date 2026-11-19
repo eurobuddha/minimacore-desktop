@@ -536,9 +536,12 @@ function resyncCommand(o) {
 // going on means, and the main process checks again before it leaves the Dexicon check out (mcd:dxSkipCheck).
 // Resolves true when the caller may try once more.
 async function offerWithoutDexicon(e) {
-  if (!/Dexicon .*you can go on without this check\./.test(ipcError(e))) return false;
+  // 0.18.137: also AtomiX or PandaPools that cannot be checked, and the warning about this wallet's own open pools
+  const why = ipcError(e), unchecked = /you can go on without this check\./.test(why), pools = /You can go on after confirming this\./.test(why);
+  if (!unchecked && !pools) return false;
   let warning; try { warning = await api.dxSkipWarning(); } catch (err) { return false; }
-  if (!await showConfirm("Go on without checking Dexicon?", warning, "Go on without the check", true)) return false;
+  const dexOnly = unchecked && !pools && !/(AtomiX|PandaPools) (could not open|has not finished starting after)/.test(why);
+  if (!await showConfirm(dexOnly ? "Go on without checking Dexicon?" : pools && !unchecked ? "Replace the wallet these pools belong to?" : "Replace the wallet without these checks?", warning, dexOnly ? "Go on without the check" : pools && !unchecked ? "I have its 24 words: go on" : "Go on without the check", true)) return false;
   try { await api.dxSkipCheck(); return true; } catch (err) { toast(ipcError(err), "err"); return false; }
 }
 // The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is

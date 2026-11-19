@@ -490,6 +490,7 @@ async function glue(dir0) {
   const dir = dir0 || fs.mkdtempSync(path.join(os.tmpdir(), "pp-room-")), contexts = [], stores = [], exports = {}, answers = {};
   const sandbox = { module: { exports }, exports, console, setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, Date, require: (n) => {
     if (n === "electron") return { app: { getPath: () => dir, getVersion: () => "test" } };
+    if (n === "./restore") return require(path.join(ROOT, "main/restore.js"));
     if (n === "./config") return { rpcSecret: () => "" }; if (n === "./node-manager") return { rpcPort: () => 0 };
     if (n === "./rpc") return { rpcCall: async () => { throw new Error("a real rpcCall in a test"); } }; if (n === "./netfetch") return { fetchJson: async () => { throw new Error("a real fetch in a test"); } };
     if (n === "./pandapools/loader") return Object.assign({}, loader, { createContext: (...a) => { const c = loader.createContext(...a); contexts.push(c); return c; } });
@@ -563,4 +564,88 @@ test("the Shutdown warning and the restore gate count pool operations truthfully
   assert.match(sw([], { cfg: {}, state: {} }, null, Date.now(), { ready: true, takes: 0 }).message, /Could not be checked: pool operations\./);
   assert.match(sw([], { cfg: {}, state: {} }, [{ type: "SWAP", confirmed: false, failed: false, ts: Date.now() - 1000 }], Date.now(), { ready: true, takes: 0 }).message, /^1 pool transaction sent in the last hour is not confirmed yet/);
   assert.equal(sw([], { cfg: {}, state: {} }, [], Date.now(), { ready: true, takes: 0 }).title, "Shut down the node?");
+});
+
+// ---- 0.18.137: the wallet-restore gate and pools ----
+const AXQ = { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, HINT = /If it stays like this, you can go on without this check\.$/;
+test("a pool store that cannot be opened: the error is carried and said, the restore gate names it and can be passed by a confirm, and the file is moved aside, never deleted", async () => {
+  const restore = require("../main/restore.js"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "pp-bad-")), file = path.join(dir, "pandapools.sqlite"), junk = Buffer.from("this is not a database ".repeat(64));
+  fs.writeFileSync(file, junk);
+  const h = await glue(dir);
+  try {
+    await assert.rejects(h.api.init()); await assert.rejects(h.api.init(), "and again on every start");
+    const st = h.api.status();
+    assert.equal(st.ready, false); assert.ok(st.error && st.error.length > 3, "status() carries why: " + st.error); assert.ok(st.waitedMs >= 0);
+    assert.equal(await h.api.activeWork(), null); assert.equal(await h.api.ownPools(), null, "its own pools could not be read either");
+    // the gate: named exactly, with the way on; before 0.18.137 this was 'wait a moment' for ever
+    const list = restore.activeWorkList({ atomix: AXQ, pools: null, poolsState: st, ownPools: null });
+    assert.equal(list.length, 1); assert.ok(list[0].startsWith("PandaPools could not open its pool store (" + st.error + "), so whether a pool transaction is still waiting, and which pools this wallet owns, cannot be checked. ")); assert.match(list[0], HINT);
+    assert.equal(restore.onlyDexiconUnchecked(list), true); assert.deepEqual(restore.activeWorkList({ atomix: AXQ, pools: null, poolsState: st, skipDexicon: true }), [], "after the deliberate confirm");
+    const warn = restore.skipWarning(list); assert.ok(warn.includes(st.error)); assert.match(warn, /kept beside the new one under a dated name\. Nothing is deleted\./); assert.match(warn, /Go on only if you have this wallet's 24 words\.$/);
+    // an engine that merely has not started yet still says wait; after two minutes it may be passed
+    assert.match(restore.activeWorkList({ atomix: AXQ, pools: null, poolsState: { error: "", waitedMs: 5000 } })[0], /^PandaPools could not be asked whether a pool transaction is still waiting\. Wait a moment and try again\.$/);
+    assert.match(restore.activeWorkList({ atomix: AXQ, pools: null, poolsState: { error: "", waitedMs: 190000 } })[0], /^PandaPools has not finished starting after 3 minutes, so .* cannot be checked\. If it stays like this, you can go on without this check\.$/);
+    // never a way round work that IS known
+    assert.equal(restore.onlyDexiconUnchecked(restore.activeWorkList({ atomix: Object.assign({}, AXQ, { swaps: [PK("5A")] }), pools: null, poolsState: st })), false);
+    // the room: the error in plain words with what to do, and the store set aside on request
+    const said = C.storeError("PandaPools", "pool store", st.error, "Then restore your pools.");
+    assert.ok(said.startsWith("PandaPools cannot start: its pool store could not be opened (")); assert.match(said, /quit the app and open it again/); assert.match(said, /kept under a dated name, never deleted/);
+    const kept = h.api.setAsideStore();
+    assert.match(kept, /pandapools\.sqlite-legacy-keys-\d{8}$/); assert.ok(fs.readFileSync(kept).equals(junk), "moved as it was"); assert.equal(fs.existsSync(file), false);
+    await h.api.init(); assert.equal(h.api.status().ready, true); assert.equal(h.api.status().error, "");
+    assert.throws(() => h.api.setAsideStore(), /is open, so nothing was moved/, "a store that opens is never moved");
+    assert.deepEqual(await h.api.ownPools(), [], "started, no pools");
+  } finally { h.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+  // a wallet replacement over a damaged store: moved aside by invalidate(), and the engine starts
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "pp-bad2-")); fs.writeFileSync(path.join(dir2, "pandapools.sqlite"), junk);
+  const h2 = await glue(dir2);
+  try {
+    await assert.rejects(h2.api.init()); await h2.api.invalidate();
+    assert.equal(h2.api.status().ready, true); assert.equal(fs.readdirSync(dir2).filter((f) => /^pandapools\.sqlite-legacy-keys-\d{8}$/.test(f)).length, 1);
+  } finally { h2.close(); fs.rmSync(dir2, { recursive: true, force: true }); }
+  const pp = src("dexicon-pp.js"), main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), app = src("app.js");
+  assert.match(pp, /else if \(!S\.st\.ready && S\.st\.error\) out\.push\(/); assert.match(pp, /data-ppaside="1"/); assert.match(pp, /api\(\)\.engineSetAside\("pandapools"\)/);
+  assert.match(main, /poolsState: pandapools\.status\(\), ownPools: await pandapools\.ownPools\(\)\.catch\(\(\) => null\)/); assert.match(main, /ipcMain\.handle\("mcd:engineSetAside"/); assert.match(main, /restore\.skipWarning\(await walletWork\(false\)\)/);
+  assert.match(app, /unchecked = \/you can go on without this check\\\.\/\.test\(why\), pools = \/You can go on after confirming this\\\.\/\.test\(why\)/);
+});
+test("AtomiX's store gets the same treatment: an init that never succeeds is named, can be passed by a confirm, and the file is only ever moved aside", async () => {
+  const restore = require("../main/restore.js"), atomix = require("../main/atomix"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-bad-")), file = path.join(dir, "atomix.sqlite"), junk = Buffer.from("not a swap database ".repeat(64));
+  fs.writeFileSync(file, junk); atomix._setDataDir(dir); atomix._setRunner(async () => { throw new Error("a real rpcCall in a test"); });
+  try {
+    await assert.rejects(atomix.init());
+    const st = atomix.status(), w = await atomix.activeWork();
+    assert.equal(st.ready, false); assert.ok(st.error); assert.deepEqual([w.ready, w.hasStore, w.error], [false, true, st.error]);
+    const list = restore.activeWorkList({ atomix: w, pools: [] });
+    assert.equal(list.length, 1); assert.ok(list[0].startsWith("AtomiX could not open its swap store (" + st.error + "), so whether a swap is in flight")); assert.match(list[0], HINT);
+    assert.equal(restore.onlyDexiconUnchecked(list), true); assert.deepEqual(restore.activeWorkList({ atomix: w, pools: [], skipDexicon: true }), []);
+    assert.match(restore.activeWorkList({ atomix: { ready: false, hasStore: true, error: "", waitedMs: 1000 }, pools: [] })[0], /Wait a moment and try again\.$/, "the first two minutes: wait");
+    assert.match(restore.activeWorkList({ atomix: { ready: false, hasStore: true, error: "", waitedMs: 121000 }, pools: [] })[0], /^AtomiX has not finished starting after 2 minutes.*you can go on without this check\.$/);
+    assert.match(restore.activeWorkList({ atomix: null, pools: [] })[0], /Wait a moment and try again\.$/, "a read that failed once is not a dead end: still refused");
+    const kept = atomix.setAsideStore();
+    assert.match(kept, /atomix\.sqlite-legacy-keys-\d{8}$/); assert.ok(fs.readFileSync(kept).equals(junk)); assert.equal(fs.existsSync(file), false); assert.equal(atomix.status().error, "");
+    assert.throws(() => atomix.setAsideStore(), /is open, so nothing was moved/, "only after a start that failed");
+    assert.match(src("dexicon-ax.js"), /else if \(!S\.st\.ready && S\.st\.error\) out\.push\(/); assert.match(src("dexicon-ax.js"), /engineSetAside\("atomix"\)/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test("a live pool of this wallet: the restore gate lists it whole with its reserves as a warning to confirm, and says a same-wallet restore changes nothing", async () => {
+  const restore = require("../main/restore.js"), own = [{ address: PK("B1"), token: "MxUSD", reserveM: "40000", reserveT: "128.4" }, { address: PK("B9"), token: "MxUSD", reserveM: null, reserveT: null }];
+  const list = restore.activeWorkList({ atomix: AXQ, pools: [], ownPools: own });
+  assert.equal(list.length, 1, "before 0.18.137 a live pool was neither refused nor warned of");
+  assert.ok(list[0].startsWith("2 PandaPools pools of this wallet are still open: " + PK("B1") + " (40000 MINIMA and 128.4 MxUSD), " + PK("B9") + " (its reserves are not visible to this node just now). "));
+  assert.ok(list[0].includes("These pools belong to the wallet you are replacing. Their funds can only be withdrawn by that wallet. Close them first, or make sure you have its 24 words and a pool backup."));
+  assert.ok(list[0].includes("If it is this same wallet (the same 24 words), nothing changes for your pools")); assert.ok(list[0].endsWith(restore.CONFIRM_HINT));
+  assert.equal(restore.onlyDexiconUnchecked(list), true, "a warning: it can be confirmed"); assert.ok(restore.activeWorkProblem(list).includes(PK("B1")));
+  const warn = restore.skipWarning(list); assert.ok(warn.includes(PK("B1")) && warn.includes(PK("B9")) && warn.includes(restore.OWN_POOLS_WARNING)); assert.ok(!warn.includes(restore.CONFIRM_HINT));
+  assert.deepEqual(restore.activeWorkList({ atomix: AXQ, pools: [], ownPools: own, skipDexicon: true }), [], "confirmed: the restore goes on");
+  assert.equal(restore.onlyDexiconUnchecked(restore.activeWorkList({ atomix: AXQ, pools: [{ txpowid: PK("71"), confirmed: false }], ownPools: own })), false, "a transaction still waiting is a refusal, pools or not");
+  assert.deepEqual(restore.activeWorkList({ atomix: AXQ, pools: [], ownPools: [] }), [], "no pools: no scare"); assert.equal(restore.replacesWalletFromPhrase("megammrsync action:resync host:h:1"), false, "a chain resync of the same wallet does not pass the gate at all");
+  // the glue's list: this wallet's saved pools that are not put away, by token id
+  const h = await glue();
+  try {
+    assert.deepEqual(await h.api.ownPools(), [], "no store: none");
+    await h.api.init(); const c = h.contexts.at(-1);
+    await new Promise((r) => { c.Store.ownRecord({ address: PK("B1"), mxaddress: "", opk: PK("0B"), oadr: PK("0A"), tok: MXUSD, tokName: "USDT", tokDecimals: 8, kmin: "1", reserveM: c.PP.dec("40000"), reserveT: c.PP.dec("128.4") }); setTimeout(r, 50); });
+    const mine = await h.api.ownPools();
+    assert.deepEqual(JSON.parse(JSON.stringify(mine)), [{ address: PK("B1").toLowerCase(), token: "MxUSD", reserveM: null, reserveT: null }], "a saved pool the scan does not show is still listed, its reserves said to be unknown");
+  } finally { h.close(); }
 });
