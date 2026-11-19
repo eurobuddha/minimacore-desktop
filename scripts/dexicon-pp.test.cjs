@@ -33,10 +33,16 @@ const READS = ["ppStatus", "ppPools", "ppMyPools", "ppListRetired", "ppPendingCo
 const BASE = { ppPools: [POOL], ppPairInfo: { pools: 1, depth: "40000" }, ppMarketToken: { usdt: MXUSD }, ppMarket: { mid: 0.0032, fresh: true }, ppMyPools: [], ppListRetired: [], ppPendingCollect: [], ppCompleteBackupRequired: false, ppActivity: [], ppFeed: [], ppWhy: null };
 
 /** The old panel on a stand-in page: elements exist when asked for, hold a value and their handlers. */
+const MINE = { address: PK("B1"), opk: PK("0B"), tok: MXUSD, tokName: "USDT", tokDecimals: 8, reserveM: "40000", reserveT: "128.4", value: "80000", poolPrice: "0.00321", feesMinima: 30.42569, feesPct: 0.07169, kratio: 1.2, priceMove: -2.3199, il: -0.01399, ageBlocks: 5120, signingStateUnverified: true, unresolved: false };
+const LOST = { address: PK("B9"), opk: PK("09"), tok: MXUSD, signingStateUnverified: false, unresolved: true };
+const RETIRED = [{ address: PK("B7"), opk: PK("07") }, { address: PK("B8"), opk: PK("08") }];
+// what the old panel's card buttons carry (pools.js wirePpMineActions): the stand-in page hands them back so they can be pressed
+const CARD = { ppadd: MINE.address, ppmig: MINE.address, ppwd: MINE.address, ppcalc: MINE.address, ppconfirm: MINE.opk, pprecover: LOST.address, ppretire: LOST.address, ppunretire: "all", ppcollect: "1" };
 function oldPanel(api, confirm) {
-  const els = {}, said = [];
+  const els = {}, said = [], btn = {};
   const mk = (id) => ({ id, value: "", checked: false, textContent: "", innerHTML: "", innerText: "", disabled: false, dataset: {}, style: {}, scrollTop: 0, type: "",
-    setAttribute() {}, getAttribute: () => null, querySelector: () => null, querySelectorAll: () => [], insertAdjacentHTML() {}, appendChild() {}, contains: () => false, remove() {} });
+    setAttribute() {}, getAttribute: () => null, querySelector: () => null, insertAdjacentHTML() {}, appendChild() {}, contains: () => false, remove() {},
+    querySelectorAll: (sel) => { const m = /^\[data-([a-z]+)\]$/.exec(sel); if (!m || !(m[1] in CARD)) return []; return [btn[m[1]] = { dataset: { [m[1]]: CARD[m[1]] } }]; } });
   const el = (id) => els[id] || (els[id] = mk(id));
   const document = { getElementById: el, querySelectorAll: () => [], querySelector: () => null, body: mk("body"), documentElement: mk("html"), createElement: () => mk("new"), activeElement: null };
   const ctx = vm.createContext({ window: null, document, localStorage: { getItem: () => null, setItem() {} }, setTimeout, clearTimeout, console, Date, Math, Number, String, JSON, Promise, isFinite, parseFloat, parseInt, TextEncoder, Array,
@@ -47,7 +53,13 @@ function oldPanel(api, confirm) {
   ctx.PoolsPanel.init({ api, el, esc: (s) => String(s == null ? "" : s), toast: (m, k) => said.push([m, k || ""]), copy() {}, short: (x) => x, TOK, MINIMA: "0x00", PoolCalc: {},
     showConfirm: async (title, msg, ok) => { said.push(["confirm", title, ok]); return confirm; }, showProgress: () => ({ close() {} }),
     tryCmd: async (c) => (c === "balance" ? BAL : c === "block" ? { block: "2428089" } : null), running: () => true, activeView: () => "pandapools" });
-  return { el, said, P: ctx.PoolsPanel, settle: () => new Promise((r) => setTimeout(r, 20)) };
+  return { el, said, btn, P: ctx.PoolsPanel, settle: () => new Promise((r) => setTimeout(r, 20)) };
+}
+/** the old panel opened on My LP, with one live pool, one saved pool whose reserves are not found, and two closed ones */
+async function oldMylp(answers, confirm) {
+  const r = recorder(Object.assign({}, BASE, { ppMyPools: [MINE, LOST], ppListRetired: RETIRED }, answers)), p = oldPanel(r.api, confirm);
+  p.P._setView("mylp"); await p.P.render(); await p.settle();
+  return { r, p, press: async (h) => { await h(); await p.settle(); return r.money(); } };
 }
 const ui = (confirm) => { const said = []; return { said, confirm: async (title, text, ok) => { said.push(["confirm", title, ok]); return confirm; }, say: (text, kind) => said.push([text, kind]) }; };
 
@@ -161,6 +173,62 @@ test("a failed action: the engine's fixed sentences are said in plain words, wit
   assert.match(PP.failText("The swap", "This quote expired — re-enter the amount to get a fresh quote."), /was not sent and no funds moved/);
   assert.match(PP.failText("The swap", "txncheck failed"), /^The swap did not go through: txncheck failed\. Look at Activity: if no new line is there, nothing was sent and no funds moved\.$/);
   assert.match(PP.failText("The swap", ""), /no reason was given/);
+});
+
+// ---- My LP: add, close, collect, recover, put away, bring back, confirm signing, statement ----
+const LP = [
+  { name: "add liquidity, both sides", answers: { ppDeposit: { txpowid: PK("72") } }, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "500"; o.p.el("pp2B").value = "1.605"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500", "1.605"), want: [["ppDeposit", [MINE.address, "500", "1.605"]]] },
+  { name: "add liquidity, MINIMA only", answers: { ppDeposit: { txpowid: PK("72") } }, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "500"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500", ""), want: [["ppDeposit", [MINE.address, "500", "0"]]] },
+  { name: "add liquidity, nothing typed", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "", ""), want: [], never: true },
+  { name: "add liquidity, letters", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "5oo"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "5oo", ""), want: [], never: true },
+  { name: "close the pool", answers: { ppClose: { txpowid: PK("73") } }, old: (o) => o.p.btn.ppwd.onclick(), now: (api, u) => PP.Act.withdraw(api, u, MINE), want: [["ppClose", [MINE.address]]] },
+  { name: "collect to wallet", answers: { ppCollect: { coins: 2, foreign: 0 } }, old: (o) => o.p.el("ppCollectBtn").onclick(), now: (api, u) => PP.Act.collect(api, u), want: [["ppCollect", []]] },
+  { name: "collect now (a withdrawn-funds card)", answers: { ppCollect: { cleared: true }, ppPendingCollect: [{ oadr: PK("0A"), status: "PENDING" }] }, old: (o) => o.p.btn.ppcollect.onclick(), now: (api, u) => PP.Act.collectNow(api, u), want: [["ppCollect", []]], noConfirm: true },
+  { name: "check for reserves", answers: { ppRecoverSaved: { restored: 0, total: 1, details: ["not found"], warn: "" } }, old: (o) => o.p.btn.pprecover.onclick(), now: (api, u) => PP.Act.recover(api, u, LOST.address), want: [["ppRecoverSaved", [LOST.address]]], noConfirm: true },
+  { name: "put a closed pool away", answers: { ppRetirePool: true }, old: (o) => o.p.btn.ppretire.onclick(), now: (api, u) => PP.Act.retire(api, u, LOST.address), want: [["ppRetirePool", [LOST.address, true]]], noConfirm: true },
+  { name: "bring the closed pools back", answers: { ppRetirePool: true }, old: (o) => o.p.btn.ppunretire.onclick(), now: (api, u) => PP.Act.unretire(api, u, RETIRED), want: RETIRED.map((x) => ["ppRetirePool", [x.address, false]]), noConfirm: true },
+  { name: "confirm the wallet signing state", answers: { ppConfirmSigning: true }, old: (o) => o.p.btn.ppconfirm.onclick(), now: (api, u) => PP.Act.confirmSigning(api, u, MINE.opk), want: [["ppConfirmSigning", [MINE.opk, true]]] },
+  { name: "export the statement", answers: { ppStatement: { csv: "a,b\n1,2\n", rows: 1, pools: 1, backfilled: true }, exportCsv: "/tmp/x.csv" }, old: (o) => o.p.el("ppStatementBtn").onclick(), now: (api, u) => PP.Act.statement(api, u), want: [["ppStatement", []], ["exportCsv", ["a,b\n1,2\n", "pandapools-statement.csv"]]], noConfirm: true },
+  { name: "export the statement, no pools", answers: { ppStatement: { csv: "", rows: 0, pools: 0, backfilled: true } }, old: (o) => o.p.el("ppStatementBtn").onclick(), now: (api, u) => PP.Act.statement(api, u), want: [["ppStatement", []]], noConfirm: true }
+];
+for (const c of LP) for (const confirm of c.noConfirm || c.never ? [true] : [true, false]) {
+  test(`My LP, ${c.name}${c.noConfirm || c.never ? "" : confirm ? ", confirmed" : ", closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
+    const o = await oldMylp(c.answers, confirm), was = await o.press(() => c.old(o));
+    const r = recorder(Object.assign({ ppWhy: null }, c.answers)), u = ui(confirm); u.show = async (title, text) => { u.said.push(["show", title, text]); };
+    await c.now(r.api, u);
+    assert.deepEqual(r.money(), was);
+    assert.deepEqual(r.money(), confirm ? c.want : [], confirm ? "exactly these calls" : "a closed question sends nothing");
+    if (!c.noConfirm && !c.never) assert.ok(u.said.some((x) => x[0] === "confirm") && o.p.said.some((x) => x[0] === "confirm"), "both ask first");
+  });
+}
+test("My LP: every outcome says what happened, whether funds moved and what to do; identifiers are whole; figures are cut", async () => {
+  const run = async (answers, fn) => { const r = recorder(Object.assign({ ppWhy: null }, answers)), u = ui(true); u.show = async (t, x) => { u.said.push(["show", t, x]); }; await fn(r.api, u); return u.said; };
+  const boom = new Error("Error invoking remote method 'mcd:ppClose': Error: The close timed out — check Activity before retrying.");
+  let said = await run({ ppClose: boom }, (a, u) => PP.Act.withdraw(a, u, MINE));
+  assert.ok(said[0][2] === "Withdraw" && said[0][1] === "Withdraw all liquidity?");
+  assert.match(said[1][0], /^It is not known whether this was sent/); assert.equal(said[1][1], "error");
+  said = await run({ ppCollect: { coins: 0, foreign: 2 } }, (a, u) => PP.Act.collect(a, u));
+  assert.match(said[1][0], /^There was nothing to collect right now\. No funds moved\. 2 owner keys are paused or not in this wallet/); assert.equal(said[1][1], "error");
+  said = await run({ ppCollect: { stranded: true } }, (a, u) => PP.Act.collectNow(a, u));
+  assert.match(said[0][0], /^The funds were not moved: this wallet cannot sign for that payout address/);
+  said = await run({ ppConfirmSigning: false }, (a, u) => PP.Act.confirmSigning(a, u, MINE.opk));
+  assert.ok(said[0][0] === "confirm" && said[1][0].startsWith("Not confirmed: signing stays paused"));
+  said = await run({ ppRecoverSaved: { restored: 0, total: 1, details: ["Pool " + LOST.address + ": 3 USDT reserve not found."], warn: "No transaction was signed." } }, (a, u) => PP.Act.recover(a, u, LOST.address));
+  assert.deepEqual(said[0].slice(0, 2), ["show", "Recovery result"]); assert.ok(said[0][2].includes(LOST.address) && said[0][2].includes("3 MxUSD reserve"));
+  said = await run({ ppStatement: { csv: "x", rows: 7, pools: 1, backfilled: false }, exportCsv: "/tmp/x.csv" }, (a, u) => PP.Act.statement(a, u));
+  assert.match(said[0][0], /still being read from the node \(7 transactions so far\): the file says so/);
+  assert.equal(PP.poolIds(MINE), "Pool: " + MINE.address + "\nOwner key: " + MINE.opk);
+  assert.equal(PP.cutNum(30.42569), "30.4256"); assert.equal(PP.cutNum(0.07169), "0.0716"); assert.equal(PP.cutNum(-2.3199), "-2.3199"); assert.equal(PP.cutNum(-0.01399), "-0.0139"); assert.equal(PP.cutNum(-0.00001), "0");
+  const rows = PP.lpRows(MINE);
+  assert.deepEqual(rows.map((x) => x[0]), ["Your liquidity", "Value now", "Pool price", "Fees earned", "Price since open", "Impermanent loss", "Age"]);
+  assert.equal(rows[3][1], "≈ 30.4256 MINIMA  (+0.0716%)"); assert.equal(rows[4][1], "-2.3199%"); assert.equal(rows[5][2], "warn");
+  assert.deepEqual(PP.lpSummary([MINE, LOST]), { value: "40000 MINIMA reserves", sub: "1 visible pool · token reserves shown below · 1 unavailable" });
+  assert.deepEqual(PP.lpSummary([LOST]), { value: "Reserves unavailable", sub: "1 saved pool needs a live reserve check." });
+  assert.deepEqual(PP.lpSummary([]), { value: "No pools yet", sub: "Create a pool to start earning the swap fee." });
+  assert.equal(PP.needsMigrate({ kratio: 1.85 }), true); assert.equal(PP.needsMigrate({ kratio: 1.84 }), false);
+  const pp = src("dexicon-pp.js");
+  assert.match(pp, /const act = \(fn\) => D\.money\(/, "every My LP action passes Dexicon's one gate");
+  assert.match(pp, /ppMyPools\(\)\.then\(\(m\) => \{ S\.mine = m \|\| \[\]; S\.mineErr = ""; \}, \(e\) => \{ S\.mineErr = bare\(e\); \}\)/, "saved pools that cannot be read are said, never shown as none");
 });
 
 // ---- Pools ----

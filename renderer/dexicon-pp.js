@@ -83,6 +83,33 @@
     return { title: "MINIMA / " + name + "  ·  combined", rows: [["pools combined", String(a.count)], ["total reserves", whole(a.totalMinima) + " MINIMA  ·  " + whole(a.totalToken) + " " + name], ["aggregate spot price", cut(a.price, 8) + " " + name + " / MINIMA"], ["tradeable depth", whole(a.depth) + " MINIMA"]] };
   }
 
+  // ---- My LP (MyLpView.java) ----
+  /** a figure the glue computes as a number (fees, percentages), CUT to 4 decimals toward zero, never rounded */
+  const cutNum = (n) => { n = Number(n); if (!isFinite(n)) return "0"; const t = Math.trunc(n * 1e4) / 1e4; return String(Object.is(t, -0) ? 0 : t); };
+  /** K/KMIN is the pool's headroom over its product floor; past 1.85 the phone turns the bar amber and offers Migrate first */
+  const MIGRATE_AT = 1.85;
+  const needsMigrate = (p) => { const r = Number(p && p.kratio); return isFinite(r) && r >= MIGRATE_AT; };
+  /** The summary card (MyLpView.renderSummary): total MINIMA reserves of the pools this node can see. */
+  function lpSummary(mine) {
+    if (!mine) return { value: "…", sub: "" };
+    const live = mine.filter((p) => !p.unresolved), gone = mine.length - live.length;
+    if (!live.length) return gone ? { value: "Reserves unavailable", sub: plural(gone, "saved pool") + (gone === 1 ? " needs" : " need") + " a live reserve check." } : { value: "No pools yet", sub: "Create a pool to start earning the swap fee." };
+    return { value: C.str(live.reduce((t, p) => C.add(t, C.dec(p.reserveM) || C.zero), C.zero)) + " MINIMA reserves", sub: plural(live.length, "visible pool") + " · token reserves shown below" + (gone ? " · " + gone + " unavailable" : "") };
+  }
+  /** One of my pools as rows [label, value, tone] (MyLpView.poolCard). */
+  function lpRows(p) {
+    const name = tokLabel(p.tok, p.tokName), rows = [["Your liquidity", whole(p.reserveM) + " MINIMA  +  " + whole(p.reserveT) + " " + name], ["Value now", "≈ " + whole(p.value) + " MINIMA"], ["Pool price", cut(p.poolPrice, 8) + " " + name + " / MINIMA"],
+      ["Fees earned", "≈ " + cutNum(p.feesMinima) + " MINIMA  (+" + cutNum(p.feesPct) + "%)", "ok"]];
+    if (p.priceMove != null) {
+      rows.push(["Price since open", (p.priceMove >= 0 ? "+" : "") + cutNum(p.priceMove) + "%"], ["Impermanent loss", cutNum(p.il) + "%  vs holding", p.il < -0.01 ? "warn" : ""]);
+      if (p.ageBlocks > 0) rows.push(["Age", (Number(p.ageBlocks) || 0) + " blocks  (~" + cutNum(p.ageBlocks * 50 / 3600) + " h)"]);
+    }
+    return rows;
+  }
+  const poolIds = (p) => "Pool: " + p.address + (p.opk ? "\nOwner key: " + p.opk : "");
+  const recoveryResult = (r) => "Verified reserves for " + r.restored + " of " + r.total + " pools.\n" + (r.details || []).join("\n\n") + "\n" + (r.warn || "");
+  const CLOSE_TO_OWNER = "to the pool's owner address on this node. PandaPools then moves them into your wallet by itself; if they have not arrived after a few blocks, use Collect withdrawn funds. Do that before you restore your seed on another node.";
+
   /** An error as the bridge gives it, without the bridge's own wrapping. */
   const bare = (e) => String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
   /**
@@ -121,23 +148,86 @@
         ui.say("Swap submitted: you pay " + amt + " " + (dir ? "MINIMA" : t.name) + " and receive " + whole(r && r.totalOut) + " " + (dir ? t.name : "MINIMA") + " when a block confirms it. It is not final yet: follow it in Activity. Transaction " + ((r && r.txpowid) || "not reported"), "note");
         return r || {};
       } catch (e) { ui.say(await why(api, "The swap", e, since), "error"); return { err: bare(e) }; }
+    },
+    /** Add liquidity (the old panel's sheet): either amount may be left empty, not both; confirm → ppDeposit(address, a || "0", b || "0"). */
+    async deposit(api, ui, p, a, b) {
+      const name = tokLabel(p.tok, p.tokName), ok = (v) => v === "" || /^[0-9]*\.?[0-9]+$/.test(v);
+      if (!ok(a) || !ok(b) || ((parseFloat(a) || 0) <= 0 && (parseFloat(b) || 0) <= 0)) { ui.say("Enter an amount to add. Nothing was sent.", "note"); return null; }
+      if (!await ui.confirm("Add liquidity?", "Add " + (a || "0") + " MINIMA and " + (b || "0") + " " + name + " to the pool.\n\nPool: " + p.address + "\n\nThis posts an on-chain transaction and cannot be undone. The amounts stay yours inside the pool.", "Add")) return null;
+      const since = Date.now();
+      try { const r = await api.ppDeposit(p.address, a || "0", b || "0"); ui.say("Liquidity sent to the pool: " + (a || "0") + " MINIMA and " + (b || "0") + " " + name + ". It counts once a block confirms it: follow it in Activity.", "note"); return r || {}; }
+      catch (e) { ui.say(await why(api, "Adding liquidity", e, since), "error"); return { err: bare(e) }; }
+    },
+    /** Close a pool and take all its liquidity out: confirm → ppClose(address). */
+    async withdraw(api, ui, p) {
+      const name = tokLabel(p.tok, p.tokName);
+      if (!await ui.confirm("Withdraw all liquidity?", "This closes the MINIMA / " + name + " pool and sweeps its reserves (" + whole(p.reserveM) + " MINIMA + " + whole(p.reserveT) + " " + name + ", earned fees included) " + CLOSE_TO_OWNER + "\n\nPool: " + p.address, "Withdraw")) return null;
+      const since = Date.now();
+      try { const r = await api.ppClose(p.address); ui.say("The pool is closing. Its reserves go " + CLOSE_TO_OWNER, "note"); return r || {}; }
+      catch (e) { ui.say(await why(api, "Closing the pool", e, since), "error"); return { err: bare(e) }; }
+    },
+    /** Collect to wallet: confirm → ppCollect(). */
+    async collect(api, ui) {
+      if (!await ui.confirm("Collect to wallet?", "Move any withdrawn or migrated reserves from your pool owner addresses into this node's wallet.", "Collect")) return null;
+      const since = Date.now();
+      try {
+        const r = await api.ppCollect(), skipped = r && r.foreign ? " " + plural(r.foreign, "owner key") + (r.foreign === 1 ? " is" : " are") + " paused or not in this wallet, so " + (r.foreign === 1 ? "its" : "their") + " funds were left where they are: confirm the wallet signing state on the pool's card." : "";
+        ui.say((r && r.coins ? "Collection sent: " + plural(r.coins, "coin") + " on the way to your wallet. It is final when a block confirms it." : "There was nothing to collect right now. No funds moved.") + skipped, r && r.foreign ? "error" : "note"); return r || {};
+      } catch (e) { ui.say(await why(api, "The collection", e, since), "error"); return { err: bare(e) }; }
+    },
+    /** "Collect now" on a withdrawn-funds card: ppCollect() at once, as the old card's button. */
+    async collectNow(api, ui) {
+      const since = Date.now();
+      try {
+        const r = await api.ppCollect();
+        ui.say(r.cleared ? "The withdrawn funds were moved to your wallet." : r.stranded ? "The funds were not moved: this wallet cannot sign for that payout address. See the card for what is needed." : "Not moved yet: the withdrawn coins are not spendable yet. PandaPools keeps trying by itself.", r.stranded ? "error" : "note"); return r;
+      } catch (e) { ui.say(await why(api, "The collection", e, since), "error"); return { err: bare(e) }; }
+    },
+    /** Check for reserves: ppRecoverSaved(address), then its result. Nothing is signed. */
+    async recover(api, ui, address) {
+      try { const r = await api.ppRecoverSaved(address); await ui.show("Recovery result", mx(recoveryResult(r))); return r; }
+      catch (e) { ui.say("The reserves could not be checked: " + mx(bare(e)) + ". Nothing was signed and nothing was changed.", "error"); return null; }
+    },
+    /** Put a closed pool away: ppRetirePool(address, true). Hidden, never deleted. */
+    async retire(api, ui, address) {
+      try { await api.ppRetirePool(address, true); ui.say("Put away. The recipe is still saved and still goes into your backups.", "note"); return true; }
+      catch (e) { ui.say("The pool was not put away: " + mx(bare(e)) + ".", "error"); return false; }
+    },
+    /** Bring back: ppRetirePool(address, false) for each closed pool. */
+    async unretire(api, ui, retired) {
+      try { for (const r of retired) await api.ppRetirePool(r.address, false); ui.say("Closed pools are showing again.", "note"); return true; }
+      catch (e) { ui.say("Not every closed pool was brought back: " + mx(bare(e)) + ".", "error"); return false; }
+    },
+    /** Confirm wallet signing state: the warning, then ppConfirmSigning(owner key, true). */
+    async confirmSigning(api, ui, opk) {
+      if (!await ui.confirm("Confirm current wallet signing state", "Confirm only if this node has the latest complete MinimaCore wallet backup, including signing counters, and every other copy has stopped signing. A seed or old backup is insufficient. This enables owner spending and automatic refresh for key:\n" + opk, "I confirm current wallet state")) return null;
+      try { const ok = await api.ppConfirmSigning(opk, true); ui.say(ok ? "Confirmation saved. Owner signing is enabled for this pool." : "Not confirmed: signing stays paused. The owner key is missing, used up or below a recorded count.", ok ? "note" : "error"); return ok; }
+      catch (e) { ui.say("Not confirmed: " + mx(bare(e)) + ". Signing stays paused.", "error"); return null; }
+    },
+    /** Export statement: ppStatement() (it tops up the history first) → exportCsv(csv, "pandapools-statement.csv"). */
+    async statement(api, ui) {
+      let r; try { r = await api.ppStatement(); } catch (e) { ui.say("The statement was not built: " + mx(bare(e)) + ". No file was written.", "error"); return null; }
+      if (!r || !r.pools) { ui.say("There are no pools to report on yet. No file was written.", "note"); return null; }
+      const path = await api.exportCsv(r.csv, "pandapools-statement.csv");
+      ui.say(!path ? "Export cancelled. No file was written." : r.backfilled ? "Statement saved: " + plural(r.pools, "pool") + ", " + plural(r.rows, "transaction") + "." : "Statement saved, but the history is still being read from the node (" + r.rows + " transactions so far): the file says so. Export again later for the full statement.", "note");
+      return path;
     }
   };
 
-  const core = { MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [] };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
   const typing = () => { const a = document.activeElement, b = body(); return !!(a && b && b.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
   const say = (text, kind) => { S.said = text ? { text, kind: kind || "error" } : null; paint(); };
-  const ui = { confirm: (title, text, ok) => D.dialog(title, text, ok), say };
+  const ui = { confirm: (title, text, ok) => D.dialog(title, text, ok), show: (title, text) => D.dialog(title, text, ""), say };
   const up = () => D.running() && !!(S.st && S.st.ready);
   const toks = () => pairs(S.pools), pair = () => toks()[S.sel] || toks()[0] || null;
 
@@ -149,14 +239,16 @@
     const want = { pools: () => api().ppPools(), acts: () => api().ppActivity() };
     if (tab === "swap") { want.bal = () => D.tryCmd("balance"); want.market = () => api().ppMarket(); }
     if (tab === "pools" && S.combined) want.agg = () => api().ppAggregate();
+    if (tab === "mylp") { want.retired = () => api().ppListRetired(); want.collect = () => api().ppPendingCollect(); }
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled" && got[i].value != null) S[k] = got[i].value; });
+    if (tab === "mylp") await api().ppMyPools().then((m) => { S.mine = m || []; S.mineErr = ""; }, (e) => { S.mineErr = bare(e); });   // a read that fails is said, never shown as "no pools"
     if (tab === "swap" && pair()) S.info = await api().ppPairInfo(pair().tok).catch(() => S.info);
   }
   /** the engine's scans say "update": passive parts only, never under someone typing (the old panel's "frozen tab" rule) */
   function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (visible()) load(S.tab).then(paint, paint); }, 400); }
   function tick() { if (D && visible() && !typing() && !C.gate.on && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
-  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
+  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
   /** what stands above every screen of the room: the node, the engine, the last thing said */
   function banners() {
@@ -239,8 +331,80 @@
   }
   async function scan() { if (S.scanning || !up()) return; S.scanning = true; paint(); await api().ppScan().catch(() => null); S.scanning = false; load(S.tab).then(paint, paint); }
 
+  // ---- My LP (MyLpView.java): my pools, what they earned, and what I can do with them ----
+  /** A dialog with its own fields. onOk(dialog) returns a string to refuse (shown, the dialog stays) or a value. */
+  function form(title, html, okLabel, onOk, wire) {
+    return new Promise((resolve) => {
+      const d = document.createElement("dialog"); d.className = "dx-dlg pp-dlg";
+      d.innerHTML = `<h2>${esc(title)}</h2>${html}<div class="pp-bad" role="alert"></div><div class="dx-dlg__b"><button class="dx-btn" data-x="0">Close</button>${okLabel ? `<button class="dx-btn dx-btn--go" data-x="1">${esc(okLabel)}</button>` : ""}</div>`;
+      const end = (v) => { d.close(); d.remove(); resolve(v); };
+      d.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-x]"); if (!b || b.disabled) return;
+        if (b.dataset.x === "0") return end(null);
+        b.disabled = true; const bad = await onOk(d); b.disabled = false;
+        if (typeof bad === "string" && bad) d.querySelector(".pp-bad").textContent = bad; else end(bad === undefined ? true : bad);
+      });
+      d.addEventListener("cancel", () => { d.remove(); resolve(null); });
+      $("shell").appendChild(d); if (wire) wire(d); d.showModal();
+    });
+  }
+  const fld = (label, name, ph, val) => `<label class="pp-fld"><b>${esc(label)}</b><input class="dx-in" name="${name}" inputmode="decimal" autocomplete="off" placeholder="${esc(ph || "0.0")}" value="${esc(val || "")}"></label>`;
+  const val = (d, name) => d.querySelector(`[name=${name}]`).value.trim();
+  const mylpSkeleton = () => `<div id="ppTop"></div><div id="ppLp"></div>`;
+  const lpBtn = (label, attr, value, cls) => `<button class="dx-btn ${cls || ""}" data-${attr}="${esc(value)}"${C.gate.on ? " disabled" : ""}>${label}</button>`;
+  function collectHtml() {
+    return (S.collect || []).map((c) => { const stranded = c.status === "STRANDED"; return `<div class="dx-card pp-card pp-card--warn"><b class="pp-ct">${stranded ? "Withdrawn funds cannot be moved from this address" : "Withdrawn funds still being moved to your wallet"}</b>
+      <div class="pp-note">${stranded ? "This is the address your pool was closed to. PandaPools cannot move the funds because this wallet cannot sign for it: that address is not one of the 64 addresses a seed phrase rebuilds. Restore the matching complete MinimaCore wallet backup, then use Collect. A seed on its own will not do it."
+        : "Your pool's withdrawal landed at its owner payout address and PandaPools is moving it into your wallet. It keeps trying in the background and stops only once the address is empty."}</div>
+      <div class="pp-ids" data-copy="${esc(c.oadr)}" title="Click to copy">Payout address: ${esc(c.oadr)}</div>${c.lastError ? `<div class="pp-note">${esc(mx(c.lastError))}</div>` : ""}
+      <div class="pp-acts">${lpBtn(stranded ? "Try again" : "Collect now", "ppcollectnow", "1")}</div></div>`; }).join("");
+  }
+  function mineHtml() {
+    return (S.mine || []).map((p) => {
+      const name = tokLabel(p.tok, p.tokName), ids = `<div class="pp-ids" data-copy="${esc(p.address)}" title="Click to copy the pool address">${esc(poolIds(p))}</div>`;
+      const hold = p.signingStateUnverified ? `<div class="pp-hold"><b>Owner signing paused</b><div class="pp-note">PandaPools cannot tell how many of this owner key's one-time signatures have already been used, so it has stopped signing for this pool. Automatic refresh is paused too.</div><div class="pp-acts">${lpBtn("Confirm wallet signing state", "ppconfirm", p.opk)}</div></div>` : "";
+      if (p.unresolved) return `<div class="dx-card pp-card"><b class="pp-ct">Saved pool · reserves not found</b>${ids}<div class="pp-note">This node cannot currently see both reserve coins. It may still be syncing, or the pool may have closed.</div>${hold}
+        <div class="pp-acts">${lpBtn("Check for reserves", "pprecover", p.address)}${lpBtn("It's closed: put it away", "ppretire", p.address)}</div></div>`;
+      const r = Number(p.kratio), warn = needsMigrate(p), pct = isFinite(r) && r > 0 ? Math.max(4, Math.min(100, r / 2 * 100)) : 0;
+      return `<div class="dx-card pp-card"><b class="pp-ct">MINIMA / ${esc(name)}</b>${ids}${hold}${lpRows(p).map((x) => kv(x[0], esc(x[1]), x[2] ? "pp-" + x[2] : "")).join("")}
+        ${pct ? `<div class="pp-health"><div class="pp-kv"><span>Floor headroom</span><span class="${warn ? "pp-warn" : "pp-dimv"}">${warn ? "migrate soon" : "healthy"}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
+        <div class="pp-acts pp-acts--3">${lpBtn(warn ? "Add (full)" : "Add", "ppadd", p.address)}${lpBtn("Close", "ppclose", p.address)}</div>
+        <button class="pp-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</button></div>`;
+    }).join("");
+  }
+  function paintMylp() {
+    $("ppTop").innerHTML = banners();
+    if (!up()) { $("ppLp").innerHTML = ""; return; }
+    if (S.mineErr) { $("ppLp").innerHTML = `<div class="dx-state dx-state--error" role="alert">Your saved pools could not be read: ${esc(mx(S.mineErr))}. They are not lost: nothing was changed. This screen tries again by itself.</div>`; return; }
+    const sum = lpSummary(S.mine), n = (S.retired || []).length;
+    $("ppLp").innerHTML = `<div class="dx-card pp-card pp-sum"><div class="pp-fl">YOUR LIQUIDITY</div><div class="pp-sum__v">${esc(sum.value)}</div><div class="pp-sum__s">${esc(sum.sub)}</div></div>
+      <div class="pp-tools" id="ppTools">${lpBtn("EXPORT STATEMENT", "pptool", "statement", "pp-out")}${lpBtn("POOL CALCULATOR", "pptool", "calc", "pp-out")}${lpBtn("COLLECT WITHDRAWN FUNDS TO MY WALLET", "pptool", "collect", "pp-out")}</div>
+      ${collectHtml()}${mineHtml()}
+      ${n ? `<div class="dx-card pp-card"><div class="pp-sum__s">${n} closed pool(s) kept for recovery</div><div class="pp-note">Their recipes are still saved and still go into your backups: they are just out of the way. If a close never actually landed, the pool reappears here on its own.</div><div class="pp-acts">${lpBtn("Show closed pools", "pptool", "closed")}</div></div>` : ""}
+      <div class="pp-note pp-note--foot">Pools you created on this node. PandaPools keeps their reserves fresh by itself: leave this app and the node running so your pools stay live for everyone. Anyone on the network can trade against them; you earn the 0.50% fee on every swap that routes through them.</div>`;
+  }
+  const pool = (address) => (S.mine || []).find((p) => p.address === address);
+  /** every money action of the screen: Dexicon's one gate, the buttons off while it runs, then a fresh read */
+  const act = (fn) => D.money(async () => { paint(); try { await fn(); } catch (e) { say(failText("That", e), "error"); } load(S.tab).then(paint, paint); }).then(paint, paint);
+  async function addSheet(p) {
+    const name = tokLabel(p.tok, p.tokName), price = C.dec(p.poolPrice);
+    const got = await form("Add liquidity", `<div class="pp-note">Grow MINIMA / ${esc(name)} in place (capped at 2× the floor: beyond that, use Migrate). Add both sides in the pool's ratio so the price does not move.</div>${fld("Add MINIMA", "a")}${fld("Add " + name, "b")}<div class="pp-note" data-hint></div>`, "Add",
+      (d) => ({ a: val(d, "a"), b: val(d, "b") }), (d) => { d.oninput = () => { const m = C.dec(val(d, "a")); d.querySelector("[data-hint]").textContent = m && price && m.v > 0n ? "At the pool price, " + C.str(m) + " MINIMA goes with ≈ " + C.str(C.down(C.mul(m, price), 8)) + " " + name + "." : ""; }; });
+    if (got) await Act.deposit(api(), ui, p, got.a, got.b);
+  }
+  function calc(address) {
+    const seed = address ? pool(address) : null, cs = getComputedStyle($("shell")), cv = (n, fb) => cs.getPropertyValue(n).trim() || fb;
+    const f = D.PoolCalc.form({ x0: seed && seed.reserveM ? String(seed.reserveM) : "100000", y0: seed && seed.reserveT ? String(seed.reserveT) : "500", tok: seed ? tokLabel(seed.tok, seed.tokName) : "MxUSD",
+      colors: { accent: cv("--dx-accent", "#F7931A"), ink: cv("--dx-text", "#fff"), dim: cv("--dx-dim", "#8B909C"), grid: cv("--dx-dim2", "#6F7583"), surface: cv("--dx-surface2", "#1B1F28"), font: "Inter, sans-serif" } });
+    form("Pool calculator", `<div class="pp-calc" data-calc></div>`, "", () => true, (d) => { d.classList.add("pp-dlg--wide"); d.querySelector("[data-calc]").appendChild(f.el); setTimeout(() => f.render(), 0); });
+  }
+  async function closedPools() {
+    const list = S.retired || [];
+    if (await D.dialog("Closed pools", list.map(poolIds).join("\n\n"), "Bring back")) await Act.unretire(api(), ui, list);
+  }
+
   // ---- the room ----
-  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
+  const SCREENS = { mylp: { skeleton: mylpSkeleton, bind: noop, paint: paintMylp }, swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
   function render(tab, host) {
     if (!D) return;
     const scr = SCREENS[tab];
@@ -260,6 +424,17 @@
     if (ds.ppstart) return D.start();
     if (ds.ppmode) { S.combined = ds.ppmode === "combined"; paint(); return load(S.tab).then(paint, paint); }   // the cached pools are drawn at once; a stale answer is simply painted over
     if (ds.ppscan) return scan();
+    if (ds.ppcalc != null) return calc(ds.ppcalc);
+    if (ds.pptool === "calc") return calc("");
+    if (ds.pptool === "statement") return act(() => Act.statement(api(), ui));
+    if (ds.pptool === "collect") return act(() => Act.collect(api(), ui));
+    if (ds.pptool === "closed") return act(closedPools);
+    if (ds.ppcollectnow) return act(() => Act.collectNow(api(), ui));
+    if (ds.ppconfirm) return act(() => Act.confirmSigning(api(), ui, ds.ppconfirm));
+    if (ds.pprecover) return act(async () => { say("Checking local reserves and current archive proofs. No transaction is signed.", "note"); await Act.recover(api(), ui, ds.pprecover); S.said = null; });
+    if (ds.ppretire) return act(() => Act.retire(api(), ui, ds.ppretire));
+    if (ds.ppadd) { const p = pool(ds.ppadd); return p ? act(() => addSheet(p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }
+    if (ds.ppclose) { const p = pool(ds.ppclose); return p ? act(() => Act.withdraw(api(), ui, p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }
   }
 
   return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick }, core);

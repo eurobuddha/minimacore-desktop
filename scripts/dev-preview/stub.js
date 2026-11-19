@@ -320,7 +320,7 @@
       if (view === "pandapools") setTimeout(() => {   // ?ppf=<amount>  ?ppdir=buy  ?ppin=<selector>=<text>|…  ?ppdo=<selector>|<selector>…  (one step every 450 ms)
         if (Q.get("ppdir") === "buy" && el("ppFlip")) el("ppFlip").click();
         if (Q.get("ppf") && el("ppAmt")) { el("ppAmt").value = Q.get("ppf"); el("ppAmt").oninput(); }
-        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.indexOf("="), n = document.querySelector(kv.slice(0, i)); if (n) { n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };
+        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.lastIndexOf("="), n = document.querySelector(kv.slice(0, i)); if (n) { n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };
         const step = (i) => setTimeout(() => { type(); if (i < steps.length) { const n = document.querySelector(steps[i]); if (n) n.click(); step(i + 1); } }, 450);
         step(0);
       }, 700);

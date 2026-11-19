@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.124] — Dexicon ② Pools, My LP (Phase 3d)
+
+- **My LP**: the phone's summary card (your MINIMA reserves, or "No pools yet", or that saved pools need a reserve check), then each of your pools with its liquidity, value, pool price, fees earned, price since open, impermanent loss, age and floor headroom. Pool address and owner key are shown whole, labelled, one click to copy.
+- **Add** and **Close** on each pool, **Collect withdrawn funds to my wallet**, **Check for reserves**, **put a closed pool away** and **bring it back**, **Confirm wallet signing state** when owner signing is paused, the withdrawn-funds cards (still moving, or cannot be moved from this wallet), **Export statement** and the **Pool calculator**. Each makes the call the old panel made, with the same arguments, after the same question.
+- Fees and percentages are cut to 4 decimals, not rounded.
+- Saved pools that cannot be read are said to be unreadable, never shown as "No pools yet".
+- Create a pool, Migrate and the backup and recovery tools follow in the next versions.
+- Not run on a node. Tests run each action through the old panel and the new screen and compare the calls.
+
 ## [0.18.123] — Dexicon ② Pools, the pool list (Phase 3d)
 
 - **Pools**: every pool of the shared registry as the phone lists it: reserves, spot price, fees accrued and the pool address, whole, one click to copy. The line above says how many pools there are and their MINIMA depth, added exactly. SCAN reads the registry again now.

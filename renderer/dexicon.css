@@ -350,3 +350,19 @@ input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outlin
 .dx-card.pp-card { padding: 14px; border-color: color-mix(in srgb, var(--dx-dim2) 35%, transparent); }
 .pp-ct { display: block; padding-bottom: 2px; font: 700 15px/21px var(--dx-sans); }
 .pp-kv--mono { padding: 2px 0; } .pp-kv--mono > :last-child { font-family: var(--dx-mono); font-size: 12px; } .pp-kv[data-copy] { cursor: copy; }
+/* My LP (MyLpView) and the room's dialogs */
+.pp-sum { padding: 16px; } .pp-sum__v { padding: 6px 0 2px; font: 300 26px/34px var(--dx-sans); overflow-wrap: anywhere; } .pp-sum__s { font: 400 14px/20px var(--dx-sans); color: var(--dx-dim); }
+.pp-tools { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.dx-btn.pp-out { flex: 0 0 auto; min-height: 44px; border: 1px solid var(--dx-accent); background: none; color: var(--dx-accent); font: 700 13px/18px var(--dx-sans); letter-spacing: .1em; }
+.dx-btn.pp-fill { flex: 0 0 auto; min-height: 52px; border: 0; background: var(--dx-accent); color: var(--dx-on-accent); font: 700 15px/20px var(--dx-sans); letter-spacing: .12em; }
+.pp-note { margin: 6px 0; font: 400 12.5px/18px var(--dx-sans); color: var(--dx-dim); overflow-wrap: anywhere; white-space: pre-wrap; } .pp-note:empty { display: none; } .pp-note--foot { margin: 14px 2px 4px; }
+.pp-ids { margin: 4px 0 8px; font: 400 11px/16px var(--dx-mono); color: var(--dx-dim); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: copy; }
+.pp-hold { margin: 8px 0; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--pp-amber) 14%, transparent); } .pp-hold b { font: 700 14px/20px var(--dx-sans); color: var(--pp-amber); }
+.dx-card.pp-card--warn { border-color: color-mix(in srgb, var(--pp-amber) 60%, transparent); }
+.pp-ok { color: var(--dx-in); } .pp-kv .pp-warn { padding: 0; } .pp-dimv { color: var(--dx-dim); }
+.pp-health { margin-top: 4px; } .pp-bar { height: 6px; border-radius: 3px; background: var(--dx-surface2); overflow: hidden; } .pp-bar i { display: block; height: 100%; background: var(--dx-accent); } .pp-bar i[data-warn] { background: var(--pp-amber); }
+.pp-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; } .pp-acts .dx-btn { flex: 1 1 140px; min-height: 44px; font-weight: 700; font-size: 13px; }
+.pp-dlg { max-height: calc(100vh - 32px); overflow-y: auto; } .pp-dlg--wide { width: min(760px, calc(100vw - 32px)); }
+.pp-fld { display: block; margin-top: 10px; } .pp-fld b { font: 700 10.5px/15px var(--dx-sans); color: var(--dx-dim); letter-spacing: .04em; } .pp-fld .dx-in { margin-top: 3px; font-family: var(--dx-mono); }
+.pp-bad { margin-top: 8px; font: 400 12.5px/18px var(--dx-sans); color: var(--dx-red); } .pp-bad:empty { display: none; }
+.pp-calc { --accent: var(--dx-accent); --surface: var(--dx-surface); --surface2: var(--dx-surface2); --border: var(--dx-border); --border-light: var(--dx-border); --heading: var(--dx-text); --text: var(--dx-text); --dim: var(--dx-dim); --dim2: var(--dx-dim2); color: var(--dx-text); }
