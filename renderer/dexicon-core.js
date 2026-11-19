@@ -8,16 +8,17 @@
 (function (root, factory) { const m = factory(); if (typeof module === "object" && module.exports) module.exports = m; else root.DexCore = m; })(this, function () {
   "use strict";
 
-  // Room 1 is AtomiX on the desktop's own engine (renderer/dexicon-ax.js). Room 2 is the existing desktop Pools panel
-  // until phase 3d: it brings its own tab bar, so the Dexicon bottom bar has no tabs for it yet.
+  // Room 1 is AtomiX on the desktop's own engine (renderer/dexicon-ax.js). Room 2 is PandaPools on the desktop's own
+  // engine (renderer/dexicon-pp.js), with PandaPools' five tabs (pandapools MainActivity: Swap, Pools, My LP, Wallet, Activity).
   const ROOMS = [
     { id: "mxusd", n: "①", label: "MxUSD", view: "atomix", tabs: ["swap", "market", "otc", "activity", "assets", "settings"] },
-    { id: "pools", n: "②", label: "Pools", view: "pandapools", tabs: [] },
+    { id: "pools", n: "②", label: "Pools", view: "pandapools", tabs: ["swap", "pools", "mylp", "wallet", "activity"] },
     { id: "exchange", n: "③", label: "Exchange", view: "dexicon", tabs: ["trade", "orders", "history", "activity", "assets", "settings"] }
   ];
-  /** Activity, Assets and Settings are ONE screen each, shown in rooms 1 and 3 (ActivityTab, AssetsTab, RelaysTab). */
+  /** Activity, Assets and Settings are ONE screen each, shown in rooms 1 and 3 (ActivityTab, AssetsTab, RelaysTab).
+   *  Room 2's Activity is PandaPools' own screen, not this one. */
   const SHARED = ["activity", "assets", "settings"];
-  const TAB_LABEL = { swap: "Swap", market: "Market", otc: "OTC", trade: "Trade", orders: "Orders", history: "History", activity: "Activity", assets: "Assets", settings: "Settings" };
+  const TAB_LABEL = { swap: "Swap", pools: "Pools", mylp: "My LP", wallet: "Wallet", market: "Market", otc: "OTC", trade: "Trade", orders: "Orders", history: "History", activity: "Activity", assets: "Assets", settings: "Settings" };
   const roomOfView = (view) => ROOMS.findIndex(r => r.view === view);
 
   /** The saved choices: the last tab of each room and the theme. The room itself is not saved: Dexicon opens on ①. */
@@ -34,6 +35,16 @@
   function pickTab(mem, tab) { const r = ROOMS[mem.room]; if (r.tabs.includes(tab)) mem.tabs[r.id] = tab; return mem; }
   const tabOf = (mem) => mem.tabs[ROOMS[mem.room].id];
   const toggleTheme = (mem) => { mem.theme = mem.theme === "ONYX" ? "DAYLIGHT" : "ONYX"; return mem; };
+
+  /** One money action at a time in ALL of Dexicon, rooms 1, 2 and 3 (0.18.118 for room 3; every room since 0.18.122):
+   *  while one is being reviewed, signed or sent, a second click, a held Enter or a button of another room does
+   *  nothing. redraw (optional) is called when the gate closes and when it opens again. */
+  const gate = { on: false };
+  async function money(fn, redraw) {
+    if (gate.on) return undefined;
+    gate.on = true; if (redraw) redraw();
+    try { return await fn(); } finally { gate.on = false; if (redraw) redraw(); }
+  }
 
   /** The status strip (MainActivity pairPill): the node, then the engine. tone: "ok" | "dim". */
   function strip(nodeState, st, pageFailed) {
@@ -358,5 +369,5 @@
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
     funds, freeFor, crossing, chainCrosses, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
-    ROOMS, SHARED, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
+    ROOMS, SHARED, TAB_LABEL, gate, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

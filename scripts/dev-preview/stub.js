@@ -11,6 +11,9 @@
  *   First run: &fr=launcher|params|seed|confirm|confirm-typing|restore|restore-any|starting
  *   Backup & Recovery: &bk=create|restore|resync|keys  &seed=1  &bkdone=1
  *   History: &hist=empty  &hmenu=1  &hdetail=<row>  &chain=checking  &hfilter=1  &hforeign=1
+ *   Dexicon room 2 (view=pandapools): &pptab=swap|pools|mylp|wallet|activity  &ppf=<amount typed in Swap>  &ppdir=buy
+ *     &ppdo=<selector to click>|<selector>…  &ppin=<selector>=<text>|…  (typed before the clicks)
+ *     &pps=empty|notready|backup|manual|nousd|swapfail|mintfail|toobig|paused|collect|stranded|ownerkey|noacts
  */
 "use strict";
 (function () {
@@ -19,7 +22,7 @@
   // the node's own format (Java Date.toString()), with a zone name JavaScript cannot parse: the shell must not need to
   const BLOCK_TIME = "Thu Jul 16 14:54:04 BST 2026";
   try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); localStorage.removeItem("walletOrder"); localStorage.setItem("histRebuildVer", "1"); localStorage.setItem("histNormVer", "3"); localStorage.setItem("histHideForeign", Q.get("hforeign") === "1" ? "1" : "0"); if (Q.get("tokens")) localStorage.setItem("walletOrder", Q.get("tokens")); } catch (e) {}
-  try { localStorage.setItem("dexicon", JSON.stringify({ tabs: { exchange: Q.get("dxtab") || "trade" }, theme: Q.get("dx") === "light" ? "DAYLIGHT" : "ONYX" })); } catch (e) {}
+  try { localStorage.setItem("dexicon", JSON.stringify({ tabs: { exchange: Q.get("dxtab") || "trade", pools: Q.get("pptab") || "swap" }, theme: Q.get("dx") === "light" ? "DAYLIGHT" : "ONYX" })); } catch (e) {}
   // NOT A SEED: four list words repeated, so the word boxes accept them. Nothing was ever made from these.
   const FAKE_SEED = "TEST ONLY VOID ABANDON ".repeat(6).trim();
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
@@ -70,6 +73,31 @@
       log: ["BUY 500 MINIMA @ 0.0034 (limit)", "+0.0s  Found 1 FAST order at or better than your price", "+6.2s  Order 9c1f02ab77d3e456: the maker refused: the order's backing coin 0x6E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C is already spent", "+6.2s  No other FAST order crosses 0.0034.", "+6.2s  Nothing was traded and no order was placed."] });
     return p;
   };
+  // PandaPools fixtures (room 2). Every pool address, owner key, coin id and transaction id is whole and plainly not
+  // real (FA4E… = "fake"); the amounts are invented.
+  const PPS = Q.get("pps") || "";
+  const ppPool = (n, m, t, fee) => ({ address: FAKE_PK("B00" + n), mxaddress: "", opk: FAKE_PK("0B" + n), oadr: FAKE_PK("0A" + n), tok: MXUSD, kmin: "1", tokName: "USDT", tokDecimals: 8, reserveM: m, reserveT: t,
+    coinidM: FAKE_PK("C0" + n), coinidT: FAKE_PK("C1" + n), reserveBlock: 2428000, spot: (Number(t) / Number(m)).toFixed(8), k: "", feeGrowthPct: fee });
+  const PP_POOLS = PPS === "empty" ? [] : [ppPool(1, "815250.75", "2617.77115575", "0.01960728"), ppPool(2, "42500.5", "136.89411", "0.07161174"), ppPool(3, "9000", "28.9", "0")];
+  const PP_MINE = PPS === "empty" || PPS === "noacts" ? [] : [
+    { address: FAKE_PK("B002"), opk: FAKE_PK("0B2"), tok: MXUSD, tokName: "USDT", tokDecimals: 8, reserveM: "42500.5", reserveT: "136.89411", value: "85001", poolPrice: "0.00322100", feesMinima: 30.4256, feesPct: 0.0716, kratio: PPS === "migrate" ? 1.91 : 1.24,
+      priceMove: 2.31, il: -0.013, ageBlocks: 5120, signingStateUnverified: PPS === "paused", unresolved: false },
+    { address: FAKE_PK("B009"), opk: FAKE_PK("0B9"), tok: MXUSD, signingStateUnverified: false, unresolved: true }];
+  const ppAct = (type, summary, tx, mins, statusText, confirmed, failed, more) => Object.assign({ type, summary, txpowid: tx ? FAKE_PK(tx) : "", ts: now - mins * 60000, timeLabel: confirmed ? "Transaction" : "Submitted", statusText, confirmed, failed, verifiedAt: confirmed ? now - 20000 : 0 }, more || {});
+  const PP_ACTS = PPS === "empty" || PPS === "noacts" ? [] : [
+    ppAct("SWAP", "Sold 250 MINIMA for 0.80211 USDT", "7001", 2, "Confirming 1/3", false, false),
+    ppAct("ADD", "Add to MINIMA / USDT  ·  500 MINIMA + 1.6105 USDT", "", 9, "Not sent", false, true, { failMsg: "Could not identify the input signing key." }),
+    ppAct("SWAP", "Bought 3000 MINIMA for 9.66 USDT", "7002", 1500, "1686 confirmations · on-chain", true, false),
+    ppAct("CREATE", "Create MINIMA / USDT pool  ·  42000 MINIMA + 135.24 USDT", "7003", 4300, "5120 confirmations · on-chain", true, false, { originalTxpowid: FAKE_PK("7009") }),
+    ppAct("Pool transaction", "+12.5 MINIMA · -0.04025 USDT", "7004", 9000, "9044 confirmations · on-chain", true, false)];
+  const PP_FEED = PPS === "empty" ? [] : [
+    { pool: FAKE_PK("B001"), kind: "SWAP", minimaIn: true, minimaAmt: "1200", tokenAmt: "3.8402", tokenLabel: "USDT", txpowid: FAKE_PK("7101"), ts: now - 600000, statusText: "12 confirmations · on-chain", confirmed: true, verifiedAt: now - 30000 },
+    { pool: FAKE_PK("B002"), kind: "ADD", minimaAmt: "500", tokenAmt: "1.6105", tokenLabel: "USDT", txpowid: FAKE_PK("7102"), ts: now - 7200000, statusText: "Confirming 2/3", confirmed: false, verifiedAt: 0 },
+    { pool: FAKE_PK("B003"), kind: "CREATE", minimaAmt: "9000", tokenAmt: "28.9", tokenLabel: "USDT", txpowid: FAKE_PK("7103"), ts: now - 90000000, statusText: "1802 confirmations · on-chain", confirmed: true, verifiedAt: now - 30000 },
+    { pool: FAKE_PK("B001"), kind: "SWAP", minimaAmt: "40", tokenAmt: "0.128", tokenLabel: "USDT", ts: now - 190000000, observed: true }];
+  const ppQuote = (tokid, dir, amt) => { const a = Number(amt) || 0; if (PPS === "notready") return { ok: false, notReady: true }; if (PPS === "toobig" || a > 400000) return { ok: false };
+    const price = 0.00321, out = dir ? a * price * 0.9948 : (a / price) * 0.9948; return { ok: true, totalIn: String(amt), totalOut: (Math.floor(out * 1e8) / 1e8).toString(), effPrice: (dir ? out / a : a / out).toFixed(10), priceImpact: "0.27", poolsUsed: 2, poolsAvailable: 3, capped: false, maxPools: 6, quoteId: 7 }; };
+  const ppFail = (msg) => { throw new Error("Error invoking remote method 'mcd:pp': Error: " + msg); };
   const tok = (name, ticker) => ({ name: { name, ticker, description: "Fixture token" }, decimals: 8, scale: 0 });
   const LONG = "0x9C2B7E4D1A6F3058B2C4D6E8F0A1B3C5D7E9F1A2B4C6D8E0F2A4B6C8D0E2F4A6";
   const ZERO = "0x3E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C";
@@ -201,11 +229,32 @@
     axCoins: async () => [{ amount: "0.8", coinid: FAKE_PK("E1") }, { amount: "0.40135743", coinid: FAKE_PK("E2") }],
     axExportSwaps: async () => AX_SWAPS.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, sellToken: s.selltoken, sellAmount: s.sellamount, buyToken: s.buytoken, buyAmount: s.buyamount, counterparty: s.counterparty, status: s.status, contractId: s.contractId, created: s.created, minimaTx: "", ethTx: FAKE_TX })),
     axSendMax: async (a) => (a === "eth" ? "0.0419" : "217.912562"), axSendReview: async () => ({ fee: "0.000412" }), axSend: async () => ({ tx: FAKE_TX }), axExportKey: async () => "0x" + "FA4E".repeat(16),
-    ppActivity: async () => [{ type: "Pool transaction", confirmed: false, failed: false, ts: now - 120000 }],
+    // PandaPools, room 2 of Dexicon (main/pandapools.js read models and actions)
+    ppStatus: async () => ({ ready: PPS !== "notready", block: 2428089, pools: PP_POOLS.length }),
+    ppPools: async () => (PPS === "notready" ? [] : PP_POOLS), ppMyPools: async () => PP_MINE, ppActivity: async () => PP_ACTS, ppFeed: async () => PP_FEED,
+    ppPairInfo: async () => ({ pools: PP_POOLS.length, depth: "866751.25" }),
+    ppAggregate: async () => (PP_POOLS.length ? [{ tok: MXUSD, name: "USDT", count: PP_POOLS.length, totalMinima: "866751.25", totalToken: "2783.56526575", price: "0.00321149", depth: "866751.25" }] : []),
+    ppMarket: async () => ({ mid: PPS === "manual" ? 0 : 0.003178, fresh: PPS !== "manual" }), ppMarketToken: async () => ({ usdt: MXUSD }),
+    ppCreateAnchor: async () => (PPS === "manual" ? null : { price: "0.003178", source: "MEXC market" }), ppCreatePreview: async (dec, x, y) => ({ ok: true, price: (Number(y) / Number(x)).toFixed(8), kmin: "5600000" }),
+    ppQuote: async (t, d, a) => ppQuote(t, d, a),
+    ppSwap: async () => (PPS === "swapfail" ? ppFail("Could not identify the input signing key.") : { txpowid: FAKE_PK("7001"), totalIn: "250", totalOut: "0.79833" }),
+    ppWhy: async () => (PPS === "swapfail" ? { verb: "txnsign", error: "No keys found for the coin's address", at: Date.now() } : PPS === "mintfail" ? { verb: "newaddress", error: "MiniDAPP does not have WRITE permission", at: Date.now() } : null),
+    ppCreate: async () => (PPS === "backup" ? ppFail("BACKUP_REQUIRED: save and verify the encrypted pool + node backup before creating another pool.") : PPS === "mintfail" ? ppFail("could not mint an owner key (grant this app write access to create pools)") : { txpowid: FAKE_PK("7005") }),
+    ppDeposit: async () => ({ txpowid: FAKE_PK("7006") }), ppMigrate: async () => (PPS === "backup" ? ppFail("BACKUP_REQUIRED: save and verify the encrypted pool + node backup before migrating.") : { txpowid: FAKE_PK("7007") }), ppClose: async () => ({ txpowid: FAKE_PK("7008") }),
+    ppCollect: async () => (PPS === "stranded" ? { coins: 0, foreign: 1, stranded: true } : { coins: 2, foreign: 0, cleared: true }),
+    ppPendingCollect: async () => (PPS === "collect" || PPS === "stranded" ? [{ oadr: FAKE_PK("0A7"), status: PPS === "stranded" ? "STRANDED" : "PENDING", lastError: PPS === "stranded" ? "No key in this wallet signs for this address." : "" }] : []),
+    ppListRetired: async () => (PPS === "empty" ? [] : [{ address: FAKE_PK("B008"), opk: FAKE_PK("0B8") }]), ppRetirePool: async () => true,
+    ppRecoverSaved: async () => ({ restored: 0, total: 1, details: ["Pool " + FAKE_PK("B009") + ": the reserve coins were not found on this node or in the archive."], warn: "No transaction was signed." }),
+    ppConfirmSigning: async () => true, ppCompleteBackupRequired: async () => PPS === "backup", ppArchiveSettings: async (url) => (url === undefined ? "" : true),
+    ppSaveBackup: async () => ({ canceled: false, path: "/Users/preview/Documents/pandapools-full-1763560000000.ppbackup" }),
+    ppLoadBackup: async (pw, node) => (node ? { canceled: false, nodePassword: "not-a-real-password", path: "/Users/preview/Documents/pandapools-node-recovery.bak" } : { canceled: false, json: JSON.stringify({ pandapools_backup: 3, pools: [{ address: FAKE_PK("B002") }, { address: FAKE_PK("B009") }] }) }),
+    ppRestore: async () => ({ restored: 1, total: 2, details: ["Pool " + FAKE_PK("B002") + ": both reserves verified on this node.", "Pool " + FAKE_PK("B009") + ": the reserve coins were not found on this node or in the archive."], warn: "Owner signing stays paused until you confirm the wallet's signing state." }),
+    ppStatement: async () => (PP_MINE.length ? { csv: "pool,date\n", rows: 12, pools: 1, backfilled: true } : { csv: "", rows: 0, pools: 0, backfilled: true }),
+    ppConsolidationCheck: async () => (PPS === "ownerkey" ? "Nothing consolidated: your wallet holds a pool owner key that cannot sign.\n\nThe owner key " + FAKE_PK("0B2") + " has an unknown number of signatures used. Confirm the wallet's signing state in My LP first." : null),
     ewStatus: async () => ({ ready: true }),
     ewBalances: async () => ({ address: "0x4B1D9E27A6C0F3581E2D7B9A4C6E8F0A1B3D5C7E", eth: "0.0425", tokens: [
       { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", balance: "125.5", decimals: 6 }] }),
-    ewTokens: async () => [], ppPools: async () => [],
+    ewTokens: async () => [],
     shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
     vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
@@ -268,6 +317,13 @@
           setTimeout(() => { for (const sel of (Q.get("axdo") || "").split("|").filter(Boolean)) { const n = document.querySelector(sel); if (n) n.click(); } }, 600);
         }, 400);
       }, 300);
+      if (view === "pandapools") setTimeout(() => {   // ?ppf=<amount>  ?ppdir=buy  ?ppin=<selector>=<text>|…  ?ppdo=<selector>|<selector>…  (one step every 450 ms)
+        if (Q.get("ppdir") === "buy" && el("ppFlip")) el("ppFlip").click();
+        if (Q.get("ppf") && el("ppAmt")) { el("ppAmt").value = Q.get("ppf"); el("ppAmt").oninput(); }
+        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.indexOf("="), n = document.querySelector(kv.slice(0, i)); if (n) { n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };
+        const step = (i) => setTimeout(() => { type(); if (i < steps.length) { const n = document.querySelector(steps[i]); if (n) n.click(); step(i + 1); } }, 450);
+        step(0);
+      }, 700);
       if (view === "dexicon" || view === "atomix") {
         const review = "Buying 2442.4471 MINIMA now\nEffective 0.003185 · 7.77919401 MxUSD\nBOOK 0 MINIMA / 0 MxUSD across 0 orders\nPOOL 2442.4471 MINIMA / 7.77919401 MxUSD across 2 pools\nWorst marginal 0.003190";
         DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { ready: true, block: 2428089, identity: { address: PK("D1"), miniaddress: ADDR }, stage: "", myTrades: [],

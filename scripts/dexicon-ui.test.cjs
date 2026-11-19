@@ -8,7 +8,7 @@ test("rooms: three, in the phone's order; Exchange has the phone's six tabs", ()
   assert.deepEqual(C.ROOMS.map(r => r.n + " " + r.label), ["① MxUSD", "② Pools", "③ Exchange"]);
   assert.deepEqual(C.ROOMS[2].tabs.map(t => C.TAB_LABEL[t]), ["Trade", "Orders", "History", "Activity", "Assets", "Settings"]);
   assert.deepEqual([C.ROOMS[0].view, C.ROOMS[1].view], ["atomix", "pandapools"]);
-  assert.deepEqual(C.ROOMS[1].tabs, [], "room 2 is the existing panel until 3d and gets no Dexicon tab that would do nothing");   // room 1: scripts/dexicon-ax.test.cjs
+  assert.deepEqual(C.ROOMS[1].tabs.map(t => C.TAB_LABEL[t]), ["Swap", "Pools", "My LP", "Wallet", "Activity"], "room 2 is PandaPools' five tabs");   // scripts/dexicon-pp.test.cjs; room 1: scripts/dexicon-ax.test.cjs
 });
 
 test("each room remembers its last tab; Dexicon opens on room 1; the theme is remembered", () => {
@@ -16,7 +16,7 @@ test("each room remembers its last tab; Dexicon opens on room 1; the theme is re
   assert.equal(mem.room, 0); assert.equal(mem.theme, "ONYX"); assert.equal(mem.tabs.exchange, "trade");
   C.pickRoom(mem, 2); C.pickTab(mem, "history");
   assert.equal(C.tabOf(mem), "history");
-  C.pickRoom(mem, 1); assert.equal(C.tabOf(mem), "", "Pools has no Dexicon tab yet");
+  C.pickRoom(mem, 1); assert.equal(C.tabOf(mem), "swap", "Pools opens on its own Swap");
   C.pickTab(mem, "orders"); assert.equal(mem.tabs.exchange, "history", "a tab of another room changes nothing");
   C.pickRoom(mem, 2); assert.equal(C.tabOf(mem), "history", "back in Exchange: the tab it was left on");
   C.toggleTheme(mem);
@@ -68,7 +68,7 @@ test("the screens' code makes the frame without any visit to Dexicon, keeps it a
   const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() { e.parent.children.splice(e.parent.children.indexOf(e), 1); e.removed = true; }, querySelectorAll: () => [], querySelector: () => null }; return e; };
   const els = {}, timers = [], listeners = {}; let clock = 1000000, status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {} }, service = null, asked = 0;
-  const win = { DexCore: C, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
+  const win = { DexCore: C, DexPools: { tick() {}, render() {} }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
     Date: class extends Date { static now() { return clock; } },
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null },
     addEventListener: (t, f) => { listeners[t] = f; } };
@@ -511,7 +511,7 @@ test("H2: the Trade button takes one click at a time, sends what was reviewed, a
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
   const els = {}, listeners = {};
   const status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} };
-  const win = { DexCore: C, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+  const win = { DexCore: C, DexPools: { tick() {}, render() {} }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
   win.window = win;
   win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async () => ({ status: true, rows: [] }),

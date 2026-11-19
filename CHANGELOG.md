@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.122] — Dexicon ② Pools, the room and Swap (Phase 3d)
+
+- **Room ② is PandaPools as the phone draws it inside Dexicon**, over the engine the desktop already runs, the same pool store (`pandapools.sqlite`) and the same calls. Its own bottom bar: Swap, Pools, My LP, Wallet, Activity. Each remembers where you were.
+- **Swap**: the pool line (pools and depth), your balance, the MEXC line for the MxUSD pair, You pay ⇅ You receive (est.), the rate, price impact, route and fee, then SWAP and "Confirm swap". The click asks for a fresh quote and posts exactly that quote, as before. There is no slippage setting, as on the phone: if a pool moves first, the swap is rejected and you keep your funds. Recent activity is listed under the button.
+- **One money action at a time in all three rooms.** Rooms ① and ② now pass the same gate as the Exchange: while a swap, a publish, a send or a pool action is being reviewed, signed or sent, a second click, or a button in another room, does nothing.
+- **A failed pool action says what happened, whether funds moved and what to do.** The engine reports fixed sentences ("Could not identify the input signing key", "could not mint an owner key"); the screen says them in plain words and adds what the node itself answered. The glue keeps the node's last refusal by command name only, never its arguments.
+- The dollar token is named MxUSD by its token id. A token that only calls itself USDT is said to be another token.
+- The old Pools panel is no longer drawn. Its file stays in the tree until the parity audit. The other four screens of the room follow in the next versions; until then they say so.
+- Not run on a node. Tests: `scripts/dexicon-pp.test.cjs` runs the old panel's swap beside the new one and compares every call and argument.
+
 ## [0.18.121] — Dexicon Exchange, the low findings of the review
 
 - **"You pay at most"** is now the sum of what each take can cost. Every take is its own transaction and the engine rounds each one (MxUSD paid up, MxUSD received down, 8 decimals); the screen rounded the total once, which could be less than the sum. The funds check uses the same figure, and "receive at least" is the sum of the round-downs.

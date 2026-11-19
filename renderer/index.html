@@ -114,7 +114,8 @@
       </section>
 
       <section class="view" id="view-pandapools">
-        <div class="ppapp" id="ppBody"></div>
+        <div class="dxapp" id="dxPpBody"></div>   <!-- room ② Pools: PandaPools as the phone draws it inside Dexicon (dexicon-pp.js) -->
+        <div class="ppapp" id="ppBody" hidden></div>   <!-- the panel it replaces; not drawn, kept until the 3e parity audit -->
       </section>
 
       <section class="view" id="view-dexicon">
@@ -263,6 +264,7 @@
   <script src="dexicon/lib/activity.js"></script>   <!-- the engine's own activity stage machine (verbatim, pure): window.AX.activity -->
   <script src="dexicon-core.js"></script>
   <script src="dexicon-ax.js"></script>
+  <script src="dexicon-pp.js"></script>
   <script src="dexicon-ui.js"></script>
   <script src="app.js"></script>
 </body>

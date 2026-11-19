@@ -478,7 +478,7 @@
   function bindSwap() {
     $("axSellB").onclick = () => setSide(true); $("axBuyB").onclick = () => setSide(false); $("axFlip").onclick = () => setSide(!S.sell);
     for (const [id, name] of [["axSend", "send"], ["axRecv", "recv"]]) $(id).oninput = () => { S.typed = $(id).value ? name : null; S.said = null; mirror(); if (!$(id).value) { $("axPlan").textContent = ""; } preview(); paintReview(); };
-    $("axReview").onclick = async () => {
+    $("axReview").onclick = () => D.money(async () => {
       if (S.busy) return;
       if (halted()) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was sent.", "error");
       S.busy = true; paintReview();
@@ -486,7 +486,7 @@
       S.busy = false;
       if (r && !r.err) { S.typed = null; $("axSend").value = ""; $("axRecv").value = ""; $("axPlan").textContent = ""; }
       load("swap").then(paint, paint);
-    };
+    });
   }
   const paintReview = () => { const b = $("axReview"); if (b) { b.disabled = S.busy || halted(); b.dataset.dim = amount() ? "0" : "1"; b.textContent = S.busy ? "Starting…" : "Review swap"; } };
   function paintSwap() {
@@ -619,13 +619,13 @@
     b.oninput = (e) => { const t = e.target; if (!t || t.tagName !== "INPUT") return; if (t.id !== "mkBias") numIn(t);   // the skew may be negative
       if (["mkMid", "mkStep", "mkBias", "mkLevels"].includes(t.id)) reprice(on("peg") && oracle > 0 ? oracle : undefined); else if (t.id === "mkSize") seed(); else summary(); };
     const done = () => { clearInterval(S.pegTimer); S.editing = false; S.busy = false; b.oninput = null; b.innerHTML = ""; render("market", b); };
-    $("mkSave").onclick = async () => {
+    $("mkSave").onclick = () => D.money(async () => {
       if (S.busy) return;
       if (halted() && on("enabled")) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was published.", "error");
       S.busy = "save"; $("mkSave").disabled = true; $("mkSave").textContent = "Saving…";
       await Act.makerSave(api(), ui, makerForm(get, on)); done();
-    };
-    $("mkWithdraw").onclick = async () => { if (S.busy) return; S.busy = "withdraw"; const r = await Act.makerWithdraw(api(), ui); S.busy = false; if (r) done(); };
+    });
+    $("mkWithdraw").onclick = () => D.money(async () => { if (S.busy) return; S.busy = "withdraw"; const r = await Act.makerWithdraw(api(), ui); S.busy = false; if (r) done(); });
     $("mkCancel").onclick = () => { S.said = null; done(); };
     pegUi(); showLevels(); if (n0(val("mkSize")) > 0) reprice(); summary(); if (on("peg")) poll();
   }
@@ -637,10 +637,12 @@
   }
   async function marketAct(what) {
     if (what === "edit") { S.editing = true; S.said = null; return paint(); }
-    if (S.busy) return;
-    S.busy = what; paint();
-    if (what === "publish") await Act.makerPublish(api(), ui); else await Act.makerWithdraw(api(), ui);
-    S.busy = false; load("market").then(paint, paint);
+    return D.money(async () => {
+      if (S.busy) return;
+      S.busy = what; paint();
+      if (what === "publish") await Act.makerPublish(api(), ui); else await Act.makerWithdraw(api(), ui);
+      S.busy = false; load("market").then(paint, paint);
+    });
   }
 
   // ---- OTC (OtcTab.java) ----
@@ -716,14 +718,15 @@
     const b = e.target.closest("button"); if (!b || !Object.keys(b.dataset).some((k) => k.indexOf("ax") === 0)) return false;
     await click0(b.dataset); return true;
   }
-  const one = oneAtATime();
+  /** every money action of the room passes Dexicon's one gate (DexCore.money, 0.18.122): one at a time across rooms 1, 2 and 3 */
+  const one = (fn) => D.money(fn);
   async function click0(ds) {
     if (ds.axwhy) { pref("dexicon_fold_" + ds.axwhy, pref("dexicon_fold_" + ds.axwhy) === "1" ? "0" : "1"); return paint(); }
     if (ds.axgo) return D.go(ds.axgo);
     if (ds.axslip) { if (ds.axslip === "custom") return customSlip(); S.slip = Number(ds.axslip); pref("dexicon_ax_slip", ds.axslip); paint(); return preview(); }
     if (ds.axcheck) return checkNow(ds.axcheck);
     if (ds.axmk) return marketAct(ds.axmk);
-    if (ds.axotc || ds.axlp != null || ds.axdeal) return otcAct(ds);
+    if (ds.axotc || ds.axlp != null || ds.axdeal) return D.money(() => otcAct(ds));
     if (ds.axrefresh) { S.book = null; paint(); return load(S.tab).then(paint, paint); }
     if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
@@ -731,7 +734,7 @@
     if (ds.axcsv) return Act.exportCsv(api(), ui);
     if (ds.axstart) return D.start();
     if (ds.axw) return one(() => walletAct(ds.axw));
-    if (ds.axswitch) return switchCurrency();
+    if (ds.axswitch) return switchCurrency();   // gated inside: the strip's pill calls it too
     if (ds.axabout) return void D.dialog("About AtomiX", ABOUT, "");
   }
   const reload = () => load(onShared() ? "shared" : S.tab).then(paint, paint);
@@ -811,9 +814,7 @@
   /** The ⇄ pill (MainActivity.switchCurrencyDialog): the panel's confirm, then the engine's switch. */
   async function switchCurrency() {
     if (!D || S.switching || !S.st.ready) return;
-    S.switching = true; D.repaintStrip();
-    await Act.switchCurrency(api(), ui, S.st.currency);
-    S.switching = false; S.typed = null; S.book = null; S.mc = null; S.wallet = null; S.bals = null;
+    if (await D.money(async () => { S.switching = true; D.repaintStrip(); await Act.switchCurrency(api(), ui, S.st.currency); S.switching = false; return true; }) !== true) return; S.typed = null; S.book = null; S.mc = null; S.wallet = null; S.bals = null;
     if (onShared()) return reload();
     const b = body(); if (b && SCREENS[S.tab] && b.dataset.tab === S.tab) { b.innerHTML = ""; render(S.tab, b); } else load("").then(D.repaintStrip, D.repaintStrip);
   }

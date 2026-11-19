@@ -546,7 +546,7 @@ async function offerWithoutDexicon(e) {
 // The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
 // node.onWalletReplaced, 0.18.106): that must not depend on this window being open. Here only the screen is cleared.
 async function walletReplaced() {
-  resetMailState(); resetPpState(); resetAxState();
+  resetMailState(); resetPpState(); DexPools.reset(); resetAxState();
   resetWalletFigures(); api.nodeStatus().then(paintFooter);
 }
 // A backup password as the node can carry it (the phone's rule): letters and numbers only. A quote used to
@@ -1279,8 +1279,7 @@ function renderActive() {
   else if (activeView === "webwallet") renderWebWallet();
   else if (activeView === "mail") renderMail();
   else if (activeView === "chat") renderChat();
-  else if (activeView === "pandapools") renderPandapools();
-  else if (activeView === "atomix" || activeView === "dexicon") DexUI.render();   // Dexicon rooms ① and ③
+  else if (activeView === "pandapools" || activeView === "atomix" || activeView === "dexicon") DexUI.render();   // Dexicon rooms ①, ② and ③
   else if (activeView === "ethwallet") renderEthWallet();
   else if (activeView === "minimall") renderMiniMall();
   else if (activeView === "vestr") renderVestr();
@@ -2007,7 +2006,9 @@ PoolsPanel.init({
 });
 api.appVersion().then(v => PoolsPanel.setVersion(v)).catch(() => {});
 function renderPandapools() { PoolsPanel.render(); }
-function onPandapoolsUpdate() { PoolsPanel.onUpdate(); }
+// Room ② of Dexicon draws PandaPools now (renderer/dexicon-pp.js) over the same window.mcd calls. The panel above is
+// no longer rendered; it stays, initialised, until the 3e parity audit.
+function onPandapoolsUpdate() { DexPools.onUpdate(); }
 // Was called on every seed change / wallet reset but never defined — the ReferenceError killed the rest of
 // that line, so the AtomiX and Casino resets beside it never ran either.
 function resetPpState() { PoolsPanel.reset(); }
@@ -3226,7 +3227,8 @@ AtomixPanel.init({
 api.appVersion().then(v => AtomixPanel.setVersion(v)).catch(() => {});
 // Room ① of Dexicon draws AtomiX now (renderer/dexicon-ax.js) over the same window.mcd calls. The panel above is
 // no longer rendered; it stays, initialised, until the 3e parity audit.
-DexAx.init({ api, copy, relTime, consolidateToken, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
+DexPools.init({ api, copy, tryCmd, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
+DexAx.init({ api, copy, relTime, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
 function resetAxState() { AtomixPanel.reset(); DexAx.reset(); }
 

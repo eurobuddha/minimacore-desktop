@@ -1,8 +1,8 @@
 /*
  * dexicon-ui.js: Dexicon's screens. The chrome (header, status strip, room pills, bottom tab bar) is native and is
  * the Android client's (apks/dexicon MainActivity.java buildChrome); logic without a DOM lives in dexicon-core.js.
- * Room ① MxUSD is AtomiX (renderer/dexicon-ax.js draws Swap, Market and OTC); room ② Pools shows the existing desktop
- * Pools panel until phase 3d. Room ③ Exchange is drawn here over the hosted Dexicon engine (window.mcd dx* calls,
+ * Room ① MxUSD is AtomiX (renderer/dexicon-ax.js draws Swap, Market and OTC); room ② Pools is PandaPools
+ * (renderer/dexicon-pp.js draws its five screens). Room ③ Exchange is drawn here over the hosted Dexicon engine (window.mcd dx* calls,
  * main/dexicon.js). Activity, Assets and Settings are one screen each, shown in rooms ① and ③.
  */
 const DexUI = (() => {
@@ -12,6 +12,9 @@ const DexUI = (() => {
   // Android's tab icons, path data unchanged (apks/dexicon res/drawable/ic_tab_*.xml; 24 grid, stroke 2, round)
   const ICON = {
     swap: "M7,4 L7,16 M7,16 L4,13 M7,16 L10,13 M17,20 L17,8 M17,8 L14,11 M17,8 L20,11",
+    pools: "M3,9 Q6,6 9,9 T15,9 T21,9 M3,15 Q6,12 9,15 T15,15 T21,15",
+    mylp: "M12,4 L20,8 L12,12 L4,8 Z M4,12 L12,16 L20,12 M4,16 L12,20 L20,16",
+    wallet: "M6,6 h11 a3,3 0 0,1 3,3 v6 a3,3 0 0,1 -3,3 h-11 a3,3 0 0,1 -3,-3 v-6 a3,3 0 0,1 3,-3 z M16,12 h2.5",
     market: "M6,20 L6,10 M12,20 L12,4 M18,20 L18,14",
     otc: "M4,9 L18,9 M14,5 L18,9 L14,13 M20,15 L6,15 M10,11 L6,15 L10,19",
     trade: "M8,4 L8,20 M6,8 L10,8 L10,15 L6,15 Z M16,4 L16,18 M14,7 L18,7 L18,13 L14,13 Z",
@@ -44,14 +47,15 @@ const DexUI = (() => {
     api.onDexicon((message) => { if (typeof message === "string") onService(message); if (Page.frame && typeof message === "string") Page.frame.contentWindow.postMessage({ dxRoom: 1, update: { dex: message } }, "*"); if (shown()) refresh(); else watch(); });
     window.addEventListener("message", onFrameMessage);
     // the FAST book moves between blocks; and on every other tab the engine is still watched, so its page exists (watch)
-    setInterval(() => { if (mine()) refresh(); else watch(); DexAx.tick(); }, 5000);
+    setInterval(() => { if (mine()) refresh(); else watch(); DexAx.tick(); DexPools.tick(); }, 5000);
     paintTheme();
   }
   const shown = () => $("shell").dataset.mode === "dex";
-  const axRoom = () => C.ROOMS[mem.room].view === "atomix";
-  /** the screen on show is one this file draws: any tab of room 3, and the shared tabs of room 1 */
-  const mine = () => shown() && (C.ROOMS[mem.room].view === "dexicon" || (axRoom() && C.SHARED.includes(C.tabOf(mem))));
-  const host = () => $(axRoom() ? "dxAxBody" : "dxBody");
+  const axRoom = () => C.ROOMS[mem.room].view === "atomix", ppRoom = () => C.ROOMS[mem.room].view === "pandapools";
+  /** the screen is one this file draws: any tab of room 3, and the shared tabs of room 1 (room 2's five are PandaPools' own) */
+  const ours = () => C.ROOMS[mem.room].view === "dexicon" || (axRoom() && C.SHARED.includes(C.tabOf(mem)));
+  const mine = () => shown() && ours();
+  const host = () => $(axRoom() ? "dxAxBody" : ppRoom() ? "dxPpBody" : "dxBody");
 
   /** Called for every screen change (app.js selectTab). */
   function paint(view) {
@@ -180,13 +184,9 @@ const DexUI = (() => {
     if (typeof p.amount === "string" && p.amount !== X.sent) { const a = $("dxAmount"); if (a) a.value = p.amount; X.sent = null; }
     else if (X.sentRan) X.sent = null;
   }
-  /** One money action at a time in the whole Dexicon frame (H2): a second click, a held Enter or another button does
-   *  nothing while one is being reviewed, signed or sent. */
-  async function money(fn) {
-    if (X.busy) return;
-    X.busy = true; draw();
-    try { await fn(); } finally { X.busy = false; draw(); }
-  }
+  /** One money action at a time in the whole of Dexicon (H2): a second click, a held Enter or another button, in any
+   *  room, does nothing while one is being reviewed, signed or sent. */
+  const money = (fn) => C.money(fn, draw);   // the gate is DexCore's: rooms 1 and 2 pass through the same one
   const book = () => C.tradeBook(X.book, Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
   const fundsNow = () => C.funds(X.bal && X.bal.minima, X.bal && X.bal.mxusd, X.orders, X.fills);
   const lad = () => C.ladder(X.book, X.group);
@@ -219,6 +219,7 @@ const DexUI = (() => {
   function render() {
     const body = host(); if (!body) return;
     const tab = C.tabOf(mem);
+    if (ppRoom()) return DexPools.render(tab, body);
     if (axRoom() && !C.SHARED.includes(tab)) return DexAx.render(tab, body);
     DexAx.shared(true);
     if (body.dataset.tab !== tab) { body.dataset.tab = tab; body.innerHTML = tab === "trade" ? tradeSkeleton() : ""; if (tab === "trade") bindTrade(); body.onclick = tab === "trade" ? null : onTabClick; $("main").scrollTop = 0; X.said = null; }
@@ -348,7 +349,7 @@ const DexUI = (() => {
     $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? "Exceeds your free " + (buy ? "MxUSD" : "MINIMA") + " by " + C.fmt(pl.short) + " (free " + C.fmtBal(pl.free) + ")" : "";
     $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.</p>`;
-    const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || !!X.busy, dead = !!why && !/No relay answers/.test(why);
+    const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !/No relay answers/.test(why);
     for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
     cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(side + C.fmt(pl.take) + " NOW · FAST") + "<small>instant · " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? "BUY MINIMA" : "SELL MINIMA";
     cta.disabled = trading || dead || short || !f.known || !!typo || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
@@ -601,5 +602,5 @@ const DexUI = (() => {
       + `<div class="dx-card"><div class="dx-h">ENGINE</div><div class="dx-sub dx-sub--sans">Dexicon engine ${esc((st && st.version) || "…")} · block ${esc((st && st.block) || "…")} · ${px && px.mid > 0 ? esc(C.priceName(px.source) + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : "no MEXC price yet"}</div></div>`;
   }
 
-  return { init, paint, render, node: node_, dialog, paintStrip, say, redraw: () => draw(), where: () => ({ shown: shown(), shared: !(axRoom() && !C.SHARED.includes(C.tabOf(mem))) }), pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
+  return { init, paint, render, node: node_, dialog, paintStrip, say, redraw: () => draw(), money, where: () => ({ shown: shown(), shared: ours(), room: C.ROOMS[mem.room].id, tab: C.tabOf(mem) }), pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
 })();

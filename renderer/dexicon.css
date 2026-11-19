@@ -310,3 +310,34 @@ button.dx-pill { cursor: pointer; }
 .ax-halt .ax-bad { margin: 14px 0; }
 .ax-rescue { display: block; width: 100%; min-height: 48px; margin-top: 8px; border: 0; border-radius: 14px; font-weight: 400; }
 .dx-card.ax-alert { border-color: color-mix(in srgb, var(--ax-warn) 60%, transparent); }
+
+/* ---- room 2, Pools: PandaPools as the phone draws it inside Dexicon (pandapools SwapView / PoolsView / MyLpView /
+   WalletView / ActivityView, Ui.java, Design.java on Dexicon's tokens). renderer/dexicon-pp.js ---- */
+.shell { --pp-amber: #E6A23C; } .shell[data-dx="DAYLIGHT"] { --pp-amber: #9A6B00; }
+.shell #view-pandapools.view--active { display: block; height: auto; padding: 0; }
+#view-pandapools #ppBody[hidden] { display: none; }
+#dxPpBody { padding: 14px; font-size: 13px; }
+.pp-line { font: 400 13px/19px var(--dx-sans); color: var(--dx-dim); overflow-wrap: anywhere; } .pp-line:empty { display: none; }
+.pp-line--gap { margin: 6px 0 10px; } .pp-line + .pp-panel, .pp-pair + .pp-panel { margin-top: 10px; }
+.pp-pair { display: flex; align-items: center; gap: 10px; margin: 6px 0; font: 700 10.5px/15px var(--dx-sans); color: var(--dx-dim); letter-spacing: .08em; }
+.pp-pair .dx-in { margin: 0; }
+.pp-panel { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--dx-dim2) 27%, transparent); border-radius: 12px; background: var(--dx-surface); }
+.pp-panel__m { flex: 1; min-width: 0; display: block; }
+.pp-fl { display: block; font: 400 11px/15px var(--dx-sans); color: var(--dx-dim); letter-spacing: .08em; }
+.pp-amt { display: block; width: 100%; padding: 4px 0 0; border: 0; background: none; color: var(--dx-text); font: 400 24px/32px var(--dx-sans); overflow-wrap: anywhere; }
+input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outline: none; } .pp-panel:focus-within { border-color: var(--dx-accent); }
+.pp-tok { flex: 0 0 auto; font: 700 15px/20px var(--dx-sans); color: var(--dx-accent); }
+.pp-fliprow { display: flex; justify-content: center; padding: 6px 0; }
+.pp-flip { width: 48px; height: 44px; border: 0; background: none; color: var(--dx-accent); font: 700 20px/1 var(--dx-sans); cursor: pointer; }
+.pp-quote { padding: 8px 2px 0; } .pp-quote:empty { padding: 0; }
+.pp-kv { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font: 400 13px/18px var(--dx-sans); }
+.pp-kv > :first-child { flex: 0 1 auto; max-width: 190px; color: var(--dx-dim); } .pp-kv > :last-child { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhere; user-select: text; }
+.pp-warn { padding: 4px 0; font: 400 13px/18px var(--dx-sans); color: var(--pp-amber); }
+.pp-cta { display: block; width: 100%; margin-top: 14px; padding: 15px 0; border: 0; border-radius: 12px; background: var(--dx-accent); color: var(--dx-on-accent); font: 700 15px/20px var(--dx-sans); letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+.pp-cta:disabled { background: color-mix(in srgb, var(--dx-accent) 24%, transparent); color: color-mix(in srgb, var(--dx-on-accent) 47%, transparent); cursor: default; }
+.pp-recent { margin-top: 18px; } .pp-recent:empty { display: none; }
+.pp-rrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; font: 400 13px/18px var(--dx-sans); }
+.pp-rrow span { flex: 1; min-width: 0; overflow-wrap: anywhere; } .pp-rrow b { flex: 0 0 auto; max-width: 45%; text-align: right; font: 700 11px/15px var(--dx-sans); color: var(--pp-amber); }
+.pp-rrow b[data-tone="ok"] { color: var(--dx-in); } .pp-rrow b[data-tone="bad"] { color: var(--dx-red); }
+.pp-link { display: inline-block; padding: 10px 0; border: 0; background: none; color: var(--dx-accent); font: 700 13px/18px var(--dx-sans); cursor: pointer; text-align: left; }
+.dx-btn.pp-inline { flex: 0 0 auto; margin-left: 8px; padding: 5px 12px; font-weight: 400; font-size: 12px; }

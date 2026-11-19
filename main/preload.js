@@ -180,6 +180,8 @@ contextBridge.exposeInMainWorld("mcd", {
   ppConfirmSigning: (opk, attested) => ipcRenderer.invoke("mcd:ppConfirmSigning", opk, attested),
   ppSaveBackup: (json) => ipcRenderer.invoke("mcd:ppSaveBackup", json),
   ppCompleteBackupRequired: () => ipcRenderer.invoke("mcd:ppCompleteBackupRequired"),
+  ppStatus: () => ipcRenderer.invoke("mcd:ppStatus"),
+  ppWhy: () => ipcRenderer.invoke("mcd:ppWhy"),
   ppLoadBackup: (password, extractNode) => ipcRenderer.invoke("mcd:ppLoadBackup", password, extractNode),
   onPandapools: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:pandapools", h); return () => ipcRenderer.removeListener("mcd:pandapools", h); },
 

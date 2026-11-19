@@ -60,6 +60,20 @@ function _setRunner(fn) { runner = fn; }
 function _setDataDir(d) { dataDir = d; }
 function nodeCmd(cmd) { return runner(cmd); }
 
+// The engine reports a failed action in fixed sentences ("could not mint an owner key…", "Could not identify the input
+// signing key."), without what the node answered. The node's own last refusal is kept here, by command NAME only (never
+// its arguments), so a screen can show the real reason beside the engine's sentence (lastNodeFailure, mcd:ppWhy).
+// Read-only bookkeeping: nothing the engine receives or sends is changed.
+let lastFail = null;
+function noteFail(command, r) {
+  if (!r || r.status !== false) return;
+  const error = String(r.error || r.message || "").slice(0, 400);
+  if (error) lastFail = { verb: String(command).trim().split(/\s+/)[0].slice(0, 40), error: error, at: Date.now() };
+}
+function lastNodeFailure() { return lastFail; }
+/** For the screens: has the engine started (its saved pools open, the registry scan running)? Read only. */
+function status() { return { ready: !!(ready && ctx), block: lastTip || 0, pools: POOLS.length }; }
+
 function buildMds() {
   const epoch=contextEpoch, storage=sqlShim, signal=poolAbort;
   return {
@@ -69,7 +83,7 @@ function buildMds() {
     cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}
       if(held&&require("./noderun").SIGNING.test(String(command))){if(cb)cb({status:false,error:HELD});return;}
       busy++;   // hold() waits for what is at the node
-      runner(command,{signal:signal}).then(function (r) { busy--; if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { busy--; if (cb) cb({ status: false }); }); },
+      runner(command,{signal:signal}).then(function (r) { busy--; noteFail(command, r); if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function (e) { busy--; noteFail(command, { status: false, error: (e && e.message) || String(e) }); if (cb) cb({ status: false }); }); },
     sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
     persistRecovery: function(cb) { cb(epoch===contextEpoch&&storage.flushChecked()); },
     archiveGET: function(url,cb) { fetchJson(url).then(cb,function(){cb(null);}); },
@@ -126,7 +140,7 @@ async function invalidate() {
   const old=ctx,storage=sqlShim;
   if(old&&old.ActivityChain)old.ActivityChain.stop();
   ready=false;ctx=null;serviceHandler=null;initPromise=null;
-  POOLS=[];lastTip=0;scanning=false;scanStartTs=0;lastQuotes={};
+  POOLS=[];lastTip=0;scanning=false;scanStartTs=0;lastQuotes={};lastFail=null;
   if(storage){
     const r=storage.sql("UPDATE pp_ownpools SET signing_unverified=1");
     if(!r.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine stopped; resolve storage before restarting.");
@@ -779,6 +793,6 @@ module.exports = {
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
-  onNodeRestarted,
+  onNodeRestarted, lastNodeFailure, status,
   _setRunner, _setDataDir,
 };
