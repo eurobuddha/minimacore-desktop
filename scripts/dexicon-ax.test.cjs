@@ -328,3 +328,58 @@ test("OTC: terms are checked before anything is sent; a deal says whose move it 
   assert.equal(AX.dealStatus({ status: "EXECUTING" }), "Executing: the swap's two sides are locking");
   assert.equal(AX.dealCanAct({ status: "PROPOSED", whoseTurn: "ME" }), true); assert.equal(AX.dealCanAct({ status: "AGREED", whoseTurn: "ME" }), false); assert.equal(AX.dealCanAct({ status: "COUNTERED", whoseTurn: "THEM" }), false);
 });
+
+// ---- the Ethereum wallet, the key and the CSV (shared screens: Assets and Activity) ----
+const ETH = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0001", TO = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002", TX = "0x" + "FA4E00".repeat(10) + "0001";
+const WALLET = { addr: ETH, label: "mxUSDT", currency: "mxusdt", bals: { minima: "1.2", usdt: "217.912562", eth: "0.0425", ethErr: null, meta: { confirmed: "1.2", unconfirmed: "0", sendable: "1.2", coins: 2 } } };
+const SENDS = [
+  { name: "ETH", asset: "eth", to: TO, amt: "0.01", review: { fee: "0.000412" } },
+  { name: "USDT", asset: "usdt", to: " " + TO + " ", amt: " 25.5 ", review: { fee: "0.0011" } },
+  { name: "ETH refused by the engine's check (not an address)", asset: "eth", to: "0x123", amt: "1", review: { err: "Enter a valid Ethereum address" } },
+  { name: "USDT refused (more than the balance)", asset: "usdt", to: TO, amt: "9999", review: { err: "Not enough USDT" } }
+];
+for (const c of SENDS) for (const confirm of [true, false]) test(`wallet send ${c.name}, review ${confirm ? "accepted" : "closed"}: axSendReview then axSend with the same asset, address and amount as the old panel`, async () => {
+  const answers = () => ({ axStatus: { ready: true, currency: "mxusdt", eth: ETH }, axWallet: WALLET, axSendReview: c.review, axSend: { tx: TX } });
+  const ro = recorder(answers()), p = oldPanel(ro.api, confirm);
+  p.P._setView("wallet"); await p.P.render(); await p.settle();
+  await p.el("axSend").onclick(); if (c.asset === "usdt") p.el("axSendUsdt").onclick();
+  p.el("axSendTo").value = c.to; p.el("axSendAmt").value = c.amt;
+  await p.el("axSendReview").onclick(); await p.settle();
+  const rn = recorder(answers()), u = ui(confirm), to = c.to.trim(), amt = c.amt.trim();   // the dialog trims both, as the old one did
+  const chk = await AX.Act.sendCheck(rn.api, c.asset, to, amt);
+  if (!chk.err) await AX.Act.sendGo(rn.api, u, c.asset, ETH, to, amt, chk.fee);
+  assert.deepEqual(rn.money(), ro.money());
+  const want = [["axSendReview", [c.asset, to, amt]]]; if (!c.review.err && confirm) want.push(["axSend", [c.asset, to, amt]]);
+  assert.deepEqual(rn.money(), want);
+  if (!c.review.err && confirm) assert.ok(u.said[u.said.length - 1][0].endsWith("Transaction " + TX), "the transaction hash whole");
+});
+test("wallet send: the review shows both addresses whole, and a send that fails says a transaction may have gone out", async () => {
+  const r = AX.sendReview("usdt", ETH, TO, "25.5", "0.0011");
+  assert.equal(r.title, "Review: Send USDT"); assert.ok(r.text.includes("From  " + ETH) && r.text.includes("To  " + TO) && r.text.includes("Send  25.5 USDT") && r.text.includes("≈ 0.0011 ETH"));
+  const u = ui(true); await AX.Act.sendGo({ axSend: async () => { throw new Error("nonce too low"); } }, u, "eth", ETH, TO, "1", "0.0004");
+  assert.match(u.said[u.said.length - 1][0], /^The send of 1 ETH was not confirmed as sent: nonce too low\. Look at this address on an Ethereum explorer before sending again/);
+});
+for (const confirm of [true, false]) test(`Export key, warning ${confirm ? "accepted" : "closed"}: the old warning first, axExportKey only after it`, async () => {
+  const ro = recorder({ axStatus: { ready: true, currency: "mxusdt" }, axWallet: WALLET, axExportKey: "0xKEY" }), p = oldPanel(ro.api, confirm);
+  p.P._setView("wallet"); await p.P.render(); await p.settle(); await p.el("axExport").onclick(); await p.settle();
+  const rn = recorder({ axExportKey: "0xKEY" }), u = ui(confirm), pk = await AX.Act.exportKey(rn.api, u);
+  assert.deepEqual(rn.money(), ro.money()); assert.deepEqual(rn.money(), confirm ? [["axExportKey", []]] : []);
+  assert.equal(pk, confirm ? "0xKEY" : null);
+  assert.equal(u.said[0][1], "Export ETH private key"); assert.equal(AX.KEY_WARN, "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.");
+});
+test("the CSV is the old panel's file, byte for byte: the same column names in the same order (another tool parses them)", async () => {
+  const rows = [
+    { hash: PK("91"), role: "INITIATOR", direction: "MINIMA_TO_ERC20", sellToken: "0x00", sellAmount: "3050", buyToken: "USDT", buyAmount: "9.722789", counterparty: PK("D1"), status: "COMPLETE", contractId: PK("F1"), created: 1795000000000, minimaTx: PK("A1"), ethTx: TX + ";" + TX },
+    { hash: PK("92"), role: "RESPONDER", direction: "ERC20_TO_MINIMA", sellToken: "USDT", sellAmount: "2.2", buyToken: AX.MXUSD, buyAmount: "2.2", counterparty: '=cmd|"x"', status: "REFUNDED", contractId: "", created: 0, minimaTx: "", ethTx: "" },
+    { hash: PK("93"), role: "", direction: "ODD", sellToken: "mxUSDT", sellAmount: "0", buyToken: "USDT", buyAmount: "1", counterparty: null, status: null, contractId: "-1", created: "x", minimaTx: "+a", ethTx: "@b" }];
+  let oldFile = null, newFile = null;
+  const ro = recorder({ axStatus: { ready: true, currency: "mxusdt" }, axSwaps: [{ hash: PK("91"), status: "COMPLETE", role: "INITIATOR" }], axExportSwaps: rows, exportCsv: (text, name) => { oldFile = [text, name]; return "/tmp/x.csv"; } }), p = oldPanel(ro.api, true);
+  p.P._setView("activity"); await p.P.render(); await p.settle(); await p.el("axExportBtn").onclick(); await p.settle();
+  const rn = recorder({ axExportSwaps: rows, exportCsv: (text, name) => { newFile = [text, name]; return "/tmp/x.csv"; } });
+  await AX.Act.exportCsv(rn.api, ui(true));
+  assert.deepEqual(newFile, oldFile); assert.equal(newFile[1], "atomix-trades.csv");
+  assert.equal(newFile[0].split("\r\n")[0], "Date,Role,Direction,Sold Amount,Sold Token,Bought Amount,Bought Token,Price (USDT/MINIMA),Counterparty,Status,Contract Id,Minima Tx,Eth Tx");
+  assert.deepEqual(AX.CSV_COLS.length, 13);
+  const none = recorder({ axExportSwaps: [] }), u = ui(true); await AX.Act.exportCsv(none.api, u);
+  assert.deepEqual(none.log.map((x) => x[0]), ["axExportSwaps"], "no file is asked for when there is nothing to write");
+});

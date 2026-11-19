@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.114] — Dexicon ① MxUSD: AtomiX in Activity, History, Assets and Settings (Phase 3c)
+
+- **Activity, Assets and Settings are one screen each, in rooms ① and ③**, and now hold AtomiX as the phone's do.
+- **Activity**: every AtomiX swap of the market the ⇄ pill is on, in flight first (taker and maker side, with the steps done, the maker's deadline and notice, when the refund opens, Refund now, Check now, the swap hash, counterparty and Ethereum swap id whole, and ✕ to hide the card), and any still-actionable swap of the other market (the engine's own rule: it is never hidden). Market history lists the market's prints. A second export, "↓ AtomiX swaps CSV", sits beside the Exchange one.
+- **History** (room ③) lists every finished AtomiX swap under the Exchange fills, each with Check now; a hidden card is still here.
+- **The CSV is the old file, byte for byte**: the same thirteen column names in the same order, the same quoting, the same file name (`atomix-trades.csv`). The test writes the file through the old panel and through the new action from the same rows and compares the text.
+- **Assets**: the ETHEREUM card in the phone's place (after the two coins): USDT and ETH, the wallet address whole with Copy, Refresh, Fund / QR, Send and Export key; then what AtomiX can swap of the active coin (confirmed, locked, unconfirmed, the coin count), Show coins with every coin id whole, and Consolidate, which is the wallet's own consolidation with its confirmation and its pool-key check. The card that said "the Ethereum wallet is in room ①" is gone. No token contract address is printed anywhere near the wallet address.
+- **Wallet send, same path**: `axSendReview(asset, to, amount)` (the engine's checks and the fee; a refusal is shown in the dialog and nothing is sent), then the review with both addresses whole, then `axSend(asset, to, amount)`. The result names the transaction hash whole and copies it; a send that errors says a transaction may have gone out and what to look at before sending again. Export key shows the old warning first. Compared call for call with the old panel (8 send cases, 2 key cases).
+- **Settings**: an AtomiX card with the market in use and the switch (the ⇄ pill's own confirmed switch), the max slippage for a buy, About AtomiX (the old panel's "?" text) and the engine's state.
+
 ## [0.18.113] — Dexicon ① MxUSD: OTC (Phase 3c)
 
 - **OTC** (`OtcTab.java`): the fold "OTC: A PRIVATE DEAL", MY AVAILABILITY (I SELL up to, I BUY up to, "● Live" or "○ Off", Go live / Update, Withdraw), LIQUIDITY PROVIDERS (what each LP sells and buys, its id whole, Buy and Sell buttons) and MY DEALS (the terms, whose move it is, the swap's hash once it settles, Accept / Counter / Reject on the user's move).

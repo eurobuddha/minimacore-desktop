@@ -68,7 +68,7 @@ test("the screens' code makes the frame without any visit to Dexicon, keeps it a
   const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() { e.parent.children.splice(e.parent.children.indexOf(e), 1); e.removed = true; }, querySelectorAll: () => [], querySelector: () => null }; return e; };
   const els = {}, timers = [], listeners = {}; let clock = 1000000, status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {} }, service = null, asked = 0;
-  const win = { DexCore: C, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {} }, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
+  const win = { DexCore: C, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
     Date: class extends Date { static now() { return clock; } },
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null },
     addEventListener: (t, f) => { listeners[t] = f; } };

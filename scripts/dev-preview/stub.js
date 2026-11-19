@@ -267,7 +267,7 @@
           setTimeout(() => { for (const sel of (Q.get("axdo") || "").split("|").filter(Boolean)) { const n = document.querySelector(sel); if (n) n.click(); } }, 600);
         }, 400);
       }, 300);
-      if (view === "dexicon") {
+      if (view === "dexicon" || view === "atomix") {
         const review = "Buying 2442.4471 MINIMA now\nEffective 0.003185 · 7.77919401 MxUSD\nBOOK 0 MINIMA / 0 MxUSD across 0 orders\nPOOL 2442.4471 MINIMA / 7.77919401 MxUSD across 2 pools\nWorst marginal 0.003190";
         DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { ready: true, block: 2428089, identity: { address: PK("D1"), miniaddress: ADDR }, stage: "", myTrades: [],
           tape: DXS === "empty" ? [] : [{ timems: now - 600000, buy: true, size: "400", price: "0.00332683", txpowid: PK("8A") }, { timems: now - 86400000, buy: false, size: "1500", price: "0.003", txpowid: PK("8B") }] } }));

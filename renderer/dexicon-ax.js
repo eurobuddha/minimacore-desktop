@@ -188,6 +188,26 @@
     return cap != null && Number(amount) > Number(cap) + 1e-9 ? "Above the LP's max size (" + cap + "). Nothing was sent." : "";
   }
 
+  /**
+   * The swap history as CSV (the panel's axExportCsv, character for character): tools/dexHistory reads these column
+   * NAMES. Columns may be appended, never renamed or reordered. rows = axExportSwaps().
+   */
+  const CSV_COLS = ["Date", "Role", "Direction", "Sold Amount", "Sold Token", "Bought Amount", "Bought Token", "Price (USDT/MINIMA)", "Counterparty", "Status", "Contract Id", "Minima Tx", "Eth Tx"];
+  function csv(rows) {
+    const q = (v) => { let t = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };
+    const role = (r) => { const x = roleLabel(r); return x ? x[0].toUpperCase() + x.slice(1) : ""; };
+    const dir = (d) => (d === "MINIMA_TO_ERC20" ? "Sell MINIMA" : d === "ERC20_TO_MINIMA" ? "Buy MINIMA" : d || "");
+    const iso = (ms) => { const n = Number(ms); return n > 0 && isFinite(n) ? new Date(n).toISOString() : ""; };
+    const price = (x) => { const sell = parseFloat(x.sellAmount), buy = parseFloat(x.buyAmount); if (!(sell > 0) || !(buy > 0)) return ""; const p = x.direction === "MINIMA_TO_ERC20" ? buy / sell : x.direction === "ERC20_TO_MINIMA" ? sell / buy : 0; return p > 0 ? String(Number(p.toPrecision(8))) : ""; };
+    const lines = rows.map((x) => [iso(x.created), role(x.role), dir(x.direction), x.sellAmount, tokRaw(x.sellToken), x.buyAmount, tokRaw(x.buyToken), price(x), x.counterparty, String(x.status == null ? "" : x.status).toLowerCase(), x.contractId, x.minimaTx, x.ethTx].map(q).join(","));
+    return [CSV_COLS.join(",")].concat(lines).join("\r\n");
+  }
+  /** the panel's axTok, for the file: a token id becomes its name, anything else is written as it is */
+  const tokRaw = (t) => { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = t.toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "MxUSD"; } return t; };
+  /** The review of a wallet send (WalletActions.review): from, amount, to and the fee, every address whole. */
+  const sendReview = (asset, from, to, amt, fee) => { const sym = asset === "eth" ? "ETH" : "USDT"; return { title: "Review: Send " + sym, ok: "Send now", text: "From  " + from + "\n\nSend  " + amt + " " + sym + "\nTo  " + to + "\n\nNetwork fee  ≈ " + fee + " ETH\nThis cannot be undone." }; };
+  const KEY_WARN = "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.";
+
   // The engine reads at most this many coins of a token before it refuses (main/atomix/lib/htlc.js guardedCoins): a maker
   // over it declines every buy until the coins are merged (AtomixConsolidate.warning).
   const COIN_CAP = { minima: 200, mxusdt: 53 };
@@ -262,11 +282,32 @@
       else ui.say(action === "accept" ? "Accepted. The deal now settles as an ordinary AtomiX swap: follow it in Activity. If the other side never locks, your lock is refunded by itself at its timelock." : action === "reject" ? "Rejected. Nothing was locked." : "Counter-offer sent. Nothing is locked until one side accepts.", "note");
       return r;
     },
+    // ---- the Ethereum wallet: axSendReview (the engine's checks and the fee) → review → axSend ----
+    /** { err } to show in the dialog, or { fee }. */
+    async sendCheck(api, asset, to, amt) { const r = await api.axSendReview(asset, to, amt).catch(fail); return r && r.err ? { err: mx(r.err) } : r; },
+    async sendGo(api, ui, asset, from, to, amt, fee) {
+      const rv = sendReview(asset, from, to, amt, fee);
+      if (!await ui.confirm(rv.title, rv.text, rv.ok)) return null;
+      const r = await api.axSend(asset, to, amt).catch(fail), sym = asset === "eth" ? "ETH" : "USDT";
+      if (r && r.err) ui.say("The send of " + amt + " " + sym + " was not confirmed as sent: " + mx(r.err) + ". Look at this address on an Ethereum explorer before sending again: a transaction may have gone out.", "error");
+      else ui.say("Sent " + amt + " " + sym + ". It is final once Ethereum confirms it. Transaction " + (r && r.tx), "note");
+      return r;
+    },
+    /** the warning first, then the key (axExportKey) */
+    async exportKey(api, ui) { if (!await ui.confirm("Export ETH private key", KEY_WARN, "Reveal key")) return null; return api.axExportKey().catch(() => null); },
+    /** every swap, maker and taker, to one file: axExportSwaps → exportCsv(text, "atomix-trades.csv") */
+    async exportCsv(api, ui) {
+      const rows = await api.axExportSwaps().catch(() => []);
+      if (!rows.length) { ui.say("There are no swaps to export. No file was written.", "note"); return null; }
+      const path = await api.exportCsv(csv(rows), "atomix-trades.csv").catch(() => null);
+      ui.say(path ? "Saved " + rows.length + " swaps." : "Export cancelled. No file was written.", "note");
+      return path;
+    },
     async refundNow(api, ui, hash) { const r = await api.axRefundNow(hash).catch((e) => ({ msg: "Refund check failed: " + ((e && e.message) || e) })); return mx(r.msg); },
     async inspect(api, hash) { return (await api.axInspect(hash).catch((e) => ["Check failed: " + ((e && e.message) || e)])).map(mx); }
   };
 
-  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem };
+  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -278,7 +319,9 @@
     slip: slipOf(pref("dexicon_ax_slip")) || 4.2, hidden: new Set((pref("dexicon_ax_hidden") || "").split(",").filter(Boolean)) };
   const api = () => D.api;
   const ccy = () => ccyOf(S.st), halted = () => !!(S.st && S.st.halt);
-  const say = (text, kind) => { S.said = text ? { text, kind: kind || "error" } : null; paint(); };
+  /** is the screen on show one of the shared ones (Activity, Assets, Settings, History), which dexicon-ui.js draws? */
+  const onShared = () => { const w = D.where(); return w.shared; };
+  const say = (text, kind) => { if (onShared()) return D.say(text, kind || "error"); S.said = text ? { text, kind: kind || "error" } : null; paint(); };
   const ui = { confirm: (title, text, ok) => D.dialog(title, text, ok), say };
   const body = () => $("dxAxBody");
   const visible = (tab) => { const b = body(); return !!b && b.dataset.tab === (tab || S.tab) && $("shell").dataset.mode === "dex" && b.offsetParent !== null; };
@@ -308,14 +351,15 @@
     const fresh = await api().axStatus().catch(() => null); if (fresh) S.st = fresh;
     D.repaintStrip();
     if (!D.running() || !S.st.ready) return;
-    const want = { book: () => api().axBook(), swaps: () => api().axSwaps(), mc: () => api().axMakerCfg() };
-    if (tab === "market") want.mh = () => api().axMarketHistory();
+    const want = { swaps: () => api().axSwaps() };
+    if (tab !== "shared") { want.book = () => api().axBook(); want.mc = () => api().axMakerCfg(); }   // a book scan is slow: only where a book is shown
+    if (tab === "market" || tab === "shared") want.mh = () => api().axMarketHistory();
     if (tab === "otc") want.otc = () => api().axOtc();
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled") S[k] = got[i].value; });
     api().axWallet().then((w) => { if (w) { S.wallet = w; S.bals = w.bals; paint(); } }).catch(() => {});
   }
-  function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (visible()) load(S.tab).then(paint, paint); else api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, 400); }
+  function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (onShared() && D.where().shown) load("shared").then(paint, paint); else if (visible()) load(S.tab).then(paint, paint); else api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, 400); }
   function reset() { Object.assign(S, { st: { ready: false }, book: null, swaps: null, bals: null, wallet: null, mc: null, mh: null, otc: null, typed: null, said: null, answers: {}, at: 0 }); const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
   // ---- what stands above every screen of the room ----
@@ -628,15 +672,21 @@
     paint(); load(tab).then(paint, paint);
   }
   function paint() {
+    if (onShared()) return D.redraw();
     const b = body(), scr = SCREENS[S.tab]; if (!b || !scr || b.dataset.tab !== S.tab || (!b.firstChild && !scr.whole)) return;
     if (scr.whole && typing() && !S.editing) return;   // a screen drawn whole is never redrawn under someone typing
     b.dataset.axccy = S.st.currency || ""; scr.paint();
   }
   /** once a minute while a screen of the room is open (the phone's REFRESH_MS), never under someone typing */
-  function tick() { if (D && SCREENS[S.tab] && visible() && !typing() && !S.busy && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
+  /** the shared screens ask for AtomiX's part of their data: at once when one opens, then once a minute */
+  function shared(force) { if (!D || (!force && Date.now() - S.at < 60000)) return; load("shared").then(D.redraw, D.redraw); }
+  function tick() { if (D && !onShared() && SCREENS[S.tab] && visible() && !typing() && !S.busy && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
+  /** true when the click was one of this file's (dexicon-ui.js asks first, on the shared screens) */
   async function click(e) {
-    const b = e.target.closest("button"); if (!b) return;
-    const ds = b.dataset;
+    const b = e.target.closest("button"); if (!b || !Object.keys(b.dataset).some((k) => k.indexOf("ax") === 0)) return false;
+    await click0(b.dataset); return true;
+  }
+  async function click0(ds) {
     if (ds.axwhy) { pref("dexicon_fold_" + ds.axwhy, pref("dexicon_fold_" + ds.axwhy) === "1" ? "0" : "1"); return paint(); }
     if (ds.axgo) return D.go(ds.axgo);
     if (ds.axslip) { if (ds.axslip === "custom") return customSlip(); S.slip = Number(ds.axslip); pref("dexicon_ax_slip", ds.axslip); paint(); return preview(); }
@@ -646,17 +696,95 @@
     if (ds.axrefresh) { S.book = null; paint(); return load(S.tab).then(paint, paint); }
     if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
-    if (ds.axrefund) { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return load(S.tab).then(paint, paint); }
+    if (ds.axrefund) { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); }
+    if (ds.axcsv) return Act.exportCsv(api(), ui);
+    if (ds.axw) return walletAct(ds.axw);
+    if (ds.axswitch) return switchCurrency();
+    if (ds.axabout) return void D.dialog("About AtomiX", ABOUT, "");
+  }
+  const reload = () => load(onShared() ? "shared" : S.tab).then(paint, paint);
+
+  // ---- AtomiX's part of the shared screens (dexicon-ui.js places them): Activity, History, Assets, Settings ----
+  const ABOUT = "Swap MINIMA or MxUSD ⇄ Ethereum USDT trustlessly across chains: no middleman ever holds your funds. Both sides lock their funds in a time-locked contract; a swap that stalls is refunded by itself at its deadline.\n\nYour keys are derived from this node's seed, so it is the same wallet and identity on any device running AtomiX on this node's seed.\n\nRoom ① has Swap (a quick trade), Market (the order book and your own offer) and OTC (private negotiated deals). Your swaps are in Activity and History, your Ethereum wallet in Assets.\n\nAtomiX trades on the same on-chain books as the AtomiX phone app and MiniDapp.";
+  const up = () => D.running() && S.st.ready;
+  function part(tab, sub) {
+    if (!up()) return tab === "assets" ? `<div class="dx-card"><div class="dx-label">ETHEREUM</div><div class="dx-sub dx-sub--sans">${D.running() ? "AtomiX is still starting: the Ethereum wallet appears when it is ready." : "The node is stopped. The Ethereum wallet appears when it runs."}</div></div>` : "";
+    const c = ccy(), swaps = S.swaps || [];
+    if (tab === "activity") {
+      if (sub === 1) { const rec = (S.mh && S.mh.recent) || []; return rec.length ? `<div class="dx-day">ATOMIX · USDT ⇄ ${esc(c)}</div>` + rec.map((t) => `<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline">${fmtPx(t.price)} USDT</span><span class="dx-chip" data-tone="${t.status === "EXECUTED" ? "ok" : t.status === "REFUNDED" ? "bad" : "live"}">${t.status === "EXECUTED" ? "FILLED" : t.status === "REFUNDED" ? "REFUNDED" : "OPEN"}</span></div><div class="dx-sub">${esc(t.sizeMinima)} ${esc(c)} · block ${esc(t.createdBlock)}</div></div>`).join("") : ""; }
+      const list = swaps.filter((x) => !S.hidden.has(x.hash)).sort((a, b) => (terminal(a) - terminal(b)) || (b.created - a.created));
+      return list.length ? `<div class="dx-day">ATOMIX SWAPS · USDT ⇄ ${esc(c)}</div>` + list.map((x) => swapCard(x, true)).join("") : "";
+    }
+    if (tab === "history") { const list = swaps.filter(terminal).sort((a, b) => b.created - a.created); return list.length ? `<div class="dx-day">ATOMIX SWAPS · USDT ⇄ ${esc(c)}</div>` + list.map((x) => swapCard(x, false)).join("") : ""; }
+    if (tab === "assets") {
+      const w = S.wallet, b = (w && w.bals) || {}, m = b.meta, warn = coinWarn(S.st.currency, m && m.coins), addr = S.st.eth || (w && w.addr) || "";
+      const locked = m ? Math.max(0, (Number(m.confirmed) || 0) - (Number(m.sendable) || 0)) : 0;
+      return `<div class="dx-card"><div class="dx-row"><span class="dx-label">ETHEREUM</span><span class="dx-row"><button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">Copy</button><button class="dx-info" data-axw="info" aria-label="About this Ethereum wallet">i</button></span></div>
+          <div class="ax-ethbal">USDT ${esc(w ? b.usdt : "…")} · ETH ${esc(w ? b.eth : "…")}</div><div class="dx-addr" data-copy="${esc(addr)}" title="Your Ethereum wallet address. Click to copy">${esc(addr)}</div>
+          ${b.ethErr ? `<div class="ax-bad">The Ethereum balance could not be read: ${esc(b.ethErr)}. The amounts above are not known; nothing is lost. Try Refresh.</div>` : ""}
+          <div class="ax-wbtns"><button class="dx-btn" data-axw="refresh">↻  Refresh</button><button class="dx-btn" data-axw="fund">⤓  Fund / QR</button><button class="dx-btn" data-axw="send">↑  Send</button><button class="dx-btn ax-key" data-axw="key">Export key</button></div></div>`
+        + `<div class="dx-card"><div class="dx-label">ATOMIX · ${esc(c)} AVAILABLE TO SWAP</div><div class="ax-ethbal">${esc(w ? b.minima : "…")} ${esc(c)}</div>`
+        + (m ? `<div class="dx-sub">confirmed ${esc(m.confirmed)} · locked ≈ ${cut(locked)} · unconfirmed ${esc(m.unconfirmed)} · ${esc(m.coins)} ${Number(m.coins) === 1 ? "coin" : "coins"}</div>` : "")
+        + (warn ? `<div class="ax-bad">${esc(warn)}</div>` : "") + `<div class="ax-wbtns"><button class="dx-btn" data-axw="coins">Show coins</button><button class="dx-btn" data-axw="consolidate">Consolidate ${esc(c)} coins</button></div></div>`;
+    }
+    if (tab === "settings") {
+      const custom = S.slip !== 2 && S.slip !== 4.2, other = S.st.currency === "minima" ? "MxUSD" : "MINIMA";
+      return `<div class="dx-card" data-axccy="${esc(S.st.currency || "")}"><div class="dx-row"><span class="dx-h">ATOMIX</span><button class="dx-info" data-axabout="1" aria-label="About AtomiX">i</button></div>
+        <div class="dx-sub dx-sub--sans">Room ① trades USDT ⇄ ${esc(c)} now. One market at a time: switching withdraws your offer on this one first; swaps in flight still settle.</div>
+        <div class="ax-wbtns"><button class="dx-btn" data-axswitch="1"${S.switching ? " disabled" : ""}>⇄  Switch to ${other}</button></div>
+        <div class="ax-slip"><span>Max slippage for a buy</span>${[2, 4.2].map((x) => `<button data-axslip="${x}" aria-pressed="${S.slip === x}">${x}%</button>`).join("")}<button data-axslip="custom" aria-pressed="${custom}">${custom ? S.slip + "%" : "Custom"}</button></div>
+        <div class="dx-sub dx-sub--sans">AtomiX engine ready · Ethereum mainnet · block ${esc(S.st.block || "…")}${halted() ? " · HALTED" : ""}</div></div>`;
+    }
+    return "";
+  }
+  async function walletAct(what) {
+    const w = S.wallet, addr = S.st.eth || (w && w.addr) || "", c = ccy();
+    if (what === "refresh") { S.wallet = null; paint(); return reload(); }
+    if (what === "info") return void D.dialog("Ethereum wallet", "ERC20 USDT and a little ETH for gas. This wallet is derived from this node's seed: the same address as the AtomiX phone app and MiniDapp on this seed. Its key is made again at every start and is never stored.", "");
+    if (what === "fund") {
+      let qr = ""; try { if (typeof qrcode !== "undefined") { const q = qrcode(0, "M"); q.addData(addr); q.make(); qr = `<div class="ax-qr">${q.createImgTag(5, 6)}</div>`; } } catch (e) {}
+      return void form("Receive / Fund · Ethereum", `<div class="dx-addr" data-copy="${esc(addr)}" title="Click to copy">${esc(addr)}</div>${qr}<div class="dx-sub dx-sub--sans">Same address on all EVM networks: fund it with Ethereum ETH and USDT. A little ETH pays the gas for swaps and sends.</div><button class="dx-btn ax-copy" data-copy="${esc(addr)}">Copy address</button>`, "");
+    }
+    if (what === "send") return sendDialog("");
+    if (what === "key") {
+      const pk = await Act.exportKey(api(), ui); if (pk === null) return;
+      if (!pk) return say("The Ethereum wallet is not ready yet. No key was shown.", "note");
+      return void form("ETH private key", `<div class="ax-bad">⚠ Keep this secret.</div><div class="dx-addr">${esc(pk)}</div><button class="dx-btn ax-copy" data-copy="${esc(pk)}">Copy key</button>`, "");
+    }
+    if (what === "coins") {
+      const rows = await api().axCoins().catch(() => []);
+      return void D.dialog("Your " + c + " coins", rows.length ? rows.map((r) => r.amount + " " + c + "\ncoin " + r.coinid).join("\n\n") : "No sendable coins right now.", "");
+    }
+    if (what === "consolidate") { const done = await D.consolidateToken(S.st.currency === "minima" ? "0x00" : MXUSD, c); if (done) reload(); }
+  }
+  /** Send from the Ethereum wallet (WalletActions.send): ETH or USDT, to, amount with Max; the engine checks it and names the fee; then the review. */
+  async function sendDialog(prefill) {
+    const w = S.wallet, from = S.st.eth || (w && w.addr) || ""; let asset = "eth";
+    const got = await form("Send from this wallet", `<div class="dx-seg"><button data-asset="eth" aria-pressed="true">ETH</button><button data-asset="usdt" aria-pressed="false">USDT</button></div>
+      <label class="ax-fld"><b>To</b><input class="dx-in ax-in" name="to" placeholder="0x… recipient" autocomplete="off" spellcheck="false" value="${esc(prefill || "")}"></label>
+      <label class="ax-fld"><b>Amount</b><span class="ax-maxrow"><input class="dx-in ax-in" name="amt" inputmode="decimal" placeholder="0.00" autocomplete="off"><button class="dx-btn dx-btn--side" data-max="1">Max</button></span></label>
+      <div class="dx-sub dx-sub--sans">Sends are irreversible. Double-check the address.</div>`, "Review",
+      async (d) => { const to = d.querySelector("[name=to]").value.trim(), amt = d.querySelector("[name=amt]").value.trim(), r = await Act.sendCheck(api(), asset, to, amt); return r.err ? r.err + " Nothing was sent." : { asset, to, amt, fee: r.fee }; },
+      (d) => d.addEventListener("click", async (e) => {
+        const a = e.target.closest("[data-asset]"), m = e.target.closest("[data-max]");
+        if (a) { asset = a.dataset.asset; d.querySelectorAll("[data-asset]").forEach((x) => x.setAttribute("aria-pressed", String(x === a))); }
+        if (m) { const v = await api().axSendMax(asset).catch(() => null); if (v != null) d.querySelector("[name=amt]").value = v; }
+      }));
+    if (!got) return;
+    const r = await Act.sendGo(api(), ui, got.asset, from, got.to, got.amt, got.fee);
+    if (r && !r.err && r.tx) D.copy(r.tx);
+    if (r) reload();
   }
   /** The ⇄ pill (MainActivity.switchCurrencyDialog): the panel's confirm, then the engine's switch. */
   async function switchCurrency() {
     if (!D || S.switching || !S.st.ready) return;
     S.switching = true; D.repaintStrip();
     await Act.switchCurrency(api(), ui, S.st.currency);
-    S.switching = false; S.typed = null; S.book = null; S.mc = null;
+    S.switching = false; S.typed = null; S.book = null; S.mc = null; S.wallet = null; S.bals = null;
+    if (onShared()) return reload();
     const b = body(); if (b && SCREENS[S.tab] && b.dataset.tab === S.tab) { b.innerHTML = ""; render(S.tab, b); } else load("").then(D.repaintStrip, D.repaintStrip);
   }
 
-  return Object.assign({ Act, init: (deps) => { D = deps; api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, render, onUpdate, reset, tick, click, switchCurrency,
+  return Object.assign({ Act, init: (deps) => { D = deps; api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, render, onUpdate, reset, tick, click, switchCurrency, part, shared,
     pill: () => ({ text: "⇄  " + (S.switching ? "Switching…" : ccy()), currency: S.st.currency || "", busy: !!S.switching, label: "Trading " + ccy() + ". Activate to switch to " + (S.st.currency === "minima" ? "MxUSD" : "MINIMA") + "." }) }, core);
 });

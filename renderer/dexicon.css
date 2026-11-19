@@ -294,3 +294,12 @@ button.dx-pill { cursor: pointer; }
 .ax-sec { margin: 14px 2px 6px; font-size: 12px; }
 .ax-dlg pre { margin-bottom: 4px; font-family: var(--dx-sans); }
 .ax-dlg .dx-btn--go { background: linear-gradient(var(--ax-acc-top), var(--ax-acc)); color: var(--ax-ink); }
+/* AtomiX on the shared screens (AssetsTab.java, WalletActions.java) */
+.ax-ethbal { margin-top: 8px; font: 400 14px/20px var(--dx-mono); }
+.ax-wbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; } .ax-wbtns .dx-btn { min-height: 44px; border: 0; font-weight: 400; font-size: 12.5px; }
+.ax-key { color: var(--dx-dim); }
+.ax-qr { width: fit-content; margin: 10px auto; padding: 8px; border-radius: 8px; background: #FFFFFF; }
+.ax-copy { display: block; width: 100%; margin-top: 10px; }
+.ax-maxrow { display: flex; align-items: center; gap: 8px; } .ax-maxrow .dx-in { flex: 1; }
+.ax-dlg .dx-seg button[aria-pressed="true"] { background: var(--ax-acc); color: var(--ax-ink); }
+.dx-card .ax-slip { flex-wrap: wrap; }
