@@ -167,7 +167,7 @@ const DexUI = (() => {
   function render() {
     const body = $("dxBody"); if (!body) return;
     const tab = C.tabOf(mem);
-    if (body.dataset.tab !== tab) { body.dataset.tab = tab; body.innerHTML = tab === "trade" ? tradeSkeleton() : ""; if (tab === "trade") bindTrade(); body.onclick = tab === "trade" ? null : onTabClick; $("main").scrollTop = 0; }
+    if (body.dataset.tab !== tab) { body.dataset.tab = tab; body.innerHTML = tab === "trade" ? tradeSkeleton() : ""; if (tab === "trade") bindTrade(); body.onclick = tab === "trade" ? null : onTabClick; $("main").scrollTop = 0; X.said = null; }
     draw();
     load().then(draw, draw);
   }

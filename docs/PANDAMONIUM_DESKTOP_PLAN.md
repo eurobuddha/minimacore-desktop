@@ -186,6 +186,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.101 | 3b | ③ Exchange, Trade: reproduced from the Android screen (the MiniDapp page was captured beside it and does not match); the page runs unchanged and hidden in a sandboxed `dxroom://` frame as the taker's engine (pinned by `scripts/dexicon-page.manifest.json`, no network, no `window.mcd`), driven through nine named actions; one-click FAST takes with the review shown before the click; on-chain trades confirmed by the page's own review text; amounts cut, never rounded |
 | 0.18.102 | 3b | ③ Exchange, Orders and History: open orders (takes sent, FAST, on-chain) with reviewed change-price and cancel; the market maker card, its dialogs hosted from the page (the mirror of the Android dialog); fills marked WAITING until a block holds them; the net of settled trades; Export CSV with the Android column names |
 | 0.18.103 | 3b | ③ Exchange, Activity / Assets / Settings: activity lines with the engine's own stage machine (`lib/activity.js`, verbatim) so posted is never shown as done; funds with their breakdown, receive address and trading ID whole; relays with add, discover, remove and their state |
+| 0.18.104 | 3b | Comparison round against the Fold and phone captures (Dexicon dark and light, 932 x 704 and 1440 x 900); a message no longer follows the user across tabs; differences kept on purpose listed in the changelog |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";
@@ -222,3 +223,8 @@ Phases 0 to 2 were verified by tests and a browser preview only. The app has not
 - [ ] Dexicon and the other engines on one wallet: a coin chosen by two engines at once ends in a refused `txnpost` (expected `status:false`), a `txndelete`, and no stuck claim.
 - [ ] Dexicon on a block-key wallet: `keys action:list` lists the keys that own the user's on-chain orders (the own-order rule and My orders depend on it).
 - [ ] Dexicon after a wallet restore: `dexicon.sqlite-legacy-keys-YYYYMMDD` is beside a new, empty `dexicon.sqlite`; the refusal while an order is on the chain.
+- [ ] Dexicon page frame: `dxroom://exchange/index.html` loads in the packaged app (asar), the page boots its identity, and no console error about the content security policy appears.
+- [ ] Dexicon Trade on the dev node: a FAST order rests and shows on a second node; a FAST take against another node's order co-signs and settles; a take the maker never answers is voided after 5 minutes; an on-chain trade through a pool shows the page's review and settles.
+- [ ] Dexicon relays: add, discover and remove; the page's relay traffic passes the host's allow-list for a relay added a moment ago (the service takes up to one tick to learn it).
+- [ ] Dexicon market maker: the page's dialog opens over the screen in both themes, saves, and STOP withdraws the ladder.
+- [ ] Dexicon Export CSV: the save dialog, and the file read by the reconciliation tool.

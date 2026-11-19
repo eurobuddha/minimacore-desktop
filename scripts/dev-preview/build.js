@@ -65,7 +65,7 @@ if (process.argv.includes("--shots")) {
     ["dex-trade-take", "view=dexicon&dxf=buy:0.0034:25000"], ["dex-trade-take-dxlight", "view=dexicon&dx=light&dxf=buy:0.0034:25000"], ["dex-trade-rest", "view=dexicon&dxf=sell:0.0036:500"], ["dex-trade-own", "view=dexicon&dxf=sell:0.0029:100"],
     ["dex-trade-review", "view=dexicon&dxf=buy:0.0032:3000&dxdlg=1"], ["dex-trade-taking", "view=dexicon&dxs=taking&dxf=buy:0.0034:500&scroll=200"], ["dex-trade-failed", "view=dexicon&dxs=failed&dxf=buy:0.0034:500&scroll=200"],
     ["dex-trade-stopped", "view=dexicon&state=stopped"], ["dex-trade-notready", "view=dexicon&dxs=notready"], ["dex-trade-norelay", "view=dexicon&dxs=norelay"], ["dex-trade-relaydown", "view=dexicon&dxs=relaydown"],
-    ["dex-trade-empty", "view=dexicon&dxs=empty"], ["dex-trade-phone", "view=dexicon", 412, 915, 2],
+    ["dex-trade-empty", "view=dexicon&dxs=empty"], ["dex-trade-narrow", "view=dexicon", 560, 915, 2],
     ["dex-orders", "view=dexicon&dxtab=orders"], ["dex-orders-dxlight", "view=dexicon&dxtab=orders&dx=light"], ["dex-orders-1440x900", "view=dexicon&dxtab=orders", 1440, 900, 1], ["dex-orders-dxlight-1440x900", "view=dexicon&dxtab=orders&dx=light", 1440, 900, 1],
     ["dex-orders-fills", "view=dexicon&dxtab=orders&dxsub=1"], ["dex-orders-maker", "view=dexicon&dxtab=orders&dxmm=1"], ["dex-orders-empty", "view=dexicon&dxtab=orders&dxs=empty"], ["dex-orders-stopped", "view=dexicon&dxtab=orders&state=stopped"],
     ["dex-history", "view=dexicon&dxtab=history"], ["dex-history-dxlight", "view=dexicon&dxtab=history&dx=light"], ["dex-history-1440x900", "view=dexicon&dxtab=history", 1440, 900, 1], ["dex-history-dxlight-1440x900", "view=dexicon&dxtab=history&dx=light", 1440, 900, 1],

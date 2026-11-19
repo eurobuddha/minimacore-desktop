@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.104] — Dexicon ③ Exchange: comparison round (Phase 3b, part 5)
+
+- Every Exchange screen was captured in Dexicon dark and Dexicon light at 932 x 704 and 1440 x 900 and opened beside its Fold and phone captures. A message from one tab no longer follows the user to the next tab. The narrow-window capture is taken at 560 px (headless Chrome cannot be narrower than about 500 px, so the 412 px one was cut off); below 700 px the Trade screen is the phone's single column in the phone's order.
+- Known differences from the phone, kept on purpose: an unknown value shows "…" where the phone shows a dash (no em dashes in the desktop's own text); a fill waiting for a block carries a WAITING badge; the ticker has one more line, the MEXC price; the Trade ticket spells out what the click signs; the "sweep of both" third button is not there (FAST and on-chain are two buttons); History and Activity list Exchange trades only until room ① is rebuilt; Assets points to room ① for the Ethereum wallet.
+
 ## [0.18.103] — Dexicon ③ Exchange: Activity, Assets, Settings (Phase 3b, part 4)
 
 - **Activity** (`ActivityTab.java`): My activity, Market history, Export CSV. Each line's badge and status come from the engine's own stage machine, `lib/activity.js`, loaded verbatim (it is pure: no node, no page): SENT, CO-SIGNED, SETTLING / IN BLOCK, then DONE or CONFIRMED only at three confirmations; FAILED, REFUSED, DROPPED and LOST carry the engine's real reason, whole. A click shows the facts and every identifier in full.
