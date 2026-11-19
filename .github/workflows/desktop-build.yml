@@ -106,7 +106,8 @@ jobs:
       - name: Verify AtomiX glue
         run: node scripts/atomix-unit.js
 
-      - name: Verify Casino glue
+      # P2P Chance was removed in 0.18.68; this proves what is left can only settle, never start a bet.
+      - name: Verify P2P Chance settle-only glue
         run: node scripts/casino-glue-test.js
 
       - name: Verify terminal autocomplete

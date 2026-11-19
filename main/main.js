@@ -169,8 +169,8 @@ ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? ""
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
+  if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   const c = config.save(patch || {});
-  try { if (c.casinoEnabled) startCasinoIfEnabled(); } catch (e) {}
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
 });
@@ -543,42 +543,12 @@ ipcMain.handle("mcd:ewExportKey", () => ethwallet.exportKey());
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
-// Casino (Zero Edge Casino — on-chain commit-reveal)
-ipcMain.handle("mcd:casinoStatus", () => casino.status());
-ipcMain.handle("mcd:casinoOpenBets", () => casino.openBets());
-ipcMain.handle("mcd:casinoMyBets", () => casino.myBets());
-ipcMain.handle("mcd:casinoHistory", () => casino.history());
-ipcMain.handle("mcd:casinoBalance", () => casino.balance());
-ipcMain.handle("mcd:casinoRawBets", () => casino.rawBets());
-ipcMain.handle("mcd:casinoWalletCoins", () => casino.walletCoins());
-ipcMain.handle("mcd:casinoStakeable", () => casino.stakeable());
-ipcMain.handle("mcd:casinoResolveOutcome", (_e, commit, role) => casino.resolveOutcome(commit, role));
-ipcMain.handle("mcd:casinoCreate", (_e, preset, bet) => casino.create(preset, bet));
-ipcMain.handle("mcd:casinoTake", (_e, coinid, pick) => casino.take(coinid, pick));
-ipcMain.handle("mcd:casinoCancel", (_e, coinid) => casino.cancel(coinid));
-ipcMain.handle("mcd:casinoResolve", (_e, coinid) => casino.resolve(coinid));
-ipcMain.handle("mcd:casinoReveal", (_e, coinid) => casino.reveal(coinid));
-ipcMain.handle("mcd:casinoClaimTimeout", (_e, coinid) => casino.claimTimeout(coinid));
-ipcMain.handle("mcd:casinoSetCurrency", (_e, tokenid) => casino.setCurrency(tokenid));
-ipcMain.handle("mcd:casinoNewCount", () => casino.newCount());
-ipcMain.handle("mcd:casinoSeen", () => casino.markSeen());
+// P2P Chance was removed in 0.18.68. What is left only SETTLES bets a wallet already has on the chain (reveal,
+// resolve, withdraw its own open offers, claim timeouts — main/casino.js). It runs only for an install whose
+// config already says casinoEnabled; nothing in the app can turn that on any more, so everyone else runs nothing.
+ipcMain.handle("mcd:casinoOpen", () => casino.open());
 ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
 casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
-casino.emitter.on("log", (l) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casinolog", l); });   // activity board feed
-let casinoClaimNotification = null;
-casino.emitter.on("notifycancel", () => { if (casinoClaimNotification) casinoClaimNotification.close(); casinoClaimNotification = null; });
-casino.emitter.on("notify", (msg) => {   // stable timeout reminder; click routes to My Bets
-  try {
-    if (casinoClaimNotification) casinoClaimNotification.close();
-    const n = new Notification({ title: "Casino timeout claims", body: String(msg), silent: !!(win && !win.isDestroyed() && win.isFocused()) });
-    casinoClaimNotification = n;
-    n.on("click", () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:casinoClaims"); } });
-    n.show();
-  } catch (e) { /* best-effort */ }
-});
-// Casino background auto-processor (reveal/resolve). GATED on config.casinoEnabled — not just the tab being
-// visible — so a hidden/disabled Casino never auto-reveals or resolves bets. Starts on node-running if already
-// enabled; startCasinoIfEnabled() is also called from the saveConfig handler so toggling it ON starts it live.
 let casinoStarted = false;
 function startCasinoIfEnabled() {
   if (casinoStarted) return;

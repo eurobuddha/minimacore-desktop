@@ -492,10 +492,6 @@ body { font-family: var(--sans); }
 #view-minimall .shop-card { font-size:11px; color:var(--dim); background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:6px 8px; margin-top:4px; word-break:break-all; }
 #view-minimall .mail-thread { display:flex; flex-direction:column; gap:6px; }
 
-/* The one P2P Chance rule the shell still owns: the 18+ chip on the Settings card that enables the tab.
-   Everything else moved to renderer/casino.css, scoped to .czapp. */
-.casino-18 { color:var(--accent); font:700 11px/1 var(--mono); letter-spacing:.05em; }
-
 /* ============================ Vestr (token vesting) ============================ */
 #view-vestr .v-card { border-radius:12px; }
 #view-vestr .v-top { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }

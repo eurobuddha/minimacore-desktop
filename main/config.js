@@ -63,13 +63,13 @@ const DEFAULTS = {
   extraArgs: "",             // any additional raw args, appended verbatim
   labels: {},                // address → friendly name (shown in Receive / History / CSV)
   theme: "current",          // current | original-light | original-dark
-  casinoEnabled: false,      // Casino tab hidden until enabled in Settings (18+ self-cert); also gates the bg auto-processor
-  casinoAgeCertified: false, // user self-certified 18+ / legal gambling age
-  openAtLogin: false,        // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
-  casinoDollar: false        // Casino currency toggle: false = MINIMA, true = MxUSD. It MUST be declared here —
-                             // save() drops any key DEFAULTS does not name, and this one being absent is what
-                             // froze the toggle in 0.16.97 (it had lived in the renderer only since 0.16.37).
-                             // scripts/config-keys-test.cjs now fails the build if a renderer key goes missing.
+  casinoEnabled: false,      // P2P Chance was removed in 0.18.68 and nothing sets this any more. An install that
+                             // had it on keeps it: it is the gate for the settle-only loop (main/casino.js) that
+                             // gets that wallet's existing bets and offers paid out. Do not delete this key.
+  openAtLogin: false         // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
+                             // Every key the renderer saves MUST be declared here — save() drops any key DEFAULTS
+                             // does not name (the 0.16.97 casinoDollar regression). scripts/config-keys-test.cjs
+                             // fails the build if a renderer key goes missing.
 };
 
 function load() {

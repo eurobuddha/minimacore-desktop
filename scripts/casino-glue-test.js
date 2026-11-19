@@ -1,127 +1,139 @@
-/* Headless glue test for the casino module — MOCK runner, no node. Verifies:
- *  - the vm boots service.js + engine.js and exposes ctx.CASINO
- *  - checkmode is synthesised to WRITE
- *  - the house-create `send` is routed through pinMinimaSend (fromaddress appended)
- *  - createBet emits the exact covenant `send` (state ports 0..7, phase 0)
- *  - takeBet builds the correct txn sequence (contract input + funding + pot output storestate:true + states + auto sign)
+/* Headless test for what is left of P2P Chance (removed in 0.18.68) — MOCK runner, no node.
+ *
+ * main/casino.js is now SETTLE-ONLY glue. This proves, through the real engine files in the real vm:
+ *  - nothing runs until startLoop, and main.js only calls startLoop when config.casinoEnabled is already true
+ *  - it can never start anything: no `send`, no take, no offer renewal reaches the node — even in the worst
+ *    case, where the cancel marker cannot be saved and service.js's keepalive tries to renew a due offer
+ *  - it does settle: an own open offer is withdrawn to the wallet, a taken bet is revealed, an expired pot is
+ *    claimed, a stranger's coin is never touched
+ *  - a failed scan is never read as "nothing open"; the bet secrets and history are never deleted or rewritten
+ *  - the covenant is still registered trackall:false and the hygiene sweep still spares every own coin
  */
 const path = require("path");
-// Inject an in-memory keychain (config.getSecret/setSecret are used by casino.js's keypair shim; real config needs
-// electron). `let` on the setSecret so the negative durability test can force it to fail.
+const fs = require("fs");
+const vm = require("vm");
+const crypto = require("crypto");
 const cfg = require(path.join(__dirname, "..", "main/config.js"));
-const mem = {};
+const mem = {}, deleted = [];
 let secretWritesOk = true;
 cfg.getSecret = (acct) => (acct in mem ? mem[acct] : null);
 cfg.setSecret = (val, acct) => { if (!secretWritesOk) return false; mem[acct] = String(val); return true; };
-cfg.deleteSecret = (acct) => { delete mem[acct]; };
+cfg.deleteSecret = (acct) => { deleted.push(acct); delete mem[acct]; };
+const acct = (key) => "casino-" + crypto.createHash("sha256").update(key).digest("hex");   // casino.js kpAccount
 const casino = require(path.join(__dirname, "..", "main/casino.js"));
 
 const CONTRACT = "0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F";
-const sent = [];   // every command the engine issued through the shim → runner
+const WALLET = "0x" + "AB".repeat(32), MYPK = "0xA1A1", OTHER = "0xB2B2";
+const st = (arr) => arr.map((data, port) => ({ port, data }));
+const coinsFor = (age) => [
+  { coinid: "0x0F01", amount: "1", tokenid: "0x00", age: 600 + age, state: st([MYPK, WALLET, "0xC0C0", "2", "2", "1", "0", "1500"]) },                          // my open offer, due for renewal
+  { coinid: "0x0F02", amount: "2", tokenid: "0x00", age: 5 + age, state: st([MYPK, WALLET, "0xC1C1", "2", "2", "1", "1", "1500", OTHER, "0xDD", "0xEE", "1"]) },   // my offer, taken → I must reveal
+  { coinid: "0x0F03", amount: "2", tokenid: "0x00", age: 1600 + age, state: st([OTHER, "0xDD", "0xC2C2", "2", "2", "1", "1", "1500", MYPK, WALLET, "0xEE", "0"]) }, // I took it, house never revealed → timeout claim
+  { coinid: "0x0F04", amount: "1", tokenid: "0x00", age: 700 + age, state: st([OTHER, "0xDD", "0xC3C3", "2", "2", "1", "0", "1500"]) }                            // a stranger's open offer
+];
+mem[acct("casino_secret_for_0xC0C0")] = "0x5EC0";   // so a renewal WOULD go through if nothing stopped it
+mem[acct("casino_secret_for_0xC1C1")] = "0x5EC1";
+mem[acct("casino_history")] = '[{"coinid":"0xOLD"}]';
+const precious = () => JSON.stringify([mem[acct("casino_secret_for_0xC0C0")], mem[acct("casino_secret_for_0xC1C1")], mem[acct("casino_history")]]);
+const PRECIOUS = precious();
 
-// A signable wallet coin (66-char addr, >= any stake) + a sentinel beacon dust coin (short addr, unsignable).
-const WALLET_ADDR = "0x" + "AB".repeat(32);            // 66 chars
-const BEACON_ADDR = "0x50414E4441504F4F4C53";          // "PANDAPOOLS" — short, anyone-can-spend
-const OPEN_BET = {   // someone else's phase-0 Coin Flip open bet at the contract
-  coinid: "0xBET1", amount: "1", age: 3,
-  state: [
-    { port: 0, data: "0xHOUSEPK" }, { port: 1, data: "0xHOUSEADDR" }, { port: 2, data: "0xCOMMIT" },
-    { port: 3, data: "2" }, { port: 4, data: "2" }, { port: 5, data: "1" }, { port: 6, data: "0" }, { port: 7, data: "1500" }
-  ]
-};
-
+const sent = [];   // every command that REACHED the node
+let block = 100, age = 0, scan = "coins";
 casino._setRunner(async (cmd) => {
   sent.push(cmd);
-  if (/^block\b/.test(cmd)) return { status: true, response: { block: 100 } };
+  if (/^block\b/.test(cmd)) return { status: true, response: { block } };
   if (/^newscript\b/.test(cmd)) return { status: true, response: { address: CONTRACT } };
-  if (/^keys\b/.test(cmd)) return { status: true, response: { keys: [{ publickey: "0xMYPK" }] } };   // real core shape
-  if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: "0xMYPK", address: WALLET_ADDR, miniaddress: "MxWALLET" } };
-  if (/^balance\b/.test(cmd)) return { status: true, response: [{ sendable: "500" }] };
-  if (/^coins relevant:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [{ amount: "500", address: WALLET_ADDR, coinid: "0xFUND1" }] };
-  // The shared pin now asks for checkmempool:true between sendable and tokenid (the AtomiX publish fix);
-  // match on the flags, not their adjacency, so this mock stays honest about what the pin sends.
-  if (/^coins relevant:true sendable:true (checkmempool:true )?tokenid:0x00\b/.test(cmd)) return { status: true, response: [
-    { amount: "1", address: BEACON_ADDR, coinid: "0xDUST", state: [] },      // must be skipped (short addr)
-    { amount: "19.84626467552", address: WALLET_ADDR, coinid: "0xFUND1", state: [] }   // 11-dp coin: change must NOT round up
+  if (/^scripts address:/.test(cmd)) return { status: true, response: { address: CONTRACT } };
+  if (/^scripts\b/.test(cmd)) return { status: true, response: [{ address: WALLET, simple: true }] };
+  if (/^keys\b/.test(cmd)) return { status: true, response: { keys: [{ publickey: MYPK }] } };
+  if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: MYPK, address: WALLET, miniaddress: "MxWALLET" } };
+  if (/^coins relevant:true address:/.test(cmd)) return { status: true, response: [   // the hygiene sweep's view
+    { coinid: "0xSTRANGERBET", state: st([OTHER, "0xDD"]) },                                 // foreign → untrack
+    { coinid: "0xMINEBYKEY", state: st([MYPK]) },                                            // my key → spare
+    { coinid: "0xMINEBYADDR", state: [{ port: 0, data: OTHER }, { port: 9, data: WALLET }] }  // my address → spare
   ] };
-  if (/^checkaddress\b/.test(cmd)) return { status: true, response: { simple: /address:0x[0-9A-Fa-f]{64}\b/.test(cmd) } };
-  if (/^scripts\b/.test(cmd)) return { status: true, response: [{ address: WALLET_ADDR, simple: true }] };
-  if (/^coins relevant:true address:0xD65ADBBB/.test(cmd)) return { status: true, response: [
-    { coinid: "0xSTRANGERBET", state: [{ port: 0, data: "0xNOTMYPK" }, { port: 1, data: "0xNOTMYADDR" }] },  // foreign → untrack
-    { coinid: "0xMINEBYKEY", state: [{ port: 0, data: "0xMYPK" }] },                                        // my key → spare
-    { coinid: "0xMINEBYADDR", state: [{ port: 0, data: "0xNOTMYPK" }, { port: 9, data: WALLET_ADDR }] }     // my addr → spare
-  ] };
-  if (/^cointrack\b/.test(cmd)) return { status: true };
-  if (/^coins address:/.test(cmd)) return { status: true, response: [OPEN_BET] };
-  if (/^random\b/.test(cmd)) return { status: true, response: { random: "0x" + "11".repeat(32) } };
-  if (/^hash data:/.test(cmd)) return { status: true, response: { hash: "0x" + "22".repeat(32) } };
-  if (/^txncreate\b/.test(cmd)) return { status: true };
-  if (/^txninput\b/.test(cmd)) return { status: true };
-  if (/^txnoutput\b/.test(cmd)) return { status: true };
-  if (/^txnstate\b/.test(cmd)) return { status: true };
-  if (/^txnsign\b/.test(cmd)) return { status: true };
-  if (/txnpost/.test(cmd)) return [{ status: true }, { status: true }];
+  if (/^coins address:/.test(cmd)) return scan === "fail" ? { status: false } : { status: true, response: scan === "empty" ? [] : coinsFor(age) };
+  if (/^maths\b/.test(cmd)) return { status: true, response: { result: "1" } };
+  if (/^txnbasics .*;txnpost/.test(cmd)) return [{ status: true }, { status: true }];
   return { status: true, response: {} };
 });
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL: " + msg); process.exitCode = 1; } else console.log("ok  " + msg); };
 const has = (re) => sent.some(c => re.test(c));
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const pass = async () => { sent.length = 0; casino.startLoop(); await wait(250); casino.stopLoop(); };   // one settle pass on the current block
+// What must NEVER reach the node: a send, or any covenant output that is not the house reveal.
+const starts = () => sent.filter(c => /(^|;)\s*send\b/.test(c) || (/^txnoutput\b/.test(c) && c.toUpperCase().includes(CONTRACT) && !/^txnoutput id:svc_reveal_/.test(c)));
 
 (async () => {
-  await casino.init();
-  assert(casino.status().contract === CONTRACT, "status contract = " + CONTRACT);
-  assert(has(/^newscript script:".*" trackall:false/), "registered script with trackall:false (balance-pollution fix)");
-  assert(!has(/^newscript .*trackall:true/), "no newscript may carry trackall:true any more");
+  // ---- nothing runs unless it was already enabled ----
+  assert(sent.length === 0, "loading the module talks to no node");
+  casino.invalidate();   // a wallet reset on an install that never enabled it
+  await wait(50);
+  assert(sent.length === 0 && casino.open() === null, "a wallet reset does not start the loop on an install that never enabled it");
+  const mainSrc = fs.readFileSync(path.join(__dirname, "..", "main/main.js"), "utf8");
+  const gate = mainSrc.slice(mainSrc.indexOf("let casinoStarted = false;"), mainSrc.indexOf('node.on("status", (s) => { if (s.state === "running") startCasinoIfEnabled();'));
+  for (const enabled of [false, true]) {
+    let started = 0;
+    const c = vm.createContext({ node: { state: "running" }, require: () => ({ load: () => ({ casinoEnabled: enabled }) }), casino: { startLoop() { started++; } } });
+    vm.runInContext(gate + ";startCasinoIfEnabled();startCasinoIfEnabled();", c);
+    assert(started === (enabled ? 1 : 0), "main.js: casinoEnabled " + enabled + " → the loop " + (enabled ? "starts once" : "does NOT start"));
+  }
+  assert((mainSrc.match(/casino\.startLoop\(\)/g) || []).length === 1, "main.js has exactly one startLoop call, behind that gate");
+  assert(!["create", "take", "setCurrency", "cancel", "reveal", "resolve"].some(k => k in casino), "the glue exports no create / take / currency action");
 
-  // Hygiene sweep (fund-critical filter): runs off the service keys callback during init.
-  await new Promise(r => setTimeout(r, 150));
-  const unt = sent.filter(c => /^cointrack enable:false coinid:/.test(c));
-  assert(unt.length === 1 && /0xSTRANGERBET/.test(unt[0]), "sweep untracks ONLY the stranger's bet coin");
-  assert(!sent.some(c => /^cointrack .*coinid:0xMINE/.test(c)), "sweep NEVER untracks a coin carrying an own key/address");
+  // ---- the refusal rule itself ----
+  assert(casino.refused('send amount:10 address:' + CONTRACT + ' tokenid:0x00 state:{"6":"0"}'), "refused: the createBet send");
+  assert(casino.refused("txnoutput id:take_1_1 amount:2 address:" + CONTRACT + " tokenid:0x00 storestate:true"), "refused: the takeBet pot output");
+  assert(casino.refused("txnoutput id:svc_offer_1_1 amount:1 address:" + CONTRACT.toLowerCase() + " tokenid:0x00 storestate:true"), "refused: the offer renewal output (any letter case)");
+  assert(casino.refused("txncreate id:x;send amount:1 address:0xAA"), "refused: a send hidden behind ';'");
+  assert(!casino.refused("txnoutput id:svc_reveal_1 amount:2 address:" + CONTRACT + " tokenid:0x00 storestate:true"), "allowed: the house reveal");
+  assert(!casino.refused("txnoutput id:svc_offer_1_1 amount:1 address:" + WALLET + " tokenid:0x00 storestate:false"), "allowed: an offer withdrawn to the wallet");
+  assert(!casino.refused("txnoutput id:timeout_1_1 amount:2 address:" + WALLET + " tokenid:0x00 storestate:false"), "allowed: a timeout claim to the wallet");
 
-  // read-model
-  const open = await casino.openBets();
-  assert(Array.isArray(open) && open.length === 1 && open[0].game === "Coin Flip", "openBets surfaces the external Coin Flip bet");
-
-  // checkmode is synthesised in the shim (never reaches the runner) → WRITE mode; service.js then auto-processes
-  // on NEWBLOCK, which is observable as a `coins address:CONTRACT` scan through the runner.
-  sent.length = 0;
-  casino._fire("NEWBLOCK");
-  await new Promise(r => setTimeout(r, 80));
-  assert(has(/^coins address:0xD65ADBBB.* depth:4096/), "checkmode→WRITE: service.js scans the contract on NEWBLOCK, depth-capped ABOVE the stock cascade (2048)");
-
-  // HOUSE create — the covenant send + pin
-  sent.length = 0;
-  const cr = await casino.create("flip", "10");
-  assert(cr && cr.ok && cr.stake === 10, "createBet ok, stake = bet*(payout-1) = 10");
-  const send = sent.find(c => /^send /.test(c));
-  assert(!!send, "createBet emitted a send");
-  assert(/amount:10 address:0xD65ADBBB/.test(send), "send stakes 10 to the contract");
-  assert(/state:\{"0":"0xMYPK","1":"0x[A-F]{64}","2":"0x2222.*","3":"2","4":"2","5":"10","6":"0","7":"1500"\}/.test(send), "send carries state ports 0..7 phase 0");
-  assert(/fromaddress:0x[0-9A-Fa-f]{64}/.test(send), "house-send pinned to a signable coin (beacon dust excluded)");
-
-  // PLAYER take — the txn sequence
-  sent.length = 0;
-  const tk = await casino.take("0xBET1", 1);
-  assert(tk && tk.ok, "takeBet ok");
-  assert(has(/^txninput id:take_.* coinid:0xBET1/), "take inputs the contract bet coin");
-  assert(has(/^txninput id:take_.* coinid:0xFUND1/) && !has(/coinid:0xDUST/), "take funds from the signable coin, NOT beacon dust");
-  assert(has(/^txnoutput id:take_.* amount:2 address:0xD65ADBBB.* storestate:true/), "take pot output = amount+bet back to contract, storestate:true");
-  assert(has(/^txnoutput id:take_.* amount:18\.84626467552 address:0xAB.* storestate:false/), "take change is EXACT (18.84626467552), NOT rounded up to 18.84626468 → balances, node accepts");
-  assert(has(/^txnstate id:take_.* port:6 value:1/), "take sets phase → 1");
-  assert(has(/^txnstate id:take_.* port:8 value:0xMYPK/), "take writes player pubkey (port 8)");
-  assert(has(/^txnstate id:take_.* port:11 value:1/), "take writes pick (port 11)");
-  assert(has(/^txnsign id:take_.* publickey:auto/), "take signs publickey:auto");
-
-  // C1: if the preimage can't be persisted durably, createBet must ABORT and NEVER send (no stranded pot).
+  // ---- WORST CASE: the cancel marker cannot be saved, so service.js's keepalive tries to RENEW the due offer ----
   secretWritesOk = false;
-  sent.length = 0;
-  let aborted = false;
-  try { await casino.create("flip", "10"); } catch (e) { aborted = true; }
-  assert(aborted, "C1: createBet REJECTS when the secret write fails");
-  assert(!sent.some(c => /^send /.test(c)), "C1: NO send was issued when the preimage wasn't durable");
+  await pass();
+  assert(has(/^newscript script:".*" trackall:false/) && !has(/^newscript .*trackall:true/), "the covenant is registered trackall:false, never trackall:true");
+  const unt = sent.filter(c => /^cointrack enable:false coinid:/.test(c));
+  assert(unt.length === 1 && /0xSTRANGERBET/.test(unt[0]) && !has(/^cointrack .*coinid:0xMINE/), "the hygiene sweep untracks ONLY the stranger's coin, never one carrying an own key/address");
+  assert(has(/^txncreate id:svc_offer_/), "worst case: the keepalive did try to renew (the test is not vacuous)");
+  assert(starts().length === 0, "worst case: no send and no covenant output except a reveal reached the node");
+  assert(!has(/txnpost id:svc_offer_/), "worst case: the renewal was never posted");
+  assert(has(/^txndelete id:svc_offer_/), "worst case: the refused renewal was cleaned up");
+  assert(has(/^txnoutput id:svc_reveal_.* address:0xD65ADBBB.* storestate:true/) && has(/txnpost id:svc_reveal_/), "worst case: the taken bet is still revealed");
   secretWritesOk = true;
 
-  console.log(process.exitCode ? "\n=== SOME CHECKS FAILED ===" : "\n=== ALL GLUE CHECKS PASSED ===");
+  // ---- NORMAL: marker saved → the offer is withdrawn, the bet revealed, the timeout claimed ----
+  block += 10; age += 10;
+  await pass();
+  assert(mem[acct("casino_cancel_for_0xC0C0")] === "1", "the durable cancel marker is written for my open offer");
+  assert(mem[acct("casino_cancel_for_0xC3C3")] === undefined, "…and not for the stranger's");
+  assert(has(new RegExp("^txnoutput id:svc_offer_.* amount:1 address:" + WALLET + " tokenid:0x00 storestate:false")) && has(/^txnpost id:svc_offer_/), "my open offer is withdrawn to my wallet and posted");
+  assert(has(/^txnsign id:svc_reveal_.* publickey:0xA1A1/) && has(/txnpost id:svc_reveal_/), "the taken bet is revealed");
+  assert(has(new RegExp("^txnoutput id:timeout_.* amount:2 address:" + WALLET + " tokenid:0x00 storestate:false")) && has(/txnpost id:timeout_/), "the expired pot is claimed to my wallet");
+  assert(!has(/coinid:0x0F04/), "the stranger's offer is never an input");
+  assert(starts().length === 0, "normal pass: nothing that starts a bet reached the node");
+  assert(JSON.stringify(casino.open()) === '{"offers":1,"bets":2}', "the Settings card is told 1 open offer + 2 bets in play");
+
+  block += 1;   // next block, coins not yet mined away: the claim is not re-posted inside its cooldown
+  await pass();
+  assert(!has(/id:timeout_/), "a posted timeout claim is not re-posted on the next block");
+
+  // ---- a failed scan is not "nothing open"; a clean empty scan is ----
+  block += 1; scan = "fail";
+  await pass();
+  assert(JSON.stringify(casino.open()) === '{"offers":1,"bets":2}', "a failed coin scan leaves the count as it was");
+  block += 1; scan = "empty";
+  await pass();
+  assert(JSON.stringify(casino.open()) === '{"offers":0,"bets":0}', "a clean empty scan → nothing open (the card disappears)");
+  assert(sent.filter(c => /^coins address:/.test(c)).length === 1 && !has(/^txn/), "with nothing open the engine is not driven: one read-only scan, no transaction");
+
+  // ---- the crown jewels ----
+  assert(precious() === PRECIOUS, "bet secrets and casino_history are byte-for-byte untouched");
+  const identity = ["casino_pubkey", "casino_hexaddr", "casino_miniaddr"].map(acct);
+  assert(deleted.every(a => identity.includes(a)), "the only keychain entries ever deleted are the cached identity (wallet reset)");
+
+  console.log(process.exitCode ? "\n=== SOME CHECKS FAILED ===" : "\n=== ALL SETTLE-ONLY CHECKS PASSED ===");
   process.exit(process.exitCode || 0);
 })().catch(e => { console.error("harness error:", e); process.exit(1); });

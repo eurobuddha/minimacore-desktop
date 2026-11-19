@@ -220,29 +220,10 @@ contextBridge.exposeInMainWorld("mcd", {
   ewSetRpc: (url) => ipcRenderer.invoke("mcd:ewSetRpc", url),
   onEthWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:ethwallet", h); return () => ipcRenderer.removeListener("mcd:ethwallet", h); },
 
-  // Casino (Zero Edge Casino — on-chain commit-reveal)
-  casinoStatus: () => ipcRenderer.invoke("mcd:casinoStatus"),
-  casinoOpenBets: () => ipcRenderer.invoke("mcd:casinoOpenBets"),
-  casinoMyBets: () => ipcRenderer.invoke("mcd:casinoMyBets"),
-  casinoHistory: () => ipcRenderer.invoke("mcd:casinoHistory"),
-  casinoBalance: () => ipcRenderer.invoke("mcd:casinoBalance"),
-  casinoRawBets: () => ipcRenderer.invoke("mcd:casinoRawBets"),
-  casinoWalletCoins: () => ipcRenderer.invoke("mcd:casinoWalletCoins"),
-  casinoStakeable: () => ipcRenderer.invoke("mcd:casinoStakeable"),
-  casinoResolveOutcome: (commit, role) => ipcRenderer.invoke("mcd:casinoResolveOutcome", commit, role),
-  casinoCreate: (preset, bet) => ipcRenderer.invoke("mcd:casinoCreate", preset, bet),
-  casinoTake: (coinid, pick) => ipcRenderer.invoke("mcd:casinoTake", coinid, pick),
-  casinoCancel: (coinid) => ipcRenderer.invoke("mcd:casinoCancel", coinid),
-  casinoResolve: (coinid) => ipcRenderer.invoke("mcd:casinoResolve", coinid),
-  casinoReveal: (coinid) => ipcRenderer.invoke("mcd:casinoReveal", coinid),
-  casinoClaimTimeout: (coinid) => ipcRenderer.invoke("mcd:casinoClaimTimeout", coinid),
-  casinoSetCurrency: (tokenid) => ipcRenderer.invoke("mcd:casinoSetCurrency", tokenid),
-  casinoNewCount: () => ipcRenderer.invoke("mcd:casinoNewCount"),
-  casinoSeen: () => ipcRenderer.invoke("mcd:casinoSeen"),
+  // P2P Chance was removed in 0.18.68; only the settle-only status of bets already on the chain is left.
+  casinoOpen: () => ipcRenderer.invoke("mcd:casinoOpen"),
   casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),
   onCasino: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casino", h); return () => ipcRenderer.removeListener("mcd:casino", h); },
-  onCasinoClaims: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casinoClaims", h); return () => ipcRenderer.removeListener("mcd:casinoClaims", h); },
-  onCasinoLog: (fn) => { const h = (_e, l) => fn(l); ipcRenderer.on("mcd:casinolog", h); return () => ipcRenderer.removeListener("mcd:casinolog", h); },
 
   // Vestr (token vesting)
   vestrStatus: () => ipcRenderer.invoke("mcd:vestrStatus"),

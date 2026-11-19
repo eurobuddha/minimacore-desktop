@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.68] — P2P Chance removed
+
+- **P2P Chance (the peer-to-peer coin flip / dice / roulette module) is no longer part of the app.** The tab, the game screens, the Settings card that enabled it, the 18+ gate and the MINIMA / MxUSD currency choice are gone, with `renderer/casino.js`, `renderer/casinoart.js` and `renderer/casino.css`. No new game can be created or taken from this app.
+- **Nobody's money is left behind.** An install that had P2P Chance enabled keeps a settle-only background task (`main/casino.js`; the vendored engine under `main/casino/` is unchanged): it reveals and resolves bets already in play, claims a pot as soon as its timeout allows (this used to be a button in My Bets), and withdraws the wallet's own untaken offers — their stake comes back to the wallet — instead of renewing them. The node-command shim refuses every command that could put new value into the contract (`send`, and any contract output that is not a reveal), so it cannot create, take or re-post an offer even if a marker write fails.
+- While something is still open, Settings shows one card: "P2P Chance has been removed", how many open offers and bets in play remain, and that they are withdrawn / settled automatically — keep the app open with the node running until the card disappears. Nothing to press.
+- With nothing open the task stops driving the engine and takes one read-only look an hour (a node that is still syncing can show an empty contract; a look that stopped for good could cost a house a taken bet at the timeout). An install that never enabled P2P Chance runs nothing and sees nothing, including after a wallet reset (the reset used to start the loop for everyone).
+- Bet secrets and the result history in the OS keychain are never deleted or rewritten. `casinoEnabled` stays in the config as the gate for the settle-only task and can no longer be changed from the app; `casinoAgeCertified` and `casinoDollar` are no longer used.
+- Tests: `scripts/casino-glue-test.js` is now the settle-only proof (34 checks: the loop does not start unless already enabled, no create / take / renewal command reaches the node, offers are withdrawn, bets revealed, timeouts claimed, a failed scan is not "nothing open"); the engine parity, timeout and keepalive suites stay; the UI-only casino tests are removed.
+
 ## [0.18.60] — the node starts again after a pid reuse
 
 - `reclaimStaleNode`: the pid in `node.pid` counts as "our node from an earlier launch" only while that pid still runs our jar. Pids are reused — DexiconPro (same code) hit it on 17 Nov 2026: the pidfile's pid had become a macOS XPC service, the start reported "port in use by ThemeWidgetControlViewService" and the node was never launched, with no log line. A refused start is now logged. Source fix; no installer cut yet.
