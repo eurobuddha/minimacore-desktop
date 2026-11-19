@@ -24,20 +24,18 @@ if (!fs.existsSync(path.join(donor, 'poolmgr.js'))) {
 }
 for (const f of files) assert.equal(fs.readFileSync(path.join(root,'main/pandapools',f),'utf8'),fs.readFileSync(path.join(donor,f),'utf8'),'MDS/Desktop drift: '+f);
 console.log('PASS ' + files.length + ' byte-identical MDS/Desktop engine files');
-// The Desktop receipt templates moved into the PandaPools panel module in 0.17.18 (APK parity). Same
-// templates, same assertions — reached through the panel's own display-only exports.
-const ctx={Math,Date,JSON,String,Number,Boolean,Array,Object,RegExp,Promise,console,setTimeout,clearTimeout,
-  localStorage:{getItem:()=>null,setItem(){},removeItem(){}},
-  document:{getElementById:()=>null,querySelectorAll:()=>[],createElement:()=>({style:{}}),body:{appendChild(){},insertAdjacentHTML(){}}}};
-ctx.window=ctx;ctx.globalThis=ctx;vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(root,'renderer/pools.js'),'utf8'),ctx,{filename:'pools.js'});
-ctx.PoolsPanel.init({TOK:{shortId:s=>s,tidyAmount:s=>s},esc:s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'),
-  el:()=>null,api:{},toast(){},copy(){},short:s=>s,showConfirm:async()=>false,showProgress:()=>({close(){}}),tryCmd:async()=>[],
-  running:()=>true,activeView:()=>'pandapools'});
-ctx.ppActsHtml=ctx.PoolsPanel._actsHtml;ctx.ppFeedHtml=ctx.PoolsPanel._feedHtml;
+// The Desktop receipts are room 2 of Dexicon now (renderer/dexicon-pp.js actItem / feedItem; the old panel's templates were
+// removed with it in 0.18.141). The same properties, on what the room draws: real confirmation counts, the original
+// submission whole, UTC times, a public withdrawal named as one, an observation marked unverified, and escaping.
+const PP=require(path.join(root,'renderer/dexicon-pp.js'));
 const row={type:'CLOSE',summary:'784.52331493 USDT',txpowid:'0x1234',originalTxpowid:'0xabcd',ts:1788896729000,timeLabel:'Transaction',verifiedAt:1788936000000,statusText:'853 confirmations · on-chain',confirmed:true};
-const html=ctx.ppActsHtml([row]);assert(html.includes('853 confirmations'));assert(html.includes('Original submission'));assert(html.includes('2026-09-08'));assert(html.includes('UTC'));assert(html.includes('data-copy="0xabcd"'));
-const feed=ctx.ppFeedHtml([{kind:'WITHDRAW',minimaAmt:'175157.93892489164',tokenAmt:'784.52331493',tokenLabel:'USDT',txpowid:row.txpowid,ts:row.ts,statusText:row.statusText,confirmed:true},{kind:'WITHDRAW',minimaAmt:'175157',tokenAmt:'784',tokenLabel:'USDT',observed:true,ts:1788936000000}]);
-assert(feed.includes('Liquidity withdrawal'));assert(feed.includes('853 confirmations'));assert(feed.includes('Transaction time unknown'));assert(!feed.includes('Sold 175157'));
-assert(!ctx.ppActsHtml([{type:'<img src=x>',summary:'<script>',statusText:'<b>'}]).includes('<script>'));
+const act=PP.actItem(row,1788936600000);
+assert.equal(act.chip,'853 confirmations · on-chain');assert.deepEqual(act.ids,[['transaction','0x1234'],['original submission','0xabcd']]);
+assert(act.lines[0].startsWith('Transaction ')&&act.lines[0].includes('08 Sep 2026')&&act.lines[0].endsWith('GMT'));
+const seen=PP.feedItem({kind:'WITHDRAW',minimaAmt:'175157.93892489164',tokenAmt:'784.52331493',tokenLabel:'USDT',txpowid:row.txpowid,ts:row.ts,statusText:row.statusText,confirmed:true},1788936600000);
+assert(seen.title.startsWith('Liquidity withdrawal'));assert.equal(seen.chip,'853 confirmations · on-chain');assert(!seen.title.includes('Sold 175157'));
+const obs=PP.feedItem({kind:'WITHDRAW',minimaAmt:'175157',tokenAmt:'784',tokenLabel:'USDT',observed:true},1788936600000);
+assert(obs.title.includes('observation (unverified)'));assert(obs.lines.join(' ').includes('Transaction time unknown'));
+const src=fs.readFileSync(path.join(root,'renderer/dexicon-pp.js'),'utf8');
+assert(src.includes('<b class="pp-ct">${esc(it.title)}</b>')&&src.includes('${esc(it.chip)}')&&src.includes('${esc(it.summary)}')&&src.includes('${esc(l)}'),'every part of a row is escaped where it is drawn');
 console.log('PASS Desktop receipts, actual counts, UTC times, public withdrawal classification, observation provenance and escaping');

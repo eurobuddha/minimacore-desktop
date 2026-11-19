@@ -1,0 +1,596 @@
+{
+ "take|buy, the coin typed|true": [
+  [
+   "axQuote",
+   [
+    false,
+    "118.811881",
+    4.2
+   ]
+  ],
+  [
+   "axSwap",
+   [
+    "q7"
+   ]
+  ]
+ ],
+ "take|buy, the coin typed|false": [
+  [
+   "axQuote",
+   [
+    false,
+    "118.811881",
+    4.2
+   ]
+  ]
+ ],
+ "take|buy, the USDT typed (the coin amount comes from the best price)|true": [
+  [
+   "axQuote",
+   [
+    false,
+    "118.811881",
+    4.2
+   ]
+  ],
+  [
+   "axSwap",
+   [
+    "q7"
+   ]
+  ]
+ ],
+ "take|buy, the USDT typed (the coin amount comes from the best price)|false": [
+  [
+   "axQuote",
+   [
+    false,
+    "118.811881",
+    4.2
+   ]
+  ]
+ ],
+ "take|sell, the coin typed, a single part|true": [
+  [
+   "axQuote",
+   [
+    true,
+    "50",
+    4.2
+   ]
+  ],
+  [
+   "axSwap",
+   [
+    "q8"
+   ]
+  ]
+ ],
+ "take|sell, the coin typed, a single part|false": [
+  [
+   "axQuote",
+   [
+    true,
+    "50",
+    4.2
+   ]
+  ]
+ ],
+ "take|sell, the USDT typed|true": [
+  [
+   "axQuote",
+   [
+    true,
+    "50",
+    4.2
+   ]
+  ],
+  [
+   "axSwap",
+   [
+    "q8"
+   ]
+  ]
+ ],
+ "take|sell, the USDT typed|false": [
+  [
+   "axQuote",
+   [
+    true,
+    "50",
+    4.2
+   ]
+  ]
+ ],
+ "take|letters and a second dot in the amount|true": [
+  [
+   "axQuote",
+   [
+    true,
+    "50",
+    4.2
+   ]
+  ],
+  [
+   "axSwap",
+   [
+    "q8"
+   ]
+  ]
+ ],
+ "take|letters and a second dot in the amount|false": [
+  [
+   "axQuote",
+   [
+    true,
+    "50",
+    4.2
+   ]
+  ]
+ ],
+ "take|nothing typed|true": [],
+ "take|nothing typed|false": [],
+ "take|the quote is refused (not enough USDT)|true": [
+  [
+   "axQuote",
+   [
+    false,
+    "9000",
+    4.2
+   ]
+  ]
+ ],
+ "take|the quote is refused (not enough USDT)|false": [
+  [
+   "axQuote",
+   [
+    false,
+    "9000",
+    4.2
+   ]
+  ]
+ ],
+ "switch|mxusdt|true": {
+  "money": [
+   [
+    "axSwitchCurrency",
+    [
+     "minima"
+    ]
+   ]
+  ],
+  "question": "Switch to MINIMA?"
+ },
+ "switch|mxusdt|false": {
+  "money": [],
+  "question": "Switch to MINIMA?"
+ },
+ "switch|minima|true": {
+  "money": [
+   [
+    "axSwitchCurrency",
+    [
+     "mxusdt"
+    ]
+   ]
+  ],
+  "question": "Switch to MxUSD?"
+ },
+ "switch|minima|false": {
+  "money": [],
+  "question": "Switch to MxUSD?"
+ },
+ "makerSave|a manual ladder, two rungs a side": [
+  [
+   "axMakerSave",
+   [
+    {
+     "pegEnable": false,
+     "step": 1,
+     "size": 100,
+     "askSize": 100,
+     "bidSize": 100,
+     "bias": 0,
+     "reprice": 1,
+     "levels": 2,
+     "min": 5
+    },
+    {
+     "asks": [
+      {
+       "p": 1.01,
+       "a": 100
+      },
+      {
+       "p": 1.02,
+       "a": 80
+      }
+     ],
+     "bids": [
+      {
+       "p": 0.99,
+       "a": 100
+      },
+      {
+       "p": 0.98,
+       "a": 250.5
+      }
+     ]
+    }
+   ]
+  ]
+ ],
+ "makerSave|pegged, size and step set": [
+  [
+   "axMakerSave",
+   [
+    {
+     "pegEnable": true,
+     "step": 0.5,
+     "size": 40,
+     "askSize": 40,
+     "bidSize": 40,
+     "bias": -2,
+     "reprice": 1,
+     "levels": 6,
+     "min": 0
+    },
+    {
+     "asks": [
+      {
+       "p": 1.005,
+       "a": 40
+      }
+     ],
+     "bids": [
+      {
+       "p": 0.995,
+       "a": 40
+      }
+     ]
+    }
+   ]
+  ]
+ ],
+ "makerSave|pegged but no size: the peg is not armed": [
+  [
+   "axMakerSave",
+   [
+    {
+     "pegEnable": false,
+     "step": 1,
+     "size": 0,
+     "askSize": 0,
+     "bidSize": 0,
+     "bias": 0,
+     "reprice": 2,
+     "levels": 1,
+     "min": 1
+    },
+    {
+     "asks": [],
+     "bids": [
+      {
+       "p": 0.9,
+       "a": 10
+      }
+     ]
+    }
+   ]
+  ]
+ ],
+ "makerSave|rungs with a price and no amount, or text, are left out": [
+  [
+   "axMakerSave",
+   [
+    {
+     "pegEnable": false,
+     "step": 1,
+     "size": 5,
+     "askSize": 5,
+     "bidSize": 5,
+     "bias": 0,
+     "reprice": 1,
+     "levels": 3,
+     "min": 0
+    },
+    {
+     "asks": [
+      {
+       "p": 1.01,
+       "a": 7
+      }
+     ],
+     "bids": []
+    }
+   ]
+  ]
+ ],
+ "makerSave|Enabled is off: the market is withdrawn, nothing is saved": [
+  [
+   "axMakerWithdraw",
+   []
+  ]
+ ],
+ "ladder|1/1/0/3": [
+  {
+   "bid": "0.99",
+   "ask": "1.01"
+  },
+  {
+   "bid": "0.98",
+   "ask": "1.02"
+  },
+  {
+   "bid": "0.97",
+   "ask": "1.03"
+  }
+ ],
+ "ladder|0.00332683/0.5/-2/6": [
+  {
+   "bid": "0.00324399",
+   "ask": "0.00327659"
+  },
+  {
+   "bid": "0.00322769",
+   "ask": "0.0032929"
+  },
+  {
+   "bid": "0.00321139",
+   "ask": "0.0033092"
+  },
+  {
+   "bid": "0.00319509",
+   "ask": "0.0033255"
+  },
+  {
+   "bid": "0.00317879",
+   "ask": "0.0033418"
+  },
+  {
+   "bid": "0.00316248",
+   "ask": "0.0033581"
+  }
+ ],
+ "ladder|1.0004/2.5/35/2": [
+  {
+   "bid": "1.17047",
+   "ask": "1.23049"
+  },
+  {
+   "bid": "1.14046",
+   "ask": "1.2605"
+  }
+ ],
+ "ladder|1/1/0/0": [
+  {
+   "bid": "0.99",
+   "ask": "1.01"
+  }
+ ],
+ "ladder|/1/0/3": [],
+ "ladder|1/0/0/3": [],
+ "makerWithdrawPublish|true": {
+  "withdraw": [
+   [
+    "axMakerWithdraw",
+    []
+   ]
+  ],
+  "question": "Withdraw your market?",
+  "publish": [
+   [
+    "axMakerPublish",
+    []
+   ]
+  ]
+ },
+ "makerWithdrawPublish|false": {
+  "withdraw": [],
+  "question": "Withdraw your market?",
+  "publish": [
+   [
+    "axMakerPublish",
+    []
+   ]
+  ]
+ },
+ "otcLive|500|250": [
+  [
+   "axOtcGoLive",
+   [
+    "500",
+    "250"
+   ]
+  ],
+  [
+   "axOtcWithdraw",
+   []
+  ]
+ ],
+ "otcLive||1000.5": [
+  [
+   "axOtcGoLive",
+   [
+    "",
+    "1000.5"
+   ]
+  ],
+  [
+   "axOtcWithdraw",
+   []
+  ]
+ ],
+ "otcLive||": [
+  [
+   "axOtcGoLive",
+   [
+    "",
+    ""
+   ]
+  ],
+  [
+   "axOtcWithdraw",
+   []
+  ]
+ ],
+ "otcPropose|SELL|300|1.004": [
+  [
+   "axOtcPropose",
+   [
+    {
+     "cid": "0xC1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "mpk": "0xC2FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "eth": "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002"
+    },
+    "SELL",
+    "300",
+    "1.004"
+   ]
+  ]
+ ],
+ "otcPropose|BUY|120.5|0.997": [
+  [
+   "axOtcPropose",
+   [
+    {
+     "cid": "0xC1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "mpk": "0xC2FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "eth": "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002"
+    },
+    "BUY",
+    "120.5",
+    "0.997"
+   ]
+  ]
+ ],
+ "otcPropose|buy|5|1": [
+  [
+   "axOtcPropose",
+   [
+    {
+     "cid": "0xC1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "mpk": "0xC2FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "eth": "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002"
+    },
+    "BUY",
+    "5",
+    "1"
+   ]
+  ]
+ ],
+ "otcPropose|HOLD|5|1": [],
+ "otcPropose|SELL||1": [],
+ "otcDealCalls": [
+  "api.axOtcDeal(btn.dataset.axaccept, \"accept\")",
+  "api.axOtcDeal(btn.dataset.axreject, \"reject\")"
+ ],
+ "send|ETH|true": [
+  [
+   "axSendReview",
+   [
+    "eth",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "0.01"
+   ]
+  ],
+  [
+   "axSend",
+   [
+    "eth",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "0.01"
+   ]
+  ]
+ ],
+ "send|ETH|false": [
+  [
+   "axSendReview",
+   [
+    "eth",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "0.01"
+   ]
+  ]
+ ],
+ "send|USDT|true": [
+  [
+   "axSendReview",
+   [
+    "usdt",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "25.5"
+   ]
+  ],
+  [
+   "axSend",
+   [
+    "usdt",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "25.5"
+   ]
+  ]
+ ],
+ "send|USDT|false": [
+  [
+   "axSendReview",
+   [
+    "usdt",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "25.5"
+   ]
+  ]
+ ],
+ "send|ETH refused by the engine's check (not an address)|true": [
+  [
+   "axSendReview",
+   [
+    "eth",
+    "0x123",
+    "1"
+   ]
+  ]
+ ],
+ "send|ETH refused by the engine's check (not an address)|false": [
+  [
+   "axSendReview",
+   [
+    "eth",
+    "0x123",
+    "1"
+   ]
+  ]
+ ],
+ "send|USDT refused (more than the balance)|true": [
+  [
+   "axSendReview",
+   [
+    "usdt",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "9999"
+   ]
+  ]
+ ],
+ "send|USDT refused (more than the balance)|false": [
+  [
+   "axSendReview",
+   [
+    "usdt",
+    "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002",
+    "9999"
+   ]
+  ]
+ ],
+ "exportKey|true": [
+  [
+   "axExportKey",
+   []
+  ]
+ ],
+ "exportKey|false": [],
+ "csv": [
+  "Date,Role,Direction,Sold Amount,Sold Token,Bought Amount,Bought Token,Price (USDT/MINIMA),Counterparty,Status,Contract Id,Minima Tx,Eth Tx\r\n\"2026-11-18T11:06:40.000Z\",\"Taker\",\"Sell MINIMA\",\"3050\",\"MINIMA\",\"9.722789\",\"USDT\",\"0.0031877997\",\"0xD1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA\",\"complete\",\"0xF1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA\",\"0xA1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA\",\"0xFA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E000001;0xFA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E00FA4E000001\"\r\n\"\",\"Maker\",\"Buy MINIMA\",\"2.2\",\"USDT\",\"2.2\",\"MxUSD\",\"1\",\"'=cmd|\"\"x\"\"\",\"refunded\",\"\",\"\",\"\"\r\n\"\",\"\",\"ODD\",\"0\",\"mxUSDT\",\"1\",\"USDT\",\"\",\"\",\"\",\"'-1\",\"'+a\",\"'@b\"",
+  "atomix-trades.csv"
+ ]
+}

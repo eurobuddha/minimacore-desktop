@@ -1,5 +1,5 @@
 // Dexicon room ① MxUSD (Phase 3c): AtomiX's screens were replaced, its behaviour was not. Each money action is run
-// twice here, once through the panel it replaces (renderer/atomix-ui.js, executed on a stand-in page) and once
+// twice: once through the panel it replaced (renderer/atomix-ui.js, removed in 0.18.141: its answers are recorded) and once
 // through the new screens' action (renderer/dexicon-ax.js Act), against the same recording window.mcd; the calls,
 // their arguments and their order must be identical, and a refused confirm must stop both before the same call.
 // Nothing here reaches a node, Ethereum or the network: any call that is not a recorded stand-in throws.
@@ -30,23 +30,10 @@ function recorder(answers) {
 // reads the two screens make at different moments (drawing); the comparison is over everything else
 const READS = ["axStatus", "axBook", "axSwaps", "axWallet", "axSwapPreview", "axMakerCfg", "axMarketHistory", "axOtc", "axCoins"];
 
-/** The old panel on a stand-in page: elements exist when asked for, hold a value and their handlers. */
-function oldPanel(api, confirm, prompts) {
-  const els = {}, said = [];
-  const mk = (id) => { const set = new Set(); return { id, value: "", textContent: "", innerHTML: "", disabled: false, dataset: {}, style: {}, _l: {},
-    classList: { add: (c) => set.add(c), remove: (c) => set.delete(c), contains: (c) => set.has(c), toggle: (c, f) => { const on = f === undefined ? !set.has(c) : !!f; if (on) set.add(c); else set.delete(c); return on; } },
-    addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); }, fire(t) { (this._l[t] || []).forEach((f) => f({ stopPropagation() {} })); },
-    setAttribute() {}, getAttribute: () => null, querySelector: () => null, querySelectorAll: () => [], insertAdjacentHTML() {}, contains: () => false, remove() {}, getContext: () => null }; };
-  const el = (id) => els[id] || (els[id] = mk(id));
-  const document = { getElementById: el, querySelectorAll: () => [], querySelector: () => null, body: mk("body"), documentElement: mk("html"), activeElement: null };
-  const ctx = vm.createContext({ window: null, document, localStorage: { getItem: () => null, setItem() {} }, setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {}, console, Date, Math, Number, String, JSON, Promise, isFinite, parseFloat, parseInt, getComputedStyle: () => ({ getPropertyValue: () => "" }) });
-  ctx.window = ctx;
-  vm.runInContext(fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8"), ctx, { filename: "atomix-ui.js" });
-  const queue = (prompts || []).slice();
-  ctx.AtomixPanel.init({ api, el, esc: (s) => String(s == null ? "" : s), toast: (m, k) => said.push([m, k || ""]), copy() {}, TOK: { shortId: (x) => x }, relTime: () => "", idHtml: (x) => String(x),
-    showConfirm: async (title, msg, ok) => { said.push(["confirm", title, ok]); return confirm; }, showPrompt: async () => queue.shift(), running: () => true, activeView: () => "atomix" });
-  return { el, said, P: ctx.AtomixPanel, settle: () => new Promise((r) => setTimeout(r, 20)) };
-}
+// The removed panel's recorded answers (scripts/fixtures/old-atomix-panel.json): written by running the old panel one last
+// time, in 0.18.141, just before its file was deleted. They are the oracle now and are never regenerated.
+const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "old-atomix-panel.json"), "utf8"));
+function old(key) { assert.ok(key in FIX, "no recording of the old panel for: " + key); return FIX[key]; }
 const ui = (confirm) => { const said = []; return { said, confirm: async (title, text, ok) => { said.push(["confirm", title, ok]); return confirm; }, say: (text, kind) => said.push([text, kind]) }; };
 
 // ---- take: axQuote (frozen) → review → axSwap(quoteId) ----
@@ -59,15 +46,6 @@ const TAKES = [
   { name: "nothing typed", sell: true, typedCoin: true, text: "", quote: SINGLE },
   { name: "the quote is refused (not enough USDT)", sell: false, typedCoin: true, text: "9000", quote: { err: "Need ≈ 9090.000000 USDT for that — you have 217.912562 USDT." } }
 ];
-async function oldTake(c, confirm) {
-  const r = recorder({ axStatus: { ready: true, currency: "mxusdt" }, axBook: BOOK, axSwaps: [], axWallet: null, axSwapPreview: null, axQuote: c.quote, axSwap: { ok: 1, of: 1, hashes: [PK("B1")] } });
-  const p = oldPanel(r.api, confirm);
-  p.P._setView("swap"); await p.P.render(); await p.settle();
-  if (!c.sell) { p.el("axDirBuy").onclick(); await p.settle(); }   // the old panel opens on Sell
-  const input = p.el((c.typedCoin ? "axInCcy" : "axInUsdt")); input.value = c.text; input.fire("input");
-  await p.el("axReview").onclick(); await p.settle();
-  return r.money();
-}
 async function newTake(c, confirm) {
   const r = recorder({ axQuote: c.quote, axSwap: { ok: 1, of: 1, hashes: [PK("B1")] } }), u = ui(confirm);
   const price = c.sell ? BOOK.bestBid : BOOK.bestAsk;
@@ -76,7 +54,8 @@ async function newTake(c, confirm) {
 }
 for (const c of TAKES) for (const confirm of [true, false]) {
   test(`take, ${c.name}, review ${confirm ? "accepted" : "closed"}: the same calls with the same arguments as the old panel`, async () => {
-    const was = await oldTake(c, confirm), now = await newTake(c, confirm);
+    const was = old(`take|${c.name}|${confirm}`);
+    const now = await newTake(c, confirm);
     assert.deepEqual(now.calls, was);
     const swapped = now.calls.some(([n]) => n === "axSwap");
     assert.equal(swapped, confirm && !c.quote.err && !!AX.cleanNum(c.text), "axSwap only after an accepted review of a quote that was given");
@@ -101,14 +80,12 @@ test("take: every outcome says what happened, whether anything was locked, and w
 // ---- the ⇄ pill ----
 for (const cur of ["mxusdt", "minima"]) for (const confirm of [true, false]) {
   test(`currency switch from ${cur}, ${confirm ? "confirmed" : "closed"}: the old panel's confirm, then the same axSwitchCurrency`, async () => {
-    const ro = recorder({ axStatus: { ready: true, currency: cur }, axBook: BOOK, axSwaps: [], axWallet: null, axSwitchCurrency: { ok: true } }), p = oldPanel(ro.api, confirm);
-    p.P._setStatus({ ready: true, currency: cur }); p.P._setView("swap"); await p.P.render(); await p.settle();
-    await p.el("axCcy").onclick(); await p.settle();
+    const was = old(`switch|${cur}|${confirm}`);
     const rn = recorder({ axSwitchCurrency: { ok: true } }), u = ui(confirm);
     await AX.Act.switchCurrency(rn.api, u, cur);
-    assert.deepEqual(rn.money(), ro.money());
+    assert.deepEqual(rn.money(), was.money);
     assert.deepEqual(rn.money(), confirm ? [["axSwitchCurrency", [cur === "minima" ? "mxusdt" : "minima"]]] : []);
-    assert.equal(u.said[0][1], p.said.find((x) => x[0] === "confirm")[1], "the same question");
+    assert.equal(u.said[0][1], was.question, "the same question");
   });
 }
 
@@ -200,24 +177,21 @@ test("the room: the phone's six tabs, opened on Swap at every start; Activity, A
   assert.equal(mem.room, 0); assert.equal(mem.tabs.mxusd, "swap", "a new start opens room 1 on Swap"); assert.equal(mem.tabs.exchange, "orders");
   C.pickTab(mem, "market"); assert.equal(C.tabOf(mem), "market", "and the tab is kept while the app runs");
 });
-test("the old panel is still in the tree, untouched by room ①, and is no longer drawn", () => {
+test("the old AtomiX panel is gone: no file, no tag, no wiring; room ① is the only AtomiX screen", () => {
   const html = fs.readFileSync(path.join(R, "index.html"), "utf8"), app = fs.readFileSync(path.join(R, "app.js"), "utf8");
-  assert.ok(fs.existsSync(path.join(R, "atomix-ui.js")));
-  assert.match(html, /<div class="axapp" id="axBody" hidden><\/div>/); assert.match(html, /<div class="dxapp" id="dxAxBody"><\/div>/);
-  assert.ok(!/AtomixPanel\.render\(/.test(app), "nothing asks the old panel to draw");
+  for (const f of ["atomix-ui.js", "atomix-ui.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
+  assert.ok(!/atomix-ui|axBody|class="axapp"/.test(html)); assert.ok(!/AtomixPanel/.test(app));
+  assert.match(html, /<div class="dxapp" id="dxAxBody"><\/div>/);
   assert.ok(html.indexOf('src="dexicon-ax.js"') < html.indexOf('src="dexicon-ui.js"'));
+  // the fonts every Dexicon room is drawn in were declared in the removed sheet: they are in dexicon.css now
+  const css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8");
+  for (const [face, file] of [["Inter", "Inter-variable.woff"], ["JetBrains Mono", "JetBrainsMono-variable.woff"]]) { assert.ok(css.includes('@font-face { font-family: "' + face + '"; src: url("fonts/' + file + '")'), face); assert.ok(fs.existsSync(path.join(R, "fonts", file)), file); }
 });
 
 // ---- Market: the maker's order ----
 const MC = { cfg: { pegEnable: false, step: 1, levels: 3, size: 100, bias: 0, reprice: 1, min: 5 }, manual: { bids: [], asks: [] }, state: { withdrawn: false }, lastPublishMs: 0 };
 const MAKER_ANSWERS = () => ({ axStatus: { ready: true, currency: "mxusdt" }, axBook: BOOK, axSwaps: [], axWallet: null, axMarketHistory: { chart: [], recent: [] }, axMakerCfg: MC,
   axMakerPreview: { ok: true, mid: 0, source: "Parity" }, axMakerSave: { ok: true }, axMakerPublish: { ok: true }, axMakerWithdraw: { ok: true } });
-async function oldEditor(confirm) {
-  const r = recorder(MAKER_ANSWERS()), p = oldPanel(r.api, confirm);
-  p.P._setView("market"); await p.P.render(); await p.settle();
-  p.el("axEdit").onclick(); await p.settle();
-  return { r, p };
-}
 const FORMS = [
   { name: "a manual ladder, two rungs a side", on: { enabled: true, peg: false }, f: { step: "1", size: "100", bias: "0", reprice: "1", levels: "2", min: "5", bidP0: "0.99", bidA0: "100", bidP1: "0.98", bidA1: "250.5", askP0: "1.01", askA0: "100", askP1: "1.02", askA1: "80" } },
   { name: "pegged, size and step set", on: { enabled: true, peg: true }, f: { step: "0.5", size: "40", bias: "-2", reprice: "", levels: "9", min: "", bidP0: "0.995", bidA0: "40", askP0: "1.005", askA0: "40" } },
@@ -225,38 +199,27 @@ const FORMS = [
   { name: "rungs with a price and no amount, or text, are left out", on: { enabled: true, peg: false }, f: { step: "1", size: "5", levels: "3", bidP0: "0.99", bidA0: "", bidP1: "abc", bidA1: "5", askP0: "1.01", askA0: "7" } },
   { name: "Enabled is off: the market is withdrawn, nothing is saved", on: { enabled: false, peg: true }, f: { step: "1", size: "100", levels: "3", bidP0: "0.99", bidA0: "100" } }
 ];
-const OLD_ID = (n) => ({ step: "axStep", size: "axSize", bias: "axBias", reprice: "axReprice", levels: "axLevels", min: "axMin" }[n] || "ax" + n[0].toUpperCase() + n.slice(1));   // bidP0 → axBidP0
 for (const c of FORMS) test(`Save & publish, ${c.name}: the same call and the same cfg and ladder as the old editor`, async () => {
-  const { r, p } = await oldEditor(true);
-  for (const [k, v] of Object.entries(c.f)) p.el(OLD_ID(k)).value = v;
-  for (const [id, on] of [["axEnabled", c.on.enabled], ["axPegToggle", c.on.peg]]) p.el(id).classList.toggle("on", on);
-  await p.el("axSave").onclick(); await p.settle();
+  const was = old(`makerSave|${c.name}`);
   const rn = recorder(MAKER_ANSWERS());
   await AX.Act.makerSave(rn.api, ui(true), AX.makerForm((n) => c.f[n] || "", (n) => c.on[n]));
-  assert.deepEqual(rn.money(), r.money());
+  assert.deepEqual(rn.money(), was);
   assert.equal(rn.money().length, 1); assert.equal(rn.money()[0][0], c.on.enabled ? "axMakerSave" : "axMakerWithdraw");
 });
 test("the editor's prices from mid, step and skew are the old editor's, rung for rung", async () => {
   for (const [mid, step, bias, levels] of [["1", "1", "0", "3"], ["0.00332683", "0.5", "-2", "6"], ["1.0004", "2.5", "35", "2"], ["1", "1", "0", "0"], ["", "1", "0", "3"], ["1", "0", "0", "3"]]) {
-    const { p } = await oldEditor(true);
-    for (let i = 0; i < 6; i++) for (const k of ["axBidP", "axAskP", "axBidA", "axAskA"]) p.el(k + i).value = "";
-    p.el("axStep").value = step; p.el("axBias").value = bias; p.el("axLevels").value = levels; p.el("axSize").value = ""; p.el("axMid").value = mid; p.el("axMid").fire("input");
-    const old = []; for (let i = 0; i < 6; i++) if (p.el("axBidP" + i).value) old.push({ bid: p.el("axBidP" + i).value, ask: p.el("axAskP" + i).value });
-    assert.deepEqual(AX.ladderPrices(mid, step, bias, levels), old, [mid, step, bias, levels].join(" / "));
+    const was = old(`ladder|${[mid, step, bias, levels].join("/")}`);
+    assert.deepEqual(AX.ladderPrices(mid, step, bias, levels), was, [mid, step, bias, levels].join(" / "));
   }
 });
 for (const confirm of [true, false]) test(`Publish and Withdraw (${confirm ? "confirmed" : "closed"}): axMakerPublish at once, axMakerWithdraw only after the old confirm`, async () => {
-  const { r, p } = await oldEditor(confirm);
-  await p.el("axWithdraw").onclick(); await p.settle();
-  const old = r.money();
+  const was = old(`makerWithdrawPublish|${confirm}`);
   const rn = recorder(MAKER_ANSWERS()), u = ui(confirm);
   await AX.Act.makerWithdraw(rn.api, u);
-  assert.deepEqual(rn.money(), old); assert.deepEqual(rn.money(), confirm ? [["axMakerWithdraw", []]] : []);
-  assert.equal(u.said[0][1], p.said.find((x) => x[0] === "confirm")[1], "the same question");
-  const ro = recorder(MAKER_ANSWERS()), po = oldPanel(ro.api, confirm);
-  po.P._setView("market"); await po.P.render(); await po.settle(); await po.el("axPublish").onclick(); await po.settle();
+  assert.deepEqual(rn.money(), was.withdraw); assert.deepEqual(rn.money(), confirm ? [["axMakerWithdraw", []]] : []);
+  assert.equal(u.said[0][1], was.question, "the same question");
   const rp = recorder(MAKER_ANSWERS()); await AX.Act.makerPublish(rp.api, ui(confirm));
-  assert.deepEqual(rp.money(), ro.money()); assert.deepEqual(rp.money(), [["axMakerPublish", []]]);
+  assert.deepEqual(rp.money(), was.publish); assert.deepEqual(rp.money(), [["axMakerPublish", []]]);
 });
 test("a publish, save or withdrawal that fails says it was NOT done, and what stands", async () => {
   for (const [act, args, re] of [["makerPublish", [], /^Your market is NOT on the book yet: publish timed out\. What was on the book before is unchanged\. While it runs, AtomiX publishes the saved order again by itself/], ["makerWithdraw", [], /^Your market was NOT withdrawn: .* It may still be on the book\.$/],
@@ -292,13 +255,11 @@ test("the 'buys declined' warning uses the engine's own read limits", () => {
 const LP = { cid: PK("C1"), mpk: PK("C2"), eth: "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002", sell: 2000, buy: 750 };
 const OTC = { board: [LP], deals: [{ ref: "d1", side: "SELL", amount: "300", price: "1.004", status: "PROPOSED", whoseTurn: "ME" }], myOffer: { enable: false, sellSize: 500, buySize: 250 } };
 const OTC_ANSWERS = () => ({ axStatus: { ready: true, currency: "mxusdt" }, axOtc: OTC, axOtcGoLive: { ok: true }, axOtcWithdraw: { ok: true }, axOtcPropose: { ok: true }, axOtcDeal: { ok: true } });
-async function oldOtc(prompts) { const r = recorder(OTC_ANSWERS()), p = oldPanel(r.api, true, prompts); p.P._setView("otc"); await p.P.render(); await p.settle(); return { r, p }; }
 test("OTC availability: Go live sends the two sizes as typed, Withdraw sends nothing else, as the old panel", async () => {
   for (const [sell, buy] of [["500", "250"], ["", "1000.5"], ["", ""]]) {
-    const { r, p } = await oldOtc(); p.el("axOtcSell").value = sell; p.el("axOtcBuy").value = buy;
-    await p.el("axOtcLive").onclick(); await p.el("axOtcWithdraw").onclick(); await p.settle();
+    const was = old(`otcLive|${sell}|${buy}`);
     const rn = recorder(OTC_ANSWERS()); await AX.Act.otcGoLive(rn.api, ui(true), sell, buy); await AX.Act.otcWithdraw(rn.api, ui(true));
-    assert.deepEqual(rn.money(), r.money()); assert.deepEqual(rn.money(), [["axOtcGoLive", [sell, buy]], ["axOtcWithdraw", []]]);
+    assert.deepEqual(rn.money(), was); assert.deepEqual(rn.money(), [["axOtcGoLive", [sell, buy]], ["axOtcWithdraw", []]]);
   }
 });
 // the old panel wired its LP and deal buttons through querySelectorAll, which the stand-in page does not parse: its
@@ -308,15 +269,12 @@ for (const [side, amount, price] of [["SELL", "300", "1.004"], ["BUY", "120.5", 
   const good = /^(sell|buy)$/i.test(side) && !!amount;
   assert.deepEqual(rn.money(), good ? [["axOtcPropose", [{ cid: LP.cid, mpk: LP.mpk, eth: LP.eth }, side.toUpperCase(), amount, price]]] : []);
   // the old panel's own function, lifted out of its file and run with the same answers to its three prompts
-  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8"), from = src.indexOf("async function axOtcPropose(lp)"), to = src.indexOf("// ---- Wallet (ETH) ----");
-  const ro = recorder(OTC_ANSWERS()), queue = [side, amount, price];
-  const old = new Function("api", "showPrompt", "toast", "renderAxOtc", "axCcyOf", "axStatusCache", src.slice(from, to) + "; return axOtcPropose;")(ro.api, async () => queue.shift(), () => {}, () => {}, () => "MxUSD", {});
-  await old(LP);
-  assert.deepEqual(rn.money(), ro.money(), "the same call as the old panel's axOtcPropose");
+  const was = old(`otcPropose|${side}|${amount}|${price}`);
+  assert.deepEqual(rn.money(), was, "the same call as the old panel's axOtcPropose");
 });
 test("OTC deals: accept and reject are axOtcDeal(ref, action) as the old panel wrote them; a counter adds the amount and price", async () => {
-  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
-  assert.ok(src.includes('api.axOtcDeal(btn.dataset.axaccept, "accept")') && src.includes('api.axOtcDeal(btn.dataset.axreject, "reject")'), "the old panel's two calls");
+  const was = old("otcDealCalls");
+  assert.deepEqual(was, ['api.axOtcDeal(btn.dataset.axaccept, "accept")', 'api.axOtcDeal(btn.dataset.axreject, "reject")'], "the old panel's two calls, as its source had them");
   const rn = recorder(OTC_ANSWERS());
   await AX.Act.otcDeal(rn.api, ui(true), "d1", "accept"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "reject"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "counter", "250", "1.002");
   assert.deepEqual(rn.log, [["axOtcDeal", ["d1", "accept"]], ["axOtcDeal", ["d1", "reject"]], ["axOtcDeal", ["d1", "counter", "250", "1.002"]]]);
@@ -342,15 +300,11 @@ const SENDS = [
 ];
 for (const c of SENDS) for (const confirm of [true, false]) test(`wallet send ${c.name}, review ${confirm ? "accepted" : "closed"}: axSendReview then axSend with the same asset, address and amount as the old panel`, async () => {
   const answers = () => ({ axStatus: { ready: true, currency: "mxusdt", eth: ETH }, axWallet: WALLET, axSendReview: c.review, axSend: { tx: TX } });
-  const ro = recorder(answers()), p = oldPanel(ro.api, confirm);
-  p.P._setView("wallet"); await p.P.render(); await p.settle();
-  await p.el("axSend").onclick(); if (c.asset === "usdt") p.el("axSendUsdt").onclick();
-  p.el("axSendTo").value = c.to; p.el("axSendAmt").value = c.amt;
-  await p.el("axSendReview").onclick(); await p.settle();
+  const was = old(`send|${c.name}|${confirm}`);
   const rn = recorder(answers()), u = ui(confirm), to = c.to.trim(), amt = c.amt.trim();   // the dialog trims both, as the old one did
   const chk = await AX.Act.sendCheck(rn.api, c.asset, to, amt);
   if (!chk.err) await AX.Act.sendGo(rn.api, u, c.asset, ETH, to, amt, chk.fee);
-  assert.deepEqual(rn.money(), ro.money());
+  assert.deepEqual(rn.money(), was);
   const want = [["axSendReview", [c.asset, to, amt]]]; if (!c.review.err && confirm) want.push(["axSend", [c.asset, to, amt]]);
   assert.deepEqual(rn.money(), want);
   if (!c.review.err && confirm) assert.ok(u.said[u.said.length - 1][0].endsWith("Transaction " + TX), "the transaction hash whole");
@@ -362,10 +316,9 @@ test("wallet send: the review shows both addresses whole, and a send that fails 
   assert.match(u.said[u.said.length - 1][0], /^The send of 1 ETH was not confirmed as sent: nonce too low\. Look at this address on an Ethereum explorer before sending again/);
 });
 for (const confirm of [true, false]) test(`Export key, warning ${confirm ? "accepted" : "closed"}: the old warning first, axExportKey only after it`, async () => {
-  const ro = recorder({ axStatus: { ready: true, currency: "mxusdt" }, axWallet: WALLET, axExportKey: "0xKEY" }), p = oldPanel(ro.api, confirm);
-  p.P._setView("wallet"); await p.P.render(); await p.settle(); await p.el("axExport").onclick(); await p.settle();
+  const was = old(`exportKey|${confirm}`);
   const rn = recorder({ axExportKey: "0xKEY" }), u = ui(confirm), pk = await AX.Act.exportKey(rn.api, u);
-  assert.deepEqual(rn.money(), ro.money()); assert.deepEqual(rn.money(), confirm ? [["axExportKey", []]] : []);
+  assert.deepEqual(rn.money(), was); assert.deepEqual(rn.money(), confirm ? [["axExportKey", []]] : []);
   assert.equal(pk, confirm ? "0xKEY" : null);
   assert.equal(u.said[0][1], "Export ETH private key"); assert.equal(AX.KEY_WARN, "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.");
 });
@@ -374,9 +327,8 @@ test("the CSV is the old panel's file, byte for byte: the same column names in t
     { hash: PK("91"), role: "INITIATOR", direction: "MINIMA_TO_ERC20", sellToken: "0x00", sellAmount: "3050", buyToken: "USDT", buyAmount: "9.722789", counterparty: PK("D1"), status: "COMPLETE", contractId: PK("F1"), created: 1795000000000, minimaTx: PK("A1"), ethTx: TX + ";" + TX },
     { hash: PK("92"), role: "RESPONDER", direction: "ERC20_TO_MINIMA", sellToken: "USDT", sellAmount: "2.2", buyToken: AX.MXUSD, buyAmount: "2.2", counterparty: '=cmd|"x"', status: "REFUNDED", contractId: "", created: 0, minimaTx: "", ethTx: "" },
     { hash: PK("93"), role: "", direction: "ODD", sellToken: "mxUSDT", sellAmount: "0", buyToken: "USDT", buyAmount: "1", counterparty: null, status: null, contractId: "-1", created: "x", minimaTx: "+a", ethTx: "@b" }];
-  let oldFile = null, newFile = null;
-  const ro = recorder({ axStatus: { ready: true, currency: "mxusdt" }, axSwaps: [{ hash: PK("91"), status: "COMPLETE", role: "INITIATOR" }], axExportSwaps: rows, exportCsv: (text, name) => { oldFile = [text, name]; return "/tmp/x.csv"; } }), p = oldPanel(ro.api, true);
-  p.P._setView("activity"); await p.P.render(); await p.settle(); await p.el("axExportBtn").onclick(); await p.settle();
+  let newFile = null;
+  const oldFile = old("csv");
   const rn = recorder({ axExportSwaps: rows, exportCsv: (text, name) => { newFile = [text, name]; return "/tmp/x.csv"; } });
   await AX.Act.exportCsv(rn.api, ui(true));
   assert.deepEqual(newFile, oldFile); assert.equal(newFile[1], "atomix-trades.csv");

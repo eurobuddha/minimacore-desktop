@@ -1,5 +1,5 @@
 // Dexicon room ② Pools (Phase 3d): PandaPools' screens were replaced, its behaviour was not. Each money action is run
-// twice here, once through the panel it replaces (renderer/pools.js, executed on a stand-in page) and once through the
+// twice: once through the panel it replaced (renderer/pools.js, removed in 0.18.141: its answers are recorded) and once through the
 // new screens' action (renderer/dexicon-pp.js Act), against the same recording window.mcd; the calls, their arguments
 // and their order must be identical, and a refused confirm must stop both before the same call.
 // Nothing here reaches a node or the network: any call that is not a recorded stand-in throws.
@@ -32,37 +32,14 @@ function recorder(answers) {
 const READS = ["ppStatus", "ppPools", "ppMyPools", "ppListRetired", "ppPendingCollect", "ppCompleteBackupRequired", "ppPairInfo", "ppMarketToken", "ppMarket", "ppActivity", "ppFeed", "ppAggregate", "ppWhy"];
 const BASE = { ppPools: [POOL], ppPairInfo: { pools: 1, depth: "40000" }, ppMarketToken: { usdt: MXUSD }, ppMarket: { mid: 0.0032, fresh: true }, ppMyPools: [], ppListRetired: [], ppPendingCollect: [], ppCompleteBackupRequired: false, ppActivity: [], ppFeed: [], ppWhy: null };
 
-/** The old panel on a stand-in page: elements exist when asked for, hold a value and their handlers. */
+// one live pool, one saved pool whose reserves are not found, and two closed ones
 const MINE = { address: PK("B1"), opk: PK("0B"), tok: MXUSD, tokName: "USDT", tokDecimals: 8, reserveM: "40000", reserveT: "128.4", value: "80000", poolPrice: "0.00321", feesMinima: 30.42569, feesPct: 0.07169, kratio: 1.2, priceMove: -2.3199, il: -0.01399, ageBlocks: 5120, signingStateUnverified: true, unresolved: false };
 const LOST = { address: PK("B9"), opk: PK("09"), tok: MXUSD, signingStateUnverified: false, unresolved: true };
 const RETIRED = [{ address: PK("B7"), opk: PK("07") }, { address: PK("B8"), opk: PK("08") }];
-// what the old panel's card buttons carry (pools.js wirePpMineActions): the stand-in page hands them back so they can be pressed
-const CARD = { ppadd: MINE.address, ppmig: MINE.address, ppwd: MINE.address, ppcalc: MINE.address, ppconfirm: MINE.opk, pprecover: LOST.address, ppretire: LOST.address, ppunretire: "all", ppcollect: "1" };
-function oldPanel(api, confirm) {
-  const els = {}, said = [], btn = {};
-  const mk = (id) => ({ id, value: "", checked: false, textContent: "", innerHTML: "", innerText: "", disabled: false, dataset: {}, style: {}, scrollTop: 0, type: "",
-    setAttribute() {}, getAttribute: () => null, querySelector: () => null, insertAdjacentHTML() {}, appendChild() {}, contains: () => false, remove() {},
-    querySelectorAll: (sel) => { const m = /^\[data-([a-z]+)\]$/.exec(sel); if (!m || !(m[1] in CARD)) return []; return [btn[m[1]] = { dataset: { [m[1]]: CARD[m[1]] } }]; } });
-  // an overlay exists only between the insertAdjacentHTML that makes it and its remove(): the old panel asks "is it open?"
-  const open = new Set(), el = (id) => (/Ov$/.test(id) && !open.has(id) ? null : els[id] || (els[id] = Object.assign(mk(id), /Ov$/.test(id) ? { remove() { open.delete(id); } } : {})));
-  const bodyEl = Object.assign(mk("body"), { insertAdjacentHTML(_p, html) { for (const m of String(html).matchAll(/id="(\w+Ov)"/g)) open.add(m[1]); } });
-  const document = { getElementById: el, querySelectorAll: () => [], querySelector: () => null, body: bodyEl, documentElement: mk("html"), createElement: () => mk("new"), activeElement: null };
-  const ctx = vm.createContext({ window: null, document, localStorage: { getItem: () => null, setItem() {} }, setTimeout, clearTimeout, console, Date, Math, Number, String, JSON, Promise, isFinite, parseFloat, parseInt, TextEncoder, Array,
-    getComputedStyle: () => ({ getPropertyValue: () => "" }) });
-  ctx.window = ctx;
-  vm.runInContext(src("pools.js"), ctx, { filename: "pools.js" });
-  const TOK = { shortId: (x) => x, tidyAmount: (x) => String(x), tokenName: (t, tid) => (t && t.name && t.name.name) || tid };
-  ctx.PoolsPanel.init({ api, el, esc: (s) => String(s == null ? "" : s), toast: (m, k) => said.push([m, k || ""]), copy() {}, short: (x) => x, TOK, MINIMA: "0x00", PoolCalc: {},
-    showConfirm: async (title, msg, ok) => { said.push(["confirm", title, ok]); return confirm; }, showProgress: () => ({ close() {} }),
-    tryCmd: async (c) => (c === "balance" ? BAL : c === "block" ? { block: "2428089" } : null), running: () => true, activeView: () => "pandapools" });
-  return { el, said, btn, P: ctx.PoolsPanel, settle: () => new Promise((r) => setTimeout(r, 20)) };
-}
-/** the old panel opened on My LP, with one live pool, one saved pool whose reserves are not found, and two closed ones */
-async function oldMylp(answers, confirm) {
-  const r = recorder(Object.assign({}, BASE, { ppMyPools: [MINE, LOST], ppListRetired: RETIRED }, answers)), p = oldPanel(r.api, confirm);
-  p.P._setView("mylp"); await p.P.render(); await p.settle();
-  return { r, p, press: async (h) => { await h(); await p.settle(); return r.money(); } };
-}
+// The removed panel's recorded answers (scripts/fixtures/old-pools-panel.json): written by running the old panel one last
+// time, in 0.18.141, just before its file was deleted. They are the oracle now and are never regenerated.
+const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "old-pools-panel.json"), "utf8"));
+function old(key) { assert.ok(key in FIX, "no recording of the old panel for: " + key); return FIX[key]; }
 const ui = (confirm) => { const said = []; return { said, confirm: async (title, text, ok) => { said.push(["confirm", title, ok]); return confirm; }, say: (text, kind) => said.push([text, kind]) }; };
 
 // ---- swap: ppQuote at the click (frozen) → confirm → ppSwap(quoteId) ----
@@ -76,14 +53,6 @@ const SWAPS = [
   { name: "too large for the pools", dir: true, text: "900000", quote: { ok: false } },
   { name: "the engine has not started", dir: true, text: "250", quote: { ok: false, notReady: true } }
 ];
-async function oldSwap(c, confirm, swapAnswer) {
-  const r = recorder(Object.assign({}, BASE, { ppQuote: c.quote, ppSwap: swapAnswer || { txpowid: PK("71"), totalIn: "250", totalOut: "0.79832711" } })), p = oldPanel(r.api, confirm);
-  p.P._setView("swap"); await p.P.render(); await p.settle();
-  if (!c.dir) { p.el("ppFlip").onclick(); await p.settle(); }   // the old panel opens on "pay MINIMA"
-  p.el("ppSwapAmt").value = c.text;
-  await p.el("ppSwapGo").onclick(); await p.settle();
-  return { calls: r.money(), said: p.said };
-}
 async function newSwap(c, confirm, swapAnswer) {
   const r = recorder({ ppQuote: c.quote, ppSwap: swapAnswer || { txpowid: PK("71"), totalIn: "250", totalOut: "0.79832711" }, ppWhy: null }), u = ui(confirm);
   const res = await PP.Act.swap(r.api, u, T, c.dir, c.text);
@@ -91,7 +60,8 @@ async function newSwap(c, confirm, swapAnswer) {
 }
 for (const c of SWAPS) for (const confirm of [true, false]) {
   test(`swap, ${c.name}, review ${confirm ? "accepted" : "closed"}: the same calls with the same arguments as the old panel`, async () => {
-    const was = await oldSwap(c, confirm), now = await newSwap(c, confirm);
+    const was = old(`swap|${c.name}|${confirm}`);
+    const now = await newSwap(c, confirm);
     assert.deepEqual(now.calls, was.calls);
     const swapped = now.calls.some(([n]) => n === "ppSwap");
     assert.equal(swapped, confirm && !!c.quote.ok && PP.amountOk(c.text), "ppSwap only after an accepted review of a quote that was given");
@@ -101,7 +71,8 @@ for (const c of SWAPS) for (const confirm of [true, false]) {
 }
 test("swap: a failure makes the same calls as the old panel and says what happened, whether funds moved and what to do", async () => {
   const boom = new Error("Error invoking remote method 'mcd:ppSwap': Error: Could not identify the input signing key.");
-  const was = await oldSwap(SWAPS[0], true, boom), now = await newSwap(SWAPS[0], true, boom);
+  const was = old("swap|the engine refuses the swap");
+  const now = await newSwap(SWAPS[0], true, boom);
   assert.deepEqual(now.calls, was.calls);
   const [text, kind] = now.said[now.said.length - 1];
   assert.equal(kind, "error"); assert.match(text, /^The swap was not done and nothing was signed/); assert.match(text, /try again\.$/);
@@ -111,7 +82,8 @@ test("swap: a failure makes the same calls as the old panel and says what happen
   assert.ok(ok.said[ok.said.length - 1][0].endsWith(PK("71")), "the transaction id whole");
 });
 test("the review is the old panel's question and names exactly what is posted; there is no slippage setting, as on the phone", async () => {
-  const was = await oldSwap(SWAPS[0], false), now = await newSwap(SWAPS[0], false);
+  const was = old("swap|the review's question");
+  const now = await newSwap(SWAPS[0], false);
   assert.deepEqual(now.said[0], was.said.find((x) => x[0] === "confirm"), "the same title and the same button");
   const rv = PP.swapReview(QUOTE, "250", T, true);
   assert.match(rv.text, /^Pay {2}250 MINIMA\nReceive {2}0\.79832711 MxUSD\n/); assert.match(rv.text, /Routed across 2 pools in one transaction/);
@@ -273,27 +245,27 @@ test("swap: the review and the result print the amount the pools take (the route
 
 // ---- My LP: add, close, collect, recover, put away, bring back, confirm signing, statement ----
 const LP = [
-  { name: "add liquidity, both sides", answers: { ppDeposit: { txpowid: PK("72") } }, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "500"; o.p.el("pp2B").value = "1.605"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500"), want: [["ppDeposit", [MINE.address, "500", "1.605"]]] },
-  { name: "add liquidity, nothing typed", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, ""), want: [], never: true },
-  { name: "add liquidity, letters", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "5oo"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "5oo"), want: [], never: true },
-  { name: "close the pool", answers: { ppClose: { txpowid: PK("73") } }, old: (o) => o.p.btn.ppwd.onclick(), now: (api, u) => PP.Act.withdraw(api, u, MINE), want: [["ppClose", [MINE.address]]] },
-  { name: "collect to wallet", answers: { ppCollect: { coins: 2, foreign: 0 } }, old: (o) => o.p.el("ppCollectBtn").onclick(), now: (api, u) => PP.Act.collect(api, u), want: [["ppCollect", []]] },
-  { name: "collect now (a withdrawn-funds card)", answers: { ppCollect: { cleared: true }, ppPendingCollect: [{ oadr: PK("0A"), status: "PENDING" }] }, old: (o) => o.p.btn.ppcollect.onclick(), now: (api, u) => PP.Act.collectNow(api, u), want: [["ppCollect", []]], noConfirm: true },
-  { name: "check for reserves", answers: { ppRecoverSaved: { restored: 0, total: 1, details: ["not found"], warn: "" } }, old: (o) => o.p.btn.pprecover.onclick(), now: (api, u) => PP.Act.recover(api, u, LOST.address), want: [["ppRecoverSaved", [LOST.address]]], noConfirm: true },
-  { name: "put a closed pool away", answers: { ppRetirePool: true }, old: (o) => o.p.btn.ppretire.onclick(), now: (api, u) => PP.Act.retire(api, u, LOST.address), want: [["ppRetirePool", [LOST.address, true]]], noConfirm: true },
-  { name: "bring the closed pools back", answers: { ppRetirePool: true }, old: (o) => o.p.btn.ppunretire.onclick(), now: (api, u) => PP.Act.unretire(api, u, RETIRED), want: RETIRED.map((x) => ["ppRetirePool", [x.address, false]]), noConfirm: true },
-  { name: "confirm the wallet signing state", answers: { ppConfirmSigning: true }, old: (o) => o.p.btn.ppconfirm.onclick(), now: (api, u) => PP.Act.confirmSigning(api, u, MINE.opk), want: [["ppConfirmSigning", [MINE.opk, true]]] },
-  { name: "export the statement", answers: { ppStatement: { csv: "a,b\n1,2\n", rows: 1, pools: 1, backfilled: true }, exportCsv: "/tmp/x.csv" }, old: (o) => o.p.el("ppStatementBtn").onclick(), now: (api, u) => PP.Act.statement(api, u), want: [["ppStatement", []], ["exportCsv", ["a,b\n1,2\n", "pandapools-statement.csv"]]], noConfirm: true },
-  { name: "export the statement, no pools", answers: { ppStatement: { csv: "", rows: 0, pools: 0, backfilled: true } }, old: (o) => o.p.el("ppStatementBtn").onclick(), now: (api, u) => PP.Act.statement(api, u), want: [["ppStatement", []]], noConfirm: true }
+  { name: "add liquidity, both sides", answers: { ppDeposit: { txpowid: PK("72") } }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500"), want: [["ppDeposit", [MINE.address, "500", "1.605"]]] },
+  { name: "add liquidity, nothing typed", answers: {}, now: (api, u) => PP.Act.deposit(api, u, MINE, ""), want: [], never: true },
+  { name: "add liquidity, letters", answers: {}, now: (api, u) => PP.Act.deposit(api, u, MINE, "5oo"), want: [], never: true },
+  { name: "close the pool", answers: { ppClose: { txpowid: PK("73") } }, now: (api, u) => PP.Act.withdraw(api, u, MINE), want: [["ppClose", [MINE.address]]] },
+  { name: "collect to wallet", answers: { ppCollect: { coins: 2, foreign: 0 } }, now: (api, u) => PP.Act.collect(api, u), want: [["ppCollect", []]] },
+  { name: "collect now (a withdrawn-funds card)", answers: { ppCollect: { cleared: true }, ppPendingCollect: [{ oadr: PK("0A"), status: "PENDING" }] }, now: (api, u) => PP.Act.collectNow(api, u), want: [["ppCollect", []]], noConfirm: true },
+  { name: "check for reserves", answers: { ppRecoverSaved: { restored: 0, total: 1, details: ["not found"], warn: "" } }, now: (api, u) => PP.Act.recover(api, u, LOST.address), want: [["ppRecoverSaved", [LOST.address]]], noConfirm: true },
+  { name: "put a closed pool away", answers: { ppRetirePool: true }, now: (api, u) => PP.Act.retire(api, u, LOST.address), want: [["ppRetirePool", [LOST.address, true]]], noConfirm: true },
+  { name: "bring the closed pools back", answers: { ppRetirePool: true }, now: (api, u) => PP.Act.unretire(api, u, RETIRED), want: RETIRED.map((x) => ["ppRetirePool", [x.address, false]]), noConfirm: true },
+  { name: "confirm the wallet signing state", answers: { ppConfirmSigning: true }, now: (api, u) => PP.Act.confirmSigning(api, u, MINE.opk), want: [["ppConfirmSigning", [MINE.opk, true]]] },
+  { name: "export the statement", answers: { ppStatement: { csv: "a,b\n1,2\n", rows: 1, pools: 1, backfilled: true }, exportCsv: "/tmp/x.csv" }, now: (api, u) => PP.Act.statement(api, u), want: [["ppStatement", []], ["exportCsv", ["a,b\n1,2\n", "pandapools-statement.csv"]]], noConfirm: true },
+  { name: "export the statement, no pools", answers: { ppStatement: { csv: "", rows: 0, pools: 0, backfilled: true } }, now: (api, u) => PP.Act.statement(api, u), want: [["ppStatement", []]], noConfirm: true }
 ];
 for (const c of LP) for (const confirm of c.noConfirm || c.never ? [true] : [true, false]) {
   test(`My LP, ${c.name}${c.noConfirm || c.never ? "" : confirm ? ", confirmed" : ", closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
-    const o = await oldMylp(c.answers, confirm), was = await o.press(() => c.old(o));
+    const was = old(`mylp|${c.name}|${confirm}`);
     const r = recorder(Object.assign({ ppWhy: null }, c.answers)), u = ui(confirm); u.show = async (title, text) => { u.said.push(["show", title, text]); };
     await c.now(r.api, u);
-    assert.deepEqual(r.money(), was);
+    assert.deepEqual(r.money(), was.money);
     assert.deepEqual(r.money(), confirm ? c.want : [], confirm ? "exactly these calls" : "a closed question sends nothing");
-    if (!c.noConfirm && !c.never) assert.ok(u.said.some((x) => x[0] === "confirm") && o.p.said.some((x) => x[0] === "confirm"), "both ask first");
+    if (!c.noConfirm && !c.never) assert.ok(u.said.some((x) => x[0] === "confirm") && was.asked, "both ask first");
   });
 }
 test("My LP: every outcome says what happened, whether funds moved and what to do; identifiers are whole; figures are cut", async () => {
@@ -352,8 +324,7 @@ const newCreate = async (answers, confirm, fn) => { const r = recorder(Object.as
 for (const c of [{ name: "1.90 MxUSD at the market price", u: "1.90" }, { name: "more MxUSD than the wallet holds", u: "301" }, { name: "more than the MINIMA covers", u: "20" , bal: "100" }, { name: "nothing typed", u: "" }, { name: "letters", u: "1.9o" }]) for (const confirm of [true, false]) {
   test(`create, priced, ${c.name}, ${confirm ? "confirmed" : "closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
     const answers = { ppCreateAnchor: { price: "0.0032", source: "MEXC market" }, ppCreate: { txpowid: PK("75") }, ppSaveBackup: { canceled: true } };
-    const o = await oldMylp(answers, confirm);
-    const was = await o.press(async () => { await o.p.el("ppCreateBtn").onclick(); await o.p.settle(); o.p.el("ppcU").value = c.u; return o.p.el("ppcGo").onclick(); });
+    const was = old(`createPriced|${c.name}|${confirm}`);
     const now = await newCreate(answers, confirm, (api, u, op) => PP.Act.createPriced(api, u, op.t, op.minimaAvail, op.anchor.price, op.anchor.source, c.u));
     assert.deepEqual(now.calls, was);
     const sent = c.u === "1.90" && confirm;
@@ -363,8 +334,7 @@ for (const c of [{ name: "1.90 MxUSD at the market price", u: "1.90" }, { name: 
 for (const c of [{ name: "both amounts and the box ticked", x: "100", y: "0.56", ack: true }, { name: "the box not ticked", x: "100", y: "0.56", ack: false }, { name: "one amount missing", x: "100", y: "", ack: true }]) for (const confirm of [true, false]) {
   test(`create, no market price, ${c.name}, ${confirm ? "confirmed" : "closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
     const answers = { ppCreateAnchor: null, ppCreatePreview: { ok: true, price: "0.0056", kmin: "56" }, ppCreate: { txpowid: PK("75") }, ppSaveBackup: { canceled: true } };
-    const o = await oldMylp(answers, confirm);
-    const was = await o.press(async () => { await o.p.el("ppCreateBtn").onclick(); await o.p.settle(); o.p.el("ppcX").value = c.x; o.p.el("ppcY").value = c.y; o.p.el("ppcAck").checked = c.ack; return o.p.el("ppcGo").onclick(); });
+    const was = old(`createManual|${c.name}|${confirm}`);
     const now = await newCreate(answers, confirm, (api, u, op) => { assert.equal(op.anchor, null); return PP.Act.createManual(api, u, op.t, c.x, c.y, c.ack); });
     assert.deepEqual(now.calls, was);
     const ok = c.ack && c.y;
@@ -381,11 +351,11 @@ test("create: without MxUSD nothing is asked of the engine beyond the old panel'
   const ok = await newCreate({ ppCreateAnchor: { price: "0.0032", source: "MEXC market" }, ppCreate: { txpowid: PK("75") } }, true, (api, u, op) => PP.Act.createPriced(api, u, op.t, op.minimaAvail, op.anchor.price, op.anchor.source, "1.90"));
   assert.match(ok.said[ok.said.length - 1][0], /^Pool submitted: 593\.75 MINIMA \+ 1\.90 MxUSD\..*do not submit it again\. Now save the backup\.$/);
 });
-test("create is four steps, and the fourth is the forced backup; the old panel opened the same backup after a create and after a migrate", () => {
+test("create is four steps, and the fourth is the forced backup; the old panel opened the same backup after a create and after a migrate", async () => {
   assert.deepEqual(PP.STEPS, ["Before you start", "Amounts", "Review", "Back up"]);
-  const pp = src("dexicon-pp.js"), old = src("pools.js");
-  assert.match(old, /await api\.ppCreate\(t\.tokenid, t\.dec, String\(minima\), uStr\); prog\.close\(\); toast\("Pool created ✓", "ok"\); renderPandapools\(\); showPpBackup\(\);/);
-  assert.match(old, /await api\.ppMigrate\(addr, a, b\); prog\.close\(\); toast\("Migrated ✓", "ok"\); renderPandapools\(\); showPpBackup\(\);/);
+  const pp = src("dexicon-pp.js");
+  const was = old("backupAfterCreateAndMigrate");
+  assert.equal(was.length, 2, "the old panel's source opened the backup after a create and after a migrate (its two lines, as recorded)");
   assert.match(pp, /c\.step = 4; paint\(\);\n\s+await backupDialog\(true\); leaveCreate\(\);/, "after a create that was sent: step 4, the backup");
   assert.match(pp, /if \(r && !r\.err\) await backupDialog\(true\);/, "after a migrate that was sent: the backup");
   assert.match(pp, /c\.step = \/BACKUP_REQUIRED\/\.test\(\(r && r\.err\) \|\| ""\) \? 1 : 2; if \(c\.step === 1\) S\.backupDue = true;/, "the engine's refusal sends the flow back to the owed backup, never past it");
@@ -397,8 +367,8 @@ test("create is four steps, and the fourth is the forced backup; the old panel o
 });
 for (const c of [{ name: "both reserves", a: "50000", b: "160" }, { name: "one missing", a: "50000", b: "" }, { name: "zero", a: "0", b: "160" }]) for (const confirm of [true, false]) {
   test(`migrate, ${c.name}, ${confirm ? "confirmed" : "closed at the question"}: the same calls with the same arguments as the old panel`, async () => {
-    const answers = { ppMigrate: { txpowid: PK("76") }, ppSaveBackup: { canceled: true } }, o = await oldMylp(answers, confirm);
-    const was = await o.press(() => { o.p.btn.ppmig.onclick(); o.p.el("pp2A").value = c.a; o.p.el("pp2B").value = c.b; return o.p.el("pp2Go").onclick(); });
+    const answers = { ppMigrate: { txpowid: PK("76") }, ppSaveBackup: { canceled: true } };
+    const was = old(`migrate|${c.name}|${confirm}`);
     const r = recorder(Object.assign({ ppWhy: null }, answers)), u = ui(confirm); await PP.Act.migrate(r.api, u, MINE, c.a, c.b);
     assert.deepEqual(r.money(), was);
     assert.deepEqual(r.money(), c.name === "both reserves" && confirm ? [["ppMigrate", [MINE.address, "50000", "160"]]] : []);
@@ -408,9 +378,8 @@ for (const c of [{ name: "both reserves", a: "50000", b: "160" }, { name: "one m
 // ---- backup, restore, recovery ----
 const PASS = "correct horse battery staple";
 test("backup: the old panel's password rule, then ppSaveBackup(password) and nothing else", async () => {
-  for (const [p1, p2] of [[PASS, PASS], ["short", "short"], [PASS, PASS + "x"], ["", ""], ["x".repeat(1025), "x".repeat(1025)], ["ééééééééééé", "ééééééééééé"], ["éééééééééééé", "éééééééééééé"]]) {
-    const o = await oldMylp({ ppSaveBackup: { canceled: false, path: "/tmp/b.ppbackup" } }, true);
-    const was = await o.press(async () => { await o.p.el("ppBackupBtn").onclick(); o.p.el("ppbPass").value = p1; o.p.el("ppbAgain").value = p2; return o.p.el("ppbSave").onclick(); });
+  for (const [p1, p2, n] of [[PASS, PASS, "good"], ["short", "short", "short"], [PASS, PASS + "x", "not the same twice"], ["", "", "empty"], ["x".repeat(1025), "x".repeat(1025), "1025 letters"], ["ééééééééééé", "ééééééééééé", "11 two-byte letters"], ["éééééééééééé", "éééééééééééé", "12 two-byte letters"]]) {
+    const was = old(`backup|${n}`);
     const r = recorder({ ppSaveBackup: { canceled: false, path: "/tmp/b.ppbackup" } }), res = await PP.Act.backup(r.api, p1, p2);
     assert.deepEqual(r.money(), was, JSON.stringify([p1.length, p2.length]));
     assert.equal(!!res.bad, !was.length, "refused exactly when the old panel refused");
@@ -425,8 +394,7 @@ test("backup: the old panel's password rule, then ppSaveBackup(password) and not
 });
 test("restore: Load file, Extract node backup and Restore make the old panel's calls with the same arguments", async () => {
   const json = '{"pandapools_backup":3,"pools":[]}', answers = { ppLoadBackup: (pw, node) => (node ? { canceled: false, nodePassword: "np", path: "/tmp/n.bak" } : { canceled: false, json }), ppRestore: { restored: 1, total: 2, details: ["a 3 USDT", "b"], warn: "w" } };
-  const o = await oldMylp(answers, true);
-  const was = await o.press(async () => { await o.p.el("ppRestoreBtn").onclick(); o.p.el("pprPass").value = PASS; await o.p.el("pprFile").onclick(); await o.p.el("pprGo").onclick(); o.p.el("pprPass").value = PASS; await o.p.el("pprNode").onclick(); });
+  const was = old("restore");
   const r = recorder(answers), f = await PP.Act.loadFile(r.api, PASS), res = await PP.Act.restore(r.api, f.json), node = await PP.Act.extractNode(r.api, PASS);
   assert.deepEqual(r.money(), was);
   assert.deepEqual(was, [["ppLoadBackup", [PASS]], ["ppRestore", [json]], ["ppLoadBackup", [PASS, true]]]);
@@ -437,8 +405,8 @@ test("restore: Load file, Extract node backup and Restore make the old panel's c
   assert.match((await PP.Act.loadFile(recorder({ ppLoadBackup: new Error("This is a legacy pool-only file; no node backup is included.") }).api, "")).bad, /Nothing was restored\.$/);
 });
 test("recovery archive: read with no argument, saved with the address as typed, as the old panel; a refusal says nothing was saved", async () => {
-  const answers = { ppArchiveSettings: (url) => (url === undefined ? "https://old.example" : true) }, o = await oldMylp(answers, true);
-  const was = await o.press(async () => { await o.p.el("ppArchiveBtn").onclick(); o.p.el("ppaUrl").value = "https://archive.example"; return o.p.el("ppaSave").onclick(); });
+  const answers = { ppArchiveSettings: (url) => (url === undefined ? "https://old.example" : true) };
+  const was = old("archive");
   const r = recorder(answers); assert.equal(await PP.Act.archiveGet(r.api), "https://old.example"); assert.deepEqual(await PP.Act.archiveSave(r.api, "https://archive.example"), {});
   assert.deepEqual(r.money(), was); assert.deepEqual(was, [["ppArchiveSettings", []], ["ppArchiveSettings", ["https://archive.example"]]]);
   assert.match((await PP.Act.archiveSave(recorder({ ppArchiveSettings: false }).api, "http://x")).bad, /^Not saved\. Use a public HTTPS hostname/);
@@ -462,26 +430,25 @@ test("Pools: every pool with its address whole, the depth added exactly, and the
   const comb = PP.combinedCard({ tok: MXUSD, name: "USDT", count: 2, totalMinima: "866751.25", totalToken: "2783.56526575", price: "0.003211499999", depth: "866751.25" });
   assert.equal(comb.title, "MINIMA / MxUSD  ·  combined"); assert.deepEqual(comb.rows.map((r) => r[1]), ["2", "866751.25 MINIMA  ·  2783.56526575 MxUSD", "0.00321149 MxUSD / MINIMA", "866751.25 MINIMA"]);
   // the old panel's Pools tab makes reads only (ppPools, and ppAggregate for Combined): nothing there to carry over as a money call
-  const r = recorder(Object.assign({}, BASE, { ppAggregate: [] })), p = oldPanel(r.api, true);
-  p.P._setView("pools"); await p.P.render(); await p.settle();
-  assert.deepEqual(r.money(), []); assert.deepEqual(r.log.map((x) => x[0]), ["ppPools"]);
+  const was = old("poolsTab");
+  assert.deepEqual(was, { money: [], reads: ["ppPools"] });
   const pp = src("dexicon-pp.js");
   assert.match(pp, /if \(tab === "pools" && S\.combined\) want\.agg = \(\) => api\(\)\.ppAggregate\(\)/); assert.match(pp, /await api\(\)\.ppScan\(\)/);
 });
 
 // ---- the room ----
-test("the room: PandaPools' five tabs in its order, each remembered; the old panel stays in the tree and is no longer drawn", () => {
+test("the room: PandaPools' five tabs in its order, each remembered; the old panel is gone", () => {
   assert.deepEqual(C.ROOMS[1].tabs, ["swap", "pools", "mylp", "wallet", "activity"]);
   const mem = C.load(""); C.pickRoom(mem, 1); assert.equal(C.tabOf(mem), "swap");
   C.pickTab(mem, "mylp"); C.pickRoom(mem, 2); C.pickRoom(mem, 1); assert.equal(C.tabOf(mem), "mylp", "the room remembers its tab");
   assert.equal(C.tabOf(C.load(C.save(mem)) && C.pickRoom(C.load(C.save(mem)), 1)), "mylp");
   const html = src("index.html"), app = src("app.js");
-  assert.match(html, /<div class="dxapp" id="dxPpBody"><\/div>/); assert.match(html, /<div class="ppapp" id="ppBody" hidden><\/div>/);
+  assert.match(html, /<div class="dxapp" id="dxPpBody"><\/div>/); assert.ok(!/ppBody|class="ppapp"|pools\.(js|css)/.test(html), "the old panel has no element, sheet or script");
   assert.ok(html.indexOf('src="dexicon-core.js"') < html.indexOf('src="dexicon-pp.js"') && html.indexOf('src="dexicon-pp.js"') < html.indexOf('src="dexicon-ui.js"'));
-  assert.ok(fs.existsSync(path.join(R, "pools.js")) && app.includes("PoolsPanel.init({"), "kept until the 3e parity audit");
-  assert.ok(!/renderActive[\s\S]{0,2500}renderPandapools\(\)/.test(app.slice(app.indexOf("function renderActive"))), "nothing draws the old panel");
+  assert.ok(!/PoolsPanel|renderPandapools/.test(app), "the old panel's wiring is gone (0.18.141)");
   assert.match(app, /function onPandapoolsUpdate\(\) \{ DexPools\.onUpdate\(\); \}/);
-  for (const f of ["pools.js", "pools.css", "poolcalc.js"]) assert.ok(fs.existsSync(path.join(R, f)), f + " is untouched in the tree");
+  for (const f of ["pools.js", "pools.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
+  assert.ok(fs.existsSync(path.join(R, "poolcalc.js")) && html.includes('src="poolcalc.js"') && /DexPools\.init\(\{[^\n]*PoolCalc/.test(app), "the calculator stays: room ② opens the same PoolCalc.form");
 });
 
 // ---- the glue: read-only additions ----
@@ -694,7 +661,7 @@ test("a glue call the engine never answers ends with 'no answer', so Dexicon's o
   }
   assert.equal(PP.noAnswer(new Error("Pool not found.")), "");
   const pp = src("dexicon-pp.js");
-  assert.match(pp, /if \(ds\.pptool === "statement"\) return reading\(\(\) => Act\.statement\(api\(\), ui\)\)/, "the statement does not hold the money gate"); assert.match(pp, /if \(ds\.pprecover\) return reading\(async \(\) => \{/, "nor does a reserve check");
+  assert.match(pp, /if \(ds\.pptool === "statement"\) return reading\(\(\) => \{ say\("Building the statement: [^"]+", "note"\); return Act\.statement\(api\(\), ui\); \}\)/, "the statement does not hold the money gate"); assert.match(pp, /if \(ds\.pprecover\) return reading\(async \(\) => \{/, "nor does a reserve check");
   assert.ok(!/const reading = [^\n]*D\.money/.test(pp)); assert.match(pp, /if \(ds\.ppbal != null\) \{ if \(C\.gate\.on\) return say\(GATE_BUSY, "note"\);/, "the coins dialog (Split, Consolidate) is not opened while a money action runs");
 });
 

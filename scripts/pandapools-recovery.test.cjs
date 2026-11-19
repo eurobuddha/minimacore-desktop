@@ -247,19 +247,15 @@ test('one card per pool, carrying BOTH identifiers and the retire action',async(
  }else{console.log('    # donor MDS tree absent ('+donor+') — MDS card assertions skipped, Desktop card still checked');}
  // The Desktop half moved out of renderer/app.js into the PandaPools panel module in 0.17.18 (APK parity).
  // Same card, same assertions — loaded through the panel's own template export.
- const c={Math,Date,JSON,String,Number,Boolean,Array,Object,RegExp,Promise,console,setTimeout,clearTimeout,
-   localStorage:{getItem:()=>null,setItem(){},removeItem(){}},
-   document:{getElementById:()=>null,querySelectorAll:()=>[],createElement:()=>({style:{}}),body:{appendChild(){},insertAdjacentHTML(){}}}};
- c.window=c;c.globalThis=c;vm.createContext(c);
- vm.runInContext(fs.readFileSync(path.join(desktop,'renderer/pools.js'),'utf8'),c,{filename:'pools.js'});
- c.PoolsPanel.init({TOK:{shortId:s=>s,tidyAmount:s=>String(s)},esc:s=>String(s).replace(/</g,'&lt;'),short:s=>s,
-   el:()=>null,api:{},toast(){},copy(){},showConfirm:async()=>false,showProgress:()=>({close(){}}),tryCmd:async()=>[],
-   running:()=>true,activeView:()=>'pandapools'});
- const desktopCard=c.PoolsPanel._mineHtml([{address:addr,opk,tok,unresolved:true,signingStateUnverified:true}]);
- assert(desktopCard.includes(addr));assert(desktopCard.includes(opk),'Desktop must name the owner key too');
- assert(desktopCard.includes('Pool:')&&desktopCard.includes('Owner key:'),'labelled on Desktop as well');
- assert(desktopCard.includes('data-pprecover'));assert(desktopCard.includes('data-ppretire'));
- assert(desktopCard.includes('data-ppconfirm'));assert(!desktopCard.includes('data-ppwd'));
+ // the Desktop card is room 2 of Dexicon (renderer/dexicon-pp.js; the old panel was removed in 0.18.141)
+ const PP=require(path.join(desktop,'renderer/dexicon-pp.js')),pp=fs.readFileSync(path.join(desktop,'renderer/dexicon-pp.js'),'utf8');
+ const ids=PP.poolIds({address:addr,opk});
+ assert(ids.includes(addr));assert(ids.includes(opk),'Desktop must name the owner key too');
+ assert(ids.includes('Pool:')&&ids.includes('Owner key:'),'labelled on Desktop as well');
+ const card=pp.slice(pp.indexOf('if (p.unresolved) return'),pp.indexOf('const r = Number(p.kratio)'));
+ assert(card.includes('${ids}')&&card.includes('${hold}'),'the unresolved card carries the ids and the paused-signing block');
+ assert(card.includes('"pprecover", p.address')&&card.includes('"ppretire", p.address'));
+ assert(pp.includes('lpBtn("Confirm wallet signing state", "ppconfirm", p.opk)'));assert(!/ppwd|"Close"/.test(card),'no Close on a pool whose reserves are not found');
  }finally{h.close();}
 });
 

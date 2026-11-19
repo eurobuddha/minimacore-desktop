@@ -453,7 +453,7 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
         const rd = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
         assert.ok(/ipcMain\.handle\("mcd:axRefundNow", \(_e, hash\) => atomix\.refundNow\(hash\)\)/.test(rd("main/main.js")));
         assert.ok(/axRefundNow: \(hash\) => ipcRenderer\.invoke\("mcd:axRefundNow", hash\)/.test(rd("main/preload.js")));
-        assert.ok(/api\.axRefundNow\(hash\)/.test(rd("renderer/atomix-ui.js")));
+        assert.ok(/api\.axRefundNow\(hash\)/.test(rd("renderer/dexicon-ax.js")), "room 1 of Dexicon (the old panel was removed in 0.18.141)");
       });
       await okA("refundNow refuses a non-hash before touching the engine", async () => {
         await assert.rejects(() => atomix.refundNow("x'; DROP"), /not a swap hash/);

@@ -183,10 +183,6 @@ function onStatus(s) {
   DexUI.node(s);
   // A node the user shut down: say so on every screen, with the way back. (At launch the node is "stopped" for a moment too.)
   el("stopBar").hidden = !(s.state === "stopped" && !s.resyncing && !waitingForNode && CFG.setupDone && CFG.walletDone);
-  if (s.health && s.health.block) {                                      // both APK-parity headers carry the tip
-    PoolsPanel.setBlock(s.health.block);
-    AtomixPanel.setBlock(s.health.block);
-  }
 
   // live progress on the starting/onboarding overlay (before the wallet is ready)
   if (el("setup").style.display !== "none" && !CFG.walletDone) updateSetupProgress(s);
@@ -549,7 +545,7 @@ async function offerWithoutDexicon(e) {
 // The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
 // node.onWalletReplaced, 0.18.106): that must not depend on this window being open. Here only the screen is cleared.
 async function walletReplaced() {
-  resetMailState(); resetPpState(); DexPools.reset(); resetAxState();
+  resetMailState(); resetPpState(); resetAxState();
   resetWalletFigures(); api.nodeStatus().then(paintFooter);
 }
 // A backup password as the node can carry it (the phone's rule): letters and numbers only. A quote used to
@@ -1998,23 +1994,10 @@ async function refreshChatBadge() {
   b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
 }
 ChatPanel.badgeChanged = refreshChatBadge;
-// ---- PandaPools — the panel lives in renderer/pools.js (APK parity, its own palette) ----------------------
-// The old panel was ~740 lines here in the desktop's generic TERMINAL styling. app.js keeps only the wiring;
-// every engine call, validation, confirm dialog and busy guard moved across verbatim.
-PoolsPanel.init({
-  api, esc, el, toast, copy, short, TOK,
-  showConfirm, showProgress, tryCmd, PoolCalc, MINIMA,
-  running: () => running,
-  activeView: () => activeView
-});
-api.appVersion().then(v => PoolsPanel.setVersion(v)).catch(() => {});
-function renderPandapools() { PoolsPanel.render(); }
-// Room ② of Dexicon draws PandaPools now (renderer/dexicon-pp.js) over the same window.mcd calls. The panel above is
-// no longer rendered; it stays, initialised, until the 3e parity audit.
+// ---- PandaPools: room ② of Dexicon (renderer/dexicon-pp.js) over the window.mcd pp* calls. The panel it replaced
+// (renderer/pools.js) was removed in 0.18.141 after the parity audit (docs/DEXICON_PARITY_AUDIT.md).
 function onPandapoolsUpdate() { DexPools.onUpdate(); }
-// Was called on every seed change / wallet reset but never defined — the ReferenceError killed the rest of
-// that line, so the AtomiX and Casino resets beside it never ran either.
-function resetPpState() { PoolsPanel.reset(); }
+function resetPpState() { DexPools.reset(); }
 
 // ---- History ---------------------------------------------------------------
 // History filter/paging state. The list renders from the local DB via api.histQuery (paged); the filter bar is
@@ -3218,22 +3201,12 @@ async function renderLogs() {
 boot();
 initLogs();
 
-// ---- AtomiX — the panel lives in renderer/atomix-ui.js (APK parity, its own Onyx/Daylight palette) ----------
-// app.js keeps only the wiring. Every engine call, the frozen-quote path, the maker save/withdraw, the OTC deal
-// actions, the ETH send review → confirm → send and every guard moved across verbatim.
-AtomixPanel.init({
-  api, esc, el, toast, copy, TOK,
-  showConfirm, showPrompt, relTime, idHtml,
-  running: () => running,
-  activeView: () => activeView
-});
-api.appVersion().then(v => AtomixPanel.setVersion(v)).catch(() => {});
-// Room ① of Dexicon draws AtomiX now (renderer/dexicon-ax.js) over the same window.mcd calls. The panel above is
-// no longer rendered; it stays, initialised, until the 3e parity audit.
+// ---- AtomiX: room ① of Dexicon (renderer/dexicon-ax.js) over the window.mcd ax* calls. The panel it replaced
+// (renderer/atomix-ui.js) was removed in 0.18.141 after the parity audit (docs/DEXICON_PARITY_AUDIT.md).
 DexPools.init({ api, copy, tryCmd, TOK, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 DexAx.init({ api, copy, relTime, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
-function resetAxState() { AtomixPanel.reset(); DexAx.reset(); }
+function resetAxState() { DexAx.reset(); }
 
 // ============================ ETH Wallet (standalone tab) ============================
 // A full ERC20 wallet on the SAME seed-derived ethbridge address AtomiX uses (main/ethwallet.js → main/atomix.js

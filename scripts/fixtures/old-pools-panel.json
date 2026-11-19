@@ -1,0 +1,644 @@
+{
+ "swap|sell MINIMA for MxUSD|true": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "250"
+    ]
+   ],
+   [
+    "ppSwap",
+    [
+     41
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "confirm",
+    "Confirm swap",
+    "Swap"
+   ],
+   [
+    "Swapped ✓ — received 0.79832711 USDT",
+    "ok"
+   ]
+  ]
+ },
+ "swap|sell MINIMA for MxUSD|false": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "250"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "confirm",
+    "Confirm swap",
+    "Swap"
+   ]
+  ]
+ },
+ "swap|buy MINIMA with MxUSD|true": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     false,
+     "1.5"
+    ]
+   ],
+   [
+    "ppSwap",
+    [
+     42
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "confirm",
+    "Confirm swap",
+    "Swap"
+   ],
+   [
+    "Swapped ✓ — received 0.79832711 MINIMA",
+    "ok"
+   ]
+  ]
+ },
+ "swap|buy MINIMA with MxUSD|false": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     false,
+     "1.5"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "confirm",
+    "Confirm swap",
+    "Swap"
+   ]
+  ]
+ },
+ "swap|nothing typed|true": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|nothing typed|false": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|letters in the amount|true": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|letters in the amount|false": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|a comma in the amount|true": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|a comma in the amount|false": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|zero|true": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|zero|false": {
+  "calls": [],
+  "said": [
+   [
+    "Enter an amount.",
+    "err"
+   ]
+  ]
+ },
+ "swap|too large for the pools|true": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "900000"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "That trade is too large for these pools.",
+    "err"
+   ]
+  ]
+ },
+ "swap|too large for the pools|false": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "900000"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "That trade is too large for these pools.",
+    "err"
+   ]
+  ]
+ },
+ "swap|the engine has not started|true": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "250"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "Starting up — try again in a moment.",
+    "err"
+   ]
+  ]
+ },
+ "swap|the engine has not started|false": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "250"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "Starting up — try again in a moment.",
+    "err"
+   ]
+  ]
+ },
+ "swap|the engine refuses the swap": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "250"
+    ]
+   ],
+   [
+    "ppSwap",
+    [
+     41
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "confirm",
+    "Confirm swap",
+    "Swap"
+   ],
+   [
+    "Swap failed: Error invoking remote method 'mcd:ppSwap': Error: Could not identify the input signing key.",
+    "err"
+   ]
+  ]
+ },
+ "swap|the review's question": {
+  "calls": [
+   [
+    "ppQuote",
+    [
+     "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+     true,
+     "250"
+    ]
+   ]
+  ],
+  "said": [
+   [
+    "confirm",
+    "Confirm swap",
+    "Swap"
+   ]
+  ]
+ },
+ "mylp|add liquidity, both sides|true": {
+  "money": [
+   [
+    "ppDeposit",
+    [
+     "0xB1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     "500",
+     "1.605"
+    ]
+   ]
+  ],
+  "asked": true
+ },
+ "mylp|add liquidity, both sides|false": {
+  "money": [],
+  "asked": true
+ },
+ "mylp|add liquidity, nothing typed|true": {
+  "money": [],
+  "asked": false
+ },
+ "mylp|add liquidity, letters|true": {
+  "money": [],
+  "asked": false
+ },
+ "mylp|close the pool|true": {
+  "money": [
+   [
+    "ppClose",
+    [
+     "0xB1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA"
+    ]
+   ]
+  ],
+  "asked": true
+ },
+ "mylp|close the pool|false": {
+  "money": [],
+  "asked": true
+ },
+ "mylp|collect to wallet|true": {
+  "money": [
+   [
+    "ppCollect",
+    []
+   ]
+  ],
+  "asked": true
+ },
+ "mylp|collect to wallet|false": {
+  "money": [],
+  "asked": true
+ },
+ "mylp|collect now (a withdrawn-funds card)|true": {
+  "money": [
+   [
+    "ppCollect",
+    []
+   ]
+  ],
+  "asked": false
+ },
+ "mylp|check for reserves|true": {
+  "money": [
+   [
+    "ppRecoverSaved",
+    [
+     "0xB9FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA"
+    ]
+   ]
+  ],
+  "asked": true
+ },
+ "mylp|put a closed pool away|true": {
+  "money": [
+   [
+    "ppRetirePool",
+    [
+     "0xB9FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     true
+    ]
+   ]
+  ],
+  "asked": false
+ },
+ "mylp|bring the closed pools back|true": {
+  "money": [
+   [
+    "ppRetirePool",
+    [
+     "0xB7FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     false
+    ]
+   ],
+   [
+    "ppRetirePool",
+    [
+     "0xB8FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     false
+    ]
+   ]
+  ],
+  "asked": false
+ },
+ "mylp|confirm the wallet signing state|true": {
+  "money": [
+   [
+    "ppConfirmSigning",
+    [
+     "0x0BFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+     true
+    ]
+   ]
+  ],
+  "asked": true
+ },
+ "mylp|confirm the wallet signing state|false": {
+  "money": [],
+  "asked": true
+ },
+ "mylp|export the statement|true": {
+  "money": [
+   [
+    "ppStatement",
+    []
+   ],
+   [
+    "exportCsv",
+    [
+     "a,b\n1,2\n",
+     "pandapools-statement.csv"
+    ]
+   ]
+  ],
+  "asked": false
+ },
+ "mylp|export the statement, no pools|true": {
+  "money": [
+   [
+    "ppStatement",
+    []
+   ]
+  ],
+  "asked": false
+ },
+ "createPriced|1.90 MxUSD at the market price|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ],
+  [
+   "ppCreate",
+   [
+    "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+    8,
+    "593.75",
+    "1.90"
+   ]
+  ]
+ ],
+ "createPriced|1.90 MxUSD at the market price|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|more MxUSD than the wallet holds|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|more MxUSD than the wallet holds|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|more than the MINIMA covers|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|more than the MINIMA covers|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|nothing typed|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|nothing typed|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|letters|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createPriced|letters|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createManual|both amounts and the box ticked|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ],
+  [
+   "ppCreatePreview",
+   [
+    8,
+    "100",
+    "0.56"
+   ]
+  ],
+  [
+   "ppCreate",
+   [
+    "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+    8,
+    "100",
+    "0.56"
+   ]
+  ]
+ ],
+ "createManual|both amounts and the box ticked|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ],
+  [
+   "ppCreatePreview",
+   [
+    8,
+    "100",
+    "0.56"
+   ]
+  ]
+ ],
+ "createManual|the box not ticked|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createManual|the box not ticked|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createManual|one amount missing|true": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "createManual|one amount missing|false": [
+  [
+   "ppCreateAnchor",
+   []
+  ]
+ ],
+ "backupAfterCreateAndMigrate": [
+  "await api.ppCreate(t.tokenid, t.dec, String(minima), uStr); prog.close(); toast(\"Pool created ✓\", \"ok\"); renderPandapools(); showPpBackup();",
+  "await api.ppMigrate(addr, a, b); prog.close(); toast(\"Migrated ✓\", \"ok\"); renderPandapools(); showPpBackup();"
+ ],
+ "migrate|both reserves|true": [
+  [
+   "ppMigrate",
+   [
+    "0xB1FA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA4EFA",
+    "50000",
+    "160"
+   ]
+  ]
+ ],
+ "migrate|both reserves|false": [],
+ "migrate|one missing|true": [],
+ "migrate|one missing|false": [],
+ "migrate|zero|true": [],
+ "migrate|zero|false": [],
+ "backup|good": [
+  [
+   "ppSaveBackup",
+   [
+    "correct horse battery staple"
+   ]
+  ]
+ ],
+ "backup|short": [],
+ "backup|not the same twice": [],
+ "backup|empty": [],
+ "backup|1025 letters": [],
+ "backup|11 two-byte letters": [],
+ "backup|12 two-byte letters": [
+  [
+   "ppSaveBackup",
+   [
+    "éééééééééééé"
+   ]
+  ]
+ ],
+ "restore": [
+  [
+   "ppLoadBackup",
+   [
+    "correct horse battery staple"
+   ]
+  ],
+  [
+   "ppRestore",
+   [
+    "{\"pandapools_backup\":3,\"pools\":[]}"
+   ]
+  ],
+  [
+   "ppLoadBackup",
+   [
+    "correct horse battery staple",
+    true
+   ]
+  ]
+ ],
+ "archive": [
+  [
+   "ppArchiveSettings",
+   []
+  ],
+  [
+   "ppArchiveSettings",
+   [
+    "https://archive.example"
+   ]
+  ]
+ ],
+ "poolsTab": {
+  "money": [],
+  "reads": [
+   "ppPools"
+  ]
+ }
+}

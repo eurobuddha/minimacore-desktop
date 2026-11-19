@@ -74,7 +74,6 @@ select.field__input option { background: var(--surface2); color: var(--text); }
 
 /* ---- PandaPools ---- */
 #view-pandapools.view--active { display: flex; flex-direction: column; height: 100%; }
-#view-pandapools #ppBody { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
 
 /* toast — lift it */
 .toast { border-radius: 10px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.7); }
@@ -222,7 +221,6 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 
 
 
-/* AtomiX moved to renderer/atomix-ui.css, scoped to .axapp (0.17.21). */
 
 /* ============================ miniMall (shop · studio · orders) ============================ */
 #view-minimall .ax-seclabel { font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin:12px 0 6px; font-weight:700; }
@@ -317,7 +315,6 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 #view-ethwallet .ew-tierrow, #view-ethwallet .ew-tokrow { flex-wrap:wrap; }
 
 /* PandaPools what-if calculator — the form is built by renderer/poolcalc.js (byte-mirror of the MDS calc.js) */
-.modal--wide { max-width: 520px; }
 .pc-range { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
 .pc-range__lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--dim2); margin-bottom: 8px; }
 .pc-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }

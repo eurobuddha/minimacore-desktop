@@ -22,9 +22,10 @@
   const roomOfView = (view) => ROOMS.findIndex(r => r.view === view);
 
   /** The saved choices: the last tab of each room and the theme. The room itself is not saved: Dexicon opens on ①. */
-  function load(raw) {
+  /** was: what the removed AtomiX panel had saved as its own theme ("daylight" / "onyx"); it counts until Dexicon's own choice is saved. */
+  function load(raw, was) {
     let o = {}; try { o = JSON.parse(raw || "{}") || {}; } catch (e) { o = {}; }
-    const mem = { room: 0, tabs: {}, theme: o.theme === "DAYLIGHT" ? "DAYLIGHT" : "ONYX" };
+    const mem = { room: 0, tabs: {}, theme: (o.theme || (was === "daylight" ? "DAYLIGHT" : "")) === "DAYLIGHT" ? "DAYLIGHT" : "ONYX" };
     for (const r of ROOMS) mem.tabs[r.id] = r.tabs.includes(o.tabs && o.tabs[r.id]) ? o.tabs[r.id] : (r.tabs[0] || "");
     mem.tabs.mxusd = "swap";   // every start opens room 1 on Swap (DoorHost.applyLaunchRule); the tab is remembered while the app runs
     return mem;

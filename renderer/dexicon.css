@@ -1,8 +1,10 @@
 /*
  * dexicon.css: Dexicon, full screen, as the Android client draws it (apks/dexicon Design.java + MainActivity.java).
- * 1 dp = 1 px, 1 sp = 1 px. Inter and JetBrains Mono (the @font-face rules are in atomix-ui.css, same files).
+ * 1 dp = 1 px, 1 sp = 1 px. Inter and JetBrains Mono (the two @font-face rules below; they came here from atomix-ui.css when the old AtomiX panel was removed, 0.18.141).
  * Dexicon has its own dark (ONYX) and light (DAYLIGHT) theme behind the sun button, independent of the system theme.
  */
+@font-face { font-family: "Inter"; src: url("fonts/Inter-variable.woff") format("woff"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-variable.woff") format("woff"); font-weight: 100 800; font-display: swap; }
 .shell { --dx-bg: #0B0D12; --dx-surface: #12151C; --dx-surface2: #1B1F28; --dx-border: rgba(255,255,255,.07); --dx-text: #EEF0F4;
   --dx-dim: #8B909C; --dx-dim2: #6F7583; --dx-accent: #F7931A; --dx-accent-soft: rgba(247,147,26,.2); --dx-grad: #FFAB3D;
   --dx-on-accent: #0B0D12; --dx-in: #3FD0A2; --dx-red: #FF5C5C; --dx-on-side: #FFFFFF;
@@ -319,7 +321,6 @@ button.dx-pill { cursor: pointer; }
    WalletView / ActivityView, Ui.java, Design.java on Dexicon's tokens). renderer/dexicon-pp.js ---- */
 .shell { --pp-amber: #E6A23C; } .shell[data-dx="DAYLIGHT"] { --pp-amber: #9A6B00; }
 .shell #view-pandapools.view--active { display: block; height: auto; padding: 0; }
-#view-pandapools #ppBody[hidden] { display: none; }
 #dxPpBody { padding: 14px; font-size: 13px; }
 .pp-line { font: 400 13px/19px var(--dx-sans); color: var(--dx-dim); overflow-wrap: anywhere; } .pp-line:empty { display: none; }
 .pp-line--gap { margin: 6px 0 10px; } .pp-line + .pp-panel, .pp-pair + .pp-panel { margin-top: 10px; }

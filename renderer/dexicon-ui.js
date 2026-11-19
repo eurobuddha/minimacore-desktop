@@ -24,9 +24,10 @@ const DexUI = (() => {
     assets: "M6,6 h11 a3,3 0 0,1 3,3 v6 a3,3 0 0,1 -3,3 h-11 a3,3 0 0,1 -3,-3 v-6 a3,3 0 0,1 3,-3 z M16,12 h2.5",
     settings: "M4,7 L20,7 M4,17 L20,17 M9,4 L9,10 M15,14 L15,20"
   };
-  let mem = C.load(read()), opts = null, node = { state: "" }, st = null;
+  let mem = C.load(read(), oldTheme()), opts = null, node = { state: "" }, st = null;
 
   function read() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+  function oldTheme() { try { return localStorage.getItem("ax_theme"); } catch (e) { return null; } }   // the removed AtomiX panel's own theme choice
   function write() { try { localStorage.setItem(KEY, C.save(mem)); } catch (e) {} }
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -40,7 +41,7 @@ const DexUI = (() => {
       const all = [...$("dxNav").querySelectorAll(".dx-tab")], i = all.indexOf(document.activeElement); if (i < 0) return;
       const next = all[(i + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length]; e.preventDefault(); next.focus(); next.click();
     });
-    $("dxTheme").onclick = () => { C.toggleTheme(mem); write(); paintTheme(); };
+    $("dxTheme").onclick = () => { C.toggleTheme(mem); write(); paintTheme(); draw(); };   // draw(): an open chart takes the new theme's colours at once (the old AtomiX panel did; 0.18.141)
     $("dxClose").onclick = () => opts.leave();
     $("dxPair").onclick = () => { if (node.state === "stopped") opts.start(); };
     $("dxCcy").onclick = () => DexAx.switchCurrency();

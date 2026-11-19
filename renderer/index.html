@@ -9,8 +9,6 @@
   <link rel="stylesheet" href="shell.css" />   <!-- the Pandamonium shell: toolbar, tabs, tray, menu, footer -->
   <link rel="stylesheet" href="mail.css" />   <!-- the Mail panel, scoped to .mailapp -->
   <link rel="stylesheet" href="chat.css" />   <!-- the KeetChat panel, scoped to .chatapp -->
-  <link rel="stylesheet" href="pools.css" />  <!-- the PandaPools panel, scoped to .ppapp -->
-  <link rel="stylesheet" href="atomix-ui.css" /> <!-- the AtomiX panel, scoped to .axapp -->
   <link rel="stylesheet" href="dexicon.css" />   <!-- Dexicon: its full-screen chrome and room 3 (Exchange) -->
 </head>
 <body>
@@ -115,7 +113,6 @@
 
       <section class="view" id="view-pandapools">
         <div class="dxapp" id="dxPpBody"></div>   <!-- room ② Pools: PandaPools as the phone draws it inside Dexicon (dexicon-pp.js) -->
-        <div class="ppapp" id="ppBody" hidden></div>   <!-- the panel it replaces; not drawn, kept until the 3e parity audit -->
       </section>
 
       <section class="view" id="view-dexicon">
@@ -124,7 +121,6 @@
 
       <section class="view" id="view-atomix">
         <div class="dxapp" id="dxAxBody"></div>   <!-- room ① MxUSD: AtomiX as the phone draws it (dexicon-ax.js) -->
-        <div class="axapp" id="axBody" hidden></div>   <!-- the panel it replaces; not drawn, kept until the 3e parity audit -->
       </section>
 
       <section class="view" id="view-ethwallet">
@@ -259,8 +255,6 @@
   <script src="mail.js"></script>
   <script src="chat.js"></script>
   <script src="poolcalc.js"></script>
-  <script src="pools.js"></script>
-  <script src="atomix-ui.js"></script>
   <script src="dexicon/lib/activity.js"></script>   <!-- the engine's own activity stage machine (verbatim, pure): window.AX.activity -->
   <script src="dexicon-core.js"></script>
   <script src="dexicon-ax.js"></script>

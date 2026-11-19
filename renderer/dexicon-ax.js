@@ -2,7 +2,7 @@
  * dexicon-ax.js: Dexicon room ① MxUSD. The REAL AtomiX (USDT on Ethereum ⇄ MxUSD on Minima, and the MINIMA / USDT
  * market behind the ⇄ pill), drawn as the Android client draws it (apks/dexicon DoorsTab / MarketTab / OtcTab /
  * AssetsTab / WalletActions) over the engine the desktop already runs: the SAME window.mcd ax* calls with the SAME
- * arguments and the SAME guards, in the same order, as the panel it replaces (renderer/atomix-ui.js, which stays in
+ * arguments and the SAME guards, in the same order, as the panel it replaces (renderer/atomix-ui.js, removed in 0.18.141; was kept in
  * the tree until the 3e parity audit). This file changes screens, never behaviour: scripts/dexicon-ax.test.cjs runs
  * both and compares every call.
  *
@@ -94,7 +94,7 @@
     const st = tok(sw.selltoken), bt = tok(sw.buytoken), a = sw.status === "LOCKED" || sw.status === "CLAIMING" ? 3 : sw.status === "COMPLETE" ? 5 : 2;
     const leg = (i) => (i < a ? "done" : i === a ? "active" : "pending");
     if (sw.status === "REFUNDED") rows.push({ state: "warn", text: "Timed out: " + sw.sellamount + " " + st + " refunded" });
-    else if (sw.status === "ERROR") rows.push({ state: "warn", text: sw.inWindow ? "Stopped with an error: see it under In progress (in History if you hid it)" : "Stopped with an error: see it in Activity for what happened" });
+    else if (sw.status === "ERROR") rows.push({ state: "warn", text: sw.inWindow ? "Stopped with an error: see it under In progress (in ③ Exchange, History, if you hid it)" : "Stopped with an error: see it in Activity for what happened" });
     else rows.push({ state: leg(1), text: "Locked your " + sw.sellamount + " " + st }, { state: leg(2), text: "Counterparty locks their side" }, { state: leg(3), text: "Claim your " + sw.buyamount + " " + bt }, { state: leg(4), text: "Swap complete" });
     return { rows, which: sw.sellamount + " " + st + "  →  " + sw.buyamount + " " + bt + "   ·   " + roleLabel(sw.role), check: terminal(sw) ? "" : sw.hash, more };
   }
@@ -728,7 +728,7 @@
       <label class="ax-fld"><b>I SELL up to</b><input class="dx-in ax-in ax-in--line" id="otcSell" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.sell)}"></label>
       <label class="ax-fld"><b>I BUY up to</b><input class="dx-in ax-in ax-in--line" id="otcBuy" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.buy)}"></label>
       <div class="ax-offer" data-live="${live}">${live ? "● Live: LPs can negotiate with you" : "○ Off"}</div>
-      <div class="ax-acts"><button class="dx-btn ax-go" data-axotc="live"${dis}>${live ? "Update" : "Go live"}</button>${live ? `<button class="dx-btn" data-axotc="withdraw"${S.busy ? " disabled" : ""}>Withdraw</button>` : ""}</div></div>`);
+      <div class="ax-acts"><button class="dx-btn ax-go" data-axotc="live"${dis}>${live ? "Update" : "Go live"}</button><button class="dx-btn" data-axotc="withdraw"${S.busy ? " disabled" : ""}>Withdraw</button></div></div>`);   // always there, as in the old panel (0.18.141): an offer this screen thinks is off can still be on the board
     out.push(`<div class="dx-label ax-sec">LIQUIDITY PROVIDERS</div>`);
     if (!o) out.push(`<div class="ax-dim">Reading the OTC board…</div>`);
     else if (!o.board.length) out.push(`<div class="ax-dim">No OTC LPs online right now.</div>`);

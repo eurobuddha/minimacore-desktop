@@ -59,12 +59,24 @@ test('0.18.16: KeetChat is this app\'s on BOTH kinds - the jar\'s keets bridge i
     'renderer must not hide the Chat tab by node kind');
 });
 
-test('resources: sidecar bundle present, jar contains the keets classes', () => {
+test('resources: sidecar source present, jar contains the keets classes', () => {
   assert.ok(fs.existsSync(path.join(ROOT, 'resources/keets-sidecar/index.js')), 'sidecar index.js bundled');
-  assert.ok(fs.existsSync(path.join(ROOT, 'resources/keets-sidecar/node_modules/hyperswarm')), 'hyperswarm bundled');
+  assert.ok(fs.existsSync(path.join(ROOT, 'resources/keets-sidecar/package-lock.json')), 'its dependencies are pinned by a committed lockfile');
   const listing = execSync('unzip -l ' + path.join(ROOT, 'resources/minima.jar'), { encoding: 'utf8' });
   assert.ok(listing.includes('org/minima/system/network/keets/KeetsManager'),
     'resources/minima.jar must contain KeetsManager (keets-enabled build)');
+});
+
+// The sidecar's node_modules are never in git (scripts/fetch-keets-sidecar.sh installs them from the lockfile: a
+// download). Until 0.18.141 this was one test with the two above, so it failed in every checkout that had not run
+// the fetch, which hid nothing and proved nothing. A checkout without them cannot be PACKAGED, and that is what
+// must fail: so the check is required in CI and wherever KEETS_REQUIRE_DEPS=1 (set it before a local release build),
+// and says plainly that it was skipped anywhere else.
+test('resources: sidecar dependencies installed (needed to package the app)', (t) => {
+  const have = fs.existsSync(path.join(ROOT, 'resources/keets-sidecar/node_modules/hyperswarm'));
+  if (!have && !process.env.CI && process.env.KEETS_REQUIRE_DEPS !== '1')
+    return t.skip('resources/keets-sidecar/node_modules is not installed in this checkout: run `npm run fetch:keets` (a download) before packaging; KeetChat cannot start from this tree until then');
+  assert.ok(have, 'hyperswarm bundled: run `npm run fetch:keets`');
 });
 
 test('package.json: sidecar ships via extraResources', () => {

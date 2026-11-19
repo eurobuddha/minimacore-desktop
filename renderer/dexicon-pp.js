@@ -2,7 +2,7 @@
  * dexicon-pp.js: Dexicon room ② Pools. The REAL PandaPools (constant-product pools MINIMA ⇄ MxUSD on Minima), drawn as
  * the Android client draws it inside Dexicon (apks/dexicon com.eurobuddha.pandapools SwapView / PoolsView / MyLpView /
  * WalletView / ActivityView) over the engine the desktop already runs: the SAME window.mcd pp* calls with the SAME
- * arguments and the SAME guards, in the same order, as the panel it replaces (renderer/pools.js, which stays in the
+ * arguments and the SAME guards, in the same order, as the panel it replaces (renderer/pools.js, removed in 0.18.141; was kept in the
  * tree until the 3e parity audit). This file changes screens, never behaviour: scripts/dexicon-pp.test.cjs runs both
  * and compares every call.
  *
@@ -490,7 +490,7 @@
     if (tab === "swap" && pair()) S.info = await api().ppPairInfo(pair().tok).catch(() => S.info);
   }
   /** the engine's scans say "update": passive parts only, never under someone typing (the old panel's "frozen tab" rule) */
-  function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; const w = D.where(); if (visible()) load(S.tab).then(paint, paint); else if (w.shown && w.shared && (w.tab === "activity" || w.tab === "history")) shared(true); }, 400); }
+  function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; const w = D.where(); if (visible()) load(S.tab).then(() => { paint(); if (S.tab === "swap" && $("ppAmt") && !C.gate.on) requote(); }, paint); else if (w.shown && w.shared && (w.tab === "activity" || w.tab === "history")) shared(true); }, 400); }
   function tick() { if (D && visible() && !typing() && !C.gate.on && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
   function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: "", lost: "", dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null, addr: "", balAt: 0, feed: null, shownA: 60, shownF: 60, sharedAt: 0 }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
@@ -616,12 +616,12 @@
   function mineHtml() {
     return (S.mine || []).map((p) => {
       const name = tokLabel(p.tok, p.tokName), ids = `<div class="pp-ids" data-copy="${esc(p.address)}" title="Click to copy the pool address">${esc(poolIds(p))}</div>`;
-      const hold = p.signingStateUnverified ? `<div class="pp-hold"><b>Owner signing paused</b><div class="pp-note">PandaPools cannot tell how many of this owner key's one-time signatures have already been used, so it has stopped signing for this pool. Automatic refresh is paused too.</div><div class="pp-acts">${lpBtn("Confirm wallet signing state", "ppconfirm", p.opk)}</div></div>` : "";
+      const hold = p.signingStateUnverified ? `<div class="pp-hold"><b>Owner signing paused</b><div class="pp-note">PandaPools cannot tell how many of this owner key's one-time signatures have already been used, so it has stopped signing for this pool. Automatic refresh is paused too. Stop every other copy of this wallet that signs, then confirm the latest complete wallet signing state.</div><div class="pp-acts">${lpBtn("Confirm wallet signing state", "ppconfirm", p.opk)}</div></div>` : "";
       if (p.unresolved) return `<div class="dx-card pp-card"><b class="pp-ct">Saved pool · reserves not found</b>${ids}<div class="pp-note">This node cannot currently see both reserve coins. It may still be syncing, or the pool may have closed.</div>${hold}
         <div class="pp-acts">${lpBtn("Check for reserves", "pprecover", p.address)}${lpBtn("It's closed: put it away", "ppretire", p.address)}</div></div>`;
       const r = Number(p.kratio), warn = needsMigrate(p), pct = isFinite(r) && r > 0 ? Math.max(4, Math.min(100, r / 2 * 100)) : 0;
       return `<div class="dx-card pp-card"><b class="pp-ct">${esc(pairName({ tok: p.tok, name }))}</b>${ids}${hold}${lpRows(p).map((x) => kv(x[0], esc(x[1]), x[2] ? "pp-" + x[2] : "")).join("")}
-        ${pct ? `<div class="pp-health"><div class="pp-kv"><span>Floor headroom</span><span class="${warn ? "pp-warn" : "pp-dimv"}">${warn ? "migrate soon" : "healthy"}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
+        ${pct ? `<div class="pp-health"><div class="pp-kv"><span>Floor headroom</span><span class="${warn ? "pp-warn" : "pp-dimv"}">K/KMIN ${cutNum(Math.trunc(r * 100) / 100)} · ${warn ? "migrate soon" : "healthy"}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
         <div class="pp-acts">${lpBtn(warn ? "Add (full)" : "Add", "ppadd", p.address)}${lpBtn("Migrate", "ppmig", p.address, warn ? "dx-btn--go" : "")}${lpBtn("Close", "ppclose", p.address)}</div>
         <button class="pp-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</button></div>`;
     }).join("");
@@ -856,7 +856,7 @@
     if (ds.ppbal != null) { if (C.gate.on) return say(GATE_BUSY, "note"); const row = (S.bal || [])[Number(ds.ppbal)]; return row ? D.showCoins(row) : null; }   // not while a money action runs: Split and Consolidate are in this dialog   // the wallet's own coins dialog: every coin whole, with Split, Consolidate and the token's details and Send
     if (ds.ppcalc != null) return calc(ds.ppcalc);
     if (ds.pptool === "calc") return calc("");
-    if (ds.pptool === "statement") return reading(() => Act.statement(api(), ui));
+    if (ds.pptool === "statement") return reading(() => { say("Building the statement: the transaction history is being caught up with the node. This can take a while.", "note"); return Act.statement(api(), ui); });
     if (ds.pptool === "closed") return act(closedPools);
     if (ds.pptool === "create") return act(() => createAct("open"));
     if (ds.ppcreate) return act(() => createAct(ds.ppcreate));
@@ -865,7 +865,7 @@
     if (ds.pptool === "backup") return act(() => backupDialog(false));
     if (ds.ppcollectnow) return act(() => Act.collectNow(api(), ui));
     if (ds.ppconfirm) return act(() => Act.confirmSigning(api(), ui, ds.ppconfirm));
-    if (ds.pprecover) return reading(async () => { say("Checking local reserves and current archive proofs. No transaction is signed.", "note"); await Act.recover(api(), ui, ds.pprecover); S.said = null; });
+    if (ds.pprecover) return reading(async () => { say("Checking local reserves and current archive proofs. No transaction is signed.", "note"); if (await Act.recover(api(), ui, ds.pprecover)) S.said = null; });   // a failure's message stays (0.18.141: it was erased at once)
     if (ds.ppretire) return act(() => Act.retire(api(), ui, ds.ppretire));
     if (ds.ppadd) { const p = pool(ds.ppadd); return p ? act(() => addSheet(p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }
     if (ds.ppclose) { const p = pool(ds.ppclose); return p ? act(() => Act.withdraw(api(), ui, p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }

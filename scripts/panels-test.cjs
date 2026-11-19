@@ -1,5 +1,11 @@
 /*
- * panels-test.cjs — the shared guard over every APK-parity panel, plus the PandaPools panel's render tests.
+ * panels-test.cjs — the shared guard over every APK-parity panel sheet.
+ *
+ * 0.18.141: the PandaPools and AtomiX panels (renderer/pools.js, pools.css, atomix-ui.js, atomix-ui.css) were removed
+ * after the parity audit (docs/DEXICON_PARITY_AUDIT.md); Dexicon rooms 2 and 1 draw them. Their render tests went
+ * with the files. What they pinned that still matters is pinned on the rooms at the end of this file; the calls
+ * and arguments of every money action are pinned against the old panels' recorded answers in
+ * scripts/dexicon-ax.test.cjs and scripts/dexicon-pp.test.cjs (scripts/fixtures/old-*-panel.json).
  *
  * Each of these panels (Mail, PandaPools, and Casino/AtomiX as they land) carries its OWN palette so it can
  * look like its phone app without repainting the rest of minimaCore. That only holds while every selector in
@@ -16,9 +22,7 @@ const R = path.join(__dirname, "..", "renderer");
 
 /** Every panel sheet, with the wrapper class it must never paint outside of. */
 const PANELS = [
-  { css: "mail.css", wrap: "mailapp", host: "view-mail", js: "mail.js" },
-  { css: "pools.css", wrap: "ppapp", host: "view-pandapools", js: "pools.js" },
-  { css: "atomix-ui.css", wrap: "axapp", host: "view-atomix", js: "atomix-ui.js" }
+  { css: "mail.css", wrap: "mailapp", host: "view-mail", js: "mail.js" }
 ];
 // Font stacks are shared on purpose — the shell's face is the OS face, and a panel that redeclared it would
 // only drift. Colour and geometry tokens are what must never be borrowed.
@@ -97,204 +101,7 @@ test("no panel wrapper declares a property that app.css's .overlay owns, unless 
     for (const prop of root) if (overlayProps.has(prop) && !restated.has(prop)) bad.push(p.css + " ." + p.wrap + " { " + prop + " }");
   }
   assert.deepEqual(bad, [], "wrapper properties that would beat .overlay by source order: " + bad.join(" | "));
-  assert.ok(checked >= 2, "PandaPools and AtomiX both share the overlay box and were both checked");
-});
-
-// ------------------------------------------------------------------ the PandaPools panel, headless
-/** Load pools.js in a DOM-less sandbox. A typo in any of its ~40 templates fails here, not in front of a user. */
-function panel() {
-  const sandbox = { setTimeout, clearTimeout, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console,
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-    document: { getElementById: () => null, querySelectorAll: () => [], querySelector: () => null,
-      createElement: () => ({ style: {}, appendChild() {} }), body: { appendChild() {}, insertAdjacentHTML() {} } },
-    getComputedStyle: () => ({ getPropertyValue: () => "" }) };
-  sandbox.window = sandbox; sandbox.globalThis = sandbox;
-  const ctx = vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(R, "pools.js"), "utf8"), ctx, { filename: "pools.js" });
-  return sandbox;
-}
-
-/** Elements that only record what was written into them — enough to assert on the templates. */
-function fakeDom() {
-  const nodes = {};
-  const mk = () => ({ innerHTML: "", textContent: "", value: "", className: "", hidden: false, style: {}, scrollTop: 0, scrollHeight: 0,
-    querySelectorAll: () => [], querySelector: () => null, setAttribute() {}, getAttribute: () => null,
-    removeAttribute() {}, addEventListener() {}, appendChild() {}, onclick: null,
-    classList: { add() {}, remove() {}, contains: () => false } });
-  return { get: (id) => (nodes[id] || (nodes[id] = mk())), nodes };
-}
-
-const NOOP_API = new Proxy({}, { get: () => () => Promise.resolve([]) });
-const DEPS = (over) => Object.assign({
-  api: NOOP_API,
-  esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
-  el: () => null, toast() {}, copy() {}, short: (s) => String(s),
-  TOK: { shortId: (t) => String(t), tidyAmount: (a) => String(a), tokenName: (t, id) => String(id) },
-  showConfirm: async () => false, showProgress: () => ({ close() {} }), tryCmd: async () => [],
-  PoolCalc: { form: () => ({ el: {}, render() {} }) }, MINIMA: "0x00",
-  running: () => true, activeView: () => "pandapools"
-}, over || {});
-
-test("the PandaPools panel loads and exposes only its wiring surface", () => {
-  const s = panel();
-  assert.ok(s.PoolsPanel, "PoolsPanel is exported");
-  for (const fn of ["init", "render", "onUpdate", "reset", "setVersion", "setBlock"]) {
-    assert.equal(typeof s.PoolsPanel[fn], "function", fn + " is on the panel");
-  }
-});
-
-test("the header carries the APK chrome, and the tab strip keeps its hard-coded colours", async () => {
-  const s = panel();
-  const dom = fakeDom();
-  s.PoolsPanel.init(DEPS({ el: (id) => dom.get(id) }));
-  s.PoolsPanel.setVersion("0.17.18");
-  await s.PoolsPanel.render();                       // no pools → the swap tab's empty state
-  const html = dom.get("ppBody").innerHTML;
-  assert.ok(html.includes("PandaPools"), "the wordmark");
-  assert.ok(html.includes("LIQUIDITY POOLS · v0.17.18"), "the tracked sub-line carries the version");
-  assert.ok(html.includes("◐ STYLE"), "the style pill");
-  assert.ok(/pp-tab[" ]/.test(html), "the tab strip renders");
-  assert.ok(html.includes(">SWAP<") && html.includes(">MY LP<"), "the APK's uppercase tab labels");
-  // the strip's colours are literals in pools.css precisely because the APK does not theme them
-  const css = fs.readFileSync(path.join(R, "pools.css"), "utf8");
-  assert.ok(/\.pp-tab\.is-on\s*\{[^}]*#F7931A/.test(css), "the active tab is the APK's literal orange");
-});
-
-test("all four tabs render against live-shaped data, with the APK's row vocabulary", async () => {
-  const s = panel();
-  const dom = fakeDom();
-  const POOL = "0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A";
-  const TOKID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";   // MxUSD
-  const pools = [{ address: POOL, tok: TOKID, tokName: "MxUSD", reserveM: "175157.93", reserveT: "784.52", spot: "0.00448", feeGrowthPct: "1.2" }];
-  const mine = [{ address: POOL, opk: "0xBB", tok: TOKID, tokName: "MxUSD", reserveM: "175157.93", reserveT: "784.52",
-    value: "350000", poolPrice: "0.00448", feesMinima: "12.5", feesPct: "0.9", priceMove: 3.2, il: -0.04, ageBlocks: 5000, kratio: 1.2 }];
-  const api = new Proxy({}, { get: (_t, k) => () => {
-    if (k === "ppPools") return Promise.resolve(pools);
-    if (k === "ppMyPools") return Promise.resolve(mine);
-    if (k === "ppPairInfo") return Promise.resolve({ pools: 1, depth: "175157" });
-    if (k === "ppMarketToken") return Promise.resolve({ usdt: TOKID });
-    if (k === "ppMarket") return Promise.resolve({ mid: "0.00450", fresh: true });
-    if (k === "ppActivity") return Promise.resolve([{ type: "SWAP", summary: "Sold 10 MINIMA for 0.04 MxUSD", txpowid: "0xAA",
-      ts: 1788896729000, statusText: "3 confirmations · on-chain", confirmed: true }]);
-    if (k === "ppFeed") return Promise.resolve([{ kind: "SWAP", minimaIn: true, minimaAmt: "10", tokenAmt: "0.04",
-      tokenLabel: "MxUSD", txpowid: "0xBB", ts: 1788896729000, statusText: "3 confirmations · on-chain", confirmed: true }]);
-    return Promise.resolve([]);
-  } });
-  s.PoolsPanel.init(DEPS({ api, el: (id) => dom.get(id), tryCmd: async (c) => (c === "block" ? { block: "1234567" } : [{ tokenid: "0x00", sendable: "500" }]) }));
-
-  const paint = async (v) => { dom.nodes.ppBody = null; delete dom.nodes.ppBody; s.PoolsPanel._setView(v); await s.PoolsPanel.render(); return dom.get("ppBody").innerHTML; };
-
-  const swap = await paint("swap");
-  assert.ok(swap.includes("YOU PAY") && swap.includes("YOU RECEIVE"), "the FROM/TO legs");
-  assert.ok(swap.includes(">⇅<"), "the flip control sits between them");
-  assert.ok(!/slippage/i.test(swap), "the APK has no slippage control here, and neither does this");
-
-  const list = await paint("pools");
-  assert.ok(list.includes("MINIMA / MxUSD"), "the pair card");
-  assert.ok(list.includes(`data-pool="${POOL}"`), "the row carries the complete pool address");
-
-  const lp = await paint("mylp");
-  assert.ok(lp.includes("YOUR LIQUIDITY"), "the summary block");
-  assert.ok(lp.includes("K/KMIN 1.20 · healthy"), "the health bar reads the pool's real headroom");
-  assert.ok(lp.includes("Pool calculator"), "the calculator is reachable");
-
-  const act = await paint("activity");
-  assert.ok(act.includes("3 confirmations · on-chain"), "the confirmation vocabulary is unchanged");
-  assert.ok(act.includes("pp-glyph--ok"), "and carries the APK's glyph column");
-  assert.ok(act.includes("2026-09-08") && act.includes("UTC"), "times stay absolute UTC");
-
-  for (const html of [swap, list, lp, act]) {
-    assert.ok(!/undefined|\[object Object\]/.test(html), "no template hole reached the markup");
-  }
-});
-
-test("the style toggle is the panel's own, and survives nothing but its own state", () => {
-  const s = panel();
-  const dom = fakeDom();
-  let stored = null;
-  s.localStorage = { getItem: () => stored, setItem: (k, v) => { stored = v; }, removeItem() {} };
-  s.PoolsPanel.init(DEPS({ el: (id) => dom.get(id) }));
-  const css = fs.readFileSync(path.join(R, "pools.css"), "utf8");
-  assert.ok(css.includes('[data-ppstyle="original"]'), "the Original look is a data-attribute variant");
-  assert.ok(/\[data-ppstyle="original"\][\s\S]*--pp-r:\s*0px/.test(css), "Original is hard-edged");
-  assert.ok(/\[data-ppstyle="original"\][\s\S]*--pp-sans:\s*var\(--pp-mono\)/.test(css), "Original is monospace");
-});
-
-test("the kv atom keeps the APK's two different value faces", () => {
-  const css = fs.readFileSync(path.join(R, "pools.css"), "utf8");
-  assert.ok(/\.ppapp \.pp-k\s*\{[^}]*max-width:\s*190px/.test(css), "the key column is capped at 190px");
-  assert.ok(/\.ppapp \.pp-v\s*\{[^}]*font-family:\s*var\(--pp-mono\)/.test(css), "kv values are monospace");
-  const vc = /\.ppapp \.pp-vc\s*\{([^}]*)\}/.exec(css);
-  assert.ok(vc, ".pp-vc exists");
-  assert.ok(!/font-family/.test(vc[1]), "MyLpView.kvColored is NOT monospace — the APK's own inconsistency");
-});
-
-test("a pool past the product-floor threshold turns the health bar amber and fills Migrate", () => {
-  const s = panel();
-  const dom = fakeDom();
-  s.PoolsPanel.init(DEPS({ el: (id) => dom.get(id) }));
-  const mine = (kratio) => [{ address: "0xAAA", opk: "0xBBB", tok: "0xCCC", tokName: "MxUSD",
-    reserveM: "100", reserveT: "50", value: "200", poolPrice: "0.5", feesMinima: "1", feesPct: "0.5", kratio }];
-  const healthy = s.PoolsPanel._mineHtml(mine(1.2));
-  const warn = s.PoolsPanel._mineHtml(mine(1.9));
-  assert.ok(healthy.includes("healthy") && !healthy.includes("migrate soon"), "below the threshold reads healthy");
-  assert.ok(warn.includes("migrate soon") && warn.includes("is-warn"), "past it the bar and label go amber");
-  assert.ok(/class="pp-btn pp-btn--sm pp-btn--fill" data-ppmig=/.test(warn), "Migrate becomes the filled action");
-  assert.ok(!/class="pp-btn pp-btn--sm pp-btn--fill" data-ppmig=/.test(healthy), "and is not filled before that");
-});
-
-test("RULE 1 — a shortened pool address always carries the complete value to copy", () => {
-  const s = panel();
-  const dom = fakeDom();
-  s.PoolsPanel.init(DEPS({ el: (id) => dom.get(id) }));
-  const full = "0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A";
-  const html = s.PoolsPanel._mineHtml([{ address: full, opk: "0xBBB", tok: "0xCCC", tokName: "MxUSD",
-    reserveM: "100", reserveT: "50", value: "200", poolPrice: "0.5", feesMinima: "1", feesPct: "0.5", kratio: 1 }]);
-  assert.ok(html.includes(`data-copy="${full}"`), "the complete address is one click away");
-  assert.ok(html.includes(`title="${full}"`), "and readable on hover");
-});
-
-test("nothing that moves value changed — the engine calls and guards came across verbatim", () => {
-  const src = fs.readFileSync(path.join(R, "pools.js"), "utf8");
-  for (const call of ["api.ppQuote(", "api.ppSwap(q.quoteId)", "api.ppCreate(", "api.ppDeposit(",
-                      "api.ppMigrate(", "api.ppClose(", "api.ppCollect()", "api.ppRestore(",
-                      "api.ppRecoverSaved(", "api.ppConfirmSigning("]) {
-    assert.ok(src.includes(call), call + " is still here");
-  }
-  for (const guard of ["ppSwapBusy", "ppWithdrawBusy", "ppCollectBusy", "ppBackupBusy", "ppStatementBusy", "ppQuoteSeq"]) {
-    assert.ok(src.includes(guard), guard + " survived the rewrite");
-  }
-  // the swap still posts the EXACT quote it showed, not a re-derived one
-  assert.ok(/const q = await api\.ppQuote\([^)]*\)[\s\S]{0,900}await showConfirm\("Confirm swap"/.test(src),
-    "a fresh quote is frozen before the confirm dialog");
-  assert.ok(/await showConfirm\("Confirm swap"[\s\S]{0,900}api\.ppSwap\(q\.quoteId\)/.test(src),
-    "and that same quoteId is what gets posted");
-});
-
-test("0.17.20 review fixes stay fixed — scrim, RULE 2, quote race, style-stamped dialogs", () => {
-  const css = fs.readFileSync(path.join(R, "pools.css"), "utf8");
-  const src = fs.readFileSync(path.join(R, "pools.js"), "utf8");
-  // the wrapper's opaque ground must never win over the shared scrim (same specificity, later sheet)
-  assert.ok(/\.ppapp\.overlay\s*\{[^}]*background:\s*rgba\(0, 0, 0, \.62\)/.test(css), "the dialog scrim is restated at two-class specificity");
-  // RULE 2 — the Minima dollar token is MxUSD; the wrong name must not ride in on a moved file
-  assert.ok(!/mxUSDT/i.test(src.replace(/^\s*\/\/.*$/gm, "")), "no mxUSDT in code or copy");
-  assert.ok(src.includes('"Get MxUSD first"'), "the create gate names the token correctly");
-  // an in-flight quote is retired when the amount is cleared, so it cannot repaint under an empty field
-  assert.ok(/parseFloat\(amt\) <= 0\) \{ ppQuoteSeq\+\+;/.test(src), "the early return bumps the quote sequence");
-  // every dialog carries the ◐ STYLE state, not just the panel body
-  const sites = (src.match(/insertAdjacentHTML\("beforeend"/g) || []).length + (src.match(/document\.body\.appendChild\(ov\)/g) || []).length;
-  const stamped = (src.match(/`\); *ppApplyStyle\(\);/g) || []).length + (src.match(/appendChild\(ov\); ppApplyStyle\(\);/g) || []).length;
-  assert.equal(stamped, sites, "each of the " + sites + " overlay sites re-stamps the style");
-  assert.ok(/querySelectorAll\("\.overlay\.ppapp"\)\.forEach\(o => o\.setAttribute\("data-ppstyle"/.test(src), "and ppApplyStyle reaches them");
-});
-
-test("app.js keeps only the wiring, and defines the reset it always called", () => {
-  const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
-  assert.ok(app.includes("PoolsPanel.init({"), "the panel is injected, not reached into");
-  assert.ok(/function resetPpState\(\) \{ PoolsPanel\.reset\(\); \}/.test(app),
-    "resetPpState exists — it was called on every seed change but never defined");
-  assert.ok(!/function renderPpSwap/.test(app), "the panel's internals left app.js");
-  assert.ok(!/ppMineHtml/.test(app), "…all of them");
+  assert.equal(checked, 0, "no panel shares a box with .overlay any more: the two that did (PandaPools, AtomiX) were removed in 0.18.141; a new one is checked by the loop above");
 });
 
 // ------------------------------------------------------------------ P2P Chance is gone (0.18.68)
@@ -313,132 +120,44 @@ test("P2P Chance left the app: no tab, no screen, no way to start a game — onl
   assert.ok(/node\.onWalletReplaced = async \(\) => \{[\s\S]*?casino\.invalidate\(\)/.test(main), "every wallet reset still drops the cached identity (0.18.106: in the main process, inside the resync)");
 });
 
-// ------------------------------------------------------------------ the AtomiX panel, headless
-function axPanel() {
-  const sandbox = { setTimeout, clearTimeout, setInterval, clearInterval, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console,
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-    getComputedStyle: () => ({ getPropertyValue: () => "" }),
-    document: { getElementById: () => null, querySelectorAll: () => [], querySelector: () => null, activeElement: null,
-      createElement: () => ({ style: {} }), body: { appendChild() {}, insertAdjacentHTML() {} } } };
-  sandbox.window = sandbox; sandbox.globalThis = sandbox;
-  const ctx = vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8"), ctx, { filename: "atomix-ui.js" });
-  return sandbox;
-}
-const AX_DEPS = (over) => Object.assign({
-  api: NOOP_API,
-  esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
-  el: () => null, toast() {}, copy() {}, TOK: { shortId: (t) => String(t) },
-  showConfirm: async () => false, showPrompt: async () => null, relTime: () => "just now",
-  idHtml: (v) => `<span class="idcopy" data-copy="${v}">${v}</span>`,
-  running: () => true, activeView: () => "atomix"
-}, over || {});
 
-test("the AtomiX panel loads and exposes only its wiring surface", () => {
-  const s = axPanel();
-  assert.ok(s.AtomixPanel, "AtomixPanel is exported");
-  for (const fn of ["init", "render", "onUpdate", "reset", "setVersion", "setBlock"]) {
-    assert.equal(typeof s.AtomixPanel[fn], "function", fn + " is on the panel");
-  }
+// ------------------------------------------------------------------ what the removed panels' tests pinned, on the rooms
+// The old "0.17.20 review fixes stay fixed" test read pools.js and pools.css. It had failed since 0.18.32 for a reason
+// of its own: it counted dialog sites written with double quotes, and the backup dialog was rewritten with single
+// quotes, so it found 8 sites and 9 style stamps. Every dialog was in fact stamped. Of its four properties:
+//   scrim              kept below (room dialogs are native <dialog>: the scrim is ::backdrop, nothing can paint over it)
+//   MxUSD naming       kept below, on both rooms
+//   quote race         kept below, on room 2 (and the preview's stale-answer guard on room 1)
+//   style-stamped dialogs   dropped: the "Original" style and its per-dialog stamp do not exist on the new side;
+//                           room dialogs sit inside #shell, which carries the one Dexicon theme
+const code = (f) => fs.readFileSync(path.join(R, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+test("rooms 1 and 2: the old panels are gone, and nothing they were wired with is left", () => {
+  const app = fs.readFileSync(path.join(R, "app.js"), "utf8"), html = fs.readFileSync(path.join(R, "index.html"), "utf8");
+  for (const f of ["pools.js", "pools.css", "atomix-ui.js", "atomix-ui.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
+  assert.ok(!/PoolsPanel|AtomixPanel|renderPandapools|ppBody|axBody/.test(app + html), "no wiring, element, sheet or script of the old panels");
+  assert.ok(/function resetPpState\(\) \{ DexPools\.reset\(\); \}/.test(app) && /function resetAxState\(\) \{ DexAx\.reset\(\); \}/.test(app), "a wallet reset clears the rooms");
+  assert.ok(!/function renderPpSwap|ppMineHtml|function renderAxSwap|function axMakerEditor|function axLadder|function axShort/.test(app), "none of the panels' internals is in app.js");
+  assert.ok(app.includes("idHtml(shopIdentity.publicId)"), "miniMall's shop id is copyable in full (it never went through a truncating helper again)");
 });
-
-test("RULE 2 — the Minima dollar token reads MxUSD everywhere; the engine's internal key is untouched", () => {
-  const s = axPanel();
-  assert.equal(s.AtomixPanel._ccyName("mxUSDT"), "MxUSD", "the donor's coinLabel maps to MxUSD");
-  assert.equal(s.AtomixPanel._ccyName("mxusdt"), "MxUSD");
-  assert.equal(s.AtomixPanel._ccyName("minima"), "MINIMA");
-  assert.equal(s.AtomixPanel._ccyName("USDT"), "USDT", "the ERC-20 leg keeps its own name");
-  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-  // the only mxUSDT left in code is the engine default fed INTO axCcyName, never a string shown as-is
-  const raw = src.split("\n").filter((l) => /mxUSDT/.test(l) && !/axCcyName\(/.test(l));
-  assert.deepEqual(raw, [], "no user-visible mxUSDT: " + raw.join(" | "));
-  assert.ok(src.includes('key = cur === "minima" ? "mxusdt" : "minima"'), "the engine key stays mxusdt");
-  const eng = fs.readFileSync(path.join(R, "..", "main", "atomix.js"), "utf8");
-  assert.ok(eng.includes("coinLabel"), "main/atomix.js is untouched — it still hands the donor label up");
+test("RULE 2 on the rooms: the dollar token is written MxUSD; the engine's own key and label are only ever read, never shown", () => {
+  const pp = code("dexicon-pp.js"), ax = code("dexicon-ax.js");
+  assert.ok(!/mxUSDT/i.test(pp), "room 2 has no mxUSDT in code or copy");
+  assert.ok(pp.includes('"Get MxUSD first"'), "the create gate names the token correctly");
+  const PP = require("../renderer/dexicon-pp.js"), AX = require("../renderer/dexicon-ax.js");
+  assert.equal(PP.tokLabel(PP.MXUSD || "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "USDT"), "MxUSD", "by token id, whatever the name says");
+  assert.equal(PP.tokLabel("0x" + "EE".repeat(32), "MxUSD"), "MxUSD (not MxUSD)");
+  // room 1 reads the engine's "mxusdt" key and "mxUSDT" label and writes MxUSD: every literal left is a key, a storage name or the rewrite itself
+  for (const line of ax.split("\n").filter((l) => /mxusdt/i.test(l))) assert.ok(/["'`]mxusdt["'`]|mxusdt:|\.mxusdt|mxUSDT\/gi?|\/.*mxusdt.*\/i?/i.test(line), "room 1 shows mxUSDT to the user: " + line.trim().slice(0, 160));
+  assert.equal(AX.ccyName ? AX.ccyName("mxusdt") : "MxUSD", "MxUSD");
 });
-
-test("the header is the APK's, and the tab bar is at the bottom in the APK's order with its five icons", () => {
-  const s = axPanel();
-  s.AtomixPanel.init(AX_DEPS());
-  s.AtomixPanel.setVersion("0.17.21"); s.AtomixPanel.setBlock(1234567);
-  s.AtomixPanel._setStatus({ ready: true, currency: "mxusdt" });
-  const head = s.AtomixPanel._header("swap");
-  assert.ok(head.includes('class="ax-brand">AtomiX<'), "the wordmark");
-  assert.ok(head.includes(">MxUSD<"), "the currency pill names the token correctly");
-  assert.ok(head.includes("☾") || head.includes("☀"), "the theme pill");
-  assert.ok(head.includes("Mainnet"), "the live chip");
-  assert.ok(head.includes("v0.17.21  ·  block 1234567  ·  real funds"), "the sub-line");
-  const bar = s.AtomixPanel._tabBar("market");
-  const order = [...bar.matchAll(/data-axview="(\w+)"/g)].map((m) => m[1]);
-  assert.deepEqual(order, ["swap", "wallet", "activity", "market", "otc"], "the APK's tab order");
-  assert.equal((bar.match(/<svg /g) || []).length, 5, "five icons");
-  assert.ok(bar.includes('class="ax-tab is-on" data-axview="market"'), "the active cell");
-  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
-  assert.ok(/\.axapp \.ax-tabbar\s*\{[^}]*position:\s*sticky;\s*bottom:\s*0/.test(css), "…pinned to the bottom");
-  assert.ok(/\.axapp \.ax-tab svg\s*\{[^}]*width:\s*22px/.test(css), "22px icons over a 10.5px label");
+test("quote race on the rooms: a late answer never repaints over a newer amount, and clearing the amount retires the quote in flight", () => {
+  const pp = fs.readFileSync(path.join(R, "dexicon-pp.js"), "utf8"), ax = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.ok(pp.includes('if (!amountOk(a)) { S.qseq++; S.q = null;'), "room 2: the early return bumps the quote sequence (the old ppQuoteSeq++)");
+  assert.ok(/const seq = \+\+S\.qseq, dir = S\.dir, r = await api\(\)\.ppQuote\(t\.tok, dir, a\)[^\n]*\n\s*if \(seq !== S\.qseq \|\| !\$\("ppQuote"\)\) return;/.test(pp), "room 2: an answer to an older question is dropped");
+  assert.ok(pp.includes('if (S.tab === "swap" && $("ppAmt") && !C.gate.on) requote();'), "room 2: the quote on screen is asked again when the pools move, as the old panel did (0.18.141)");
+  assert.ok(/sell !== S\.sell \|\| amt !== amount\(\)/.test(ax), "room 1: a preview for another side or amount is dropped");
 });
-
-test("the accent follows the traded currency, and DIM is the same in both themes", () => {
-  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
-  assert.ok(/\.axapp\s*\{[^}]*--ax-accent:\s*#26A17B/.test(css), "MxUSD = Tether green, the default");
-  assert.ok(/\.axapp\[data-axccy="minima"\]\s*\{[^}]*--ax-accent:\s*#F7931A/.test(css), "MINIMA = orange");
-  const day = /\.axapp\[data-axtheme="daylight"\]\s*\{([^}]*)\}/.exec(css);
-  assert.ok(day && !/--ax-dim:/.test(day[1]), "Daylight does not redefine --ax-dim (#8B909C in both, per Design.java)");
-  assert.ok(/--ax-dim:\s*#8B909C/.test(css), "and it is #8B909C");
-  assert.ok(!/depth-bar|ax-bar|linear-gradient\(to (left|right)/.test(css), "no depth bars — the APK has none");
-});
-
-test("the order book mirrors around a literal │, bids left / asks right, rank 0 bold on SURFACE2", () => {
-  const s = axPanel();
-  s.AtomixPanel.init(AX_DEPS());
-  const book = { bids: [{ p: 0.998, cap: 120, signer: "0xAAAA", mine: false }], asks: [{ p: 1.002, cap: 80, signer: "0xBBBB", mine: true }], bestBid: 0.998, bestAsk: 1.002 };
-  const html = s.AtomixPanel._ladder(book, "MxUSD");
-  assert.ok(html.includes('<span class="divider">│</span>'), "the literal divider");
-  assert.ok(/ax-half bid[^>]*>[\s\S]*bidpx/.test(html), "bid half carries the bid price");
-  assert.ok(html.includes('class="ax-depth best"'), "rank 0 is the best row");
-  assert.ok(html.includes('data-copy="0xAAAA"'), "RULE 1: the maker key rides in full on the tag");
-  assert.ok(html.includes('class="ax-tag you"'), "your own level is marked");
-  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
-  assert.ok(/\.axapp \.ax-depth\.best\s*\{[^}]*var\(--ax-surface2\)[^}]*font-weight:\s*700/.test(css), "…bold, on SURFACE2");
-});
-
-test("RULE 1 — the review dialog prints maker keys in full, never shortened", () => {
-  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
-  assert.ok(src.includes("Counterparty\\n${q.single.maker}"), "single-leg review carries the whole key");
-  assert.ok(src.includes("USDT\\n  ${l.maker}`"), "…and so does every sweep leg");
-  assert.ok(!/axShort\(q\.single\.maker\)|axShort\(l\.maker\)/.test(src), "axShort is gone from the dialog");
-  assert.ok(src.includes("${idHtml(w.addr)}"), "the Wallet tab shows the whole ETH address, copyable");
-});
-
-test("nothing that moves value changed in the AtomiX rewrite", () => {
-  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
-  for (const call of ["api.axQuote(axSell, axAmt, axSlip)", "api.axSwap(q.quoteId)", "api.axMakerSave(cfg, collect())",
-                      "api.axMakerWithdraw()", "api.axOtcPropose(", "api.axOtcDeal(", "api.axSendReview(asset, to, amt)",
-                      "api.axSend(asset, to, amt)", "api.axSwitchCurrency(key)", "api.axExportKey()"]) {
-    assert.ok(src.includes(call), call + " is still here");
-  }
-  assert.ok(/const q = await api\.axQuote\([\s\S]{0,2200}await showConfirm\(title, msg[\s\S]{0,300}api\.axSwap\(q\.quoteId\)/.test(src),
-    "quote → confirm → post that same quoteId");
-  assert.ok(/showConfirm\("Export ETH private key"/.test(src), "the key-export warning is intact");
-  assert.ok(/showConfirm\("Review — Send "[\s\S]{0,200}This cannot be undone/.test(src), "the irreversible-send confirm is intact");
-  assert.ok(/showConfirm\("Withdraw your market\?"/.test(src), "…and the withdraw confirm");
-});
-
-test("app.js keeps only the AtomiX wiring, and miniMall's shop id is copyable in full", () => {
-  const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
-  assert.ok(app.includes("AtomixPanel.init({"), "the panel is injected, not reached into");
-  assert.ok(!/function renderAxSwap|function axMakerEditor|function axLadder/.test(app), "the panel's internals left app.js");
-  assert.ok(app.includes("idHtml(shopIdentity.publicId)"), "the shop id no longer goes through a truncating helper");
-  assert.ok(!/function axShort/.test(app), "axShort left with the panel");
-});
-
-test("0.17.22 review fixes stay fixed — theme flip repaints the chart, and the chart bitmap is crisp", () => {
-  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
-  const css = fs.readFileSync(path.join(R, "atomix-ui.css"), "utf8");
-  assert.ok(/AX_THEME = AX_THEME === "daylight" \? "onyx" : "daylight";[\s\S]{0,400}axDrawChart\(el\("axChart"\), axLastChart\)/.test(src), "the ☾/☀ toggle redraws an open chart");
-  assert.ok(src.includes("axLastChart = mh.chart"), "…from the series the Market tab last drew");
-  assert.ok(src.includes('<canvas id="axChart" class="ax-chart"></canvas>'), "no fixed bitmap size on the tag");
-  assert.ok(/cv\.setTransform\(dpr, 0, 0, dpr, 0, 0\)/.test(src), "the bitmap follows the CSS box at device resolution");
-  assert.ok(!/position:\s*relative/.test(ruleBody(css, ".axapp") || ""), "the wrapper is not positioned");
-  assert.ok(!/padding-bottom/.test(ruleBody(css, ".axapp") || ""), "no dead gap under the sticky tab bar");
+test("scrim: a room dialog is a native <dialog> with its own backdrop, so no wrapper can paint over it", () => {
+  const css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8"), ui = fs.readFileSync(path.join(R, "dexicon-ui.js"), "utf8");
+  assert.ok(/\.dx-dlg::backdrop \{ background: rgba\(0,0,0,\.55\); \}/.test(css)); assert.ok(/showModal\(\)/.test(ui));
 });
