@@ -7,6 +7,19 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.99] — Dexicon engine hosted (Phase 3a, part 2): it runs with the node; no screens yet
+
+The Dexicon engine (the FAST book over relays and the on-chain book with pool routing) now runs inside the app, for the Exchange room that Phase 3b will draw. There is no new screen in this version. Full notes and the safety analysis: `docs/DEXICON_ENGINE_NOTES.md`.
+
+- `main/dexicon.js` (host), `main/dexicon/loader.js`, `main/dexicon/service.desktop.js`: ported from DexiconPro's host as the public build. Not brought over: its private price feed and take gate, PAUSE ALL / NUKE, the Mandate, its SQL and `MAKER_*` refusals, its hard-coded relay hosts. The engine's AtomiX doors are not in the app at all (AtomiX stays the one engine on that ETH key).
+- Node commands go only through `rpcCall`, so every signature the engine asks for waits in the app's one signing queue. Its five signing forms (`txnsign` with `auto` or a named key, `send` for a split and for placing an order, `consolidate`) were already in the queue's pattern.
+- Network: https only, to the relays in the engine's own list (the user's list; the MiniDapp's three defaults on a fresh install) and to `api.mexc.com` for the price, exactly as the MiniDapp gets it (MEXC depth, then MEXC bookTicker; the MiniDapp has no other fallback and none was added). No redirects (`main/netfetch.js` `fetchJson` takes `noRedirect`).
+- Data: `userData/dexicon/dexicon.sqlite`. Takes sent, fills, input claims and the order state are written to disk at once.
+- Life cycle: starts when the node is running (so after the wallet exists and the key-mode gate has passed), stops with it. A replaced wallet: refused while Dexicon has orders on the chain, placements waiting for a block or takes not yet answered (each order's coin id in full; "could not be asked" also refuses); afterwards the store is moved aside as `dexicon.sqlite-legacy-keys-YYYYMMDD`, never deleted, and the engine starts empty on the new wallet.
+- For the screens to come: `dxStatus`, `dxBook`, `dxMine`, `dxCommand`, `dxInvalidate`, `onDexicon`. `dxCommand` is the one bridge: an allow-list of the 21 node verbs the MiniDapp page issues (six fewer than DexiconPro's list: `coinexport`, `consolidate`, `runscript`, `tokens`, `txnbasics`, `txnstate`), the engine's own SQL, and packets to the service.
+- Own orders and own pools. Owner's decision (19 Nov 2026): crossing against pools is allowed, the user's own pool included (a pool trade routes over several pools, pays a fee, and a liquidity provider may want to bring a pool back into line). Auto-cross runs as in the MiniDapp, switched on only by the user's own setting; it plans over pools and never over an order. A user's order must never fill their own order: the FAST take path refuses that in the engine; the on-chain LIMIT path does not, so the bridge refuses a LIMIT that would reach one of this node's own orders, naming the order's coin id. That rule belongs in the engine and is noted as a donor change to make.
+- `scripts/dexicon-host.test.cjs`: 15 tests on a stand-in node and network (the real `rpcCall` and the real network are replaced by versions that throw). `npm run test:dexicon` runs the manifest and these; CI runs it.
+
 ## [0.18.98] — Dexicon engine vendored (Phase 3a, part 1): files and parity gate, nothing runs yet
 
 - `main/dexicon/{lib,crypto,vendor,resting}/`: the 37 engine files the Dexicon service loads, copied byte for byte from the Dexicon MiniDapp (`mds/dexicon` 0.0.89, branch `security/2026-11-07`, commit `500dd24344a3739472eccbefb0c684bed2aa2930`). Not copied: `doors/` and `lib/door.js` (the AtomiX doors are never started in this app: room 1 is the real AtomiX engine on the same ETH key) and the page's own files.

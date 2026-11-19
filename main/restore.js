@@ -76,7 +76,8 @@ function moveAside(file, now) {
 /**
  * What replacing the wallet would strand, each in plain words ([] = nothing). r holds what the existing read
  * models said: atomix = main/atomix.js activeWork() (null = it could not be asked), pools = PandaPools activity
- * rows (null = could not be read), casino = { offers, bets } or null. Identifiers are given in full.
+ * rows (null = could not be read), casino = { offers, bets } or null, dexicon = main/dexicon.js activeWork()
+ * (undefined = not asked). Identifiers are given in full.
  */
 function activeWorkList(r) {
   const out = [], ax = r && r.atomix, plural = (n, one) => n + " " + one + (n === 1 ? "" : "s");
@@ -91,6 +92,15 @@ function activeWorkList(r) {
   if (r && r.pools === null) out.push("PandaPools could not be asked whether a pool transaction is still waiting. Wait a moment and try again.");
   const waiting = ((r && r.pools) || []).filter(x => x && x.txpowid && x.confirmed === false && !x.failed);
   if (waiting.length) out.push(plural(waiting.length, "PandaPools transaction") + " still waiting to confirm: " + waiting.map(x => x.txpowid).join(", "));
+  // Dexicon (main/dexicon.js activeWork). undefined = not asked (the engine is not part of this caller); null = it could not be asked.
+  const dx = r && r.dexicon;
+  if (dx === null) out.push("Dexicon could not be asked whether an order or a take is still open. Wait a moment and try again.");
+  else if (dx && !dx.ready) { if (dx.hasStore) out.push("Dexicon has not finished starting, so its orders could not be checked. Wait a moment and try again."); }
+  else if (dx) {
+    if (dx.orders && dx.orders.length) out.push(plural(dx.orders.length, "Dexicon order") + " still on the chain, which only this wallet's keys can cancel or collect. Cancel " + (dx.orders.length === 1 ? "it" : "them") + " first: " + dx.orders.join(", "));
+    if (dx.pending) out.push(plural(dx.pending, "Dexicon order") + " still waiting for a block.");
+    if (dx.takes) out.push(plural(dx.takes, "Dexicon trade") + " sent and not yet answered. Wait for " + (dx.takes === 1 ? "it" : "them") + " to settle (a few minutes).");
+  }
   const c = r && r.casino;
   if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
   return out;

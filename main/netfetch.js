@@ -190,11 +190,12 @@ async function tokenIcon(url) {
 
 /** Fetch a JSON API (e.g. the MEXC MINIMA/USDT ticker) → parsed object, or null. Same SSRF guard + byte cap +
  *  bounded pool as icon fetches; read-only public market data; NEVER throws to the caller. */
-async function fetchJson(url) {
+async function fetchJson(url, opts) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
   await acquire();
   try {
-    const r = await getCapped(url.trim(), MAX_REDIRECTS, "application/json");
+    // opts.noRedirect (main/dexicon.js): the caller's host allow-list must hold for the host that answers
+    const r = await getCapped(url.trim(), opts && opts.noRedirect ? 0 : MAX_REDIRECTS, "application/json");
     if (!r || !r.buf || !r.buf.length) return null;
     try { return JSON.parse(r.buf.toString("utf8")); } catch (e) { return null; }
   } finally { release(); }

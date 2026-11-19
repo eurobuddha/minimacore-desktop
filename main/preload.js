@@ -227,6 +227,14 @@ contextBridge.exposeInMainWorld("mcd", {
   ewSetRpc: (url) => ipcRenderer.invoke("mcd:ewSetRpc", url),
   onEthWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:ethwallet", h); return () => ipcRenderer.removeListener("mcd:ethwallet", h); },
 
+  // Dexicon (room 3, Exchange): read model + the command bridge ({ op: "cmd" | "sql" | "comms", … }, main/dexicon.js)
+  dxStatus: () => ipcRenderer.invoke("mcd:dxStatus"),
+  dxBook: () => ipcRenderer.invoke("mcd:dxBook"),
+  dxMine: () => ipcRenderer.invoke("mcd:dxMine"),
+  dxCommand: (a) => ipcRenderer.invoke("mcd:dxCommand", a),
+  dxInvalidate: () => ipcRenderer.invoke("mcd:dxInvalidate"),
+  onDexicon: (fn) => { const h = (_e, message) => fn(message); ipcRenderer.on("mcd:dexicon", h); return () => ipcRenderer.removeListener("mcd:dexicon", h); },
+
   // P2P Chance was removed in 0.18.68; only the settle-only status of bets already on the chain is left.
   casinoOpen: () => ipcRenderer.invoke("mcd:casinoOpen"),
   casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),

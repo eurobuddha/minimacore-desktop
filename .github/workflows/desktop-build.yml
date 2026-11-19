@@ -96,7 +96,7 @@ jobs:
       # The same gate for the Dexicon engine: main/dexicon/{lib,crypto,vendor,resting}/ is copied verbatim from the
       # Dexicon MiniDapp (not checked out here), so this verifies the committed digest manifest
       # (scripts/dexicon-parity-check.cjs does the donor comparison locally).
-      - name: Verify Dexicon engine parity
+      - name: Verify Dexicon engine parity + host (mock node, no network)
         run: npm run test:dexicon
 
       # The donor-free halves of the other suites. The parity checks in test:atomix / test:casino diff against

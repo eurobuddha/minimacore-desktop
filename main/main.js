@@ -23,6 +23,7 @@ const mail = require("./mail");
 const chat = require("./chat");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
+const dexicon = require("./dexicon");
 const ethwallet = require("./ethwallet");
 const shop = require("./shop");
 const casino = require("./casino");
@@ -197,7 +198,7 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 });
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
 const walletWork = async () => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activity().catch(() => null),
-  casino: config.load().casinoEnabled ? casino.open() : null });
+  casino: config.load().casinoEnabled ? casino.open() : null, dexicon: await dexicon.activeWork().catch(() => null) });
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
   running: node.state === "running", run: (c) => node.runResync(c), work: walletWork }));
@@ -560,6 +561,19 @@ atomix.emitter.on("notify", (msg) => {   // settlement/OTC milestones — OS not
 let axStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted = true; atomix.startLoop(); } });
 
+// Dexicon (room 3, Exchange) — the Dexicon MiniDapp's engine (main/dexicon/*) in a vm; read model + the command
+// bridge the Dexicon screens use (main/dexicon.js command(): an allow-list of node verbs, the engine's own SQL, and
+// packets to the service). It runs only while the node is "running" (so: after the wallet exists and the key-mode
+// gate has passed) and stops with it.
+ipcMain.handle("mcd:dxStatus", () => dexicon.status());
+ipcMain.handle("mcd:dxBook", () => dexicon.book());
+ipcMain.handle("mcd:dxMine", () => dexicon.mine());
+ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));
+ipcMain.handle("mcd:dxInvalidate", () => { dexicon.invalidate(); return true; });
+dexicon.emitter.on("comms", (message) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", message); });   // service → screens
+dexicon.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", null); });           // a new block, or a wallet reset
+node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });
+
 // ETH Wallet — a standalone full-parity ERC20 wallet on the SAME seed-derived address, reusing the AtomiX engine.
 ipcMain.handle("mcd:ewStatus", () => ethwallet.status());
 ipcMain.handle("mcd:ewBalances", () => ethwallet.balances());
@@ -688,6 +702,7 @@ let quitting = false;
 app.on("before-quit", async (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
+  try { dexicon.flush(); } catch (err) {}      // and the Dexicon store (orders, takes and fills are already sync-flushed)
   try { casino.flush(); } catch (err) {}       // casino keychain writes are sync; no-op, kept for symmetry
   try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;

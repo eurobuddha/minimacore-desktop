@@ -536,6 +536,7 @@ async function walletReplaced() {
   try { await api.mailInvalidate(); } catch (e) {} resetMailState();
   try { await api.ppInvalidate(); } catch (e) {} resetPpState();
   try { await api.axInvalidate(); } catch (e) {} resetAxState();
+  try { await api.dxInvalidate(); } catch (e) {}   // the Dexicon store is moved aside (never deleted) and its engine starts empty
   try { await api.casinoInvalidate(); } catch (e) {}
   resetWalletFigures(); api.nodeStatus().then(paintFooter);
 }
