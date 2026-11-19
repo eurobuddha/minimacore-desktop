@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.103] — Dexicon ③ Exchange: Activity, Assets, Settings (Phase 3b, part 4)
+
+- **Activity** (`ActivityTab.java`): My activity, Market history, Export CSV. Each line's badge and status come from the engine's own stage machine, `lib/activity.js`, loaded verbatim (it is pure: no node, no page): SENT, CO-SIGNED, SETTLING / IN BLOCK, then DONE or CONFIRMED only at three confirmations; FAILED, REFUSED, DROPPED and LOST carry the engine's real reason, whole. A click shows the facts and every identifier in full.
+- **Assets** (`AssetsTab.java`): MINIMA and MxUSD available to trade, each opening to what live FAST orders promise, what is free for a new order and what is settling; the receive address and the trading ID, whole, with Copy. The Ethereum wallet belongs to AtomiX: its card points to room ① MxUSD (it moves here with 3c).
+- **Settings** (`RelaysTab.java`): the wallet note, ADD RELAY and DISCOVER, each relay with its state in the page's own words and remove, discovered relays with ADD, and an ENGINE line (version, block, the MEXC price with its label). A relay that is not https, or is on this machine or the local network, is refused before anything is saved, because the desktop host could not reach it.
+- A screen is never redrawn while someone is typing in it.
+- Tests: 25 in `scripts/dexicon-ui.test.cjs`.
+
 ## [0.18.102] — Dexicon ③ Exchange: Orders and History (Phase 3b, part 3)
 
 - **Orders**, as the Android screen (`OrdersTab.java`): OPEN and MY FILLS. Open shows the market maker card, takes that were signed and sent and still wait for the maker ("Not traded yet"), FAST orders (remaining, of how much, backing coins, expiry, sequence) and on-chain orders, each with change-price and cancel behind a review that says what the node signs. Every identifier is whole and copies on click. This cancel is the Exchange's own "cancel order"; there is still no manual cancel of an AtomiX swap.

@@ -343,3 +343,26 @@ test("day headers and ages", () => {
   assert.equal(C.dayLabel(new Date(2025, 11, 31).getTime(), now), "31 DEC 2025");
   assert.deepEqual([C.ago(59999), C.ago(60000), C.ago(7199999), C.ago(86400000 * 2)], ["59s ago", "1 minute ago", "1 hour ago", "2 days ago"], "cut down, never rounded up");
 });
+
+// ---------------------------------------------------------------- Activity, Assets, Settings (0.18.103)
+test("Activity uses the engine's own stage machine: posted, co-signed or in a shallow block is never DONE", () => {
+  require("../renderer/dexicon/lib/activity.js");   // the verbatim, pure file the shell loads (pinned by the page manifest)
+  const A = globalThis.AX.activity, tip = 1000;
+  assert.equal(A.chip({ route: "FAST", stage: "SENT" }, tip), "SENT");
+  assert.equal(A.chip({ route: "FAST", stage: "COSIGNED" }, tip), "CO-SIGNED", "co-signed and posted: not done");
+  assert.match(A.status({ route: "FAST", stage: "COSIGNED", cosignMs: 2300, postBlock: 999 }, tip, 0), /waiting for a block/);
+  assert.equal(A.chip({ route: "FAST", stage: "COSIGNED", block: 999 }, tip), "SETTLING", "one confirmation: still not done");
+  assert.equal(A.chip({ route: "FAST", stage: "COSIGNED", block: 997 }, tip), "DONE", "three confirmations");
+  assert.equal(A.chip({ route: "POOL", stage: "POSTED" }, tip), "POSTED"); assert.equal(A.chip({ route: "POOL", stage: "POSTED", block: 990 }, tip), "CONFIRMED");
+  assert.equal(A.status({ stage: "REFUSED", reason: "coin 0xAB is already spent" }, tip, 0), "Refused by the maker — coin 0xAB is already spent", "the engine's real reason, whole");
+  assert.match(fs.readFileSync(path.join(__dirname, "../renderer/index.html"), "utf8"), /<script src="dexicon\/lib\/activity\.js"><\/script>/);
+});
+
+test("Settings: a relay the desktop cannot reach is refused before anything is saved", () => {
+  assert.equal(C.relayProblem("https://relay.example/dex-relay"), "");
+  assert.equal(C.relayProblem("https://relay.example:9602"), "");
+  assert.match(C.relayProblem("http://relay.example:19702"), /must be an https address\. Nothing was added\./);
+  for (const local of ["https://localhost:9602", "https://127.0.0.1/dex", "https://192.168.1.5/dex", "https://10.0.0.2/dex"]) assert.match(C.relayProblem(local), /this machine or the local network/, local);
+  assert.match(C.relayProblem("https://user:pw@relay.example/dex"), /no user name/);
+  assert.match(C.relayProblem("relay.example"), /Enter a relay address/); assert.match(C.relayProblem(""), /Enter a relay address/);
+});

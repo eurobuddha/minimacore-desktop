@@ -263,6 +263,15 @@
     });
     return [CSV_HEADER].concat(rows).join("\n") + "\n";
   }
+  /** Why a relay address cannot be used on the desktop ("" = it can). The host reaches relays over https only, and
+   *  never an address of this machine or the local network (main/netfetch.js). */
+  function relayProblem(url) {
+    let u; try { u = new URL(String(url)); } catch (e) { return "Enter a relay address like https://relay.example/dex-relay."; }
+    if (u.protocol !== "https:") return "On the desktop a relay must be an https address. Nothing was added.";
+    if (u.username || u.password || u.search || u.hash) return "A relay address has no user name, query or fragment. Nothing was added.";
+    if (/^(localhost|127\.|10\.|192\.168\.|\[?::1\]?$)/i.test(u.hostname)) return "A relay on this machine or the local network cannot be used from the desktop. Nothing was added.";
+    return "";
+  }
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   /** "TODAY · 19 NOV" / "18 NOV" (local time), for the day headers of History and Activity */
   function dayLabel(ms, nowMs) { const d = new Date(ms), n = new Date(nowMs), t = d.getDate() + " " + MONTHS[d.getMonth()]; return (d.toDateString() === n.toDateString() ? "TODAY · " : "") + t + (d.getFullYear() === n.getFullYear() ? "" : " " + d.getFullYear()); }
@@ -285,6 +294,6 @@
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

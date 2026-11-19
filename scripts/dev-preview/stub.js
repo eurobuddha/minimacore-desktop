@@ -43,6 +43,7 @@
     { role: "taker", orderId: "c2d4e6f8a0b1c3d5", side: "sell", price: "0.0031", filled: "300", gave: "300", got: "0.93", txpowid: PK("7C"), coins: [PK("CA")], maker: PK("D9"), ts: Math.floor(now / 1000) - 90000, status: "lost" }];
   const DX_PAGE = () => {
     const relays = DXS === "norelay" ? [] : DX_RELAYS.map((url, i) => ({ url, meta: DXS === "relaydown" ? "network" : "cursor " + (412 + i), state: DXS === "relaydown" ? "bad" : "ok", found: false }));
+    if (DXS === "found") relays.push({ url: "https://relay-three.example/dex-relay", meta: "via https://relay-one.example/dex-relay", state: "unk", found: true });
     const p = { ready: true, idError: "", notice: "Live book · block 2428089", kind: "live", log: [], trading: false, relays };
     if (DXS === "taking") Object.assign(p, { trading: true, log: ["BUY 500 MINIMA @ 0.0034 (limit)", "+0.0s  Found 8 FAST orders at or better than your price", "+0.4s  Order 9c1f02ab77d3e456: built and signed, sent to the maker", "+0.4s  Waiting for the maker's co-sign…"] });
     if (DXS === "failed") Object.assign(p, { kind: "error", notice: "Take failed: the maker refused: the order's backing coin 0x6E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C is already spent",
@@ -174,7 +175,12 @@
         { K: "myorders", V: JSON.stringify([{ orderId: "0xf3a91c07d2b84e65", side: "buy", price: "0.0029", amount: "2000", remaining: "1250.5", coins: [PK("C1")], address: PK("D1"), seq: 1763560000, expiry: Math.floor(now / 1000) + 79200, status: "live" }]) },
         { K: "pending_takes", V: JSON.stringify({ "0x9c1f02ab77d3e456": { order: { orderId: "0x9c1f02ab77d3e456", side: "sell", price: "0.00316983" }, plan: { filled: "500" }, sent: now - 42000 } }) },
         { K: "mm_config", V: JSON.stringify(Q.get("dxmm") === "1" ? { enabled: true, peg: true } : {}) }, { K: "mm_status", V: Q.get("dxmm") === "1" ? "6 rungs live · last reprice 14s ago" : "" },
-        { K: "mm_feed", V: JSON.stringify({ line: "MEXC MINIMA/USDT mid 0.00315 · 4s old" }) }] };
+        { K: "mm_feed", V: JSON.stringify({ line: "MEXC MINIMA/USDT mid 0.00315 · 4s old" }) },
+        { K: "activity", V: JSON.stringify([
+          { id: "act-0x9c1f02ab77d3e456-1", route: "FAST", role: "taker", side: "buy", amount: "500", price: "0.00316983", orderId: "0x9c1f02ab77d3e456", ts: now - 42000, stage: "SENT", sentMs: now - 42000, relays: 2 },
+          { id: "act-" + PK("7A"), route: "FAST", role: "taker", side: "buy", amount: "1200", price: "0.00316983", txpowid: PK("7A"), outs: [PK("C8")], ts: now - 240000, stage: "COSIGNED", cosignMs: 2300, postBlock: 2428088, block: 2428088, tip: 2428089 },
+          { id: "act-" + PK("7E"), route: "POOL", side: "sell", amount: "2442.4471", price: "0.003185", txpowid: PK("7E"), ts: now - 3600000, stage: "POSTED", postBlock: 2428060, block: 2428062, tip: 2428089 },
+          { id: "act-0xc2d4e6f8a0b1c3d5-1", route: "FAST", role: "taker", side: "sell", amount: "300", price: "0.0031", orderId: "0xc2d4e6f8a0b1c3d5", ts: now - 90000000, stage: "REFUSED", reason: "the order's backing coin " + PK("6E") + " is already spent" }]) }] };
       if (/fill_/.test(a.query)) return { status: true, rows: (DXS === "empty" ? [] : DX_FILLS).map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) };
       return { status: true, rows: [] };
     },
@@ -210,6 +216,8 @@
       if (Q.get("shutdown") === "1") menuAction("shutdown");
       if (view === "dexicon") {
         const review = "Buying 2442.4471 MINIMA now\nEffective 0.003185 · 7.77919401 MxUSD\nBOOK 0 MINIMA / 0 MxUSD across 0 orders\nPOOL 2442.4471 MINIMA / 7.77919401 MxUSD across 2 pools\nWorst marginal 0.003190";
+        DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { ready: true, block: 2428089, identity: { address: PK("D1"), miniaddress: ADDR }, stage: "", myTrades: [],
+          tape: DXS === "empty" ? [] : [{ timems: now - 600000, buy: true, size: "400", price: "0.00332683", txpowid: PK("8A") }, { timems: now - 86400000, buy: false, size: "1500", price: "0.003", txpowid: PK("8B") }] } }));
         DexUI._preview(DX_PAGE(), async (act, args) => (act === "place" && args.layer === "chain" && !args.reviewed ? { error: "", asked: review } : { error: "" }));
         setTimeout(() => {
           const f = (Q.get("dxf") || "").split(":");
@@ -217,6 +225,8 @@
           if (Q.get("dxdlg") === "1") el("dxCta2").click();
           if (Q.get("dxsub") === "1") document.querySelector('[data-sub="1"]').click();
           if (Q.get("dxfill") === "1") document.querySelector("[data-fill]").click();
+          if (Q.get("dxasub") === "1") document.querySelector('[data-asub="1"]').click();
+          if (Q.get("dxopen") === "1") document.querySelector('[data-asset="mxusd"]').click();
         }, 500);
       }
       if (Q.get("expand") === "1") el("walHead").click();

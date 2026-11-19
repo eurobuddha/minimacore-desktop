@@ -113,20 +113,20 @@ const DexUI = (() => {
 
   // ---- room 3, Exchange: the Android screens over the engine's read model ----
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-  const X = { kv: {}, takes: {}, mm: {}, sub: 0, book: null, mine: { orders: [], pending: [] }, orders: [], fills: [], bal: null, balErr: "", svc: {}, buy: true, group: 0, fundsBig: false, said: null, loaded: false };
+  const X = { kv: {}, takes: {}, mm: {}, acts: [], sub: 0, asub: 0, open: {}, book: null, mine: { orders: [], pending: [] }, orders: [], fills: [], bal: null, balErr: "", svc: {}, buy: true, group: 0, fundsBig: false, said: null, loaded: false };
   try { X.group = Math.min(3, Math.max(0, Number(localStorage.getItem("dexicon_group")) || 0)); X.fundsBig = localStorage.getItem("dexicon_funds_big") === "1"; } catch (e) {}
   const pref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
   async function load() {
     const ok = node.state === "running" && st && st.ready;
     if (!ok) { X.book = null; X.loaded = false; return; }
-    const got = await Promise.allSettled([api.dxBook(), api.dxMine(), api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','coin_max_age')" }),
+    const got = await Promise.allSettled([api.dxBook(), api.dxMine(), api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','activity')" }),
       api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%'" }), api.cmd("balance")]);
     const val = (i, d) => (got[i].status === "fulfilled" && got[i].value != null ? got[i].value : d);
     X.kv = {}; for (const r of (val(2, {}).rows || [])) X.kv[r.K || r.k] = String(r.V == null ? r.v : r.V);
     const json = (k, d) => { try { const v = JSON.parse(X.kv[k]); return v == null ? d : v; } catch (e) { return d; } };
     X.book = val(0, null); X.mine = val(1, { orders: [], pending: [] }); X.orders = json("myorders", []); if (!Array.isArray(X.orders)) X.orders = [];
-    X.takes = json("pending_takes", {}); X.mm = json("mm_config", {});
+    X.takes = json("pending_takes", {}); X.mm = json("mm_config", {}); X.acts = json("activity", []); if (!Array.isArray(X.acts)) X.acts = [];
     X.fills = ((val(3, {}).rows) || []).map(r => { try { return JSON.parse(r.V || r.v); } catch (e) { return null; } }).filter(Boolean).sort((a, b) => (b.ts || 0) - (a.ts || 0));
     const bal = val(4, null);
     if (bal && bal.status && Array.isArray(bal.response)) { const of = (id) => (bal.response.find(r => r.tokenid === id) || {}).sendable || "0"; X.bal = { minima: of("0x00"), mxusd: of(MXUSD) }; X.balErr = ""; }
@@ -178,7 +178,7 @@ const DexUI = (() => {
     else if (document.activeElement && body.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // never redraw under someone typing
     else {
       const why = blocker(), top = (why ? `<div class="dx-state" role="status">${esc(why)}</div>` : "") + (X.said ? `<div class="dx-state dx-state--${X.said.kind}" role="alert">${esc(X.said.text)}</div>` : "");
-      body.innerHTML = top + (tab === "orders" ? ordersHtml() : tab === "history" ? historyHtml() : `<div class="dx-card"><div class="dx-note"><b>${esc(C.TAB_LABEL[tab])}</b></div></div>`);
+      body.innerHTML = top + (tab === "orders" ? ordersHtml() : tab === "history" ? historyHtml() : tab === "activity" ? activityHtml() : tab === "assets" ? assetsHtml() : settingsHtml());
     }
   }
 
@@ -448,6 +448,20 @@ const DexUI = (() => {
     if (ds.info) return void dialog("History", HIST_INFO, "");
     if (ds.fill != null) return void dialog("Trade", fillFacts(X.fills[Number(ds.fill)]), "");
     if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say("Saved " + X.fills.length + " fills.", "note"); } catch (err) { say(err && err.message); } return; }
+    if (ds.asub != null) { X.asub = Number(ds.asub); return draw(); }
+    if (ds.act != null) return void dialog("Activity", actFacts(X.acts[Number(ds.act)]), "");
+    if (ds.ainfo) return void dialog("Activity", ACT_INFO, "");
+    if (ds.asset) { X.open[ds.asset] = !X.open[ds.asset]; return draw(); }
+    if (ds.room != null) return opts.go(C.ROOMS[Number(ds.room)].view);
+    if (ds.relay) {
+      const url = ds.relay === "add" ? $("dxRelayIn").value.trim().replace(/\/+$/, "") : ds.url;
+      const bad = ds.relay === "add" ? C.relayProblem(url) : "";
+      if (bad) return say(bad, "note");
+      const r = await drive(ds.relay === "add" || ds.relay === "found" ? "addRelay" : ds.relay === "remove" ? "removeRelay" : "discover", { url });
+      if (r.error) return say(r.error);
+      if (ds.relay === "add") $("dxRelayIn").value = "";
+      X.said = null; if (document.activeElement) document.activeElement.blur(); return draw();
+    }
     if (ds.mm) {
       if (ds.mm === "makerStop" && !(await dialog("Stop the market maker?", "Your node signs a cancel for every ladder order and sends it to the relays within seconds. Your settings are kept. A take a maker already co-signed still settles.", "Stop"))) return;
       const r = await drive(ds.mm, { light: mem.theme === "DAYLIGHT" });
@@ -455,5 +469,64 @@ const DexUI = (() => {
     }
   }
 
-  return { init, paint, render, node: node_, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
+  // ---- Activity (ActivityTab.java), Assets (AssetsTab.java), Settings (RelaysTab.java): shared by the rooms ----
+  const ACT_INFO = "Every BUY and SELL you make and every fill your node co-signs, newest first, with its live progress. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. AtomiX swaps are followed in room ① MxUSD.";
+  const A = () => (window.AX && window.AX.activity) || null;   // the engine's own stage machine and wording (dexicon/lib/activity.js, verbatim)
+  function activityHtml() {
+    const out = [`<div class="dx-title"><h2>Activity</h2><button class="dx-info" data-ainfo="1" aria-label="About Activity">i</button></div>`,
+      `<div class="dx-chips"><button data-asub="0" aria-pressed="${X.asub === 0}">My activity</button><button data-asub="1" aria-pressed="${X.asub === 1}">Market history</button><button data-csv="1"${X.fills.length ? "" : " disabled"}>↓ Export CSV</button></div>`];
+    const now = Date.now(), tip = (st && st.block) || 0, hm = (ms) => { const t = new Date(ms); return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0"); };
+    let day = "";
+    if (X.asub === 0) {
+      if (!X.acts.length) out.push(`<div class="dx-card dx-none"><b>${X.loaded ? "Nothing yet" : "…"}</b><span>Every BUY and SELL you make and every fill your node co-signs shows its live progress here.</span></div>`);
+      X.acts.forEach((a, i) => {
+        const ms = Number(a.ts) || 0, d = C.dayLabel(ms, now), buy = a.side === "buy" || a.buy === true, m = A();
+        const chip = m ? m.chip(a, tip) : String(a.stage || ""), status = m ? m.status(a, tip, now) : String(a.stage || ""), tone = /DONE|CONFIRMED/.test(chip) ? "ok" : /FAILED|REFUSED|DROPPED|LOST/.test(chip) ? "bad" : "live";
+        if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
+        out.push(`<button class="dx-card dx-led" data-act="${i}"><span class="dx-led__ic" data-tone="${tone}">${tone === "ok" ? "✓" : tone === "bad" ? "!" : "…"}</span><span class="dx-led__m"><b>${tone === "ok" ? (buy ? "Bought" : "Sold") : (buy ? "Buy" : "Sell")} MINIMA</b>`
+          + `<span class="dx-led__a">${esc(a.amount || a.minima || "")} MINIMA @ ${esc(a.price || "")}</span><span class="dx-led__s">${stamp(ms)} · ${a.route === "FAST" ? "fast book" : "on-chain"} · ${esc(status)}</span></span>`
+          + `<span class="dx-led__r"><span class="dx-chip" data-tone="${tone}">${esc(chip)}</span><span class="dx-led__t">▸</span></span></button>`);
+      });
+    } else {
+      const tape = X.svc && Array.isArray(X.svc.tape) ? X.svc.tape : [];
+      if (!tape.length) out.push(`<div class="dx-card dx-none"><b>No trades seen yet</b><span>Fills this node sees on the on-chain book are listed here. There is no server and no back-fill.</span></div>`);
+      for (const t of tape) {
+        const ms = Number(t.timems) || 0, d = C.dayLabel(ms, now);
+        if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
+        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${t.buy ? "buy" : "sell"}">${t.buy ? "BUY " : "SELL "}${esc(t.size)} MINIMA @ ${esc(t.price)}</span><span class="dx-led__t">${hm(ms)}</span></div>${idLine("txpow", t.txpowid)}</div>`);
+      }
+    }
+    return out.join("");
+  }
+  function actFacts(a) {
+    const m = A(), tip = (st && st.block) || 0, L = [(a.side === "buy" || a.buy === true ? "BUY " : "SELL ") + (a.amount || a.minima || "") + " MINIMA at " + (a.price || "") + " MxUSD per MINIMA",
+      "Route: " + (a.route === "FAST" ? "FAST book" : "on-chain book and pools") + (a.role ? ", you were the " + a.role : ""), "State: " + (m ? m.chip(a, tip) + ". " + m.status(a, tip, Date.now()) : a.stage), "Started: " + new Date(Number(a.ts) || 0).toString(), ""];
+    for (const [k, label] of [["txpowid", "txpow id (before mining)"], ["orderId", "order"], ["counterparty", "counterparty"], ["id", "activity id"]]) if (a[k]) L.push(label + "\n" + a[k]);
+    for (const [k, label] of [["outs", "output coins"], ["ins", "input coins"]]) if (Array.isArray(a[k]) && a[k].length) L.push(label + "\n" + a[k].join("\n"));
+    return L.join("\n");
+  }
+  function assetsHtml() {
+    const f = fundsNow(), ident = (X.svc && X.svc.identity) || {}, addr = ident.miniaddress || ident.address || "", id = (st && st.publicId) || "";
+    const asset = (key, name, avail, inOrders, settling) => `<button class="dx-card dx-asset" data-asset="${key}" aria-expanded="${!!X.open[key]}"><span class="dx-row"><span><b>${name}</b><span class="dx-asset__n">${f.known ? esc(C.fmt(avail)) : "…"}</span></span><span class="dx-asset__h">available to trade ${X.open[key] ? "▾" : "▸"}</span></span>`
+      + (X.open[key] && f.known ? `<span class="dx-asset__more">${esc(C.fmt(inOrders))}  promised by your live FAST orders (still in your wallet)\n${esc(C.fmt(C.sub(avail, inOrders)))}  free for a new order\n+${esc(C.fmt(settling))}  settling: traded, waiting for a block</span>` : "") + `</button>`;
+    return (!f.known ? `<div class="dx-state dx-state--note">${esc(X.balErr || "The balance has not been read yet.")}</div>` : "")
+      + asset("minima", "MINIMA", f.minima, f.minimaOrders, f.minimaSettling) + asset("mxusd", "MxUSD", f.mxusd, f.mxusdOrders, f.mxusdSettling)
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">RECEIVE MINIMA OR MxUSD</span>${addr ? `<button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">Copy</button>` : ""}</div><div class="dx-addr" ${addr ? `data-copy="${esc(addr)}" title="Click to copy"` : ""}>${esc(addr || "The address appears when Dexicon has read the chain.")}</div></div>`
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">YOUR TRADING ID</span>${id ? `<button class="dx-btn dx-btn--side" data-copy="${esc(id)}">Copy</button>` : ""}</div><div class="dx-addr" ${id ? `data-copy="${esc(id)}" title="Click to copy"` : ""}>${esc(id || "Not read yet.")}</div>`
+      + `<div class="dx-sub dx-sub--sans">Other traders see this ID when you trade on the fast book. It is made from your node's seed, so it stays the same if you reinstall. It is not an address: never send coins to it.</div></div>`
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">ETHEREUM</span><button class="dx-btn dx-btn--side" data-room="0">Open ① MxUSD</button></div><div class="dx-sub dx-sub--sans">The Ethereum wallet (USDT and ETH for AtomiX swaps) is in room ① MxUSD, with its address, Send and Export key.</div></div>`;
+  }
+  function settingsHtml() {
+    const relays = Page.state.relays || [], px = st && st.price;
+    const health = (r) => (r.found ? "found through " + r.meta.replace(/^via\s*/, "") : r.state === "ok" ? "OK · " + r.meta : r.state === "bad" ? "ERROR · " + r.meta : "not polled yet");
+    return `<div class="dx-card"><div class="dx-h">WALLET</div><div class="dx-sub dx-sub--sans">Dexicon trades with this node's own wallet: the node signs every trade with its own keys. Your node's seed phrase backs up everything here.</div></div>`
+      + `<div class="dx-card"><div class="dx-h">ADD RELAY</div><div class="dx-sub dx-sub--sans">A Dexicon relay is the dexrelay cape of parlons-node.jar / maxima-server.jar. Orders are published to EVERY relay here; the book is the union. On the desktop a relay must be an https address.</div>`
+      + `<input class="dx-in dx-in--s" id="dxRelayIn" placeholder="https://relay.example/dex-relay" aria-label="Relay address" autocomplete="off" spellcheck="false"><div class="dx-mm__b"><button class="dx-btn dx-btn--acc" data-relay="add">ADD</button><button class="dx-btn dx-btn--acc" data-relay="discover">DISCOVER</button></div></div>`
+      + (relays.length ? relays.map(r => `<div class="dx-card dx-relay"><div><div class="dx-relay__u" data-copy="${esc(r.url)}" title="Click to copy">${esc(r.url)}</div><div class="dx-relay__s" data-state="${r.found ? "" : esc(r.state)}">${esc(health(r))}</div></div>`
+          + (r.found ? `<button class="dx-btn dx-btn--side" data-relay="found" data-url="${esc(r.url)}">ADD</button>` : `<button class="dx-relay__x" data-relay="remove" data-url="${esc(r.url)}" aria-label="Remove this relay">✕</button>`) + `</div>`).join("")
+        : `<div class="dx-card dx-none"><b>${Page.state.ready || Page.stub ? "No relays yet" : "…"}</b><span>Add the address of any Dexicon relay, then DISCOVER to find the others.</span></div>`)
+      + `<div class="dx-card"><div class="dx-h">ENGINE</div><div class="dx-sub dx-sub--sans">Dexicon engine ${esc((st && st.version) || "…")} · block ${esc((st && st.block) || "…")} · ${px && px.mid > 0 ? esc((px.source || "MEXC price") + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : "no MEXC price yet"}</div></div>`;
+  }
+
+  return { init, paint, render, node: node_, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
 })();

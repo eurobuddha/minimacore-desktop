@@ -69,7 +69,13 @@ if (process.argv.includes("--shots")) {
     ["dex-orders", "view=dexicon&dxtab=orders"], ["dex-orders-dxlight", "view=dexicon&dxtab=orders&dx=light"], ["dex-orders-1440x900", "view=dexicon&dxtab=orders", 1440, 900, 1], ["dex-orders-dxlight-1440x900", "view=dexicon&dxtab=orders&dx=light", 1440, 900, 1],
     ["dex-orders-fills", "view=dexicon&dxtab=orders&dxsub=1"], ["dex-orders-maker", "view=dexicon&dxtab=orders&dxmm=1"], ["dex-orders-empty", "view=dexicon&dxtab=orders&dxs=empty"], ["dex-orders-stopped", "view=dexicon&dxtab=orders&state=stopped"],
     ["dex-history", "view=dexicon&dxtab=history"], ["dex-history-dxlight", "view=dexicon&dxtab=history&dx=light"], ["dex-history-1440x900", "view=dexicon&dxtab=history", 1440, 900, 1], ["dex-history-dxlight-1440x900", "view=dexicon&dxtab=history&dx=light", 1440, 900, 1],
-    ["dex-history-empty", "view=dexicon&dxtab=history&dxs=empty"], ["dex-history-facts", "view=dexicon&dxtab=history&dxfill=1"], ["dex-trade-nofunds", "view=dexicon&bal=empty&dxf=buy:0.0034:500"],
+    ["dex-history-empty", "view=dexicon&dxtab=history&dxs=empty"], ["dex-history-facts", "view=dexicon&dxtab=history&dxfill=1"],
+    ["dex-activity", "view=dexicon&dxtab=activity"], ["dex-activity-dxlight", "view=dexicon&dxtab=activity&dx=light"], ["dex-activity-1440x900", "view=dexicon&dxtab=activity", 1440, 900, 1], ["dex-activity-dxlight-1440x900", "view=dexicon&dxtab=activity&dx=light", 1440, 900, 1],
+    ["dex-activity-market", "view=dexicon&dxtab=activity&dxasub=1"], ["dex-activity-empty", "view=dexicon&dxtab=activity&dxs=empty"],
+    ["dex-assets", "view=dexicon&dxtab=assets"], ["dex-assets-dxlight", "view=dexicon&dxtab=assets&dx=light"], ["dex-assets-1440x900", "view=dexicon&dxtab=assets", 1440, 900, 1], ["dex-assets-dxlight-1440x900", "view=dexicon&dxtab=assets&dx=light", 1440, 900, 1],
+    ["dex-assets-open", "view=dexicon&dxtab=assets&dxopen=1"], ["dex-assets-nofunds", "view=dexicon&dxtab=assets&bal=fail"],
+    ["dex-settings", "view=dexicon&dxtab=settings"], ["dex-settings-dxlight", "view=dexicon&dxtab=settings&dx=light"], ["dex-settings-1440x900", "view=dexicon&dxtab=settings", 1440, 900, 1], ["dex-settings-dxlight-1440x900", "view=dexicon&dxtab=settings&dx=light", 1440, 900, 1],
+    ["dex-settings-found", "view=dexicon&dxtab=settings&dxs=found"], ["dex-settings-norelay", "view=dexicon&dxtab=settings&dxs=norelay"], ["dex-settings-relaydown", "view=dexicon&dxtab=settings&dxs=relaydown"], ["dex-trade-nofunds", "view=dexicon&bal=empty&dxf=buy:0.0034:500"],
     ["wide-1440x900", "view=balances&tray=1", 1440, 900, 1], ["narrow-680", "view=balances&tray=1", 680, 704, 2]
   ];
   const only = (process.argv.find(a => a.startsWith("--only=")) || "").slice(7);   // --only=wallet captures the names that start with it

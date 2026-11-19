@@ -177,3 +177,28 @@ button.dx-pill { cursor: pointer; }
 .dx-led__s { font: 400 11.5px/17px var(--dx-sans); color: var(--dx-dim2); }
 .dx-led__r { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; align-self: stretch; gap: 6px; }
 .dx-led__t { margin-top: auto; font: 400 11.5px/16px var(--dx-mono); color: var(--dx-dim2); }
+
+/* ---- Activity, Assets, Settings (ActivityTab.java, AssetsTab.java, RelaysTab.java) ---- */
+.dx-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.dx-chips button { padding: 8px 12px; border: 0; border-radius: 100px; background: var(--dx-surface2); color: var(--dx-dim); font: 400 12.5px/17px var(--dx-sans); cursor: pointer; }
+.dx-chips button[aria-pressed="true"] { background: var(--dx-accent); color: var(--dx-on-accent); }
+.dx-chips button:disabled { opacity: .45; cursor: default; }
+.dx-none { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; text-align: center; }
+.dx-none b { font: 700 13px/18px var(--dx-sans); color: var(--dx-dim); }
+.dx-none span { font: 400 11.5px/17px var(--dx-sans); color: var(--dx-dim2); }
+.dx-asset { display: block; width: 100%; padding: 22px 12px; text-align: left; cursor: pointer; }
+.dx-asset b { font: 700 14px/20px var(--dx-sans); }
+.dx-asset__n { margin-left: 18px; font: 700 17px/24px var(--dx-mono); overflow-wrap: anywhere; }
+.dx-asset__h { flex: 0 0 auto; font: 400 12.5px/17px var(--dx-sans); color: var(--dx-dim2); }
+.dx-asset__more { display: block; margin-top: 10px; white-space: pre-wrap; font: 400 11px/17px var(--dx-mono); color: var(--dx-dim); }
+.dx-addr { margin: 8px 0 4px; font: 400 12.5px/19px var(--dx-mono); overflow-wrap: anywhere; user-select: text; }
+.dx-addr[data-copy] { cursor: copy; }
+.dx-sub--sans { font-family: var(--dx-sans); font-size: 10.5px; line-height: 15px; margin-top: 2px; }
+.dx-in--s { font-size: 11px; }
+.dx-btn--acc { color: var(--dx-accent); font: 400 11px/15px var(--dx-mono); }
+.dx-relay { display: flex; align-items: center; gap: 8px; }
+.dx-relay > div { flex: 1; min-width: 0; }
+.dx-relay__u { font: 400 12px/18px var(--dx-mono); overflow-wrap: anywhere; cursor: copy; user-select: text; }
+.dx-relay__s { font: 400 10px/15px var(--dx-mono); color: var(--dx-dim2); overflow-wrap: anywhere; }
+.dx-relay__s[data-state="ok"] { color: var(--dx-in); } .dx-relay__s[data-state="bad"] { color: var(--dx-red); }
+.dx-relay__x { min-width: 36px; min-height: 36px; border: 0; background: none; color: var(--dx-red); font: 400 15px/1 var(--dx-sans); cursor: pointer; }
