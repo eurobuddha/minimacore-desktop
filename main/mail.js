@@ -472,11 +472,17 @@ async function resolveRecipient(input) {
   if (mc.isValidPublicId(raw)) return "0x" + raw.replace(/^0x/i, "").toLowerCase();
   const words = address.normalize(text);
   if (!words) throw new Error("Enter six address words, a contact link or a Mail key.");
-  const matches = new Set(contacts().map(c => c.publicId).filter(k => address.isKey(k) && address.phrase(k) === words).map(k => k.toLowerCase()));
+  const known = new Set([identity?.publicId, ...contacts().map(c => c.publicId)]);
+  for (const message of store.all()) {
+    known.add(message.frompublickey);
+    known.add(message.topublickey);
+  }
+  const matches = new Set([...known].filter(k => typeof k === "string" && /^(?:0x)?[a-f0-9]{128}$/i.test(k))
+    .map(k => "0x" + k.replace(/^0x/i, "").toLowerCase()).filter(k => address.phrase(k) === words));
   if (matches.size > 1) throw new Error("Multiple contacts match. Ask for a contact link.");
   if (matches.size) return [...matches][0];
   const found = await address.find(nodeCmd, await mc.ready(), words, 1500);
-  if (!found) throw new Error("Address is not currently discoverable. Ask for a contact link.");
+  if (!found) throw new Error("No published address found on this node. Ask the recipient to publish their address or share their contact link.");
   return found.key;
 }
 

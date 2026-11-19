@@ -315,3 +315,14 @@ test("Android Mail address, link and signed beacon interoperate byte for byte", 
   coin.state[2] = "0x" + "00".repeat(64);
   assert.equal(await codec.find(run, sodium, words, 1500), null);
 });
+
+test("six words resolve an unsaved correspondent from message headers", async t => {
+  const store = require("../main/mail-store");
+  const codec = require("../main/mailaddress");
+  const recipient = "0x" + "12".repeat(64);
+  const peer = "0x" + "34".repeat(64);
+  t.mock.method(store, "contacts", () => []);
+  t.mock.method(store, "all", () => [{ frompublickey: peer, topublickey: recipient.slice(2).toUpperCase() }]);
+  assert.equal(await mail.resolveRecipient(codec.phrase(recipient)), recipient);
+  assert.equal(await mail.resolveRecipient(codec.phrase(peer)), peer);
+});

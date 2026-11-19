@@ -207,4 +207,10 @@
 
 .mailapp .mm-self { flex: 1; font-size: 13px; overflow-wrap: anywhere; }
 #view-mail .mail-address-entry fieldset { border: 0; margin: 1em 0; padding: 0; }
-#view-mail .mail-address-entry .mm-word-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .5em; }
+#view-mail .mm-word-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .5em; }
+
+#view-mail .mm-word-grid[hidden], #view-mail #mmTo[hidden] { display: none; }
+#view-mail #mmToWords { flex: 1; min-width: 0; }
+#view-mail #mmToWords input { width: 100%; box-sizing: border-box; border-bottom: 1px solid var(--mm-hairline); }
+.mailapp .mm-recipient-state { padding-inline: 16px; font-size: 13px; }
+.mailapp .mm-recipient-state:has(#mmLookup:empty) { display: none; }

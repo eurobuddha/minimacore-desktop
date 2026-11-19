@@ -390,19 +390,9 @@
   }
 
   // Desktop counterpart of Android AddressWordEntry. Exact words win over unique prefixes.
-  async function enterAddress() {
-    const dictionary = await D.api.mailAddressWords();
-    const overlay = document.createElement("div");
-    overlay.className = "overlay mail-address-entry";
-    overlay.innerHTML = '<form class="modal"><div class="modal__title">Mail address</div>'
-      + '<textarea class="field__input" rows="2" aria-label="Contact link or Mail key" placeholder="Paste a contact link or Mail key"></textarea>'
-      + '<fieldset><legend>Or enter six address words</legend><div class="mm-word-grid"></div></fieldset>'
-      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">Cancel</button>'
-      + '<button type="submit" class="btn btn--primary">Use address</button></div></form>';
-    const form = overlay.querySelector("form"), raw = form.querySelector("textarea");
-    const grid = form.querySelector(".mm-word-grid"), status = form.querySelector('[role="status"]');
+  function addressBoxes(grid, dictionary, changed, useRaw) {
     const boxes = [], choices = document.createElement("datalist");
-    choices.id = "mmAddressOptions"; grid.append(choices);
+    choices.id = grid.id ? grid.id + "Options" : "mmAddressOptions"; grid.append(choices);
     for (const word of dictionary) { const option = document.createElement("option"); option.value = word; choices.append(option); }
     function complete(value) {
       const word = value.trim().toLowerCase();
@@ -414,18 +404,54 @@
       const box = document.createElement("input");
       box.className = "field__input"; box.setAttribute("list", choices.id); box.autocomplete = "off";
       box.setAttribute("aria-label", "Address word " + (i + 1)); box.placeholder = String(i + 1);
-      box.oninput = () => { raw.value = ""; status.textContent = ""; };
-      box.onblur = () => { const word = complete(box.value); if (word) box.value = word; };
+      box.spellcheck = false;
+      function advance() { if (boxes[i + 1]) boxes[i + 1].focus(); }
+      box.oninput = event => {
+        const prefix = box.value.toLowerCase();
+        if (!event.isComposing && !String(event.inputType).startsWith("delete") && prefix &&
+            (prefix.length >= 4 || dictionary.includes(prefix))) {
+          const matches = dictionary.filter(w => w.startsWith(prefix));
+          if (matches.length === 1) { box.value = matches[0]; advance(); }
+        }
+        changed();
+      };
+      box.onkeydown = event => {
+        if ((event.key === " " || event.key === "Enter") && dictionary.includes(box.value.toLowerCase())) {
+          event.preventDefault(); advance(); changed();
+        }
+      };
       box.onpaste = event => {
-        const parts = event.clipboardData.getData("text").trim().split(/[\s-]+/);
+        const text = event.clipboardData.getData("text").trim();
+        if (text.includes("://") || text.includes("|") || /^(?:0x)?[0-9a-f]{128}$/i.test(text)) {
+          event.preventDefault(); useRaw(text); return;
+        }
+        const parts = text.split(/[\s-]+/);
         if (parts.length < 2) return;
         event.preventDefault();
         const start = parts.length === 6 ? 0 : i;
-        if (start + parts.length > 6) { status.textContent = "Enter six address words."; return; }
-        raw.value = ""; parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
+        if (start + parts.length > 6) { box.value = ""; changed(); box.setCustomValidity("Enter six address words."); box.reportValidity(); box.setCustomValidity(""); return; }
+        parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
+        boxes[Math.min(5, start + parts.length)].focus(); changed();
       };
       grid.append(box); boxes.push(box);
     }
+    return { boxes, complete };
+  }
+
+  async function enterAddress() {
+    const dictionary = await D.api.mailAddressWords();
+    const overlay = document.createElement("div");
+    overlay.className = "overlay mail-address-entry";
+    overlay.innerHTML = '<form class="modal"><div class="modal__title">Mail address</div>'
+      + '<textarea class="field__input" rows="2" aria-label="Contact link or Mail key" placeholder="Paste a contact link or Mail key"></textarea>'
+      + '<fieldset><legend>Or enter six address words</legend><div class="mm-word-grid"></div></fieldset>'
+      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">Cancel</button>'
+      + '<button type="submit" class="btn btn--primary">Use address</button></div></form>';
+    const form = overlay.querySelector("form"), raw = form.querySelector("textarea");
+    const grid = form.querySelector(".mm-word-grid"), status = form.querySelector('[role="status"]');
+    const { boxes, complete } = addressBoxes(grid, dictionary,
+      () => { raw.value = ""; status.textContent = ""; },
+      text => { raw.value = text; boxes.forEach(box => { box.value = ""; }); raw.focus(); });
     raw.oninput = () => { if (raw.value) boxes.forEach(box => { box.value = ""; }); };
     const previous = document.activeElement;
     D.el("view-mail").append(overlay); raw.focus();
@@ -541,16 +567,22 @@
 
   // ---------------------------------------------------------------- compose
   function openCompose(pre) { COMPOSE = { to: (pre && pre.to) || "", subject: (pre && pre.subject) || "", body: "" }; VIEW = "compose"; render(); }
-  function renderCompose(host) {
+  async function renderCompose(host) {
     var c = COMPOSE || { to: "", subject: "", body: "" };
+    let dictionary;
+    try { dictionary = await D.api.mailAddressWords(); }
+    catch (error) { dictionary = []; D.toast(errText(error), "err"); }
+    if (VIEW !== "compose" || COMPOSE !== c) return;
     host.innerHTML = '<div class="mailapp">'
       + '<div class="mm-chead"><button class="mm-ibtn" type="button" id="mmCancel" aria-label="Close">' + g.micon("close") + "</button>"
       + '<span class="mm-t">New message</span>'
       + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "Send</button></div>"
       + '<div class="mm-f"><span class="mm-lab">To</span>'
+      + '<div class="mm-word-grid" id="mmToWords"></div>'
       + '<textarea rows="1" class="mm-monoin" id="mmTo" placeholder="Six words, contact link or Mail key" autocomplete="off" spellcheck="false">' + D.esc(c.to) + '</textarea>'
       + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmEnterWords">Enter words</button><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "Scan</button>"
       + '<button class="mm-outchip" type="button" id="mmPick" aria-label="Pick a contact">' + g.micon("contacts") + "</button></span></div>"
+      + '<div class="mm-recipient-state"><span id="mmLookup" role="status"></span> <button hidden id="mmRetryLookup" type="button">Retry lookup</button></div>'
       + '<div class="mm-f"><span class="mm-lab">Subject</span>'
       + '<input id="mmSubj" placeholder="(optional — subjects make their own thread)" autocomplete="off" value="' + D.esc(c.subject) + '" /></div>'
       + '<textarea class="mm-cbody" id="mmBodyIn" placeholder="Write your message…">' + D.esc(c.body) + "</textarea>"
@@ -559,39 +591,82 @@
       + '<div class="mm-hint">' + g.micon("chain")
       + "<span>Delivered with the next block — usually 1–3 minutes. Your message waits in the Outbox until it's on-chain.</span></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
-    var keep = function () { COMPOSE = { to: D.el("mmTo").value, subject: D.el("mmSubj").value, body: D.el("mmBodyIn").value }; };
-    ["mmTo", "mmSubj", "mmBodyIn"].forEach(function (id) { D.el(id).oninput = keep; });
+    const raw = D.el("mmTo"), grid = D.el("mmToWords"), toggle = D.el("mmEnterWords");
+    const status = D.el("mmLookup"), retry = D.el("mmRetryLookup");
+    const actions = ["mmDoSend", "mmPhoto", "mmFunds"].map(id => D.el(id));
+    let revision = 0, resolved = "", sending = false;
+    const { boxes } = addressBoxes(grid, dictionary, wordsChanged, useRaw);
+    (c.words || []).forEach((word, i) => { boxes[i].value = word; });
+    function mode(asRaw) {
+      raw.hidden = !asRaw; grid.hidden = asRaw;
+      toggle.textContent = asRaw ? "Enter words" : "Link or Mail key";
+      toggle.disabled = !dictionary.length;
+    }
+    function useRaw(text) { mode(true); raw.value = text; raw.focus(); keep(); check(); }
+    function wordsChanged() {
+      const parts = boxes.map(box => box.value.toLowerCase());
+      raw.value = parts.every(word => dictionary.includes(word)) ? parts.join("-") : "";
+      keep(); check();
+    }
+    function keep() {
+      Object.assign(c, { to: raw.value, words: boxes.map(box => box.value), raw: !raw.hidden,
+        subject: D.el("mmSubj").value, body: D.el("mmBodyIn").value });
+    }
+    async function check() {
+      const request = ++revision, text = raw.value.trim();
+      resolved = ""; actions.forEach(button => { button.disabled = true; });
+      status.textContent = ""; retry.hidden = true;
+      if (!/^(?:0x)?[0-9a-f]{128}(?:\||$)/i.test(text) && !text.includes("minimamail:") &&
+          !(text.split(/[\s-]+/).length === 6 && text.toLowerCase().split(/[\s-]+/).every(word => dictionary.includes(word)))) return;
+      status.textContent = "Looking up address…";
+      try {
+        const key = await D.api.mailResolveAddress(text);
+        if (request !== revision || !raw.isConnected) return;
+        resolved = key; status.textContent = "Recipient ready";
+        actions.forEach(button => { button.disabled = sending; });
+      } catch (error) {
+        if (request !== revision || !raw.isConnected) return;
+        status.textContent = errText(error); retry.hidden = false;
+      }
+    }
+    raw.oninput = () => { keep(); check(); };
+    D.el("mmSubj").oninput = D.el("mmBodyIn").oninput = keep;
+    mode(!dictionary.length || (c.raw ?? Boolean(c.to)));
+    retry.onclick = check;
+    check();
     D.el("mmCancel").onclick = function () { COMPOSE = null; VIEW = "inbox"; render(); };
     D.el("mmPick").onclick = function () {
       if (!CONTACTS.length) { D.toast("No contacts yet — paste a Mail key instead.", ""); return; }
       D.showActionSheet("Send to", CONTACTS.map(function (ct) {
-        return { label: ct.username || shortKey(ct.publicId), onclick: function () { D.el("mmTo").value = ct.publicId; keep(); } };
+        return { label: ct.username || shortKey(ct.publicId), onclick: function () { useRaw(ct.publicId); } };
       }));
     };
-    D.el("mmEnterWords").onclick = async function () {
-      const value = await enterAddress(); if (value) { D.el("mmTo").value = value; keep(); }
+    toggle.onclick = () => {
+      if (raw.hidden) { useRaw(raw.value); raw.select(); }
+      else { mode(false); wordsChanged(); boxes[Math.max(0, boxes.findIndex(box => !dictionary.includes(box.value)))].focus(); }
     };
     D.el("mmScan").onclick = async function () {
       var v = await D.scanQR("Scan a Mail key").catch(function () { return null; });
-      if (v) { D.el("mmTo").value = String(v).split("|")[0].trim(); keep(); }
+      if (v) { useRaw(String(v).trim()); }
     };
     D.el("mmPhoto").onclick = function () { D.el("mmFile").click(); };
-    D.el("mmFile").onchange = function (e) { if (e.target.files[0]) composeImage(e.target.files[0]); };
+    D.el("mmFile").onchange = function (e) { if (resolved && e.target.files[0]) composeImage(e.target.files[0], resolved); };
     D.el("mmFunds").onclick = async function () {
-      var to = D.el("mmTo").value.trim();
-      if (!to) { D.toast("Add a recipient first.", "err"); return; }
-      try { await sendFunds(await D.api.mailResolveAddress(to)); } catch (e) { D.toast(errText(e), "err"); }
+      if (resolved) await sendFunds(resolved);
     };
-    D.el("mmDoSend").onclick = doSend;
+    D.el("mmDoSend").onclick = async () => {
+      if (!resolved || sending) return;
+      sending = true;
+      try { await doSend(resolved); }
+      finally { sending = false; actions[0].disabled = !resolved; }
+    };
   }
-  async function doSend() {
-    var to = D.el("mmTo").value.trim();
+  async function doSend(to) {
     var subject = D.el("mmSubj").value.trim();
     var body = D.el("mmBodyIn").value.trim();
     if (!body) { D.toast("Write a message first.", "err"); return; }
     var btn = D.el("mmDoSend"); btn.disabled = true;
     try {
-      to = await D.api.mailResolveAddress(to);
       await D.api.mailSend(to, { message: body, subject: subject });
       COMPOSE = null;
       openThread(to, subject, "");
@@ -627,11 +702,9 @@
     } catch (e) { D.toast(errText(e), "err"); }
     render();
   }
-  async function composeImage(file) {
-    var to = D.el("mmTo").value.trim();
+  async function composeImage(file, to) {
     var subject = D.el("mmSubj").value.trim();
     try {
-      to = await D.api.mailResolveAddress(to);
       var b64 = await compressImage(file);
       await D.api.mailSend(to, { message: "", subject: subject, type: "image", image: b64 });
       COMPOSE = null; openThread(to, subject, "");
