@@ -336,6 +336,10 @@ ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myId
 ipcMain.handle("mcd:mailAddressWords", () => require("./mailaddress").words);
 ipcMain.handle("mcd:mailResolveAddress", (_e, value) => mail.resolveRecipient(value));
 ipcMain.handle("mcd:mailPublishAddress", (_e, key, enabled) => mail.setPublication(key, enabled === true));
+ipcMain.handle("mcd:mailBeaconStatus", (_e, key) => mail.beaconStatus(key));
+ipcMain.handle("mcd:mailPhrases", (_e, keys) => mail.phrases(keys));
+ipcMain.handle("mcd:mailSetTheme", (_e, theme) => mail.setTheme(theme));
+ipcMain.handle("mcd:mailPayOptions", () => mail.payOptions());
 ipcMain.handle("mcd:mailShare", () => mail.shareString());
 ipcMain.handle("mcd:mailThreads", () => mail.threads());
 ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));
@@ -369,7 +373,7 @@ ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
   if (r.canceled || !r.filePaths.length) return null;
   return chat.sendImageFile(to, r.filePaths[0]);
 });
-ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo));
+ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo, subject) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo, subject));
 ipcMain.handle("mcd:mailRequestPayaddr", (_e, peer) => mail.requestPayaddr(peer));
 ipcMain.handle("mcd:mailResolvePayaddr", (_e, peer) => mail.resolvePayaddr(peer));
 ipcMain.handle("mcd:mailReceivingAddr", () => mail.myReceivingAddress());

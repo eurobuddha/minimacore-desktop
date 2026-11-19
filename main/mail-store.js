@@ -9,6 +9,8 @@ const path = require("path");
 
 const WRITE_DEBOUNCE_MS = 300;
 const MAX_MESSAGES = 50000;
+const REV = 2;   // 1 (no field) = the store up to 0.18.147; 2 = the same shape with more meta keys
+const body = () => JSON.stringify({ version: 1, rev: REV, messages: mem.messages, contacts: mem.contacts, meta: mem.meta });
 
 let mem = null;   // { messages:{ "hashref|randomid":msg }, contacts:{ publicId:{publicId,username} }, meta:{} }
 let writeTimer = null;
@@ -23,6 +25,9 @@ function ensureLoaded() {
   try {
     const j = JSON.parse(raw);
     if (j) { mem.messages = j.messages || {}; mem.contacts = j.contacts || {}; mem.meta = j.meta || {}; }
+    // 0.18.148 adds keys to meta (theme, saved cards, the publication opt-out) and nothing else. The file as the older
+    // version left it is copied aside once, before this version writes anything: this store is the only complete inbox.
+    if (j && j.rev !== REV) { try { fs.copyFileSync(filePath(), filePath() + ".before-0.18.148", fs.constants.COPYFILE_EXCL); } catch (e2) { /* already kept, or unreadable */ } }
   } catch (e) {
     // The file EXISTS but is unparseable. This store is the source of truth (the node prunes coins), so we must NOT
     // silently reset and let the next write clobber it. Preserve the bad file aside for recovery, then start fresh.
@@ -36,7 +41,7 @@ function persistSoon() {
     try {
       const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
       const tmp = path.join(dir, "mail.json.tmp");
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
+      fs.writeFileSync(tmp, body());
       fs.renameSync(tmp, filePath());
     } catch (e) { /* retried next write */ }
   }, WRITE_DEBOUNCE_MS);
@@ -122,7 +127,7 @@ function setAside() {
   let kept = "";
   if (Object.keys(mem.messages).length || Object.keys(mem.contacts).length || Object.keys(mem.meta).length) {
     fs.mkdirSync(app.getPath("userData"), { recursive: true });
-    fs.writeFileSync(filePath(), JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));   // what is in memory now, not the last debounced write
+    fs.writeFileSync(filePath(), body());   // what is in memory now, not the last debounced write
     kept = require("./restore").moveAside(filePath());
   }
   clear();

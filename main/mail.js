@@ -89,6 +89,7 @@ async function init() {
     config.setSecret(mc.serializeIdentity(identity), MAIL_KEY_ACCOUNT);
   }
   try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; mypayaddr = gr.miniaddress || gr.address || ""; if (mypayaddr) store.metaSet("mypayaddr", mypayaddr); } catch (e) {}
+  ensureOwn(await mc.ready());
   if (!store.metaGet("coinnotify")) { try { await nodeCmd("coinnotify action:add address:" + CHAINMAIL); store.metaSet("coinnotify", true); } catch (e) {} }
   return identity;
 }
@@ -190,8 +191,31 @@ async function retrySend(hashref, randomid) {
   emitter.emit("update");
   return true;
 }
-async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
+/** Mail pays in MINIMA and MxUSD only (PaymentCurrency.java). The names are the phone's, the ids are fixed here. */
+const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+const PAY_NAMES = { "0x00": "Minima", [MXUSD.toLowerCase()]: "MxUSD" };
+/** PaymentCurrency.options: always both rows; the balance is the node's sendable (else confirmed) when above zero, else "0". */
+function payOptionsFrom(balances) {
+  const minima = { tokenid: "0x00", name: "Minima", balance: "0" }, mxusd = { tokenid: MXUSD, name: "MxUSD", balance: "0" };
+  for (const row of Array.isArray(balances) ? balances : []) {
+    const id = String((row && row.tokenid) || "").toLowerCase();
+    const cur = id === "0x00" ? minima : id === MXUSD.toLowerCase() ? mxusd : null;
+    if (!cur) continue;
+    const bal = String(row.sendable != null ? row.sendable : row.confirmed != null ? row.confirmed : "0");
+    if (/^[0-9]+(\.[0-9]+)?$/.test(bal) && /[1-9]/.test(bal)) cur.balance = bal;
+  }
+  return [minima, mxusd];
+}
+async function payOptions() {
+  const r = await nodeCmd("balance");
+  return r && r.status === true && Array.isArray(r.response) ? payOptionsFrom(r.response) : [];
+}
+async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo, subject) {
   await init();
+  const payName = PAY_NAMES[String(tokenid).toLowerCase()];
+  if (!payName) throw new Error("Mail sends Minima and MxUSD only.");
+  tokenid = payName === "MxUSD" ? MXUSD : "0x00"; tokenname = payName;
+  subject = String(subject || "").slice(0, 200);
   if (!looksLikeMinimaAddress(payaddr)) throw new Error("Invalid pay address.");   // rejects a Mail key too
   if (!/^[0-9]*\.?[0-9]+$/.test(String(amount)) || parseFloat(amount) <= 0) throw new Error("Invalid amount.");
   if (!/^0x[0-9A-Fa-f]+$/.test(tokenid) && tokenid !== "0x00") throw new Error("Invalid token.");
@@ -216,14 +240,14 @@ async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
   // The payment is committed here. A receipt-message failure MUST NOT surface as a payment failure —
   // otherwise the user re-pays (double spend). Post the on-chain receipt best-effort.
   const txpowid = (r.response && r.response.txpowid) || "";
-  try { return await sendMessage(toPublicId, { type: "payment", message: memoStr, amount: String(amount), tokenid, tokenname: tokenname || "", txpowid }); }
+  try { return await sendMessage(toPublicId, { type: "payment", subject, message: memoStr, amount: String(amount), tokenid, tokenname: tokenname || "", txpowid }); }
   catch (e) {
     // Receipt-to-peer failed, but the PAYMENT already went through above. Persist a local ledger entry regardless,
     // so the spend is visible in the thread/history after a restart — otherwise a receipt failure hides real funds leaving.
     try {
       const block = await currentBlock();   // the payment IS on-chain — record the block so it can confirm normally
-      store.addMessage({ hashref: threadKey(identity.publicId, toPublicId, ""), fromname: store.metaGet("myname") || "",
-        frompublickey: identity.publicId, topublickey: toPublicId, subject: "", message: memoStr, randomid: randomId(),
+      store.addMessage({ hashref: threadKey(identity.publicId, toPublicId, subject), fromname: store.metaGet("myname") || "",
+        frompublickey: identity.publicId, topublickey: toPublicId, subject, message: memoStr, randomid: randomId(),
         incoming: false, read: true, date: Date.now(), status: "sent", sentblock: block, type: "payment",
         amount: String(amount), tokenid, tokenname: tokenname || "", txpowid, image: "", payaddr: mypayaddr });
     } catch (e2) { /* best effort */ }
@@ -463,25 +487,57 @@ function stopLoop() { if (scanTimer) { clearInterval(scanTimer); scanTimer = nul
 function myIdentity() {
   const id = identity?.publicId;
   return { publicId: id, words: id && address.phrase(id), link: id && address.link(id),
-    published: !!publications()[id], name: store.metaGet("myname") || "", payaddr: store.metaGet("mypayaddr") || mypayaddr || "" };
+    published: !!publications()[id], name: store.metaGet("myname") || "", payaddr: store.metaGet("mypayaddr") || mypayaddr || "",
+    theme: store.metaGet("theme") === "dark" ? "dark" : "light" };
 }
+/** Mail's own Paper / Dark choice (Design.java; meta "theme", Paper unless set). It does not follow the shell. */
+function setTheme(theme) { store.metaSet("theme", theme === "dark" ? "dark" : "light"); return myIdentity(); }
+/** The six words of each key asked for (MailAddress.display), so no screen has to show a 130-character key as a name. */
+function phrases(keys) {
+  const out = {};
+  for (const k of Array.isArray(keys) ? keys.slice(0, 5000) : []) { const c = address.canonicalKey(k); if (c) out[k] = address.phrase(c); }
+  return out;
+}
+/** Every key this store knows: contacts and both parties of every message (CommsDb.knownMailKeys), and our own. */
+function knownKeys() {
+  const keys = new Set();
+  for (const c of store.contacts()) keys.add(c.publicId);
+  for (const m of store.all()) { keys.add(m.frompublickey); keys.add(m.topublickey); }
+  if (identity) keys.add(identity.publicId);
+  const out = new Set();
+  for (const k of keys) { const c = address.canonicalKey(k); if (c) out.add(c); }
+  return out;
+}
+/** MainActivity.resolveRecipient: a key or key|address, a contact link, or six words (known keys first, then the live beacon). */
 async function resolveRecipient(input) {
   const text = String(input || "").trim();
-  const linked = address.direct(text);
-  if (linked) return linked;
-  const raw = text.split("|")[0].trim();
-  if (mc.isValidPublicId(raw)) return "0x" + raw.replace(/^0x/i, "").toLowerCase();
+  if (text.includes("minimamail:")) {
+    const linked = address.direct(text);
+    if (!linked) throw new Error("Enter six address words, a contact link or a Mail key.");
+    return linked.toLowerCase();
+  }
+  const bar = text.indexOf("|");
+  const raw = address.canonicalKey(bar > 0 ? text.slice(0, bar).trim() : text);
+  if (raw) {
+    const pa = bar > 0 ? text.slice(bar + 1).trim() : "";
+    if (pa && mc.isValidPublicId(raw) && looksLikeMinimaAddress(pa)) store.metaSet("pa:" + raw, pa);   // acceptKeyShare
+    return raw;
+  }
   const words = address.normalize(text);
   if (!words) throw new Error("Enter six address words, a contact link or a Mail key.");
-  const matches = new Set(contacts().map(c => c.publicId).filter(k => address.isKey(k) && address.phrase(k) === words).map(k => k.toLowerCase()));
-  if (matches.size > 1) throw new Error("Multiple contacts match. Ask for a contact link.");
-  if (matches.size) return [...matches][0];
-  const found = await address.find(nodeCmd, await mc.ready(), words, 1500);
-  if (!found) throw new Error("Address is not currently discoverable. Ask for a contact link.");
+  const owner = identity;
+  const matches = [...knownKeys()].filter(k => address.phrase(k) === words);
+  if (matches.length > 1) throw new Error("Ambiguous address. Ask for a contact link.");
+  if (matches.length) return matches[0];
+  const found = await address.find(nodeCmd, await mc.ready(), words, address.DISCOVERY);
+  if (identity !== owner) throw new Error("The Mail identity changed. Try again.");
+  if (!found) throw new Error("No published address found on this node. Ask the recipient to publish their address or share their contact link.");
+  store.metaSet("card:" + found.key, found);
   return found.key;
 }
 
-// Only user-enabled, signed public cards are retained. The regular node loop checks them at most every four hours.
+// Only signed public cards are retained. The owner's own card is published unless the owner stopped it (AddressRenewal
+// .ensureOwn / stopOwn); a contact's card is relayed only when the user asks. The node loop checks each at most every four hours.
 function publications() { return store.metaGet("mail-address-publications") || {}; }
 function updatePublication(key, entry) {
   const entries = { ...publications() };
@@ -489,19 +545,38 @@ function updatePublication(key, entry) {
   else delete entries[key];
   store.metaSet("mail-address-publications", entries);
 }
+function ownOff(key) { return store.metaGet("mail-address-off:" + key) === true; }
+/** The owner's address is discoverable by default; a recorded "stop" is respected for good (0.5.22). */
+function ensureOwn(sodium) {
+  const key = identity && identity.publicId.toLowerCase();
+  if (!key || ownOff(key) || publications()[key]) return;
+  updatePublication(key, { card: address.card(sodium, identity), next: 0, pending: false });
+}
 async function setPublication(key, enable) {
   if (!address.isKey(key)) throw new Error("Invalid Mail key");
   key = key.toLowerCase();
-  if (!enable) { updatePublication(key, null); return myIdentity(); }
+  const own = identity?.publicId.toLowerCase() === key;
+  if (!enable) {
+    if (own) store.metaSet("mail-address-off:" + key, true);
+    updatePublication(key, null);
+    return myIdentity();
+  }
   const owner = identity;
   const sodium = await mc.ready();
-  const card = owner?.publicId === key ? address.card(sodium, owner)
-    : contacts().some(c => c.publicId === key) && await address.find(nodeCmd, sodium, address.phrase(key), 1500);
-  if (!owner || identity !== owner || !card || card.key !== key) throw new Error("A verified contact card is required for publication.");
+  const saved = store.metaGet("card:" + key);
+  const card = own ? address.card(sodium, owner)
+    : saved && address.verify(sodium, key, saved.sig, saved.phrase) ? saved
+    : contacts().some(c => String(c.publicId).toLowerCase() === key) && await address.find(nodeCmd, sodium, address.phrase(key), address.DISCOVERY);
+  if (!owner || identity !== owner) throw new Error("The Mail identity changed. Try again.");
+  if (!card || card.key !== key) throw new Error("Ask this contact to publish their address first.");
+  if (!own) store.metaSet("card:" + key, card);
+  if (own) store.metaSet("mail-address-off:" + key, false);
   if (!publications()[key]) updatePublication(key, { card, next: 0, pending: false });
   await renewAddresses();
   return myIdentity();
 }
+// MailBeacon.renew's outcomes, in its words ("Core" is the node).
+const FRESH_STATUS = "Address visible on-chain", PENDING_STATUS = "Awaiting Core approval";
 let renewing = false;
 async function renewAddresses() {
   if (renewing || !identity) return;
@@ -513,24 +588,46 @@ async function renewAddresses() {
       const card = job.card;
       if (!card || key !== card.key || !address.verify(sodium, key, card.sig, card.phrase)) continue;
       const current = () => publications()[key] === job;
+      const say = (status) => { if (current()) { job.status = status; updatePublication(key, job); } };
       if (!current()) continue;
       job.next = Date.now() + 4 * 60 * 60 * 1000;
       updatePublication(key, job);
-      const found = await address.find(nodeCmd, sodium, card.phrase, 1000);
+      let found;
+      try { found = await address.find(nodeCmd, sodium, card.phrase, address.FRESH); }
+      catch (e) { say(String((e && e.message) || e)); continue; }
       if (!current()) continue;
-      if (found) { if (found.key === key) { job.pending = false; updatePublication(key, job); } continue; }
-      if (job.pending) continue;
+      if (found) { if (found.key === key) { job.pending = false; say(FRESH_STATUS); } else say("Address conflict"); continue; }
+      if (job.pending) { say(PENDING_STATUS); continue; }
       const state = { 0: address.tag(card.phrase), 1: key, 2: "0x" + card.sig };
       const command = "send amount:" + MSG_AMOUNT + " address:" + address.ADDRESS + " tokenid:0x00 state:" + JSON.stringify(state);
       const pinned = await pinMinimaSend(nodeCmd, command, { minCoinage: MAIL_MIN_COINAGE });
-      if (!current() || !pinned.includes(" fromaddress:")) continue;
+      if (!current()) continue;
+      if (!pinned.includes(" fromaddress:")) { say("No suitable signing coin"); continue; }
       job.pending = true; updatePublication(key, job); // An unknown send outcome must survive a restart.
-      const reply = await nodeCmd(pinned);
+      let reply;
+      try { reply = await nodeCmd(pinned); } catch (e) { say(PENDING_STATUS); continue; }   // outcome unknown: never post twice
       if (current() && reply?.pending !== true && typeof reply?.status === "boolean") {
-        job.pending = false; updatePublication(key, job);
-      }
+        job.pending = false; say(reply.status ? "Beacon submitted to Core" : "Core rejected the beacon");
+      } else say(PENDING_STATUS);
     }
   } finally { renewing = false; }
+}
+/** The live check under "Your key" (MainActivity.showBeaconStatus): what this node sees for the address right now. */
+async function beaconStatus(key) {
+  if (!address.isKey(key)) throw new Error("Invalid Mail key");
+  key = key.toLowerCase();
+  const job = publications()[key];
+  let seen;
+  try { seen = await address.inspect(nodeCmd, await mc.ready(), address.phrase(key), address.DISCOVERY); }
+  catch (e) { return { state: "error", text: "Could not verify beacon: " + String((e && e.message) || e) }; }
+  if (seen.card && seen.card.key === key) return { state: "live", block: seen.block, text: seen.block > 0 ? "Beacon live · block " + seen.block : "Beacon live on this node" };
+  if (seen.card) return { state: "conflict", text: "Address conflict" };
+  if (job) {
+    let progress = job.status || "Publication scheduled";
+    if (progress === FRESH_STATUS) progress = "Waiting for renewal";
+    return { state: "waiting", text: "Beacon not yet visible · " + progress };
+  }
+  return { state: "off", text: "Publication off · no visible beacon" };
 }
 function resolvePayaddr(peer) { return store.metaGet("pa:" + peer) || ""; }         // a peer's known receiving address (or "")
 function myReceivingAddress() { return store.metaGet("mypayaddr") || mypayaddr || ""; }
@@ -555,7 +652,7 @@ function otherOf(m) { if (!m || !identity) return ""; return m.incoming ? m.from
 // to refresh an open thread; emitting unconditionally would re-trigger that handler forever (a self-feeding loop).
 function thread(hashref) { if (store.markThreadRead(hashref)) emitter.emit("update"); return store.thread(hashref); }
 function threadWith(peer, subject) { if (!identity) return []; const h = threadKey(identity.publicId, peer, subject || ""); if (store.markThreadRead(h)) emitter.emit("update"); return store.thread(h); }
-function contacts() { const jobs = publications(); return store.contacts().map(c => ({ ...c, published: !!jobs[c.publicId] })); }
+function contacts() { const jobs = publications(); return store.contacts().map(c => ({ ...c, published: !!jobs[String(c.publicId).toLowerCase()] })); }
 async function addContact(share, name) {
   const parts = String(share || "").split("|");
   const id = await resolveRecipient(share);
@@ -572,7 +669,11 @@ function renameContact(peer, name) {
   emitter.emit("update");
   return { publicId: peer };
 }
-function removeContact(peer) { if (peer !== identity?.publicId && publications()[peer]) updatePublication(peer, null); store.removeContact(peer); emitter.emit("update"); return true; }
+function removeContact(peer) {
+  const key = String(peer).toLowerCase();
+  if (key !== identity?.publicId.toLowerCase()) { if (publications()[key]) updatePublication(key, null); if (store.metaGet("card:" + key)) store.metaSet("card:" + key, ""); }
+  store.removeContact(peer); emitter.emit("update"); return true;
+}
 function deleteThread(hashref) { store.deleteThread(hashref); emitter.emit("update"); return true; }
 function archivedThreads() { return store.archivedThreads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
 function setArchived(hashref, on) { store.setArchived(hashref, !!on); emitter.emit("update"); return true; }
@@ -637,9 +738,9 @@ async function importBackup(passphrase, json) {
 module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   startBackfill, backfillStatus, status, outbox, sent, retrySend,
   sendMessage, pay, requestPayaddr, resolvePayaddr, myReceivingAddress, looksLikeMinimaAddress,
-  myIdentity, shareString, resolveRecipient, setPublication, setName, threads, thread, threadWith, contacts, addContact,
+  myIdentity, shareString, resolveRecipient, setPublication, beaconStatus, phrases, setTheme, payOptions, _payOptionsFrom: payOptionsFrom, MXUSD, setName, threads, thread, threadWith, contacts, addContact,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
-  _setRunner, CHAINMAIL, threadKey,
+  _setRunner, _renewAddresses: renewAddresses, CHAINMAIL, threadKey,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)
   _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget,
   _limits: { POLL_DEPTH, WINDOW_DEPTH, MIN_DEPTH, BACKFILL_CHUNK, GAP_MARGIN } };

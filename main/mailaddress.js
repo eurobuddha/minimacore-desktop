@@ -42,21 +42,39 @@ function verify(sodium, key, sig, address) {
   return isKey(key) && typeof sig === "string" && /^[0-9a-f]{128}$/i.test(sig) && phrase(key) === address
     && sodium.crypto_sign_verify_detached(Buffer.from(sig, "hex"), tagged("minima-mail-card-v1", key), Buffer.from(key.slice(66), "hex"));
 }
-async function find(run, sodium, address, depth) {
+/** MailBeacon.inspect: the one valid card for these words in the window, and the newest block a matching beacon was created in. */
+async function inspect(run, sodium, address, depth) {
   if (!address || normalize(address) !== address || ![1000, 1500].includes(depth)) throw new Error("Invalid Mail address");
   const t = tag(address);
   const reply = await run("coins address:" + ADDRESS + " tokenid:0x00 state:" + t + " simplestate:true order:desc depth:" + depth);
   if (reply?.status !== true || !Array.isArray(reply.response)) throw new Error("Could not read Mail address beacons.");
-  let found = null;
+  let found = null, block = 0;
   for (const coin of reply.response) {
     const state = coin?.state;
     if (String(coin?.address).toUpperCase() !== ADDRESS.toUpperCase() || String(coin.tokenid).toLowerCase() !== "0x00" ||
         String(state?.[0]).toUpperCase() !== t.toUpperCase() || typeof state[2] !== "string" || !/^0x/i.test(state[2])) continue;
     const sig = state[2].slice(2), key = state[1];
     if (!verify(sodium, key, sig, address)) continue;
-    if (found && found.key !== key.toLowerCase()) throw new Error("Multiple keys match. Ask for a contact link.");
+    if (found && found.key !== key.toLowerCase()) throw new Error("Multiple keys match this address. Ask for a contact link.");
     found = { key: key.toLowerCase(), sig: sig.toLowerCase(), phrase: address };
+    const created = /^\d{1,15}$/.test(String(coin.created)) ? Number(coin.created) : 0;   // Java optLong("created", 0)
+    block = Math.max(block, created);
   }
-  return found;
+  return { card: found, block };
 }
-module.exports = { words, phrase, normalize, link, direct, tag, card, verify, find, isKey, ADDRESS };
+async function find(run, sodium, address, depth) { return (await inspect(run, sodium, address, depth)).card; }
+/** MailAddress.canonicalKey: a Mail key with or without 0x, lower case; null for anything else. */
+function canonicalKey(value) {
+  if (typeof value !== "string" || !/^(?:0x)?[a-f0-9]{128}$/i.test(value)) return null;
+  return (value.length === 128 ? "0x" + value : value).toLowerCase();
+}
+/** MailAddress.display: the six words of a key; anything that is not a key is shown as it is. */
+function display(value) { const key = canonicalKey(value); return key === null ? value : phrase(key); }
+/** MailAddress.lookupReady: is this worth a lookup yet (a key, a link, or six list words). */
+function lookupReady(input) {
+  input = String(input || "");
+  const bar = input.indexOf("|");
+  return canonicalKey(bar < 0 ? input : input.slice(0, bar).trim()) !== null || input.includes("minimamail:") || normalize(input) !== null;
+}
+module.exports = { words, phrase, normalize, link, direct, tag, card, verify, find, inspect, canonicalKey, display, lookupReady, isKey, ADDRESS,
+  FRESH: 1000, DISCOVERY: 1500 };

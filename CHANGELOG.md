@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.148] — Mail, the main process up to the phone's 0.5.28: your address published by default, the live beacon check, six words resolved the phone's way, payments in Minima and MxUSD only
+
+- **Why**: the desktop Mail was at parity with the phone's Minima Mail 0.5.8. The phone is at 0.5.28 (and in Pandamonium 2.2.53). This is the main-process half of catching up; the screens follow.
+- **Your address is published by default** (phone 0.5.22). The first time Mail opens, the signed card of your own six-word address is put on the renewal list, as the phone does. "Stop publishing address" is remembered and never undone by the app. Each post is one nano-Minima and one signing operation, at most once every four hours and only when the node no longer shows the beacon.
+- **The live beacon check gives its block** (0.5.23): `mcd:mailBeaconStatus` reads the address's beacons from the node (the 1,500-block discovery window) and answers "Beacon live · block N", "Beacon live on this node", "Beacon not yet visible · …", "Address conflict", "Publication off · no visible beacon" or "Could not verify beacon: …", in the phone's words. A renewal now records its outcome (visible, submitted, rejected, no suitable signing coin, awaiting approval).
+- **Six words resolve as on the phone** (0.5.20, 0.5.24): a Mail key (with or without 0x, with an optional `|address`), a contact link, or six words. Words are matched against every key this store knows (contacts, both parties of every message, your own) before the node is asked; a verified card found on the node is kept so the contact can be relayed later. The refusals are the phone's sentences.
+- **Send funds: Minima and MxUSD only** (0.5.26, 0.5.27). `mcd:mailPayOptions` answers the two currencies with the node's sendable balance; MxUSD is the token id `0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90` and nothing else (a token merely named MxUSD is ignored). A payment in any other token is refused before the node is asked. The `send` command is built exactly as before. The receipt message now goes into the thread the payment was made from (its subject), as on the phone; it used to land in the subject-less thread.
+- **Mail's theme is its own** (Paper unless you choose Dark), kept in the store as on the phone; `mcd:mailSetTheme`. The screens use it from the next version.
+- **Store**: `mail.json` gains meta keys only (`theme`, `card:<key>`, `mail-address-off:<key>`, a `status` on each publication) and a `rev: 2` marker. Before this version writes anything, the file as the older version left it is copied to `mail.json.before-0.18.148`, once. No message, contact or existing key is changed.
+- **Tests**: `scripts/mail-address-test.cjs` (10, in `npm run test:mail`) runs the main process on a store in a temp folder with a recorded node: the identity and words from the phone's `PublicAddressTest` vault vector, the signed card, the link rules, the currency picker vector, and `MailBeaconTest`'s rule that a renewal posts only after a successful, empty lookup with a signable coin (and its creation block).
+- Not proven here: anything on a node. See the checklist in `docs/PANDAMONIUM_DESKTOP_PLAN.md`.
+
 ## [0.18.147] — Coin reservation, review of 0.18.143: a posted coin survives its owner's own retry, and the file is opened again when the node was not ready
 
 - **Found in review**: when an engine named a coin it had already POSTED in one transaction for a second one (its own retry) and then deleted the second, the coin was released although the posted transaction could still spend it. The posted record now stays; only a coin still being built moves to the new transaction.
