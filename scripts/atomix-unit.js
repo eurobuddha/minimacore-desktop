@@ -268,6 +268,32 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.ok(/authentication/.test(r.error));
     });
 
+    await okA("a maker step that times out aborts the signal its publish sends carry (a queued send is then never signed)", async () => {
+      // makerPublish / makerSave / makerWithdraw / switchCurrency give up after 60 s, but the engine's send can still
+      // be QUEUED behind another signer and would sign later; a retry would sign twice. main/noderun.js drops a
+      // queued entry whose signal is aborted (scripts/rpc-test.cjs). This proves the glue hands it that signal.
+      const got = [];
+      atomix._setRunner((cmd, opts) => {
+        if (/^coins /.test(cmd)) return Promise.resolve({ response: [{ amount: "5", address: BIG }] });
+        if (/^checkaddress /.test(cmd)) return Promise.resolve({ response: { simple: true } });
+        if (/^send /.test(cmd)) { got.push(opts && opts.signal); return new Promise(() => {}); }   // queued behind a stuck signer
+        return Promise.resolve({ status: true });
+      });
+      const mds = atomix._buildMds();
+      const step = atomix._makerStep(() => { mds.cmd(PUB, () => {}); return new Promise(() => {}); }, "publish", 80);
+      await new Promise(r => setTimeout(r, 30));
+      assert.equal(got.length, 1, "the publish send reached the runner");
+      assert.ok(got[0] && got[0].aborted === false, "it carries the step's signal, not yet aborted");
+      await assert.rejects(step, /publish timed out/);
+      assert.equal(got[0].aborted, true, "the timeout aborts it");
+      mds.cmd(PUB, () => {});   // the engine's own republish, outside any step
+      await new Promise(r => setTimeout(r, 30));
+      assert.equal(got.length, 2); assert.equal(got[1], undefined, "a send outside a step carries no signal and is never dropped");
+      const src = fs.readFileSync(path.join(__dirname, "..", "main/atomix.js"), "utf8");
+      assert.equal((src.match(/await makerStep\(/g) || []).length, 4, "publish (x2), withdraw and switch all run as steps");
+      assert.ok(!/withTimeout\([^\n]*60000/.test(src), "none of them is left on a bare 60 s timeout");
+    });
+
     await okA("switchCurrency applies the switch itself instead of firing into the POLLING guard", async () => {
       // service.js's poll() returns early when a pass is in flight, and switchCurrency has just spent up to
       // 60s tombstoning — so a pass usually IS in flight and the MDS_TIMER_60SECONDS nudge was swallowed.

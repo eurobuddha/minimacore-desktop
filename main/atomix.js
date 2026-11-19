@@ -44,9 +44,9 @@ let initPromise = null;
 let pollTimer = null, minuteTimer = null, lastTip = null;
 let generation = 0;           // bumped on invalidate — a stale in-flight init from an old seed must not resurrect
 let dataDir = null;
-let runner = (cmd) => {
+let runner = (cmd, opts) => {   // opts.signal: see makerStep
   const config = require("./config"), node = require("./node-manager");
-  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, opts);
 };
 const LOG_RING = [];          // last engine log lines for the renderer/status
 const SCAN_EVERY_MS = 12000;
@@ -124,21 +124,22 @@ const AX_PUBLISH_MAX_PINS = 4;
  * Rather than surface that as a failure — which used to strand the maker until a node restart — try the
  * next signable address, then fall back to an unpinned send, and say which happened in the log.
  */
-async function publishSendWithRetry(command) {
+async function publishSendWithRetry(command, signal) {
+  const opts = signal ? { signal } : undefined;
   const tried = new Set();
   for (let attempt = 0; attempt < AX_PUBLISH_MAX_PINS; attempt++) {
     const pinned = await pinPublishSend(command, tried);
     if (pinned === command) break;                                   // nothing left to pin → unpinned below
     const m = /\bfromaddress:(0x[0-9A-Fa-f]+)/.exec(pinned);
     const addr = m ? m[1] : "";
-    const r = await runner(pinned);
+    const r = await runner(pinned, opts);
     if (!bareRefusal(r)) return r;                                   // success, pending, or a REAL error
     log("publish-send pin: node refused funding from " + addr + " (" + (r && r.message ? r.message : "no reason given")
         + ") — trying the next signable address");
     if (addr) tried.add(addr.toLowerCase());
   }
   log("publish-send pin: no pinned candidate accepted after " + tried.size + " — sending unpinned");
-  return runner(command);
+  return runner(command, opts);
 }
 
 function buildMds() {
@@ -155,7 +156,7 @@ function buildMds() {
       // undefined". That threw away the only clue (auth/timeout/bad-reply) and made a publish failure
       // undiagnosable from the UI. Carry the reason through as `error` instead.
       const failed = (e) => cb(toVm({ status: false, error: (e && e.message) ? e.message : String(e) }));
-      if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c).then(r => cb(toVm(normReply(r))), failed); return; }
+      if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c, makerOp && makerOp.signal).then(r => cb(toVm(normReply(r))), failed); return; }
       runner(c).then(r => cb(toVm(normReply(r))), failed);
     },
     sql(query, cb) {
@@ -269,6 +270,18 @@ function AX() { if (!ctx || !ctx.READY) throw new Error("AtomiX engine not boote
 function vmCtx() { return ctx.CTX; }
 function withTimeout(promise, ms, what) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(what + " timed out")), ms))]);
+}
+// Publish, withdraw and switch give up after 60 s, but the engine's `send` may then still be QUEUED behind another
+// signer (main/noderun.js) and would sign later, after the user was told it failed; a retry would then sign twice.
+// So each of them runs as a step with an abort signal. Every publish send issued while the step is open carries
+// that signal (the MDS shim, cmd), and a step that fails or times out aborts it: the queue drops such an entry
+// before it reaches the node. A send the node has already been given cannot be recalled.
+let makerOp = null;
+function makerStep(start, what, ms = 60000) {
+  const ac = new AbortController(); makerOp = ac;
+  return withTimeout(start(), ms, what)
+    .catch(e => { ac.abort(); throw e; })
+    .finally(() => { if (makerOp === ac) makerOp = null; });
 }
 function p(fn) { return new Promise((res, rej) => { try { fn((err, val) => err ? rej(err instanceof Error ? err : new Error(String(err))) : res(val)); } catch (e) { rej(e); } }); }
 function jclone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
@@ -672,7 +685,7 @@ async function makerSave(cfg, manual) {
   await p(cb => A.maker.saveConfig(jvm(cfg), jvm(manual), () => cb(null)));
   await p(cb => A.maker.refreshPeg(() => cb(null)));
   const avail = await makerAvail();
-  await withTimeout(p(cb => A.maker.publish(jvm(avail), e => cb(e))), 60000, "publish");
+  await makerStep(() => p(cb => A.maker.publish(jvm(avail), e => cb(e))), "publish");
   emitter.emit("update");
   return { ok: true };
 }
@@ -680,14 +693,14 @@ async function makerPublish() {
   const A = AX();
   await p(cb => A.maker.refreshPeg(() => cb(null)));
   const avail = await makerAvail();
-  await withTimeout(p(cb => A.maker.publish(jvm(avail), e => cb(e))), 60000, "publish");
+  await makerStep(() => p(cb => A.maker.publish(jvm(avail), e => cb(e))), "publish");
   emitter.emit("update");
   return { ok: true };
 }
 async function makerWithdraw() {
   const A = AX();
   const avail = await makerAvail();
-  await withTimeout(p(cb => A.maker.tombstone(jvm(avail), e => cb(e))), 60000, "withdraw");
+  await makerStep(() => p(cb => A.maker.tombstone(jvm(avail), e => cb(e))), "withdraw");
   emitter.emit("update");
   return { ok: true };
 }
@@ -701,7 +714,7 @@ async function switchCurrency(key) {
   if (key !== "minima" && key !== "mxusdt") throw new Error("bad currency");
   if (A.trading.active().key === key) return { ok: true };
   const avail = await makerAvail();
-  await withTimeout(p(cb => A.maker.onCurrencySwitch(jvm(avail), () => cb(null))), 60000, "switch");
+  await makerStep(() => p(cb => A.maker.onCurrencySwitch(jvm(avail), () => cb(null))), "switch");
   // OTC quiesces WITH the order side (native 0.1.16 / atomix-mds 0.1.16): the OTC board sentinel is
   // per-currency, so an offer armed by otcGoLive would re-advertise the LEAVING currency's sizes on the
   // ARRIVING currency's board. Disarm only — the old board's coin ages out, as it does in both peers.
@@ -1136,7 +1149,7 @@ module.exports = {
   _lastFailureNote: lastFailureNote,   // test-only: the Activity row's failure projection
   _projectRow: projectRow,             // test-only: the whole Activity row incl. the swap-status block
   _FUND_DURABLE_WRITE: FUND_DURABLE_WRITE,   // test-only: asserted against the SQL swapdb.js really emits
-  _publishSendWithRetry: publishSendWithRetry,
+  _publishSendWithRetry: publishSendWithRetry, _makerStep: makerStep,
   _ctx: () => ctx, _fire: fire,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,

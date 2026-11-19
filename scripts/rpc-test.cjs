@@ -66,3 +66,112 @@ test('signing commands are serialised process-wide; reads are not held behind th
     assert.deepEqual(seen.slice(2), ['txnsign id:a publickey:auto', 'txncreate id:b;txnsign id:b publickey:auto'], 'signers ran one at a time, in order');
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 });
+
+// ---- the signing queue (main/noderun.js), 0.18.75 ----
+const { createNodeRunner, SIGNING } = require('../main/noderun');
+const tick = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+test('the SIGNING pattern: every command that signs is queued, nothing else is', () => {
+  const q = createNodeRunner(async () => ({}));
+  const signs = [
+    'send amount:1 address:0x00', 'sendpoll action:add amount:1 address:0x00', 'sendsign file:a.txn',
+    'txnsign id:a publickey:auto', 'consolidate tokenid:0x00', 'tokencreate name:x amount:10', 'multisig action:sign id:a',
+    'sign publickey:0xAA data:0xBB', 'signfrom data:0xAA privatekey:0xBB keyuses:3', 'txnauto id:a amount:1 address:0x00 sign:true',
+    'txnpost id:a auto:true', 'txnpost id:a burn:0.1', '  SEND amount:1 address:0x00',
+    'txncreate id:b;txnsign id:b publickey:auto', 'txncreate id:c; txnpost id:c auto:true', 'balance;sign publickey:0xAA data:0xBB'
+  ];
+  const reads = [
+    'balance', 'coins relevant:true', 'txnpost id:a', 'txnpost id:a mine:true', 'sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0xCC keyuses:2',
+    'txncreate id:a', 'quit', 'block', 'keys', 'sendnosign amount:1 address:0x00', 'sendview file:a.txn', 'sendpost file:a.txn',
+    'signature', 'txnlist', 'txncreate id:a;txninput id:a coinid:0x01;txnpost id:a', 'verify publickey:0xAA data:0xBB signature:0xCC'
+  ];
+  for (const c of signs) assert.equal(q.signing(c), true, 'signs: ' + c);
+  for (const c of reads) assert.equal(q.signing(c), false, 'does not sign: ' + c);
+  assert.ok(SIGNING.test('sign data:0x01') && !SIGNING.test('signature'), 'the verb is matched whole');
+});
+
+test('a signer that timed out holds the queue until the node answers a read; the next signer never overlaps it', async () => {
+  const seen = []; let probes = 0; const warned = [];
+  const raw = async (c) => {
+    seen.push(c);
+    if (c === 'send amount:1 address:0x00') throw new Error('RPC timeout');           // the node is still signing it
+    if (c === 'block') { if (++probes < 3) throw new Error('RPC timeout'); return { status: true, response: { block: 7 } }; }
+    return { status: true };
+  };
+  const q = createNodeRunner(raw, { lost: (e) => /timeout|ECONNRESET|socket hang up/.test(e.message), pauseMs: 40, warn: (l) => warned.push(l) });
+  const first = q.run('send amount:1 address:0x00');
+  const second = q.run('txnsign id:a publickey:auto');
+  await assert.rejects(first, /RPC timeout/, 'the caller is told at once');
+  await tick(60);
+  assert.deepEqual(seen.filter(c => c !== 'block'), ['send amount:1 address:0x00'], 'the node has not answered yet: the next signer is still held');
+  await second;
+  assert.deepEqual(seen, ['send amount:1 address:0x00', 'block', 'block', 'block', 'txnsign id:a publickey:auto'], 'it ran only after `block` answered');
+  assert.equal(warned.length, 1, 'one log line for the hold');
+  assert.ok(!/amount:1/.test(warned[0]), 'which names the verb only, never the whole command');
+});
+
+test('a status:false reply and a clean rejection release the queue at once (no probe)', async () => {
+  const seen = [];
+  const raw = async (c) => { seen.push(c); if (/^send /.test(c)) return { status: false, message: 'Insufficient funds' }; if (/^sign /.test(c)) throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }); return { status: true }; };
+  const q = createNodeRunner(raw, { lost: (e) => e.code !== 'ECONNREFUSED', pauseMs: 5000 });
+  const a = q.run('send amount:1 address:0x00'), b = q.run('sign publickey:0xAA data:0xBB'), c = q.run('txnsign id:a publickey:auto');
+  assert.equal((await a).status, false); await assert.rejects(b, /ECONNREFUSED/); await c;
+  assert.deepEqual(seen, ['send amount:1 address:0x00', 'sign publickey:0xAA data:0xBB', 'txnsign id:a publickey:auto']);
+});
+
+test('a node that never answers again: the hold ends at its bound, loudly', async () => {
+  const seen = []; const warned = [];
+  const raw = async (c) => { seen.push(c); if (c === 'txnsign id:b publickey:auto') return { status: true }; throw new Error('RPC timeout'); };
+  const q = createNodeRunner(raw, { lost: () => true, pauseMs: 20, maxHoldMs: 70, warn: (l) => warned.push(l) });
+  await assert.rejects(q.run('txnsign id:a publickey:auto'));
+  await q.run('txnsign id:b publickey:auto');
+  assert.ok(seen.filter(c => c === 'block').length >= 2, 'it kept asking');
+  assert.equal(seen[seen.length - 1], 'txnsign id:b publickey:auto');
+  assert.match(warned[warned.length - 1], /RELEASED WITHOUT AN ANSWER/);
+});
+
+test('rpcCall: a dropped connection on a signer holds the queue until `block` answers', async () => {
+  const http = require('node:http');
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const cmd = decodeURIComponent(req.url.slice(1)); seen.push(cmd);
+    if (cmd.startsWith('send ')) { req.socket.destroy(); return; }
+    setTimeout(() => res.end(JSON.stringify({ status: true, command: cmd })), cmd === 'block' ? 80 : 0);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const quiet = console.error; console.error = () => {};
+  try {
+    const first = rpcCall(port, 's', 'send amount:1 address:0x00');
+    const second = rpcCall(port, 's', 'txnsign id:a publickey:auto');
+    await assert.rejects(first);
+    await second;
+    assert.deepEqual(seen, ['send amount:1 address:0x00', 'block', 'txnsign id:a publickey:auto']);
+  } finally { console.error = quiet; server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
+
+test('rpcCall: a queued signer whose caller gave up never reaches the node', async () => {
+  const http = require('node:http');
+  const seen = []; let releaseFirst;
+  const server = http.createServer((req, res) => {
+    const cmd = decodeURIComponent(req.url.slice(1)); seen.push(cmd);
+    const reply = () => res.end(JSON.stringify({ status: true, command: cmd }));
+    if (cmd.startsWith('send amount:1 ')) releaseFirst = reply; else reply();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const gaveUp = new AbortController(), patient = new AbortController();
+    const first = rpcCall(port, 's', 'send amount:1 address:0x00');
+    const dropped = rpcCall(port, 's', 'send amount:2 address:0x00', { signal: gaveUp.signal });
+    const kept = rpcCall(port, 's', 'send amount:3 address:0x00', { signal: patient.signal });
+    dropped.catch(() => {});
+    await tick(100);
+    gaveUp.abort();                    // the caller's own 60 s ran out while its send was still queued
+    releaseFirst();
+    await first;
+    await assert.rejects(dropped, (e) => e.dropped === true && /still queued when its caller gave up/.test(e.message));
+    await kept;
+    assert.deepEqual(seen, ['send amount:1 address:0x00', 'send amount:3 address:0x00'], 'the abandoned send was never sent; the queue moved on at once');
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});

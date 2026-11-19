@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.75] — signing queue: review fixes
+
+- `sign` and `signfrom` now wait in the signing queue, as do `txnauto` and a `txnpost` with `burn:` (the node signs a burn as its own transaction). The pattern was checked against the node's command sources. Left out on purpose: `sendfrom` (the Web Wallet reserves that key's uses before it signs), a plain `txnpost`, and the commands that only build or view a transaction.
+- A signing command that fails with a timeout or a dropped connection may still be running inside the node. The queue used to move on at once, so the next signer could overlap it. It now waits until the node answers a `block` read, asking again every 5 seconds for at most 10 minutes, then releases with a line in the log. A `status:false` reply, a refused connection and a failed login release at once, as before.
+- AtomiX publish, withdraw and currency switch give up after 60 seconds. Their `send` could still be waiting in the queue and would sign later, after the user had been told it failed; a retry then signed twice. A send that is still queued when its action gives up is now dropped and never reaches the node. A send the node has already been given cannot be recalled.
+- The comment in `main/rpc.js` said the RPC secret is read per call. It is the one the caller passed when the command was queued; the comment now says so.
+- Tests: `scripts/rpc-test.cjs` has a table of commands that must and must not be queued, the hold after a timeout and after a dropped connection, the bound on the hold, and the dropped queued entry. `scripts/atomix-unit.js` checks that the four maker actions hand their abort signal to the publish send.
+
 ## [0.18.74] — P2P Chance: bets are settled even after the old "Disable"
 
 - A wallet that pressed the old "Disable" after betting still has its bets on the chain, but the settle-only loop started only for an install whose saved setting was still on. Such a wallet's open offer stayed takeable, and a taken bet was never revealed, so the taker could claim the whole pot after the 1500-block timeout. Now, when the setting is off, the app looks at the covenant for this wallet's own bets once the node is running. The look is read-only (`coins` and `keys`). If it finds a bet, the settle-only loop starts and the Settings card appears. A failed look or an unreadable key list is repeated after a minute, and a clean "none" once an hour, because a node that is still syncing can show an empty covenant. A wallet with no bets still sends no casino write to the node.

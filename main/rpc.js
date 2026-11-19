@@ -74,14 +74,20 @@ function rawCall(port, secret, command) {
 // ONE signing queue per node (keyed by RPC port), under every caller. Minima signs with one-time Winternitz leaves:
 // two signing commands in flight at once can be handed the SAME leaf, which leaks that key. Each engine serialised
 // its own signing, but nothing serialised them against each other or against the wallet's own Send. Reads are not
-// queued. The secret is read per call, so a rotated secret is never captured by the queue.
+// queued. A queued command carries the secret its caller passed when it was enqueued (every caller passes
+// config.rpcSecret(), which does not change while a node runs).
 const runners = new Map();
 
-/** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
-function rpcCall(port, secret, command) {
+// After which failures the node may still be signing (noderun then holds the queue until `block` answers). Everything
+// except the two that prove it is not: nothing listening on the port, and a request the node turned away at the door.
+const lost = (e) => !(e && (e.code === "ECONNREFUSED" || /RPC authentication failed/.test(e.message)));
+
+/** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects).
+ *  opts.signal (AbortSignal): a SIGNING command still queued when it aborts is rejected and never reaches the node. */
+function rpcCall(port, secret, command, opts) {
   let r = runners.get(port);
-  if (!r) { r = createNodeRunner(null); runners.set(port, r); }
-  return r.run(command, (c) => rawCall(port, secret, c));
+  if (!r) { r = createNodeRunner(null, { lost }); runners.set(port, r); }
+  return r.run(command, (c) => rawCall(port, secret, c), opts);
 }
 
 module.exports = { rpcCall };

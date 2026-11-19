@@ -157,6 +157,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.72 | 1 | Node tab as the phone: NODE card (Status, Block, Block time, Connections, Incoming, Random peer), IDENTITY card (Key uses, Minima, App version), then the desktop controls and log |
 | 0.18.73 | 1 | Comparison round against the Fold captures: toolbar and tray title weight, MINIMA label baseline; preview captures refreshed |
 | 0.18.74 | 0 review | P2P Chance: a wallet with the setting off but bets on the chain is found by a read-only look and settled; the key cache only grows; the card says "settled" |
+| 0.18.75 | 0 review | Signing queue: `sign`, `signfrom`, `txnauto` and `txnpost burn:` queued; a signer lost to a timeout holds the queue until `block` answers; a queued AtomiX publish send is dropped once its action has given up |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";
