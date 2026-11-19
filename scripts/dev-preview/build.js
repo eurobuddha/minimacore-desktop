@@ -53,6 +53,8 @@ if (process.argv.includes("--shots")) {
     ["mode-params", "fr=params&block=1"], ["mode-restore", "fr=restore&block=1&scroll=330"], ["mode-restore-picked", "fr=restore&block=1&scroll=330&pick=classic"],
     ["mode-restore-1440x900", "fr=restore&block=1&scroll=330&pick=block", 1440, 900, 1], ["mode-rebuild", "view=backup&tray=0&bk=keys&block=1&scroll=520"],
     ["mode-tray-block", "view=node&tray=1&block=1&mode=block"], ["mode-refused", "view=node&tray=0&state=refused"],
+    ["settings", "view=settings&tray=0"], ["settings-scroll", "view=settings&tray=0&scroll=640"], ["settings-scroll2", "view=settings&tray=0&scroll=1400"],
+    ["settings-stopped", "view=settings&tray=0&state=stopped"], ["settings-1440x900", "view=settings&tray=0", 1440, 900, 1],
     ["apps", "view=apps&tray=0"], ["node", "view=node&tray=0"],
     ["tray", "view=node&tray=1"], ["overflow", "view=balances&tray=0&menu=1"], ["ethwallet", "view=ethwallet&tray=0"],
     ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],

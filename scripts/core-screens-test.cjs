@@ -299,3 +299,17 @@ test("Startup Params refuses -blockaskeyuses and -lowram; the tray line shows th
   k.paintKeyMode("block"); assert.equal(els.trayMode.textContent, "Block key uses · low-RAM node");
   k.paintKeyMode(undefined); assert.equal(els.trayMode.textContent, "Block key uses · low-RAM node", "a status without the mode changes nothing");
 });
+
+// ---- Settings (0.18.89) ----
+test("Settings holds the desktop's own items in the shell's style, and no second command box", () => {
+  const body = app.slice(app.indexOf("async function renderSettings()"), app.indexOf("function keysInfo("));
+  const titles = [...body.matchAll(/sec\("([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(titles, ["This computer", "Updates", "Node", "Signing keys", "Address key uses", "Signing keys", "Address labels", "History"]);
+  assert.ok(!/diagCmd|diagGo|diagOut|Diagnostics/.test(app), "the Diagnostics command box is gone: the Terminal is the one place to type a node command");
+  assert.ok(!/api\.cmd\(/.test(body), "Settings sends no free-text command");
+  assert.ok(!/vault|megammrsync|backup password/.test(body), "seed, resync and backup live in Backup & Recovery");
+  assert.ok(/class="switch switch--m2" role="switch" id="setAutostart"/.test(body) && body.includes("home-eyebrow") && body.includes("home-card"), "the phone's switch, eyebrow and card");
+  assert.ok(!/if \(!running\) \{ host\.innerHTML = waitHtml\(\); return; \}/.test(body), "updates and open at login do not wait for the node");
+  for (const id of ["updCard", "updCheck", "updGet", "setKindApply", "setHeap", "kuAudit", "setClearHist", "chanceLeft"]) assert.ok(body.includes(id), id + " kept");
+  assert.ok(!/—/.test(body.slice(0, body.indexOf("const drawUpdate"))), "no em dash in the Settings text");
+});

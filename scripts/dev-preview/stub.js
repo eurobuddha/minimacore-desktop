@@ -107,7 +107,7 @@
     // key mode: ?block=1 = a node that can run block keys; &mode=block|classic = the wallet's recorded mode
     keyMode: async () => ({ mode: Q.get("mode") || (Q.get("fr") ? "" : "classic"), supported: Q.get("block") === "1" }),
     recordKeyMode: async (m) => m,
-    getConfig: async () => ({ setupDone: !Q.get("fr"), walletDone: !Q.get("fr"), megammrHost: "megammr.example:9001", contribute: false, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: {}, params: {}, heapMb: 0, openAtLogin: false, walletMode: "new" }),
+    getConfig: async () => ({ setupDone: !Q.get("fr"), walletDone: !Q.get("fr"), megammrHost: "megammr.example:9001", contribute: false, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: Q.get("view") === "settings" ? { [ADDR]: "Savings (fixture)" } : {}, params: {}, heapMb: 0, openAtLogin: false, walletMode: "new" }),
     saveConfig: async (p) => Object.assign(await fixtures.getConfig(), p),
     nodeStatus: async () => status, nodeStart: async () => status, nodeStop: async () => status, nodeRestart: async () => status,
     nodeLogs: async () => ["Minima @ 19/11/2026 13:54:04 [88.7 MB] : Connected to the blockchain", "Minima @ 19/11/2026 13:54:31 [76.1 MB] : Block 2428089 received"],

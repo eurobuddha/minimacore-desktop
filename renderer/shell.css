@@ -471,3 +471,21 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .modeq .opt { width: 100%; text-align: left; background: none; font-family: var(--sans); color: var(--text); padding: 12px 14px; margin: 0 0 8px; cursor: pointer; }
 .modeq .opt b { font-weight: 600; font-size: 15px; } .modeq .opt span { font-size: 13px; }
 .modeq .opt.sel { border-color: var(--orange); background: var(--surface2); }
+/* ---------------------------------------------------------------- Settings: the Node tab's eyebrow and card, the phone's switch and buttons */
+#view-settings { padding: 16px 16px 40px; }
+#settingsBody > .home-eyebrow:first-child { margin-top: 0; }
+.set-card { margin: 0; }
+.set-text { margin: 0 0 10px; font: 400 15px/21px var(--sans); color: var(--dim); }
+.set-text b { color: var(--text); font-weight: 600; }
+.set-sw { margin-top: 0; }
+.set-card .ps-note { margin-top: 2px; }
+.set-actions { margin-top: 12px; padding-bottom: 0; }
+.set-card > .set-actions:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.set-radio { display: flex; align-items: flex-start; gap: 10px; min-height: 36px; padding: 6px 0; font: 400 15px/21px var(--sans); color: var(--text); cursor: pointer; }
+.set-radio input { margin-top: 4px; accent-color: var(--orange); }
+.set-label { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.set-label:first-child { border-top: 0; padding-top: 0; }
+.set-label__t { flex: 1 1 0; min-width: 0; }
+.set-label__t b { display: block; font: 600 15px/20px var(--sans); color: var(--text); }
+.set-label__t span { display: block; font: 400 12.5px/1.3 var(--mono); color: var(--dim); overflow-wrap: anywhere; user-select: text; }
+.set-card .status:empty { display: none; }

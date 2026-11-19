@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.89] — Settings: restyled, and the second command box removed
+
+- Settings is laid out like the Node tab: a small heading and a card for each of This computer, Updates, Node, Signing keys, Address key uses, Address labels and History. Open at login is a switch.
+- The Diagnostics card is removed. It was a second box for typing node commands; the Terminal is the one place for that.
+- Updates, Open at login and the node choice no longer wait for the node to be running. The two key sections say "The node is stopped." while it is.
+- An address label shows its whole address.
+- Seed, resync and backup left Settings in 0.18.86 (Backup & Recovery); node settings are in Startup Params.
+- The app is named "Minima Core" in the Settings text, as in the title bar.
+- Dev preview: `?view=settings`.
+
 ## [0.18.88] — Key mode: recorded once, never switched, and nothing visible until the node supports it
 
 Nothing changes for any wallet today. The node jars this build ships cannot run block-as-key-uses, so every wallet is classic and no new control appears. This release puts the rules in place for the day the jars can (see `docs/JAR_PROOF.md`).

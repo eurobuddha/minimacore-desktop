@@ -2630,67 +2630,53 @@ async function renderFaucet() {
     btn.disabled = false; btn.textContent = "Request Minima";
   };
 }
+// Settings: what is the desktop's own and has no screen on the phone (open at login, updates, which node, the
+// key-use audit, address labels, the history store). Laid out with the shell's own pieces: the phone's
+// eyebrow-and-card of the Node tab. Node commands are typed in the Terminal; there is no second command box here.
 async function renderSettings() {
   const host = el("settingsBody");
-  if (!running) { host.innerHTML = waitHtml(); return; }
-  const [keys, scripts] = await Promise.all([tryCmd("keys action:list"), tryCmd("scripts")]);
+  const [keys, scripts] = running ? await Promise.all([tryCmd("keys action:list"), tryCmd("scripts")]) : [null, null];
   const ku = keysInfo(keys);
   const kuRows = keyUsesRows(keys, scripts);
   const pct = ku.cap ? Math.min(100, Math.round(ku.used / ku.cap * 100)) : 0;
   const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
   const kind = CFG.nodeKind === "minima" ? "minima" : "parlons";
-  host.innerHTML = `
-    <div class="card"><div class="card__title">Node</div>
-      <div class="view__desc">${kind === "parlons"
+  const sec = (title, body, id) => `<div class="eyebrow home-eyebrow">${title}</div><div class="card home-card set-card"${id ? ` id="${id}"` : ""}>${body}</div>`;
+  host.innerHTML =
+    sec("This computer", `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setAutostartL">Open at login</span><button class="switch switch--m2" role="switch" id="setAutostart" aria-checked="${CFG.openAtLogin ? "true" : "false"}" aria-labelledby="setAutostartL"></button></div>
+      <p class="ps-note">Start Minima Core, and so your node, when you log in to this computer. It opens to the tray on Mac. Uses the login items on Mac and Windows and the autostart folder on Linux.</p>`) +
+    sec("Updates", `<p class="set-text">Minima Core checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.</p>
+      <p class="set-text" id="updBody">Checking…</p>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="updCheck">Check now</button><button class="btn btn--primary" id="updGet" hidden>Download</button></div>
+      <div class="status" id="updStatus"></div>`, "updCard") +
+    sec("Node", `<p class="set-text">${kind === "parlons"
         ? "This is the <b>Parlons Node</b>: a full Minima node plus your Parlons account (chat, calls, payments) under this node's seed, and a Maxima relay when you contribute. Parlons, in the app tray, is your account."
-        : "This is the <b>plain Minima node</b>. The Parlons Node is the same node plus your Parlons account under this seed — same chain, same wallet, same data folder."}</div>
-      <label class="prow"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span class="prow__l">Parlons Node — node + your Parlons account (recommended)</span></label>
-      <label class="prow"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span class="prow__l">Plain Minima node — no Parlons account</span></label>
-      <div class="field"><div class="field__label">Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)</div><input class="field__input" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" /></div>
-      <button class="btn btn--outline btn--full" id="setKindApply">Apply and restart the node</button>
-      <div class="status" id="setKindStatus"></div>
-    </div>
-    <div class="card" id="updCard"><div class="card__title">Updates</div>
-      <div class="view__desc">minimaCore checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.</div>
-      <div id="updBody" class="view__desc">Checking…</div>
-      <div class="seg"><button class="btn btn--sm btn--outline" id="updCheck">Check now</button><button class="btn btn--sm btn--primary" id="updGet" hidden>Download</button></div>
-      <div class="status" id="updStatus"></div>
-    </div>
-    <div class="card"><div class="card__title">Signing keys (WOTS safety)</div>
-      <div class="view__desc">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically — this shows your headroom.</div>
+        : "This is the <b>plain Minima node</b>. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder."}</p>
+      <label class="set-radio"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span>Parlons Node: the node and your Parlons account (recommended)</span></label>
+      <label class="set-radio"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span>Plain Minima node: no Parlons account</span></label>
+      <div class="eyebrow ps-label">Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)</div><input class="field__input ps-field" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" />
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="setKindApply">Apply and restart the node</button></div>
+      <div class="status" id="setKindStatus"></div>`) +
+    (running ? sec("Signing keys", `<p class="set-text">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.</p>
       <div class="health"><div class="health__row"><span>Most-used key</span><span>${esc(ku.used)} / ${esc(ku.cap)} sigs${ku.count ? " · " + ku.count + " keys" : ""}</span></div>
         <div class="health__track"><div class="health__fill${warn ? " health__fill--warn" : ""}" style="width:${pct}%"></div></div></div>
-      ${warn ? `<div class="status status--warn">⚠ A signing key is ${pct}% used — generate fresh keys or restore with the correct key-uses before it exhausts.</div>` : ""}
-    </div>
-    <div class="card"><div class="card__title">Address key-uses</div>
-      <div class="view__desc">Every signing key can sign up to 262,144 times before it exhausts, and a one-time key that signs the same leaf twice is unsafe. This lists each key's address and how many signatures it has used. "Deep reuse audit" cross-checks the chain via your KeyUses service — the node's own counter can under-report.</div>
-      <div id="kuList" class="ku-list">${kuRows.length ? kuRows.map(kuRowHtml).join("") : `<div class="view__desc">No keys reported.</div>`}</div>
-      <button class="btn btn--outline btn--full" id="kuAudit" style="margin-top:10px">Deep reuse audit</button>
+      ${warn ? `<div class="status status--warn">⚠ A signing key is ${pct}% used. Generate fresh keys or restore with the correct key uses before it exhausts.</div>` : ""}`) +
+    sec("Address key uses", `<p class="set-text">This lists each key's address and how many signatures it has used; a one-time key that signs the same leaf twice is unsafe. "Deep reuse audit" cross-checks the chain through your KeyUses service, because the node's own counter can under-report.</p>
+      <div id="kuList" class="ku-list">${kuRows.length ? kuRows.map(kuRowHtml).join("") : `<p class="set-text">No keys reported.</p>`}</div>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="kuAudit">Deep reuse audit</button></div>
       <div class="status" id="kuAuditStatus"></div>
-      <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse — automatically when you open this panel, and when you tap the button. Nothing else leaves your node.</div>
-    </div>
-    <div class="card"><div class="card__title">Address labels</div>
-      ${labelKeys.length ? labelKeys.map(a => `<div class="kv"><span class="kv__k" style="word-break:break-all">${esc(labels[a])} <span style="color:var(--dim2);font-size:11px">${esc(short(a, 24))}</span></span><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("") : `<div class="view__desc">No labels yet. Name an address on the Receive screen.</div>`}
-    </div>
-    <div class="card"><div class="card__title">History</div>
-      <div class="view__desc">Your transaction history is stored locally (the node prunes old data). Clear it if you switch wallets.</div>
-      <button class="btn btn--outline btn--full" id="setClearHist">Clear local history</button>
-    </div>
-    <div class="card"><div class="card__title">Diagnostics</div>
-      <div class="field"><input class="field__input" id="diagCmd" placeholder="a node command, e.g. status" /></div>
-      <button class="btn btn--sm btn--outline" id="diagGo">Run</button>
-      <pre class="logbox" id="diagOut"></pre>
-    </div>
-    <div class="card"><div class="card__title">Open at login</div>
-      <div class="view__desc">Start minimaCore — and so your node — when you log in to this computer. It opens to the tray on Mac. Uses the OS login items on Mac and Windows and the autostart folder on Linux.</div>
-      <button class="btn btn--outline btn--full" id="setAutostart">${CFG.openAtLogin ? "Stop opening at login" : "Open at login"}</button>
-    </div>
-    <div id="chanceLeft"></div>`;
+      <p class="ps-note">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse: when you open this screen, and when you press the button. Nothing else leaves your node.</p>`)
+      : sec("Signing keys", `<p class="set-text">${nodeState === "stopped" ? "The node is stopped." : "Waiting for the node…"}</p>`)) +
+    sec("Address labels", labelKeys.length ? labelKeys.map(a => `<div class="set-label"><div class="set-label__t"><b>${esc(labels[a])}</b><span>${esc(a)}</span></div><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("")
+      : `<p class="set-text">No labels yet. Name an address on the Receive screen.</p>`) +
+    sec("History", `<p class="set-text">Your transaction history is stored on this computer (the node prunes old data). Clear it if you switch wallets.</p>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="setClearHist">Clear local history</button></div>`) +
+    `<div id="chanceLeft"></div>`;
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
     if (u.error && !u.available) b.textContent = "Could not read the feed (" + u.error + "). Running v" + u.running + ".";
-    else if (u.available) b.innerHTML = "<b>minimaCore " + esc(u.version) + "</b> is available (you run v" + esc(u.running) + ")" + (u.date ? " · " + esc(u.date) : "") + (u.notes ? "<br>" + esc(u.notes) : "") + (u.downloaded ? "<br>Downloaded to " + esc(u.downloaded) : "");
+    else if (u.available) b.innerHTML = "<b>Minima Core " + esc(u.version) + "</b> is available (you run v" + esc(u.running) + ")" + (u.date ? " · " + esc(u.date) : "") + (u.notes ? "<br>" + esc(u.notes) : "") + (u.downloaded ? "<br>Downloaded to " + esc(u.downloaded) : "");
     else b.textContent = "You run the newest build, v" + u.running + (u.checkedAt ? " (checked " + new Date(u.checkedAt).toLocaleTimeString() + ")" : "") + ".";
     g.hidden = !u.available;
   };
@@ -2721,13 +2707,12 @@ async function renderSettings() {
     CFG = await api.saveConfig({ labels: nl }); toast("Label removed", "ok"); renderSettings();
   });
   el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
-  el("diagGo").onclick = async () => { const c = el("diagCmd").value.trim(); if (!c) return; try { const r = await api.cmd(c); el("diagOut").textContent = JSON.stringify(r, null, 2); } catch (e) { el("diagOut").textContent = e.message; } };
   el("setAutostart").onclick = async () => {
     const on = !CFG.openAtLogin;
     CFG = await api.saveConfig({ openAtLogin: on });
     const li = CFG.loginItem || {};
     if (li.ok === false) toast((on ? "Saved, but not registered: " : "Saved, but could not unregister: ") + (li.note || "unknown error"), "warn");
-    else toast(on ? "minimaCore will open when you log in ✓" : "minimaCore will no longer open at login", "ok");
+    else toast(on ? "Minima Core will open when you log in ✓" : "Minima Core will no longer open at login", "ok");
     renderSettings();
   };
   chanceLeftCard();
@@ -2791,7 +2776,7 @@ async function runKeyAudit(force) {
   if (!audit || !audit.keys) {
     KU_AUDIT_AT = 0;   // transient failure → let the next panel-open retry instead of blocking for the whole window
     status.className = "status status--warn";
-    status.textContent = "⚠ Reuse audit unavailable (KeyUses service unreachable) — showing local key-use counts only. Try again later.";
+    status.textContent = "⚠ Reuse audit unavailable (KeyUses service unreachable). Showing local key-use counts only. Try again later.";
     return;
   }
   const byPk = {}; audit.keys.forEach(u => { if (u && u.publickey) byPk[String(u.publickey).toUpperCase()] = u; });
