@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.72] — Node tab laid out as Pandamonium's
+
+- The Node tab is the phone's: a NODE card (Status with its dot, Block, Block time, Connections, Incoming, Random peer) and an IDENTITY card (Key uses as the large figure, Minima version, App version). Key uses, the random peer and the incoming count come from the same three read-only commands the phone uses (`keys`, `peers`, `network`), at most every 30 seconds while the tab is showing.
+- Everything the old Node card did is kept under "This computer": Role, Network help and the port-forward instructions, Public address, Network, RPC port, the error and port-owner lines, and the Restart, "Stop any node on port N and start", Contribute and Reconfigure buttons, then the log. The Restart button reads "Start node" after a Shutdown.
+
 ## [0.18.71] — Apps tab: Hide
 
 - The Apps tab is the phone's Internal list: one row per integrated app with its icon, its state ("Always on", "In app drawer", "Hidden from drawer") and a Hide switch. Hiding an app takes its row out of the tray until it is switched back; the app keeps running, and a hidden app's unread count no longer lights the dot on the tray button. The choice is saved.

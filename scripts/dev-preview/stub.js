@@ -29,6 +29,7 @@
     keys: () => keys,
     scripts: () => [],
     peers: () => ({ peerslist: "203.0.113.24:9001,198.51.100.77:9001" }),
+    network: () => ({ details: { connected: 8, p2p: { address: "192.0.2.10:9001" } }, connections: [1, 2, 3, 4, 5, 6].map(i => ({ incoming: true, host: "203.0.113." + i })).concat([{ incoming: false, host: "198.51.100.77" }, { incoming: false, host: "198.51.100.78" }]) }),
     status: () => ({ version: "1.0.45.14", chain: { block: 2428089, time: new Date(now - 41000).toString() } })
   };
   const mailId = PK("E5");

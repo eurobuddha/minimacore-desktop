@@ -7,6 +7,9 @@
    PandamoniumHooks.java (the tray), view_wallet_balance.xml, view_balance_row.xml,
    view_apps_internal_row.xml, view_home.xml. 1 dp = 1 CSS px.
 
+   Letter spacing: the phone's Body text inherits Material 3's .03em and its Caption
+   text .018em; they are part of how it looks, so they are set here too.
+
    Weights: the phone's TextAppearances ask for 600 to 800, but the app on the
    device draws body text, numerals, buttons and eyebrows at Manrope Regular.
    The phone wins, so those are 400 here. Tab labels are 600 on the phone too.
@@ -110,7 +113,7 @@
 /* ---------------------------------------------------------------- footer (activity_main main_footer) */
 .foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 9px 16px; background: var(--surface); border-top: 1px solid var(--border);
-  font-size: 13px; font-weight: 400; line-height: 20px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  font-size: 13px; font-weight: 400; line-height: 20px; letter-spacing: .018em; color: var(--dim); font-variant-numeric: tabular-nums; }
 .foot__l { display: flex; align-items: center; min-width: 0; }
 .foot__dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--dim2); }
 .foot__dot[data-state="running"] { background: var(--green); }
@@ -150,7 +153,7 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .menu__item--update { color: var(--orange); }
 
 /* ---------------------------------------------------------------- Wallet tab (view_wallet_balance) */
-.wal-head { padding: 20px 16px 0; font-size: 13px; font-weight: 400; line-height: 18px; color: var(--dim); }
+.wal-head { padding: 20px 16px 0; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim); }
 .wal-total { display: flex; align-items: flex-end; padding: 5px 16px 0; }
 .wal-total__n { flex: 1 1 auto; min-width: 0; font-size: 26px; font-weight: 400; line-height: 36px;
   color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; user-select: text; }
@@ -169,8 +172,8 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 #balList .tok-badge { border-color: var(--surface); background: var(--blue); }
 .balrow__main { flex: 1 1 0; min-width: 0; }
 .balrow__top { display: flex; align-items: flex-start; }
-.balrow__name { flex: 1 1 0; min-width: 0; margin-right: 10px; font-size: 15px; font-weight: 400; line-height: 20px; color: var(--text); overflow-wrap: anywhere; }
-.balrow__amt { flex: 1 1 0; min-width: 0; font-size: 15px; font-weight: 400; line-height: 20px; color: var(--text);
+.balrow__name { flex: 1 1 0; min-width: 0; margin-right: 10px; font-size: 15px; font-weight: 400; line-height: 20px; letter-spacing: .03em; color: var(--text); overflow-wrap: anywhere; }
+.balrow__amt { flex: 1 1 0; min-width: 0; font-size: 15px; font-weight: 400; line-height: 20px; letter-spacing: .03em; color: var(--text);
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #balList .bal-breakdown { margin-top: 3px; font: 400 11px/15px var(--sans); color: var(--dim2); white-space: pre-wrap; }
 #balList > .card:not(.balrow) { margin: 0 16px; }
@@ -181,14 +184,14 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 #balList .consolidate-btn { flex: 0 0 auto; margin-left: 12px; }
 
 /* ---------------------------------------------------------------- Apps tab (view_apps, view_apps_internal_row) */
-.apps-help { padding: 16px 16px 8px; font-size: 13px; font-weight: 400; line-height: 18px; color: var(--dim2); }
+.apps-help { padding: 16px 16px 8px; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim2); }
 .apps-row { display: flex; align-items: center; padding: 13px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .apps-row__ic { flex: 0 0 44px; width: 44px; height: 44px; padding: 6px; border-radius: 10px; background: var(--surface2); display: block; }
 svg.apps-row__ic { fill: #08090B; }
 .apps-row__ic img, img.apps-row__ic { object-fit: contain; }
 .apps-row__main { flex: 1 1 0; min-width: 0; margin-left: 13px; }
-.apps-row__name { font-size: 15px; font-weight: 400; line-height: 20px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.apps-row__state { margin-top: 1px; font-size: 13px; font-weight: 400; line-height: 18px; color: var(--dim2); }
+.apps-row__name { font-size: 15px; font-weight: 400; line-height: 20px; letter-spacing: .03em; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.apps-row__state { margin-top: 1px; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim2); }
 
 .apps-row__hide { flex: 0 0 auto; display: flex; align-items: center; margin-left: 10px; font-size: 13px; font-weight: 400; color: var(--dim); cursor: pointer; }
 .apps-row__hide span { margin-right: 6px; }
@@ -201,6 +204,26 @@ svg.apps-row__ic { fill: #08090B; }
 .switch[aria-checked="true"]::after { left: 22px; width: 24px; height: 24px; margin-top: -12px; background: #fff; }
 .switch:disabled { opacity: .38; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+
+/* ---------------------------------------------------------------- Node tab (view_home) */
+.home-eyebrow { margin: 20px 0 8px; line-height: 17px; }
+#nodeCard > .home-eyebrow:first-child { margin-top: 0; }
+.home-card { margin: 0; padding: 16px; }
+.home-row { display: flex; align-items: center; min-height: 61px; padding: 9px 0; gap: 12px; border-top: 1px solid var(--border); font-size: 15px; letter-spacing: .03em; }
+.home-card > .home-row:first-child { border-top: 0; min-height: 60px; }
+.home-row__k { flex: 1 1 0; min-width: 0; font-weight: 400; color: var(--dim); }
+.home-row__v { flex: 0 1 auto; min-width: 0; text-align: right; font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; user-select: text; }
+.home-dot { flex: 0 0 8px; width: 8px; height: 8px; margin-right: -4px; border-radius: 50%; background: var(--dim2); }
+.home-status { color: var(--dim2); }
+.home-row[data-state="running"] .home-dot { background: var(--green); }
+.home-row[data-state="running"] .home-status { color: var(--green); }
+.home-row[data-state="error"] .home-dot { background: var(--red); }
+.home-row[data-state="error"] .home-status { color: var(--red); }
+.home-cap { font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim); }
+.home-num { margin: 2px 0 14px; font-size: 34px; font-weight: 400; line-height: 44px; letter-spacing: -.025em; color: var(--text); font-variant-numeric: tabular-nums; user-select: text; }
+.home-actions { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0 4px; border-top: 1px solid var(--border); }
+.home-card .logbox { margin: 0; }
+.home-card .howto { margin: 0 0 12px; }
 
 /* ---------------------------------------------------------------- scrollbars follow the theme */
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }

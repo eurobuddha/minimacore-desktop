@@ -2513,6 +2513,26 @@ function forwardHowTo(pm) {
   </div>`;
 }
 
+// The phone's dashboard reads (HomeView.readDashboard): `keys` for the most-used key, `peers` for one peer
+// picked at random, `network` for the live connection and incoming counts. Read-only, at most every 30 s
+// while the Node tab is showing; the values are kept so a status push does not blank them.
+let NODE_DASH = {}, NODE_DASH_AT = 0;
+async function refreshNodeDash() {
+  if (Date.now() - NODE_DASH_AT < 30000) return;
+  NODE_DASH_AT = Date.now();
+  const [keys, peers, net] = await Promise.all([tryCmd("keys"), tryCmd("peers"), tryCmd("network")]);
+  const d = {};
+  const ku = maxKeyUses(keys); if (ku != null) d.keyuses = ku;
+  if (peers) { const list = String(peers.peerslist || "").split(",").filter(Boolean); d.peer = list.length ? list[Math.floor(Math.random() * list.length)] : "No peers"; }
+  if (net) {
+    const det = net.details || {}, self = String((det.p2p && det.p2p.address) || "").split(":")[0];
+    if (det.connected != null) d.connected = det.connected;
+    // incoming peers, minus a hairpinned dial back to this node's own address (same rule as the phone and main/node-manager.js)
+    if (Array.isArray(net.connections)) d.incoming = net.connections.filter(c => c && c.incoming === true && String(c.host || "") !== self).length;
+  }
+  NODE_DASH = Object.assign({}, NODE_DASH, d);
+  if (activeView === "node" && running) api.nodeStatus().then(renderNode);
+}
 function renderNode(s) {
   s = s || { state: "?", health: null };
   const c = el("nodeCard");
@@ -2525,36 +2545,58 @@ function renderNode(s) {
   const p2pIp = String(h.p2pAddress || "").split(":")[0];
   const showAddr = !!p2pIp && !isPrivateAddr(p2pIp);
   const addrOk = showAddr && !!pm.externalIp && p2pIp === pm.externalIp;
+  // Laid out as the phone's Node tab (view_home.xml): NODE, then IDENTITY. The desktop's own controls follow.
+  const up = s.state === "running";
+  const status = up ? "Online" : s.state === "starting" ? "Waiting for node" : s.state === "error" ? "Error" : s.state === "stopped" ? "Stopped" : s.state === "stopping" ? "Stopping" : String(s.state);
+  const when = h.time && !isNaN(new Date(h.time)) ? new Date(h.time).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "";
+  const D = up ? NODE_DASH : {};
+  const row = (k, v, extra) => `<div class="home-row"${extra || ""}><span class="home-row__k">${k}</span><span class="home-row__v">${v}</span></div>`;
   c.innerHTML = `
-    <div class="kv"><span class="kv__k">State</span><span class="kv__v">${esc(s.state)}</span></div>
-    <div class="kv"><span class="kv__k">Version</span><span class="kv__v">${esc(h.version || "—")}</span></div>
-    <div class="kv"><span class="kv__k">Block</span><span class="kv__v">${esc(h.block ?? "—")}</span></div>
-    <div class="kv"><span class="kv__k">Peers</span><span class="kv__v">${esc(h.connections ?? "—")}</span></div>
-    <div class="kv"><span class="kv__k">Role</span><span class="kv__v">${contributing ? "Contributing (server)" : "Light wallet"}</span></div>
-    ${help ? `<div class="kv"><span class="kv__k">Network help</span><span class="kv__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
-    ${help && help.howto ? forwardHowTo(pm) : ""}
-    ${contributing && showAddr ? `<div class="kv"><span class="kv__k">Public address</span><span class="kv__v">${esc(h.p2pAddress)}${addrOk ? " ✓" : ""}</span></div>` : ""}
-    <div class="kv"><span class="kv__k">Network</span><span class="kv__v">${esc(CFG.network)}</span></div>
-    <div class="kv"><span class="kv__k">RPC port</span><span class="kv__v">${esc(s.rpcPort || CFG.basePort + 4)}</span></div>
-    ${s.lastError ? `<div class="kv"><span class="kv__k">Error</span><span class="kv__v kv__v--red">${esc(s.lastError)}</span></div>` : ""}
-    ${s.portOwner ? `<div class="kv"><span class="kv__k">Port held by</span><span class="kv__v" style="word-break:break-all">pid ${esc(s.portOwner.pid)} · ${esc(s.portOwner.command)}</span></div>` : ""}
-    <div class="seg" style="margin-top:10px">
-      <button class="btn btn--sm btn--outline" id="nRestart">Restart node</button>
-      ${s.state === "error" ? `<button class="btn btn--sm btn--outline" id="nReclaim">Stop any node on port ${esc(CFG.basePort)} and start</button>` : ""}
+    <div class="eyebrow home-eyebrow">Node</div>
+    <div class="card home-card">
+      <div class="home-row" data-state="${esc(s.state)}"><i class="home-dot"></i><span class="home-row__k">Status</span><span class="home-row__v home-status">${esc(status)}</span></div>
+      ${row("Block", esc(up ? (h.block ?? "") : ""))}
+      ${row("Block time", esc(up ? when : ""))}
+      ${row("Connections", esc(up ? (D.connected ?? h.connections ?? "") : ""))}
+      ${row("Incoming", esc(D.incoming ?? ""))}
+      ${row("Random peer", esc(D.peer ?? ""))}
     </div>
-    ${CFG.network !== "solo" ? `<button class="btn btn--outline btn--full" id="nContrib" style="margin-top:8px">Contribute to the network: ${contributing ? "On — turn off" : "Off — turn on"}</button>` : ""}
-    <button class="btn btn--outline btn--full" id="nReconfig" style="margin-top:8px">Reconfigure node (network · new/restore · startup params)…</button>`;
+    <div class="eyebrow home-eyebrow">Identity</div>
+    <div class="card home-card">
+      <div class="home-cap">Key uses</div>
+      <div class="home-num">${esc(D.keyuses ?? (up ? "Connecting…" : ""))}</div>
+      ${row("Minima", esc(h.version || ""))}
+      ${row("App version", esc(APP_VERSION))}
+    </div>
+    <div class="eyebrow home-eyebrow">This computer</div>
+    <div class="card home-card">
+    ${row("Role", contributing ? "Contributing (server)" : "Light wallet")}
+    ${help ? `<div class="home-row"><span class="home-row__k">Network help</span><span class="home-row__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
+    ${help && help.howto ? forwardHowTo(pm) : ""}
+    ${contributing && showAddr ? row("Public address", esc(h.p2pAddress) + (addrOk ? " ✓" : "")) : ""}
+    ${row("Network", esc(CFG.network))}
+    ${row("RPC port", esc(s.rpcPort || CFG.basePort + 4))}
+    ${s.lastError ? `<div class="home-row"><span class="home-row__k">Error</span><span class="home-row__v" style="color:var(--red)">${esc(s.lastError)}</span></div>` : ""}
+    ${s.portOwner ? row("Port held by", "pid " + esc(s.portOwner.pid) + " · " + esc(s.portOwner.command)) : ""}
+    <div class="home-actions">
+      <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? "Start node" : "Restart node"}</button>
+      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">Stop any node on port ${esc(CFG.basePort)} and start</button>` : ""}
+      ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib">${contributing ? "Stop contributing to the network" : "Contribute to the network"}</button>` : ""}
+      <button class="btn btn--outline" id="nReconfig">Reconfigure node</button>
+    </div>
+    </div>`;
+  if (up) refreshNodeDash();
   const nContrib = el("nContrib");
   if (nContrib) nContrib.onclick = async () => {
     const turnOn = !contributing;
     const msg = turnOn
-      ? "Contribute to the network?\n\nYour node will accept incoming connections and help other nodes sync. This asks your router to open TCP " + CFG.basePort + " (UPnP), keeps ~50 days of block history (a one-time extra download), and restarts the node now.\n\nNot all routers allow this — if yours doesn't, you'll still help by relaying."
+      ? "Contribute to the network?\n\nYour node will accept incoming connections and help other nodes sync. This asks your router to open TCP " + CFG.basePort + " (UPnP), keeps ~50 days of block history (a one-time extra download), and restarts the node now.\n\nNot all routers allow this. If yours doesn't, you'll still help by relaying."
       : "Stop contributing?\n\nYour node goes back to a light wallet (outbound connections only), the router port is closed, and the node restarts now.";
     if (!await showConfirm(turnOn ? "Contribute to the network?" : "Stop contributing?",
         msg.slice(msg.indexOf("\n\n") + 2), turnOn ? "Contribute" : "Stop", !turnOn)) return;
     const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     CFG = await api.saveConfig({ contribute: turnOn, params });
-    toast(turnOn ? "Contributing — restarting node…" : "Back to light wallet — restarting node…");
+    toast(turnOn ? "Contributing. Restarting node…" : "Back to light wallet. Restarting node…");
     api.nodeRestart();
   };
   el("nReconfig").onclick = () => showSetup();
