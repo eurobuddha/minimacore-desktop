@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.95] — Restore from file: the backup's key mode is asked and checked first
+
+Security audit of the key mode, part 3: restoring a backup file.
+
+- Restore from file now asks: "Was this backup made by a wallet using block key uses, such as Pandamonium on a phone with default settings, or classic keys?" A backup file brings its wallet's keys as they are, so a backup of the other mode is refused before anything is sent to the node. It is asked on every node, also the classic-only ones shipped today: before, a block backup from a Pandamonium phone could be restored into a classic install, which mixes the two kinds of key for good.
+- A block backup on a node that runs classic keys only is refused with what can be done instead: keep using the wallet in the app that made it, or send its funds to an address of this wallet. Typing its 24 words in would give a different, empty classic wallet, and the message says so.
+- The check and the command are in the main process (`main/restore.js`, `mcd:restoreBackup`), with the recorded mode and the jar's capability read there. The general command channel (which the Terminal uses) refuses `restore`, `restoresync` and `megammrsync … file:`, so the screen is the one way to restore a backup file.
+- The backup file cannot answer the question itself: after a salt and an IV, everything in it is encrypted under the backup password (upstream `backup.java`). So it is asked.
+- The note under "Which kind of wallet were these words used in?" said "restore again and choose the other", which the app refuses because the mode is recorded once. It now says the choice is kept for this install and the other mode needs a fresh install.
+- `scripts/restore-test.cjs` (new, 3 tests) and `scripts/core-screens-test.cjs` (24).
+
 ## [0.18.94] — Key mode: the folder marker at every start, and the running node's real mode checked
 
 Security audit of the key mode, part 2.

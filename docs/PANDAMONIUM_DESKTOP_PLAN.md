@@ -177,6 +177,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.92 | 2a/2b review | Split dialog: focus in and back, one at a time, no close or second submit while the split is with the node, no lookup on the closed dialog; coins dialog and coin detail open once; every confirm queued one at a time with focus on Cancel and Escape; Tab kept inside these dialogs (`modalTab`); dashes out of the Send, Split, Consolidate and History detail text |
 | 0.18.93 | key-mode audit | Audit H1, H2, M3: `keymode.argvProblem` checks the finished argv of either node kind (the Parlons args string tokenised as the jar does): key-mode tokens exactly the recorded mode's, `-data` / `-basefolder` the install's own; parameter values starting with a dash refused; `-blockaskeyuses true -lowram true` with explicit values; managed parameters and `-conf` refused in extra arguments; every `-conf` file read and checked; node spawned without `MINIMA_*`, `PARLONS_*` and JVM option variables |
 | 0.18.94 | key-mode audit | Audit H4, M5: block folder marked at every start before java (folder change, lost config, older config, deleted marker all tested; an unmarked folder with data is refused, never guessed); `verifyKeyMode` reads the running node's key shapes with `keys` before the app calls it running and stops it on a mismatch, with a blocking message and no restart in that run; the node's block-mode boot line kills a classic wallet's node |
+| 0.18.95 | key-mode audit | Audit H3, M4: Restore from file asks the backup's key mode on every node and the main process (`main/restore.js`, `mcd:restoreBackup`) refuses a mismatch with the recorded mode, and a block backup on a classic-only jar with what to do instead; `restore`, `restoresync` and `megammrsync file:` refused on the general command channel; the backup file is encrypted throughout, so it cannot reveal its mode; the wrong-mode note corrected |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";
@@ -187,3 +188,6 @@ Owner decisions added 19 Nov 2026 (evening):
 - Parlons opens in the system browser from the tray (the node's one-time ticket link), not in an embedded view.
   Phase 4 removes the embedded webview and its media-permission code. Calls and call notifications then belong to
   the browser tab.
+- The app keeps a notifier for Parlons calls and messages while the panel lives in the browser: a desktop
+  notification (and dock/taskbar attention for a call) raised by the app; clicking it opens the Parlons panel in the
+  browser. Phase 4 must find how the app learns of them from the node without the embedded view.

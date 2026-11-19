@@ -77,8 +77,9 @@ test("megammrsync is built in one place and puts the bytes on the wire that 0.18
     `megammrsync action:resync host:${H} phrase:"${FAKE}" anyphrase:true keyuses:2000`, "the restore dialog's command; only the ends of the phrase are trimmed");
   assert.equal(resyncCommand({ host: H, phrase: FAKE, keyuses: 0 }).cmd, `megammrsync action:resync host:${H} phrase:"${FAKE}" keyuses:0`);
   assert.equal(resyncCommand({ host: H, phrase: "Not  A  Real   Seed", anyphrase: true, keyuses: "1" }).cmd.includes('"Not  A  Real   Seed"'), true, "spacing and case inside a phrase are never changed");
-  assert.equal(resyncCommand({ host: H, file: "old.bak", password: "pw1" }).cmd, `megammrsync action:resync host:${H} file:old.bak password:pw1`);
-  assert.ok(resyncCommand({ host: H, phrase: FAKE, keyuses: "1" }).resetsWallet && resyncCommand({ host: H, file: "a.bak" }).resetsWallet);
+  assert.equal(require("../main/restore.js").restoreFileCommand({ host: H, file: "old.bak", password: "pw1" }).cmd, `megammrsync action:resync host:${H} file:old.bak password:pw1`, "a backup file's command is built in the main process (0.18.95)");
+  assert.ok(resyncCommand({ host: H, phrase: FAKE, keyuses: "1" }).resetsWallet);
+  assert.ok(!/file:/.test(source("resyncCommand")), "and the page cannot build one");
 });
 
 test("megammrsync refuses everything the old screens refused, before any command exists", () => {
@@ -93,11 +94,13 @@ test("megammrsync refuses everything the old screens refused, before any command
   bad({ host: H, phrase: "fake words", keyuses: "-1" }, "negative key uses");
   bad({ host: H, phrase: "fake words", keyuses: "12abc" }, "key uses that are not a number");
   bad({ host: H, keyuses: "x" }, "key uses that are not a number, without a phrase");
-  bad({ host: H, file: "my file.bak" }, "a file path with a space");
-  bad({ host: H, file: "a.bak", password: "p w" }, "a password with a space");
-  bad({ host: H, file: "a.bak", password: 'p"w' }, "a password with a quote");
   bad({ host: H, needPhrase: true }, "Rebuild without a phrase");
-  bad({ host: H, needFile: true }, "Restore without a file");
+  const badFile = (o, why) => { const r = require("../main/restore.js").restoreFileCommand(o); assert.ok(r.error && !r.cmd, why); };
+  badFile({ host: H, file: "my file.bak" }, "a file path with a space");
+  badFile({ host: H, file: "a.bak", password: "p w" }, "a password with a space");
+  badFile({ host: H, file: "a.bak", password: 'p"w' }, "a password with a quote");
+  badFile({ host: "h:9001 phrase:x", file: "a.bak" }, "a host carrying another parameter");
+  badFile({ host: H }, "Restore without a file");
 });
 
 test("a backup password is letters and numbers, typed twice, before the backup command is built", () => {
@@ -112,7 +115,7 @@ test("a backup password is letters and numbers, typed twice, before the backup c
 test("every megammrsync screen confirms first, and a replaced wallet drops the old identities", () => {
   const body = source("renderBackup");
   const run = body.slice(body.indexOf("const run = async"), body.indexOf("const hostField"));
-  const order = ["built.error", "showConfirm(", "cmd(built.cmd)", "saveConfig({ megammrHost", "walletReplaced()"].map(x => run.indexOf(x));
+  const order = ["built.error", "showConfirm(", "await cmd(built.cmd)", "saveConfig({ megammrHost", "walletReplaced()"].map(x => run.indexOf(x));
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refuse, confirm, run, remember the host, drop identities: in that order");
   assert.equal((body.match(/megammrsync action/g) || []).length, 0, "no screen builds its own megammrsync");
   const w = source("walletReplaced");
@@ -324,4 +327,25 @@ test("M5: a node stopped for the wrong key mode puts one message over the whole 
   assert.ok(added[0].includes('role="alertdialog"') && added[0].includes("running with block keys &lt;b>") && !/<button/.test(added[0]), "the words, escaped, and no button");
   assert.equal(els.shell.inert, true, "nothing underneath can be used");
   assert.ok(/function onStatus\(s\) \{\n  if \(s\.keyModeAlert\) showKeyModeBlock\(s\.keyModeAlert\);/.test(app), "shown on the first status that carries it");
+});
+
+test("H3: Restore from file asks the backup's key mode on every node, and the main process decides", async () => {
+  const body = source("renderBackup"), q = source("backupModeQuestionHtml");
+  assert.ok(q.includes("Was this backup made by a wallet using block key uses, such as Pandamonium on a phone with default settings, or classic keys?"));
+  assert.ok(!/KEYMODE\.supported/.test(q), "asked even when this node runs classic keys only");
+  const file = body.slice(body.indexOf('if (BK_PAGE === "restore")'), body.indexOf("// Private keys"));
+  assert.ok(file.includes("backupModeQuestionHtml()") && file.includes("wireModeQuestion(host)"));
+  const order = ["api.restoreBackup(Object.assign({ check: true }, o))", 'run("bkGo", "Restore"', "exec: () => api.restoreBackup(o)"].map(x => file.indexOf(x));
+  assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "the main process refuses first; then the question; then the main process runs it");
+  assert.ok(!/megammrsync|cmd\(/.test(file), "the page sends no restore command of its own");
+  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
+  assert.ok(/"mcd:restoreBackup", \(_e, o\) => restore\.restoreBackup\(o, \{ keyMode: config\.load\(\)\.keyMode, supported: node\.blockKeysSupported\(\),/.test(main), "with the recorded mode and the jar's capability, read in the main process");
+  assert.ok(main.indexOf("restore.loadsBackupFile(command)") > main.indexOf('"mcd:cmd"') && main.indexOf("restore.loadsBackupFile(command)") < main.indexOf("pinMinimaSend(run, command)"), "and the general command channel refuses a backup-file restore before anything runs");
+});
+
+test("M4: the note under the mode question says what is true: the choice is kept, and the other mode needs a fresh install", () => {
+  const { modeQuestionHtml } = lift(["modeQuestionHtml"], { KEYMODE: { supported: true } });
+  const note = modeQuestionHtml();
+  assert.ok(!/restore again and choose the other/.test(note), "the app refuses that: the mode is already recorded");
+  assert.ok(/recorded for this install and cannot be changed afterwards/.test(note) && /the other mode then needs a fresh install of the app/.test(note) && /Nothing is lost/.test(note));
 });

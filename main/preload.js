@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("mcd", {
   clip: (text) => ipcRenderer.invoke("mcd:clip", text),
   keyMode: () => ipcRenderer.invoke("mcd:keyMode"),
   recordKeyMode: (mode) => ipcRenderer.invoke("mcd:recordKeyMode", mode),
+  restoreBackup: (o) => ipcRenderer.invoke("mcd:restoreBackup", o),
   copyRpcPassword: () => ipcRenderer.invoke("mcd:copyRpcPassword"),
 
   // config

@@ -271,7 +271,18 @@ function modeQuestionHtml() {
       <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>Block key uses</b><span>A wallet made in Pandamonium on a phone, or made new in this app.</span></button>
       <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>Classic</b><span>A wallet made in an older Minima Core, in MinimaClassic, or with Classic mode switched on.</span></button>
     </div>
-    <p class="ps-note">The same 24 words give different addresses in each mode. If you choose the wrong one, the wallet opens with no funds in it. Nothing is lost: restore again and choose the other.</p>`;
+    <p class="ps-note">The same 24 words give different addresses in each mode. Choose with care: the choice is recorded for this install and cannot be changed afterwards. If you choose the wrong one, the wallet opens with no funds in it. Nothing is lost, but the other mode then needs a fresh install of the app, where you choose again.</p>`;
+}
+// Restore from a backup FILE: the file brings its wallet's keys as they are, so its mode must be this install's.
+// Always asked, also on a node that runs classic keys only: a block backup restored there is the forbidden mix.
+// The file cannot answer for itself (everything in it is encrypted under the backup password).
+function backupModeQuestionHtml() {
+  const q = "Was this backup made by a wallet using block key uses, such as Pandamonium on a phone with default settings, or classic keys?";
+  return `<div class="eyebrow ps-label">${q}</div>
+    <div class="modeq" role="radiogroup" aria-label="${q}">
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>Block key uses</b><span>Pandamonium on a phone with default settings, or a wallet made new in an app that uses block key uses.</span></button>
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>Classic keys</b><span>An older Minima Core, MinimaClassic, or a wallet made with Classic mode switched on.</span></button>
+    </div>`;
 }
 function wireModeQuestion(host) {
   host.querySelectorAll(".modeq .opt").forEach(o => o.onclick = () => host.querySelectorAll(".modeq .opt").forEach(x => { const on = x === o; x.classList.toggle("sel", on); x.setAttribute("aria-checked", on ? "true" : "false"); }));
@@ -498,30 +509,25 @@ let BK_PAGE = "";
 const BK_TITLE = { "": "Backup & Recovery", create: "Create backup", restore: "Restore from file", resync: "Resync node", keys: "Private keys" };
 function bkOpen(page) { BK_PAGE = page; el("barPage").textContent = BK_TITLE[page]; el("main").scrollTop = 0; renderBackup(); }
 /**
- * megammrsync, built in ONE place for every screen that runs it (chain resync, restore from a file, rebuild
- * from a phrase, the first-run restore). Returns { error } or { cmd, resetsWallet }. The node's command
+ * megammrsync, built in ONE place for every screen that runs it (chain resync, rebuild from a phrase, the
+ * first-run restore). A backup FILE is restored by the main process, after its key-mode check (main/restore.js). Returns { error } or { cmd, resetsWallet }. The node's command
  * parser has no escape character, so refusing a value is the only defence: every check the Settings cards
  * and the setup dialog made is here, in their order.
  */
 function resyncCommand(o) {
   const host = String(o.host || "").trim();
   const phrase = String(o.phrase || "").trim();   // a free-form phrase is hashed as typed: trim the ends only, never the inside
-  const keyuses = String(o.keyuses == null ? "" : o.keyuses).trim(), file = String(o.file || "").trim(), password = String(o.password || "");
+  const keyuses = String(o.keyuses == null ? "" : o.keyuses).trim();
   if (o.needPhrase && !phrase) return { error: "Enter your seed phrase." };
   if (/["\\]/.test(phrase)) return { error: "This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal." };
   if (/[\n\r\t]/.test(phrase)) return { error: "Remove the line breaks and tabs: enter your seed as one clean line (they change the derived wallet)." };
   if (!/^[\w.\-]+:\d+$/.test(host)) return { error: "MegaMMR host must be host:port." };
   if (phrase && !/^\d+$/.test(keyuses)) return { error: "Enter the key uses for this seed (0 if brand new). Too low reuses one-time keys and can lose funds." };
   if (keyuses && !/^\d+$/.test(keyuses)) return { error: "Key uses must be a whole number." };
-  if (o.needFile && !file) return { error: "Enter the backup file's name or path." };
-  if (/[\s"\\]/.test(file)) return { error: "File path can't contain spaces or quotes." };
-  if (/[\s"\\]/.test(password)) return { error: "Password can't contain spaces or quotes." };
   let cmd = `megammrsync action:resync host:${host}`;
   if (phrase) cmd += ` phrase:"${phrase}"` + (o.anyphrase ? " anyphrase:true" : "");
   if (keyuses) cmd += ` keyuses:${keyuses}`;
-  if (file) cmd += ` file:${file}`;
-  if (password) cmd += ` password:${password}`;
-  return { cmd, resetsWallet: !!(phrase || file) };
+  return { cmd, resetsWallet: !!phrase };
 }
 // The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is
 // dropped and nothing the old wallet said stays on screen.
@@ -597,7 +603,8 @@ function renderBackup() {
     if (!await showConfirm(title, warning, okLabel, built.resetsWallet)) return;
     const btn = $(btnId), st = $("bkStatus"); btn.disabled = true; btn.textContent = label + "…"; st.textContent = "";
     try {
-      await cmd(built.cmd);
+      if (built.exec) { const j = await built.exec(); if (!j || j.status !== true) throw new Error((j && j.error) || "the node refused the restore"); }
+      else await cmd(built.cmd);
       CFG = await api.saveConfig({ megammrHost: built.host });
       if (built.resetsWallet) await walletReplaced();
       toast(label + " complete ✓", "ok"); bkOpen("");
@@ -617,9 +624,14 @@ function renderBackup() {
   if (BK_PAGE === "restore") {
     host.innerHTML = head("Restore from file", "Replaces this node's wallet and chain with the contents of a backup, then catches up to the chain tip from a MegaMMR node.") +
       field("bkFile", "Backup file", 'placeholder="a .bak file in the node folder, or its full path"') +
-      field("bkFilePw", "Backup password", 'type="password" placeholder="the password used when it was made"') + hostField +
+      field("bkFilePw", "Backup password", 'type="password" placeholder="the password used when it was made"') + backupModeQuestionHtml() + hostField +
       `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Restore this node">Restore this node</button><div class="bk-status" id="bkStatus" role="status"></div>`;
-    $("bkGo").onclick = () => { const f = $("bkFile").value.trim(); run("bkGo", "Restore", built({ host: $("bkHost").value, file: f, password: $("bkFilePw").value, needFile: true }), "Replace this node?",
+    wireModeQuestion(host);
+    $("bkGo").onclick = async () => { const f = $("bkFile").value.trim(), picked = host.querySelector('.modeq .opt[aria-checked="true"]');
+      const o = { host: $("bkHost").value.trim(), file: f, password: $("bkFilePw").value, mode: picked ? picked.dataset.mode : "" };
+      // The main process checks the backup's key mode and builds the command; a refusal comes before the question below.
+      try { await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { toast(ipcError(e), "err"); return; }
+      run("bkGo", "Restore", { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, "Replace this node?",
       "Minima will replace its wallet and chain with " + f + ".\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", "Restore"); };
     return;
   }

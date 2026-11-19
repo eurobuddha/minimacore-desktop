@@ -12,6 +12,7 @@ const config = require("./config");
 const node = require("./node-manager");
 const portmap = require("./portmap");
 const rpc = require("./rpc");
+const restore = require("./restore");   // backup-file restore rules (key mode first)
 const { pinMinimaSend } = require("./sendpin");
 const updater = require("./updater");
 const loginitem = require("./loginitem");   // "Open at login" — OS login item (mac/win) or XDG autostart (linux)   // app updates from the minimaCore store feed (the jar itself ships with the app)
@@ -156,6 +157,8 @@ function requireRunning() {
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   requireRunning();
+  // A backup file brings its own keys, in its own key mode: only Backup & Recovery restores one, after the mode check.
+  if (restore.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
@@ -186,6 +189,9 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
   if (mode === "block" && !node.blockKeysSupported()) throw new Error("The node in this version of the app cannot run a block key wallet.");
   return config.recordKeyMode(mode === "block" ? "block" : "classic");
 });
+// Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
+ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
+  running: node.state === "running", run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c) }));
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
