@@ -40,6 +40,7 @@ const reserve = require("./reserve");   // the shared coin reservation (docs/COI
 // opened before an engine sends its first command (guard waits for the open). Opened per wallet when the node runs,
 // swept once a minute against the node's real coins, closed when the node stops (the builds died with it).
 reserve.onLog = (line) => node.log("[coins] " + line);
+reserve.setHoldSource("dexicon", () => dexicon.coinHolds());   // the coins of live FAST orders and unanswered takes (main/dexicon.js COIN HOLDS)
 let reserveSweep = null, reserveSweeping = false;
 const reserveRead = (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c);
 node.on("status", (s) => {

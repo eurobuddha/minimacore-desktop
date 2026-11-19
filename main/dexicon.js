@@ -189,6 +189,8 @@ function makeHost(opts = {}) {
   let abort = new AbortController();   // one per engine epoch: aborted by drop() (stop, invalidate, a foreign store)
   const LOG = [];
 
+  /** The shared coin reservation (main/reserve.js): the app's own for the app's one host, a test's when it gives one, else none. */
+  const registry = () => opts.reserve || (opts.appHost ? require("./reserve") : null);
   function dir() { return dataDir || path.join(app.getPath("userData"), "dexicon"); }
   let store = "";   // the store this host opened last (STORE PER WALLET, header); "" before the first engine
   const ID_RE = /^0x[0-9a-f]{128}$/;
@@ -264,6 +266,7 @@ function makeHost(opts = {}) {
         if (!live() || !storage) { if (cb) cb(toVm({ status: false, error: "this wallet was replaced" })); return; }
         const r = storage.sql(String(query));
         if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(String(query)) && WRITES_NOW.test(String(query))) { try { storage.flush(); } catch (e) {} }
+        if (HOLD_KEYS.test(String(query)) && /^\s*(MERGE|DELETE|UPDATE|INSERT)/i.test(String(query))) syncHolds();   // COIN HOLDS: before the engine's next step
         if (cb) cb(toVm(r));
       },
       net: {
@@ -323,6 +326,7 @@ function makeHost(opts = {}) {
       box.storage = sqlShim = shim; store = storeFor(me);
       ctx = c; serviceHandler = handler;
       ready = true;
+      syncHolds();   // what the store already says is held, before the engine's first event
       fire("inited");
     })().catch(e => { if (mine === epoch) { initPromise = null; ready = false; ctx = null; sqlShim = null; serviceHandler = null; } if (lastInitError !== e.message) { lastInitError = e.message; log("init failed: " + e.message); } throw e; });
     return initPromise;
@@ -349,7 +353,7 @@ function makeHost(opts = {}) {
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
     frameTx = new Map(); budget = null; ownCache = null;
     busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
-    if (!opts.runner) require("./reserve").releaseOwner("dexicon");   // its unfinished builds died with it; posted coins and live orders' coins stay held
+    const R = registry(); if (R) R.releaseOwner("dexicon");   // its unfinished builds died with it; posted coins and live orders' coins stay held
   }
 
   // NEWBLOCK for the RESTING engine (the node pushes it to a MiniDapp; here the timer looks for a new tip)
@@ -405,6 +409,29 @@ function makeHost(opts = {}) {
     return draining;
   }
   function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
+
+  // COIN HOLDS (0.18.145, docs/COIN_RESERVATION.md). A FAST order locks nothing on the chain: it only NAMES its backing
+  // coins, and the engine keeps them from its own other orders (lib/maker.js coinsBackingOthers) and from a second take
+  // (service.desktop.js lockCoins). Nothing kept them from AtomiX, PandaPools or a wallet send. The engine is not
+  // edited: its own records are read here and mirrored into the shared reservation, whenever it writes them and at
+  // every sweep. Held: the coins of every live order that has not expired (`myorders`), and this wallet's own coins in
+  // takes sent and not yet answered, or being voided (`pending_takes`, `void_takes`, field `mine`: a signed take has no
+  // expiry, and the maker can post it until one of those coins is spent).
+  const HOLD_KEYS = /'(?:myorders|pending_takes|void_takes)'/;
+  /** [{ coinid, why, until }] from the open store; null when it cannot be said now (no store, or the table is not made yet). */
+  function coinHolds() {
+    if (!sqlShim) return null;
+    const out = [], hex = /^0x[0-9A-Fa-f]{64}$/;
+    try {
+      const kv = (k, empty) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || empty) || JSON.parse(empty) : JSON.parse(empty); };
+      for (const o of kv("myorders", "[]")) if (o && o.status === "live") for (const c of (o.coins || [])) if (hex.test(String(c))) out.push({ coinid: String(c), why: "a live Dexicon order", until: Number(o.expiry) > 0 ? Number(o.expiry) * 1000 : 0 });
+      const takes = (k, why) => { const all = kv(k, "{}"); for (const id of Object.keys(all)) for (const c of ((all[id] && all[id].mine) || [])) if (hex.test(String(c))) out.push({ coinid: String(c), why }); };
+      takes("pending_takes", "a Dexicon take that has not been answered yet");
+      takes("void_takes", "a Dexicon take that is being voided");
+    } catch (e) { return null; }
+    return out;
+  }
+  function syncHolds() { const R = registry(), l = R && coinHolds(); if (l) { try { R.setHolds("dexicon", l); } catch (e) {} } }
   /** HOLD: stopped, and not started again by a node status, the timer or a screen until release(). The store stays. */
   function hold() { if (!held) { held = true; log("held: a command that may replace the wallet is about to run"); } return stop(); }
   function release() { held = false; }   // main.js starts it again when the node is running
@@ -542,6 +569,7 @@ function makeHost(opts = {}) {
     if (!sqlShim) return Promise.reject(new Error("Dexicon is still starting"));
     const r = sqlShim.sql(q);
     if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(q) && WRITES_NOW.test(q)) { try { sqlShim.flush(); } catch (e) {} }
+    if (HOLD_KEYS.test(q) && /^\s*(MERGE|DELETE)/i.test(q)) syncHolds();   // the page writes its takes (pending_takes, void_takes) through here
     return Promise.resolve(r);
   }
   /** a page MDS.comms.solo → the service's MDSCOMMS event. Only the page's own two origins. */
@@ -581,12 +609,12 @@ function makeHost(opts = {}) {
     throw new Error("unknown Dexicon op");
   }
 
-  return { emitter, init, start, stop, hold, release, flush, invalidate, status, activeWork, book, mine, command, storePath,
+  return { emitter, init, start, stop, hold, release, flush, invalidate, status, activeWork, book, mine, command, storePath, coinHolds,
     identitySeed, checkEpoch,
     _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),
     _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _ctx: () => ctx, _fire: fire, _netAllowed: netAllowed };
 }
 
-const host = makeHost();   // the app's one Dexicon engine (main.js); tests build their own with makeHost(opts)
+const host = makeHost({ appHost: true });   // the app's one Dexicon engine (main.js); tests build their own with makeHost(opts)
 module.exports = Object.assign(host, { makeHost, dexCommand, dexSql, DEX_VERBS, ENGINE_VERSION, UNANSWERED });

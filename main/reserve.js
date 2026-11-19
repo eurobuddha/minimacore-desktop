@@ -28,6 +28,7 @@ const crypto = require("crypto");
 const BUILD_MS = 15 * 60 * 1000;   // a `building` coin with no post and no delete for this long is an abandoned build
 const DEAD_MS = 10 * 60 * 1000;    // known dead: this long AND this many blocks after the post, unspent, out of the mempool
 const DEAD_BLOCKS = 12;
+const HOLD_STALE_MS = 24 * 60 * 60 * 1000;   // a hold its source has not listed for this long is released: none leaks for good
 const SWEEP_READS = 25;            // coins asked of the node per sweep, round robin: a fragmented wallet is never listed
 const SETTLES = new Set(["atomix", "casino"]);   // owners whose transactions settle against a deadline
 const TXN_WHY = { atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet" };
@@ -273,17 +274,22 @@ function createRegistry(o = {}) {
   }
 
   // ---- holds ----
-  /** Replace `owner`'s holds with this list ([{ coinid, why }]). */
+  /**
+   * Replace `owner`'s holds with this list ([{ coinid, why, until }]; until: unix ms after which the hold lapses by
+   * itself, e.g. a FAST order's expiry). A coin already in a transaction of another owner is still noted: it counts
+   * once that transaction is gone.
+   */
   function setHolds(owner, list) {
-    const want = new Map();
-    for (const h of (list || [])) { const k = lc(h && h.coinid); if (isCoin(k) && !gone.has(k) && !want.has(k)) want.set(k, h); }
+    const want = new Map(), t = now();
+    for (const h of (list || [])) { const k = lc(h && h.coinid); if (isCoin(k) && !gone.has(k) && !want.has(k) && !(h.until > 0 && h.until <= t)) want.set(k, h); }
     let changed = false;
     for (const [k, h] of holds) if (h.owner === owner && !want.has(k)) { holds.delete(k); changed = true; }
     for (const [k, h] of want) {
-      const had = holds.get(k);
+      const had = holds.get(k), why = String(h.why || ""), until = h.until > 0 ? Number(h.until) : 0;
       if (had && had.owner !== owner) continue;   // first come: two owners never hold one coin
-      if (!had) { holds.set(k, { coinid: String(h.coinid), owner, why: String(h.why || ""), at: now() }); changed = true; }
-      else if (had.why !== String(h.why || "")) { had.why = String(h.why || ""); changed = true; }
+      if (!had) { holds.set(k, { coinid: String(h.coinid), owner, why, at: t, seen: t, until }); changed = true; continue; }
+      if (had.why !== why || (had.until || 0) !== until || t - (had.seen || 0) > 3600000) changed = true;   // `seen` reaches the disk at least hourly
+      had.why = why; had.until = until; had.seen = t;
     }
     if (changed) persist();
     return changed;
@@ -314,7 +320,11 @@ function createRegistry(o = {}) {
     let freed = 0, dirty = false;
     const t = now();
     for (const [k, r] of txns) if (r.state === "building" && t - r.at > BUILD_MS) { unlink(k); freed++; dirty = true; log("released: coin " + r.coinid + " (" + describe(r) + "), named for transaction " + r.txn + " that was never posted or deleted"); }
-    for (const [owner, fn] of sources) { try { const l = await fn(); if (l) setHolds(owner, l); } catch (e) {} }
+    for (const [owner, fn] of sources) { try { const l = await fn(); if (l) setHolds(owner, l); } catch (e) {} }   // null: the source cannot say now (its engine is down): nothing changes
+    for (const [k, h] of holds) {
+      const lapsed = h.until > 0 && h.until <= t, stale = t - (h.seen || h.at || 0) > HOLD_STALE_MS;
+      if (lapsed || stale) { holds.delete(k); freed++; dirty = true; log("released: coin " + h.coinid + " (" + describe(h) + ") " + (lapsed ? "is past its time" : "has not been listed by " + h.owner + " for a day")); }
+    }
     for (const [id, x] of txOf) if (!x.coins.size) txOf.delete(id);   // an id with no coin left says nothing (a later txninput notes it again)
     const keys = [...new Set([...txns.keys(), ...holds.keys()])];
     if (keys.length) {
@@ -360,4 +370,4 @@ function createRegistry(o = {}) {
     _file: () => file, _size: () => txns.size + holds.size });
 }
 
-module.exports = Object.assign(createRegistry(), { createRegistry, BUILD_MS, DEAD_MS, DEAD_BLOCKS, SWEEP_READS });
+module.exports = Object.assign(createRegistry(), { createRegistry, HOLD_STALE_MS, BUILD_MS, DEAD_MS, DEAD_BLOCKS, SWEEP_READS });

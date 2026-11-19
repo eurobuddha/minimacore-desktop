@@ -73,8 +73,10 @@ follows releases the transaction's other coins here.
 6. Engine stop: that owner's `building` coins (the builds died with the engine). Its posted coins and its holds stay:
    they still back something on the chain or on the relays.
 7. Wallet replaced or reset: everything; the store is moved aside under a dated name, never deleted.
-8. A hold ends when its source no longer lists the coin (order cancelled, filled, expired; take answered or voided),
-   or by 3.
+8. A hold ends when its source no longer lists the coin (order cancelled, filled; take answered or voided), at the
+   order's own expiry (`until`, so an order lapses here even with no engine running), by 3, or when its source has
+   not listed it for 24 hours (an engine that never comes back cannot hold a coin for good). While the engine is
+   merely stopped its holds stay: the order is still on the relays, and the source answers "cannot say", not "none".
 
 ## Settlement wins
 

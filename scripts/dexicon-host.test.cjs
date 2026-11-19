@@ -1066,6 +1066,45 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   for (const gone of ["DX_GATE", "RELAY_HOSTS", "pauseAll", "Mandate", "MAKER_", "setPrice", "setGate", "mxusd_tokenid"]) assert.ok(!code.includes(gone), "DexiconPro-only part not ported: " + gone);
 });
 
+test("coin holds: the coins of live FAST orders and of unanswered takes are mirrored into the shared reservation, from the engine's own records", async () => {
+  const { createRegistry } = require("../main/reserve.js");
+  const reg = createRegistry(), node = M.mockNode(), dir = tmp();
+  const host = makeHost({ runner: node.run, dataDir: dir, net: M.mockNet(), tickMs: 40, quiet: true, reserve: reg });
+  node.attach(host); hosts.push(host);
+  assert.equal(host.coinHolds(), null, "no store yet: it cannot be said, and nothing is changed");
+  await host.start();
+  await M.until(() => host.status().ready && host.status().restingReady);
+  const C = (n) => "0x" + String(n).repeat(64).slice(0, 64), soon = Math.floor(Date.now() / 1000) + 3600;
+  const orders = [{ orderId: "o1", side: "sell", status: "live", coins: [C(1), C(2)], expiry: soon }, { orderId: "o2", side: "buy", status: "cancelled", coins: [C(3)], expiry: soon },
+    { orderId: "o3", side: "buy", status: "live", coins: [C(4)], expiry: 1 }, { orderId: "o4", status: "live", coins: ["not a coin"], expiry: soon }];
+  // the engine's own write (lib/mdsw.js kvSet), through the engine's MDS.sql
+  await new Promise(res => host._ctx().MDS.sql("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify(orders) + "')", res));
+  let held = reg.list();
+  assert.deepEqual(held.map(h => [h.coinid, h.owner, h.why, h.state]), [[C(1), "dexicon", "a live Dexicon order", "held"], [C(2), "dexicon", "a live Dexicon order", "held"]], "live and not expired only; ids whole");
+  assert.equal(reg.foreign("atomix", C(1)).why, "a live Dexicon order"); assert.equal(reg.foreign("dexicon", C(1)), null);
+  // the page's take, through the screens' bridge (ui/app.js savePending)
+  await host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '" + JSON.stringify({ o9: { sent: Date.now(), mine: [C(5)] } }) + "')" });
+  assert.equal(reg.foreign("wallet", C(5)).why, "a Dexicon take that has not been answered yet");
+  await host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('void_takes', '" + JSON.stringify({ o8: { mine: [C(6)], act: "" } }) + "')" });
+  await host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{}')" });
+  assert.equal(reg.foreign("wallet", C(5)), null, "answered: free");
+  assert.equal(reg.foreign("wallet", C(6)).why, "a Dexicon take that is being voided");
+  // cancelled: the engine rewrites the list, the coins are free at once
+  orders[0].status = "cancelled";
+  await new Promise(res => host._ctx().MDS.sql("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify(orders) + "')", res));
+  assert.deepEqual(reg.list().map(h => h.coinid), [C(6)]);
+  // the engine stopped: its holds stay (the order is still on the relays), and the source says "cannot say" rather than "none"
+  orders[0].status = "live";
+  await new Promise(res => host._ctx().MDS.sql("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify(orders) + "')", res));
+  await host.stop();
+  assert.equal(host.coinHolds(), null);
+  assert.deepEqual(reg.list().map(h => h.coinid).sort(), [C(1), C(2), C(6)].sort());
+  // no engine file was touched to do this
+  const src = fs.readFileSync(path.join(M.root, "main/dexicon.js"), "utf8");
+  assert.match(src, /const host = makeHost\(\{ appHost: true \}\)/, "the app's host mirrors into the app's registry");
+  assert.match(fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), /reserve\.setHoldSource\("dexicon", \(\) => dexicon\.coinHolds\(\)\)/);
+});
+
 test("no test reached a real node or the real network", () => {
   assert.deepEqual(M.leaks, []);
 });

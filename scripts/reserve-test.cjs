@@ -389,3 +389,82 @@ test("nothing waits when every free coin is held: each command fails at once wit
   assert.equal((await build(as("atomix"), "axswap_refund", [HTLC.coinid], { noPost: true })).ok, true);
   assert.equal((await as("wallet")("txncreate id:u;send amount:1 address:" + ADDR(9))).error, "Not sent: coins are held for an AtomiX swap and a live Dexicon order, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.");
 });
+
+// ---- 0.18.145: standing collateral (the coins of a live Dexicon FAST order) ----
+const { HOLD_STALE_MS } = require("../main/reserve");
+
+test("a FAST order's backing coin cannot be spent by an AtomiX lock, a pool operation or a wallet send while the order is live; it is free when the order is cancelled, filled or expired", async () => {
+  const { node, as, reg, clock } = rig(wallet3());
+  const order = (coins, until) => reg.setHolds("dexicon", coins.map(c => ({ coinid: c, why: ORDER, until })));
+  order([coinId(1)]);
+  const tries = async () => [
+    (await build(as("atomix"), "axswap_lock" + node.seen.length, [coinId(1)])).ok,                                   // lockFromCoins
+    (await as("atomix")("send amount:100 mine:true address:" + ADDR(7) + ' state:{"0":"0x01"} tokenid:0x00')).status,  // lock by send
+    (await build(as("pandapools"), "pp" + node.seen.length, [coinId(2), coinId(1)])).ok,                               // a pool operation funded from the wallet
+    (await as("wallet")("send amount:100 address:" + ADDR(9))).status,                                                 // Wallet Send
+    (await as("wallet")("send amount:100 address:" + ADDR(9) + " split:10")).status                                    // Wallet Split
+  ];
+  assert.deepEqual(await tries(), [false, false, false, false, false]);
+  assert.equal(node.mempool.size, 0, "coin 1 was never spent, and nothing else was");
+  assert.equal(node.saw(/^txninput id:\S+ coinid:0x0{63}1$/).length, 0);
+  // the maker itself still uses it (its relock, the fill it co-signs)
+  assert.equal((await build(as("dexicon"), "rl1", [coinId(1)], { noPost: true })).ok, true);
+  await as("dexicon")("txndelete id:rl1");
+  assert.equal(reg.foreign("atomix", coinId(1)).why, ORDER, "the maker's own transaction gone, the order's hold is still there");
+  // cancelled: the engine's list no longer has the coin
+  order([]);
+  assert.equal((await build(as("atomix"), "axswap_after_cancel", [coinId(1)], { noPost: true })).ok, true);
+  await as("atomix")("txndelete id:axswap_after_cancel");
+  // filled: the order now names its change coin instead
+  order([coinId(2)]);
+  assert.equal((await build(as("pandapools"), "pp_after_fill", [coinId(1)], { noPost: true })).ok, true);
+  assert.equal((await build(as("pandapools"), "pp_after_fill2", [coinId(2)], { noPost: true })).ok, false);
+  await as("pandapools")("txndelete id:pp_after_fill");
+  // expired: the order's own expiry, with no engine there to say so
+  order([coinId(3)], clock.t + 60000);
+  assert.equal((await as("wallet")("txninput id:w coinid:" + coinId(3))).reserved, true);
+  clock.t += 60001;
+  await reg.sweep(node.run);
+  assert.equal(reg.foreign("wallet", coinId(3)), null);
+});
+
+test("a hold survives an app restart, lapses when its source stops listing it for a day, and a coin spent outside the app does not come back", async () => {
+  const dir = tmp(), node = makeNode(wallet3()), clock = { t: 1e12 };
+  const one = rig(null, { node, clock }); await one.reg.open(dir, node.run);
+  hold(one.reg, coinId(1), coinId(2));
+  const two = rig(null, { node, clock }); await two.reg.open(dir, node.run);   // the app died and started again; Dexicon is not up yet
+  assert.equal((await build(two.as("atomix"), "a", [coinId(1)])).ok, false, "held from the file, before the Dexicon engine has said anything");
+  two.reg.setHoldSource("dexicon", () => null);   // the engine cannot say (it never came up)
+  clock.t += HOLD_STALE_MS; await two.reg.sweep(node.run);
+  assert.equal(two.reg.list().length, 2, "not yet a day");
+  clock.t += 1; await two.reg.sweep(node.run);
+  assert.equal(two.reg.list().length, 0, "no hold outlives its source by more than a day");
+  // spent by a phone on the same node while the engine's list still names it
+  const three = rig(null, { node, clock });
+  three.reg.setHoldSource("dexicon", () => [{ coinid: coinId(1), why: ORDER }]);
+  await three.reg.sweep(node.run); assert.equal(three.reg.list().length, 1);
+  node.spendOutside(coinId(1));
+  await three.reg.sweep(node.run); await three.reg.sweep(node.run);
+  assert.equal(three.reg.list().length, 0, "the source still lists it; the node says it is gone");
+});
+
+test("settlement wins: a settlement transaction takes a coin that is only collateral; an AtomiX lock does not", async () => {
+  const { node, as, reg, lines } = rig(wallet3().concat([HTLC]));
+  hold(reg, coinId(1));
+  // a lock: plain coins only. Refused.
+  assert.equal((await build(as("atomix"), "axswap_lock", [coinId(2), coinId(1)])).ok, false);
+  // a settlement that carries its contract coin and then needs a plain coin that is collateral: it goes through
+  await as("casino")("txncreate id:svc_reveal_1");
+  assert.equal((await as("casino")("txninput id:svc_reveal_1 coinid:" + HTLC.coinid)).status, true);
+  assert.equal((await as("casino")("txninput id:svc_reveal_1 coinid:" + coinId(1))).status, true);
+  assert.match(lines.join("\n"), /settlement first: coin 0x0{63}1 was held for a live Dexicon order and goes into a P2P Chance transaction svc_reveal_1/);
+  assert.equal(reg.foreign("dexicon", coinId(1)).owner, "casino", "the maker now finds its coin taken: its own pre-sign check and refresh deal with it");
+  // but never a coin that is in another owner's TRANSACTION (that would be a double spend)
+  await build(as("pandapools"), "pp", [coinId(3)], { noPost: true });
+  assert.equal((await as("casino")("txninput id:svc_reveal_1 coinid:" + coinId(3))).reserved, true);
+  // and PandaPools, which has no deadline of that kind, does not get this
+  hold(reg, coinId(2));
+  await as("pandapools")("txncreate id:pp2"); await as("pandapools")("txninput id:pp2 coinid:" + HTLC.coinid);
+  assert.equal((await as("pandapools")("txninput id:pp2 coinid:" + coinId(2))).reserved, true);
+  void node;
+});
