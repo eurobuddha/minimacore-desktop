@@ -14,7 +14,7 @@ way is listed at the end and in `PANDAMONIUM_DESKTOP_PLAN.md` section 9.
 | Service | `main/dexicon/service.desktop.js` | hand mirror of the donor's `service.js`; its header lists every difference |
 | Loader | `main/dexicon/loader.js` | DexiconPro's, without its two injected hooks. The vm gives the engine its own scope, **not a confinement** (its header, corrected in 0.18.110) |
 | Host | `main/dexicon.js` | DexiconPro's `main/dexicon.js` + the `room.dex` part of `main/rooms.js`, as the public build |
-| Store | `userData/dexicon/dexicon.sqlite` | new; the SQL shim is `main/pandapools/sqlshim.js` (the one DexiconPro uses) |
+| Store | `userData/dexicon/dexicon-<trading identity, whole>.sqlite`, one per wallet since 0.18.120 (before: one `dexicon.sqlite`, renamed once to its owner's name) | new; the SQL shim is `main/pandapools/sqlshim.js` (the one DexiconPro uses) |
 | IPC | `mcd:dxStatus`, `mcd:dxBook`, `mcd:dxMine`, `mcd:dxCommand`, event `mcd:dexicon` (`mcd:dxInvalidate` removed in 0.18.106) | `main/main.js`, `main/preload.js` |
 
 The donor working tree had uncommitted changes only under `graphify-out/` and untracked notes; none in the engine. The
@@ -211,6 +211,17 @@ names what cannot be checked; when that is the only thing in the way the screen 
 (`restore.DEX_SKIP_WARNING`), and `mcd:dxSkipCheck` checks again in the main process, logs the choice and leaves the
 Dexicon check out for two minutes. Lines 1 to 4 then run as always, so the damaged store is kept aside.
 
+**One store per wallet (0.18.120, M3).** The host derives the trading identity itself before it opens anything
+(`seedrandom modifier:dexicon-identity-v1`, then the engine's own `AX.identity.fromSeed` in the engine's context) and
+opens `dexicon-<publicId>.sqlite`. Another data folder, or a wallet restored over this one, therefore opens ITS store,
+and the first wallet finds its own again when it is back (its orders, and the takes it had sent: they can be voided
+again). Until 0.18.119 line 3 moved the one `dexicon.sqlite` aside at every such change and nothing brought it back.
+A `dexicon.sqlite` from before is read (read only) for the identity it records and renamed once to that identity's
+name, whoever is running; to this wallet's when it records none; kept aside when that name already exists; left alone,
+with no engine started, when it cannot be read. Line 3 still stands for a file under this wallet's name that records
+another identity. `invalidate()` (line 1) still moves the store this host had open aside under its dated name; a host
+that has opened none moves only an old `dexicon.sqlite`. Cost: `seedrandom` is asked twice per start (host, service).
+
 Not covered by line 3: a store with no recorded `publicId` (the engine never reached READY on it). AtomiX and
 PandaPools have line 1 only, plus their own guards (AtomiX IdentityWatch, PandaPools signing holds); a data-folder
 change does not reset them.
@@ -304,9 +315,10 @@ the second.
 `{ op: "cmd", command }`, `{ op: "sql", query }`, `{ op: "comms", message }`, `{ op: "net", … }`, `{ op: "identity" }`.
 Ported from DexiconPro's `room.dex`.
 
-**It is not a spending boundary.** The hidden page builds, signs and posts its own FAST takes, so `txncreate`,
-`txninput`, `txnoutput`, `txnsign` and `txnpost` must reach it; whoever controls the page can build a spend with them.
-What bounds the page: it is this app's vendored code (digest-pinned), it runs in a sandboxed frame of its own origin
+**Until 0.18.119 it was not a spending boundary**: the hidden page builds and signs its own FAST takes, so `txncreate`,
+`txninput`, `txnoutput`, `txnsign` and `txnpost` reach it, and whoever controlled the page could build any spend with
+them. Since 0.18.120 the main process checks every signature and post the frame asks for (next section).
+What else bounds the page: it is this app's vendored code (digest-pinned), it runs in a sandboxed frame of its own origin
 with no network (CSP `connect-src 'none'`) and no `window.mcd`, and relay data is parsed, never evaluated. The verb
 list keeps out what the page never needs (`send`, `consolidate`, backups, key and password parameters).
 
@@ -335,6 +347,64 @@ Verbs and rules:
 - **Removed** (DexiconPro-only): the PAUSE ALL / NUKE gate on `send` / `txnpost` / LIMIT / SPLIT / EDIT, the refusal
   of `MAKER_*` packets, the SQL refusals (`maker_state`, `mm_*`, `mxusd_tokenid`).
 - **Added**: packets must be JSON with origin `ui` or `dexicon`. (The own-order rule on LIMIT of 0.18.99 was removed in 0.18.105, see (a).)
+
+## The frame's transactions are checked in the main process (0.18.120, M4)
+
+`main/dexicon-signgate.js` (pure rules) and `pageCmd` / `frameCheck` in `main/dexicon.js`.
+
+What is enforced, on every `txn*` command that comes through the bridge:
+
+- Only the exact command shapes of the page's two builders (`lib/fill.js` `buildSigned`, `lib/maker.js` `relock`):
+  `txncreate id:`, `txninput id: coinid: scriptmmr:true`, `txnoutput id: amount: address:0x… [tokenid:]`,
+  `txnsign id: publickey:auto|0x…`, `txnpost id:`, `txncheck`, `txnexport`, `txndelete`. Any other spelling (a floating
+  input, `storestate:`, an `Mx` address, extra parameters) is refused. `txnimport` is no longer a verb of the bridge.
+- `txninput` / `txnoutput` / `txnsign` / `txnpost` / `txncheck` / `txnexport` / `txndelete` only on an id the frame
+  created with `txncreate` in this engine's life.
+- Before a `txnsign` or `txnpost` is forwarded, main asks the node what that id holds (`txnlist id:`) and applies:
+  - **SELF** (every output pays this wallet): allowed, signed and posted, when per token everything that goes in
+    comes back (no burn). This is the page's void / relock.
+  - **TAKE** (an output pays someone else): never posted. Signed only when the user reviewed a FAST trade on the
+    native Trade screen in the last ten minutes (`{ op: "reviewed", buy, price, amount }`, sent by the app's own
+    window before it drives the page; the frame's bridge cannot send that op); every input that is not this wallet's
+    is a coin of ONE live order, of the side being taken, that the **service's own** relay client holds
+    (`RELAY.orders()`, not the page's copy); every foreign output pays that order's address or the address of one of
+    its coins; only MINIMA and MxUSD move; this wallet gives one and receives the other at that order's price or
+    better (the engine's rounding); the order's price is inside the reviewed limit; and the MINIMA of all takes signed
+    since the review is inside the reviewed amount (a transaction signed with several keys is counted once).
+- "This wallet's address" = a `RETURN SIGNEDBY(key)` script from `scripts` whose key is in `keys`. (`scripts` alone
+  holds every maker's script the taker registered.) Read once per engine, and again before a refusal stands.
+- A refusal that may only mean "this side is behind" (the page has heard an order the service has not read yet) makes
+  the service read each relay once, then the check is made again.
+- Frame transaction commands run one at a time, so nothing can be added to a transaction between the check and the
+  signature. Every refusal is logged ("REFUSED from the Dexicon page") and returned to the page as its error.
+
+What it does NOT cover:
+
+- **Which order.** Main knows the reviewed side, limit and amount, not the orders the review listed. A take of
+  another live order inside the same limit and amount passes (that is also what the page's own sweep may do).
+- **The engine's own records.** The brief asked for the check to read the pending take the transaction belongs to.
+  It cannot: `ui/app.js` `sendTake` writes `pending_takes[orderId]` AFTER `F.build` has signed, and the transaction
+  id (`dx` + time + random) appears in no table. The order is therefore taken from the service's relay book instead.
+- **Both books come from the same relays.** An order a relay invents is "an order" for both; what bounds the loss is
+  the reviewed limit price and amount, not the order's honesty.
+- The maker's side (its change, whether its coins cover the fill): not this wallet's funds; the engine checks them.
+- Non-transaction verbs (`newscript`, reads), the page's SQL (its own allow-list) and its relay traffic.
+- The service (`main/dexicon/service.desktop.js`) is not behind this gate: it is the app's own code in the main
+  process, and it must co-sign as maker and place on-chain orders.
+- Not proven on a node: that `txnlist id:` shows input and output coins with `address`, `tokenid` and, for MxUSD,
+  `tokenamount` exactly as read from the node's source (`TxnRow.toJSON`, `Coin.toJSON`, `txninput`, `txnoutput`). If
+  it does not, every FAST take is refused with "an MxUSD amount the node did not state": first dev-node check.
+
+**Proposed donor-side change (mds/dexicon), so a host can bind a signature to the engine's own record:**
+
+1. `ui/app.js` `sendTake`: write the pending take (order id, the order as taken, the plan with its inputs and outputs)
+   to `ax_kv.pending_takes` BEFORE `F.build`, marked `building`, and clear the mark once it is signed and sent (a
+   record left `building` is dropped by the void pass: nothing was sent).
+2. `lib/fill.js` `buildSigned`: take the transaction id from the caller and store it in that record
+   (`pending_takes[orderId].txnid`), or derive it from the order id, instead of `txnId('dx')` known to nobody.
+3. `ui/app.js` `executeTake`: write the reviewed limit, side and amount of the run (`ax_kv.take_run`) before the
+   first order is tried, so the bound a host enforces is the engine's own record and not a message from the screen.
+4. `nextOrder`: do not turn a sweep that finds nothing into `createFast` (0.18.118 refuses it from outside).
 
 ## Not proven without a node or relays
 

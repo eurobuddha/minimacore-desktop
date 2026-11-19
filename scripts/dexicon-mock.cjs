@@ -65,4 +65,4 @@ function mockNet() {
 
 const until = async (fn, ms = 8000) => { const end = Date.now() + ms; for (;;) { if (await fn()) return; if (Date.now() > end) throw new Error("timed out waiting for: " + fn); await new Promise(r => setTimeout(r, 15)); } };
 
-module.exports = { mockNode, mockNet, until, leaks, hex, root };
+module.exports = { mockNode, mockNet, until, leaks, hex, root, KEY, ADDRESS };

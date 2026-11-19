@@ -62,8 +62,9 @@ test("the engine boots in the vm and reaches its ready state, on the mock node o
   assert.deepEqual(host.book(), { fast: [], book: [], poolAsks: [], poolBids: [], pools: [] });
   assert.deepEqual(host.mine(), { orders: [], pending: [] });
   host.flush();
-  assert.ok(fs.existsSync(path.join(dir, "dexicon.sqlite")), "the store is dexicon.sqlite in the host's own folder");
-  assert.equal(host.storePath(), path.join(dir, "dexicon.sqlite"));
+  assert.ok(fs.existsSync(path.join(dir, "dexicon-" + s.publicId + ".sqlite")), "the store is named by this wallet's trading identity, whole, in the host's own folder");
+  assert.equal(host.storePath(), path.join(dir, "dexicon-" + s.publicId + ".sqlite"));
+  assert.ok(!fs.existsSync(path.join(dir, "dexicon.sqlite")));
 });
 
 test("nothing is sent before start, and stop ends the timer and the block watch", async () => {
@@ -81,7 +82,7 @@ test("nothing is sent before start, and stop ends the timer and the block watch"
   assert.equal(host.status().started, false);
   await host.start(); await M.until(() => node.seen.length > n);
   await M.until(() => host.status().ready);
-  assert.equal(node.seen.filter(c => c.startsWith("seedrandom")).length, 2, "the node that starts may hold another wallet: a start never reuses the identity the stopped node gave (0.18.106)");
+  assert.equal(node.seen.filter(c => c.startsWith("seedrandom")).length, 4, "(the host derives it to name the store, the service to sign: twice per start) the node that starts may hold another wallet: a start never reuses the identity the stopped node gave (0.18.106)");
   assert.notEqual(host._ctx(), null);
 });
 
@@ -138,7 +139,7 @@ test("the command bridge: only the verbs the MiniDapp page issues, one command a
   assert.equal(dexCommand("txnsign id:a publickey:auto"), "txnsign id:a publickey:auto");
   assert.equal(dexCommand("txnpost id:a"), "txnpost id:a");
   assert.deepEqual([...DEX_VERBS].sort(), ["balance", "block", "checkmode", "coins", "getaddress", "history", "newscript", "random", "scripts", "status",
-    "txncheck", "txncreate", "txndelete", "txnexport", "txnimport", "txninput", "txnoutput", "txnpost", "txnsign", "txnview", "txpow"], "the allow-list, pinned");
+    "txncheck", "txncreate", "txndelete", "txnexport", "txninput", "txnoutput", "txnpost", "txnsign", "txnview", "txpow"], "the allow-list, pinned (txnimport left it in 0.18.120)");
   // packets: only the page's two origins
   for (const m of [JSON.stringify({ origin: "service", type: "STATE", data: {} }), JSON.stringify({ type: "LIMIT" }), "not json", JSON.stringify({ origin: "ui" })])
     await assert.rejects(host.command({ op: "comms", message: m }), /bad message/);
@@ -296,7 +297,7 @@ test("MEXC unreachable: the price is MEXC's own ticker via CoinGecko, labelled; 
 test("a wallet reset moves the store aside (never deleted) and starts empty; the old engine can no longer reach the node or the store", async () => {
   const { host, node, dir, ctx } = await boot();
   await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('fill_0xF1', '{\"status\":\"done\",\"txpowid\":\"0xF1\"}')");
-  const old = host.status().publicId, oldMds = ctx.AX.mds, file = path.join(dir, "dexicon.sqlite");
+  const old = host.status().publicId, oldMds = ctx.AX.mds, file = host.storePath();
   host.flush();
   const before = fs.readFileSync(file);
   node.seen.length = 0;
@@ -432,6 +433,131 @@ test("H4: a take of realistic size, built by the engine's own envelope code, is 
   assert.equal(posts.length, 2);
 });
 
+// 0.18.120 (M4): the hidden page can ask for txncreate … txnsign … txnpost, so one unescaped relay string in it would
+// have been full custody. The main process now checks what the NODE holds under the transaction id before it forwards
+// a signature or a post (main/dexicon-signgate.js). The trades below are built by the engine's own lib/fill.js and
+// lib/maker.js THROUGH the bridge, so the gate is tested against the commands the page really issues.
+const ATTACKER = "0x" + "E7".repeat(32), MAKER = "0x" + "A1".repeat(32), MAKER_COIN_AT = "0x" + "A2".repeat(32), MC = "0x" + "C1".repeat(32), UC = "0x" + "C2".repeat(32), MINE2 = "0x" + "C3".repeat(32);
+/** A node that keeps custom transactions as the real one does (txnlist shows what was built), and a host on it. */
+async function frameRig(o = {}) {
+  const txns = {}, ok = (response) => ({ status: true, pending: false, response });
+  let F = null, n = 0;
+  const coins = () => ({
+    [MC]: { coinid: MC, address: MAKER_COIN_AT, amount: "300", tokenid: "0x00" },                                   // the maker's MINIMA, backing its order
+    [UC]: { coinid: UC, address: M.ADDRESS, amount: "0.000005", tokenamount: "5", tokenid: F.MXUSD },                // this wallet's MxUSD
+    [MINE2]: { coinid: MINE2, address: M.ADDRESS, amount: "7", tokenid: "0x00" } });                                 // this wallet's MINIMA
+  const on = (c) => {
+    let m;
+    if ((m = /^txncreate id:(\w+)$/.exec(c))) { txns[m[1]] = { inputs: [], outputs: [], state: [] }; return null; }
+    if ((m = /^txninput id:(\w+) coinid:(0x[0-9A-Fa-f]+)/.exec(c))) { txns[m[1]].inputs.push(coins()[m[2]]); return null; }
+    if ((m = /^txnoutput id:(\w+) amount:(\S+) address:(\S+?)(?: tokenid:(\S+))?$/.exec(c))) { const tok = m[4] || "0x00"; txns[m[1]].outputs.push(Object.assign({ coinid: M.hex("out" + (++n), 64), address: m[3], tokenid: tok }, tok === "0x00" ? { amount: m[2] } : { amount: "0.000001", tokenamount: m[2] })); return null; }
+    if ((m = /^txnlist id:(\w+)$/.exec(c))) return txns[m[1]] ? ok({ id: m[1], transaction: JSON.parse(JSON.stringify(txns[m[1]])) }) : { status: false, error: "Transaction not found : " + m[1] };
+    if ((m = /^txnexport id:(\w+)$/.exec(c))) return ok({ data: "0xABCD" });
+    if ((m = /^txndelete id:(\w+)$/.exec(c))) { delete txns[m[1]]; return null; }
+    if (c === "scripts") return ok([{ address: M.ADDRESS, script: "RETURN SIGNEDBY(" + M.KEY + ")", publickey: M.KEY, simple: true },
+      { address: MAKER, script: "RETURN SIGNEDBY(0x" + "B1".repeat(32) + ")", simple: true }, { address: ATTACKER, script: "RETURN SIGNEDBY(0x" + "B2".repeat(32) + ")", simple: true }]);   // makers' scripts a taker registered: in the list, not this wallet's
+    return o.on ? o.on(c) : null;
+  };
+  const b = await boot({ node: { on } }); F = b.ctx.AX.fill;
+  const order = Object.assign({ orderId: "0x" + "0F".repeat(16), side: "sell", price: "0.0031", amount: "250", coins: [MC], address: MAKER, scripts: [] }, o.order);
+  b.ctx.__orders = [order]; vm.runInContext("RELAY.orders = function () { return __orders; }; RELAY.pollBook = function (h, cb) { cb(null, false, ''); };", b.ctx);
+  const cmd = (command) => b.host.command({ op: "cmd", command });
+  // the page's MDS, as renderer/dexicon/mds.js makes it: every command through the bridge
+  const mds = { cmd: (c, cb) => { cmd(c).then(r => cb(r)); }, cmdR: (c, cb) => { cmd(c).then(r => (r && r.status ? cb(null, r.response, r) : cb(new Error((r && r.error) || "failed"), null, r))); } };
+  const take = (minima) => new Promise(res => { let p; try { p = F.plan(order, minima, [coins()[MC]], [coins()[UC]], M.ADDRESS); } catch (e) { return res({ err: e }); } F.build(mds, p, (err, hex) => res({ err, hex, plan: p })); });
+  const signs = () => b.node.seen.filter(c => /^txnsign /.test(c)), posts = () => b.node.seen.filter(c => /^txnpost /.test(c));
+  return Object.assign(b, { cmd, mds, take, signs, posts, order, review: (buy, price, amount) => b.host.command({ op: "reviewed", buy, price, amount }), txns });
+}
+
+test("M4: a take the page builds is signed only inside what the user reviewed: side, limit price and amount", async () => {
+  const r = await frameRig();
+  // nothing was reviewed: the engine's own, perfectly formed take is not signed
+  let t = await r.take("100");
+  assert.match(t.err.message, /Refused by the app's signing check: no FAST trade was reviewed on the Trade screen in the last ten minutes .*Nothing was signed/);
+  assert.deepEqual(r.signs(), []);
+  // reviewed: BUY up to 100 MINIMA, never above 0.0032
+  assert.deepEqual(await r.review(true, "0.0032", "100"), { status: true });
+  t = await r.take("60");
+  assert.equal(t.err, null, String(t.err && t.err.message)); assert.equal(t.hex, "0xABCD");
+  assert.equal(r.signs().length, 1); assert.match(r.signs()[0], new RegExp("^txnsign id:dx\\w+ publickey:" + M.KEY + "$"), "the engine's own command, unchanged");
+  assert.deepEqual(r.posts(), [], "a take is never posted by the page");
+  // 40 are left of the review: 41 more is refused, 40 goes through, then nothing is left
+  t = await r.take("41"); assert.match(t.err.message, /41 MINIMA is more than is left of the reviewed amount \(40\)/);
+  t = await r.take("40"); assert.equal(t.err, null);
+  t = await r.take("1"); assert.match(t.err.message, /more than is left of the reviewed amount \(0\)/);
+  assert.equal(r.signs().length, 2);
+  // a new review of the other side: a buy is no longer signed
+  await r.review(false, "0.003", "100");
+  t = await r.take("10"); assert.match(t.err.message, /not the coins of one live buy order the engine has read from the relays/);
+  // the order's price is above the reviewed limit (an order at an absurd price is still "an order")
+  const dear = await frameRig({ order: { price: "1000" } });
+  await dear.review(true, "0.0032", "0.005");
+  t = await dear.take("0.005"); assert.match(t.err.message, /at 1000 is outside the reviewed limit 0\.0032/);
+  assert.deepEqual(dear.signs(), []);
+  // a review that has lapsed
+  const late = await frameRig(); await late.review(true, "0.0032", "100");
+  const realNow = Date.now; Date.now = () => realNow() + 10 * 60000 + 1;
+  try { t = await late.take("10"); } finally { Date.now = realNow; }
+  assert.match(t.err.message, /no FAST trade was reviewed/);
+});
+
+test("M4: a script in the page cannot have a spend signed: not to an address of its choice, not above the order's price, not by posting, not on another transaction", async () => {
+  const r = await frameRig(), F = r.ctx.AX.fill, USD = F.MXUSD;
+  await r.review(true, "0.0032", "100");
+  const refused = async (cmds, why) => { let last; for (const c of cmds) last = await r.cmd(c); assert.equal(last.status, false, cmds.join(" ; ")); assert.match(last.error, why, cmds.join(" ; ")); };
+  // 1. this wallet's coin to an address of the attacker's choice
+  await refused(["txncreate id:ev1", "txninput id:ev1 coinid:" + UC + " scriptmmr:true", "txnoutput id:ev1 amount:5 address:" + ATTACKER + " tokenid:" + USD, "txnsign id:ev1 publickey:auto"], /pays 0x(E7){32} and spends no coin of any order/i);
+  // 2. dressed as a take of the real order, but the payment goes elsewhere
+  await refused(["txncreate id:ev2", "txninput id:ev2 coinid:" + MC + " scriptmmr:true", "txninput id:ev2 coinid:" + UC + " scriptmmr:true", "txnoutput id:ev2 amount:100 address:" + M.ADDRESS, "txnoutput id:ev2 amount:200 address:" + MAKER_COIN_AT,
+    "txnoutput id:ev2 amount:5 address:" + ATTACKER + " tokenid:" + USD, "txnsign id:ev2 publickey:" + M.KEY], /an output pays 0x(E7){32}, which is neither this wallet nor order/i);
+  // 3. to the order's own address, but 5 MxUSD for 100 MINIMA at 0.0031 (0.31 is the price)
+  await refused(["txncreate id:ev3", "txninput id:ev3 coinid:" + MC + " scriptmmr:true", "txninput id:ev3 coinid:" + UC + " scriptmmr:true", "txnoutput id:ev3 amount:100 address:" + M.ADDRESS, "txnoutput id:ev3 amount:200 address:" + MAKER_COIN_AT,
+    "txnoutput id:ev3 amount:5 address:" + MAKER + " tokenid:" + USD, "txnsign id:ev3 publickey:" + M.KEY], /not at order 0x(0F){16}'s price 0\.0031: 100 MINIMA for 5 MxUSD/i);
+  // 4. a third token, state, an address that is not a plain one
+  await refused(["txncreate id:ev4", "txninput id:ev4 coinid:" + MINE2 + " scriptmmr:true", "txnoutput id:ev4 amount:7 address:" + M.ADDRESS + " tokenid:0x" + "99".repeat(32), "txnsign id:ev4 publickey:auto"], /neither MINIMA nor MxUSD/);
+  // 5. a transaction the page did not create (another engine's, or one imported)
+  await refused(["txnsign id:dmOther1 publickey:auto"], /transaction dmOther1 was not created by the page in this session/);
+  await refused(["txnpost id:rlOther1"], /was not created by the page/);
+  await assert.rejects(r.cmd("txnimport id:ev5 data:0xABCD"), /not available to Dexicon: txnimport/);
+  // 6. any other spelling of a transaction command
+  for (const c of ["txnoutput id:ev1 amount:1 address:" + M.ADDRESS + " storestate:false", "txninput id:ev1 coinid:" + UC + " scriptmmr:true address:" + ATTACKER, "txninput id:ev1 floating:true address:" + ATTACKER + " amount:1 tokenid:0x00",
+    "txnoutput id:ev1 amount:1 address:MxG08ATTACKER", "txnsign id:ev1 publickey:auto mmrproofs:false", "txncreate id:../x"])
+    await refused([c], /not one of the transaction commands the page builds a trade with/);
+  // 7. posting a take; and a "void" that quietly burns
+  const t = await r.take("10"); assert.equal(t.err, null);
+  await refused(["txncreate id:ev7", "txninput id:ev7 coinid:" + MC + " scriptmmr:true", "txninput id:ev7 coinid:" + UC + " scriptmmr:true", "txnoutput id:ev7 amount:10 address:" + M.ADDRESS, "txnoutput id:ev7 amount:290 address:" + MAKER_COIN_AT,
+    "txnoutput id:ev7 amount:0.031 address:" + MAKER + " tokenid:" + USD, "txnoutput id:ev7 amount:4.969 address:" + M.ADDRESS + " tokenid:" + USD, "txnpost id:ev7"], /the page posts only transactions that pay this wallet/);
+  await refused(["txncreate id:ev8", "txninput id:ev8 coinid:" + MINE2 + " scriptmmr:true", "txnoutput id:ev8 amount:1 address:" + M.ADDRESS, "txnsign id:ev8 publickey:auto"], /not everything that goes in comes back to this wallet \(MINIMA: 7 in, 1 back\)/);
+  assert.equal(r.signs().length, 1, "of all that, only the engine's own take was signed"); assert.deepEqual(r.posts(), []);
+  // every refusal is in the log
+  assert.ok(r.host.status().log.some(l => /REFUSED from the Dexicon page: `txnsign`/.test(l)));
+});
+
+test("M4: the page's void (the engine's own relock) is signed and posted without a review; a transaction cannot change between the check and the signature", async () => {
+  const r = await frameRig(), F = r.ctx.AX.fill;
+  const txpowid = await new Promise((res, rej) => r.ctx.AX.maker.relock(r.mds, [{ coinid: MINE2, address: M.ADDRESS, amount: "7", tokenid: "0x00" }], M.ADDRESS, (e, id) => (e ? rej(e) : res(id))));
+  assert.match(txpowid, /^0x/); assert.equal(r.signs().length, 1); assert.equal(r.posts().length, 1);
+  assert.match(r.signs()[0], /^txnsign id:rl\w+ publickey:auto$/);
+  // an output added in the same breath as the signature waits for it: the node signs exactly what was checked
+  await r.cmd("txncreate id:race1"); await r.cmd("txninput id:race1 coinid:" + MINE2 + " scriptmmr:true"); await r.cmd("txnoutput id:race1 amount:7 address:" + M.ADDRESS);
+  r.node.seen.length = 0;
+  const sign = r.cmd("txnsign id:race1 publickey:auto"), late = r.cmd("txnoutput id:race1 amount:1 address:" + ATTACKER);
+  assert.equal((await sign).status, true); await late;
+  const order = r.node.seen.filter(c => /^(txnlist|txnsign|txnoutput) /.test(c)).map(c => c.split(" ")[0]);
+  assert.deepEqual(order, ["txnlist", "txnsign", "txnoutput"]);
+  assert.match((await r.cmd("txnpost id:race1")).error, /the page posts only transactions that pay this wallet/, "and with the late output it is no longer posted");
+});
+
+test("M4: this wallet's addresses are its own keys' addresses; a maker's script the taker registered is not one", () => {
+  const { ownAddresses, check } = require("../main/dexicon-signgate.js");
+  const scripts = { status: true, response: [{ address: "0xAA" + "00".repeat(31), script: "RETURN SIGNEDBY(0x" + "11".repeat(32) + ")" }, { address: "0xBB" + "00".repeat(31), script: "RETURN SIGNEDBY(0x" + "22".repeat(32) + ")" },
+    { address: "0xCC" + "00".repeat(31), script: "RETURN SIGNEDBY(0x" + "11".repeat(32) + ") AND TRUE" }] };
+  const keys = { status: true, response: { keys: [{ publickey: "0x" + "11".repeat(32) }] } };
+  assert.deepEqual([...ownAddresses(scripts, keys)], ["0xaa" + "00".repeat(31)]);
+  assert.deepEqual([...ownAddresses(scripts, { status: false })], [], "no key list: nothing is this wallet's, so nothing is signed");
+  assert.equal(check({ txn: { inputs: [], outputs: [] }, own: new Set(), orders: [], budget: null, now: 0, F: {} }).ok, false);
+});
+
 // 0.18.116 (M2): held around a wallet-replacing megammrsync. Nothing starts it, no screen reaches the node through it,
 // and the store stays where it is: released on the same wallet, it goes on with every record.
 test("hold: the engine is stopped and stays stopped (node status, timer, a screen), the store is not moved; release and start bring it back on the same records", async () => {
@@ -461,35 +587,96 @@ async function oldWalletStore(dir) {
   await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([LIVE_ORDER(a.node.ADDRESS)]) + "')");
   await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('mm_config', '{\"enabled\":true,\"peg\":true}')");
   await a.host.stop();   // as the node stopping does: the store is on disk
-  return { id, bytes: fs.readFileSync(path.join(dir, "dexicon.sqlite")) };
+  return { id, file: a.host.storePath(), bytes: fs.readFileSync(a.host.storePath()) };
 }
-const legacy = (dir) => fs.readdirSync(dir).filter(f => /^dexicon\.sqlite-legacy-keys-\d{8}(-\d+)?$/.test(f));
+const legacy = (dir) => fs.readdirSync(dir).filter(f => /^dexicon(-0x[0-9a-f]{128})?\.sqlite-legacy-keys-\d{8}(-\d+)?$/.test(f));
+/** The trading identity a seed gives (a host on a folder of its own). */
+async function idOf(seed) { const x = await boot({ node: { seed } }), id = x.host.status().publicId; await x.host.stop(); return id; }
+const storeOf = (dir, id) => path.join(dir, "dexicon-" + id + ".sqlite");
 
-test("another wallet under an un-invalidated store: the engine does not go READY on it; the store is moved aside and it starts clean", async () => {
+// 0.18.120 (M3): one store per wallet. Up to 0.18.119 there was one dexicon.sqlite, and a wallet that was not its
+// owner had it moved aside: data folder A -> B -> A set A's store aside for good, and A's takes awaiting an answer
+// were never voided.
+test("M3: each wallet opens its own store and finds it again: A, then B, then A again holds A's orders and A's unanswered take", async () => {
+  const dir = tmp();
+  const a = await boot({ dir, node: { seed: "one" } }), idA = a.host.status().publicId;
+  await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([Object.assign(LIVE_ORDER(a.node.ADDRESS), { status: "cancelled" })]) + "')");
+  await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"0xAB\":{\"id\":\"0xAB\",\"sent\":" + Date.now() + "}}')");
+  await a.host.stop();
+  const bytesA = fs.readFileSync(storeOf(dir, idA));
+  // the same app folder, a node on another data folder: wallet B
+  const b = await boot({ dir, node: { seed: "two" } }), idB = b.host.status().publicId;
+  assert.notEqual(idB, idA);
+  assert.equal(b.host.storePath(), storeOf(dir, idB));
+  assert.deepEqual(await sql(b.host, "SELECT k FROM ax_kv WHERE k IN ('myorders','pending_takes')"), [], "B starts on its own, empty store");
+  assert.ok(fs.readFileSync(storeOf(dir, idA)).equals(bytesA), "A's store is where it was, byte for byte");
+  assert.deepEqual(legacy(dir), [], "nothing is moved aside");
+  assert.ok(!b.node.seen.some(c => c.includes("C0".repeat(32))), "nothing of A's reached B's node");
+  await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('coin_max_age', '777')");
+  await b.host.stop();
+  // back to A
+  const a2 = await boot({ dir, node: { seed: "one" } });
+  assert.equal(a2.host.status().publicId, idA); assert.equal(a2.host.storePath(), storeOf(dir, idA));
+  assert.equal(JSON.parse((await sql(a2.host, "SELECT v FROM ax_kv WHERE k='myorders'"))[0].V)[0].orderId, "0x" + "1".repeat(32), "A's orders are back");
+  assert.equal((await a2.host.activeWork()).takes, 1, "A's take awaiting an answer is known again, so it can be voided");
+  assert.deepEqual(await sql(a2.host, "SELECT v FROM ax_kv WHERE k='coin_max_age' AND v='777'"), [], "and nothing of B's is in it");
+  assert.deepEqual(fs.readdirSync(dir).filter(f => /sqlite$/.test(f)).sort(), [path.basename(storeOf(dir, idA)), path.basename(storeOf(dir, idB))].sort());
+  await a2.host.stop();
+});
+
+test("M3: a dexicon.sqlite from before is renamed once to its owner's name, whoever is running: another wallet does not open it, its own wallet finds it", async () => {
   const dir = tmp(), old = await oldWalletStore(dir);
+  fs.renameSync(old.file, path.join(dir, "dexicon.sqlite"));   // an install from before 0.18.120, last used by wallet one
+  const logs = [], node = M.mockNode({ seed: "two" }), net = M.mockNet();
+  const host = makeHost({ runner: node.run, dataDir: dir, net, tickMs: 40, quiet: true }); node.attach(host); hosts.push(host);
+  host.emitter.on("log", l => logs.push(l));
+  await host.start(); await M.until(() => host.status().ready && host.status().restingReady);
+  const idB = host.status().publicId;
+  assert.ok(!fs.existsSync(path.join(dir, "dexicon.sqlite")), "the old name is gone");
+  assert.ok(fs.readFileSync(storeOf(dir, old.id)).equals(old.bytes), "it is its owner's store now, byte for byte");
+  assert.ok(logs.some(l => l.includes(storeOf(dir, old.id)) && l.includes(old.id) && l.includes(idB)), "said, both identities whole:\n" + logs.join("\n"));
+  assert.deepEqual(await sql(host, "SELECT k FROM ax_kv WHERE k IN ('myorders','mm_config')"), [], "wallet two does not trade wallet one's orders");
+  await new Promise(r => setTimeout(r, 300));   // several ticks, a maker refresh among them
+  assert.ok(!net.calls.some(c => /^POST .*\/dex\/publish/.test(c))); assert.ok(!node.seen.some(c => /^(txn|send)/.test(c) || c.includes("C0".repeat(32))), "no transaction over the old order's coins");
+  await host.stop();
+  const one = await boot({ dir, node: { seed: "one" } });
+  assert.equal(JSON.parse((await sql(one.host, "SELECT v FROM ax_kv WHERE k='myorders'"))[0].V)[0].orderId, "0x" + "1".repeat(32), "wallet one finds its store");
+  await one.host.stop();
+  // its own wallet first: simply renamed. A store that records no identity (never READY) becomes this wallet's. Never over an existing store.
+  const dir2 = tmp(), old2 = await oldWalletStore(dir2);
+  fs.renameSync(old2.file, path.join(dir2, "dexicon.sqlite"));
+  const same = await boot({ dir: dir2, node: { seed: "one" } });
+  assert.equal(same.host.storePath(), storeOf(dir2, old2.id)); assert.equal((await sql(same.host, "SELECT v FROM ax_kv WHERE k='myorders'")).length, 1);
+  await same.host.stop();
+  fs.copyFileSync(storeOf(dir2, old2.id), path.join(dir2, "dexicon.sqlite"));   // an old file AND this wallet's store: the old one is kept aside, not written over
+  const both = await boot({ dir: dir2, node: { seed: "one" } });
+  assert.ok(!fs.existsSync(path.join(dir2, "dexicon.sqlite"))); assert.equal(fs.readdirSync(dir2).filter(f => /^dexicon\.sqlite-legacy-keys-\d{8}$/.test(f)).length, 1);
+  await both.host.stop();
+});
+
+// 0.18.106 (HIGH), still held: a store that records ANOTHER identity than the wallet it is opened for (now: a file
+// under this wallet's name with another wallet's records in it) is never traded on.
+test("a store under this wallet's name that records another identity: the engine does not go READY on it; it is moved aside and starts clean", async () => {
+  const dir = tmp(), old = await oldWalletStore(dir), idB = await idOf("two");
+  fs.renameSync(old.file, storeOf(dir, idB));
   assert.deepEqual(legacy(dir), []);
-  // the SAME folder, a node that now holds another wallet (seed two): what a missed dxInvalidate used to leave behind
   const node = M.mockNode({ seed: "two" }), net = M.mockNet(), logs = [];
   const host = makeHost({ runner: node.run, dataDir: dir, net, tickMs: 40, quiet: true }); node.attach(host); hosts.push(host);
   host.emitter.on("log", l => logs.push(l));
-  const readyOnOld = []; host.emitter.on("update", () => { const s = host.status(); if (s.ready && s.publicId !== null) readyOnOld.push(s.publicId); });
   await host.start();
   await M.until(() => host.status().ready && host.status().restingReady);
-  const idB = host.status().publicId;
-  assert.notEqual(idB, old.id, "a different seed gives a different identity");
+  assert.equal(host.status().publicId, idB);
   const kept = legacy(dir);
-  assert.equal(kept.length, 1, "the old wallet's store is moved aside under its dated name");
+  assert.equal(kept.length, 1, "moved aside under its dated name");
   assert.ok(fs.readFileSync(path.join(dir, kept[0])).equals(old.bytes), "byte for byte: never deleted, never written to by the new wallet");
   assert.deepEqual(await sql(host, "SELECT k FROM ax_kv WHERE k IN ('myorders','mm_config')"), [], "the old store's orders and ladder are not carried over");
   assert.deepEqual((await sql(host, "SELECT v FROM ax_kv WHERE k='publicId'")).map(r => r.V), [idB]);
   assert.ok(logs.some(l => l.includes("NOT STARTING on this store") && l.includes(old.id) && l.includes(idB)), "said loudly, both identities in full:\n" + logs.join("\n"));
-  // nothing of the old wallet's order reached a relay or the node from the new wallet
-  await new Promise(r => setTimeout(r, 300));   // several ticks, a maker refresh among them at this tick length
-  assert.ok(!net.calls.some(c => /^POST .*\/dex\/publish/.test(c)), "no order was published:\n" + net.calls.filter(c => /^POST/.test(c)).join("\n"));
+  await new Promise(r => setTimeout(r, 300));
+  assert.ok(!net.calls.some(c => /^POST .*\/dex\/publish/.test(c)), "no order was published");
   assert.ok(!node.seen.some(c => /^(txn|send)/.test(c) || c.includes("C0".repeat(32))), "no transaction was built over the old order's coins");
   assert.equal(host.status().problem, "");
-  // the same wallet again (an ordinary restart): nothing is moved
-  host.stop();
+  await host.stop();
   const again = await boot({ dir, node: { seed: "two" } });
   assert.equal(again.host.status().publicId, idB); assert.equal(legacy(dir).length, 1, "a restart on the same wallet moves nothing aside");
 });
@@ -497,7 +684,8 @@ test("another wallet under an un-invalidated store: the engine does not go READY
 test("the old store cannot be moved aside: the engine does not start on it, says why, and starts clean once it can", async () => {
   if (process.getuid && process.getuid() === 0) return;   // root ignores the folder permission this test uses
   // (1) found at boot by the identity check
-  const dir = tmp(), old = await oldWalletStore(dir);
+  const dir = tmp(), old = await oldWalletStore(dir), idB = await idOf("two"), wrong = storeOf(dir, idB);
+  fs.renameSync(old.file, wrong);   // wallet one's records under wallet two's name
   const node = M.mockNode({ seed: "two" }), net = M.mockNet();
   const host = makeHost({ runner: node.run, dataDir: dir, net, tickMs: 40, quiet: true }); node.attach(host); hosts.push(host);
   fs.chmodSync(dir, 0o555);   // rename out of this folder now fails
@@ -505,19 +693,20 @@ test("the old store cannot be moved aside: the engine does not start on it, says
     await host.start();
     await M.until(() => host.status().problem !== "");
     assert.match(host.status().problem, /could not be moved aside .*so Dexicon is not running: it must not trade on another wallet's records/);
-    assert.ok(host.status().problem.includes(path.join(dir, "dexicon.sqlite")), "the file is named in full");
+    assert.ok(host.status().problem.includes(wrong), "the file is named in full");
     const n = node.seen.length;
     await new Promise(r => setTimeout(r, 300));   // seven ticks of retrying
     assert.equal(host.status().ready, false); assert.equal(host._ctx(), null, "no engine exists on that store");
     assert.equal(node.seen.length, n, "and nothing more is asked of the node");
     assert.ok(!net.calls.some(c => /^POST/.test(c)));
-    assert.ok(fs.readFileSync(path.join(dir, "dexicon.sqlite")).equals(old.bytes), "the store itself is untouched");
+    assert.ok(fs.readFileSync(wrong).equals(old.bytes), "the store itself is untouched");
   } finally { fs.chmodSync(dir, 0o755); }
   await M.until(() => host.status().ready && host.status().restingReady);   // by itself, at the next tick
   assert.equal(host.status().problem, ""); assert.equal(legacy(dir).length, 1);
   assert.deepEqual(await sql(host, "SELECT k FROM ax_kv WHERE k='myorders'"), []);
   // (2) the same when the main process's own invalidate() cannot move it: it throws, stays owed, and no later start opens the store
-  const dir2 = tmp(); await oldWalletStore(dir2);
+  const dir2 = tmp(), old2 = await oldWalletStore(dir2);
+  fs.renameSync(old2.file, path.join(dir2, "dexicon.sqlite"));   // a host that has opened nothing yet knows only the old single name
   const node2 = M.mockNode({ seed: "two" });
   const host2 = makeHost({ runner: node2.run, dataDir: dir2, net: M.mockNet(), tickMs: 40, quiet: true }); node2.attach(host2); hosts.push(host2);
   fs.chmodSync(dir2, 0o555);
@@ -543,16 +732,16 @@ test("a populated copy of the store survives a restart unchanged", async () => {
   await sql(first.host, "INSERT INTO pp_posted_inputs (coinid,handle) VALUES ('0x" + "ab".repeat(32) + "','dex_1')");
   const VOLATILE = ["mm_feed"];   // the feed line carries the time it was written
   const was = await dump(first.host, VOLATILE);
-  first.host.stop();
+  await first.host.stop();
   assert.ok(was.ax_kv.length >= 8 && was.pp_posted_inputs.length === 1 && was.my_coins.length === 1);
   // the COPY: another folder, another host, as after an app restart or a move to this app
   const dir2 = tmp();
-  fs.copyFileSync(path.join(first.dir, "dexicon.sqlite"), path.join(dir2, "dexicon.sqlite"));
+  fs.copyFileSync(first.host.storePath(), path.join(dir2, path.basename(first.host.storePath())));
   const second = await boot({ dir: dir2 });
   await new Promise(r => setTimeout(r, 500));   // a dozen service ticks over it: ladder pass, void sweep, settle, block refresh
   assert.equal(second.host.status().relays[0], "https://relay.example/dex-relay", "the user's relay list is the one in use");
   assert.deepEqual(await dump(second.host, VOLATILE), was, "every table, every row, as it was");
-  second.host.stop();
+  await second.host.stop();
   // and it is on disk, not only in memory
   const third = await boot({ dir: dir2 });
   assert.deepEqual(await dump(third.host, VOLATILE), was);
@@ -602,12 +791,14 @@ test("a signing command still queued when the engine is stopped or its wallet re
     const gate = new Promise(r => { release = r; });
     // the app's arrangement: one queue under every signer (main/noderun.js), as main/rpc.js puts it under rpcCall
     const queued = (run) => { const q = createNodeRunner(async (c) => { if (SIGNING.test(c)) { atNode.push(c); if (c.includes("first")) await gate; } return run(c); }); return (c, o) => q.run(c, undefined, o); };
-    const { host, ctx } = await boot({ wrap: queued });
+    const self = { coinid: "0x" + "5E".repeat(32), address: M.ADDRESS, amount: "5", tokenid: "0x00" };   // a void: the page's own coin back to its own address
+    const { host, ctx } = await boot({ wrap: queued, node: { on: (c) => (c === "txnlist id:third" ? { status: true, pending: false, response: { id: "third", transaction: { inputs: [self], outputs: [self], state: [] } } } : null) } });
+    assert.equal((await host.command({ op: "cmd", command: "txncreate id:third" })).status, true);
     const mds = ctx.AX.mds, ask = (c) => new Promise(res => mds.cmd(c, res));
     const first = ask("txnsign id:first publickey:auto");          // at the node, signing
     await M.until(() => atNode.length === 1);
     const second = ask("txnsign id:second publickey:auto");        // from the engine: waits its turn in the queue
-    const third = host.command({ op: "cmd", command: "txnsign id:third publickey:0xAB" });   // from the page's bridge: queued too
+    const third = host.command({ op: "cmd", command: "txnsign id:third publickey:auto" });   // from the page's bridge (it passed the signing check): queued too
     await new Promise(r => setTimeout(r, 30));
     assert.deepEqual(atNode, ["txnsign id:first publickey:auto"], "queued, not sent");
     if (how === "stop") host.stop(); else host.invalidate({ hold: true });

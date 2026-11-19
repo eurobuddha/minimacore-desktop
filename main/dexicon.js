@@ -7,7 +7,8 @@
  * stand-in; this file builds the stand-in, drives the 10 s timer and the block watch, and gives the screens a read
  * model and a command bridge.
  *   cmd  -> the node, ONLY through rpcCall (main/rpc.js: every signing command passes the one process-wide queue)
- *   sql  -> its own SQLite file, userData/dexicon/dexicon.sqlite, through the H2->SQLite shim PandaPools uses
+ *   sql  -> its own SQLite file, userData/dexicon/dexicon-<trading identity>.sqlite (one per wallet, 0.18.120: STORE
+ *           PER WALLET below), through the H2->SQLite shim PandaPools uses
  *   net  -> https only: the engine's current relay list (kv 'relays': the user's list, which is where a relay found
  *           by DISCOVER lands once the user adds it; the MiniDapp's three defaults on a fresh install) and the
  *           MiniDapp's own price source, api.mexc.com (resting/price.js: depth, then bookTicker), with its one
@@ -20,6 +21,13 @@
  * cancelOne / chain(). The engine's AtomiX doors are never loaded (main/dexicon/service.desktop.js).
  * ADDED: an epoch guard (a wallet replaced under a running engine: the old context's late callbacks reach neither
  * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted).
+ * STORE PER WALLET (0.18.120): the store is named by the wallet's public trading identity, whole
+ * (dexicon-0x<128 hex>.sqlite). Until then there was one dexicon.sqlite, and a wallet that was not its owner had it
+ * moved aside: with two data folders A and B, A -> B -> A set A's store aside for good, and the takes A had sent and
+ * not yet had answered were never voided. Now each wallet opens its own file and finds it again. The host derives the
+ * identity itself before it opens anything (the node's one-way seedrandom, then the engine's own
+ * AX.identity.fromSeed, in the engine's context). A dexicon.sqlite from before is renamed once, to the name of the
+ * identity recorded inside it (to this wallet's when it records none); it is never opened for writing under the old name.
  * STOP DRAINS (0.18.117): stop() ends the timer and every new event at once, but the engine is dropped only when what
  * it had in flight has ended: a maker's co-signed take writes its fill, tells the taker and reduces the order AFTER
  * txnpost answers, and an engine dropped in between left a fill on the chain that nothing recorded. node-manager waits
@@ -44,6 +52,7 @@ const fs = require("fs");
 const { rpcCall } = require("./rpc");
 const { createContext } = require("./dexicon/loader");
 const { makeSqlShim } = require("./pandapools/sqlshim");
+const signgate = require("./dexicon-signgate");
 
 let app = null; try { app = require("electron").app; } catch (e) {}
 
@@ -92,8 +101,21 @@ const priceUrl = (x) => !x.port && (x.hostname === PRICE_HOST || (x.hostname ===
 // really issues (ui/*.js and the lib/ resting/ files index.html loads): coinexport, consolidate, runscript, tokens,
 // txnbasics and txnstate are gone (the page never sends them: its consolidate is a CONSOLIDATE packet to the service).
 const DEX_VERBS = new Set(["balance", "block", "checkmode", "coins", "getaddress", "history", "newscript", "random",
-  "scripts", "status", "txpow", "txncheck", "txncreate", "txndelete", "txnexport", "txnimport", "txninput",
-  "txnoutput", "txnpost", "txnsign", "txnview"]);
+  "scripts", "status", "txpow", "txncheck", "txncreate", "txndelete", "txnexport", "txninput",
+  "txnoutput", "txnpost", "txnsign", "txnview"]);   // txnimport left the list in 0.18.120: the page never sends it, and an imported transaction is one the frame did not build
+// THE FRAME'S TRANSACTIONS (0.18.120, main/dexicon-signgate.js): the exact commands the page's two builders issue
+// (lib/fill.js buildSigned, lib/maker.js relock). Any other spelling of a txn command is refused.
+const TXID = "([A-Za-z0-9]{3,40})", HEX = "0x[0-9A-Fa-f]{64}";
+const FRAME_TXN = {
+  txncreate: new RegExp("^txncreate id:" + TXID + "$"),
+  txninput: new RegExp("^txninput id:" + TXID + " coinid:" + HEX + " scriptmmr:true$"),
+  txnoutput: new RegExp("^txnoutput id:" + TXID + " amount:[0-9]{1,45}(?:\\.[0-9]{1,45})? address:" + HEX + "(?: tokenid:0x[0-9A-Fa-f]{2,64})?$"),
+  txnsign: new RegExp("^txnsign id:" + TXID + " publickey:(?:auto|" + HEX + ")$"),
+  txnpost: new RegExp("^txnpost id:" + TXID + "$"),
+  txncheck: new RegExp("^txncheck id:" + TXID + "$"),
+  txnexport: new RegExp("^txnexport id:" + TXID + "$"),
+  txndelete: new RegExp("^txndelete id:" + TXID + "$")
+};
 /** One node command from a Dexicon screen, or a refusal. No chained ";" (it would also slip past the signing queue's
  *  per-command check), no parameter that reads or writes a FILE, picks key uses, carries a private key or a password,
  *  or makes txnpost sign / mine / burn. */
@@ -151,6 +173,9 @@ function makeHost(opts = {}) {
   let epoch = 0;   // bumped by drop(): everything built before it is disowned
   let asideOwed = false;   // the store on disk belongs to another wallet: it is moved aside before any store is opened
   let problem = "";        // why Dexicon is not running although the node is, in plain words (status().problem)
+  // THE FRAME'S TRANSACTIONS (main/dexicon-signgate.js): the ids the page created in this engine's life, the trade the
+  // user last reviewed, and one queue so a transaction cannot change between the check and the signature
+  let frameTx = new Map(), budget = null, frameTail = Promise.resolve(), ownCache = null;
   let busy = 0, posts = 0;  // engine commands at the node, and the txnposts among them (STOP DRAINS)
   let draining = null;     // the promise of a stop() that is waiting for the engine to finish
   let held = false;        // HOLD (0.18.116): a command that may replace the wallet is running in the node; no engine, no bridge, until release()
@@ -165,7 +190,29 @@ function makeHost(opts = {}) {
   const LOG = [];
 
   function dir() { return dataDir || path.join(app.getPath("userData"), "dexicon"); }
-  function storePath() { return path.join(dir(), "dexicon.sqlite"); }
+  let store = "";   // the store this host opened last (STORE PER WALLET, header); "" before the first engine
+  const ID_RE = /^0x[0-9a-f]{128}$/;
+  const legacyPath = () => path.join(dir(), "dexicon.sqlite");                      // the one name before 0.18.120
+  const storeFor = (id) => path.join(dir(), "dexicon-" + id + ".sqlite");
+  /** The open store's file; before any engine, the old single name when such a file is still there. */
+  function storePath() { return store && path.dirname(store) === dir() ? store : legacyPath(); }
+  const anyStore = () => { try { return fs.readdirSync(dir()).some(f => /^dexicon(-0x[0-9a-f]{128})?\.sqlite$/.test(f)); } catch (e) { return false; } };
+  /** A dexicon.sqlite from before 0.18.120: whose is it? null = there is none; "" = it records no identity (the engine
+   *  never went READY on it). Read only. Throws when the file cannot be read as a database: it is then left where it
+   *  is and no engine starts (as before: a damaged store is never silently replaced). */
+  async function legacyOwner() {
+    if (!fs.existsSync(legacyPath())) return null;
+    const old = await makeSqlShim(legacyPath());
+    try { const r = old.sql("SELECT v FROM ax_kv WHERE k='publicId'"); const v = r.status && r.rows.length ? String(r.rows[0].V || "").toLowerCase() : ""; return ID_RE.test(v) ? v : ""; }
+    finally { try { old._db.close(); } catch (e) {} }
+  }
+  /** Rename the old single file to its owner's name, once. Never over an existing store: then it is kept aside. */
+  function adoptLegacy(owner, me) {
+    const to = storeFor(owner || me), R = require("./restore");
+    if (fs.existsSync(to)) { const kept = R.moveAside(legacyPath()); log("a Dexicon store from before 0.18.120 is kept as " + kept + " (this wallet already has " + to + ")"); return; }
+    fs.renameSync(legacyPath(), to);
+    log("the Dexicon store from before 0.18.120 is now " + to + (owner && owner !== me ? " (it belongs to trading identity " + owner + ", not to this wallet " + me + "; it is opened again when that wallet is back)" : ""));
+  }
   function log(line) {
     const s = new Date().toISOString().slice(11, 19) + " " + String(line).replace(/^\[dexicon\]\s*/, "");
     LOG.push(s); if (LOG.length > 300) LOG.shift();
@@ -194,8 +241,9 @@ function makeHost(opts = {}) {
   // input claims, and the resting engine's own order / pending / ladder state).
   const WRITES_NOW = /fill_|pending_takes|void_takes|mm_cross_pending|pp_posted_inputs|pending_state|maker_state|my_orders|my_coins|cancelled_coins|processor_inflight/;
 
-  function buildMds() {
-    const mine = epoch, storage = sqlShim, live = () => mine === epoch, signal = abort.signal;
+  /** box.storage: this engine's store, set by init() before the engine's first event (it opens after the identity is known). */
+  function buildMds(box) {
+    const mine = epoch, live = () => mine === epoch, signal = abort.signal;
     return {
       minidappuid: "",
       cmd(command, cb) {
@@ -212,7 +260,8 @@ function makeHost(opts = {}) {
           e => end({ status: false, error: (post && !notRun(e) ? UNANSWERED + ": " : "") + ((e && e.message) || String(e)) }));
       },
       sql(query, cb) {
-        if (!live()) { if (cb) cb(toVm({ status: false, error: "this wallet was replaced" })); return; }
+        const storage = box.storage;
+        if (!live() || !storage) { if (cb) cb(toVm({ status: false, error: "this wallet was replaced" })); return; }
         const r = storage.sql(String(query));
         if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(String(query)) && WRITES_NOW.test(String(query))) { try { storage.flush(); } catch (e) {} }
         if (cb) cb(toVm(r));
@@ -240,7 +289,7 @@ function makeHost(opts = {}) {
         asideOwed = true; drop(); emitter.emit("update");
         if (again) init().catch(() => {});   // a failed move is tried again by the timer; the store is not opened before it worked
       },
-      persistRecovery(cb) { cb(live() && !!storage.flushChecked()); },
+      persistRecovery(cb) { cb(live() && !!box.storage && !!box.storage.flushChecked()); },
       log(msg) { log(String(msg)); },
       init(cb) { serviceHandler = cb; }
     };
@@ -256,10 +305,23 @@ function makeHost(opts = {}) {
     initPromise = (async () => {
       fs.mkdirSync(dir(), { recursive: true });
       if (asideOwed) aside();   // throws while it cannot be moved: the engine does not start on another wallet's store
-      const shim = await makeSqlShim(storePath());
-      if (mine !== epoch) return;   // the wallet was replaced while the store was opening: drop it, write nothing
-      sqlShim = shim;
-      ctx = createContext(buildMds());
+      // STORE PER WALLET (header): whose store, before any store is opened
+      const owner = await legacyOwner();   // throws on a damaged dexicon.sqlite: nothing is asked of the node, nothing starts
+      if (mine !== epoch) return;
+      const before = serviceHandler, box = { storage: null };
+      const c = createContext(buildMds(box)), handler = serviceHandler;   // the engine's code, loaded; nothing runs before "inited"
+      serviceHandler = before;
+      const r = await runner("seedrandom modifier:dexicon-identity-v1", { signal: abort.signal });
+      if (mine !== epoch) return;   // the wallet was replaced meanwhile: drop it, write nothing
+      const seed = r && r.status === true && r.pending !== true && r.response ? String(r.response.seedrandom || "") : "";
+      if (!/^0x[0-9A-Fa-f]{64}$/.test(seed)) throw new Error("this wallet's trading identity could not be read from the node (" + ((r && (r.error || r.message)) || "no derived seed: is the node locked?") + ")");
+      const me = String(c.AX.identity.fromSeed(seed, c.IDENTITY_CONTEXT).publicId()).toLowerCase();
+      if (!ID_RE.test(me)) throw new Error("the engine gave no trading identity");
+      if (owner !== null) adoptLegacy(owner, me);
+      const shim = await makeSqlShim(storeFor(me));
+      if (mine !== epoch) return;
+      box.storage = sqlShim = shim; store = storeFor(me);
+      ctx = c; serviceHandler = handler;
       ready = true;
       fire("inited");
     })().catch(e => { if (mine === epoch) { initPromise = null; ready = false; ctx = null; sqlShim = null; serviceHandler = null; } if (lastInitError !== e.message) { lastInitError = e.message; log("init failed: " + e.message); } throw e; });
@@ -270,7 +332,7 @@ function makeHost(opts = {}) {
    *  when there was no file. Throws, with `problem` set, while the move fails: asideOwed stays, so nothing opens it. */
   function aside() {
     try {
-      const kept = require("./restore").moveAside(storePath());
+      const kept = require("./restore").moveAside(storePath());   // the store this host had open; before any engine, an old dexicon.sqlite
       asideOwed = false; problem = "";
       if (kept) log("the old wallet's Dexicon store is kept as " + kept);
       return kept;
@@ -285,6 +347,7 @@ function makeHost(opts = {}) {
     abort.abort(); abort = new AbortController();   // queued signers of the dropped engine are never sent
     flush();
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
+    frameTx = new Map(); budget = null; ownCache = null;
     busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
   }
 
@@ -400,7 +463,7 @@ function makeHost(opts = {}) {
     const kv = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
     const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
     if (!ctx || !ctx.DX || !ctx.DX.restingReady()) {
-      const w = { ready: false, hasStore: fs.existsSync(storePath()), waitedMs: timer && startedAt ? Date.now() - startedAt : 0 };   // waitedMs: main/restore.js lets the user go on after two minutes of this
+      const w = { ready: false, hasStore: anyStore(), waitedMs: timer && startedAt ? Date.now() - startedAt : 0 };   // waitedMs: main/restore.js lets the user go on after two minutes of this
       if (sqlShim && ctx && ctx.DX && ctx.DX.ready()) { try { w.takes = takes(); } catch (e) {} }   // the FAST half is up: its takes are known even while the chain is still being read
       return w;
     }
@@ -413,7 +476,62 @@ function makeHost(opts = {}) {
     const c = dexCommand(command);
     if (/^checkmode\b/.test(c)) return Promise.resolve({ status: true, response: { writemode: true, dblocked: false } });
     const signal = abort.signal;   // the page's take, queued behind another signer when the engine is dropped, is not sent either
-    return Promise.resolve().then(() => runner(c, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
+    const send = () => Promise.resolve().then(() => runner(c, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
+    const verb = c.trim().split(/\s+/)[0].toLowerCase();
+    if (!/^txn/.test(verb) || verb === "txnview") return send();   // reads, newscript; txnview decodes hex and touches no transaction
+    // ---- a transaction of the frame's (header of main/dexicon-signgate.js) ----
+    const refuse = (why) => { log("REFUSED from the Dexicon page: `" + verb + "` — " + why); return Promise.resolve({ status: false, error: "Refused by the app's signing check: " + why + ". Nothing was signed." }); };
+    const m = FRAME_TXN[verb] && FRAME_TXN[verb].exec(c.trim());
+    if (!m) return refuse("not one of the transaction commands the page builds a trade with");
+    const id = m[1], mine = epoch;
+    const step = async () => {
+      if (mine !== epoch) return { status: false, error: "this wallet was replaced: the engine is restarting" };
+      if (verb === "txncreate") { if (frameTx.has(id)) return refuse("transaction id " + id + " is already in use"); frameTx.set(id, { counted: "0" }); return send(); }
+      if (!frameTx.has(id)) return refuse("transaction " + id + " was not created by the page in this session");
+      if (verb === "txndelete") { const r = await send(); frameTx.delete(id); return r; }
+      if (verb !== "txnsign" && verb !== "txnpost") return send();
+      const v = await frameCheck(id, verb === "txnpost");
+      if (mine !== epoch) return { status: false, error: "this wallet was replaced: the engine is restarting" };
+      if (!v.ok) return refuse(v.why + " (transaction " + id + ")");
+      if (v.kind === "take") {   // counted once per transaction, however many keys sign it
+        const F = ctx.AX.fill, rec = frameTx.get(id);
+        budget.left = F.d(budget.left).plus(F.d(rec.counted)).minus(F.d(v.minima)).toFixed(); rec.counted = v.minima;
+      }
+      return send();
+    };
+    // one at a time: a txnoutput sent while a txnsign is being checked waits for that signature
+    const out = frameTail.then(step, step); frameTail = out.catch(() => {});
+    return out.catch(e => ({ status: false, error: (e && e.message) || String(e) }));
+  }
+  /** What the NODE holds under that id, checked by the rules of main/dexicon-signgate.js. Never throws. */
+  async function frameCheck(id, post) {
+    try {
+      const F = ctx && ctx.AX && ctx.AX.fill; if (!F) return { ok: false, why: "Dexicon is still starting" };
+      const signal = abort.signal;
+      const t = await runner("txnlist id:" + id, { signal });
+      const txn = t && t.status === true && t.response && t.response.transaction;
+      if (!txn) return { ok: false, why: "the node could not show the transaction (" + ((t && (t.error || t.message)) || "no reply") + ")" };
+      const rec = frameTx.get(id), b = budget && Object.assign({}, budget, { left: F.d(budget.left).plus(F.d(rec ? rec.counted : "0")).toFixed() });
+      const orders = () => { try { return plain(ctx.RELAY ? ctx.RELAY.orders() : []); } catch (e) { return []; } };
+      const own = async (fresh) => { if (fresh || !ownCache) ownCache = signgate.ownAddresses(await runner("scripts", { signal }), await runner("keys", { signal })); return ownCache; };
+      let v = signgate.check({ txn, own: await own(false), orders: orders(), budget: b, post, now: Date.now(), F });
+      if (v.ok) return v;
+      // A refusal may only mean that this side is behind: a new wallet address, or an order the page has heard of and
+      // the service has not read yet (it reads one relay every 10 s). Both are read again, once, before it stands.
+      if (ctx.RELAY && ctx.RELAY.relays) for (let i = 0; i < ctx.RELAY.relays.length; i++) await new Promise(res => { let done = false; const end = () => { if (!done) { done = true; res(); } }; setTimeout(end, 5000); try { ctx.RELAY.pollBook(0, end); } catch (e) { end(); } });
+      v = signgate.check({ txn, own: await own(true), orders: orders(), budget: b, post, now: Date.now(), F });
+      return v;
+    } catch (e) { return { ok: false, why: "the check itself failed (" + ((e && e.message) || e) + ")" }; }
+  }
+  /** The app's own window says what the user has just reviewed on the Trade screen (renderer/dexicon-ui.js submit):
+   *  side, limit price, amount. The frame cannot send this (renderer/dexicon-core.js bridgeCall forwards only its five
+   *  ops), so it is the one statement of intent the signing check can rest on. A new review replaces the last. */
+  function pageReviewed(a) {
+    const num = /^[0-9]{1,30}(\.[0-9]{1,30})?$/;
+    if (!a || typeof a.buy !== "boolean" || !num.test(String(a.price)) || !num.test(String(a.amount))) throw new Error("bad review");
+    budget = { buy: a.buy, price: String(a.price), left: String(a.amount), until: Date.now() + signgate.BUDGET_MS };
+    for (const rec of frameTx.values()) rec.counted = "0";
+    return { status: true };
   }
   function pageSql(query) {
     let q; try { q = dexSql(query); } catch (e) { log("refused SQL from a screen (" + e.message + "): " + String(query).slice(0, 80)); throw e; }
@@ -441,7 +559,8 @@ function makeHost(opts = {}) {
     const asked = method === "POST" ? netPost(url, String(a.body == null ? "" : a.body), alive, false) : netGet(url, alive).then(o => (o == null ? null : JSON.stringify(o)));
     return asked.then(text => (text == null ? { status: false, error: "no reply" } : { status: true, response: String(text) }));
   }
-  /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message } | { op: "net", method, url, body }. */
+  /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message } | { op: "net", method, url, body }
+   *  | { op: "reviewed", buy, price, amount } (the native Trade screen only). */
   async function command(a) {
     if (held) throw new Error(HELD);   // the page's own txnsign / txnpost included
     const op = a && a.op;
@@ -449,6 +568,7 @@ function makeHost(opts = {}) {
     if (op === "sql") return pageSql(a.query);
     if (op === "comms") return pageComms(a.message);
     if (op === "net") return pageNet(a);
+    if (op === "reviewed") return pageReviewed(a);
     throw new Error("unknown Dexicon op");
   }
 

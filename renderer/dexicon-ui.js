@@ -366,6 +366,8 @@ const DexUI = (() => {
       const pl = C.plan(book(), X.buy, price, amount, fundsNow());
       if (!pl.ok || pl.stuck) return say(pl.why || "Nothing can be taken in this amount. Nothing was signed.", "note");
       Object.assign(args, C.expectOf(pl));
+      // M4 (0.18.120): the main process signs a take from the page only inside what was reviewed here (main/dexicon-signgate.js)
+      try { await api.dxCommand({ op: "reviewed", buy: X.buy, price, amount }); } catch (e) { return say("The review could not be recorded, so nothing was signed: " + C.refusal(e && e.message)); }
       X.sent = amount; X.sentRan = false;
     }
     let r = await drive("place", args);

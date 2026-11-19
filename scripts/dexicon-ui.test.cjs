@@ -446,6 +446,13 @@ test("M1: a long poll's hold is cut below the app's idle limit, so a quiet relay
   assert.match(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/ui/app.js"), "utf8"), /client\.pollInbox\(me\.publicId\(\), 25,/);
 });
 
+test("M4: what the user reviewed is told to the main process by the app's own window; the frame cannot say it", () => {
+  assert.equal(C.bridgeCall({ dxRoom: 1, id: 1, name: "room.dex", args: { op: "reviewed", buy: true, price: "1000", amount: "1000000" } }), null, "the frame's bridge forwards its five ops and nothing else");
+  assert.deepEqual(C.OPS, ["cmd", "sql", "comms", "net", "identity"]);
+  const ui = fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8");
+  assert.ok(ui.indexOf('api.dxCommand({ op: "reviewed", buy: X.buy, price, amount })') > 0 && ui.indexOf('api.dxCommand({ op: "reviewed"') < ui.indexOf('let r = await drive("place", args);'), "recorded before the page is driven");
+});
+
 test("H1: the Trade ticket plans on the page's book, and says what the click must still find", () => {
   const pageFast = [{ side: "sell", price: "0.0031", minima: "250" }];
   const b = C.tradeBook(BOOK, pageFast);
