@@ -1,0 +1,89 @@
+{
+  "_comment": "Digests of the Dexicon page files copied verbatim from the MiniDapp, at the same commit as the engine (scripts/dexicon-parity.manifest.json). Regenerate ONLY with `node scripts/dexicon-page-manifest.cjs --update` beside a deliberate re-copy. This app's differences belong in renderer/dexicon/mds.js, never in a page file.",
+  "donor": {
+    "mdsVersion": "0.0.89",
+    "gitSha": "500dd24344a3739472eccbefb0c684bed2aa2930"
+  },
+  "files": {
+    "index.html": {
+      "sha256": "b0b8edf0a4ffef2dc543f0502a74b61564a1aabfcb9f11d1914339158d8ed4c1",
+      "bytes": 25713
+    },
+    "lib/activity.js": {
+      "sha256": "9b876a506a0f2717231e5fc21084ebcb576be4bd3b70dbdfb383b511453164c8",
+      "bytes": 9085
+    },
+    "lib/calm.js": {
+      "sha256": "fc374cacbbbafa8383fdafdd74ca8bfcfb3a33a1aed75caa2c8b89ab3fd4aded",
+      "bytes": 21049
+    },
+    "resting/balance.js": {
+      "sha256": "75101e7f0ebd281823086ad9218edc571b2be62b4d6835504df72bc66327fde4",
+      "bytes": 6758
+    },
+    "resting/explorer.js": {
+      "sha256": "5d2e5ca74a1973e1e7f2996741375ac6bdf6d0643ae370dfef57d25d82e7c6cc",
+      "bytes": 3525
+    },
+    "resting/export.js": {
+      "sha256": "d9c6de12829f7acb2552d1226a9305d7886462a020de59822cbb2ba3666c1c79",
+      "bytes": 8089
+    },
+    "resting/zip.js": {
+      "sha256": "2b083ebc6b0dfcd534d2f78b954206241d814c46643eff2186a7e0c084490368",
+      "bytes": 6557
+    },
+    "ui/activity.js": {
+      "sha256": "e6ffb4e3dd2de0f91c1e1a2ab7073216b9e7d81c330a91f959c1b5845be66d2e",
+      "bytes": 11441
+    },
+    "ui/app.js": {
+      "sha256": "17ece603c5be74be7976f7a2db49f7333410e0c8532bc19c2046d4af79ebe7be",
+      "bytes": 51826
+    },
+    "ui/dexicon.css": {
+      "sha256": "529d5291aee1e3c9c4639f0e5359d17eeb49308fff4ca5c49dc4bca1f18a1d3f",
+      "bytes": 13763
+    },
+    "ui/doors.js": {
+      "sha256": "bd6cff70294f46dcfb238b8ca0f427c2aebd3e3097de53700cc2c1297bb5d157",
+      "bytes": 23629
+    },
+    "ui/fonts.css": {
+      "sha256": "8b734ccea136d281ed12debc1fc81f990b4b922ccfb1d7d9aa56aeec260bfff6",
+      "bytes": 240
+    },
+    "ui/inter_var.ttf": {
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "bytes": 876576
+    },
+    "ui/jetbrains_mono_var.ttf": {
+      "sha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda",
+      "bytes": 187208
+    },
+    "ui/layout.css": {
+      "sha256": "94ac04a39d19e708cc9de922f926ba6574695484516d4b2b68a9bc93675f6876",
+      "bytes": 9915
+    },
+    "ui/maker.js": {
+      "sha256": "ed33ec976d775c398d82eac1c53dfc9bfc354d0ce2332bfc7ea05c869aa353df",
+      "bytes": 13400
+    },
+    "ui/parity.css": {
+      "sha256": "800162ecd37e746e52d22c465faf419a3d1c3316f92abd429102d7476952770a",
+      "bytes": 11908
+    },
+    "ui/pd_app.js": {
+      "sha256": "124ac3964063ab62dc7b4b9737689c43e2a363a77f457023f27ea609e1f7a3c7",
+      "bytes": 69290
+    },
+    "ui/style.css": {
+      "sha256": "86dc7c3ebeb23624e5a5790fe3bdf8ca75b8099b125f640d405f0edfe81f9909",
+      "bytes": 9931
+    },
+    "ui/wallet.js": {
+      "sha256": "b37042d7f649f6f5a08244d40efe103d23101fe4ecb74e394e059423ef146f18",
+      "bytes": 6229
+    }
+  }
+}

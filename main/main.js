@@ -24,6 +24,7 @@ const chat = require("./chat");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const dexicon = require("./dexicon");
+require("./dexicon-room").register(require("electron"));   // dxroom://exchange/: the Dexicon page for its hidden, sandboxed frame
 const ethwallet = require("./ethwallet");
 const shop = require("./shop");
 const casino = require("./casino");

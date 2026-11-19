@@ -256,12 +256,23 @@ function makeHost(opts = {}) {
     fire("MDSCOMMS", { data: { public: false, message } });
     return { status: true };
   }
-  /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message }. */
+  /** The page's relay transport (its XMLHttpRequest, renderer/dexicon/mds.js): only a URL under one of the engine's
+   *  current relays, https, no redirects. Not the price host: the page asks no exchange for anything. The reply is
+   *  text, as an XMLHttpRequest gives it. */
+  function pageNet(a) {
+    const method = a && a.method === "POST" ? "POST" : "GET", url = String((a && a.url) || "");
+    let host = ""; try { host = new URL(url).hostname; } catch (e) {}
+    if (!ready || host === PRICE_HOST || !netAllowed(url, method)) return Promise.resolve({ status: false, error: "host not allowed" });
+    const asked = method === "POST" ? net().postText(url, String(a.body == null ? "" : a.body)) : net().fetchJson(url, { noRedirect: true }).then(o => (o == null ? null : JSON.stringify(o)));
+    return Promise.resolve(asked).then(text => (text == null ? { status: false, error: "no reply" } : { status: true, response: String(text) }), e => ({ status: false, error: (e && e.message) || "net failed" }));
+  }
+  /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message } | { op: "net", method, url, body }. */
   async function command(a) {
     const op = a && a.op;
     if (op === "cmd") return pageCmd(a.command);
     if (op === "sql") return pageSql(a.query);
     if (op === "comms") return pageComms(a.message);
+    if (op === "net") return pageNet(a);
     throw new Error("unknown Dexicon op");
   }
 

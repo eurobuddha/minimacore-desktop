@@ -59,8 +59,13 @@ if (process.argv.includes("--shots")) {
     ["tray", "view=node&tray=1"], ["overflow", "view=balances&tray=0&menu=1"], ["ethwallet", "view=ethwallet&tray=0"],
     ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],
     ["stopped", "view=balances&tray=0&state=stopped"], ["shutdown", "view=balances&tray=0&shutdown=1"], ["apps-hidden", "view=apps&tray=0&hidden=mail"],
-    ["dex-mxusd", "view=atomix"], ["dex-pools", "view=pandapools"], ["dex-exchange", "view=dexicon"], ["dex-exchange-light", "view=dexicon&dx=light"],
-    ["dex-exchange-1440x900", "view=dexicon", 1440, 900, 1], ["dex-stopped", "view=dexicon&state=stopped"], ["dex-notready", "view=dexicon&dxs=notready"],
+    // Dexicon. The file prefix is the SYSTEM theme; "-dxlight" is Dexicon's own light theme (it does not follow the system)
+    ["dex-mxusd", "view=atomix"], ["dex-pools", "view=pandapools"], ["dex-trade", "view=dexicon"], ["dex-trade-dxlight", "view=dexicon&dx=light"],
+    ["dex-trade-1440x900", "view=dexicon", 1440, 900, 1], ["dex-trade-dxlight-1440x900", "view=dexicon&dx=light", 1440, 900, 1],
+    ["dex-trade-take", "view=dexicon&dxf=buy:0.0034:25000"], ["dex-trade-take-dxlight", "view=dexicon&dx=light&dxf=buy:0.0034:25000"], ["dex-trade-rest", "view=dexicon&dxf=sell:0.0036:500"], ["dex-trade-own", "view=dexicon&dxf=sell:0.0029:100"],
+    ["dex-trade-review", "view=dexicon&dxf=buy:0.0032:3000&dxdlg=1"], ["dex-trade-taking", "view=dexicon&dxs=taking&dxf=buy:0.0034:500&scroll=200"], ["dex-trade-failed", "view=dexicon&dxs=failed&dxf=buy:0.0034:500&scroll=200"],
+    ["dex-trade-stopped", "view=dexicon&state=stopped"], ["dex-trade-notready", "view=dexicon&dxs=notready"], ["dex-trade-norelay", "view=dexicon&dxs=norelay"], ["dex-trade-relaydown", "view=dexicon&dxs=relaydown"],
+    ["dex-trade-empty", "view=dexicon&dxs=empty"], ["dex-trade-phone", "view=dexicon", 412, 915, 2], ["dex-trade-nofunds", "view=dexicon&bal=empty&dxf=buy:0.0034:500"],
     ["wide-1440x900", "view=balances&tray=1", 1440, 900, 1], ["narrow-680", "view=balances&tray=1", 680, 704, 2]
   ];
   const only = (process.argv.find(a => a.startsWith("--only=")) || "").slice(7);   // --only=wallet captures the names that start with it

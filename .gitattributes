@@ -9,3 +9,8 @@ main/dexicon/lib/*.js -text
 main/dexicon/crypto/*.js -text
 main/dexicon/vendor/*.js -text
 main/dexicon/resting/*.js -text
+# The Dexicon page (scripts/dexicon-page.manifest.json): verbatim bytes; mds.js there is this app's own.
+renderer/dexicon/index.html -text
+renderer/dexicon/ui/* -text
+renderer/dexicon/lib/*.js -text
+renderer/dexicon/resting/*.js -text

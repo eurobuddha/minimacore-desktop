@@ -1,0 +1,388 @@
+/* minimaxtDesk — desktop-first layout. Min width ~1280px; mobile deferred. */
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0a0a0a;
+    color: #ddd;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+body { display: flex; flex-direction: column; }
+
+#app {
+    display: grid;
+    grid-template-rows: 36px 1fr 24px;
+    flex: 1;
+    min-height: 0;
+}
+
+/* MegaMMR banner — sits above #app when MegaMMR is off or unverified. */
+.megammr-banner {
+    flex: 0 0 auto;
+    padding: 10px 16px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-bottom: 1px solid #000;
+}
+.megammr-banner[hidden] { display: none; }
+.megammr-banner.red {
+    background: #4a1320;
+    color: #ffd6df;
+    border-bottom-color: #6b1d2c;
+}
+.megammr-banner.amber {
+    background: #3a2a0c;
+    color: #ffe9b8;
+    border-bottom-color: #5a4012;
+}
+.megammr-banner code {
+    background: rgba(0, 0, 0, 0.35);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-family: inherit;
+}
+
+/* Footer pill mirrors the banner state in compact form. */
+.megammr-pill {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 2px;
+    border: 1px solid transparent;
+}
+.megammr-pill.on {
+    color: #7bd88f;
+    border-color: #2a5a36;
+    background: #0e1f15;
+}
+.megammr-pill.off {
+    color: #f38ba8;
+    border-color: #6b1d2c;
+    background: #2a0e15;
+}
+.megammr-pill.unknown {
+    color: #e0a53b;
+    border-color: #5a4012;
+    background: #1f180a;
+}
+
+/* When MegaMMR is confirmed off, dim the entry form so the banner is the
+   loud signal and clicking buttons is visibly inert. */
+body.no-megammr #pane-entry {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+header#topbar {
+    background: #141414;
+    border-bottom: 1px solid #222;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12px;
+}
+header#topbar .title {
+    color: #e0a53b;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+header#topbar .version { color: #666; }
+header#topbar .spacer { flex: 1; }
+header#topbar .bal { color: #ccc; }
+header#topbar .bal .tok { color: #888; margin-right: 4px; }
+
+main#panes {
+    display: grid;
+    grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.2fr) minmax(360px, 1.2fr);
+    gap: 1px;
+    background: #1a1a1a;
+    overflow: hidden;
+}
+
+main#panes > section {
+    background: #0f0f0f;
+    overflow-y: auto;
+    padding: 10px 12px;
+}
+
+main#panes > section > h2 {
+    color: #888;
+    font-size: 10px;
+    font-weight: normal;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 8px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #222;
+}
+
+footer#statusbar {
+    background: #141414;
+    border-top: 1px solid #222;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 10px;
+    color: #888;
+}
+footer#statusbar .conn.online   { color: #7bd88f; }
+footer#statusbar .conn.connecting { color: #e0a53b; }
+footer#statusbar .conn.offline  { color: #f38ba8; }
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+table th {
+    text-align: left;
+    color: #666;
+    font-weight: normal;
+    padding: 3px 6px;
+    border-bottom: 1px solid #222;
+    position: sticky;
+    top: 0;
+    background: #0f0f0f;
+}
+table td {
+    padding: 2px 6px;
+    border-bottom: 1px solid #1a1a1a;
+    white-space: nowrap;
+}
+table td.num { text-align: right; }
+table tr.ask td { color: #f38ba8; }
+table tr.bid td { color: #7bd88f; }
+table tr:hover { background: #161616; }
+
+/* Forms */
+label {
+    display: block;
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 10px;
+    margin-bottom: 3px;
+}
+input[type="number"], input[type="text"], select {
+    width: 100%;
+    background: #181818;
+    color: #ddd;
+    border: 1px solid #2a2a2a;
+    padding: 5px 7px;
+    font-family: inherit;
+    font-size: 12px;
+}
+input[type="number"]:focus, input[type="text"]:focus, select:focus {
+    border-color: #3a3a3a;
+    outline: none;
+}
+
+button {
+    background: #2a2a2a;
+    color: #ddd;
+    border: 1px solid #444;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 2px;
+}
+button:hover { background: #333; }
+button.buy  { background: #164d2b; border-color: #287c46; }
+button.buy:hover  { background: #1c6337; }
+button.sell { background: #5a1f29; border-color: #8a2d3c; }
+button.sell:hover { background: #6d2633; }
+button.danger { background: #722; border-color: #a33; }
+button.secondary { background: #14548a; border-color: #2677c1; }
+
+/* Empty-state text */
+.empty {
+    color: #555;
+    font-style: italic;
+    padding: 10px 0;
+    text-align: center;
+}
+
+/* Orderbook pane */
+#pane-orderbook .book-meta {
+    font-size: 10px;
+    color: #888;
+    margin: 4px 0 8px;
+    padding: 4px 6px;
+    background: #141414;
+    border: 1px solid #222;
+    border-radius: 3px;
+}
+table.orderbook-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin: 0;
+}
+table.orderbook-table th {
+    background: #141414;
+    padding: 2px 6px;
+    text-align: right;
+    color: #666;
+    font-weight: normal;
+    border-bottom: 1px solid #222;
+}
+table.orderbook-table td {
+    padding: 2px 6px;
+    border-bottom: 1px solid #141414;
+    text-align: right;
+    white-space: nowrap;
+}
+table.orderbook-table tr.ask td:first-child { color: #f38ba8; }
+table.orderbook-table tr.bid td:first-child { color: #7bd88f; }
+table.orderbook-table tr.ask td:not(:first-child),
+table.orderbook-table tr.bid td:not(:first-child) { color: #999; }
+table.orderbook-table tr:hover { background: #161616; cursor: pointer; }
+
+.mid-strip {
+    text-align: center;
+    padding: 6px 0;
+    margin: 2px 0;
+    background: #1a1a1a;
+    color: #e0a53b;
+    font-weight: 600;
+    font-size: 12px;
+    border-top: 1px solid #222;
+    border-bottom: 1px solid #222;
+}
+
+/* Order Entry */
+.entry-row { display: flex; gap: 6px; margin: 0 0 8px 0; }
+.entry-side { gap: 0; }
+.entry-side-btn {
+    flex: 1;
+    padding: 8px 0;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    color: #888;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+.entry-side-btn.active.buy  { background: #164d2b; border-color: #287c46; color: #fff; }
+.entry-side-btn.active.sell { background: #5a1f29; border-color: #8a2d3c; color: #fff; }
+.entry-totals {
+    font-size: 11px;
+    color: #ccc;
+    margin: 10px 0;
+    padding: 6px 8px;
+    background: #141414;
+    border: 1px solid #222;
+    border-radius: 3px;
+    line-height: 1.5;
+}
+#entry-place { width: 100%; padding: 8px; }
+.entry-error { color: #f38ba8; font-size: 11px; margin-top: 6px; min-height: 14px; }
+
+/* Open orders */
+table.myorders-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+table.myorders-table th {
+    background: #141414;
+    color: #666;
+    text-align: left;
+    font-weight: normal;
+    padding: 3px 6px;
+    border-bottom: 1px solid #222;
+}
+table.myorders-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid #141414;
+    white-space: nowrap;
+}
+table.myorders-table td.num  { text-align: right; color: #ccc; }
+table.myorders-table td.buy  { color: #7bd88f; }
+table.myorders-table td.sell { color: #f38ba8; }
+button.myorders-cancel {
+    padding: 1px 7px;
+    font-size: 11px;
+    line-height: 1;
+    background: #2a1017;
+    border: 1px solid #5a1f29;
+    color: #f38ba8;
+}
+button.myorders-cancel:hover { background: #3a1721; }
+
+/* Take-order modal (Stage D — taker flow) */
+.take-modal {
+    position: fixed; inset: 0; z-index: 100;
+}
+.take-modal-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+}
+.take-modal-card {
+    position: relative; z-index: 1;
+    width: min(560px, 90vw);
+    margin: 80px auto 0;
+    background: #0f0f0f;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+.take-modal-card header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #222;
+    background: #141414;
+}
+.take-title { color: #e0a53b; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+.take-close {
+    background: transparent; border: none; color: #888;
+    font-size: 18px; cursor: pointer; line-height: 1; padding: 0 4px;
+}
+.take-close:hover { color: #ddd; background: transparent; }
+.take-body { padding: 14px; }
+.take-summary {
+    background: #141414; border: 1px solid #222; border-radius: 3px;
+    padding: 8px 10px; font-size: 12px; color: #ddd; margin-bottom: 10px;
+}
+.take-amounts { font-size: 10px; color: #888; margin: 4px 0 12px; }
+.take-slider { width: 100%; }
+.take-amount-row { display: flex; gap: 6px; align-items: center; }
+.take-amount-row .take-slider { flex: 1; }
+.take-amount-row .take-amount-input {
+    width: 130px; flex: 0 0 130px;
+    background: #181818; color: #ddd;
+    border: 1px solid #2a2a2a; padding: 5px 7px;
+    font-family: inherit; font-size: 12px;
+}
+.take-amount-row .take-max {
+    background: #2a2a2a; border: 1px solid #444; color: #ddd;
+    padding: 5px 10px; font-size: 11px; cursor: pointer;
+}
+.take-amount-row .take-max:hover { background: #333; }
+.take-execute {
+    width: 100%; padding: 10px; font-size: 13px; font-weight: 600;
+    margin-top: 8px;
+}
+.take-log-wrap {
+    border-top: 1px solid #222; padding: 10px 14px 14px;
+}
+.take-log-wrap h4 {
+    margin: 0 0 6px; font-size: 10px; color: #888;
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: normal;
+}
+.take-log {
+    background: #000; border: 1px solid #1a1a1a; border-radius: 3px;
+    padding: 8px 10px; font-size: 11px; color: #7bd88f;
+    max-height: 180px; min-height: 60px; overflow: auto;
+    white-space: pre-wrap; margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

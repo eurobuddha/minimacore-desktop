@@ -1,0 +1,10 @@
+@font-face {
+  font-family: "Inter";
+  src: url("inter_var.ttf") format("truetype");
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("jetbrains_mono_var.ttf") format("truetype");
+  font-weight: 100 900;
+}

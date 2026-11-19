@@ -40,5 +40,208 @@
     return { text: "PAIRED", tone: "ok" };
   }
 
-  return { ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
+  // ---- exact decimals: strings in, BigInt inside, never a float; shortening is always a cut, never a rounding ----
+  const NUM = /^[0-9]{1,40}(\.[0-9]{1,40})?$/;
+  const p10 = (n) => 10n ** BigInt(n);
+  /** A plain non-negative decimal string, or null. */
+  function dec(x) {
+    const t = String(x == null ? "" : x).trim();
+    if (!NUM.test(t)) return null;
+    const [w, f = ""] = t.split(".");
+    return { v: BigInt(w + f), s: f.length };
+  }
+  const zero = { v: 0n, s: 0 };
+  const lift = (a, s) => a.v * p10(s - a.s);
+  const add = (a, b) => { const s = Math.max(a.s, b.s); return { v: lift(a, s) + lift(b, s), s }; };
+  /** a - b, never below zero */
+  const sub = (a, b) => { const s = Math.max(a.s, b.s), v = lift(a, s) - lift(b, s); return { v: v < 0n ? 0n : v, s }; };
+  const cmp = (a, b) => { const s = Math.max(a.s, b.s), x = lift(a, s), y = lift(b, s); return x < y ? -1 : x > y ? 1 : 0; };
+  const mul = (a, b) => ({ v: a.v * b.v, s: a.s + b.s });
+  const min = (a, b) => (cmp(a, b) <= 0 ? a : b);
+  /** cut to dp decimals (toward zero) */
+  const down = (a, dp) => (a.s <= dp ? a : { v: a.v / p10(a.s - dp), s: dp });
+  /** up to dp decimals: only for "you pay at most", where showing less than the truth would be the lie */
+  const up = (a, dp) => { if (a.s <= dp) return a; const q = p10(a.s - dp); return { v: a.v / q + (a.v % q ? 1n : 0n), s: dp }; };
+  /** a / b cut to dp decimals; null when b is zero */
+  const div = (a, b, dp) => (b.v === 0n ? null : { v: (a.v * p10(dp + b.s)) / (b.v * p10(a.s)), s: dp });
+  /** every digit it has, no trailing zeros */
+  function str(a) {
+    let t = a.v.toString().padStart(a.s + 1, "0");
+    if (a.s) t = (t.slice(0, -a.s) + "." + t.slice(-a.s)).replace(/0+$/, "").replace(/\.$/, "");
+    return t;
+  }
+  const fmt = (a) => (a ? str(a) : "0");
+  /** a balance: cut to 6 decimals (Util.fmtBal) */
+  const fmtBal = (a) => (a ? str(down(a, 6)) : "0");
+  /** a price: every digit it has, padded to 6 decimals for alignment, never shortened (Util.fmtPrice) */
+  function fmtPrice(a) { if (!a) return "…"; const t = str(a), f = (t.split(".")[1] || "").length; return f >= 6 ? t : (f ? t : t + ".") + "0".repeat(6 - f); }
+  /** exactly dp decimals, cut (Util.fmtDown) */
+  function fmtDown(a, dp) { const x = a || zero, v = x.s > dp ? x.v / p10(x.s - dp) : x.v * p10(dp - x.s), t = v.toString().padStart(dp + 1, "0"); return dp ? t.slice(0, -dp) + "." + t.slice(-dp) : t; }
+
+  const MIN_REM = dec("1");   // main/dexicon/lib/fill.js MIN_REM: a partial take leaves at least 1 MINIMA on the maker's order
+  /** How much of an order of `amount` a take of `want` really takes (lib/fill.js floorTake): all of it, or so that
+   *  at least 1 MINIMA stays; zero when neither is possible. */
+  function floorTake(amount, want) {
+    if (cmp(want, amount) >= 0) return amount;
+    if (cmp(sub(amount, want), MIN_REM) >= 0) return want;
+    return cmp(amount, MIN_REM) > 0 ? sub(amount, MIN_REM) : zero;
+  }
+
+  // ---- the order book (TradeView.renderLadder): FAST, BOOK and POOL at each price ----
+  const GROUPS = [null, "0.0001", "0.001", "0.01"], GROUP_LABELS = ["EXACT", "0.0001", "0.001", "0.01"], MAX_ROWS = 10;
+  /** the level a price belongs to: asks up to the tick, bids down (a grouping of the view, the row still shows the exact best price) */
+  function levelKey(price, tick, sell) {
+    if (!tick) return price;
+    const t = dec(tick), q = div(price, t, 0), back = mul(q, t);
+    return sell && cmp(back, price) < 0 ? add(back, t) : back;
+  }
+  function ladder(book, groupIdx) {
+    const tick = GROUPS[groupIdx] || null, sides = { sell: new Map(), buy: new Map() }, count = { fast: 0, book: 0, pools: ((book && book.pools) || []).length };
+    const at = (side, price) => {
+      const k = levelKey(price, tick, side === "sell"), id = str(k), m = sides[side];
+      if (!m.has(id)) m.set(id, { price: k, exact: price, fast: zero, book: zero, pool: zero, mine: false, others: zero });
+      const lv = m.get(id);
+      if (side === "sell" ? cmp(price, lv.exact) < 0 : cmp(price, lv.exact) > 0) lv.exact = price;
+      return lv;
+    };
+    for (const kind of ["fast", "book"]) for (const o of (book && book[kind]) || []) {
+      const price = dec(o.price), amt = dec(o.minima); if (!price || !amt || amt.v === 0n) continue;
+      const lv = at(o.side === "sell" ? "sell" : "buy", price);
+      lv[kind] = add(lv[kind], amt); count[kind]++;
+      if (o.ours) lv.mine = true; else lv.others = add(lv.others, amt);
+    }
+    for (const [list, side] of [[(book && book.poolAsks) || [], "sell"], [(book && book.poolBids) || [], "buy"]]) for (const r of list) {
+      const price = dec(r.price), amt = dec(r.minima); if (!price || !amt || amt.v === 0n) continue;
+      const lv = at(side, price); lv.pool = add(lv.pool, amt); lv.others = add(lv.others, amt);
+    }
+    const sorted = (m, asc) => [...m.values()].map(l => Object.assign(l, { total: add(add(l.fast, l.book), l.pool) })).sort((a, b) => (asc ? cmp(a.price, b.price) : cmp(b.price, a.price)));
+    const asks = sorted(sides.sell, true), bids = sorted(sides.buy, false);
+    const bestAsk = asks.length ? asks[0].exact : null, bestBid = bids.length ? bids[0].exact : null;
+    const mid = bestAsk && bestBid ? div(add(bestAsk, bestBid), dec("2"), 8) : bestBid || bestAsk;
+    return { asks, bids, count, bestAsk, bestBid, mid, spread: bestAsk && bestBid ? sub(bestAsk, bestBid) : null };
+  }
+  /** The rows to draw on one side: at most ten from the best price, each with its depth so far. */
+  function rows(levels) {
+    const top = levels.slice(0, MAX_ROWS); let run = zero;
+    const all = top.reduce((t, l) => add(t, l.total), zero);
+    return top.map(l => { run = add(run, l.total); const f = div(run, all, 4); return { lv: l, cum: run, frac: f ? Number(str(f)) : 0 }; });
+  }
+  /** The amount column (TradeView.amountText): FAST and POOL always tagged, BOOK only beside another source; FAST and
+   *  BOOK exact (they can be taken in full), POOL cut to two decimals (sampled depth). One line per source. */
+  function amountText(fast, bookAmt, pool) {
+    const parts = [], hasPool = pool && pool.v > 0n;
+    if (fast && fast.v > 0n) parts.push("FAST " + str(fast));
+    if (bookAmt && bookAmt.v > 0n) parts.push((parts.length || hasPool ? "BOOK " : "") + str(bookAmt));
+    if (hasPool) parts.push("POOL " + fmtDown(pool, 2));
+    return parts.length ? parts : [fmtDown(zero, 2)];
+  }
+
+  // ---- funds (Funds.java) ----
+  /** sendable balances, what the user's live FAST orders already promise, and what is still settling */
+  function funds(minimaSendable, mxusdSendable, orders, fills) {
+    let mo = zero, uo = zero, ms = zero, us = zero;
+    for (const o of orders || []) {
+      if (o.status !== "live") continue;
+      const rem = dec(o.remaining), price = dec(o.price); if (!rem || !price) continue;
+      if (o.side === "sell") mo = add(mo, rem); else uo = add(uo, up(mul(rem, price), 8));
+    }
+    for (const f of fills || []) {
+      if (f.status !== "settling") continue;
+      const m = dec(f.filled) || zero, u = dec(f.role === "maker" ? f.received : f.got) || zero;
+      if (f.side === "buy") ms = add(ms, m); else us = add(us, u);
+    }
+    const ma = dec(minimaSendable), ua = dec(mxusdSendable);
+    return { known: !!(ma && ua), minima: ma || zero, mxusd: ua || zero, minimaOrders: mo, mxusdOrders: uo, minimaSettling: ms, mxusdSettling: us };
+  }
+  /** free to commit to a NEW order on the paying side */
+  const freeFor = (f, buy) => (buy ? sub(f.mxusd, f.mxusdOrders) : sub(f.minima, f.minimaOrders));
+
+  // ---- what one click would do (TradeView.paintCta / updateTotal, ui/app.js crossing) ----
+  /** The FAST orders of OTHER makers that a limit at `price` crosses, best price first, and whether the only orders
+   *  there are the user's own. book = the read model (dxBook). */
+  function crossing(book, buy, price) {
+    const hits = [], mine = [];
+    for (const o of (book && book.fast) || []) {
+      const op = dec(o.price), amt = dec(o.minima); if (!op || !amt || amt.v === 0n) continue;
+      if (buy ? o.side !== "sell" || cmp(op, price) > 0 : o.side !== "buy" || cmp(op, price) < 0) continue;
+      (o.ours ? mine : hits).push({ price: op, amount: amt });
+    }
+    hits.sort((a, b) => (buy ? cmp(a.price, b.price) : cmp(b.price, a.price)));
+    return { hits, ownOnly: !hits.length && mine.length > 0, offered: hits.reduce((t, h) => add(t, h.amount), zero) };
+  }
+  /** Is there on-chain liquidity (a BOOK order of someone else, or pool depth) at or inside `price`? */
+  function chainCrosses(book, buy, price) {
+    const inside = (p) => { const d = dec(p); return d && (buy ? cmp(d, price) <= 0 : cmp(d, price) >= 0); };
+    return ((book && book.book) || []).some(o => !o.ours && (o.side === "sell") === buy && inside(o.price)) || ((book && (buy ? book.poolAsks : book.poolBids)) || []).some(r => inside(r.price));
+  }
+  /** The plan the Trade screen shows before the click. All strings are for display; the engine plans again itself. */
+  function plan(book, buy, priceText, amountText_, f) {
+    const price = dec(priceText), amount = dec(amountText_);
+    if (!price || !amount || price.v === 0n || amount.v === 0n) return { ok: false, why: "" };
+    if (price.s > 8 || amount.s > 8) return { ok: false, why: "At most 8 decimals." };
+    const x = crossing(book, buy, price), chain = chainCrosses(book, buy, price);
+    let left = amount, take = zero, cost = zero, n = 0;
+    for (const h of x.hits) {
+      if (left.v === 0n) break;
+      const t = floorTake(h.amount, min(left, h.amount)); if (t.v === 0n) continue;
+      take = add(take, t); cost = add(cost, mul(t, h.price)); left = sub(left, t); n++;
+    }
+    const fast = take.v > 0n;
+    const need = fast ? (buy ? up(cost, 8) : take) : (buy ? up(mul(amount, price), 8) : amount);
+    const free = f && f.known ? freeFor(f, buy) : null, short = free ? sub(need, free) : zero;
+    return { ok: true, buy, price, amount, fast, takes: n, take, cost, rest: fast ? sub(amount, take) : amount, avg: fast ? div(cost, take, 8) : null,
+      chain, ownOnly: x.ownOnly && !chain, need, free, short, offered: x.offered };
+  }
+  /** The amount a % button fills (TradeView.applyPercent): of the exact MINIMA on offer at that price when FAST orders
+   *  cross, capped by the user's free funds; else of the free funds. Cut to 8 decimals. null: no price or no funds read. */
+  function percent(book, buy, priceText, pct, f) {
+    const price = dec(priceText); if (!price || price.v === 0n || !f || !f.known) return null;
+    const free = freeFor(f, buy), cap = buy ? div(free, price, 8) : down(free, 8), offer = crossing(book, buy, price).offered;
+    const of = (a) => down(div(mul(a, dec(String(pct))), dec("100"), 8), 8);
+    return offer.v > 0n ? min(of(offer), cap) : of(cap);
+  }
+
+  /** The inline review: exactly what the click signs. One click is the phone's rule for FAST; nothing is hidden. */
+  function review(pl, relays) {
+    if (!pl.ok) return [];
+    const side = pl.buy ? "BUY" : "SELL", L = [];
+    if (pl.fast) {
+      L.push("One click signs and sends: " + side + " " + fmt(pl.take) + " MINIMA from " + pl.takes + " FAST " + (pl.buy ? "ask" : "bid") + (pl.takes === 1 ? "" : "s") + ", best price first, " + (pl.buy ? "never above " : "never below ") + fmtPrice(pl.price) + " MxUSD per MINIMA.");
+      L.push(pl.buy ? "You pay at most " + fmt(up(pl.cost, 8)) + " MxUSD and receive " + fmt(pl.take) + " MINIMA (average " + fmtPrice(pl.avg) + ")."
+                    : "You pay " + fmt(pl.take) + " MINIMA and receive at least " + fmt(down(pl.cost, 8)) + " MxUSD (average " + fmtPrice(pl.avg) + ").");
+      L.push("Your node signs one transaction per order taken; each maker's node co-signs and posts it. A partial take leaves at least 1 MINIMA on the maker's order or takes it whole.");
+      if (pl.rest.v > 0n) L.push("The other " + fmt(pl.rest) + " MINIMA is not traded and no order is placed for it.");
+    } else {
+      if (pl.ownOnly) L.push("Only your own orders are at this price. Nothing would trade.");
+      L.push("One click signs and publishes a FAST order: " + side + " " + fmt(pl.amount) + " MINIMA at " + fmtPrice(pl.price) + " MxUSD per MINIMA (" + (pl.buy ? "up to " + fmt(up(mul(pl.amount, pl.price), 8)) : "at least " + fmt(down(mul(pl.amount, pl.price), 8))) + " MxUSD in all) on " + relays + " relay" + (relays === 1 ? "" : "s") + ".");
+      L.push("Nothing is traded now and no coin is locked: the coins stay in your wallet and your node co-signs each fill while it is running. You can change or cancel the order at any time.");
+    }
+    if (pl.chain) L.push("On-chain orders or pools also reach this price. The second button shows that trade for review before anything is signed.");
+    return L;
+  }
+  /** A refusal or an error, from the engine, the page or the bridge: its own words, with the plain prefix a reader
+   *  needs. Nothing is added about what happened to funds unless the text itself says it. */
+  function refusal(text) {
+    const t = String(text == null ? "" : text).replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
+    return t || "It did not go through, and no reason was given. Look at Activity before trying again.";
+  }
+
+  // ---- what the screens may ask for: the page's nine actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
+  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh"];
+  const OPS = ["cmd", "sql", "comms", "net"];
+  /** A request from the page's frame, or null when it is not one the shell forwards. */
+  function bridgeCall(m) {
+    if (!m || m.dxRoom !== 1 || typeof m.id !== "number") return null;
+    if (m.name === "clip" && m.args && typeof m.args.text === "string") return { kind: "clip", text: m.args.text };
+    if (m.name !== "room.dex" || !m.args || !OPS.includes(m.args.op)) return null;
+    const a = m.args, s = (v) => (typeof v === "string" ? v : "");
+    return { kind: "dx", args: a.op === "cmd" ? { op: "cmd", command: s(a.command) } : a.op === "sql" ? { op: "sql", query: s(a.query) } : a.op === "comms" ? { op: "comms", message: s(a.message) }
+      : { op: "net", method: a.method === "POST" ? "POST" : "GET", url: s(a.url), body: a.body == null ? null : s(a.body) } };
+  }
+  /** A drive message for the page, or an Error for an action that is not on the list. */
+  function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
+
+  return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, ACTS, OPS, bridgeCall, driveCall,
+    ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

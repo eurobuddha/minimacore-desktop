@@ -26,6 +26,29 @@
   const NFT = "0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8";
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";
   const PK = (n) => "0x" + (n + "C4E8A1F09B37D25E6A8C0F1B3D5E7A9C2E4F6081A3B5C7D9E0F2A4B6C8D0E2F4").slice(0, 64);
+  // Dexicon fixtures: a book with FAST, BOOK and POOL rows on both sides, one level holding the user's own order
+  const DXS = Q.get("dxs") || "", DX_RELAYS = ["https://relay-one.example/dex-relay", "https://relay-two.example/dex-relay"];
+  const fastRow = (side, price, minima, ours) => ({ side, price, minima, ours: !!ours });
+  const DX_BOOK = {
+    fast: [fastRow("sell", "0.00344458", "11659"), fastRow("sell", "0.00340533", "10312"), fastRow("sell", "0.00336608", "9627"), fastRow("sell", "0.00332683", "10081"), fastRow("sell", "0.00328758", "10311"),
+      fastRow("sell", "0.00324833", "9623"), fastRow("sell", "0.00323094", "1000"), fastRow("sell", "0.00320908", "9192"), fastRow("sell", "0.00316983", "6915.25"),
+      fastRow("buy", "0.00313015", "7020"), fastRow("buy", "0.0031", "8800.5"), fastRow("buy", "0.00306", "9100"), fastRow("buy", "0.0029", "1250.5", true), fastRow("buy", "0.00285", "12000")],
+    book: [{ side: "sell", price: "0.0039", minima: "750", ours: true }, { side: "sell", price: "0.00332683", minima: "400", ours: false }, { side: "buy", price: "0.003", minima: "1500", ours: false }],
+    poolAsks: [{ price: "0.00318", minima: "812.4471" }, { price: "0.00319", minima: "1630.02" }], poolBids: [{ price: "0.00312", minima: "790.118" }, { price: "0.00311", minima: "1588.9" }],
+    pools: [{ address: PK("F1"), minima: "250000", mxusd: "787.5", mine: false }, { address: PK("F2"), minima: "90000", mxusd: "283.1", mine: true }]
+  };
+  const DX_FILLS = [
+    { role: "taker", orderId: "a81b22c9d0e47f13", side: "buy", price: "0.00316983", filled: "1200", gave: "3.803796", got: "1200", txpowid: PK("7A"), coins: [PK("C8")], maker: PK("D7"), ts: Math.floor(now / 1000) - 240, status: "settling" },
+    { role: "maker", orderId: "f3a91c07d2b84e65", side: "buy", price: "0.0029", filled: "749.5", received: "749.5", paid: "2.17355", txpowid: PK("7B"), coins: [PK("C9")], taker: PK("D8"), ts: Math.floor(now / 1000) - 5400, block: 2428031, status: "done" },
+    { role: "taker", orderId: "c2d4e6f8a0b1c3d5", side: "sell", price: "0.0031", filled: "300", gave: "300", got: "0.93", txpowid: PK("7C"), coins: [PK("CA")], maker: PK("D9"), ts: Math.floor(now / 1000) - 90000, status: "lost" }];
+  const DX_PAGE = () => {
+    const relays = DXS === "norelay" ? [] : DX_RELAYS.map((url, i) => ({ url, meta: DXS === "relaydown" ? "network" : "cursor " + (412 + i), state: DXS === "relaydown" ? "bad" : "ok", found: false }));
+    const p = { ready: true, idError: "", notice: "Live book · block 2428089", kind: "live", log: [], trading: false, relays };
+    if (DXS === "taking") Object.assign(p, { trading: true, log: ["BUY 500 MINIMA @ 0.0034 (limit)", "+0.0s  Found 8 FAST orders at or better than your price", "+0.4s  Order 9c1f02ab77d3e456: built and signed, sent to the maker", "+0.4s  Waiting for the maker's co-sign…"] });
+    if (DXS === "failed") Object.assign(p, { kind: "error", notice: "Take failed: the maker refused: the order's backing coin 0x6E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C is already spent",
+      log: ["BUY 500 MINIMA @ 0.0034 (limit)", "+0.0s  Found 1 FAST order at or better than your price", "+6.2s  Order 9c1f02ab77d3e456: the maker refused: the order's backing coin 0x6E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C is already spent", "+6.2s  No other FAST order crosses 0.0034.", "+6.2s  Nothing was traded and no order was placed."] });
+    return p;
+  };
   const tok = (name, ticker) => ({ name: { name, ticker, description: "Fixture token" }, decimals: 8, scale: 0 });
   const LONG = "0x9C2B7E4D1A6F3058B2C4D6E8F0A1B3C5D7E9F1A2B4C6D8E0F2A4B6C8D0E2F4A6";
   const ZERO = "0x3E5A7C9B1D2F4A6C8E0B2D4F6A8C0E2B4D6F8A0C2E4B6D8F0A2C4E6B8D0F2A4C";
@@ -140,9 +163,17 @@
     shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
     vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
-    // Dexicon (main/dexicon.js read model). ?dxs=notready: the engine has not started
-    dxStatus: async () => Q.get("dxs") === "notready" ? { version: "0.0.89", started: false, ready: false, restingReady: false, publicId: null, block: 0, relays: [], price: { mid: 0, ageMs: null, label: "" }, log: [] }
-      : { version: "0.0.89", started: true, ready: true, restingReady: true, publicId: PK("5D"), block: 2428089, relays: ["https://relay-one.example/dex-relay", "https://relay-two.example/dex-relay"], price: { mid: 0.00315, ageMs: 4000, label: "MEXC" }, log: [] },
+    // Dexicon (main/dexicon.js read model). ?dxs=notready|norelay|relaydown|empty|taking|failed
+    dxStatus: async () => DXS === "notready" ? { version: "0.0.89", started: false, ready: false, restingReady: false, publicId: null, block: 0, relays: [], price: { mid: 0, ageMs: null, label: "" }, log: [] }
+      : { version: "0.0.89", started: true, ready: true, restingReady: true, publicId: PK("5D"), block: 2428089, relays: DXS === "norelay" ? [] : DX_RELAYS, price: { mid: 0.00315, ageMs: 4000, label: "live" }, log: [] },
+    dxBook: async () => DXS === "empty" || DXS === "norelay" ? { fast: [], book: [], poolAsks: [], poolBids: [], pools: [] } : DX_BOOK,
+    dxMine: async () => ({ orders: DXS === "empty" ? [] : [{ coinid: PK("E1"), orderId: PK("E2"), sell: true, price: "0.0039", minima: "750", pending: "" }], pending: [] }),
+    dxCommand: async (a) => {
+      if (a.op !== "sql") return { status: true };
+      if (/k='myorders'/.test(a.query)) return { status: true, rows: [{ V: JSON.stringify(DXS === "empty" ? [] : [{ orderId: "f3a91c07d2b84e65", side: "buy", price: "0.0029", amount: "2000", remaining: "1250.5", coins: [PK("C1")], address: PK("D1"), seq: 1763560000, status: "live" }]) }] };
+      if (/fill_/.test(a.query)) return { status: true, rows: DX_FILLS.map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) };
+      return { status: true, rows: [] };
+    },
     parlonsStatus: async () => ({ ready: false }), portmapStatus: async () => ({})
   };
   // Anything not listed: an "on…" subscription is a no-op that returns its unsubscribe; any other call
@@ -173,6 +204,15 @@
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
       if (Q.get("state") === "refused") onStatus(Object.assign({}, status, { state: "error", health: null, keyMode: "block", lastError: "This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with." }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
+      if (view === "dexicon") {
+        const review = "Buying 2442.4471 MINIMA now\nEffective 0.003185 · 7.77919401 MxUSD\nBOOK 0 MINIMA / 0 MxUSD across 0 orders\nPOOL 2442.4471 MINIMA / 7.77919401 MxUSD across 2 pools\nWorst marginal 0.003190";
+        DexUI._preview(DX_PAGE(), async (act, args) => (act === "place" && args.layer === "chain" && !args.reviewed ? { error: "", asked: review } : { error: "" }));
+        setTimeout(() => {
+          const f = (Q.get("dxf") || "").split(":");
+          if (f.length === 3 && el("dxPrice")) { el(f[0] === "sell" ? "dxSell" : "dxBuy").click(); el("dxPrice").value = f[1]; el("dxAmount").value = f[2]; el("dxPrice").oninput(); }
+          if (Q.get("dxdlg") === "1") el("dxCta2").click();
+        }, 500);
+      }
       if (Q.get("expand") === "1") el("walHead").click();
       // History: ?hmenu=1 opens its options, ?hdetail=<n> the n-th row's detail (&chain=checking: no answer yet), ?hfilter=1 the filter, ?hforeign=1 hides foreign rows
       if (view === "history") setTimeout(() => {

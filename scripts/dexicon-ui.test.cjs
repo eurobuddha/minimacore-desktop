@@ -51,3 +51,243 @@ test("the version pill is the vendored engine's version", () => {
   assert.equal(dexicon.ENGINE_VERSION, manifest.donor.mdsVersion);
   assert.equal(dexicon.makeHost({ quiet: true, dataDir: "/nonexistent" }).status().version, manifest.donor.mdsVersion);
 });
+
+// ---------------------------------------------------------------- Trade (0.18.101)
+const d = (x) => C.dec(x);
+const BOOK = {
+  fast: [{ side: "sell", price: "0.0032", minima: "100", ours: false }, { side: "sell", price: "0.0033", minima: "50.5", ours: false }, { side: "sell", price: "0.0031", minima: "40", ours: true },
+    { side: "buy", price: "0.003", minima: "200", ours: false }, { side: "buy", price: "0.0029", minima: "70", ours: true }],
+  book: [{ side: "sell", price: "0.0033", minima: "25", ours: false }, { side: "buy", price: "0.0028", minima: "10", ours: true }],
+  poolAsks: [{ price: "0.00335", minima: "812.4479" }], poolBids: [{ price: "0.00295", minima: "300.999" }], pools: [{ address: "0xAA", minima: "1", mxusd: "1", mine: true }]
+};
+const FUNDS = C.funds("1000", "10", [{ status: "live", side: "buy", remaining: "100", price: "0.01" }, { status: "cancelled", side: "sell", remaining: "999", price: "1" }],
+  [{ status: "settling", side: "buy", role: "taker", filled: "5", got: "5" }, { status: "done", side: "buy", filled: "50" }]);
+
+test("amounts are cut, never rounded", () => {
+  assert.equal(C.fmtBal(d("13.404884999999")), "13.404884", "a balance: 6 decimals, cut");
+  assert.equal(C.fmtBal(d("0.9999999")), "0.999999");
+  assert.equal(C.fmt(C.down(d("1.999999999"), 8)), "1.99999999");
+  assert.equal(C.fmtDown(d("812.4479"), 2), "812.44", "pool depth: two decimals, cut (not 812.45)");
+  assert.equal(C.fmtDown(d("5"), 2), "5.00");
+  assert.equal(C.fmt(C.div(d("2"), d("3"), 8)), "0.66666666", "a division is cut");
+  assert.equal(C.fmtPrice(d("0.0034")), "0.003400", "a price is padded to 6 decimals");
+  assert.equal(C.fmtPrice(d("0.00314999123")), "0.00314999123", "and never shortened");
+  assert.equal(C.fmt(C.up(d("1.000000001"), 8)), "1.00000001", "up() exists only for 'you pay at most'");
+  assert.equal(C.fmt(C.sub(d("1"), d("2"))), "0", "a subtraction never goes below zero");
+  assert.equal(C.fmt(C.mul(d("0.1"), d("0.2"))), "0.02", "no float anywhere: 0.1 x 0.2 is 0.02");
+  for (const bad of ["", "abc", "1e5", "-1", "1.2.3", " ", null, undefined, "0x10", "1,5"]) assert.equal(C.dec(bad), null, "not a number: " + bad);
+});
+
+test("the 1 MINIMA minimum remainder: a partial take leaves at least 1 MINIMA or takes the order whole", () => {
+  assert.equal(C.fmt(C.floorTake(d("10"), d("10"))), "10");
+  assert.equal(C.fmt(C.floorTake(d("10"), d("25"))), "10");
+  assert.equal(C.fmt(C.floorTake(d("10"), d("5"))), "5");
+  assert.equal(C.fmt(C.floorTake(d("10"), d("9.5"))), "9", "9.5 would leave 0.5: cut back so 1 stays");
+  assert.equal(C.fmt(C.floorTake(d("0.8"), d("0.3"))), "0", "an order under 1 MINIMA can only be taken whole");
+  const engine = require("fs").readFileSync(path.join(__dirname, "../main/dexicon/lib/fill.js"), "utf8");
+  assert.ok(/var MIN_REM = '1';/.test(engine), "the engine's own constant is still 1 (the engine enforces the rule; the screen only shows it)");
+});
+
+test("the order book: FAST, BOOK and POOL at each price; the user's own level marked; grouping is of the view only", () => {
+  const L = C.ladder(BOOK, 0);
+  assert.deepEqual(L.asks.map(l => C.fmt(l.price)), ["0.0031", "0.0032", "0.0033", "0.00335"], "asks from the best price up");
+  assert.deepEqual(L.bids.map(l => C.fmt(l.price)), ["0.003", "0.00295", "0.0029", "0.0028"], "bids from the best price down");
+  assert.equal(L.asks[0].mine, true);
+  assert.deepEqual(C.amountText(L.asks[2].fast, L.asks[2].book, L.asks[2].pool), ["FAST 50.5", "BOOK 25"]);
+  assert.deepEqual(C.amountText(L.asks[3].fast, L.asks[3].book, L.asks[3].pool), ["POOL 812.44"]);
+  assert.deepEqual(C.amountText(C.zero, d("25"), C.zero), ["25"], "BOOK alone carries no tag");
+  assert.deepEqual(L.count, { fast: 5, book: 2, pools: 1 });
+  assert.equal(C.fmt(L.mid), "0.00305"); assert.equal(C.fmt(L.spread), "0.0001");
+  const G = C.ladder(BOOK, 2);   // 0.001
+  assert.deepEqual(G.asks.map(l => C.fmt(l.price)), ["0.004"], "asks group up to the tick");
+  assert.deepEqual(G.bids.map(l => C.fmt(l.price)), ["0.003", "0.002"], "bids group down");
+  assert.equal(C.fmt(G.asks[0].exact), "0.0031", "the row still shows the exact best price in the group");
+  const R = C.rows(L.asks);
+  assert.equal(C.fmt(R[1].cum), "140", "the depth so far, which a click on the row fills in");
+  assert.equal(C.ladder(null, 0).mid, null);
+});
+
+test("funds: free = sendable minus what live FAST orders already promise; settling shown apart", () => {
+  assert.equal(C.fmt(C.freeFor(FUNDS, true)), "9", "10 MxUSD less the live bid's 1");
+  assert.equal(C.fmt(C.freeFor(FUNDS, false)), "1000");
+  assert.equal(C.fmt(FUNDS.minimaSettling), "5");
+  assert.equal(C.funds(null, null, [], []).known, false, "an unread balance is not zero: it is unknown");
+});
+
+test("% buttons: of the exact MINIMA on offer when FAST orders cross, capped by free funds; else of the free funds", () => {
+  assert.equal(C.fmt(C.percent(BOOK, true, "0.0033", 100, FUNDS)), "150.5", "100 % of the offer is the offer itself (own order left out)");
+  assert.equal(C.fmt(C.percent(BOOK, true, "0.0033", 25, FUNDS)), "37.625");
+  assert.equal(C.fmt(C.percent(BOOK, true, "0.001", 50, FUNDS)), "4500", "nothing crosses: half of what 9 MxUSD buys at 0.001");
+  assert.equal(C.fmt(C.percent(BOOK, true, "0.0033", 100, C.funds("0", "0.1", [], []))), "30.3030303", "capped by 0.1 MxUSD at 0.0033, cut to 8 decimals");
+  assert.equal(C.percent(BOOK, true, "", 100, FUNDS), null);
+  assert.equal(C.percent(BOOK, true, "0.0033", 100, C.funds(null, null, [], [])), null);
+});
+
+test("the review of a FAST take names exactly what the click signs", () => {
+  const pl = C.plan(BOOK, true, "0.0033", "120", FUNDS), text = C.review(pl, 2).join("\n");
+  assert.equal(pl.fast, true); assert.equal(pl.takes, 2);
+  assert.equal(C.fmt(pl.take), "120"); assert.equal(C.fmt(pl.cost), "0.386", "100 at 0.0032 + 20 at 0.0033");
+  assert.match(text, /One click signs and sends: BUY 120 MINIMA from 2 FAST asks, best price first, never above 0\.003300 MxUSD per MINIMA\./);
+  assert.match(text, /You pay at most 0\.386 MxUSD and receive 120 MINIMA \(average 0\.00321666\)\./, "the average is cut, not rounded (0.003216666…)");
+  assert.match(text, /leaves at least 1 MINIMA on the maker's order or takes it whole/);
+  assert.match(text, /On-chain orders or pools also reach this price/, "the on-chain route is offered for review, never taken silently");
+  const part = C.plan(BOOK, true, "0.0032", "99.5", FUNDS);
+  assert.equal(C.fmt(part.take), "99", "99.5 of 100 would leave 0.5: the take is 99");
+  assert.match(C.review(part, 2).join("\n"), /The other 0\.5 MINIMA is not traded and no order is placed for it\./);
+  const sell = C.review(C.plan(BOOK, false, "0.003", "50", FUNDS), 2).join("\n");
+  assert.match(sell, /SELL 50 MINIMA from 1 FAST bid, best price first, never below 0\.003000/);
+  assert.match(sell, /You pay 50 MINIMA and receive at least 0\.15 MxUSD/);
+});
+
+test("the review of a limit order that rests says nothing trades and nothing is locked", () => {
+  const pl = C.plan(BOOK, false, "0.0036", "500", FUNDS), text = C.review(pl, 2).join("\n");
+  assert.equal(pl.fast, false); assert.equal(pl.chain, false);
+  assert.match(text, /One click signs and publishes a FAST order: SELL 500 MINIMA at 0\.003600 MxUSD per MINIMA \(at least 1\.8 MxUSD in all\) on 2 relays\./);
+  assert.match(text, /Nothing is traded now and no coin is locked/);
+  assert.match(C.review(C.plan(BOOK, true, "0.001", "7", FUNDS), 1).join("\n"), /BUY 7 MINIMA at 0\.001000 MxUSD per MINIMA \(up to 0\.007 MxUSD in all\) on 1 relay\./);
+  assert.deepEqual(C.review(C.plan(BOOK, true, "", "5", FUNDS), 2), [], "no price: no review");
+  assert.equal(C.plan(BOOK, true, "0.123456789", "1", FUNDS).why, "At most 8 decimals.");
+});
+
+test("funds short: the plan says by how much, and the screen blocks the click", () => {
+  const pl = C.plan(BOOK, true, "0.0033", "150.5", C.funds("0", "0.2", [], []));
+  assert.equal(C.fmt(pl.need), "0.48665"); assert.equal(C.fmt(pl.short), "0.28665");
+  assert.equal(C.plan(BOOK, false, "0.003", "50", FUNDS).short.v, 0n);
+});
+
+test("only the user's own orders at a price: ordinary plan feedback, no special flow", () => {
+  const own = { fast: [{ side: "sell", price: "0.0031", minima: "40", ours: true }], book: [], poolAsks: [], poolBids: [] };
+  const pl = C.plan(own, true, "0.0031", "10", FUNDS);
+  assert.equal(pl.fast, false, "an own order is never counted as something to take");
+  assert.equal(pl.ownOnly, true);
+  assert.match(C.review(pl, 2)[0], /^Only your own orders are at this price\. Nothing would trade\.$/);
+  assert.equal(C.plan(BOOK, true, "0.0031", "10", FUNDS).ownOnly, true);
+  assert.equal(C.plan(BOOK, true, "0.0032", "10", FUNDS).ownOnly, false);
+});
+
+test("a refusal is shown in the words it came in, whoever refused", () => {
+  const bridge = "Error invoking remote method 'mcd:dxCommand': Error: This would trade with your own order at 0.0031 (coin 0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8). Cancel or re-price that order first. Nothing was sent.";
+  assert.equal(C.refusal(bridge), "This would trade with your own order at 0.0031 (coin 0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8). Cancel or re-price that order first. Nothing was sent.",
+    "the bridge's wrapper is removed; the message and the identifier are whole");
+  assert.equal(C.refusal("the maker refused: coin already spent"), "the maker refused: coin already spent");
+  assert.match(C.refusal(""), /no reason was given/); assert.match(C.refusal(null), /Look at Activity before trying again/);
+});
+
+test("nothing outside the allow-list leaves the Exchange screens", () => {
+  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh"]);
+  for (const act of ["send", "consolidate", "eval", "txnsign", "__proto__", "constructor", ""]) assert.throws(() => C.driveCall(1, act, {}), /not an action of the Exchange screens/, act);
+  assert.deepEqual(C.driveCall(7, "place", { buy: true }), { dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true } } });
+  // from the page's frame: only the four bridge ops, each rebuilt from its named fields (nothing else rides along)
+  assert.deepEqual(C.bridgeCall({ dxRoom: 1, id: 1, name: "room.dex", args: { op: "cmd", command: "block", extra: "x", fn: "axSend" } }), { kind: "dx", args: { op: "cmd", command: "block" } });
+  assert.deepEqual(C.bridgeCall({ dxRoom: 1, id: 2, name: "room.dex", args: { op: "net", method: "DELETE", url: "https://x/dex/book", body: null } }).args, { op: "net", method: "GET", url: "https://x/dex/book", body: null });
+  for (const m of [{ dxRoom: 1, id: 1, name: "room.dex", args: { op: "invalidate" } }, { dxRoom: 1, id: 1, name: "room.ax", args: { op: "cmd", command: "block" } }, { dxRoom: 1, id: 1, name: "mcd.cmd", args: {} },
+    { dxRoom: 2, id: 1, name: "room.dex", args: { op: "cmd" } }, { dxRoom: 1, id: "1", name: "room.dex", args: { op: "cmd" } }, { dxRoom: 1, id: 1, name: "room.dex" }, null, "x"]) assert.equal(C.bridgeCall(m), null);
+  // and what does pass still meets the main process's own verb list (3a): a signing or wallet verb is refused there
+  require("./dexicon-mock.cjs");
+  const { dexCommand } = require("../main/dexicon.js");
+  for (const c of ["send amount:1 address:0xAA", "consolidate tokenid:0x00", "vault action:seed", "backup file:x", "txnpost id:a auto:true", "block;send amount:1 address:0xAA", "keys action:list", "tokencreate name:x amount:1"])
+    assert.throws(() => dexCommand(c), Error, c);
+});
+
+test("the page's bridge (renderer/dexicon/mds.js): every call is a message to the shell; unknown actions and unreviewed on-chain trades go nowhere", async () => {
+  const vm = require("node:vm"), sent = [], calls = [];
+  const els = {}, el = (id) => (els[id] = els[id] || { id, value: "", textContent: "", className: "", hidden: false, children: [], classList: { contains: () => false }, querySelector: () => null });
+  const tradeBtn = { classList: { contains: () => false }, textContent: "" };
+  el("trade").querySelector = () => tradeBtn;
+  const listeners = {};
+  const win = { console: { log() {}, error() {} }, document: { getElementById: el, querySelectorAll: () => [], head: {}, createElement: () => ({}) }, navigator: {}, setInterval() {}, JSON, Object, Array, String, Number, Promise, Error,
+    parent: { postMessage: (m) => sent.push(m) }, addEventListener: (t, f) => { listeners[t] = f; },
+    // the page's own globals the driver calls (ui/pd_app.js, ui/app.js), recorded
+    state: { block: 100, book: [], pools: [] }, chooseSide: (b) => calls.push("side:" + b), preview: () => calls.push("preview"), place: () => { calls.push("place"); if (win.pageAsks) calls.push("confirmed:" + win.confirm(win.pageAsks)); },
+    cancel: (id) => calls.push("cancel:" + id + ":" + win.confirm("?")), editOrder: (id) => calls.push("edit:" + id + ":" + win.prompt("?")), send: (t) => calls.push("send:" + t),
+    DexiconFast: { setMode: (f) => calls.push("fast:" + f), refreshPreview() {}, cancelOrder: (id) => calls.push("cancelFast:" + id + ":" + win.confirm("?")), editOrder: (id) => calls.push("editFast:" + id + ":" + win.prompt("?")),
+      addRelay: (u) => calls.push("addRelay:" + u), removeRelay() {}, discover() {}, refresh() {}, myId: () => "id", myIdError: () => "" },
+    PandaComposite: { plan: () => ({}), isEmpty: () => !win.crosses, poolCount: () => (win.crosses ? 1 : 0) }, PandaBook: { plan: () => ({ takes: [] }) } };
+  win.window = win; win.parent.window = win.parent;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/mds.js"), "utf8"), win);
+  const say = (data) => listeners.message({ source: win.parent, data });
+  const reply = () => sent.filter(m => m.driven != null).pop();
+
+  win.MDS.cmd("balance", () => {}); win.MDS.sql("SELECT 1", () => {}); win.MDS.comms.solo("{}", () => {});
+  const x = new win.XMLHttpRequest(); x.open("GET", "https://relay.example/dex-relay/dex/book?market=x"); x.send(null);
+  assert.deepEqual(sent.map(m => m.name + ":" + m.args.op), ["room.dex:cmd", "room.dex:sql", "room.dex:comms", "room.dex:net"], "node, store, service and relay traffic all go through the one bridge");
+  await assert.rejects(win.fetch("https://example.com"), /no network/);
+  assert.equal(win.confirm("anything"), false, "outside a driven action the page's confirm is always No");
+  assert.equal(win.prompt("anything"), null);
+
+  say({ dxRoom: 1, drive: { id: 1, act: "eval", args: {} } });
+  assert.match(reply().error, /not an action of the Exchange screens: eval/); assert.deepEqual(calls, []);
+  listeners.message({ source: {}, data: { dxRoom: 1, drive: { id: 2, act: "refresh", args: {} } } });
+  assert.deepEqual(calls, [], "a message that is not from the shell is ignored");
+
+  say({ dxRoom: 1, drive: { id: 3, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "fast" } } });
+  assert.deepEqual(calls, ["side:true", "fast:true", "preview", "place"]); assert.equal(reply().error, null);
+  assert.deepEqual([el("price").value, el("amount").value], ["0.0032", "10"], "the amounts reach the page as typed");
+  calls.length = 0;
+  for (const bad of [{ price: "1e3", amount: "1", layer: "fast" }, { price: "0.1", amount: "-1", layer: "fast" }, { price: "0.1", amount: "1", layer: "both" }]) { say({ dxRoom: 1, drive: { id: 4, act: "place", args: bad } }); assert.ok(reply().error, JSON.stringify(bad)); }
+  assert.deepEqual(calls, [], "a bad price, amount or layer never reaches place()");
+
+  // on-chain: no rounding, nothing that crosses nothing, and the page's own review word for word
+  say({ dxRoom: 1, drive: { id: 5, act: "place", args: { buy: true, price: "0.0032001", amount: "10", layer: "chain" } } });
+  assert.match(reply().error, /at most 6 decimals\. Nothing was sent\./);
+  say({ dxRoom: 1, drive: { id: 6, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
+  assert.match(reply().error, /Nothing on the chain crosses this price now\. Nothing was sent\./);
+  assert.ok(!calls.includes("place"));
+  win.crosses = true; win.pageAsks = "Buying 10 MINIMA now\nEffective 0.003200";
+  say({ dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
+  assert.equal(calls.pop(), "confirmed:false", "first call: the page asks, the answer is No, nothing is sent");
+  assert.equal(reply().asked, win.pageAsks, "and its review text comes back for the native dialog");
+  say({ dxRoom: 1, drive: { id: 8, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain", reviewed: "Buying 9 MINIMA now" } } });
+  assert.equal(calls.pop(), "confirmed:false", "a review of a different trade (the book moved) confirms nothing");
+  say({ dxRoom: 1, drive: { id: 9, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain", reviewed: win.pageAsks } } });
+  assert.equal(calls.pop(), "confirmed:true", "the same text back: confirmed");
+  assert.equal(win.confirm(win.pageAsks), false, "and the answer does not outlive the call");
+
+  calls.length = 0;
+  say({ dxRoom: 1, drive: { id: 10, act: "cancelFast", args: { orderId: "f3a91c07d2b84e65" } } });
+  say({ dxRoom: 1, drive: { id: 11, act: "editChain", args: { coinid: "0xAB12", price: "0.0035" } } });
+  say({ dxRoom: 1, drive: { id: 12, act: "cancelChain", args: { coinid: "0xAB12'); alert(1); ('" } } });
+  assert.deepEqual(calls, ["cancelFast:f3a91c07d2b84e65:true", "edit:0xAB12:0.0035"], "an id that is not an id is refused");
+  // a packet the host refuses comes back to the page as the service's own ERROR, not as silence
+  let told = null; win.MDS.init((m) => { told = m; });
+  const comms = sent.filter(m => m.name === "room.dex" && m.args.op === "comms").pop();
+  say({ dxRoom: 1, id: comms.id, error: "This would trade with your own order at 0.0031. Nothing was sent." });
+  await new Promise(r => setImmediate(r));
+  assert.match(JSON.parse(told.data.message).data.message, /This would trade with your own order at 0\.0031\. Nothing was sent\./);
+  assert.equal(JSON.parse(told.data.message).type, "ERROR");
+});
+
+test("the page is served from two pinned folders and nowhere else; its frame has no network", () => {
+  const { roomFile, CSP } = require("../main/dexicon-room.js");
+  const rel = (f) => f && path.relative(path.join(__dirname, ".."), f);
+  assert.equal(rel(roomFile("exchange", "/index.html")), path.join("renderer", "dexicon", "index.html"));
+  assert.equal(rel(roomFile("exchange", "/mds.js")), path.join("renderer", "dexicon", "mds.js"));
+  assert.equal(rel(roomFile("exchange", "/ui/app.js")), path.join("renderer", "dexicon", "ui", "app.js"));
+  assert.equal(rel(roomFile("exchange", "/lib/fill.js")), path.join("main", "dexicon", "lib", "fill.js"), "engine files come from the vendored engine");
+  assert.equal(rel(roomFile("exchange", "/lib/calm.js")), path.join("renderer", "dexicon", "lib", "calm.js"));
+  for (const no of ["/doors/engine.js", "/lib/door.js", "/../app.js", "/..%2Fapp.js", "/%2e%2e/app.js", "/service.desktop.js", "/loader.js", "/lib/../loader.js", "/ui/", "/", "/ui/app.js%00.html", "/lib/fill.js.map", "//etc/passwd", "/ui\\app.js"])
+    assert.equal(roomFile("exchange", no), null, no);
+  assert.equal(roomFile("rooms", "/index.html"), null, "one host only");
+  assert.match(CSP, /default-src 'none'/); assert.match(CSP, /connect-src 'none'/); assert.ok(!/https:|wss:|http:/.test(CSP), "no network source at all");
+  assert.match(fs.readFileSync(path.join(__dirname, "../renderer/index.html"), "utf8"), /frame-src dxroom:;/);
+  require("node:child_process").execFileSync(process.execPath, [path.join(__dirname, "dexicon-page-manifest.cjs"), "--verify"]);   // throws on a changed, missing or stray page file
+});
+
+test("the page's relay traffic passes the host's allow-list: the engine's relays, https, and never the price host", async () => {
+  const M = require("./dexicon-mock.cjs"), os = require("node:os");
+  const dexicon = require("../main/dexicon.js"), net = M.mockNet(), node = M.mockNode();
+  const host = dexicon.makeHost({ quiet: true, dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "dx-ui-")), runner: node.run, net, tickMs: 3600000 });
+  node.attach(host);
+  assert.deepEqual(await host.command({ op: "net", method: "GET", url: "https://eurobuddha.com/dex-relay/dex/book?market=x&since=0&hold=0" }), { status: false, error: "host not allowed" }, "before the engine is up: nothing");
+  await host.start(); await M.until(() => host.status().ready);
+  const relay = host.status().relays[0];
+  const ok = await host.command({ op: "net", method: "GET", url: relay + "/dex/book?market=MINIMA&since=0&hold=0" });
+  assert.equal(ok.status, true); assert.equal(typeof ok.response, "string", "text, as an XMLHttpRequest gives it");
+  assert.equal((await host.command({ op: "net", method: "POST", url: relay + "/dex/msg", body: "{}" })).status, true);
+  const before = net.calls.length;
+  for (const url of ["https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT", "https://evil.example/dex/book", relay.replace("https:", "http:") + "/dex/book", relay + "/../admin", relay + ".evil.example/dex/book", "file:///etc/passwd", "http://127.0.0.1:9005/status", ""])
+    assert.deepEqual(await host.command({ op: "net", method: "GET", url }), { status: false, error: "host not allowed" }, url);
+  assert.equal(net.calls.length, before, "a refused URL never reaches the network");
+  host.stop();
+  assert.deepEqual(M.leaks, [], "the real rpcCall and the real network were never reached");
+});
