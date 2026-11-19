@@ -322,12 +322,32 @@ function myPools() {
     })).then(resolve,reject);
   }));
 }
-function activityLabels(active) { active = active || ctx; var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "USDT"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = active.PP.tokenLabel(p); }); return labels; }
+/**
+ * A token's label in a record, by its ID and never by its name (0.18.135): the one dollar token is "MxUSD"; every other
+ * token is its own name (control and zero-width characters removed) marked as not MxUSD, with its WHOLE id. A token can
+ * be named anything, "MxUSD" included, so a name alone must never be what a record or a screen calls the dollar token.
+ */
+function labelById(tok, name) {
+  if (isMarketFed(tok)) return "MxUSD";
+  var n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+  return (n && n.toLowerCase() !== String(tok || "").toLowerCase() ? n : "unnamed token") + " (not MxUSD, token " + tok + ")";
+}
+function activityLabels() { var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "MxUSD"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = labelById(p.tok, p.tokName); }); return labels; }
+/** A swap recorded before 0.18.135 ends in the token's NAME as the engine read it ("… for 10 USDT"). Where the node's own
+ *  history of that transaction names exactly one token, the record is labelled by that token's id; otherwise it is left
+ *  exactly as recorded (never guessed, never reworded). */
+function relabelSwap(model, row) {
+  var m = /^((?:Sold|Bought) \S+ MINIMA for \S+) (.+)$/.exec((model && model.summary) || ""), h = row && row.history;
+  if (!m || model.type !== "SWAP" || !h || /\(not MxUSD, token 0x[0-9A-Fa-f]+\)$/.test(m[2])) return model;
+  var ids = []; try { ids = Object.keys(JSON.parse(h.deltas || "{}")).filter(function (t) { return t !== "0x00"; }); } catch (e) {}
+  if (ids.length === 1) model.summary = m[1] + " " + labelById(ids[0], m[2]);
+  return model;
+}
 function activity() {
   if (!ctx) return Promise.resolve([]);
   const active = ctx;
   return new Promise(function (resolve) { active.ActivityChain.snapshot(function (snap) {
-    var rows = snap.rows.map(function (r) { return active.ActivityChain.rowModel(r, activityLabels(active)); });
+    var labels = activityLabels(), rows = snap.rows.map(function (r) { return relabelSwap(active.ActivityChain.rowModel(r, labels), r); });
     var error = [snap.error, active.History.error()].filter(Boolean).join(" · ");
     if (error) rows.unshift({ type: "STATUS", summary: error });
     resolve(rows);
@@ -348,10 +368,11 @@ function feed() {
   if (!ctx) return Promise.resolve([]);
   const active = ctx;
   return new Promise(function (resolve) { active.ActivityChain.snapshot(function (snap) {
-    var labels = activityLabels(active);
-    var rows = snap.events.map(function (e) { return { pool: e.pool, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: e.minimaAmt, tokenAmt: e.tokenAmt, tokenLabel: labels[String(e.tokenid).toLowerCase()] || active.PP.shorten(e.tokenid), txpowid: e.txpowid, ts: e.ts, statusText: e.transaction.statusText, confirmed: e.transaction.confirmed, verifiedAt: e.transaction.verifiedAt }; });
+    var labels = activityLabels();
+    var rows = snap.events.map(function (e) { return { pool: e.pool, kind: e.kind, minimaIn: e.minimaIn, minimaAmt: e.minimaAmt, tokenAmt: e.tokenAmt, tokenLabel: labels[String(e.tokenid).toLowerCase()] || labelById(e.tokenid, ""), txpowid: e.txpowid, ts: e.ts, statusText: e.transaction.statusText, confirmed: e.transaction.confirmed, verifiedAt: e.transaction.verifiedAt }; });
     active.Store.feedList(-1, function (observations) {
-      observations.forEach(function (e) { rows.push({ pool: e.pool, kind: e.kind, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), tokenLabel: e.tokenLabel, ts: e.ts, observed: true }); });
+      // an observation kept only the token's NAME: labelled by id through its pool when that pool is in the scan, else said to be a name only
+      observations.forEach(function (e) { var p = poolByAddress(e.pool); rows.push({ pool: e.pool, kind: e.kind, minimaAmt: s(e.minimaAmt), tokenAmt: s(e.tokenAmt), tokenLabel: p ? labelById(p.tok, p.tokName) : String(e.tokenLabel || "token") + " (a name only: the token was not identified)", ts: e.ts, observed: true }); });
       resolve(rows);
     });
   }); });
@@ -441,7 +462,7 @@ function quoteAndStash(tok, minimaToToken, amountIn) {
   var route = ctx.Router.route(pl, minimaToToken, amountIn);
   if (!route.ok) return { ok: false };
   var qid = ++quoteCounter;
-  var tokenLabel = ctx.PP.tokenLabel({ tok: tok, tokName: pl[0] && pl[0].tokName }) || "token";
+  var tokenLabel = labelById(tok, pl[0] && pl[0].tokName);   // what the swap's record will call the token: by its id
   lastQuotes[qid] = { route: route, minimaToToken: minimaToToken, tokenLabel: tokenLabel };
   var ids = Object.keys(lastQuotes);
   if (ids.length > 40) ids.sort(function (a, b) { return a - b; }).slice(0, ids.length - 30).forEach(function (k) { delete lastQuotes[k]; });  // keep the recent ~30
@@ -805,5 +826,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, lastNodeFailure, status, activeWork,
-  _setRunner, _setDataDir,
+  _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap,
 };

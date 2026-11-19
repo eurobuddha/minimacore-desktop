@@ -87,6 +87,7 @@ if (process.argv.includes("--shots")) {
     ["pp-swap-quote", "view=pandapools&ppf=250"], ["pp-swap-quote-dxlight", "view=pandapools&dx=light&ppf=250"], ["pp-swap-buy", "view=pandapools&ppdir=buy&ppf=1.5"], ["pp-swap-review", "view=pandapools&ppf=250&ppdo=%23ppGo"],
     ["pp-swap-done", "view=pandapools&ppf=250&ppdo=%23ppGo%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D"], ["pp-swap-failed", "view=pandapools&pps=swapfail&ppf=250&ppdo=%23ppGo%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D"],
     ["pp-swap-toobig", "view=pandapools&ppf=900000"], ["pp-swap-empty", "view=pandapools&pps=empty"], ["pp-swap-notready", "view=pandapools&pps=notready"], ["pp-swap-stopped", "view=pandapools&state=stopped"],
+    ["pp-swap-fake", "view=pandapools&pps=fake&ppf=250"], ["pp-swap-fakeonly-review", "view=pandapools&pps=fakeonly&ppf=250&ppdo=%23ppGo"], ["pp-pools-fake", "view=pandapools&pptab=pools&pps=fake"],
     ["pp-swap-scroll", "view=pandapools&ppf=250&scroll=400"], ["pp-swap-narrow", "view=pandapools&ppf=250", 560, 915, 2],
     ["pp-pools-combined", "view=pandapools&pptab=pools&ppdo=%5Bdata-ppmode%3Dcombined%5D"], ["pp-pools-combined-dxlight", "view=pandapools&dx=light&pptab=pools&ppdo=%5Bdata-ppmode%3Dcombined%5D"], ["pp-pools-empty", "view=pandapools&pptab=pools&pps=empty"],
     ["pp-pools-notready", "view=pandapools&pptab=pools&pps=notready"], ["pp-pools-stopped", "view=pandapools&pptab=pools&state=stopped"], ["pp-pools-narrow", "view=pandapools&pptab=pools", 560, 915, 2],

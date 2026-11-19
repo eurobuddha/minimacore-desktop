@@ -78,23 +78,25 @@
   const PPS = Q.get("pps") || "";
   const ppPool = (n, m, t, fee) => ({ address: FAKE_PK("B00" + n), mxaddress: "", opk: FAKE_PK("0B" + n), oadr: FAKE_PK("0A" + n), tok: MXUSD, kmin: "1", tokName: "USDT", tokDecimals: 8, reserveM: m, reserveT: t,
     coinidM: FAKE_PK("C0" + n), coinidT: FAKE_PK("C1" + n), reserveBlock: 2428000, spot: (Number(t) / Number(m)).toFixed(8), k: "", feeGrowthPct: fee });
-  const PP_POOLS = PPS === "empty" ? [] : [ppPool(1, "815250.75", "2617.77115575", "0.01960728"), ppPool(2, "42500.5", "136.89411", "0.07161174"), ppPool(3, "9000", "28.9", "0")];
+  // pps=fake: another token that calls itself "MxUSD " (a trailing space), deeper than the real pools so the scan lists it first; pps=fakeonly: it is the only pool
+  const PP_FAKE = Object.assign(ppPool(7, "2400000", "9100", "0"), { tok: FAKE_PK("FA7E"), tokName: "MxUSD " });
+  const PP_POOLS = PPS === "empty" ? [] : PPS === "fakeonly" ? [PP_FAKE] : [...(PPS === "fake" ? [PP_FAKE] : []), ppPool(1, "815250.75", "2617.77115575", "0.01960728"), ppPool(2, "42500.5", "136.89411", "0.07161174"), ppPool(3, "9000", "28.9", "0")];
   const PP_MINE = PPS === "empty" || PPS === "noacts" ? [] : [
     { address: FAKE_PK("B002"), opk: FAKE_PK("0B2"), tok: MXUSD, tokName: "USDT", tokDecimals: 8, reserveM: "42500.5", reserveT: "136.89411", value: "85001", poolPrice: "0.00322100", feesMinima: 30.4256, feesPct: 0.0716, kratio: PPS === "migrate" ? 1.91 : 1.24,
       priceMove: 2.31, il: -0.013, ageBlocks: 5120, signingStateUnverified: PPS === "paused", unresolved: false },
     { address: FAKE_PK("B009"), opk: FAKE_PK("0B9"), tok: MXUSD, signingStateUnverified: false, unresolved: true }];
   const ppAct = (type, summary, tx, mins, statusText, confirmed, failed, more) => Object.assign({ type, summary, txpowid: tx ? FAKE_PK(tx) : "", ts: now - mins * 60000, timeLabel: confirmed ? "Transaction" : "Submitted", statusText, confirmed, failed, verifiedAt: confirmed ? now - 20000 : 0 }, more || {});
   const PP_ACTS = PPS === "empty" || PPS === "noacts" ? [] : [
-    ppAct("SWAP", "Sold 250 MINIMA for 0.80211 USDT", "7001", 2, "Confirming 1/3", false, false),
-    ppAct("ADD", "Add to MINIMA / USDT  ·  500 MINIMA + 1.6105 USDT", "", 9, "Not sent", false, true, { failMsg: "Could not identify the input signing key." }),
-    ppAct("SWAP", "Bought 3000 MINIMA for 9.66 USDT", "7002", 1500, "1686 confirmations · on-chain", true, false),
-    ppAct("CREATE", "Create MINIMA / USDT pool  ·  42000 MINIMA + 135.24 USDT", "7003", 4300, "5120 confirmations · on-chain", true, false, { originalTxpowid: FAKE_PK("7009") }),
-    ppAct("Pool transaction", "+12.5 MINIMA · -0.04025 USDT", "7004", 9000, "9044 confirmations · on-chain", true, false)];
+    ppAct("SWAP", "Sold 250 MINIMA for 0.80211 MxUSD", "7001", 2, "Confirming 1/3", false, false),
+    ppAct("ADD", "Add to MINIMA / MxUSD  ·  500 MINIMA + 1.6105 MxUSD", "", 9, "Not sent", false, true, { failMsg: "Could not identify the input signing key." }),
+    ppAct("SWAP", "Bought 3000 MINIMA for 9.66 MxUSD", "7002", 1500, "1686 confirmations · on-chain", true, false),
+    ppAct("CREATE", "Create MINIMA / MxUSD pool  ·  42000 MINIMA + 135.24 MxUSD", "7003", 4300, "5120 confirmations · on-chain", true, false, { originalTxpowid: FAKE_PK("7009") }),
+    ppAct("Pool transaction", "+12.5 MINIMA · -0.04025 MxUSD", "7004", 9000, "9044 confirmations · on-chain", true, false)];
   const PP_FEED = PPS === "empty" ? [] : [
-    { pool: FAKE_PK("B001"), kind: "SWAP", minimaIn: true, minimaAmt: "1200", tokenAmt: "3.8402", tokenLabel: "USDT", txpowid: FAKE_PK("7101"), ts: now - 600000, statusText: "12 confirmations · on-chain", confirmed: true, verifiedAt: now - 30000 },
-    { pool: FAKE_PK("B002"), kind: "ADD", minimaAmt: "500", tokenAmt: "1.6105", tokenLabel: "USDT", txpowid: FAKE_PK("7102"), ts: now - 7200000, statusText: "Confirming 2/3", confirmed: false, verifiedAt: 0 },
-    { pool: FAKE_PK("B003"), kind: "CREATE", minimaAmt: "9000", tokenAmt: "28.9", tokenLabel: "USDT", txpowid: FAKE_PK("7103"), ts: now - 90000000, statusText: "1802 confirmations · on-chain", confirmed: true, verifiedAt: now - 30000 },
-    { pool: FAKE_PK("B001"), kind: "SWAP", minimaAmt: "40", tokenAmt: "0.128", tokenLabel: "USDT", ts: now - 190000000, observed: true }];
+    { pool: FAKE_PK("B001"), kind: "SWAP", minimaIn: true, minimaAmt: "1200", tokenAmt: "3.8402", tokenLabel: "MxUSD", txpowid: FAKE_PK("7101"), ts: now - 600000, statusText: "12 confirmations · on-chain", confirmed: true, verifiedAt: now - 30000 },
+    { pool: FAKE_PK("B002"), kind: "ADD", minimaAmt: "500", tokenAmt: "1.6105", tokenLabel: "MxUSD", txpowid: FAKE_PK("7102"), ts: now - 7200000, statusText: "Confirming 2/3", confirmed: false, verifiedAt: 0 },
+    { pool: FAKE_PK("B003"), kind: "CREATE", minimaAmt: "9000", tokenAmt: "28.9", tokenLabel: "MxUSD", txpowid: FAKE_PK("7103"), ts: now - 90000000, statusText: "1802 confirmations · on-chain", confirmed: true, verifiedAt: now - 30000 },
+    { pool: FAKE_PK("B001"), kind: "SWAP", minimaAmt: "40", tokenAmt: "0.128", tokenLabel: "MxUSD", ts: now - 190000000, observed: true }];
   const ppQuote = (tokid, dir, amt) => { const a = Number(amt) || 0; if (PPS === "notready") return { ok: false, notReady: true }; if (PPS === "toobig" || a > 400000) return { ok: false };
     const price = 0.00321, out = dir ? a * price * 0.9948 : (a / price) * 0.9948; return { ok: true, totalIn: String(amt), totalOut: (Math.floor(out * 1e8) / 1e8).toString(), effPrice: (dir ? out / a : a / out).toFixed(10), priceImpact: "0.27", poolsUsed: 2, poolsAvailable: 3, capped: false, maxPools: 6, quoteId: 7 }; };
   const ppFail = (msg) => { throw new Error("Error invoking remote method 'mcd:pp': Error: " + msg); };

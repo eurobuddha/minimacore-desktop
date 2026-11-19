@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.135] — Dexicon ② Pools: a token is its id, never its name (review, high)
+
+- **Found**: a token is named by whoever made it. One called "MxUSD " (a trailing space), "MxUSD" with a zero-width character, or "МxUSD" with a Cyrillic М was shown unmarked on Swap; the pool line and the review showed no token id; the pair list followed the scan, so a deep fake pool could be the default pair; the selection was a position in that list, so a rescan could silently change the selected token. MINIMA could be paid for a worthless token.
+- **The rule now**: the one MxUSD is token `0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90`. Only it is written "MxUSD"; it is listed first and is the default pair.
+- **Every other token** is written by its own name marked "(not MxUSD)", with its whole token id in the pair name (the pool line, the pair list, the Pools and My LP cards) and in the swap review ("Pool pair"). Control, zero-width and direction characters are removed from a name before it is shown.
+- **A name that imitates MxUSD or USDT** (compared without case, spaces, accents, zero-width characters and with Cyrillic and Greek look-alike letters mapped) adds a line of its own to the review: "This token is not MxUSD. Its name imitates it."
+- **The selected pair is held by token id.** A rescan that reorders the pools changes nothing. If the selected token leaves the registry, nothing is selected and the screen says so with the id; no other pair is selected in its place.
+- **Activity records** are labelled by token id in the glue (`labelById` in `main/pandapools.js`): a new swap's record, the pool transactions of All pools and the history rows. An older record that ends in a name is relabelled only where the node's own history of that transaction names one token; otherwise it is left exactly as recorded. The screen no longer rewrites the word "USDT" in a record ("Tether USDT" used to become "Tether MxUSD").
+- Not covered: look-alike letters outside Cyrillic and Greek do not get the extra warning line (they are still marked "(not MxUSD)" with the id).
+
 ## [0.18.134] — Dexicon ① MxUSD: Market and OTC beside the wide captures
 
 - Market and OTC were built from phone-size captures, because two Fold captures were mislabelled. The real wide captures (19 Nov) were read beside the regenerated dev-preview shots, and the differences fixed:

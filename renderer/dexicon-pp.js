@@ -16,10 +16,27 @@
   // ======================================================================== Core: no DOM
   const MINIMA = "0x00", MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
   const isMxusd = (tok) => String(tok || "").toLowerCase() === MXUSD.toLowerCase();
-  /** A pool token's name. The dollar token is named by its ID, never by what a token calls itself: another token that
-   *  calls itself USDT or MxUSD is said to be another token. An unnamed token is its whole id. */
-  const tokLabel = (tok, name) => (isMxusd(tok) ? "MxUSD" : !name || name === tok ? String(tok || "token") : /^m?x?usdt?$/i.test(name) ? name + " (another token, not MxUSD)" : String(name));
-  /** the engine's own records say USDT for the dollar token */
+  /** A token's own name as it may be shown: without control and format characters (zero-width, direction marks), which can hide a difference or reorder the words that follow. */
+  const clean = (name) => String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+  /**
+   * A token's identity is its ID, never its name (0.18.135). The one MxUSD is MXUSD above and is the only token written
+   * "MxUSD". EVERY other token is written by its own name marked "(not MxUSD)", and wherever a pair is named or a trade is
+   * reviewed its whole token id stands beside it (pairName). A name can be anything its maker typed: "MxUSD " with a
+   * space, a zero-width character, Cyrillic letters.
+   */
+  const tokLabel = (tok, name) => { if (isMxusd(tok)) return "MxUSD"; const n = clean(name); return (n && n.toLowerCase() !== String(tok || "").toLowerCase() ? n : "unnamed token") + " (not MxUSD)"; };
+  /** "MINIMA / MxUSD", or for any other token "MINIMA / <name> (not MxUSD)  ·  token <its whole id>". t = { tok, name: tokLabel }. */
+  const pairName = (t) => "MINIMA / " + t.name + (isMxusd(t.tok) ? "" : "  ·  token " + t.tok);
+  // Letters of other alphabets (and two signs) that read as the Latin letters of "MxUSD" and "USDT", after lower-casing.
+  // ponytail: Cyrillic and Greek only; a look-alike from another script still gets "(not MxUSD)" and its id, only not the extra warning line.
+  const LOOK = { "м": "m", "μ": "m", "х": "x", "χ": "x", "ц": "u", "џ": "u", "υ": "u", "ս": "u", "ѕ": "s", "$": "s", "5": "s", "ԁ": "d", "д": "d", "δ": "d", "т": "t", "τ": "t", "а": "a", "α": "a", "е": "e", "ε": "e", "о": "o", "ο": "o", "0": "o", "р": "p", "ρ": "p", "с": "c", "і": "i", "ι": "i", "к": "k", "κ": "k" };
+  /** a name reduced to what the eye reads: compatibility forms unfolded, accents, spaces, control and zero-width characters dropped, look-alike letters mapped, lower case */
+  const skeleton = (name) => Array.from(clean(name).normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()).map((c) => LOOK[c] || c).join("").replace(/[^a-z]/g, "");
+  /** Does another token's name imitate the dollar token (MxUSD, mxUSDT, USDT, USD…)? Then the review says so in its own line. */
+  const imitates = (tok, name) => !isMxusd(tok) && /usd/.test(skeleton(name));
+  const IMITATES = "This token is not MxUSD. Its name imitates it.";
+  /** The engine's fixed sentences and the node's errors say USDT for the dollar token. For those sentences ONLY: a record
+   *  (a swap's summary, a token's label) is labelled by token id in the glue (main/pandapools.js labelById), never by rewriting words. */
   const mx = (s) => String(s == null ? "" : s).replace(/\bm?x?USDT\b/gi, "MxUSD");
   /** a decimal string CUT to dp decimals, never rounded (SwapView.trim8 / fmt6: RoundingMode.DOWN); other text as it is */
   const cut = (x, dp) => { const d = C.dec(x); return d ? C.str(C.down(d, dp)) : String(x == null || x === "" ? "0" : x); };
@@ -29,9 +46,19 @@
   const amountOk = (v) => /^[0-9]*\.?[0-9]+$/.test(String(v)) && parseFloat(v) > 0;
   const plural = (n, one) => n + " " + one + (Number(n) === 1 ? "" : "s");
 
-  /** The pairs there are pools for, deepest first as the scan gives them: [{ tok, name }]. */
-  function pairs(pools) { const seen = {}, out = []; for (const p of pools || []) if (p.tok && !seen[p.tok.toLowerCase()]) { seen[p.tok.toLowerCase()] = 1; out.push({ tok: p.tok, name: tokLabel(p.tok, p.tokName) }); } return out; }
-  const poolLine = (t, info) => "MINIMA / " + t.name + "   ·   " + plural(info.pools, "pool") + "   ·   depth " + whole(info.depth) + " MINIMA";
+  /** The pairs there are pools for: [{ tok, name, fake? }]. MxUSD (by its id) is always FIRST, so it is the default; the
+   *  others follow as the scan gives them (deepest first). fake: the name imitates the dollar token. */
+  function pairs(pools) {
+    const seen = {}, out = [];
+    for (const p of pools || []) if (p.tok && !seen[p.tok.toLowerCase()]) { seen[p.tok.toLowerCase()] = 1; out.push(Object.assign({ tok: p.tok, name: tokLabel(p.tok, p.tokName) }, imitates(p.tok, p.tokName) ? { fake: true } : {})); }
+    return out.sort((a, b) => isMxusd(b.tok) - isMxusd(a.tok));
+  }
+  /** The selected pair, held by TOKEN ID. sel "" = nothing chosen yet: the first pair (MxUSD when it has a pool). A chosen
+   *  id that is no longer in the list selects NOTHING (lost), never another token: a rescan cannot change what is traded. */
+  const NONE = "none";
+  function chosen(list, sel) { if (!sel) return { t: list[0] || null, lost: false }; const t = list.find((x) => x.tok.toLowerCase() === String(sel).toLowerCase()) || null; return { t, lost: !t && sel !== NONE }; }
+  const lostLine = (tok) => "The pair you had selected is no longer in the pool registry (token " + tok + "). Nothing was sent and no other pair was selected for you. Pick a pair.";
+  const poolLine = (t, info) => pairName(t) + "   ·   " + plural(info.pools, "pool") + "   ·   depth " + whole(info.depth) + " MINIMA";
   /** sendable, not confirmed: confirmed counts coins locked in pools (the old panel's rule) */
   function sendable(bal, tok) { const r = (bal || []).find((b) => b.tokenid && b.tokenid.toLowerCase() === String(tok).toLowerCase()); return r ? r.sendable || "0" : "0"; }
   const balanceLine = (bal, t) => "Your balance: " + cut(sendable(bal, MINIMA), 6) + " MINIMA  ·  " + cut(sendable(bal, t.tok), 6) + " " + t.name;
@@ -59,7 +86,7 @@
   /** What the Swap click asks to be confirmed (SwapView.confirmAndSwap; the old panel's "Confirm swap"). */
   function swapReview(q, amt, t, dir) {
     const pay = dir ? "MINIMA" : t.name, get = dir ? t.name : "MINIMA";
-    return { title: "Confirm swap", ok: "Swap", text: "Pay  " + amt + " " + pay + "\nReceive  " + whole(q.totalOut) + " " + get + "\nRate  ≈ " + cut(q.effPrice, 8) + " " + t.name + " / MINIMA\n\nPrice impact " + q.priceImpact + "%."
+    return { title: "Confirm swap", ok: "Swap", text: "Pay  " + amt + " " + pay + "\nReceive  " + whole(q.totalOut) + " " + get + "\nRate  ≈ " + cut(q.effPrice, 8) + " " + t.name + " / MINIMA\nPool pair  " + pairName(t) + (t.fake ? "\n\n" + IMITATES : "") + "\n\nPrice impact " + q.priceImpact + "%."
       + (Number(q.poolsUsed) > 1 ? "\nRouted across " + q.poolsUsed + " pools in one transaction." : "")
       + "\n\nThis posts a real on-chain transaction for exactly these amounts. There is no slippage setting: if a pool moves before it confirms, the swap is rejected and you keep your funds." };
   }
@@ -75,12 +102,12 @@
     const name = tokLabel(p.tok, p.tokName), rows = [["reserves", whole(p.reserveM) + " MINIMA  ·  " + whole(p.reserveT) + " " + name], ["spot price", cut(p.spot, 8) + " " + name + " / MINIMA"], ["fees accrued (K/KMIN−1)", cut(p.feeGrowthPct, 8) + " %"]];
     if (!isMxusd(p.tok)) rows.push(["token", String(p.tok), p.tok]);
     rows.push(["pool", p.address + "  (click to copy)", p.address]);
-    return { title: "MINIMA / " + name, rows };
+    return { title: pairName({ tok: p.tok, name }), rows };
   }
   /** One collective card per token (PoolsView.combinedCard), from the engine's own aggregates (ppAggregate). */
   function combinedCard(a) {
     const name = tokLabel(a.tok, a.name);
-    return { title: "MINIMA / " + name + "  ·  combined", rows: [["pools combined", String(a.count)], ["total reserves", whole(a.totalMinima) + " MINIMA  ·  " + whole(a.totalToken) + " " + name], ["aggregate spot price", cut(a.price, 8) + " " + name + " / MINIMA"], ["tradeable depth", whole(a.depth) + " MINIMA"]] };
+    return { title: pairName({ tok: a.tok, name }) + "  ·  combined", rows: [["pools combined", String(a.count)], ["total reserves", whole(a.totalMinima) + " MINIMA  ·  " + whole(a.totalToken) + " " + name], ["aggregate spot price", cut(a.price, 8) + " " + name + " / MINIMA"], ["tradeable depth", whole(a.depth) + " MINIMA"]] };
   }
 
   // ---- My LP (MyLpView.java) ----
@@ -130,11 +157,11 @@
     if (a.originalTxpowid && String(a.originalTxpowid).toLowerCase() !== String(a.txpowid).toLowerCase()) ids.push(["original submission", a.originalTxpowid]);
     if (a.verifiedAt) lines.push("Checked " + since(a.verifiedAt, now));
     if (a.failed) lines.push(a.failMsg ? failText("This", a.failMsg).replace(/ Look at Activity: if no new line is there, nothing was sent and no funds moved\.$/, " Nothing was sent and no funds moved.") : "It was not sent. No funds moved.");
-    return { title: ACT_NAME[a.type] || String(a.type || "Pool transaction"), chip: a.failed ? "FAILED" : a.statusText || "Waiting for node check", tone, summary: mx(swapSummary(a)), lines, ids, done: !!(a.failed || a.confirmed) };
+    return { title: ACT_NAME[a.type] || String(a.type || "Pool transaction"), chip: a.failed ? "FAILED" : a.statusText || "Waiting for node check", tone, summary: swapSummary(a), lines, ids, done: !!(a.failed || a.confirmed) };
   }
   /** One transaction of any pool (ActivityView.globalRow). */
   function feedItem(f, now) {
-    const label = mx(f.tokenLabel), action = f.kind === "CREATE" ? "Pool creation" : f.kind === "ADD" ? "Liquidity addition" : f.kind === "WITHDRAW" ? "Liquidity withdrawal" : f.kind === "SWAP" ? (f.minimaIn ? "MINIMA sale" : "MINIMA purchase") : "Pool reserves changed";
+    const label = String(f.tokenLabel || "token"), action = f.kind === "CREATE" ? "Pool creation" : f.kind === "ADD" ? "Liquidity addition" : f.kind === "WITHDRAW" ? "Liquidity withdrawal" : f.kind === "SWAP" ? (f.minimaIn ? "MINIMA sale" : "MINIMA purchase") : "Pool reserves changed";
     if (f.observed) return { observed: true, title: String(f.kind || "Pool") + " observation (unverified) · " + whole(f.minimaAmt) + " MINIMA / " + whole(f.tokenAmt) + " " + label, lines: ["Observed on this device " + when(f.ts) + " · Transaction time unknown"], ids: f.pool ? [["pool", f.pool]] : [] };
     return { title: action + " · " + whole(f.minimaAmt) + " MINIMA / " + whole(f.tokenAmt) + " " + label, chip: f.statusText || "", tone: f.confirmed ? "ok" : "live", lines: ["Transaction " + when(f.ts)].concat(f.verifiedAt ? ["Checked " + since(f.verifiedAt, now)] : []),
       ids: [].concat(f.pool ? [["pool", f.pool]] : [], f.txpowid ? [["transaction", f.txpowid]] : []) };
@@ -259,7 +286,7 @@
     /** Close a pool and take all its liquidity out: confirm → ppClose(address). */
     async withdraw(api, ui, p) {
       const name = tokLabel(p.tok, p.tokName);
-      if (!await ui.confirm("Withdraw all liquidity?", "This closes the MINIMA / " + name + " pool and sweeps its reserves (" + whole(p.reserveM) + " MINIMA + " + whole(p.reserveT) + " " + name + ", earned fees included) " + CLOSE_TO_OWNER + "\n\nPool: " + p.address, "Withdraw")) return null;
+      if (!await ui.confirm("Withdraw all liquidity?", "This closes the " + pairName({ tok: p.tok, name }) + " pool and sweeps its reserves (" + whole(p.reserveM) + " MINIMA + " + whole(p.reserveT) + " " + name + ", earned fees included) " + CLOSE_TO_OWNER + "\n\nPool: " + p.address, "Withdraw")) return null;
       const since = Date.now();
       try { const r = await api.ppClose(p.address); ui.say("The pool is closing. Its reserves go " + CLOSE_TO_OWNER, "note"); return r || {}; }
       catch (e) { ui.say(await why(api, "Closing the pool", e, since), "error"); return { err: bare(e) }; }
@@ -378,14 +405,14 @@
     }
   };
 
-  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null, addr: "", balAt: 0, feed: null, all: false, shownA: 60, shownF: 60, sharedAt: 0 };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: "", dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null, addr: "", balAt: 0, feed: null, all: false, shownA: 60, shownF: 60, sharedAt: 0 };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
@@ -393,7 +420,7 @@
   const say = (text, kind) => { S.said = text ? { text, kind: kind || "error" } : null; paint(); };
   const ui = { confirm: (title, text, ok) => D.dialog(title, text, ok), show: (title, text) => D.dialog(title, text, ""), say };
   const up = () => D.running() && !!(S.st && S.st.ready);
-  const toks = () => pairs(S.pools), pair = () => toks()[S.sel] || toks()[0] || null;
+  const toks = () => pairs(S.pools), pair = () => chosen(toks(), S.sel).t;
 
   // ---- reads: each screen asks for what it shows ----
   async function load(tab) {
@@ -408,13 +435,14 @@
     if (tab === "mylp") { want.retired = () => api().ppListRetired(); want.collect = () => api().ppPendingCollect(); want.backupDue = () => api().ppCompleteBackupRequired().catch(() => true); }   // unknown counts as due, as in the old panel
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled" && got[i].value != null) S[k] = got[i].value; });
+    if (S.pools && chosen(toks(), S.sel).lost) { S.lost = S.sel; S.sel = NONE; S.info = null; S.q = null; S.qseq++; }   // the selected token left the registry: nothing is selected, and it is said
     if (tab === "mylp") await api().ppMyPools().then((m) => { S.mine = m || []; S.mineErr = ""; }, (e) => { S.mineErr = bare(e); });   // a read that fails is said, never shown as "no pools"
     if (tab === "swap" && pair()) S.info = await api().ppPairInfo(pair().tok).catch(() => S.info);
   }
   /** the engine's scans say "update": passive parts only, never under someone typing (the old panel's "frozen tab" rule) */
   function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; const w = D.where(); if (visible()) load(S.tab).then(paint, paint); else if (w.shown && w.shared && (w.tab === "activity" || w.tab === "history")) shared(true); }, 400); }
   function tick() { if (D && visible() && !typing() && !C.gate.on && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
-  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null, addr: "", balAt: 0, feed: null, shownA: 60, shownF: 60, sharedAt: 0 }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
+  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: "", lost: "", dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null, addr: "", balAt: 0, feed: null, shownA: 60, shownF: 60, sharedAt: 0 }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
   /** what stands above every screen of the room: the node, the engine, the last thing said */
   function banners() {
@@ -428,7 +456,7 @@
   const kv = (k, v, cls) => `<div class="pp-kv"><span>${esc(k)}</span><span class="${cls || ""}">${v}</span></div>`;
   /** A pool operation as one line of the strip under Swap (SwapView.activityRow). */
   const tone = (a) => (a.failed ? "bad" : a.confirmed ? "ok" : "live");
-  const recentRow = (a) => `<div class="pp-rrow"><span>${esc(a.type)} · ${esc(mx(a.summary))}</span><b data-tone="${tone(a)}">${esc(a.statusText || "Waiting for node check")}</b></div>`;
+  const recentRow = (a) => `<div class="pp-rrow"><span>${esc(a.type)} · ${esc(swapSummary(a))}</span><b data-tone="${tone(a)}">${esc(a.statusText || "Waiting for node check")}</b></div>`;
 
   // ---- Swap (SwapView.java) ----
   function swapSkeleton() {
@@ -458,7 +486,7 @@
   function bindSwap() {
     $("ppAmt").oninput = () => { S.said = null; $("ppTop").innerHTML = banners(); requote(); };
     $("ppFlip").onclick = () => { S.dir = !S.dir; paintSwap(); requote(); };
-    $("ppPair").onchange = () => { S.sel = Number($("ppPair").value) || 0; S.info = null; paintSwap(); requote(); load("swap").then(paint, paint); };
+    $("ppPair").onchange = () => { S.sel = $("ppPair").value || NONE; if (S.sel !== NONE) S.lost = ""; S.info = null; paintSwap(); requote(); load("swap").then(paint, paint); };
     $("ppGo").onclick = () => D.money(async () => {
       const t = pair(), dir = S.dir;   // the pair and the direction being confirmed, read once
       S.swapping = true; paintGo();
@@ -471,9 +499,9 @@
   function paintSwap() {
     const t = pair(), list = toks();
     $("ppTop").innerHTML = banners();
-    $("ppPairRow").hidden = list.length < 2;
-    if (!typing()) $("ppPair").innerHTML = list.map((x, i) => `<option value="${i}"${i === S.sel ? " selected" : ""}>MINIMA / ${esc(x.name)}</option>`).join("");
-    $("ppPoolLine").textContent = !up() ? "" : !S.pools ? "Finding pools…" : !t ? "No live pools yet. Create one in My LP to seed liquidity." : S.info ? poolLine(t, S.info) : "MINIMA / " + t.name;
+    $("ppPairRow").hidden = list.length < 2 && S.sel !== NONE;
+    if (!typing()) $("ppPair").innerHTML = (S.sel === NONE ? `<option value="" selected>Pick a pair</option>` : "") + list.map((x) => `<option value="${esc(x.tok)}"${t && x.tok === t.tok ? " selected" : ""}>${esc(pairName(x))}</option>`).join("");
+    $("ppPoolLine").textContent = !up() ? "" : !S.pools ? "Finding pools…" : S.sel === NONE ? (S.lost ? lostLine(S.lost) : "Pick a pair.") : !t ? "No live pools yet. Create one in My LP to seed liquidity." : S.info ? poolLine(t, S.info) : pairName(t);
     $("ppBalLine").textContent = t && S.bal ? balanceLine(S.bal, t) : "";
     $("ppMktLine").textContent = t ? marketLine(t, S.market, S.pools) : "";
     $("ppFrom").textContent = S.dir ? "MINIMA" : t ? t.name : "token"; $("ppTo").textContent = S.dir ? (t ? t.name : "token") : "MINIMA";
@@ -532,7 +560,7 @@
       if (p.unresolved) return `<div class="dx-card pp-card"><b class="pp-ct">Saved pool · reserves not found</b>${ids}<div class="pp-note">This node cannot currently see both reserve coins. It may still be syncing, or the pool may have closed.</div>${hold}
         <div class="pp-acts">${lpBtn("Check for reserves", "pprecover", p.address)}${lpBtn("It's closed: put it away", "ppretire", p.address)}</div></div>`;
       const r = Number(p.kratio), warn = needsMigrate(p), pct = isFinite(r) && r > 0 ? Math.max(4, Math.min(100, r / 2 * 100)) : 0;
-      return `<div class="dx-card pp-card"><b class="pp-ct">MINIMA / ${esc(name)}</b>${ids}${hold}${lpRows(p).map((x) => kv(x[0], esc(x[1]), x[2] ? "pp-" + x[2] : "")).join("")}
+      return `<div class="dx-card pp-card"><b class="pp-ct">${esc(pairName({ tok: p.tok, name }))}</b>${ids}${hold}${lpRows(p).map((x) => kv(x[0], esc(x[1]), x[2] ? "pp-" + x[2] : "")).join("")}
         ${pct ? `<div class="pp-health"><div class="pp-kv"><span>Floor headroom</span><span class="${warn ? "pp-warn" : "pp-dimv"}">${warn ? "migrate soon" : "healthy"}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
         <div class="pp-acts">${lpBtn(warn ? "Add (full)" : "Add", "ppadd", p.address)}${lpBtn("Migrate", "ppmig", p.address, warn ? "dx-btn--go" : "")}${lpBtn("Close", "ppclose", p.address)}</div>
         <button class="pp-link" data-ppcalc="${esc(p.address)}">What if the price moves?  Pool calculator ›</button></div>`;
@@ -556,7 +584,7 @@
   const act = (fn) => D.money(async () => { paint(); try { await fn(); } catch (e) { say(failText("That", e), "error"); } load(S.tab).then(paint, paint); }).then(paint, paint);
   async function addSheet(p) {
     const name = tokLabel(p.tok, p.tokName), price = C.dec(p.poolPrice);
-    const got = await form("Add liquidity", `<div class="pp-note">Grow MINIMA / ${esc(name)} in place (capped at 2× the floor: beyond that, use Migrate). Add both sides in the pool's ratio so the price does not move.</div>${fld("Add MINIMA", "a")}${fld("Add " + name, "b")}<div class="pp-note" data-hint></div>`, "Add",
+    const got = await form("Add liquidity", `<div class="pp-note">Grow ${esc(pairName({ tok: p.tok, name }))} in place (capped at 2× the floor: beyond that, use Migrate). Add both sides in the pool's ratio so the price does not move.</div>${fld("Add MINIMA", "a")}${fld("Add " + name, "b")}<div class="pp-note" data-hint></div>`, "Add",
       (d) => ({ a: val(d, "a"), b: val(d, "b") }), (d) => { d.oninput = () => { const m = C.dec(val(d, "a")); d.querySelector("[data-hint]").textContent = m && price && m.v > 0n ? "At the pool price, " + C.str(m) + " MINIMA goes with ≈ " + C.str(C.down(C.mul(m, price), 8)) + " " + name + "." : ""; }; });
     if (got) await Act.deposit(api(), ui, p, got.a, got.b);
   }
