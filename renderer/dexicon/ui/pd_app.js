@@ -2,6 +2,8 @@
    hook points marked DexiconFast / window.PD. Re-vendor by re-running the patch in scripts/vendor-pandadex.sh notes. */
 var PANDADEX_VERSION = (document.body.getAttribute("data-version") || "dev");
 var state = {}, balancesState = {}, balanceFailed = {}, isBuy = true, gtcOn = true, ordersSub = 0, tapeSub = 0, chartSel = 1, chartSelected = -1, makerHydrated = false, CHARTS = [900000,3600000,14400000,86400000], GROUPS = ["", "0.0001", "0.001", "0.01"], groupIdx = Number(localStorage.getItem("dexicon_group") || 0);
+/* Dexicon 0.0.91: the trade preview routes past my own on-chain orders, as the service does (lib/ownskip.js). */
+AX.ownskip.install(PandaComposite, PandaBook, function(o) { var m=Array.isArray(state.mine)?state.mine:[], i; for(i=0;i<m.length;i++) if(m[i]&&m[i].coinid===o.coinid) return true; return false; });
 function el(id) { return document.getElementById(id); }
 /* HTML-escaping is NOT JS-string escaping. Inside onclick="fn('...')" the parser decodes
    &#39; back to an apostrophe BEFORE the JS is parsed, so an esc()-ed quote still closes the

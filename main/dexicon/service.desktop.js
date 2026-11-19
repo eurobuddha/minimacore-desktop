@@ -2,7 +2,7 @@
  * service.desktop.js — the Dexicon background engine as this desktop runs it (DESKTOP-OWNED; the lib/ crypto/ vendor/
  * resting/ files beside it are BYTE-IDENTICAL copies of mds/dexicon, enforced by scripts/dexicon-parity-manifest.cjs).
  *
- * A hand mirror of mds/dexicon/service.js at 500dd24344a3739472eccbefb0c684bed2aa2930 (0.0.89; its sha256 is in the
+ * A hand mirror of mds/dexicon/service.js at 9a95eb114ad35d3e18692a60c248529762fd72d5 (0.0.91; its sha256 is in the
  * parity manifest, so a donor change is noticed). Everything not listed here is the donor's text:
  *
  *   NOT LOADED  doors/ and lib/door.js (the AtomiX taker engine) and no axEvent: room 1 of this app is the real AtomiX
@@ -21,6 +21,9 @@
  *               gets one `inited` per node start, this host gets one per app start.
  *   READ MODEL  DX (bottom of the file): ready / publicId / book / mine for the screens, and a relay book poll to feed
  *               it (in the MiniDapp the page polls the book itself). Read-only: it places, changes and cancels nothing.
+ *   OWN ORDERS  as the donor since 0.0.91: lib/ownskip.js wraps the two planners so an order routes PAST this node's own
+ *               on-chain orders, and a LIMIT with nothing but own orders inside its limit is answered with the engine's
+ *               sentence and sends nothing (onlyOwnOrders). The desktop's own refusal rule (selfTrade, 0.18.99) is gone.
  */
 MDS.load('lib/rhino_shim.js');   // MUST be first — Uint8Array.slice/.fill polyfills Rhino lacks
 MDS.load('vendor/nacl.js');
@@ -46,6 +49,9 @@ MDS.load('resting/tape.js'); MDS.load('resting/maker.js'); MDS.load('resting/pri
 MDS.load('resting/pending.js'); MDS.load('resting/stats.js'); MDS.load('resting/split.js'); MDS.load('resting/chain.js');
 MDS.load('resting/history.js'); MDS.load('resting/pd_service.js');
 MDS.load('lib/autocross.js');   // trades PandaPools back to the ladder's rungs (needs the resting/ engine above)
+MDS.load('lib/ownskip.js');     // an order never fills against my own on-chain order: the planners route past them
+AX.ownskip.install(PandaComposite, PandaBook, PDService.isMine, PDService.keysUsable);
+AX.ladder.feed(PandaPrice);     // MEXC unreachable → MEXC's own ticker via CoinGecko (lib/ladder.js); never another exchange
 
 var ME = null, RELAY = null, READY = false, BOOTING = false, lastBootTryMs = 0, lastBootLog = '';
 var BOOT_RETRY_PACE_MS = 55000, HOLD_SECONDS = 8, REFRESH_EVERY_TICKS = 6;
@@ -374,6 +380,15 @@ function consolidate(data) {
     });
 }
 
+/** A LIMIT with nothing but my own orders inside its limit (no third-party order, no pool): say so and send nothing.
+ *  Anything it cannot judge (keys unread, a bad amount) is left to PDService.action, which plans past my own orders. */
+function onlyOwnOrders(data) {
+    var why = '';
+    try { if (PDService.ready && PDService.keysUsable()) why = AX.ownskip.onlyOwn(PDService.book, PDService.pools, !!data.buy, data.minima, data.price, PDService.block); } catch (e) { why = ''; }
+    if (why) { PDService.setStage(why); PDService.tell('ERROR', { message: why }); }
+    return !!why;
+}
+
 /** RETRY (header): the resting engine's boot, again while it is not ready, at most once a minute.
  *  ponytail: paced by the clock, not by the boot's own end (PDService.boot has no callback); a boot slower than a
  *  minute would overlap its retry. Its steps are loads and idempotent registrations. */
@@ -391,6 +406,7 @@ function pdEvent(msg) {
         else if (msg.event === 'NEWBLOCK') PDService.cmd('block', function (result) { var tip = PandaSafety.tipBlock(result); if (tip > 0) { PDService.block = tip; PDService.refresh(); } });
         else if (msg.event === 'MDSCOMMS' && msg.data && !msg.data.public) {
             var packet = JSON.parse(msg.data.message || '{}');
+            if (packet.origin === 'ui' && packet.type === 'LIMIT' && onlyOwnOrders(packet.data || {})) return;
             if (packet.origin === 'ui') PDService.action(packet);
             else if (packet.origin === 'dexicon' && packet.type === 'CONSOLIDATE') consolidate(packet.data || {});
             // SAVE / STOP on the market maker: reconcile NOW, not on the next 10 s timer after the 8 s inbox hold
@@ -460,23 +476,6 @@ function ownKey(pk) {
     return false;
 }
 
-/** Why this LIMIT packet would fill one of this node's OWN orders ('' = it would not). The engine itself has no such
- *  rule (docs/DEXICON_ENGINE_NOTES.md (a)): PandaComposite.plan / PandaBook.plan route over every fillable order.
- *  Asked by the host before it forwards a LIMIT. data = { buy, minima, price } as the page sends them. Blunt on
- *  purpose: any own order on the other side at or inside the limit refuses it (no limit: any own order there), because
- *  the engine plans again after this check. Pools are not looked at: trading with one's own pool is allowed. */
-function selfTrade(data) {
-    var i, o, buy = !!(data && data.buy), limit = PDService.maybeDec(data && data.price);
-    if (!PDService.ready || !PDService.keysUsable()) return "Still reading this wallet's keys, so your own orders cannot be told apart yet. Try again in a moment. Nothing was sent.";
-    for (i = 0; i < PDService.book.length; i++) {
-        o = PDService.book[i];
-        if (!o || o.fillable === false || o.sell !== buy || !PDService.isMine(o)) continue;
-        if (!limit || !limit.gt(0) || (buy ? !PandaDEX.d(o.price).gt(limit) : !PandaDEX.d(o.price).lt(limit)))
-            return 'This would trade with your own order at ' + PandaDEX.plain(o.price) + ' (coin ' + o.coinid + '). Cancel or re-price that order first. Nothing was sent.';
-    }
-    return '';
-}
-
 /** Our own ON-CHAIN orders and what is still waiting for a block, for the page's My orders. */
 function chainMine() {
     var out = { orders: [], pending: [] }, i, o, r;
@@ -499,8 +498,7 @@ var DX = {
     relays: function () { return RELAY ? RELAY.relays.slice() : []; },
     block: function () { return Number(PDService.block || 0); },
     mine: chainMine,
-    book: mergedBook,
-    selfTrade: selfTrade
+    book: mergedBook
 };
 
 MDS.init(function (msg) {

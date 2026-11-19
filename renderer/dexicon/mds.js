@@ -145,6 +145,9 @@
         // asking. Neither may happen from here: no rounding, and nothing leaves without its review.
         need((a.price.split(".")[1] || "").length <= 6, "An on-chain order takes a price of at most 6 decimals. Nothing was sent.");
         need((a.amount.split(".")[1] || "").length <= 8, "At most 8 decimals in the amount. Nothing was sent.");
+        // nothing but my own orders inside the limit: the engine's own sentence (lib/ownskip.js), before the generic one
+        var own = window.AX && AX.ownskip ? String(AX.ownskip.onlyOwn(state.book || [], state.pools || [], !!a.buy, a.amount, a.price, Number(state.block || 0)) || "") : "";
+        need(!own, own);
         need(chainCrosses(a), "Nothing on the chain crosses this price now. Nothing was sent.");
       }
       place();

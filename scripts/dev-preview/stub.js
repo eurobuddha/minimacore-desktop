@@ -165,8 +165,8 @@
     vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
     // Dexicon (main/dexicon.js read model). ?dxs=notready|norelay|relaydown|empty|taking|failed
-    dxStatus: async () => DXS === "notready" ? { version: "0.0.89", started: false, ready: false, restingReady: false, publicId: null, block: 0, relays: [], price: { mid: 0, ageMs: null, label: "" }, log: [] }
-      : { version: "0.0.89", started: true, ready: true, restingReady: true, publicId: PK("5D"), block: 2428089, relays: DXS === "norelay" ? [] : DX_RELAYS, price: { mid: 0.00315, ageMs: 4000, label: "live" }, log: [] },
+    dxStatus: async () => DXS === "notready" ? { version: "0.0.91", started: false, ready: false, restingReady: false, publicId: null, block: 0, relays: [], price: { mid: 0, ageMs: null, label: "" }, log: [] }
+      : { version: "0.0.91", started: true, ready: true, restingReady: true, publicId: PK("5D"), block: 2428089, relays: DXS === "norelay" ? [] : DX_RELAYS, price: { mid: 0.00315, ageMs: 4000, label: "live", source: "MEXC" }, log: [] },
     dxBook: async () => DXS === "empty" || DXS === "norelay" ? { fast: [], book: [], poolAsks: [], poolBids: [], pools: [] } : DX_BOOK,
     dxMine: async () => ({ orders: DXS === "empty" ? [] : [{ coinid: PK("E1"), orderId: PK("E2"), sell: true, price: "0.0039", minima: "750", pending: "" }], pending: [] }),
     dxCommand: async (a) => {

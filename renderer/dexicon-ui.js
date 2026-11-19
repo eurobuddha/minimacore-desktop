@@ -162,7 +162,7 @@ const DexUI = (() => {
       $("shell").appendChild(d); d.showModal();
     });
   }
-  const say = (text, kind) => { X.said = { text: C.refusal(text), kind: kind || "error" }; draw(); };
+  const say = (text, kind) => { X.said = { text: C.refusal(text), kind: kind || C.feedbackKind(C.refusal(text)) }; draw(); };
 
   function render() {
     const body = $("dxBody"); if (!body) return;
@@ -248,7 +248,7 @@ const DexUI = (() => {
     $("dxBidsN").textContent = L.count.fast + " fast · " + L.count.book + " book order" + (L.count.book === 1 ? "" : "s");
     $("dxAsksN").textContent = L.count.pools + " pool" + (L.count.pools === 1 ? "" : "s");
     // the only outside price shown is MEXC's, with the label the engine's read model gives it
-    const px = st && st.price; $("dxMexc").textContent = px && px.mid > 0 ? (px.source || "MEXC price") + " " + px.mid + (px.label ? " · " + px.label : "") : "";
+    const px = st && st.price; $("dxMexc").textContent = px && px.mid > 0 ? C.priceName(px.source) + " " + px.mid + (px.label ? " · " + px.label : "") : "";
     document.querySelectorAll("#dxGroups button").forEach(b => b.setAttribute("aria-pressed", Number(b.dataset.g) === X.group ? "true" : "false"));
     const row = (r, ask) => {
       const lv = r.lv, parts = C.amountText(lv.fast, lv.book, lv.pool), shown_ = C.fmtPrice(lv.exact), at = C.GROUPS[X.group] ? C.fmt(lv.price) : C.fmt(lv.exact);
@@ -301,7 +301,7 @@ const DexUI = (() => {
     const log = $("dxLog"), mine = X.said;
     log.hidden = !lines.length && !mine;
     log.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join("") + (mine ? `<div class="dx-log__${mine.kind}">${esc(mine.text)}</div>` : "");
-    log.dataset.kind = /error/.test(k) ? "error" : "";
+    log.dataset.kind = /error/.test(k) && C.feedbackKind(n) === "error" ? "error" : "";   // "Only your own orders are at this price…" is plan feedback
   }
   async function submit(layer) {
     const price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim();
@@ -525,7 +525,7 @@ const DexUI = (() => {
       + (relays.length ? relays.map(r => `<div class="dx-card dx-relay"><div><div class="dx-relay__u" data-copy="${esc(r.url)}" title="Click to copy">${esc(r.url)}</div><div class="dx-relay__s" data-state="${r.found ? "" : esc(r.state)}">${esc(health(r))}</div></div>`
           + (r.found ? `<button class="dx-btn dx-btn--side" data-relay="found" data-url="${esc(r.url)}">ADD</button>` : `<button class="dx-relay__x" data-relay="remove" data-url="${esc(r.url)}" aria-label="Remove this relay">✕</button>`) + `</div>`).join("")
         : `<div class="dx-card dx-none"><b>${Page.state.ready || Page.stub ? "No relays yet" : "…"}</b><span>Add the address of any Dexicon relay, then DISCOVER to find the others.</span></div>`)
-      + `<div class="dx-card"><div class="dx-h">ENGINE</div><div class="dx-sub dx-sub--sans">Dexicon engine ${esc((st && st.version) || "…")} · block ${esc((st && st.block) || "…")} · ${px && px.mid > 0 ? esc((px.source || "MEXC price") + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : "no MEXC price yet"}</div></div>`;
+      + `<div class="dx-card"><div class="dx-h">ENGINE</div><div class="dx-sub dx-sub--sans">Dexicon engine ${esc((st && st.version) || "…")} · block ${esc((st && st.block) || "…")} · ${px && px.mid > 0 ? esc(C.priceName(px.source) + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : "no MEXC price yet"}</div></div>`;
   }
 
   return { init, paint, render, node: node_, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };

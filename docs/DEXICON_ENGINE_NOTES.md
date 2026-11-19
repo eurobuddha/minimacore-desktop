@@ -1,5 +1,7 @@
 # Dexicon engine in the desktop: notes and safety analysis (Phase 3a)
 
+Updated with 0.18.105 for engine 0.0.91 (own orders, price fallback).
+
 Written 19 Nov 2026 with 0.18.99. Nothing here was tried on a node or against a relay: every statement is from
 reading the code and from tests on a stand-in node (`scripts/dexicon-host.test.cjs`). What could not be proven that
 way is listed at the end and in `PANDAMONIUM_DESKTOP_PLAN.md` section 9.
@@ -8,7 +10,7 @@ way is listed at the end and in `PANDAMONIUM_DESKTOP_PLAN.md` section 9.
 
 | Part | File | Origin |
 |---|---|---|
-| Engine, 37 files | `main/dexicon/{lib,crypto,vendor,resting}/` | byte for byte from `mds/dexicon` 0.0.89, branch `security/2026-11-07`, commit `500dd24344a3739472eccbefb0c684bed2aa2930`; gate: `scripts/dexicon-parity-manifest.cjs` (CI) and `scripts/dexicon-parity-check.cjs` (donor) |
+| Engine, 38 files | `main/dexicon/{lib,crypto,vendor,resting}/` | byte for byte from `mds/dexicon` 0.0.91, branch `security/2026-11-07`, commit `9a95eb114ad35d3e18692a60c248529762fd72d5` (0.18.98 to 0.18.104: 37 files of 0.0.89, `500dd24344a3739472eccbefb0c684bed2aa2930`); gate: `scripts/dexicon-parity-manifest.cjs` (CI) and `scripts/dexicon-parity-check.cjs` (donor) |
 | Service | `main/dexicon/service.desktop.js` | hand mirror of the donor's `service.js`; its header lists every difference |
 | Loader | `main/dexicon/loader.js` | DexiconPro's, without its two injected hooks |
 | Host | `main/dexicon.js` | DexiconPro's `main/dexicon.js` + the `room.dex` part of `main/rooms.js`, as the public build |
@@ -35,21 +37,21 @@ What the engine does, case by case:
 | A FAST take arriving at the maker (`handleTake` → `AX.fill.cosign` / `verifyAsMaker`) | Only if the same node built it, which the line above refuses. The maker side has no check of its own for "the taker is me". | engine |
 | The FAST ladder (`lib/ladder.js`) and `AX.maker` | They publish and re-back orders; they take nothing. | engine |
 | The on-chain ladder (`resting/maker.js`, `PDService.makerOnBook`) and the processor | They post, re-price and renew orders; they take nothing. | engine |
-| **A LIMIT order on the Exchange page (`PDService.limitWithPoolsInner`)** | **Yes: the engine does not prevent it.** It plans over the whole book: `PandaComposite.plan(PDService.book, …)` (`resting/pd_service.js:1165`) and `PandaBook.plan(PDService.book, …)` (`:1197`); `C.orders` (`resting/composite.js:115`) and `B.plan` (`resting/book.js:47`) skip only unfillable, wrong-side, expired and out-of-limit orders. `PDService.owns` / `isMine` (`resting/pd_service.js:112`, `:113`) are used for display, cancel and the ladder, never for routing. | **closed in the host**, below |
+| **A LIMIT order on the Exchange page (`PDService.limitWithPoolsInner`)** | **No, since engine 0.0.91.** `lib/ownskip.js` wraps `PandaComposite.plan` and `PandaBook.plan` (installed by the service with `PDService.isMine` and `PDService.keysUsable`, and by the page with its own list): this node's own orders are taken out of the book before either plans, so the plan routes past them inside the same limit. While the key list is unread a non-empty book is not planned at all. Up to 0.0.89 the engine did not prevent it and the host refused instead. | engine; tested through the host |
 
-**The host's rule for LIMIT** (`selfTrade` in `main/dexicon/service.desktop.js`, asked by `pageComms` in
-`main/dexicon.js` before the packet reaches the engine): a LIMIT is refused when any fillable order of this node's
-own keys (`PDService.isMine`) sits on the other side at or inside the limit price (with no limit price: any own order
-on the other side), and while the node's keys have not been read. It is blunt on purpose, because the engine re-reads
-the pools and plans again after the check. The message names the order's price and its coin id in full. Pools are not
-part of the rule. Limits of this rule, stated plainly:
+**Own orders and a LIMIT, since 0.18.105.** The host's own rule of 0.18.99 (`selfTrade`: refuse a LIMIT that could
+reach an own order) is **removed** (owner, 19 Nov 2026: "market orders should not be refused if we have orders in the
+stack"). What happens now, all in the engine:
 
-- It is a host rule over a book that is up to one block old. An own order that appears on the chain between the
-  check and the engine's own plan is not seen. The right place for the rule is the engine (`C.orders` and `B.plan`
-  leaving out `PDService.isMine` orders); that is a change in the donor, to be made there and re-vendored.
-- It covers the bridge (`mcd:dxCommand`). Nothing else in this app can send a LIMIT to the engine.
-- DexiconPro's rule was different (`crosses()`: its order form only rests, so anything that would trade at once is
-  refused). The public page does take, so that rule was not ported.
+- An own order at the best price and a third party's behind it: the plan takes the third party's (test: "an own order
+  at the best price…", through `mcd:dxCommand` on the mock node).
+- Nothing but own orders inside the limit, and no pool: the service answers with `AX.ownskip.ONLY_OWN` ("Only your own
+  orders are at this price, so there is nothing to trade against. Nothing was sent.") as an `ERROR` packet and a stage
+  line, and `PDService.action` is not called (`onlyOwnOrders` in `service.desktop.js`, the donor's text). The screens
+  show that sentence as plan feedback, not as an error (`DexCore.feedbackKind`).
+- The page's own preview and its "does this cross" test use the same wrapped planners (`ui/pd_app.js`), and
+  `renderer/dexicon/mds.js` asks `AX.ownskip.onlyOwn` before an on-chain order so the same sentence is given there.
+- Pools are untouched, the user's own pool included.
 
 Auto-cross therefore runs as in the MiniDapp: the user's own saved setting (`mm_config.autoCross`, off by default,
 behind the page's warning text) switches it on.
@@ -188,14 +190,14 @@ lost, but putting it back is a manual step today.
 |---|---|---|
 | `MDS.cmd`: through MiniHub permissions, WRITE trust, replies can be `pending:true`, replies over about 256 KB come back empty | the node's own RPC through `rpcCall`: no trust levels, never `pending`, no size cap | the engine's `pending` branches never run; `checkmode` is answered by the host (`writemode:true`, `dblocked:false`), so a password-locked node is not noticed up front and shows as failed signatures; the book scan's "empty reply, halve the window" probe costs one extra read per region and nothing else |
 | `MDS.sql`: H2, one database shared by page and service | sql.js (SQLite) through the shim: `MERGE INTO … KEY(…)` → `INSERT OR REPLACE`, upper-case column names, `auto_increment` rewritten | every statement the engine uses ran on the stand-in (boot, tape migration with `ALTER TABLE … ADD COLUMN`, kv, claims); SQLite's `LIKE` is case-insensitive where H2's is not (the engine's only `LIKE` is `k LIKE 'fill_%'`); the database is saved whole to a file (at once for the rows above, else after 400 ms), where H2 commits each statement |
-| `MDS.net.GET` / `POST`: **synchronous** in Rhino, any URL | **asynchronous**, https only, only under a relay of the engine's current list or `api.mexc.com` (GET), no redirects, the app's SSRF guard (`main/netfetch.js`: no private or loopback address), replies capped at 8 MB, a POST body at 64 KB, read timeout 15 s | the tick needs an overlap guard and a watchdog (service header, ASYNC NET); **a relay on the user's own machine or LAN (`http://localhost…`, which the engine itself allows) cannot be used here**; the long poll (8 s of every 10 s) holds one slot of the pool the app's other outbound calls share |
+| `MDS.net.GET` / `POST`: **synchronous** in Rhino, any URL | **asynchronous**, https only, only under a relay of the engine's current list or the price source (GET: `api.mexc.com`, and `api.coingecko.com/api/v3/coins/minima/tickers`), no redirects, the app's SSRF guard (`main/netfetch.js`: no private or loopback address), replies capped at 8 MB, a POST body at 64 KB, read timeout 15 s | the tick needs an overlap guard and a watchdog (service header, ASYNC NET); **a relay on the user's own machine or LAN (`http://localhost…`, which the engine itself allows) cannot be used here**; the long poll (8 s of every 10 s) holds one slot of the pool the app's other outbound calls share |
 | `MDS.comms.solo`: echoed to every part of the MiniDapp, the service included | service → `mcd:dexicon` event for the screens; screens → `mcd:dxCommand` `{op:"comms"}` → the service's `MDSCOMMS` event; no echo | the `origin` field's job (ignoring one's own echo) has nothing to do; the host accepts only origins `ui` and `dexicon` from a screen |
 | `MDS.keypair` | not provided | the engine does not use it (settings live in `ax_kv`) |
 | Timers: the node sends `MDS_TIMER_10SECONDS` and pushes `NEWBLOCK` per block; the service scope has no `setTimeout` | a 10 s interval in the host; the block is **polled** on that interval, so a block is seen up to 10 s late and several blocks arrive as one event | the engine takes the tip from `block` itself, so a merged event loses nothing; `setTimeout` exists in the vm but the engine never calls it |
 | `MDS.notify` | the host's `notify` event (no OS notification is raised yet) | 3b decides what to show |
 | `MDS.load` | path-jailed to `main/dexicon/` | a stray file there fails the parity gate |
 | `inited` once per node start | once per app start, plus a retry of `PDService.boot()` once a minute while the resting engine is not ready | a node that was slow at the first try does not leave the Exchange dead |
-| Price: `resting/price.js` over `MDS.net.GET` (MEXC depth, then MEXC bookTicker) | the same file, the same two URLs | **the MiniDapp has no CoinGecko fallback** (that exists in the Android apps); none was added |
+| Price: `resting/price.js` over `MDS.net.GET` (MEXC depth, then MEXC bookTicker), and since 0.0.90 `AX.ladder.feed(PandaPrice)`: when neither MEXC call returns JSON, MEXC's own MINIMA/USDT ticker from `https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc` | the same files, the same three URLs; the host allows GET to `api.mexc.com` and to that one CoinGecko path, nothing else | a MEXC answer (even a thin or crossed book) stands and CoinGecko is not asked; the fallback read is aged from CoinGecko's fetch time; `dxStatus().price.source` is `MEXC` or `MEXC via CoinGecko` |
 
 ## The command bridge (`mcd:dxCommand`)
 
@@ -211,7 +213,7 @@ lost, but putting it back is a manual step today.
   is refused.
 - **Removed** (DexiconPro-only): the PAUSE ALL / NUKE gate on `send` / `txnpost` / LIMIT / SPLIT / EDIT, the refusal
   of `MAKER_*` packets, the SQL refusals (`maker_state`, `mm_*`, `mxusd_tokenid`).
-- **Added**: packets must be JSON with origin `ui` or `dexicon`; a LIMIT passes the own-order rule of (a).
+- **Added**: packets must be JSON with origin `ui` or `dexicon`. (The own-order rule on LIMIT of 0.18.99 was removed in 0.18.105, see (a).)
 
 ## Not proven without a node or relays
 

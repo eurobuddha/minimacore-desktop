@@ -4,7 +4,8 @@
  * spacing, or manual rows) published as one FAST order per rung, kept live by service.js.
  * Feed rules are AtomiX PriceOracle's: fresh ≤ 5 min tight; stale → spread widens linearly to ×10 over 90 min; no
  * price, or stale past 12 h → withdraw; a > 50 % jump needs a second agreeing read. The MEXC fetch itself is
- * PandaPrice (resting/price.js, already loaded in the service). Asks round UP, bids DOWN, to 8 dp.
+ * PandaPrice (resting/price.js, already loaded in the service); feed() below gives it the APK's one fallback, MEXC's own
+ * ticker as CoinGecko rebroadcasts it, for when MEXC cannot be reached. Asks round UP, bids DOWN, to 8 dp.
  * Rhino-safe (ES5). Requires AX.fill, AX.maker. Attaches to AX.ladder.
  *
  * kv 'mm_config' = config JSON · 'mm_ids' = { rungKey: orderId } · 'mm_status' = status text · 'mm_dirty' = '1' after SAVE
@@ -132,8 +133,71 @@
     function feedLine(P) {
         var mid = P.mid(), age = P.ageMs();
         if (!(mid > 0)) return 'MEXC: ' + (P.lastError ? 'unavailable (' + P.lastError + ')' : 'no price yet');
-        return 'MEXC mid ' + mid + ' · ' + Math.floor(age / 1000) + 's ago' + (age > FRESH_MS ? ' — STALE · spread ×' + wideningFactor(age).toFixed(1) : '');
+        return (P.source && P.source !== 'MEXC' ? P.source + ' mid (MEXC direct unreachable) ' : 'MEXC mid ') + mid + ' · ' + Math.floor(age / 1000) + 's ago' + (age > FRESH_MS ? ' — STALE · spread ×' + wideningFactor(age).toFixed(1) : '');
     }
+
+    // ---- the price fallback (mirror of the APK maker/MexcFeed.java, 9 Nov) ----
+    // MEXC is the only price. When MEXC cannot be REACHED (both direct calls fail to return JSON; a thin or crossed book
+    // is an answer and stands), the feed reads MEXC's OWN MINIMA/USDT ticker as CoinGecko rebroadcasts it: never another
+    // exchange, never an average. It passes PandaPrice.accept like any read, is aged from CoinGecko's fetch time (so
+    // an old one widens the spread), and the jump guard above applies to it as to any mid.
+    var GECKO_MEXC_URL = 'https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc', VIA_GECKO = 'MEXC via CoinGecko';
+    /** "2026-11-09T09:53:00+00:00" (or Z) → unix ms, 0 when it is anything else. By hand, so Rhino and a browser cannot disagree. */
+    function isoMs(s) {
+        var m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(Z|[+-]\d\d:\d\d)$/.exec(String(s || '')), t, z;
+        if (!m) return 0;
+        t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]); z = m[7];
+        if (z !== 'Z') t -= (z.charAt(0) === '-' ? -1 : 1) * ((+z.substring(1, 3)) * 60 + (+z.substring(4, 6))) * 60000;
+        return t > 0 ? t : 0;
+    }
+    /** CoinGecko's MEXC MINIMA/USDT ticker → [bid, ask, dataAtMs]: MEXC's last trade ± half MEXC's bid-ask spread, dated by
+     *  CoinGecko's fetch (a future stamp counts as now). null unless the MEXC/USDT row is there and not stale/anomalous. Pure. */
+    function parseGeckoMexc(d, nowMs) {
+        var ts = d && d.tickers, i, t, last, sp, at, half, yes = function (v) { return v === true || v === 'true'; };
+        if (!ts || !ts.length) return null;
+        for (i = 0; i < ts.length; i++) {
+            t = ts[i];
+            if (!t || !t.market || t.market.identifier !== 'mxc' || t.target !== 'USDT') continue;
+            if (yes(t.is_stale) || yes(t.is_anomaly)) return null;
+            last = Number(t.last); sp = t.bid_ask_spread_percentage === null || t.bid_ask_spread_percentage === undefined ? -1 : Number(t.bid_ask_spread_percentage);
+            at = isoMs(t.last_fetch_at);
+            if (!(last > 0) || !(sp >= 0) || !(at > 0)) return null;
+            half = last * sp / 200;
+            return [last - half, last + half, Math.min(at, nowMs)];
+        }
+        return null;
+    }
+    /** PandaPrice.refreshAsync with the fallback: depth, then bookTicker (as before), then MEXC via CoinGecko ONLY when
+     *  neither MEXC call returned JSON. Same 30 s gap and stuck-fetch rule; no timers; never a guessed price. */
+    function refresh(P, done) {
+        var now = Date.now();
+        done = done || function () { };
+        if (P.fetching && now - P.lastTryMs > P.FETCH_STUCK_MS) { P.fetching = false; P.lastError = 'price feed timed out'; }
+        if (P.fetching || now - P.lastTryMs < P.FETCH_GAP_MS) return done(null, P.mid());
+        P.fetching = true; P.lastTryMs = now;
+        function end(err) { P.fetching = false; if (err) { P.lastError = err; return done(err); } done(null, P.mid()); }
+        function take(bid, ask, src, dataAt) {   // one read through PandaPrice.accept's rules → '' or why it was refused
+            try { P.accept(bid, ask); } catch (e) { return String(e); }
+            P.source = src; if (dataAt && dataAt < P.fetchedAt) P.fetchedAt = dataAt;
+            return '';
+        }
+        P.http(P.DEPTH_URL, function (e1, depth) {
+            var thin = e1 ? '' : take(P.effectiveLevel(depth && depth.bids), P.effectiveLevel(depth && depth.asks), 'MEXC');
+            if (!e1 && !thin) return end();
+            P.http(P.BOOK_URL, function (e2, book) {
+                var bad = e2 ? '' : take(Number(book && book.bidPrice || 0), Number(book && book.askPrice || 0), 'MEXC');
+                if (!e2 && !bad) return end();
+                if (!e1 || !e2) return end(bad || thin);   // MEXC answered: its answer stands, no fallback
+                P.http(GECKO_MEXC_URL, function (e3, t) {
+                    var r = e3 ? null : parseGeckoMexc(t, Date.now());
+                    var why = e3 ? String(e3) : r ? take(r[0], r[1], VIA_GECKO, r[2]) : 'no fresh MEXC ticker on CoinGecko';
+                    end(why ? 'MEXC ' + e2 + '; via CoinGecko ' + why : '');
+                });
+            });
+        });
+    }
+    /** Give PandaPrice the fallback. service.js calls it once, after resting/price.js is loaded. */
+    function feed(P) { P.source = 'MEXC'; P.refreshAsync = function (done) { refresh(P, done); }; return P; }
 
     // ---- the runner (service.js tick) ----
     var state = { lastPass: 0, lastSplit: {}, feed: { mid: 0, suspect: 0 } };
@@ -307,6 +371,6 @@
     /** The ladder's guarded MEXC mid, or 0 while a jump is unconfirmed (auto-cross prices from this, never the raw feed). */
     function guardedMid() { return state.feed.suspect > 0 ? 0 : (state.feed.mid || 0); }
     AX.ladder = { guardedMid: guardedMid, MAX_LEVELS: MAX_LEVELS, parse: parse, blankConfig: blankConfig, fromJson: fromJson, levelCount: levelCount, generate: generate, desired: desired,
-                  needsEdit: needsEdit, commits: commits, validate: validate, wideningFactor: wideningFactor, guard: guard, feedLine: feedLine, pass: pass, split: split,
+                  needsEdit: needsEdit, commits: commits, validate: validate, wideningFactor: wideningFactor, guard: guard, feedLine: feedLine, feed: feed, parseGeckoMexc: parseGeckoMexc, GECKO_MEXC_URL: GECKO_MEXC_URL, pass: pass, split: split,
                   _state: state };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

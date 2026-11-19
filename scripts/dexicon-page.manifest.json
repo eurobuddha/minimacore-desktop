@@ -1,13 +1,13 @@
 {
   "_comment": "Digests of the Dexicon page files copied verbatim from the MiniDapp, at the same commit as the engine (scripts/dexicon-parity.manifest.json). Regenerate ONLY with `node scripts/dexicon-page-manifest.cjs --update` beside a deliberate re-copy. This app's differences belong in renderer/dexicon/mds.js, never in a page file.",
   "donor": {
-    "mdsVersion": "0.0.89",
-    "gitSha": "500dd24344a3739472eccbefb0c684bed2aa2930"
+    "mdsVersion": "0.0.91",
+    "gitSha": "9a95eb114ad35d3e18692a60c248529762fd72d5"
   },
   "files": {
     "index.html": {
-      "sha256": "b0b8edf0a4ffef2dc543f0502a74b61564a1aabfcb9f11d1914339158d8ed4c1",
-      "bytes": 25713
+      "sha256": "56d40c2f6c046d2c3e455c3cb9f0fed69ba259fe5dc7bfada456be79bc71e832",
+      "bytes": 25751
     },
     "lib/activity.js": {
       "sha256": "9b876a506a0f2717231e5fc21084ebcb576be4bd3b70dbdfb383b511453164c8",
@@ -74,8 +74,8 @@
       "bytes": 11908
     },
     "ui/pd_app.js": {
-      "sha256": "124ac3964063ab62dc7b4b9737689c43e2a363a77f457023f27ea609e1f7a3c7",
-      "bytes": 69290
+      "sha256": "f5e26aaeaadb93946fa027ae0b665cdbcbb355f5b310697bc22e5f16952bf1af",
+      "bytes": 69602
     },
     "ui/style.css": {
       "sha256": "86dc7c3ebeb23624e5a5790fe3bdf8ca75b8099b125f640d405f0edfe81f9909",

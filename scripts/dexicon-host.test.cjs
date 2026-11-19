@@ -16,7 +16,7 @@ const dirs = [], hosts = [];
 const tmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "dexicon-test-")); dirs.push(d); return d; };
 /** A booted host on a mock node. o: { dir, node options, wrap(run) → runner } */
 async function boot(o = {}) {
-  const node = M.mockNode(o.node), net = M.mockNet(), dir = o.dir || tmp();
+  const node = M.mockNode(o.node), net = o.net || M.mockNet(), dir = o.dir || tmp();
   const host = makeHost({ runner: o.wrap ? o.wrap(node.run) : node.run, dataDir: dir, net, tickMs: o.tickMs || 40, quiet: true });
   node.attach(host); hosts.push(host);
   await host.start();
@@ -34,7 +34,7 @@ test.after(() => { for (const h of hosts) h.stop(); for (const d of dirs) fs.rmS
 
 test("the parity manifest verifies, and the host loads only manifest files", () => {
   const out = execFileSync(process.execPath, [path.join(__dirname, "dexicon-parity-manifest.cjs"), "--verify"], { encoding: "utf8" });
-  assert.match(out, /^PASS 37 Dexicon engine files match the committed manifest/);
+  assert.match(out, /^PASS 38 Dexicon engine files match the committed manifest/);
   const { FILES } = require("./dexicon-parity-manifest.cjs");
   const loaded = [...fs.readFileSync(path.join(M.root, "main/dexicon/service.desktop.js"), "utf8").matchAll(/^MDS\.load\('([^']+)'\)|; MDS\.load\('([^']+)'\)/gm)].map(m => m[1] || m[2]);
   assert.deepEqual(loaded, FILES, "service.desktop.js loads exactly the manifest's files, in its order");
@@ -89,6 +89,16 @@ test("the net allow-list: https, the engine's own relay list and the MiniDapp's 
   assert.ok(ok("https://minimammr.com/dex-relay/dex/publish", "POST"));
   assert.ok(ok("https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20"));
   assert.ok(!ok("https://api.mexc.com/api/v3/order", "POST"), "the price source is read, never written");
+  // the one fallback (engine 0.0.90): MEXC's own ticker as CoinGecko rebroadcasts it. That host, that path, GET, nothing else
+  const gecko = vm.runInContext("AX.ladder.GECKO_MEXC_URL", host._ctx());
+  assert.equal(gecko, "https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc");
+  assert.ok(ok(gecko), "the engine's own fallback URL");
+  assert.ok(!ok(gecko, "POST"));
+  for (const u of ["https://api.coingecko.com/api/v3/coins/bitcoin/tickers", "https://api.coingecko.com/api/v3/coins/minima/tickers/../../../ping", "https://api.coingecko.com:8443/api/v3/coins/minima/tickers",
+    "https://pro-api.coingecko.com/api/v3/coins/minima/tickers", "https://api.coingecko.com.evil.example/api/v3/coins/minima/tickers", "http://api.coingecko.com/api/v3/coins/minima/tickers", "https://api.binance.com/api/v3/depth", "https://api.xt.com/v4/public/ticker"])
+    assert.ok(!ok(u), "refused: " + u);
+  // the page asks no exchange for anything: neither price host through its relay transport
+  for (const url of [gecko, "https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20"]) assert.deepEqual(await host.command({ op: "net", method: "GET", url }), { status: false, error: "host not allowed" });
   for (const u of ["http://eurobuddha.com/dex-relay/dex/book", "https://eurobuddha.com/other", "https://eurobuddha.com/dex-relay/dex/../../other",
     "https://eurobuddha.com.evil.example/dex-relay/dex/book", "https://evil.example/dex/book", "https://user:pw@eurobuddha.com/dex-relay/dex/book",
     "http://localhost:9602/dex/book", "http://127.0.0.1:12005/dex/book", "https://api.coingecko.com/api/v3/simple/price", "file:///etc/passwd", "nonsense"])
@@ -204,34 +214,79 @@ test("auto-cross runs as in the MiniDapp, and plans over pools only: it can neve
   assert.ok(fs.readFileSync(path.join(M.root, "main/dexicon/lib/autocross.js"), "utf8").includes("g.PandaComposite.plan([], pools, !sell, want, limit, 0)"));
 });
 
-test("a LIMIT that would fill one of this node's own orders is refused before the engine sees it", async () => {
+// engine 0.0.91 (lib/ownskip.js): an order routes PAST this node's own on-chain orders. The desktop's refusal rule is gone.
+const BOOK = (rows) => `(function () {
+    var mk = function (id, mine, sell, price) { return { coinid: id, orderId: id, ownerPk: mine ? PDService.identity.publickey : "0x" + new Array(65).join("9"), wantAddr: PDService.identity.address, sell: sell, price: PandaDEX.d(price), minima: PandaDEX.d("100"), locked: sell ? PandaDEX.d("100") : PandaDEX.d(price).mul(100), wantAmt: sell ? PandaDEX.d(price).mul(100) : PandaDEX.d("100"), minRem: PandaDEX.d("0"), created: PDService.block, fillable: true }; };
+    PDService.book = ${JSON.stringify(rows)}.map(function (r) { return mk(r[0], r[1], r[2], r[3]); });
+    if (!globalThis.__plans) { globalThis.__plans = []; var fill = PandaTxn.fill; PandaTxn.fill = function (cmd, id, plan) { __plans.push(plan.takes.map(function (t) { return t.order.coinid + ":" + PandaDEX.plain(t.minima); })); return fill.apply(PandaTxn, arguments); }; }
+  })()`;
+const limitVia = (host, data) => host.command({ op: "comms", message: JSON.stringify({ origin: "ui", type: "LIMIT", data }) });
+
+test("an own order at the best price, a third party's behind it: a LIMIT is not refused, and fills the third party", async () => {
   const { host, ctx, node } = await boot();
-  const limit = (data) => host.command({ op: "comms", message: JSON.stringify({ origin: "ui", type: "LIMIT", data }) });
-  const self = (data) => String(ctx.DX.selfTrade(vm.runInContext("(" + JSON.stringify(data) + ")", ctx)));
-  // an own offer at 0.0100 and someone else's at 0.0090, a bid of ours at 0.0080
+  const packets = []; host.emitter.on("comms", m => { const p = JSON.parse(m); if (p.origin === "service" && p.type !== "STATE") packets.push(p); });
+  vm.runInContext(BOOK([["0xAA01", true, true, "0.0090"], ["0xBB02", false, true, "0.0095"], ["0xAA03", true, false, "0.0080"]]), ctx);
+  assert.equal(host.book().book.filter(o => o.ours).length, 2, "the read model still marks the own orders");
+  node.seen.length = 0;
+  assert.deepEqual(await limitVia(host, { buy: true, minima: "10", price: "0.0100" }), { status: true }, "the bridge refuses nothing: own orders in the stack do not block an order");
+  await M.until(() => vm.runInContext("__plans.length", ctx) > 0 || packets.length > 0);
+  assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(__plans)", ctx)), [["0xBB02:10"]], "the engine's plan takes the third party's order at 0.0095, past the own one at 0.0090");
+  await M.until(() => packets.length > 0);   // the mock wallet holds no coins, so the build ends; what matters is which coin it named
+  assert.ok(!node.seen.some(c => c.includes("0xAA01")), "the own order's coin is in no command");
+  assert.ok(!packets.some(p => /own order/i.test(JSON.stringify(p))), JSON.stringify(packets));
+  assert.equal(ctx.DX.selfTrade, undefined, "the desktop's own refusal rule is gone");
+});
+
+test("only own orders inside the limit: the engine's sentence, nothing built, nothing sent; an own pool is still routed to", async () => {
+  const { host, ctx, node } = await boot();
+  const packets = []; host.emitter.on("comms", m => { const p = JSON.parse(m); if (p.origin === "service" && p.type !== "STATE") packets.push(p); });
+  vm.runInContext(BOOK([["0xAA01", true, true, "0.0090"], ["0xBB02", false, true, "0.0200"]]), ctx);
+  node.seen.length = 0;
+  assert.deepEqual(await limitVia(host, { buy: true, minima: "10", price: "0.0100" }), { status: true });
+  await M.until(() => packets.length > 0);
+  assert.deepEqual(packets, [{ origin: "service", type: "ERROR", data: { message: "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent." } }]);
+  await new Promise(r => setTimeout(r, 100));
+  assert.ok(!node.seen.some(c => /^(txn|send|newscript|consolidate)/.test(c)), "nothing was built, signed or posted: " + node.seen.join(" | "));
+  assert.equal(vm.runInContext("__plans.length", ctx), 0);
+  // pools are not part of the rule (owner, 19 Nov 2026): with an own pool inside the limit there is something to trade against
   vm.runInContext(`(function () {
-    var mk = function (id, pk, sell, price) { return { coinid: id, orderId: id, ownerPk: pk, wantAddr: PDService.identity.address, sell: sell, price: PandaDEX.d(price), minima: PandaDEX.d("100"), locked: sell ? PandaDEX.d("100") : PandaDEX.d(price).mul(100), wantAmt: sell ? PandaDEX.d(price).mul(100) : PandaDEX.d("100"), minRem: PandaDEX.d("0"), created: PDService.block, fillable: true }; };
-    PDService.book = [mk("0xAA01", PDService.identity.publickey, true, "0.0100"), mk("0xBB02", "0x" + new Array(65).join("9"), true, "0.0090"), mk("0xAA03", PDService.identity.publickey, false, "0.0080")];
-  })()`, ctx);
-  assert.equal(self({ buy: true, minima: "10", price: "0.0095" }), "", "a buy that stops below our own offer may go");
-  assert.match(self({ buy: true, minima: "10", price: "0.0100" }), /^This would trade with your own order at 0\.01 \(coin 0xAA01\)/);
-  assert.match(self({ buy: true, minima: "10", price: "" }), /your own order/, "no limit price: any own offer could be reached");
-  assert.match(self({ buy: false, minima: "10", price: "0.0080" }), /your own order at 0\.008 \(coin 0xAA03\)/);
-  assert.equal(self({ buy: false, minima: "10", price: "0.0085" }), "");
-  const n = node.seen.length;
-  await assert.rejects(limit({ buy: true, minima: "10", price: "0.0100" }), /your own order/);
-  assert.ok(!node.seen.slice(n).some(c => /^(txn|send)/.test(c)), "nothing was built or signed");
-  // pools are not part of this rule (owner, 19 Nov 2026): an own pool refuses nothing, and the read model marks it
-  vm.runInContext(`(function () {
-    PDService.book = [];
-    PDService.pools = [PandaPool.clean({ opk: PDService.identity.publickey.toLowerCase(), oadr: "0x01", tok: PandaDEX.USDT, kmin: "0", address: "0xC1", reserveM: "100000", reserveT: "1000", coinidM: "0xC101", coinidT: "0xC102" })];
+    PDService.pools = [PandaPool.clean({ opk: PDService.identity.publickey.toLowerCase(), oadr: "0x01", tok: PandaDEX.USDT, kmin: "0", address: "0xC1", reserveM: "100000", reserveT: "900", coinidM: "0xC101", coinidT: "0xC102" })];
     PDService.poolHaveLive = true;
   })()`, ctx);
-  assert.equal(self({ buy: true, minima: "10", price: "0.02" }), "");
+  assert.equal(vm.runInContext('AX.ownskip.onlyOwn(PDService.book, PDService.pools, true, "10", "0.0100", PDService.block)', ctx), "");
   assert.equal(host.book().pools.find(p => p.address === "0xC1").mine, true, "own pool, key matched whatever its letter case");
-  // keys not read yet: nothing can be told apart, so nothing is sent
+  // keys not read: own orders cannot be told apart, so the wrapped planner refuses to plan a non-empty book at all
   vm.runInContext("PDService.keysReady = false", ctx);
-  assert.match(self({ buy: true, minima: "10", price: "0.02" }), /Still reading this wallet's keys/);
+  assert.throws(() => vm.runInContext('PandaBook.plan(PDService.book, true, "10", "0.0100", PDService.block)', ctx), /Still reading this wallet's keys/);
+});
+
+test("MEXC unreachable: the price is MEXC's own ticker via CoinGecko, labelled; a MEXC answer needs no fallback", async () => {
+  const calls = [], iso = new Date(Date.now() - 20000).toISOString().slice(0, 19) + "Z";
+  const net = { calls, async fetchJson(url) {
+      calls.push("GET " + url);
+      if (/^https:\/\/api\.mexc\.com\//.test(url)) return null;   // as main/netfetch.js answers a failed read
+      if (url === "https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc") return { tickers: [{ market: { identifier: "binance" }, target: "USDT", last: 9 },
+        { market: { identifier: "mxc" }, target: "USDT", last: 0.0101, bid_ask_spread_percentage: 1, last_fetch_at: iso, is_stale: false, is_anomaly: false }] };
+      if (/\/dex\/inbox\?/.test(url)) return { cursor: 0, messages: [] };
+      if (/\/dex\/book\?/.test(url)) return { cursor: 0, orders: [] };
+      return null;
+    }, async postText(url) { calls.push("POST " + url); return '{"ok":true}'; } };
+  const { host } = await boot({ net });
+  await M.until(() => host.status().price.mid > 0);
+  const px = host.status().price;
+  assert.ok(Math.abs(px.mid - 0.0101) < 1e-12, "MEXC's last trade, from the mxc row only: " + px.mid);
+  assert.equal(px.source, "MEXC via CoinGecko", "the read model carries the engine's own label");
+  assert.ok(px.ageMs >= 20000, "aged from CoinGecko's fetch time, not from now");
+  const order = calls.filter(c => /mexc|coingecko/.test(c));
+  assert.deepEqual(order.slice(0, 3), ["GET https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20", "GET https://api.mexc.com/api/v3/ticker/bookTicker?symbol=MINIMAUSDT", "GET https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc"], "both MEXC calls first, then the fallback");
+  assert.ok(calls.every(c => /^(GET|POST) https:\/\/(api\.mexc\.com\/|api\.coingecko\.com\/api\/v3\/coins\/minima\/tickers\?|eurobuddha\.com\/|store\.eurobuddha\.com\/|minimammr\.com\/)/.test(c)), "CoinGecko is the only non-MEXC host the price fetch reaches:\n" + calls.join("\n"));
+  await M.until(async () => /MEXC via CoinGecko mid \(MEXC direct unreachable\)/.test(JSON.stringify(await sql(host, "SELECT v FROM ax_kv WHERE k='mm_feed'"))));   // the market maker's feed line says it too
+  // MEXC answering: its answer stands and CoinGecko is never asked
+  const up = await boot();
+  await M.until(() => up.host.status().price.mid > 0);
+  assert.equal(up.host.status().price.source, "MEXC");
+  assert.ok(!up.net.calls.some(c => /coingecko/.test(c)));
+  assert.equal(makeHost({ quiet: true, dataDir: tmp() }).status().price.source, "", "no price yet: no source claimed");
 });
 
 test("a wallet reset moves the store aside (never deleted) and starts empty; the old engine can no longer reach the node or the store", async () => {

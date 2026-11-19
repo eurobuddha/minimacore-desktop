@@ -10,15 +10,17 @@
  *   sql  -> its own SQLite file, userData/dexicon/dexicon.sqlite, through the H2->SQLite shim PandaPools uses
  *   net  -> https only: the engine's current relay list (kv 'relays': the user's list, which is where a relay found
  *           by DISCOVER lands once the user adds it; the MiniDapp's three defaults on a fresh install) and the
- *           MiniDapp's own price source, api.mexc.com (resting/price.js: depth, then bookTicker). Nothing else.
+ *           MiniDapp's own price source, api.mexc.com (resting/price.js: depth, then bookTicker), with its one
+ *           fallback when MEXC cannot be reached: MEXC's own MINIMA/USDT ticker as CoinGecko rebroadcasts it
+ *           (lib/ladder.js GECKO_MEXC_URL: api.coingecko.com, that one path). Nothing else.
  *
  * NOT ported from DexiconPro (its private parts): the injected MEXC feed (PandaPrice) and the take gate (DX_GATE),
  * PAUSE ALL / NUKE (pauseAll, the room gates), the Mandate, the SQL refusals (maker_state, mm_*, mxusd_tokenid), the
  * MAKER_* packet refusal, the hard-coded RELAY_HOSTS, the cockpit's merged book / ladder editor / create / edit /
  * cancelOne / chain(). The engine's AtomiX doors are never loaded (main/dexicon/service.desktop.js).
  * ADDED: an epoch guard (a wallet replaced under a running engine: the old context's late callbacks reach neither
- * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted), and the own-order
- * check on LIMIT (docs/DEXICON_ENGINE_NOTES.md (a)).
+ * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted). The own-order refusal
+ * on LIMIT of 0.18.99 is gone: since engine 0.0.91 the planners route past own orders (docs/DEXICON_ENGINE_NOTES.md (a)).
  */
 const { EventEmitter } = require("events");
 const path = require("path");
@@ -30,8 +32,11 @@ const { makeSqlShim } = require("./pandapools/sqlshim");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const TICK_MS = 10000;
-const ENGINE_VERSION = "0.0.89";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
+const ENGINE_VERSION = "0.0.91";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
 const PRICE_HOST = "api.mexc.com";   // resting/price.js DEPTH_URL / BOOK_URL
+const GECKO_HOST = "api.coingecko.com", GECKO_PATH = "/api/v3/coins/minima/tickers";   // lib/ladder.js GECKO_MEXC_URL: MEXC's ticker, when MEXC itself cannot be reached
+/** A GET of the engine's price source: MEXC, or that one CoinGecko path. x = a parsed https URL. */
+const priceUrl = (x) => !x.port && (x.hostname === PRICE_HOST || (x.hostname === GECKO_HOST && x.pathname === GECKO_PATH));
 
 // The MiniDapp page builds and signs its own FAST takes, so it needs node commands; it gets exactly the verbs its
 // code issues and no others. Ported from DexiconPro's DEX_VERBS, then cut to what the page at mds/dexicon 0.0.89
@@ -90,10 +95,10 @@ function makeHost(opts = {}) {
   }
 
   /** https only, and only a URL under one of the engine's current relays, or the MiniDapp's price source. */
-  function netAllowed(u, method) {
+  function netAllowed(u, method, noPrice) {
     let x; try { x = new URL(String(u)); } catch (e) { return false; }
     if (x.protocol !== "https:" || x.username || x.password) return false;
-    if (method === "GET" && x.hostname === PRICE_HOST) return true;
+    if (priceUrl(x)) return method === "GET" && !noPrice;   // read, never written; never for the page
     let relays = []; try { relays = (ctx && ctx.DX && ctx.DX.relays()) || []; } catch (e) {}
     return relays.some(r => typeof r === "string" && /^https:\/\//.test(r) && x.href.startsWith(r + "/dex/"));   // x.href: dot segments already resolved
   }
@@ -204,13 +209,14 @@ function makeHost(opts = {}) {
 
   function status() {
     const s = { version: ENGINE_VERSION, started: !!timer, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
-      price: { mid: 0, ageMs: null, label: "" }, log: LOG.slice(-20) };
+      price: { mid: 0, ageMs: null, label: "", source: "" }, log: LOG.slice(-20) };
     try {
       if (!ctx || !ctx.DX) return s;
       s.ready = !!ctx.DX.ready(); s.restingReady = !!ctx.DX.restingReady(); s.publicId = s.ready ? String(ctx.DX.publicId()) : null;
       s.block = ctx.DX.block(); s.relays = plain(ctx.DX.relays());
       const P = ctx.PandaPrice, age = P.ageMs();
-      s.price = { mid: P.mid(), ageMs: age >= Number.MAX_SAFE_INTEGER ? null : age, label: String(P.stateLabel()) };
+      // source: the engine's own field (lib/ladder.js feed): "MEXC", or "MEXC via CoinGecko" when the last read was the fallback
+      s.price = { mid: P.mid(), ageMs: age >= Number.MAX_SAFE_INTEGER ? null : age, label: String(P.stateLabel()), source: P.mid() > 0 ? String(P.source || "MEXC") : "" };
     } catch (e) {}
     return s;
   }
@@ -245,14 +251,12 @@ function makeHost(opts = {}) {
     if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(q) && WRITES_NOW.test(q)) { try { sqlShim.flush(); } catch (e) {} }
     return Promise.resolve(r);
   }
-  /** a page MDS.comms.solo → the service's MDSCOMMS event. Only the page's own two origins; a LIMIT that would fill
-   *  one of this node's own orders is refused here, before the engine sees it. */
+  /** a page MDS.comms.solo → the service's MDSCOMMS event. Only the page's own two origins. */
   function pageComms(message) {
     if (typeof message !== "string" || message.length > 100000) throw new Error("bad message");
     let p = null; try { p = JSON.parse(message); } catch (e) { p = null; }
     if (!p || (p.origin !== "ui" && p.origin !== "dexicon") || typeof p.type !== "string") throw new Error("bad message");
-    const dx = DX();   // not booted: say so instead of dropping the packet
-    if (p.origin === "ui" && p.type === "LIMIT") { const why = String(dx.selfTrade(toVm(p.data || {})) || ""); if (why) throw new Error(why); }
+    DX();   // not booted: say so instead of dropping the packet
     fire("MDSCOMMS", { data: { public: false, message } });
     return { status: true };
   }
@@ -261,8 +265,7 @@ function makeHost(opts = {}) {
    *  text, as an XMLHttpRequest gives it. */
   function pageNet(a) {
     const method = a && a.method === "POST" ? "POST" : "GET", url = String((a && a.url) || "");
-    let host = ""; try { host = new URL(url).hostname; } catch (e) {}
-    if (!ready || host === PRICE_HOST || !netAllowed(url, method)) return Promise.resolve({ status: false, error: "host not allowed" });
+    if (!ready || !netAllowed(url, method, true)) return Promise.resolve({ status: false, error: "host not allowed" });
     const asked = method === "POST" ? net().postText(url, String(a.body == null ? "" : a.body)) : net().fetchJson(url, { noRedirect: true }).then(o => (o == null ? null : JSON.stringify(o)));
     return Promise.resolve(asked).then(text => (text == null ? { status: false, error: "no reply" } : { status: true, response: String(text) }), e => ({ status: false, error: (e && e.message) || "net failed" }));
   }

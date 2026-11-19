@@ -166,9 +166,16 @@ test("only the user's own orders at a price: ordinary plan feedback, no special 
 });
 
 test("a refusal is shown in the words it came in, whoever refused", () => {
-  const bridge = "Error invoking remote method 'mcd:dxCommand': Error: This would trade with your own order at 0.0031 (coin 0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8). Cancel or re-price that order first. Nothing was sent.";
-  assert.equal(C.refusal(bridge), "This would trade with your own order at 0.0031 (coin 0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8). Cancel or re-price that order first. Nothing was sent.",
+  const bridge = "Error invoking remote method 'mcd:dxCommand': Error: Order 0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8 is no longer on the book. Nothing was sent.";
+  assert.equal(C.refusal(bridge), "Order 0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8 is no longer on the book. Nothing was sent.",
     "the bridge's wrapper is removed; the message and the identifier are whole");
+  // the engine's sentence for "nothing but your own orders there" (lib/ownskip.js) is plan feedback, not an error
+  const ownskip = {}; require("node:vm").runInNewContext(fs.readFileSync(path.join(__dirname, "../main/dexicon/lib/ownskip.js"), "utf8"), ownskip);
+  assert.equal(C.feedbackKind(ownskip.AX.ownskip.ONLY_OWN), "note");
+  assert.equal(C.feedbackKind(C.refusal("Error invoking remote method 'mcd:dxCommand': Error: " + ownskip.AX.ownskip.ONLY_OWN)), "note");
+  assert.equal(C.feedbackKind("the maker refused: coin already spent"), "error"); assert.equal(C.feedbackKind(null), "error");
+  // the one outside price, named from the engine's own field
+  assert.equal(C.priceName("MEXC"), "MEXC price"); assert.equal(C.priceName("MEXC via CoinGecko"), "MEXC price via CoinGecko"); assert.equal(C.priceName(undefined), "MEXC price"); assert.equal(C.priceName("Binance"), "MEXC price");
   assert.equal(C.refusal("the maker refused: coin already spent"), "the maker refused: coin already spent");
   assert.match(C.refusal(""), /no reason was given/); assert.match(C.refusal(null), /Look at Activity before trying again/);
 });
@@ -236,6 +243,11 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   say({ dxRoom: 1, drive: { id: 6, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
   assert.match(reply().error, /Nothing on the chain crosses this price now\. Nothing was sent\./);
   assert.ok(!calls.includes("place"));
+  win.AX = { ownskip: { onlyOwn: (book, pools, buy, minima, price, block) => (calls.push("onlyOwn:" + [buy, minima, price, block].join(",")), "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent.") } };
+  say({ dxRoom: 1, drive: { id: 61, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
+  assert.equal(reply().error, "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent.", "only own orders inside the limit: the engine's own sentence");
+  assert.deepEqual(calls.splice(calls.indexOf("onlyOwn:true,10,0.0032,100")), ["onlyOwn:true,10,0.0032,100"]); assert.ok(!calls.includes("place"));
+  win.AX = undefined;
   win.crosses = true; win.pageAsks = "Buying 10 MINIMA now\nEffective 0.003200";
   say({ dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
   assert.equal(calls.pop(), "confirmed:false", "first call: the page asks, the answer is No, nothing is sent");
@@ -259,9 +271,9 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   // a packet the host refuses comes back to the page as the service's own ERROR, not as silence
   let told = null; win.MDS.init((m) => { told = m; });
   const comms = sent.filter(m => m.name === "room.dex" && m.args.op === "comms").pop();
-  say({ dxRoom: 1, id: comms.id, error: "This would trade with your own order at 0.0031. Nothing was sent." });
+  say({ dxRoom: 1, id: comms.id, error: "bad message" });
   await new Promise(r => setImmediate(r));
-  assert.match(JSON.parse(told.data.message).data.message, /This would trade with your own order at 0\.0031\. Nothing was sent\./);
+  assert.equal(JSON.parse(told.data.message).data.message, "bad message");
   assert.equal(JSON.parse(told.data.message).type, "ERROR");
 });
 

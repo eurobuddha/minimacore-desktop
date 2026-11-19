@@ -27,7 +27,7 @@ const FILES = ['lib/rhino_shim.js', 'vendor/nacl.js', 'vendor/blake.js', 'vendor
   'resting/safety.js', 'resting/covenant.js', 'resting/input-claims.js', 'resting/funding.js', 'resting/signlock.js', 'resting/book.js',
   'resting/pool.js', 'resting/composite.js', 'resting/txn.js', 'resting/tape.js', 'resting/maker.js', 'resting/price.js',
   'resting/verifier.js', 'resting/pending.js', 'resting/stats.js', 'resting/split.js', 'resting/chain.js', 'resting/history.js',
-  'resting/pd_service.js', 'lib/autocross.js'];
+  'resting/pd_service.js', 'lib/autocross.js', 'lib/ownskip.js'];
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const fail = (...lines) => { for (const l of lines) console.error(l); process.exit(1); };

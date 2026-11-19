@@ -221,6 +221,11 @@
   }
   /** A refusal or an error, from the engine, the page or the bridge: its own words, with the plain prefix a reader
    *  needs. Nothing is added about what happened to funds unless the text itself says it. */
+  /** The engine's own sentence for "nothing but your own orders at this price" (dexicon/lib/ownskip.js ONLY_OWN) is
+   *  ordinary plan feedback, not a failure: "note", everything else that reaches say() unlabelled is an "error". */
+  const feedbackKind = (text) => (/^Only your own orders are at this price/.test(String(text == null ? "" : text).trim()) ? "note" : "error");
+  /** The one outside price's name, from the engine's own field (status().price.source: "MEXC" | "MEXC via CoinGecko"). */
+  const priceName = (source) => "MEXC price" + (/^MEXC via CoinGecko$/.test(String(source || "")) ? " via CoinGecko" : "");
   function refusal(text) {
     const t = String(text == null ? "" : text).replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
     return t || "It did not go through, and no reason was given. Look at Activity before trying again.";
@@ -294,6 +299,6 @@
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, feedbackKind, priceName, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });
