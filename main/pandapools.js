@@ -46,18 +46,22 @@ let dataDir = null;
 let contextEpoch=0, quarantineRequired=false;
 
 // swappable node-command runner (overridable in tests via _setRunner) — mirrors mail.js:42-45.
-let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+let runner = (cmd, opts) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd, opts);   // opts.signal: see poolAbort
+// One per contextEpoch (0.18.107): invalidate() aborts it, so a signing command of the old engine still queued in
+// main/noderun.js is never sent. The queue reads only `.aborted`, so this is that one field and not an AbortController
+// (this file is also run inside a bare vm context by its tests, where that global does not exist).
+let poolAbort = { aborted: false };
 function _setRunner(fn) { runner = fn; }
 function _setDataDir(d) { dataDir = d; }
 function nodeCmd(cmd) { return runner(cmd); }
 
 function buildMds() {
-  const epoch=contextEpoch, storage=sqlShim;
+  const epoch=contextEpoch, storage=sqlShim, signal=poolAbort;
   return {
     poolDesktop: true, // MiniHub WRITE/block-mode requirement is enforced in the MDS runtime.
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
-    cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}runner(command).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { if (cb) cb({ status: false }); }); },
+    cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}runner(command,{signal:signal}).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { if (cb) cb({ status: false }); }); },
     sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
     persistRecovery: function(cb) { cb(epoch===contextEpoch&&storage.flushChecked()); },
     archiveGET: function(url,cb) { fetchJson(url).then(cb,function(){cb(null);}); },
@@ -109,7 +113,7 @@ function onNodeRestarted() {
 }
 /** Wallet identity changes invalidate live work, never the saved recipes or usage floors. */
 async function invalidate() {
-  quarantineRequired=true;stopLoop();contextEpoch++;
+  quarantineRequired=true;stopLoop();contextEpoch++;poolAbort.aborted=true;poolAbort={aborted:false};
   const old=ctx,storage=sqlShim;
   if(old&&old.ActivityChain)old.ActivityChain.stop();
   ready=false;ctx=null;serviceHandler=null;initPromise=null;

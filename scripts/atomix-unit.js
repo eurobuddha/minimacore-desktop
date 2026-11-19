@@ -288,7 +288,7 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       assert.equal(got[0].aborted, true, "the timeout aborts it");
       mds.cmd(PUB, () => {});   // the engine's own republish, outside any step
       await new Promise(r => setTimeout(r, 30));
-      assert.equal(got.length, 2); assert.equal(got[1], undefined, "a send outside a step carries no signal and is never dropped");
+      assert.equal(got.length, 2); assert.ok(got[1] && got[1] !== got[0] && got[1].aborted === false, "a send outside a step carries only its engine's signal (0.18.107), which nothing aborts while that engine lives: it is never dropped");
       const src = fs.readFileSync(path.join(__dirname, "..", "main/atomix.js"), "utf8");
       assert.equal((src.match(/await makerStep\(/g) || []).length, 4, "publish (x2), withdraw and switch all run as steps");
       assert.ok(!/withTimeout\([^\n]*60000/.test(src), "none of them is left on a bare 60 s timeout");

@@ -43,6 +43,7 @@ let ready = false;            // orchestrator init done (engine boot is async + 
 let initPromise = null;
 let pollTimer = null, minuteTimer = null, lastTip = null;
 let generation = 0;           // bumped on invalidate — a stale in-flight init from an old seed must not resurrect
+let engineAbort = new AbortController();   // one per generation (0.18.107): invalidate() aborts it, so a signing command of the old engine still queued in main/noderun.js is never sent
 let dataDir = null;
 let runner = (cmd, opts) => {   // opts.signal: see makerStep
   const config = require("./config"), node = require("./node-manager");
@@ -143,6 +144,7 @@ async function publishSendWithRetry(command, signal) {
 }
 
 function buildMds() {
+  const gen = generation, signal = engineAbort.signal, GONE = "this wallet was replaced: the engine is restarting";
   return {
     minidappuid: "",
     cmd(command, cb) {
@@ -156,10 +158,14 @@ function buildMds() {
       // undefined". That threw away the only clue (auth/timeout/bad-reply) and made a publish failure
       // undiagnosable from the UI. Carry the reason through as `error` instead.
       const failed = (e) => cb(toVm({ status: false, error: (e && e.message) ? e.message : String(e) }));
-      if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c, makerOp && makerOp.signal).then(r => cb(toVm(normReply(r))), failed); return; }
-      runner(c).then(r => cb(toVm(normReply(r))), failed);
+      // 0.18.107: an engine disowned by invalidate() (the wallet was replaced) reaches neither the node nor the new
+      // engine's store; what it had already queued behind another signer is dropped by the signal.
+      if (gen !== generation) return failed(new Error(GONE));
+      if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c, makerOp ? AbortSignal.any([makerOp.signal, signal]) : signal).then(r => cb(toVm(normReply(r))), failed); return; }
+      runner(c, { signal }).then(r => cb(toVm(normReply(r))), failed);
     },
     sql(query, cb) {
+      if (gen !== generation) { if (cb) cb({ status: false, error: GONE }); return; }   // sqlShim is the NEW engine's store by now
       sqlShim.sql(query, cb);
       // FUND-SAFETY DURABILITY: the H2 peers persist synchronously; our sqlite image is debounced 400ms. A
       // crash in that window loses the row, so the two row classes that a refund or a claim DEPENDS on are
@@ -262,6 +268,7 @@ async function activeWork() {
  *  preimages of the old wallet, and is kept beside the new one as atomix.sqlite-legacy-keys-YYYYMMDD. */
 function invalidate() {
   generation++;              // disown any in-flight init (old seed) BEFORE we tear down
+  engineAbort.abort(); engineAbort = new AbortController();   // and whatever the old engine still has queued to sign
   stopLoop();
   flush();
   try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); }

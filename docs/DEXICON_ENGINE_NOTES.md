@@ -191,7 +191,9 @@ After it, four independent lines, none of which needs the window:
 4. While a move aside is owed and fails, `init()` opens no store: Dexicon stays stopped, `dxStatus().problem` says why
    (the Dexicon screens show it), and the move is tried again every tick.
 
-The old engine's late callbacks reach neither the node nor the new store (epoch guard, tested).
+The old engine's late callbacks reach neither the node nor the new store (epoch guard, tested). A signing command
+it had already queued behind another signer is dropped in the queue (0.18.107: one `AbortController` per epoch, its
+signal on every `rpcCall`, aborted by `stop()` and `invalidate()`); one the node was already given cannot be recalled.
 
 Not covered by line 3: a store with no recorded `publicId` (the engine never reached READY on it). AtomiX and
 PandaPools have line 1 only, plus their own guards (AtomiX IdentityWatch, PandaPools signing holds); a data-folder

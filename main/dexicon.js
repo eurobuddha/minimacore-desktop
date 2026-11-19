@@ -76,10 +76,13 @@ function makeHost(opts = {}) {
   let epoch = 0;   // bumped by drop(): everything built before it is disowned
   let asideOwed = false;   // the store on disk belongs to another wallet: it is moved aside before any store is opened
   let problem = "";        // why Dexicon is not running although the node is, in plain words (status().problem)
-  let runner = opts.runner || ((cmd) => {
+  // opts.signal: a SIGNING command still waiting in the process-wide queue (main/noderun.js) when its engine is
+  // dropped is rejected there and never reaches the node (0.18.107)
+  let runner = opts.runner || ((cmd, o) => {
     const config = require("./config"), node = require("./node-manager");
-    return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+    return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, o);
   });
+  let abort = new AbortController();   // one per engine epoch: aborted by drop() (stop, invalidate, a foreign store)
   const LOG = [];
 
   function dir() { return dataDir || path.join(app.getPath("userData"), "dexicon"); }
@@ -113,7 +116,7 @@ function makeHost(opts = {}) {
   const WRITES_NOW = /fill_|pending_takes|void_takes|mm_cross_pending|pp_posted_inputs|pending_state|maker_state|my_orders|my_coins|cancelled_coins|processor_inflight/;
 
   function buildMds() {
-    const mine = epoch, storage = sqlShim, live = () => mine === epoch;
+    const mine = epoch, storage = sqlShim, live = () => mine === epoch, signal = abort.signal;
     return {
       minidappuid: "",
       cmd(command, cb) {
@@ -122,7 +125,9 @@ function makeHost(opts = {}) {
         // checkmode: the node RPC is the node's own admin interface, so the engine's WRITE-trust preflight always passes.
         if (/^checkmode\b/.test(c)) return cb(toVm({ status: true, response: { writemode: true, dblocked: false } }));
         // two-arg then(): one reply = exactly one cb call (the engine's signing lock is freed by that call and by nothing else)
-        Promise.resolve().then(() => runner(c)).then(r => cb(toVm(r && typeof r === "object" ? r : { status: false, error: "no reply" })),
+        // The epoch is checked here, at entry; the signal covers what entry cannot: a signing command that is still
+        // QUEUED behind another signer when the engine is dropped is never sent.
+        Promise.resolve().then(() => runner(c, { signal })).then(r => cb(toVm(r && typeof r === "object" ? r : { status: false, error: "no reply" })),
                                                    e => cb(toVm({ status: false, error: (e && e.message) || String(e) })));
       },
       sql(query, cb) {
@@ -196,6 +201,7 @@ function makeHost(opts = {}) {
   /** Disown the engine: its late callbacks reach neither the node nor a store (epoch), what it wrote is on disk. */
   function drop() {
     epoch++;
+    abort.abort(); abort = new AbortController();   // queued signers of the dropped engine are never sent
     flush();
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
   }
@@ -282,7 +288,8 @@ function makeHost(opts = {}) {
   function pageCmd(command) {
     const c = dexCommand(command);
     if (/^checkmode\b/.test(c)) return Promise.resolve({ status: true, response: { writemode: true, dblocked: false } });
-    return Promise.resolve().then(() => runner(c)).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
+    const signal = abort.signal;   // the page's take, queued behind another signer when the engine is dropped, is not sent either
+    return Promise.resolve().then(() => runner(c, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
   }
   function pageSql(query) {
     const q = dexSql(query);

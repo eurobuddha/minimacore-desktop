@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.107] — Security review (MEDIUM): a signing command already queued survived a stopped or replaced engine
+
+- **The finding, confirmed.** The Dexicon host checked "is this still my engine" only when a command entered. A signing command (`txnsign`, `send`, `consolidate`) that was already waiting in the process-wide signing queue behind another signer was still sent to the node after `stop()` or `invalidate()`.
+- **Fix.** Each engine epoch has an `AbortController`; every node command of the engine and of the page's bridge carries its signal to `rpcCall` (which already drops a queued signer whose signal is aborted); `stop()`, `invalidate()` and the foreign-store path abort it. A command the node has already been given cannot be recalled.
+- **The same gap in the other two glue files, fixed in the glue only.** `main/pandapools.js` had the entry check but passed no signal: it now does, aborted by `invalidate()`. `main/atomix.js` had neither: its MDS stand-in did not check at entry at all, so an engine disowned by `invalidate()` could still send commands, and its SQL went to whichever store was current (the new wallet's). It now refuses both for a disowned engine and passes the signal (a publish send carries both its step's signal and the engine's). Nothing under `main/atomix/` or `main/pandapools/` was touched.
+- Tests: `scripts/dexicon-host.test.cjs` "a signing command still queued when the engine is stopped or its wallet replaced never reaches the node" (engine and bridge, both ways); `scripts/engine-abort.test.cjs` for the AtomiX and PandaPools glue. Each fails without its fix.
+
 ## [0.18.106] — Security review (HIGH): the old wallet's Dexicon store could keep trading on a new wallet
 
 - **The finding, confirmed.** The Dexicon store was reset only when the window asked for it (`mcd:dxInvalidate`, after the resync had returned). If the window was closed or reloaded during `megammrsync`, if `runResync` threw after the node had swapped wallets, if the app crashed, or if the move aside failed, the engine came back on the OLD wallet's `myorders` with the NEW wallet under it. Its once-a-minute refresh would then have re-backed each live order with the new wallet's coins while the order still paid the previous wallet's address. The engine also kept the identity it had derived across a node restart, and the node came back "running" (engines ticking) before the window's reset arrived.

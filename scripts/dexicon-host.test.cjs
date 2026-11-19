@@ -451,6 +451,32 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   assert.deepEqual(await cold.activeWork(), { ready: false, hasStore: false });
 });
 
+// 0.18.107 (MEDIUM): the epoch guard is at entry only. A signing command already waiting in the process-wide queue
+// when the engine is stopped or invalidated must not be sent afterwards.
+test("a signing command still queued when the engine is stopped or its wallet replaced never reaches the node", async () => {
+  for (const how of ["stop", "invalidate"]) {
+    const atNode = []; let release;
+    const gate = new Promise(r => { release = r; });
+    // the app's arrangement: one queue under every signer (main/noderun.js), as main/rpc.js puts it under rpcCall
+    const queued = (run) => { const q = createNodeRunner(async (c) => { if (SIGNING.test(c)) { atNode.push(c); if (c.includes("first")) await gate; } return run(c); }); return (c, o) => q.run(c, undefined, o); };
+    const { host, ctx } = await boot({ wrap: queued });
+    const mds = ctx.AX.mds, ask = (c) => new Promise(res => mds.cmd(c, res));
+    const first = ask("txnsign id:first publickey:auto");          // at the node, signing
+    await M.until(() => atNode.length === 1);
+    const second = ask("txnsign id:second publickey:auto");        // from the engine: waits its turn in the queue
+    const third = host.command({ op: "cmd", command: "txnsign id:third publickey:0xAB" });   // from the page's bridge: queued too
+    await new Promise(r => setTimeout(r, 30));
+    assert.deepEqual(atNode, ["txnsign id:first publickey:auto"], "queued, not sent");
+    if (how === "stop") host.stop(); else host.invalidate({ hold: true });
+    release();
+    const [, r2, r3] = [await first, await second, await third];
+    await new Promise(r => setTimeout(r, 60));
+    assert.deepEqual(atNode, ["txnsign id:first publickey:auto"], how + ": neither queued signer reached the node");
+    assert.equal(r2.status, false); assert.match(r2.error, /not sent: `txnsign` was still queued when its caller gave up/);
+    assert.equal(r3.status, false); assert.match(r3.error, /not sent: `txnsign` was still queued/);
+  }
+});
+
 test("the app wiring: started and stopped with the node, reset by the MAIN process before the node restarts, flushed on quit, one bridge", () => {
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
