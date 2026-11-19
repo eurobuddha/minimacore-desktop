@@ -181,7 +181,7 @@ function onStatus(s) {
   paintFooter(s);
   nodeState = s.state;
   // A node the user shut down: say so on every screen, with the way back. (At launch the node is "stopped" for a moment too.)
-  el("stopBar").hidden = !(s.state === "stopped" && !waitingForNode && CFG.setupDone && CFG.walletDone);
+  el("stopBar").hidden = !(s.state === "stopped" && !s.resyncing && !waitingForNode && CFG.setupDone && CFG.walletDone);
   if (s.health && s.health.block) {                                      // both APK-parity headers carry the tip
     PoolsPanel.setBlock(s.health.block);
     AtomixPanel.setBlock(s.health.block);
@@ -520,6 +520,7 @@ function resyncCommand(o) {
   const keyuses = String(o.keyuses == null ? "" : o.keyuses).trim();
   if (o.needPhrase && !phrase) return { error: "Enter your seed phrase." };
   if (/["\\]/.test(phrase)) return { error: "This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal." };
+  if (phrase.includes(";")) return { error: "This seed contains a semicolon (;), which the node reads as the end of the command. Remove it or restore via the node's own command line." };
   if (/[\n\r\t]/.test(phrase)) return { error: "Remove the line breaks and tabs: enter your seed as one clean line (they change the derived wallet)." };
   if (!/^[\w.\-]+:\d+$/.test(host)) return { error: "MegaMMR host must be host:port." };
   if (phrase && !/^\d+$/.test(keyuses)) return { error: "Enter the key uses for this seed (0 if brand new). Too low reuses one-time keys and can lose funds." };
@@ -607,7 +608,10 @@ function renderBackup() {
       else await cmd(built.cmd);
       CFG = await api.saveConfig({ megammrHost: built.host });
       if (built.resetsWallet) await walletReplaced();
-      toast(label + " complete ✓", "ok"); bkOpen("");
+      // The node shut itself down at the end and the main process started it again, through every start check.
+      const after = await api.nodeStatus();
+      if (after.state === "error") { st.textContent = label + " finished, but the node was not started again. " + (after.lastError || ""); btn.disabled = false; btn.textContent = btn.dataset.label; return; }
+      toast(label + " complete ✓ The node is restarting.", "ok"); bkOpen("");
     } catch (e) { st.textContent = label + " not completed. " + ipcError(e); btn.disabled = false; btn.textContent = btn.dataset.label; }
   };
   const hostField = field("bkHost", "MegaMMR node", `value="${esc(CFG.megammrHost)}"`);
@@ -757,7 +761,10 @@ async function postBootRestore() {
     RESTORE = null;   // clear the seed from memory
     await walletReplaced();   // seed changed: every identity derived from the old one is dropped
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
-    hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
+    const after = await api.nodeStatus();   // the node shut itself down at the end; the main process started it again
+    hideSetup(); renderActive();
+    if (after.state === "error") toast("Wallet restored, but the node was not started again. " + (after.lastError || ""), "err");
+    else toast("Wallet restored ✓ The node is restarting.", "ok");
   } catch (e) {
     const st = el("rStat"); if (st) { st.textContent = "⚠ " + ipcError(e); st.style.color = "var(--red)"; }
     el("setupBody").insertAdjacentHTML("beforeend",
@@ -1016,7 +1023,7 @@ function paintFooter(s) {
   el("footDot").dataset.state = s.state || "";
   const keyLabel = KEYMODE.mode === "block" ? "Last key block: " : "Key uses: ";   // the phone's two wordings
   el("footL").textContent = up ? (FOOT_KEYS == null ? "Awaiting blocks…" : keyLabel + FOOT_KEYS)
-    : s.state === "error" ? "Node error" : s.state === "stopped" ? "Node stopped" : "Awaiting blocks…";
+    : s.state === "error" ? "Node error" : s.resyncing ? "Restarting after resync…" : s.state === "stopped" ? "Node stopped" : "Awaiting blocks…";
   const at = clock(h.time);
   el("footR").textContent = up && h.block ? h.block + (at ? " @ " + at : "") : "";
   if (up && Date.now() - FOOT_KEYS_AT > 60000) {       // one read-only `keys` a minute at most

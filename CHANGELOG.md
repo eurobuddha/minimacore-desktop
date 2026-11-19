@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.97] — Resync and restore: the node is restarted through the guarded start, with an honest state
+
+Security audit of the key mode, part 5: the restart after a resync, and smaller findings.
+
+- `megammrsync` ends by saving everything and shutting the node's own insides down ("please restart"), and the node process may then exit. Before, the app showed "node exited unexpectedly" straight after a "complete" message, and the Start bar only appears for a node that was stopped by hand. Now every `megammrsync action:resync`, from Resync node, Restore from file, Rebuild, the first-run restore or the Terminal, runs through `node.runResync`: the exit is expected, and the node is started again through the ordinary start, so the gate on the start command and the check of the running node's real key mode both run on it.
+- Honest state throughout: the footer says "Restarting after resync…", the "node is stopped" bar stays away, and the screen says "complete ✓ The node is restarting." only after reading the node's state. If the restart is refused (for example by the key-mode gate), the screen says the restore finished but the node was not started again, with the reason.
+- A resync the node refuses leaves the node running. No answer while the node is still there: nothing is restarted over a resync that may still be running, and the message says to watch the Logs. No answer and the node gone: it is started again and the message says the result is not known.
+- A semicolon in the restore file path, the backup password or a seed phrase is refused with a plain message. The node reads `;` as the end of a command, so the restore used to fail on half a name.
+- The main process applies the backup password rule (letters and numbers only) to every `backup` command it is asked to send, and builds the backup-file restore command itself with the same value rules.
+- Tests: `scripts/keymode-test.cjs` 27, `scripts/restore-test.cjs` 9, `scripts/core-screens-test.cjs` 25.
+
 ## [0.18.96] — A replaced wallet: refused while work is open, and no store deleted
 
 Security audit of the key mode, part 4: what a replaced wallet leaves behind.

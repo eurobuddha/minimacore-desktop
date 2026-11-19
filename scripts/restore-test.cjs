@@ -144,3 +144,17 @@ test("M1: AtomiX's own read models say what is in flight (the engine's real swap
   assert.equal(w.maker, false, "a withdrawn order is not a live one");
   await assert.rejects(atomix._activeWorkFrom(A({ swapdb: { allSwaps: (cb) => cb(new Error("db closed")) } }), 100, now), /db closed/, "an unreadable swap list is an error, which main.js turns into a refusal");
 });
+
+// ---- 0.18.97: M2 and the low findings ----
+test("lows: a semicolon in a restore value is refused in plain words; a resync and a bad backup password are recognised in the main process", () => {
+  assert.ok(/semicolon \(;\), which the node reads as the end of the command\. Rename the file/.test(restore.restoreFileCommand({ host: H, file: "my;backup.bak" }).error));
+  assert.ok(/semicolon \(;\).*cannot pass it/.test(restore.restoreFileCommand({ host: H, file: "a.bak", password: "pw;1" }).error));
+  assert.ok(restore.restoreFileCommand({ host: H, file: "a.bak", password: "pw1" }).cmd);
+  for (const c of ["megammrsync action:resync host:h:1", 'megammrsync action:resync host:h:1 phrase:"x" keyuses:1', "megammrsync host:h:1 action:resync", "status;megammrsync action:resync host:h:1"]) assert.equal(restore.isResync(c), true, c);
+  for (const c of ["megammrsync action:mydetails", "megammrsync action:proofs address:0x00", "megammrsync action:resyncx", "status", "", null]) assert.equal(restore.isResync(c), false, String(c));
+  for (const c of ['backup password:"abc123"', "backup password:abc123", "backup", "backup password:abc confirm:abc file:x.bak", "status", "send address:0x00 amount:1"]) assert.equal(restore.backupCommandProblem(c), "", c);
+  for (const c of ['backup password:"a"b"', 'backup password:"a b"', "backup password:a;b", 'backup password:"pä55"', "backup password:", 'backup password:"abc" confirm:"ab c"', " Backup password:a-b"])
+    assert.ok(/letters and numbers only/.test(restore.backupCommandProblem(c)), c);
+  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
+  assert.ok(cmd.indexOf("restore.backupCommandProblem(command)") > 0 && cmd.indexOf("restore.backupCommandProblem(command)") < cmd.indexOf("return run(pinned)"));
+});

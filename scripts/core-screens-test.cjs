@@ -101,6 +101,9 @@ test("megammrsync refuses everything the old screens refused, before any command
   badFile({ host: H, file: "a.bak", password: 'p"w' }, "a password with a quote");
   badFile({ host: "h:9001 phrase:x", file: "a.bak" }, "a host carrying another parameter");
   badFile({ host: H }, "Restore without a file");
+  bad({ host: H, phrase: "fake words; status", keyuses: "1" }, "a semicolon in the phrase: the node would run the rest as a second command");
+  badFile({ host: H, file: "a;b.bak" }, "a semicolon in the file path"); badFile({ host: H, file: "a.bak", password: "p;w" }, "a semicolon in the password");
+  assert.ok(/semicolon/.test(require("../main/restore.js").restoreFileCommand({ host: H, file: "a;b.bak" }).error), "said in plain words");
 });
 
 test("a backup password is letters and numbers, typed twice, before the backup command is built", () => {
@@ -172,6 +175,7 @@ function flow(opts) {
       saveConfig: async (p) => { log.push("save:" + Object.keys(p).sort().join(",")); saved.push(p); return Object.assign({}, env.cfg0, ...saved); },
       recordKeyMode: async (m) => { log.push("record:" + m); if (opts.recordRefused) throw new Error("This wallet's key mode is classic and cannot be changed."); return m; },
       nodeStart: async () => { log.push("nodeStart"); }, nodeRestart: async () => { log.push("nodeRestart"); },
+      nodeStatus: async () => ({ state: opts.afterState || "starting", lastError: opts.afterError || null }),
       cmd: async (c) => { log.push("cmd:" + c); return opts.cmdFails ? { status: false, error: "node says no" } : { status: true, response: {} }; },
       clip: async () => true
     },
@@ -348,4 +352,21 @@ test("M4: the note under the mode question says what is true: the choice is kept
   const note = modeQuestionHtml();
   assert.ok(!/restore again and choose the other/.test(note), "the app refuses that: the mode is already recorded");
   assert.ok(/recorded for this install and cannot be changed afterwards/.test(note) && /the other mode then needs a fresh install of the app/.test(note) && /Nothing is lost/.test(note));
+});
+
+test("M2: after megammrsync the node is restarted by the main process, and every screen says what the node is doing", async () => {
+  const body = source("renderBackup"), run = body.slice(body.indexOf("const run = async"), body.indexOf("const hostField"));
+  const order = ["await cmd(built.cmd)", "walletReplaced()", "await api.nodeStatus()", 'after.state === "error"', "The node is restarting."].map(x => run.indexOf(x));
+  assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "the node's state is read before anything is called complete: " + order);
+  assert.ok(!/complete ✓", "ok"/.test(run), "no bare 'complete' while the node is down");
+  assert.ok(app.includes('el("stopBar").hidden = !(s.state === "stopped" && !s.resyncing &&'), "no 'The node is stopped' bar during the restart");
+  assert.ok(app.includes('s.resyncing ? "Restarting after resync…" : s.state === "stopped" ? "Node stopped"'), "the footer says so too");
+  const R = { seed: WordEntry.minimaForm(FAKE24), keyuses: "1", host: "megammr.example:9001" };
+  let h = flow(); h.fns.setRestore(R); await h.fns.postBootRestore();
+  assert.deepEqual(h.toasts, ["ok:Wallet restored ✓ The node is restarting."]);
+  h = flow({ afterState: "error", afterError: "The node was not started: its start command holds -blockaskeyuses" }); h.fns.setRestore(R); await h.fns.postBootRestore();
+  assert.equal(h.toasts.length, 1); assert.ok(/^err:Wallet restored, but the node was not started again\. The node was not started: its start command holds -blockaskeyuses/.test(h.toasts[0]), h.toasts[0]);
+  assert.ok(h.saved.some(p => p.walletDone === true), "the wallet IS restored, so it is marked done either way");
+  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
+  assert.ok(main.includes("if (restore.isResync(command)) return node.runResync(command);") && main.includes("run: (c) => node.runResync(c)"), "every megammrsync, from any screen or the Terminal, goes through runResync");
 });

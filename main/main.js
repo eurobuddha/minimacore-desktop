@@ -161,6 +161,10 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (restore.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
   // Replacing the wallet from a seed phrase resets every identity made from the old one: refused while work that needs the old keys is open.
   if (restore.replacesWalletFromPhrase(command)) { const open = restore.activeWorkProblem(await walletWork()); if (open) throw new Error(open); }
+  const bad = restore.backupCommandProblem(command);
+  if (bad) throw new Error(bad);
+  // megammrsync ends by shutting the node down: run it with that expected, then start the node again (guarded).
+  if (restore.isResync(command)) return node.runResync(command);
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
@@ -196,7 +200,7 @@ const walletWork = async () => restore.activeWorkList({ atomix: await atomix.act
   casino: config.load().casinoEnabled ? casino.open() : null });
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
-  running: node.state === "running", run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), work: walletWork }));
+  running: node.state === "running", run: (c) => node.runResync(c), work: walletWork }));
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });

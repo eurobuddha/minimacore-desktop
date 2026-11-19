@@ -31,9 +31,28 @@ function restoreFileCommand(o) {
   if (!file) return { error: "Enter the backup file's name or path." };
   if (/[\s"\\]/.test(file)) return { error: "File path can't contain spaces or quotes." };
   if (/[\s"\\]/.test(password)) return { error: "Password can't contain spaces or quotes." };
+  // The node reads ; as the end of a command: the rest of the value would be run as a second command and the restore would fail on half a name.
+  if (file.includes(";")) return { error: "The file path contains a semicolon (;), which the node reads as the end of the command. Rename the file or move it, then try again." };
+  if (password.includes(";")) return { error: "The password contains a semicolon (;), which the node reads as the end of the command, so this app cannot pass it. Restore this backup from the node's own command line." };
   let cmd = `megammrsync action:resync host:${host} file:${file}`;
   if (password) cmd += ` password:${password}`;
   return { cmd };
+}
+
+/** Is this node command (or any ;-separated part of it) a megammrsync resync, which ends by shutting the node down? */
+function isResync(command) {
+  return String(command || "").split(";").some(part => /^\s*megammrsync(\s|$)/i.test(part) && /\saction:resync(\s|$)/i.test(part));
+}
+/** Why a `backup` command may not be sent ("" = it may): the password must be letters and numbers only, the rule the screen applies. A quote closed password:"…" early, so the node encrypted under a different password than the one typed. */
+function backupCommandProblem(command) {
+  // a ; straight after the value would cut the password short: the node would encrypt under the part before it
+  if (/^\s*backup\s[^;]*\s?(password|confirm):[^\s;]*;/i.test(String(command || ""))) return "A backup password can hold letters and numbers only.";
+  for (const part of String(command || "").split(";")) {
+    if (!/^\s*backup(\s|$)/i.test(part)) continue;
+    for (const m of part.matchAll(/\s(password|confirm):(\S*)/gi))
+      if (!/^("[A-Za-z0-9]+"|[A-Za-z0-9]+)$/.test(m[2])) return "A backup password can hold letters and numbers only.";
+  }
+  return "";
 }
 
 /** Does this node command (or any ;-separated part of it) replace the wallet from a seed phrase? */
@@ -104,4 +123,4 @@ async function restoreBackup(o, d) {
   return d.run(built.cmd);
 }
 
-module.exports = { backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup };
+module.exports = { isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup };

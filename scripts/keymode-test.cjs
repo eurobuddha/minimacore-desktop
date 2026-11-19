@@ -448,3 +448,52 @@ test("M5: the node's own boot line 'block mode is on' stops a classic wallet's n
   assert.equal(c2.killed, undefined, "a block wallet's node says the same line and runs on"); assert.equal(m.keyModeAlert, "");
   c2.restore();
 });
+
+// ---- 0.18.97: M2, the restart after megammrsync goes through the guarded start ----
+test("M2: megammrsync ends with the node shutting down; that is not an error, and the node is started again through every start check", async () => {
+  for (const nodeKind of KINDS) {
+    freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind, setupDone: true, walletDone: true });
+    const m = manager(true), calls = fakeJava(m), states = [], seenResyncing = [];
+    const onStatus = (s) => { states.push(s.state); seenResyncing.push(s.resyncing); }; m.on("status", onStatus);
+    await m.start();
+    const first = calls.proc;
+    m.rpc = async (c) => { if (c === "quit") { setImmediate(() => calls.proc.emit("exit", 0, null)); return { status: true }; }
+      first.emit("exit", 0, null);   // the node exits by itself as it answers
+      return { status: true, response: { message: "MegaMMR sync fininshed.. please restart" } }; };
+    const j = await m.runResync("megammrsync action:resync host:megammr.example:9001");
+    m.off("status", onStatus);
+    assert.equal(j.status, true);
+    assert.ok(!states.includes("error"), "no 'node exited unexpectedly' after a resync that worked: " + states.join(","));
+    assert.equal(calls.length, 2, "started again"); assert.ok(m.proc && m.proc !== first);
+    assert.equal(keymode.argvProblem(calls[1].args, "block", dataDir()), "", "by the ordinary start: the gate passed on this argv");
+    assert.ok(seenResyncing.includes(true) && m.snapshot().resyncing === false, "the window is told while it lasts");
+    assert.equal(m.lastError, null);
+    calls.restore();
+  }
+});
+
+test("M2: the restart is refused like any start when the start command is wrong; a refused or unanswered megammrsync restarts nothing", async () => {
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
+  const m = manager(true); let calls = fakeJava(m);
+  await m.start();
+  writeConfig(Object.assign(stored(), { extraArgs: "-blockaskeyuses" }));   // behind the app's back, while the node runs
+  m.rpc = async (c) => { setImmediate(() => calls.proc.emit("exit", 0, null)); return { status: true, response: {} }; };
+  await m.runResync("megammrsync action:resync host:megammr.example:9001");
+  assert.equal(calls.length, 1, "no second java"); assert.equal(m.state, "error"); assert.ok(/-blockaskeyuses/.test(m.lastError), m.lastError);
+  calls.restore();
+  // the node says no: it is left running
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true, walletDone: true });
+  calls = fakeJava(m); await m.start();
+  m.rpc = async () => ({ status: false, error: "Could not connect to host" });
+  assert.equal((await m.runResync("megammrsync action:resync host:megammr.example:9001")).status, false);
+  assert.equal(calls.length, 1); assert.ok(m.proc, "still the same node"); assert.equal(m.snapshot().resyncing, false);
+  // no answer and the node still there: nothing is restarted over a resync that may still be running
+  m.rpc = async () => { throw new Error("RPC timeout"); };
+  await assert.rejects(m.runResync("megammrsync action:resync host:megammr.example:9001"), /may still be resyncing/);
+  assert.equal(calls.length, 1); assert.ok(m.proc);
+  // no answer and the node gone: started again, and the unknown result is said
+  m.rpc = async () => { calls.proc.emit("exit", 1, null); throw new Error("socket hang up"); };
+  await assert.rejects(m.runResync("megammrsync action:resync host:megammr.example:9001"), /result is not known\. It was started again/);
+  assert.equal(calls.length, 2);
+  calls.restore();
+});

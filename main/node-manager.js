@@ -449,7 +449,8 @@ class NodeManager extends EventEmitter {
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
       this.stopHealth();
-      if (this.state !== "stopping") {
+      if (this.resyncing && !this.fatalHint) this.setState("stopped");   // megammrsync ends by shutting the node down: expected, and runResync starts it again
+      else if (this.state !== "stopping") {
         this.lastError = this.fatalHint || ("node exited unexpectedly (" + (code ?? sig) + ")");
         this.setState("error");
         // The node died on its own — release the router port rather than leave it forwarding to nothing,
@@ -509,6 +510,27 @@ class NodeManager extends EventEmitter {
   }
 
   async restart() { await this.stop(); await this.start(); }
+
+  /**
+   * megammrsync action:resync. When it succeeds the node saves everything and shuts its own insides down ("please
+   * restart"), and its process may exit by itself: that exit is expected here, not an error. The node is then
+   * started again through the ordinary start(), so every key-mode check runs on it (the gate on the start command
+   * before java, the node's real mode once it answers). A refused command leaves the node as it was.
+   */
+  async runResync(cmd) {
+    this.resyncing = true; this.emit("status", this.snapshot());
+    try {
+      let j;
+      try { j = await this.rpc(cmd); }
+      catch (e) {
+        if (this.proc) throw new Error(e.message + ". The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.");
+        await this.start();
+        throw new Error("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.");
+      }
+      if (j && j.status === true) await this.restart();
+      return j;
+    } finally { this.resyncing = false; this.emit("status", this.snapshot()); }
+  }
 
   // ---- health ----
   startHealth() {
@@ -572,7 +594,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
