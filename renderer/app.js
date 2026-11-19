@@ -28,7 +28,7 @@ const SUG_MAX = 40;          // dropdown row cap
 let SEND_TOKENS = [];        // [{tokenid, name, sendable}] for the Send/Split/Consolidate token dropdowns
 
 function tokenOptions() {
-  return SEND_TOKENS.map(t => `<option value="${esc(t.tokenid)}">${esc(t.name)}${t.tokenid !== MINIMA ? " · " + short(t.tokenid, 12) : ""}</option>`).join("");
+  return SEND_TOKENS.map(t => `<option value="${esc(t.tokenid)}">${esc(t.name)}${t.tokenid !== MINIMA ? " · " + t.tokenid : ""}</option>`).join("");
 }
 
 function labelFor(addr) { return (CFG && CFG.labels && CFG.labels[addr]) || ""; }
@@ -838,9 +838,14 @@ async function renderBalances() {
     e.stopPropagation();                                 // don't also open the detail modal
     const tid = btn.dataset.tokenid;
     if (!validTok(tid)) return;
-    btn.disabled = true; btn.textContent = "Consolidating…";
-    try { await cmd(`consolidate tokenid:${tid}`); toast("Consolidation submitted ✓ — coins merge over the next blocks.", "ok"); }
-    catch (e2) { toast("Consolidate failed: " + e2.message, "err"); btn.disabled = false; }
+    const label = btn.textContent; btn.disabled = true; btn.textContent = "Consolidating…";
+    try { if (!await consolidateToken(tid, TOK.tokenName((BAL_BY_TID[tid] || {}).token, tid))) { btn.disabled = false; btn.textContent = label; } }
+    catch (e2) { toast("Consolidate failed: " + e2.message, "err"); btn.disabled = false; btn.textContent = label; }
+  });
+  // Split / Consolidate on every token: open the Send tab on that form with this token already chosen.
+  host.querySelectorAll(".tok-tool").forEach(btn => btn.onclick = (e) => {
+    e.stopPropagation();                                 // not the detail modal
+    SEND_PRESELECT = btn.dataset.tokenid; SEND_MODE_NEXT = btn.dataset.tool; selectTab("send");
   });
   // Whole card opens the rich token-detail modal (the consolidate button stops propagation above).
   host.querySelectorAll(".card[data-tokenid]").forEach(card => card.onclick = () => {
@@ -896,6 +901,10 @@ function balCardHtml(b) {
     <div class="kv"><span class="kv__k">${iconCell}${esc(name)}</span><span class="kv__v">${esc(TOK.tidyAmount(sendable))}</span></div>
     <div class="kv bal-sub"><span class="kv__k">${sub}</span><span class="kv__v">${esc(TOK.ticker(b.token) || "")}</span></div>
     <div class="bal-breakdown">${esc(balBreakdown(b, confirmed, locked, coins))}</div>
+    ${nft || !(Number(sendable) > 0) ? "" : `<div class="bal-tools">
+      <button class="btn btn--sm btn--outline tok-tool" data-tool="split" data-tokenid="${esc(b.tokenid || MINIMA)}" title="Split some of this into several equal coins, so you can make several sends without waiting for change">Split</button>
+      ${spendCoins >= 2 ? `<button class="btn btn--sm btn--outline tok-tool" data-tool="consolidate" data-tokenid="${esc(b.tokenid || MINIMA)}" title="Merge this token's ${spendCoins} spendable coins into fewer, larger ones">Consolidate</button>` : ""}
+    </div>`}
     ${nudge}
   </div>`;
 }
@@ -950,6 +959,21 @@ function applyIcon(w, e) {
 }
 
 // ---- Token detail modal (rich, mirrors the official/utxoWallet token view) --
+let SEND_MODE_NEXT = null;   // "split" | "consolidate": the Send tab opens on that form (set by a token card's button)
+/** Consolidate one token's coins: say what will happen, check the pool owner keys, then run the node's own command.
+ *  The confirmation and the owner-key check are PandaPools' (WalletTools.showConsolidate, checkConsolidation). */
+async function consolidateToken(tid, name) {
+  if (!validTok(tid)) { toast("Token id must be a 0x… hex value.", "err"); return false; }
+  const cmdText = "consolidate tokenid:" + tid;
+  if (!await showConfirm("Consolidate " + name + "?",
+        "Combine your " + name + " wallet coins into fewer, larger ones?\n\nMinimaCore selects the coins itself with its standard consolidation command. Only spendable coins are merged. No burn fee.\n\n" + cmdText,
+        "Consolidate", false)) return false;
+  const why = await api.ppConsolidationCheck();
+  if (why) { await showConfirm("Not consolidated", why, "OK", false); return false; }
+  await cmd(cmdText);
+  toast("Consolidation submitted ✓ — coins merge over the next blocks.", "ok");
+  return true;
+}
 let SEND_PRESELECT = null;   // tokenid to preselect in the Send tab (set by the modal's Send action)
 
 /** Group the integer part of a decimal string with thousands separators (display only). */
@@ -2182,7 +2206,7 @@ async function renderSend() {
     </div>
     <div id="sendForm"></div>`;
   const modes = card.querySelectorAll("#sendModes .btn");
-  let mode = "send";
+  let mode = SEND_MODE_NEXT || "send"; SEND_MODE_NEXT = null;
   const paint = () => {
     modes.forEach(b => b.className = "btn btn--sm " + (b.dataset.mode === mode ? "btn--primary" : "btn--outline"));
     sendForm(mode);
@@ -2244,6 +2268,7 @@ function sendForm(mode) {
       <div class="field"><div class="field__label">Amount to split</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
       <div class="field"><div class="field__label">Into how many coins (2–20)</div><input class="field__input" id="spN" value="10" /></div>
       <button class="btn btn--primary btn--full" id="spGo">Split</button>`;
+    { const pre = SEND_PRESELECT; SEND_PRESELECT = null; if (pre) el("spTok").value = pre; }
     el("spGo").onclick = async () => {
       const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0, tok = el("spTok").value;
       if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
@@ -2260,11 +2285,11 @@ function sendForm(mode) {
       <div class="view__desc">Merge many small coins of one token into fewer, larger coins.</div>
       <div class="field"><div class="field__label">Token</div><select class="field__input" id="coTok">${tokenOptions()}</select></div>
       <button class="btn btn--primary btn--full" id="coGo">Consolidate</button>`;
+    { const pre = SEND_PRESELECT; SEND_PRESELECT = null; if (pre) el("coTok").value = pre; }
     el("coGo").onclick = async () => {
       const tok = el("coTok").value || MINIMA;
-      if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
       el("coGo").disabled = true;
-      try { await cmd(`consolidate tokenid:${tok}`); toast("Consolidated ✓", "ok"); }
+      try { await consolidateToken(tok, (SEND_TOKENS.find(x => x.tokenid === tok) || {}).name || tok); }
       catch (e) { toast(e.message, "err"); }
       el("coGo").disabled = false;
     };

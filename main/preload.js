@@ -146,6 +146,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppMyPools: () => ipcRenderer.invoke("mcd:ppMyPools"),
   ppActivity: () => ipcRenderer.invoke("mcd:ppActivity"),
   ppStatement: () => ipcRenderer.invoke("mcd:ppStatement"),
+  ppConsolidationCheck: () => ipcRenderer.invoke("mcd:ppConsolidationCheck"),
   ppFeed: () => ipcRenderer.invoke("mcd:ppFeed"),
   ppScan: () => ipcRenderer.invoke("mcd:ppScan"),
   ppQuote: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppQuote", tok, minimaToToken, amount),
