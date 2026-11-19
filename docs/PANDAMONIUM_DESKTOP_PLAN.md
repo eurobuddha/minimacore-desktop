@@ -175,7 +175,14 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.90 | 2a/2b review | History import: refused whole when it would pass the 200,000 row cap (nothing written, numbers shown), one write, ids `0x` + 64 hex in upper case, every field rebuilt from checked values (bad records left out and counted), imported rows marked so the node's own row replaces them on sync and they are trimmed first |
 | 0.18.91 | 2a review | Wallet list: drag re-checked after the balance read, a drag whose row is gone or a node stop clears it (no frozen list); coins dialog: a failed sendable read claims nothing (no "sendable" title or line, footer says so); footer sum compared with a fresh confirmed + unconfirmed, warning only from two agreeing reads |
 | 0.18.92 | 2a/2b review | Split dialog: focus in and back, one at a time, no close or second submit while the split is with the node, no lookup on the closed dialog; coins dialog and coin detail open once; every confirm queued one at a time with focus on Cancel and Escape; Tab kept inside these dialogs (`modalTab`); dashes out of the Send, Split, Consolidate and History detail text |
+| 0.18.93 | key-mode audit | Audit H1, H2, M3: `keymode.argvProblem` checks the finished argv of either node kind (the Parlons args string tokenised as the jar does): key-mode tokens exactly the recorded mode's, `-data` / `-basefolder` the install's own; parameter values starting with a dash refused; `-blockaskeyuses true -lowram true` with explicit values; managed parameters and `-conf` refused in extra arguments; every `-conf` file read and checked; node spawned without `MINIMA_*`, `PARLONS_*` and JVM option variables |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";
 `scripts/atomix-unit.js` "frozen quote issues a replayable quoteId".
+
+Owner decisions added 19 Nov 2026 (evening):
+- The Parlons node stays the base node. A block-capable `parlons-node.jar` is being built (see `docs/JAR_PROOF.md`).
+- Parlons opens in the system browser from the tray (the node's one-time ticket link), not in an embedded view.
+  Phase 4 removes the embedded webview and its media-permission code. Calls and call notifications then belong to
+  the browser tab.

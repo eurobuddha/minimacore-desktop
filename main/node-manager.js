@@ -129,6 +129,7 @@ class NodeManager extends EventEmitter {
     this.startedTs = 0;
     this.wasMapped = false;
     this.lastNetRestart = 0;
+    this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
     // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
     // not from `status` (the chain is up well before the account has attached to the relays).
     this.parlons = { ready: false, error: "", version: "", cape: false };
@@ -180,10 +181,9 @@ class NodeManager extends EventEmitter {
   /** Why the node must not start with the wallet's recorded key mode ("" = it may). See keymode.startProblem. */
   keyModeProblem() {
     const cfg = config.load();
-    let confText = "";
-    if (cfg.params && cfg.params.conf) { try { confText = fs.readFileSync(String(cfg.params.conf), "utf8"); } catch (e) { /* the node reports a missing file itself */ } }
     return keymode.startProblem({ mode: cfg.keyMode, supported: this.blockKeysSupported(),
-      folderMode: keymode.folderKeyMode(cfg.dataFolder || config.defaultDataFolder()), extraArgs: cfg.extraArgs, confText });
+      folderMode: keymode.folderKeyMode(cfg.dataFolder || config.defaultDataFolder()), extraArgs: cfg.extraArgs,
+      params: cfg.params, confFile: cfg.params && cfg.params.conf });
   }
 
   /** "parlons" (parlons-node.jar: node + Parlons account + relay when contributing) or "minima". */
@@ -402,17 +402,21 @@ class NodeManager extends EventEmitter {
     // jar that cannot run it is REFUSED, never started classic (that would add classic keys to it for good).
     const keyWhy = this.keyModeProblem();
     if (keyWhy) { this.lastError = keyWhy; this.log("[app] node NOT started: " + keyWhy); this.setState("error"); return; }
+    // THE gate, on the argv as it will really be run (either node kind): the key-mode tokens in it must be
+    // exactly the recorded mode's, whatever field they came from. See keymode.argvProblem.
+    const args = this.buildArgs();
+    const argvWhy = keymode.argvProblem(args, config.load().keyMode, this.dataDir());
+    if (argvWhy) { this.lastError = argvWhy; this.log("[app] node NOT started: " + argvWhy); this.setState("error"); return; }
     this.setState("starting");
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
-    const args = this.buildArgs();
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
     this.log("[app] starting node: java " + redactArgs(args, config.rpcSecret()));
     let p;
     try {
-      p = spawn(this.javaPath(), args, { stdio: ["ignore", "pipe", "pipe"] });
+      p = this.spawnFn(this.javaPath(), args, { stdio: ["ignore", "pipe", "pipe"], env: keymode.childEnv(process.env) });
     } catch (e) {
       this.lastError = "could not launch java: " + e.message;
       this.setState("error");

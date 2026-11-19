@@ -334,6 +334,8 @@ function paramsPatch(f, cfg) {
   if (f.net === "custom" && !f.customPeer) return { error: "Enter a host:port for the custom peer." };
   const keyArg = MINIMA_PARAMS.keyModeArg(f.extraArgs);
   if (keyArg) return { error: keyArg + " cannot be set here. The wallet's key mode sets it." };
+  const ownedArg = MINIMA_PARAMS.reservedArg(f.extraArgs);
+  if (ownedArg) return { error: ownedArg + " cannot be set here. The app sets it itself." };
   return { patch: {
     network: f.net, basePort: parseInt(f.basePort, 10) || cfg.basePort, rpcPortManual: f.rpcPort,
     contribute: !!f.server && f.net !== "solo", dataFolder: f.dataFolder || "",

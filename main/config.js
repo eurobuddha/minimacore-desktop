@@ -143,6 +143,8 @@ function save(patch) {
   // The wallet's key mode sets -blockaskeyuses and -lowram. Refused here, so no save path can store them.
   const arg = PARAMS.keyModeArg(cfg.extraArgs);
   if (arg) throw new Error(arg + " cannot be set in the extra arguments. The wallet's key mode sets it.");
+  const owned = PARAMS.reservedArg(cfg.extraArgs);
+  if (owned) throw new Error(owned + " cannot be set in the extra arguments. The app sets it itself.");
   if (cfg.params) { cfg.params = Object.assign({}, cfg.params); for (const f of PARAMS.KEY_MODE_FLAGS) delete cfg.params[f]; }
   const cur = load();
   // Route secret params (passwords / DSNs) to the Keychain; store only a boolean "set" marker in config.

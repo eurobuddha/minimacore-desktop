@@ -126,8 +126,19 @@
     }
     return "";
   }
+  /** The first extra-argument token that names a parameter the app sets itself ("-data"), or -conf, or "". The node keeps the LAST value, so one in the extra arguments would override the app's. */
+  function reservedArg(extra) {
+    var toks = String(extra == null ? "" : extra).split(/\s+/);
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i].replace(/["']/g, "");
+      if (t.charAt(0) !== "-") continue;
+      var name = t.replace(/^-+/, "").split("=")[0].toLowerCase();
+      if (name === "conf" || MANAGED.indexOf(name) >= 0) return "-" + name;
+    }
+    return "";
+  }
 
-  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;

@@ -59,7 +59,7 @@ test("today's bundled jars do not support block mode (read only; skipped for a j
 
 test("the start rule, both capability states: block flags only for a block wallet on a jar that knows them; never a silent classic start", () => {
   assert.deepEqual(keymode.startFlags("classic"), []);
-  assert.deepEqual(keymode.startFlags("block"), ["-blockaskeyuses", "-lowram"]);
+  assert.deepEqual(keymode.startFlags("block"), ["-blockaskeyuses", "true", "-lowram", "true"], "each with its value, so no later token can be taken as one");
   for (const supported of [true, false]) {
     assert.equal(keymode.startProblem({ mode: "classic", supported, folderMode: "classic" }), "", "a classic wallet starts on either jar");
     assert.equal(keymode.startProblem({ mode: "classic", supported, folderMode: "" }), "");
@@ -67,7 +67,8 @@ test("the start rule, both capability states: block flags only for a block walle
     assert.ok(keymode.startProblem({ mode: "classic", supported, folderMode: "block" }), "a classic install pointed at a block wallet's folder");
     assert.ok(keymode.startProblem({ mode: "block", supported, folderMode: "classic" }), "a block install pointed at a classic wallet's folder");
     assert.ok(keymode.startProblem({ mode: "classic", supported, folderMode: "classic", extraArgs: "-txpowdbstore 3 -lowram" }));
-    assert.ok(keymode.startProblem({ mode: "classic", supported, folderMode: "classic", confText: "blockaskeyuses=true" }), "a -conf file may not set it either");
+    const conf = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "keymode-conf-")), "node.conf"); fs.writeFileSync(conf, "blockaskeyuses=true\n");
+    assert.ok(keymode.startProblem({ mode: "classic", supported, folderMode: "classic", confFile: conf }), "a -conf file may not set it either");
   }
   assert.equal(keymode.startProblem({ mode: "block", supported: true, folderMode: "block" }), "");
   const down = keymode.startProblem({ mode: "block", supported: false, folderMode: "block" });
@@ -172,8 +173,9 @@ test("block wallet on a jar that supports it: -blockaskeyuses -lowram, for both 
     freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind, setupDone: true });
     const m = manager(true), args = m.buildArgs();
     assert.equal(m.keyModeProblem(), "");
-    if (nodeKind === "minima") assert.ok(args.includes("-blockaskeyuses") && args.includes("-lowram"));
-    else assert.ok(/^-Dparlons\.node\.args=.* -blockaskeyuses -lowram/.test(args.find(a => a.startsWith("-Dparlons.node.args="))), "inside the Parlons Node's one argument string");
+    if (nodeKind === "minima") assert.ok(flat(args).includes(" -blockaskeyuses true -lowram true"));
+    else assert.ok(/^-Dparlons\.node\.args=.* -blockaskeyuses true -lowram true/.test(args.find(a => a.startsWith("-Dparlons.node.args="))), "inside the Parlons Node's one argument string");
+    assert.equal(keymode.argvProblem(args, "block", dataDir()), "", "and the finished argv passes the gate");
     assert.equal((flat(args).match(/-blockaskeyuses/g) || []).length, 1);
   }
 });
@@ -206,4 +208,118 @@ test("no wallet yet, or a key-mode flag smuggled into a saved config: no start",
   config.save({ nodeKind: "parlons" });
   assert.ok(!flat(m.buildArgs()).includes("blockaskeyuses"));
   m.reclaimStaleNode = realReclaim;
+});
+
+// ---- 0.18.93: the gate on the finished argv (audit H1, H2, M3) ----
+const { EventEmitter } = require("events");
+/** A start that runs every step but java: a stand-in child, no stale-node search, no RPC polling. Returns the spawn calls. */
+function fakeJava(m) {
+  const calls = [], real = { spawnFn: m.spawnFn, startHealth: m.startHealth, reclaimStaleNode: m.reclaimStaleNode };
+  m.spawnFn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); p.pid = 0; p.kill = () => {}; return p; };
+  m.startHealth = () => {}; m.reclaimStaleNode = async () => "";
+  calls.restore = () => { Object.assign(m, real); m.proc = null; m.state = "stopped"; };
+  return calls;
+}
+const KINDS = ["minima", "parlons"];
+
+test("H1: a key-mode flag given as a parameter VALUE is refused, by the value rule and by the gate on the finished argv, for both node kinds", async () => {
+  for (const nodeKind of KINDS) {
+    freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind, setupDone: true, params: { host: "-blockaskeyuses" } });
+    const m = manager(true), args = m.buildArgs();
+    assert.ok(/blockaskeyuses/.test(flat(args)), "the flag is in the argv the old code would have run (" + nodeKind + ")");
+    assert.ok(/value of -host starts with a dash/.test(m.keyModeProblem()), m.keyModeProblem());
+    const why = keymode.argvProblem(args, "classic", dataDir());
+    assert.ok(/was not started/.test(why) && /-blockaskeyuses/.test(why), "the gate alone catches it: " + why);
+    // even with the first check out of the way, start() runs no java
+    const calls = fakeJava(m), realProblem = m.keyModeProblem; m.keyModeProblem = () => "";
+    await m.start();
+    assert.equal(calls.length, 0); assert.equal(m.state, "error"); assert.ok(/-blockaskeyuses/.test(m.lastError), m.lastError);
+    m.keyModeProblem = realProblem; calls.restore();
+  }
+});
+
+test("the gate reads the argv as the node will: every form of the flag, wrong values, repeats and a missing flag", () => {
+  const D = "/data/folder", base = ["-jar", "/x/minima.jar", "-data", D, "-basefolder", D, "-port", "12001"];
+  const parlons = (flags) => ["-Xmx1536m", "-Dparlons.node.data=" + D, "-Dparlons.node.args=-basefolder \"" + D + "\" " + flags, "-jar", "/x/parlons-node.jar"];
+  assert.equal(keymode.argvProblem(base, "classic", D), "");
+  assert.equal(keymode.argvProblem(base.concat("-blockaskeyuses", "true", "-lowram", "true"), "block", D), "");
+  assert.equal(keymode.argvProblem(parlons("-keets"), "classic", D), "");
+  assert.equal(keymode.argvProblem(parlons("-blockaskeyuses true -lowram true -keets"), "block", D), "");
+  for (const extra of [["-blockaskeyuses"], ["-lowram"], ["--blockaskeyuses"], ["-BlockAsKeyUses"], ["-lowram=true"], ["-host", "-lowram"], ["-lowram", "false"]]) {
+    assert.ok(keymode.argvProblem(base.concat(extra), "classic", D), "classic + " + extra.join(" "));
+    assert.ok(keymode.argvProblem(parlons(extra.join(" ")), "classic", D), "classic, Parlons + " + extra.join(" "));
+    assert.ok(keymode.argvProblem(parlons('-host "' + extra[extra.length > 1 && extra[0] === "-host" ? 1 : 0] + '"'), "classic", D), "quoted as a value inside the Parlons string");
+  }
+  for (const flags of [["-blockaskeyuses", "-lowram"], ["-blockaskeyuses", "true", "-lowram", "false"], ["-blockaskeyuses", "true"], ["-lowram", "true", "-blockaskeyuses", "true"],
+    ["-blockaskeyuses", "true", "-lowram", "true", "-lowram", "false"], ["-blockaskeyuses", "true", "-lowram", "true", "-blockaskeyuses", "false"], []]) {
+    assert.ok(keymode.argvProblem(base.concat(flags), "block", D), "block + [" + flags.join(" ") + "]");
+    assert.ok(keymode.argvProblem(parlons(flags.join(" ")), "block", D), "block, Parlons + [" + flags.join(" ") + "]");
+  }
+  assert.deepEqual(keymode.nodeTokens(["-Dparlons.node.args=-a \"b c\" 'd e' f\\ g \"h\\\"i\" x\"-lowram\""]), ["-a", "b c", "d e", "f g", 'h"i', "x-lowram"], "the Parlons Node's own tokeniser, ported");
+});
+
+test("M3: -lowram cannot be switched off by the token after it", async () => {
+  for (const nodeKind of KINDS) {
+    freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind, setupDone: true, extraArgs: "false" });
+    const m = manager(true), calls = fakeJava(m);
+    await m.start();
+    assert.equal(calls.length, 1, m.lastError || "");
+    const toks = keymode.nodeTokens(calls[0].args), i = toks.indexOf("-lowram"), j = toks.indexOf("-blockaskeyuses");
+    assert.equal(toks[i + 1], "true", nodeKind + ": -lowram keeps its own value"); assert.equal(toks[j + 1], "true");
+    calls.restore();
+  }
+});
+
+test("H2a: a -conf file is refused wherever it is named, and is read when it is the app's own parameter", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "keymode-conf-")), file = (name, text) => { const f = path.join(dir, name); fs.writeFileSync(f, text); return f; };
+  const bad = file("block.conf", "txpowdbstore=3\nblockaskeyuses=true\n"), low = file("low.conf", "LowRam=true\n"), moved = file("moved.conf", "data=/somewhere/else\n"), fine = file("fine.conf", "txpowdbstore=3\n");
+  for (const nodeKind of KINDS) {
+    freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind, setupDone: true });
+    const m = manager(true);
+    assert.throws(() => config.save({ extraArgs: "-conf " + bad }), /-conf cannot be set in the extra arguments/);
+    fs.writeFileSync(path.join(USERDATA, "config.json"), JSON.stringify(Object.assign(stored(), { extraArgs: "-conf " + bad })));   // behind the app's back
+    assert.ok(/-conf is in the extra arguments/.test(m.keyModeProblem()), m.keyModeProblem());
+    assert.ok(/-conf sets -blockaskeyuses or -lowram/.test(keymode.argvProblem(m.buildArgs(), "classic", dataDir())), "and the gate reads the file the argv names");
+    fs.writeFileSync(path.join(USERDATA, "config.json"), JSON.stringify(Object.assign(stored(), { extraArgs: "" })));
+    for (const [f, re] of [[bad, /sets -blockaskeyuses or -lowram/], [low, /sets -blockaskeyuses or -lowram/], [moved, /sets data, which the app sets itself/], [path.join(dir, "missing.conf"), /could not be read/]]) {
+      config.save({ params: { conf: f } });
+      assert.ok(re.test(m.keyModeProblem()), nodeKind + " " + path.basename(f) + ": " + m.keyModeProblem());
+      assert.ok(re.test(keymode.argvProblem(m.buildArgs(), "classic", dataDir())), "the gate too");
+      const calls = fakeJava(m); await m.start(); assert.equal(calls.length, 0); calls.restore();
+    }
+    config.save({ params: { conf: fine } });
+    assert.equal(m.keyModeProblem(), ""); assert.equal(keymode.argvProblem(m.buildArgs(), "classic", dataDir()), "");
+  }
+  assert.ok(keymode.argvProblem(["-Dparlons.node.conf=" + fine, "-jar", "x.jar"], "classic", "/d"), "the Parlons Node's own conf property is never passed");
+});
+
+test("H2b: the extra arguments cannot name a parameter the app sets itself, so the node cannot be pointed at another folder", async () => {
+  for (const s of ["-data /other", "-basefolder /other", "-x 1 -Data /other", '"-data" /other', "--basefolder=/other", "-port 9001", "-rpcpassword x", "-daemon", "-conf a.conf", "-seed a"])
+    assert.ok(PARAMS.reservedArg(s), JSON.stringify(s) + " is caught");
+  for (const s of ["", "-txpowdbstore 3", "-p2pnodes data.example:9001", "-database x"]) assert.equal(PARAMS.reservedArg(s), "", JSON.stringify(s) + " is not");
+  for (const nodeKind of KINDS) {
+    freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind, setupDone: true });
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), "keymode-other-")); fs.mkdirSync(path.join(other, "1.1")); fs.writeFileSync(path.join(other, "1.1", "wallet.db"), "classic wallet");
+    assert.throws(() => config.save({ extraArgs: "-data " + other }), /-data cannot be set in the extra arguments/);
+    fs.writeFileSync(path.join(USERDATA, "config.json"), JSON.stringify(Object.assign(stored(), { extraArgs: "-data " + other + " -basefolder " + other })));
+    const m = manager(true);
+    assert.ok(/-data is in the extra arguments/.test(m.keyModeProblem()), m.keyModeProblem());
+    assert.ok(/folder other than this install's data folder/.test(keymode.argvProblem(m.buildArgs(), "block", dataDir())), "the gate alone: " + keymode.argvProblem(m.buildArgs(), "block", dataDir()));
+    const calls = fakeJava(m); await m.start(); assert.equal(calls.length, 0); assert.equal(m.state, "error"); calls.restore();
+  }
+  assert.ok(keymode.argvProblem(["-Dparlons.node.data=/other", "-Dparlons.node.args=-basefolder /d", "-jar", "x.jar"], "classic", "/d"));
+});
+
+test("H2c: the node is started without MINIMA_*, PARLONS_* and JVM option variables", async () => {
+  const env = keymode.childEnv({ PATH: "/bin", HOME: "/h", MINIMA_BLOCKASKEYUSES: "true", minima_lowram: "true", Minima_Data: "/x", PARLONS_NODE_ARGS: "-blockaskeyuses", JAVA_TOOL_OPTIONS: "-Dparlons.node.conf=/x", _JAVA_OPTIONS: "-Dx=1", JDK_JAVA_OPTIONS: "-Dx=1", MINIMALIST: "kept" });
+  assert.deepEqual(env, { PATH: "/bin", HOME: "/h", MINIMALIST: "kept" });
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true });
+  const m = manager(true), calls = fakeJava(m);
+  process.env.MINIMA_BLOCKASKEYUSES = "true"; process.env.PARLONS_NODE_ARGS = "-blockaskeyuses"; process.env.JAVA_TOOL_OPTIONS = "-Dparlons.node.conf=/x";
+  try { await m.start(); } finally { delete process.env.MINIMA_BLOCKASKEYUSES; delete process.env.PARLONS_NODE_ARGS; delete process.env.JAVA_TOOL_OPTIONS; }
+  assert.equal(calls.length, 1, m.lastError || "");
+  const passed = calls[0].opts.env;
+  assert.ok(passed && passed.PATH === process.env.PATH, "an explicit environment, with the ordinary variables");
+  assert.ok(!Object.keys(passed).some(k => /^(minima_|parlons_)/i.test(k) || /java_tool_options/i.test(k)), Object.keys(passed).filter(k => /minima|parlons|java/i.test(k)).join(","));
+  calls.restore();
 });

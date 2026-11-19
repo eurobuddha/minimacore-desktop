@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.93] — Key mode: one gate on the finished start command
+
+Security audit of the key mode (0.18.88), part 1: every route round the start gate.
+
+- One gate on the finished start command, for both node kinds (`keymode.argvProblem`, run in `start()` after the command is built, including the flags inside the Parlons Node's one `-Dparlons.node.args=` string, read with a port of that jar's own tokeniser). The key-mode flags in it must be exactly what the wallet's recorded mode needs: none for classic; `-blockaskeyuses true -lowram true`, once each, for block. Any other form, value, repeat or absence refuses the start. It does not matter which field a flag came from.
+- A parameter value that starts with a dash is refused. Before, a value such as `-blockaskeyuses` in the Host field became a flag of its own, because the node reads any token that starts with a dash as a parameter name.
+- The block flags now carry their values (`-blockaskeyuses true -lowram true`). Before, a bare `-lowram` took the first extra argument as its value, so the extra argument `false` switched it off.
+- Extra arguments may not name a parameter the app sets itself (`-data`, `-basefolder`, `-port`, `-rpc…`, `-daemon`, `-seed`, …) or `-conf`. The node keeps the last value it is given, so `-data` there pointed a block install at another folder. Refused on save and at start; the gate also checks that every `-data` / `-basefolder` in the command is this install's own folder.
+- A `-conf` file is read wherever the command names it and refused if it mentions `blockaskeyuses` or `lowram`, sets a parameter the app sets itself, or cannot be read. Before, only the Config file parameter was read; `-conf` in the extra arguments was not. The file is checked when the node starts; a file edited after that is not re-read until the next start.
+- The node is started with an environment that has no `MINIMA_*` variable (the node reads `MINIMA_BLOCKASKEYUSES=true` as the flag), no `PARLONS_*` variable (the Parlons Node reads `PARLONS_NODE_ARGS` when it has no argument string; the app always gives one) and none of `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS` (which could carry `-Dparlons.node.conf=`; the gate also refuses that property in the command).
+- `scripts/keymode-test.cjs` runs these with the block capability injected and a stand-in for java: 19 tests.
+
 ## [0.18.92] — Split dialog and confirms: one at a time, focus inside, and plain wording
 
 Review of 0.18.80 to 0.18.84.

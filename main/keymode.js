@@ -63,11 +63,98 @@ function markBlockFolder(dir) {
   fs.writeFileSync(path.join(dir, MARKER), "block\n");
 }
 
-/** The two flags of block mode. Classic passes neither. Only ever called after startProblem() returned "". */
-function startFlags(mode) { return mode === "block" ? ["-blockaskeyuses", "-lowram"] : []; }
+/**
+ * The flags of block mode, each with its value spelled out. Classic passes neither. A bare -lowram took the
+ * next free-text token as its value ("false" switched it off); "-lowram true" cannot be captured that way.
+ * The node reads a boolean parameter as on only when its value is exactly "true" (ParamConfigurer).
+ */
+function startFlags(mode) { return mode === "block" ? ["-blockaskeyuses", "true", "-lowram", "true"] : []; }
+
+const KEY_FLAGS = PARAMS.KEY_MODE_FLAGS;
+const APP_OWNED = PARAMS.MANAGED.concat(["conf"]);   // set by the app (conf: by its own parameter only), never by hand
+/** "-Name", "--name", "-name=x" → "name"; anything that does not start with a dash → "". */
+const flagName = (tok) => (String(tok).charAt(0) === "-" ? String(tok).replace(/^-+/, "").split("=")[0].toLowerCase() : "");
+
+/** MinimaFlags.tokenise of the Parlons Node, ported: what the jar makes of its one -Dparlons.node.args string. */
+function tokeniseParlons(raw) {
+  const out = []; let cur = "", quote = "", have = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (quote) {
+      if (c === quote) quote = "";
+      else if (c === "\\" && i + 1 < raw.length && quote === '"') cur += raw[++i];
+      else cur += c;
+      have = true;
+    } else if (c === "'" || c === '"') { quote = c; have = true; }
+    else if (c === "\\" && i + 1 < raw.length) { cur += raw[++i]; have = true; }
+    else if (/\s/.test(c)) { if (have) { out.push(cur); cur = ""; have = false; } }
+    else { cur += c; have = true; }
+  }
+  if (have) out.push(cur);
+  return out;
+}
+/** Every token the node's own parser is handed by a finished java argv, for either node kind. */
+function nodeTokens(argv) {
+  const out = [];
+  for (const a of argv.map(String)) {
+    if (a.startsWith("-Dparlons.node.args=")) out.push(...tokeniseParlons(a.slice("-Dparlons.node.args=".length)));
+    else out.push(a);
+  }
+  return out;
+}
+
+/** Why a -conf file may not be used ("" = it may). It is read here because the node applies every line of it. */
+function confProblem(file) {
+  let text;
+  try { text = fs.readFileSync(String(file), "utf8"); }
+  catch (e) { return "The config file given with -conf could not be read, so it could not be checked: " + file + ". The node was not started."; }
+  if (/blockaskeyuses|lowram/i.test(text))
+    return "The config file given with -conf sets -blockaskeyuses or -lowram. The wallet's key mode sets them, so they cannot be passed by hand. Remove them from that file.";
+  for (const line of text.split(/\r?\n/)) {
+    const key = line.split("=")[0].trim().replace(/^-+/, "").toLowerCase();
+    if (APP_OWNED.includes(key)) return "The config file given with -conf sets " + key + ", which the app sets itself. Remove that line from the file.";
+  }
+  return "";
+}
 
 /**
- * Why the node must NOT be started ("" = it may). o = { mode, supported, folderMode, extraArgs, confText }.
+ * THE gate: why this finished java argv must not be run ("" = it may). It looks at what the node will really
+ * be handed, for either kind (the Parlons Node's flags are inside one -D string), so it does not matter which
+ * field a token came from: a parameter value, the extra arguments, a quoted string. The key-mode tokens present
+ * must be exactly the ones the recorded mode needs, every -data / -basefolder must be this install's own
+ * folder, and every -conf file is read and checked.
+ */
+function argvProblem(argv, mode, dataDir) {
+  const toks = nodeTokens(argv), found = [];
+  for (let i = 0; i < toks.length; i++) {
+    const name = flagName(toks[i]);
+    if (KEY_FLAGS.includes(name)) found.push(toks[i] + " " + (i + 1 < toks.length ? toks[i + 1] : ""));
+    else if (name === "data" || name === "basefolder") {
+      if (toks[i].replace(/^-+/, "") !== name || toks[i + 1] !== dataDir) return "The node was not started: -" + name + " would point it at a folder other than this install's data folder. Remove it from the extra arguments in Startup Params.";
+    } else if (name === "dparlons.node.data") {
+      if (toks[i] !== "-Dparlons.node.data=" + dataDir) return "The node was not started: it would be pointed at a folder other than this install's data folder.";
+    } else if (name === "dparlons.node.conf") return "The node was not started: a config file was given outside the app's own -conf parameter.";
+    else if (name === "conf") { const why = confProblem(toks[i + 1] == null ? "" : toks[i + 1]); if (why) return why; }
+  }
+  const want = mode === "block" ? ["-blockaskeyuses true", "-lowram true"] : [];
+  if (found.join("\n") !== want.join("\n"))
+    return "The node was not started: its start command " + (found.length ? "holds " + found.map(f => f.trim()).join(", ") : "does not hold the block key flags") + ", and this wallet uses " + mode + " keys, which needs " + (want.length ? "exactly " + want.join(" ") : "neither -blockaskeyuses nor -lowram") + ". Check the parameter values and extra arguments in Startup Params.";
+  return "";
+}
+
+/**
+ * The environment the node is started with. The node reads any MINIMA_<parameter> variable as that parameter
+ * (MINIMA_BLOCKASKEYUSES=true), the Parlons Node reads PARLONS_NODE_ARGS when it is given no argument string,
+ * and the JVM reads its own option variables (which could carry -Dparlons.node.conf=). None of them reaches it.
+ */
+function childEnv(env) {
+  const out = {};
+  for (const k of Object.keys(env || {})) if (!/^(minima_|parlons_)/i.test(k) && !/^(java_tool_options|_java_options|jdk_java_options)$/i.test(k)) out[k] = env[k];
+  return out;
+}
+
+/**
+ * Why the node must NOT be started ("" = it may). o = { mode, supported, folderMode, extraArgs, params, confFile }.
  * Every refusal is the same rule: never start a wallet in a mode other than the one it was made in.
  */
 function startProblem(o) {
@@ -79,9 +166,13 @@ function startProblem(o) {
     return "This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with.";
   const arg = PARAMS.keyModeArg(o.extraArgs);
   if (arg) return arg + " is in the extra arguments. The wallet's key mode sets it, so it cannot be passed by hand. Remove it in Startup Params.";
-  if (/blockaskeyuses|lowram/i.test(String(o.confText || "")))
-    return "The config file given with -conf sets -blockaskeyuses or -lowram. The wallet's key mode sets them, so they cannot be passed by hand. Remove them from that file.";
+  const owned = PARAMS.reservedArg(o.extraArgs);
+  if (owned) return owned + " is in the extra arguments. The app sets it itself, and a second one would override the app's. Remove it in Startup Params.";
+  // The node reads any token that starts with a dash as a parameter NAME, wherever it stands.
+  for (const [k, v] of Object.entries(o.params || {}))
+    if (typeof v === "string" && /^\s*["']?-/.test(v)) return "The value of -" + k + " starts with a dash. The node would read it as another parameter, so it was not started. Correct it in Startup Params.";
+  if (o.confFile) return confProblem(o.confFile);
   return "";
 }
 
-module.exports = { jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, readZipEntry, MARKER };
+module.exports = { jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, argvProblem, nodeTokens, childEnv, readZipEntry, MARKER };
