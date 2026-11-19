@@ -251,3 +251,12 @@ Phases 0 to 2 were verified by tests and a browser preview only. The app has not
 - [ ] Taker's page without a visit (0.18.109): start the app, stay on the Wallet tab for a minute, then open Dexicon: Trade is ready at once (no "still starting"), and a take left unanswered before the restart is gone from Orders after 5 minutes.
 - [ ] Shutdown (0.18.109): with a take sent and not yet answered, Shutdown names "1 Dexicon trade is sent and not yet answered".
 - [ ] Restore override (0.18.110): rename `dexicon.sqlite` to a text file's content (a damaged store), start, wait two minutes, try Restore from seed: the refusal offers to go on, the warning is shown, and after it the damaged file is beside a new store under its dated name.
+- [ ] Room ① (0.18.111 to 0.18.115, never run on a node): with swaps in flight from the old panel, open Dexicon after the update: every swap is in Activity with the same amounts, and settles; the ⇄ pill shows the market the engine is on.
+- [ ] Room ① Swap: a buy and a sell of a small amount, one part and two parts; the review lists the makers; after "Start swap" the stages and the IN PROGRESS card move to DONE; a quote older than two minutes is refused with "review the swap again".
+- [ ] Room ① Market: Edit my order, Save & publish, the offer shows "Live" with its levels within a block or two; Withdraw asks, then the offer leaves the book; pegged mode follows the price line.
+- [ ] Room ① OTC between two nodes: Go live, a proposal, a counter, accept; the deal settles as a swap in Activity. Reject on the other side.
+- [ ] Room ① Assets: Send a small ETH and a small USDT amount (the transaction hash in the message is the one on the explorer), Max, Export key, Fund / QR, Show coins, Consolidate.
+- [ ] Room ① AtomiX CSV: the file opens in the reconciliation tool (`tools/dexHistory`) with no column error.
+- [ ] Room ① ⇄ switch with a live market: the old market is withdrawn first, the room changes colour, the MINIMA banner appears after a restart while that market is live.
+- [ ] Room ① halt card: cannot be provoked safely on a funded wallet; on the dev node, restore another seed under a running AtomiX store copy and check the card, Export the stale ETH key and Sweep.
+- [ ] Room ① Market offline: stop the node with a market published: the card appears, Start the node brings the market back.
