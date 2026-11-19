@@ -608,7 +608,7 @@ function renderBackup() {
       CFG = await api.saveConfig({ megammrHost: built.host });
       if (built.resetsWallet) await walletReplaced();
       toast(label + " complete ✓", "ok"); bkOpen("");
-    } catch (e) { st.textContent = label + " not completed. " + e.message; btn.disabled = false; btn.textContent = btn.dataset.label; }
+    } catch (e) { st.textContent = label + " not completed. " + ipcError(e); btn.disabled = false; btn.textContent = btn.dataset.label; }
   };
   const hostField = field("bkHost", "MegaMMR node", `value="${esc(CFG.megammrHost)}"`);
   const built = (o) => Object.assign(resyncCommand(o), { host: String(o.host || "").trim() });
@@ -630,7 +630,7 @@ function renderBackup() {
     $("bkGo").onclick = async () => { const f = $("bkFile").value.trim(), picked = host.querySelector('.modeq .opt[aria-checked="true"]');
       const o = { host: $("bkHost").value.trim(), file: f, password: $("bkFilePw").value, mode: picked ? picked.dataset.mode : "" };
       // The main process checks the backup's key mode and builds the command; a refusal comes before the question below.
-      try { await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { toast(ipcError(e), "err"); return; }
+      try { $("bkStatus").textContent = ""; await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { $("bkStatus").textContent = ipcError(e); return; }
       run("bkGo", "Restore", { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, "Replace this node?",
       "Minima will replace its wallet and chain with " + f + ".\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", "Restore"); };
     return;
@@ -759,7 +759,7 @@ async function postBootRestore() {
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
-    const st = el("rStat"); if (st) { st.textContent = "⚠ " + e.message; st.style.color = "var(--red)"; }
+    const st = el("rStat"); if (st) { st.textContent = "⚠ " + ipcError(e); st.style.color = "var(--red)"; }
     el("setupBody").insertAdjacentHTML("beforeend",
       `<button class="btn btn--primary ps-btn" id="rRetry">Retry</button><button class="btn btn--outline ps-btn" id="rBack">Back</button>`);
     el("rRetry").onclick = () => postBootRestore();

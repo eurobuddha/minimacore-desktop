@@ -414,7 +414,7 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .bk-row__s { display: block; margin-top: 3px; font: 400 15px/19px var(--sans); color: var(--dim); }
 .ps-btn--go { margin-top: 24px; }
 .btn--danger.ps-btn--go { background: none; }
-.bk-status { margin-top: 20px; font: 600 15px/20px var(--sans); color: var(--text); overflow-wrap: anywhere; }
+.bk-status { margin-top: 20px; font: 600 15px/20px var(--sans); color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
 .bk-status:empty { display: none; }
 .bk-mono { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface2); font: 400 12.5px/1.15 var(--mono); color: var(--text); overflow-wrap: anywhere; user-select: text; }
 .bk-gap { margin-top: 32px; }

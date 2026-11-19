@@ -92,14 +92,15 @@ async function init() {
   if (!store.metaGet("coinnotify")) { try { await nodeCmd("coinnotify action:add address:" + CHAINMAIL); store.metaSet("coinnotify", true); } catch (e) {} }
   return identity;
 }
-/** On wallet restore the seed changed → drop the cached identity AND the old seed's local inbox/contacts/payaddr,
- *  so the restored (different) identity doesn't show the previous wallet's conversations. Called only on seed change. */
+/** On wallet restore the seed changed → drop the cached identity AND take the old seed's local inbox/contacts/payaddr
+ *  out of the app, so the restored (different) identity doesn't show the previous wallet's conversations. The old
+ *  mail is moved aside (mail.json-legacy-keys-YYYYMMDD), never deleted. Called only on seed change. */
 function invalidateIdentity() {
   config.deleteSecret(MAIL_KEY_ACCOUNT);
   identity = null; seenCoins.clear(); mypayaddr = "";
   backfill = { active: false, floor: 0, target: 0, done: false, steps: 0 }; lastScanMs = 0;
   identityGen++; repliedReq.clear(); paReplyCooldown.clear(); autoReplyTimes = [];
-  try { store.clear(); } catch (e) { /* best effort */ }
+  try { store.setAside(); } catch (e) { try { store.clear(); } catch (e2) { /* best effort */ } }
 }
 
 function threadKey(a, b, subject) { return crypto.createHash("sha256").update([a, b].sort().join("") + (subject || ""), "utf8").digest("hex"); }

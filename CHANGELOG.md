@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.96] — A replaced wallet: refused while work is open, and no store deleted
+
+Security audit of the key mode, part 4: what a replaced wallet leaves behind.
+
+- Replacing the wallet (Restore from file, Rebuild from seed phrase, the first-run restore, or `megammrsync … phrase:` typed in the Terminal) is refused while work that needs the old keys is open, before the node is sent anything. The message names each piece in full: AtomiX swaps not yet finished (and swaps in error still inside their timelock), a live AtomiX maker order, a live OTC offer, open OTC deals, PandaPools transactions still waiting to confirm, open P2P Chance offers and bets. If AtomiX or PandaPools cannot be asked, that is a refusal too, not "nothing open". The check runs in the main process against the existing read models (`atomix.activeWork`, `pandapools.activity`, `casino.open`).
+- No store is deleted when the wallet is replaced. Before: `atomix.sqlite` was deleted (`fs.unlinkSync`), which destroyed the swap rows and preimages of the old wallet, so a swap in flight could be neither claimed nor refunded; the mail store (`mail.json`: messages, contacts, settings) was emptied in place. Now: both are moved aside beside the new ones as `atomix.sqlite-legacy-keys-YYYYMMDD` and `mail.json-legacy-keys-YYYYMMDD` (a second one on the same day gets `-2`), and the app starts empty for the new wallet.
+- What the reset chain touches, in full, unchanged otherwise: the cached mail identity secret is removed (it is derived from the seed); `pandapools.sqlite` stays where it is with its pools marked "signing unverified"; P2P Chance drops its three cached key entries and keeps bet secrets and history; the chat and shop stores are not touched.
+- `scripts/restore-test.cjs`: 8 tests, including AtomiX's own swap rules (`trading.js`) run against a stand-in database.
+
 ## [0.18.95] — Restore from file: the backup's key mode is asked and checked first
 
 Security audit of the key mode, part 3: restoring a backup file.

@@ -114,8 +114,22 @@ function metaGet(k) { ensureLoaded(); return mem.meta[k]; }
 function metaSet(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 
 function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
+/** A wallet restore: the old identity's mail is kept on disk under a dated name (main/restore.js moveAside), never
+ *  deleted; then the store starts empty. Returns where it went ("" when there was nothing to keep). */
+function setAside() {
+  ensureLoaded();
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  let kept = "";
+  if (Object.keys(mem.messages).length || Object.keys(mem.contacts).length || Object.keys(mem.meta).length) {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(filePath(), JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));   // what is in memory now, not the last debounced write
+    kept = require("./restore").moveAside(filePath());
+  }
+  clear();
+  return kept;
+}
 function exportAll() { ensureLoaded(); return { messages: mem.messages, contacts: mem.contacts, meta: mem.meta }; }
 
 module.exports = { addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
   markThreadRead, unreadCount, markConfirmed, setStatus,
-  contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, exportAll };
+  contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, setAside, exportAll };

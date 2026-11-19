@@ -159,6 +159,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   requireRunning();
   // A backup file brings its own keys, in its own key mode: only Backup & Recovery restores one, after the mode check.
   if (restore.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
+  // Replacing the wallet from a seed phrase resets every identity made from the old one: refused while work that needs the old keys is open.
+  if (restore.replacesWalletFromPhrase(command)) { const open = restore.activeWorkProblem(await walletWork()); if (open) throw new Error(open); }
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
@@ -189,9 +191,12 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
   if (mode === "block" && !node.blockKeysSupported()) throw new Error("The node in this version of the app cannot run a block key wallet.");
   return config.recordKeyMode(mode === "block" ? "block" : "classic");
 });
+// What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
+const walletWork = async () => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activity().catch(() => null),
+  casino: config.load().casinoEnabled ? casino.open() : null });
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
-  running: node.state === "running", run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c) }));
+  running: node.state === "running", run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), work: walletWork }));
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });

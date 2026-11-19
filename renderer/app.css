@@ -123,7 +123,7 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 /* starting / restoring progress overlay */
 .setup-progress { text-align: center; padding: 22px 6px 10px; }
 .setup-progress__title { color: var(--heading); font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
-.setup-progress__stat { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-top: 12px; }
+.setup-progress__stat { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .spin--lg { width: 34px; height: 34px; margin: 0 auto; padding: 0; border: 3px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: mcd-spin .9s linear infinite; }
 @keyframes mcd-spin { to { transform: rotate(360deg); } }
