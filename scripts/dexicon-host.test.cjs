@@ -323,6 +323,87 @@ test("a wallet reset moves the store aside (never deleted) and starts empty; the
   assert.equal(cold.status().started, false, "a reset does not start an engine the node has not started");
 });
 
+// 0.18.117 (H3): a maker's co-signed take is recorded AFTER txnpost answers. Dropping the engine at the node's
+// "stopping" lost that record: the fill was on the chain, the taker was never told, the order was backed again in full.
+// The engine's own verification is stood in for (a mock node cannot make a valid take); the host and the service are real.
+const COIN = "0x" + "C0".repeat(32), OUT = "0x" + "0D".repeat(32), ORDER = "0x" + "1".repeat(32), POSTED = "0x" + "AB".repeat(32);
+async function makerWithTake(onPost, more) {
+  const b = await boot({ node: { on: (c) => (/^txnpost id:dmtest/.test(c) ? onPost() : more ? more(c) : null) } });
+  await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([LIVE_ORDER(b.node.ADDRESS)]) + "')");
+  vm.runInContext(`AX.maker.refresh = function (a, b, c, cb) { cb(null, 0, null); }; AX.maker.syncRelays = function (a, b, c, cb) { cb({ lines: [] }); };
+    AX.fill.verifyAsMaker = function () { return { ok: true, filled: "40", received: "0.492", paid: "40" }; };
+    AX.fill.cosign = function (mds, hex, keys, verifyFn, cb) { var v = verifyFn({ inputs: [{ coinid: "${COIN}" }], outputs: [{ coinid: "${OUT}" }] }, []);
+      mds.cmdR("txnpost id:dmtest", function (e, post) { if (e) return cb(e, null, v); cb(null, post.txpowid, v, ["${OUT}"]); }); };
+    var __takeDone = false;
+    handleTake({ _from: AX.identity.fromSeed("0x" + new Array(33).join("a0"), "decks").publicId(), txn: "0xabcd", orderId: "${ORDER}" }, function () { __takeDone = true; });`, b.ctx);
+  await M.until(() => b.node.seen.some(c => /^txnpost id:dmtest/.test(c)));
+  return b;
+}
+const orderNow = async (host) => JSON.parse((await sql(host, "SELECT v FROM ax_kv WHERE k='myorders'"))[0].V)[0];
+const fillsNow = async (host) => (await sql(host, "SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%'")).map(r => Object.assign({ K: r.K }, JSON.parse(r.V)));
+const msgs = (net) => net.calls.filter(c => /^POST .*\/dex\/msg$/.test(c)).length;
+
+test("H3: the node is stopping while a co-signed take's txnpost is unanswered: the engine is not dropped until the fill is recorded, the taker told and the order reduced", async () => {
+  let answer; const b = await makerWithTake(() => new Promise(r => { answer = () => r({ status: true, pending: false, response: { txpowid: POSTED } }); }));
+  const told = msgs(b.net);
+  const stopped = b.host.stop();                       // node status "stopping"
+  assert.equal(b.host.status().started, false, "the timer ends at once"); assert.equal(b.host.status().ready, false, "and the screens see an engine that takes nothing new");
+  await new Promise(r => setTimeout(r, 200));
+  assert.ok(b.host._ctx(), "not dropped while txnpost is unanswered (far beyond three quiet looks)");
+  b.node.seen.length = 0; b.host._fire("MDS_TIMER_10SECONDS"); await new Promise(r => setTimeout(r, 60));
+  assert.deepEqual(b.node.seen, [], "no new work is started while it drains");
+  answer(); await stopped;
+  assert.equal(b.host._ctx(), null, "then it is dropped");
+  await b.host.start(); await M.until(() => b.host.status().ready);
+  const f = (await fillsNow(b.host)).find(x => x.txpowid === POSTED);
+  assert.ok(f, "the fill is recorded"); assert.equal(f.status, "settling"); assert.equal(f.filled, "40");
+  assert.equal((await orderNow(b.host)).remaining, "60", "the order is not at full size again");
+  assert.ok(msgs(b.net) > told, "the taker was told");
+});
+
+test("H3: a stop with nothing in flight drops the engine after three quiet looks; a stop that never goes quiet is bounded when no txnpost is out", async () => {
+  const a = await boot(); const t0 = Date.now(); await a.host.stop();
+  assert.equal(a.host._ctx(), null); assert.ok(Date.now() - t0 < 2000, "quick: " + (Date.now() - t0) + " ms");
+  const node = M.mockNode({ on: (c) => (c === "coins never" ? new Promise(() => {}) : null) }), logs = [];
+  const host = makeHost({ runner: node.run, dataDir: tmp(), net: M.mockNet(), tickMs: 40, quiet: true, drainMs: 300 }); node.attach(host); hosts.push(host);
+  host.emitter.on("log", l => logs.push(l));
+  await host.start(); await M.until(() => host.status().ready && host.status().restingReady);
+  host._ctx().AX.mds.cmd("coins never", () => {});     // a read that never answers
+  const t1 = Date.now(); await host.stop();
+  assert.ok(Date.now() - t1 >= 300 && Date.now() - t1 < 3000); assert.equal(host._ctx(), null);
+  assert.ok(logs.some(l => /still working after/.test(l)));
+});
+
+test("H3: txnpost never answered (the node went away): recorded as unknown, the order reduced, the taker told nothing; the chain then says done, or never posted and the amount comes back", async () => {
+  for (const mined of [true, false]) {
+    let chain = false;   // what the chain says, once asked for below
+    const b = await makerWithTake(() => { throw new Error("socket hang up"); },
+      (c) => (!chain ? null : mined && c === "coins coinid:" + OUT ? { status: true, pending: false, response: [{ coinid: OUT, created: "1234" }] }
+        : !mined && c === "coins coinid:" + COIN + " checkmempool:true" ? { status: true, pending: false, response: [{ coinid: COIN }] } : null));
+    await M.until(() => vm.runInContext("__takeDone", b.ctx));
+    let f = (await fillsNow(b.host))[0];
+    assert.equal(f.status, "unknown"); assert.match(f.K, /^fill_unanswered_/); assert.deepEqual(f.spent, [COIN]); assert.deepEqual(f.coins, [OUT]);
+    assert.equal((await orderNow(b.host)).remaining, "60", "not backed again at full size while the fill's fate is unknown");
+    assert.equal(msgs(b.net), 0, "neither 'taken' nor 'refused' is claimed");
+    await b.host.stop(); await b.host.start(); await M.until(() => b.host.status().ready);   // a restart in between: the record is on disk
+    assert.equal((await orderNow(b.host)).remaining, "60");
+    if (!mined) { f.ts -= 601; const K = f.K; delete f.K; await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + K + "', '" + JSON.stringify(f) + "')"); }
+    chain = true; vm.runInContext("settleFills()", b.host._ctx());
+    await M.until(async () => (await fillsNow(b.host))[0].status !== "unknown");
+    f = (await fillsNow(b.host))[0];
+    if (mined) { assert.equal(f.status, "done"); assert.equal(f.block, "1234"); assert.equal((await orderNow(b.host)).remaining, "60"); }
+    else { assert.equal(f.status, "lost"); await M.until(async () => (await orderNow(b.host)).remaining === "100"); }
+    await b.host.stop();
+  }
+});
+
+test("H3: txnpost refused at the door (nothing listening): the node provably did not run it, so it is an ordinary refusal", async () => {
+  const b = await makerWithTake(() => { throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1"), { code: "ECONNREFUSED" }); });
+  await M.until(() => vm.runInContext("__takeDone", b.ctx));
+  assert.deepEqual(await fillsNow(b.host), []); assert.equal((await orderNow(b.host)).remaining, "100");
+  await M.until(() => msgs(b.net) > 0);   // the refusal
+});
+
 // 0.18.116 (M2): held around a wallet-replacing megammrsync. Nothing starts it, no screen reaches the node through it,
 // and the store stays where it is: released on the same wallet, it goes on with every record.
 test("hold: the engine is stopped and stays stopped (node status, timer, a screen), the store is not moved; release and start bring it back on the same records", async () => {
@@ -351,7 +432,7 @@ async function oldWalletStore(dir) {
   const a = await boot({ dir, node: { seed: "one" } }), id = a.host.status().publicId;
   await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([LIVE_ORDER(a.node.ADDRESS)]) + "')");
   await sql(a.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('mm_config', '{\"enabled\":true,\"peg\":true}')");
-  a.host.stop();   // as the node stopping does: the store is on disk
+  await a.host.stop();   // as the node stopping does: the store is on disk
   return { id, bytes: fs.readFileSync(path.join(dir, "dexicon.sqlite")) };
 }
 const legacy = (dir) => fs.readdirSync(dir).filter(f => /^dexicon\.sqlite-legacy-keys-\d{8}(-\d+)?$/.test(f));

@@ -470,6 +470,9 @@ class NodeManager extends EventEmitter {
     if (!this.proc) { this.setState("stopped"); return; }
     this.setState("stopping");
     this.stopHealth();
+    // The engines finish what they have at the node BEFORE it is told to quit (main.js onStopping; each wait is bounded
+    // by its owner, and 30 s here in any case): a transaction posted in the node's last second is then recorded.
+    if (typeof this.onStopping === "function") { try { await Promise.race([this.onStopping(), sleep(30_000)]); } catch (e) {} }
     // Bounded, always. The interval used to clear ONLY when this.proc went null, so if neither signal reaped
     // the child (an unkillable/zombie process, or kill() throwing EPERM) this promise never settled — and
     // before-quit awaits it after preventDefault(), so the app hung on quit with no window to close.

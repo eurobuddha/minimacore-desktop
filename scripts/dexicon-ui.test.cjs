@@ -387,6 +387,8 @@ test("a fill that is posted and waiting for a block is not done", () => {
   assert.deepEqual(C.fillState(FILLS[1]), { chip: "DONE", tone: "ok", text: "in block 2428031" });
   assert.equal(C.fillState(FILLS[2]).chip, "LOST"); assert.match(C.fillState(FILLS[2]).text, /the coins were not spent/);
   assert.equal(C.fillState({ status: "" }).chip, "WAITING", "an unknown state is never shown as done");
+  assert.equal(C.fillState({ status: "unknown" }).chip, "UNKNOWN"); assert.match(C.fillState({ status: "unknown" }).text, /not known yet/);
+  assert.match(C.fillState({ status: "lost", reason: "this node's coin in it is unspent and not in the mempool" }).text, /never posted/);
 });
 
 test("History: the net counts settled fills only, with the exact MxUSD leg of each", () => {

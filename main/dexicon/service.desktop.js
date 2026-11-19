@@ -32,6 +32,15 @@
  *               dropped when more than 32 wait. A refusal carries no signature; a taker voids an unanswered take by
  *               itself. In the node MDS.net is synchronous, so the donor's replies cannot pile up; here 16 refused
  *               takes were 16 concurrent POST chains. Every other reply goes out as in the donor, never dropped.
+ *   POST        (0.18.117) A maker's co-signed take whose txnpost the node never answered (it was stopping) may be
+ *   UNANSWERED  on the chain or not. The donor treats it as a failure: the taker is told "refused" and the order stays
+ *               at full size, so a fill that did go out was unrecorded and the order was backed again in full. Here
+ *               (handleTake unanswered, settleFills settleUnknown): the outcome is recorded at once as a fill with
+ *               status 'unknown' (written to disk before anything else), the order is reduced as if it was posted, and
+ *               the taker is told nothing (a taker voids an unanswered take by itself, and "taken" needs a txpowid
+ *               this node never got). The chain decides later: one of the take's output coins exists = done; this
+ *               node's own input coin is unspent and out of the mempool ten minutes on, or nothing after two hours =
+ *               lost, and the amount is put back on the order.
  *   OWN ORDERS  as the donor since 0.0.91: lib/ownskip.js wraps the two planners so an order routes PAST this node's own
  *               on-chain orders, and a LIMIT with nothing but own orders inside its limit is answered with the engine's
  *               sentence and sends nothing (onlyOwnOrders). The desktop's own refusal rule (selfTrade, 0.18.99) is gone.
@@ -306,6 +315,7 @@ function settleFills() {
             if (i >= rows.length) return;
             var row = rows[i++], f = null;
             try { f = JSON.parse(row.V || row.v); } catch (e) { return step(); }
+            if (f && f.status === 'unknown') return settleUnknown(String(row.K || row.k), f, step);   // POST UNANSWERED (header)
             if (!f || f.status !== 'settling' || !f.txpowid) return step();
             var probe = (f.coins && f.coins.length) ? f.coins[0] : null;
             if (!probe || !/^0x[0-9A-Fa-f]{64}$/.test(String(probe))) return step();
@@ -321,6 +331,37 @@ function settleFills() {
             });
         }
         step();
+    });
+}
+
+/** POST UNANSWERED (header): a fill whose txnpost was never answered. next() exactly once. */
+function settleUnknown(key, f, next) {
+    var probe = (f.coins && f.coins.length) ? f.coins[0] : null, mine = (f.spent && f.spent.length) ? f.spent[0] : null;
+    function lost(why) {
+        f.status = 'lost'; f.reason = why;
+        AX.mds.kvSet(key, JSON.stringify(f), function () {
+            AX.maker.load(AX.mds, function (e, list) {   // the order was reduced as if the fill had happened: put the amount back
+                var o = e ? null : AX.maker.find(list, f.orderId);
+                if (!o || o.status !== 'live') return next();   // filled, cancelled or gone meanwhile: left as it is
+                o.remaining = AX.fill.plain(AX.fill.d(o.remaining).plus(AX.fill.d(f.filled))); o.seq = Math.max(nowS(), Number(o.seq || 0) + 1);   // lib/maker.js nextSeq
+                AX.maker.save(AX.mds, list, function () { log('unanswered fill of ' + f.orderId + ' was never posted (' + why + '): ' + f.filled + ' MINIMA is back on the order'); notify({ type: 'fill', status: 'lost' }); next(); });
+            });
+        });
+    }
+    if (!probe || !/^0x[0-9A-Fa-f]{64}$/.test(String(probe))) return next();
+    AX.mds.cmdR('coins coinid:' + probe, function (err, res) {
+        var c = (!err && res) ? (Object.prototype.toString.call(res) === '[object Array]' ? res[0] : res) : null;
+        if (c && c.coinid) {
+            f.status = 'done'; f.block = c.created;
+            return AX.mds.kvSet(key, JSON.stringify(f), function () { log('unanswered fill of ' + f.orderId + ' IS on the chain (block ' + c.created + ')'); notify({ type: 'fill', status: 'done' }); next(); });
+        }
+        if (err) return next();   // the node did not say: nothing is concluded
+        if (f.ts && nowS() - f.ts > 2 * 3600) return lost('not in a block after 2 hours');
+        if (!mine || !f.ts || nowS() - f.ts < 600) return next();
+        AX.mds.cmdR('coins coinid:' + mine + ' checkmempool:true', function (e2, rows) {
+            if (!e2 && rows && rows.length) return lost('this node\'s coin in it is unspent and not in the mempool');
+            next();
+        });
     });
 }
 
@@ -359,12 +400,26 @@ function handleTake(take, next) {
         if (!lockCoins(o.coins)) { reply(taker, { k: 'refused', orderId: take.orderId, reason: 'taken' }); return next(); }
         log('take received for ' + o.orderId + ' from ' + taker + ' (' + take.txn.length / 2 + ' bytes)');
         var recvMs = Date.now();   // ACTIVITY: "Co-signed for <taker> in X.Xs" (take received → posted)
-        var spentByMe = [];
+        var spentByMe = [], outs = [];
         AX.fill.cosign(AX.mds, take.txn, AX.fill.signKeys(o.scripts), function (txn, wallet) {
             var v = AX.fill.verifyAsMaker(txn, { side: o.side, price: o.price, address: o.address }, o.coins, o.remaining, addressList().concat(wallet));
             if (v.ok) for (var i = 0; i < txn.inputs.length; i++) if (o.coins.indexOf(txn.inputs[i].coinid) >= 0) spentByMe.push(txn.inputs[i].coinid);
+            if (v.ok) for (var j = 0; j < txn.outputs.length; j++) if (txn.outputs[j] && txn.outputs[j].coinid) outs.push(txn.outputs[j].coinid);
             return v;
         }, function (e, txpowid, verdict, outCoins) {
+            // POST UNANSWERED (header): signed, and the node never answered txnpost (main/dexicon.js UNANSWERED)
+            if (e && verdict && verdict.ok && /the node did not answer txnpost/.test(String(e.message))) {
+                var key = 'fill_unanswered_' + Date.now() + '_' + o.orderId;
+                log('take for ' + o.orderId + ': the node did not answer txnpost, so it is NOT KNOWN whether the fill was posted. Recorded as ' + key + '; the order is reduced by ' + verdict.filled + ' MINIMA until the chain says which');
+                return AX.mds.kvSet(key, JSON.stringify({ role: 'maker', orderId: o.orderId, side: o.side, price: o.price, filled: verdict.filled, received: verdict.received, paid: verdict.paid, txpowid: '', coins: outs, spent: spentByMe, taker: taker, ts: nowS(), recvMs: recvMs, status: 'unknown' }), function () {
+                    AX.maker.afterFill(AX.mds, RELAY, ME, o.orderId, verdict.filled, spentByMe, function (e2) {
+                        unlockCoins(o.coins);
+                        if (e2) log('afterFill: ' + e2.message);
+                        notify({ type: 'fill', status: 'unknown' });
+                        next();
+                    });
+                });
+            }
             if (e) {
                 unlockCoins(o.coins);
                 log('take for ' + o.orderId + ' refused: ' + e.message);

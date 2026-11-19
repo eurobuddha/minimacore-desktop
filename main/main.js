@@ -220,7 +220,10 @@ node.onWalletReplaced = async () => {
 // Around a wallet-replacing megammrsync (node-manager runResync, 0.18.116): the three trading engines are stopped
 // before the command is sent and stay stopped until it is known which wallet the node holds; they then go on, on
 // their own stores (the same wallet) or on new ones (onWalletReplaced above has run in between).
-node.onEnginesHold = async () => { dexicon.hold(); await Promise.all([atomix.hold(), pandapools.hold()]); };
+node.onEnginesHold = async () => { await Promise.all([dexicon.hold(), atomix.hold(), pandapools.hold()]); };
+// Before the node is told to quit (node-manager stop(), 0.18.117): what the engines have at the node ends first, so a
+// posted action is recorded by the engine that posted it. Each wait is bounded (Dexicon: main/dexicon.js STOP DRAINS).
+node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandapools.quiet(10000)]);
 node.onEnginesRelease = () => { atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),

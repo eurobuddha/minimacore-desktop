@@ -139,8 +139,13 @@ async function invalidate() {
 /** HOLD (above). Resolves once nothing of the engine's is at the node any more (three quiet looks), or after maxMs. */
 async function hold(maxMs) {
   if (!held) { held = true; heldLoop = !!scanTimer; stopLoop(); }
-  const end = Date.now() + (maxMs || 15000);
-  for (let quiet = 0; quiet < 3 && Date.now() < end;) { await new Promise(function (r) { setTimeout(r, 100); }); quiet = busy ? 0 : quiet + 1; }
+  await quiet(maxMs || 15000);
+}
+/** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
+ *  Also awaited before the node is told to quit (main.js onStopping). */
+async function quiet(maxMs) {
+  const end = Date.now() + (maxMs || 10000);
+  for (let n = 0; n < 3 && Date.now() < end;) { await new Promise(function (r) { setTimeout(r, 100); }); n = busy ? 0 : n + 1; }
   flush();
 }
 function release() { if (!held) return; held = false; if (heldLoop) startLoop(); }
@@ -770,7 +775,7 @@ async function consolidationCheck() {
 module.exports = {
   consolidationCheck,
   completeBackup, completeBackupRequired, validateCompleteRecipes,
-  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate, hold, release,
+  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate, hold, release, quiet,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,

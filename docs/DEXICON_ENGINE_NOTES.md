@@ -193,7 +193,8 @@ After it, four independent lines, none of which needs the window:
    the next start. One case is still decided without a comparison: the wallet could not be identified BEFORE the
    command (a locked node). Then the stores are set aside after a success and after an unknown result, as in 0.18.106.
 2. `dexicon.stop()` drops the engine whenever the node is not "running", so no engine carries an identity across a
-   node start. Other ways to another wallet (another data folder, a crash in the middle) meet line 3.
+   node start. Other ways to another wallet (another data folder, a crash in the middle) meet line 3. Since 0.18.117
+   the drop waits for what the engine has in flight (see "Stopping", below).
 3. At every boot the service compares `ax_kv.publicId` with the identity this wallet derives
    (`retireOldIdentity`). Different: not READY, the on-chain engine not booted, the store moved aside by the host
    (`MDS.foreignStore`), an empty engine started, both identities logged in full.
@@ -232,6 +233,34 @@ check is in memory); the next start then meets lines 2 to 4 for Dexicon and the 
 | `MDS.load` | path-jailed to `main/dexicon/` | a stray file there fails the parity gate |
 | `inited` once per node start | once per node start too since 0.18.106 (the engine is dropped when the node stops), plus a retry of `PDService.boot()` once a minute while the resting engine is not ready, never beside a boot still running (0.18.110; a boot that never ends is given up on after 5 minutes) | a node that was slow at the first try does not leave the Exchange dead |
 | Price: `resting/price.js` over `MDS.net.GET` (MEXC depth, then MEXC bookTicker), and since 0.0.90 `AX.ladder.feed(PandaPrice)`: when neither MEXC call returns JSON, MEXC's own MINIMA/USDT ticker from `https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc` | the same files, the same three URLs; the host allows GET to `api.mexc.com` and to that one CoinGecko path, nothing else | a MEXC answer (even a thin or crossed book) stands and CoinGecko is not asked; the fallback read is aged from CoinGecko's fetch time; `dxStatus().price.source` is `MEXC` or `MEXC via CoinGecko` |
+
+## Stopping: what is in flight ends first (0.18.117)
+
+A maker's co-signed take is recorded after `txnpost` answers (`handleTake`: `fill_<txpowid>`, the "taken" reply,
+`afterFill` reducing `remaining`). Up to 0.18.116 `stop()` dropped the engine the moment the node said "stopping", so a
+reply that arrived after it was refused by the epoch guard: the fill was on the chain and nothing recorded it.
+
+- `node-manager.stop()` now calls `onStopping` (main.js) **before** it sends `quit` and waits for it (30 s at most):
+  `dexicon.stop()`, `atomix.quiet()`, `pandapools.quiet()`.
+- `dexicon.stop()` ends the timer and every new event at once (`fire` is closed, `status().ready` is false), drops
+  signers that are only queued (0.18.107), and drops the engine when nothing is at the node and nothing is in the WORK
+  lane for three looks running (40 ms apart), or after 15 s; an unanswered `txnpost` is waited for beyond that (it ends
+  when the node answers or the request fails; the RPC limit is 180 s).
+- A `txnpost` that fails without the node having provably refused it (anything but ECONNREFUSED or an auth failure)
+  reaches the engine as "the node did not answer txnpost: …". For a maker's take the service (POST UNANSWERED in its
+  header) writes `ax_kv.fill_unanswered_<ms>_<orderId>` with status `unknown` at once (to disk, it matches `fill_`),
+  reduces the order as if the fill had happened and tells the taker nothing. `settleFills` decides later: an output
+  coin of the take on the chain = `done`; this node's own input coin unspent and out of the mempool ten minutes on, or
+  nothing after two hours = `lost`, and the amount is put back on the order if it is still live. The screens show
+  UNKNOWN / DONE / LOST (`DexCore.fillState`).
+- Not done: the taker is not told "taken" after the fact (the reply needs the txpowid, which this node never got);
+  the taker's own void pass settles its side from the chain.
+- AtomiX and PandaPools: their engines are not dropped when the node stops (the context lives until the app quits or
+  the wallet is replaced), so a record written after a reply is written. What they lacked was the wait: `quiet()`
+  (10 s at most) now lets what they have at the node answer before `quit`. A `txnpost` of theirs that the node never
+  answers is not specially recorded by the glue. What each engine then does is its own (vendored) rule and was not
+  re-examined here: AtomiX records the coin it locked on first sighting on the chain (`mycoinid`), PandaPools has its
+  durable input claims (`pp_posted_inputs`).
 
 ## The taker's page and takes awaiting an answer (0.18.109)
 

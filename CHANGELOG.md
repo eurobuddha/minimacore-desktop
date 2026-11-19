@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.117] — A fill co-signed while the node stops is no longer lost (review, H3)
+
+- **The fault.** The Dexicon engine was dropped the moment the node said "stopping". A maker's co-signed take writes its fill, tells the taker and reduces the order only after `txnpost` answers; an answer that arrived after the drop was refused, so the fill was on the chain and unrecorded, the taker was never told, and after the restart the order was backed again at full size.
+- **Stop drains.** `dexicon.stop()` ends the timer and every new event at once and drops signers that are only queued, but drops the engine only when nothing of it is at the node or on its way to a relay (three quiet looks), or after 15 s; an unanswered `txnpost` is waited for beyond that. The node is told to quit only after that (`node-manager.stop()` → `onStopping`, 30 s at most).
+- **An unanswered txnpost is recorded, not guessed.** When the node goes away without answering (anything but a refused connection), the service writes a fill with status `unknown` to disk at once, reduces the order as if it had been posted, and tells the taker neither "taken" nor "refused". The chain decides: an output coin of the trade exists = DONE; this node's own coin in it is unspent and out of the mempool ten minutes later, or nothing after two hours = LOST and the amount is put back on the order. History shows UNKNOWN with what it means.
+- **AtomiX and PandaPools** have the same shape (a record written after the reply) but their engines are not dropped at a node stop; they now also finish what they have at the node before `quit` (`quiet()`, 10 s at most). Not changed, and not re-examined: what each of those engines does with a `txnpost` of its own that is never answered.
+- Not done: telling the taker "taken" once an unknown fill turns out to be on the chain (the reply needs the txpowid, which the node never gave).
+- Tests: `scripts/dexicon-host.test.cjs` (four: the drain, its bound, unknown → done and unknown → lost across a restart, a refused connection), `scripts/keymode-test.cjs` (the drain comes before `quit`), `scripts/dexicon-ui.test.cjs` (the UNKNOWN chip).
+
 ## [0.18.116] — A failed or repeated wallet restore no longer sets the swap store aside (review, M2)
 
 - **The fault.** `runResync` set every engine store aside whenever a wallet-replacing `megammrsync` (phrase or file) did not answer, also when the node was still running on the unchanged wallet. `atomix.sqlite` holds the claim secrets of swaps in flight; AtomiX then started again on an empty store. On the success path the three engines kept ticking between the node's wallet swap and its shutdown.

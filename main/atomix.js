@@ -255,8 +255,14 @@ function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
 /** HOLD (above). Resolves once nothing of the engine's is at the node any more (three quiet looks), or after maxMs. */
 async function hold(maxMs = 15000) {
   if (!held) { held = true; heldLoop = !!pollTimer; stopLoop(); log("held: a command that may replace the wallet is about to run"); }
+  await quiet(maxMs);
+}
+/** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
+ *  Also awaited before the node is told to quit (main.js onStopping): the engine outlives the node here, so the
+ *  record it writes after a reply is written; this makes the reply arrive before the node goes. */
+async function quiet(maxMs = 10000) {
   const end = Date.now() + maxMs;
-  for (let quiet = 0; quiet < 3 && Date.now() < end;) { await new Promise(r => setTimeout(r, 100)); quiet = busy ? 0 : quiet + 1; }
+  for (let n = 0; n < 3 && Date.now() < end;) { await new Promise(r => setTimeout(r, 100)); n = busy ? 0 : n + 1; }
   flush();
 }
 function release() { if (!held) return; held = false; log("released"); if (heldLoop) startLoop(); }
@@ -1204,7 +1210,7 @@ async function ethSetRpc(url) {
 }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, status, activeWork, _activeWorkFrom: activeWorkFrom,
+  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, quiet, status, activeWork, _activeWorkFrom: activeWorkFrom,
   book, quote, swapPreview, swapExecute: whileHeld(swapExecute), swaps, refundNow: whileHeld(refundNow), exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute: whileHeld(sendExecute),
   makerCfg, makerPreview, makerSave: whileHeld(makerSave), makerPublish: whileHeld(makerPublish), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),

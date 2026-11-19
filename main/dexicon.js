@@ -20,6 +20,12 @@
  * cancelOne / chain(). The engine's AtomiX doors are never loaded (main/dexicon/service.desktop.js).
  * ADDED: an epoch guard (a wallet replaced under a running engine: the old context's late callbacks reach neither
  * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted).
+ * STOP DRAINS (0.18.117): stop() ends the timer and every new event at once, but the engine is dropped only when what
+ * it had in flight has ended: a maker's co-signed take writes its fill, tells the taker and reduces the order AFTER
+ * txnpost answers, and an engine dropped in between left a fill on the chain that nothing recorded. node-manager waits
+ * for this before it sends `quit` (main.js onStopping). Bounded (15 s), except that an unanswered txnpost is waited
+ * for: it ends by itself when the node answers or is gone. A txnpost that ends without an answer is reported to the
+ * engine as UNANSWERED, and the service records the unknown outcome (service.desktop.js POST UNANSWERED).
  * OUTBOUND LANES (0.18.108): Dexicon's relay and price traffic takes NO slot of the app's shared four-slot pool
  * (main/netfetch.js), which the AtomiX Ethereum RPC needs for a claim or a refund. It has two bounded lanes of its
  * own: WORK (2 at a time: takes, replies, publishes, book reads, the price) and POLL (3: the long polls, which hold
@@ -42,6 +48,11 @@ const { makeSqlShim } = require("./pandapools/sqlshim");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const TICK_MS = 10000;
+const DRAIN_MS = 15000;   // STOP DRAINS (header)
+/** In the error of a txnpost the node never answered (it may have posted). service.desktop.js looks for this text. */
+const UNANSWERED = "the node did not answer txnpost";
+/** Did this failed node call end with the node provably NOT having run it? (nothing listening, or turned away) As main/rpc.js `lost`. */
+const notRun = (e) => !!e && (e.code === "ECONNREFUSED" || /RPC authentication failed/.test(String(e.message)));
 const WORK_LANE = 2, POLL_LANE = 3, LOW_MAX = 32, NET_LIMIT_MS = 30000;   // OUTBOUND LANES (header); netfetch's own limit is 15 s idle, 20 s in all
 
 /** A lane: at most `size` requests in flight, the rest waiting in order, low-priority ones behind the others. Each
@@ -136,6 +147,8 @@ function makeHost(opts = {}) {
   let epoch = 0;   // bumped by drop(): everything built before it is disowned
   let asideOwed = false;   // the store on disk belongs to another wallet: it is moved aside before any store is opened
   let problem = "";        // why Dexicon is not running although the node is, in plain words (status().problem)
+  let busy = 0, posts = 0;  // engine commands at the node, and the txnposts among them (STOP DRAINS)
+  let draining = null;     // the promise of a stop() that is waiting for the engine to finish
   let held = false;        // HOLD (0.18.116): a command that may replace the wallet is running in the node; no engine, no bridge, until release()
   const HELD = "Dexicon is stopped while the wallet is being replaced. It starts again by itself.";
   // opts.signal: a SIGNING command still waiting in the process-wide queue (main/noderun.js) when its engine is
@@ -189,8 +202,10 @@ function makeHost(opts = {}) {
         // two-arg then(): one reply = exactly one cb call (the engine's signing lock is freed by that call and by nothing else)
         // The epoch is checked here, at entry; the signal covers what entry cannot: a signing command that is still
         // QUEUED behind another signer when the engine is dropped is never sent.
-        Promise.resolve().then(() => runner(c, { signal })).then(r => cb(toVm(r && typeof r === "object" ? r : { status: false, error: "no reply" })),
-                                                   e => cb(toVm({ status: false, error: (e && e.message) || String(e) })));
+        const post = /^\s*txnpost\b/i.test(c); busy++; if (post) posts++;
+        const end = (r) => { if (live()) { busy--; if (post) posts--; } cb(toVm(r)); };
+        Promise.resolve().then(() => runner(c, { signal })).then(r => end(r && typeof r === "object" ? r : { status: false, error: "no reply" }),
+          e => end({ status: false, error: (post && !notRun(e) ? UNANSWERED + ": " : "") + ((e && e.message) || String(e)) }));
       },
       sql(query, cb) {
         if (!live()) { if (cb) cb(toVm({ status: false, error: "this wallet was replaced" })); return; }
@@ -227,7 +242,7 @@ function makeHost(opts = {}) {
     };
   }
 
-  function fire(event, extra) { if (serviceHandler) { try { serviceHandler(toVm(Object.assign({ event }, extra))); } catch (e) { log("handler error: " + e.message); } } }
+  function fire(event, extra) { if (serviceHandler && !draining) { try { serviceHandler(toVm(Object.assign({ event }, extra))); } catch (e) { log("handler error: " + e.message); } } }
 
   async function init() {
     if (held) throw new Error(HELD);
@@ -266,6 +281,7 @@ function makeHost(opts = {}) {
     abort.abort(); abort = new AbortController();   // queued signers of the dropped engine are never sent
     flush();
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
+    busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
   }
 
   // NEWBLOCK for the RESTING engine (the node pushes it to a MiniDapp; here the timer looks for a new tip)
@@ -289,22 +305,40 @@ function makeHost(opts = {}) {
    *  gate has passed). Nothing is sent to the node before that. */
   function start() {
     if (held || timer) return Promise.resolve();
+    if (draining) return draining.then(start);   // the node is back before the last engine had finished
     startedAt = Date.now();
     timer = setInterval(() => { if (!ready) { init().catch(() => {}); return; } fire("MDS_TIMER_10SECONDS"); blockWatch(); }, tickMs);   // a failed init is tried again
     if (timer.unref) timer.unref();
     return init().then(() => { if (timer) blockWatch(); }, () => {});
   }
-  /** Stop with the node: no timer, no block watch, the store written out, and the engine itself dropped. The engine
-   *  holds an identity derived from the node that just stopped; the node that starts next may hold another wallet (a
-   *  restore, a resync, another data folder), so the next start() builds a new engine that derives it again and checks
-   *  the store against it. */
+  /** Stop with the node: no timer, no block watch and no new event at once; the store written out; and the engine
+   *  itself dropped once what it had in flight has ended (STOP DRAINS, header). The engine holds an identity derived
+   *  from the node that just stopped; the node that starts next may hold another wallet (a restore, a resync, another
+   *  data folder), so the next start() builds a new engine that derives it again and checks the store against it.
+   *  Returns a promise: resolved when the engine is dropped. */
   function stop() {
     if (timer) { clearInterval(timer); timer = null; }
-    if (ctx || initPromise) { drop(); emitter.emit("update"); } else flush();
+    if (draining) return draining;
+    if (!(ctx || initPromise)) { flush(); return Promise.resolve(); }
+    flush();
+    abort.abort();   // 0.18.107 still holds: a signer of this engine that is only QUEUED is never sent. What is AT the node ends, with what follows it.
+    const mine = epoch, t0 = Date.now(), bound = opts.drainMs || DRAIN_MS;
+    draining = (async () => {
+      // quiet: nothing at the node and nothing in the WORK lane (the reply to the taker, the republished order), three looks running
+      for (let quiet = 0; quiet < 3 && mine === epoch;) {
+        await new Promise(r => setTimeout(r, 40));
+        quiet = busy || work.active() || work.waiting() ? 0 : quiet + 1;
+        if (Date.now() - t0 > bound && !posts) { if (quiet < 3) log("stopping: the engine was still working after " + Math.round(bound / 1000) + " s; no txnpost is unanswered, so it is dropped now"); break; }
+      }
+      draining = null;
+      if (mine === epoch) { drop(); emitter.emit("update"); }
+    })();
+    emitter.emit("update");
+    return draining;
   }
   function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
   /** HOLD: stopped, and not started again by a node status, the timer or a screen until release(). The store stays. */
-  function hold() { if (!held) { held = true; log("held: a command that may replace the wallet is about to run"); } stop(); }
+  function hold() { if (!held) { held = true; log("held: a command that may replace the wallet is about to run"); } return stop(); }
   function release() { held = false; }   // main.js starts it again when the node is running
 
   /**
@@ -336,7 +370,7 @@ function makeHost(opts = {}) {
     const s = { version: ENGINE_VERSION, started: !!timer, problem, epoch, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
       price: { mid: 0, ageMs: null, label: "", source: "" }, log: LOG.slice(-20) };
     try {
-      if (!ctx || !ctx.DX) return s;
+      if (!ctx || !ctx.DX || draining) return s;   // draining: this engine takes nothing new and is about to go
       s.ready = !!ctx.DX.ready(); s.restingReady = !!ctx.DX.restingReady(); s.publicId = s.ready ? String(ctx.DX.publicId()) : null;
       s.block = ctx.DX.block(); s.relays = plain(ctx.DX.relays());
       const P = ctx.PandaPrice, age = P.ageMs();
@@ -422,4 +456,4 @@ function makeHost(opts = {}) {
 }
 
 const host = makeHost();   // the app's one Dexicon engine (main.js); tests build their own with makeHost(opts)
-module.exports = Object.assign(host, { makeHost, dexCommand, dexSql, DEX_VERBS, ENGINE_VERSION });
+module.exports = Object.assign(host, { makeHost, dexCommand, dexSql, DEX_VERBS, ENGINE_VERSION, UNANSWERED });

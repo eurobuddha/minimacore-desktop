@@ -264,7 +264,9 @@
   /** A fill's state in plain words. "settling" is posted and waiting for a block: it is not done. */
   function fillState(f) {
     return f.status === "done" ? { chip: "DONE", tone: "ok", text: "in block " + (f.block || "?") }
-      : f.status === "lost" ? { chip: "LOST", tone: "bad", text: "not in a block after 2 hours: the coins were not spent" }
+      : f.status === "lost" ? { chip: "LOST", tone: "bad", text: f.reason ? "never posted (" + f.reason + "): the coins were not spent" : "not in a block after 2 hours: the coins were not spent" }
+      // 0.18.117: the node stopped before it answered txnpost (main/dexicon/service.desktop.js POST UNANSWERED)
+      : f.status === "unknown" ? { chip: "UNKNOWN", tone: "live", text: "the node stopped before it answered: not known yet whether this trade was posted. Your order was reduced as if it was; the chain decides" }
       : { chip: "WAITING", tone: "live", text: "co-signed and posted, waiting for a block: not final yet" };
   }
   /** Net of SETTLED fills only: signed MINIMA and MxUSD, and the counts (HistoryTab.render). */

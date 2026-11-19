@@ -602,6 +602,20 @@ test("0.18.116: main.js holds and releases all three trading engines", () => {
   for (const e of ["atomix", "pandapools", "dexicon"]) { assert.ok(hold.includes(e + ".hold()"), e + " held"); assert.ok(rel.includes(e + ".release()"), e + " released"); }
 });
 
+test("0.18.117: the engines finish what they have at the node before the node is told to quit", async () => {
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true, walletDone: true });
+  const m = manager(true), calls = fakeJava(m), ev = [];
+  try {
+    await m.start(); m.state = "running";
+    m.rpc = async (c) => { ev.push(c); if (c === "quit") setImmediate(() => calls.proc.emit("exit", 0, null)); return { status: true }; };
+    m.onStopping = async () => { ev.push("draining:" + m.state); await new Promise(r => setTimeout(r, 60)); ev.push("drained"); };
+    await m.stop();
+    assert.deepEqual(ev, ["draining:stopping", "drained", "quit"]);
+    const main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), line = /node\.onStopping = [^\n]+/.exec(main)[0];
+    for (const e of ["dexicon.stop()", "atomix.quiet(", "pandapools.quiet("]) assert.ok(line.includes(e), e);
+  } finally { m.onStopping = null; calls.restore(); }
+});
+
 test("M2: the restart is refused like any start when the start command is wrong; a refused or unanswered megammrsync restarts nothing", async () => {
   freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
   const m = manager(true); let calls = fakeJava(m);
