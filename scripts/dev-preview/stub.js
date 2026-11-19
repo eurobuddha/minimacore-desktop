@@ -231,7 +231,7 @@
     axSendMax: async (a) => (a === "eth" ? "0.0419" : "217.912562"), axSendReview: async () => ({ fee: "0.000412" }), axSend: async () => ({ tx: FAKE_TX }), axExportKey: async () => "0x" + "FA4E".repeat(16),
     // PandaPools, room 2 of Dexicon (main/pandapools.js read models and actions)
     ppStatus: async () => ({ ready: PPS !== "notready", block: 2428089, pools: PP_POOLS.length }),
-    ppPools: async () => (PPS === "notready" ? [] : PP_POOLS), ppMyPools: async () => PP_MINE, ppActivity: async () => PP_ACTS, ppFeed: async () => PP_FEED,
+    ppPools: async () => (PPS === "notready" ? [] : PP_POOLS), ppMyPools: async () => PP_MINE, ppActivity: async () => PP_ACTS, ppWork: async () => (PPS === "notready" ? null : PP_ACTS), ppFeed: async () => PP_FEED,
     ppPairInfo: async () => ({ pools: PP_POOLS.length, depth: "866751.25" }),
     ppAggregate: async () => (PP_POOLS.length ? [{ tok: MXUSD, name: "USDT", count: PP_POOLS.length, totalMinima: "866751.25", totalToken: "2783.56526575", price: "0.00321149", depth: "866751.25" }] : []),
     ppMarket: async () => ({ mid: PPS === "manual" ? 0 : 0.003178, fresh: PPS !== "manual" }), ppMarketToken: async () => ({ usdt: MXUSD }),

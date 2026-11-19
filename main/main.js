@@ -199,7 +199,7 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
   return config.recordKeyMode(mode === "block" ? "block" : "classic");
 });
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
-const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activity().catch(() => null),
+const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
   casino: config.load().casinoEnabled ? casino.open() : null, dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
 // MAIN process while the node is stopped and before it is started again, so it does not depend on the window being
@@ -504,6 +504,7 @@ ipcMain.handle("mcd:ppPendingCollect", () => pandapools.pendingCollect());
 ipcMain.handle("mcd:ppArchiveSettings", (_e, url) => pandapools.archiveSettings(url));
 ipcMain.handle("mcd:ppConfirmSigning", (_e, opk, attested) => pandapools.confirmSigning(opk, attested));
 ipcMain.handle("mcd:ppCompleteBackupRequired",()=>pandapools.completeBackupRequired());
+ipcMain.handle("mcd:ppWork", () => pandapools.activeWork().catch(() => null));   // for the Shutdown warning: null = could not be checked
 ipcMain.handle("mcd:ppStatus", () => pandapools.status());
 ipcMain.handle("mcd:ppWhy", () => pandapools.lastNodeFailure());   // the node's last refusal of a pool command: { verb, error, at } or null
 ipcMain.handle("mcd:ppSaveBackup", async (_e, password) => {

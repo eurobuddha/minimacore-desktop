@@ -110,6 +110,36 @@
   const recoveryResult = (r) => "Verified reserves for " + r.restored + " of " + r.total + " pools.\n" + (r.details || []).join("\n\n") + "\n" + (r.warn || "");
   const CLOSE_TO_OWNER = "to the pool's owner address on this node. PandaPools then moves them into your wallet by itself; if they have not arrived after a few blocks, use Collect withdrawn funds. Do that before you restore your seed on another node.";
 
+  // ---- Activity (ActivityView.java) ----
+  const ACT_NAME = { SWAP: "Swap", CREATE: "Create pool", ADD: "Add liquidity", DEPOSIT: "Add liquidity", WITHDRAW: "Withdraw", CLOSE: "Withdraw", MIGRATE: "Migrate", COLLECT: "Collect" };
+  /** "18 Nov 2026 14:13:36 GMT" (ActivityView.absolute), or that the time is not known */
+  const when = (ms) => (Number(ms) > 0 ? new Date(Number(ms)).toUTCString().replace(/^\w+, /, "") : "Time unknown");
+  /** how long ago a check was made (ActivityView.relative) */
+  const since = (ms, now) => { const d = now - Number(ms); return d < 60000 ? "just now" : d < 3600000 ? Math.floor(d / 60000) + "m ago" : d < 86400000 ? Math.floor(d / 3600000) + "h ago" : Math.floor(d / 86400000) + "d ago"; };
+  /** Older swap rows were kept from the token's side ("Bought <token> for <minima>"): said from MINIMA's side, as new ones are (the old panel's ppSwapSummary). */
+  function swapSummary(a) {
+    const s = a.summary || "";
+    if (a.type !== "SWAP" || /MINIMA/.test(s)) return s;
+    let m = /^Bought (\S+) for (\S+)$/.exec(s); if (m) return "Sold " + m[2] + " MINIMA for " + m[1];
+    m = /^Sold (\S+) for (\S+)$/.exec(s); return m ? "Bought " + m[1] + " MINIMA for " + m[2] : s;
+  }
+  /** One of my pool operations as a card: { title, chip, tone, summary, lines, ids: [[label, whole id]] }. */
+  function actItem(a, now) {
+    const tone = a.failed ? "bad" : a.confirmed ? "ok" : "live", lines = [(a.timeLabel || "Submitted") + " " + when(a.ts)], ids = [];
+    if (a.txpowid) ids.push(["transaction", a.txpowid]);
+    if (a.originalTxpowid && String(a.originalTxpowid).toLowerCase() !== String(a.txpowid).toLowerCase()) ids.push(["original submission", a.originalTxpowid]);
+    if (a.verifiedAt) lines.push("Checked " + since(a.verifiedAt, now));
+    if (a.failed) lines.push(a.failMsg ? failText("This", a.failMsg).replace(/ Look at Activity: if no new line is there, nothing was sent and no funds moved\.$/, " Nothing was sent and no funds moved.") : "It was not sent. No funds moved.");
+    return { title: ACT_NAME[a.type] || String(a.type || "Pool transaction"), chip: a.failed ? "FAILED" : a.statusText || "Waiting for node check", tone, summary: mx(swapSummary(a)), lines, ids, done: !!(a.failed || a.confirmed) };
+  }
+  /** One transaction of any pool (ActivityView.globalRow). */
+  function feedItem(f, now) {
+    const label = mx(f.tokenLabel), action = f.kind === "CREATE" ? "Pool creation" : f.kind === "ADD" ? "Liquidity addition" : f.kind === "WITHDRAW" ? "Liquidity withdrawal" : f.kind === "SWAP" ? (f.minimaIn ? "MINIMA sale" : "MINIMA purchase") : "Pool reserves changed";
+    if (f.observed) return { observed: true, title: String(f.kind || "Pool") + " observation (unverified) · " + whole(f.minimaAmt) + " MINIMA / " + whole(f.tokenAmt) + " " + label, lines: ["Observed on this device " + when(f.ts) + " · Transaction time unknown"], ids: f.pool ? [["pool", f.pool]] : [] };
+    return { title: action + " · " + whole(f.minimaAmt) + " MINIMA / " + whole(f.tokenAmt) + " " + label, chip: f.statusText || "", tone: f.confirmed ? "ok" : "live", lines: ["Transaction " + when(f.ts)].concat(f.verifiedAt ? ["Checked " + since(f.verifiedAt, now)] : []),
+      ids: [].concat(f.pool ? [["pool", f.pool]] : [], f.txpowid ? [["transaction", f.txpowid]] : []) };
+  }
+
   // ---- Wallet (WalletView.java): what can be pooled ----
   /** One balance as the phone's card: the sendable amount (whole), the coin count, and the line beneath. */
   function walletCard(b, name, agoText) {
@@ -348,14 +378,14 @@
     }
   };
 
-  const core = { walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null, addr: "", balAt: 0 };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null, addr: "", balAt: 0, feed: null, all: false, shownA: 60, shownF: 60, sharedAt: 0 };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
@@ -373,6 +403,7 @@
     const want = { pools: () => api().ppPools(), acts: () => api().ppActivity() };
     if (tab === "swap") { want.bal = () => D.tryCmd("balance"); want.market = () => api().ppMarket(); }
     if (tab === "wallet") { want.bal = () => D.tryCmd("balance").then((b) => { if (b) S.balAt = Date.now(); return b; }); if (!S.addr) want.addr = () => D.tryCmd("getaddress").then((r) => (r && (r.miniaddress || r.address)) || ""); }
+    if (tab === "activity") want.feed = () => api().ppFeed();
     if (tab === "pools" && S.combined) want.agg = () => api().ppAggregate();
     if (tab === "mylp") { want.retired = () => api().ppListRetired(); want.collect = () => api().ppPendingCollect(); want.backupDue = () => api().ppCompleteBackupRequired().catch(() => true); }   // unknown counts as due, as in the old panel
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
@@ -381,9 +412,9 @@
     if (tab === "swap" && pair()) S.info = await api().ppPairInfo(pair().tok).catch(() => S.info);
   }
   /** the engine's scans say "update": passive parts only, never under someone typing (the old panel's "frozen tab" rule) */
-  function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (visible()) load(S.tab).then(paint, paint); }, 400); }
+  function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; const w = D.where(); if (visible()) load(S.tab).then(paint, paint); else if (w.shown && w.shared && (w.tab === "activity" || w.tab === "history")) shared(true); }, 400); }
   function tick() { if (D && visible() && !typing() && !C.gate.on && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
-  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null, addr: "", balAt: 0 }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
+  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null, addr: "", balAt: 0, feed: null, shownA: 60, shownF: 60, sharedAt: 0 }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
   /** what stands above every screen of the room: the node, the engine, the last thing said */
   function banners() {
@@ -540,6 +571,35 @@
     if (await D.dialog("Closed pools", list.map(poolIds).join("\n\n"), "Bring back")) await Act.unretire(api(), ui, list);
   }
 
+  // ---- Activity (ActivityView.java): my pool operations, and every pool's transactions ----
+  const activitySkeleton = () => `<div id="ppTop"></div><div class="pp-sumrow pp-sumrow--tight"><div class="pp-chips" role="group" aria-label="Which activity"><button data-ppall="0">MY ACTIVITY</button><button data-ppall="1">ALL POOLS</button></div><button class="pp-scan" data-ppreload="1" aria-label="Read the activity again">↻</button></div><div id="ppActs"></div>`;
+  const idRow = (x) => `<div class="pp-ids" data-copy="${esc(x[1])}" title="Click to copy">${esc(x[0])}: ${esc(x[1])}</div>`;
+  const itemHtml = (it) => `<div class="dx-card pp-card pp-act"><div class="dx-row"><b class="pp-ct">${esc(it.title)}</b>${it.chip ? `<span class="dx-chip" data-tone="${it.tone}">${esc(it.chip)}</span>` : ""}</div>${it.summary ? `<div class="pp-act__s">${esc(it.summary)}</div>` : ""}${it.ids.map(idRow).join("")}${it.lines.map((l) => `<div class="pp-act__l">${esc(l)}</div>`).join("")}</div>`;
+  const more = (n, shown, which) => (n > shown ? `<button class="pp-link" data-ppmore="${which}">Show more (${n - shown} remaining) ▾</button>` : "");
+  function paintActivity() {
+    $("ppTop").innerHTML = banners();
+    body().querySelectorAll("[data-ppall]").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.ppall === "1") === S.all)));
+    const now = Date.now(), host = $("ppActs"); if (!up()) { host.innerHTML = ""; return; }
+    if (!S.all) {
+      const notes = (S.acts || []).filter((a) => a.type === "STATUS"), rows = (S.acts || []).filter((a) => a.type !== "STATUS");
+      host.innerHTML = notes.map((a) => `<div class="dx-state dx-state--note" role="status">${esc(mx(a.summary))}</div>`).join("") + (!S.acts ? `<div class="pp-line">Loading your history…</div>` : !rows.length ? `<div class="pp-line">No transactions recorded yet.</div>`
+        : `<div class="dx-label pp-hdr">TRANSACTIONS · NEWEST FIRST</div>` + rows.slice(0, S.shownA).map((a) => itemHtml(actItem(a, now))).join("") + more(rows.length, S.shownA, "a"));
+    } else {
+      const tx = (S.feed || []).filter((f) => !f.observed), obs = (S.feed || []).filter((f) => f.observed);
+      host.innerHTML = `<div class="dx-label pp-hdr">POOL TRANSACTIONS · NEWEST FIRST</div>` + (!S.feed ? `<div class="pp-line">Loading transactions from the node…</div>` : !tx.length ? `<div class="pp-line">No pool transactions found in this node's stored history.</div>` : tx.slice(0, S.shownF).map((f) => itemHtml(feedItem(f, now))).join("") + more(tx.length, S.shownF, "f"))
+        + (obs.length ? `<div class="dx-label pp-hdr">PREVIOUS LOCAL OBSERVATIONS</div><div class="pp-note">These were inferred from pool scans. They are not verified transaction records.</div>` + obs.map((f) => itemHtml(feedItem(f, now))).join("") : "");
+    }
+  }
+  /** PandaPools' part of the shared Activity and History screens of rooms ① and ③ (dexicon-ui.js places them). */
+  function part(tab) {
+    if (!D || !D.running()) return "";
+    if (!S.st || !S.st.ready) return tab === "activity" ? `<div class="dx-day">POOL OPERATIONS · ② POOLS</div><div class="dx-state dx-state--note" role="status">PandaPools has not started yet, so your pool operations could not be checked. They are listed here when it has.</div>` : "";
+    const now = Date.now(), rows = (S.acts || []).filter((a) => a.type !== "STATUS").map((a) => actItem(a, now)), list = tab === "history" ? rows.filter((x) => x.done) : rows.slice().sort((a, b) => a.done - b.done);
+    return list.length ? `<div class="dx-day">POOL OPERATIONS · ② POOLS</div>` + list.slice(0, 60).map(itemHtml).join("") : "";
+  }
+  /** the shared screens ask for PandaPools' part of their data: at once when one opens, then once a minute */
+  function shared(force) { if (!D || (!force && Date.now() - S.sharedAt < 60000)) return; S.sharedAt = Date.now(); (async () => { S.st = await api().ppStatus().catch(() => null); if (up()) S.acts = await api().ppActivity().catch(() => S.acts); })().then(D.redraw, D.redraw); }
+
   // ---- Wallet (WalletView.java): the receive address, the tools, one card per balance ----
   const walletSkeleton = () => `<div id="ppTop"></div><div id="ppWal"></div>`;
   const balName = (b) => (b.tokenid === MINIMA ? "MINIMA" : tokLabel(b.tokenid, D.TOK.tokenName(b.token, b.tokenid)));
@@ -670,7 +730,7 @@
   }
 
   // ---- the room ----
-  const SCREENS = { wallet: { skeleton: walletSkeleton, bind: noop, paint: paintWallet }, mylp: { skeleton: mylpSkeleton, bind: noop, paint: paintMylp }, swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
+  const SCREENS = { activity: { skeleton: activitySkeleton, bind: noop, paint: paintActivity }, wallet: { skeleton: walletSkeleton, bind: noop, paint: paintWallet }, mylp: { skeleton: mylpSkeleton, bind: noop, paint: paintMylp }, swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
   function render(tab, host) {
     if (!D) return;
     const scr = SCREENS[tab];
@@ -690,6 +750,9 @@
     if (ds.ppstart) return D.start();
     if (ds.ppmode) { S.combined = ds.ppmode === "combined"; paint(); return load(S.tab).then(paint, paint); }   // the cached pools are drawn at once; a stale answer is simply painted over
     if (ds.ppscan) return scan();
+    if (ds.ppall != null) { S.all = ds.ppall === "1"; return paint(); }
+    if (ds.ppmore) { if (ds.ppmore === "a") S.shownA += 60; else S.shownF += 60; return paint(); }
+    if (ds.ppreload) return load(S.tab).then(paint, paint);
     if (ds.ppwal) return walletAct(ds.ppwal);
     if (ds.ppbal != null) { const row = (S.bal || [])[Number(ds.ppbal)]; return row ? D.showCoins(row) : null; }   // the wallet's own coins dialog: every coin whole, with Split, Consolidate and the token's details and Send
     if (ds.ppcalc != null) return calc(ds.ppcalc);
@@ -710,5 +773,5 @@
     if (ds.ppclose) { const p = pool(ds.ppclose); return p ? act(() => Act.withdraw(api(), ui, p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }
   }
 
-  return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick }, core);
+  return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick, part, shared }, core);
 });

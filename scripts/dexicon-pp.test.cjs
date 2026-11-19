@@ -390,9 +390,9 @@ test("the room: PandaPools' five tabs in its order, each remembered; the old pan
 });
 
 // ---- the glue: read-only additions ----
-async function glue() {
+async function glue(dir0) {
   const actualSql = require(path.join(ROOT, "main/pandapools/sqlshim")), loader = require(path.join(ROOT, "main/pandapools/loader"));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pp-room-")), contexts = [], stores = [], exports = {}, answers = {};
+  const dir = dir0 || fs.mkdtempSync(path.join(os.tmpdir(), "pp-room-")), contexts = [], stores = [], exports = {}, answers = {};
   const sandbox = { module: { exports }, exports, console, setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, Date, require: (n) => {
     if (n === "electron") return { app: { getPath: () => dir, getVersion: () => "test" } };
     if (n === "./config") return { rpcSecret: () => "" }; if (n === "./node-manager") return { rpcPort: () => 0 };
@@ -404,7 +404,7 @@ async function glue() {
   vm.runInNewContext(fs.readFileSync(path.join(ROOT, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
   const api = sandbox.module.exports; api._setDataDir(dir);
   api._setRunner(async (q) => { const verb = q.split(" ")[0]; if (verb in answers) { if (answers[verb] instanceof Error) throw answers[verb]; return answers[verb]; } return q === "block" ? { status: true, response: { block: 0 } } : { status: false }; });
-  return { api, dir, contexts, answers, close: () => { api.stopLoop(); for (const c of contexts) c.ActivityChain.stop(); for (const sql of stores) { try { sql.flush(); sql._db.close(); } catch (e) {} } fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { api, dir, contexts, answers, close: () => { api.stopLoop(); for (const c of contexts) c.ActivityChain.stop(); for (const sql of stores) { try { sql.flush(); sql._db.close(); } catch (e) {} } if (!dir0) fs.rmSync(dir, { recursive: true, force: true }); } };
 }
 test("the glue says whether the engine has started, and keeps the node's last refusal by command name only", async () => {
   const h = await glue();
@@ -424,4 +424,48 @@ test("the glue says whether the engine has started, and keeps the node's last re
     await new Promise((r) => c.MDS.cmd("balance", r));
     assert.equal(h.api.lastNodeFailure().verb, "txpow", "a command that worked changes nothing");
   } finally { h.close(); }
+});
+
+// ---- Activity, and pool operations in the shared screens, the Shutdown warning and the restore gate ----
+test("Activity: every pool operation with its state, its transaction id whole, the time, and a failure in plain words", () => {
+  const now = Date.UTC(2026, 10, 19, 12, 0, 0);
+  const ok = PP.actItem({ type: "SWAP", summary: "Sold 3000 MINIMA for 10.01511937 USDT", txpowid: PK("71"), ts: Date.UTC(2026, 10, 17, 10, 13, 13), timeLabel: "Transaction", statusText: "3723 confirmations · on-chain", confirmed: true, failed: false, verifiedAt: now - 5000 }, now);
+  assert.deepEqual(ok, { title: "Swap", chip: "3723 confirmations · on-chain", tone: "ok", summary: "Sold 3000 MINIMA for 10.01511937 MxUSD", lines: ["Transaction 17 Nov 2026 10:13:13 GMT", "Checked just now"], ids: [["transaction", PK("71")]], done: true });
+  const wait = PP.actItem({ type: "CREATE", summary: "x", txpowid: PK("72"), originalTxpowid: PK("73"), ts: now - 60000, statusText: "Confirming 1/3", confirmed: false, failed: false }, now);
+  assert.equal(wait.tone, "live"); assert.equal(wait.done, false); assert.deepEqual(wait.ids, [["transaction", PK("72")], ["original submission", PK("73")]]); assert.equal(wait.lines[0], "Submitted 19 Nov 2026 11:59:00 GMT");
+  const bad = PP.actItem({ type: "ADD", summary: "Add to MINIMA / USDT", txpowid: "", ts: 0, failed: true, failMsg: "Could not identify the input signing key." }, now);
+  assert.equal(bad.chip, "FAILED"); assert.equal(bad.lines[0], "Submitted Time unknown"); assert.match(bad.lines[1], /^This was not done and nothing was signed/); assert.equal(bad.done, true);
+  assert.equal(PP.actItem({ type: "Pool transaction", summary: "+1 MINIMA", ts: 1 }, now).title, "Pool transaction");
+  assert.equal(PP.swapSummary({ type: "SWAP", summary: "Bought 12 for 3000" }), "Sold 3000 MINIMA for 12", "an old row is said from MINIMA's side, as the old panel did");
+  assert.equal(PP.swapSummary({ type: "SWAP", summary: "Sold 3000 for 12" }), "Bought 3000 MINIMA for 12");
+  assert.equal(PP.since(now - 59000, now), "just now"); assert.equal(PP.since(now - 3 * 3600000 - 5, now), "3h ago");
+  const f = PP.feedItem({ pool: PK("B1"), kind: "SWAP", minimaIn: true, minimaAmt: "1200.0", tokenAmt: "3.84020", tokenLabel: "USDT", txpowid: PK("74"), ts: now, statusText: "12 confirmations · on-chain", confirmed: true, verifiedAt: now }, now);
+  assert.equal(f.title, "MINIMA sale · 1200 MINIMA / 3.8402 MxUSD"); assert.deepEqual(f.ids, [["pool", PK("B1")], ["transaction", PK("74")]]);
+  assert.match(PP.feedItem({ pool: PK("B1"), kind: "SWAP", minimaAmt: "40", tokenAmt: "0.128", tokenLabel: "USDT", ts: now, observed: true }, now).title, /observation \(unverified\)/);
+  const pp = src("dexicon-pp.js"), ui_ = src("dexicon-ui.js");
+  assert.match(ui_, /DexAx\.part\("activity", X\.asub\) \+ \(X\.asub === 0 \? DexPools\.part\("activity"\) : ""\)/, "pool operations are in the shared Activity");
+  assert.match(ui_, /DexAx\.part\("history"\) \+ DexPools\.part\("history"\)/, "and the finished ones in History");
+  assert.match(pp, /PandaPools has not started yet, so your pool operations could not be checked/, "an engine that has not started is said, not shown as nothing");
+});
+test("the Shutdown warning and the restore gate count pool operations truthfully: 'could not be checked' when the engine has not started", async () => {
+  const first = await glue();
+  try {
+    assert.deepEqual(await first.api.activeWork(), [], "a data folder that never had a pool store: nothing can be waiting");
+    await first.api.init(); assert.ok(Array.isArray(await first.api.activeWork()), "started: its own activity rows");
+    first.api.flush();
+    const second = await glue(first.dir);
+    try { assert.equal(await second.api.activeWork(), null, "a store, and an engine that has not started: could not be checked"); assert.deepEqual(await second.api.activity(), [], "activity() itself would have looked idle"); } finally { second.close(); }
+  } finally { first.close(); }
+  const restore = require("../main/restore.js"), ax = { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 };
+  assert.ok(restore.activeWorkList({ atomix: ax, pools: null }).some((l) => /^PandaPools could not be asked whether a pool transaction is still waiting/.test(l)));
+  const list = restore.activeWorkList({ atomix: ax, pools: [{ type: "SWAP", txpowid: PK("71"), confirmed: false, failed: false }, { type: "SWAP", txpowid: PK("72"), confirmed: true }] });
+  assert.ok(list.some((l) => l.includes("1 PandaPools transaction still waiting to confirm: " + PK("71"))), "the id whole");
+  const main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), app = src("app.js");
+  assert.match(main, /pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\)/); assert.match(main, /ipcMain\.handle\("mcd:ppWork", \(\) => pandapools\.activeWork\(\)\.catch\(\(\) => null\)\)/);
+  assert.match(app, /read\(api\.axMakerCfg\(\)\), read\(api\.ppWork\(\)\), read\(api\.dxWork\(\)\)/);
+  // the Shutdown warning itself, lifted from app.js: null = could not be checked; a recent unconfirmed row is counted
+  const sw = new Function(/const SWAP_DONE = [^\n]*\n/.exec(app)[0] + /function shutdownWarning\(swaps, maker, pool, nowMs, dex\) \{[\s\S]*?\n\}/.exec(app)[0] + "; return shutdownWarning;")();
+  assert.match(sw([], { cfg: {}, state: {} }, null, Date.now(), { ready: true, takes: 0 }).message, /Could not be checked: pool operations\./);
+  assert.match(sw([], { cfg: {}, state: {} }, [{ type: "SWAP", confirmed: false, failed: false, ts: Date.now() - 1000 }], Date.now(), { ready: true, takes: 0 }).message, /^1 pool transaction sent in the last hour is not confirmed yet/);
+  assert.equal(sw([], { cfg: {}, state: {} }, [], Date.now(), { ready: true, takes: 0 }).title, "Shut down the node?");
 });

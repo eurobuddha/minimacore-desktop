@@ -180,6 +180,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppConfirmSigning: (opk, attested) => ipcRenderer.invoke("mcd:ppConfirmSigning", opk, attested),
   ppSaveBackup: (json) => ipcRenderer.invoke("mcd:ppSaveBackup", json),
   ppCompleteBackupRequired: () => ipcRenderer.invoke("mcd:ppCompleteBackupRequired"),
+  ppWork: () => ipcRenderer.invoke("mcd:ppWork"),
   ppStatus: () => ipcRenderer.invoke("mcd:ppStatus"),
   ppWhy: () => ipcRenderer.invoke("mcd:ppWhy"),
   ppLoadBackup: (password, extractNode) => ipcRenderer.invoke("mcd:ppLoadBackup", password, extractNode),

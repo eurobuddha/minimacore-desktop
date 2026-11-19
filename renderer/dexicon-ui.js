@@ -155,7 +155,7 @@ const DexUI = (() => {
   const pref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
   async function load() {
-    DexAx.shared(false);   // AtomiX's part of the shared screens: its own reads, at most once a minute
+    DexAx.shared(false); DexPools.shared(false);   // AtomiX's and PandaPools' parts of the shared screens: their own reads, at most once a minute
     const ok = node.state === "running" && st && st.ready;
     if (!ok) { X.book = null; X.loaded = false; return; }
     const got = await Promise.allSettled([api.dxBook(), api.dxMine(), api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','activity')" }),
@@ -221,7 +221,7 @@ const DexUI = (() => {
     const tab = C.tabOf(mem);
     if (ppRoom()) return DexPools.render(tab, body);
     if (axRoom() && !C.SHARED.includes(tab)) return DexAx.render(tab, body);
-    DexAx.shared(true);
+    DexAx.shared(true); DexPools.shared(true);
     if (body.dataset.tab !== tab) { body.dataset.tab = tab; body.innerHTML = tab === "trade" ? tradeSkeleton() : ""; if (tab === "trade") bindTrade(); body.onclick = tab === "trade" ? null : onTabClick; $("main").scrollTop = 0; X.said = null; }
     draw();
     load().then(draw, draw);
@@ -505,7 +505,7 @@ const DexUI = (() => {
         + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? "you were the maker" : "fast book"} · ${esc(fs.text)}</span></span>`
         + `<span class="dx-led__r">${f.status === "done" ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${fs.chip}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>`);
     });
-    return out.join("") + DexAx.part("history");
+    return out.join("") + DexAx.part("history") + DexPools.part("history");
   }
   function fillFacts(f) {
     const buy = f.side === "buy", fs = C.fillState(f);
@@ -544,16 +544,16 @@ const DexUI = (() => {
   }
 
   // ---- Activity (ActivityTab.java), Assets (AssetsTab.java), Settings (RelaysTab.java): shared by the rooms ----
-  const ACT_INFO = "Every BUY and SELL you make and every fill your node co-signs, newest first, with its live progress. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. AtomiX swaps are listed first, each with its steps, Check now and, when one is due, Refund now; a swap is never cancelled by hand: one that stalls is refunded by itself at its deadline.";
+  const ACT_INFO = "Every BUY and SELL you make and every fill your node co-signs, newest first, with its live progress. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. AtomiX swaps are listed first, each with its steps, Check now and, when one is due, Refund now; a swap is never cancelled by hand: one that stalls is refunded by itself at its deadline. Pool operations (swaps against pools, creating, adding, migrating and closing a pool) follow, each with its transaction id whole; room ② Activity has the same list and every pool's transactions.";
   const A = () => (window.AX && window.AX.activity) || null;   // the engine's own stage machine and wording (dexicon/lib/activity.js, verbatim)
   function activityHtml() {
     const out = [`<div class="dx-title"><h2>Activity</h2><button class="dx-info" data-ainfo="1" aria-label="About Activity">i</button></div>`,
       `<div class="dx-chips"><button data-asub="0" aria-pressed="${X.asub === 0}">My activity</button><button data-asub="1" aria-pressed="${X.asub === 1}">Market history</button><button data-csv="1"${X.fills.length ? "" : " disabled"}>↓ Export CSV</button><button data-axcsv="1">↓ AtomiX swaps CSV</button></div>`];
-    const ax = DexAx.part("activity", X.asub); out.push(ax);
+    const ax = DexAx.part("activity", X.asub) + (X.asub === 0 ? DexPools.part("activity") : ""); out.push(ax);
     const now = Date.now(), tip = (st && st.block) || 0, hm = (ms) => { const t = new Date(ms); return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0"); };
     let day = "";
     if (X.asub === 0) {
-      if (!X.acts.length && !ax) out.push(`<div class="dx-card dx-none"><b>${X.loaded || axRoom() ? "Nothing yet" : "…"}</b><span>Every BUY and SELL you make, every fill your node co-signs and every AtomiX swap shows its live progress here.</span></div>`);
+      if (!X.acts.length && !ax) out.push(`<div class="dx-card dx-none"><b>${X.loaded || axRoom() ? "Nothing yet" : "…"}</b><span>Every BUY and SELL you make, every fill your node co-signs, every AtomiX swap and every pool operation shows its live progress here.</span></div>`);
       X.acts.forEach((a, i) => {
         const ms = Number(a.ts) || 0, d = C.dayLabel(ms, now), buy = a.side === "buy" || a.buy === true, m = A();
         const chip = m ? m.chip(a, tip) : String(a.stage || ""), status = m ? m.status(a, tip, now) : String(a.stage || ""), tone = /DONE|CONFIRMED/.test(chip) ? "ok" : /FAILED|REFUSED|DROPPED|LOST/.test(chip) ? "bad" : "live";

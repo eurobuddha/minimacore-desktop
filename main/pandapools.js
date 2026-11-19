@@ -333,6 +333,17 @@ function activity() {
     resolve(rows);
   }); });
 }
+/**
+ * For the Shutdown warning and the restore gate (the Dexicon host's activeWork, for pools): the activity rows while
+ * the engine runs; [] when this data folder never had a pool store, so nothing can be waiting; null when there is a
+ * store but the engine has not started, so whether a pool transaction is waiting COULD NOT BE CHECKED. activity()
+ * itself answers [] in that case, which read as "nothing in flight".
+ */
+function activeWork() {
+  if (ctx) return activity();
+  let has = true; try { has = fs.existsSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}
+  return Promise.resolve(has ? null : []);
+}
 function feed() {
   if (!ctx) return Promise.resolve([]);
   const active = ctx;
@@ -793,6 +804,6 @@ module.exports = {
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
-  onNodeRestarted, lastNodeFailure, status,
+  onNodeRestarted, lastNodeFailure, status, activeWork,
   _setRunner, _setDataDir,
 };

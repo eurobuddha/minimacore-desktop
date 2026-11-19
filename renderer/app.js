@@ -985,7 +985,7 @@ async function menuAction(act) {
   else if (act === "shutdown") {
     // Ask the AtomiX and PandaPools glue what is in flight first (their own saved records; no node command).
     const read = (p) => Promise.race([Promise.resolve(p).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]);
-    const [swaps, maker, pool, dex] = await Promise.all([read(api.axSwaps()), read(api.axMakerCfg()), read(api.ppActivity()), read(api.dxWork())]);
+    const [swaps, maker, pool, dex] = await Promise.all([read(api.axSwaps()), read(api.axMakerCfg()), read(api.ppWork()), read(api.dxWork())]);
     const w = shutdownWarning(swaps, maker, pool, Date.now(), dex);
     if (!await showConfirm(w.title, w.message, "Shut down", true)) return;
     toast("Shutting down the node…");
@@ -993,7 +993,7 @@ async function menuAction(act) {
   }
 }
 // What a Shutdown would interrupt, in plain words. swaps = api.axSwaps(), maker = api.axMakerCfg(), pool =
-// api.ppActivity(); null means that read failed, and the dialog says so instead of looking idle. dex = api.dxWork()
+// api.ppWork() (main/pandapools.js activeWork: the activity rows, or null when the engine has not started); null means that read failed, and the dialog says so instead of looking idle. dex = api.dxWork()
 // (main/dexicon.js activeWork): undefined = not asked, null = could not be read.
 const SWAP_DONE = ["COMPLETE", "REFUNDED", "ERROR"];   // the engine's own "nothing left to claim or refund" (trading.js isTerminalSwap)
 function shutdownWarning(swaps, maker, pool, nowMs, dex) {
@@ -3227,7 +3227,7 @@ AtomixPanel.init({
 api.appVersion().then(v => AtomixPanel.setVersion(v)).catch(() => {});
 // Room ① of Dexicon draws AtomiX now (renderer/dexicon-ax.js) over the same window.mcd calls. The panel above is
 // no longer rendered; it stays, initialised, until the 3e parity audit.
-DexPools.init({ api, copy, tryCmd, TOK, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
+DexPools.init({ api, copy, tryCmd, TOK, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 DexAx.init({ api, copy, relTime, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
 function resetAxState() { AtomixPanel.reset(); DexAx.reset(); }

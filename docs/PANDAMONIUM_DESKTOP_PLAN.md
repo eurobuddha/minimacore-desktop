@@ -210,6 +210,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.125 | 3d | Backup, restore, recovery: `Act.backup` (`ppSaveBackup(password)` after `backupProblem`), `loadFile` / `extractNode` (`ppLoadBackup(password[, true])`), `restore` (`ppRestore(json)`), `archiveGet` / `archiveSave`; `ppCompleteBackupRequired` read and said; `plainCode` strips internal codes | |
 | 0.18.126 | 3d | Create in four steps (`STEPS`, `Act.createOpen` / `createPriced` / `createManual`: `ppCreateAnchor`, `ppCreatePreview`, `ppCreate(tokenid, decimals, x, y)` with the old `derive`), then the forced backup; `Act.migrate` (`ppMigrate(address, a, b)`), then the backup; BACKUP_REQUIRED returns the flow to the owed backup | |
 | 0.18.127 | 3d | Wallet: `walletCard` over `balance` and `getaddress`; Consolidate through `consolidateToken` (app.js: confirm, `ppConsolidationCheck`, `consolidate tokenid:`) behind `DexCore.money`; a balance opens `showCoins` | |
+| 0.18.128 | 3d | Activity: `actItem` / `feedItem` over `ppActivity` and `ppFeed`; `DexPools.part("activity" | "history")` in the shared screens; glue `activeWork()` (rows, `[]` with no store, `null` = could not be checked) used by `walletWork` (restore gate) and `mcd:ppWork` (Shutdown warning) | |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";

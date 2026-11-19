@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.128] — Dexicon ② Pools, Activity, and pool operations everywhere they are counted (Phase 3d)
+
+- **Activity** in room ②: My activity (every swap, create, add, migrate and close you sent, newest first, with its state, the transaction id whole, when it was sent and when it was last checked; a failure in plain words with whether funds moved) and All pools (every pool's transactions this node holds, then the older unverified observations, marked as such). Show more loads the rest.
+- **Pool operations are in the shared Activity and History** of rooms ① and ③, after the AtomiX swaps: waiting ones first in Activity, finished ones in History.
+- **The Shutdown warning and the restore check no longer take "PandaPools has not started" for "nothing is waiting".** When there is a pool store and the engine has not started, they say the pool operations could not be checked. A data folder that never had a pool store still counts as nothing waiting. A wallet restore now waits for PandaPools to start, as it already did for AtomiX.
+- Not run on a node.
+
 ## [0.18.127] — Dexicon ② Pools, Wallet (Phase 3d)
 
 - **Wallet**: the phone's "Available to pool" card with your receive address whole (one click to copy), Consolidate MINIMA coins, Consolidate MxUSD coins and Check node connection, then one card per balance: the sendable amount in full, the coin count, and confirmed, locked, unconfirmed and when it was read.
