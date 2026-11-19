@@ -181,7 +181,9 @@ test("another wallet opens another file; a node that gives no seed leaves the re
   const c = rig(null, { node });
   await c.reg.open(dir, async () => ({ status: false, error: "locked" }));
   assert.equal(c.reg._file(), null);
-  assert.match(c.lines.join("\n"), /kept in memory only/);
+  assert.match(c.lines.join("\n"), /kept in memory only; it is tried again every minute/);
+  await c.reg.open(dir, async () => ({ status: false, error: "locked" }));
+  assert.equal(c.lines.length, 1, "the same failure is said once");
   await build(c.as("atomix"), "a", [coinId(1)], { noPost: true });
   assert.equal((await c.as("wallet")("txninput id:w coinid:" + coinId(1))).reserved, true);
 });
@@ -489,4 +491,20 @@ test("the Wallet's figures: per token, what is held (with the coins that share a
   const fs2 = require("node:fs"), root = require("node:path").join(__dirname, "..");
   assert.match(fs2.readFileSync(root + "/main/main.js", "utf8"), /ipcMain\.handle\("mcd:reserved", async \(\) => \{\s+if \(node\.state !== "running"\) return \{ coins: \[\], funds: \[\] \};\s+return \{ coins: reserve\.list\(\)\.filter\(r => r\.owner !== "wallet"\), funds: await reserve\.funds\("wallet", reserveRead\) \};/);
   assert.match(fs2.readFileSync(root + "/main/preload.js", "utf8"), /reserved: \(\) => ipcRenderer\.invoke\("mcd:reserved"\)/);
+});
+
+// ---- 0.18.147 ----
+test("a coin its owner has posted stays held when the same owner builds and deletes a second transaction with it; a late open keeps what memory holds", async () => {
+  const dir = tmp(), { node, as, reg } = rig(wallet3());
+  await build(as("pandapools"), "p1", [coinId(1)]);                       // posted, not mined
+  await build(as("pandapools"), "p2", [coinId(1)], { noPost: true });     // its own retry names the coin again
+  await as("pandapools")("txndelete id:p2");
+  assert.equal(reg.list().length, 1); assert.equal(reg.list()[0].txn, "p1");
+  assert.equal((await as("atomix")("txninput id:a coinid:" + coinId(1))).reserved, true);
+  // the file could not be opened at start and is opened a minute later: nothing held in memory is lost, and it is written
+  await reg.open(dir, node.run);
+  assert.equal(reg.list().length, 1);
+  hold(reg, coinId(2));
+  assert.match(fs.readFileSync(reg._file(), "utf8"), /"txn":"p1"[\s\S]*"why":"a live Dexicon order"/);
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), /reserve\._file\(\) \? Promise\.resolve\(\) : reserve\.open\(app\.getPath\("userData"\), reserveRead\)/);
 });

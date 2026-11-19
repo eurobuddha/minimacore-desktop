@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.147] — Coin reservation, review of 0.18.143: a posted coin survives its owner's own retry, and the file is opened again when the node was not ready
+
+- **Found in review**: when an engine named a coin it had already POSTED in one transaction for a second one (its own retry) and then deleted the second, the coin was released although the posted transaction could still spend it. The posted record now stays; only a coin still being built moves to the new transaction.
+- **Found in review**: if the node did not answer, or was locked, at the moment the app first asked for the wallet id, the reservations were kept in memory only for the whole session. The open is now tried again with every sweep (once a minute); what memory held is kept and written. The failure is logged once, not every minute.
+
 ## [0.18.146] — Coin reservation: the Wallet shows what is held, and by what
 
 - **Found**: the node's "sendable" counts every plain coin of the wallet, the ones backing a live Dexicon order or named for an AtomiX or PandaPools transaction included. The Wallet offered them, and since 0.18.144 a send of them is refused: the figure and the refusal disagreed.

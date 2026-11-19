@@ -52,7 +52,7 @@ function createRegistry(o = {}) {
   const txOf = new Map();       // txn id -> { owner, posted, coins:Set }
   const sources = new Map();    // owner -> () => [{ coinid, why }]: where that owner's holds are read from
   const gone = new Map();       // coin ids the node no longer shows (a source that still lists one does not bring it back)
-  let file = null, lastFile = null, opening = null, cursor = 0;
+  let file = null, lastFile = null, opening = null, cursor = 0, openFailed = "";
   const api = { onLog: o.log || null };
   const log = (line) => { try { if (api.onLog) api.onLog(String(line)); } catch (e) {} };
 
@@ -95,7 +95,7 @@ function createRegistry(o = {}) {
         load();
         // nothing survives a restart as `building` for long: what was being built then is aged out by sweep (BUILD_MS from its own time)
         const n = txns.size + holds.size; if (n) log(n + " coin reservation" + (n === 1 ? "" : "s") + " read back from " + file);
-      } catch (e) { file = null; log("this wallet's reservation file could not be opened (" + ((e && e.message) || e) + "): reservations are kept in memory only until the next start"); }
+      } catch (e) { file = null; const why = (e && e.message) || String(e); if (why !== openFailed) { openFailed = why; log("this wallet's reservation file could not be opened (" + why + "): reservations are kept in memory only; it is tried again every minute"); } }
       finally { opening = null; }
     })();
     return opening;
@@ -159,7 +159,9 @@ function createRegistry(o = {}) {
       if (why) { log("refused: `txninput` of " + owner + " (transaction " + id + "): " + why); return refusal("txninput", why); }
     }
     const had = txns.get(coin), t = tx(id, owner);
-    const mine = !had || had.owner === owner;   // a contract coin another owner named first keeps its first record
+    // A contract coin another owner named first keeps its first record. So does a coin this owner has already POSTED in
+    // another transaction: deleting the new one must not free a coin the posted one may still spend.
+    const mine = !had || (had.owner === owner && had.state === "building");
     if (mine) { if (had) unlink(coin); txns.set(coin, { coinid: given, owner, txn: id, state: "building", at: now() }); t.coins.add(coin); persist(); }
     const back = () => { const r = txns.get(coin); if (mine && r && r.txn === id && r.state === "building") { unlink(coin); persist(); } };
     let r; try { r = await send(c); } catch (e) { back(); throw e; }

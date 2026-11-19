@@ -100,7 +100,8 @@ A reservation must never stop a time-critical settlement.
 `userData/coin-reservations-<wallet id>.json`, written (temp file, fsync, rename) before the reserving command is
 forwarded. The wallet id is the SHA-256 of `seedrandom modifier:coin-reservation-v1`: one-way, public, and another
 wallet opens another file. The file is opened when the node is running and closed when it stops. If the id cannot be
-read the registry works in memory and says so in the log; it never blocks a command for that.
+read the registry works in memory, says so once in the log and tries again every minute; it never blocks a command
+for that. A coin its owner has already posted keeps that record when the same owner names it for a second transaction.
 
 ## Visibility
 

@@ -49,7 +49,8 @@ node.on("status", (s) => {
     reserveSweep = setInterval(() => {
       if (reserveSweeping || node.state !== "running") return;
       reserveSweeping = true;
-      reserve.sweep(reserveRead).catch(() => {}).then(() => { reserveSweeping = false; });
+      // a file that could not be opened at start (the node did not answer yet, or was locked) is tried again each minute
+      (reserve._file() ? Promise.resolve() : reserve.open(app.getPath("userData"), reserveRead)).then(() => reserve.sweep(reserveRead)).catch(() => {}).then(() => { reserveSweeping = false; });
     }, 60000);
     if (reserveSweep.unref) reserveSweep.unref();
   } else if (s.state !== "running" && reserveSweep) { clearInterval(reserveSweep); reserveSweep = null; reserve.close(); }
