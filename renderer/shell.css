@@ -110,13 +110,6 @@
   background: var(--orange); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
 .tab .tab-badge { position: absolute; top: 6px; left: calc(50% + 6px); }
 
-/* Temporary Dexicon holder: which of the two existing panels shows. Orange when active, as Dexicon's room pills. */
-.dexswitch { display: none; flex: 0 0 auto; gap: 8px; padding: 10px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
-.shell[data-mode="tabs"][data-tab="dexicon"] .dexswitch { display: flex; }
-.dexswitch__b { min-height: 34px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
-  color: var(--dim); font: 600 13px/1 var(--sans); cursor: pointer; }
-.dexswitch__b[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: #fff; }
-
 /* the node is stopped: a strip under the bar on every screen, with Start */
 .stopbar { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface2);
   border-bottom: 1px solid var(--border); color: var(--text); font-size: 14px; line-height: 20px; letter-spacing: .018em; }

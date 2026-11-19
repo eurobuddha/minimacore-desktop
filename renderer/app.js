@@ -180,6 +180,7 @@ function onStatus(s) {
   paintKeyMode(s.keyMode);
   paintFooter(s);
   nodeState = s.state;
+  DexUI.node(s);
   // A node the user shut down: say so on every screen, with the way back. (At launch the node is "stopped" for a moment too.)
   el("stopBar").hidden = !(s.state === "stopped" && !s.resyncing && !waitingForNode && CFG.setupDone && CFG.walletDone);
   if (s.health && s.health.block) {                                      // both APK-parity headers carry the tip
@@ -780,7 +781,7 @@ async function postBootRestore() {
 //   a TAB screen      toolbar (tray button, titles, menu) + tab strip + footer
 //   a SUB screen      a back arrow and the screen's title, as the phone's own Receive / Send / Logs / Terminal
 //   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
-const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
+const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", dexicon: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
 const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params", backup: "Backup & Recovery" };
 // The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
 // (Future Cash Next, Minima Explorer, Entropy, KeyUses) get a row when their phase builds them: no dead rows.
@@ -797,7 +798,8 @@ const TRAY_APPS = [
 const CORE_MARK = '<svg class="tray__ic" viewBox="0 0 105 100" aria-hidden="true"><path d="M84.16,26.77L79.52,48.44L73.58,22.29L52.79,13.38L47.17,39.59L42.21,8.86L21.42,0L0,100H22.71L29.27,69.27L34.23,100H56.98L62.56,73.8L68.5,100H91.21L105,35.63L84.16,26.77Z"/></svg>';
 const NARROW = window.matchMedia("(max-width: 719px)");   // below this the tray overlays, as on the phone
 let lastTabView = "balances";   // where Back returns to, and where "Minima Core" in the tray lands
-let dexView = "atomix";         // which of the two panels the Dexicon tab last showed
+let dexView = "atomix";         // the Dexicon room last shown: "atomix" (①), "pandapools" (②) or "dexicon" (③ Exchange)
+let lastShellView = "balances"; // where Dexicon's ✕ returns to: the last screen that wore the shell's tabs
 let APP_VERSION = "";
 function store(key, value) {    // shell preferences only (tray open, order, hidden); never anything that matters
   try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) {}
@@ -812,7 +814,8 @@ function trayOrder(saved, ids) {
   return order;
 }
 function viewOfTab(tab) { return tab === "wallet" ? "balances" : tab === "dexicon" ? dexView : tab; }
-function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: tab ? "tabs" : SUB_TITLE[view] ? "sub" : "app" }; }
+// Dexicon is full screen: its own header, room pills and bottom bar; none of the shell's bars (mode "dex").
+function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: tab === "dexicon" ? "dex" : tab ? "tabs" : SUB_TITLE[view] ? "sub" : "app" }; }
 
 function selectTab(view) {
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
@@ -820,7 +823,7 @@ function selectTab(view) {
   if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
   activeView = view;
   const { tab, mode } = shellMode(view);
-  if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; }
+  if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; else lastShellView = view; }
   el("shell").dataset.mode = mode;
   el("shell").dataset.tab = tab;
   el("barPage").textContent = SUB_TITLE[view] || "";
@@ -828,7 +831,7 @@ function selectTab(view) {
     const on = b.dataset.tab === tab;
     b.classList.toggle("tab--active", on); b.setAttribute("aria-selected", on ? "true" : "false"); b.tabIndex = on ? 0 : -1;
   });
-  document.querySelectorAll(".dexswitch__b").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view ? "true" : "false"));
+  DexUI.paint(view);
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("view--active", v.id === "view-" + view));
   paintTraySelection();
   closeMenu();
@@ -846,7 +849,7 @@ function initShell() {
     const next = shown[(i + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
     e.preventDefault(); next.focus(); next.click();
   });
-  document.querySelectorAll(".dexswitch__b").forEach(b => b.onclick = () => selectTab(b.dataset.view));
+  DexUI.init({ go: selectTab, leave: () => selectTab(lastShellView), start: () => { toast("Starting the node…"); api.nodeStart(); } });
   el("backBtn").onclick = () => (activeView === "backup" && BK_PAGE ? bkOpen("") : selectTab(lastTabView));   // a Backup & Recovery screen goes back to its hub
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
@@ -1265,6 +1268,7 @@ function renderActive() {
   else if (activeView === "chat") renderChat();
   else if (activeView === "pandapools") renderPandapools();
   else if (activeView === "atomix") renderAtomix();
+  else if (activeView === "dexicon") DexUI.render();
   else if (activeView === "ethwallet") renderEthWallet();
   else if (activeView === "minimall") renderMiniMall();
   else if (activeView === "vestr") renderVestr();

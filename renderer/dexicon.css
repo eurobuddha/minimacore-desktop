@@ -1,0 +1,53 @@
+/*
+ * dexicon.css: Dexicon, full screen, as the Android client draws it (apks/dexicon Design.java + MainActivity.java).
+ * 1 dp = 1 px, 1 sp = 1 px. Inter and JetBrains Mono (the @font-face rules are in atomix-ui.css, same files).
+ * Dexicon has its own dark (ONYX) and light (DAYLIGHT) theme behind the sun button, independent of the system theme.
+ */
+.shell { --dx-bg: #0B0D12; --dx-surface: #12151C; --dx-surface2: #1B1F28; --dx-border: rgba(255,255,255,.07); --dx-text: #EEF0F4;
+  --dx-dim: #8B909C; --dx-dim2: #6F7583; --dx-accent: #F7931A; --dx-accent-soft: rgba(247,147,26,.2); --dx-grad: #FFAB3D;
+  --dx-on-accent: #0B0D12; --dx-in: #3FD0A2; --dx-red: #FF5C5C; --dx-on-side: #FFFFFF;
+  --dx-sans: "Inter", system-ui, sans-serif; --dx-mono: "JetBrains Mono", ui-monospace, monospace; }
+.shell[data-dx="DAYLIGHT"] { --dx-bg: #F3F4F7; --dx-surface: #FFFFFF; --dx-surface2: #EDEEF2; --dx-border: #E6E8EE; --dx-text: #181B22;
+  --dx-dim: #8B909C; --dx-dim2: #A6ABB6; --dx-accent-soft: rgba(247,147,26,.12); --dx-on-accent: #201400; --dx-in: #12A97E; --dx-red: #E5484D; }
+
+/* full screen: none of the shell's bars, no tray */
+.dx-top, .dx-nav { display: none; }
+.shell[data-mode="dex"] .bar, .shell[data-mode="dex"] .tabs, .shell[data-mode="dex"] .foot,
+.shell[data-mode="dex"] .tray, .shell[data-mode="dex"] .tray-scrim { display: none !important; }
+.shell[data-mode="dex"] .dx-top { display: block; flex: 0 0 auto; background: var(--dx-bg); color: var(--dx-text); font-family: var(--dx-sans); }
+.shell[data-mode="dex"] .dx-nav:not([hidden]) { display: flex; }
+.shell[data-mode="dex"] .main { background: var(--dx-bg); }
+
+.dx-head { display: flex; align-items: center; padding: 12px 12px 6px; }
+.dx-logo { flex: 1; margin: 0; font: 700 15px/20px var(--dx-mono); color: var(--dx-text); letter-spacing: 0; }
+.dx-pill { display: inline-flex; align-items: center; justify-content: center; padding: 6px 10px; border: 0; border-radius: 14px;
+  background: var(--dx-surface2); color: var(--dx-dim); font: 400 11px/15px var(--dx-sans); white-space: nowrap; }
+.dx-pill--ver { color: var(--dx-dim2); margin-right: 6px; }
+button.dx-pill { cursor: pointer; }
+.dx-pill--sq { min-width: 48px; min-height: 48px; font-size: 14px; }
+.dx-pill--sq:active, .dx-room:active, .dx-tab:active { transform: scale(.96); }
+.dx-strip { display: flex; align-items: center; gap: 6px; padding: 0 12px 6px; }
+.dx-strip .dx-pill--pair { flex: 1; }
+.dx-pill--pair[data-tone="ok"] { color: var(--dx-in); }
+.dx-rail { display: flex; gap: 6px; padding: 0 12px 6px; }
+.dx-room { flex: 1 1 0; min-width: 0; min-height: 36px; padding: 0 4px; border: 1px solid var(--dx-border); border-radius: 10px; background: var(--dx-surface2);
+  color: var(--dx-dim); font: 700 12px/16px var(--dx-sans); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dx-room[aria-pressed="true"] { background: var(--dx-accent); border-color: var(--dx-accent); color: var(--dx-on-accent); }
+
+/* the bottom bar: icon over label, a soft accent tile on the selected tab */
+.dx-nav { flex: 0 0 auto; padding: 7px 6px 9px; background: var(--dx-surface); font-family: var(--dx-sans); }
+.dx-tab { flex: 1 1 0; min-width: 0; min-height: 48px; margin: 0 3px; padding: 6px 0 5px; border: 0; border-radius: 14px; background: transparent;
+  color: var(--dx-dim); display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; }
+.dx-tab svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dx-tab span { padding-top: 4px; font: 400 10.5px/14px var(--dx-sans); white-space: nowrap; }
+.dx-tab[aria-selected="true"] { background: var(--dx-accent-soft); color: var(--dx-text); }
+.dx-tab[aria-selected="true"] span { font-weight: 700; }
+.shell[data-mode="dex"] :is(.dx-pill, .dx-room, .dx-tab):focus-visible { outline: 2px solid var(--dx-accent); outline-offset: 2px; }
+
+/* room 3, Exchange */
+.dxapp { min-height: 100%; padding: 12px; background: var(--dx-bg); color: var(--dx-text); font: 400 12px/1.4 var(--dx-sans); }
+.dx-card { background: var(--dx-surface); border: 1px solid var(--dx-border); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.dx-note { color: var(--dx-dim); font: 400 12px/1.5 var(--dx-sans); }
+.dx-note b { color: var(--dx-text); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .dx-pill--sq:active, .dx-room:active, .dx-tab:active { transform: none; } }
+#view-dexicon { padding: 0; }

@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="chat.css" />   <!-- the KeetChat panel, scoped to .chatapp -->
   <link rel="stylesheet" href="pools.css" />  <!-- the PandaPools panel, scoped to .ppapp -->
   <link rel="stylesheet" href="atomix-ui.css" /> <!-- the AtomiX panel, scoped to .axapp -->
+  <link rel="stylesheet" href="dexicon.css" />   <!-- Dexicon: its full-screen chrome and room 3 (Exchange) -->
 </head>
 <body>
   <div class="shell" id="shell" data-mode="tabs">
@@ -55,10 +56,17 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="node"><span class="tab__in"><svg class="tab__ic" viewBox="0 0 200 200" aria-hidden="true"><path d="M100,0C44.77,0,0,44.77,0,100s44.77,100,100,100,100-44.77,100-100S155.23,0,100,0Z"/></svg><span class="tab__l">Node</span></span></button>
       </nav>
 
-      <!-- Temporary holder (until Phase 3): the existing AtomiX and Pools panels share the Dexicon tab. -->
-      <div class="dexswitch" id="dexSwitch" role="group" aria-label="Dexicon">
-        <button class="dexswitch__b" data-view="atomix" aria-pressed="true">AtomiX</button>
-        <button class="dexswitch__b" data-view="pandapools" aria-pressed="false">Pools</button>
+      <!-- Dexicon, full screen (the shell's bars are hidden while its tab is selected): header, status strip, room pills.
+           As the Android client (apks/dexicon MainActivity.java buildChrome). Drawn and driven by dexicon-ui.js. -->
+      <div class="dx-top" id="dxTop">
+        <div class="dx-head">
+          <h1 class="dx-logo">◆ DEXICON</h1>
+          <span class="dx-pill dx-pill--ver" id="dxVer">v…</span>
+          <button class="dx-pill dx-pill--sq" id="dxTheme" aria-label="Switch Dexicon to its light theme">☀</button>
+          <button class="dx-pill dx-pill--sq" id="dxClose" aria-label="Back to Minima Core">✕</button>
+        </div>
+        <div class="dx-strip"><span class="dx-pill dx-pill--pair" id="dxPair" role="status">CONNECTING…</span><span class="dx-pill" id="dxBlock"># …</span></div>
+        <div class="dx-rail" id="dxRail" role="group" aria-label="Dexicon rooms"></div>
       </div>
 
       <!-- Shown after a Shutdown (or if the node stops on its own): the window must not look alive. -->
@@ -107,6 +115,10 @@
 
       <section class="view" id="view-pandapools">
         <div class="ppapp" id="ppBody"></div>
+      </section>
+
+      <section class="view" id="view-dexicon">
+        <div class="dxapp" id="dxBody"></div>
       </section>
 
       <section class="view" id="view-atomix">
@@ -214,6 +226,8 @@
       </section>
       </main>
 
+      <nav class="dx-nav" id="dxNav" role="tablist" aria-label="Dexicon" hidden></nav>
+
       <footer class="foot" id="foot">
         <span class="foot__l"><i class="foot__dot" id="footDot"></i><span id="footL">Awaiting blocks…</span></span>
         <span class="foot__r" id="footR"></span>
@@ -245,6 +259,8 @@
   <script src="poolcalc.js"></script>
   <script src="pools.js"></script>
   <script src="atomix-ui.js"></script>
+  <script src="dexicon-core.js"></script>
+  <script src="dexicon-ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

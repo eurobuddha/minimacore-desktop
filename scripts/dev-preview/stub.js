@@ -19,6 +19,7 @@
   // the node's own format (Java Date.toString()), with a zone name JavaScript cannot parse: the shell must not need to
   const BLOCK_TIME = "Thu Jul 16 14:54:04 BST 2026";
   try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); localStorage.removeItem("walletOrder"); localStorage.setItem("histRebuildVer", "1"); localStorage.setItem("histNormVer", "3"); localStorage.setItem("histHideForeign", Q.get("hforeign") === "1" ? "1" : "0"); if (Q.get("tokens")) localStorage.setItem("walletOrder", Q.get("tokens")); } catch (e) {}
+  try { localStorage.setItem("dexicon", JSON.stringify({ tabs: { exchange: Q.get("dxtab") || "trade" }, theme: Q.get("dx") === "light" ? "DAYLIGHT" : "ONYX" })); } catch (e) {}
   // NOT A SEED: four list words repeated, so the word boxes accept them. Nothing was ever made from these.
   const FAKE_SEED = "TEST ONLY VOID ABANDON ".repeat(6).trim();
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
@@ -139,6 +140,9 @@
     shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
     vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
+    // Dexicon (main/dexicon.js read model). ?dxs=notready: the engine has not started
+    dxStatus: async () => Q.get("dxs") === "notready" ? { version: "0.0.89", started: false, ready: false, restingReady: false, publicId: null, block: 0, relays: [], price: { mid: 0, ageMs: null, label: "" }, log: [] }
+      : { version: "0.0.89", started: true, ready: true, restingReady: true, publicId: PK("5D"), block: 2428089, relays: ["https://relay-one.example/dex-relay", "https://relay-two.example/dex-relay"], price: { mid: 0.00315, ageMs: 4000, label: "MEXC" }, log: [] },
     parlonsStatus: async () => ({ ready: false }), portmapStatus: async () => ({})
   };
   // Anything not listed: an "on…" subscription is a no-op that returns its unsubscribe; any other call

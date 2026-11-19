@@ -30,6 +30,7 @@ const { makeSqlShim } = require("./pandapools/sqlshim");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const TICK_MS = 10000;
+const ENGINE_VERSION = "0.0.89";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
 const PRICE_HOST = "api.mexc.com";   // resting/price.js DEPTH_URL / BOOK_URL
 
 // The MiniDapp page builds and signs its own FAST takes, so it needs node commands; it gets exactly the verbs its
@@ -202,7 +203,7 @@ function makeHost(opts = {}) {
   const plain = (v) => JSON.parse(JSON.stringify(v));   // out of the engine's vm realm
 
   function status() {
-    const s = { started: !!timer, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
+    const s = { version: ENGINE_VERSION, started: !!timer, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
       price: { mid: 0, ageMs: null, label: "" }, log: LOG.slice(-20) };
     try {
       if (!ctx || !ctx.DX) return s;
@@ -269,4 +270,4 @@ function makeHost(opts = {}) {
 }
 
 const host = makeHost();   // the app's one Dexicon engine (main.js); tests build their own with makeHost(opts)
-module.exports = Object.assign(host, { makeHost, dexCommand, dexSql, DEX_VERBS });
+module.exports = Object.assign(host, { makeHost, dexCommand, dexSql, DEX_VERBS, ENGINE_VERSION });

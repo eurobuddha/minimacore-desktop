@@ -119,7 +119,8 @@ test("block time: the node's Java date is read without Date parsing (BST, CET, G
 test("tab selection: where a view sits decides what the shell wears", () => {
   const { shellMode, viewOfTab } = lift(["TAB_OF", "SUB_TITLE", "viewOfTab", "shellMode"], 'let dexView = "pandapools";\n');
   assert.deepEqual(shellMode("balances"), { tab: "wallet", mode: "tabs" });
-  assert.deepEqual(shellMode("pandapools"), { tab: "dexicon", mode: "tabs" });
+  assert.deepEqual(shellMode("pandapools"), { tab: "dexicon", mode: "dex" }, "Dexicon is full screen: none of the shell's bars");
+  assert.deepEqual(shellMode("dexicon"), { tab: "dexicon", mode: "dex" });
   assert.deepEqual(shellMode("node"), { tab: "node", mode: "tabs" });
   for (const v of ["send", "receive", "logs", "terminal", "settings"]) assert.deepEqual(shellMode(v), { tab: "", mode: "sub" }, v);
   for (const v of ["mail", "ethwallet", "faucet", "parlons"]) assert.deepEqual(shellMode(v), { tab: "", mode: "app" }, v);

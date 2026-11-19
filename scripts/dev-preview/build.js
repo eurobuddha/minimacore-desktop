@@ -59,6 +59,8 @@ if (process.argv.includes("--shots")) {
     ["tray", "view=node&tray=1"], ["overflow", "view=balances&tray=0&menu=1"], ["ethwallet", "view=ethwallet&tray=0"],
     ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],
     ["stopped", "view=balances&tray=0&state=stopped"], ["shutdown", "view=balances&tray=0&shutdown=1"], ["apps-hidden", "view=apps&tray=0&hidden=mail"],
+    ["dex-mxusd", "view=atomix"], ["dex-pools", "view=pandapools"], ["dex-exchange", "view=dexicon"], ["dex-exchange-light", "view=dexicon&dx=light"],
+    ["dex-exchange-1440x900", "view=dexicon", 1440, 900, 1], ["dex-stopped", "view=dexicon&state=stopped"], ["dex-notready", "view=dexicon&dxs=notready"],
     ["wide-1440x900", "view=balances&tray=1", 1440, 900, 1], ["narrow-680", "view=balances&tray=1", 680, 704, 2]
   ];
   const only = (process.argv.find(a => a.startsWith("--only=")) || "").slice(7);   // --only=wallet captures the names that start with it

@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.100] — Dexicon, full screen (Phase 3b, part 1): the chrome
+
+Selecting the Dexicon tab now opens Dexicon full screen, as on the phone: none of the shell's bars.
+
+- Header "◆ DEXICON", the version pill (the vendored engine's version, 0.0.89), the sun / moon button (Dexicon's own dark and light theme, remembered, independent of the system theme), and ✕ back to the screen you came from.
+- Status strip with the block number. It says what is true: "NODE STOPPED" (click to start), "PAIRED · starting Dexicon", "PAIRED · reading the chain", "PAIRED".
+- Three room pills: ① MxUSD, ② Pools, ③ Exchange (selected = orange). ① and ② open the existing AtomiX and Pools panels, unchanged, inside this chrome until phases 3c and 3d; the temporary two-pill switch is gone. Those panels keep their own tab bars, so the Dexicon bottom bar shows for ③ only.
+- Bottom tab bar for ③: Trade, Orders, History, Activity, Assets, Settings, with the phone's icons. Each room remembers its last tab. Dexicon opens on ①.
+- Colours, sizes and radii are the Android client's (`Design.java`, `MainActivity.java`); Inter and JetBrains Mono are the files already in `renderer/fonts`.
+- The Exchange screens themselves come in the next versions; until then ③ shows the engine's state.
+- `renderer/dexicon-core.js` (logic, no DOM), `renderer/dexicon-ui.js`, `renderer/dexicon.css`; `scripts/dexicon-ui.test.cjs` (run by `npm run test:dexicon`); preview captures `dex-*`.
+
 ## [0.18.99] — Dexicon engine hosted (Phase 3a, part 2): it runs with the node; no screens yet
 
 The Dexicon engine (the FAST book over relays and the on-chain book with pool routing) now runs inside the app, for the Exchange room that Phase 3b will draw. There is no new screen in this version. Full notes and the safety analysis: `docs/DEXICON_ENGINE_NOTES.md`.
