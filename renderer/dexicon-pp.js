@@ -240,6 +240,9 @@
 
   /** An error as the bridge gives it, without the bridge's own wrapping. */
   const bare = (e) => String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
+  /** The glue's own words when a call got no answer in time (main/pandapools.js NO_ANSWER and its kin): said as they are.
+   *  Whether the thing was done is then NOT KNOWN, so it is never reworded as "failed", "was not" or "could not". "" = another error. */
+  const noAnswer = (e) => (/gave no answer in time/.test(bare(e)) ? bare(e) : "");
   /**
    * A failed action in the alert's three parts: what happened, whether funds moved, what to do. The engine reports
    * fixed sentences; the ones a reader cannot act on are said in plain words, with the node's own answer beside them
@@ -328,23 +331,23 @@
     /** Check for reserves: ppRecoverSaved(address), then its result. Nothing is signed. */
     async recover(api, ui, address) {
       try { const r = await api.ppRecoverSaved(address); await ui.show("Recovery result", mx(recoveryResult(r))); return r; }
-      catch (e) { ui.say("The reserves could not be checked: " + mx(bare(e)) + ". Nothing was signed and nothing was changed.", "error"); return null; }
+      catch (e) { ui.say(noAnswer(e) || "The reserves could not be checked: " + mx(bare(e)) + ". Nothing was signed and nothing was changed.", "error"); return null; }
     },
     /** Put a closed pool away: ppRetirePool(address, true). Hidden, never deleted. */
     async retire(api, ui, address) {
       try { await api.ppRetirePool(address, true); ui.say("Put away. The recipe is still saved and still goes into your backups.", "note"); return true; }
-      catch (e) { ui.say("The pool was not put away: " + mx(bare(e)) + ".", "error"); return false; }
+      catch (e) { ui.say(noAnswer(e) || "The pool was not put away: " + mx(bare(e)) + ".", "error"); return false; }
     },
     /** Bring back: ppRetirePool(address, false) for each closed pool. */
     async unretire(api, ui, retired) {
       try { for (const r of retired) await api.ppRetirePool(r.address, false); ui.say("Closed pools are showing again.", "note"); return true; }
-      catch (e) { ui.say("Not every closed pool was brought back: " + mx(bare(e)) + ".", "error"); return false; }
+      catch (e) { ui.say(noAnswer(e) || "Not every closed pool was brought back: " + mx(bare(e)) + ".", "error"); return false; }
     },
     /** Confirm wallet signing state: the warning, then ppConfirmSigning(owner key, true). */
     async confirmSigning(api, ui, opk) {
       if (!await ui.confirm("Confirm current wallet signing state", "Confirm only if this node has the latest complete MinimaCore wallet backup, including signing counters, and every other copy has stopped signing. A seed or old backup is insufficient. This enables owner spending and automatic refresh for key:\n" + opk, "I confirm current wallet state")) return null;
       try { const ok = await api.ppConfirmSigning(opk, true); ui.say(ok ? "Confirmation saved. Owner signing is enabled for this pool." : "Not confirmed: signing stays paused. The owner key is missing, used up or below a recorded count.", ok ? "note" : "error"); return ok; }
-      catch (e) { ui.say("Not confirmed: " + mx(bare(e)) + ". Signing stays paused.", "error"); return null; }
+      catch (e) { ui.say(noAnswer(e) || "Not confirmed: " + mx(bare(e)) + ". Signing stays paused.", "error"); return null; }
     },
     // ---- create and migrate ----
     /** Step 1 of create reads what the old panel read, in its order: balance, the market-fed token, then the price anchor.
@@ -354,12 +357,31 @@
       try { const mt = await api.ppMarketToken(); usdt = (mt && mt.usdt) || ""; } catch (e) {}
       const c = createTokens(bal, usdt); if (!c.toks.length) return { none: true };
       let a = null; try { a = await api.ppCreateAnchor(); } catch (e) {}
-      return { t: c.toks[0], minimaAvail: c.minimaAvail, anchor: a && a.price ? { price: a.price, source: a.source || "market" } : null };
+      return { t: c.toks[0], minimaAvail: c.minimaAvail, anchor: a && a.price ? { price: a.price, source: a.source || "market", at: Number(a.at) || Date.now() } : null };
+    },
+    /**
+     * At Review (0.18.138): the price and the balances the form was opened with are READ AGAIN, by the same reads
+     * (createOpen). The form used to keep them for as long as it stayed open, across tabs and rooms, and hours later
+     * the review still said "matches MEXC market": the pool then opened off the market and was arbitraged at its
+     * owner's cost. had = the form's { anchor } (anchor null = the manual form). Returns { bad } (nothing may be
+     * sent), or { fresh, moved, text }: moved = the price differs, or a market price has appeared or gone; then the
+     * old and the new are said and the user must review again. Never a review from the old read.
+     */
+    async createRefresh(api, tryCmd, had, now) {
+      const o = await Act.createOpen(api, tryCmd), was = had && had.anchor, is = o.anchor;
+      if (o.none) return { bad: "Your wallet no longer holds sendable MxUSD, so the pool cannot be created. Nothing was sent." };
+      const per = (a) => cut(a.price, 8) + " " + o.t.name + " per MINIMA (" + a.source + ")", age = was ? since(was.at, now || Date.now()) : "";
+      if (was && !is) return { bad: "The market price could not be read again just now, so the opening price of " + per(was) + ", read " + age + ", cannot be checked. Nothing was sent: press Review again in a moment." };
+      if (!was && !is) return { fresh: o, moved: false, text: "" };
+      if (!was) return { fresh: o, moved: true, text: "A market price can be read now: " + per(is) + ". The pool opens at that price, so you no longer set it yourself. Enter the amount and review again. Nothing was sent." };
+      const a = C.dec(was.price), b = C.dec(is.price), moved = !a || !b || C.cmp(a, b) !== 0 || was.source !== is.source;
+      return { fresh: o, moved, text: moved ? "The price changed since it was read " + age + ": it was " + per(was) + ", it is now " + per(is) + ". The MINIMA needed was worked out again at the new price. Check the figures and press Review again. Nothing was sent." : "" };
     },
     /** The priced form's Create: the same checks, the same question, then ppCreate(token id, decimals, String(MINIMA derived), the amount as typed). */
     async createPriced(api, ui, t, minimaAvail, price, source, uStr) {
       const p = parseFloat(price);
       if (!(p > 0)) { ui.say("There is no price yet. Refresh the price and try again. Nothing was sent.", "note"); return null; }
+      source = String(source || "market");
       if (!amountOk(uStr)) { ui.say("Enter the " + t.name + " amount (a positive number). Nothing was sent.", "note"); return null; }
       const u = parseFloat(uStr), minima = derive(u, p);
       if (minima > minimaAvail || u > t.avail) { ui.say("Not enough balance for that amount. Nothing was sent.", "note"); return null; }
@@ -414,7 +436,7 @@
     },
     /** Export statement: ppStatement() (it tops up the history first) → exportCsv(csv, "pandapools-statement.csv"). */
     async statement(api, ui) {
-      let r; try { r = await api.ppStatement(); } catch (e) { ui.say("The statement was not built: " + mx(bare(e)) + ". No file was written.", "error"); return null; }
+      let r; try { r = await api.ppStatement(); } catch (e) { ui.say(noAnswer(e) || "The statement was not built: " + mx(bare(e)) + ". No file was written.", "error"); return null; }
       if (!r || !r.pools) { ui.say("There are no pools to report on yet. No file was written.", "note"); return null; }
       const path = await api.exportCsv(r.csv, "pandapools-statement.csv");
       ui.say(!path ? "Export cancelled. No file was written." : r.backfilled ? "Statement saved: " + plural(r.pools, "pool") + ", " + plural(r.rows, "transaction") + "." : "Statement saved, but the history is still being read from the node (" + r.rows + " transactions so far): the file says so. Export again later for the full statement.", "note");
@@ -422,7 +444,7 @@
     }
   };
 
-  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, noAnswer, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -606,6 +628,8 @@
   }
   const pool = (address) => (S.mine || []).find((p) => p.address === address);
   /** every money action of the screen: Dexicon's one gate, the buttons off while it runs, then a fresh read */
+  /** a READ (the statement, a reserve check): nothing is signed, so it does not hold the money gate; one at a time of its own */
+  const reading = (fn) => { if (S.reading) return; S.reading = true; (async () => { try { await fn(); } catch (e) { say(failText("That", e), "error"); } })().then(() => { S.reading = false; load(S.tab).then(paint, paint); }); };
   const act = (fn) => D.money(async () => { paint(); try { await fn(); } catch (e) { say(failText("That", e), "error"); } load(S.tab).then(paint, paint); }).then(paint, paint);
   async function addSheet(p) {
     const name = tokLabel(p.tok, p.tokName);
@@ -656,6 +680,7 @@
   function shared(force) { if (!D || (!force && Date.now() - S.sharedAt < 60000)) return; S.sharedAt = Date.now(); (async () => { S.st = await api().ppStatus().catch(() => null); if (up()) S.acts = await api().ppActivity().catch(() => S.acts); })().then(D.redraw, D.redraw); }
 
   // ---- Wallet (WalletView.java): the receive address, the tools, one card per balance ----
+  const GATE_BUSY = "A money action is still running. The coins (with Split and Consolidate) open when it has finished. Nothing was sent.";
   const walletSkeleton = () => `<div id="ppTop"></div><div id="ppWal"></div>`;
   const balName = (b) => (b.tokenid === MINIMA ? "MINIMA" : tokLabel(b.tokenid, D.TOK.tokenName(b.token, b.tokenid)));
   function paintWallet() {
@@ -665,7 +690,7 @@
     $("ppWal").innerHTML = `<div class="dx-card pp-card pp-wal"><div class="pp-fl"><b>AVAILABLE TO POOL</b></div><div class="pp-note">Sendable balances below. Funds locked in your pools show as LOCKED.</div>
         <div class="pp-recv"${S.addr ? ` data-copy="${esc(S.addr)}" title="Click to copy"` : ""}>${S.addr ? "Receive:  " + esc(S.addr) : "…"}</div><div class="pp-hint">click to copy your receive address</div>
         <button class="pp-link pp-link--row" data-ppwal="minima"${C.gate.on ? " disabled" : ""}>Consolidate MINIMA coins</button><button class="pp-link pp-link--row" data-ppwal="mxusd"${C.gate.on ? " disabled" : ""}>Consolidate MxUSD coins</button><button class="pp-link pp-link--row" data-ppwal="check">Check node connection</button></div>`
-      + (!S.bal ? `<div class="pp-line">Loading balances…</div>` : !list.length ? `<div class="pp-line">No balances yet.</div>` : list.map((b, i) => { const c = walletCard(b, balName(b), ago); return `<button class="dx-card pp-card pp-bal" data-ppbal="${i}"><span class="dx-row"><span class="pp-bal__h"><img class="pp-bal__ic" alt="" src="${b.tokenid === MINIMA ? "minima-mark.svg" : esc(D.TOK.identiconDataUri(b.tokenid))}"><b class="pp-bal__n">${esc(c.name)}</b></span><span class="pp-bal__r"><b>${esc(c.amount)}</b><small>${esc(c.coins)}</small></span></span>${b.tokenid === MINIMA || isMxusd(b.tokenid) ? "" : `<span class="pp-ids">Token: ${esc(b.tokenid)}</span>`}<span class="pp-bal__l">${esc(c.line)}</span></button>`; }).join(""));
+      + (!S.bal ? `<div class="pp-line">Loading balances…</div>` : !list.length ? `<div class="pp-line">No balances yet.</div>` : list.map((b, i) => { const c = walletCard(b, balName(b), ago); return `<button class="dx-card pp-card pp-bal" data-ppbal="${i}"${C.gate.on ? " disabled" : ""}><span class="dx-row"><span class="pp-bal__h"><img class="pp-bal__ic" alt="" src="${b.tokenid === MINIMA ? "minima-mark.svg" : esc(D.TOK.identiconDataUri(b.tokenid))}"><b class="pp-bal__n">${esc(c.name)}</b></span><span class="pp-bal__r"><b>${esc(c.amount)}</b><small>${esc(c.coins)}</small></span></span>${b.tokenid === MINIMA || isMxusd(b.tokenid) ? "" : `<span class="pp-ids">Token: ${esc(b.tokenid)}</span>`}<span class="pp-bal__l">${esc(c.line)}</span></button>`; }).join(""));
   }
   async function walletAct(what) {
     if (what === "check") { const b = await D.tryCmd("block"); return say(nodeCheck(D.running(), b && (b.block != null ? b.block : b), await api().ppStatus().catch(() => null)), "note"); }
@@ -711,9 +736,14 @@
     if (!c) return;
     if (what === "cancel") return leaveCreate();
     if (what === "next") { if (!$("ppcAck1") || !$("ppcAck1").checked) return say("Tick the box to confirm you understand. Nothing was sent.", "note"); c.ack1 = true; c.step = 2; S.said = null; return; }
-    if (what === "price") { $("ppcInfo").textContent = "Refreshing the price…"; try { const m = await api().ppMarket(); if (m && m.mid) c.anchor = { price: m.mid, source: "MEXC market" }; } catch (e) {} return paintCreateInfo(); }
+    if (what === "price") { $("ppcInfo").textContent = "Refreshing the price…"; try { const m = await api().ppMarket(); if (m && m.mid) c.anchor = { price: m.mid, source: "MEXC market", at: Number(m.at) || Date.now() }; } catch (e) {} return paintCreateInfo(); }
     if (what === "go") {
       const ack = !!($("ppcAck") && $("ppcAck").checked);
+      // the price and the balances are read again before anything is reviewed (Act.createRefresh): never a review from an old read
+      const f = await Act.createRefresh(api(), D.tryCmd, c).catch((e) => ({ bad: "The price and your balances could not be read again: " + bare(e) + ". Nothing was sent." }));
+      if (f.bad) return say(f.bad, "note");
+      const manual = !c.anchor; Object.assign(c, f.fresh);
+      if (f.moved) { if (manual) { const h = $("ppLp"); if (h) delete h.dataset.step; paint(); } else paintCreateInfo(); return say(f.text, "note"); }
       c.step = 3; paint();
       const r = c.anchor ? await Act.createPriced(api(), ui, c.t, c.minimaAvail, c.anchor.price, c.anchor.source, c.u || "") : await Act.createManual(api(), ui, c.t, c.x || "", c.y || "", ack);
       if (!r || r.err) { c.step = /BACKUP_REQUIRED/.test((r && r.err) || "") ? 1 : 2; if (c.step === 1) S.backupDue = true; return; }
@@ -811,10 +841,10 @@
     if (ds.ppmore) { if (ds.ppmore === "a") S.shownA += 60; else S.shownF += 60; return paint(); }
     if (ds.ppreload) return load(S.tab).then(paint, paint);
     if (ds.ppwal) return walletAct(ds.ppwal);
-    if (ds.ppbal != null) { const row = (S.bal || [])[Number(ds.ppbal)]; return row ? D.showCoins(row) : null; }   // the wallet's own coins dialog: every coin whole, with Split, Consolidate and the token's details and Send
+    if (ds.ppbal != null) { if (C.gate.on) return say(GATE_BUSY, "note"); const row = (S.bal || [])[Number(ds.ppbal)]; return row ? D.showCoins(row) : null; }   // not while a money action runs: Split and Consolidate are in this dialog   // the wallet's own coins dialog: every coin whole, with Split, Consolidate and the token's details and Send
     if (ds.ppcalc != null) return calc(ds.ppcalc);
     if (ds.pptool === "calc") return calc("");
-    if (ds.pptool === "statement") return act(() => Act.statement(api(), ui));
+    if (ds.pptool === "statement") return reading(() => Act.statement(api(), ui));
     if (ds.pptool === "closed") return act(closedPools);
     if (ds.pptool === "create") return act(() => createAct("open"));
     if (ds.ppcreate) return act(() => createAct(ds.ppcreate));
@@ -823,7 +853,7 @@
     if (ds.pptool === "backup") return act(() => backupDialog(false));
     if (ds.ppcollectnow) return act(() => Act.collectNow(api(), ui));
     if (ds.ppconfirm) return act(() => Act.confirmSigning(api(), ui, ds.ppconfirm));
-    if (ds.pprecover) return act(async () => { say("Checking local reserves and current archive proofs. No transaction is signed.", "note"); await Act.recover(api(), ui, ds.pprecover); S.said = null; });
+    if (ds.pprecover) return reading(async () => { say("Checking local reserves and current archive proofs. No transaction is signed.", "note"); await Act.recover(api(), ui, ds.pprecover); S.said = null; });
     if (ds.ppretire) return act(() => Act.retire(api(), ui, ds.ppretire));
     if (ds.ppadd) { const p = pool(ds.ppadd); return p ? act(() => addSheet(p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }
     if (ds.ppclose) { const p = pool(ds.ppclose); return p ? act(() => Act.withdraw(api(), ui, p)) : say("That pool is no longer in the list. Nothing was sent.", "note"); }

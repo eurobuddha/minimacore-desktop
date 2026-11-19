@@ -107,6 +107,7 @@ if (process.argv.includes("--shots")) {
     ["pp-create-2-dxlight", "view=pandapools&pptab=mylp&dx=light&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90"],
     ["pp-create-3", "view=pandapools&pptab=mylp&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D%7C%5Bdata-ppcreate%3Dgo%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90"],
     ["pp-create-4", "view=pandapools&pptab=mylp&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D%7C%5Bdata-ppcreate%3Dgo%5D%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90"],
+    ["pp-create-moved", "view=pandapools&pptab=mylp&pps=moved&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D%7C%5Bdata-ppcreate%3Dgo%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90"],
     ["pp-create-mintfail", "view=pandapools&pptab=mylp&pps=mintfail&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D%7C%5Bdata-ppcreate%3Dgo%5D%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90"],
     ["pp-create-refused", "view=pandapools&pptab=mylp&pps=backup2&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D%7C%5Bdata-ppcreate%3Dgo%5D%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90"],
     ["pp-create-manual", "view=pandapools&pptab=mylp&pps=manual&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D&ppin=%23ppcAck1%3D1%7C.pp-fld%20%5Bname%3Dx%5D%3D100%7C.pp-fld%20%5Bname%3Dy%5D%3D0.56"],

@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.138] — Dexicon ② Pools: a fresh price at Review, and a gate that cannot stay closed (review, mediums)
+
+- **Found (a)**: the create form kept the opening price and the balances it was opened with, across tabs and rooms, with no age limit. Hours later the review still said "matches MEXC market", and the pool would open off the market (arbitraged at its owner's cost).
+- **At Review the price and the balances are read again.** If the price is the same, the review follows from that fresh read. If it moved (or its source changed), the form stays, the screen says the old and the new price and how old the first read was, the MINIMA needed is worked out again, and Review must be pressed again. If the price can no longer be read, nothing is sent. If the manual form is open and a market price can now be read, the pool opens at that price and the form says so.
+- **Found (b)**: four glue calls waited on one engine callback with no time limit (statement, check reserves, put a pool away, confirm signing). One dropped callback left Dexicon's one money gate closed in all three rooms until the app was restarted.
+- **Those calls now end** after a set time with what is true: "PandaPools gave no answer in time, so it is not known whether this was done. Check Activity before trying again." The screen says those words as they are, never "failed". A reserve check that got no answer no longer blocks the next one as "already running".
+- **Read-only actions no longer hold the money gate**: Export statement and Check for reserves.
+- **The coins dialog** (with Split and Consolidate) no longer opens from room ② Wallet while a money action is running.
+- The glue's shared `withTimeout` now clears its timer when the call ends.
+
 ## [0.18.137] — The wallet-restore gate: a store that cannot be opened, and this wallet's own pools (review, high)
 
 - **Found (a)**: a damaged `pandapools.sqlite` fails its integrity check on every start. Room ② then said "starting" for ever without the error, and the restore gate said "wait a moment and try again" for ever. AtomiX had the same dead end with `atomix.sqlite`.

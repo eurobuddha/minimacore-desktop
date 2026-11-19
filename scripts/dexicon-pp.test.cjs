@@ -649,3 +649,51 @@ test("a live pool of this wallet: the restore gate lists it whole with its reser
     assert.deepEqual(JSON.parse(JSON.stringify(mine)), [{ address: PK("B1").toLowerCase(), token: "MxUSD", reserveM: null, reserveT: null }], "a saved pool the scan does not show is still listed, its reserves said to be unknown");
   } finally { h.close(); }
 });
+
+// ---- 0.18.138: the mediums ----
+test("create: the opening price and the balances are read again at Review; a price that moved is shown old and new and must be reviewed again", async () => {
+  const now = Date.UTC(2026, 10, 19, 12), had = { anchor: { price: "0.0032", source: "MEXC market", at: now - 3 * 3600000 } };
+  const bal = async (c) => (c === "balance" ? BAL : null), read = (anchor) => recorder({ ppMarketToken: { usdt: MXUSD }, ppCreateAnchor: anchor });
+  let r = read({ price: "0.0041", source: "MEXC market", at: now });
+  const moved = await PP.Act.createRefresh(r.api, bal, had, now);
+  assert.equal(moved.moved, true); assert.equal(moved.fresh.anchor.price, "0.0041", "what is reviewed next is the new read");
+  assert.equal(moved.text, "The price changed since it was read 3h ago: it was 0.0032 MxUSD per MINIMA (MEXC market), it is now 0.0041 MxUSD per MINIMA (MEXC market). The MINIMA needed was worked out again at the new price. Check the figures and press Review again. Nothing was sent.");
+  assert.deepEqual(r.log.map((x) => x[0]), ["ppMarketToken", "ppCreateAnchor"], "reads only: nothing is created by the refresh");
+  const same = await PP.Act.createRefresh(read({ price: "0.00320", source: "MEXC market", at: now }).api, bal, had, now);
+  assert.equal(same.moved, false, "the same price written another way is not a move"); assert.equal(same.fresh.minimaAvail, 5000, "the balances are fresh too");
+  const src2 = await PP.Act.createRefresh(read({ price: "0.0032", source: "live pools" }).api, bal, had, now);
+  assert.equal(src2.moved, true, "MEXC gone, the pools' own price in its place: never 'matches MEXC market' from the old read"); assert.match(src2.text, /it is now 0\.0032 MxUSD per MINIMA \(live pools\)/);
+  const gone = await PP.Act.createRefresh(read(null).api, bal, had, now);
+  assert.match(gone.bad, /could not be read again just now, so the opening price of 0\.0032 MxUSD per MINIMA \(MEXC market\), read 3h ago, cannot be checked\. Nothing was sent/);
+  const appeared = await PP.Act.createRefresh(read({ price: "0.0033", source: "MEXC market" }).api, bal, { anchor: null }, now);
+  assert.equal(appeared.moved, true); assert.match(appeared.text, /^A market price can be read now: 0\.0033 MxUSD per MINIMA \(MEXC market\)\. The pool opens at that price/);
+  assert.equal((await PP.Act.createRefresh(read(null).api, bal, { anchor: null }, now)).moved, false, "still no market: the manual form goes on");
+  assert.match((await PP.Act.createRefresh(read({ price: "0.0032", source: "MEXC market" }).api, async () => [{ tokenid: "0x00", sendable: "5" }], had, now)).bad, /no longer holds sendable MxUSD/);
+  const pp = src("dexicon-pp.js"), go = pp.slice(pp.indexOf('if (what === "go") {'), pp.indexOf("async function migrateSheet"));
+  assert.ok(go.indexOf("await Act.createRefresh(api(), D.tryCmd, c)") > 0 && go.indexOf("await Act.createRefresh(api(), D.tryCmd, c)") < go.indexOf("c.step = 3"), "read again before the review step");
+  assert.ok(go.indexOf("if (f.moved)") < go.indexOf("Act.createPriced("), "a moved price returns to the form before any question");
+  assert.match(fs.readFileSync(path.join(ROOT, "main/pandapools.js"), "utf8"), /return \{ price: fmtMid\(\), source: "MEXC market", at: mktAt \}/);
+});
+test("a glue call the engine never answers ends with 'no answer', so Dexicon's one gate cannot stay closed; read-only actions do not hold it; the coins dialog does not open under a money action", async () => {
+  const h = await glue(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), ended = (p) => Promise.race([p.then(() => "answered", (e) => e.message), wait(1500).then(() => "STILL WAITING")]);
+  try {
+    await h.api.init(); const c = h.contexts.at(-1); h.api._setWaits({ statement: 40, recover: 40, retire: 40, confirm: 40 });
+    c.Store.setRetired = () => {}; c.ReserveRecovery.confirmKey = () => {}; c.History.sync = () => {}; c.ReserveRecovery.configuredArchive = () => {};   // the engine drops every callback
+    assert.equal(await ended(h.api.retirePool(PK("B1"), true)), h.api.NO_ANSWER); assert.equal(await ended(h.api.confirmSigning(PK("0B"), true)), h.api.NO_ANSWER);
+    assert.match(h.api.NO_ANSWER, /^PandaPools gave no answer in time, so it is not known whether this was done\. Check Activity before trying again\.$/); assert.ok(!/fail/i.test(h.api.NO_ANSWER), "never 'failed'");
+    assert.match(await ended(h.api.statement()), /gave no answer in time, so the statement was not built and no file was written/);
+    const backup = JSON.stringify({ pandapools_backup: 3, pools: [] });
+    assert.match(await ended(h.api.restore(backup)), /gave no answer in time, so it is not known which reserves were found\. Nothing was signed/);
+    assert.match(await ended(h.api.restore(backup)), /gave no answer in time/, "and the next check is not refused as 'already running'");
+  } finally { h.close(); }
+  // the screen says those words as they are, never 'was not' or 'could not'
+  for (const [fn, name] of [[(api, u) => PP.Act.retire(api, u, PK("B1")), "ppRetirePool"], [(api, u) => PP.Act.confirmSigning(api, u, PK("0B")), "ppConfirmSigning"], [(api, u) => PP.Act.recover(api, u, PK("B1")), "ppRecoverSaved"], [(api, u) => PP.Act.statement(api, u), "ppStatement"]]) {
+    const msg = "PandaPools gave no answer in time, so it is not known whether this was done. Check Activity before trying again.";
+    const r = recorder({ [name]: new Error("Error invoking remote method 'mcd:" + name + "': Error: " + msg) }), u = ui(true); u.show = async () => {};
+    await fn(r.api, u); assert.equal(u.said.at(-1)[0], msg, name);
+  }
+  assert.equal(PP.noAnswer(new Error("Pool not found.")), "");
+  const pp = src("dexicon-pp.js");
+  assert.match(pp, /if \(ds\.pptool === "statement"\) return reading\(\(\) => Act\.statement\(api\(\), ui\)\)/, "the statement does not hold the money gate"); assert.match(pp, /if \(ds\.pprecover\) return reading\(async \(\) => \{/, "nor does a reserve check");
+  assert.ok(!/const reading = [^\n]*D\.money/.test(pp)); assert.match(pp, /if \(ds\.ppbal != null\) \{ if \(C\.gate\.on\) return say\(GATE_BUSY, "note"\);/, "the coins dialog (Split, Consolidate) is not opened while a money action runs");
+});

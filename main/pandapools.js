@@ -191,7 +191,16 @@ function currentBlock() {
 function D(x) { return ctx.PP.dec(x); }
 function s(d) { try { return ctx.PP.plain(d); } catch (e) { return "0"; } }
 /** Reject a fund action that never settles (a dropped PoolMgr callback / a node command that never returns). */
-function withTimeout(p, ms, msg) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(msg)); }, ms); })]); }
+function withTimeout(p, ms, msg) { var t; return Promise.race([p, new Promise(function (_, rej) { t = setTimeout(function () { rej(new Error(msg)); }, ms); })]).finally(function () { clearTimeout(t); }); }
+/**
+ * For the calls that are not fund actions but still wait on ONE engine callback (statement, check reserves, put away,
+ * confirm signing): before 0.18.138 a callback the engine dropped left the screen's promise open for ever, and with it
+ * Dexicon's one money gate, in all three rooms, until the app was restarted. Now the wait ends with what is true: no
+ * answer came, so it is not known whether it was done.
+ */
+var NO_ANSWER = "PandaPools gave no answer in time, so it is not known whether this was done. Check Activity before trying again.";
+var READ_WAIT_MS = { statement: 300000, recover: 180000, retire: 30000, confirm: 60000 };
+function _setWaits(w) { Object.assign(READ_WAIT_MS, w); }
 
 // ------------------------------------------------------------------ glue-level fund-action queue
 //
@@ -413,7 +422,7 @@ function feed() {
  */
 function statement() {
   if (!ctx) return Promise.resolve({ csv: "", rows: 0, backfilled: false });
-  return new Promise(function (resolve) {
+  return withTimeout(new Promise(function (resolve) {
     ctx.History.sync(function () {
       // Same ownership test as the My LP tab: a pool is ours if we hold a recovery recipe for it, and the
       // reserves come from the live scan — so the statement and the pool card read the same numbers.
@@ -434,7 +443,7 @@ function statement() {
         });
       });
     });
-  });
+  }), READ_WAIT_MS.statement, "PandaPools gave no answer in time, so the statement was not built and no file was written. Try again in a moment.");
 }
 
 /** Keep the permanent history mirror current. Fire-and-forget; safe to call every block. */
@@ -563,7 +572,7 @@ async function market() {
  *  MEXC (tier 1) needs no node; only the tier-2 live-pool fallback needs ctx/POOLS. */
 async function createAnchor() {
   if (!marketFresh()) await refreshMarket();
-  if (marketFresh() && mktMid > 0) return { price: fmtMid(), source: "MEXC market" };
+  if (marketFresh() && mktMid > 0) return { price: fmtMid(), source: "MEXC market", at: mktAt };   // at: when MEXC was read (0.18.138: the review says how old the price is)
   try { await init(); } catch (e) { return { price: null, source: "" }; }
   var live = POOLS.filter(function (p) { return p && isMarketFed(p.tok); });
   var agg = ctx && ctx.Curve.aggregatePrice(live);
@@ -769,14 +778,14 @@ async function restore(json) {
   if(recoveryBusy)throw new Error("Pool recovery is already running.");
   recoveryBusy=true;const active=ctx;
   try {
-    return await new Promise(resolve => active.ReserveRecovery.configuredArchive(archive => {
+    return await withTimeout(new Promise(resolve => active.ReserveRecovery.configuredArchive(archive => {
       active.ReserveRecovery.restore(json,archive,null,r => {emitter.emit("update");if(active===ctx)scanNow().catch(()=>{});resolve(r);});
-    }));
+    })), READ_WAIT_MS.recover, "PandaPools gave no answer in time, so it is not known which reserves were found. Nothing was signed. Check My LP before trying again.");
   } finally {recoveryBusy=false;}
 }
 async function retirePool(address, retired) {
   await init(); const active=ctx;
-  return new Promise(resolve=>active.Store.setRetired(address, retired ? 1 : 0, ()=>{emitter.emit("update");resolve(true);}));
+  return withTimeout(new Promise(resolve=>active.Store.setRetired(address, retired ? 1 : 0, ()=>{emitter.emit("update");resolve(true);})), READ_WAIT_MS.retire, NO_ANSWER);
 }
 
 async function listRetired() {
@@ -801,7 +810,7 @@ async function archiveSettings(url) {
 }
 async function confirmSigning(opk,attested) {
   await init();if(attested!==true||typeof opk!=="string"||!/^0x[0-9a-fA-F]{64}$/.test(opk))return false;
-  const active=ctx;return new Promise(resolve=>active.ReserveRecovery.confirmKey(opk,ok=>{emitter.emit("update");resolve(ok);},lastTip));   // block-mode: the tip counts too
+  const active=ctx;return withTimeout(new Promise(resolve=>active.ReserveRecovery.confirmKey(opk,ok=>{emitter.emit("update");resolve(ok);},lastTip)), READ_WAIT_MS.confirm, NO_ANSWER);   // block-mode: the tip counts too
 }
 
 // Full backups are captured and encrypted in main; renderer never receives node bytes or its inner password.
@@ -867,5 +876,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, lastNodeFailure, status, activeWork, ownPools, setAsideStore,
-  _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed,
+  _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed, _setWaits, NO_ANSWER,
 };

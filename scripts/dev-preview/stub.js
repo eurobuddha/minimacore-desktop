@@ -99,6 +99,7 @@
     { pool: FAKE_PK("B001"), kind: "SWAP", minimaAmt: "40", tokenAmt: "0.128", tokenLabel: "MxUSD", ts: now - 190000000, observed: true }];
   const ppQuote = (tokid, dir, amt) => { const a = Number(amt) || 0; if (PPS === "notready") return { ok: false, notReady: true }; if (PPS === "toobig" || a > 400000) return { ok: false };
     const price = 0.00321, out = dir ? a * price * 0.9948 : (a / price) * 0.9948; return { ok: true, totalIn: String(amt), totalOut: (Math.floor(out * 1e8) / 1e8).toString(), effPrice: (dir ? out / a : a / out).toFixed(10), priceImpact: "0.27", poolsUsed: 2, poolsAvailable: 3, capped: false, maxPools: 6, quoteId: 7 }; };
+  let ppAnchorReads = 0;   // pps=moved: the price read when Create opened is three hours old and differs from the one read at Review
   const ppFail = (msg) => { throw new Error("Error invoking remote method 'mcd:pp': Error: " + msg); };
   const tok = (name, ticker) => ({ name: { name, ticker, description: "Fixture token" }, decimals: 8, scale: 0 });
   const LONG = "0x9C2B7E4D1A6F3058B2C4D6E8F0A1B3C5D7E9F1A2B4C6D8E0F2A4B6C8D0E2F4A6";
@@ -238,7 +239,7 @@
     ppPairInfo: async () => ({ pools: PP_POOLS.length, depth: "866751.25" }),
     ppAggregate: async () => (PP_POOLS.length ? [{ tok: MXUSD, name: "USDT", count: PP_POOLS.length, totalMinima: "866751.25", totalToken: "2783.56526575", price: "0.00321149", depth: "866751.25" }] : []),
     ppMarket: async () => ({ mid: PPS === "manual" ? 0 : 0.003178, fresh: PPS !== "manual" }), ppMarketToken: async () => ({ usdt: MXUSD }),
-    ppCreateAnchor: async () => (PPS === "manual" ? null : { price: "0.003178", source: "MEXC market" }), ppCreatePreview: async (dec, x, y) => ({ ok: true, price: (Number(y) / Number(x)).toFixed(8), kmin: "5600000" }),
+    ppCreateAnchor: async () => (PPS === "manual" ? null : { price: PPS === "moved" && ++ppAnchorReads > 1 ? "0.003402" : "0.003178", source: "MEXC market", at: Date.now() - (PPS === "moved" ? 3 * 3600000 : 0) }), ppCreatePreview: async (dec, x, y) => ({ ok: true, price: (Number(y) / Number(x)).toFixed(8), kmin: "5600000" }),
     ppQuote: async (t, d, a) => ppQuote(t, d, a),
     ppSwap: async () => (PPS === "swapfail" ? ppFail("Could not identify the input signing key.") : { txpowid: FAKE_PK("7001"), totalIn: "250", totalOut: "0.79833" }),
     ppWhy: async () => (PPS === "swapfail" ? { verb: "txnsign", error: "No keys found for the coin's address", at: Date.now() } : PPS === "mintfail" ? { verb: "newaddress", error: "MiniDAPP does not have WRITE permission", at: Date.now() } : null),
@@ -323,7 +324,7 @@
       if (view === "pandapools") setTimeout(() => {   // ?ppf=<amount>  ?ppdir=buy  ?ppin=<selector>=<text>|…  ?ppdo=<selector>|<selector>…  (one step every 450 ms)
         if (Q.get("ppdir") === "buy" && el("ppFlip")) el("ppFlip").click();
         if (Q.get("ppf") && el("ppAmt")) { el("ppAmt").value = Q.get("ppf"); el("ppAmt").oninput(); }
-        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.lastIndexOf("="), n = document.querySelector(kv.slice(0, i)); if (n) { if (n.type === "checkbox") n.checked = true; else n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };
+        const steps = (Q.get("ppdo") || "").split("|").filter(Boolean), type = () => { for (const kv of (Q.get("ppin") || "").split("|").filter(Boolean)) { const i = kv.lastIndexOf("="), n = document.querySelector(kv.slice(0, i)); if (n && (n.type === "checkbox" ? !n.checked : n.value !== kv.slice(i + 1))) { if (n.type === "checkbox") n.checked = true; else n.value = kv.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } } };   // typed once: typing again would clear what the screen has just said
         const step = (i) => setTimeout(() => { type(); if (i < steps.length) { const n = document.querySelector(steps[i]); if (n) n.click(); step(i + 1); } }, 450);
         step(0);
       }, 700);
