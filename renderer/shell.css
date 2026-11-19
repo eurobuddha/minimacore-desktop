@@ -78,7 +78,7 @@
 /* which parts of the bar each kind of screen wears */
 .shell[data-mode="tabs"] .bar__back, .shell[data-mode="tabs"] .bar__page { display: none; }
 .shell[data-mode="sub"] .bar { border-bottom: 1px solid var(--border); flex-basis: 65px; height: 65px; }
-.shell[data-mode="sub"] .bar__tray, .shell[data-mode="sub"] .bar__titles, .shell[data-mode="sub"] .bar__more,
+.shell[data-mode="sub"] .bar__tray, .shell[data-mode="sub"] .bar__titles,
 .shell[data-mode="sub"] .tabs, .shell[data-mode="sub"] .foot { display: none; }
 /* a tray app: the phone's dark host bar, the same in light and dark */
 .shell[data-mode="app"] .bar { flex-basis: 52px; height: 52px; background: var(--tray-bg); }
@@ -86,7 +86,11 @@
 .shell[data-mode="app"] .bar__titles { position: static; transform: none; margin-left: 4px; }
 .shell[data-mode="app"] .bar__brand { color: var(--tray-text); line-height: 20px; }
 .shell[data-mode="app"] .bar__sub { color: var(--tray-muted); line-height: 15px; }
-.shell[data-mode="app"] .bar__back, .shell[data-mode="app"] .bar__page, .shell[data-mode="app"] .bar__more,
+/* the overflow menu stays on sub screens and in tray apps: it is the only route to Logs, Terminal, Settings and Shutdown */
+.shell[data-mode="app"] .bar__more { color: var(--tray-muted); }
+.shell[data-mode="app"] .bar__more:hover { background: #212A2F; }
+.shell[data-mode="app"] .menu { top: 3px; }
+.shell[data-mode="app"] .bar__back, .shell[data-mode="app"] .bar__page,
 .shell[data-mode="app"] .tabs, .shell[data-mode="app"] .foot { display: none; }
 
 /* ---------------------------------------------------------------- tab strip (Widget.MinimaCore.Tabs) */
@@ -200,6 +204,7 @@ svg.apps-row__ic { fill: #08090B; }
 .apps-row__ic img, img.apps-row__ic { object-fit: contain; }
 .apps-row__main { flex: 1 1 0; min-width: 0; margin-left: 13px; }
 .apps-row__name { font-size: 15px; font-weight: 400; line-height: 20px; letter-spacing: .03em; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.apps-row__name .tab-badge { margin-left: 8px; vertical-align: 2px; }
 .apps-row__state { margin-top: 1px; font-size: 13px; font-weight: 400; line-height: 18px; letter-spacing: .018em; color: var(--dim2); }
 
 .apps-row__hide { flex: 0 0 auto; display: flex; align-items: center; margin-left: 10px; font-size: 13px; font-weight: 400; color: var(--dim); cursor: pointer; }

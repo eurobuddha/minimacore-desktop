@@ -160,6 +160,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.75 | 0 review | Signing queue: `sign`, `signfrom`, `txnauto` and `txnpost burn:` queued; a signer lost to a timeout holds the queue until `block` answers; a queued AtomiX publish send is dropped once its action has given up |
 | 0.18.76 | 1 review | Block time read from the node's Java date text (blank outside GMT/US zones before); the dev preview feeds the node's real format; `test:shell` wired into package.json and CI with executed tests |
 | 0.18.77 | 1 review | Shutdown names the AtomiX swaps, live market and unconfirmed pool transactions it would interrupt (or says what it could not check); a stopped node shows a strip with Start node on every screen. Quit path not covered |
+| 0.18.78 | 1 review | Overflow menu kept on sub screens and in tray apps; a hidden app's unread still lights the tray dot and shows on its Apps row; Wallet total, Faucet address, footer key uses and Node figures cleared on stop and restore; narrow tray is modal (`inert`); Wallet rows keep keyboard focus across the 15 s rebuild |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";

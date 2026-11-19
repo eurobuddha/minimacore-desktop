@@ -145,3 +145,22 @@ test("Shutdown names what is in flight, and says so when it could not be read", 
   assert.ok(/Could not be checked: AtomiX swaps, your AtomiX market, pool operations/.test(blind.message), "a failed read is never shown as idle");
   assert.ok(/id="stopBar"[^>]*hidden/.test(html) && /id="stopStart"/.test(html) && /api\.nodeStart\(\)/.test(app), "a stopped node shows a strip with Start");
 });
+
+test("a hidden app's unread still counts: the tray dot, and its Apps tab row", () => {
+  const { trayDotOn } = lift(["trayDotOn"]);
+  const row = (count, hidden) => ({ count, hidden });
+  assert.equal(trayDotOn([row(false, false), row(false, true)], false), false, "nothing unread: no dot");
+  assert.equal(trayDotOn([row(true, false)], false), true, "a shown app, tray closed: dot");
+  assert.equal(trayDotOn([row(true, false)], true), false, "a shown app, tray open: its row shows the count");
+  assert.equal(trayDotOn([row(true, true)], false), true, "a hidden app, tray closed: dot");
+  assert.equal(trayDotOn([row(true, true)], true), true, "a hidden app, tray open: its row is not there, so the dot stays");
+  assert.equal(trayDotOn([row(false, true), row(true, true)], true), true);
+  assert.ok(/data-count="\$\{a\.badge\}"/.test(app) && /function paintAppsCounts/.test(app), "the count is drawn on the Apps tab row");
+});
+
+test("the overflow menu is reachable from sub screens and tray apps; an overlaying tray is modal", () => {
+  const hides = [...shell.matchAll(/([^{}]+)\{[^}]*display:\s*none[^}]*\}/g)].map(m => m[1]).join(",");
+  assert.ok(/data-mode="sub"\] \.bar__tray/.test(hides), "the scan sees the hide rules");
+  for (const mode of ["sub", "app"]) assert.ok(!hides.includes('data-mode="' + mode + '"] .bar__more'), mode + " screens keep the overflow button");
+  assert.ok(/el\("stage"\)\.inert = open && NARROW\.matches/.test(app) && /id="stage"/.test(html), "the screen under an overlaying tray is inert");
+});

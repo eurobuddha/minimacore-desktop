@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.78] — shell review: the menu everywhere, hidden apps still count, nothing stale
+
+- The overflow button was hidden inside a tray app (Mail, ETH Wallet and the rest) and on Send, Receive, Logs, Terminal and Settings, so from those screens there was no route to Logs, Terminal, Settings or Shutdown, and the "Update" marker disappeared. It now stays in the bar on every screen.
+- Hiding an app also hid its unread count everywhere. A hidden app with unread items now lights the dot on the tray button (also while the tray is open, since its row is not in it), and MinimaMail and miniMall show their count beside their name on the Apps tab.
+- After a Shutdown or a failed balance read, the Wallet kept the old total above the message. The total now reads "–", and a failed read says "The balance could not be read" where it used to say "No coins yet".
+- After a restore, the Faucet kept the old wallet's address, and the footer's key uses and the Node tab's figures stayed the old wallet's until their timers ran out. All are cleared on a restore and when the node stops, and read again.
+- In a narrow window the open tray lies over the screen. The screen under it is now `inert`, so Tab stays in the tray; Escape or a click outside closes it.
+- The Wallet list is rebuilt every 15 seconds, which dropped keyboard focus. Focus now returns to the same token's row, or the same button on it.
+- Tests: `scripts/shell-test.cjs` runs the tray-dot rule for shown and hidden apps with the tray open and closed, and checks that no rule hides the overflow button on a sub screen or in a tray app. New preview capture: the Apps tab with MinimaMail hidden and one unread.
+
 ## [0.18.77] — shell review: Shutdown says what it interrupts, and a stopped node looks stopped
 
 - Shutdown (the overflow menu) asked the same plain question whether the wallet was idle or had a swap half way through. Before it asks, it now reads the AtomiX swap list, the saved AtomiX market and the PandaPools activity (the app's own records; no node command) and names what is in flight: the number of AtomiX swaps in progress ("a swap in progress cannot settle while the node is stopped and can time out"), an AtomiX market that is switched on, and pool transactions sent in the last hour that are not confirmed yet. If one of the three cannot be read within 5 seconds the dialog says which could not be checked, instead of looking idle.

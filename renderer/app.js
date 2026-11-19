@@ -182,7 +182,7 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running && (activeView === "balances" || activeView === "faucet")) renderActive();
+  if (wasRunning && !running) { resetWalletFigures(); if (activeView === "balances" || activeView === "faucet") renderActive(); }
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
@@ -453,7 +453,7 @@ async function postBootRestore() {
     RESTORE = null;   // clear the seed from memory
     try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
-    hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
+    resetWalletFigures(); api.nodeStatus().then(paintFooter); hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
     const st = el("rStat"); if (st) { st.textContent = "⚠ " + e.message; st.style.color = "var(--red)"; }
     el("setupBody").insertAdjacentHTML("beforeend",
@@ -492,7 +492,7 @@ function showRestoreOverlay() {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
       try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
-      hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
+      resetWalletFigures(); api.nodeStatus().then(paintFooter); hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
   };
   el("setup").style.display = "";
@@ -586,7 +586,7 @@ function initShell() {
   el("trayBtn").onclick = () => setTray(el("tray").hidden);
   el("trayScrim").onclick = () => setTray(false);
   setTray(!NARROW.matches && store("shellTray") === "1", true);
-  NARROW.addEventListener("change", () => { if (NARROW.matches) setTray(false, true); });
+  NARROW.addEventListener("change", () => setTray(!NARROW.matches && !el("tray").hidden, true));   // also drops `inert` when the window widens
 
   // overflow menu
   el("moreBtn").onclick = () => (el("moreMenu").hidden ? openMenu() : closeMenu());
@@ -647,6 +647,7 @@ function initTrayOrder(list) {
 function setTray(open, quiet) {
   el("tray").hidden = !open;
   el("trayScrim").hidden = !open;                      // CSS shows the scrim only when the tray overlays
+  el("stage").inert = open && NARROW.matches;          // an overlaying tray is modal: Tab stays inside it (Escape or the scrim closes it)
   el("shell").classList.toggle("shell--tray", open);
   el("trayBtn").setAttribute("aria-expanded", open ? "true" : "false");
   if (!NARROW.matches && !quiet) store("shellTray", open ? "1" : "0");   // remembered for the push-aside tray
@@ -661,10 +662,24 @@ function paintTraySelection() {
   });
 }
 // Mail and miniMall count their unread on their tray rows. With the tray closed those rows are out of
-// sight, so the tray button carries a dot while either count is showing.
+// sight, so the tray button carries a dot while either count is showing. A HIDDEN app's row is never in
+// sight, so its count lights the dot whether the tray is open or not, and shows on its Apps tab row.
+function trayDotOn(rows, trayOpen) { return rows.some(r => r.count && (r.hidden || !trayOpen)); }
 function paintTrayDot() {
-  const any = ["mailBadge", "shopBadge"].some(id => { const b = el(id); return b && !b.hidden && !b.closest(".tray__row").hidden; });
-  el("trayDot").hidden = !any || !el("tray").hidden;
+  const rows = TRAY_APPS.filter(a => a.badge && el(a.badge)).map(a => ({ count: !el(a.badge).hidden, hidden: el(a.badge).closest(".tray__row").hidden }));
+  el("trayDot").hidden = !trayDotOn(rows, !el("tray").hidden);
+  paintAppsCounts();
+}
+function paintAppsCounts() {
+  document.querySelectorAll("#appsList [data-count]").forEach(c => { const b = el(c.dataset.count); c.hidden = !b || b.hidden; c.textContent = b ? b.textContent : ""; });
+}
+// A stopped node or a restored seed: nothing the old wallet said may stay on screen (the Wallet total, the
+// Faucet's address, the footer's key uses, the Node dashboard). Each is read again when it is next shown.
+const NO_FIGURE = "–";
+function resetWalletFigures() {
+  el("walTotal").textContent = NO_FIGURE;
+  el("faucetBody").innerHTML = "";
+  FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {};
 }
 function waitHtml() { return nodeState === "stopped" ? `<div class="empty">The node is stopped.</div>` : `<div class="spin">Waiting for the node…</div>`; }
 function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
@@ -991,10 +1006,12 @@ function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshT
 // ---- Balances --------------------------------------------------------------
 async function renderBalances() {
   const host = el("balList");
-  if (!running) { host.innerHTML = waitHtml(); return; }
+  if (!running) { el("walTotal").textContent = NO_FIGURE; host.innerHTML = waitHtml(); return; }
   const bal = await tryCmd("balance");
   BAL_AT = Date.now();                                   // drives the "updated Ns ago" stamp
-  if (!bal || !bal.length) { host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
+  // a failed read is not an empty wallet: no old total above it, and no "No coins yet"
+  if (!bal) { el("walTotal").textContent = NO_FIGURE; host.innerHTML = `<div class="empty">The balance could not be read. It is read again every 15 seconds.</div>`; return; }
+  if (!bal.length) { el("walTotal").textContent = "0"; host.innerHTML = `<div class="card"><div class="view__desc">No coins yet. Your balance appears here once the node has synced and you hold MINIMA or tokens.</div></div>`; return; }
   BAL_BY_TID = {};
   for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
   // "Total balance" is the MINIMA headline, the same sendable figure its row shows.
@@ -1007,7 +1024,12 @@ async function renderBalances() {
     const sc = await tryCmd("coins relevant:true sendable:true") || [];
     for (const c of sc) { const t = c.tokenid || MINIMA; SENDABLE_COUNT[t] = (SENDABLE_COUNT[t] || 0) + 1; }
   } catch (e) { /* nudge just won't show if we can't count — safe default */ }
+  // The list is rebuilt every 15 s. Keyboard focus stays where it was: the same token's row, or the same button on it.
+  const stops = (r) => [r, ...r.querySelectorAll("button")];
+  const was = host.contains(document.activeElement) ? document.activeElement.closest(".balrow") : null;
+  const wasTid = was && was.dataset.tokenid, wasStop = was ? stops(was).indexOf(document.activeElement) : -1;
   host.innerHTML = bal.map(balCardHtml).join("");
+  if (was) { const row = [...host.querySelectorAll(".balrow")].find(r => r.dataset.tokenid === wasTid); if (row) (stops(row)[wasStop] || row).focus(); }
   host.querySelectorAll(".consolidate-btn").forEach(btn => btn.onclick = async (e) => {
     e.stopPropagation();                                 // don't also open the detail modal
     const tid = btn.dataset.tokenid;
@@ -2072,9 +2094,10 @@ function renderApps() {
     const core = a.id === "core", off = hidden.includes(a.id);
     return `<div class="apps-row">
     ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
-    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}</div><div class="apps-row__state">${core ? "Always on" : off ? "Hidden from drawer" : "In app drawer"}</div></div>
+    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${core ? "Always on" : off ? "Hidden from drawer" : "In app drawer"}</div></div>
     <label class="apps-row__hide"><span>Hide</span><button class="switch" role="switch" aria-checked="${off}" aria-label="Hide ${esc(a.name)}" data-hide="${a.id}"${core ? " disabled" : ""}></button></label>
   </div>`; }).join("");
+  paintAppsCounts();
   el("appsList").querySelectorAll(".switch:not([disabled])").forEach(sw => sw.onclick = () => {
     const id = sw.dataset.hide, now = hiddenApps();
     store("shellHidden", (now.includes(id) ? now.filter(x => x !== id) : now.concat(id)).join(","));
