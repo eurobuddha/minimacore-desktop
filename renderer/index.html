@@ -65,7 +65,7 @@
           <button class="dx-pill dx-pill--sq" id="dxTheme" aria-label="Switch Dexicon to its light theme">☀</button>
           <button class="dx-pill dx-pill--sq" id="dxClose" aria-label="Back to Minima Core">✕</button>
         </div>
-        <div class="dx-strip"><span class="dx-pill dx-pill--pair" id="dxPair" role="status">CONNECTING…</span><span class="dx-pill" id="dxBlock"># …</span></div>
+        <div class="dx-strip"><span class="dx-pill dx-pill--pair" id="dxPair" role="status">CONNECTING…</span><button class="dx-pill dx-pill--ccy" id="dxCcy" hidden>⇄  …</button><span class="dx-pill" id="dxBlock"># …</span></div>
         <div class="dx-rail" id="dxRail" role="group" aria-label="Dexicon rooms"></div>
       </div>
 
@@ -122,7 +122,8 @@
       </section>
 
       <section class="view" id="view-atomix">
-        <div class="axapp" id="axBody"></div>
+        <div class="dxapp" id="dxAxBody"></div>   <!-- room ① MxUSD: AtomiX as the phone draws it (dexicon-ax.js) -->
+        <div class="axapp" id="axBody" hidden></div>   <!-- the panel it replaces; not drawn, kept until the 3e parity audit -->
       </section>
 
       <section class="view" id="view-ethwallet">
@@ -261,6 +262,7 @@
   <script src="atomix-ui.js"></script>
   <script src="dexicon/lib/activity.js"></script>   <!-- the engine's own activity stage machine (verbatim, pure): window.AX.activity -->
   <script src="dexicon-core.js"></script>
+  <script src="dexicon-ax.js"></script>
   <script src="dexicon-ui.js"></script>
   <script src="app.js"></script>
 </body>

@@ -1,8 +1,9 @@
 /*
  * dexicon-ui.js: Dexicon's screens. The chrome (header, status strip, room pills, bottom tab bar) is native and is
  * the Android client's (apks/dexicon MainActivity.java buildChrome); logic without a DOM lives in dexicon-core.js.
- * Rooms ① MxUSD and ② Pools show the existing desktop AtomiX and Pools panels, as they are, until phases 3c / 3d.
- * Room ③ Exchange is drawn here over the hosted Dexicon engine (window.mcd dx* calls, main/dexicon.js).
+ * Room ① MxUSD is AtomiX (renderer/dexicon-ax.js draws Swap, Market and OTC); room ② Pools shows the existing desktop
+ * Pools panel until phase 3d. Room ③ Exchange is drawn here over the hosted Dexicon engine (window.mcd dx* calls,
+ * main/dexicon.js). Activity, Assets and Settings are one screen each, shown in rooms ① and ③.
  */
 const DexUI = (() => {
   "use strict";
@@ -10,6 +11,9 @@ const DexUI = (() => {
   const KEY = "dexicon";
   // Android's tab icons, path data unchanged (apks/dexicon res/drawable/ic_tab_*.xml; 24 grid, stroke 2, round)
   const ICON = {
+    swap: "M7,4 L7,16 M7,16 L4,13 M7,16 L10,13 M17,20 L17,8 M17,8 L14,11 M17,8 L20,11",
+    market: "M6,20 L6,10 M12,20 L12,4 M18,20 L18,14",
+    otc: "M4,9 L18,9 M14,5 L18,9 L14,13 M20,15 L6,15 M10,11 L6,15 L10,19",
     trade: "M8,4 L8,20 M6,8 L10,8 L10,15 L6,15 Z M16,4 L16,18 M14,7 L18,7 L18,13 L14,13 Z",
     orders: "M9,7 L20,7 M9,12 L20,12 M9,17 L20,17 M4,7 L5,7 M4,12 L5,12 M4,17 L5,17",
     history: "M3,12 A9,9 0 1,1 21,12 A9,9 0 1,1 3,12 M12,7 L12,12 L15,14",
@@ -36,13 +40,18 @@ const DexUI = (() => {
     $("dxTheme").onclick = () => { C.toggleTheme(mem); write(); paintTheme(); };
     $("dxClose").onclick = () => opts.leave();
     $("dxPair").onclick = () => { if (node.state === "stopped") opts.start(); };
+    $("dxCcy").onclick = () => DexAx.switchCurrency();
     api.onDexicon((message) => { if (typeof message === "string") onService(message); if (Page.frame && typeof message === "string") Page.frame.contentWindow.postMessage({ dxRoom: 1, update: { dex: message } }, "*"); if (shown()) refresh(); else watch(); });
     window.addEventListener("message", onFrameMessage);
     // the FAST book moves between blocks; and on every other tab the engine is still watched, so its page exists (watch)
-    setInterval(() => { if (shown() && C.ROOMS[mem.room].view === "dexicon") refresh(); else watch(); }, 5000);
+    setInterval(() => { if (mine()) refresh(); else watch(); DexAx.tick(); }, 5000);
     paintTheme();
   }
   const shown = () => $("shell").dataset.mode === "dex";
+  const axRoom = () => C.ROOMS[mem.room].view === "atomix";
+  /** the screen on show is one this file draws: any tab of room 3, and the shared tabs of room 1 */
+  const mine = () => shown() && (C.ROOMS[mem.room].view === "dexicon" || (axRoom() && C.SHARED.includes(C.tabOf(mem))));
+  const host = () => $(axRoom() ? "dxAxBody" : "dxBody");
 
   /** Called for every screen change (app.js selectTab). */
   function paint(view) {
@@ -71,6 +80,9 @@ const DexUI = (() => {
     const block = (node.health && node.health.block) || (st && st.block) || 0;
     $("dxBlock").textContent = "# " + (block > 0 ? block : "…");
     $("dxVer").textContent = "v" + ((st && st.version) || "…");
+    // the ⇄ currency pill belongs to AtomiX's room only (MainActivity: ccyPill, room 0)
+    const pill = DexAx.pill(), c = $("dxCcy");
+    c.hidden = !axRoom(); c.textContent = pill.text; c.dataset.axccy = pill.currency; c.disabled = pill.busy; c.setAttribute("aria-label", pill.label);
   }
   function node_(s) { node = s || { state: "" }; if (!opts) return; paintStrip(); if (node.state === "running") watch(); else pageEnsure(); }
   /** The engine's state, read on EVERY tab: the page frame is made as soon as the engine is ready and remade when the
@@ -85,7 +97,7 @@ const DexUI = (() => {
   async function refresh() {
     try { st = await api.dxStatus(); } catch (e) { st = null; }
     paintStrip(); pageEnsure();
-    if (shown() && C.ROOMS[mem.room].view === "dexicon") { await load().catch(() => {}); draw(); }
+    if (mine()) { await load().catch(() => {}); draw(); }
   }
 
   // ---- the page: the taker's engine, verbatim, in a hidden sandboxed frame (renderer/dexicon/mds.js) ----
@@ -186,14 +198,15 @@ const DexUI = (() => {
   const say = (text, kind) => { X.said = { text: C.refusal(text), kind: kind || C.feedbackKind(C.refusal(text)) }; draw(); };
 
   function render() {
-    const body = $("dxBody"); if (!body) return;
+    const body = host(); if (!body) return;
     const tab = C.tabOf(mem);
+    if (axRoom() && !C.SHARED.includes(tab)) return DexAx.render(tab, body);
     if (body.dataset.tab !== tab) { body.dataset.tab = tab; body.innerHTML = tab === "trade" ? tradeSkeleton() : ""; if (tab === "trade") bindTrade(); body.onclick = tab === "trade" ? null : onTabClick; $("main").scrollTop = 0; X.said = null; }
     draw();
     load().then(draw, draw);
   }
   function draw() {
-    const body = $("dxBody"); if (!body || !shown() || C.ROOMS[mem.room].view !== "dexicon") return;
+    const body = host(); if (!body || !mine()) return;
     const tab = body.dataset.tab;
     if (tab === "trade") paintTrade();
     else if (document.activeElement && body.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // never redraw under someone typing
@@ -549,5 +562,5 @@ const DexUI = (() => {
       + `<div class="dx-card"><div class="dx-h">ENGINE</div><div class="dx-sub dx-sub--sans">Dexicon engine ${esc((st && st.version) || "…")} · block ${esc((st && st.block) || "…")} · ${px && px.mid > 0 ? esc(C.priceName(px.source) + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : "no MEXC price yet"}</div></div>`;
   }
 
-  return { init, paint, render, node: node_, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
+  return { init, paint, render, node: node_, dialog, paintStrip, pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
 })();

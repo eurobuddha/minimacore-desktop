@@ -7,8 +7,8 @@ const C = require("../renderer/dexicon-core.js");
 test("rooms: three, in the phone's order; Exchange has the phone's six tabs", () => {
   assert.deepEqual(C.ROOMS.map(r => r.n + " " + r.label), ["① MxUSD", "② Pools", "③ Exchange"]);
   assert.deepEqual(C.ROOMS[2].tabs.map(t => C.TAB_LABEL[t]), ["Trade", "Orders", "History", "Activity", "Assets", "Settings"]);
-  assert.deepEqual([C.ROOMS[0].view, C.ROOMS[1].view], ["atomix", "pandapools"], "rooms 1 and 2 are the existing panels until 3c / 3d");
-  assert.deepEqual([C.ROOMS[0].tabs, C.ROOMS[1].tabs], [[], []], "and get no Dexicon tab that would do nothing");
+  assert.deepEqual([C.ROOMS[0].view, C.ROOMS[1].view], ["atomix", "pandapools"]);
+  assert.deepEqual(C.ROOMS[1].tabs, [], "room 2 is the existing panel until 3d and gets no Dexicon tab that would do nothing");   // room 1: scripts/dexicon-ax.test.cjs
 });
 
 test("each room remembers its last tab; Dexicon opens on room 1; the theme is remembered", () => {
@@ -68,7 +68,7 @@ test("the screens' code makes the frame without any visit to Dexicon, keeps it a
   const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() { e.parent.children.splice(e.parent.children.indexOf(e), 1); e.removed = true; }, querySelectorAll: () => [], querySelector: () => null }; return e; };
   const els = {}, timers = [], listeners = {}; let clock = 1000000, status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {} }, service = null, asked = 0;
-  const win = { DexCore: C, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
+  const win = { DexCore: C, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {} }, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
     Date: class extends Date { static now() { return clock; } },
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null },
     addEventListener: (t, f) => { listeners[t] = f; } };

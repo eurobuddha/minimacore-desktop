@@ -60,7 +60,11 @@ if (process.argv.includes("--shots")) {
     ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],
     ["stopped", "view=balances&tray=0&state=stopped"], ["shutdown", "view=balances&tray=0&shutdown=1"], ["apps-hidden", "view=apps&tray=0&hidden=mail"],
     // Dexicon. The file prefix is the SYSTEM theme; "-dxlight" is Dexicon's own light theme (it does not follow the system)
-    ["dex-mxusd", "view=atomix"], ["dex-pools", "view=pandapools"], ["dex-trade", "view=dexicon"], ["dex-trade-dxlight", "view=dexicon&dx=light"],
+    ["ax-swap", "view=atomix"], ["ax-swap-dxlight", "view=atomix&dx=light"], ["ax-swap-1440x900", "view=atomix", 1440, 900, 1], ["ax-swap-dxlight-1440x900", "view=atomix&dx=light", 1440, 900, 1],
+    ["ax-swap-buy", "view=atomix&axf=buy:120"], ["ax-swap-sell", "view=atomix&axf=sell:120&scroll=260"], ["ax-swap-review", "view=atomix&axf=buy:120&axdo=%23axReview"], ["ax-swap-progress", "view=atomix&scroll=560"], ["ax-swap-progress-dxlight", "view=atomix&dx=light&scroll=560"],
+    ["ax-swap-check", "view=atomix&axdo=%5Bdata-axcheck%5D"], ["ax-swap-hide", "view=atomix&axdo=%5Bdata-axhide%5D"], ["ax-swap-empty", "view=atomix&axs=empty"], ["ax-swap-noquote", "view=atomix&axs=noquote"], ["ax-swap-notready", "view=atomix&axs=notready"],
+    ["ax-swap-stopped", "view=atomix&state=stopped"], ["ax-swap-minima", "view=atomix&axs=minima"], ["ax-swap-idle", "view=atomix&axs=idle"], ["ax-swap-switch", "view=atomix&axdo=%23dxCcy"], ["ax-swap-narrow", "view=atomix", 560, 915, 2],
+    ["dex-pools", "view=pandapools"], ["dex-trade", "view=dexicon"], ["dex-trade-dxlight", "view=dexicon&dx=light"],
     ["dex-trade-1440x900", "view=dexicon", 1440, 900, 1], ["dex-trade-dxlight-1440x900", "view=dexicon&dx=light", 1440, 900, 1],
     ["dex-trade-take", "view=dexicon&dxf=buy:0.0034:25000"], ["dex-trade-take-dxlight", "view=dexicon&dx=light&dxf=buy:0.0034:25000"], ["dex-trade-rest", "view=dexicon&dxf=sell:0.0036:500"], ["dex-trade-own", "view=dexicon&dxf=sell:0.0029:100"],
     ["dex-trade-review", "view=dexicon&dxf=buy:0.0032:3000&dxdlg=1"], ["dex-trade-taking", "view=dexicon&dxs=taking&dxf=buy:0.0034:500&scroll=200"], ["dex-trade-failed", "view=dexicon&dxs=failed&dxf=buy:0.0034:500&scroll=200"],

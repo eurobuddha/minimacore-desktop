@@ -1280,8 +1280,7 @@ function renderActive() {
   else if (activeView === "mail") renderMail();
   else if (activeView === "chat") renderChat();
   else if (activeView === "pandapools") renderPandapools();
-  else if (activeView === "atomix") renderAtomix();
-  else if (activeView === "dexicon") DexUI.render();
+  else if (activeView === "atomix" || activeView === "dexicon") DexUI.render();   // Dexicon rooms ① and ③
   else if (activeView === "ethwallet") renderEthWallet();
   else if (activeView === "minimall") renderMiniMall();
   else if (activeView === "vestr") renderVestr();
@@ -3225,9 +3224,11 @@ AtomixPanel.init({
   activeView: () => activeView
 });
 api.appVersion().then(v => AtomixPanel.setVersion(v)).catch(() => {});
-function renderAtomix() { AtomixPanel.render(); }
-function onAtomixUpdate() { AtomixPanel.onUpdate(); }
-function resetAxState() { AtomixPanel.reset(); }
+// Room ① of Dexicon draws AtomiX now (renderer/dexicon-ax.js) over the same window.mcd calls. The panel above is
+// no longer rendered; it stays, initialised, until the 3e parity audit.
+DexAx.init({ api, copy, relTime, consolidateToken, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab });
+function onAtomixUpdate() { DexAx.onUpdate(); }
+function resetAxState() { AtomixPanel.reset(); DexAx.reset(); }
 
 // ============================ ETH Wallet (standalone tab) ============================
 // A full ERC20 wallet on the SAME seed-derived ethbridge address AtomiX uses (main/ethwallet.js → main/atomix.js

@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.18.110",
+  "version": "0.18.111",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -41,7 +41,7 @@
     "test:dexicon-parity": "node scripts/dexicon-parity-check.cjs",
     "test:dexicon-manifest": "node scripts/dexicon-parity-manifest.cjs --verify",
     "test:dexicon-page": "node scripts/dexicon-page-manifest.cjs --verify",
-    "test:dexicon": "npm run test:dexicon-manifest && npm run test:dexicon-page && node --test scripts/dexicon-host.test.cjs scripts/dexicon-ui.test.cjs"
+    "test:dexicon": "npm run test:dexicon-manifest && npm run test:dexicon-page && node --test scripts/dexicon-host.test.cjs scripts/dexicon-ui.test.cjs scripts/dexicon-ax.test.cjs"
   },
   "devDependencies": {
     "electron": "^33.0.0",

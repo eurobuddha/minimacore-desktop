@@ -202,3 +202,60 @@ button.dx-pill { cursor: pointer; }
 .dx-relay__s { font: 400 10px/15px var(--dx-mono); color: var(--dx-dim2); overflow-wrap: anywhere; }
 .dx-relay__s[data-state="ok"] { color: var(--dx-in); } .dx-relay__s[data-state="bad"] { color: var(--dx-red); }
 .dx-relay__x { min-width: 36px; min-height: 36px; border: 0; background: none; color: var(--dx-red); font: 400 15px/1 var(--dx-sans); cursor: pointer; }
+
+/* ---- room 1, MxUSD: AtomiX (DoorsTab / MarketTab / OtcTab; sizes are their sp / dp values) ----
+   Each AtomiX market wears its own colour (TradingContext): MxUSD is Tether green with white ink, MINIMA is orange. */
+#view-atomix { padding: 0; }
+.shell { --ax-acc: var(--dx-accent); --ax-acc-top: var(--dx-grad); --ax-ink: var(--dx-on-accent); --ax-soft: var(--dx-accent-soft); --ax-warn: #E6A23C; }
+.shell [data-axccy="mxusdt"] { --ax-acc: #26A17B; --ax-acc-top: #3DBF93; --ax-ink: #FFFFFF; --ax-soft: rgba(38,161,123,.2); }
+.shell[data-dx="DAYLIGHT"] [data-axccy="mxusdt"] { --ax-soft: rgba(38,161,123,.12); }
+.dx-pill--ccy { min-height: 36px; padding: 6px 14px; border: 1px solid color-mix(in srgb, var(--ax-acc) 55%, transparent); background: var(--ax-soft); color: var(--dx-text); font: 700 12px/16px var(--dx-sans); }
+.dx-pill--ccy:disabled { opacity: .6; cursor: default; }
+.ax-h2 { margin: 4px 0 2px; font: 700 18px/25px var(--dx-sans); }
+.ax-sub { padding-bottom: 12px; font: 400 12.5px/18px var(--dx-sans); color: var(--dx-dim); }
+.ax-dim { margin-top: 6px; font: 400 12.5px/18px var(--dx-sans); color: var(--dx-dim); overflow-wrap: anywhere; }
+.ax-t13 { font: 700 13px/18px var(--dx-sans); } .ax-t14 { font: 700 14.5px/20px var(--dx-sans); }
+.ax-why { display: block; width: 100%; margin: 0 0 8px; padding: 10px 4px; border: 0; background: none; text-align: left; cursor: pointer; }
+.ax-why--open { padding: 12px; border: 1px solid var(--dx-border); border-radius: 12px; background: var(--dx-surface); }
+.ax-why__t { display: block; margin-top: 8px; font: 400 12.5px/20px var(--dx-sans); color: var(--dx-dim); }
+.ax-launch { margin-bottom: 10px; padding: 10px; border-radius: 10px; background: var(--dx-accent-soft); font: 700 11px/16px var(--dx-sans); }
+.ax-side { display: flex; gap: 10px; }
+.ax-side button { flex: 1; min-height: 46px; border: 1px solid var(--dx-border); border-radius: 12px; background: var(--dx-surface2); color: var(--dx-dim); font: 700 13px/18px var(--dx-sans); cursor: pointer; }
+.ax-side button[aria-pressed="true"] { border-color: var(--ax-acc); background: var(--ax-acc); color: var(--ax-ink); }
+.dx-card.ax-big { margin: 14px 0 0; padding: 14px 16px 16px; border-radius: 18px; }
+.ax-fl { font: 400 11px/15px var(--dx-sans); color: var(--dx-dim); letter-spacing: .06em; }
+.ax-amtrow { display: flex; align-items: center; padding: 6px 0 4px; }
+.ax-chip { display: flex; align-items: center; flex: 0 0 auto; }
+.ax-chip b { display: block; font: 700 15px/20px var(--dx-sans); } .ax-chip small { display: block; font: 400 11px/15px var(--dx-sans); color: var(--dx-dim); }
+.ax-disc { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; margin-right: 10px; border-radius: 50%; background: var(--ax-acc); color: var(--ax-ink); font: 700 15px/1 var(--dx-sans); }
+.ax-disc--usdt { background: #26A69A; color: #FFFFFF; }
+.ax-bigin { flex: 1; min-width: 0; padding: 0 0 0 8px; border: 0; background: none; color: var(--dx-text); font: 700 26px/34px var(--dx-mono); text-align: right; }
+.ax-bigin--recv { color: var(--ax-acc); } .ax-bigin::placeholder { color: var(--dx-dim2); } .ax-bigin:focus { outline: none; }
+.ax-amtrow:focus-within { box-shadow: 0 2px 0 var(--ax-acc); }
+.ax-flip { display: flex; align-items: center; padding: 10px 0; } .ax-flip i { flex: 1; height: 1px; background: var(--dx-border); }
+.ax-flip button { width: 38px; height: 38px; margin: 0 12px; border: 1px solid var(--dx-border); border-radius: 50%; background: var(--dx-surface2); color: var(--ax-acc); font: 700 16px/1 var(--dx-sans); cursor: pointer; }
+.ax-best { padding-top: 12px; font: 400 11.5px/16px var(--dx-sans); color: var(--dx-dim2); }
+.ax-slip { display: flex; align-items: center; gap: 6px; margin-top: 10px; font: 400 11.5px/16px var(--dx-sans); color: var(--dx-dim); } .ax-slip[hidden] { display: none; }
+.ax-slip button { padding: 6px 10px; border: 0; border-radius: 14px; background: var(--dx-surface2); color: var(--dx-dim); font: 400 11px/15px var(--dx-sans); cursor: pointer; }
+.ax-slip button[aria-pressed="true"] { background: var(--ax-soft); color: var(--ax-acc); }
+.ax-plan { padding-top: 10px; white-space: pre-wrap; font: 400 10.5px/15px var(--dx-mono); color: var(--dx-dim); user-select: text; } .ax-plan:empty { display: none; }
+.ax-plan[data-kind="bad"], .ax-bad { color: var(--dx-red); } .ax-plan[data-kind="warn"] { color: var(--ax-warn); }
+.ax-bad { margin-top: 8px; font: 400 12px/17px var(--dx-sans); } .ax-bad:empty { display: none; }
+.ax-cta { display: block; width: 100%; margin-top: 16px; padding: 13px 0; border: 0; border-radius: 14px; background: linear-gradient(var(--ax-acc-top), var(--ax-acc)); color: var(--ax-ink); font: 700 13px/18px var(--dx-sans); cursor: pointer; }
+.ax-cta[data-dim="1"], .ax-cta:disabled { opacity: .5; } .ax-cta:disabled { cursor: default; }
+.ax-btn--s { flex: 0 0 auto; width: auto; margin-top: 12px; padding: 8px 14px; font-weight: 400; }
+.ax-stages { margin-top: 18px; } .ax-stages .ax-fl { padding: 0 2px 8px; }
+.ax-stage { display: flex; align-items: center; padding: 5px 2px; font: 400 13px/18px var(--dx-sans); }
+.ax-stage i { flex: 0 0 9px; height: 9px; margin: 0 12px 0 2px; border-radius: 50%; border: 1px solid var(--dx-dim2); }
+.ax-stage[data-state="done"] i { border-color: var(--dx-in); background: var(--dx-in); } .ax-stage[data-state="active"] i { border-color: var(--ax-acc); background: var(--ax-acc); }
+.ax-stage[data-state="warn"] i { border-color: var(--ax-warn); background: var(--ax-warn); } .ax-stage[data-state="warn"] { color: var(--ax-warn); }
+.ax-stage[data-state="pending"] { color: var(--dx-dim); } .ax-stage[data-state="active"] { font-weight: 700; }
+.ax-which { padding: 8px 2px 6px; font: 400 13px/18px var(--dx-mono); overflow-wrap: anywhere; }
+.ax-more, .ax-fin { display: block; padding: 8px 2px 0; border: 0; background: none; text-align: left; color: var(--dx-dim2); font: 400 11.5px/16px var(--dx-sans); cursor: pointer; }
+.ax-fin { min-height: 44px; padding: 0 4px; font-size: 12.5px; color: var(--dx-dim); } .ax-fin:empty { display: none; }
+.ax-prog { padding: 14px 4px 6px; }
+.ax-swap .ax-amt { margin-top: 4px; font: 400 13px/19px var(--dx-mono); overflow-wrap: anywhere; }
+.ax-line { margin-top: 3px; font: 400 11.5px/16px var(--dx-sans); color: var(--dx-dim); overflow-wrap: anywhere; }
+.ax-swap .dx-id { margin-top: 3px; }
+.ax-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; } .ax-acts .dx-btn { flex: 0 1 auto; padding: 8px 14px; font-weight: 400; font-size: 12px; }
+.ax-x { width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; color: var(--dx-dim2); cursor: pointer; }

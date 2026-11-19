@@ -8,14 +8,16 @@
 (function (root, factory) { const m = factory(); if (typeof module === "object" && module.exports) module.exports = m; else root.DexCore = m; })(this, function () {
   "use strict";
 
-  // Rooms 1 and 2 are the existing desktop AtomiX and Pools panels until phases 3c / 3d: those panels bring their
-  // own tab bars, so the Dexicon bottom bar has no tabs for them yet (never a tab that does nothing).
+  // Room 1 is AtomiX on the desktop's own engine (renderer/dexicon-ax.js). Room 2 is the existing desktop Pools panel
+  // until phase 3d: it brings its own tab bar, so the Dexicon bottom bar has no tabs for it yet.
   const ROOMS = [
-    { id: "mxusd", n: "①", label: "MxUSD", view: "atomix", tabs: [] },
+    { id: "mxusd", n: "①", label: "MxUSD", view: "atomix", tabs: ["swap", "market", "otc", "activity", "assets", "settings"] },
     { id: "pools", n: "②", label: "Pools", view: "pandapools", tabs: [] },
     { id: "exchange", n: "③", label: "Exchange", view: "dexicon", tabs: ["trade", "orders", "history", "activity", "assets", "settings"] }
   ];
-  const TAB_LABEL = { trade: "Trade", orders: "Orders", history: "History", activity: "Activity", assets: "Assets", settings: "Settings" };
+  /** Activity, Assets and Settings are ONE screen each, shown in rooms 1 and 3 (ActivityTab, AssetsTab, RelaysTab). */
+  const SHARED = ["activity", "assets", "settings"];
+  const TAB_LABEL = { swap: "Swap", market: "Market", otc: "OTC", trade: "Trade", orders: "Orders", history: "History", activity: "Activity", assets: "Assets", settings: "Settings" };
   const roomOfView = (view) => ROOMS.findIndex(r => r.view === view);
 
   /** The saved choices: the last tab of each room and the theme. The room itself is not saved: Dexicon opens on ①. */
@@ -23,6 +25,7 @@
     let o = {}; try { o = JSON.parse(raw || "{}") || {}; } catch (e) { o = {}; }
     const mem = { room: 0, tabs: {}, theme: o.theme === "DAYLIGHT" ? "DAYLIGHT" : "ONYX" };
     for (const r of ROOMS) mem.tabs[r.id] = r.tabs.includes(o.tabs && o.tabs[r.id]) ? o.tabs[r.id] : (r.tabs[0] || "");
+    mem.tabs.mxusd = "swap";   // every start opens room 1 on Swap (DoorHost.applyLaunchRule); the tab is remembered while the app runs
     return mem;
   }
   const save = (mem) => JSON.stringify({ tabs: mem.tabs, theme: mem.theme });
@@ -321,5 +324,5 @@
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
     funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
-    ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
+    ROOMS, SHARED, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

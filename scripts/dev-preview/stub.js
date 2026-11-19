@@ -26,6 +26,25 @@
   const NFT = "0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8";
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";
   const PK = (n) => "0x" + (n + "C4E8A1F09B37D25E6A8C0F1B3D5E7A9C2E4F6081A3B5C7D9E0F2A4B6C8D0E2F4").slice(0, 64);
+  // AtomiX fixtures. Every address, key and hash is whole and plainly not real (FA4E… = "fake").
+  const AXS = Q.get("axs") || "", AX_MINIMA = AXS === "minima" || AXS === "idle";
+  const FAKE_ETH = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0001", FAKE_ETH2 = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002", FAKE_TX = "0x" + "FA4E00".repeat(10) + "0001";
+  const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
+  const AX_BOOK = { scanned: 3, makers: 2, bestBid: 0.99, bestAsk: 1.01, bidCap: 100, askCap: 100, currency: "mxusdt", label: "mxUSDT", pricingParity: true,
+    bids: [{ signer: FAKE_PK("D1"), p: 0.99, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 0.985, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 0.98, cap: 10000, mine: false }],
+    asks: [{ signer: FAKE_PK("D1"), p: 1.01, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 1.015, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 1.02, cap: 10000, mine: false }] };
+  const AX_PLAN = (sell, amt) => { const n = Number(amt) || 0, a = Math.min(n, 100), b = Math.max(0, n - 100), p1 = sell ? 0.99 : 1.01, p2 = sell ? 0.98 : 1.02, legs = [{ maker: FAKE_PK("D1"), price: p1, minima: String(a), usdt: String(Math.floor(a * p1 * 1e6) / 1e6) }];
+    if (b > 0) legs.push({ maker: FAKE_PK("D2"), price: p2, minima: String(b), usdt: String(Math.floor(b * p2 * 1e6) / 1e6) });
+    const total = legs.reduce((t, l) => t + Number(l.usdt), 0); return { legs, filledMinima: n, totalUsdt: total, avgPrice: n ? total / n : 0, worstPrice: b > 0 ? p2 : p1, target: n, partial: false, stopReason: "", slippagePct: sell ? 0 : 4.2 }; };
+  const axSwap = (h, role, direction, status, sa, ba, ago, vis, detail) => ({ hash: FAKE_PK(h), role, direction, status, selltoken: direction === "ERC20_TO_MINIMA" ? "USDT" : MXUSD, sellamount: sa, buytoken: direction === "ERC20_TO_MINIMA" ? MXUSD : "USDT", buyamount: ba,
+    created: now - ago, updated: now - ago + 60000, counterparty: FAKE_PK("D1"), contractId: FAKE_PK("F" + h), detail, vis, lastFail: "" });
+  const nowS = Math.floor(now / 1000);
+  const AX_SWAPS = [
+    axSwap("90", "INITIATOR", "ERC20_TO_MINIMA", "STARTED", "25", "24.752475", 240000, { blocks: false, steps: ["Locked 25 USDT on Ethereum", "Take sent to the maker"], respondBy: nowS + 900, refundAt: nowS + 6900, cur: nowS, refundOpen: false, canRefund: true, timedOut: false }, "Waiting for the maker to lock mxUSDT."),
+    axSwap("92", "INITIATOR", "ERC20_TO_MINIMA", "STARTED", "40", "39.603960", 5400000, { blocks: false, steps: ["Locked 40 USDT on Ethereum", "Take sent to the maker"], respondBy: nowS - 1800, refundAt: nowS + 2280, cur: nowS, refundOpen: false, canRefund: true, timedOut: true, notice: { state: "declined", reason: "Maker wallet: too many coins, it consolidates automatically and retries." } }, "The maker did not lock. Your USDT is refunded at the deadline."),
+    axSwap("93", "RESPONDER", "MINIMA_TO_ERC20", "LOCKED", "100", "99", 600000, null, "You locked 100 mxUSDT. Waiting for the taker to claim."),
+    axSwap("91", "INITIATOR", "MINIMA_TO_ERC20", "COMPLETE", "50", "49.5", 86400000 + 3600000, null, "Done: received 49.5 USDT."),
+    axSwap("94", "INITIATOR", "ERC20_TO_MINIMA", "REFUNDED", "10", "9.90099", 2 * 86400000, { blocks: false, steps: ["Locked 10 USDT on Ethereum"], respondBy: nowS - 170000, refundAt: nowS - 160000, cur: nowS, refundOpen: true, canRefund: false, timedOut: true, refundSent: FAKE_TX, refunded: true }, "Refunded: 10 USDT is back in your Ethereum wallet.")];
   // Dexicon fixtures: a book with FAST, BOOK and POOL rows on both sides, one level holding the user's own order
   const DXS = Q.get("dxs") || "", DX_RELAYS = ["https://relay-one.example/dex-relay", "https://relay-two.example/dex-relay"];
   const fastRow = (side, price, minima, ours) => ({ side, price, minima, ours: !!ours });
@@ -154,8 +173,33 @@
     chatInit: async () => ({ pubkey: PK("77"), name: "Preview" }),
     chatThreads: async () => [chatThread(PK("31"), "Mirela Okafor", "See you at the harbour at six.", 2, 5), chatThread(PK("32"), "Jonas Petrov", "Thanks, got it.", 0, 300)],
     chatThread: async () => [], chatStatus: async () => ({ ready: true }),
-    axSwaps: async () => [{ hash: PK("90"), status: "STARTED" }, { hash: PK("91"), status: "COMPLETE" }],
-    axMakerCfg: async () => ({ cfg: { pegEnable: true }, state: { withdrawn: false } }),
+    // AtomiX, room 1 of Dexicon (main/atomix.js read models). ?axs=empty|noquote|minima|idle|halt|notready|manycoins
+    axStatus: async () => ({ ready: AXS !== "notready", eth: FAKE_ETH, minimaPk: FAKE_PK("A1"), currency: AX_MINIMA ? "minima" : "mxusdt", block: 2428089, log: [],
+      halt: AXS === "halt" ? { summary: "Your ETH wallet no longer matches what this node derives.", minimaMismatch: false, ethMismatch: true, orphanedPk: "", staleEth: FAKE_ETH, nodeEth: FAKE_ETH2 } : null }),
+    axBook: async () => AXS === "empty" || AXS === "noquote" ? { scanned: 0, makers: 0, bestBid: 0, bestAsk: 0, bidCap: 0, askCap: 0, bids: [], asks: [], currency: "mxusdt", label: "mxUSDT", pricingParity: true } : AX_BOOK,
+    axSwaps: async () => (AXS === "empty" || AXS === "idle" ? [] : AX_SWAPS),
+    axWallet: async () => ({ addr: FAKE_ETH, currency: AX_MINIMA ? "minima" : "mxusdt", label: AX_MINIMA ? "Minima" : "mxUSDT",
+      bals: AXS === "empty" ? { minima: "0", usdt: "0", eth: "0", ethErr: null, meta: { confirmed: "0", unconfirmed: "0", sendable: "0", coins: 0 } }
+        : { minima: AX_MINIMA ? "40250.5" : "1.20135743", usdt: "217.912562", eth: "0.0425", ethErr: null, meta: { confirmed: "1.20135743", unconfirmed: "0.4", sendable: "1.20135743", coins: AXS === "manycoins" ? 61 : 7 } } }),
+    axSwapPreview: async (sell, amt) => ({ mode: "sweep", sell, single: null, plan: AX_PLAN(sell, amt), label: "mxUSDT", meta: { bestPrice: sell ? 0.99 : 1.01, bestCap: 100, depth: 10100, label: "mxUSDT" } }),
+    axQuote: async (sell, amt) => ({ quoteId: "q1", mode: "sweep", sell, single: null, plan: AX_PLAN(sell, amt), label: "mxUSDT", meta: {} }),
+    axSwap: async () => ({ ok: 2, of: 2, hashes: [FAKE_PK("B1"), FAKE_PK("B2")] }),
+    axInspect: async (h) => ["Swap " + h, "Your lock: 25 USDT on Ethereum, confirmed.", "The maker has not locked mxUSDT yet. It must answer before 14:20.", "Nothing to do: if the maker never locks, your USDT is refunded by itself after the timelock."],
+    axRefundNow: async () => ({ msg: "The refund opens in 38 min. It is sent by itself then, app open or not.", opened: false }),
+    axMakerCfg: async () => ({ cfg: AXS === "empty" ? {} : { pegEnable: true, step: 1, levels: 3, size: 100, bias: 0, reprice: 1, min: 5 }, manual: AXS === "empty" ? { bids: [], asks: [] } : { bids: [{ p: 0.99, a: 100 }, { p: 0.98, a: 100 }], asks: [{ p: 1.01, a: 100 }, { p: 1.02, a: 100 }] },
+      state: { withdrawn: AXS === "empty" || AXS === "idle", lastMid: 1 }, lastPublishMs: AXS === "empty" ? 0 : now - 240000 }),
+    axMakerPreview: async () => ({ ok: true, mid: 1, source: "Parity", fresh: true, wide: false, bids: [], asks: [] }),
+    axMakerPublish: async () => ({ ok: true }), axMakerSave: async () => ({ ok: true }), axMakerWithdraw: async () => ({ ok: true }), axSwitchCurrency: async () => ({ ok: true }),
+    axMarketHistory: async () => (AXS === "empty" ? { chart: [], recent: [] } : { chart: [0.992, 0.995, 1.001, 0.998, 1.004, 1.002, 1.006].map((price, i) => ({ price, createdBlock: 2427900 + i * 25 })),
+      recent: [{ price: 1.006, sizeMinima: "250", status: "EXECUTED", createdBlock: 2428050 }, { price: 1.002, sizeMinima: "40", status: "OPEN", createdBlock: 2428061 }, { price: 0.998, sizeMinima: "1200", status: "REFUNDED", createdBlock: 2427990 }] }),
+    axOtc: async () => (AXS === "empty" ? { board: [], deals: [], myOffer: {} } : { myOffer: { enable: true, sellSize: 500, buySize: 250 },
+      board: [{ cid: FAKE_PK("C1"), mpk: FAKE_PK("C2"), eth: FAKE_ETH2, sell: 2000, buy: 750, ts: now - 90000 }, { cid: FAKE_PK("C3"), mpk: FAKE_PK("C4"), eth: FAKE_ETH2, sell: 0, buy: 5000, ts: now - 400000 }],
+      deals: [{ ref: "d1", side: "SELL", amount: "300", price: "1.004", status: "PROPOSED", whoseTurn: "ME", hash: "" }, { ref: "d2", side: "BUY", amount: "120", price: "0.997", status: "COUNTERED", whoseTurn: "THEM", hash: "" },
+        { ref: "d3", side: "SELL", amount: "50", price: "1.001", status: "EXECUTING", whoseTurn: "", hash: FAKE_PK("C9") }] }),
+    axOtcGoLive: async () => ({ ok: true }), axOtcWithdraw: async () => ({ ok: true }), axOtcPropose: async () => ({ ok: true }), axOtcDeal: async () => ({ ok: true }),
+    axCoins: async () => [{ amount: "0.8", coinid: FAKE_PK("E1") }, { amount: "0.40135743", coinid: FAKE_PK("E2") }],
+    axExportSwaps: async () => AX_SWAPS.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, sellToken: s.selltoken, sellAmount: s.sellamount, buyToken: s.buytoken, buyAmount: s.buyamount, counterparty: s.counterparty, status: s.status, contractId: s.contractId, created: s.created, minimaTx: "", ethTx: FAKE_TX })),
+    axSendMax: async (a) => (a === "eth" ? "0.0419" : "217.912562"), axSendReview: async () => ({ fee: "0.000412" }), axSend: async () => ({ tx: FAKE_TX }), axExportKey: async () => "0x" + "FA4E".repeat(16),
     ppActivity: async () => [{ type: "Pool transaction", confirmed: false, failed: false, ts: now - 120000 }],
     ewStatus: async () => ({ ready: true }),
     ewBalances: async () => ({ address: "0x4B1D9E27A6C0F3581E2D7B9A4C6E8F0A1B3D5C7E", eth: "0.0425", tokens: [
@@ -215,6 +259,14 @@
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
       if (Q.get("state") === "refused") onStatus(Object.assign({}, status, { state: "error", health: null, keyMode: "block", lastError: "This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with." }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
+      if (view === "atomix") setTimeout(() => {   // ?axtab=market|otc|activity|assets|settings  ?axf=sell:120 (side:amount typed in "you send")  ?axdo=<selector to click>
+        const tab = Q.get("axtab"); if (tab) document.querySelector('[data-dxtab="' + tab + '"]').click();
+        setTimeout(() => {
+          const f = (Q.get("axf") || "").split(":");
+          if (f.length === 2 && el("axSend")) { el(f[0] === "sell" ? "axSellB" : "axBuyB").click(); el("axSend").value = f[1]; el("axSend").oninput(); }
+          setTimeout(() => { for (const sel of (Q.get("axdo") || "").split("|").filter(Boolean)) { const n = document.querySelector(sel); if (n) n.click(); } }, 600);
+        }, 400);
+      }, 300);
       if (view === "dexicon") {
         const review = "Buying 2442.4471 MINIMA now\nEffective 0.003185 · 7.77919401 MxUSD\nBOOK 0 MINIMA / 0 MxUSD across 0 orders\nPOOL 2442.4471 MINIMA / 7.77919401 MxUSD across 2 pools\nWorst marginal 0.003190";
         DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { ready: true, block: 2428089, identity: { address: PK("D1"), miniaddress: ADDR }, stage: "", myTrades: [],
