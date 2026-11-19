@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld("mcd", {
   mailPublishAddress: (key, enabled) => ipcRenderer.invoke("mcd:mailPublishAddress", key, enabled),
   mailShare: () => ipcRenderer.invoke("mcd:mailShare"),
   mailThreads: () => ipcRenderer.invoke("mcd:mailThreads"),
+  mailReadMessage: (hash, id) => ipcRenderer.invoke("mcd:mailReadMessage", hash, id),
   mailThread: (h) => ipcRenderer.invoke("mcd:mailThread", h),
   mailThreadWith: (peer, subject) => ipcRenderer.invoke("mcd:mailThreadWith", peer, subject),
   mailSend: (to, base) => ipcRenderer.invoke("mcd:mailSend", to, base),

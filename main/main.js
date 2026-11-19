@@ -244,6 +244,7 @@ ipcMain.handle("mcd:mailResolveAddress", (_e, value) => mail.resolveRecipient(va
 ipcMain.handle("mcd:mailPublishAddress", (_e, key, enabled) => mail.setPublication(key, enabled === true));
 ipcMain.handle("mcd:mailShare", () => mail.shareString());
 ipcMain.handle("mcd:mailThreads", () => mail.threads());
+ipcMain.handle("mcd:mailReadMessage", (_e, hash, id) => mail.readMessage(hash, id));
 ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));
 ipcMain.handle("mcd:mailThreadWith", (_e, peer, subject) => mail.threadWith(peer, subject));
 ipcMain.handle("mcd:mailSend", (_e, to, base) => mail.sendMessage(to, base || {}));

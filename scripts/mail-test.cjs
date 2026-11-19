@@ -158,7 +158,7 @@ function panel() {
   vm.runInContext(fs.readFileSync(path.join(dir, "mail.js"), "utf8"), ctx, { filename: "mail.js" });
   return sandbox;
 }
-const ME = "0x" + "11".repeat(65), PEER = "0x" + "ab".repeat(65);
+const ME = "0x" + "11".repeat(64), PEER = "0x" + "ab".repeat(64);
 function deps(dom, api) {
   return {
     api, el: dom.get, esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
@@ -189,14 +189,31 @@ test("an inbox row names the sender from the message when they are not a saved c
   assert.ok(html.includes("mm-unread") && html.includes("mm-udot"), "unread is bold + the orange dot");
 });
 
-test("a peer with no declared name falls back to their WHOLE key (RULE 1)", async () => {
-  const P = panel(), dom = fakeDom();
-  const msg = { frompublickey: PEER, topublickey: ME, fromname: "", incoming: true, subject: "", message: "gm", date: Date.now(), type: "text" };
-  P.MailPanel.init(deps(dom, baseApi({ mailThreads: async () => [{ hashref: "h2", unread: 0, last: msg, other: PEER }] })));
+test("opening an inbox preview reads the selected body and shows its six-word address", async () => {
+  const P = panel(), dom = fakeDom(), host = dom.get("mailBody");
+  const codec = require("../main/mailaddress"), words = codec.phrase(PEER);
+  assert.equal(codec.display(PEER.slice(2).toUpperCase()), words);
+  const msg = { frompublickey: PEER, topublickey: ME, incoming: true, subject: "", message: "yo", type: "text", randomid: "selected" };
+  const row = { dataset: { peer: PEER, hashref: "thread", message: msg.randomid } };
+  host.querySelectorAll = selector => selector === "[data-peer]" ? [row] : [];
+  P.MailPanel.init(deps(dom, baseApi({
+    mailThreads: async () => [{ hashref: "thread", unread: 1, last: msg, other: PEER, words }],
+    mailReadMessage: async (hash, id) => {
+      assert.equal(hash, "thread"); assert.equal(id, "selected");
+      return { message: msg, peer: PEER, words };
+    }
+  })));
   await P.MailPanel.render();
-  const html = dom.nodes.mailBody.innerHTML;
-  assert.ok(html.includes(PEER) && !html.includes("…"), "the whole key, never 0x + 8…6");
-  assert.ok(html.includes("(no subject)") && html.includes("mm-none"), "an empty subject reads as italic (no subject)");
+  assert.ok(host.innerHTML.includes('data-message="selected"'));
+  assert.ok(host.innerHTML.indexOf(">yo<") < host.innerHTML.indexOf(">" + words + "<"));
+  await row.onclick({ target: { closest: () => null } });
+  assert.ok(host.innerHTML.includes('class="mm-reader-text">yo<'));
+  assert.ok(host.innerHTML.includes('>' + words + '</button>'));
+  assert.ok(host.innerHTML.includes('id="mmReadReply"'));
+  assert.ok(!host.innerHTML.includes(PEER));
+  await dom.get("mmBack").onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(host.innerHTML.includes('data-message="selected"'));
 });
 
 test("a saved contact name beats the sender's own", async () => {

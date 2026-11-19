@@ -21,6 +21,8 @@
   var STATUS = null;            // main's scan/backfill status
   var VIEW = "inbox";           // inbox | outbox | sent | archive | contacts | key | settings | thread | compose
   var PEER = null, SUBJ = "", HASH = "";
+  let reading = null;
+  const peerWords = new Map();
   var COMPOSE = null;           // { to, subject, body } kept across a re-render so typing is never lost
   var booted = false;
 
@@ -41,7 +43,7 @@
     if (/may have been submitted/i.test(m)) return "The node didn't answer in time — check before sending again.";
     return m;
   }
-  function reset() { ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
+  function reset() { reading = null; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
 
   // ---------------------------------------------------------------- identity, names, avatars
   /** A peer's key for display: the WHOLE key (RULE 1). It was 0x + 8…6; .mm-key wraps it. */
@@ -50,7 +52,7 @@
     return s;   // RULE 1: the whole key (it used to be 0x + 8…6); the name was kept so call sites stay put
   }
   /**
-   * Who wrote this. Contact name first, then the sender's own declared name off the message, then the short key
+   * Who wrote this. Prefer a saved name, then the sender’s declared name, then the six-word address
    * — the same chain main/mail.js already uses for OS notifications. The old panel resolved from an id alone,
    * so it could never see `fromname` and every unsaved peer showed as hex.
    */
@@ -58,15 +60,15 @@
     if (!id) return "(unknown)";
     if (ID && id === ID.publicId) return "You";
     for (var i = 0; i < CONTACTS.length; i++) if (CONTACTS[i].publicId === id) {
-      if (CONTACTS[i].username) return CONTACTS[i].username;
+      if (typeof CONTACTS[i].username === "string" && CONTACTS[i].username.trim() && CONTACTS[i].username.toLowerCase() !== id.toLowerCase()) return CONTACTS[i].username;
       break;
     }
     if (msg) {
       // fromname travels on every message, but only the SENDER's own messages declare their name.
       var theirs = msg.incoming ? msg.fromname : null;
-      if (theirs) return theirs;
+      if (typeof theirs === "string" && theirs.trim() && theirs.toLowerCase() !== id.toLowerCase()) return theirs;
     }
-    return shortKey(id);
+    return peerWords.get(id) || shortKey(id);
   }
   /** The APK's avatar: hash → HSV(S .55, V .72). In CSS that is exactly hsl(H, 38%, 52%). */
   function discHue(key) { var h = 0, s = String(key || ""); for (var i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; return ((h % 360) + 360) % 360; }
@@ -162,15 +164,14 @@
     var unread = !!t.unread;
     var subject = (m.subject || "").trim();
     var nm = nameFor(peer, m);
-    var isHex = nm.indexOf("0x") === 0;
     return '<button class="mm-row' + (unread ? " mm-unread" : "") + '" type="button" data-peer="' + D.esc(peer)
-      + '" data-subject="' + D.esc(subject) + '" data-hashref="' + D.esc(t.hashref || "") + '">'
+      + '" data-subject="' + D.esc(subject) + '" data-hashref="' + D.esc(t.hashref || "") + '" data-message="' + D.esc(m.randomid || "") + '">'
       + avatar(peer, nm, 44)
-      + '<span class="mm-mid"><span class="mm-l1">'
-      + '<span class="mm-nm' + (isHex ? " mm-key" : "") + '">' + D.esc(nm) + "</span>"
-      + '<span class="mm-time">' + D.esc(rel(m.date)) + "</span></span>"
-      + '<span class="mm-subj' + (subject ? "" : " mm-none") + '">' + D.esc(subject || "(no subject)") + "</span>"
-      + '<span class="mm-snip">' + D.esc((m.incoming ? "" : "You: ") + previewText(m)) + "</span></span>"
+      + '<span class="mm-mid mm-inbox-preview">'
+      + (subject ? '<span class="mm-subj">' + D.esc(subject) + '</span>' : '')
+      + '<span class="mm-snip">' + D.esc((m.incoming ? "" : "You: ") + previewText(m)) + '</span>'
+      + '<span class="mm-l1"><span class="mm-nm">' + D.esc(nm) + '</span>'
+      + '<span class="mm-time">' + D.esc(rel(m.date)) + '</span></span></span>'
       + (unread ? '<span class="mm-udot"></span>' : "") + "</button>";
   }
   /** The four chain states, said plainly. The old panel showed ✓ / ✓✓ — ticks it had invented, since this
@@ -189,7 +190,7 @@
   }
   function statusRow(m, withRetry) {
     var subject = (m.subject || "").trim();
-    return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-subject="' + D.esc(subject) + '">'
+    return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-message="' + D.esc(m.randomid) + '" data-message-thread="' + D.esc(m.hashref) + '" data-subject="' + D.esc(subject) + '">'
       + '<div class="mm-sto"><b>To ' + D.esc(nameFor(m.topublickey, m)) + " — " + D.esc(subject || "(no subject)") + "</b>"
       + "<span>" + D.esc(rel(m.date)) + "</span></div>"
       + '<div class="mm-ssnip">' + D.esc(previewText(m)) + "</div>"
@@ -211,6 +212,8 @@
     ]);
     THREADS = r[0] || []; ARCHIVED = r[1] || []; OUT = r[2] || []; SENTL = r[3] || [];
     CONTACTS = r[4] || []; STATUS = r[5];
+    peerWords.clear();
+    for (const t of THREADS.concat(ARCHIVED)) if (t.words) peerWords.set(t.other, t.words);
   }
 
   // ---------------------------------------------------------------- screens
@@ -343,6 +346,7 @@
       booted = true;
     }
     await loadLists();
+    if (VIEW === "message" && reading) return renderMessage(host);
     if (VIEW === "thread") return renderThread(host);
     if (VIEW === "compose") return renderCompose(host);
     renderFolder(host);
@@ -367,8 +371,18 @@
     };
     if (f === "settings") wireSettings(host);
     host.querySelectorAll("[data-peer]").forEach(function (r) {
-      r.onclick = function (e) {
+      r.onclick = async function (e) {
         if (e.target.closest("[data-retry]")) return;
+        if (r.dataset.message) {
+          const origin = VIEW;
+          try {
+            const item = await D.api.mailReadMessage(r.dataset.messageThread || r.dataset.hashref, r.dataset.message);
+            if (VIEW !== origin) return;
+            if (!item) { D.toast("Message unavailable.", "err"); return; }
+            reading = { ...item, origin }; VIEW = "message"; renderMessage(host);
+          } catch (error) { D.toast(errText(error), "err"); }
+          return;
+        }
         openThread(r.dataset.peer, r.dataset.subject || "", r.dataset.hashref || "");
       };
       if (r.dataset.hashref) r.oncontextmenu = function (e) { e.preventDefault(); rowMenu(r.dataset.hashref, f === "archive"); };
@@ -528,6 +542,22 @@
   }
 
   // ---------------------------------------------------------------- thread screen
+  function renderMessage(host) {
+    const { message: m, peer, words, origin } = reading;
+    const address = words || peer;
+    const name = nameFor(peer, m);
+    const sender = name === address || name === peer ? address : name + " · " + address;
+    host.innerHTML = '<div class="mailapp"><div class="mm-cbar"><button id="mmBack" class="mm-ibtn" aria-label="Back">'
+      + g.micon("back") + '</button><strong class="mm-ct">' + D.esc(m.subject || "(no subject)") + '</strong></div>'
+      + '<article class="mm-body mm-reader">' + (m.type === "image" || m.type === "payment" ? bubble(m, false, false)
+        : '<div class="mm-reader-text">' + D.esc(m.message || "") + '</div>')
+      + '<button type="button" id="mmSender" class="mm-reader-sender" title="' + D.esc(sender) + '">' + D.esc(sender) + '</button></article>'
+      + '<div class="mm-comp"><button type="button" class="mm-chip" id="mmReadReply">Reply</button></div></div>';
+    D.el("mmBack").onclick = () => { reading = null; VIEW = origin; render(); };
+    D.el("mmSender").onclick = () => D.copy(address);
+    D.el("mmReadReply").onclick = () => { reading = null; openThread(peer, m.subject || "", m.hashref); };
+  }
+
   function openThread(peer, subject, hashref) {
     PEER = peer; SUBJ = subject || ""; HASH = hashref || ""; VIEW = "thread"; render();
   }
@@ -535,7 +565,9 @@
     var msgs = await D.api.mailThreadWith(PEER, SUBJ).catch(function () { return []; });
     var nm = nameFor(PEER, msgs.length ? msgs[msgs.length - 1] : null);
     var title = SUBJ || nm;
-    var sub = SUBJ ? nm + " · " + shortKey(PEER) : shortKey(PEER);
+    const address = peerWords.get(PEER) || PEER;
+    var sub = SUBJ && nm !== address ? nm + " · " + address : address;
+    if (!SUBJ && nm === address) title = "Conversation";
     host.innerHTML = '<div class="mailapp">'
       + '<div class="mm-cbar"><button class="mm-ibtn" type="button" id="mmBack" aria-label="Back">' + g.micon("back") + "</button>"
       + avatar(PEER, nm, 34)
@@ -819,7 +851,7 @@
     pending = setTimeout(function () {
       if (!booted) return;
       // Never rebuild the compose form under someone's hands — their draft would go with it.
-      if (VIEW === "compose") { loadLists(); return; }
+      if (VIEW === "compose" || VIEW === "message") { loadLists(); return; }
       render();
     }, 350);
   }

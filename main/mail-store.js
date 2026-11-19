@@ -86,12 +86,15 @@ function deleteThread(hashref) {
 // archive state lives in meta under `arch:<hashref>`
 function archivedSet() { ensureLoaded(); const s = new Set(); for (const k in mem.meta) if (k.indexOf("arch:") === 0 && mem.meta[k]) s.add(k.slice(5)); return s; }
 function setArchived(hashref, on) { ensureLoaded(); if (on) mem.meta["arch:" + hashref] = true; else delete mem.meta["arch:" + hashref]; persistSoon(); }
+function getMessage(hashref, randomid) {
+  ensureLoaded();
+  return mem.messages[hashref + "|" + randomid];
+}
 /** Patch one message in place, found by its thread + dedup id. The send lifecycle needs this: a message is
  *  written as `posting` BEFORE the coin is broadcast (so the Outbox shows it and a crash can't lose it), then
  *  promoted to `sent` or demoted to `failed` by the same call site. */
 function setStatus(hashref, randomid, patch) {
-  ensureLoaded();
-  const m = mem.messages[hashref + "|" + randomid];
+  const m = getMessage(hashref, randomid);
   if (!m) return false;
   Object.assign(m, patch);
   persistSoon();
@@ -117,5 +120,5 @@ function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon()
 function exportAll() { ensureLoaded(); return { messages: mem.messages, contacts: mem.contacts, meta: mem.meta }; }
 
 module.exports = { addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
-  markThreadRead, unreadCount, markConfirmed, setStatus,
+  getMessage, markThreadRead, unreadCount, markConfirmed, setStatus,
   contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, exportAll };

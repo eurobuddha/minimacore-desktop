@@ -21,6 +21,10 @@ function phrase(key) {
   }
   return result.join("-");
 }
+function display(key) {
+  if (typeof key === "string" && /^[a-f0-9]{128}$/i.test(key)) key = "0x" + key;
+  return isKey(key) ? phrase(key) : key;
+}
 function normalize(input) {
   if (typeof input !== "string" || input.length > 100) return null;
   const parts = input.trim().toLowerCase().split(/[\s-]+/);
@@ -59,4 +63,4 @@ async function find(run, sodium, address, depth) {
   }
   return found;
 }
-module.exports = { words, phrase, normalize, link, direct, tag, card, verify, find, isKey, ADDRESS };
+module.exports = { words, phrase, display, normalize, link, direct, tag, card, verify, find, isKey, ADDRESS };

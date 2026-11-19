@@ -214,3 +214,11 @@
 #view-mail #mmToWords input { width: 100%; box-sizing: border-box; border-bottom: 1px solid var(--mm-hairline); }
 .mailapp .mm-recipient-state { padding-inline: 16px; font-size: 13px; }
 .mailapp .mm-recipient-state:has(#mmLookup:empty) { display: none; }
+
+.mailapp .mm-inbox-preview .mm-subj, .mailapp .mm-inbox-preview .mm-snip { display: block; }
+.mailapp .mm-inbox-preview .mm-snip { font-size: 16px; color: var(--mm-text); opacity: 1; }
+.mailapp .mm-row .mm-inbox-preview .mm-nm { font-size: 11px; color: var(--mm-dim); font-weight: 400; }
+.mailapp .mm-inbox-preview .mm-l1 { margin-top: 4px; }
+.mailapp .mm-reader { padding: 18px; }
+.mailapp .mm-reader-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 19px; color: var(--mm-text); }
+.mailapp .mm-reader-sender { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 12px; padding: 0; border: 0; background: none; color: var(--mm-dim); font: inherit; font-size: 11px; cursor: copy; }

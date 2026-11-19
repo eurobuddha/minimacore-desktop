@@ -545,7 +545,22 @@ function setName(name) { store.metaSet("myname", String(name || "")); emitter.em
 // message's from/to is definitive). This hides threads orphaned by an identity change — e.g. a seed restore gives a
 // new mail identity, and the old conversation, keyed with the previous publicId, would otherwise linger as a duplicate.
 function mineThread(t) { const me = identity && identity.publicId; return !!(me && t.last && (t.last.frompublickey === me || t.last.topublickey === me)); }
-function threads() { return store.threads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last), subject: (t.last && t.last.subject) || "" })); }
+function threadSummary(t) {
+  const other = otherOf(t.last);
+  return { hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other,
+    words: address.display(other), subject: t.last.subject || "" };
+}
+function threads() { return store.threads().filter(mineThread).map(threadSummary); }
+function readMessage(hashref, randomid) {
+  const m = store.getMessage(hashref, randomid);
+  if (!m || !mineThread({ last: m })) return null;
+  if (m.incoming && !m.read) {
+    store.setStatus(hashref, randomid, { read: true });
+    emitter.emit("update");
+  }
+  const peer = otherOf(m);
+  return { message: m, peer, words: address.display(peer) };
+}
 /** Outgoing mail that has not reached the chain yet (Outbox) and outgoing mail that has (Sent) — the APK's two
  *  folders, off the same store. `status` is the on-chain lifecycle: posting → sent → confirmed, or failed. */
 function outgoing(match) {
@@ -579,7 +594,7 @@ function renameContact(peer, name) {
 }
 function removeContact(peer) { if (peer !== identity?.publicId && publications()[peer]) updatePublication(peer, null); store.removeContact(peer); emitter.emit("update"); return true; }
 function deleteThread(hashref) { store.deleteThread(hashref); emitter.emit("update"); return true; }
-function archivedThreads() { return store.archivedThreads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
+function archivedThreads() { return store.archivedThreads().filter(mineThread).map(threadSummary); }
 function setArchived(hashref, on) { store.setArchived(hashref, !!on); emitter.emit("update"); return true; }
 
 // ---- passphrase-encrypted backup (identity + name + contacts + messages), byte-compatible with the native app ----
@@ -642,7 +657,7 @@ async function importBackup(passphrase, json) {
 module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   startBackfill, backfillStatus, status, outbox, sent, retrySend,
   sendMessage, pay, requestPayaddr, resolvePayaddr, myReceivingAddress, looksLikeMinimaAddress,
-  myIdentity, shareString, resolveRecipient, setPublication, setName, threads, thread, threadWith, contacts, addContact,
+  myIdentity, shareString, resolveRecipient, setPublication, setName, threads, thread, readMessage, threadWith, contacts, addContact,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
   _setRunner, CHAINMAIL, threadKey,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)
