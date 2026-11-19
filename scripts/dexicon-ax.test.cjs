@@ -424,3 +424,16 @@ test("market offline: said only when the node is not running and a market was be
   assert.equal(AX.offline(true, true), ""); assert.equal(AX.offline(false, false), "");
   assert.match(AX.offline(false, true), /^Market offline: your Minima node isn't running.* You were not filled by this.* Start the node/);
 });
+
+// 0.18.118 (H2): the room's money actions that had no in-flight state of their own
+test("Refund now and the wallet actions run one at a time: a second click while one runs does nothing", async () => {
+  const one = AX.oneAtATime(); let runs = 0, release;
+  const first = one(() => new Promise(r => { runs++; release = r; }));
+  await one(async () => { runs++; }); await one(async () => { runs++; });
+  assert.equal(runs, 1, "the double click started nothing");
+  release(); await first;
+  await one(async () => { runs++; }); assert.equal(runs, 2, "free again afterwards");
+  await assert.rejects(one(async () => { throw new Error("x"); })); await one(async () => { runs++; }); assert.equal(runs, 3, "also after a failure");
+  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  assert.match(src, /if \(ds\.axrefund\) return one\(/); assert.match(src, /if \(ds\.axw\) return one\(/);
+});

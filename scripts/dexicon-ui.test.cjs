@@ -259,7 +259,8 @@ test("nothing outside the allow-list leaves the Exchange screens", () => {
     assert.throws(() => dexCommand(c), Error, c);
 });
 
-test("the page's bridge (renderer/dexicon/mds.js): every call is a message to the shell; unknown actions and unreviewed on-chain trades go nowhere", async () => {
+/** renderer/dexicon/mds.js on a stand-in page: the page's own globals the driver calls are recorded in `calls`. */
+function bridge() {
   const vm = require("node:vm"), sent = [], calls = [];
   const els = {}, el = (id) => (els[id] = els[id] || { id, value: "", textContent: "", className: "", hidden: false, children: [], classList: { contains: () => false }, querySelector: () => null });
   const tradeBtn = { classList: { contains: () => false }, textContent: "" };
@@ -277,9 +278,20 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   win.localStorage = { setItem: (k, v) => calls.push("ls:" + k + "=" + v), getItem: () => null }; win.applyTheme = () => {};
   win.document.createElement = () => ({}); win.document.head = { appendChild: (el_) => { win.pageStyle = el_.textContent; } };
   win.window = win; win.parent.window = win.parent;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/mds.js"), "utf8"), win);
+  // the engine's own decimal and take rule (the page loads the same two files), and a FAST book the test sets
+  vm.createContext(win);
+  for (const f of ["vendor/decimal.js", "lib/fill.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "../main/dexicon", f), "utf8"), win);
+  win.fastOrders = [];   // { side, price, amount }: other makers' backed orders, as ui/app.js crossing() sees them
+  win.DexiconFast.crossing = (isBuy, price) => win.fastOrders.filter(o => (isBuy ? o.side === "sell" && Number(o.price) <= Number(price) : o.side === "buy" && Number(o.price) >= Number(price)))
+    .sort((x, y) => (isBuy ? Number(x.price) - Number(y.price) : Number(y.price) - Number(x.price)));
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/mds.js"), "utf8"), win);
   const say = (data) => listeners.message({ source: win.parent, data });
   const reply = () => sent.filter(m => m.driven != null).pop();
+  return { win, sent, calls, el, tradeBtn, listeners, say, reply };
+}
+
+test("the page's bridge (renderer/dexicon/mds.js): every call is a message to the shell; unknown actions and unreviewed on-chain trades go nowhere", async () => {
+  const { win, sent, calls, el, listeners, say, reply } = bridge();
 
   win.MDS.cmd("balance", () => {}); win.MDS.sql("SELECT 1", () => {}); win.MDS.comms.solo("{}", () => {});
   const x = new win.XMLHttpRequest(); x.open("GET", "https://relay.example/dex-relay/dex/book?market=x"); x.send(null);
@@ -293,7 +305,7 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   listeners.message({ source: {}, data: { dxRoom: 1, drive: { id: 2, act: "refresh", args: {} } } });
   assert.deepEqual(calls, [], "a message that is not from the shell is ignored");
 
-  say({ dxRoom: 1, drive: { id: 3, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "fast" } } });
+  say({ dxRoom: 1, drive: { id: 3, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "fast", expect: "rest" } } });
   assert.deepEqual(calls, ["side:true", "fast:true", "preview", "place"]); assert.equal(reply().error, null);
   assert.deepEqual([el("price").value, el("amount").value], ["0.0032", "10"], "the amounts reach the page as typed");
   calls.length = 0;
@@ -306,11 +318,11 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   say({ dxRoom: 1, drive: { id: 6, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
   assert.match(reply().error, /Nothing on the chain crosses this price now\. Nothing was sent\./);
   assert.ok(!calls.includes("place"));
-  win.AX = { ownskip: { onlyOwn: (book, pools, buy, minima, price, block) => (calls.push("onlyOwn:" + [buy, minima, price, block].join(",")), "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent.") } };
+  const realAX = win.AX; win.AX = { ownskip: { onlyOwn: (book, pools, buy, minima, price, block) => (calls.push("onlyOwn:" + [buy, minima, price, block].join(",")), "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent.") } };
   say({ dxRoom: 1, drive: { id: 61, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
   assert.equal(reply().error, "Only your own orders are at this price, so there is nothing to trade against. Nothing was sent.", "only own orders inside the limit: the engine's own sentence");
   assert.deepEqual(calls.splice(calls.indexOf("onlyOwn:true,10,0.0032,100")), ["onlyOwn:true,10,0.0032,100"]); assert.ok(!calls.includes("place"));
-  win.AX = undefined;
+  win.AX = realAX;
   win.crosses = true; win.pageAsks = "Buying 10 MINIMA now\nEffective 0.003200";
   say({ dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
   assert.equal(calls.pop(), "confirmed:false", "first call: the page asks, the answer is No, nothing is sent");
@@ -338,6 +350,139 @@ test("the page's bridge (renderer/dexicon/mds.js): every call is a message to th
   await new Promise(r => setImmediate(r));
   assert.equal(JSON.parse(told.data.message).data.message, "bad message");
   assert.equal(JSON.parse(told.data.message).type, "ERROR");
+});
+
+// 0.18.118 (H1): the native review and the page's book were two books. "BUY 100 from 1 FAST ask, no order is placed"
+// could publish a RESTING order when that ask had gone from the page's book, and "nothing is traded now" could take.
+test("H1: place signs only what was reviewed: the page's own crossing() is asked again at the click, and a reviewed take can never become a resting order", () => {
+  const { win, calls, say, reply, tradeBtn } = bridge();
+  const fast = (o) => say({ dxRoom: 1, drive: { id: 1, act: "place", args: Object.assign({ buy: true, price: "0.0032", amount: "100", layer: "fast" }, o) } });
+  const CHANGED = "The book changed since you reviewed this. Review it again. Nothing was signed.";
+  // reviewed: BUY 100 from one ask of 250 @ 0.0031. The ask is gone from the page's book at the click.
+  win.fastOrders = [];
+  fast({ expect: "take", take: "100", worst: "0.0031" });
+  assert.equal(reply().error, CHANGED); assert.ok(!calls.includes("place"), "nothing was signed: no resting order instead of the take");
+  // reviewed: nothing crosses, the order rests. An ask has arrived at the click: it would be an immediate take.
+  win.fastOrders = [{ side: "sell", price: "0.0031", amount: "250" }];
+  fast({ expect: "rest" });
+  assert.equal(reply().error, CHANGED); assert.ok(!calls.includes("place"));
+  // no statement of what was reviewed: refused (an older screen, or anything else that drives the page)
+  fast({}); assert.equal(reply().error, CHANGED);
+  // the book still says what was reviewed: it goes through
+  fast({ expect: "take", take: "100", worst: "0.0031" });
+  assert.equal(reply().error, null); assert.equal(calls.filter(c => c === "place").length, 1);
+  const done = () => { tradeBtn.classList.contains = () => true; say({ dxRoom: 1, drive: { id: 9, act: "refresh", args: {} } }); tradeBtn.classList.contains = () => false; say({ dxRoom: 1, drive: { id: 9, act: "refresh", args: {} } }); };
+  done();   // the sweep ran (the page locked its button) and ended
+  // another amount or another worst price than reviewed: refused. (two asks: 60 @ 0.0031 and 250 @ 0.0032)
+  calls.length = 0; win.fastOrders = [{ side: "sell", price: "0.0031", amount: "60" }, { side: "sell", price: "0.0032", amount: "250" }];
+  for (const o of [{ expect: "take", take: "100", worst: "0.0031" }, { expect: "take", take: "60", worst: "0.0031" }, { expect: "take", take: "100", worst: "0.00320001" }, { expect: "take", take: "1e2", worst: "0.0032" }, { expect: "rest" }]) {
+    fast(o); assert.equal(reply().error, CHANGED, JSON.stringify(o));
+  }
+  assert.ok(!calls.includes("place"));
+  // the same two asks, reviewed as they are: 60 whole, then 40 of the 250
+  fast({ expect: "take", take: "100", worst: "0.0032" }); assert.equal(reply().error, null); done();
+  // the minimum remainder is the engine's own rule (lib/fill.js floorTake): 250.5 wanted of 60 + 191 takes 60 + 190
+  win.fastOrders[1].amount = "191";
+  fast({ amount: "250.5", expect: "take", take: "250.5", worst: "0.0032" }); assert.equal(reply().error, CHANGED);
+  fast({ amount: "250.5", expect: "take", take: "250", worst: "0.0032" }); assert.equal(reply().error, null);
+});
+
+test("H1/H2: a reviewed take cannot rest, one money action at a time, and the page reports its book and its own amount", async () => {
+  const { win, calls, say, reply, tradeBtn, listeners, sent, el } = bridge();
+  let created = 0;
+  win.AX.maker = { create: (mds, client, me, spec, cb) => { created++; win.pendingCreate = () => cb(null, { orderId: "x" }, []); } };
+  win.MDS.init(() => {}); listeners.load();                       // the page has loaded: the guard is on AX.maker.create
+  const fast = (o) => say({ dxRoom: 1, drive: { id: 1, act: "place", args: Object.assign({ buy: true, price: "0.0032", amount: "100", layer: "fast" }, o) } });
+  // a take is running (the stand-in place() starts a sweep that then finds nothing and wants to rest the full amount)
+  win.fastOrders = [{ side: "sell", price: "0.0031", amount: "250" }];
+  let err = "unset"; win.place = () => { calls.push("place"); win.AX.maker.create(null, null, null, { side: "buy", price: "0.0032", amount: "100" }, (e) => { err = e && e.message; }); };
+  fast({ expect: "take", take: "100", worst: "0.0031" });
+  assert.equal(created, 0, "no order was published in place of the reviewed take"); assert.match(err, /book changed.*No order was placed and nothing was signed/);
+  // H2: while it runs, a second click (place, cancel, edit, stop) starts nothing
+  const page = () => sent.filter(m => m.page).pop().page;
+  assert.equal(page().trading, true, "said to the screens at once, before the page has locked its own button");
+  calls.length = 0;
+  for (const d of [{ act: "place", args: { buy: true, price: "0.0032", amount: "100", layer: "fast", expect: "take", take: "100", worst: "0.0031" } }, { act: "cancelFast", args: { orderId: "ab12" } }, { act: "editFast", args: { orderId: "ab12", price: "0.1" } }, { act: "makerStop", args: {} }]) {
+    say({ dxRoom: 1, drive: Object.assign({ id: 2 }, d) }); assert.match(reply().error, /still running\. Wait for it to finish\. Nothing was signed\./, d.act);
+  }
+  assert.deepEqual(calls, []);
+  // the page locks its button for the sweep, then unlocks: free again
+  tradeBtn.classList.contains = () => true; say({ dxRoom: 1, drive: { id: 3, act: "refresh", args: {} } });
+  tradeBtn.classList.contains = () => false; say({ dxRoom: 1, drive: { id: 3, act: "refresh", args: {} } });
+  assert.equal(page().trading, false);
+  // a reviewed RESTING order: published, and "running" until the engine has answered
+  win.fastOrders = []; win.place = () => { calls.push("place"); win.AX.maker.create(null, null, null, {}, () => { calls.push("published"); }); };
+  fast({ expect: "rest" }); assert.equal(reply().error, null); assert.equal(created, 1);
+  fast({ expect: "rest" }); assert.match(reply().error, /still running/, "a double click does not publish the order twice");
+  assert.equal(created, 1);
+  win.pendingCreate(); assert.ok(calls.includes("published"));
+  fast({ expect: "rest" }); assert.equal(reply().error, null); assert.equal(created, 2, "free again once it is published");
+  win.pendingCreate();
+  // the report carries the page's own FAST book (what a click will act on) and its own amount field
+  win.fastOrders = [{ side: "sell", price: "0.0031", amount: "250" }, { side: "buy", price: "0.003", amount: "40" }];
+  el("amount").value = "37.5"; say({ dxRoom: 1, drive: { id: 4, act: "refresh", args: {} } });
+  assert.deepEqual(JSON.parse(JSON.stringify(page().fast)), [{ side: "sell", price: "0.0031", minima: "250" }, { side: "buy", price: "0.003", minima: "40" }]);
+  assert.equal(page().amount, "37.5");
+});
+
+test("H1: the Trade ticket plans on the page's book, and says what the click must still find", () => {
+  const pageFast = [{ side: "sell", price: "0.0031", minima: "250" }];
+  const b = C.tradeBook(BOOK, pageFast);
+  assert.deepEqual(b.fast.map(o => o.price + (o.ours ? "*" : "")), ["0.0031", "0.0031*", "0.0029*"], "the page's orders, plus this node's own from the read model");
+  assert.equal(C.tradeBook(BOOK, undefined), BOOK, "until the page has spoken: the read model");
+  const take = C.plan(b, true, "0.0032", "100", FUNDS);
+  assert.deepEqual(C.expectOf(take), { expect: "take", take: "100", worst: "0.0031" });
+  // the service's book (BOOK) says 100 @ 0.0032 is on offer; the page's book has nothing: the plan is a resting order
+  const rest = C.plan(C.tradeBook(BOOK, []), true, "0.0032", "100", FUNDS);
+  assert.equal(rest.fast, false); assert.deepEqual(C.expectOf(rest), { expect: "rest" });
+  // a crossing order that cannot be taken in this amount: the page would sweep and trade nothing, so no "rests as your order"
+  const stuck = C.plan(C.tradeBook(null, [{ side: "sell", price: "0.0031", minima: "1" }]), true, "0.0032", "0.5", FUNDS);
+  assert.equal(stuck.fast, true); assert.equal(stuck.stuck, true);
+  assert.match(C.review(stuck, 3)[0], /none can be taken in this amount.*no order would be placed/);
+  // the minimum remainder, as the engine's own floorTake: 250.5 wanted of 60 + 191 is 60 + 190 (the page's test above says the same)
+  assert.equal(C.expectOf(C.plan(C.tradeBook(null, [{ side: "sell", price: "0.0031", minima: "60" }, { side: "sell", price: "0.0032", minima: "191" }]), true, "0.0032", "250.5", C.funds("1", "1000", [], []))).take, "250");
+});
+
+test("H2: the Trade button takes one click at a time, sends what was reviewed, and afterwards holds the page's own remaining amount", async () => {
+  const vm = require("node:vm"), posted = [];
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage: (m) => posted.push(m) }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
+  const els = {}, listeners = {};
+  const status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} };
+  const win = { DexCore: C, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
+  win.window = win;
+  win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async () => ({ status: true, rows: [] }),
+    dxBook: async () => ({ fast: [{ side: "sell", price: "0.0032", minima: "999", ours: false }], book: [], poolAsks: [], poolBids: [], pools: [] }),   // the SERVICE's book: not what the page will act on
+    cmd: async () => ({ status: true, response: [{ tokenid: "0x00", sendable: "1000" }, { tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", sendable: "10" }] }) };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r)); };
+  const shell = win.document.getElementById("shell"); shell.dataset.mode = "dex";
+  win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+  win.DexUI.paint("dexicon"); win.DexUI.render(); await settle();
+  const frame = shell.children.find(c => c.tag === "iframe"), page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [] }, p) } });
+  page({ fast: [{ side: "sell", price: "0.0031", minima: "250" }], amount: "", trading: false });
+  els.dxPrice.value = "0.0032"; els.dxAmount.value = "100"; els.dxPrice.oninput();
+  assert.match(els.dxReview.innerHTML, /BUY 100 MINIMA from 1 FAST ask/); assert.equal(els.dxCta.disabled, false);
+  const drives = () => posted.filter(m => m.drive);
+  els.dxCta.onclick(); els.dxCta.onclick(); els.dxCta2.onclick();   // a double click, and the other button
+  await settle();
+  assert.equal(drives().length, 1, "one action, not two");
+  assert.deepEqual(JSON.parse(JSON.stringify(drives()[0].drive.args)), { buy: true, price: "0.0032", amount: "100", layer: "fast", expect: "take", take: "100", worst: "0.0031" }, "what was reviewed, from the PAGE's book (the service's book said 0.0032)");
+  assert.equal(els.dxCta.disabled, true); assert.equal(els.dxCta.innerHTML, "TRADING…");
+  listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, driven: drives()[0].drive.id, error: null } });
+  page({ fast: [], amount: "100", trading: true }); await settle();
+  els.dxCta.onclick(); await settle();
+  assert.equal(drives().length, 1, "still running: a click does nothing"); assert.equal(els.dxCta.disabled, true);
+  // the sweep ends: 60 were co-signed, the page keeps only the surely-untraded 40
+  page({ fast: [], amount: "40", trading: false }); await settle();
+  assert.equal(els.dxAmount.value, "40", "the amount is the page's own remainder, not the full 100 again");
+  // the page refuses (the book changed): said plainly, the amount is left, the button is free again
+  els.dxAmount.value = "40"; els.dxPrice.oninput(); els.dxCta.onclick(); await settle();
+  assert.equal(drives().length, 2); assert.equal(drives()[1].drive.args.expect, "rest", "nothing crosses on the page's book now: reviewed as a resting order");
+  listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, driven: drives()[1].drive.id, error: "The book changed since you reviewed this. Review it again. Nothing was signed." } });
+  await settle();
+  assert.match(els.dxLog.innerHTML, /The book changed since you reviewed this/); assert.equal(els.dxAmount.value, "40"); assert.equal(els.dxCta.disabled, false);
 });
 
 test("the page is served from two pinned folders and nowhere else; its frame has no network", () => {

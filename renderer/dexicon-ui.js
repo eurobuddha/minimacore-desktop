@@ -124,7 +124,8 @@ const DexUI = (() => {
     const m = e.data || {}; if (m.dxRoom !== 1) return;
     if (!Page.heard) { Page.heard = true; if (Page.failed) { Page.failed = false; paintStrip(); } }
     if (m.page && typeof m.page === "object") {
-      Page.state = m.page;
+      Page.state = m.page; pageAmount(m.page);
+      if (Page.heardWait) { const w = Page.heardWait; Page.heardWait = null; w(); }
       Page.frame.hidden = !m.page.dialog; Page.frame.classList.toggle("dx-frame", !!m.page.dialog);   // only the page's market maker dialogs are ever shown
       if (shown()) draw(); return;
     }
@@ -170,6 +171,22 @@ const DexUI = (() => {
     if (!p || p.origin !== "service") return;
     if (p.type === "STATE") X.svc = p.data || {};
   }
+  /** H2 (0.18.118): after a FAST trade or order the amount field is the PAGE's own: only what is surely untraded
+   *  after a sweep (ui/app.js finishSweep), empty after a published order. Never the full amount again. */
+  function pageAmount(p) {
+    if (X.sent == null) return;
+    if (p.trading) { X.sentRan = true; return; }
+    if (typeof p.amount === "string" && p.amount !== X.sent) { const a = $("dxAmount"); if (a) a.value = p.amount; X.sent = null; }
+    else if (X.sentRan) X.sent = null;
+  }
+  /** One money action at a time in the whole Dexicon frame (H2): a second click, a held Enter or another button does
+   *  nothing while one is being reviewed, signed or sent. */
+  async function money(fn) {
+    if (X.busy) return;
+    X.busy = true; draw();
+    try { await fn(); } finally { X.busy = false; draw(); }
+  }
+  const book = () => C.tradeBook(X.book, Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
   const fundsNow = () => C.funds(X.bal && X.bal.minima, X.bal && X.bal.mxusd, X.orders, X.fills);
   const lad = () => C.ladder(X.book, X.group);
 
@@ -253,14 +270,14 @@ const DexUI = (() => {
   const num = (v) => { const d = C.dec(v); return d && d.v > 0n ? d : null; };
   function bindTrade() {
     const price = $("dxPrice"), amount = $("dxAmount");
-    for (const i of [price, amount]) i.oninput = () => { const clean = i.value.replace(",", ".").replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"); if (clean !== i.value) i.value = clean; X.said = null; paintTicket(); };
+    for (const i of [price, amount]) i.oninput = () => { X.sent = null; const clean = i.value.replace(",", ".").replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"); if (clean !== i.value) i.value = clean; X.said = null; paintTicket(); };
     $("dxBuy").onclick = () => { X.buy = true; paintTicket(); };
     $("dxSell").onclick = () => { X.buy = false; paintTicket(); };
     $("dxGroups").onclick = (e) => { const b = e.target.closest("[data-g]"); if (!b) return; X.group = Number(b.dataset.g); pref("dexicon_group", String(X.group)); paintTrade(); };
     $("dxFunds").onclick = () => { X.fundsBig = !X.fundsBig; pref("dexicon_funds_big", X.fundsBig ? "1" : "0"); paintFunds(); };
     const pct = (n) => {
       if (!num(price.value)) return say("Enter a price first, or click a row in the book.", "note");
-      const a = C.percent(X.book, X.buy, price.value, n, fundsNow());
+      const a = C.percent(book(), X.buy, price.value, n, fundsNow());
       if (!a) return say(X.balErr || "The balance has not been read yet.", "note");
       amount.value = a.v > 0n ? C.fmt(a) : ""; X.said = null; paintTicket();
     };
@@ -268,9 +285,9 @@ const DexUI = (() => {
     $("dxAvail").onclick = () => pct(100);
     const rowClick = (e) => { const r = e.target.closest("[data-price]"); if (!r) return; X.buy = r.dataset.side === "ask"; price.value = r.dataset.price; amount.value = r.dataset.cum; X.said = null; paintTicket(); };
     $("dxAsks").onclick = rowClick; $("dxBids").onclick = rowClick;
-    $("dxCta").onclick = () => submit("fast");
-    $("dxCta2").onclick = () => submit("chain");
-    $("dxMyOrders").onclick = (e) => { const b = e.target.closest("[data-oact]"); if (b) orderAction(b.dataset.oact, b.dataset.kind, b.dataset.id, b.dataset.price); };
+    $("dxCta").onclick = () => money(() => submit("fast"));
+    $("dxCta2").onclick = () => money(() => submit("chain"));
+    $("dxMyOrders").onclick = (e) => { const b = e.target.closest("[data-oact]"); if (b) money(() => orderAction(b.dataset.oact, b.dataset.kind, b.dataset.id, b.dataset.price)); };
   }
   function paintTrade() {
     if (!$("dxPrice")) return;
@@ -309,27 +326,27 @@ const DexUI = (() => {
   }
   function paintTicket() {
     if (!$("dxPrice")) return;
-    const buy = X.buy, f = fundsNow(), pl = C.plan(X.book, buy, $("dxPrice").value, $("dxAmount").value, f), why = blocker(), side = buy ? "BUY " : "SELL ";
+    const buy = X.buy, f = fundsNow(), pl = C.plan(book(), buy, $("dxPrice").value, $("dxAmount").value, f), why = blocker(), side = buy ? "BUY " : "SELL ";
     $("dxBuy").setAttribute("aria-pressed", buy ? "true" : "false"); $("dxSell").setAttribute("aria-pressed", buy ? "false" : "true");
     $("dxAvail").textContent = !f.known ? "Available: … (" + (X.balErr || "not read yet") + ")" : "Available: " + C.fmtBal(C.freeFor(f, buy)) + (buy ? " MxUSD" : " MINIMA") + "  ·  tap for max\n(" + C.fmtBal(f.minima) + " MINIMA · " + C.fmtBal(f.mxusd) + " MxUSD in wallet)";
     let total = "Total: …";
     if (pl.ok) {
       const all = C.mul(pl.amount, pl.price);
       total = (buy ? "You pay up to " + C.fmt(C.up(all, 8)) + " MxUSD\nYou receive " + C.fmt(pl.amount) + " MINIMA" : "You pay " + C.fmt(pl.amount) + " MINIMA\nYou receive at least " + C.fmt(C.down(all, 8)) + " MxUSD")
-        + (pl.fast ? "\nFills now ≈ " + C.fmt(pl.take) + " MINIMA @ avg " + C.fmtPrice(pl.avg) : "\nNothing crosses on the FAST book: all of it rests as your FAST order @ " + C.fmtPrice(pl.price));
+        + (pl.stuck ? "\nNothing can be taken in this amount" : pl.fast ? "\nFills now ≈ " + C.fmt(pl.take) + " MINIMA @ avg " + C.fmtPrice(pl.avg) : "\nNothing crosses on the FAST book: all of it rests as your FAST order @ " + C.fmtPrice(pl.price));
     }
     $("dxTotal").textContent = total;
     const short = pl.ok && pl.short.v > 0n;
     $("dxWarn").textContent = pl.ok === false && pl.why ? pl.why : short ? "Exceeds your free " + (buy ? "MxUSD" : "MINIMA") + " by " + C.fmt(pl.short) + " (free " + C.fmtBal(pl.free) + ")" : "";
     $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.</p>`;
-    const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading, dead = !!why && !/No relay answers/.test(why);
+    const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || !!X.busy, dead = !!why && !/No relay answers/.test(why);
     for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
-    cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast ? esc(side + C.fmt(pl.take) + " NOW · FAST") + "<small>instant · " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? "BUY MINIMA" : "SELL MINIMA";
-    cta.disabled = trading || dead || short || !f.known || (pl.ok === false && !!pl.why);
+    cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(side + C.fmt(pl.take) + " NOW · FAST") + "<small>instant · " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? "BUY MINIMA" : "SELL MINIMA";
+    cta.disabled = trading || dead || short || !f.known || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
     cta2.hidden = !(pl.ok && pl.chain) || trading;
     cta2.innerHTML = esc(side.trim() + " · BOOK / POOL") + "<small>on-chain, about 3 minutes · review first</small>";
-    cta2.disabled = dead || !f.known;
+    cta2.disabled = dead || !f.known || trading;
     // the engine's own words: the take's progress, then what the page or the service last said
     const lines = (Page.state.log || []).slice(), n = Page.state.notice, k = Page.state.kind || "";
     const stage = X.svc && X.svc.stage; if (stage) lines.push(stage);
@@ -344,6 +361,13 @@ const DexUI = (() => {
     if (!num(price) || !num(amount)) return say("Enter a price and an amount.", "note");
     X.said = null;
     const args = { buy: X.buy, price, amount, layer };
+    if (layer === "fast") {
+      // H1: the click carries what the review on screen said; the page signs only if its own book still says so
+      const pl = C.plan(book(), X.buy, price, amount, fundsNow());
+      if (!pl.ok || pl.stuck) return say(pl.why || "Nothing can be taken in this amount. Nothing was signed.", "note");
+      Object.assign(args, C.expectOf(pl));
+      X.sent = amount; X.sentRan = false;
+    }
     let r = await drive("place", args);
     while (!r.error && r.asked && r.asked !== args.reviewed) {   // on-chain: the page's own review, word for word, before anything is signed
       const ok = await dialog(args.reviewed ? "The book moved. Review again" : "Review this on-chain trade", r.asked + "\n\nYour node signs this transaction and posts it. It is final only when a block confirms it (about 3 minutes); until then Activity shows it as waiting.", "Sign and send");
@@ -351,7 +375,9 @@ const DexUI = (() => {
       args.reviewed = r.asked;
       r = await drive("place", args);
     }
-    if (r.error) return say(r.error);
+    if (r.error) { X.sent = null; return say(r.error); }
+    // stay busy until the page has said what it is doing (its "trading" state arrives in its next report)
+    if (layer === "fast" && !Page.stub) await new Promise(res => { Page.heardWait = res; setTimeout(res, 1500); });
     load().then(draw, draw);
   }
   function paintMyOrders() {
@@ -481,7 +507,7 @@ const DexUI = (() => {
     const b = e.target.closest("button"); if (!b) return;
     const ds = b.dataset;
     if (ds.sub != null) { X.sub = Number(ds.sub); return draw(); }
-    if (ds.oact) return orderAction(ds.oact, ds.kind, ds.id, ds.price);
+    if (ds.oact) return money(() => orderAction(ds.oact, ds.kind, ds.id, ds.price));
     if (ds.info) return void dialog("History", HIST_INFO, "");
     if (ds.fill != null) return void dialog("Trade", fillFacts(X.fills[Number(ds.fill)]), "");
     if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say("Saved " + X.fills.length + " fills.", "note"); } catch (err) { say(err && err.message); } return; }
@@ -499,11 +525,11 @@ const DexUI = (() => {
       if (ds.relay === "add") $("dxRelayIn").value = "";
       X.said = null; if (document.activeElement) document.activeElement.blur(); return draw();
     }
-    if (ds.mm) {
+    if (ds.mm) return money(async () => {
       if (ds.mm === "makerStop" && !(await dialog("Stop the market maker?", "Your node signs a cancel for every ladder order and sends it to the relays within seconds. Your settings are kept. A take a maker already co-signed still settles.", "Stop"))) return;
       const r = await drive(ds.mm, { light: mem.theme === "DAYLIGHT" });
       if (r.error) say(r.error); else { X.said = null; load().then(draw, draw); }
-    }
+    });
   }
 
   // ---- Activity (ActivityTab.java), Assets (AssetsTab.java), Settings (RelaysTab.java): shared by the rooms ----

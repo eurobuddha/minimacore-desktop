@@ -19,6 +19,13 @@
  *                                          page asks { op: "identity" }; the main process derives the seed and calls
  *                                          __dxIdentity inside THIS frame (main/dexicon-room.js). The secret never
  *                                          passes through the app's window, which only hears "delivered".
+ *   one money action at a time, and    -> (0.18.118) `place` carries what the user reviewed (expect "take" | "rest", the
+ *   only the one that was reviewed        amount and the worst price of the take). The page's own crossing() is asked again
+ *                                          here, at the click: when it no longer says the same, nothing is signed ("the
+ *                                          book changed, review again"). A reviewed TAKE can never become a resting order
+ *                                          (AX.maker.create is refused while that take runs), and no money action starts
+ *                                          while another is running (running()). The review itself is drawn from the
+ *                                          page's own FAST book, sent with every report (`fast`).
  *   the AtomiX doors                    -> not in this app (doors/ and lib/door.js are not served); their hooks are
  *                                          no-ops, so the page never starts a second settlement engine on the ETH key.
  */
@@ -104,6 +111,7 @@
     init: function (cb) {
       handler = cb;
       window.addEventListener("load", function () {
+        guardCreate();
         if (window.DexiconDoors) { DexiconDoors.inited = function () { }; DexiconDoors.onBlock = function () { }; DexiconDoors.refresh = function () { }; DexiconDoors.ethCard = function () { return ""; }; }
         fire({ event: "inited" });
         tick(); setInterval(tick, 10000); setInterval(report, 500);
@@ -145,14 +153,62 @@
   // ---- what the native screens may ask the page to do: these actions and no others ----
   var NUM = /^[0-9]{1,30}(\.[0-9]{1,30})?$/, HEXID = /^[0-9A-Za-z]{1,160}$/;
   function need(ok, why) { if (!ok) throw new Error(why); }
+  var CHANGED = "The book changed since you reviewed this. Review it again. Nothing was signed.";
+  // ---- one money action at a time (0.18.118) ----
+  var act = null;   // the driven FAST place that is still running: { take, at, busySeen, creating }
+  function ctaBusy() { var b = $("trade") && $("trade").querySelector(".order-form .cta"); return !!(b && b.classList.contains("busy")); }
+  /** Is a trade or an order of the page's still running? The page locks its button while a sweep runs (ui/app.js lock);
+   *  a sweep reads its void records before it locks, and a resting order is being published until M.create calls back. */
+  function running() {
+    if (ctaBusy()) { if (act) act.busySeen = true; return true; }
+    if (!act) return false;
+    if (act.creating) return true;
+    if (act.take && !act.busySeen && Date.now() - act.at < 1500) return true;
+    act = null; return false;
+  }
+  /** ui/app.js nextOrder turns a sweep whose orders have just gone into a RESTING order of the full amount. The user
+   *  reviewed a take, so that order is refused here; a reviewed resting order is "running" until it is published. */
+  function guardCreate() {
+    var M = window.AX && AX.maker, create = M && M.create;
+    if (!create || create.dxGuard) return;
+    M.create = function (mds, client, me, spec, cb) {
+      if (act && act.take) return cb && cb(new Error(CHANGED.replace("Nothing was signed.", "No order was placed and nothing was signed.")));
+      var mine = act; if (mine) mine.creating = true;
+      return create.call(M, mds, client, me, spec, function () { if (act === mine) act = null; if (cb) cb.apply(this, arguments); });
+    };
+    M.create.dxGuard = true;
+  }
+  /** What one click would take now, by the page's own rules: DexiconFast.crossing (best price first, never my own,
+   *  backed orders only) walked as ui/app.js tryOrder does (AX.fill.floorTake). { n, take, worst } as Decimals. */
+  function fastPlan(buy, price, amount) {
+    var hits = DexiconFast.crossing(buy, price), left = new Decimal(amount), take = new Decimal(0), worst = null, i, now;
+    for (i = 0; i < hits.length && left.gt(0); i++) {
+      now = AX.fill.floorTake(Decimal.min(left, new Decimal(hits[i].amount)), hits[i].amount);
+      if (!now.gt(0)) continue;
+      take = take.add(now); left = left.sub(now); worst = new Decimal(hits[i].price);
+    }
+    return { n: hits.length, take: take, worst: worst };
+  }
+  /** The page's FAST book for the native review: every backed order of another maker, in the page's own take order. */
+  function fastBook() {
+    if (!window.DexiconFast || !DexiconFast.crossing) return null;
+    var row = function (o) { return { side: o.side, price: String(o.price), minima: String(o.amount) }; };
+    try { return DexiconFast.crossing(true, "1000000000000000").map(row).concat(DexiconFast.crossing(false, "0.000000000000000001").map(row)); } catch (e) { return null; }
+  }
+  var MONEY = { place: 1, cancelFast: 1, editFast: 1, cancelChain: 1, editChain: 1, makerStop: 1 };
   var ACTS = {
     /** One order from the Trade form. layer "fast": takes the crossing FAST orders best-first or, when none crosses,
      *  rests as a FAST order (ui/app.js place). layer "chain": the on-chain book and pools (ui/pd_app.js place). */
     place: function (a) {
       need(NUM.test(a.price) && NUM.test(a.amount), "Enter a valid price and amount.");
       need(a.layer === "fast" || a.layer === "chain", "unknown layer");
-      var b = $("trade").querySelector(".order-form .cta");
-      need(!(b && b.classList.contains("busy")), "A trade is still running. Wait for it to finish.");
+      if (a.layer === "fast") {
+        // H1: the click signs only what was reviewed. The page's own book is asked again, now.
+        need(a.expect === "take" || a.expect === "rest", CHANGED);
+        var seen = fastPlan(!!a.buy, a.price, a.amount);
+        if (a.expect === "rest") need(!seen.n, CHANGED);
+        else need(seen.n > 0 && seen.take.gt(0) && NUM.test(a.take) && NUM.test(a.worst) && seen.take.eq(new Decimal(a.take)) && seen.worst.eq(new Decimal(a.worst)), CHANGED);
+      }
       chooseSide(!!a.buy); DexiconFast.setMode(a.layer === "fast");
       $("price").value = a.price; $("amount").value = a.amount;
       preview(); DexiconFast.refreshPreview();
@@ -167,7 +223,9 @@
         need(!own, own);
         need(chainCrosses(a), "Nothing on the chain crosses this price now. Nothing was sent.");
       }
+      if (a.layer === "fast") act = { take: a.expect === "take", at: Date.now(), busySeen: false, creating: false };
       place();
+      if (act && !act.take && !act.creating) act = null;   // the page placed nothing (it says why in its notice)
     },
     cancelFast: function (a) { need(HEXID.test(a.orderId), "bad order id"); DexiconFast.cancelOrder(a.orderId); },
     editFast: function (a) { need(HEXID.test(a.orderId) && NUM.test(a.price), "Enter a valid new price."); DexiconFast.editOrder(a.orderId, a.price); },
@@ -198,6 +256,7 @@
     var err = null;
     try {
       need(Object.prototype.hasOwnProperty.call(ACTS, d.act), "not an action of the Exchange screens: " + d.act);
+      need(!(MONEY[d.act] && running()), "A trade is still running. Wait for it to finish. Nothing was signed.");
       asked = null;
       answer = { any: d.act !== "place", reviewed: d.args && d.args.reviewed, prompt: d.args && d.args.price };
       ACTS[d.act](d.args || {});
@@ -210,12 +269,15 @@
   // ---- what the page says, for the native screens to show in the page's own words ----
   var last = "";
   function report() {
-    var s = $("status"), log = $("tradeLog"), b = $("trade") && $("trade").querySelector(".order-form .cta"), rows = document.querySelectorAll("#relayList .relay-row");
+    var s = $("status"), log = $("tradeLog"), rows = document.querySelectorAll("#relayList .relay-row");
     var p = {
       ready: !!(window.DexiconFast && DexiconFast.myId()), idError: window.DexiconFast ? String(DexiconFast.myIdError() || "") : "",
       notice: s ? String(s.textContent || "") : "", kind: s ? String(s.className || "").replace(/^notice\s*/, "") : "",
       log: log && !log.hidden ? Array.prototype.map.call(log.children, function (c) { return String(c.textContent || ""); }) : [],
-      trading: !!(b && b.classList.contains("busy")), dialog: !!document.querySelector("dialog[open]"),
+      trading: running(), dialog: !!document.querySelector("dialog[open]"),
+      // 0.18.118: the book the page will act on (the native review is drawn from it), and its own amount field: after
+      // a sweep it holds only what is surely untraded (ui/app.js finishSweep), after a published order it is empty
+      fast: fastBook(), amount: $("amount") ? String($("amount").value || "") : "",
       relays: Array.prototype.map.call(rows, function (r) {
         var u = r.querySelector(".url"), m = r.querySelector(".meta"), dot = r.querySelector("b");
         return { url: u ? u.textContent : "", meta: m ? m.textContent : "", state: dot ? dot.className : "", found: r.classList.contains("discovered") };

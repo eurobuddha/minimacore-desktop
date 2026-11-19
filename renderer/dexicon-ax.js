@@ -323,7 +323,10 @@
     async inspect(api, hash) { return (await api.axInspect(hash).catch((e) => ["Check failed: " + ((e && e.message) || e)])).map(mx); }
   };
 
-  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
+  /** One at a time (0.18.118): while fn runs, a second call does nothing. For the money actions that had no
+   *  in-flight state of their own: a double click on Refund now or on a wallet action started it twice. */
+  function oneAtATime() { let on = false; return async (fn) => { if (on) return; on = true; try { return await fn(); } finally { on = false; } }; }
+  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -711,6 +714,7 @@
     const b = e.target.closest("button"); if (!b || !Object.keys(b.dataset).some((k) => k.indexOf("ax") === 0)) return false;
     await click0(b.dataset); return true;
   }
+  const one = oneAtATime();
   async function click0(ds) {
     if (ds.axwhy) { pref("dexicon_fold_" + ds.axwhy, pref("dexicon_fold_" + ds.axwhy) === "1" ? "0" : "1"); return paint(); }
     if (ds.axgo) return D.go(ds.axgo);
@@ -721,10 +725,10 @@
     if (ds.axrefresh) { S.book = null; paint(); return load(S.tab).then(paint, paint); }
     if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
-    if (ds.axrefund) { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); }
+    if (ds.axrefund) return one(async () => { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); });
     if (ds.axcsv) return Act.exportCsv(api(), ui);
     if (ds.axstart) return D.start();
-    if (ds.axw) return walletAct(ds.axw);
+    if (ds.axw) return one(() => walletAct(ds.axw));
     if (ds.axswitch) return switchCurrency();
     if (ds.axabout) return void D.dialog("About AtomiX", ABOUT, "");
   }

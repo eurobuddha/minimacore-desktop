@@ -276,6 +276,29 @@ inbox poll, and voids it (spends one of its own coins in it back to the wallet) 
 - While the node is stopped nothing can void a take. The Shutdown warning says how many are waiting
   (`dexicon.activeWork().takes`, through `mcd:dxWork`); the wallet-restore gate refuses while any is.
 
+## The Trade click signs what was reviewed (0.18.118)
+
+Two books exist: the service's (`dxBook`, one relay read every 10 s, drawn as the ladder) and the page's own
+(long-polled; the one a take is built from). Up to 0.18.117 the review was planned on the first and the click acted on
+the second.
+
+- The page sends its FAST book with every report (`renderer/dexicon/mds.js` `fastBook`: `DexiconFast.crossing` on
+  both sides, so other makers' backed orders only, in the page's own take order). The ticket plans on it
+  (`DexCore.tradeBook`), with this node's own orders added from the read model for the "only your own orders" line.
+- `place` carries `expect` ("take" or "rest") and, for a take, `take` and `worst` (`DexCore.expectOf`). `ACTS.place`
+  walks the page's `crossing()` again with `AX.fill.floorTake` and refuses with "The book changed since you reviewed
+  this. Review it again. Nothing was signed." unless it finds the same: no crossing order for "rest"; the same total
+  and the same worst price for "take".
+- `ui/app.js` `nextOrder` turns a sweep whose orders have just gone into a resting order of the full amount. The page
+  file is verbatim, so `mds.js` wraps `AX.maker.create`: while a reviewed take runs, it is refused.
+- One money action at a time: `running()` in `mds.js` (the page's own busy button, a published order not yet answered,
+  and the 1.5 s before a sweep has locked the button) refuses `place`, both cancels, both edits and `makerStop`; the
+  native screens have one `money()` gate for the same buttons. After a FAST action the amount field is set to the
+  page's own (`finishSweep`: only what is surely untraded; empty after a published order).
+- Not covered: within a take the page may still skip an order (an earlier take of it pending, a refusal) and move to
+  the next one inside the same limit price; the limit is the bound, as on the phone. Room ①'s actions are not behind
+  the Exchange gate (another engine; the signing queue serialises them).
+
 ## The command bridge (`mcd:dxCommand`)
 
 `{ op: "cmd", command }`, `{ op: "sql", query }`, `{ op: "comms", message }`, `{ op: "net", … }`, `{ op: "identity" }`.

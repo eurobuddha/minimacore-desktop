@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.118] — The FAST Trade click signs only what was reviewed, once (review, H1 + H2)
+
+- **H1, the fault.** The review on the Trade screen was planned on the service's relay book (one relay every 10 s); the hidden page signs from its own long-polled book. "BUY 100 from 1 FAST ask, no order is placed" could publish a RESTING order when that ask had left the page's book, and "nothing is traded now" could be an immediate take.
+- **One book.** The page now sends its own FAST book with every report and the ticket plans on that (the ladder is still the read model). A crossing order that cannot be taken in the amount (minimum remainder) is said as such, and the button is off, instead of promising a resting order the page would not place.
+- **The click carries the review.** `place` sends `expect` (take or rest) and, for a take, the amount and the worst price. The page's own `crossing()` is asked again at the click; unless it finds the same, nothing is signed: "The book changed since you reviewed this. Review it again. Nothing was signed." A reviewed take can no longer turn into a resting order inside the page (`AX.maker.create` is refused while it runs).
+- **H2, the fault.** `submit()` had no in-flight guard and kept the amount: a double click or a held Enter published the FAST order twice, and after a sweep the button was armed again with the full amount.
+- **One money action at a time.** Trade (both buttons), cancel, change price and Stop the market maker share one gate on the screens, and the page refuses a second one itself while a trade or a publish is running. After a FAST action the amount field holds the page's own remainder (only what is surely untraded), or nothing.
+- **Room ①** already guarded Start swap, Publish, Save, Withdraw, OTC and the ⇄ switch. Refund now and the wallet actions (Send, Export key, Consolidate) had none: they now run one at a time.
+- Tests: `scripts/dexicon-ui.test.cjs` (four new: the page refuses what was not reviewed; a take cannot rest, one action at a time, the report; the ticket's book and `expectOf`; the native double click and the amount), `scripts/dexicon-ax.test.cjs` (one).
+
 ## [0.18.117] — A fill co-signed while the node stops is no longer lost (review, H3)
 
 - **The fault.** The Dexicon engine was dropped the moment the node said "stopping". A maker's co-signed take writes its fill, tells the taker and reduces the order only after `txnpost` answers; an answer that arrived after the drop was refused, so the fill was on the chain and unrecorded, the taker was never told, and after the restart the order was backed again at full size.

@@ -185,18 +185,27 @@
     if (!price || !amount || price.v === 0n || amount.v === 0n) return { ok: false, why: "" };
     if (price.s > 8 || amount.s > 8) return { ok: false, why: "At most 8 decimals." };
     const x = crossing(book, buy, price), chain = chainCrosses(book, buy, price);
-    let left = amount, take = zero, cost = zero, n = 0;
+    let left = amount, take = zero, cost = zero, n = 0, worst = null;
     for (const h of x.hits) {
       if (left.v === 0n) break;
       const t = floorTake(h.amount, min(left, h.amount)); if (t.v === 0n) continue;
-      take = add(take, t); cost = add(cost, mul(t, h.price)); left = sub(left, t); n++;
+      take = add(take, t); cost = add(cost, mul(t, h.price)); left = sub(left, t); n++; worst = h.price;
     }
-    const fast = take.v > 0n;
-    const need = fast ? (buy ? up(cost, 8) : take) : (buy ? up(mul(amount, price), 8) : amount);
+    // fast: what the page does at the click (ui/app.js place): ANY crossing FAST order means a sweep, never a resting
+    // order. A sweep that can take nothing (the minimum remainder) trades nothing: `stuck`.
+    const fast = x.hits.length > 0, stuck = fast && take.v === 0n;
+    const need = stuck ? zero : fast ? (buy ? up(cost, 8) : take) : (buy ? up(mul(amount, price), 8) : amount);
     const free = f && f.known ? freeFor(f, buy) : null, short = free ? sub(need, free) : zero;
-    return { ok: true, buy, price, amount, fast, takes: n, take, cost, rest: fast ? sub(amount, take) : amount, avg: fast ? div(cost, take, 8) : null,
+    return { ok: true, buy, price, amount, fast, stuck, takes: n, take, worst, cost, rest: fast ? sub(amount, take) : amount, avg: fast && !stuck ? div(cost, take, 8) : null,
       chain, ownOnly: x.ownOnly && !chain, need, free, short, offered: x.offered };
   }
+  /** What a reviewed plan tells the page at the click (renderer/dexicon/mds.js ACTS.place): the page signs only when
+   *  its own book still says the same. */
+  const expectOf = (pl) => (pl.fast ? { expect: "take", take: str(pl.take), worst: str(pl.worst || zero) } : { expect: "rest" });
+  /** The book the Trade ticket plans on: the page's own FAST orders (Page.state.fast: what the click will act on)
+   *  with this node's own orders from the read model (for "only your own orders"); the read model alone until the
+   *  page has spoken. */
+  const tradeBook = (book, pageFast) => (Array.isArray(pageFast) ? Object.assign({}, book || {}, { fast: pageFast.concat(((book && book.fast) || []).filter(o => o.ours)) }) : book);
   /** The amount a % button fills (TradeView.applyPercent): of the exact MINIMA on offer at that price when FAST orders
    *  cross, capped by the user's free funds; else of the free funds. Cut to 8 decimals. null: no price or no funds read. */
   function percent(book, buy, priceText, pct, f) {
@@ -210,7 +219,9 @@
   function review(pl, relays) {
     if (!pl.ok) return [];
     const side = pl.buy ? "BUY" : "SELL", L = [];
-    if (pl.fast) {
+    if (pl.stuck) {
+      L.push("FAST orders cross this price, but none can be taken in this amount: a partial take must leave at least 1 MINIMA on the maker's order. Nothing would be traded and no order would be placed. Change the amount.");
+    } else if (pl.fast) {
       L.push("One click signs and sends: " + side + " " + fmt(pl.take) + " MINIMA from " + pl.takes + " FAST " + (pl.buy ? "ask" : "bid") + (pl.takes === 1 ? "" : "s") + ", best price first, " + (pl.buy ? "never above " : "never below ") + fmtPrice(pl.price) + " MxUSD per MINIMA.");
       L.push(pl.buy ? "You pay at most " + fmt(up(pl.cost, 8)) + " MxUSD and receive " + fmt(pl.take) + " MINIMA (average " + fmtPrice(pl.avg) + ")."
                     : "You pay " + fmt(pl.take) + " MINIMA and receive at least " + fmt(down(pl.cost, 8)) + " MxUSD (average " + fmtPrice(pl.avg) + ").");
@@ -325,6 +336,6 @@
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, expectOf, tradeBook, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, SHARED, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });
