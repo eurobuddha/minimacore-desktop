@@ -1674,25 +1674,43 @@ function histQueryArgs() { return { search: HIST_FILTER.search, token: HIST_FILT
 // the wallet's net effect. A plain node never imports those covenants, so its `history` difference already reflects
 // only own coins; this set lets us reproduce that view even though our node tracks the covenants. Mx + 0x forms.
 let HIST_OWN = null;
+let HIST_CONTRACT = null;   // script addresses the node knows that are NOT simple wallet addresses (covenants, contracts)
 const HIST_NORM_VER = 3;   // bump when normalize()'s classification changes → re-normalizes already-stored rows once
 async function loadOwnAddresses() {
   try {
     const j = await api.cmd("scripts");
     let arr = j && j.response;
     arr = Array.isArray(arr) ? arr : (arr && arr.scripts) || [];
-    const set = new Set();
+    const set = new Set(), contracts = new Set();
     for (const s of arr) {
-      if (!s || s.simple !== true) continue;   // own signable address; covenants (anyone-can-spend) are simple:false
-      if (s.miniaddress) set.add(String(s.miniaddress));
-      if (s.address) set.add(String(s.address).toLowerCase());
+      if (!s) continue;
+      const into = s.simple === true ? set : contracts;   // own signable address; covenants (anyone-can-spend) are simple:false
+      if (s.miniaddress) into.add(String(s.miniaddress));
+      if (s.address) into.add(String(s.address).toLowerCase());
     }
-    if (set.size) HIST_OWN = set;
+    if (set.size) { HIST_OWN = set; HIST_CONTRACT = contracts; }   // an empty reply never replaces a good set
   } catch (e) { /* leave HIST_OWN null → normalize falls back to the node's own difference */ }
   return HIST_OWN;
 }
+// An address as the phone's History labels it: YOURS (a simple wallet address), CONTRACT (a script the node
+// knows that is not one), EXTERNAL (neither). "" while the wallet's addresses are not known: never a wrong label.
+function histOwnership(addr) {
+  if (!HIST_OWN || !HIST_OWN.size || !addr) return "";
+  const has = (set) => set.has(String(addr)) || set.has(String(addr).toLowerCase());
+  return has(HIST_OWN) ? "YOURS" : (HIST_CONTRACT && has(HIST_CONTRACT)) ? "CONTRACT" : "EXTERNAL";
+}
+// Does this transaction touch one of the wallet's own addresses at all? One that does not is contract or
+// external activity the node adopted; "Hide foreign contract activity" leaves those rows out.
+function histInvolvesWallet(r) {
+  return histOwnership(r.counterparty) === "YOURS" || (r.inputs || []).some(ownAddr) || (r.outputs || []).some(ownAddr);
+}
 
+let HIST_TIP = 0;            // the chain tip, for "synced to block"
+let HIST_LAST_SYNC = 0;      // when the last sync that reached the node finished
+let HIST_LAST_OK = true;     // false: the last sync could not read the node
+let HIST_WIRED = false;
 async function renderHistory() {
-  ensureHistActions();
+  initHistory();
   await ensureHistFilter();
   if (running) {
     if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();
@@ -1700,17 +1718,61 @@ async function renderHistory() {
     if (!rebuilt) await renormalizeStored();        // otherwise reclassify stored rows in place
   }
   await renderHistoryList();
-  if (running) syncHistory({ older: false });
+  if (running) histSync({ older: false });
 }
-function ensureHistActions() {
-  el("histActions").innerHTML =
-    `<button class="btn btn--sm btn--outline" id="histRefresh">Refresh</button>
-     <button class="btn btn--sm btn--outline" id="histCopy">Copy</button>
-     <button class="btn btn--sm btn--outline" id="histCsv">Export CSV</button>`;
-  el("histRefresh").onclick = () => { if (running) syncHistory({ older: false }); };
-  el("histCopy").onclick = () => copyHistory();
-  el("histCsv").onclick = () => exportHistory();
+// The header is the phone's: title, Sync, the options menu, the status line and the search field. Wired once,
+// so a background sync re-rendering the list cannot take the focus out of the search field.
+function initHistory() {
+  if (HIST_WIRED) return; HIST_WIRED = true;
+  el("histSync").onclick = () => { if (running) histSync({ older: false }); else toast("The node is not running.", "err"); };
+  el("histSearch").oninput = (e) => { HIST_FILTER.search = e.target.value.trim(); HIST_DISPLAY = HIST_STEP; clearTimeout(histSearchTimer); histSearchTimer = setTimeout(renderHistoryList, 200); };
+  const menu = el("histMenu"), btn = el("histMenuBtn");
+  const close = () => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+  const open = () => { paintHistMenu(); menu.hidden = false; btn.setAttribute("aria-expanded", "true"); menu.querySelector(".menu__item").focus(); };
+  btn.onclick = () => (menu.hidden ? open() : close());
+  menu.onclick = (e) => { const b = e.target.closest("[data-hact]"); if (!b) return; close(); histMenuAction(b.dataset.hact); };
+  menu.onkeydown = (e) => {
+    const items = [...menu.querySelectorAll(".menu__item")], i = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); items[(i + items.length - 1) % items.length].focus(); }
+    else if (e.key === "Escape") { e.stopPropagation(); close(); btn.focus(); }
+    else if (e.key === "Tab") close();
+  };
+  document.addEventListener("mousedown", (e) => { if (!menu.hidden && !e.target.closest("#histMenu, #histMenuBtn")) close(); });
 }
+function histHideForeign() { return store("histHideForeign") === "1"; }
+function paintHistMenu() {
+  el("histMenu").querySelector('[data-hact="foreign"]').setAttribute("aria-checked", histHideForeign() ? "true" : "false");
+  el("histMenu").querySelector('[data-hact="filter"]').setAttribute("aria-checked", el("histFilter").hidden ? "false" : "true");
+}
+function histMenuAction(act) {
+  if (act === "json") exportHistoryJson();
+  else if (act === "csv") exportHistory();
+  else if (act === "import") importHistory();
+  else if (act === "foreign") { store("histHideForeign", histHideForeign() ? "0" : "1"); renderHistoryList(); }
+  else if (act === "filter") { el("histFilter").hidden = !el("histFilter").hidden; }
+  else if (act === "copy") copyHistory();
+}
+// Sync now, with the phone's signs of it: the button shows "⟳ …" and the status line "Syncing…".
+async function histSync(opts) {
+  el("histSync").textContent = "⟳ …"; el("histStatus").textContent = "Syncing…";
+  let r = null;
+  try { r = await syncHistory(opts); } catch (e) { r = { reachable: false }; }
+  if (!r.busy) { HIST_LAST_OK = !!r.reachable; if (r.reachable) HIST_LAST_SYNC = Date.now(); }
+  el("histSync").textContent = "⟳ Sync";
+  paintHistStatus();
+}
+async function paintHistStatus() {
+  const box = el("histStatus"); if (!box || HIST_SYNCING) return;
+  let total = 0; try { total = ((await api.histStats()) || {}).count || 0; } catch (e) {}
+  if (!total && running && !HIST_LAST_OK) { box.textContent = "Couldn't read history. The node may be busy. Press Sync to retry."; return; }
+  box.textContent = total + (total === 1 ? " transaction" : " transactions")
+    + (HIST_TIP > 0 ? " · synced to block " + HIST_TIP : "")
+    + (HIST_LAST_SYNC ? " · " + since(HIST_LAST_SYNC) : "")
+    + (running ? "" : " · " + (nodeState === "stopped" ? "the node is stopped" : "waiting for the node"));
+}
+// The desktop's own token and direction filter. The phone has no place for it, so it sits behind the
+// options menu ("Filter by direction and token") and shows itself whenever a filter is set.
 async function ensureHistFilter() {
   const host = el("histFilter"); if (!host) return;
   const toks = await api.histTokens().catch(() => []);
@@ -1719,12 +1781,9 @@ async function ensureHistFilter() {
   ).join("");
   const dirs = [["", "All"], ["in", "In"], ["out", "Out"], ["self", "Self"], ["split", "Split"], ["consolidation", "Consol."]];
   host.innerHTML = `
-    <div class="hist-filter">
-      <input id="histSearch" class="field__input hist-search" placeholder="Search address, token or txid…" value="${esc(HIST_FILTER.search)}" autocomplete="off" spellcheck="false" />
-      <select id="histToken" class="field__input hist-tokensel">${tokOpts}</select>
-    </div>
-    <div class="seg hist-dirs" id="histDir">${dirs.map(([v, l]) => `<button class="btn btn--sm ${HIST_FILTER.direction === v ? "chip--active" : ""}" data-dir="${v}">${l}</button>`).join("")}</div>`;
-  el("histSearch").oninput = (e) => { HIST_FILTER.search = e.target.value.trim(); HIST_DISPLAY = HIST_STEP; clearTimeout(histSearchTimer); histSearchTimer = setTimeout(renderHistoryList, 200); };
+    <select id="histToken" class="field__input hist-tokensel" aria-label="Token">${tokOpts}</select>
+    <div class="hist-dirs" id="histDir">${dirs.map(([v, l]) => `<button class="btn btn--sm ${HIST_FILTER.direction === v ? "chip--active" : ""}" data-dir="${v}">${l}</button>`).join("")}</div>`;
+  if (HIST_FILTER.token || HIST_FILTER.direction) host.hidden = false;
   el("histToken").onchange = (e) => { HIST_FILTER.token = e.target.value; HIST_DISPLAY = HIST_STEP; renderHistoryList(); };
   el("histDir").querySelectorAll("[data-dir]").forEach(b => b.onclick = () => {
     HIST_FILTER.direction = b.dataset.dir; HIST_DISPLAY = HIST_STEP;
@@ -1734,31 +1793,34 @@ async function ensureHistFilter() {
 }
 async function renderHistoryList() {
   const host = el("histList");
-  const rows = await api.histQuery(Object.assign(histQueryArgs(), { limit: HIST_DISPLAY, offset: 0 }));
-  HIST_ROWS = rows || [];
-  if (!HIST_ROWS.length) {
-    host.innerHTML = `<div class="empty">${histFilterActive() ? "No matching transactions." : (running ? "No transactions yet." : "Waiting for the node…")}</div>`;
-    el("histMore").innerHTML = ""; return;
-  }
-  let tip = 0; try { const b = await tryCmd("block"); tip = parseInt((b && (b.block != null ? b.block : b)), 10) || 0; } catch (e) {}
-  host.innerHTML = HIST_ROWS.map(histRowHtml).join("");
-  host.querySelectorAll(".row[data-txid]").forEach(node => node.onclick = () => {
-    const row = HIST_ROWS.find(x => x.txpowid === node.dataset.txid); if (row) showHistoryDetail(row, tip);
+  const stored = (await api.histQuery(Object.assign(histQueryArgs(), { limit: HIST_DISPLAY, offset: 0 }))) || [];
+  // "Hide foreign contract activity" does nothing until the wallet's own addresses are known: never an empty list for lack of data.
+  HIST_ROWS = (histHideForeign() && HIST_OWN && HIST_OWN.size) ? stored.filter(histInvolvesWallet) : stored;
+  try { const b = await tryCmd("block"); HIST_TIP = parseInt((b && (b.block != null ? b.block : b)), 10) || HIST_TIP; } catch (e) {}
+  paintHistStatus();
+  host.innerHTML = HIST_ROWS.length ? HIST_ROWS.map(histRowHtml).join("")
+    : (histFilterActive() || stored.length ? `<div class="hist-empty">No matching transactions.</div>` : "");   // nothing stored yet: the status line says "0 transactions", as the phone
+  host.querySelectorAll(".hrow").forEach(node => {
+    node.onclick = () => { const row = HIST_ROWS.find(x => x.txpowid === node.dataset.txid); if (row) showHistoryDetail(row); };
+    node.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); node.click(); } };
   });
   // Pager: more matching rows in the DB → "Show more"; else, unfiltered + running → fetch older from the node.
-  if (HIST_ROWS.length >= HIST_DISPLAY) {
+  if (stored.length >= HIST_DISPLAY) {
     el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histMoreBtn">Show more</button>`;
     el("histMoreBtn").onclick = () => { HIST_DISPLAY += HIST_STEP; renderHistoryList(); };
-  } else if (running && !histFilterActive()) {
+  } else if (running && !histFilterActive() && stored.length) {
     el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histOlder">Fetch older from node</button>`;
-    el("histOlder").onclick = () => syncHistory({ older: true });
+    el("histOlder").onclick = () => histSync({ older: true });
   } else {
     el("histMore").innerHTML = "";
   }
 }
+// One row, as the phone's: the arrow, the signed amount and token in the direction's colour, then the other
+// party, whose address it is, and when. The address is shown whole (the phone shortens it). The right-hand
+// word is "Unverified", as the phone: a row is a wallet change, not proof it settled. The detail asks the chain.
 function histRowHtml(r) {
   const glyph = r.direction === "in" ? "↓" : r.direction === "out" ? "↑" : "⟲";
-  const cls = r.direction === "in" ? "row__l1--green" : r.direction === "out" ? "row__l1--red" : "";
+  const cls = r.direction === "in" ? "hrow--in" : r.direction === "out" ? "hrow--out" : "hrow--self";
   let l1;
   if (r.kind === "buy" || r.kind === "sell") {
     const c = tradeCounter(r);
@@ -1769,11 +1831,36 @@ function histRowHtml(r) {
     const sign = r.direction === "in" ? "+" : r.direction === "out" ? "−" : "";
     l1 = sign + TOK.tidyAmount(r.amount) + "  " + r.tokenName;
   }
-  const who = labelFor(r.counterparty) || short(r.counterparty, 20);
-  return `<div class="row" data-txid="${esc(r.txpowid)}" style="cursor:pointer">
-    <div class="row__glyph ${cls}">${glyph}</div>
-    <div class="row__mid"><div class="row__l1 ${cls}">${esc(l1)}</div><div class="row__l2">${esc(who)} · ${esc(relTime(r.time))}</div></div>
-    <div class="row__r">#${esc(r.block)}</div></div>`;
+  const who = labelFor(r.counterparty) || short(r.counterparty, 20), tag = histOwnership(r.counterparty);
+  const l2 = [who, tag, histWhen(r.time)].filter(Boolean).join("  ·  ");
+  return `<div class="hrow ${cls}" data-txid="${esc(r.txpowid)}" tabindex="0" role="button">
+    <div class="hrow__g">${glyph}</div>
+    <div class="hrow__mid"><div class="hrow__l1">${esc(l1)}</div><div class="hrow__l2">${esc(l2)}</div></div>
+    <div class="hrow__r">Unverified</div></div>`;
+}
+/** "31 minutes ago" inside a week, then the date (the phone's relative()). */
+function histWhen(ms) {
+  if (!ms || ms <= 0) return "";
+  return Date.now() - ms < 7 * 86400000 ? since(ms) : new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+/**
+ * What the node says about a transaction being on the chain (the phone's HistoryChainStatus.describe, from the
+ * reply to `txpow onchain:<id>`). A block height in a TxPoW header and a change in the wallet are not evidence
+ * of settlement, so anything short of a consistent found / block / tip / confirmations reply reads "Unverified".
+ */
+function chainStatus(j) {
+  try {
+    if (!j || j.status !== true || j.pending === true) return "Unverified";
+    const r = j.response;
+    if (!r || typeof r !== "object") return "Unverified";
+    if (r.found === false) return "Not found on this node, unverified";
+    if (r.found !== true) return "Unverified";
+    if (typeof r.blockid !== "string" || !/^0x[0-9a-f]{64}$/i.test(r.blockid) || /^0x0+$/i.test(r.blockid)) return "Unverified";
+    const whole = (k) => { if (typeof r[k] !== "string" || !/^[0-9]{1,30}$/.test(r[k])) throw new Error(k); return BigInt(r[k]); };
+    const block = whole("block"), tip = whole("tip"), depth = whole("confirmations");
+    if (block <= 0n || tip - block !== depth) return "Unverified";
+    return (depth >= 3n ? "Confirmed" : "In block") + " #" + block + " · " + depth + " confirmations";
+  } catch (e) { return "Unverified"; }
 }
 // The counter (token) leg of a buy/sell row, read from the persisted difference map → {amt, name}.
 function tradeCounter(r) {
@@ -1783,8 +1870,7 @@ function tradeCounter(r) {
   const coin = (r.inputs || []).concat(r.outputs || []).find(c => c.tokenid === tid);
   return { amt: String(d[tid]).replace(/^-/, ""), name: TOK.tokenName(coin && coin.token, tid) };
 }
-function showHistoryDetail(r, tip) {
-  const conf = (tip && r.block) ? (tip - r.block + 1) : "";
+function showHistoryDetail(r) {
   const timeStr = r.time ? new Date(r.time).toLocaleString() : "—";
   const lbl = labelFor(r.counterparty);
   const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "—";
@@ -1812,7 +1898,8 @@ function showHistoryDetail(r, tip) {
     <div class="kv"><span class="kv__k">Type</span><span class="kv__v">${esc(kind)}</span></div>
     <div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${amtStr}</span></div>
     ${feeRow}
-    <div class="kv"><span class="kv__k">Block</span><span class="kv__v">#${esc(r.block)}${conf !== "" ? " · " + conf + " conf" : ""}</span></div>
+    <div class="kv"><span class="kv__k">Created at height (not confirmation)</span><span class="kv__v">${esc(r.block)}</span></div>
+    <div class="kv"><span class="kv__k">On chain</span><span class="kv__v" id="histChain">Checking chain inclusion…</span></div>
     <div class="kv"><span class="kv__k">Time</span><span class="kv__v">${esc(timeStr)}</span></div>
     ${sizeRow}
     <div class="kv"><span class="kv__k">Txpow id</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(short(r.txpowid, 22))}</span></div>
@@ -1824,6 +1911,10 @@ function showHistoryDetail(r, tip) {
     <div class="view__sub">Outputs (${r.outCount})</div><div class="kv__v" style="text-align:left">${bd(r.outputs)}</div>
     <button class="btn btn--outline btn--full" id="histClose">Close</button></div></div>`);
   el("histTxid").onclick = () => copy(r.txpowid);
+  // Ask the node whether this transaction is in a block on the chain it follows. Read-only; the id is checked before it goes into the command.
+  const chain = el("histChain"), said = (t) => { if (chain.isConnected) chain.textContent = t; };
+  if (!/^0x[0-9a-f]{64}$/i.test(String(r.txpowid || "")) || !running) said("Unverified");
+  else api.cmd("txpow onchain:" + r.txpowid).then(j => said(chainStatus(j)), () => said("Unverified, node check unavailable"));
   const close = () => { const o = el("histDetail"); if (o) o.remove(); };
   el("histClose").onclick = close;
   el("histDetail").onclick = (e) => { if (e.target.id === "histDetail") close(); };
@@ -2024,7 +2115,7 @@ const HIST_OLDER_BUDGET = 2000; // rows fetched per "Load older" click
 // UPSERTS every row (no stop-at-known) so a coinLite/normalize change re-writes the whole stored history.
 async function syncHistory(opts) {
   opts = opts || {};
-  if (HIST_SYNCING) return { fetched: 0, reachable: false, completed: false }; HIST_SYNCING = true;
+  if (HIST_SYNCING) return { fetched: 0, reachable: false, completed: false, busy: true }; HIST_SYNCING = true;
   let reachable = false, fetched = 0, completed = false;   // completed = the loop reached a clean end (empty page / all-known), not a node error
   try {
     if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();   // classify new rows over own coins (native's view)
@@ -2092,6 +2183,53 @@ async function copyHistory() {
   const lines = rows.map(r => histCells(r).join("\t"));
   copy([HIST_COLS.join("\t"), ...lines].join("\n"));
   toast(`Copied ${rows.length} rows ✓`, "ok");
+}
+// The whole local history as one JSON file to keep (the phone's "Export as JSON (backup)"): the same envelope,
+// with the desktop's richer rows inside. Every stored row, whatever the screen is filtered to.
+async function exportHistoryJson() {
+  const rows = (await api.histGet()) || [];
+  const text = JSON.stringify({ app: "minima-history", version: 1, source: "minimacore-desktop", exported_at: Date.now(), count: rows.length, tx: rows });
+  const p = await api.exportCsv(text, "minima-history.json");
+  toast(p ? `Exported ${rows.length} transaction${rows.length === 1 ? "" : "s"} ✓` : "Export cancelled", p ? "ok" : "");
+}
+// One record of an export file → a row for the local store, or null if it is not one. Reads the desktop's
+// own rows and the phone's (HistoryEntry.toJson: received / sent, timemilli, inputs and deltas as JSON text,
+// coins with `addr`). Every field is rebuilt by name and type; nothing from the file is passed through as is.
+function histImportRow(o) {
+  if (!o || typeof o !== "object" || typeof o.txpowid !== "string" || !/^0x[0-9A-Fa-f]{1,128}$/.test(o.txpowid)) return null;
+  const parsed = (v) => { if (typeof v === "string") { try { return JSON.parse(v); } catch (e) { return null; } } return v; };
+  const list = (v) => { v = parsed(v); return Array.isArray(v) ? v : []; };
+  const map = (v) => { v = parsed(v); const out = {}; if (v && typeof v === "object" && !Array.isArray(v)) for (const k of Object.keys(v)) out[String(k)] = String(v[k]); return out; };
+  const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const coin = (c) => ({ address: String((c && (c.address || c.addr)) || ""), amount: String((c && c.amount) || "0"), tokenid: String((c && c.tokenid) || MINIMA),
+    token: c && c.token && typeof c.token === "object" ? c.token : undefined, coinid: String((c && c.coinid) || ""), state: Array.isArray(c && c.state) ? c.state : [] });
+  const inputs = list(o.inputs).map(coin), outputs = list(o.outputs).map(coin);
+  const tokenid = typeof o.tokenid === "string" && validTok(o.tokenid) && o.tokenid ? o.tokenid : MINIMA;
+  return { txpowid: o.txpowid, block: num(o.block), time: num(o.time != null ? o.time : o.timemilli),
+    istransaction: o.istransaction !== false, isblock: o.isblock === true, size: num(o.size), burn: String(o.burn != null ? o.burn : "0"),
+    direction: ({ received: "in", sent: "out", in: "in", out: "out" })[o.direction] || "self",
+    kind: ["split", "consolidation", "buy", "sell"].includes(o.kind) ? o.kind : "normal",
+    tokenid, tokenName: typeof o.tokenName === "string" && o.tokenName ? o.tokenName : TOK.tokenName(null, tokenid),
+    amount: String(o.amount != null ? o.amount : "0").replace(/^-/, ""), counterparty: String(o.counterparty || ""),
+    inCount: inputs.length || num(o.inCount), outCount: outputs.length || num(o.outCount),
+    difference: map(o.difference != null ? o.difference : o.deltas), inputs, outputs, state: list(o.state) };
+}
+// "Import history (restore / merge)": rows the store does not have are added; a row it already has is left
+// exactly as it is (matched on the txpow id), so importing the same file twice, or one from another device, is safe.
+async function importHistory() {
+  let text;
+  try { text = await api.importJson(); } catch (e) { toast("Import failed: " + (e.message || e), "err"); return; }
+  if (text == null) return;                                          // cancelled
+  try {
+    const arr = JSON.parse(text).tx;
+    if (!Array.isArray(arr)) throw new Error("this is not a history export");
+    const known = new Set(((await api.histGet()) || []).map(r => r.txpowid)), fresh = [];
+    let total = 0;
+    for (const o of arr) { const row = histImportRow(o); if (!row) continue; total++; if (!known.has(row.txpowid)) { known.add(row.txpowid); fresh.push(row); } }
+    for (let i = 0; i < fresh.length; i += 500) await api.histAdd(fresh.slice(i, i + 500));
+    toast(`Imported: ${total} · New: ${fresh.length}`, "ok");
+    await ensureHistFilter(); await renderHistoryList();
+  } catch (e) { toast("Import failed: " + (e.message || e), "err"); }
 }
 async function exportHistory() {
   const rows = await histExportRows();

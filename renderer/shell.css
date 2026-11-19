@@ -232,6 +232,50 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .send-line .btn { flex: 0 0 auto; min-height: 44px; margin-left: 8px; padding: 0 16px; font-size: 15px; font-weight: 400; }
 .send-go { width: 100%; min-height: 52px; margin-top: 28px; font-size: 15px; font-weight: 400; }
 
+/* ---------------------------------------------------------------- History (the phone's HistoryScreen, HistoryDesign palette) */
+#view-history { padding: 0; min-height: 100%; background: #0A0A0F; }
+.shell[data-tab="history"] .main { background: #0A0A0F; }
+/* dark and orange in light and dark alike, as on the phone: the shared controls inside pick these up */
+.histapp { color-scheme: dark; --bg: #0A0A0F; --surface: #15151F; --surface2: #1F1F2B; --border: #2A2A38; --text: #FFFFFF; --dim: #9A9AA8; --dim2: #6A6A78;
+  --heading: #FFFFFF; --muted: #9A9AA8; --border-light: #2A2A38;
+  --hist-accent: #F7931A; --menu-shadow: 0 2px 6px 2px rgba(0,0,0,.30), 0 1px 2px rgba(0,0,0,.45); color: var(--text); }
+.hist-head { background: var(--surface); padding: 12px 16px 10px; }
+.hist-top { position: relative; display: flex; align-items: center; min-height: 40px; }
+.hist-title { flex: 1 1 0; min-width: 0; margin: 0; font-size: 20px; font-weight: 700; line-height: 28px; color: var(--hist-accent); }
+.hist-sync { min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--hist-accent); cursor: pointer; font: 400 16px/20px var(--sans); white-space: nowrap; }
+.hist-more { width: 36px; height: 36px; margin-right: -8px; border: 0; border-radius: 50%; background: none; color: var(--dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.hist-more svg { width: 20px; height: 20px; fill: currentColor; }
+.hist-sync:hover, .hist-more:hover { background: var(--surface2); }
+.histapp :focus-visible { outline-color: var(--hist-accent); }
+.hist-menu { top: 38px; right: -4px; max-width: 320px; }
+.hist-menu [aria-checked]::after { content: ""; flex: 0 0 18px; width: 18px; height: 18px; margin-left: auto; border: 2px solid var(--dim); border-radius: 2px; }
+.hist-menu [aria-checked] { gap: 16px; padding-right: 16px; }
+.hist-menu [aria-checked="true"]::after { border-color: var(--hist-accent); background: var(--hist-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230A0A0F' d='M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'/%3E%3C/svg%3E") center / 16px no-repeat; }
+.hist-status { padding-top: 10px; font: 400 13px/18px var(--sans); color: var(--dim); user-select: text; min-height: 28px; }
+.hist-search { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--text); font: 400 15px/20px var(--sans); }
+.hist-search::placeholder { color: var(--dim2); }
+.hist-search:focus, .hist-search:focus-visible { outline: none; box-shadow: 0 1px 0 var(--hist-accent); }
+.hist-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0 4px; }
+.hist-filter .hist-tokensel { flex: 0 1 280px; min-width: 0; }
+.hist-dirs { display: flex; gap: 6px; flex-wrap: wrap; }
+.hist-dirs .btn { border-radius: 100px; padding: 5px 12px; color: var(--text); }
+.hist-dirs .chip--active { background: rgba(247,147,26,.2); color: var(--hist-accent); border-color: var(--hist-accent); }
+.hrow { display: flex; align-items: center; padding: 11px 16px; cursor: pointer; }
+.hrow:hover { background: var(--surface); }
+.hrow:focus-visible { outline-offset: -2px; }
+.hrow__g { flex: 0 0 28px; width: 28px; font-size: 18px; line-height: 24px; }
+.hrow__mid { flex: 1 1 0; min-width: 0; padding: 0 6px; }
+.hrow__l1 { font-size: 15px; font-weight: 700; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hrow__l2 { font-size: 12px; line-height: 17px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hrow__r { flex: 0 0 auto; font-size: 11px; line-height: 16px; color: var(--dim2); text-align: right; }
+.hrow--in .hrow__g, .hrow--in .hrow__l1 { color: #2ECC71; }
+.hrow--out .hrow__g, .hrow--out .hrow__l1 { color: #FF7A66; }
+.hrow--self .hrow__g, .hrow--self .hrow__l1 { color: #9A9AA8; }
+.hist-empty { padding: 28px 16px; font-size: 13px; color: var(--dim); }
+#histMore { padding: 4px 16px 20px; }
+#histMore:empty { display: none; }
+#histMore .btn { color: var(--text); }
+
 /* ---------------------------------------------------------------- dialogs (the phone's AlertDialog: title, body, text buttons) */
 .overlay--dlg { padding: 24px; }
 .dlg { width: 100%; max-width: 560px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden;

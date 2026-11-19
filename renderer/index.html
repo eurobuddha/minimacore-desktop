@@ -131,11 +131,31 @@
         <div id="vestrBody"></div>
       </section>
 
+      <!-- History wears its own dark and orange palette in both themes, as on the phone (HistoryDesign). -->
       <section class="view" id="view-history">
-        <div class="seg" id="histActions"></div>
-        <div id="histFilter"></div>
-        <div id="histList"></div>
-        <div id="histMore"></div>
+        <div class="histapp">
+          <div class="hist-head">
+            <div class="hist-top">
+              <h2 class="hist-title">Minima History</h2>
+              <button class="hist-sync" id="histSync">⟳ Sync</button>
+              <button class="hist-more" id="histMenuBtn" aria-label="History options" aria-haspopup="menu" aria-controls="histMenu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
+              <!-- The phone's four options, in its order and words; then the desktop's own two. -->
+              <div class="menu hist-menu" id="histMenu" role="menu" aria-label="History options" hidden>
+                <button class="menu__item" role="menuitem" data-hact="json">Export as JSON (backup)</button>
+                <button class="menu__item" role="menuitem" data-hact="csv">Export as CSV (spreadsheet)</button>
+                <button class="menu__item" role="menuitem" data-hact="import">Import history (restore / merge)</button>
+                <button class="menu__item" role="menuitemcheckbox" aria-checked="false" data-hact="foreign">Hide foreign contract activity</button>
+                <button class="menu__item" role="menuitemcheckbox" aria-checked="false" data-hact="filter">Filter by direction and token</button>
+                <button class="menu__item" role="menuitem" data-hact="copy">Copy the listed rows</button>
+              </div>
+            </div>
+            <div class="hist-status" id="histStatus" role="status"></div>
+            <input class="hist-search" id="histSearch" placeholder="Search address, id, token, amount…" aria-label="Search history" autocomplete="off" spellcheck="false" />
+            <div class="hist-filter" id="histFilter" hidden></div>
+          </div>
+          <div id="histList"></div>
+          <div id="histMore"></div>
+        </div>
       </section>
 
       <section class="view" id="view-terminal">

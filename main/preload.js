@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld("mcd", {
 
   // save a CSV via a native save dialog → written path or null
   exportCsv: (text, name) => ipcRenderer.invoke("mcd:exportCsv", text, name),
+  // pick a JSON file via a native open dialog → its text, or null (History import)
+  importJson: () => ipcRenderer.invoke("mcd:importJson"),
 
   appVersion: () => ipcRenderer.invoke("mcd:appVersion"),
 

@@ -178,7 +178,7 @@ async function all(limit) {
 /**
  * Filtered, paged query (Stage 2). filters:
  *   { search, token, direction, from, to, limit, offset }
- * search → LIKE across counterparty / token name / txpowid; token → primary_tokenid equality;
+ * search → LIKE across counterparty / token name / txpowid / amount; token → primary_tokenid equality;
  * direction → one of in|out|self|split|consolidation (matched against direction OR kind);
  * from/to → time range (ms). All values are BOUND, never interpolated.
  */
@@ -188,8 +188,8 @@ async function query(filters) {
   const clauses = [], params = [];
   if (filters.search) {
     const like = "%" + String(filters.search).trim() + "%";
-    clauses.push(`(counterparty LIKE ? OR primary_tokenname LIKE ? OR txpowid LIKE ?)`);
-    params.push(like, like, like);
+    clauses.push(`(counterparty LIKE ? OR primary_tokenname LIKE ? OR txpowid LIKE ? OR primary_amount LIKE ?)`);   // address, token, id, amount: the phone's four
+    params.push(like, like, like, like);
   }
   if (filters.token) { clauses.push(`primary_tokenid = ?`); params.push(String(filters.token)); }
   if (filters.direction) { clauses.push(`(direction = ? OR kind = ?)`); params.push(String(filters.direction), String(filters.direction)); }

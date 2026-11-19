@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.84] — History: the phone's screen, JSON export and import, chain inclusion
+
+- The History tab is the phone's screen, over the same local store as before (`history.sqlite` is not migrated or rewritten, and how transactions are classified is unchanged). "Minima History" in orange, Sync, the options button, one status line ("11 transactions · synced to block 2428089 · now"), and the search field "Search address, id, token, amount…". It wears the phone's own dark and orange palette in light and dark alike. Search now also matches the amount.
+- Each row is the phone's: the arrow, the signed amount and token in the direction's colour, then the other party's address, whose it is (YOURS, CONTRACT or EXTERNAL, from the node's own script list; no label until that list is known) and when ("31 minutes ago", then the date after a week). The address is shown whole; the phone shortens it. Bought / Sold, Split and Consolidation rows keep the desktop's wording.
+- The right-hand word on every row is "Unverified", as on the phone: a row records a change in the wallet, which is not proof that it settled. Opening a transaction asks the node (`txpow onchain:`, read-only) and shows "Checking chain inclusion…" until it answers, then "In block #N · 2 confirmations", "Confirmed #N · 13 confirmations", "Not found on this node, unverified" or "Unverified". Only a reply whose block, tip and confirmations agree is believed. The old "Block #N · X conf" line, which was worked out from the height in the transaction's header, is gone; the height is now labelled "Created at height (not confirmation)".
+- The options menu has the phone's four, in its order and words: "Export as JSON (backup)", "Export as CSV (spreadsheet)", "Import history (restore / merge)", "Hide foreign contract activity". Then the desktop's two: "Filter by direction and token" (the old filter bar, which the phone has no place for) and "Copy the listed rows".
+- Export as JSON writes every stored row to one file. Import reads such a file, or one exported by the phone app, and adds only the transactions the store does not have; a row already stored is never overwritten, so importing twice or from another device is safe. Each record is rebuilt field by field and anything that is not a transaction is skipped. The file is chosen in a system dialog and may be at most 64 MB.
+- "Hide foreign contract activity" leaves out rows that touch none of the wallet's own addresses. It is remembered, and does nothing until the wallet's addresses are known, so it can never blank the list.
+- A sync that cannot read the node says so in the status line when nothing is stored; an empty store shows "0 transactions" and no placeholder text, as the phone.
+- New tests in `scripts/history-screen-test.cjs`; `npm run test:wallet` runs them with the wallet money-path tests, and CI runs it.
+- Dev preview: history rows of every kind, the options menu, the filter, a transaction still being checked, an empty history.
+
 ## [0.18.83] — Send: the phone's screen, the same send
 
 - The Send screen is laid out as the phone's, in the phone's order and words: Token, the "sendable" figure for it, Amount with Max, To address, "Send Funds". The phone's Scan button is left out (no camera flow on the desktop screen).

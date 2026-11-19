@@ -599,11 +599,20 @@ ipcMain.handle("mcd:histStats", () => histDb.stats());
 ipcMain.handle("mcd:exportCsv", async (_e, text, name) => {
   const r = await dialog.showSaveDialog(win, {
     defaultPath: name || "minima-history.csv",
-    filters: [{ name: "CSV", extensions: ["csv"] }]
+    filters: /\.json$/i.test(String(name || "")) ? [{ name: "JSON", extensions: ["json"] }] : [{ name: "CSV", extensions: ["csv"] }]   // the History JSON backup saves through here too
   });
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, String(text == null ? "" : text), "utf8");
   return r.filePath;
+});
+
+// History "Import history (restore / merge)": the user picks a JSON export; its TEXT goes back to the renderer,
+// which checks every record before anything is stored. Nothing is read without the dialog. 64 MB at most.
+ipcMain.handle("mcd:importJson", async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "History export", extensions: ["json"] }, { name: "All files", extensions: ["*"] }] });
+  if (r.canceled || !r.filePaths.length) return null;
+  if (fs.statSync(r.filePaths[0]).size > 64 * 1024 * 1024) throw new Error("That file is larger than 64 MB.");
+  return fs.readFileSync(r.filePaths[0], "utf8");
 });
 
 // miniMall: export a .shop bundle (save dialog) / import one (open dialog → parsed JSON)

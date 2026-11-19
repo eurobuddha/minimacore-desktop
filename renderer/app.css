@@ -222,11 +222,6 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .ku-v--risk { color: var(--red); font-weight: 700; }
 
 /* history search + filter bar */
-.hist-filter { display: flex; gap: 8px; margin: 6px 0 8px; }
-.hist-search { flex: 1 1 auto; }
-.hist-tokensel { flex: 0 0 auto; max-width: 44%; }
-.hist-dirs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
-.hist-dirs .btn { border-radius: 100px; padding: 5px 12px; }
 
 
 

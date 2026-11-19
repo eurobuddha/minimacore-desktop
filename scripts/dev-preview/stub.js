@@ -6,6 +6,7 @@
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
  *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
  *   Send: &send=filled|review|error
+ *   History: &hist=empty  &hmenu=1  &hdetail=<row>  &chain=checking  &hfilter=1  &hforeign=1
  */
 "use strict";
 (function () {
@@ -13,7 +14,7 @@
   const now = Date.now();
   // the node's own format (Java Date.toString()), with a zone name JavaScript cannot parse: the shell must not need to
   const BLOCK_TIME = "Thu Jul 16 14:54:04 BST 2026";
-  try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); localStorage.removeItem("walletOrder"); if (Q.get("tokens")) localStorage.setItem("walletOrder", Q.get("tokens")); } catch (e) {}
+  try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); localStorage.removeItem("walletOrder"); localStorage.setItem("histRebuildVer", "1"); localStorage.setItem("histNormVer", "3"); localStorage.setItem("histHideForeign", Q.get("hforeign") === "1" ? "1" : "0"); if (Q.get("tokens")) localStorage.setItem("walletOrder", Q.get("tokens")); } catch (e) {}
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
   const NFT = "0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8";
   const ADDR = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";
@@ -50,11 +51,33 @@
     checkaddress: () => ({ simple: true }),
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
     keys: () => keys,
-    scripts: () => [],
+    scripts: () => [{ simple: true, address: PK("D1"), miniaddress: ADDR }, { simple: false, address: PK("9F"), miniaddress: "MxG08LOCKEDCONTRACTADDRESS00F1XTURE0000000000000000000000000000" }],
+    history: () => ({ txpows: [], details: [] }),
+    block: () => ({ block: "2428089" }),
+    txpow: () => ({ found: true, blockid: PK("AA"), block: "2428076", tip: "2428089", confirmations: "13" }),
     peers: () => ({ peerslist: "203.0.113.24:9001,198.51.100.77:9001" }),
     network: () => ({ details: { connected: 8, p2p: { address: "192.0.2.10:9001" } }, connections: [1, 2, 3, 4, 5, 6].map(i => ({ incoming: true, host: "203.0.113." + i })).concat([{ incoming: false, host: "198.51.100.77" }, { incoming: false, host: "198.51.100.78" }]) }),
     status: () => ({ version: "1.0.45.14", chain: { block: 2428089, time: BLOCK_TIME } })
   };
+  // History: ?hist=empty, else rows of every kind: received, sent, a contract counterparty, a swap, a split,
+  // a consolidation, an internal transfer, a long token name, a tiny amount, a row older than a week
+  const EXT = "MxG083EXTERNALCOUNTERPARTY0F1XTURE00000000000000000000000000001", CON = "MxG08LOCKEDCONTRACTADDRESS00F1XTURE0000000000000000000000000000";
+  const c = (address, amount, tokenid, name) => ({ address, amount, tokenid: tokenid || "0x00", token: name ? tok(name, name) : "Minima", coinid: PK("C7"), state: [] });
+  const tx = (i, mins, direction, kind, amount, tokenid, tokenName, counterparty, inputs, outputs, difference) => ({ txpowid: PK("B" + i), block: 2428089 - i * 13, time: now - mins * 60000,
+    istransaction: true, isblock: false, size: 1480, burn: "0", direction, kind, tokenid, tokenName, amount, counterparty, inCount: inputs.length, outCount: outputs.length, difference, inputs, outputs, state: [] });
+  const histRows = Q.get("hist") === "empty" ? [] : [
+    tx(1, 31, "out", "normal", "0.000000001", "0x00", "Minima", EXT, [c(ADDR, "10")], [c(EXT, "0.000000001"), c(ADDR, "9.999999999")], { "0x00": "-0.000000001" }),
+    tx(2, 64, "out", "normal", "1", MXUSD, "MxUSD", EXT, [c(ADDR, "3", MXUSD, "MxUSD")], [c(EXT, "1", MXUSD, "MxUSD"), c(ADDR, "2", MXUSD, "MxUSD")], { [MXUSD]: "-1" }),
+    tx(3, 71, "in", "normal", "2.1999", MXUSD, "MxUSD", CON, [c(CON, "2.1999", MXUSD, "MxUSD")], [c(ADDR, "2.1999", MXUSD, "MxUSD")], { [MXUSD]: "2.1999" }),
+    tx(4, 190, "in", "buy", "120", "0x00", "Minima", CON, [c(CON, "120"), c(ADDR, "4.8", MXUSD, "MxUSD")], [c(ADDR, "120"), c(CON, "4.8", MXUSD, "MxUSD")], { "0x00": "120", [MXUSD]: "-4.8" }),
+    tx(5, 400, "self", "split", "100", "0x00", "Minima", ADDR, [c(ADDR, "100")], Array.from({ length: 10 }, () => c(ADDR, "10")), { "0x00": "0" }),
+    tx(6, 1500, "self", "consolidation", "42.5", "0x00", "Minima", ADDR, Array.from({ length: 6 }, () => c(ADDR, "7.0833")), [c(ADDR, "42.5")], { "0x00": "0" }),
+    tx(7, 3000, "self", "normal", "0", "0x00", "Minima", ADDR, [c(ADDR, "5")], [c(ADDR, "5")], { "0x00": "0" }),
+    tx(8, 5000, "in", "normal", "3", LONG, "The Meridian Harbour Lighthouse Preservation Society Commemorative Membership Token, Second Series", EXT, [c(EXT, "3", LONG, "MHLPS")], [c(ADDR, "3", LONG, "MHLPS")], { [LONG]: "3" }),
+    tx(9, 9000, "out", "normal", "0.00000000000000000000000000000000000000000001", "0x00", "Minima", CON, [c(ADDR, "1")], [c(CON, "0.00000000000000000000000000000000000000000001")], { "0x00": "-0.00000000000000000000000000000000000000000001" }),
+    tx(10, 60 * 24 * 40, "in", "normal", "1000", "0x00", "Minima", EXT, [c(EXT, "1000")], [c(ADDR, "1000")], { "0x00": "1000" }),
+    tx(11, 60 * 24 * 41, "in", "normal", "7", "0x00", "Minima", CON, [c(CON, "7")], [c(CON, "7")], { "0x00": "7" })   // touches no wallet address: "foreign"
+  ];
   const mailId = PK("E5");
   const mailThread = (who, name, subject, message, unread, mins) => ({ other: who, hashref: PK("F" + mins), unread,
     last: { incoming: true, frompublickey: who, topublickey: mailId, fromname: name, subject, message, type: "text", timemilli: now - mins * 60000, date: now - mins * 60000 } });
@@ -65,6 +88,7 @@
   };
   const fixtures = {
     cmd: async (c) => {
+      if (Q.get("chain") === "checking" && /^txpow onchain:/.test(c)) return new Promise(() => {});   // the node has not answered yet
       const f = cmds[String(c).split(" ")[0]];
       try { return f ? { status: true, response: f(String(c)) } : { status: false, error: "preview: no fixture for " + c }; }
       catch (e) { return { status: false, error: e.message }; }
@@ -77,7 +101,10 @@
     appVersion: async () => "0.0.0-preview",
     updateStatus: async () => ({ available: Q.get("update") === "1", version: "9.9.9", running: "0.0.0-preview" }),
     tokenIcon: async () => null, keyAudit: async () => null, keyReuse: async () => null,
-    histGet: async () => [], histQuery: async () => ({ rows: [], total: 0 }), histTokens: async () => [], histStats: async () => ({ count: 0 }),
+    histGet: async () => histRows, histTokens: async () => [{ tokenid: "0x00", name: "Minima" }, { tokenid: MXUSD, name: "MxUSD" }],
+    histQuery: async (f) => histRows.filter(r => (!f.search || JSON.stringify([r.counterparty, r.tokenName, r.txpowid, r.amount]).toLowerCase().includes(String(f.search).toLowerCase()))
+      && (!f.direction || r.direction === f.direction || r.kind === f.direction) && (!f.token || r.tokenid === f.token)),
+    histStats: async () => ({ count: histRows.length }), histAdd: async () => histRows.length, exportCsv: async () => null, importJson: async () => null,
     mailInit: async () => ({ publicId: mailId, name: "Preview", words: "amber canal dune ember fjord grove", published: false, payaddr: ADDR }),
     mailThreads: async () => [
       mailThread(PK("11"), "Odile Varga", "Saturday market", "The stall is booked, table nine by the fountain.", 1, 12),
@@ -113,6 +140,12 @@
       if (Q.get("state") === "stopped") onStatus(Object.assign({}, status, { state: "stopped", health: null }));
       if (Q.get("shutdown") === "1") menuAction("shutdown");
       if (Q.get("expand") === "1") el("walHead").click();
+      // History: ?hmenu=1 opens its options, ?hdetail=<n> the n-th row's detail (&chain=checking: no answer yet), ?hfilter=1 the filter, ?hforeign=1 hides foreign rows
+      if (view === "history") setTimeout(() => {
+        if (Q.get("hfilter") === "1") histMenuAction("filter");
+        if (Q.get("hmenu") === "1") { el("histMenuBtn").click(); document.activeElement.blur(); }
+        if (Q.get("hdetail")) document.querySelectorAll(".hrow")[parseInt(Q.get("hdetail"), 10) - 1].click();
+      }, 600);
       // ?send=filled|review|error fills the Send form, opens its review, or shows what a pasted address with extra parameters gets
       if (Q.get("send")) setTimeout(() => {
         el("sTok").value = MXUSD; el("sTok").onchange(); el("sAmt").value = "25.5";
