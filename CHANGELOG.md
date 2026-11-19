@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.113] — Dexicon ① MxUSD: OTC (Phase 3c)
+
+- **OTC** (`OtcTab.java`): the fold "OTC: A PRIVATE DEAL", MY AVAILABILITY (I SELL up to, I BUY up to, "● Live" or "○ Off", Go live / Update, Withdraw), LIQUIDITY PROVIDERS (what each LP sells and buys, its id whole, Buy and Sell buttons) and MY DEALS (the terms, whose move it is, the swap's hash once it settles, Accept / Counter / Reject on the user's move).
+- **Same calls.** Go live is `axOtcGoLive(sell, buy)` with the two fields as typed, Withdraw `axOtcWithdraw()`, a proposal `axOtcPropose({cid, mpk, eth}, side, amount, price)`, accept and reject `axOtcDeal(ref, action)`. The old panel asked for a proposal's side, amount and price in three prompts; the phone's Buy / Sell buttons and one dialog with amount and price replace them, and the tests run the old panel's own function with the same answers and compare the call.
+- **Added from the phone, on an existing engine call:** Counter (`axOtcDeal(ref, "counter", amount, price)`; the old panel never offered it), and a proposal above the LP's stated size is refused on the screen before anything is sent.
+- Each outcome says what was sent, that nothing is locked by an offer, and that an accepted deal settles as an ordinary swap shown in Activity. With the identity halted only Withdraw and Reject remain.
+
 ## [0.18.112] — Dexicon ① MxUSD: Market (Phase 3c)
 
 - **Market** (`MarketTab.java`): the fold "YOUR AtomiX MARKET", the reference mid, YOUR OFFER at a glance (live, saved, withdrawn or off, with the user's own levels and the last publish), "Order book · N live" with Refresh, the spread, the SELL (bid) / BUY (ask) legend and the mirrored ladder with every maker key whole (click copies) and the user's own levels marked "you"; Edit my order, Publish, Withdraw; the price chart of the market's history.

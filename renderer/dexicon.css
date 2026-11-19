@@ -290,3 +290,7 @@ button.dx-pill { cursor: pointer; }
 .ax-rin { flex: 1 1 0; min-width: 0; padding: 8px; border: 1px solid var(--dx-border); border-radius: 8px; background: var(--dx-surface2); color: var(--dx-text); font: 400 12px/16px var(--dx-mono); text-align: right; }
 .ax-rin--bid { color: var(--dx-in); } .ax-rin--ask { color: var(--dx-red); text-align: left; } .ax-rin--ask + .ax-rin { text-align: left; }
 .ax-rin:focus-visible, .ax-bigin:focus-visible { outline: 2px solid var(--ax-acc); outline-offset: 1px; }
+/* OTC (OtcTab.java) */
+.ax-sec { margin: 14px 2px 6px; font-size: 12px; }
+.ax-dlg pre { margin-bottom: 4px; font-family: var(--dx-sans); }
+.ax-dlg .dx-btn--go { background: linear-gradient(var(--ax-acc-top), var(--ax-acc)); color: var(--ax-ink); }

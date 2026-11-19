@@ -285,3 +285,46 @@ test("the 'buys declined' warning uses the engine's own read limits", () => {
   assert.equal(AX.coinWarn("mxusdt", 53), ""); assert.equal(AX.coinWarn("mxusdt", 54), "54 MxUSD coins: AtomiX buys are being declined. Consolidate.");
   assert.equal(AX.coinWarn("minima", 200), ""); assert.match(AX.coinWarn("minima", 201), /^201 MINIMA coins/); assert.equal(AX.coinWarn("mxusdt", undefined), "");
 });
+
+// ---- OTC ----
+const LP = { cid: PK("C1"), mpk: PK("C2"), eth: "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002", sell: 2000, buy: 750 };
+const OTC = { board: [LP], deals: [{ ref: "d1", side: "SELL", amount: "300", price: "1.004", status: "PROPOSED", whoseTurn: "ME" }], myOffer: { enable: false, sellSize: 500, buySize: 250 } };
+const OTC_ANSWERS = () => ({ axStatus: { ready: true, currency: "mxusdt" }, axOtc: OTC, axOtcGoLive: { ok: true }, axOtcWithdraw: { ok: true }, axOtcPropose: { ok: true }, axOtcDeal: { ok: true } });
+async function oldOtc(prompts) { const r = recorder(OTC_ANSWERS()), p = oldPanel(r.api, true, prompts); p.P._setView("otc"); await p.P.render(); await p.settle(); return { r, p }; }
+test("OTC availability: Go live sends the two sizes as typed, Withdraw sends nothing else, as the old panel", async () => {
+  for (const [sell, buy] of [["500", "250"], ["", "1000.5"], ["", ""]]) {
+    const { r, p } = await oldOtc(); p.el("axOtcSell").value = sell; p.el("axOtcBuy").value = buy;
+    await p.el("axOtcLive").onclick(); await p.el("axOtcWithdraw").onclick(); await p.settle();
+    const rn = recorder(OTC_ANSWERS()); await AX.Act.otcGoLive(rn.api, ui(true), sell, buy); await AX.Act.otcWithdraw(rn.api, ui(true));
+    assert.deepEqual(rn.money(), r.money()); assert.deepEqual(rn.money(), [["axOtcGoLive", [sell, buy]], ["axOtcWithdraw", []]]);
+  }
+});
+// the old panel wired its LP and deal buttons through querySelectorAll, which the stand-in page does not parse: its
+// propose is reached through the prompts, and its accept / reject calls are the two-argument axOtcDeal read below
+for (const [side, amount, price] of [["SELL", "300", "1.004"], ["BUY", "120.5", "0.997"], ["buy", "5", "1"], ["HOLD", "5", "1"], ["SELL", "", "1"]]) test(`OTC propose ${side} ${amount || "(no amount)"} @ ${price}: axOtcPropose with the LP's three ids, the side, the amount and the price as text`, async () => {
+  const rn = recorder(OTC_ANSWERS()); await AX.Act.otcPropose(rn.api, ui(true), LP, side, amount, price);
+  const good = /^(sell|buy)$/i.test(side) && !!amount;
+  assert.deepEqual(rn.money(), good ? [["axOtcPropose", [{ cid: LP.cid, mpk: LP.mpk, eth: LP.eth }, side.toUpperCase(), amount, price]]] : []);
+  // the old panel's own function, lifted out of its file and run with the same answers to its three prompts
+  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8"), from = src.indexOf("async function axOtcPropose(lp)"), to = src.indexOf("// ---- Wallet (ETH) ----");
+  const ro = recorder(OTC_ANSWERS()), queue = [side, amount, price];
+  const old = new Function("api", "showPrompt", "toast", "renderAxOtc", "axCcyOf", "axStatusCache", src.slice(from, to) + "; return axOtcPropose;")(ro.api, async () => queue.shift(), () => {}, () => {}, () => "MxUSD", {});
+  await old(LP);
+  assert.deepEqual(rn.money(), ro.money(), "the same call as the old panel's axOtcPropose");
+});
+test("OTC deals: accept and reject are axOtcDeal(ref, action) as the old panel wrote them; a counter adds the amount and price", async () => {
+  const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
+  assert.ok(src.includes('api.axOtcDeal(btn.dataset.axaccept, "accept")') && src.includes('api.axOtcDeal(btn.dataset.axreject, "reject")'), "the old panel's two calls");
+  const rn = recorder(OTC_ANSWERS());
+  await AX.Act.otcDeal(rn.api, ui(true), "d1", "accept"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "reject"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "counter", "250", "1.002");
+  assert.deepEqual(rn.log, [["axOtcDeal", ["d1", "accept"]], ["axOtcDeal", ["d1", "reject"]], ["axOtcDeal", ["d1", "counter", "250", "1.002"]]]);
+  const u = ui(true); await AX.Act.otcDeal({ axOtcDeal: async () => { throw new Error("deal not found"); } }, u, "d9", "accept");
+  assert.deepEqual(u.said[0], ["The deal was NOT accepted: deal not found", "error"]);
+});
+test("OTC: terms are checked before anything is sent; a deal says whose move it is", () => {
+  assert.equal(AX.termsProblem("300", "1.004", 2000), ""); assert.match(AX.termsProblem("2000.01", "1", 2000), /^Above the LP's max size \(2000\)/);
+  for (const [a, p] of [["", "1"], ["5", ""], ["0", "1"], ["5", "-1"], ["1e3", "1"], ["5", "abc"]]) assert.match(AX.termsProblem(a, p, 100), /^Enter an amount and a price/, a + " @ " + p);
+  assert.equal(AX.dealStatus({ status: "PROPOSED", whoseTurn: "ME" }), "Your move: accept, counter or reject"); assert.equal(AX.dealStatus({ status: "COUNTERED", whoseTurn: "THEM" }), "Waiting for the counterparty…");
+  assert.equal(AX.dealStatus({ status: "EXECUTING" }), "Executing: the swap's two sides are locking");
+  assert.equal(AX.dealCanAct({ status: "PROPOSED", whoseTurn: "ME" }), true); assert.equal(AX.dealCanAct({ status: "AGREED", whoseTurn: "ME" }), false); assert.equal(AX.dealCanAct({ status: "COUNTERED", whoseTurn: "THEM" }), false);
+});

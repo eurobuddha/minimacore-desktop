@@ -174,6 +174,20 @@
     return { live, rows: live ? rows : [], text: !mc ? "…" : st.withdrawn ? "Withdrawn: your offer is off the book, or leaving it within about a block." : live ? "Live" + (c.pegEnable ? " · pegged to " + src : "") + " · kept on the book while this app and the node run."
       : set ? "Saved, not on the book. Publish puts it there." : "Off: edit your order, then Publish.", ago: mc && mc.lastPublishMs ? mc.lastPublishMs : 0 };
   }
+  /** An OTC deal's state in words (OtcTab.dealStatus). */
+  function dealStatus(d) {
+    const st = String(d.status || "");
+    return st === "PROPOSED" || st === "COUNTERED" ? (d.whoseTurn === "ME" ? "Your move: accept, counter or reject" : "Waiting for the counterparty…")
+      : st === "AGREED" ? "Agreed: settling" : st === "EXECUTING" ? "Executing: the swap's two sides are locking" : st === "COMPLETE" ? "Complete" : st === "REJECTED" ? "Rejected" : st === "EXPIRED" ? "Expired" : st.toLowerCase();
+  }
+  const dealCanAct = (d) => d.whoseTurn === "ME" && (d.status === "PROPOSED" || d.status === "COUNTERED");
+  /** Why an OTC offer's terms cannot be sent ("" = they can): both plain positive numbers, the amount within the LP's size. */
+  function termsProblem(amount, price, cap) {
+    const ok = (t) => /^[0-9]+(\.[0-9]+)?$/.test(String(t).trim()) && Number(t) > 0;
+    if (!ok(amount) || !ok(price)) return "Enter an amount and a price. Nothing was sent.";
+    return cap != null && Number(amount) > Number(cap) + 1e-9 ? "Above the LP's max size (" + cap + "). Nothing was sent." : "";
+  }
+
   // The engine reads at most this many coins of a token before it refuses (main/atomix/lib/htlc.js guardedCoins): a maker
   // over it declines every buy until the coins are merged (AtomixConsolidate.warning).
   const COIN_CAP = { minima: 200, mxusdt: 53 };
@@ -222,11 +236,37 @@
       ui.say(r && r.err ? "Your market was NOT withdrawn: " + mx(r.err) + ". It may still be on the book." : "Market withdrawn: your offer leaves the book within about a block. A take already in flight still settles.", r && r.err ? "error" : "note");
       return r;
     },
+    // ---- OTC: the panel's four calls. side is the LP's side: "SELL" = the LP sells (you buy), "BUY" = the LP buys (you sell) ----
+    async otcGoLive(api, ui, sell, buy) {
+      const r = await api.axOtcGoLive(sell, buy).catch(fail);
+      ui.say(r && r.err ? "Your availability was NOT published: " + mx(r.err) : "Your availability was published: other people can now propose deals to you. Nothing is traded until you accept one.", r && r.err ? "error" : "note");
+      return r;
+    },
+    async otcWithdraw(api, ui) {
+      const r = await api.axOtcWithdraw().catch(fail);
+      ui.say(r && r.err ? "Your availability may still be on the board: " + mx(r.err) : "Availability withdrawn. A deal already agreed still settles.", r && r.err ? "error" : "note");
+      return r;
+    },
+    async otcPropose(api, ui, lp, side, amount, price) {
+      side = String(side || "").trim().toUpperCase();
+      if (side !== "SELL" && side !== "BUY") { ui.say("Side must be SELL or BUY. Nothing was sent.", "note"); return null; }
+      if (!amount || !price) return null;
+      const r = await api.axOtcPropose({ cid: lp.cid, mpk: lp.mpk, eth: lp.eth }, side, amount, price).catch(fail);
+      ui.say(r && r.err ? "Your offer was NOT sent: " + mx(r.err) : "Offer sent. Nothing is locked: the LP can accept, counter or reject it, and you will see it under My deals.", r && r.err ? "error" : "note");
+      return r;
+    },
+    /** accept / reject: axOtcDeal(ref, action). counter: axOtcDeal(ref, "counter", amount, price). */
+    async otcDeal(api, ui, ref, action, amount, price) {
+      const r = await (action === "counter" ? api.axOtcDeal(ref, "counter", amount, price) : api.axOtcDeal(ref, action)).catch(fail);
+      if (r && r.err) ui.say((action === "accept" ? "The deal was NOT accepted: " : action === "reject" ? "The deal may not be rejected yet: " : "Your counter-offer was NOT sent: ") + mx(r.err), "error");
+      else ui.say(action === "accept" ? "Accepted. The deal now settles as an ordinary AtomiX swap: follow it in Activity. If the other side never locks, your lock is refunded by itself at its timelock." : action === "reject" ? "Rejected. Nothing was locked." : "Counter-offer sent. Nothing is locked until one side accepts.", "note");
+      return r;
+    },
     async refundNow(api, ui, hash) { const r = await api.axRefundNow(hash).catch((e) => ({ msg: "Refund check failed: " + ((e && e.message) || e) })); return mx(r.msg); },
     async inspect(api, hash) { return (await api.axInspect(hash).catch((e) => ["Check failed: " + ((e && e.message) || e)])).map(mx); }
   };
 
-  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn };
+  const core = { MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, stages, swapItem, HIDE_ASK, launch, makerLive, RUNGS, clampLevels, ladderPrices, makerForm, ladderSummary, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -270,6 +310,7 @@
     if (!D.running() || !S.st.ready) return;
     const want = { book: () => api().axBook(), swaps: () => api().axSwaps(), mc: () => api().axMakerCfg() };
     if (tab === "market") want.mh = () => api().axMarketHistory();
+    if (tab === "otc") want.otc = () => api().axOtc();
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled") S[k] = got[i].value; });
     api().axWallet().then((w) => { if (w) { S.wallet = w; S.bals = w.bals; paint(); } }).catch(() => {});
@@ -528,13 +569,61 @@
     S.busy = false; load("market").then(paint, paint);
   }
 
+  // ---- OTC (OtcTab.java) ----
+  const WHY_OTC = "Negotiate a custom size and price directly with a liquidity provider (LP), then settle as the same trustless HTLC swap as everything else in ①: each side locks, the secret releases both, and a stalled deal refunds. Go live with your own availability and other people can propose deals to you; this app answers and settles while it is running.";
+  function otcHtml() {
+    const c = ccy(), o = S.otc, out = [banners(), why("otc", "OTC: A PRIVATE DEAL", WHY_OTC)];
+    if (!D.running() || !S.st.ready) return out.join("");
+    const my = (o && o.myOffer) || {}, live = !!my.enable, dr = S.otcDraft || (o ? (S.otcDraft = { sell: my.sellSize || "", buy: my.buySize || "" }) : { sell: "", buy: "" }), dis = S.busy || halted() ? " disabled" : "";
+    out.push(`<div class="dx-label ax-sec">MY AVAILABILITY</div><div class="dx-card">
+      <label class="ax-fld"><b>I SELL up to</b><input class="dx-in ax-in" id="otcSell" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.sell)}"></label>
+      <label class="ax-fld"><b>I BUY up to</b><input class="dx-in ax-in" id="otcBuy" inputmode="decimal" autocomplete="off" placeholder="max ${esc(c)} (blank = off)" value="${esc(dr.buy)}"></label>
+      <div class="ax-offer" data-live="${live}">${live ? "● Live: LPs can negotiate with you" : "○ Off"}</div>
+      <div class="ax-acts"><button class="dx-btn ax-go" data-axotc="live"${dis}>${live ? "Update" : "Go live"}</button>${live ? `<button class="dx-btn" data-axotc="withdraw"${S.busy ? " disabled" : ""}>Withdraw</button>` : ""}</div></div>`);
+    out.push(`<div class="dx-label ax-sec">LIQUIDITY PROVIDERS</div>`);
+    if (!o) out.push(`<div class="ax-dim">Reading the OTC board…</div>`);
+    else if (!o.board.length) out.push(`<div class="ax-dim">No OTC LPs online right now.</div>`);
+    else o.board.forEach((lp, i) => {
+      const sides = [Number(lp.sell) > 0 ? "sells up to " + lp.sell + " " + c : "", Number(lp.buy) > 0 ? "buys up to " + lp.buy + " " + c : ""].filter(Boolean).join("   ·   ");
+      out.push(`<div class="dx-card"><b class="ax-t13">${esc(sides || "no size offered")}</b>${idLine("LP id", lp.cid)}<div class="ax-acts">${Number(lp.sell) > 0 ? `<button class="dx-btn ax-go" data-axlp="${i}" data-side="SELL"${dis}>Buy ${esc(c)}</button>` : ""}${Number(lp.buy) > 0 ? `<button class="dx-btn" data-axlp="${i}" data-side="BUY"${dis}>Sell ${esc(c)}</button>` : ""}</div></div>`);
+    });
+    out.push(`<div class="dx-label ax-sec">MY DEALS</div>`);
+    if (o && !o.deals.length) out.push(`<div class="ax-dim">No OTC deals yet.</div>`);
+    for (const d of (o && o.deals) || []) out.push(`<div class="dx-card"><b class="ax-t14">${d.side === "SELL" ? "LP sells " : "LP buys "}${esc(d.amount)} ${esc(c)} @ ${esc(d.price)} USDT</b><div class="ax-dim">${esc(dealStatus(d))}</div>${d.hash ? idLine("swap", d.hash) : ""}`
+      + (dealCanAct(d) ? `<div class="ax-acts"><button class="dx-btn ax-go" data-axdeal="accept" data-ref="${esc(d.ref)}"${dis}>Accept</button><button class="dx-btn" data-axdeal="counter" data-ref="${esc(d.ref)}"${dis}>Counter</button><button class="dx-btn" data-axdeal="reject" data-ref="${esc(d.ref)}"${S.busy ? " disabled" : ""}>Reject</button></div>` : "") + `</div>`);
+    return out.join("");
+  }
+  function paintOtc() { const b = body(); b.innerHTML = otcHtml(); b.oninput = (e) => { const t = e.target; if (t && (t.id === "otcSell" || t.id === "otcBuy")) { numIn(t); if (S.otcDraft) S.otcDraft[t.id === "otcSell" ? "sell" : "buy"] = t.value; } }; }
+  /** amount and price for a proposal or a counter-offer (OtcTab.terms) */
+  const terms = (title, text, okLabel, amount, price, cap) => form(title, `<pre>${esc(text)}</pre><label class="ax-fld"><b>${esc(ccy())} amount${cap != null ? " (at most " + esc(cap) + ")" : ""}</b><input class="dx-in ax-in" name="a" inputmode="decimal" autocomplete="off" value="${esc(amount || "")}"></label><label class="ax-fld"><b>Price (USDT per ${esc(ccy())})</b><input class="dx-in ax-in" name="p" inputmode="decimal" autocomplete="off" value="${esc(price || "")}"></label>`,
+    okLabel, (d) => { const a = d.querySelector("[name=a]").value.trim(), p_ = d.querySelector("[name=p]").value.trim(); return termsProblem(a, p_, cap) || { amount: a, price: p_ }; }, (d) => { d.oninput = (e) => { if (e.target.tagName === "INPUT") numIn(e.target); }; });
+  async function otcAct(ds) {
+    if (S.busy) return;
+    if (halted() && !(ds.axotc === "withdraw" || ds.axdeal === "reject")) return say("Halted: this node no longer owns the keys AtomiX uses here. Nothing was sent.", "error");
+    const o = S.otc || { board: [], deals: [] }, c = ccy(), run = async (fn) => { S.busy = true; paint(); await fn(); S.busy = false; S.otcDraft = ds.axotc ? null : S.otcDraft; load("otc").then(paint, paint); };
+    if (ds.axotc === "live") return run(() => Act.otcGoLive(api(), ui, $("otcSell").value, $("otcBuy").value));
+    if (ds.axotc === "withdraw") return run(() => Act.otcWithdraw(api(), ui));
+    if (ds.axlp != null) {
+      const lp = o.board[Number(ds.axlp)]; if (!lp) return;
+      const buy = ds.side === "SELL", t = await terms(buy ? "Buy " + c : "Sell " + c, (buy ? "You buy " + c + " from this LP and pay USDT on Ethereum." : "You sell " + c + " to this LP and receive USDT on Ethereum.") + " This sends an offer only: nothing is locked until the LP accepts and the swap starts.\n\nLP id\n" + lp.cid, "Send offer", "", "", buy ? lp.sell : lp.buy);
+      return t ? run(() => Act.otcPropose(api(), ui, lp, ds.side, t.amount, t.price)) : null;
+    }
+    if (ds.axdeal === "counter") {
+      const d = o.deals.find((x) => x.ref === ds.ref); if (!d) return;
+      const t = await terms("Counter-offer", "Your counter replaces the terms on the table. Nothing is locked until one side accepts.", "Send counter", d.amount, d.price, null);
+      return t ? run(() => Act.otcDeal(api(), ui, ds.ref, "counter", t.amount, t.price)) : null;
+    }
+    if (ds.axdeal) return run(() => Act.otcDeal(api(), ui, ds.ref, ds.axdeal));
+  }
+
   // ---- the room ----
   const none = () => "", noop = () => {};
-  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap }, market: { skeleton: none, bind: noop, paint: paintMarket, whole: true } };
+  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap }, market: { skeleton: none, bind: noop, paint: paintMarket, whole: true },
+    otc: { skeleton: none, bind: noop, paint: paintOtc, whole: true } };
   function render(tab, host) {
     if (!D) return;
     const scr = SCREENS[tab]; if (!scr) { host.dataset.tab = tab; host.onclick = null; host.innerHTML = `<div class="dx-state dx-state--note" role="status">This screen of the room is not built in this version yet.</div>`; S.tab = tab; return; }
-    if (host.dataset.tab !== tab || (!host.firstChild && !scr.whole)) { host.dataset.tab = tab; clearInterval(S.pegTimer); S.editing = false; host.oninput = null; host.innerHTML = scr.skeleton(); host.onclick = click; S.said = null; scr.bind(); $("main").scrollTop = 0; }
+    if (host.dataset.tab !== tab || (!host.firstChild && !scr.whole)) { host.dataset.tab = tab; clearInterval(S.pegTimer); S.editing = false; S.otcDraft = null; host.oninput = null; host.innerHTML = scr.skeleton(); host.onclick = click; S.said = null; scr.bind(); $("main").scrollTop = 0; }
     S.tab = tab; host.dataset.axccy = S.st.currency || "";
     paint(); load(tab).then(paint, paint);
   }
@@ -553,6 +642,7 @@
     if (ds.axslip) { if (ds.axslip === "custom") return customSlip(); S.slip = Number(ds.axslip); pref("dexicon_ax_slip", ds.axslip); paint(); return preview(); }
     if (ds.axcheck) return checkNow(ds.axcheck);
     if (ds.axmk) return marketAct(ds.axmk);
+    if (ds.axotc || ds.axlp != null || ds.axdeal) return otcAct(ds);
     if (ds.axrefresh) { S.book = null; paint(); return load(S.tab).then(paint, paint); }
     if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
