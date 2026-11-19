@@ -59,3 +59,72 @@ test("the RPC password goes from the main process to the clipboard and is never 
   assert.ok(/"mcd:copyRpcPassword", \(\) => \{ clipboard\.writeText\(config\.rpcSecret\(\)\); return true; \}/.test(main));
   assert.ok(!/(return|=>)\s*config\.rpcSecret\(\)/.test(main), "no handler returns the secret");
 });
+
+// ---- Backup & Recovery (0.18.86) ----
+test("Backup & Recovery: the phone's hub rows, in its order, with Mail backup after Chat backup", () => {
+  assert.ok(html.includes('id="view-backup"') && /SUB_TITLE = \{[^}]*backup: "Backup & Recovery"/.test(app));
+  const rows = [...source("renderBackup").matchAll(/\["([a-z]+)", "([^"]+)", "/g)].map(m => m[1] + "=" + m[2]);
+  assert.deepEqual(rows, ["create=Create backup", "restore=Restore from file", "chat=Chat backup", "mail=Mail backup", "resync=Resync node", "keys=Private keys"]);
+  assert.ok(!/setBackup|setResync|setReveal|setRestore|showRestoreOverlay/.test(app), "the Settings cards and the restore dialog are gone: one home for each operation");
+});
+
+test("megammrsync is built in one place and puts the bytes on the wire that 0.18.84 did", () => {
+  const { resyncCommand } = lift(["resyncCommand"]);
+  const H = "megammr.example:9001", FAKE = "not a real seed just test words";
+  assert.equal(resyncCommand({ host: H }).cmd, "megammrsync action:resync host:" + H);
+  assert.equal(resyncCommand({ host: H }).resetsWallet, false, "a plain resync does not touch the wallet");
+  assert.equal(resyncCommand({ host: H, phrase: " " + FAKE + "\n", anyphrase: true, keyuses: "2000" }).cmd,
+    `megammrsync action:resync host:${H} phrase:"${FAKE}" anyphrase:true keyuses:2000`, "the restore dialog's command; only the ends of the phrase are trimmed");
+  assert.equal(resyncCommand({ host: H, phrase: FAKE, keyuses: 0 }).cmd, `megammrsync action:resync host:${H} phrase:"${FAKE}" keyuses:0`);
+  assert.equal(resyncCommand({ host: H, phrase: "Not  A  Real   Seed", anyphrase: true, keyuses: "1" }).cmd.includes('"Not  A  Real   Seed"'), true, "spacing and case inside a phrase are never changed");
+  assert.equal(resyncCommand({ host: H, file: "old.bak", password: "pw1" }).cmd, `megammrsync action:resync host:${H} file:old.bak password:pw1`);
+  assert.ok(resyncCommand({ host: H, phrase: FAKE, keyuses: "1" }).resetsWallet && resyncCommand({ host: H, file: "a.bak" }).resetsWallet);
+});
+
+test("megammrsync refuses everything the old screens refused, before any command exists", () => {
+  const { resyncCommand } = lift(["resyncCommand"]);
+  const H = "megammr.example:9001", bad = (o, why) => { const r = resyncCommand(o); assert.ok(r.error && !r.cmd, why); };
+  bad({ host: "megammr.example" }, "a host without a port");
+  bad({ host: "h:9001 phrase:x" }, "a host carrying another parameter");
+  bad({ host: H, phrase: 'fake "words"', keyuses: "1" }, "a quote in the phrase");
+  bad({ host: H, phrase: "fake\\words", keyuses: "1" }, "a backslash in the phrase");
+  bad({ host: H, phrase: "fake\nwords", keyuses: "1" }, "a line break inside the phrase");
+  bad({ host: H, phrase: "fake words" }, "a phrase without key uses");
+  bad({ host: H, phrase: "fake words", keyuses: "-1" }, "negative key uses");
+  bad({ host: H, phrase: "fake words", keyuses: "12abc" }, "key uses that are not a number");
+  bad({ host: H, keyuses: "x" }, "key uses that are not a number, without a phrase");
+  bad({ host: H, file: "my file.bak" }, "a file path with a space");
+  bad({ host: H, file: "a.bak", password: "p w" }, "a password with a space");
+  bad({ host: H, file: "a.bak", password: 'p"w' }, "a password with a quote");
+  bad({ host: H, needPhrase: true }, "Rebuild without a phrase");
+  bad({ host: H, needFile: true }, "Restore without a file");
+});
+
+test("a backup password is letters and numbers, typed twice, before the backup command is built", () => {
+  const { backupPasswordProblem } = lift(["backupPasswordProblem"]);
+  assert.equal(backupPasswordProblem("abc123", "abc123"), "");
+  for (const pw of ["", 'a"b', "a\\b", "a b", "a\nb", "pä55"]) assert.ok(backupPasswordProblem(pw, pw), JSON.stringify(pw) + " is refused");
+  assert.ok(backupPasswordProblem("abc123", "abc124"), "the two entries must match");
+  const body = source("renderBackup");
+  assert.ok(body.indexOf("backupPasswordProblem(") < body.indexOf('cmd(`backup password:"${pw}"`)'), "checked first; the command string is the 0.18.84 one");
+});
+
+test("every megammrsync screen confirms first, and a replaced wallet drops the old identities", () => {
+  const body = source("renderBackup");
+  const run = body.slice(body.indexOf("const run = async"), body.indexOf("const hostField"));
+  const order = ["built.error", "showConfirm(", "cmd(built.cmd)", "saveConfig({ megammrHost", "walletReplaced()"].map(x => run.indexOf(x));
+  assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refuse, confirm, run, remember the host, drop identities: in that order");
+  assert.equal((body.match(/megammrsync action/g) || []).length, 0, "no screen builds its own megammrsync");
+  const w = source("walletReplaced");
+  for (const call of ["mailInvalidate", "resetMailState", "ppInvalidate", "resetPpState", "axInvalidate", "resetAxState", "casinoInvalidate", "resetWalletFigures"]) assert.ok(w.includes(call), call);
+});
+
+test("the seed phrase is read only on request, shown only on its screen, and never stored or logged", () => {
+  const body = source("renderBackup");
+  assert.equal((app.match(/tryCmd\("vault"\)/g) || []).length <= 2, true);
+  assert.ok(/\$\("bkShow"\)\.onclick = async[\s\S]*?seedFrom\(await tryCmd\("vault"\)\)/.test(body), "vault runs when Show seed phrase is pressed");
+  assert.ok(app.includes('if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";'), "leaving the screen removes the words from the page");
+  assert.ok(!/console\.\w+\([^)]*(phrase|seed|pw\b|password)/i.test(app), "nothing logs a phrase or a password");
+  assert.ok(!/saveConfig\(\{[^}]*(phrase|seed|password)/i.test(app), "nothing saves one");
+  assert.ok(!/localStorage|\bstore\(/.test(body), "and the hub keeps nothing in browser storage");
+});

@@ -513,6 +513,7 @@
   window.ChatPanel = {
     init(deps) { D = deps; },
     render,
+    backup: backupChats, restore: restoreChats,   // also opened from Backup & Recovery
     async onUpdate() {
       await refreshThreads();
       renderContacts();

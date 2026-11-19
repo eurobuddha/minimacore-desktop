@@ -755,5 +755,5 @@
     catch (e) { return 0; }
   }
 
-  g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge };
+  g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge, backup: doBackup, restore: doRestore };   // backup and restore are also opened from Backup & Recovery
 })(window);

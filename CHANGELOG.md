@@ -7,6 +7,19 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.86] — Backup & Recovery: the phone's hub
+
+- "Backup & Recovery" in the menu opens the phone's hub: Create backup, Restore from file, Chat backup, Mail backup, Resync node, Private keys. Each row opens its own screen; Back returns to the hub. While the node is stopped the rows are greyed and the hub says why.
+- These are the operations that sat in Settings as the Wallet, Resync chain and Backup cards, and in the "Restore from a different seed" dialog. They have one home now and are gone from Settings.
+- Create backup: the password is typed twice and must be letters and numbers only, which is what the node can carry. The command is the same (`backup password:"…"`). When the node reports the file, its whole path is shown with "Copy full path".
+- Resync node, Restore from file and "Rebuild wallet from seed phrase" (under Private keys) all run `megammrsync`. The command is now built in one function that makes every check the old screens made (host, quotes, backslashes, line breaks, key uses, file path, password) before any command exists. Each asks for confirmation first, and the ones that replace the wallet say what is lost.
+- A restore from a backup file now also drops the mail, AtomiX and pool identities derived from the old seed, as a seed restore always did. Before, only a seed restore did.
+- Private keys: "Show seed phrase" reads the words from the node when pressed and "Hide seed phrase" removes them. Leaving the screen removes them from the page as well. They are never stored or logged.
+- Key uses must be a whole number; "12abc" used to be read as 12.
+- Chat backup and Mail backup open the same back-up and restore steps as their own apps.
+- Left out, because the desktop has no code behind them yet: the phone's file name field and "save a copy" for a backup, its list of backup files, lock / unlock / wipe / restore private keys, and Copy seed phrase. The `keys:` option of a seed rebuild is in the Terminal only.
+- Dev preview: `?view=backup`, `&bk=create|restore|resync|keys`. The preview's "seed" is the words PREVIEW FIXTURE NOT REAL.
+
 ## [0.18.85] — Startup Params: the phone's screen over the same settings
 
 - "Startup Params" in the menu, and "Reconfigure node" on the Node tab, open the phone's screen instead of the old setup dialog: "Startup parameters", then a switch each for Server mode (-server), MegaMMR (-megammr) and Keets transport (-keets), the Extra arguments box, Save and Save & Restart Node.

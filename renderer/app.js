@@ -556,6 +556,161 @@ function renderParams(host, firstRun, done) {
 // Electron wraps a main-process refusal as "Error invoking remote method 'x': Error: the message".
 function ipcError(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
 
+// ---- Backup & Recovery (the phone's BackupActivity hub, over the backup, resync, restore and vault commands
+// the Settings cards ran). One view; BK_PAGE says which of the phone's screens it shows ("" = the hub).
+let BK_PAGE = "";
+const BK_TITLE = { "": "Backup & Recovery", create: "Create backup", restore: "Restore from file", resync: "Resync node", keys: "Private keys" };
+function bkOpen(page) { BK_PAGE = page; el("barPage").textContent = BK_TITLE[page]; el("main").scrollTop = 0; renderBackup(); }
+/**
+ * megammrsync, built in ONE place for every screen that runs it (chain resync, restore from a file, rebuild
+ * from a phrase, the first-run restore). Returns { error } or { cmd, resetsWallet }. The node's command
+ * parser has no escape character, so refusing a value is the only defence: every check the Settings cards
+ * and the setup dialog made is here, in their order.
+ */
+function resyncCommand(o) {
+  const host = String(o.host || "").trim();
+  const phrase = String(o.phrase || "").trim();   // a free-form phrase is hashed as typed: trim the ends only, never the inside
+  const keyuses = String(o.keyuses == null ? "" : o.keyuses).trim(), file = String(o.file || "").trim(), password = String(o.password || "");
+  if (o.needPhrase && !phrase) return { error: "Enter your seed phrase." };
+  if (/["\\]/.test(phrase)) return { error: "This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal." };
+  if (/[\n\r\t]/.test(phrase)) return { error: "Remove the line breaks and tabs: enter your seed as one clean line (they change the derived wallet)." };
+  if (!/^[\w.\-]+:\d+$/.test(host)) return { error: "MegaMMR host must be host:port." };
+  if (phrase && !/^\d+$/.test(keyuses)) return { error: "Enter the key uses for this seed (0 if brand new). Too low reuses one-time keys and can lose funds." };
+  if (keyuses && !/^\d+$/.test(keyuses)) return { error: "Key uses must be a whole number." };
+  if (o.needFile && !file) return { error: "Enter the backup file's name or path." };
+  if (/[\s"\\]/.test(file)) return { error: "File path can't contain spaces or quotes." };
+  if (/[\s"\\]/.test(password)) return { error: "Password can't contain spaces or quotes." };
+  let cmd = `megammrsync action:resync host:${host}`;
+  if (phrase) cmd += ` phrase:"${phrase}"` + (o.anyphrase ? " anyphrase:true" : "");
+  if (keyuses) cmd += ` keyuses:${keyuses}`;
+  if (file) cmd += ` file:${file}`;
+  if (password) cmd += ` password:${password}`;
+  return { cmd, resetsWallet: !!(phrase || file) };
+}
+// The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is
+// dropped and nothing the old wallet said stays on screen.
+async function walletReplaced() {
+  try { await api.mailInvalidate(); } catch (e) {} resetMailState();
+  try { await api.ppInvalidate(); } catch (e) {} resetPpState();
+  try { await api.axInvalidate(); } catch (e) {} resetAxState();
+  try { await api.casinoInvalidate(); } catch (e) {}
+  resetWalletFigures(); api.nodeStatus().then(paintFooter);
+}
+// A backup password as the node can carry it (the phone's rule): letters and numbers only. A quote used to
+// close password:"…" early, so the node encrypted under a DIFFERENT password than the one typed.
+function backupPasswordProblem(pw, again) {
+  if (!pw) return "Enter a backup password.";
+  if (!/^[A-Za-z0-9]+$/.test(pw)) return "Letters and numbers only";
+  if (pw !== again) return "The two passwords do not match";
+  return "";
+}
+function renderBackup() {
+  const host = el("backupBody"), $ = (id) => host.querySelector("#" + id);
+  el("barPage").textContent = BK_TITLE[BK_PAGE];
+  const head = (h, intro) => `<h2 class="ps-h">${esc(h)}</h2><p class="ps-intro">${esc(intro)}</p>`;
+  const field = (id, label, attrs) => `<div class="eyebrow ps-label">${esc(label)}</div><input class="field__input ps-field" id="${id}" autocomplete="off" spellcheck="false" ${attrs || ""}/>`;
+  const stopped = `<div class="ps-tile ps-tile--strong" role="status">The node is not running. Start the node before backing up or restoring.</div>`;
+  if (BK_PAGE && !running) { host.innerHTML = head(BK_TITLE[BK_PAGE], "") + stopped; return; }
+
+  if (BK_PAGE === "") {
+    const rows = [["create", "Create backup", "Write an encrypted .bak of this node into its data folder."],
+      ["restore", "Restore from file", "Put a backup back on this node, then catch up to the chain tip from a MegaMMR node."],
+      ["chat", "Chat backup", "Save or restore your keets chat address, contacts and messages."],
+      ["mail", "Mail backup", "Save or restore your MinimaMail identity, contacts and messages."],
+      ["resync", "Resync node", "Rebuild this node's chain from a MegaMMR node. Your wallet and seed phrase are not touched."],
+      ["keys", "Private keys", "Seed phrase, or rebuild this wallet from a phrase."]];
+    host.innerHTML = head("Backup & Recovery", "Save a copy of this node, put it back, or rebuild it from another node.") + (running ? "" : stopped) +
+      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
+    host.querySelectorAll(".bk-row").forEach(b => b.onclick = () => {
+      const k = b.dataset.bk;
+      if (k === "chat") showActionSheet("Chat backup", [{ label: "Back up chats", onclick: () => ChatPanel.backup() }, { label: "Restore chats", onclick: () => ChatPanel.restore() }]);
+      else if (k === "mail") showActionSheet("Mail backup", [{ label: "Back up identity", onclick: () => MailPanel.backup() }, { label: "Restore from a backup", onclick: () => MailPanel.restore() }]);
+      else bkOpen(k);
+    });
+    return;
+  }
+
+  if (BK_PAGE === "create") {
+    host.innerHTML = head("Create backup", "Writes one encrypted .bak file holding this node's wallet, chain and archive. The node keeps running.") +
+      field("bkPw", "Password", 'type="password" placeholder="letters and numbers only"') +
+      field("bkPw2", "Confirm password", 'type="password" placeholder="type it again"') +
+      `<div class="ps-tile">This password is the only thing protecting your private keys inside the file. There is no way to recover the backup without it, and no way to reset it later.</div>
+      <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo">Create backup</button>
+      <div class="bk-status" id="bkStatus" role="status"></div><div id="bkOut"></div>`;
+    $("bkGo").onclick = async () => {
+      const pw = $("bkPw").value, st = $("bkStatus");
+      const why = backupPasswordProblem(pw, $("bkPw2").value);
+      if (why) { toast(why, "err"); return; }
+      $("bkGo").disabled = true; $("bkGo").textContent = "Creating…";
+      st.textContent = "Writing the backup. The node is locked while it copies, so this can take a while.";
+      try {
+        const r = await cmd(`backup password:"${pw}"`);
+        const b = (r && r.backup) || r || {}, file = b.file || "";
+        $("bkPw").value = ""; $("bkPw2").value = "";
+        st.textContent = file ? "Backup created. Saved in the node folder as" : "Backup created in the node's data folder.";
+        $("bkOut").innerHTML = file ? `<div class="bk-mono" id="bkPath">${esc(file)}</div><button class="btn btn--outline ps-btn" data-copy="${esc(file)}">Copy full path</button>` : "";
+      } catch (e) { st.textContent = "Backup failed. " + e.message; }
+      $("bkGo").disabled = false; $("bkGo").textContent = "Create backup";
+    };
+    return;
+  }
+
+  // The three screens that run megammrsync share its confirm step, its run and what follows a replaced wallet.
+  const run = async (btnId, label, built, title, warning, okLabel) => {
+    if (built.error) { toast(built.error, "err"); return; }
+    if (!await showConfirm(title, warning, okLabel, built.resetsWallet)) return;
+    const btn = $(btnId), st = $("bkStatus"); btn.disabled = true; btn.textContent = label + "…"; st.textContent = "";
+    try {
+      await cmd(built.cmd);
+      CFG = await api.saveConfig({ megammrHost: built.host });
+      if (built.resetsWallet) await walletReplaced();
+      toast(label + " complete ✓", "ok"); bkOpen("");
+    } catch (e) { st.textContent = label + " not completed. " + e.message; btn.disabled = false; btn.textContent = btn.dataset.label; }
+  };
+  const hostField = field("bkHost", "MegaMMR node", `value="${esc(CFG.megammrHost)}"`);
+  const built = (o) => Object.assign(resyncCommand(o), { host: String(o.host || "").trim() });
+
+  if (BK_PAGE === "resync") {
+    host.innerHTML = head("Resync node", "Choose a Minima MegaMMR node to resync from. Use the format host:port.") + hostField +
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Resync">Resync</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    $("bkGo").onclick = () => { const h = $("bkHost").value.trim(); run("bkGo", "Resync", built({ host: h }), "Resync this node?",
+      "Minima will rebuild its chain data from " + h + ".\n\n• Your wallet and seed phrase are not touched.\n• Any transaction still waiting to be mined is dropped.\n\nThis can take a while on a slow connection.", "Resync"); };
+    return;
+  }
+
+  if (BK_PAGE === "restore") {
+    host.innerHTML = head("Restore from file", "Replaces this node's wallet and chain with the contents of a backup, then catches up to the chain tip from a MegaMMR node.") +
+      field("bkFile", "Backup file", 'placeholder="a .bak file in the node folder, or its full path"') +
+      field("bkFilePw", "Backup password", 'type="password" placeholder="the password used when it was made"') + hostField +
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Restore this node">Restore this node</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    $("bkGo").onclick = () => { const f = $("bkFile").value.trim(); run("bkGo", "Restore", built({ host: $("bkHost").value, file: f, password: $("bkFilePw").value, needFile: true }), "Replace this node?",
+      "Minima will replace its wallet and chain with " + f + ".\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", "Restore"); };
+    return;
+  }
+
+  // Private keys: the seed phrase, and the rebuild of this wallet from a phrase.
+  host.innerHTML = head("Private keys", "Anyone who reads these words owns your funds. Write them down somewhere only you can reach: never in a photo, a note app or a message.") +
+    `<div class="eyebrow ps-label">Seed</div>
+    <div class="seedcard" id="bkSeed" hidden></div>
+    <button class="btn btn--outline ps-btn" id="bkShow">Show seed phrase</button>
+    <div class="eyebrow ps-label bk-gap">Rebuild wallet from seed phrase</div>
+    <p class="ps-note ps-note--body">Replace this node's wallet with the one for a seed phrase, then resync from a MegaMMR node. Destructive.</p>
+    <div class="eyebrow ps-label">Seed phrase</div>
+    <textarea class="field__input ps-field" id="bkPhrase" rows="2" autocomplete="off" spellcheck="false" placeholder="your 24 words, separated by spaces"></textarea>
+    <label class="bk-check"><input type="checkbox" id="bkAny"><span>My phrase is not 24 list words. Use it exactly as typed: capital letters, spaces and punctuation all count.</span></label>` +
+    field("bkUses", "Key uses", 'inputmode="numeric" placeholder="higher than any previous rebuild of this seed"') + hostField +
+    `<button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Rebuild">Rebuild</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+  $("bkShow").onclick = async () => {
+    const box = $("bkSeed");
+    if (!box.hidden) { box.hidden = true; box.textContent = ""; $("bkShow").textContent = "Show seed phrase"; return; }
+    const p = seedFrom(await tryCmd("vault"));
+    if (!p) { toast("The node did not return a seed phrase.", "err"); return; }
+    box.textContent = p; box.hidden = false; $("bkShow").textContent = "Hide seed phrase";
+  };
+  $("bkGo").onclick = () => run("bkGo", "Rebuild", built({ host: $("bkHost").value, phrase: $("bkPhrase").value, anyphrase: $("bkAny").checked, keyuses: $("bkUses").value, needPhrase: true }), "Rebuild this wallet?",
+    "Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds.", "Rebuild");
+}
+
 // ---- starting / progress overlay -------------------------------------------
 function showStarting() {
   const restore = CFG.walletMode === "restore";
@@ -628,49 +783,13 @@ async function postBootRestore() {
   }
 }
 
-// Restore a DIFFERENT seed on an already-running node (from Settings) — same megammrsync, done inline.
-function showRestoreOverlay() {
-  el("shell").style.filter = "blur(2px)";
-  el("setupBody").innerHTML = `
-    <div class="view__desc">Restore a different seed on this node — 24 BIP39 words or your own passphrase. The current wallet will be replaced by the restored one.</div>
-    <div class="field"><div class="field__label">Your seed phrase</div>
-      <textarea class="field__input" id="orSeed" rows="3" placeholder="24 BIP39 words, or any passphrase"></textarea>
-      <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as created — case- and spacing-sensitive.</div></div>
-    <div class="field"><div class="field__label">Signatures already used (key-uses)</div>
-      <input class="field__input" id="orKeyuses" value="0" inputmode="numeric" /></div>
-    <div class="view__desc" style="color:var(--amber)">⚠ Key-uses must be at least the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds — if unsure, set it higher.</div>
-    <div class="field"><div class="field__label">MegaMMR host (ip:port, must run -megammr)</div>
-      <input class="field__input" id="orHost" value="${esc(CFG.megammrHost)}" /></div>
-    <div class="seg"><button class="btn btn--outline btn--full" id="orCancel">Cancel</button>
-      <button class="btn btn--primary btn--full" id="orGo">Restore + sync</button></div>`;
-  el("orCancel").onclick = () => { hideSetup(); };
-  el("orGo").onclick = async () => {
-    const seed = el("orSeed").value.trim();   // anyphrase: pass verbatim (see restore in showSetup)
-    const keyuses = parseInt(el("orKeyuses").value, 10);
-    const host = el("orHost").value.trim() || CFG.megammrHost;
-    if (!seed) { toast("Enter your seed phrase."); return; }
-    if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
-    if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
-    if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
-    if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
-    el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
-    try {
-      await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {}   // seed changed → re-derive the mail identity
-      CFG = await api.saveConfig({ megammrHost: host });
-      resetWalletFigures(); api.nodeStatus().then(paintFooter); hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
-    } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
-  };
-  el("setup").style.display = "";
-}
-
 // ---- the shell: Pandamonium's toolbar, six tabs, app tray, overflow menu and footer ----------------------
 // selectTab(view) is still the one way to show a screen. Where the screen sits decides what the shell wears:
 //   a TAB screen      toolbar (tray button, titles, menu) + tab strip + footer
 //   a SUB screen      a back arrow and the screen's title, as the phone's own Receive / Send / Logs / Terminal
 //   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
-const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params" };
+const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params", backup: "Backup & Recovery" };
 // The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
 // (Future Cash Next, Minima Explorer, Entropy, KeyUses) get a row when their phase builds them: no dead rows.
 const TRAY_APPS = [
@@ -706,6 +825,7 @@ function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: t
 function selectTab(view) {
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
+  if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
   activeView = view;
   const { tab, mode } = shellMode(view);
   if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; }
@@ -735,7 +855,7 @@ function initShell() {
     e.preventDefault(); next.focus(); next.click();
   });
   document.querySelectorAll(".dexswitch__b").forEach(b => b.onclick = () => selectTab(b.dataset.view));
-  el("backBtn").onclick = () => selectTab(lastTabView);
+  el("backBtn").onclick = () => (activeView === "backup" && BK_PAGE ? bkOpen("") : selectTab(lastTabView));   // a Backup & Recovery screen goes back to its hub
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
@@ -857,7 +977,7 @@ function openSettingsAt(cardId) {
 }
 async function menuAction(act) {
   if (act === "logs" || act === "terminal" || act === "settings") selectTab(act);
-  else if (act === "backup") openSettingsAt("bkCard");
+  else if (act === "backup") { BK_PAGE = ""; selectTab("backup"); }
   else if (act === "params") selectTab("params");
   else if (act === "shutdown") {
     // Ask the AtomiX and PandaPools glue what is in flight first (their own saved records; no node command).
@@ -1161,6 +1281,7 @@ function renderActive() {
   else if (activeView === "logs") renderLogs();
   else if (activeView === "settings") renderSettings();
   else if (activeView === "params") renderParams();
+  else if (activeView === "backup") renderBackup();
   else if (activeView === "apps") renderApps();
   else if (activeView === "faucet") renderFaucet();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
@@ -2549,13 +2670,12 @@ async function renderFaucet() {
 async function renderSettings() {
   const host = el("settingsBody");
   if (!running) { host.innerHTML = waitHtml(); return; }
-  const [addr, keys, scripts] = await Promise.all([tryCmd("getaddress"), tryCmd("keys action:list"), tryCmd("scripts")]);
+  const [keys, scripts] = await Promise.all([tryCmd("keys action:list"), tryCmd("scripts")]);
   const ku = keysInfo(keys);
   const kuRows = keyUsesRows(keys, scripts);
   const pct = ku.cap ? Math.min(100, Math.round(ku.used / ku.cap * 100)) : 0;
   const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
-  const fullAddr = (addr && (addr.miniaddress || addr.address)) || "—";
   const kind = CFG.nodeKind === "minima" ? "minima" : "parlons";
   host.innerHTML = `
     <div class="card"><div class="card__title">Node</div>
@@ -2574,28 +2694,6 @@ async function renderSettings() {
       <div class="seg"><button class="btn btn--sm btn--outline" id="updCheck">Check now</button><button class="btn btn--sm btn--primary" id="updGet" hidden>Download</button></div>
       <div class="status" id="updStatus"></div>
     </div>
-    <div class="card"><div class="card__title">Wallet</div>
-      <div class="field__label">Your address</div>
-      <div class="addrbox addrbox__addr" id="setAddr" title="Click to copy" style="margin-top:0">${esc(fullAddr)}</div>
-      <button class="btn btn--outline btn--full" id="setReveal" style="margin-top:8px">Reveal seed phrase</button>
-      <div class="addrbox" id="setSeed" style="display:none;white-space:normal;line-height:1.6"></div>
-      <button class="btn btn--outline btn--full" id="setRestore">Restore from a different seed…</button>
-    </div>
-    <div class="card"><div class="card__title">Resync chain</div>
-      <div class="view__desc">Re-fetch the chain and your coins from a MegaMMR host (seconds). Use if the node is stuck or behind — with just a host, your seed, keys and key-uses are left untouched.</div>
-      <div class="field"><div class="field__label">MegaMMR host (ip:port)</div><input class="field__input" id="setResyncHost" value="${esc(CFG.megammrHost)}" /></div>
-      <label class="prow" style="margin-top:4px"><input type="checkbox" id="setResyncAdv"><span class="prow__l">Advanced parameters (full megammrsync)</span></label>
-      <div id="setResyncAdvBox" style="display:none">
-        <div class="view__desc" style="color:var(--amber)">⚠ Providing a seed phrase performs a FULL WALLET RESET to that seed (regenerates keys, sets key-uses) — not a plain resync. Leave the phrase blank for the safe chain-only resync.</div>
-        <div class="field"><div class="field__label">Seed phrase (optional — resets the wallet)</div><textarea class="field__input" id="setResyncPhrase" rows="2" placeholder="blank = plain resync"></textarea></div>
-        <label class="prow"><input type="checkbox" id="setResyncAnyphrase"><span class="prow__l">anyphrase (seed is any text, not BIP39 words)</span></label>
-        <div class="field"><div class="field__label">Key-uses (signatures this seed has ever made; required with a seed)</div><input class="field__input" id="setResyncKeyuses" placeholder="0 if brand new" inputmode="numeric" /></div>
-        <div class="field"><div class="field__label">Keys to generate (default 64)</div><input class="field__input" id="setResyncKeys" placeholder="64" inputmode="numeric" /></div>
-        <div class="field"><div class="field__label">Restore from backup file (optional)</div><input class="field__input" id="setResyncFile" placeholder="path to a .bak file" /></div>
-        <div class="field"><div class="field__label">Backup password (optional)</div><input class="field__input" id="setResyncPassword" type="password" /></div>
-      </div>
-      <button class="btn btn--outline btn--full" id="setResync">Resync now</button>
-    </div>
     <div class="card"><div class="card__title">Signing keys (WOTS safety)</div>
       <div class="view__desc">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically — this shows your headroom.</div>
       <div class="health"><div class="health__row"><span>Most-used key</span><span>${esc(ku.used)} / ${esc(ku.cap)} sigs${ku.count ? " · " + ku.count + " keys" : ""}</span></div>
@@ -2608,11 +2706,6 @@ async function renderSettings() {
       <button class="btn btn--outline btn--full" id="kuAudit" style="margin-top:10px">Deep reuse audit</button>
       <div class="status" id="kuAuditStatus"></div>
       <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse — automatically when you open this panel, and when you tap the button. Nothing else leaves your node.</div>
-    </div>
-    <div class="card" id="bkCard"><div class="card__title">Backup</div>
-      <div class="view__desc">Writes an encrypted recovery backup into the node's data folder. Your seed phrase (above) is the ultimate backup.</div>
-      <div class="field"><input class="field__input" id="bkPw" type="password" placeholder="backup password" /></div>
-      <button class="btn btn--outline btn--full" id="setBackup">Create encrypted backup</button>
     </div>
     <div class="card"><div class="card__title">Address labels</div>
       ${labelKeys.length ? labelKeys.map(a => `<div class="kv"><span class="kv__k" style="word-break:break-all">${esc(labels[a])} <span style="color:var(--dim2);font-size:11px">${esc(short(a, 24))}</span></span><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("") : `<div class="view__desc">No labels yet. Name an address on the Receive screen.</div>`}
@@ -2631,7 +2724,6 @@ async function renderSettings() {
       <button class="btn btn--outline btn--full" id="setAutostart">${CFG.openAtLogin ? "Stop opening at login" : "Open at login"}</button>
     </div>
     <div id="chanceLeft"></div>`;
-  el("setAddr").onclick = () => copy(fullAddr);
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
     if (u.error && !u.available) b.textContent = "Could not read the feed (" + u.error + "). Running v" + u.running + ".";
@@ -2660,52 +2752,6 @@ async function renderSettings() {
       toast("Node restarting…", "ok");
     } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
     el("setKindApply").disabled = false;
-  };
-  el("setReveal").onclick = async () => { const v = await tryCmd("vault"); const p = seedFrom(v); if (!p) { toast("Couldn't read the seed.", "err"); return; } el("setSeed").style.display = ""; el("setSeed").textContent = p; };
-  el("setRestore").onclick = () => showRestoreOverlay();
-  el("setResyncAdv").onclick = () => { el("setResyncAdvBox").style.display = el("setResyncAdv").checked ? "" : "none"; };
-  el("setResync").onclick = async () => {
-    const rhost = el("setResyncHost").value.trim();
-    if (!/^[\w.\-]+:\d+$/.test(rhost)) { toast("Host must be ip:port.", "err"); return; }
-    let cmdStr = `megammrsync action:resync host:${rhost}`, resetsWallet = false;
-    if (el("setResyncAdv").checked) {
-      const phrase = el("setResyncPhrase").value.trim(), keyuses = el("setResyncKeyuses").value.trim();
-      const keys = el("setResyncKeys").value.trim(), file = el("setResyncFile").value.trim(), password = el("setResyncPassword").value;
-      if (phrase) {
-        if (/["\\\n\r\t]/.test(phrase)) { toast("Seed phrase has a \", \\ or line break the command can't carry.", "err"); return; }
-        if (!/^\d+$/.test(keyuses)) { toast("Enter key-uses when providing a seed (0 if brand new) — reusing WOTS keys can lose funds.", "err"); return; }
-        cmdStr += ` phrase:"${phrase}"` + (el("setResyncAnyphrase").checked ? " anyphrase:true" : "");
-        resetsWallet = true;
-      }
-      if (keyuses) { if (!/^\d+$/.test(keyuses)) { toast("Key-uses must be a whole number.", "err"); return; } cmdStr += ` keyuses:${keyuses}`; }
-      if (keys) { if (!/^\d+$/.test(keys)) { toast("Keys must be a whole number.", "err"); return; } cmdStr += ` keys:${keys}`; }
-      if (file) { if (/[\s"\\]/.test(file)) { toast("File path can't contain spaces or quotes.", "err"); return; } cmdStr += ` file:${file}`; }
-      if (password) { if (/[\s"\\]/.test(password)) { toast("Password can't contain spaces or quotes.", "err"); return; } cmdStr += ` password:${password}`; }
-    }
-    const warn = resetsWallet
-      ? "⚠ This RESETS your wallet to the entered seed (regenerates keys, sets key-uses). Continue?"
-      : "Re-fetches the chain and your coins. Your seed, keys and key-uses are NOT changed. Continue?";
-    // showConfirm, not the browser's blocking confirm(): the rest of the app uses it, and this is the
-    // dialog in front of a wallet RESET. A native modal also freezes the renderer while it is open.
-    if (!await showConfirm("Resync from " + rhost + "?", warn, resetsWallet ? "Reset and resync" : "Resync", resetsWallet)) return;
-    const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
-    try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
-      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} }   // seed reset → re-derive the mail identity
-      toast("Resync complete ✓", "ok"); renderBalances(); }
-    catch (e) { toast("Resync failed: " + e.message, "err"); }
-    btn.disabled = false; btn.textContent = "Resync now";
-  };
-  el("setBackup").onclick = async () => {
-    const pw = el("bkPw").value.trim();
-    if (!pw) { toast("Enter a backup password."); return; }
-    // A `"` closes password:"…" early, so the node encrypted the backup under a DIFFERENT password than the
-    // one typed and reported success — the user only finds out when a restore fails, with funds behind it.
-    // The resync handler forty lines up already guards its password this way; this one didn't.
-    if (/["\\]/.test(pw) || /[\n\r\t]/.test(pw)) {
-      toast("Backup password can't contain a \" or \\ or a line break — the node can't carry it safely.", "err"); return;
-    }
-    try { await cmd(`backup password:"${pw}"`); toast("Encrypted backup written to the node data folder ✓", "ok"); }
-    catch (e) { toast("Backup failed: " + e.message, "err"); }
   };
   host.querySelectorAll(".lbl-del").forEach(btn => btn.onclick = async () => {
     const nl = Object.assign({}, CFG.labels); delete nl[btn.dataset.addr];

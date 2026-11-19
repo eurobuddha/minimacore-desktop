@@ -404,3 +404,24 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .switch--m2[aria-checked="true"] { background: none; }
 .switch--m2[aria-checked="true"]::before { background: rgba(255,74,43,.38); }
 .switch--m2[aria-checked="true"]::after { left: 24px; width: 20px; height: 20px; margin-top: -10px; background: var(--orange); }
+/* Backup & Recovery (backup_hub, view_backup_row, backup_create) */
+.ps-tile--strong { font-weight: 600; color: var(--text); margin-top: 18px; }
+.bk-rows { margin-top: 12px; }
+.bk-row { display: block; width: 100%; margin-top: 10px; padding: 16px; border: 0; border-radius: 10px; background: var(--surface2); text-align: left; cursor: pointer; font-family: var(--sans); }
+.bk-row:hover { background: var(--border); }
+.bk-row:disabled { opacity: .45; cursor: default; }
+.bk-row__t { display: block; font: 400 15px/20px var(--sans); color: var(--text); }
+.bk-row__s { display: block; margin-top: 3px; font: 400 15px/19px var(--sans); color: var(--dim); }
+.ps-btn--go { margin-top: 24px; }
+.btn--danger.ps-btn--go { background: none; }
+.bk-status { margin-top: 20px; font: 600 15px/20px var(--sans); color: var(--text); overflow-wrap: anywhere; }
+.bk-status:empty { display: none; }
+.bk-mono { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface2); font: 400 12.5px/1.15 var(--mono); color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.bk-gap { margin-top: 32px; }
+.ps-note--body { font-size: 15px; }
+.bk-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; font: 400 13px/18px var(--sans); color: var(--dim); cursor: pointer; }
+.bk-check input { margin-top: 3px; accent-color: var(--orange); }
+/* the seed in its orange-stroke card (newwallet_activity) */
+.seedcard { margin-top: 6px; padding: 16px; border: 1px solid var(--orange); border-radius: 12px; background: var(--surface); text-align: center;
+  font: 400 17px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.seedcard[hidden] { display: none; }

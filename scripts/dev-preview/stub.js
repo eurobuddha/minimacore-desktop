@@ -7,6 +7,7 @@
  *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
  *   Send: &send=filled|review|error
  *   Any screen: &scroll=<px>
+ *   Backup & Recovery: &bk=create|restore|resync|keys  &seed=1  &bkdone=1
  *   History: &hist=empty  &hmenu=1  &hdetail=<row>  &chain=checking  &hfilter=1  &hforeign=1
  */
 "use strict";
@@ -49,6 +50,10 @@
         : tid === LONG ? Array.from({ length: 20 }, (_, i) => coin(i + 1, "1", true)) : tid === NFT ? [coin(1, "1")] : [];
       return set.filter(x => !/sendable:true/.test(c) || !x._locked).map(x => { const o = Object.assign({}, x); delete o._locked; return o; });
     },
+    // Backup & Recovery. The "seed" is 24 words that are plainly not one; the backup path is invented.
+    vault: () => ({ phrase: "PREVIEW FIXTURE NOT REAL ".repeat(6).trim(), locked: false }),
+    backup: () => ({ backup: { file: "/Users/preview/Library/Application Support/minimaCore/node-data/minima-backup-20261119-135600.bak" } }),
+    megammrsync: () => ({ message: "preview" }),
     checkaddress: () => ({ simple: true }),
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
     keys: () => keys,
@@ -160,6 +165,9 @@
         document.querySelectorAll(".balrow")[parseInt(dlg[1], 10) || 0].click();
         setTimeout(() => { if (dlg[0] === "coin") document.querySelector(".coin-row" + (dlg[2] ? ":nth-child(" + dlg[2] + ")" : "")).click(); if (dlg[0] === "split") el("coinsSplit").click(); }, 250);
       }, 250);
+      // Backup & Recovery: ?view=backup&bk=create|restore|resync|keys, &seed=1 shows the (fake) seed, &bkdone=1 a finished backup
+      if (view === "backup" && Q.get("bk")) { bkOpen(Q.get("bk")); if (Q.get("seed") === "1") el("bkShow").click();
+        if (Q.get("bkdone") === "1") { el("bkPw").value = el("bkPw2").value = "preview1"; el("bkGo").click(); } }
       if (Q.get("scroll")) setTimeout(() => { el("main").scrollTop = parseInt(Q.get("scroll"), 10); }, 500);
       if (Q.get("menu") === "1") { openMenu(); document.activeElement.blur(); }
     } catch (e) { document.title = "PREVIEW ERROR " + e.message; console.error(e); }
