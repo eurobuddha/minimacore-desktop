@@ -1281,6 +1281,7 @@ async function renderBalances() {
   if (WAL_DRAG) return;                                  // a drag that began while the node was answering: its row must not be rebuilt under it
   // a failed read is not an empty wallet: no old total above it, and no zero row
   if (!bal) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = `<div class="empty">The balance could not be read. It is read again every 15 seconds.</div>`; return; }
+  await loadHeld();                                      // what the engines hold: left out of every "sendable" below
   BAL_AT = Date.now();                                   // drives the breakdown's "updated ..."
   // The phone always shows a Minima row, at 0 for a wallet that holds nothing yet.
   if (!bal.length) bal = [{ token: "Minima", tokenid: MINIMA, confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0" }];
@@ -1288,7 +1289,7 @@ async function renderBalances() {
   for (const b of bal) BAL_BY_TID[b.tokenid || MINIMA] = b;
   // "Total balance" is the MINIMA headline, the same sendable figure its row shows.
   WAL_MINIMA = BAL_BY_TID[MINIMA] || { confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0" };
-  el("walTotal").textContent = summaryAmount(WAL_MINIMA.sendable || "0");
+  el("walTotal").textContent = summaryAmount(freeOf(WAL_MINIMA));
   paintWalBreakdown();
   // The list is rebuilt every 15 s. Keyboard focus stays where it was: the same token's row.
   const was = host.contains(document.activeElement) ? document.activeElement.closest(".balrow") : null;
@@ -1303,6 +1304,23 @@ async function renderBalances() {
   });
   enhanceTokenIcons(host);
 }
+// HELD FUNDS (0.18.146, docs/COIN_RESERVATION.md): what AtomiX, PandaPools and Dexicon hold of this wallet's coins. The
+// node's `sendable` counts them (they are plain coins), but the wallet cannot send them: the figures below leave them
+// out and say what holds them. coins: coin id (lower case) -> what holds it; funds: token id (lower case) ->
+// { held, free, why }. A read that fails keeps the last answer: nothing new is claimed.
+let HELD = { coins: {}, funds: {} };
+async function loadHeld() {
+  try {
+    const r = await api.reserved(), coins = {}, funds = {};
+    for (const c of (r && r.coins) || []) coins[String(c.coinid).toLowerCase()] = String(c.why || "another part of the app");
+    for (const f of (r && r.funds) || []) funds[String(f.tokenid).toLowerCase()] = f;
+    HELD = { coins, funds };
+  } catch (e) {}
+}
+const heldOf = (tid) => HELD.funds[String(tid || MINIMA).toLowerCase()] || null;
+/** What the wallet itself can send of this balance row: the node's sendable less what is held (never below 0). */
+const freeOf = (b) => { const h = heldOf(b.tokenid || MINIMA); return h ? decSub(b.sendable || "0", h.held) : (b.sendable || "0"); };
+const heldLine = (tid) => { const h = heldOf(tid); return h ? "held " + TOK.tidyAmount(h.held) + " for " + h.why : ""; };
 let BAL_BY_TID = {};       // tokenid → last balance row, so a row click can open its dialog without refetching
 let BAL_AT = 0;            // when the last `balance` reply landed: the breakdown's "updated ..."
 let WAL_MINIMA = null;     // the MINIMA balance row behind "Total balance" (null: not read)
@@ -1375,6 +1393,7 @@ function paintWalBreakdown() {
   const b = WAL_MINIMA, box = el("walBreakdown");
   box.textContent = !b ? "Node not connected"
     : `confirmed ${summaryAmount(b.confirmed || "0")}  ·  locked ≈ ${summaryAmount(decSub(b.confirmed || "0", b.sendable || "0"))}`
+      + (heldLine(MINIMA) ? "  ·  " + heldLine(MINIMA) : "")
       + `  ·  unconfirmed ${summaryAmount(b.unconfirmed || "0")}  ·  ${coinCount(b.coins)}  ·  updated ${since(BAL_AT)}  ·  click a token for coins`;
 }
 function toggleWalBreakdown() {
@@ -1413,14 +1432,15 @@ function balCardHtml(b) {
   // The amount is SENDABLE: what can be spent. `confirmed` also counts coins locked in scripts and pools.
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0";   // balance.java always emits both; guard so a malformed row can't blank the whole list
   const positive = (v) => /[1-9]/.test(String(v || "")) && !String(v).startsWith("-");
-  const locked = decSub(confirmed, sendable), parts = [];
+  const locked = decSub(confirmed, sendable), parts = [], free = freeOf(b);   // free: less what the engines hold
   if (positive(locked)) parts.push("locked " + summaryAmount(locked));
+  if (heldLine(tid)) parts.push(heldLine(tid));
   if (positive(b.unconfirmed)) parts.push("unconfirmed " + summaryAmount(b.unconfirmed));
   if (parseInt(b.coins, 10) > 0) parts.push(coinCount(b.coins));
   return `<div class="balrow" data-tokenid="${esc(tid)}" tabindex="0" role="button">
     ${iconCell}
     <div class="balrow__main">
-    <div class="balrow__top"><span class="balrow__name">${esc(TOK.tokenName(b.token, tid))}</span><span class="balrow__amt">${esc(summaryAmount(sendable))}</span></div>
+    <div class="balrow__top"><span class="balrow__name">${esc(TOK.tokenName(b.token, tid))}</span><span class="balrow__amt">${esc(summaryAmount(free))}</span></div>
     ${parts.length ? `<div class="bal-breakdown">${esc(parts.join("  ·  "))}</div>` : ""}
     </div>
   </div>`;
@@ -1538,7 +1558,8 @@ async function showTokenDetail(b) {
       <div class="tokd-name">${esc(name)}${nft ? " · NFT" : (isNative ? "" : " · token")}</div>
       ${desc ? `<div class="tokd-desc">${esc(desc)}</div>` : ""}
     </div>
-    <div class="kv"><span class="kv__k">Spendable</span><span class="kv__v kv__v--green">${esc(TOK.tidyAmount(sendable))}${tick ? " " + esc(tick) : ""}</span></div>
+    <div class="kv"><span class="kv__k">Spendable</span><span class="kv__v kv__v--green">${esc(TOK.tidyAmount(freeOf(b)))}${tick ? " " + esc(tick) : ""}</span></div>
+    ${heldOf(tid) ? `<div class="kv"><span class="kv__k">Held</span><span class="kv__v">${esc(TOK.tidyAmount(heldOf(tid).held))} for ${esc(heldOf(tid).why)}</span></div>` : ""}
     ${locked !== "0" ? `<div class="kv"><span class="kv__k">🔒 Locked</span><span class="kv__v">${esc(TOK.tidyAmount(locked))}</span></div>` : ""}
     ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">Pending</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
     <div class="kv"><span class="kv__k">Coins</span><span class="kv__v">${coins}</span></div>
@@ -1620,7 +1641,8 @@ document.addEventListener("keydown", modalTab, true);
 async function showCoins(b) {
   const tid = b.tokenid || MINIMA, isNative = tid === MINIMA, name = TOK.tokenName(b.token, tid);
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0", locked = decSub(confirmed, sendable);
-  const head = `sendable ${TOK.tidyAmount(sendable)}` + (locked !== "0" ? `  ·  locked ${TOK.tidyAmount(locked)}` : "") + `  ·  confirmed ${TOK.tidyAmount(confirmed)}`;
+  await loadHeld();
+  const head = `sendable ${TOK.tidyAmount(freeOf(b))}` + (heldLine(tid) ? `  ·  ${heldLine(tid)}` : "") + (locked !== "0" ? `  ·  locked ${TOK.tidyAmount(locked)}` : "") + `  ·  confirmed ${TOK.tidyAmount(confirmed)}`;
   const canSplit = !isNftBal(b) && Number(sendable) > 0;
   const d = openDlg("coinsDlg", name + " coins",
     `<div class="coins-head">${esc(head)}</div>
@@ -1668,10 +1690,13 @@ async function showCoins(b) {
   if (!all.length) { status("No coins for this token."); return; }
   const amountOf = (c) => String(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
   const isSendable = (c) => (sendableIds ? sendableIds.has(c.coinid) : null);   // null: not known, and never shown as "sendable"
+  const heldWhy = (c) => HELD.coins[String(c.coinid || "").toLowerCase()] || "";
   const tagOf = (c) => {
     const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
     if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="coin-chip">POOL</span>`;
     if (ad === PANDA_SENTINEL.toLowerCase()) return `<span class="coin-chip">BEACON</span>`;
+    const why = heldWhy(c);   // held by AtomiX, PandaPools or Dexicon: said in plain words on the row, not only in a tooltip
+    if (why) return `<span class="coin-chip coin-chip--locked">HELD</span><span class="coin-held">${esc(why)}</span>`;
     return "";
   };
   const list = el("coinsList");
@@ -1680,7 +1705,7 @@ async function showCoins(b) {
       <div class="coin-row__cid">${esc(String(c.coinid || ""))}</div>
     </div>`).join("");
   list.querySelectorAll(".coin-row").forEach(r => {
-    r.onclick = () => { const c = all[parseInt(r.dataset.i, 10)]; showCoinDetail(c, isSendable(c)); };
+    r.onclick = () => { const c = all[parseInt(r.dataset.i, 10)]; showCoinDetail(c, isSendable(c), heldWhy(c)); };
     r.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); r.click(); } };
   });
   el("coinsStatus").hidden = true; list.hidden = false;
@@ -1707,15 +1732,15 @@ function coinsFootText(count, locked, sum, before, after) {
 /** Everything the node knows about one coin (the phone's CoinDetailDialog). No value is shortened and each
  *  has its own Copy: an id that comes out of here must go back into `coins coinid:` byte for byte.
  *  sendable is true, false, or null when the sendable read failed: then nothing is claimed either way. */
-function showCoinDetail(c, sendable) {
+function showCoinDetail(c, sendable, held) {
   const state = (c.state == null || (Array.isArray(c.state) ? !c.state.length : (typeof c.state === "object" ? !Object.keys(c.state).length : c.state === "")))
     ? "(none)" : (typeof c.state === "string" ? c.state : JSON.stringify(c.state, null, 2));
   const rows = [["Coin ID", c.coinid], ["Amount", c.amount], ["Token amount", c.tokenamount], ["Token ID", c.tokenid], ["Address", c.address],
-    ["Mini address", c.miniaddress], ["Sendable", sendable == null ? null : sendable ? "yes" : "no, locked in a contract"], ["Created", c.created], ["Age", c.age],
+    ["Mini address", c.miniaddress], ["Sendable", sendable == null ? null : held ? "not by the wallet while it is held" : sendable ? "yes" : "no, locked in a contract"], ["Held for", held || null], ["Created", c.created], ["Age", c.age],
     ["MMR entry", c.mmrentry], ["Spent", c.spent], ["Store state", c.storestate], ["State", state]]
     .filter(([, v]) => v != null && String(v) !== "" && String(v) !== "null").map(([k, v]) => [k, String(v)]);
   const raw = JSON.stringify(c, null, 2);
-  const d = openDlg("coinDlg", sendable == null ? "Coin" : sendable ? "Coin, sendable" : "Coin, locked",
+  const d = openDlg("coinDlg", sendable == null ? "Coin" : held ? "Coin, held" : sendable ? "Coin, sendable" : "Coin, locked",
     (sendable == null ? `<div class="coins-status coins-status--warn">Whether this coin is sendable could not be checked.</div>` : "") + rows.map(([k, v], i) => `<div class="cd-row"><div class="eyebrow">${esc(k)}</div>
         <div class="cd-row__line"><div class="cd-row__v">${esc(v)}</div><button class="dlg__btn dlg__btn--sm" data-i="${i}" aria-label="Copy ${esc(k)}">COPY</button></div></div>`).join("")
       + `<div class="eyebrow cd-raw-h">Raw JSON</div><pre class="cd-raw">${esc(raw)}</pre>`,
@@ -2922,7 +2947,8 @@ async function renderSend() {
   if (!running) { card.innerHTML = waitHtml(); return; }
   // token dropdown source — the wallet's held coins/tokens (MINIMA first). No raw token-id typing.
   const bal = await tryCmd("balance") || [];
-  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid), sendable: b.sendable || "0",
+  await loadHeld();   // sendable here is what the WALLET can send: less what AtomiX, PandaPools and Dexicon hold
+  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid), sendable: freeOf(b), held: heldLine(b.tokenid || MINIMA),
     ticker: (b.tokenid || MINIMA) === MINIMA ? "MINIMA" : (TOK.ticker(b.token) || "") }));
   if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima", sendable: "0", ticker: "MINIMA" });
   SEND_TOKENS.sort((a, b) => (a.tokenid === MINIMA ? -1 : b.tokenid === MINIMA ? 1 : 0));
@@ -2954,7 +2980,7 @@ function sendForm() {
     const sendableOf = (tid) => tokOf(tid).sendable || "0";
     const refreshAvail = () => {
       const t = tokOf(el("sTok").value);
-      el("sAvail").textContent = "sendable " + TOK.tidyAmount(t.sendable || "0");
+      el("sAvail").textContent = "sendable " + TOK.tidyAmount(t.sendable || "0") + (t.held ? "  ·  " + t.held : "");
     };
     el("sTok").onchange = refreshAvail;
     el("sMax").onclick = () => { el("sAmt").value = TOK.tidyAmount(sendableOf(el("sTok").value)); };
@@ -2965,7 +2991,7 @@ function sendForm() {
       if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
       if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
       const avail = sendableOf(tok);
-      if (absCmp(amt, avail) > 0) { toast("Amount exceeds your spendable balance (" + TOK.tidyAmount(avail) + "). The rest is locked in scripts/pools.", "err"); return; }
+      if (absCmp(amt, avail) > 0) { toast("Amount exceeds your spendable balance (" + TOK.tidyAmount(avail) + "). " + (tokOf(tok).held ? "Not sendable now: " + tokOf(tok).held + ". Nothing was sent." : "The rest is locked in scripts/pools."), "err"); return; }
       el("sGo").disabled = true; el("sGo").textContent = "Sending…";
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient

@@ -24,6 +24,9 @@ function page() {
   return { els, el };
 }
 
+// the held-funds helpers of app.js (0.18.146), as shipped
+const HELD_SRC = "let HELD = { coins: {}, funds: {} };\n" + ["decSub", "loadHeld", "heldOf", "freeOf", "heldLine"].map(source).join("\n") + "\n";
+
 // ---- 4. the Wallet list and a drag ----
 function walletList(opts) {
   const p = page(), calls = [];
@@ -32,9 +35,9 @@ function walletList(opts) {
     tryCmd: async (c) => { calls.push(c); if (opts.duringRead) opts.duringRead(api); return opts.balance === undefined ? [{ tokenid: "0x00", confirmed: "5", sendable: "5" }] : opts.balance; },
     summaryAmount: (s) => s, paintWalBreakdown() {}, waitHtml: () => "STOPPED", store: () => null, tokenOrder: (s, present) => present,
     balCardHtml: (b) => "<row " + b.tokenid + " " + b.sendable + ">", initTokenOrder() {}, enhanceTokenIcons() {}, showCoins() {},
-    FOOT: null
+    FOOT: null, api: { reserved: async () => { if (opts.reserved === "fails") throw new Error("no"); return opts.reserved || { coins: [], funds: [] }; } }
   };
-  const api = new Function(...Object.keys(env), 'const MINIMA = "0x00", NO_FIGURE = "-"; let running = true, BAL_AT = 0, BAL_BY_TID = {}, WAL_MINIMA = null, WAL_DRAG = null, FOOT_KEYS, FOOT_KEYS_AT, NODE_DASH, NODE_DASH_AT, RECV_ADDR;\n' +
+  const api = new Function(...Object.keys(env), 'const MINIMA = "0x00", NO_FIGURE = "-"; let running = true, BAL_AT = 0, BAL_BY_TID = {}, WAL_MINIMA = null, WAL_DRAG = null, FOOT_KEYS, FOOT_KEYS_AT, NODE_DASH, NODE_DASH_AT, RECV_ADDR;\n' + HELD_SRC +
     source("walDragCheck") + "\n" + source("renderBalances") + "\n" + source("resetWalletFigures") +
     "; return { renderBalances, resetWalletFigures, drag: (v) => { if (v !== undefined) WAL_DRAG = v; return WAL_DRAG; }, run: (v) => { running = v; } };")(...Object.values(env));
   return Object.assign(api, { list: p.el("balList"), calls, el: p.el });
@@ -83,19 +86,19 @@ async function coinsDialogRows(opts) {
     p.el("coinsConsolidate").hidden = true;                          // as the dialog's markup has it
     list.querySelectorAll = function (sel) { if (sel !== ".coin-row") return []; const rows = [...realMatchAll.call(this.innerHTML, /data-i="(\d+)"/g)].map(m => ({ dataset: { i: m[1] } })); keep.push(...rows); return rows; };
     const env = {
-      el: p.el, TOK, esc, copy() {}, toast() {}, document: {}, api: { ppPools: async () => [] },
+      el: p.el, TOK, esc, copy() {}, toast() {}, document: {}, api: { ppPools: async () => [], reserved: async () => opts.reserved || { coins: [], funds: [] } },
       cmd: async (c) => {
         if (c === "balance") { const v = opts.balance[Math.min(balanceReads++, opts.balance.length - 1)]; if (v == null) throw new Error("no"); return [{ tokenid: "0x00", confirmed: v[0], unconfirmed: v[1] }]; }
         if (/sendable:true/.test(c)) { if (opts.sendable == null) throw new Error("node busy"); return COINS.filter(x => opts.sendable.includes(x.coinid)); }
         return COINS;
       },
-      openDlg: () => ({ root: { isConnected: true } }), showCoinDetail: (c, s) => detail.push([c.coinid, s]),
+      openDlg: (id, title, body) => { p.el("coinsDlgBody").innerHTML = body; return { root: { isConnected: true } }; }, showCoinDetail: (c, s, h) => detail.push(h ? [c.coinid, s, h] : [c.coinid, s]),
       showTokenDetail() {}, splitDialog() {}, consolidateToken: async () => true, isNftBal: () => false, validTok: () => true, coinCount: (n) => n + " coins"
     };
     const showCoins = new Function(...Object.keys(env), 'const MINIMA = "0x00", PANDA_SENTINEL = "0x50"; let running = true;\n' +
-      ["absCmp", "decAdd", "decSub", "coinsFootText", "showCoins"].map(source).join("\n") + "; return showCoins;")(...Object.values(env));
+      "let HELD = { coins: {}, funds: {} };\n" + ["absCmp", "decAdd", "decSub", "loadHeld", "heldOf", "freeOf", "heldLine", "coinsFootText", "showCoins"].map(source).join("\n") + "; return showCoins;")(...Object.values(env));
     await showCoins({ tokenid: "0x00", token: "Minima", sendable: "1000.75", confirmed: opts.shown || "1012.75" });
-    return { foot: p.el("coinsFoot"), list, detail, consolidate: p.el("coinsConsolidate") };
+    return { foot: p.el("coinsFoot"), list, detail, consolidate: p.el("coinsConsolidate"), body: p.el("coinsDlgBody").innerHTML };
   })();
   for (const r of keep) r.onclick();
   return d;
@@ -255,4 +258,47 @@ test("wording: Wallet, coins dialog, Split, Receive, Send and History text has n
   const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");
   assert.ok(!/[—–]/.test(html.slice(html.indexOf('id="view-balances"'), html.indexOf('id="view-webwallet"'))));
   assert.ok(!/current address/i.test(app + html), "Receive does not claim one fixed address");
+});
+
+// ---- 0.18.146: what the engines hold is not "sendable", and is said ----
+const HELD_ONE = { coins: [{ coinid: "0xc2", owner: "dexicon", why: "a live Dexicon order", state: "held" }], funds: [{ tokenid: "0x00", held: "400.5", free: "612.25", why: "a live Dexicon order" }] };
+
+test("Wallet list: the headline and the rows leave out what the engines hold; a failed read claims nothing new", async () => {
+  let w = walletList({ balance: [{ tokenid: "0x00", confirmed: "1012.75", sendable: "1012.75" }], reserved: HELD_ONE });
+  await w.renderBalances();
+  assert.equal(w.el("walTotal").textContent, "612.25", "sendable less the held 400.5, exact");
+  w = walletList({ balance: [{ tokenid: "0x00", confirmed: "1012.75", sendable: "1012.75" }] });
+  await w.renderBalances();
+  assert.equal(w.el("walTotal").textContent, "1012.75", "nothing held: the node's figure");
+  w = walletList({ balance: [{ tokenid: "0x00", confirmed: "5", sendable: "5" }], reserved: "fails" });
+  await w.renderBalances();
+  assert.equal(w.el("walTotal").textContent, "5");
+  // the row itself (balCardHtml) and the Send screen use the same figure
+  assert.match(app, /const locked = decSub\(confirmed, sendable\), parts = \[\], free = freeOf\(b\);/);
+  assert.match(app, /if \(heldLine\(tid\)\) parts\.push\(heldLine\(tid\)\);/);
+  assert.match(app, /<span class="balrow__amt">\$\{esc\(summaryAmount\(free\)\)\}<\/span>/);
+  assert.match(app, /sendable: freeOf\(b\), held: heldLine\(b\.tokenid \|\| MINIMA\),/);
+  assert.match(app, /Not sendable now: " \+ tokOf\(tok\)\.held \+ "\. Nothing was sent\."/, "Send refuses over the free funds with the reason, before the review");
+  const held = new Function("TOK", "const MINIMA = '0x00';\n" + HELD_SRC + "HELD = { coins: {}, funds: { '0x00': { held: '7', free: '1', why: 'an AtomiX swap' } } }; return { free: freeOf({ sendable: '5' }), line: heldLine('0x00'), other: freeOf({ tokenid: '0xAB', sendable: '9' }) };")(TOK);
+  assert.deepEqual(held, { free: "0", line: "held 7 for an AtomiX swap", other: "9" }, "never below zero; another token is untouched");
+});
+
+test("coins dialog: a held coin carries a HELD chip and what holds it, in words on the row; the head and the detail say it too", async () => {
+  const d = await coinsDialogRows({ sendable: ["0xC1", "0xC2"], balance: [["1012.75", "0"]], reserved: HELD_ONE });
+  const rows = d.list.innerHTML.split('<div class="coin-row"').slice(1);
+  assert.ok(rows[1].includes('<span class="coin-chip coin-chip--locked">HELD</span><span class="coin-held">a live Dexicon order</span>'));
+  assert.ok(!rows[0].includes("HELD") && !rows[2].includes("HELD"));
+  assert.ok(rows[1].includes("0xC2"), "the coin id whole");
+  assert.deepEqual(d.detail, [["0xC1", true], ["0xC2", true, "a live Dexicon order"], ["0xC3", false]]);
+  assert.match(d.body, /sendable 600\.25  ·  held 400\.5 for a live Dexicon order/);
+  const none = await coinsDialogRows({ sendable: ["0xC1", "0xC2"], balance: [["1012.75", "0"]] });
+  assert.ok(!none.list.innerHTML.includes("HELD")); assert.match(none.body, /sendable 1000\.75  ·  /);
+});
+
+test("coin detail: a held coin is titled held, with what holds it", () => {
+  let got = null;
+  const env = { esc, copy() {}, el: () => ({}), openDlg: (id, title, body) => { got = { title, body }; return { root: { querySelectorAll: () => [] } }; } };
+  new Function(...Object.keys(env), source("showCoinDetail") + "; return showCoinDetail;")(...Object.values(env))({ coinid: "0xC2", amount: "5" }, true, "an AtomiX swap");
+  assert.equal(got.title, "Coin, held");
+  assert.ok(/Held for<\/div>[\s\S]*?>an AtomiX swap</.test(got.body) && /Sendable<\/div>[\s\S]*?>not by the wallet while it is held</.test(got.body));
 });

@@ -155,6 +155,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppActivity: () => ipcRenderer.invoke("mcd:ppActivity"),
   ppStatement: () => ipcRenderer.invoke("mcd:ppStatement"),
   ppConsolidationCheck: () => ipcRenderer.invoke("mcd:ppConsolidationCheck"),
+  reserved: () => ipcRenderer.invoke("mcd:reserved"),   // coins held by AtomiX, PandaPools, Dexicon: { coins:[{coinid, owner, why, state…}], funds:[{tokenid, held, free, why}] }
   ppFeed: () => ipcRenderer.invoke("mcd:ppFeed"),
   ppScan: () => ipcRenderer.invoke("mcd:ppScan"),
   ppQuote: (tok, minimaToToken, amount) => ipcRenderer.invoke("mcd:ppQuote", tok, minimaToToken, amount),

@@ -358,6 +358,34 @@ function createRegistry(o = {}) {
     return freed;
   }
 
+  /**
+   * For the Wallet: per token, what `owner` cannot send because another part of the app holds it, and what it can.
+   * The same sum the send pin makes (main/sendpin.js): a coin at an address with a held coin counts as held, because a
+   * send takes its coins from one address. One coins read per token that has a held coin; a held coin whose token is
+   * not known yet is asked for first (at most SWEEP_READS of them). [{ tokenid, held, free, why }], amounts exact.
+   */
+  async function funds(owner, read) {
+    const { toUnits, fromUnits } = require("./sendpin");
+    const recs = () => [...txns.values(), ...holds.values()].filter(r => r.owner !== owner);
+    let asked = 0;
+    for (const r of recs()) if (r.tokenid == null && asked++ < SWEEP_READS) {
+      try { const row = (rows(await read("coins coinid:" + r.coinid)) || []).find(x => lc(x.coinid) === lc(r.coinid)); if (row) { r.tokenid = String(row.tokenid || "0x00"); r.address = String(row.address || ""); r.amount = String(lc(r.tokenid) !== "0x00" && row.tokenamount != null ? row.tokenamount : row.amount); } } catch (e) {}
+    }
+    const out = [];
+    for (const tok of new Set(recs().filter(r => r.tokenid != null).map(r => lc(r.tokenid)))) {
+      let mine; try { mine = rows(await read("coins relevant:true sendable:true checkmempool:true tokenid:" + tok)); } catch (e) { mine = null; }
+      if (!mine) continue;   // not known: nothing is claimed for this token
+      const amountOf = (x) => toUnits(tok !== "0x00" && x.tokenamount != null ? x.tokenamount : x.amount);
+      const by = [], poisoned = new Set();
+      for (const x of mine) { const h = foreign(owner, x.coinid); if (h) { poisoned.add(lc(x.address)); if (by.indexOf(h) < 0) by.push(h); } }
+      if (!by.length) continue;   // held coins of this token are all in posted transactions: the node's own figures already leave them out
+      let held = 0n, free = 0n;
+      for (const x of mine) { if (poisoned.has(lc(x.address))) held += amountOf(x); else free += amountOf(x); }
+      out.push({ tokenid: tok, held: fromUnits(held), free: fromUnits(free), why: whys(by) });
+    }
+    return out;
+  }
+
   /** Every reservation, for the screens: [{ coinid, owner, why, state, txn, tokenid, amount, address }] (ids whole). */
   function list() {
     const out = [];
@@ -366,7 +394,7 @@ function createRegistry(o = {}) {
     return out;
   }
 
-  return Object.assign(api, { guard, open, close, invalidate, setHolds, setHoldSource, releaseOwner, sweep, list, foreign, others, describe,
+  return Object.assign(api, { guard, open, close, invalidate, setHolds, setHoldSource, releaseOwner, sweep, list, funds, foreign, others, describe,
     _file: () => file, _size: () => txns.size + holds.size });
 }
 

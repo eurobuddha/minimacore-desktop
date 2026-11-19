@@ -295,6 +295,7 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .coin-amt { flex: 1 1 0; min-width: 0; font-size: 15px; line-height: 20px; letter-spacing: .03em; color: var(--text); overflow-wrap: anywhere; }
 .coin-chip { flex: 0 0 auto; padding: 3px 9px; border-radius: 999px; background: var(--surface2); color: var(--dim); font-size: 10px; font-weight: 700; line-height: 14px; letter-spacing: .06em; }
 .coin-chip--locked { color: var(--amber); margin-left: 4px; }
+.coin-held { margin-left: 8px; color: var(--dim); font-size: 12px; line-height: 16px; min-width: 0; overflow-wrap: anywhere; }
 .coin-row:hover .coin-chip { background: var(--border); }
 .coin-row__cid { margin-top: 4px; font: 400 11px/16px var(--mono); color: var(--dim2); overflow-wrap: anywhere; word-break: break-all; }
 .coins-foot { padding: 12px 16px 4px; font: 400 13px/1.25 var(--sans); letter-spacing: .018em; color: var(--dim2); white-space: pre-wrap; user-select: text; }

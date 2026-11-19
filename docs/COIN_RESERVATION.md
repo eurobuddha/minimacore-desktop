@@ -104,10 +104,18 @@ read the registry works in memory and says so in the log; it never blocks a comm
 
 ## Visibility
 
-The Wallet's "sendable" leaves out what the engines hold, the coins dialog marks a held coin with what holds it, and
-Send refuses an amount above the free funds with the reason. The three Dexicon rooms keep their engines' own
-figures; because each engine's coin reads leave out what the others hold, no room offers another's coins as usable.
-A room's balance line (the node's `balance`) is the wallet total and is labelled by a "held" line beside it.
+The Wallet tab (`renderer/app.js`, fed by `mcd:reserved`: `reserve.list()` and `reserve.funds("wallet")`): the
+headline, each token row, the token page and the Send screen show the node's sendable LESS what the engines hold,
+with a line "held N for …"; the coins dialog marks a held coin with a HELD chip and what holds it in words, and the
+coin's detail says "Held for"; Send refuses an amount above the free funds with the reason before its review. The
+held figure is the one a send would meet: a coin at an address with a held coin counts as held.
+
+The three Dexicon rooms keep their engines' own figures and are not redrawn. What stops them claiming the same
+coins: each engine's own coin reads leave out what the others hold (so FAST backing, an AtomiX lock from coins, a
+pool's funding and the AtomiX coin list in room ① are chosen from coins that engine can use), and anything else is
+refused before signing with the reason. NOT reconciled: a room's balance line taken from the node's `balance`
+(rooms ① and ②, and "free for a new order" in ③) still counts coins another engine holds; the action then fails
+with the reason instead of the figure being lower. Doing better needs a held line in the room screens.
 
 ## Limits
 

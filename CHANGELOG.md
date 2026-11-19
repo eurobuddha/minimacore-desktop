@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.146] — Coin reservation: the Wallet shows what is held, and by what
+
+- **Found**: the node's "sendable" counts every plain coin of the wallet, the ones backing a live Dexicon order or named for an AtomiX or PandaPools transaction included. The Wallet offered them, and since 0.18.144 a send of them is refused: the figure and the refusal disagreed.
+- **"Sendable" in the Wallet is what the wallet can send**: the headline, each token row, the token page and the Send screen show the node's figure less what the engines hold, exact (never rounded, never below zero), with "held 400.5 for a live Dexicon order" beside it. The held amount is the one a send would meet: a coin at the same address as a held coin counts as held.
+- **The coins dialog** marks a held coin with a HELD chip and what holds it, in words on the row; the coin's detail is titled "Coin, held" and has a "Held for" line. POOL, BEACON and LOCKED are as before.
+- **Send** refuses an amount above the free funds before its review: "Not sendable now: held 400.5 for a live Dexicon order. Nothing was sent."
+- **How**: `mcd:reserved` (read only) gives every coin held by AtomiX, PandaPools and Dexicon with what holds it (ids whole) and, per token, held and free (`reserve.funds`: one wallet read per token that has a held coin). A read that fails keeps the last answer.
+- **Dexicon's rooms are not redrawn.** They keep their engines' own figures. Each engine's coin reads already leave out what the others hold (0.18.144), so no room builds on another's coins; a room's balance line from the node's `balance` still counts them, and the action is then refused with the reason. Stated in `docs/COIN_RESERVATION.md`.
+
 ## [0.18.145] — Coin reservation: the coins of a live Dexicon order are held, and settlement comes first
 
 - **Found**: a FAST order locks nothing on the chain. It names its backing coins, and the Dexicon engine keeps them from its own other orders and from a second take, but nothing kept them from an AtomiX lock, a pool operation or a wallet send. One of those spent the coin; a take arriving before the maker's next refresh was then co-signed into a transaction that could not mine.

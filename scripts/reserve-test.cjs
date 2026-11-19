@@ -468,3 +468,25 @@ test("settlement wins: a settlement transaction takes a coin that is only collat
   assert.equal((await as("pandapools")("txninput id:pp2 coinid:" + coinId(2))).reserved, true);
   void node;
 });
+
+// ---- 0.18.146: what the Wallet is told ----
+test("the Wallet's figures: per token, what is held (with the coins that share an address) and what is free, exact; a posted transaction is the node's to count", async () => {
+  const usd = [{ coinid: coinId(11), amount: "30.000001", address: ADDR(1), tokenid: MXUSD }, { coinid: coinId(12), amount: "7.5", address: ADDR(2), tokenid: MXUSD }];
+  const { node, as, reg } = rig([{ coinid: coinId(1), amount: "100", address: ADDR(1) }, { coinid: coinId(2), amount: "0.00000001", address: ADDR(1) }, { coinid: coinId(3), amount: "10", address: ADDR(3) }].concat(usd));
+  assert.deepEqual(await reg.funds("wallet", node.run), []);
+  hold(reg, coinId(1));
+  await build(as("atomix"), "axswap_1", [coinId(11)], { noPost: true });
+  node.seen.length = 0;
+  const f = await reg.funds("wallet", node.run);
+  assert.deepEqual(f.sort((a, b) => a.tokenid.localeCompare(b.tokenid)), [
+    { tokenid: "0x00", held: "100.00000001", free: "10", why: "a live Dexicon order" },
+    { tokenid: MXUSD.toLowerCase(), held: "30.000001", free: "7.5", why: "an AtomiX swap" }]);
+  assert.equal(node.saw(/^coins relevant:true sendable:true checkmempool:true tokenid:/).length, 2, "one wallet read per token that has a held coin");
+  assert.deepEqual(await reg.funds("dexicon", node.run), [{ tokenid: MXUSD.toLowerCase(), held: "30.000001", free: "7.5", why: "an AtomiX swap" }], "the holder's own coins are not held from itself");
+  await as("atomix")("txnpost id:axswap_1");
+  assert.deepEqual((await reg.funds("wallet", node.run)).map(x => x.tokenid), ["0x00"], "posted: the coin is in the mempool and the node's own sendable already leaves it out");
+  assert.deepEqual(reg.list().map(r => [r.coinid, r.owner, r.state]).sort(), [[coinId(1), "dexicon", "held"], [coinId(11), "atomix", "posted"]]);
+  const fs2 = require("node:fs"), root = require("node:path").join(__dirname, "..");
+  assert.match(fs2.readFileSync(root + "/main/main.js", "utf8"), /ipcMain\.handle\("mcd:reserved", async \(\) => \{\s+if \(node\.state !== "running"\) return \{ coins: \[\], funds: \[\] \};\s+return \{ coins: reserve\.list\(\)\.filter\(r => r\.owner !== "wallet"\), funds: await reserve\.funds\("wallet", reserveRead\) \};/);
+  assert.match(fs2.readFileSync(root + "/main/preload.js", "utf8"), /reserved: \(\) => ipcRenderer\.invoke\("mcd:reserved"\)/);
+});

@@ -515,6 +515,12 @@ ipcMain.handle("mcd:ppMyPools", () => pandapools.myPools());
 ipcMain.handle("mcd:ppActivity", () => pandapools.activity());
 ipcMain.handle("mcd:ppStatement", () => pandapools.statement());
 ipcMain.handle("mcd:ppConsolidationCheck", () => pandapools.consolidationCheck());
+// What the engines hold of the wallet's coins (main/reserve.js), for the Wallet's figures and the coins dialog: every
+// held coin with what holds it (ids whole), and per token what the wallet itself can and cannot send. Read only.
+ipcMain.handle("mcd:reserved", async () => {
+  if (node.state !== "running") return { coins: [], funds: [] };
+  return { coins: reserve.list().filter(r => r.owner !== "wallet"), funds: await reserve.funds("wallet", reserveRead) };
+});
 ipcMain.handle("mcd:ppFeed", () => pandapools.feed());
 ipcMain.handle("mcd:ppScan", () => pandapools.scanNow());
 ipcMain.handle("mcd:ppQuote", (_e, tok, minimaToToken, amount) => pandapools.quoteSwap(tok, minimaToToken, amount));
