@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.139] — Dexicon ② Pools lows, and an agreed OTC deal under a halt is ended (review)
+
+- **Messages pointed at a menu entry that does not exist** ("Open Pool recovery and confirm…"). The button is Confirm wallet signing state, on the pool's own card in My LP. The glue's sentence now says so; the engine's own sentences ("confirm it in Pool recovery", vendored and not edited) are put into those words where the desktop shows them (room ② and the wallet's Consolidate refusal).
+- **Esc or Close during "Create and save"** reported "The backup was not saved" while the save could still complete. A dialog closed while its action is still working now says what is true: it is not known yet whether the backup was saved, and how to tell. The archive setting's dialog follows the same rule.
+- **Room ① residual: an agreed OTC deal while AtomiX is halted.** The halt gate (0.18.130) refused the engine's leg-1 lock and the deal went back to AGREED; the engine's reset rewrote the row, so the deal never expired and was tried again every 10 minutes for ever. Had the halt ever cleared, it would have locked at its old price. Now a deal refused for a halt is ended for good through the engine's own reject: REJECTED in the store, and a REJECT message so the counterparty knows the deal is off. If the message cannot be sent, the deal is still ended here. The engine is not edited.
+- Every room ② dev-preview shot retaken.
+
 ## [0.18.138] — Dexicon ② Pools: a fresh price at Review, and a gate that cannot stay closed (review, mediums)
 
 - **Found (a)**: the create form kept the opening price and the balances it was opened with, across tabs and rooms, with no age limit. Hours later the review still said "matches MEXC market", and the pool would open off the market (arbitraged at its owner's cost).

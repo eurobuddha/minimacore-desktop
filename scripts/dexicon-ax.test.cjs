@@ -517,12 +517,12 @@ test("H1: while halted the glue refuses every action that creates a new liabilit
     assert.equal(G.st.touched.filter((x) => x === "engine.startLeg").length, 1, "part 2 never reached the engine");
   } finally { atomix._setCtx(null); }
 });
-test("H1: an LP's ACCEPT arriving in the service poll locks nothing while halted: the engine's own executeDeal is refused at its leg-1 lock and the deal goes back to AGREED", async () => {
+test("H1: an LP's ACCEPT arriving in the service poll locks nothing while halted: the engine's own executeDeal is refused at its leg-1 lock, and (0.18.139) the deal is ENDED, so a cleared halt cannot run it at its old price", async () => {
   const atomix = require("../main/atomix"), { createContext } = require("../main/atomix/loader"), { makeSqlShim } = require("../main/pandapools/sqlshim");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-halt-")), seen = [], notes = [];
   try {
     const shim = await makeSqlShim(path.join(dir, "atomix.sqlite"));
-    const mds = { minidappuid: "", cmd: (c, cb) => { seen.push(String(c)); cb({ status: false, error: "mock node: nothing may be sent in this test" }); }, sql: (q, cb) => shim.sql(q, cb),
+    const mds = { minidappuid: "", cmd: (c, cb) => { seen.push(String(c)); cb(/^random /.test(c) ? { status: true, response: { random: "0x" + "AB".repeat(12) } } : { status: false, error: "mock node: nothing may be sent in this test" }); }, sql: (q, cb) => shim.sql(q, cb),
       net: { GET() { throw new Error("TEST LEAK: network"); }, POST() { throw new Error("TEST LEAK: network"); } }, notify: (m) => notes.push(String(m)), log() {}, init() {} };
     const run = async (gated) => {
       const c = createContext(mds), A = c.AX; if (gated) atomix._gateEngine(c);
@@ -537,14 +537,21 @@ test("H1: an LP's ACCEPT arriving in the service poll locks nothing while halted
       seen.length = 0; notes.length = 0;
       await new Promise((res) => A.otc.executeDeal({ ref, role: "INSTIGATOR" }, res));
       await new Promise((r) => setTimeout(r, 50));
-      return { deal: await P((cb) => A.otc.getDeal(ref, cb)), seen: seen.slice(), notes: notes.slice() };
+      const first = { deal: await P((cb) => A.otc.getDeal(ref, cb)), seen: seen.slice(), notes: notes.slice() };
+      // the halt clears, and the engine's own 10-minute retry comes round (lib/otc.js expireStale: AGREED + INSTIGATOR → executeDeal)
+      A.identitywatch._setMismatch(false, false); seen.length = 0;
+      await new Promise((res) => A.otc.expireStale(Date.now() + 11 * 60000, null, res)); await new Promise((r) => setTimeout(r, 50));
+      return Object.assign(first, { later: seen.slice(), dealLater: await P((cb) => A.otc.getDeal(ref, cb)), msgs: await P((cb) => A.otc.msgs(ref, cb)) });
     };
     const open = await run(0);
     assert.ok(open.seen.length > 0, "without the gate the engine starts the lock while halted (the finding): " + open.seen.join(" | "));
     const shut = await run(1);
-    assert.deepEqual(shut.seen, [], "with the gate nothing reaches the node: no secret, no lock, no EXECUTE message");
-    assert.equal(shut.deal.status, "AGREED"); assert.equal(shut.deal.hash, "", "the deal is not left half-recorded");
-    assert.ok(shut.notes.some((n) => n.indexOf("OTC execute failed: AtomiX is halted") === 0), shut.notes.join(" | "));
+    // without the gate (the 0.18.129 state) the lock is started while halted; nothing more is asserted of it
+    assert.equal(shut.seen.filter((x) => !/^(random|send amount:0\.000000001 )/.test(x)).length, 0, "with the gate no lock reaches the node, only the REJECT message to the counterparty: " + shut.seen.join(" | "));
+    assert.deepEqual(shut.msgs.map((m) => m.type), ["REJECT"], "the engine's own reject path made the REJECT message for the counterparty (this test's stand-in identity cannot seal it, so nothing is sent here)");
+    assert.equal(shut.deal.status, "REJECTED", "ended for good through the engine's own reject, not left AGREED to be retried every 10 minutes"); assert.equal(shut.deal.hash, "", "the deal is not left half-recorded");
+    assert.ok(shut.notes.some((n) => /^OTC execute failed: AtomiX is halted.*The agreed OTC deal was ended, so it cannot run later at its old price\.$/.test(n)), shut.notes.join(" | "));
+    assert.deepEqual(shut.later, [], "the halt cleared and the retry came round: nothing is executed, at the old price or any other"); assert.equal(shut.dealLater.status, "REJECTED");
     shim.flush();
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   const glue = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8"), svc = fs.readFileSync(path.join(__dirname, "..", "main", "atomix", "service.js"), "utf8");

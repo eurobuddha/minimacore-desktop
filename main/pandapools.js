@@ -646,7 +646,8 @@ function deposit(addr, addM, addT) {
  *  the highest previously used leaf — so a key this wallet does not hold comes back as unreachable and the spend
  *  is refused. `cb(foreign)` is true for every blocked case: key absent, node unreadable, key exhausted, recipe
  *  signing-quarantined, or the node's counter below the recipe's recorded floor. */
-const UNAVAILABLE_KEY_MSG = "Owner signing is paused or its current key state could not be verified. Open Pool recovery and confirm the latest complete wallet signing state.";
+// 0.18.139: this said "Open Pool recovery and confirm…", and no such menu entry exists: the button is on the pool's own card.
+const UNAVAILABLE_KEY_MSG = "Owner signing is paused or its current key state could not be verified. In My LP, on this pool's card, press Confirm wallet signing state, with the latest complete wallet backup restored on this node.";
 function ensureOwnerKey(opk, cb) {
   if (!opk || !ctx || !ctx.PoolMgr || !ctx.PoolMgr.ensureOwnerKeys) return cb(false);
   try {
@@ -862,7 +863,8 @@ async function consolidationCheck() {
       var keys = (recipes || []).map(function (p) { return p && p.opk; }).filter(Boolean);
       if (!keys.length) { resolve(null); return; }                      // no pools of ours: nothing to protect
       ctx.ReserveRecovery.classifyKeys(keys, function (blocked) {
-        resolve(blocked && blocked.length ? STOP + "your wallet holds a pool owner key that cannot sign.\n\n" + blocked[0].message : null);
+        // the engine's sentence says "confirm it in Pool recovery"; the button is on the pool's card in My LP (the same words as renderer/dexicon-pp.js whereConfirm)
+        resolve(blocked && blocked.length ? STOP + "your wallet holds a pool owner key that cannot sign.\n\n" + String(blocked[0].message).replace(/confirm it (again )?in Pool recovery/g, "confirm it $1with Confirm wallet signing state on the pool's card in My LP") : null);
       });
     });
   }), 15000, "the key check timed out").catch(function (e) { return STOP + "could not verify your wallet keys (" + ((e && e.message) || e) + ")."; });

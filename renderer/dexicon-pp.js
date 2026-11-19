@@ -37,7 +37,10 @@
   const IMITATES = "This token is not MxUSD. Its name imitates it.";
   /** The engine's fixed sentences and the node's errors say USDT for the dollar token. For those sentences ONLY: a record
    *  (a swap's summary, a token's label) is labelled by token id in the glue (main/pandapools.js labelById), never by rewriting words. */
-  const mx = (s) => String(s == null ? "" : s).replace(/\bm?x?USDT\b/gi, "MxUSD");
+  const mx = (s) => whereConfirm(String(s == null ? "" : s).replace(/\bm?x?USDT\b/gi, "MxUSD"));
+  /** The engine's fixed sentences send the reader to "Pool recovery" to confirm a signing state (reserve-recovery.js,
+   *  vendored). No such entry exists here: the button is Confirm wallet signing state, on the pool's card in My LP. */
+  const whereConfirm = (s) => String(s).replace(/confirm it (again )?in Pool recovery/g, "confirm it $1with Confirm wallet signing state on the pool's card in My LP").replace(/Open Pool recovery and confirm/g, "In My LP, on the pool's card, press Confirm wallet signing state to confirm");
   /** a decimal string CUT to dp decimals, never rounded (SwapView.trim8 / fmt6: RoundingMode.DOWN); other text as it is */
   const cut = (x, dp) => { const d = C.dec(x); return d ? C.str(C.down(d, dp)) : String(x == null || x === "" ? "0" : x); };
   /** every digit, no trailing zeros (SwapView.trim) */
@@ -238,6 +241,14 @@
   const ARCHIVE_INTRO = "Optional public HTTPS MegaMMR RPC endpoint for current proofs. Your node verifies every proof. Leave empty for local MegaMMR or backup proofs.";
   const GUIDE = "Keep the latest complete MinimaCore wallet backup and this pool recipe. Proofs expire. A seed or recipe alone is insufficient.\n\nSaved recipes identify pools even when a light node no longer sees their coins. Restore verifies local reserves, then backup proofs, then current proofs from a synced MegaMMR archive. Missing reserves remain visible and are never reported as recovered.\n\nRestore does not regenerate keys or estimate past signature use. Confirm signing only with current complete wallet state and no other signing copies. Keep-fresh requires the app and node to remain running; it cannot guarantee availability while offline.";
 
+  /** What is said when the backup dialog ends. got: the save's result { path }, null (closed before anything was started),
+   *  or { pending: true } (closed with Esc or Close WHILE "Create and save" was still working: the save may still
+   *  complete, so "not saved" would not be true; 0.18.139). */
+  function backupEnd(got, forced) {
+    if (got && got.pending) return { kind: "note", text: "The backup dialog was closed while the backup was still being made, so it is not known yet whether it was saved. If a file was written and checked, the \"backup required\" notice in My LP goes away by itself. If the notice is still there in a minute, use Back up now." };
+    if (!got) return forced ? { kind: "note", text: "The backup was not saved. Your pool is not affected, but another pool cannot be created or migrated until the backup is saved: use Back up now." } : null;
+    return { kind: "note", text: "Encrypted pool and node backup saved and checked. Keep the file off this device, with its password." + (got.path ? " Saved as " + got.path : "") };
+  }
   /** An error as the bridge gives it, without the bridge's own wrapping. */
   const bare = (e) => String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
   /** The glue's own words when a call got no answer in time (main/pandapools.js NO_ANSWER and its kin): said as they are.
@@ -444,7 +455,7 @@
     }
   };
 
-  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, noAnswer, failText };
+  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, noAnswer, failText, whereConfirm, backupEnd };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -578,14 +589,16 @@
     return new Promise((resolve) => {
       const d = document.createElement("dialog"); d.className = "dx-dlg pp-dlg";
       d.innerHTML = `<h2>${esc(title)}</h2>${html}<div class="pp-bad" role="alert"></div><div class="dx-dlg__b"><button class="dx-btn" data-x="0">Close</button>${okLabel ? `<button class="dx-btn dx-btn--go" data-x="1">${esc(okLabel)}</button>` : ""}</div>`;
-      const end = (v) => { d.close(); d.remove(); resolve(v); };
+      let working = false, gone = false;   // closed while its action is still working: { pending: true }, never "nothing was done"
+      const end = (v) => { if (gone) return; gone = true; d.close(); d.remove(); resolve(v); };
       d.addEventListener("click", async (e) => {
         const b = e.target.closest("[data-x]"); if (!b || b.disabled) return;
-        if (b.dataset.x === "0") return end(null);
-        b.disabled = true; const bad = await onOk(d); b.disabled = false;
+        if (b.dataset.x === "0") return end(working ? { pending: true } : null);
+        b.disabled = true; working = true; const bad = await onOk(d); working = false; b.disabled = false;
+        if (gone) return;
         if (typeof bad === "string" && bad) d.querySelector(".pp-bad").textContent = bad; else end(bad === undefined ? true : bad);
       });
-      d.addEventListener("cancel", () => { d.remove(); resolve(null); });
+      d.addEventListener("cancel", () => { if (gone) return; gone = true; d.remove(); resolve(working ? { pending: true } : null); });
       $("shell").appendChild(d); if (wire) wire(d); d.showModal();
     });
   }
@@ -770,9 +783,8 @@
         const r = await Act.backup(api(), pass, again); d.querySelector("[data-st]").textContent = "";
         return r.bad || r;
       });
-    if (!got) { if (forced) say("The backup was not saved. Your pool is not affected, but another pool cannot be created or migrated until the backup is saved: use Back up now.", "note"); return false; }
-    say("Encrypted pool and node backup saved and checked. Keep the file off this device, with its password." + (got.path ? " Saved as " + got.path : ""), "note");
-    return true;
+    const said = backupEnd(got, forced); if (said) say(said.text, said.kind);
+    return !!got && !got.pending;
   }
   function restoreDialog() {
     return form("Restore pools", `<div class="pp-note">${esc(RESTORE_INTRO)}</div>${pwd("pw", "Combined backup password (blank for an old JSON file)")}
@@ -798,7 +810,7 @@
     let current; try { current = await Act.archiveGet(api()); } catch (e) { return say("The archive setting could not be read: " + plainCode(e), "error"); }
     const ok = await form("Recovery archive", `<div class="pp-note">${esc(ARCHIVE_INTRO)}</div><input class="dx-in" type="url" name="url" value="${esc(current || "")}" placeholder="https://archive.example.com" aria-label="Archive address" autocomplete="off" spellcheck="false">`, "Save",
       async (d) => { const r = await Act.archiveSave(api(), d.querySelector("[name=url]").value); return r.bad || true; });
-    if (ok) say("Recovery archive saved.", "note");
+    if (ok === true) say("Recovery archive saved.", "note"); else if (ok && ok.pending) say("The dialog was closed before the archive setting had answered, so it is not known yet whether it was saved. Open Archive connection again to see.", "note");
   }
   /** BACK UP / RESTORE POOLS (MyLpView.showRecoveryMenu): the tools, one per line; the one chosen opens when the list closes */
   function recoveryMenu() {

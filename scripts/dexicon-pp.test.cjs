@@ -697,3 +697,29 @@ test("a glue call the engine never answers ends with 'no answer', so Dexicon's o
   assert.match(pp, /if \(ds\.pptool === "statement"\) return reading\(\(\) => Act\.statement\(api\(\), ui\)\)/, "the statement does not hold the money gate"); assert.match(pp, /if \(ds\.pprecover\) return reading\(async \(\) => \{/, "nor does a reserve check");
   assert.ok(!/const reading = [^\n]*D\.money/.test(pp)); assert.match(pp, /if \(ds\.ppbal != null\) \{ if \(C\.gate\.on\) return say\(GATE_BUSY, "note"\);/, "the coins dialog (Split, Consolidate) is not opened while a money action runs");
 });
+
+// ---- 0.18.139: the lows ----
+test("a message never sends the reader to a menu entry that does not exist; a backup dialog closed while it works does not say 'not saved'", async () => {
+  const h = await glue(), g = fs.readFileSync(path.join(ROOT, "main/pandapools.js"), "utf8"), pp = src("dexicon-pp.js");
+  try {
+    assert.ok(!/Open Pool recovery and confirm/.test(g.replace(/\/\/.*$/gm, "")), "the glue's own sentence names the button where it is");
+    assert.match(g, /In My LP, on this pool's card, press Confirm wallet signing state/);
+    // the engine's own (vendored) sentences, as they reach the consolidation refusal and the screens
+    await h.api.init(); const c = h.contexts.at(-1);
+    c.Store.ownAll = (cb) => cb([{ opk: PK("0B") }]); c.ReserveRecovery.classifyKeys = (keys, cb) => cb([{ message: "The hold still stands. Free some space and confirm it again in Pool recovery." }]);
+    const refused = await h.api.consolidationCheck();
+    assert.match(refused, /confirm it again with Confirm wallet signing state on the pool's card in My LP\.$/); assert.ok(!/in Pool recovery/.test(refused));
+  } finally { h.close(); }
+  const eng = fs.readFileSync(path.join(ROOT, "main/pandapools/reserve-recovery.js"), "utf8");
+  assert.ok(/confirm it again in Pool recovery\./.test(eng) && /and confirm it in Pool recovery\./.test(eng), "the engine's sentences are as translated (vendored, not edited)");
+  assert.equal(PP.whereConfirm("Restore the backup and confirm it in Pool recovery. A seed is NOT enough."), "Restore the backup and confirm it with Confirm wallet signing state on the pool's card in My LP. A seed is NOT enough.");
+  assert.match(PP.failText("Closing the pool", "Owner signing is paused or its current key state could not be verified. Open Pool recovery and confirm the latest complete wallet signing state."), /In My LP, on the pool's card, press Confirm wallet signing state to confirm the latest/);
+  assert.match(pp, /lpBtn\("Confirm wallet signing state", "ppconfirm", p\.opk\)/, "that button is on the pool's card"); assert.ok(!/\["confirm"|data-pick="confirm"/.test(pp), "and the Pool recovery menu has no such entry");
+  // Esc or Close while "Create and save" is still working
+  const closed = PP.backupEnd({ pending: true }, true);
+  assert.match(closed.text, /^The backup dialog was closed while the backup was still being made, so it is not known yet whether it was saved\./); assert.ok(!/was not saved/.test(closed.text));
+  assert.match(PP.backupEnd(null, true).text, /^The backup was not saved\./, "closed before anything was started: nothing was saved, and that is said"); assert.equal(PP.backupEnd(null, false), null);
+  assert.match(PP.backupEnd({ path: "/x/y.ppbackup" }, true).text, /saved and checked.* Saved as \/x\/y\.ppbackup$/);
+  assert.match(pp, /d\.addEventListener\("cancel", \(\) => \{ if \(gone\) return; gone = true; d\.remove\(\); resolve\(working \? \{ pending: true \} : null\); \}\);/, "Esc while the action works resolves 'pending', not 'nothing'");
+  assert.match(pp, /if \(b\.dataset\.x === "0"\) return end\(working \? \{ pending: true \} : null\);/); assert.match(pp, /return !!got && !got\.pending;/);
+});

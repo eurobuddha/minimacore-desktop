@@ -285,7 +285,21 @@ const whileHalted = (fn) => (...a) => (haltedNow() ? Promise.reject(new Error(HA
 function gateEngine(c) {
   const eng = c && c.AX && c.AX.engine; if (!eng || !eng.executeOtc) return;
   const run = eng.executeOtc;
-  eng.executeOtc = (deal, cb) => (haltedNow(c) ? cb(new Error(HALTED)) : run(deal, cb));
+  // 0.18.139: a refused execute left the deal AGREED, and executeDeal's reset rewrites the row (upsertDeal stamps
+  // `updated`), so the deal never aged out: the engine tried it again every 10 minutes for ever, and if the halt ever
+  // cleared it would have locked leg 1 at the OLD price. So a deal refused for a halt is ENDED, through the engine's
+  // own reject (lib/otc.js reject: REJECTED in the store, and a REJECT message so the counterparty knows the deal is
+  // off). If that message cannot be sent the deal is still ended here. A REJECTED deal is terminal: never executed.
+  eng.executeOtc = (deal, cb) => {
+    if (!haltedNow(c)) return run(deal, cb);
+    const otc = c.AX.otc, refused = () => cb(new Error(HALTED + " The agreed OTC deal was ended, so it cannot run later at its old price."));
+    try {
+      otc.getDeal(deal && deal.ref, (e, cur) => {
+        if (!cur) return refused();
+        otc.reject(cur, () => { cur.status = otc.ST_REJECTED; otc.upsertDeal(cur, () => { log("halted: the agreed OTC deal " + cur.ref + " was ended (rejected) instead of being retried"); emitter.emit("update"); refused(); }); });
+      });
+    } catch (err) { refused(); }
+  };
 }
 
 /**

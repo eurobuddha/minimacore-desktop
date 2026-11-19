@@ -221,6 +221,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.18.136 | 3d review | Review H (Add liquidity): one MINIMA field; `depositToken` (the engine's rule, cut to the token's decimals) as the live estimate and in the review; empty or zero refused before the question; glue `depositUsed` returns `minima` / `token` and writes them into the ADD record; swap review and result print `q.totalIn`; tests "Add liquidity: one MINIMA amount…", "swap: the review and the result print the amount the pools take" | |
 | 0.18.137 | 3d review | Review H (restore gate): `status().error` / `waitedMs` and `setAsideStore()` in `main/pandapools.js` and `main/atomix.js`; `pandapools.ownPools()`; `restore.activeWorkList` names an unopenable or stuck AtomiX / PandaPools store with the skip hint, lists own open pools with `CONFIRM_HINT`; `restore.skipWarning`; `mcd:engineSetAside`; `DexCore.storeError` shown in rooms ① and ②; `invalidate()` moves an unopenable pool store aside; tests "a pool store that cannot be opened", "AtomiX's store gets the same treatment", "a live pool of this wallet" | |
 | 0.18.138 | 3d review | Review mediums: `Act.createRefresh` (anchor and balances re-read at Review; old vs new, review again; `createAnchor` returns `at`); glue `withTimeout` on `statement`, `restore` / `recoverSaved`, `retirePool`, `confirmSigning` with `NO_ANSWER`; `reading()` for the statement and the reserve check (no money gate); `noAnswer()` in the screen; coins dialog refused while `C.gate.on`; tests "create: the opening price and the balances are read again at Review", "a glue call the engine never answers ends with 'no answer'" | |
+| 0.18.139 | 3d review | Review lows + room ① residual: `UNAVAILABLE_KEY_MSG` and `whereConfirm` (the button is on the pool card); `backupEnd` and `form()` resolve `{ pending: true }` when closed while working; `gateEngine` ends a halted OTC execute through `otc.reject` (REJECTED, REJECT message), tested with the halt cleared and `expireStale` run 11 minutes on; tests "a message never sends the reader to a menu entry that does not exist", H1 extended in `scripts/dexicon-ax.test.cjs` | |
 
 Phase 0 change of scope: the data folder is not pinned, because the app is not being renamed (D2).
 Known failures that predate this branch (fail on `origin/master` 0.18.64): `scripts/panels-test.cjs` "overlay sites";
@@ -234,6 +235,19 @@ Owner decisions added 19 Nov 2026 (evening):
 - The app keeps a notifier for Parlons calls and messages while the panel lives in the browser: a desktop
   notification (and dock/taskbar attention for a call) raised by the app; clicking it opens the Parlons panel in the
   browser. Phase 4 must find how the app learns of them from the node without the embedded view.
+
+Owed items (recorded 19 Nov 2026 with the room ② review; none of these is built or fixed here):
+- Pool recovery tools the phone has and the desktop lacks: "Check a backup file", "Recover & withdraw" and
+  "Recover on existing wallet". The desktop has Collect, Back up, Restore pools from a file, Archive connection and
+  the guide.
+- Android gaps reported by the review (other repos; not checked or changed from this branch):
+  - `apks/atomix` and `apks/dexicon`: OTC propose and counter have no engine-level halt check.
+  - `apks/dexicon`: `OtcTab.refuse()` does not check the halt at all.
+  - `apks/dexicon`, `apks/pandadex`, `mds/pandadex-mds`: on-chain routing over the user's own orders.
+- A store set aside because it could not be opened (0.18.137) gets the dated name of a replaced wallet's store
+  (`-legacy-keys-YYYYMMDD`); a name of its own is owed.
+- Look-alike token names outside Cyrillic and Greek get the "(not MxUSD)" mark and the token id, but not the extra
+  warning line (0.18.135).
 
 ## 9. Checks that need a real node (owner, on the dev node; nothing here is proven yet)
 
@@ -313,3 +327,4 @@ Phases 0 to 2 were verified by tests and a browser preview only. The app has not
 - [ ] Add liquidity (0.18.136, dev node, small amounts): My LP, Add: one MINIMA field with the MxUSD estimate under it; Review with the field empty is refused in the form; add a small amount: the result line and the Activity record give the MINIMA and the MxUSD the pool took, and the wallet's MxUSD fell by that figure.
 - [ ] Restore gate (0.18.137, dev node only, a COPY of a data folder): with a pool open, Backup & Recovery, restore another seed: the question lists the pool's whole address and reserves with "These pools belong to the wallet you are replacing…"; Cancel changes nothing. Restore the SAME seed and go on: the pool is still in My LP afterwards. With the app closed, overwrite `pandapools.sqlite` with junk and open: room ② shows why it cannot start; "Set the store aside and start empty" leaves `pandapools.sqlite-legacy-keys-<date>` beside a new store; the same for `atomix.sqlite` in room ①.
 - [ ] Stale price (0.18.138, dev node): open Create a pool, reach Amounts, leave it open until MEXC has moved (or switch the network off for the second case), press Review: the old and new price are shown and Review must be pressed again; with no network, "could not be read again … Nothing was sent". While a swap is confirming its question, room ② Wallet's balance cards do not open the coins dialog. Export statement works while another room's action is open.
+- [ ] Lows (0.18.139, dev node): with a pool whose signing is paused, Close: the refusal names "Confirm wallet signing state" on the pool's card. Start a pool backup and press Esc while it is being made: the note says it is not known yet, and the "backup required" notice goes away by itself once the file is checked. Halt + OTC (needs the halted dev node of the 0.18.130 check and a second node as LP): agree a deal as the proposer while halted: nothing is locked, the deal shows as rejected on both nodes, and it stays so after the halt is gone.
