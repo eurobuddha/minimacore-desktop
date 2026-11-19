@@ -64,3 +64,23 @@ entry and the `minimaCore Safe Storage` entry must be untouched.
 No script in `scripts/` names a node. `atomix-unit.js` is hermetic (mock node, and it fails if anything leaves the
 process). The live gates (`atomix-boot-gate.js`, `atomix-s2-gate.js`) and `cdp-eval.js` run only when the caller
 names a node and says it is theirs; see the head of `scripts/test-node.cjs`. `scripts/hermetic-test.cjs` proves it.
+
+### The live variant of the engine checks (owner's test node)
+
+The owner's TEST node is the docker container `minimaarchive` (host ports 13001 to 13003; its RPC answers only inside
+the container, at `127.0.0.1:9005`; upstream Minima 1.0.47.16). The name is written here and nowhere in code: a
+script uses it only when the caller gives it.
+
+```bash
+AX_TEST_NODE_CONTAINER=minimaarchive AX_TEST_NODE_RPC=http://127.0.0.1:9005 AX_TEST_NODE_I_OWN_THIS=yes node scripts/atomix-unit.js
+AX_TEST_NODE_CONTAINER=minimaarchive AX_TEST_NODE_RPC=http://127.0.0.1:9005 AX_TEST_NODE_I_OWN_THIS=yes npm run gate:atomix
+```
+
+WARNING: these checks read that node's seed phrase and its Ethereum key into the test process (`vault action:seed`,
+`seedrandom modifier:ethbridge`) and register the AtomiX swap scripts on it (`newscript`). The script prints this
+before it sends anything. Run them only against a node whose funds you can afford to lose. Never name the custody
+wallet's container: no script may reach it.
+
+`minimaarchive` is an upstream stock node. It is useful as the funding source and as the counterparty for the TEST
+profile's own wallet (send from it to an address of the TEST copy; trade against it). It is not the app's node: the
+TEST copy runs its own node from `resources/`.
