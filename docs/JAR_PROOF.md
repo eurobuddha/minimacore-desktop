@@ -63,3 +63,25 @@ one). Parlons is not removed. Consequences for block-as-key-uses:
   has no separate key set. (The Parlons phone and cloud apps are different: they carry their own wallet and counter.)
 - The app must verify over RPC, after start, that the running node is in the recorded key mode, and stop if not: a
   flag name inside the jar does not prove the Parlons wrapper passes it through.
+
+## Built, 19 Nov 2026: block-capable Parlons node (local, not released)
+
+Kept in `/Users/eurobuddha/Projects/minima/_artifacts/parlons-block-2026-11-19/` with `BUILD.md`:
+- `parlons-node-0.2.153.jar` sha256 `c2b8cb33b07b78197cc4ed0b5c82cf3f14b6407095f20963971d6b932b25e6af`
+- `minima-1.1.2.31-euro5.jar` sha256 `93111abb83f2239970257e692026b6033f3b1caeaf31db52604b9f531a0617ea`
+
+Source, local branches `block-mode-2026-11-19`: core `core/minima-core` @ `48cd9b7d397` (worktree
+`_worktrees/minima-core-block-mode`), maxima @ `55a92f2c` (worktree `_worktrees/maxima-block-mode`).
+
+Proven on the desktop JRE on private chains: classic start (64x3, 262144), block start (128x4, 268435456, key uses
+follow the block), a folder created by 0.2.152 opens under 0.2.153 classic with identical keys, addresses, coins and
+Parlons identity, and the same phrase gives no keys in common between modes. The Parlons identity is the same in
+both modes. Maxima tests: 605 pass.
+
+To tell the modes apart after start: `keys`, every row's `size` / `depth` / `maxuses`
+(classic 64 / 3 / 262144; block 128 / 4 / 268435456).
+
+This node line has NO MiniDapp System. Minima Core Desktop never enables MDS, so it is unaffected; the jar must not
+go to the relay fleet or any host that uses MDS inside the Parlons node.
+
+Not proven: mainnet sync, MegaMMR, the relay cape, Keets live, a real desktop data folder, Windows and Linux.
