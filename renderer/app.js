@@ -927,7 +927,7 @@ const NO_FIGURE = "–";
 function resetWalletFigures() {
   el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown();
   el("faucetBody").innerHTML = "";
-  FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {}; RECV_ADDR = null;
+  FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {}; RECV_ADDR = null; WAL_DRAG = null;
 }
 function waitHtml() { return nodeState === "stopped" ? `<div class="empty">The node is stopped.</div>` : `<div class="spin">Waiting for the node…</div>`; }
 function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
@@ -1257,9 +1257,12 @@ function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshT
 // ---- Wallet tab (Pandamonium's BalanceView / BalanceAdapter) ---------------
 async function renderBalances() {
   const host = el("balList");
+  if (!running) { WAL_DRAG = null; el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = waitHtml(); return; }
+  walDragCheck();
   if (WAL_DRAG) return;                                  // a row is being dragged: the 15 s rebuild waits for the drop
-  if (!running) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = waitHtml(); return; }
   let bal = await tryCmd("balance");
+  walDragCheck();
+  if (WAL_DRAG) return;                                  // a drag that began while the node was answering: its row must not be rebuilt under it
   // a failed read is not an empty wallet: no old total above it, and no zero row
   if (!bal) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = `<div class="empty">The balance could not be read. It is read again every 15 seconds.</div>`; return; }
   BAL_AT = Date.now();                                   // drives the breakdown's "updated ..."
@@ -1288,6 +1291,9 @@ let BAL_BY_TID = {};       // tokenid → last balance row, so a row click can o
 let BAL_AT = 0;            // when the last `balance` reply landed: the breakdown's "updated ..."
 let WAL_MINIMA = null;     // the MINIMA balance row behind "Total balance" (null: not read)
 let WAL_DRAG = null;       // the token row being dragged
+// A drag whose row is no longer on the page has ended, whether or not its dragend came: without this a lost
+// dragend would leave WAL_DRAG set and every later refresh would return early, freezing the Wallet on old figures.
+function walDragCheck() { if (WAL_DRAG && !WAL_DRAG.isConnected) WAL_DRAG = null; }
 
 // The saved token order, as the phone's TokenOrder.decode: Minima is pinned first, then the saved ids that
 // are still held (each once), then anything new at the end, so a token just received never goes missing.
@@ -1608,11 +1614,16 @@ async function showCoins(b) {
   if (!validTok(tid)) { status("Invalid token ID. Refresh the balance before sending.", "bad"); return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
   if (!running) { status("Node not started. No coin data yet.", "warn"); return; }
   // Two reads: every relevant coin, then the sendable ones. The node's coin JSON carries no "sendable" flag,
-  // so the LOCKED chips come from the difference. If the second read fails there are no chips, not no list.
+  // so the LOCKED chips come from the difference. If the second read fails nothing is claimed either way:
+  // no chips, no "sendable" in a coin's detail, and the footer says the check could not be made.
+  // The balance is read before and after, for the footer: confirmed plus unconfirmed is what these coins add up to.
+  const balTotal = async () => { try { const row = (await cmd("balance")).find(x => (x.tokenid || MINIMA) === tid); return row ? decAdd(row.confirmed || "0", row.unconfirmed || "0") : "0"; } catch (e) { return null; } };
   let all, sendableIds = null;
+  const before = await balTotal();
   try { all = await cmd(`coins relevant:true tokenid:${tid} simplestate:false`) || []; }
   catch (e) { if (d.root.isConnected) status("Coins query failed: " + (e.message || String(e)), "bad"); return; }   // a failed read is not an empty wallet
   try { sendableIds = new Set((await cmd(`coins relevant:true sendable:true tokenid:${tid} simplestate:false`) || []).map(c => c.coinid)); } catch (e) {}
+  const after = await balTotal();
   // Pool covenant addresses this install knows about, so a reserve coin can be named as such.
   const poolAddrs = new Set();
   try {
@@ -1624,7 +1635,7 @@ async function showCoins(b) {
   if (!d.root.isConnected) return;                                   // closed while the node was answering
   if (!all.length) { status("No coins for this token."); return; }
   const amountOf = (c) => String(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
-  const isSendable = (c) => !sendableIds || sendableIds.has(c.coinid);   // unknown counts as sendable: no chip
+  const isSendable = (c) => (sendableIds ? sendableIds.has(c.coinid) : null);   // null: not known, and never shown as "sendable"
   const tagOf = (c) => {
     const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
     if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="coin-chip">POOL</span>`;
@@ -1633,7 +1644,7 @@ async function showCoins(b) {
   };
   const list = el("coinsList");
   list.innerHTML = all.map((c, i) => `<div class="coin-row" data-i="${i}" tabindex="0" role="button">
-      <div class="coin-row__top"><span class="coin-amt">${esc(TOK.tidyAmount(amountOf(c)))}</span>${isSendable(c) ? "" : `<span class="coin-chip coin-chip--locked">LOCKED</span>`}${tagOf(c)}</div>
+      <div class="coin-row__top"><span class="coin-amt">${esc(TOK.tidyAmount(amountOf(c)))}</span>${isSendable(c) === false ? `<span class="coin-chip coin-chip--locked">LOCKED</span>` : ""}${tagOf(c)}</div>
       <div class="coin-row__cid">${esc(String(c.coinid || ""))}</div>
     </div>`).join("");
   list.querySelectorAll(".coin-row").forEach(r => {
@@ -1641,30 +1652,39 @@ async function showCoins(b) {
     r.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); r.click(); } };
   });
   el("coinsStatus").hidden = true; list.hidden = false;
-  // The footer cross-checks the coins against the balance the Wallet tab is showing.
   let sum = "0"; for (const c of all) { try { sum = decAdd(sum, amountOf(c)); } catch (e) {} }
-  const lockedCount = all.filter(c => !isSendable(c)).length, foot = el("coinsFoot");
-  const differs = absCmp(sum, confirmed) !== 0;
-  foot.textContent = coinCount(all.length) + (sendableIds ? `  ·  Locked: ${lockedCount}` : "") + `  ·  sum ${TOK.tidyAmount(sum)}`
-    + (differs ? `\n⚠ sum ≠ confirmed (${TOK.tidyAmount(confirmed)})` : "");
-  foot.classList.toggle("coins-foot--warn", differs);
+  const foot = el("coinsFoot"), said = coinsFootText(all.length, sendableIds ? all.filter(c => !sendableIds.has(c.coinid)).length : null, sum, before, after);
+  foot.textContent = said.text;
+  foot.classList.toggle("coins-foot--warn", said.warn);
   foot.hidden = false;
   // Consolidate merges SPENDABLE coins only, so it is offered when there are at least two of them.
   if (sendableIds && all.filter(c => sendableIds.has(c.coinid)).length >= 2) { el("coinsConsolidate").hidden = false; el("coinsTools").hidden = false; }
 }
 
+// The coins dialog's footer. The coins listed are every relevant coin, the ones under three confirmations
+// included, so their sum is compared with confirmed plus unconfirmed from a `balance` read now, not with the
+// confirmed figure the Wallet tab had when the dialog opened (that showed a false warning after every receive
+// and Split). The warning needs two balance reads, one each side of the coins read, that agree with each other:
+// a failed read, or a block landing in between, shows no warning.
+function coinsFootText(count, locked, sum, before, after) {
+  const warn = before != null && after != null && absCmp(before, after) === 0 && absCmp(sum, after) !== 0;
+  return { warn, text: coinCount(count) + "  ·  " + (locked == null ? "locked coins could not be checked" : "Locked: " + locked) + "  ·  sum " + TOK.tidyAmount(sum)
+    + (warn ? `\n⚠ These coins add up to ${TOK.tidyAmount(sum)}. The balance, confirmed and unconfirmed, is ${TOK.tidyAmount(after)}.` : "") };
+}
+
 /** Everything the node knows about one coin (the phone's CoinDetailDialog). No value is shortened and each
- *  has its own Copy: an id that comes out of here must go back into `coins coinid:` byte for byte. */
+ *  has its own Copy: an id that comes out of here must go back into `coins coinid:` byte for byte.
+ *  sendable is true, false, or null when the sendable read failed: then nothing is claimed either way. */
 function showCoinDetail(c, sendable) {
   const state = (c.state == null || (Array.isArray(c.state) ? !c.state.length : (typeof c.state === "object" ? !Object.keys(c.state).length : c.state === "")))
     ? "(none)" : (typeof c.state === "string" ? c.state : JSON.stringify(c.state, null, 2));
   const rows = [["Coin ID", c.coinid], ["Amount", c.amount], ["Token amount", c.tokenamount], ["Token ID", c.tokenid], ["Address", c.address],
-    ["Mini address", c.miniaddress], ["Sendable", sendable ? "yes" : "no, locked in a contract"], ["Created", c.created], ["Age", c.age],
+    ["Mini address", c.miniaddress], ["Sendable", sendable == null ? null : sendable ? "yes" : "no, locked in a contract"], ["Created", c.created], ["Age", c.age],
     ["MMR entry", c.mmrentry], ["Spent", c.spent], ["Store state", c.storestate], ["State", state]]
     .filter(([, v]) => v != null && String(v) !== "" && String(v) !== "null").map(([k, v]) => [k, String(v)]);
   const raw = JSON.stringify(c, null, 2);
-  const d = openDlg("coinDlg", sendable ? "Coin, sendable" : "Coin, locked",
-    rows.map(([k, v], i) => `<div class="cd-row"><div class="eyebrow">${esc(k)}</div>
+  const d = openDlg("coinDlg", sendable == null ? "Coin" : sendable ? "Coin, sendable" : "Coin, locked",
+    (sendable == null ? `<div class="coins-status coins-status--warn">Whether this coin is sendable could not be checked.</div>` : "") + rows.map(([k, v], i) => `<div class="cd-row"><div class="eyebrow">${esc(k)}</div>
         <div class="cd-row__line"><div class="cd-row__v">${esc(v)}</div><button class="dlg__btn dlg__btn--sm" data-i="${i}" aria-label="Copy ${esc(k)}">COPY</button></div></div>`).join("")
       + `<div class="eyebrow cd-raw-h">Raw JSON</div><pre class="cd-raw">${esc(raw)}</pre>`,
     `<button class="dlg__btn" id="coinCopyJson">Copy JSON</button>`);

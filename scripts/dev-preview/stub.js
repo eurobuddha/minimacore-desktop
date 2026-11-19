@@ -4,7 +4,7 @@
  * talks to a node. Not shipped (package.json "build.files" lists main/ and renderer/ only).
  *
  * The page URL drives the state:  ?view=balances|apps|node|ethwallet|mail|...  &tray=1  &menu=1  &state=stopped  &shutdown=1
- *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none  &tokens=<saved order, token ids>
+ *   Wallet: &bal=empty|fail  &expand=1  &dlg=coins[:row] | coin[:row[:coin]] | split  &coins=fail|none|nosendable  &tokens=<saved order, token ids>
  *   Send: &send=filled|review|error
  *   Any screen: &scroll=<px>
  *   Key mode: &block=1 (the node can run block keys)  &mode=block|classic  &state=refused  &pick=block|classic
@@ -32,7 +32,7 @@
   // locked amounts, an unconfirmed amount, a long token name, a zero balance, a figure past six decimals
   const balance = Q.get("bal") === "empty" ? [] : [
     { token: "Minima", tokenid: "0x00", confirmed: "1262.750000123456", unconfirmed: "0", sendable: "1250.750000123456", coins: "5", total: "1000000000" },
-    { token: tok("MxUSD", "MxUSD"), tokenid: MXUSD, confirmed: "320.5", unconfirmed: "4.25", sendable: "300.5", coins: "3", total: "1000000" },
+    { token: tok("MxUSD", "MxUSD"), tokenid: MXUSD, confirmed: "320.5", unconfirmed: "4.25", sendable: "300.5", coins: "4", total: "1000000" },
     { token: tok("The Meridian Harbour Lighthouse Preservation Society Commemorative Membership Token, Second Series", "MHLPS"), tokenid: LONG, confirmed: "20", unconfirmed: "0", sendable: "0", coins: "20", total: "5000" },
     { token: tok("Quiet Ledger", "QL"), tokenid: ZERO, confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0", total: "100" },
     { token: { name: { name: "Harbour Print 7" }, decimals: 0 }, tokenid: NFT, confirmed: "1", unconfirmed: "0", sendable: "1", coins: "1", total: "1" }
@@ -44,13 +44,14 @@
     coins: (c) => {
       if (Q.get("coins") === "fail") throw new Error("preview: the coins read failed");
       if (Q.get("coins") === "none") return [];
+      if (Q.get("coins") === "nosendable" && /sendable:true/.test(c)) throw new Error("preview: the sendable read failed");
       const tid = (/tokenid:(0x[0-9A-Fa-f]+)/.exec(c) || [])[1] || "0x00", native = tid === "0x00";
       const coin = (i, amount, locked) => Object.assign({ coinid: PK("C" + i + tid.slice(2, 6)), amount: native ? amount : "0.00000000000000000000000000000000000001", tokenid: tid,
         address: locked ? PK("9F") : PK("D1"), miniaddress: locked ? "MxG08LOCKEDCONTRACTADDRESS00F1XTURE0000000000000000000000000000" : ADDR,
         storestate: true, spent: false, mmrentry: String(40 + i), created: String(2427000 + i * 97), age: String(1089 - i * 97),
         state: locked ? [{ port: 0, type: 2, data: PK("A1") }, { port: 1, type: 1, data: "2429000" }] : [], _locked: locked }, native ? {} : { tokenamount: amount });
       const set = native ? [coin(1, "600.250000123456"), coin(2, "400.5"), coin(3, "250"), coin(4, "10", true), coin(5, "2", true)]
-        : tid === MXUSD ? [coin(1, "200.5"), coin(2, "100"), coin(3, "20", true)]
+        : tid === MXUSD ? [coin(1, "200.5"), coin(2, "100"), coin(3, "20", true), coin(4, "4.25")]
         : tid === LONG ? Array.from({ length: 20 }, (_, i) => coin(i + 1, "1", true)) : tid === NFT ? [coin(1, "1")] : [];
       return set.filter(x => !/sendable:true/.test(c) || !x._locked).map(x => { const o = Object.assign({}, x); delete o._locked; return o; });
     },

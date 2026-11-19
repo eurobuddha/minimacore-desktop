@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.18.90",
+  "version": "0.18.91",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "test:loginitem": "node --test scripts/loginitem-test.cjs",
     "test:mail": "node --test scripts/mail-test.cjs",
     "test:shell": "node --test scripts/shell-test.cjs",
-    "test:wallet": "node --test scripts/wallet-money-test.cjs scripts/history-screen-test.cjs scripts/core-screens-test.cjs scripts/keymode-test.cjs",
+    "test:wallet": "node --test scripts/wallet-money-test.cjs scripts/wallet-review-test.cjs scripts/history-screen-test.cjs scripts/core-screens-test.cjs scripts/keymode-test.cjs",
     "test:panels": "node --test scripts/panels-test.cjs",
     "test:keets": "node --test scripts/keets-test.cjs",
     "test:atomix": "bash scripts/atomix-parity-check.sh && node scripts/atomix-unit.js",

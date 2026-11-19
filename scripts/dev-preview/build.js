@@ -38,7 +38,7 @@ if (process.argv.includes("--shots")) {
     ["history-filter", "view=history&tray=0&hfilter=1&hforeign=1"], ["history-detail", "view=history&tray=0&hdetail=3"], ["history-detail-checking", "view=history&tray=0&hdetail=1&chain=checking"],
     ["history-1440x900", "view=history&tray=0", 1440, 900, 1], ["history-menu-1440x900", "view=history&tray=1&hmenu=1", 1440, 900, 1],
     ["coins", "view=balances&tray=0&dlg=coins"], ["coins-token", "view=balances&tray=0&dlg=coins:1"], ["coins-empty", "view=balances&tray=0&dlg=coins:3"],
-    ["coins-failed", "view=balances&tray=0&dlg=coins&coins=fail"], ["coins-1440x900", "view=balances&tray=0&dlg=coins", 1440, 900, 1],
+    ["coins-failed", "view=balances&tray=0&dlg=coins&coins=fail"], ["coins-unchecked", "view=balances&tray=0&dlg=coins&coins=nosendable"], ["coin-detail-unchecked", "view=balances&tray=0&dlg=coin:0:4&coins=nosendable"], ["coins-1440x900", "view=balances&tray=0&dlg=coins", 1440, 900, 1],
     ["coin-detail", "view=balances&tray=0&dlg=coin"], ["coin-detail-locked", "view=balances&tray=0&dlg=coin:0:4"], ["coin-detail-1440x900", "view=balances&tray=0&dlg=coin:0:4", 1440, 900, 1],
     ["coins-split", "view=balances&tray=0&dlg=split"],
     ["params", "view=params&tray=0"], ["params-scroll", "view=params&tray=0&scroll=430"], ["params-1440x900", "view=params&tray=0", 1440, 900, 1],

@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.91] — Wallet list and coins dialog: no frozen list, no guessed "sendable", no false sum warning
+
+Review of 0.18.79 to 0.18.81.
+
+- Dragging a token row: the list is checked again after the balance read, so a drag that starts while the node is answering keeps its row. A drag whose row is no longer on the page counts as ended, and a node stop ends it, so a lost drop can no longer leave the Wallet showing old balances for good.
+- Coins dialog: when the read of sendable coins fails, no coin is called sendable or locked. The coin's detail is titled "Coin", has no Sendable line and says "Whether this coin is sendable could not be checked."; the footer says "locked coins could not be checked". Before, every coin was shown as sendable, a contract-locked one included.
+- Coins dialog footer: the sum of the coins is compared with confirmed plus unconfirmed from a balance read made now, because the list includes coins under three confirmations. Before, it was compared with the confirmed figure from when the dialog opened and warned after every receive and Split. The warning needs a balance read each side of the coins read that agree; a failed read or a block landing in between shows none.
+- `scripts/wallet-review-test.cjs` runs these. Dev preview: `&coins=nosendable`.
+
 ## [0.18.90] — History import: a file cannot push out, duplicate or outrank what the node gave
 
 Review of 0.18.84.
