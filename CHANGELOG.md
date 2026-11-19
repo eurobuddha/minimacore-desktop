@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.123] — Dexicon ② Pools, the pool list (Phase 3d)
+
+- **Pools**: every pool of the shared registry as the phone lists it: reserves, spot price, fees accrued and the pool address, whole, one click to copy. The line above says how many pools there are and their MINIMA depth, added exactly. SCAN reads the registry again now.
+- **Individual / Combined**: Combined shows one card per token with the pools combined, total reserves, aggregate spot price and tradeable depth, from the engine's own figures.
+- A pool of another token shows that token's id whole.
+- Reads only: nothing on this screen signs or sends.
+
 ## [0.18.122] — Dexicon ② Pools, the room and Swap (Phase 3d)
 
 - **Room ② is PandaPools as the phone draws it inside Dexicon**, over the engine the desktop already runs, the same pool store (`pandapools.sqlite`) and the same calls. Its own bottom bar: Swap, Pools, My LP, Wallet, Activity. Each remembers where you were.

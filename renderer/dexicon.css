@@ -341,3 +341,12 @@ input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outlin
 .pp-rrow b[data-tone="ok"] { color: var(--dx-in); } .pp-rrow b[data-tone="bad"] { color: var(--dx-red); }
 .pp-link { display: inline-block; padding: 10px 0; border: 0; background: none; color: var(--dx-accent); font: 700 13px/18px var(--dx-sans); cursor: pointer; text-align: left; }
 .dx-btn.pp-inline { flex: 0 0 auto; margin-left: 8px; padding: 5px 12px; font-weight: 400; font-size: 12px; }
+/* Pools (PoolsView) */
+.pp-sumrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0 14px; } .pp-sumrow .pp-line { font-size: 14px; }
+.pp-scan { flex: 0 0 auto; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--dx-accent); font: 400 13px/18px var(--dx-sans); letter-spacing: .06em; cursor: pointer; }
+.pp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.pp-chips button { min-height: 44px; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--dx-dim2) 47%, transparent); border-radius: 100px; background: var(--dx-surface2); color: var(--dx-dim); font: 700 12px/16px var(--dx-sans); cursor: pointer; }
+.pp-chips button[aria-pressed="true"] { border-color: var(--dx-accent); background: var(--dx-accent-soft); color: var(--dx-accent); }
+.dx-card.pp-card { padding: 14px; border-color: color-mix(in srgb, var(--dx-dim2) 35%, transparent); }
+.pp-ct { display: block; padding-bottom: 2px; font: 700 15px/21px var(--dx-sans); }
+.pp-kv--mono { padding: 2px 0; } .pp-kv--mono > :last-child { font-family: var(--dx-mono); font-size: 12px; } .pp-kv[data-copy] { cursor: copy; }

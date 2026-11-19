@@ -64,6 +64,25 @@
       + "\n\nThis posts a real on-chain transaction for exactly these amounts. There is no slippage setting: if a pool moves before it confirms, the swap is rejected and you keep your funds." };
   }
 
+  // ---- Pools (PoolsView.java) ----
+  /** "3 pools · 866751.25 MINIMA aggregate depth": the MINIMA reserves added exactly (VirtualCurve.totalMinima). */
+  function poolsSummary(pools) {
+    if (!pools || !pools.length) return "no active pools";
+    return plural(pools.length, "pool") + " · " + C.str(pools.reduce((t, p) => C.add(t, C.dec(p.reserveM) || C.zero), C.zero)) + " MINIMA aggregate depth";
+  }
+  /** One pool's card: its rows as [label, value, copy value]. The pool address is whole. */
+  function poolCard(p) {
+    const name = tokLabel(p.tok, p.tokName), rows = [["reserves", whole(p.reserveM) + " MINIMA  ·  " + whole(p.reserveT) + " " + name], ["spot price", cut(p.spot, 8) + " " + name + " / MINIMA"], ["fees accrued (K/KMIN−1)", cut(p.feeGrowthPct, 8) + " %"]];
+    if (!isMxusd(p.tok)) rows.push(["token", String(p.tok), p.tok]);
+    rows.push(["pool", p.address + "  (click to copy)", p.address]);
+    return { title: "MINIMA / " + name, rows };
+  }
+  /** One collective card per token (PoolsView.combinedCard), from the engine's own aggregates (ppAggregate). */
+  function combinedCard(a) {
+    const name = tokLabel(a.tok, a.name);
+    return { title: "MINIMA / " + name + "  ·  combined", rows: [["pools combined", String(a.count)], ["total reserves", whole(a.totalMinima) + " MINIMA  ·  " + whole(a.totalToken) + " " + name], ["aggregate spot price", cut(a.price, 8) + " " + name + " / MINIMA"], ["tradeable depth", whole(a.depth) + " MINIMA"]] };
+  }
+
   /** An error as the bridge gives it, without the bridge's own wrapping. */
   const bare = (e) => String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
   /**
@@ -105,14 +124,14 @@
     }
   };
 
-  const core = { MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, bare, failText };
+  const core = { MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0 };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
@@ -129,6 +148,7 @@
     if (!up()) return;
     const want = { pools: () => api().ppPools(), acts: () => api().ppActivity() };
     if (tab === "swap") { want.bal = () => D.tryCmd("balance"); want.market = () => api().ppMarket(); }
+    if (tab === "pools" && S.combined) want.agg = () => api().ppAggregate();
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
     keys.forEach((k, i) => { if (got[i].status === "fulfilled" && got[i].value != null) S[k] = got[i].value; });
     if (tab === "swap" && pair()) S.info = await api().ppPairInfo(pair().tok).catch(() => S.info);
@@ -204,8 +224,23 @@
     $("ppRecent").innerHTML = recent.length ? `<div class="dx-label">RECENT ACTIVITY</div>${recent.map(recentRow).join("")}<button class="pp-link" data-ppgo="activity">See all  →  Activity</button>` : "";
   }
 
+  // ---- Pools (PoolsView.java): every pool of the shared registry, one by one or combined per token ----
+  const noop = () => {};
+  const poolsSkeleton = () => `<div id="ppTop"></div><div class="pp-sumrow"><span class="pp-line" id="ppSum"></span><button class="pp-scan" data-ppscan="1">↻  SCAN</button></div>
+      <div class="pp-chips" role="group" aria-label="View"><button data-ppmode="indiv">INDIVIDUAL</button><button data-ppmode="combined">COMBINED</button></div><div id="ppList"></div>`;
+  const cardHtml = (c) => `<div class="dx-card pp-card"><b class="pp-ct">${esc(c.title)}</b>${c.rows.map((r) => `<div class="pp-kv pp-kv--mono"${r[2] ? ` data-copy="${esc(r[2])}" title="Click to copy"` : ""}><span>${esc(r[0])}</span><span>${esc(r[1])}</span></div>`).join("")}</div>`;
+  function paintPools() {
+    $("ppTop").innerHTML = banners();
+    $("ppSum").textContent = !up() ? "" : S.scanning ? "Scanning the pool registry…" : S.pools ? poolsSummary(S.pools) : "Scanning the pool registry…";
+    body().querySelectorAll("[data-ppmode]").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.ppmode === "combined") === S.combined)));
+    const list = S.combined ? (S.agg || []).map(combinedCard) : (S.pools || []).map(poolCard);
+    $("ppList").innerHTML = !up() || !S.pools || (S.combined && !S.agg) ? "" : list.length ? list.map(cardHtml).join("")
+      : `<div class="pp-line">${S.combined ? "No funded pools to combine yet." : "No live pools found in the registry yet. Create one in My LP to seed liquidity."}</div>`;
+  }
+  async function scan() { if (S.scanning || !up()) return; S.scanning = true; paint(); await api().ppScan().catch(() => null); S.scanning = false; load(S.tab).then(paint, paint); }
+
   // ---- the room ----
-  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote } };
+  const SCREENS = { swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
   function render(tab, host) {
     if (!D) return;
     const scr = SCREENS[tab];
@@ -223,6 +258,8 @@
     const ds = b.dataset;
     if (ds.ppgo) return D.go(ds.ppgo);
     if (ds.ppstart) return D.start();
+    if (ds.ppmode) { S.combined = ds.ppmode === "combined"; paint(); return load(S.tab).then(paint, paint); }   // the cached pools are drawn at once; a stale answer is simply painted over
+    if (ds.ppscan) return scan();
   }
 
   return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick }, core);

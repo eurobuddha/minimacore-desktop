@@ -88,6 +88,8 @@ if (process.argv.includes("--shots")) {
     ["pp-swap-done", "view=pandapools&ppf=250&ppdo=%23ppGo%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D"], ["pp-swap-failed", "view=pandapools&pps=swapfail&ppf=250&ppdo=%23ppGo%7C.dx-dlg%20%5Bdata-x%3D%221%22%5D"],
     ["pp-swap-toobig", "view=pandapools&ppf=900000"], ["pp-swap-empty", "view=pandapools&pps=empty"], ["pp-swap-notready", "view=pandapools&pps=notready"], ["pp-swap-stopped", "view=pandapools&state=stopped"],
     ["pp-swap-scroll", "view=pandapools&ppf=250&scroll=400"], ["pp-swap-narrow", "view=pandapools&ppf=250", 560, 915, 2],
+    ["pp-pools-combined", "view=pandapools&pptab=pools&ppdo=%5Bdata-ppmode%3Dcombined%5D"], ["pp-pools-combined-dxlight", "view=pandapools&dx=light&pptab=pools&ppdo=%5Bdata-ppmode%3Dcombined%5D"], ["pp-pools-empty", "view=pandapools&pptab=pools&pps=empty"],
+    ["pp-pools-notready", "view=pandapools&pptab=pools&pps=notready"], ["pp-pools-stopped", "view=pandapools&pptab=pools&state=stopped"], ["pp-pools-narrow", "view=pandapools&pptab=pools", 560, 915, 2],
     ["dex-trade", "view=dexicon"], ["dex-trade-dxlight", "view=dexicon&dx=light"],
     ["dex-trade-1440x900", "view=dexicon", 1440, 900, 1], ["dex-trade-dxlight-1440x900", "view=dexicon&dx=light", 1440, 900, 1],
     ["dex-trade-take", "view=dexicon&dxf=buy:0.0034:25000"], ["dex-trade-take-dxlight", "view=dexicon&dx=light&dxf=buy:0.0034:25000"], ["dex-trade-rest", "view=dexicon&dxf=sell:0.0036:500"], ["dex-trade-own", "view=dexicon&dxf=sell:0.0029:100"],
