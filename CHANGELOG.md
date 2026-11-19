@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.71] — Apps tab: Hide
+
+- The Apps tab is the phone's Internal list: one row per integrated app with its icon, its state ("Always on", "In app drawer", "Hidden from drawer") and a Hide switch. Hiding an app takes its row out of the tray until it is switched back; the app keeps running, and a hidden app's unread count no longer lights the dot on the tray button. The choice is saved.
+- Minima Core cannot be hidden (its switch is locked, as on the phone). The phone's second switch, Freeze, arrives with the engines in a later phase and is not drawn. There is no External list.
+
 ## [0.18.70] — the app tray can be reordered
 
 - Drag a tray row to a new place, or focus it and press Alt+Up / Alt+Down. Up / Down alone walk the rows. Minima Core stays first, as on the phone. The order is saved and comes back on the next launch; an app added by a later version joins at the end.

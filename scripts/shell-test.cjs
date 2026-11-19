@@ -74,3 +74,11 @@ test("tray order: Minima Core pinned, saved ids kept once, unknown ids dropped, 
   assert.deepEqual(trayOrder("vestr,core,vestr,casino,mail", ids), ["core", "vestr", "mail", "ethwallet", "parlons"], "core cannot be moved; duplicates and removed apps are ignored");
   assert.ok(/shellOrder/.test(app) && /dragstart/.test(app) && /altKey/.test(app), "saved, draggable, and movable by keyboard");
 });
+
+test("Apps tab: a Hide switch per app, Minima Core locked, no Freeze switch yet", () => {
+  assert.ok(/role="switch"/.test(app) && /shellHidden/.test(app), "a real switch, saved");
+  assert.ok(/core \? " disabled" : ""/.test(app), "Minima Core cannot be hidden");
+  assert.ok(/Always on/.test(app) && /In app drawer/.test(app) && /Hidden from drawer/.test(app), "the phone's three states");
+  assert.ok(!/Freeze<|>Freeze/.test(app + html), "Freeze comes with the engines: no dead switch");
+  assert.ok(!/External/.test(html.slice(html.indexOf('id="view-apps"'), html.indexOf('id="view-faucet"'))), "no External sub-tab");
+});

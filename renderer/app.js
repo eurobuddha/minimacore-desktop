@@ -575,6 +575,7 @@ function initShell() {
     if (NARROW.matches) setTray(false);
   });
   initTrayOrder(list);
+  applyHiddenApps();
   el("trayBtn").onclick = () => setTray(el("tray").hidden);
   el("trayScrim").onclick = () => setTray(false);
   setTray(!NARROW.matches && store("shellTray") === "1", true);
@@ -655,7 +656,7 @@ function paintTraySelection() {
 // Mail and miniMall count their unread on their tray rows. With the tray closed those rows are out of
 // sight, so the tray button carries a dot while either count is showing.
 function paintTrayDot() {
-  const any = ["mailBadge", "shopBadge"].some(id => { const b = el(id); return b && !b.hidden; });
+  const any = ["mailBadge", "shopBadge"].some(id => { const b = el(id); return b && !b.hidden && !b.closest(".tray__row").hidden; });
   el("trayDot").hidden = !any || !el("tray").hidden;
 }
 function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
@@ -2011,12 +2012,30 @@ function renderTerminal() {
 }
 
 // ---- Settings --------------------------------------------------------------
-// ---- Apps tab: the phone's "Internal" list, one row per tray app ----
+// ---- Apps tab: the phone's "Internal" list, one row per tray app, each with a Hide switch ----
+// Hide takes an app out of the tray until it is switched back; the app itself keeps running (the phone's
+// second switch, Freeze, comes with the engines in a later phase). Minima Core cannot be hidden.
+function hiddenApps() { return String(store("shellHidden") || "").split(",").filter(id => id && id !== "core" && TRAY_APPS.some(a => a.id === id)); }
+function applyHiddenApps() {
+  const hidden = hiddenApps();
+  document.querySelectorAll(".tray__row").forEach(r => { r.hidden = hidden.includes(r.dataset.app); });
+  paintTrayDot();
+}
 function renderApps() {
-  el("appsList").innerHTML = TRAY_APPS.map(a => `<div class="apps-row">
+  const hidden = hiddenApps();
+  el("appsList").innerHTML = TRAY_APPS.map(a => {
+    const core = a.id === "core", off = hidden.includes(a.id);
+    return `<div class="apps-row">
     ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
-    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}</div><div class="apps-row__state">${a.id === "core" ? "Always on" : "In app drawer"}</div></div>
-  </div>`).join("");
+    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}</div><div class="apps-row__state">${core ? "Always on" : off ? "Hidden from drawer" : "In app drawer"}</div></div>
+    <label class="apps-row__hide"><span>Hide</span><button class="switch" role="switch" aria-checked="${off}" aria-label="Hide ${esc(a.name)}" data-hide="${a.id}"${core ? " disabled" : ""}></button></label>
+  </div>`; }).join("");
+  el("appsList").querySelectorAll(".switch:not([disabled])").forEach(sw => sw.onclick = () => {
+    const id = sw.dataset.hide, now = hiddenApps();
+    store("shellHidden", (now.includes(id) ? now.filter(x => x !== id) : now.concat(id)).join(","));
+    applyHiddenApps(); renderApps();
+    const again = el("appsList").querySelector(`.switch[data-hide="${id}"]`); if (again) again.focus();
+  });
 }
 // ---- Minima Faucet (a tray app; the card used to sit in Settings) ----
 async function renderFaucet() {
