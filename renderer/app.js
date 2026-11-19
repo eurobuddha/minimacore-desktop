@@ -1529,8 +1529,8 @@ function relTime(ms) {
 
 // coin/txpow → normalized row (ported from the native history apps' difference→direction + split/consol rules)
 // Store the coin's REAL display amount. For a token coin the on-chain `amount` is a raw sub-grain value (e.g. a pool
-// coin's mxUSDT shows as 2.8e-37); the node's decoded real value is `tokenamount`. MINIMA (0x00) has no tokenamount —
-// its `amount` is already real. Getting this right is what lets a pool swap's mxUSDT leg be recovered (it settles into
+// coin's MxUSD shows as 2.8e-37); the node's decoded real value is `tokenamount`. MINIMA (0x00) has no tokenamount —
+// its `amount` is already real. Getting this right is what lets a pool swap's MxUSD leg be recovered (it settles into
 // the wallet as a dust-encoded token coin whose tokenamount is the true amount). Mirrors the balances read at :753.
 function coinLite(c) {
   const tid = c.tokenid || MINIMA;
@@ -1767,7 +1767,7 @@ function histDate(ms) { return ms ? new Date(ms).toISOString().slice(0, 19).repl
 const HIST_COLS = ["date", "type", "direction", "amount", "token", "counter_amount", "counter_token", "fee", "counterparty", "txpowid", "block", "inputs", "outputs", "deltas"];
 function histCells(r) {
   const deltas = Object.keys(r.difference || {}).map(t => `${TOK.shortId(t)}:${TOK.tidyAmount(r.difference[t])}`).join(" ");
-  const tc = (r.kind === "buy" || r.kind === "sell") ? tradeCounter(r) : null;   // the mxUSDT (token) leg of a swap
+  const tc = (r.kind === "buy" || r.kind === "sell") ? tradeCounter(r) : null;   // the MxUSD (token) leg of a swap
   return [histDate(r.time), histType(r), r.direction || "", TOK.tidyAmount(r.amount), r.tokenName,
     tc ? TOK.tidyAmount(tc.amt) : "", tc ? tc.name : "",
     (r.burn != null ? TOK.tidyAmount(r.burn) : ""), labelFor(r.counterparty) || r.counterparty || "", r.txpowid, r.block,
@@ -2492,7 +2492,7 @@ async function renderEthWallet() {
       <button class="btn btn--sm btn--outline ew-menu" data-ewmenu="${esc(t.address)}" title="Token options">⋯</button>
     </div>`).join("");
   host.innerHTML = `${title}
-    <div class="card ew-addr" id="ewAddrCard"><div class="card__title">Your address · tap to receive</div><div class="mono ew-addr__v">${esc(b.shortAddr)}</div></div>
+    <div class="card ew-addr" id="ewAddrCard"><div class="card__title">Your address · tap to receive</div><div class="mono ew-addr__v">${esc(b.address)}</div></div>
     <div class="card ew-asset" id="ewEthCard">${ewEthIcon()}<div class="ew-asset__main"><div class="card__title">Ethereum</div><div class="ew-val mono" style="color:var(--accent)">${esc(TOK.tidyAmount(b.eth))} ETH</div></div></div>
     ${tokenCards}
     <div class="seg ew-actions" style="flex-wrap:wrap;margin-top:12px">
@@ -2907,7 +2907,7 @@ async function renderShopStudio() {
   host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopStudioBack">← My shops</button>
     <div class="card" style="margin-top:8px"><div class="card__title">${d.shopId ? "Edit shop" : "New shop"}</div>
       <div class="field"><div class="field__label">Shop name</div><input class="field__input" id="sdName" value="${esc(d.shopName)}" placeholder="My Shop" autocomplete="off"/></div>
-      <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">mxUSDT</button></div></div>
+      <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">MxUSD</button></div></div>
       <div class="view__desc">Vendor card (auto-derived from your node — this is how buyers' orders reach you):</div>
       <div class="mono shop-card">${esc((d.vendorPublicId || "").slice(0, 18))}… | ${esc(d.vendorAddress || "")}</div>
     </div>
@@ -2977,7 +2977,7 @@ function casinoActivity(line, cls) { CasinoPanel.activity(line, cls); }
 function casinoAgeGate(onCertify) { CasinoPanel.ageGate(onCertify); }
 function resetCasinoState() { CasinoPanel.reset(); }
 
-// ============================ Vestr (token vesting — shared covenant 0x3C43…) ============================
+// ============================ Vestr (token vesting — shared covenant 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE) ============================
 // Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,
 // collectable per grace cadence. Node computes the exact collectable (main/vestr.js runscript). Merged layout.
 let vestrView = "list";          // list | create | calc

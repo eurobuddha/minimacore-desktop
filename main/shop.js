@@ -19,7 +19,7 @@ const store = require("./shop-store");
 const MINIMERCH = "0x4D494E494D45524348";   // ASCII "MINIMERCH" — the shared order channel (matches native)
 const MSG_AMOUNT = "0.000000001";
 const MINIMA_TOKEN = "0x00";
-const USDT_TOKEN = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+const MXUSD_TOKEN = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 const SHOP_KEY_ACCOUNT = "shop-identity";
 const SCAN_EVERY_MS = 10000;
 const POLL_DEPTH = 64;      // steady-state window (MINIMERCH is shared/busy — go deeper than mail's private channel)
@@ -38,7 +38,7 @@ let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
 async function nodeCmd(cmd) { return runner(cmd); }
 
-function tokenFor(currency) { return String(currency).toUpperCase() === "USDT" || String(currency).toLowerCase() === "mxusdt" ? USDT_TOKEN : MINIMA_TOKEN; }
+function tokenFor(currency) { return String(currency).toUpperCase() === "USDT" || String(currency).toLowerCase() === "mxusdt" ? MXUSD_TOKEN : MINIMA_TOKEN; }
 function randomId() { return crypto.randomBytes(16).toString("hex"); }
 function looksLikeMinimaAddress(a) {
   a = String(a || "").trim();
@@ -296,5 +296,5 @@ module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
   myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount,
   placeOrder, retryPayment, advanceStatus, reply,
-  _setRunner, MINIMERCH, USDT_TOKEN, tokenFor
+  _setRunner, MINIMERCH, MXUSD_TOKEN, tokenFor
 };
