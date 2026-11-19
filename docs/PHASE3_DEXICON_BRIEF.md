@@ -95,6 +95,17 @@ BEFORE removing them; the old panels go only when the audit shows nothing lost.
   flight (and a truthful "could not check" when an engine has not started), the Shutdown warning tightened the same
   way, and the reported mismatch between `main/atomix/lib/maker.js` and its donor explained.
 
+- 3f Shared coin reservation (owner, 19 Nov 2026: "yes add the shared coin reservation across the three engines").
+  Today AtomiX, PandaPools and the Dexicon engine each pick coins from the one wallet with no knowledge of each
+  other; a clash ends in a rejected transaction, a false "taken" for a fill that never mines, or a stalled swap.
+  Build ONE reservation in the desktop glue, where every node command already passes (`main/rpc.js`): a coin named
+  by one engine's transaction (`txninput coinid:`, a pinned `send`, a coin backing a live FAST order or a pool
+  operation) is unavailable to the others until that transaction is mined, deleted or abandoned; an unpinned `send`
+  is pinned to unreserved coins (the existing `main/sendpin.js` already takes an exclude list). Engines are not
+  edited. A reservation must always be released (mined, `txndelete`, timeout, engine stop, wallet reset) and must
+  survive an app restart for coins that still back something live. If a command cannot be satisfied without a
+  reserved coin, it fails before signing with a plain reason, never after.
+
 ## Rules
 
 - Do not edit files under `main/atomix/`, `main/pandapools/`, or the vendored Dexicon engine.
