@@ -378,3 +378,12 @@ input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outlin
 .pp-check { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 2px; font: 400 13px/19px var(--dx-sans); cursor: pointer; } .pp-check input { flex: 0 0 auto; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--dx-accent); }
 .pp-info { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12.5px/19px var(--dx-mono); color: var(--dx-text); } .pp-info:empty { display: none; }
 @media (max-width: 599px) { .pp-steps span { display: none; } .pp-steps li[aria-current] span { display: inline; } .pp-steps li:not([aria-current]) { flex: 0 0 auto; } }
+/* Wallet (WalletView) */
+.pp-wal .pp-fl b { font: 700 10.5px/15px var(--dx-mono); letter-spacing: .1em; }
+.pp-recv { margin-top: 10px; font: 400 12.5px/19px var(--dx-mono); color: var(--dx-accent); overflow-wrap: anywhere; user-select: text; } .pp-recv[data-copy] { cursor: copy; }
+.pp-hint { padding: 3px 0 4px; font: 400 10.5px/15px var(--dx-mono); color: var(--dx-dim); }
+.pp-link--row { display: block; width: 100%; min-height: 44px; font-size: 14px; } .pp-link:disabled { opacity: .45; cursor: default; }
+.pp-bal { display: block; width: 100%; text-align: left; border-left: 3px solid var(--dx-accent); cursor: pointer; }
+.pp-bal__n { font: 700 13.5px/20px var(--dx-mono); letter-spacing: .08em; text-transform: uppercase; overflow-wrap: anywhere; }
+.pp-bal__r { flex: 0 1 auto; min-width: 0; text-align: right; } .pp-bal__r b { display: block; font: 700 17px/24px var(--dx-mono); overflow-wrap: anywhere; } .pp-bal__r small { font: 400 10.5px/15px var(--dx-mono); color: var(--dx-dim); }
+.pp-bal__l { display: block; margin-top: 8px; font: 400 11.5px/17px var(--dx-mono); color: var(--dx-dim); overflow-wrap: anywhere; } .pp-bal .pp-ids { display: block; cursor: inherit; }

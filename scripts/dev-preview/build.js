@@ -111,6 +111,8 @@ if (process.argv.includes("--shots")) {
     ["pp-create-nousd", "view=pandapools&pptab=mylp&bal=empty&ppdo=%5Bdata-pptool%3Dcreate%5D"],
     ["pp-create-migrate", "view=pandapools&pptab=mylp&ppdo=%5Bdata-ppmig%5D"],
     ["pp-create-2-1440x900", "view=pandapools&pptab=mylp&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90", 1440, 900, 1], ["pp-create-2-narrow", "view=pandapools&pptab=mylp&ppdo=%5Bdata-pptool%3Dcreate%5D%7C%5Bdata-ppcreate%3Dnext%5D&ppin=%23ppcAck1%3D1%7C%23ppcU%3D1.90", 560, 915, 2],
+    ["pp-wallet-scroll", "view=pandapools&pptab=wallet&scroll=420"], ["pp-wallet-coins", "view=pandapools&pptab=wallet&ppdo=%5Bdata-ppbal%3D%221%22%5D"], ["pp-wallet-consolidate", "view=pandapools&pptab=wallet&ppdo=%5Bdata-ppwal%3Dmxusd%5D"], ["pp-wallet-refused", "view=pandapools&pptab=wallet&pps=ownerkey&ppdo=%5Bdata-ppwal%3Dmxusd%5D%7C%23cfOk"],
+    ["pp-wallet-check", "view=pandapools&pptab=wallet&ppdo=%5Bdata-ppwal%3Dcheck%5D"], ["pp-wallet-empty", "view=pandapools&pptab=wallet&bal=empty"], ["pp-wallet-stopped", "view=pandapools&pptab=wallet&state=stopped"], ["pp-wallet-narrow", "view=pandapools&pptab=wallet", 560, 915, 2],
     ["dex-trade", "view=dexicon"], ["dex-trade-dxlight", "view=dexicon&dx=light"],
     ["dex-trade-1440x900", "view=dexicon", 1440, 900, 1], ["dex-trade-dxlight-1440x900", "view=dexicon&dx=light", 1440, 900, 1],
     ["dex-trade-take", "view=dexicon&dxf=buy:0.0034:25000"], ["dex-trade-take-dxlight", "view=dexicon&dx=light&dxf=buy:0.0034:25000"], ["dex-trade-rest", "view=dexicon&dxf=sell:0.0036:500"], ["dex-trade-own", "view=dexicon&dxf=sell:0.0029:100"],

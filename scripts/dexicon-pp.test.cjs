@@ -233,6 +233,25 @@ test("My LP: every outcome says what happened, whether funds moved and what to d
   assert.match(pp, /ppMyPools\(\)\.then\(\(m\) => \{ S\.mine = m \|\| \[\]; S\.mineErr = ""; \}, \(e\) => \{ S\.mineErr = bare\(e\); \}\)/, "saved pools that cannot be read are said, never shown as none");
 });
 
+// ---- Wallet ----
+test("Wallet: balances whole, locked = confirmed minus sendable (never negative), and Consolidate is the wallet's own with the pool owner-key check", async () => {
+  const card = PP.walletCard({ confirmed: "1262.750000123456", sendable: "1250.750000123456", unconfirmed: "0", coins: "5" }, "MINIMA", "0s ago");
+  assert.equal(card.amount, "1250.750000123456", "not shortened"); assert.equal(card.coins, "5 COINS");
+  assert.equal(card.line, "confirmed 1262.750000123456  ·  locked ≈ 12  ·  unconfirmed 0  ·  5 coins  ·  updated 0s ago  ·  click for coins");
+  assert.match(PP.walletCard({ confirmed: "1", sendable: "2", unconfirmed: "0", coins: 1 }, "X", "now").line, /locked ≈ 0  ·.*1 coin  ·/);
+  assert.match(PP.nodeCheck(true, "2428089", { ready: true }), /^The node answers: block 2428089\. PandaPools is running/); assert.match(PP.nodeCheck(true, 0, null), /did not answer/); assert.match(PP.nodeCheck(false, 0, null), /not running/);
+  const pp = src("dexicon-pp.js"), app = src("app.js");
+  assert.match(pp, /return act\(async \(\) => \{ await D\.consolidateToken\(what === "minima" \? MINIMA : MXUSD, what === "minima" \? "MINIMA" : "MxUSD"\); \}\);/, "behind Dexicon's one gate");
+  assert.match(pp, /return row \? D\.showCoins\(row\) : null;/, "a balance opens the wallet's own coins dialog (Split, Consolidate, Send)");
+  // the wallet's Consolidate, lifted from app.js and run: the question, then the owner-key check, then the node's command; a refusal sends nothing
+  const body = /async function consolidateToken\(tid, name\) \{[\s\S]*?\n\}/.exec(app)[0];
+  for (const [confirm, why, want] of [[true, null, ["confirm", "check", "cmd consolidate tokenid:" + MXUSD]], [true, "Nothing consolidated: your wallet holds a pool owner key that cannot sign.", ["confirm", "check", "confirm"]], [false, null, ["confirm"]]]) {
+    const log = [], ctx = { validTok: () => true, toast() {}, showConfirm: async () => { log.push("confirm"); return confirm; }, api: { ppConsolidationCheck: async () => { log.push("check"); return why; } }, cmd: async (c) => { log.push("cmd " + c); } };
+    const fn = new Function(...Object.keys(ctx), body + "; return consolidateToken;")(...Object.values(ctx));
+    assert.equal(await fn(MXUSD, "MxUSD"), want.length === 3 && want[2].startsWith("cmd")); assert.deepEqual(log, want);
+  }
+});
+
 // ---- create a pool (four steps) and migrate ----
 const newCreate = async (answers, confirm, fn) => { const r = recorder(Object.assign({ ppWhy: null, ppMarketToken: { usdt: MXUSD } }, answers)), u = ui(confirm); const o = await PP.Act.createOpen(r.api, async (c) => (c === "balance" ? BAL : null)); const res = o.none ? null : await fn(r.api, u, o); return { calls: r.money(), said: u.said, o, res }; };
 for (const c of [{ name: "1.90 MxUSD at the market price", u: "1.90" }, { name: "more MxUSD than the wallet holds", u: "301" }, { name: "more than the MINIMA covers", u: "20" , bal: "100" }, { name: "nothing typed", u: "" }, { name: "letters", u: "1.9o" }]) for (const confirm of [true, false]) {

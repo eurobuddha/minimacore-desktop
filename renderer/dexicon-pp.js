@@ -110,6 +110,18 @@
   const recoveryResult = (r) => "Verified reserves for " + r.restored + " of " + r.total + " pools.\n" + (r.details || []).join("\n\n") + "\n" + (r.warn || "");
   const CLOSE_TO_OWNER = "to the pool's owner address on this node. PandaPools then moves them into your wallet by itself; if they have not arrived after a few blocks, use Collect withdrawn funds. Do that before you restore your seed on another node.";
 
+  // ---- Wallet (WalletView.java): what can be pooled ----
+  /** One balance as the phone's card: the sendable amount (whole), the coin count, and the line beneath. */
+  function walletCard(b, name, agoText) {
+    const conf = C.dec(b.confirmed), send = C.dec(b.sendable), n = Number(b.coins) || 0;
+    return { name, amount: whole(b.sendable), coins: (n + (n === 1 ? " coin" : " coins")).toUpperCase(),
+      line: "confirmed " + whole(b.confirmed) + "  ·  locked ≈ " + (conf && send ? C.str(C.sub(conf, send)) : "?") + "  ·  unconfirmed " + whole(b.unconfirmed) + "  ·  " + plural(n, "coin") + "  ·  updated " + agoText + "  ·  click for coins" };
+  }
+  /** What the node check found, in one sentence. */
+  const nodeCheck = (running, block, st) => (!running ? "The node is not running, so nothing here can be read or sent. Start the node."
+    : !(Number(block) > 0) ? "The node did not answer just now. Nothing was changed. Try again in a moment."
+    : "The node answers: block " + block + ". " + (st && st.ready ? "PandaPools is running and reading the pool registry." : "PandaPools has not finished starting yet."));
+
   // ---- create a pool, in PandaPools' four steps (MyLpView.openCreate → createFormPriced | createFormManual → confirmCreate → forceBackupAfterCreate) ----
   const STEPS = ["Before you start", "Amounts", "Review", "Back up"];
   /** Token decimals, read defensively (the old panel's ppSafeDec): a wrong value is refused by the engine at create. */
@@ -336,14 +348,14 @@
     }
   };
 
-  const core = { STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let D = null;   // deps from app.js: api, tryCmd, running(), dialog, money, go(tab), start(), where()
-  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null };
+  const S = { tab: "", at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, qseq: 0, combined: false, agg: null, mine: null, mineErr: "", retired: [], collect: [], backupDue: false, create: null, addr: "", balAt: 0 };
   const api = () => D.api;
   const body = () => $("dxPpBody");
   const visible = (tab) => { const b = body(), w = D.where(); return !!b && w.shown && w.room === "pools" && b.dataset.tab === (tab || S.tab); };
@@ -360,6 +372,7 @@
     if (!up()) return;
     const want = { pools: () => api().ppPools(), acts: () => api().ppActivity() };
     if (tab === "swap") { want.bal = () => D.tryCmd("balance"); want.market = () => api().ppMarket(); }
+    if (tab === "wallet") { want.bal = () => D.tryCmd("balance").then((b) => { if (b) S.balAt = Date.now(); return b; }); if (!S.addr) want.addr = () => D.tryCmd("getaddress").then((r) => (r && (r.miniaddress || r.address)) || ""); }
     if (tab === "pools" && S.combined) want.agg = () => api().ppAggregate();
     if (tab === "mylp") { want.retired = () => api().ppListRetired(); want.collect = () => api().ppPendingCollect(); want.backupDue = () => api().ppCompleteBackupRequired().catch(() => true); }   // unknown counts as due, as in the old panel
     const keys = Object.keys(want), got = await Promise.allSettled(keys.map((k) => want[k]()));
@@ -370,7 +383,7 @@
   /** the engine's scans say "update": passive parts only, never under someone typing (the old panel's "frozen tab" rule) */
   function onUpdate() { if (S.upd || !D) return; S.upd = setTimeout(() => { S.upd = null; if (visible()) load(S.tab).then(paint, paint); }, 400); }
   function tick() { if (D && visible() && !typing() && !C.gate.on && Date.now() - S.at > 60000) load(S.tab).then(paint, paint); }
-  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
+  function reset() { Object.assign(S, { at: 0, st: null, said: null, pools: null, sel: 0, dir: true, bal: null, info: null, market: null, acts: null, mine: null, mineErr: "", retired: [], collect: [], agg: null, create: null, addr: "", balAt: 0 }); S.qseq++; const b = body(); if (b) { b.innerHTML = ""; delete b.dataset.tab; } }
 
   /** what stands above every screen of the room: the node, the engine, the last thing said */
   function banners() {
@@ -527,6 +540,24 @@
     if (await D.dialog("Closed pools", list.map(poolIds).join("\n\n"), "Bring back")) await Act.unretire(api(), ui, list);
   }
 
+  // ---- Wallet (WalletView.java): the receive address, the tools, one card per balance ----
+  const walletSkeleton = () => `<div id="ppTop"></div><div id="ppWal"></div>`;
+  const balName = (b) => (b.tokenid === MINIMA ? "MINIMA" : tokLabel(b.tokenid, D.TOK.tokenName(b.token, b.tokenid)));
+  function paintWallet() {
+    $("ppTop").innerHTML = banners();
+    if (!D.running()) { $("ppWal").innerHTML = ""; return; }
+    const ago = S.balAt ? C.ago(Date.now() - S.balAt) : "…", list = S.bal || [];
+    $("ppWal").innerHTML = `<div class="dx-card pp-card pp-wal"><div class="pp-fl"><b>AVAILABLE TO POOL</b></div><div class="pp-note">Sendable balances below. Funds locked in your pools show as LOCKED.</div>
+        <div class="pp-recv"${S.addr ? ` data-copy="${esc(S.addr)}" title="Click to copy"` : ""}>${S.addr ? "Receive:  " + esc(S.addr) : "…"}</div><div class="pp-hint">click to copy your receive address</div>
+        <button class="pp-link pp-link--row" data-ppwal="minima"${C.gate.on ? " disabled" : ""}>Consolidate MINIMA coins</button><button class="pp-link pp-link--row" data-ppwal="mxusd"${C.gate.on ? " disabled" : ""}>Consolidate MxUSD coins</button><button class="pp-link pp-link--row" data-ppwal="check">Check node connection</button></div>`
+      + (!S.bal ? `<div class="pp-line">Loading balances…</div>` : !list.length ? `<div class="pp-line">No balances yet.</div>` : list.map((b, i) => { const c = walletCard(b, balName(b), ago); return `<button class="dx-card pp-card pp-bal" data-ppbal="${i}"><span class="dx-row"><b class="pp-bal__n">${esc(c.name)}</b><span class="pp-bal__r"><b>${esc(c.amount)}</b><small>${esc(c.coins)}</small></span></span>${b.tokenid === MINIMA || isMxusd(b.tokenid) ? "" : `<span class="pp-ids">Token: ${esc(b.tokenid)}</span>`}<span class="pp-bal__l">${esc(c.line)}</span></button>`; }).join(""));
+  }
+  async function walletAct(what) {
+    if (what === "check") { const b = await D.tryCmd("block"); return say(nodeCheck(D.running(), b && (b.block != null ? b.block : b), await api().ppStatus().catch(() => null)), "note"); }
+    // Consolidate is the wallet's own (app.js consolidateToken): its question, then PandaPools' owner-key check (ppConsolidationCheck), then the node's command
+    return act(async () => { await D.consolidateToken(what === "minima" ? MINIMA : MXUSD, what === "minima" ? "MINIMA" : "MxUSD"); });
+  }
+
   // ---- create a pool: four steps on the screen (1 before you start, 2 amounts, 3 review, 4 back up) ----
   const stepBar = (n) => `<ol class="pp-steps" aria-label="Step ${n} of 4">${STEPS.map((t, i) => `<li${i + 1 === n ? ' aria-current="step"' : ""} data-done="${i + 1 < n}"><b>${i + 1}</b><span>${t}</span></li>`).join("")}</ol>`;
   const check = (id, text, on) => `<label class="pp-check"><input type="checkbox" id="${id}"${on ? " checked" : ""}><span>${esc(text)}</span></label>`;
@@ -639,7 +670,7 @@
   }
 
   // ---- the room ----
-  const SCREENS = { mylp: { skeleton: mylpSkeleton, bind: noop, paint: paintMylp }, swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
+  const SCREENS = { wallet: { skeleton: walletSkeleton, bind: noop, paint: paintWallet }, mylp: { skeleton: mylpSkeleton, bind: noop, paint: paintMylp }, swap: { skeleton: swapSkeleton, bind: bindSwap, paint: paintSwap, after: requote }, pools: { skeleton: poolsSkeleton, bind: noop, paint: paintPools } };
   function render(tab, host) {
     if (!D) return;
     const scr = SCREENS[tab];
@@ -659,6 +690,8 @@
     if (ds.ppstart) return D.start();
     if (ds.ppmode) { S.combined = ds.ppmode === "combined"; paint(); return load(S.tab).then(paint, paint); }   // the cached pools are drawn at once; a stale answer is simply painted over
     if (ds.ppscan) return scan();
+    if (ds.ppwal) return walletAct(ds.ppwal);
+    if (ds.ppbal != null) { const row = (S.bal || [])[Number(ds.ppbal)]; return row ? D.showCoins(row) : null; }   // the wallet's own coins dialog: every coin whole, with Split, Consolidate and the token's details and Send
     if (ds.ppcalc != null) return calc(ds.ppcalc);
     if (ds.pptool === "calc") return calc("");
     if (ds.pptool === "statement") return act(() => Act.statement(api(), ui));

@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.127] — Dexicon ② Pools, Wallet (Phase 3d)
+
+- **Wallet**: the phone's "Available to pool" card with your receive address whole (one click to copy), Consolidate MINIMA coins, Consolidate MxUSD coins and Check node connection, then one card per balance: the sendable amount in full, the coin count, and confirmed, locked, unconfirmed and when it was read.
+- **Consolidate** is the wallet's own, with its question and the pool owner-key rule: it refuses, with the reason, while a pool owner key cannot safely sign. It passes the same one-at-a-time gate as every other money action.
+- **A balance opens the wallet's own coins dialog**: every coin with its id whole, Split, Consolidate, and the token's details with Send. These are the existing flows, unchanged.
+- The phone's Wallet screen has no Send or Split of its own (in Pandamonium they are the wallet's), so none was added here.
+
 ## [0.18.126] — Dexicon ② Pools, create a pool in four steps, and Migrate (Phase 3d)
 
 - **Create a pool** on My LP, in four steps shown on the screen: 1 Before you start (what a pool needs from you: the app and node running, the backup; tick to go on), 2 Amounts (the MxUSD to provide; the MINIMA is worked out from the MEXC or live-pool price, with what you have and what is missing), 3 Review ("Create this pool?"), 4 Back up (the encrypted backup, asked for right after the pool is posted).
