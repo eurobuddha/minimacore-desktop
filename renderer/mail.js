@@ -21,7 +21,7 @@
   var STATUS = null;            // main's scan/backfill status
   var VIEW = "inbox";           // inbox | outbox | sent | archive | contacts | key | settings | thread | compose
   var PEER = null, SUBJ = "", HASH = "";
-  let reading = null;
+  let threadOrigin = "inbox";
   const peerWords = new Map();
   var COMPOSE = null;           // { to, subject, body } kept across a re-render so typing is never lost
   var booted = false;
@@ -43,7 +43,7 @@
     if (/may have been submitted/i.test(m)) return "The node didn't answer in time — check before sending again.";
     return m;
   }
-  function reset() { reading = null; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
+  function reset() { threadOrigin = "inbox"; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
 
   // ---------------------------------------------------------------- identity, names, avatars
   /** A peer's key for display: the WHOLE key (RULE 1). It was 0x + 8…6; .mm-key wraps it. */
@@ -165,7 +165,7 @@
     var subject = (m.subject || "").trim();
     var nm = nameFor(peer, m);
     return '<button class="mm-row' + (unread ? " mm-unread" : "") + '" type="button" data-peer="' + D.esc(peer)
-      + '" data-subject="' + D.esc(subject) + '" data-hashref="' + D.esc(t.hashref || "") + '" data-message="' + D.esc(m.randomid || "") + '">'
+      + '" data-subject="' + D.esc(m.subject || "") + '" data-hashref="' + D.esc(t.hashref || "") + '" data-message="' + D.esc(m.randomid || "") + '">'
       + avatar(peer, nm, 44)
       + '<span class="mm-mid mm-inbox-preview">'
       + (subject ? '<span class="mm-subj">' + D.esc(subject) + '</span>' : '')
@@ -190,7 +190,7 @@
   }
   function statusRow(m, withRetry) {
     var subject = (m.subject || "").trim();
-    return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-message="' + D.esc(m.randomid) + '" data-message-thread="' + D.esc(m.hashref) + '" data-subject="' + D.esc(subject) + '">'
+    return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-message="' + D.esc(m.randomid) + '" data-message-thread="' + D.esc(m.hashref) + '" data-subject="' + D.esc(m.subject || "") + '">'
       + '<div class="mm-sto"><b>To ' + D.esc(nameFor(m.topublickey, m)) + " — " + D.esc(subject || "(no subject)") + "</b>"
       + "<span>" + D.esc(rel(m.date)) + "</span></div>"
       + '<div class="mm-ssnip">' + D.esc(previewText(m)) + "</div>"
@@ -238,11 +238,11 @@
       var add = '<button class="mm-tbtn" id="mmAddContact" type="button">Add contact</button>';
       if (!CONTACTS.length) return add + '<div class="mm-empty">No contacts yet.</div>';
       return add + '<div class="mm-list">'  + CONTACTS.map(function (c) {
-        var nm = c.username || shortKey(c.publicId);
+        var nm = c.username || c.words || shortKey(c.publicId);
         return '<button class="mm-row" type="button" data-contact="' + D.esc(c.publicId) + '" style="border-bottom:0">'
           + avatar(c.publicId, nm, 44)
           + '<span class="mm-mid"><span class="mm-nm" style="color:var(--mm-text);font-weight:700;font-size:15px">' + D.esc(nm) + "</span>"
-          + '<span class="mm-snip mm-key" style="font-size:12px">' + D.esc(shortKey(c.publicId)) + "</span></span></button>";
+          + '<span class="mm-contact-address mm-key" title="Copy address words">' + D.esc(c.words || c.publicId) + "</span></span></button>";
       }).join("") + "</div>";
     }
     if (f === "key") return identityBody();
@@ -347,7 +347,6 @@
       booted = true;
     }
     await loadLists();
-    if (VIEW === "message" && reading) return renderMessage(host);
     if (VIEW === "thread") return renderThread(host);
     if (VIEW === "compose") return renderCompose(host);
     renderFolder(host);
@@ -374,17 +373,7 @@
     host.querySelectorAll("[data-peer]").forEach(function (r) {
       r.onclick = async function (e) {
         if (e.target.closest("[data-retry]")) return;
-        if (r.dataset.message) {
-          const origin = VIEW;
-          try {
-            const item = await D.api.mailReadMessage(r.dataset.messageThread || r.dataset.hashref, r.dataset.message);
-            if (VIEW !== origin) return;
-            if (!item) { D.toast("Message unavailable.", "err"); return; }
-            reading = { ...item, origin }; VIEW = "message"; renderMessage(host);
-          } catch (error) { D.toast(errText(error), "err"); }
-          return;
-        }
-        openThread(r.dataset.peer, r.dataset.subject || "", r.dataset.hashref || "");
+        return openThread(r.dataset.peer, r.dataset.subject || "", r.dataset.messageThread || r.dataset.hashref || "", f);
       };
       if (r.dataset.hashref) r.oncontextmenu = function (e) { e.preventDefault(); rowMenu(r.dataset.hashref, f === "archive"); };
     });
@@ -398,7 +387,11 @@
       };
     });
     host.querySelectorAll("[data-contact]").forEach(function (b) {
-      b.onclick = function () { openCompose({ to: b.dataset.contact }); };
+      b.onclick = function (event) {
+        const address = event.target.closest(".mm-contact-address");
+        if (address) { D.copy(address.textContent); D.toast("Address copied.", "ok"); return; }
+        openCompose({ to: b.dataset.contact });
+      };
       b.oncontextmenu = function (e) { e.preventDefault(); contactMenu(b.dataset.contact); };
     });
     var fab = D.el("mmFab"); if (fab) fab.onclick = function () { openCompose(null); };
@@ -554,27 +547,16 @@
   }
 
   // ---------------------------------------------------------------- thread screen
-  function renderMessage(host) {
-    const { message: m, peer, words, origin } = reading;
-    const address = words || peer;
-    const name = nameFor(peer, m);
-    const sender = name === address || name === peer ? address : name + " · " + address;
-    host.innerHTML = '<div class="mailapp"><div class="mm-cbar"><button id="mmBack" class="mm-ibtn" aria-label="Back">'
-      + g.micon("back") + '</button><strong class="mm-ct">' + D.esc(m.subject || "(no subject)") + '</strong></div>'
-      + '<article class="mm-body mm-reader">' + (m.type === "image" || m.type === "payment" ? bubble(m, false, false)
-        : '<div class="mm-reader-text">' + D.esc(m.message || "") + '</div>')
-      + '<button type="button" id="mmSender" class="mm-reader-sender" title="' + D.esc(sender) + '">' + D.esc(sender) + '</button></article>'
-      + '<div class="mm-comp"><button type="button" class="mm-chip" id="mmReadReply">Reply</button></div></div>';
-    D.el("mmBack").onclick = () => { reading = null; VIEW = origin; render(); };
-    D.el("mmSender").onclick = () => D.copy(address);
-    D.el("mmReadReply").onclick = () => { reading = null; openThread(peer, m.subject || "", m.hashref); };
-  }
-
-  function openThread(peer, subject, hashref) {
-    PEER = peer; SUBJ = subject || ""; HASH = hashref || ""; VIEW = "thread"; render();
+  function openThread(peer, subject, hashref, origin) {
+    PEER = peer; SUBJ = subject || ""; HASH = hashref || ""; threadOrigin = origin || "inbox"; VIEW = "thread";
+    return render();
   }
   async function renderThread(host) {
-    var msgs = await D.api.mailThreadWith(PEER, SUBJ).catch(function () { return []; });
+    const peer = PEER, hash = HASH, subject = SUBJ;
+    var msgs = await (hash ? D.api.mailThread(hash) : D.api.mailThreadWith(peer, subject)).catch(function () { return []; });
+    if (VIEW !== "thread" || PEER !== peer || HASH !== hash || SUBJ !== subject) return;
+    const current = D.el("mmReply");
+    const draft = current && current.dataset && current.dataset.peer === peer && current.dataset.subject === subject ? current.value : "";
     var nm = nameFor(PEER, msgs.length ? msgs[msgs.length - 1] : null);
     var title = SUBJ || nm;
     const address = peerWords.get(PEER) || PEER;
@@ -591,12 +573,13 @@
       + '<button class="mm-send" type="button" id="mmSend" aria-label="Send">' + g.micon("up") + "</button></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
     var conv = D.el("mmConv"); if (conv) conv.scrollTop = conv.scrollHeight;
-    D.el("mmBack").onclick = function () { VIEW = "inbox"; PEER = null; render(); };
+    D.el("mmBack").onclick = function () { VIEW = threadOrigin; PEER = null; render(); };
     D.el("mmThreadMenu").onclick = function () { threadMenu(); };
     D.el("mmPlus").onclick = function () { plusMenu(); };
     var inp = D.el("mmReply");
     D.el("mmSend").onclick = function () { sendReply(); };
     inp.onkeydown = function (e) { if (e.key === "Enter") sendReply(); };
+    inp.dataset.peer = peer; inp.dataset.subject = subject; inp.value = draft;
     inp.focus();
     D.el("mmFile").onchange = function (e) { if (e.target.files[0]) sendImage(e.target.files[0]); };
   }
@@ -774,21 +757,28 @@
   }
   /** The payment sheet. The address is the peer's own, learned from their signed messages (never typed by us
    *  unless they've never written), and main re-validates it with `checkaddress` before any coin moves. */
-  async function sendFunds(peer) {
+  function sendFunds(peer) {
+    D.showActionSheet("Send funds", [
+      { label: "Minima", onclick: () => sendCurrency(peer, "0x00", "MINIMA") },
+      { label: "MxUSD", onclick: () => sendCurrency(peer, "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "MxUSD") }
+    ]);
+  }
+  async function sendCurrency(peer, tokenId, tokenName) {
+    const subject = VIEW === "thread" ? SUBJ : ((D.el("mmSubj") || {}).value || "");
     var addr = await D.api.mailResolvePayaddr(peer).catch(function () { return ""; });
     if (!addr) { try { await D.api.mailRequestPayaddr(peer); } catch (e) {} }
-    var amount = await D.showPrompt("Send funds", "", "0.0",
+    var amount = await D.showPrompt("Send " + tokenName, "", "0.0",
       { message: "To " + nameFor(peer, null) + (addr ? "\n" + addr : "\nNo address known yet — asking them for it now.") });
     if (amount == null) return;
     if (!addr) { D.toast("No receiving address for them yet — try again once they reply.", "err"); return; }
     if (!/^[0-9]*\.?[0-9]+$/.test(amount) || parseFloat(amount) <= 0) { D.toast("Enter a valid amount.", "err"); return; }
     var memo = await D.showPrompt("Note (optional)", "", "What's it for?");
     if (memo == null) memo = "";
-    var ok = await D.showConfirm("Send " + amount + " MINIMA?",
+    var ok = await D.showConfirm("Send " + amount + " " + tokenName + "?",
       "To " + nameFor(peer, null) + "\n" + addr + "\n\nThis sends real funds and cannot be undone.", "Send", true);
     if (!ok) return;
     try {
-      await D.api.mailPay(peer, addr, amount, "0x00", "MINIMA", memo);
+      await D.api.mailPay(peer, addr, amount, tokenId, tokenName, memo, subject);
       D.toast("Payment sent ✓", "ok");
     } catch (e) {
       // An RPC timeout is AMBIGUOUS — the coin may well have gone out. Never invite a retry that double-spends.
@@ -836,6 +826,7 @@
         await D.api.mailRenameContact(peer, String(n).trim()); render();
       } },
       { label: published ? "Stop relaying address" : "Relay signed address", onclick: () => toggleAddress(peer, !published) },
+      { label: "Copy address words", onclick: () => D.copy(CONTACTS.find(c => c.publicId === peer).words || peer) },
       { label: "Copy Mail key", onclick: function () { D.copy(peer); D.toast("Copied ✓", "ok"); } },
       { label: "Remove", danger: true, onclick: async function () {
         if (!await D.showConfirm("Remove this contact?", "Their messages stay; only the saved name goes.", "Remove", true)) return;
@@ -875,7 +866,7 @@
     pending = setTimeout(function () {
       if (!booted) return;
       // Never rebuild the compose form under someone's hands — their draft would go with it.
-      if (VIEW === "compose" || VIEW === "message") { loadLists(); return; }
+      if (VIEW === "compose") { loadLists(); return; }
       render();
     }, 350);
   }

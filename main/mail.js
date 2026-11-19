@@ -190,7 +190,7 @@ async function retrySend(hashref, randomid) {
   emitter.emit("update");
   return true;
 }
-async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
+async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo, subject = "") {
   await init();
   if (!looksLikeMinimaAddress(payaddr)) throw new Error("Invalid pay address.");   // rejects a Mail key too
   if (!/^[0-9]*\.?[0-9]+$/.test(String(amount)) || parseFloat(amount) <= 0) throw new Error("Invalid amount.");
@@ -216,14 +216,14 @@ async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo) {
   // The payment is committed here. A receipt-message failure MUST NOT surface as a payment failure —
   // otherwise the user re-pays (double spend). Post the on-chain receipt best-effort.
   const txpowid = (r.response && r.response.txpowid) || "";
-  try { return await sendMessage(toPublicId, { type: "payment", message: memoStr, amount: String(amount), tokenid, tokenname: tokenname || "", txpowid }); }
+  try { return await sendMessage(toPublicId, { type: "payment", subject, message: memoStr, amount: String(amount), tokenid, tokenname: tokenname || "", txpowid }); }
   catch (e) {
     // Receipt-to-peer failed, but the PAYMENT already went through above. Persist a local ledger entry regardless,
     // so the spend is visible in the thread/history after a restart — otherwise a receipt failure hides real funds leaving.
     try {
       const block = await currentBlock();   // the payment IS on-chain — record the block so it can confirm normally
-      store.addMessage({ hashref: threadKey(identity.publicId, toPublicId, ""), fromname: store.metaGet("myname") || "",
-        frompublickey: identity.publicId, topublickey: toPublicId, subject: "", message: memoStr, randomid: randomId(),
+      store.addMessage({ hashref: threadKey(identity.publicId, toPublicId, subject), fromname: store.metaGet("myname") || "",
+        frompublickey: identity.publicId, topublickey: toPublicId, subject, message: memoStr, randomid: randomId(),
         incoming: false, read: true, date: Date.now(), status: "sent", sentblock: block, type: "payment",
         amount: String(amount), tokenid, tokenname: tokenname || "", txpowid, image: "", payaddr: mypayaddr });
     } catch (e2) { /* best effort */ }
@@ -593,9 +593,14 @@ function sent() { return outgoing(st => st === "sent" || st === "confirmed"); }
 function otherOf(m) { if (!m || !identity) return ""; return m.incoming ? m.frompublickey : m.topublickey; }
 // NOTE: emit ONLY when marking-read actually changed something. The renderer's live-update handler calls these
 // to refresh an open thread; emitting unconditionally would re-trigger that handler forever (a self-feeding loop).
-function thread(hashref) { if (store.markThreadRead(hashref)) emitter.emit("update"); return store.thread(hashref); }
+function thread(hashref) {
+  const rows = store.thread(hashref);
+  if (!rows.length || !rows.every(m => mineThread({ last: m }))) return [];
+  if (store.markThreadRead(hashref)) emitter.emit("update");
+  return rows;
+}
 function threadWith(peer, subject) { if (!identity) return []; const h = threadKey(identity.publicId, peer, subject || ""); if (store.markThreadRead(h)) emitter.emit("update"); return store.thread(h); }
-function contacts() { const jobs = publications(); return store.contacts().map(c => ({ ...c, published: !!jobs[c.publicId] })); }
+function contacts() { const jobs = publications(); return store.contacts().map(c => ({ ...c, words: address.display(c.publicId), published: !!jobs[c.publicId] })); }
 async function addContact(share, name) {
   const parts = String(share || "").split("|");
   const id = await resolveRecipient(share);

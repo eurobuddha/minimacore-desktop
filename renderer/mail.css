@@ -226,3 +226,5 @@
 #view-mail #mmToWords { gap: 3px; }
 #view-mail #mmCompactTo { flex: 1; min-width: 0; text-align: left; font: inherit; font-size: 13px; color: var(--mm-text); background: transparent; border: 0; padding: 4px 0; overflow-wrap: anywhere; cursor: pointer; }
 #view-mail #mmCompactTo[hidden], #view-mail .mm-chips[hidden] { display: none; }
+
+.mailapp .mm-contact-address { display: block; white-space: normal; overflow-wrap: anywhere; color: var(--mm-dim); text-align: left; }

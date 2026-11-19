@@ -140,7 +140,7 @@ test("the panel's palette cannot leak into the rest of the app", () => {
  *  name/status logic — which is where the two reported defects lived. */
 function fakeDom() {
   const nodes = {};
-  const mk = () => ({ innerHTML: "", textContent: "", value: "", hidden: false, disabled: false, style: {},
+  const mk = () => ({ dataset: {}, innerHTML: "", textContent: "", value: "", hidden: false, disabled: false, style: {},
     querySelectorAll: () => [], querySelector: () => null, focus() {}, scrollTop: 0, scrollHeight: 0, onclick: null, onkeydown: null, oninput: null, onchange: null });
   return {
     get: (id) => (nodes[id] || (nodes[id] = mk())),
@@ -189,31 +189,26 @@ test("an inbox row names the sender from the message when they are not a saved c
   assert.ok(html.includes("mm-unread") && html.includes("mm-udot"), "unread is bold + the orange dot");
 });
 
-test("opening an inbox preview reads the selected body and shows its six-word address", async () => {
+test("tapping an inbox reply opens the stored thread at the newest message with the reply field ready", async () => {
   const P = panel(), dom = fakeDom(), host = dom.get("mailBody");
-  const codec = require("../main/mailaddress"), words = codec.phrase(PEER);
-  assert.equal(codec.display(PEER.slice(2).toUpperCase()), words);
-  const msg = { frompublickey: PEER, topublickey: ME, incoming: true, subject: "", message: "yo", type: "text", randomid: "selected" };
-  const row = { dataset: { peer: PEER, hashref: "thread", message: msg.randomid } };
+  const words = require("../main/mailaddress").phrase(PEER);
+  const incoming = { frompublickey: PEER, topublickey: ME, incoming: true, subject: "", message: "earlier", type: "text", date: 1 };
+  const reply = { ...incoming, frompublickey: ME, topublickey: PEER, incoming: false, message: "yo", date: 2 };
+  const row = { dataset: { peer: PEER, hashref: "stored-thread" } };
   host.querySelectorAll = selector => selector === "[data-peer]" ? [row] : [];
+  let focused = false;
+  dom.get("mmReply").focus = () => { focused = true; };
+  dom.get("mmConv").scrollHeight = 480;
   P.MailPanel.init(deps(dom, baseApi({
-    mailThreads: async () => [{ hashref: "thread", unread: 1, last: msg, other: PEER, words }],
-    mailReadMessage: async (hash, id) => {
-      assert.equal(hash, "thread"); assert.equal(id, "selected");
-      return { message: msg, peer: PEER, words };
-    }
+    mailThreads: async () => [{ hashref: "stored-thread", last: reply, other: PEER, words }],
+    mailThread: async hash => { assert.equal(hash, "stored-thread"); return [incoming, reply]; }
   })));
   await P.MailPanel.render();
-  assert.ok(host.innerHTML.includes('data-message="selected"'));
-  assert.ok(host.innerHTML.indexOf(">yo<") < host.innerHTML.indexOf(">" + words + "<"));
   await row.onclick({ target: { closest: () => null } });
-  assert.ok(host.innerHTML.includes('class="mm-reader-text">yo<'));
-  assert.ok(host.innerHTML.includes('>' + words + '</button>'));
-  assert.ok(host.innerHTML.includes('id="mmReadReply"'));
-  assert.ok(!host.innerHTML.includes(PEER));
-  await dom.get("mmBack").onclick();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.ok(host.innerHTML.includes('data-message="selected"'));
+  assert.match(host.innerHTML, /earlier[\s\S]*yo/);
+  assert.ok(host.innerHTML.includes(words));
+  assert.equal(dom.get("mmConv").scrollTop, 480);
+  assert.ok(focused);
 });
 
 test("a saved contact name beats the sender's own", async () => {

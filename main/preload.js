@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld("mcd", {
   mailSent: () => ipcRenderer.invoke("mcd:mailSent"),
   mailStatus: () => ipcRenderer.invoke("mcd:mailStatus"),
   mailBackfill: () => ipcRenderer.invoke("mcd:mailBackfill"),
-  mailPay: (to, payaddr, amount, tokenid, tokenname, memo) => ipcRenderer.invoke("mcd:mailPay", to, payaddr, amount, tokenid, tokenname, memo),
+  mailPay: (to, payaddr, amount, tokenid, tokenname, memo, subject) => ipcRenderer.invoke("mcd:mailPay", to, payaddr, amount, tokenid, tokenname, memo, subject),
   mailRequestPayaddr: (peer) => ipcRenderer.invoke("mcd:mailRequestPayaddr", peer),
   mailResolvePayaddr: (peer) => ipcRenderer.invoke("mcd:mailResolvePayaddr", peer),
   chatInit: () => ipcRenderer.invoke("mcd:chatInit"),

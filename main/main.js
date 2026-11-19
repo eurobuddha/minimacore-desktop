@@ -277,7 +277,7 @@ ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
   if (r.canceled || !r.filePaths.length) return null;
   return chat.sendImageFile(to, r.filePaths[0]);
 });
-ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo));
+ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo, subject) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo, subject));
 ipcMain.handle("mcd:mailRequestPayaddr", (_e, peer) => mail.requestPayaddr(peer));
 ipcMain.handle("mcd:mailResolvePayaddr", (_e, peer) => mail.resolvePayaddr(peer));
 ipcMain.handle("mcd:mailReceivingAddr", () => mail.myReceivingAddress());
