@@ -18,7 +18,7 @@ const fs = require("fs");
 const path = require("path");
 const { makeSqlShim } = require("./pandapools/sqlshim");
 
-const MAX_ROWS = 200000;     // soft cap; trims lowest-block rows if exceeded (a busy wallet is still far below this)
+const MAX_ROWS = 200000;     // cap; a node sync over it trims imported rows first, then the lowest blocks. An import is refused instead (importRows).
 
 let shim = null, db = null, readyP = null;
 
@@ -49,6 +49,9 @@ async function init() {
   db.run(`CREATE INDEX IF NOT EXISTS ix_tx_token ON tx(primary_tokenid)`);
   db.run(`CREATE INDEX IF NOT EXISTS ix_tx_dir   ON tx(direction)`);
   db.run(`CREATE INDEX IF NOT EXISTS ix_tx_cp    ON tx(counterparty)`);
+  // 0.18.90: a row that came from an import file is marked, so the node's own row for the same transaction replaces it
+  const cols = db.exec(`PRAGMA table_info(tx)`)[0].values.map(v => v[1]);
+  if (!cols.includes("imported")) db.run(`ALTER TABLE tx ADD COLUMN imported INTEGER`);
   migrateFromJson();
 }
 
@@ -77,8 +80,8 @@ function pJson(s) { if (s == null) return null; try { return JSON.parse(s); } ca
 const INSERT_SQL = `INSERT OR REPLACE INTO tx
   (txpowid, block, time, istransaction, isblock, size, burn, direction, kind,
    primary_tokenid, primary_tokenname, primary_amount, counterparty, in_count, out_count,
-   difference_json, inputs_json, outputs_json, state_json, raw_json, captured_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+   difference_json, inputs_json, outputs_json, state_json, raw_json, captured_at, imported)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
 
 function rowParams(r) {
   return [
@@ -92,7 +95,8 @@ function rowParams(r) {
     iOr(r.inCount), iOr(r.outCount),
     jOr(r.difference), jOr(r.inputs), jOr(r.outputs), jOr(r.state),
     r.raw != null ? jOr(r.raw) : null,
-    Date.now()
+    Date.now(),
+    bI(r.imported)
   ];
 }
 
@@ -113,9 +117,9 @@ function insertBatch(rows) {
 function trimIfNeeded() {
   const n = countSync();
   if (n <= MAX_ROWS) return;
-  // delete the lowest-block rows beyond the cap
+  // delete rows beyond the cap: imported ones first (a file can claim any block), then the lowest blocks
   db.run(`DELETE FROM tx WHERE txpowid IN (
-    SELECT txpowid FROM tx ORDER BY block ASC, time ASC LIMIT ?
+    SELECT txpowid FROM tx ORDER BY imported DESC, block ASC, time ASC LIMIT ?
   )`, [n - MAX_ROWS]);
 }
 
@@ -138,7 +142,8 @@ function toRow(d) {
     difference: pJson(d.difference_json) || {},
     inputs: pJson(d.inputs_json) || [],
     outputs: pJson(d.outputs_json) || [],
-    state: pJson(d.state_json) || []
+    state: pJson(d.state_json) || [],
+    imported: !!d.imported
   };
 }
 
@@ -167,6 +172,27 @@ async function merge(rows) {
   trimIfNeeded();
   shim.persist();
   return countSync();
+}
+
+/**
+ * Add rows read from an export file (0.18.90). Never replaces a stored row and never trims one: if the rows the
+ * store does not have would take it past the cap, nothing is written and the numbers are returned. One
+ * transaction, one save. Each added row is marked imported, so a later node sync replaces it with the node's own.
+ */
+async function importRows(rows) {
+  await ensureReady();
+  const seen = new Set(), has = db.prepare(`SELECT 1 FROM tx WHERE txpowid = ?`);
+  const fresh = (Array.isArray(rows) ? rows : []).filter(r => {
+    if (!r || typeof r.txpowid !== "string" || !/^0x[0-9A-F]{64}$/.test(r.txpowid) || seen.has(r.txpowid)) return false;
+    seen.add(r.txpowid);
+    has.bind([r.txpowid]); const stored = has.step(); has.reset();
+    return !stored;
+  });
+  has.free();
+  const existing = countSync();
+  if (existing + fresh.length > MAX_ROWS) return { added: 0, refused: true, existing, fresh: fresh.length, cap: MAX_ROWS };
+  if (fresh.length) { insertBatch(fresh.map(r => Object.assign({}, r, { imported: true, raw: null }))); shim.persist(); }
+  return { added: fresh.length, refused: false, existing, fresh: fresh.length, cap: MAX_ROWS };
 }
 
 /** All rows, newest chain-height first. Optional limit (default: everything — the History tab renders these). */
@@ -218,7 +244,7 @@ async function stats() {
   const stmt = db.prepare(`SELECT COUNT(*) AS c, MIN(block) AS minb, MAX(block) AS maxb,
                                   MIN(time) AS mint, MAX(time) AS maxt FROM tx`);
   stmt.step(); const o = stmt.getAsObject(); stmt.free();
-  return { count: o.c || 0, minBlock: o.minb || null, maxBlock: o.maxb || null, minTime: o.mint || null, maxTime: o.maxt || null };
+  return { cap: MAX_ROWS, count: o.c || 0, minBlock: o.minb || null, maxBlock: o.maxb || null, minTime: o.mint || null, maxTime: o.maxt || null };
 }
 
 async function clear() {
@@ -230,4 +256,4 @@ async function clear() {
 /** Synchronous whole-image save; called from app before-quit. No-op if never initialised. */
 function flush() { if (shim) shim.flush(); }
 
-module.exports = { merge, all, query, tokens, count, stats, clear, flush };
+module.exports = { merge, importRows, all, query, tokens, count, stats, clear, flush };

@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.90] — History import: a file cannot push out, duplicate or outrank what the node gave
+
+Review of 0.18.84.
+
+- A file that would take the store past its 200,000 rows is refused whole, before anything is written, and the message gives the numbers. Before, the store trimmed its lowest blocks to make room, so a large or crafted file could remove real history, which is the only record of transactions the node has since pruned.
+- The import is one write. Before, every 500 rows rewrote the whole database file.
+- A transaction id must be `0x` and 64 hex digits (it was 1 to 128), and is held in upper case as the node writes it, so a lower-case id is the stored transaction and not a second copy.
+- Every field of an imported row is rebuilt from a checked number, amount, id or address, down to each coin's token (a name and a decimals count only) and each state entry (port, type, data). A record with a wrong field is left out and counted in the result message. Before, a coin's token and state passed through as they were, and a null state entry made the detail screen fail.
+- An imported row is marked. A sync does not treat it as already known, so when the node reports that transaction its own row replaces the imported one. If the store ever does have to trim for node rows, imported rows go first.
+- `scripts/history-screen-test.cjs` runs the store itself (sql.js on a throwaway folder) for the refusal, the cap and the replacement.
+
 ## [0.18.89] — Settings: restyled, and the second command box removed
 
 - Settings is laid out like the Node tab: a small heading and a card for each of This computer, Updates, Node, Signing keys, Address key uses, Address labels and History. Open at login is a switch.

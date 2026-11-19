@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld("mcd", {
   // local transaction-history DB (SQLite; our own source of truth — survives node pruning + restarts)
   histGet: (limit) => ipcRenderer.invoke("mcd:histGet", limit),
   histAdd: (rows) => ipcRenderer.invoke("mcd:histAdd", rows),
+  histImport: (rows) => ipcRenderer.invoke("mcd:histImport", rows),
   histClear: () => ipcRenderer.invoke("mcd:histClear"),
   histQuery: (filters) => ipcRenderer.invoke("mcd:histQuery", filters),
   histTokens: () => ipcRenderer.invoke("mcd:histTokens"),

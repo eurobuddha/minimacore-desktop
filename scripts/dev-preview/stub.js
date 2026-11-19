@@ -117,7 +117,7 @@
     histGet: async () => histRows, histTokens: async () => [{ tokenid: "0x00", name: "Minima" }, { tokenid: MXUSD, name: "MxUSD" }],
     histQuery: async (f) => histRows.filter(r => (!f.search || JSON.stringify([r.counterparty, r.tokenName, r.txpowid, r.amount]).toLowerCase().includes(String(f.search).toLowerCase()))
       && (!f.direction || r.direction === f.direction || r.kind === f.direction) && (!f.token || r.tokenid === f.token)),
-    histStats: async () => ({ count: histRows.length }), histAdd: async () => histRows.length, exportCsv: async () => null, importJson: async () => null,
+    histStats: async () => ({ count: histRows.length }), histAdd: async () => histRows.length, histImport: async () => ({ added: 0, refused: false }), exportCsv: async () => null, importJson: async () => null,
     mailInit: async () => ({ publicId: mailId, name: "Preview", words: "amber canal dune ember fjord grove", published: false, payaddr: ADDR }),
     mailThreads: async () => [
       mailThread(PK("11"), "Odile Varga", "Saturday market", "The stall is booked, table nine by the fountain.", 1, 12),

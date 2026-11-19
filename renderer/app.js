@@ -2371,7 +2371,9 @@ async function syncHistory(opts) {
   try {
     if (!HIST_OWN || !HIST_OWN.size) await loadOwnAddresses();   // classify new rows over own coins (native's view)
     const upsertAll = !!(opts.older || opts.rebuild);            // don't stop at the first already-stored txpowid
-    const known = upsertAll ? null : new Set((await api.histGet()).map(r => r.txpowid));
+    // A row that came from an import file does not count as known: the walk goes on past it, so the node's own
+    // row for that transaction is written over it (and the walk then stops at the first row the node gave before).
+    const known = upsertAll ? null : new Set((await api.histGet()).filter(r => !r.imported).map(r => r.txpowid));
     let offset = opts.older ? histOldestOffset : 0, max = HIST_PAGE, skips = 0, hitKnown = false;
     let batch = [];
     const flushBatch = async () => { if (batch.length) { await api.histAdd(batch); batch = []; } };
@@ -2444,29 +2446,68 @@ async function exportHistoryJson() {
   toast(p ? `Exported ${rows.length} transaction${rows.length === 1 ? "" : "s"} ✓` : "Export cancelled", p ? "ok" : "");
 }
 // One record of an export file → a row for the local store, or null if it is not one. Reads the desktop's
-// own rows and the phone's (HistoryEntry.toJson: received / sent, timemilli, inputs and deltas as JSON text,
-// coins with `addr`). Every field is rebuilt by name and type; nothing from the file is passed through as is.
+// own rows and the phone's (HistoryEntry.toJson: received / sent / self, timemilli, inputs and deltas as JSON
+// text, coins with `addr` and `name`). Every field, down to each coin's token and state, is rebuilt from a
+// checked number, amount, id or address; nothing from the file is passed through. A field that is present and
+// wrong drops the whole row (the import counts it). Ids are upper-case hex after 0x, as the node writes them.
 function histImportRow(o) {
-  if (!o || typeof o !== "object" || typeof o.txpowid !== "string" || !/^0x[0-9A-Fa-f]{1,128}$/.test(o.txpowid)) return null;
-  const parsed = (v) => { if (typeof v === "string") { try { return JSON.parse(v); } catch (e) { return null; } } return v; };
-  const list = (v) => { v = parsed(v); return Array.isArray(v) ? v : []; };
-  const map = (v) => { v = parsed(v); const out = {}; if (v && typeof v === "object" && !Array.isArray(v)) for (const k of Object.keys(v)) out[String(k)] = String(v[k]); return out; };
-  const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : 0; };
-  const coin = (c) => ({ address: String((c && (c.address || c.addr)) || ""), amount: String((c && c.amount) || "0"), tokenid: String((c && c.tokenid) || MINIMA),
-    token: c && c.token && typeof c.token === "object" ? c.token : undefined, coinid: String((c && c.coinid) || ""), state: Array.isArray(c && c.state) ? c.state : [] });
-  const inputs = list(o.inputs).map(coin), outputs = list(o.outputs).map(coin);
-  const tokenid = typeof o.tokenid === "string" && validTok(o.tokenid) && o.tokenid ? o.tokenid : MINIMA;
-  return { txpowid: o.txpowid, block: num(o.block), time: num(o.time != null ? o.time : o.timemilli),
-    istransaction: o.istransaction !== false, isblock: o.isblock === true, size: num(o.size), burn: String(o.burn != null ? o.burn : "0"),
-    direction: ({ received: "in", sent: "out", in: "in", out: "out" })[o.direction] || "self",
-    kind: ["split", "consolidation", "buy", "sell"].includes(o.kind) ? o.kind : "normal",
-    tokenid, tokenName: typeof o.tokenName === "string" && o.tokenName ? o.tokenName : TOK.tokenName(null, tokenid),
-    amount: String(o.amount != null ? o.amount : "0").replace(/^-/, ""), counterparty: String(o.counterparty || ""),
-    inCount: inputs.length || num(o.inCount), outCount: outputs.length || num(o.outCount),
-    difference: map(o.difference != null ? o.difference : o.deltas), inputs, outputs, state: list(o.state) };
+  if (!o || typeof o !== "object" || typeof o.txpowid !== "string" || !/^0x[0-9A-Fa-f]{64}$/.test(o.txpowid)) return null;
+  const bad = new Error("row");
+  const hex = (v) => "0x" + v.slice(2).toUpperCase();
+  const parsed = (v) => { if (typeof v === "string") { try { return JSON.parse(v); } catch (e) { throw bad; } } return v; };
+  const list = (v) => { v = parsed(v); if (v == null) return []; if (!Array.isArray(v) || v.length > 2048) throw bad; return v; };
+  const whole = (v) => { if (v == null || v === "") return 0; if ((typeof v !== "number" && typeof v !== "string") || !/^[0-9]{1,15}$/.test(String(v))) throw bad; return Number(v); };
+  const amt = (v) => { if (v == null || v === "") return "0"; if ((typeof v !== "number" && typeof v !== "string") || !/^-?[0-9]{1,64}(\.[0-9]{1,64})?$/.test(String(v))) throw bad; return String(v); };
+  const addr = (v) => { if (v == null || v === "") return ""; if (typeof v !== "string" || v.length > 200 || !/^(0x|Mx)[0-9A-Za-z]+$/.test(v)) throw bad; return v; };
+  const tok = (v) => { if (v == null || v === "" || v === MINIMA) return MINIMA; if (typeof v !== "string" || !/^0x[0-9A-Fa-f]{1,128}$/.test(v)) throw bad; return hex(v); };
+  const id = (v) => { if (v == null || v === "") return ""; if (typeof v !== "string" || !/^0x[0-9A-Fa-f]{1,128}$/.test(v)) throw bad; return hex(v); };
+  const text = (v) => (typeof v === "string" && v && v.length <= 256 ? v : "");
+  const state = (v) => list(v).map(s => { if (!s || typeof s !== "object" || (typeof s.data !== "string" && typeof s.data !== "number") || String(s.data).length > 65536) throw bad;
+    return { port: whole(s.port), type: whole(s.type), data: String(s.data) }; });
+  const coin = (c) => {
+    if (!c || typeof c !== "object") throw bad;
+    const t = c.token && typeof c.token === "object" ? c.token : {};
+    const name = text(t.name && typeof t.name === "object" ? t.name.name : t.name) || text(c.name), token = {};
+    if (name) token.name = name;
+    if (t.decimals != null && whole(t.decimals) <= 64) token.decimals = whole(t.decimals);
+    return { address: addr(c.address != null ? c.address : c.addr), amount: amt(c.amount), tokenid: tok(c.tokenid),
+      token: name || token.decimals != null ? token : undefined, coinid: id(c.coinid), state: state(c.state) };
+  };
+  try {
+    const inputs = list(o.inputs).map(coin), outputs = list(o.outputs).map(coin), tokenid = tok(o.tokenid), difference = {};
+    const d = parsed(o.difference != null ? o.difference : o.deltas);
+    if (d != null) { if (typeof d !== "object" || Array.isArray(d)) throw bad; for (const k of Object.keys(d)) difference[tok(k)] = amt(d[k]); }
+    const direction = o.direction == null ? "self" : ({ received: "in", sent: "out", in: "in", out: "out", self: "self" })[o.direction];
+    const kind = o.kind == null ? "normal" : ["normal", "split", "consolidation", "buy", "sell"].find(k => k === o.kind);
+    if (!direction || !kind) throw bad;
+    return { txpowid: hex(o.txpowid), block: whole(o.block), time: whole(o.time != null ? o.time : o.timemilli),
+      istransaction: o.istransaction !== false, isblock: o.isblock === true, size: whole(o.size), burn: amt(o.burn),
+      direction, kind, tokenid, tokenName: text(o.tokenName) || TOK.tokenName(null, tokenid),
+      amount: amt(o.amount).replace(/^-/, ""), counterparty: addr(o.counterparty),
+      inCount: inputs.length || whole(o.inCount), outCount: outputs.length || whole(o.outCount),
+      difference, inputs, outputs, state: state(o.state) };
+  } catch (e) { if (e === bad) return null; throw e; }
 }
-// "Import history (restore / merge)": rows the store does not have are added; a row it already has is left
-// exactly as it is (matched on the txpow id), so importing the same file twice, or one from another device, is safe.
+// What an import would do, worked out before anything is written: the rows the store does not have, how many
+// it already has, how many records were not valid, and a refusal when the new rows would not fit. The store
+// trims its lowest blocks past the cap, and it is the only record of transactions the node has pruned, so a
+// file is never allowed to push it there.
+function histImportPlan(records, known, cap) {
+  const fresh = [], seen = new Set(); let same = 0, invalid = 0;
+  for (const o of records) {
+    const row = histImportRow(o);
+    if (!row) invalid++;
+    else if (known.has(row.txpowid) || seen.has(row.txpowid)) same++;
+    else { seen.add(row.txpowid); fresh.push(row); }
+  }
+  const refuse = cap > 0 && known.size + fresh.length > cap
+    ? `Nothing was imported. The file would add ${fresh.length} transactions to the ${known.size} already stored, and the store holds ${cap} at most.` : "";
+  return { fresh, same, invalid, refuse };
+}
+// "Import history (restore / merge)": rows the store does not have are added, in one write; a row it already
+// has is left exactly as it is (matched on the txpow id), so importing the same file twice, or one from another
+// device, is safe. An added row is marked imported: when the node later reports that transaction, a sync
+// replaces it with the node's own row.
 async function importHistory() {
   let text;
   try { text = await api.importJson(); } catch (e) { toast("Import failed: " + (e.message || e), "err"); return; }
@@ -2474,11 +2515,12 @@ async function importHistory() {
   try {
     const arr = JSON.parse(text).tx;
     if (!Array.isArray(arr)) throw new Error("this is not a history export");
-    const known = new Set(((await api.histGet()) || []).map(r => r.txpowid)), fresh = [];
-    let total = 0;
-    for (const o of arr) { const row = histImportRow(o); if (!row) continue; total++; if (!known.has(row.txpowid)) { known.add(row.txpowid); fresh.push(row); } }
-    for (let i = 0; i < fresh.length; i += 500) await api.histAdd(fresh.slice(i, i + 500));
-    toast(`Imported: ${total} · New: ${fresh.length}`, "ok");
+    const known = new Set(((await api.histGet()) || []).map(r => r.txpowid));
+    const plan = histImportPlan(arr, known, ((await api.histStats()) || {}).cap);
+    if (plan.refuse) { toast(plan.refuse, "err"); return; }
+    const res = plan.fresh.length ? await api.histImport(plan.fresh) : { added: 0 };
+    if (res.refused) { toast(`Nothing was imported. The file would add ${res.fresh} transactions to the ${res.existing} already stored, and the store holds ${res.cap} at most.`, "err"); return; }
+    toast(`Added ${res.added} of ${arr.length}. Already stored: ${plan.same + (plan.fresh.length - res.added)}.` + (plan.invalid ? ` Not valid, left out: ${plan.invalid}.` : ""), "ok");
     await ensureHistFilter(); await renderHistoryList();
   } catch (e) { toast("Import failed: " + (e.message || e), "err"); }
 }

@@ -605,6 +605,7 @@ webwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webCon
 
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));
 ipcMain.handle("mcd:histAdd", (_e, rows) => histDb.merge(Array.isArray(rows) ? rows : []));
+ipcMain.handle("mcd:histImport", (_e, rows) => histDb.importRows(rows));   // a file's rows: adds only, refuses past the cap, never trims
 ipcMain.handle("mcd:histClear", async () => { await histDb.clear(); return true; });
 ipcMain.handle("mcd:histQuery", (_e, filters) => histDb.query(filters || {}));
 ipcMain.handle("mcd:histTokens", () => histDb.tokens());
