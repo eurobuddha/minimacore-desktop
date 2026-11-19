@@ -449,6 +449,16 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   assert.match(l[1], /^1 Dexicon trade sent and not yet answered/);
   const cold = makeHost({ runner: async () => ({ status: false }), dataDir: tmp(), net: M.mockNet(), quiet: true });
   assert.deepEqual(await cold.activeWork(), { ready: false, hasStore: false });
+  // 0.18.109: takes awaiting an answer are counted from the store, with no screen open, and also while the chain is
+  // still being read (the FAST half is up, the on-chain half is not); a take being voided counts too
+  await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('void_takes', '{\"t2\":{\"mine\":[]},\"t3\":{\"mine\":[]}}')");
+  assert.equal((await host.activeWork()).takes, 3);
+  vm.runInContext("PDService.ready = false", ctx);
+  assert.deepEqual(await host.activeWork(), { ready: false, hasStore: true, takes: 3 });
+  assert.match(list(await host.activeWork())[0], /has not finished starting/, "the restore gate still refuses");
+  // the engine's instance number: the screens remake their page frame when it changes
+  const e1 = host.status().epoch; host.stop(); await host.start(); await M.until(() => host.status().ready);
+  assert.ok(host.status().epoch > e1, "a node restart is another engine");
 });
 
 // 0.18.107 (MEDIUM): the epoch guard is at entry only. A signing command already waiting in the process-wide queue
@@ -559,6 +569,7 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
   assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));'));
+  assert.ok(main.includes('ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));') && /read\(api\.dxWork\(\)\)/.test(app), "the Shutdown warning asks for takes awaiting an answer; a failed read is null");
   // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
   assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
@@ -566,7 +577,7 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   assert.ok(!/api\.\w*Invalidate\(/.test(app), "the renderer's chain only clears the screen");
   assert.ok(main.includes("dexicon: await dexicon.activeWork().catch(() => null) });"), "a failed read is null, which refuses");
   assert.ok(/try \{ dexicon\.flush\(\); \} catch \(err\) \{\}/.test(main));
-  for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
+  for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "dxWork", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
   const host = fs.readFileSync(path.join(M.root, "main/dexicon.js"), "utf8");
   assert.ok(!/require\("(http|https|net|child_process)"\)/.test(host), "the host opens no socket of its own");
   assert.equal((host.match(/rpcCall\(/g) || []).length, 1, "one way to the node: rpcCall");

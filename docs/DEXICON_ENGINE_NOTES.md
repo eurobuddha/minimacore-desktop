@@ -217,6 +217,20 @@ lost, but putting it back is a manual step today.
 | `inited` once per node start | once per node start too since 0.18.106 (the engine is dropped when the node stops), plus a retry of `PDService.boot()` once a minute while the resting engine is not ready | a node that was slow at the first try does not leave the Exchange dead |
 | Price: `resting/price.js` over `MDS.net.GET` (MEXC depth, then MEXC bookTicker), and since 0.0.90 `AX.ladder.feed(PandaPrice)`: when neither MEXC call returns JSON, MEXC's own MINIMA/USDT ticker from `https://api.coingecko.com/api/v3/coins/minima/tickers?exchange_ids=mxc` | the same files, the same three URLs; the host allows GET to `api.mexc.com` and to that one CoinGecko path, nothing else | a MEXC answer (even a thin or crossed book) stands and CoinGecko is not asked; the fallback read is aged from CoinGecko's fetch time; `dxStatus().price.source` is `MEXC` or `MEXC via CoinGecko` |
 
+## The taker's page and takes awaiting an answer (0.18.109)
+
+A FAST take is built, signed and sent by the MiniDapp page (`renderer/dexicon/ui/app.js`, verbatim, in the hidden
+`dxroom://` frame). The page records it in `ax_kv.pending_takes` before sending, hears the maker's answer on its own
+inbox poll, and voids it (spends one of its own coins in it back to the wallet) when no answer came in 5 minutes.
+
+- The frame is made by `renderer/dexicon-ui.js` whenever the node is "running" and the engine is ready, on any tab
+  (`DexCore.pageStep`); it is remade when `dxStatus().epoch` changes, and dropped with the node.
+- Voiding does not depend on the frame: when the page has written no `ui_alive` for 2 minutes, the service voids
+  from the same records (`voidSweep`, `voidOne` in `service.desktop.js`; every third tick). With the frame alive the
+  page owns its takes and the service leaves them alone.
+- While the node is stopped nothing can void a take. The Shutdown warning says how many are waiting
+  (`dexicon.activeWork().takes`, through `mcd:dxWork`); the wallet-restore gate refuses while any is.
+
 ## The command bridge (`mcd:dxCommand`)
 
 `{ op: "cmd", command }`, `{ op: "sql", query }`, `{ op: "comms", message }`. Ported from DexiconPro's `room.dex`:

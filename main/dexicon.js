@@ -295,7 +295,8 @@ function makeHost(opts = {}) {
   const plain = (v) => JSON.parse(JSON.stringify(v));   // out of the engine's vm realm
 
   function status() {
-    const s = { version: ENGINE_VERSION, started: !!timer, problem, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
+    // epoch: which engine this is. The screens' hidden page frame belongs to one engine and is remade when it changes.
+    const s = { version: ENGINE_VERSION, started: !!timer, problem, epoch, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
       price: { mid: 0, ageMs: null, label: "", source: "" }, log: LOG.slice(-20) };
     try {
       if (!ctx || !ctx.DX) return s;
@@ -319,10 +320,17 @@ function makeHost(opts = {}) {
    * coin locked, and they lapse on the relays by themselves. Not booted: { ready:false, hasStore }.
    */
   async function activeWork() {
-    if (!ctx || !ctx.DX || !ctx.DX.restingReady()) return { ready: false, hasStore: fs.existsSync(storePath()) };
-    const m = mine(), kv = async (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
-    return { ready: true, orders: m.orders.map(o => String(o.coinid)), pending: m.pending.length,
-      takes: Object.keys(await kv("pending_takes")).length + Object.keys(await kv("void_takes")).length };
+    // Takes awaiting an answer (signed and sent, not yet co-signed; or being voided): the page's own records, which it
+    // writes BEFORE it sends. Read from the store, so they are counted whether or not any screen is open.
+    const kv = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
+    const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
+    if (!ctx || !ctx.DX || !ctx.DX.restingReady()) {
+      const w = { ready: false, hasStore: fs.existsSync(storePath()) };
+      if (sqlShim && ctx && ctx.DX && ctx.DX.ready()) { try { w.takes = takes(); } catch (e) {} }   // the FAST half is up: its takes are known even while the chain is still being read
+      return w;
+    }
+    const m = mine();
+    return { ready: true, orders: m.orders.map(o => String(o.coinid)), pending: m.pending.length, takes: takes() };
   }
 
   // ---- the command bridge: what a Dexicon screen (the MiniDapp page's MDS) may ask for ----

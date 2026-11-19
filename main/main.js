@@ -586,6 +586,7 @@ ipcMain.handle("mcd:dxStatus", () => dexicon.status());
 ipcMain.handle("mcd:dxBook", () => dexicon.book());
 ipcMain.handle("mcd:dxMine", () => dexicon.mine());
 ipcMain.handle("mcd:dxCommand", (_e, a) => dexicon.command(a));
+ipcMain.handle("mcd:dxWork", () => dexicon.activeWork().catch(() => null));   // for the Shutdown warning: takes awaiting an answer (null: could not be read)
 // No mcd:dxInvalidate: a window cannot move the store aside, and a wallet replacement does not wait for a window
 // to say so (walletReplaced, below).
 dexicon.emitter.on("comms", (message) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", message); });   // service → screens

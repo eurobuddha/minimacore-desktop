@@ -44,6 +44,69 @@ test("the status strip says what is true: node, then engine", () => {
   assert.deepEqual(C.strip("running", { started: true, ready: true, restingReady: true }), { text: "PAIRED", tone: "ok" });
 });
 
+// 0.18.109: the hidden page (the taker's engine: it sends, hears and voids FAST takes) must not wait for a visit to Dexicon
+test("the page frame: wanted whenever the engine is ready, remade for another engine, tried again when it never speaks", () => {
+  const ready = { started: true, ready: true, epoch: 3 }, have = { epoch: 3, madeAt: 1000, heard: true };
+  assert.equal(C.pageStep("running", ready, null, 0), "make");
+  assert.equal(C.pageStep("running", { started: true, ready: false, epoch: 3 }, null, 0), "none");
+  assert.equal(C.pageStep("running", ready, have, 5000), "keep");
+  assert.equal(C.pageStep("running", { started: true, ready: true, epoch: 4 }, have, 5000), "remake", "a node restart or a replaced wallet: another engine, another identity");
+  assert.equal(C.pageStep("running", { started: true, ready: false, epoch: 4 }, have, 5000), "drop");
+  assert.equal(C.pageStep("stopped", ready, have, 5000), "drop");
+  assert.equal(C.pageStep("running", null, have, 5000), "keep", "a status read that failed tears nothing down: a take may be in flight");
+  assert.equal(C.pageStep("running", null, null, 5000), "none");
+  const silent = { epoch: 3, madeAt: 1000, heard: false };
+  assert.equal(C.pageStep("running", ready, silent, 1000 + C.PAGE_LOAD_MS), "keep");
+  assert.equal(C.pageStep("running", ready, silent, 1001 + C.PAGE_LOAD_MS), "retry");
+  assert.deepEqual(C.strip("running", { started: true, ready: true, restingReady: true }, true), { text: "PAIRED · trading page did not load", tone: "dim" });
+  assert.deepEqual(C.strip("running", { started: true, ready: false, problem: "The old wallet's Dexicon store could not be moved aside" }), { text: "DEXICON IS NOT RUNNING", tone: "dim" });
+  assert.match(C.PAGE_FAILED, /did not load, so a trade cannot be sent from here right now\. The app is trying again/);
+});
+
+test("the screens' code makes the frame without any visit to Dexicon, keeps it across tabs, remakes it after an engine restart, and says so when it cannot load", async () => {
+  const vm = require("node:vm");
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() { e.parent.children.splice(e.parent.children.indexOf(e), 1); e.removed = true; }, querySelectorAll: () => [], querySelector: () => null }; return e; };
+  const els = {}, timers = [], listeners = {}; let clock = 1000000, status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {} }, service = null, asked = 0;
+  const win = { DexCore: C, console, JSON, Promise, setInterval: (fn) => { timers.push(fn); }, setTimeout, localStorage: { getItem: () => null, setItem() {} },
+    Date: class extends Date { static now() { return clock; } },
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null },
+    addEventListener: (t, f) => { listeners[t] = f; } };
+  win.window = win; win.mcd = { dxStatus: async () => { asked++; if (!status) throw new Error("no answer"); return status; }, onDexicon: (f) => { service = f; }, clip: async () => true, dxCommand: async () => ({}) };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const shell = win.document.getElementById("shell"); shell.dataset.mode = "tabs";   // the Wallet tab is on screen; Dexicon was never opened
+  const frames = () => shell.children.filter(c => c.tag === "iframe"), tick = async () => { for (const t of timers) t(); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); };
+  win.DexUI.init({ go() {}, leave() {}, start() {} });
+  assert.equal(frames().length, 0);
+  win.DexUI.node({ state: "running" });
+  await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+  assert.equal(frames().length, 1, "made as soon as the node runs and the engine is ready: DexUI.paint was never called");
+  const f1 = frames()[0];
+  assert.deepEqual([f1.src, f1.attrs.sandbox, f1.hidden], ["dxroom://exchange/index.html", "allow-scripts", true]);
+  assert.equal(shell.dataset.mode, "tabs");
+  // the page speaks (its first report)
+  listeners.message({ source: f1.contentWindow, data: { dxRoom: 1, page: { ready: true } } });
+  // other tabs, many polls, a status read that fails: the same frame
+  for (let i = 0; i < 5; i++) { clock += 60000; await tick(); }
+  status = null; await tick(); status = { started: true, ready: true, epoch: 1 };
+  assert.deepEqual(frames(), [f1], "kept across tab changes and time");
+  // the engine was restarted (node restart, wallet replaced): told by the host's update event, another frame
+  status = { started: true, ready: true, restingReady: true, epoch: 2 };
+  service(null); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+  assert.equal(frames().length, 1); assert.notEqual(frames()[0], f1, "remade for the new engine"); assert.equal(f1.removed, true);
+  // a frame that never speaks: said in the status strip, and tried again
+  const f2 = frames()[0];
+  clock += C.PAGE_LOAD_MS + 1; await tick();
+  assert.equal(els.dxPair.textContent, "PAIRED · trading page did not load");
+  assert.equal(frames().length, 1); assert.notEqual(frames()[0], f2, "tried again");
+  listeners.message({ source: frames()[0].contentWindow, data: { dxRoom: 1, page: { ready: true } } });
+  assert.equal(els.dxPair.textContent, "PAIRED", "and the strip is true again once it speaks");
+  // the node stops: no engine, no frame
+  win.DexUI.node({ state: "stopped" });
+  assert.equal(frames().length, 0); assert.match(els.dxPair.textContent, /^NODE STOPPED/);
+  assert.ok(asked > 5);
+});
+
 test("the version pill is the vendored engine's version", () => {
   require("./dexicon-mock.cjs");   // main/rpc.js and main/netfetch.js replaced by versions that throw
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "dexicon-parity.manifest.json"), "utf8"));

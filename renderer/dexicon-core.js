@@ -33,8 +33,10 @@
   const toggleTheme = (mem) => { mem.theme = mem.theme === "ONYX" ? "DAYLIGHT" : "ONYX"; return mem; };
 
   /** The status strip (MainActivity pairPill): the node, then the engine. tone: "ok" | "dim". */
-  function strip(nodeState, st) {
+  function strip(nodeState, st, pageFailed) {
     if (nodeState !== "running") return { text: nodeState === "stopped" ? "NODE STOPPED" : "NODE STARTING…", tone: "dim" };
+    if (st && st.problem) return { text: "DEXICON IS NOT RUNNING", tone: "dim" };
+    if (pageFailed) return { text: "PAIRED · trading page did not load", tone: "dim" };
     if (!st || !st.started || !st.ready) return { text: "PAIRED · starting Dexicon", tone: "dim" };
     if (!st.restingReady) return { text: "PAIRED · reading the chain", tone: "ok" };
     return { text: "PAIRED", tone: "ok" };
@@ -221,6 +223,24 @@
   }
   /** A refusal or an error, from the engine, the page or the bridge: its own words, with the plain prefix a reader
    *  needs. Nothing is added about what happened to funds unless the text itself says it. */
+  // ---- the hidden page frame (renderer/dexicon/mds.js): the taker's engine ----
+  // It builds, signs and sends FAST takes, hears their answers and voids the ones never answered. So it must exist
+  // whenever the engine is ready, WHICHEVER tab is on screen (0.18.109: it used to be made on the first Dexicon visit,
+  // so a take left unanswered by the last session waited for that visit), and it must belong to the engine that is
+  // running now (st.epoch: a node restart or a replaced wallet makes a new engine).
+  const PAGE_LOAD_MS = 20000;
+  const PAGE_FAILED = "The trading part of Dexicon did not load, so a trade cannot be sent from here right now. The app is trying again. If this message stays, restart the app.";
+  /** What to do with the frame now. have = { epoch, madeAt, heard } of the one that exists, or null.
+   *  "make" | "remake" (another engine) | "retry" (it never spoke) | "drop" | "keep" | "none". */
+  function pageStep(nodeState, st, have, now) {
+    const want = nodeState === "running" && (st ? !!st.ready : !!have);   // a status read that failed tears nothing down (a take may be in flight)
+    if (!want) return have ? "drop" : "none";
+    if (!have) return "make";
+    if (st && st.epoch !== have.epoch) return "remake";
+    if (!have.heard && now - have.madeAt > PAGE_LOAD_MS) return "retry";
+    return "keep";
+  }
+
   /** The engine's own sentence for "nothing but your own orders at this price" (dexicon/lib/ownskip.js ONLY_OWN) is
    *  ordinary plan feedback, not a failure: "note", everything else that reaches say() unlabelled is an "error". */
   const feedbackKind = (text) => (/^Only your own orders are at this price/.test(String(text == null ? "" : text).trim()) ? "note" : "error");
@@ -299,6 +319,6 @@
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, feedbackKind, priceName, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, plan, percent, review, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, TAB_LABEL, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

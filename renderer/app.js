@@ -975,17 +975,18 @@ async function menuAction(act) {
   else if (act === "shutdown") {
     // Ask the AtomiX and PandaPools glue what is in flight first (their own saved records; no node command).
     const read = (p) => Promise.race([Promise.resolve(p).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]);
-    const [swaps, maker, pool] = await Promise.all([read(api.axSwaps()), read(api.axMakerCfg()), read(api.ppActivity())]);
-    const w = shutdownWarning(swaps, maker, pool, Date.now());
+    const [swaps, maker, pool, dex] = await Promise.all([read(api.axSwaps()), read(api.axMakerCfg()), read(api.ppActivity()), read(api.dxWork())]);
+    const w = shutdownWarning(swaps, maker, pool, Date.now(), dex);
     if (!await showConfirm(w.title, w.message, "Shut down", true)) return;
     toast("Shutting down the node…");
     try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
   }
 }
 // What a Shutdown would interrupt, in plain words. swaps = api.axSwaps(), maker = api.axMakerCfg(), pool =
-// api.ppActivity(); null means that read failed, and the dialog says so instead of looking idle.
+// api.ppActivity(); null means that read failed, and the dialog says so instead of looking idle. dex = api.dxWork()
+// (main/dexicon.js activeWork): undefined = not asked, null = could not be read.
 const SWAP_DONE = ["COMPLETE", "REFUNDED", "ERROR"];   // the engine's own "nothing left to claim or refund" (trading.js isTerminalSwap)
-function shutdownWarning(swaps, maker, pool, nowMs) {
+function shutdownWarning(swaps, maker, pool, nowMs, dex) {
   const busy = [], unread = [];
   if (!Array.isArray(swaps)) unread.push("AtomiX swaps");
   else {
@@ -1002,6 +1003,10 @@ function shutdownWarning(swaps, maker, pool, nowMs) {
     const n = pool.filter(r => r && r.type !== "STATUS" && !r.failed && !r.confirmed && nowMs - Number(r.ts || 0) < 3600000).length;
     if (n) busy.push((n === 1 ? "1 pool transaction" : n + " pool transactions") + " sent in the last hour " + (n === 1 ? "is" : "are") + " not confirmed yet. The app cannot check or finish " + (n === 1 ? "it" : "them") + " while the node is stopped.");
   }
+  // A FAST take that is signed and sent but not yet answered: with the node stopped nothing can void it, so its maker
+  // could still complete it later at the price that was signed.
+  if (dex === null || (dex && !dex.ready && dex.hasStore && typeof dex.takes !== "number")) unread.push("Dexicon trades waiting for an answer");
+  else if (dex && dex.takes > 0) busy.push((dex.takes === 1 ? "1 Dexicon trade is" : dex.takes + " Dexicon trades are") + " sent and not yet answered. While the node is stopped " + (dex.takes === 1 ? "it" : "they") + " cannot be voided, so the other side could still complete " + (dex.takes === 1 ? "it" : "them") + " later at the price you signed. Wait a few minutes until Dexicon, Orders shows no trade waiting, then shut down.");
   if (unread.length) busy.push("Could not be checked: " + unread.join(", ") + ". Look at the Dexicon tab before you shut down.");
   const base = "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again.";
   return { title: busy.length > (unread.length ? 1 : 0) ? "Shut down with trades in flight?" : "Shut down the node?", message: busy.concat(base).join("\n\n") };

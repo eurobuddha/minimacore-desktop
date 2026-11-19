@@ -36,9 +36,10 @@ const DexUI = (() => {
     $("dxTheme").onclick = () => { C.toggleTheme(mem); write(); paintTheme(); };
     $("dxClose").onclick = () => opts.leave();
     $("dxPair").onclick = () => { if (node.state === "stopped") opts.start(); };
-    api.onDexicon((message) => { if (typeof message === "string") onService(message); if (Page.frame && typeof message === "string") Page.frame.contentWindow.postMessage({ dxRoom: 1, update: { dex: message } }, "*"); if (shown()) refresh(); });
+    api.onDexicon((message) => { if (typeof message === "string") onService(message); if (Page.frame && typeof message === "string") Page.frame.contentWindow.postMessage({ dxRoom: 1, update: { dex: message } }, "*"); if (shown()) refresh(); else watch(); });
     window.addEventListener("message", onFrameMessage);
-    setInterval(() => { if (shown() && C.ROOMS[mem.room].view === "dexicon") refresh(); }, 5000);   // the FAST book moves between blocks
+    // the FAST book moves between blocks; and on every other tab the engine is still watched, so its page exists (watch)
+    setInterval(() => { if (shown() && C.ROOMS[mem.room].view === "dexicon") refresh(); else watch(); }, 5000);
     paintTheme();
   }
   const shown = () => $("shell").dataset.mode === "dex";
@@ -64,14 +65,22 @@ const DexUI = (() => {
     $("dxNav").innerHTML = tabs.map(t => `<button class="dx-tab" role="tab" data-dxtab="${t}" aria-selected="${t === on}" tabindex="${t === on ? 0 : -1}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[t]}"/></svg><span>${C.TAB_LABEL[t]}</span></button>`).join("");
   }
   function paintStrip() {
-    const s = C.strip(node.state, st), p = $("dxPair");
+    const s = C.strip(node.state, st, Page.failed), p = $("dxPair");
     p.textContent = s.text + (node.state === "stopped" ? "  ▸" : ""); p.dataset.tone = s.tone;
     p.style.cursor = node.state === "stopped" ? "pointer" : "";
     const block = (node.health && node.health.block) || (st && st.block) || 0;
     $("dxBlock").textContent = "# " + (block > 0 ? block : "…");
     $("dxVer").textContent = "v" + ((st && st.version) || "…");
   }
-  function node_(s) { node = s || { state: "" }; if (opts) { paintStrip(); pageEnsure(); } }
+  function node_(s) { node = s || { state: "" }; if (!opts) return; paintStrip(); if (node.state === "running") watch(); else pageEnsure(); }
+  /** The engine's state, read on EVERY tab: the page frame is made as soon as the engine is ready and remade when the
+   *  engine changes, without waiting for a visit to Dexicon. Nothing is drawn. */
+  let watching = false;
+  async function watch() {
+    if (watching) return; watching = true;
+    try { st = await api.dxStatus(); } catch (e) { st = null; }
+    watching = false; paintStrip(); pageEnsure();
+  }
 
   async function refresh() {
     try { st = await api.dxStatus(); } catch (e) { st = null; }
@@ -80,18 +89,28 @@ const DexUI = (() => {
   }
 
   // ---- the page: the taker's engine, verbatim, in a hidden sandboxed frame (renderer/dexicon/mds.js) ----
-  const Page = { frame: null, state: {}, seq: 0, waiting: {} };
+  const Page = { frame: null, state: {}, seq: 0, waiting: {}, epoch: null, madeAt: 0, heard: false, failed: false };
+  /** The frame lives in #shell, outside every tab's own view, so changing tabs never touches it (C.pageStep). */
   function pageEnsure() {
-    const want = node.state === "running" && (st ? !!st.ready : !!Page.frame);   // a status read that failed tears nothing down (a take may be in flight)
-    if (want && !Page.frame) {
+    if (Page.stub) return;   // the dev preview has no engine and no page
+    const step = C.pageStep(node.state, st, Page.frame ? Page : null, Date.now());
+    if (step === "retry") Page.failed = true;   // said in the status strip and on the screens until the page speaks
+    if (step === "drop" || step === "remake" || step === "retry") {
+      Page.frame.remove(); Page.frame = null; Page.state = {};
+      for (const k of Object.keys(Page.waiting)) { Page.waiting[k]({ error: "Dexicon stopped before it answered. Look at Activity before trying again." }); delete Page.waiting[k]; }
+      if (step !== "retry") Page.failed = false;
+    }
+    if (step === "make" || step === "remake" || step === "retry") {
       const f = document.createElement("iframe");
       f.setAttribute("sandbox", "allow-scripts"); f.hidden = true; f.title = "Dexicon engine"; f.src = "dxroom://exchange/index.html";
-      $("shell").appendChild(f); Page.frame = f;
-    } else if (!want && Page.frame) { Page.frame.remove(); Page.frame = null; Page.state = {}; for (const k of Object.keys(Page.waiting)) { Page.waiting[k]({ error: "Dexicon stopped before it answered. Look at Activity before trying again." }); delete Page.waiting[k]; } }
+      $("shell").appendChild(f); Page.frame = f; Page.epoch = st ? st.epoch : null; Page.madeAt = Date.now(); Page.heard = false;
+    }
+    if (step !== "keep" && step !== "none") paintStrip();
   }
   function onFrameMessage(e) {
     if (!Page.frame || e.source !== Page.frame.contentWindow) return;
     const m = e.data || {}; if (m.dxRoom !== 1) return;
+    if (!Page.heard) { Page.heard = true; if (Page.failed) { Page.failed = false; paintStrip(); } }
     if (m.page && typeof m.page === "object") {
       Page.state = m.page;
       Page.frame.hidden = !m.page.dialog; Page.frame.classList.toggle("dx-frame", !!m.page.dialog);   // only the page's market maker dialogs are ever shown
@@ -146,6 +165,7 @@ const DexUI = (() => {
     if (node.state !== "running") return "The node is stopped, so nothing here can trade. Start it and Dexicon comes back by itself.";
     if (st && st.problem) return st.problem;   // the engine host's own plain sentence (a store that could not be moved aside)
     if (!st || !st.started || !st.ready) return "Dexicon is still starting: it is reading this wallet's trading identity from the node. Nothing can be sent yet.";
+    if (Page.failed) return C.PAGE_FAILED;
     if (Page.state.idError) return "The trading identity could not be read: " + Page.state.idError;
     if (!Page.state.ready && !Page.stub) return "Dexicon is still starting. Nothing can be sent yet.";
     if (!(st.relays || []).length) return "No relay is set, so there is no FAST book and a FAST order cannot be published. Add a relay in Settings.";
