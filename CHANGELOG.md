@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.98] — Dexicon engine vendored (Phase 3a, part 1): files and parity gate, nothing runs yet
+
+- `main/dexicon/{lib,crypto,vendor,resting}/`: the 37 engine files the Dexicon service loads, copied byte for byte from the Dexicon MiniDapp (`mds/dexicon` 0.0.89, branch `security/2026-11-07`, commit `500dd24344a3739472eccbefb0c684bed2aa2930`). Not copied: `doors/` and `lib/door.js` (the AtomiX doors are never started in this app: room 1 is the real AtomiX engine on the same ETH key) and the page's own files.
+- `scripts/dexicon-parity-check.cjs` (local, against the donor) and `scripts/dexicon-parity-manifest.cjs` with the committed `scripts/dexicon-parity.manifest.json` (CI, no donor): each file's sha256, one overall digest (`3e424587a087fa888edc0b28b94f994d98b22d052e2123571994cb325ece1e12`), the donor commit, and the sha256 of the donor's `service.js` so a change there is noticed. A stray file under `main/dexicon/` fails the gate.
+- `npm run test:dexicon` (manifest) and `npm run test:dexicon-parity` (donor); CI runs the first before the build. `.gitattributes` keeps the copied bytes as they are.
+- Nothing loads these files yet.
+
 ## [0.18.97] — Resync and restore: the node is restarted through the guarded start, with an honest state
 
 Security audit of the key mode, part 5: the restart after a resync, and smaller findings.

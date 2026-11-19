@@ -1,0 +1,161 @@
+{
+  "_comment": "Digests of the Dexicon engine files copied verbatim from the MiniDapp. Regenerate ONLY with `node scripts/dexicon-parity-manifest.cjs --update` beside a deliberate re-copy. Desktop-only differences belong in main/dexicon/loader.js, main/dexicon/service.desktop.js or main/dexicon.js, never in an engine file.",
+  "donor": {
+    "root": "../../mds/dexicon",
+    "mdsVersion": "0.0.89",
+    "branch": "security/2026-11-07",
+    "gitSha": "500dd24344a3739472eccbefb0c684bed2aa2930",
+    "serviceJsSha256": "453ed90bb17ed68c9d9a3eb2bf192d51918ea2534608ba022d3dad7fd5af1a72"
+  },
+  "digest": "3e424587a087fa888edc0b28b94f994d98b22d052e2123571994cb325ece1e12",
+  "files": {
+    "lib/rhino_shim.js": {
+      "sha256": "3c836294a244afb5198002dcdce2c569eb166300553cb1ba60fb5b56209a487b",
+      "bytes": 1654
+    },
+    "vendor/nacl.js": {
+      "sha256": "68be2e21d81a0f4f35c15dcc526ab961a72512a6544bdf0235bdab8e11e1ab85",
+      "bytes": 78109
+    },
+    "vendor/blake.js": {
+      "sha256": "f306dd49eabade396b0b82dd401947ede6dcf90d8727b5e4ed4733fc808ec0de",
+      "bytes": 19053
+    },
+    "vendor/sha256.js": {
+      "sha256": "9da0ef5a65b401f07f335a53f11ad71a542ce1a05719e5f45491caae9e6c5925",
+      "bytes": 21893
+    },
+    "vendor/sha512.js": {
+      "sha256": "3a16e7bacfa326638fd1ca071d6745a01ec8b8ce104c1feacf28a3145db2448c",
+      "bytes": 39711
+    },
+    "vendor/decimal.js": {
+      "sha256": "fd10a24b79763cc81be1484129358c40b215efdefbc216737ca2cba715a50bf6",
+      "bytes": 131722
+    },
+    "lib/hex.js": {
+      "sha256": "679d2d8bf8089cb8a37be8da94df2e78c0f694afd77a496cc55838ee4f4a4270",
+      "bytes": 3317
+    },
+    "lib/flow.js": {
+      "sha256": "991b78f92e8d5c9e94918d4049152fe661ea787bb71a22d62eec2ed47cc1a549",
+      "bytes": 2782
+    },
+    "crypto/ax_sodium.js": {
+      "sha256": "ab932a63af008dde66b2ca6b09dceba1a172036fec2790807e47278935b6a201",
+      "bytes": 3890
+    },
+    "lib/identity.js": {
+      "sha256": "a2a24dfd6dc4d0d25e64db740620c79928813f3e0d2d9e958d4b5c3f43af22eb",
+      "bytes": 4442
+    },
+    "lib/mdsw.js": {
+      "sha256": "9ad7b743131a6b4ffea83b2318b63c6fb8ca5e3e79e9e8d3ed6f0a9e8ba55c11",
+      "bytes": 7826
+    },
+    "lib/prng.js": {
+      "sha256": "85d34716618c09824a62ab64a5083df1f96094cf6e8218630d1dcf429cd90d9c",
+      "bytes": 2675
+    },
+    "lib/envelope.js": {
+      "sha256": "f6f199d6c66870a31331262a7131818d0f0a726d2090ec04693cefeb016dc993",
+      "bytes": 9052
+    },
+    "lib/relay.js": {
+      "sha256": "4c28db5fcbe4ecd8858efe6f3f9aa6e2808deb88d868125313c736ba8b2a4ba9",
+      "bytes": 13516
+    },
+    "lib/fill.js": {
+      "sha256": "3e59021c2436c58ca88432d8dbd9bbd38e419dc3b272bf53b23a22927c3283ea",
+      "bytes": 26937
+    },
+    "lib/maker.js": {
+      "sha256": "39c7f1bd978ea75c63c831e41d609a511f4b806311dbcb414c8cec7d0efecd23",
+      "bytes": 27111
+    },
+    "lib/ladder.js": {
+      "sha256": "424bf5eeaa66c3dc53816f778ec0c87768269817228fa7f75f595f6c585b4b97",
+      "bytes": 20755
+    },
+    "resting/safety.js": {
+      "sha256": "de84385a929a5a582fddb9dc6e214b78d535096164a6a748eda5f782d2e31485",
+      "bytes": 3790
+    },
+    "resting/covenant.js": {
+      "sha256": "d6160eabe4878937a431941387f4ca475e127c1ce343f9462b79b99b6163a02a",
+      "bytes": 11282
+    },
+    "resting/input-claims.js": {
+      "sha256": "1555df26f13eac9d95dbb60709b19d3f3ef7d1468c5f04290f10432ce84512f7",
+      "bytes": 5897
+    },
+    "resting/funding.js": {
+      "sha256": "1089eb6454bb2fcd3f935ed9d4cb10db9808c3256c635b2dcc5a3f262e680f77",
+      "bytes": 6350
+    },
+    "resting/signlock.js": {
+      "sha256": "20a637f35a9a6a2901fea450bde8632fb0aa275f58a71f4fda6084dc7736c415",
+      "bytes": 4890
+    },
+    "resting/book.js": {
+      "sha256": "88aab89ef92b35400445705d78949a08287c1fa01a108f75d637519d2f522d60",
+      "bytes": 5263
+    },
+    "resting/pool.js": {
+      "sha256": "33a75fbe3de6800042fe642fb71c534e839e7d793be5a264ab75259a625272c2",
+      "bytes": 21894
+    },
+    "resting/composite.js": {
+      "sha256": "658189b67116ba8c1ef9cb45bed8ebf1e6167bbc27fddc55b15dfc05d8647b35",
+      "bytes": 10372
+    },
+    "resting/txn.js": {
+      "sha256": "0285a530308f8ee668f5acaddd9cbc09044151b87a000d064d0106e88d17bc66",
+      "bytes": 20796
+    },
+    "resting/tape.js": {
+      "sha256": "7a735151d2cd2e4e3242b320fb13bbcbe40fce1d527de68581939bc7e400eec9",
+      "bytes": 12511
+    },
+    "resting/maker.js": {
+      "sha256": "467a575d26a128652bf7295abc1c3a8408eb9dae2f32e7039733f6e8538e0381",
+      "bytes": 12285
+    },
+    "resting/price.js": {
+      "sha256": "0d5f12acad454f6a432e474a77f7606b4c12c74413accabf05dbc363e032aa09",
+      "bytes": 5734
+    },
+    "resting/verifier.js": {
+      "sha256": "fb2efd239c1f16dc4dc566f197d413b1c7b7592ee4d3d8a2780cb4c72590e90b",
+      "bytes": 8484
+    },
+    "resting/pending.js": {
+      "sha256": "6483926d02973073e9709877cda63fe8e6a470764ea3d8dba9ca5fbf9838db00",
+      "bytes": 3472
+    },
+    "resting/stats.js": {
+      "sha256": "90053bb4b53f2f600de0f8158f3fb13cd1f1ca7e0e1873bf93a1a9a910230c52",
+      "bytes": 2538
+    },
+    "resting/split.js": {
+      "sha256": "3ddba1f69400b32318fea0645b2f6f6300af53a0b3aea64498d49a873ec12779",
+      "bytes": 1768
+    },
+    "resting/chain.js": {
+      "sha256": "cb77ec8ff08ff7ec25dabb0c134d02d25b812e73661cc0e8d718ed76af3753cd",
+      "bytes": 2141
+    },
+    "resting/history.js": {
+      "sha256": "16d2eb4dbf98554bb08d3838dc84f82421017859c43e4bdf649943e0422c56ab",
+      "bytes": 7007
+    },
+    "resting/pd_service.js": {
+      "sha256": "6f415034ca09653c0ea90ced695020abff58f1e416d80f2f755fb5c96be2c224",
+      "bytes": 85271
+    },
+    "lib/autocross.js": {
+      "sha256": "b32893c5fec9ecfb417a2cd3a64b02130e21e3612a9fb08b78cc228813cb478c",
+      "bytes": 24840
+    }
+  }
+}

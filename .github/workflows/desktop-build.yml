@@ -93,6 +93,12 @@ jobs:
       - name: Verify PandaPools engine parity + recovery
         run: npm run test:pandapools
 
+      # The same gate for the Dexicon engine: main/dexicon/{lib,crypto,vendor,resting}/ is copied verbatim from the
+      # Dexicon MiniDapp (not checked out here), so this verifies the committed digest manifest
+      # (scripts/dexicon-parity-check.cjs does the donor comparison locally).
+      - name: Verify Dexicon engine parity
+        run: npm run test:dexicon
+
       # The donor-free halves of the other suites. The parity checks in test:atomix / test:casino diff against
       # donor repos that CI does not check out, but the units and gates below need nothing external — and they
       # cover fund-safety surfaces (the ETH RPC SSRF allowlist is 136 of these checks). Leaving them out meant
