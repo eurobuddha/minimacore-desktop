@@ -91,3 +91,39 @@ test("Node tab: the phone's NODE and IDENTITY cards, then the desktop's own cont
   for (const id of ["nRestart", "nContrib", "nReconfig", "nReclaim"]) assert.ok(node.includes(`id="${id}"`) && node.includes(`el("${id}")`), id + " kept and wired");
   assert.ok(/tryCmd\("keys"\), tryCmd\("peers"\), tryCmd\("network"\)/.test(app), "the phone's three read-only dashboard commands");
 });
+
+// ---- executed, not read: the functions are lifted out of app.js and run ----
+function lift(names, extra) {   // a one-line definition, or a block that ends at the first "}" in column 0
+  const src = names.map(n => {
+    const m = app.match(new RegExp("\\n((?:const|function) " + n + "\\b[^\\n]*)")); assert.ok(m, n + " found in app.js");
+    return /\{$/.test(m[1]) ? app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2) : m[1];
+  }).join("\n");
+  return new Function((extra || "") + src + "; return { " + names.filter(n => /^[a-z]/.test(n)).join(", ") + " };")();
+}
+
+test("block time: the node's Java date is read without Date parsing (BST, CET, GMT, no blocks, nothing)", () => {
+  const { clock, blockTime } = lift(["clock", "blockTime"]);
+  for (const zone of ["BST", "CET", "GMT", "JST"]) {
+    const t = "Thu Jul 16 14:54:04 " + zone + " 2026";
+    assert.equal(clock(t), "14:54:04", zone + " footer clock");
+    assert.equal(blockTime(t), "Jul 16, 2026, 14:54:04 " + zone, zone + " Node tab block time");
+  }
+  assert.equal(blockTime("Mon Nov 2 03:04:05 CET 2026"), "Nov 2, 2026, 03:04:05 CET");
+  for (const none of ["NO BLOCKS YET", "", null, undefined]) assert.equal(clock(none), "", "no clock for " + none);
+  assert.equal(blockTime("NO BLOCKS YET"), "No blocks yet");
+  assert.equal(blockTime(""), ""); assert.equal(blockTime(undefined), "");
+  assert.equal(blockTime("2026-07-16 14:54:04"), "2026-07-16 14:54:04", "an unknown format with a clock is shown as the node gave it");
+  assert.ok(isNaN(new Date("Thu Jul 16 14:54:04 BST 2026")), "the reason: JavaScript cannot parse the zone name");
+});
+
+test("tab selection: where a view sits decides what the shell wears", () => {
+  const { shellMode, viewOfTab } = lift(["TAB_OF", "SUB_TITLE", "viewOfTab", "shellMode"], 'let dexView = "pandapools";\n');
+  assert.deepEqual(shellMode("balances"), { tab: "wallet", mode: "tabs" });
+  assert.deepEqual(shellMode("pandapools"), { tab: "dexicon", mode: "tabs" });
+  assert.deepEqual(shellMode("node"), { tab: "node", mode: "tabs" });
+  for (const v of ["send", "receive", "logs", "terminal", "settings"]) assert.deepEqual(shellMode(v), { tab: "", mode: "sub" }, v);
+  for (const v of ["mail", "ethwallet", "faucet", "parlons"]) assert.deepEqual(shellMode(v), { tab: "", mode: "app" }, v);
+  assert.equal(viewOfTab("wallet"), "balances");
+  assert.equal(viewOfTab("dexicon"), "pandapools", "the Dexicon tab reopens the panel it last showed");
+  assert.equal(viewOfTab("history"), "history");
+});

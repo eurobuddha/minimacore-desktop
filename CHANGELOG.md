@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.76] — shell review: block time outside GMT and the US zones
+
+- The node reports the tip's time as Java prints a date, for example `Thu Jul 16 14:54:04 BST 2026`. The shell handed that to JavaScript's date parser, which only knows GMT and the US zone names. On a computer in any other zone (BST, CET, JST and so on) the footer's "@ time" and the Node tab's "Block time" were empty. Both now take the clock and the date from the text itself: the footer shows `14:54:04`, the Node tab `Jul 16, 2026, 14:54:04 BST`. "NO BLOCKS YET" shows as "No blocks yet" on the Node tab and as no time in the footer.
+- The dev preview hid this, because its fixture fed a JavaScript-format date. It now feeds the node's own format with a BST zone.
+- `scripts/shell-test.cjs` was never run by anything. It is now `npm run test:shell` and a step in the CI build (it needs no donor repository). New tests run the real functions lifted from `renderer/app.js`: the footer clock and the block time for BST, CET, GMT and JST strings, "NO BLOCKS YET" and missing values; and which bar a view wears (tab, sub screen or tray app).
+
 ## [0.18.75] — signing queue: review fixes
 
 - `sign` and `signfrom` now wait in the signing queue, as do `txnauto` and a `txnpost` with `burn:` (the node signs a burn as its own transaction). The pattern was checked against the node's command sources. Left out on purpose: `sendfrom` (the Web Wallet reserves that key's uses before it signs), a plain `txnpost`, and the commands that only build or view a transaction.

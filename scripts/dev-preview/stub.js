@@ -9,6 +9,8 @@
 (function () {
   const Q = new URLSearchParams(location.search);
   const now = Date.now();
+  // the node's own format (Java Date.toString()), with a zone name JavaScript cannot parse: the shell must not need to
+  const BLOCK_TIME = "Thu Jul 16 14:54:04 BST 2026";
   try { if (Q.get("order")) localStorage.setItem("shellOrder", Q.get("order")); if (Q.get("hidden")) localStorage.setItem("shellHidden", Q.get("hidden")); } catch (e) {}
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
   const NFT = "0x5A1E0FD3C47B92E6A8D0347F1C29B6E5D48A7C3F0B19E2D6C5A4F3B2E1D0C9B8";
@@ -30,7 +32,7 @@
     scripts: () => [],
     peers: () => ({ peerslist: "203.0.113.24:9001,198.51.100.77:9001" }),
     network: () => ({ details: { connected: 8, p2p: { address: "192.0.2.10:9001" } }, connections: [1, 2, 3, 4, 5, 6].map(i => ({ incoming: true, host: "203.0.113." + i })).concat([{ incoming: false, host: "198.51.100.77" }, { incoming: false, host: "198.51.100.78" }]) }),
-    status: () => ({ version: "1.0.45.14", chain: { block: 2428089, time: new Date(now - 41000).toString() } })
+    status: () => ({ version: "1.0.45.14", chain: { block: 2428089, time: BLOCK_TIME } })
   };
   const mailId = PK("E5");
   const mailThread = (who, name, subject, message, unread, mins) => ({ other: who, hashref: PK("F" + mins), unread,
@@ -38,7 +40,7 @@
   const chatThread = (pk, name, body, unread, mins) => ({ pubkey: pk, name, unread, last: { ts: now - mins * 60000, body, out: false, state: "delivered" } });
   const status = {
     state: "running", rpcPort: 9005, contribute: false, portmap: {}, parlons: { ready: false, error: "" },
-    health: { version: "1.0.45.14", block: 2428089, time: new Date(now - 41000).toString(), connections: 8, incoming: 6, locked: false, megammr: false, acceptingInLinks: null, p2pAddress: "" }
+    health: { version: "1.0.45.14", block: 2428089, time: BLOCK_TIME, connections: 8, incoming: 6, locked: false, megammr: false, acceptingInLinks: null, p2pAddress: "" }
   };
   const fixtures = {
     cmd: async (c) => { const f = cmds[String(c).split(" ")[0]]; return f ? { status: true, response: f() } : { status: false, error: "preview: no fixture for " + c }; },

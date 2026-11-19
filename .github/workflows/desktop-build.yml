@@ -113,6 +113,10 @@ jobs:
       - name: Verify terminal autocomplete
         run: npm run test:termcomplete
 
+      # The shell: six tabs, tray, overflow menu, and the block time read from the node's Java date (no donor repo needed).
+      - name: Verify shell
+        run: npm run test:shell
+
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash

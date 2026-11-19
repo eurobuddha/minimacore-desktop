@@ -529,16 +529,16 @@ function trayOrder(saved, ids) {
   return order;
 }
 function viewOfTab(tab) { return tab === "wallet" ? "balances" : tab === "dexicon" ? dexView : tab; }
+function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: tab ? "tabs" : SUB_TITLE[view] ? "sub" : "app" }; }
 
 function selectTab(view) {
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   activeView = view;
-  const tab = TAB_OF[view];
-  const mode = tab ? "tabs" : SUB_TITLE[view] ? "sub" : "app";
+  const { tab, mode } = shellMode(view);
   if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; }
   el("shell").dataset.mode = mode;
-  el("shell").dataset.tab = tab || "";
+  el("shell").dataset.tab = tab;
   el("barPage").textContent = SUB_TITLE[view] || "";
   document.querySelectorAll(".tab").forEach(b => {
     const on = b.dataset.tab === tab;
@@ -679,7 +679,16 @@ async function menuAction(act) {
 // Footer, as the phone's: a dot and the key line on the left, "block @ time" on the right. This node uses
 // classic keys, so the left reads "Key uses: N" (the phone's own text when block-as-key-uses is off).
 let FOOT_KEYS = null, FOOT_KEYS_AT = 0;
-function clock(t) { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString("en-GB", { hour12: false }) : ""; }
+// The node reports the tip's time as Java's Date.toString(), "Thu Jul 16 14:54:04 BST 2026". new Date() only
+// knows GMT and the US zone names, so BST, CET, JST and the rest came back invalid and the time went blank.
+// The wall clock and the date are taken from the text itself; "NO BLOCKS YET" and anything else carry no clock.
+function clock(t) { const m = /\b\d\d:\d\d:\d\d\b/.exec(String(t || "")); return m ? m[0] : ""; }
+function blockTime(t) {
+  t = String(t || "").trim();
+  const m = /^\w{3} (\w{3}) (\d{1,2}) (\d\d:\d\d:\d\d) (\S+) (\d{4})$/.exec(t);
+  if (m) return m[1] + " " + Number(m[2]) + ", " + m[5] + ", " + m[3] + " " + m[4];
+  return /^no blocks/i.test(t) ? "No blocks yet" : clock(t) ? t : "";
+}
 function paintFooter(s) {
   const h = s.health || {}, up = s.state === "running";
   el("footDot").dataset.state = s.state || "";
@@ -2548,7 +2557,7 @@ function renderNode(s) {
   // Laid out as the phone's Node tab (view_home.xml): NODE, then IDENTITY. The desktop's own controls follow.
   const up = s.state === "running";
   const status = up ? "Online" : s.state === "starting" ? "Waiting for node" : s.state === "error" ? "Error" : s.state === "stopped" ? "Stopped" : s.state === "stopping" ? "Stopping" : String(s.state);
-  const when = h.time && !isNaN(new Date(h.time)) ? new Date(h.time).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "";
+  const when = blockTime(h.time);
   const D = up ? NODE_DASH : {};
   const row = (k, v, extra) => `<div class="home-row"${extra || ""}><span class="home-row__k">${k}</span><span class="home-row__v">${v}</span></div>`;
   c.innerHTML = `
