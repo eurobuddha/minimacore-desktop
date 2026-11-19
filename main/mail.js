@@ -77,7 +77,7 @@ async function nodeCmd(cmd) { return runner(cmd); }
 // ---- identity (derive once, cache in Keychain) ----
 async function init() {
   if (identity) return identity;
-  await mc.ready();
+  const sodium = await mc.ready();
   const cached = config.getSecret(MAIL_KEY_ACCOUNT);
   if (cached) { try { identity = mc.loadIdentity(cached); } catch (e) { identity = null; } }
   if (!identity) {
@@ -88,6 +88,7 @@ async function init() {
     identity = await mc.deriveIdentity(resp.seed);
     config.setSecret(mc.serializeIdentity(identity), MAIL_KEY_ACCOUNT);
   }
+  ensureOwnPublication(sodium);
   try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; mypayaddr = gr.miniaddress || gr.address || ""; if (mypayaddr) store.metaSet("mypayaddr", mypayaddr); } catch (e) {}
   if (!store.metaGet("coinnotify")) { try { await nodeCmd("coinnotify action:add address:" + CHAINMAIL); store.metaSet("coinnotify", true); } catch (e) {} }
   return identity;
@@ -487,6 +488,20 @@ async function resolveRecipient(input) {
 }
 
 // Only user-enabled, signed public cards are retained. The regular node loop checks them at most every four hours.
+function ensureOwnPublication(sodium) {
+  const key = identity.publicId;
+  if (!store.metaGet("mail-address-off:" + key) && !publications()[key]) {
+    updatePublication(key, { card: address.card(sodium, identity), next: 0, pending: false });
+  }
+}
+async function checkOwnBeacon() {
+  const owner = identity;
+  if (!owner) throw new Error("Mail identity unavailable");
+  const proof = await address.find(nodeCmd, await mc.ready(), address.phrase(owner.publicId), 1500);
+  if (!proof) return null;
+  if (proof.key !== owner.publicId) throw new Error("Address conflict");
+  return { block: proof.block || 0 };
+}
 function publications() { return store.metaGet("mail-address-publications") || {}; }
 function updatePublication(key, entry) {
   const entries = { ...publications() };
@@ -497,12 +512,17 @@ function updatePublication(key, entry) {
 async function setPublication(key, enable) {
   if (!address.isKey(key)) throw new Error("Invalid Mail key");
   key = key.toLowerCase();
-  if (!enable) { updatePublication(key, null); return myIdentity(); }
+  if (!enable) {
+    if (key === identity?.publicId) store.metaSet("mail-address-off:" + key, true);
+    updatePublication(key, null);
+    return myIdentity();
+  }
   const owner = identity;
   const sodium = await mc.ready();
   const card = owner?.publicId === key ? address.card(sodium, owner)
     : contacts().some(c => c.publicId === key) && await address.find(nodeCmd, sodium, address.phrase(key), 1500);
   if (!owner || identity !== owner || !card || card.key !== key) throw new Error("A verified contact card is required for publication.");
+  if (key === owner.publicId) store.metaSet("mail-address-off:" + key, false);
   if (!publications()[key]) updatePublication(key, { card, next: 0, pending: false });
   await renewAddresses();
   return myIdentity();
@@ -619,7 +639,7 @@ async function exportBackup(passphrase) {
 }
 async function importBackup(passphrase, json) {
   if (/[^\x20-\x7E]/.test(String(passphrase))) throw new Error("Use an ASCII passphrase — a non-ASCII one won't match a backup made on another device.");
-  await mc.ready();
+  const sodium = await mc.ready();
   const plain = backup.decrypt(passphrase, json);          // throws on a wrong passphrase / tampered file
   const root = JSON.parse(plain.toString("utf8"));
   const kd = root.identity || {};
@@ -633,7 +653,12 @@ async function importBackup(passphrase, json) {
   identity = restored;
   config.setSecret(mc.serializeIdentity(identity), MAIL_KEY_ACCOUNT);
   seenCoins.clear(); repliedReq.clear(); paReplyCooldown.clear(); autoReplyTimes = []; backfilled = false; lastTip = 0;
+  const ownOff = store.metaGet("mail-address-off:" + restored.publicId);
+  const existingJob = publications()[restored.publicId];
   store.clear();   // drop the PREVIOUS identity's decrypted mail/contacts (confidentiality on a shared/repurposed node)
+  if (ownOff) store.metaSet("mail-address-off:" + restored.publicId, true);
+  else if (existingJob) updatePublication(restored.publicId, existingJob);
+  ensureOwnPublication(sodium);
   if (root.name != null) store.metaSet("myname", String(root.name));
   for (const c of (root.contacts || [])) {
     if (!c || !c.key || !mc.isValidPublicId(String(c.key))) continue;   // don't import garbage contact keys
@@ -657,7 +682,7 @@ async function importBackup(passphrase, json) {
 module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   startBackfill, backfillStatus, status, outbox, sent, retrySend,
   sendMessage, pay, requestPayaddr, resolvePayaddr, myReceivingAddress, looksLikeMinimaAddress,
-  myIdentity, shareString, resolveRecipient, setPublication, setName, threads, thread, readMessage, threadWith, contacts, addContact,
+  myIdentity, shareString, resolveRecipient, setPublication, checkOwnBeacon, setName, threads, thread, readMessage, threadWith, contacts, addContact,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
   _setRunner, CHAINMAIL, threadKey,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)

@@ -59,7 +59,9 @@ async function find(run, sodium, address, depth) {
     const sig = state[2].slice(2), key = state[1];
     if (!verify(sodium, key, sig, address)) continue;
     if (found && found.key !== key.toLowerCase()) throw new Error("Multiple keys match. Ask for a contact link.");
+    const block = Math.max(found?.block || 0, Number(coin.created) || 0);
     found = { key: key.toLowerCase(), sig: sig.toLowerCase(), phrase: address };
+    if (Number.isSafeInteger(block) && block > 0) found.block = block;
   }
   return found;
 }

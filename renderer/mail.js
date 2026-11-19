@@ -253,9 +253,10 @@
     var pid = (ID && ID.publicId) || "";
     return '<div class="mm-id">' + avatar(pid, ID && ID.name, 72)
       + (ID && ID.words ? '<div class="mm-idkey">' + D.esc(ID.words) + '</div>'
+        + '<button class="mm-abtn" id="mmPublish" type="button">' + (ID.published ? "Stop publishing address" : "Publish my address") + '</button>'
+        + '<div class="mm-idcap" role="status" id="mmBeaconStatus">Checking beacon…</div>'
         + '<button class="mm-tbtn" id="mmWords" type="button">Copy address words</button>'
-        + '<button class="mm-tbtn" id="mmLink" type="button">Copy contact link</button>'
-        + '<button class="mm-tbtn" id="mmPublish" type="button">' + (ID.published ? "Stop publishing address" : "Publish my address") + '</button>' : '')
+        + '<button class="mm-tbtn" id="mmLink" type="button">Copy contact link</button>' : '')
       + '<div class="mm-qr" id="mmQr"></div>'
       + '<div class="mm-idcap">Have someone scan this, or share your key:</div>'
       + '<div class="mm-idkey" id="mmShare" title="Click to copy">' + D.esc(pid || "(connecting to your node…)") + "</div>"
@@ -523,6 +524,17 @@
     if (ID && ID.words) {
       D.el("mmWords").onclick = () => D.copy(ID.words);
       D.el("mmLink").onclick = () => D.copy(ID.link);
+      const indicator = D.el("mmBeaconStatus");
+      async function check() {
+        if (!indicator?.isConnected || VIEW !== "key") return;
+        try {
+          const proof = await D.api.mailCheckOwnBeacon();
+          indicator.textContent = proof ? (proof.block ? "Beacon live · block " + proof.block : "Beacon live on this node")
+            : (ID.published ? "Beacon not yet visible on this node" : "Publication off · no visible beacon");
+        } catch (e) { indicator.textContent = "Could not verify beacon: " + errText(e); }
+        if (indicator.isConnected && VIEW === "key") setTimeout(check, 15000);
+      }
+      check();
       D.el("mmPublish").onclick = () => toggleAddress(ID.publicId, !ID.published);
     }
     try {

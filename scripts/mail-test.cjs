@@ -329,6 +329,8 @@ test("Android Mail address, link and signed beacon interoperate byte for byte", 
   const coin = { address: codec.ADDRESS, tokenid: "0x00", state: { 0: codec.tag(words), 1: id.publicId, 2: "0x" + card.sig } };
   const run = async cmd => { assert.ok(cmd.endsWith("depth:1500")); return { status: true, response: [coin] }; };
   assert.deepEqual(await codec.find(run, sodium, words, 1500), card);
+  coin.created = "2427884";
+  assert.deepEqual(await codec.find(run, sodium, words, 1500), { ...card, block: 2427884 });
   coin.state[2] = "0x" + "00".repeat(64);
   assert.equal(await codec.find(run, sodium, words, 1500), null);
 });
@@ -342,4 +344,31 @@ test("six words resolve an unsaved correspondent from message headers", async t 
   t.mock.method(store, "all", () => [{ frompublickey: peer, topublickey: recipient.slice(2).toUpperCase() }]);
   assert.equal(await mail.resolveRecipient(codec.phrase(recipient)), recipient);
   assert.equal(await mail.resolveRecipient(codec.phrase(peer)), peer);
+});
+
+test("the owner's card starts enabled, survives restart, and respects Stop", async t => {
+  const config = require("../main/config"), store = require("../main/mail-store");
+  const keys = require("../main/mailcrypto"), codec = require("../main/mailaddress");
+  const fixture = await keys.deriveIdentity("mail-publication-default-fixture");
+  const meta = new Map();
+  t.mock.method(config, "getSecret", () => keys.serializeIdentity(fixture));
+  t.mock.method(store, "metaGet", k => meta.get(k));
+  t.mock.method(store, "metaSet", (k,v) => meta.set(k,v));
+  const path = require.resolve("../main/mail"), original = require.cache[path];
+  t.after(() => { require.cache[path] = original; });
+  const open = async () => {
+    delete require.cache[path];
+    const instance = require(path);
+    instance._setRunner(async () => ({ status: true, response: {} }));
+    await instance.init();
+    return instance;
+  };
+  let instance = await open();
+  const job = meta.get("mail-address-publications")[fixture.publicId];
+  assert.ok(codec.verify(await keys.ready(), job.card.key, job.card.sig, job.card.phrase));
+  instance = await open();
+  assert.equal(meta.get("mail-address-publications")[fixture.publicId], job);
+  await instance.setPublication(fixture.publicId, false);
+  instance = await open();
+  assert.equal(instance.myIdentity().published, false);
 });

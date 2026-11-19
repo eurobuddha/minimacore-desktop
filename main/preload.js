@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld("mcd", {
   mailSetName: (n) => ipcRenderer.invoke("mcd:mailSetName", n),
   mailAddressWords: () => ipcRenderer.invoke("mcd:mailAddressWords"),
   mailResolveAddress: value => ipcRenderer.invoke("mcd:mailResolveAddress", value),
+  mailCheckOwnBeacon: () => ipcRenderer.invoke("mcd:mailCheckOwnBeacon"),
   mailPublishAddress: (key, enabled) => ipcRenderer.invoke("mcd:mailPublishAddress", key, enabled),
   mailShare: () => ipcRenderer.invoke("mcd:mailShare"),
   mailThreads: () => ipcRenderer.invoke("mcd:mailThreads"),

@@ -241,6 +241,7 @@ ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myId
 ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailAddressWords", () => require("./mailaddress").words);
 ipcMain.handle("mcd:mailResolveAddress", (_e, value) => mail.resolveRecipient(value));
+ipcMain.handle("mcd:mailCheckOwnBeacon", () => mail.checkOwnBeacon());
 ipcMain.handle("mcd:mailPublishAddress", (_e, key, enabled) => mail.setPublication(key, enabled === true));
 ipcMain.handle("mcd:mailShare", () => mail.shareString());
 ipcMain.handle("mcd:mailThreads", () => mail.threads());
