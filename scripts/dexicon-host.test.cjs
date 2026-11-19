@@ -17,7 +17,7 @@ const tmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "dexicon-tes
 /** A booted host on a mock node. o: { dir, node options, wrap(run) → runner } */
 async function boot(o = {}) {
   const node = M.mockNode(o.node), net = o.net || M.mockNet(), dir = o.dir || tmp();
-  const host = makeHost({ runner: o.wrap ? o.wrap(node.run) : node.run, dataDir: dir, net, tickMs: o.tickMs || 40, quiet: true });
+  const host = makeHost({ runner: o.wrap ? o.wrap(node.run) : node.run, dataDir: dir, net, tickMs: o.tickMs || 40, quiet: true, netLimitMs: o.netLimitMs });
   node.attach(host); hosts.push(host);
   await host.start();
   await M.until(() => host.status().ready && host.status().restingReady);
@@ -475,6 +475,84 @@ test("a signing command still queued when the engine is stopped or its wallet re
     assert.equal(r2.status, false); assert.match(r2.error, /not sent: `txnsign` was still queued when its caller gave up/);
     assert.equal(r3.status, false); assert.match(r3.error, /not sent: `txnsign` was still queued/);
   }
+});
+
+// 0.18.108 (MEDIUM): refusals to takers fanned out unthrottled into the app's shared four-slot net pool, which the
+// AtomiX Ethereum RPC uses for a claim or a refund.
+/** A network whose POSTs wait until the test lets them through. held: the POSTs at the network now. */
+function slowNet() {
+  const base = M.mockNet(), held = [], sent = [], opts = []; let most = 0;
+  return { calls: base.calls, held, sent, opts, most: () => most,
+    fetchJson: (url, o) => { opts.push(o); return base.fetchJson(url, o); },
+    postText: (url, body, o) => { opts.push(o); sent.push(body); return new Promise(res => { const h = { url, body, done: () => { held.splice(held.indexOf(h), 1); res('{"ok":true}'); } }; held.push(h); most = Math.max(most, held.length); }); },
+    drain: async function (until) { while (!until()) { while (held.length) held[0].done(); await new Promise(r => setTimeout(r, 5)); } } };
+}
+
+test("16 refused takes in one cycle: two refusals at the network at a time, never 16; nothing of Dexicon takes a slot of the shared pool", async () => {
+  const net = slowNet(); let inbox = null;
+  const fetchJson = net.fetchJson; net.fetchJson = (url, o) => { if (inbox && /\/dex\/inbox\?/.test(url)) { net.opts.push(o); const m = inbox; inbox = null; return Promise.resolve({ cursor: 1, messages: m }); } return fetchJson(url, o); };
+  const { host, ctx } = await boot({ net });
+  // 16 takes from 8 senders (the engine's own flood limits: 2 a sender, 16 a cycle), each for an order that is not live
+  inbox = JSON.parse(vm.runInContext(`(function () {
+    var out = [], s, i, T;
+    for (s = 0; s < 8; s++) { T = AX.identity.fromSeed("0x" + new Array(33).join("a" + s), "decks");
+      for (i = 0; i < 2; i++) out.push(AX.envelope.msg(T, ME.publicId(), AX.identity.seal(T, ME.publicId(), AX.hex.utf8(JSON.stringify({ k: "take", orderId: "0x" + s + i, txn: "0xAB" + s + i }))), nowS() + 300)); }
+    globalThis.__low = []; globalThis.__body = []; var P = MDS.net.POST; MDS.net.POST = function (u, d, cb, low) { __low.push(low === true); __body.push(String(d)); return P(u, d, cb, low); };
+    return JSON.stringify(out);
+  })()`, ctx));
+  await M.until(() => vm.runInContext("__low.length", ctx) >= 16);   // the service has answered all 16
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(net.most(), 2, "at the network at once: " + net.most());
+  assert.equal(host._lanes().work, 2); assert.ok(host._lanes().workWaiting >= 14, "the other 14 wait their turn inside Dexicon's own lane (" + host._lanes().workWaiting + " waiting, the service's own reads among them)");
+  assert.ok(JSON.parse(vm.runInContext("JSON.stringify(__low)", ctx)).every(Boolean), "each of them marked as a refusal by the service");
+  // a reply that carries a result is sent before every refusal still waiting, and is never dropped
+  vm.runInContext(`reply(AX.identity.fromSeed("0x" + new Array(33).join("a0"), "decks").publicId(), { k: "taken", orderId: "0x00", txpowid: "0x01", filled: "1", coins: [] })`, ctx);
+  const before = net.sent.length, at = vm.runInContext("__low.length - 1", ctx);
+  net.held[0].done();
+  await M.until(() => net.sent.length === before + 1);
+  assert.equal(vm.runInContext("__low[" + at + "]", ctx), false, "the 'taken' reply is not low priority");
+  assert.equal(net.sent[before], vm.runInContext("__body[" + at + "]", ctx), "and it is the next POST at the network, ahead of the 14 refusals still waiting");
+  await net.drain(() => host._lanes().work === 0 && host._lanes().workWaiting === 0);
+  assert.equal(net.most(), 2);
+  assert.ok(net.opts.length > 20 && net.opts.every(o => o && o.ownCap === true && o.noRedirect === true), "every Dexicon request tells netfetch it bounds itself: no shared slot");
+});
+
+test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an order or a read is never dropped; long polls do not block work; a request that never settles frees its place", async () => {
+  const net = slowNet();
+  const { host, ctx } = await boot({ net, netLimitMs: 400 });
+  const post = (n, low) => vm.runInContext(`MDS.net.POST("https://eurobuddha.com/dex-relay/dex/msg", ${JSON.stringify(n)}, function (r) { __done.push([${JSON.stringify(n)}, r.status]); }, ${low})`, ctx);
+  vm.runInContext("globalThis.__done = []", ctx);
+  for (let i = 0; i < 40; i++) post("low" + i, true);
+  const done = () => JSON.parse(vm.runInContext("JSON.stringify(__done)", ctx));
+  await M.until(() => done().length === 6);
+  assert.deepEqual(done(), [["low2", false], ["low3", false], ["low4", false], ["low5", false], ["low6", false], ["low7", false]], "2 at the network, 32 waiting, the 6 oldest waiting ones dropped and told so");
+  assert.equal(host._lanes().dropped, 6); assert.deepEqual(net.sent, ["low0", "low1"]);
+  // what carries a signature: from the engine (an order, a 'taken' reply) and from the page (a take)
+  post("order", false);
+  const take = host.command({ op: "net", method: "POST", url: "https://eurobuddha.com/dex-relay/dex/msg", body: "take" });
+  assert.equal(host._lanes().workWaiting, 34, "not dropped although 32 refusals wait");
+  // both WORK places are held: a long poll still goes out (its own lane), a plain read waits
+  const n = net.calls.length;
+  vm.runInContext(`MDS.net.GET("https://eurobuddha.com/dex-relay/dex/inbox?pk=0x00&since=0&hold=8", function (r) { __done.push(["poll", r.status]); }); MDS.net.GET("https://eurobuddha.com/dex-relay/dex/book?market=x&since=0&hold=0", function (r) { __done.push(["read", r.status]); })`, ctx);
+  await M.until(() => done().some(d => d[0] === "poll"));
+  assert.ok(!done().some(d => d[0] === "read"), "the read is WORK: it waits behind the two held places");
+  assert.equal(net.calls.slice(n).filter(c => /pk=0x00/.test(c)).length, 1);
+  net.held[0].done(); net.held[0].done();
+  await M.until(() => net.sent.length === 4);
+  assert.deepEqual(net.sent.slice(2), ["order", "take"], "signed work goes before every waiting refusal, in the order asked");
+  await net.drain(() => host._lanes().work === 0 && host._lanes().workWaiting === 0);
+  assert.deepEqual(await take, { status: true, response: '{"ok":true}' });
+  assert.equal(net.sent.length, 2 + 2 + 32, "every refusal that was not dropped was sent in the end");
+  assert.ok(done().some(d => d[0] === "read" && d[1] === true));
+  assert.equal(net.most(), 2);
+  // a request that never settles (netfetch gives up after 20 s by itself; the host's own limit is the backstop)
+  post("stuck1", false); post("stuck2", false); post("after", false);
+  await M.until(() => net.held.length === 2);
+  const t0 = Date.now();
+  await M.until(() => net.sent.includes("after"));
+  assert.ok(Date.now() - t0 >= 300, "after the limit, not before");
+  assert.ok(done().some(d => d[0] === "stuck1" && d[1] === false), "and its caller is told it failed");
+  net.held.slice().forEach(h => h.done());
 });
 
 test("the app wiring: started and stopped with the node, reset by the MAIN process before the node restarts, flushed on quit, one bridge", () => {

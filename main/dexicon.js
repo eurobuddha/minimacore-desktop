@@ -20,6 +20,12 @@
  * cancelOne / chain(). The engine's AtomiX doors are never loaded (main/dexicon/service.desktop.js).
  * ADDED: an epoch guard (a wallet replaced under a running engine: the old context's late callbacks reach neither
  * the node nor the new store), stop(), invalidate() (the store is moved aside, never deleted).
+ * OUTBOUND LANES (0.18.108): Dexicon's relay and price traffic takes NO slot of the app's shared four-slot pool
+ * (main/netfetch.js), which the AtomiX Ethereum RPC needs for a claim or a refund. It has two bounded lanes of its
+ * own: WORK (2 at a time: takes, replies, publishes, book reads, the price) and POLL (3: the long polls, which hold
+ * a connection for many seconds by design: the service's inbox and the page's inbox and book). Refusals to takers
+ * wait in the WORK lane at low priority, at most 32 of them: the oldest is dropped beyond that. Nothing else is ever
+ * dropped: a take, a "taken" reply and an order all carry a signature or its result. Every request has a time limit.
  * WALLET SAFETY (0.18.106): the engine never outlives the node it derived its identity from (stop() drops the whole
  * context; every node start derives the identity again and the service checks the store against it); a store written
  * by another identity is moved aside before anything trades on it; while a move aside is owed and fails, the store is
@@ -36,6 +42,34 @@ const { makeSqlShim } = require("./pandapools/sqlshim");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const TICK_MS = 10000;
+const WORK_LANE = 2, POLL_LANE = 3, LOW_MAX = 32, NET_LIMIT_MS = 30000;   // OUTBOUND LANES (header); netfetch's own limit is 15 s idle, 20 s in all
+
+/** A lane: at most `size` requests in flight, the rest waiting in order, low-priority ones behind the others. Each
+ *  request ends after limitMs at the latest (null), so one that never settles cannot hold its place for good.
+ *  push(start, low) resolves with the request's value, or null (failed, timed out, or a low one dropped: onDrop). */
+function makeLane(size, limitMs, onDrop) {
+  let active = 0; const waiting = [];
+  function pump() {
+    while (active < size && waiting.length) {
+      let i = waiting.findIndex(j => !j.low); if (i < 0) i = 0;   // a refusal never goes before a take, a reply that carries a result, or a read
+      const j = waiting.splice(i, 1)[0]; active++;
+      let done = false;
+      const end = (v) => { if (done) return; done = true; clearTimeout(t); active--; j.resolve(v); pump(); };
+      const t = setTimeout(() => end(null), limitMs); if (t.unref) t.unref();
+      Promise.resolve().then(j.start).then(end, () => end(null));
+    }
+  }
+  return {
+    push(start, low) {
+      return new Promise(resolve => {
+        waiting.push({ start, resolve, low: !!low });
+        if (low) { const lows = waiting.filter(j => j.low); if (lows.length > LOW_MAX) { waiting.splice(waiting.indexOf(lows[0]), 1); lows[0].resolve(null); onDrop(); } }
+        pump();
+      });
+    },
+    active: () => active, waiting: () => waiting.length
+  };
+}
 const ENGINE_VERSION = "0.0.91";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
 const PRICE_HOST = "api.mexc.com";   // resting/price.js DEPTH_URL / BOOK_URL
 const GECKO_HOST = "api.coingecko.com", GECKO_PATH = "/api/v3/coins/minima/tickers";   // lib/ladder.js GECKO_MEXC_URL: MEXC's ticker, when MEXC itself cannot be reached
@@ -71,6 +105,14 @@ function makeHost(opts = {}) {
   const emitter = new EventEmitter();
   const net = () => opts.net || require("./netfetch");   // asked for at the first call, so a test's stand-in is all that ever loads
   const tickMs = opts.tickMs || TICK_MS;
+  let dropped = 0;
+  const netLimit = opts.netLimitMs || NET_LIMIT_MS;
+  const work = makeLane(WORK_LANE, netLimit, () => { if (dropped++ % LOW_MAX === 0) log("more than " + LOW_MAX + " refusals to takers were waiting to be sent: the oldest are dropped (a refusal carries no signature; the taker voids an unanswered take by itself)"); });
+  const polls = makeLane(POLL_LANE, netLimit, () => {});
+  const OWN = { noRedirect: true, ownCap: true };   // netfetch: no redirects, and none of the shared four slots (this host bounds itself)
+  /** One relay or price request, in its lane. A GET that asks the relay to hold (a long poll) is a POLL; all else WORK. */
+  const netGet = (url, alive) => (/[?&]hold=[1-9]/.test(url) ? polls : work).push(() => (alive() ? net().fetchJson(url, OWN) : null));
+  const netPost = (url, body, alive, low) => work.push(() => (alive() ? net().postText(url, body, OWN) : null), low);
   let dataDir = opts.dataDir || null;
   let ctx = null, sqlShim = null, serviceHandler = null, ready = false, initPromise = null, timer = null;
   let epoch = 0;   // bumped by drop(): everything built before it is disowned
@@ -139,13 +181,12 @@ function makeHost(opts = {}) {
       net: {
         GET(url, cb) {
           if (!live() || !netAllowed(url, "GET")) return cb(toVm({ status: false, error: "host not allowed" }));
-          net().fetchJson(String(url), { noRedirect: true }).then(obj => cb(toVm(obj == null ? { status: false, error: "no reply" } : { status: true, response: obj })),
-                                                              e => cb(toVm({ status: false, error: (e && e.message) || "net failed" })));
+          netGet(String(url), live).then(obj => cb(toVm(obj == null ? { status: false, error: "no reply" } : { status: true, response: obj })));
         },
-        POST(url, data, cb) {
+        /** low (service.desktop.js reply): a refusal to a taker. It waits behind everything else and may be dropped. */
+        POST(url, data, cb, low) {
           if (!live() || !netAllowed(url, "POST")) return cb(toVm({ status: false, error: "host not allowed" }));
-          net().postText(String(url), String(data)).then(text => cb(toVm(text == null ? { status: false, error: "no reply" } : { status: true, response: text })),
-                                                       e => cb(toVm({ status: false, error: (e && e.message) || "net failed" })));
+          netPost(String(url), String(data), live, low === true).then(text => cb(toVm(text == null ? { status: false, error: "no reply" } : { status: true, response: text })));
         }
       },
       // the service's packets (STATE / ERROR / POSTED, fill, ladder) go to the screens, as MDS.comms does in the MiniDapp
@@ -313,8 +354,9 @@ function makeHost(opts = {}) {
   function pageNet(a) {
     const method = a && a.method === "POST" ? "POST" : "GET", url = String((a && a.url) || "");
     if (!ready || !netAllowed(url, method, true)) return Promise.resolve({ status: false, error: "host not allowed" });
-    const asked = method === "POST" ? net().postText(url, String(a.body == null ? "" : a.body)) : net().fetchJson(url, { noRedirect: true }).then(o => (o == null ? null : JSON.stringify(o)));
-    return Promise.resolve(asked).then(text => (text == null ? { status: false, error: "no reply" } : { status: true, response: String(text) }), e => ({ status: false, error: (e && e.message) || "net failed" }));
+    const mine = epoch, alive = () => mine === epoch;   // the page's take carries a signature: WORK lane, never low, never dropped
+    const asked = method === "POST" ? netPost(url, String(a.body == null ? "" : a.body), alive, false) : netGet(url, alive).then(o => (o == null ? null : JSON.stringify(o)));
+    return asked.then(text => (text == null ? { status: false, error: "no reply" } : { status: true, response: String(text) }));
   }
   /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message } | { op: "net", method, url, body }. */
   async function command(a) {
@@ -327,6 +369,7 @@ function makeHost(opts = {}) {
   }
 
   return { emitter, init, start, stop, flush, invalidate, status, activeWork, book, mine, command, storePath,
+    _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),
     _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _ctx: () => ctx, _fire: fire, _netAllowed: netAllowed };
 }
 

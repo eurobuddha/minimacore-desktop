@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.108] — Security review (MEDIUM): Dexicon's relay traffic could starve the AtomiX Ethereum RPC
+
+- **The finding, confirmed, and wider than reported.** All of Dexicon's relay and price traffic went through the app's one shared pool of four outbound connections (`main/netfetch.js`), the pool the AtomiX Ethereum RPC waits in for an HTLC claim or refund. A refusal to a taker was sent without waiting for the one before it (in the node `MDS.net` is synchronous; here it is not), so 16 refused takes in one cycle were 16 POST chains at once, queued without bound. Beyond that, the hidden page long-polls its inbox and the book all the time and the service long-polls its inbox 8 s of every 10 s: three of the four shared slots were held by Dexicon most of the time.
+- **Dexicon takes no shared slot any more.** It bounds itself with two lanes of its own in `main/dexicon.js` and tells `netfetch` so (`ownCap`): WORK, **2 at a time** (takes, replies, orders, book reads, the price), and POLL, 3 (the three long polls, which hold a connection by design; in the WORK lane they would block every take). AtomiX and everything else keep all four shared slots.
+- **Bounded queue.** A refusal waits at low priority behind every take, "taken" reply, order and read; at most 32 wait and the oldest is dropped beyond that (logged). The service marks a reply as a refusal itself (`reply()` in `service.desktop.js`), because the host cannot read a sealed message. Nothing that carries a signature or its result is ever dropped. A dropped refusal costs nothing: the taker voids an unanswered take by itself.
+- **Time limits.** `netfetch` already ends every request (15 s idle, 20 s in all). The lanes add their own 30 s backstop, so a request that never settles cannot hold a place.
+- Tests: `scripts/dexicon-host.test.cjs` "16 refused takes in one cycle…" (sealed takes from 8 senders through the engine's own inbox path: 2 at the network, never 16) and "Dexicon's lanes…"; `scripts/netfetch-test.cjs` "a caller with its own bound (ownCap)…". The first two fail without the cap.
+- Seen while reading, not changed: the page asks the relay to hold a poll for 25 s and `netfetch` ends an idle request at 15 s. Whether the relays answer sooner is a dev-node check.
+
 ## [0.18.107] — Security review (MEDIUM): a signing command already queued survived a stopped or replaced engine
 
 - **The finding, confirmed.** The Dexicon host checked "is this still my engine" only when a command entered. A signing command (`txnsign`, `send`, `consolidate`) that was already waiting in the process-wide signing queue behind another signer was still sent to the node after `stop()` or `invalidate()`.

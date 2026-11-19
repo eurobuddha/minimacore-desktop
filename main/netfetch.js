@@ -10,7 +10,9 @@
  *     a token's icon url could run `send`. Token metadata is attacker-supplied, and the wallet list fetches
  *     these automatically, so this path is reachable with no user action.
  *   - 8 MB streaming byte cap (abort past it) so an icon can't OOM us.
- *   - Bounded concurrency (4) so dozens of token urls don't spawn dozens of sockets.
+ *   - Bounded concurrency (4) so dozens of token urls don't spawn dozens of sockets. A caller that bounds itself
+ *     (main/dexicon.js: its own two lanes) passes opts.ownCap and takes none of these four: its long polls and
+ *     bursts can then never hold a slot the AtomiX Ethereum RPC needs for a claim or a refund.
  *   - Returns a `data:` URI (safe under `img-src data:`) or null; NEVER throws to the renderer.
  *
  * Web VALIDATION is not here — it uses the node's own `tokenvalidate` command (server-side, no CORS).
@@ -192,13 +194,14 @@ async function tokenIcon(url) {
  *  bounded pool as icon fetches; read-only public market data; NEVER throws to the caller. */
 async function fetchJson(url, opts) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
-  await acquire();
+  const shared = !(opts && opts.ownCap);   // ownCap: the caller has its own bound (header)
+  if (shared) await acquire();
   try {
     // opts.noRedirect (main/dexicon.js): the caller's host allow-list must hold for the host that answers
     const r = await getCapped(url.trim(), opts && opts.noRedirect ? 0 : MAX_REDIRECTS, "application/json");
     if (!r || !r.buf || !r.buf.length) return null;
     try { return JSON.parse(r.buf.toString("utf8")); } catch (e) { return null; }
-  } finally { release(); }
+  } finally { if (shared) release(); }
 }
 
 /** POST a small JSON body → raw response TEXT, or null on any failure/guard. Built for the AtomiX module's
@@ -207,10 +210,11 @@ async function fetchJson(url, opts) {
  *  relies on ethSetRpc having validated the former. Same SSRF guard + byte cap + bounded pool as GETs,
  *  including the pinned-address connect. POSTs never follow redirects
  *  (a redirected RPC POST is suspect; the pinned endpoints don't redirect). NEVER throws. */
-async function postText(url, body) {
+async function postText(url, body, opts) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) return null;
   if (typeof body !== "string" || body.length > 64 * 1024) return null;   // RPC payloads are tiny
-  await acquire();
+  const shared = !(opts && opts.ownCap);
+  if (shared) await acquire();
   try {
     return await new Promise((resolveRaw) => {
       let done = false;                                  // settle exactly once, always — see getCapped
@@ -244,7 +248,7 @@ async function postText(url, body) {
         } catch (e) { resolve(null); }
       }).catch(() => resolve(null));
     });
-  } finally { release(); }
+  } finally { if (shared) release(); }
 }
 
 module.exports = { tokenIcon, fetchJson, postText, isBlockedHost };

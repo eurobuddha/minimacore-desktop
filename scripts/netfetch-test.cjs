@@ -203,3 +203,35 @@ test('a failed connect releases its pool slot, so later fetches still run', asyn
     });
   } finally { restore(); }
 });
+
+// 0.18.108: Dexicon bounds its own relay traffic (main/dexicon.js lanes) and passes ownCap, so its long polls and its
+// bursts of replies hold none of the four shared slots that the AtomiX Ethereum RPC waits in.
+test('a caller with its own bound (ownCap) takes none of the shared four slots, and is not held up by them', async () => {
+  stubDns([[{ address: '1.2.3.4', family: 4 }]]);
+  const fail = [], seen = [];
+  const fake = (u) => { const req = new EventEmitter(); req.end = () => {}; req.write = () => {}; req.setTimeout = () => {}; req.destroy = () => {};
+    seen.push(u.hostname); fail.push(() => req.emit('error', new Error('stubbed — no real socket'))); return req; };
+  http.request = fake; https.request = fake;
+  const settle = () => new Promise(r => setTimeout(r, 30));
+  try {
+    // ten of Dexicon's own, all hanging (long polls, a burst of replies): a shared request still goes straight out
+    const own = [];
+    for (let i = 0; i < 10; i++) own.push(i % 2 ? netfetch.postText('https://relay.example.test/dex/msg', '{}', { ownCap: true }) : netfetch.fetchJson('https://relay.example.test/dex/inbox?hold=8', { noRedirect: true, ownCap: true }));
+    await settle();
+    assert.strictEqual(seen.filter(h => h === 'relay.example.test').length, 10);
+    const rpc = netfetch.postText('https://ethereum-rpc.example.test/', '{"method":"eth_call"}');
+    await settle();
+    assert.ok(seen.includes('ethereum-rpc.example.test'), 'the shared pool is untouched by them');
+    // and the other way: the shared four full, an ownCap request does not wait for one
+    const hogs = [0, 1, 2].map(i => netfetch.fetchJson('https://hog' + i + '.example.test/x'));
+    await settle();
+    const waiting = netfetch.fetchJson('https://fifth.example.test/x');
+    const mine = netfetch.fetchJson('https://relay2.example.test/dex/book?hold=0', { noRedirect: true, ownCap: true });
+    await settle();
+    assert.ok(!seen.includes('fifth.example.test'), 'control: the shared pool really is full (4)');
+    assert.ok(seen.includes('relay2.example.test'));
+    while (fail.length) { fail.shift()(); await settle(); }
+    assert.deepStrictEqual(await Promise.all([...own, rpc, ...hogs, waiting, mine]), new Array(16).fill(null));
+    assert.ok(seen.includes('fifth.example.test'), 'and it is released as before');
+  } finally { restore(); }
+});

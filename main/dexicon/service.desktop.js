@@ -27,6 +27,11 @@
  *               gets one `inited` per node start, this host gets one per app start.
  *   READ MODEL  DX (bottom of the file): ready / publicId / book / mine for the screens, and a relay book poll to feed
  *               it (in the MiniDapp the page polls the book itself). Read-only: it places, changes and cancels nothing.
+ *   REFUSALS    (0.18.108) reply() sends a `refused` at LOW priority (the host's MDS.net.POST, 4th argument): it waits
+ *               behind every take, "taken" reply, order and read in the host's bounded lane, and the oldest are
+ *               dropped when more than 32 wait. A refusal carries no signature; a taker voids an unanswered take by
+ *               itself. In the node MDS.net is synchronous, so the donor's replies cannot pile up; here 16 refused
+ *               takes were 16 concurrent POST chains. Every other reply goes out as in the donor, never dropped.
  *   OWN ORDERS  as the donor since 0.0.91: lib/ownskip.js wraps the two planners so an order routes PAST this node's own
  *               on-chain orders, and a LIMIT with nothing but own orders inside its limit is answered with the engine's
  *               sentence and sends nothing (onlyOwnOrders). The desktop's own refusal rule (selfTrade, 0.18.99) is gone.
@@ -337,7 +342,11 @@ function ladderPass(then) {
 
 function reply(toPublicId, obj) {
     var blob = AX.identity.seal(ME, toPublicId, AX.hex.utf8(JSON.stringify(obj)));
-    RELAY.publish(AX.envelope.msg(ME, toPublicId, blob, nowS() + 300), function () {});
+    var raw = AX.envelope.msg(ME, toPublicId, blob, nowS() + 300), urls, i = 0;
+    if (!obj || obj.k !== 'refused') return RELAY.publish(raw, function () {});   // carries a result ("taken"): never low, never dropped
+    // REFUSALS (header): relay after relay like RELAY.publish (lib/relay.js: a msg goes to /dex/msg), at low priority
+    urls = RELAY.relays.slice();
+    (function step() { if (i >= urls.length) return; MDS.net.POST(urls[i++] + '/dex/msg', raw, function () { step(); }, true); })();
 }
 
 function handleTake(take, next) {
