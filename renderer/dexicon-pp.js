@@ -86,7 +86,9 @@
   /** What the Swap click asks to be confirmed (SwapView.confirmAndSwap; the old panel's "Confirm swap"). */
   function swapReview(q, amt, t, dir) {
     const pay = dir ? "MINIMA" : t.name, get = dir ? t.name : "MINIMA";
-    return { title: "Confirm swap", ok: "Swap", text: "Pay  " + amt + " " + pay + "\nReceive  " + whole(q.totalOut) + " " + get + "\nRate  ≈ " + cut(q.effPrice, 8) + " " + t.name + " / MINIMA\nPool pair  " + pairName(t) + (t.fake ? "\n\n" + IMITATES : "") + "\n\nPrice impact " + q.priceImpact + "%."
+    // what is PAID is the amount the engine routed (q.totalIn), which is what will be posted; a typed amount it did not take whole is said beside it
+    const routed = q.totalIn != null && q.totalIn !== "" ? whole(q.totalIn) : String(amt), typed = C.dec(amt), same = !typed || routed === C.str(typed);
+    return { title: "Confirm swap", ok: "Swap", text: "Pay  " + routed + " " + pay + (same ? "" : "  (you typed " + amt + "; this is the amount the pools take)") + "\nReceive  " + whole(q.totalOut) + " " + get + "\nRate  ≈ " + cut(q.effPrice, 8) + " " + t.name + " / MINIMA\nPool pair  " + pairName(t) + (t.fake ? "\n\n" + IMITATES : "") + "\n\nPrice impact " + q.priceImpact + "%."
       + (Number(q.poolsUsed) > 1 ? "\nRouted across " + q.poolsUsed + " pools in one transaction." : "")
       + "\n\nThis posts a real on-chain transaction for exactly these amounts. There is no slippage setting: if a pool moves before it confirms, the swap is rejected and you keep your funds." };
   }
@@ -132,6 +134,12 @@
       if (p.ageBlocks > 0) rows.push(["Age", (Number(p.ageBlocks) || 0) + " blocks  (~" + cutNum(p.ageBlocks * 50 / 3600) + " h)"]);
     }
     return rows;
+  }
+  /** The token side of an Add, as the engine works it out (main/pandapools/poolmgr.js deposit): MINIMA × token reserve ÷ MINIMA
+   *  reserve, CUT to the token's decimals. An estimate: the engine uses the reserves it reads when it posts. null = not known. */
+  function depositToken(p, a) {
+    const m = C.dec(a), rm = C.dec(p && p.reserveM), rt = C.dec(p && p.reserveT); if (!m || !rm || !rt || rm.v === 0n) return null;
+    return C.str(C.down(C.div(C.mul(m, rt), rm, 30), safeDec({ decimals: p.tokDecimals })));
   }
   const poolIds = (p) => "Pool: " + p.address + (p.opk ? "\nOwner key: " + p.opk : "");
   const recoveryResult = (r) => "Verified reserves for " + r.restored + " of " + r.total + " pools.\n" + (r.details || []).join("\n\n") + "\n" + (r.warn || "");
@@ -270,18 +278,27 @@
       const since = Date.now();
       try {
         const r = await api.ppSwap(q.quoteId);
-        ui.say("Swap submitted: you pay " + amt + " " + (dir ? "MINIMA" : t.name) + " and receive " + whole(r && r.totalOut) + " " + (dir ? t.name : "MINIMA") + " when a block confirms it. It is not final yet: follow it in Activity. Transaction " + ((r && r.txpowid) || "not reported"), "note");
+        ui.say("Swap submitted: you pay " + whole((r && r.totalIn) || q.totalIn || amt) + " " + (dir ? "MINIMA" : t.name) + " and receive " + whole(r && r.totalOut) + " " + (dir ? t.name : "MINIMA") + " when a block confirms it. It is not final yet: follow it in Activity. Transaction " + ((r && r.txpowid) || "not reported"), "note");
         return r || {};
       } catch (e) { ui.say(await why(api, "The swap", e, since), "error"); return { err: bare(e) }; }
     },
-    /** Add liquidity (the old panel's sheet): either amount may be left empty, not both; confirm → ppDeposit(address, a || "0", b || "0"). */
-    async deposit(api, ui, p, a, b) {
-      const name = tokLabel(p.tok, p.tokName), ok = (v) => v === "" || /^[0-9]*\.?[0-9]+$/.test(v);
-      if (!ok(a) || !ok(b) || ((parseFloat(a) || 0) <= 0 && (parseFloat(b) || 0) <= 0)) { ui.say("Enter an amount to add. Nothing was sent.", "note"); return null; }
-      if (!await ui.confirm("Add liquidity?", "Add " + (a || "0") + " MINIMA and " + (b || "0") + " " + name + " to the pool.\n\nPool: " + p.address + "\n\nThis posts an on-chain transaction and cannot be undone. The amounts stay yours inside the pool.", "Add")) return null;
+    /**
+     * Add liquidity. The engine takes ONE figure, the MINIMA to add, and works the token side out itself from the pool's
+     * live ratio when it posts (poolmgr.js deposit); a typed token amount was never used. So: one MINIMA amount, above
+     * zero (refused here, before the question); the review states both sides, the token side as the estimate it is;
+     * ppDeposit(address, MINIMA, that estimate), the engine's own call; and the result says what the engine took
+     * (r.minima, r.token from the glue), never what was typed.
+     */
+    async deposit(api, ui, p, a) {
+      const name = tokLabel(p.tok, p.tokName), est = amountOk(a) ? depositToken(p, a) : null;
+      if (!amountOk(a)) { ui.say("Enter the MINIMA amount to add, above zero. Nothing was sent.", "note"); return null; }
+      if (est == null) { ui.say("The pool's reserves are not known just now, so the " + name + " that goes with " + a + " MINIMA cannot be shown. Nothing was sent: try again in a moment.", "note"); return null; }
+      if (!await ui.confirm("Add liquidity?", "Add " + a + " MINIMA and about " + est + " " + name + " to the pool.\n\n" + name + " is taken at the pool's ratio when the transaction is posted, so this figure can change slightly.\n\nPool pair: " + pairName({ tok: p.tok, name }) + "\nPool: " + p.address + "\n\nThis posts an on-chain transaction and cannot be undone. The amounts stay yours inside the pool.", "Add")) return null;
       const since = Date.now();
-      try { const r = await api.ppDeposit(p.address, a || "0", b || "0"); ui.say("Liquidity sent to the pool: " + (a || "0") + " MINIMA and " + (b || "0") + " " + name + ". It counts once a block confirms it: follow it in Activity.", "note"); return r || {}; }
-      catch (e) { ui.say(await why(api, "Adding liquidity", e, since), "error"); return { err: bare(e) }; }
+      try {
+        const r = await api.ppDeposit(p.address, a, est);
+        ui.say("Liquidity sent to the pool: " + (r && r.minima && r.token ? whole(r.minima) + " MINIMA and " + whole(r.token) + " " + name + ", the amounts the pool took at its ratio" : a + " MINIMA and the " + name + " that goes with it at the pool's ratio (the exact figure is in Activity)") + ". It counts once a block confirms it: follow it in Activity.", "note"); return r || {};
+      } catch (e) { ui.say(await why(api, "Adding liquidity", e, since), "error"); return { err: bare(e) }; }
     },
     /** Close a pool and take all its liquidity out: confirm → ppClose(address). */
     async withdraw(api, ui, p) {
@@ -405,7 +422,7 @@
     }
   };
 
-  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
+  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, failText };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -583,10 +600,12 @@
   /** every money action of the screen: Dexicon's one gate, the buttons off while it runs, then a fresh read */
   const act = (fn) => D.money(async () => { paint(); try { await fn(); } catch (e) { say(failText("That", e), "error"); } load(S.tab).then(paint, paint); }).then(paint, paint);
   async function addSheet(p) {
-    const name = tokLabel(p.tok, p.tokName), price = C.dec(p.poolPrice);
-    const got = await form("Add liquidity", `<div class="pp-note">Grow ${esc(pairName({ tok: p.tok, name }))} in place (capped at 2× the floor: beyond that, use Migrate). Add both sides in the pool's ratio so the price does not move.</div>${fld("Add MINIMA", "a")}${fld("Add " + name, "b")}<div class="pp-note" data-hint></div>`, "Add",
-      (d) => ({ a: val(d, "a"), b: val(d, "b") }), (d) => { d.oninput = () => { const m = C.dec(val(d, "a")); d.querySelector("[data-hint]").textContent = m && price && m.v > 0n ? "At the pool price, " + C.str(m) + " MINIMA goes with ≈ " + C.str(C.down(C.mul(m, price), 8)) + " " + name + "." : ""; }; });
-    if (got) await Act.deposit(api(), ui, p, got.a, got.b);
+    const name = tokLabel(p.tok, p.tokName);
+    // ONE field: the engine takes the MINIMA amount and works the token side out itself (Act.deposit)
+    const hint = (v) => { const est = amountOk(v) ? depositToken(p, v) : null; return !v ? "" : est == null ? "Enter the MINIMA amount to add, above zero." : "With " + v + " MINIMA the pool takes about " + est + " " + name + " from your wallet. " + name + " is taken at the pool's ratio when the transaction is posted, so this figure can change slightly."; };
+    const got = await form("Add liquidity", `<div class="pp-note">Grow ${esc(pairName({ tok: p.tok, name }))} in place (capped at 2× the floor: beyond that, use Migrate). You enter the MINIMA; the pool takes the ${esc(name)} that goes with it at its own ratio, so the price does not move.</div>${fld("Add MINIMA", "a")}<div class="pp-note" data-hint role="status"></div>`, "Review",
+      (d) => (amountOk(val(d, "a")) ? { a: val(d, "a") } : "Enter the MINIMA amount to add, above zero. Nothing was sent."), (d) => { d.oninput = () => { d.querySelector("[data-hint]").textContent = hint(val(d, "a")); d.querySelector(".pp-bad").textContent = ""; }; });
+    if (got) await Act.deposit(api(), ui, p, got.a);
   }
   function calc(address) {
     const seed = address ? pool(address) : null, cs = getComputedStyle($("shell")), cv = (n, fb) => cs.getPropertyValue(n).trim() || fb;

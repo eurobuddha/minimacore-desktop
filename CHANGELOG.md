@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.136] — Dexicon ② Pools: Add liquidity reviews what is sent (review, high)
+
+- **Found**: the engine takes one figure for an Add, the MINIMA, and works the token side out itself from the pool's ratio when it posts; it refuses a zero MINIMA amount. The screen had two fields. With 100 and nothing, the review and the result said "100 MINIMA and 0 MxUSD" while the pool took the matching MxUSD as well. With nothing and 5, the user confirmed and was then told "enter an amount to add".
+- **Add liquidity has one field, MINIMA.** Under it, the MxUSD the pool will take at its current ratio, as an estimate that follows the typing.
+- **The review states both sides**: "Add 500 MINIMA and about 1.61049999 MxUSD to the pool. MxUSD is taken at the pool's ratio when the transaction is posted, so this figure can change slightly.", with the pool pair and the pool address.
+- **An empty or zero MINIMA amount is refused before the question**, in the form.
+- **The result says what the pool took**, not what was typed. The engine answers with the transaction id only, so the glue works the token side out by the engine's own rule, with the engine's own arithmetic, from the reserves the engine had just read (`depositUsed` in `main/pandapools.js`); the same figures go into the Activity record ("Added 500 MINIMA and 1.61049999 MxUSD to a pool"). When that figure is not known the result says so and points to Activity.
+- The call is unchanged: `ppDeposit(pool, MINIMA, token)`. The third argument is now the reviewed estimate; the engine does not use it.
+- **Swap**: the review and the result print the amount the pools take (the route's `totalIn`); when it differs from what was typed, the review says both.
+
 ## [0.18.135] — Dexicon ② Pools: a token is its id, never its name (review, high)
 
 - **Found**: a token is named by whoever made it. One called "MxUSD " (a trailing space), "MxUSD" with a zero-width character, or "МxUSD" with a Cyrillic М was shown unmarked on Swap; the pool line and the review showed no token id; the pair list followed the scan, so a deep fake pool could be the default pair; the selection was a position in that list, so a rescan could silently change the selected token. MINIMA could be paid for a worthless token.

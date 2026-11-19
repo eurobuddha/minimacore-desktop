@@ -581,13 +581,28 @@ function actionOnPool(addr, fn, label, summary) {
     if (!p) return Promise.reject(new Error("Pool not found in the current scan — try again in a moment."));
     return queuedAction(label, function (resolve, reject) {
       fn(p, {
-        ok: function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); },
+        ok: function (txpowid) { ctx.Store.actRecord(label, (typeof summary === "function" ? summary() : summary) || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); },
         fail: function (m) { reject(new Error(m)); },
       });
     });
   });
 }
-function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, d); }, "ADD", "Added liquidity"); }
+/**
+ * Add liquidity. The engine takes the MINIMA amount and works the token side out itself from the reserves it reads when
+ * it posts (poolmgr.js deposit: addM × reserveT ÷ reserveM, cut to the token's decimals); addT is not used by it, and it
+ * answers with the transaction id only. So what it TOOK is worked out here, by its own rule, with its own Decimal, from
+ * the same pool object it has just refreshed (0.18.136): the record and the screen's result say that, not what was typed.
+ */
+function depositUsed(p, addM) {
+  try { var m = D(addM), t = m.times(D(p.reserveT)).div(D(p.reserveM)).toDP(p.tokDecimals, ctx.PP.D.ROUND_DOWN); return { minima: s(m), token: s(t), label: labelById(p.tok, p.tokName) }; }
+  catch (e) { return null; }
+}
+function deposit(addr, addM, addT) {
+  var used = null;
+  return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, { ok: function (txpowid) { used = depositUsed(p, addM); d.ok(txpowid); }, fail: d.fail }); }, "ADD",
+    function () { return used ? "Added " + used.minima + " MINIMA and " + used.token + " " + used.label + " to a pool" : "Added liquidity"; })
+    .then(function (r) { return used ? Object.assign(r, { minima: used.minima, token: used.token }) : r; });
+}
 
 /** READ-ONLY owner-key and signing-state pre-flight before an owner-signed spend (WITHDRAW / MIGRATE).
  *  Delegates to PoolMgr.ensureOwnerKeys, which since MDS 0.6.2x is ReserveRecovery.ensureKeys: it reads the
@@ -826,5 +841,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, lastNodeFailure, status, activeWork,
-  _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap,
+  _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed,
 };

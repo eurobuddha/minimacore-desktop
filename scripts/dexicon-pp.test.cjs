@@ -239,12 +239,43 @@ test("a failed action: the engine's fixed sentences are said in plain words, wit
   assert.match(PP.failText("The swap", ""), /no reason was given/);
 });
 
+// ---- 0.18.136: what is reviewed is what is sent ----
+test("Add liquidity: one MINIMA amount, the review states both sides as the engine will take them, and the result says what the engine took", async () => {
+  // the engine's rule (poolmgr.js deposit): MINIMA × token reserve ÷ MINIMA reserve, cut to the token's decimals
+  assert.equal(PP.depositToken(MINE, "100"), "0.321"); assert.equal(PP.depositToken({ reserveM: "3", reserveT: "1", tokDecimals: 8 }, "1"), "0.33333333", "cut, never rounded");
+  assert.equal(PP.depositToken({ reserveM: "3", reserveT: "2", tokDecimals: 2 }, "1"), "0.66"); assert.equal(PP.depositToken({ reserveM: "0", reserveT: "2" }, "1"), null); assert.equal(PP.depositToken(LOST, "1"), null);
+  const h = await glue();
+  try { await h.api.init(); for (const [pool, m] of [[{ reserveM: "3", reserveT: "1", tokDecimals: 8, tok: MXUSD }, "1"], [MINE, "100"], [{ reserveM: "815250.75", reserveT: "2617.77115575", tokDecimals: 8, tok: MXUSD }, "0.37"]]) {
+    const used = h.api._depositUsed(pool, m); assert.equal(used.token, PP.depositToken(pool, m), "the screen's estimate is the engine's own arithmetic"); assert.equal(used.label, "MxUSD"); }
+    assert.match(fs.readFileSync(path.join(ROOT, "main/pandapools/poolmgr.js"), "utf8"), /var addTc = addM\.times\(PP\.dec\(p\.reserveT\)\)\.div\(PP\.dec\(p\.reserveM\)\)\.toDP\(p\.tokDecimals, D\.ROUND_DOWN\);/, "the engine still works the token side out itself");
+  } finally { h.close(); }
+  // an empty or zero MINIMA amount is refused BEFORE the question; the old two-field form asked first and the engine then refused
+  for (const bad of ["", "0", "0.0", "abc", "-1"]) { const r = recorder({}), u = ui(true); assert.equal(await PP.Act.deposit(r.api, u, MINE, bad), null); assert.deepEqual(r.log, []); assert.ok(!u.said.some((x) => x[0] === "confirm"), JSON.stringify(bad) + ": no question"); assert.match(u.said[0][0], /above zero\. Nothing was sent\.$/); }
+  const r = recorder({ ppDeposit: { txpowid: PK("72"), minima: "100", token: "0.32099999" }, ppWhy: null }), u = ui(true), texts = []; u.confirm = async (title, text) => { texts.push(text); return true; };
+  await PP.Act.deposit(r.api, u, MINE, "100");
+  assert.match(texts[0], /^Add 100 MINIMA and about 0\.321 MxUSD to the pool\.\n\nMxUSD is taken at the pool's ratio when the transaction is posted, so this figure can change slightly\.\n\n/); assert.ok(texts[0].includes("Pool: " + MINE.address));
+  assert.deepEqual(r.money(), [["ppDeposit", [MINE.address, "100", "0.321"]]], "the engine's own call: the pool, the MINIMA, and the token side that was reviewed");
+  assert.match(u.said.at(-1)[0], /^Liquidity sent to the pool: 100 MINIMA and 0\.32099999 MxUSD, the amounts the pool took at its ratio\./, "what the engine took, not the estimate and not what was typed");
+  const r2 = recorder({ ppDeposit: { txpowid: PK("72") }, ppWhy: null }), u2 = ui(true); await PP.Act.deposit(r2.api, u2, MINE, "100");
+  assert.match(u2.said.at(-1)[0], /100 MINIMA and the MxUSD that goes with it at the pool's ratio \(the exact figure is in Activity\)/, "no figure is invented when the engine's is not known");
+  assert.ok(!/0 MxUSD/.test(texts[0] + u.said.at(-1)[0] + u2.said.at(-1)[0]), "never '100 MINIMA and 0 MxUSD'");
+  const pp = src("dexicon-pp.js"), sheet = pp.slice(pp.indexOf("async function addSheet"), pp.indexOf("function calc("));
+  assert.equal((sheet.match(/fld\(/g) || []).length, 1, "one field"); assert.ok(!/name="b"|"b"\)/.test(sheet));
+});
+test("swap: the review and the result print the amount the pools take (the route's totalIn), not the typed one", async () => {
+  const q = Object.assign({}, QUOTE, { totalIn: "249.99999999" });
+  assert.match(PP.swapReview(q, "250", T, true).text, /^Pay {2}249\.99999999 MINIMA {2}\(you typed 250; this is the amount the pools take\)\nReceive/);
+  assert.match(PP.swapReview(QUOTE, "250.0", T, true).text, /^Pay {2}250 MINIMA\nReceive/, "the same amount written another way is not a difference");
+  const r = recorder({ ppQuote: q, ppSwap: { txpowid: PK("71"), totalIn: "249.99999999", totalOut: "0.79832711" }, ppWhy: null }), u = ui(true);
+  await PP.Act.swap(r.api, u, T, true, "250");
+  assert.match(u.said.at(-1)[0], /^Swap submitted: you pay 249\.99999999 MINIMA and receive 0\.79832711 MxUSD/);
+});
+
 // ---- My LP: add, close, collect, recover, put away, bring back, confirm signing, statement ----
 const LP = [
-  { name: "add liquidity, both sides", answers: { ppDeposit: { txpowid: PK("72") } }, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "500"; o.p.el("pp2B").value = "1.605"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500", "1.605"), want: [["ppDeposit", [MINE.address, "500", "1.605"]]] },
-  { name: "add liquidity, MINIMA only", answers: { ppDeposit: { txpowid: PK("72") } }, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "500"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500", ""), want: [["ppDeposit", [MINE.address, "500", "0"]]] },
-  { name: "add liquidity, nothing typed", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "", ""), want: [], never: true },
-  { name: "add liquidity, letters", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "5oo"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "5oo", ""), want: [], never: true },
+  { name: "add liquidity, both sides", answers: { ppDeposit: { txpowid: PK("72") } }, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "500"; o.p.el("pp2B").value = "1.605"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "500"), want: [["ppDeposit", [MINE.address, "500", "1.605"]]] },
+  { name: "add liquidity, nothing typed", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, ""), want: [], never: true },
+  { name: "add liquidity, letters", answers: {}, old: (o) => { o.p.btn.ppadd.onclick(); o.p.el("pp2A").value = "5oo"; return o.p.el("pp2Go").onclick(); }, now: (api, u) => PP.Act.deposit(api, u, MINE, "5oo"), want: [], never: true },
   { name: "close the pool", answers: { ppClose: { txpowid: PK("73") } }, old: (o) => o.p.btn.ppwd.onclick(), now: (api, u) => PP.Act.withdraw(api, u, MINE), want: [["ppClose", [MINE.address]]] },
   { name: "collect to wallet", answers: { ppCollect: { coins: 2, foreign: 0 } }, old: (o) => o.p.el("ppCollectBtn").onclick(), now: (api, u) => PP.Act.collect(api, u), want: [["ppCollect", []]] },
   { name: "collect now (a withdrawn-funds card)", answers: { ppCollect: { cleared: true }, ppPendingCollect: [{ oadr: PK("0A"), status: "PENDING" }] }, old: (o) => o.p.btn.ppcollect.onclick(), now: (api, u) => PP.Act.collectNow(api, u), want: [["ppCollect", []]], noConfirm: true },
