@@ -7,7 +7,9 @@ Owner's rules for this phase:
 - Existing users' AtomiX swaps in flight and PandaPools pools carry over with zero loss.
 - No manual swap cancel button. Amounts truncated, never rounded. MEXC is the only price source (fallback: the MEXC
   ticker via CoinGecko, never another exchange). No wash trading: a user's order must never fill against their own
-  order or their own pool.
+  ORDER. Filling against a pool, including the user's own pool, is allowed (owner, 19 Nov 2026: a pool trade routes
+  across several pools and pays a fee, and a liquidity provider may want to arbitrage an out-of-line pool back into
+  line before someone else does).
 
 Read `docs/PHASE1_SHELL_BRIEF.md` first (references, 1 dp = 1 px, rules).
 
@@ -85,7 +87,7 @@ BEFORE removing them; the old panels go only when the audit shows nothing lost.
 ## Order of work
 
 - 3a Engine: vendor the Dexicon engine, host it, wire `dxroom://`, tests, parity manifest. No UI beyond what is
-  needed to prove it boots. Verify how auto-cross avoids the user's own orders and own pools; if it does not, stop.
+  needed to prove it boots. Verify how auto-cross avoids the user's own ORDERS; if it does not, stop. Own pools are allowed.
 - 3b Chrome and ③ Exchange.
 - 3c ① MxUSD.
 - 3d ② Pools.
