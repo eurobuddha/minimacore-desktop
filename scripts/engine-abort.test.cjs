@@ -74,4 +74,65 @@ test("PandaPools glue: a signer of the old engine queued at invalidate() is neve
   } finally { api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
 });
 
+// 0.18.116 (M2): hold() around a wallet-replacing megammrsync. The engine and its store stay; nothing new is signed.
+test("AtomiX glue: held, no signing command reaches the node, no action and no start; atomix.sqlite stays in place; release goes on", async () => {
+  const atomix = require("../main/atomix.js"), dir = tmp("ax-hold-"), sent = [];
+  atomix._setDataDir(dir); atomix._setRunner(async (c) => { sent.push(c); return { status: true, response: {} }; });
+  fs.writeFileSync(path.join(dir, "atomix.sqlite"), "the claim secrets of swaps in flight");
+  try {
+    const mds = atomix._buildMds(), ask = (c) => new Promise(res => mds.cmd(c, res));
+    let slow; atomix._setRunner((c) => { sent.push(c); return c === "txnpost id:inflight" ? new Promise(r => { slow = () => r({ status: true }); }) : Promise.resolve({ status: true, response: {} }); });
+    const inflight = ask("txnpost id:inflight");
+    let heldDone = false; const h = atomix.hold(3000).then(() => { heldDone = true; });
+    await new Promise(r => setTimeout(r, 450));
+    assert.equal(heldDone, false, "hold waits for what is at the node");
+    slow(); assert.equal((await inflight).status, true, "a command in flight ends with its real answer"); await h;
+    const r = await ask("txnsign id:held publickey:auto");
+    assert.equal(r.status, false); assert.match(r.error, /stopped while the wallet is being replaced/);
+    assert.equal((await ask("send amount:1 address:0xAA")).status, false);
+    assert.equal((await ask("txndelete id:held")).status, true, "a chain in flight can still clean up");
+    assert.ok(!sent.some(c => /^(txnsign|send)/.test(c)), sent.join(" | "));
+    await assert.rejects(atomix.init(), /stopped while the wallet is being replaced/);
+    await assert.rejects(atomix.swapExecute("q"), /stopped while the wallet is being replaced/);
+    atomix.startLoop(); await new Promise(r => setTimeout(r, 30));
+    assert.equal(atomix.status().booted === true, false, "startLoop while held starts nothing");
+    assert.deepEqual(fs.readdirSync(dir), ["atomix.sqlite"], "not moved aside");
+    assert.equal(fs.readFileSync(path.join(dir, "atomix.sqlite"), "utf8"), "the claim secrets of swaps in flight");
+    atomix.release(); atomix.stopLoop();
+    assert.equal((await ask("txnsign id:after publickey:auto")).status, true, "the SAME engine signs again");
+  } finally { atomix.release(); atomix.stopLoop(); atomix.flush(); }
+});
+
+test("PandaPools glue: held, no signing command reaches the node and no action starts; release goes on with the same engine", async () => {
+  const dir = tmp("pp-hold-"), contexts = [], stores = [], mdsSeen = [], sent = [];
+  const actualSql = require("../main/pandapools/sqlshim"), loader = require("../main/pandapools/loader");
+  const exports = {};
+  const sandbox = { module: { exports }, exports, console, setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, AbortController, AbortSignal, Promise, require: (n) => {
+    if (n === "electron") return { app: { getPath: () => dir, getVersion: () => "test" } };
+    if (n === "./config") return { rpcSecret: () => "" }; if (n === "./node-manager") return { rpcPort: () => 0 };
+    if (n === "./rpc") return { rpcCall: async () => { throw new Error("TEST LEAK: rpcCall"); } }; if (n === "./netfetch") return { fetchJson: async () => null };
+    if (n === "./noderun") return require("../main/noderun.js");
+    if (n === "./pandapools/loader") return { ...loader, createContext: (mds, ...rest) => { mdsSeen.push(mds); const c = loader.createContext(mds, ...rest); contexts.push(c); return c; } };
+    if (n === "./pandapools/sqlshim") return { makeSqlShim: async (file) => { const sql = await actualSql.makeSqlShim(file); stores.push(sql); return sql; } };
+    return require(n);
+  } };
+  vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
+  const api = sandbox.module.exports; api._setDataDir(dir);
+  api._setRunner((c) => { sent.push(c); return Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } } : SIGNING.test(c) ? { status: true, response: {} } : { status: false }); });
+  try {
+    await api.init();
+    const mds = mdsSeen[0], ask = (c) => new Promise(res => mds.cmd(c, res));
+    await api.hold(1000);
+    sent.length = 0;
+    const r = await ask("txnsign id:held publickey:auto");
+    assert.equal(r.status, false); assert.match(r.error, /stopped while the wallet is being replaced/);
+    assert.deepEqual(sent.filter(c => SIGNING.test(c)), []);
+    await assert.rejects(api.scanNow(), /stopped while the wallet is being replaced/, "every action starts with init()");
+    api.startLoop();
+    api.release(); api.stopLoop();
+    assert.equal(mdsSeen.length, 1, "the same engine, not a new one");
+    assert.equal((await ask("txnsign id:after publickey:auto")).status, true);
+  } finally { api.release(); api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
+});
+
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });

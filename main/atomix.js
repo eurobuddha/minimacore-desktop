@@ -13,6 +13,7 @@ const { EventEmitter } = require("events");
 const path = require("path");
 const fs = require("fs");
 const { rpcCall } = require("./rpc");
+const { SIGNING } = require("./noderun");
 const { createContext } = require("./atomix/loader");
 const { makeSqlShim } = require("./pandapools/sqlshim");   // the proven generic H2→SQLite shim (3rd instance)
 const netfetch = require("./netfetch");
@@ -45,6 +46,12 @@ let pollTimer = null, minuteTimer = null, lastTip = null;
 let generation = 0;           // bumped on invalidate — a stale in-flight init from an old seed must not resurrect
 let engineAbort = new AbortController();   // one per generation (0.18.107): invalidate() aborts it, so a signing command of the old engine still queued in main/noderun.js is never sent
 let dataDir = null;
+// HOLD (0.18.116): a command that may replace the wallet is about to run in the node (node-manager runResync). The
+// engine is kept, with its store, but does nothing new: no timer, no start, no action from a screen, and no SIGNING
+// command reaches the node (reads and txndelete still do, so a chain in flight ends cleanly). release() lifts it:
+// on the same wallet the engine goes on exactly where it was; on another one invalidate() has run in between.
+let held = false, heldLoop = false, busy = 0;
+const HELD = "AtomiX is stopped while the wallet is being replaced. It starts again by itself.";
 let runner = (cmd, opts) => {   // opts.signal: see makerStep
   const config = require("./config"), node = require("./node-manager");
   return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, opts);
@@ -147,7 +154,8 @@ function buildMds() {
   const gen = generation, signal = engineAbort.signal, GONE = "this wallet was replaced: the engine is restarting";
   return {
     minidappuid: "",
-    cmd(command, cb) {
+    cmd(command, cb0) {
+      busy++; const cb = (r) => { busy--; cb0(r); };   // hold() waits for what is at the node
       // two-arg then (pandapools pattern): a throw inside the success cb must not double-fire the cb.
       // CROSS-REALM: the engine tests `r.response instanceof Array` (orderbook/otc/responder book scans) — a
       // main-realm array is NOT instanceof the VM realm's Array, so every cmd response is marshalled INTO the
@@ -161,6 +169,7 @@ function buildMds() {
       // 0.18.107: an engine disowned by invalidate() (the wallet was replaced) reaches neither the node nor the new
       // engine's store; what it had already queued behind another signer is dropped by the signal.
       if (gen !== generation) return failed(new Error(GONE));
+      if (held && SIGNING.test(c)) return failed(new Error(HELD));
       if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c, makerOp ? AbortSignal.any([makerOp.signal, signal]) : signal).then(r => cb(toVm(normReply(r))), failed); return; }
       runner(c, { signal }).then(r => cb(toVm(normReply(r))), failed);
     },
@@ -207,6 +216,7 @@ function toVm(obj) {
 }
 
 async function init() {
+  if (held) throw new Error(HELD);
   if (ready) return;
   if (initPromise) return initPromise;
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
@@ -223,6 +233,7 @@ async function init() {
 }
 
 function startLoop() {
+  if (held) { heldLoop = true; return; }   // started by release()
   if (pollTimer) return;
   const tick = () => init().then(() => {
     runner("block").then(r => {
@@ -240,6 +251,17 @@ function stopLoop() {
 }
 
 function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
+
+/** HOLD (above). Resolves once nothing of the engine's is at the node any more (three quiet looks), or after maxMs. */
+async function hold(maxMs = 15000) {
+  if (!held) { held = true; heldLoop = !!pollTimer; stopLoop(); log("held: a command that may replace the wallet is about to run"); }
+  const end = Date.now() + maxMs;
+  for (let quiet = 0; quiet < 3 && Date.now() < end;) { await new Promise(r => setTimeout(r, 100)); quiet = busy ? 0 : quiet + 1; }
+  flush();
+}
+function release() { if (!held) return; held = false; log("released"); if (heldLoop) startLoop(); }
+/** A screen's action that can sign or lock: refused while held. */
+const whileHeld = (fn) => (...a) => (held ? Promise.reject(new Error(HELD)) : fn(...a));
 
 /**
  * What a wallet replacement would strand, from the engine's own read models (main/restore.js activeWorkList):
@@ -1182,12 +1204,12 @@ async function ethSetRpc(url) {
 }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, flush, invalidate, status, activeWork, _activeWorkFrom: activeWorkFrom,
-  book, quote, swapPreview, swapExecute, swaps, refundNow, exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
-  sendMax, sendReview, sendExecute,
-  makerCfg, makerPreview, makerSave, makerPublish, makerWithdraw, switchCurrency,
-  otc, otcGoLive, otcWithdraw, otcPropose, otcDealAction,
-  ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute, ethSetRpc,
+  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, status, activeWork, _activeWorkFrom: activeWorkFrom,
+  book, quote, swapPreview, swapExecute: whileHeld(swapExecute), swaps, refundNow: whileHeld(refundNow), exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
+  sendMax, sendReview, sendExecute: whileHeld(sendExecute),
+  makerCfg, makerPreview, makerSave: whileHeld(makerSave), makerPublish: whileHeld(makerPublish), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),
+  otc, otcGoLive: whileHeld(otcGoLive), otcWithdraw: whileHeld(otcWithdraw), otcPropose: whileHeld(otcPropose), otcDealAction: whileHeld(otcDealAction),
+  ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute: whileHeld(ethSendExecute), ethSetRpc,
   _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
   // test-only: the publish-send coin pin (scripts/atomix-unit.js) — drive it with _setRunner
   _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,

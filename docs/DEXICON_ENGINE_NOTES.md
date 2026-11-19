@@ -179,10 +179,19 @@ do not block it: they lock nothing and lapse by themselves.
 
 After it, four independent lines, none of which needs the window:
 
-1. `node-manager.runResync` stops the node, calls `node.onWalletReplaced` (`main/main.js`: minimaMail, PandaPools,
-   AtomiX, Dexicon with `hold`, P2P Chance) and only then starts the node. `dexicon.invalidate()` moves
-   `dexicon.sqlite` aside as `dexicon.sqlite-legacy-keys-YYYYMMDD` (a second on the same day gets `-2`; never deleted).
-   The same when the node never answered the resync (result unknown).
+1. `node-manager.runResync` (rewritten in 0.18.116). Before a wallet-replacing command is sent, the three trading
+   engines are held (`onEnginesHold`: `atomix.hold()`, `pandapools.hold()`, `dexicon.hold()`; no timer, no start, no
+   screen action, no signing command) and the wallet is identified: `walletMark()`, a SHA-256 of the node's
+   `seedrandom modifier:minimacore-desktop-wallet-mark-v1` (equal = the same seed). After the command the mark is read
+   again (`walletSettle`: at once when the node still runs, else by the health poll before the restarted node is
+   called "running"). **Another wallet**: `node.onWalletReplaced` (`main/main.js`: minimaMail, PandaPools, AtomiX,
+   Dexicon with `hold`, P2P Chance) sets the stores aside (`dexicon.sqlite-legacy-keys-YYYYMMDD`, a second on the same
+   day gets `-2`; never deleted), then the engines are released. **The same wallet** (the same phrase restored again,
+   a refused command, a timeout before any swap): nothing is moved and the engines go on with their stores.
+   **Not readable**: nothing is concluded, the engines stay held, asked again every health tick. After a timeout with
+   the node still running the check stays owed, because the node may swap later: it is asked again every tick and at
+   the next start. One case is still decided without a comparison: the wallet could not be identified BEFORE the
+   command (a locked node). Then the stores are set aside after a success and after an unknown result, as in 0.18.106.
 2. `dexicon.stop()` drops the engine whenever the node is not "running", so no engine carries an identity across a
    node start. Other ways to another wallet (another data folder, a crash in the middle) meet line 3.
 3. At every boot the service compares `ax_kv.publicId` with the identity this wallet derives
@@ -205,8 +214,9 @@ Not covered by line 3: a store with no recorded `publicId` (the engine never rea
 PandaPools have line 1 only, plus their own guards (AtomiX IdentityWatch, PandaPools signing holds); a data-folder
 change does not reset them.
 
-Open point: a restore that goes back to the SAME wallet also moves the store aside. The file is kept, so nothing is
-lost, but putting it back is a manual step today.
+A restore that goes back to the SAME wallet keeps every store (0.18.116; before, the stores were moved aside and
+putting them back was a manual step). Not covered: the app killed between the command and the comparison (the owed
+check is in memory); the next start then meets lines 2 to 4 for Dexicon and the engines' own guards for the others.
 
 ## (e) The MiniDapp's MDS and this host's stand-ins
 

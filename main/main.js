@@ -217,6 +217,11 @@ node.onWalletReplaced = async () => {
   node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon and P2P Chance were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
   if (failed.length) throw new Error(failed.join("; "));
 };
+// Around a wallet-replacing megammrsync (node-manager runResync, 0.18.116): the three trading engines are stopped
+// before the command is sent and stay stopped until it is known which wallet the node holds; they then go on, on
+// their own stores (the same wallet) or on new ones (onWalletReplaced above has run in between).
+node.onEnginesHold = async () => { dexicon.hold(); await Promise.all([atomix.hold(), pandapools.hold()]); };
+node.onEnginesRelease = () => { atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
   running: node.state === "running", run: (c) => node.runResync(c), work: walletWork }));

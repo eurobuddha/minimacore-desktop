@@ -51,6 +51,11 @@ let runner = (cmd, opts) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd, opt
 // main/noderun.js is never sent. The queue reads only `.aborted`, so this is that one field and not an AbortController
 // (this file is also run inside a bare vm context by its tests, where that global does not exist).
 let poolAbort = { aborted: false };
+// HOLD (0.18.116): a command that may replace the wallet is about to run in the node (node-manager runResync). The
+// engine and its store are kept, but nothing new is done: no scan timer, no init, so no action from a screen (each
+// starts with init()), and no SIGNING command reaches the node. release() lifts it.
+let held = false, heldLoop = false, busy = 0;
+const HELD = "PandaPools is stopped while the wallet is being replaced. It starts again by itself.";
 function _setRunner(fn) { runner = fn; }
 function _setDataDir(d) { dataDir = d; }
 function nodeCmd(cmd) { return runner(cmd); }
@@ -61,7 +66,10 @@ function buildMds() {
     poolDesktop: true, // MiniHub WRITE/block-mode requirement is enforced in the MDS runtime.
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
-    cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}runner(command,{signal:signal}).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { if (cb) cb({ status: false }); }); },
+    cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}
+      if(held&&require("./noderun").SIGNING.test(String(command))){if(cb)cb({status:false,error:HELD});return;}
+      busy++;   // hold() waits for what is at the node
+      runner(command,{signal:signal}).then(function (r) { busy--; if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { busy--; if (cb) cb({ status: false }); }); },
     sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
     persistRecovery: function(cb) { cb(epoch===contextEpoch&&storage.flushChecked()); },
     archiveGET: function(url,cb) { fetchJson(url).then(cb,function(){cb(null);}); },
@@ -79,6 +87,7 @@ function buildMds() {
 }
 
 async function init() {
+  if (held) throw new Error(HELD);
   if (ready) return;
   if (initPromise) return initPromise;
   const epoch=contextEpoch;
@@ -123,8 +132,18 @@ async function invalidate() {
     if(!r.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine stopped; resolve storage before restarting.");
     quarantineRequired=false;
   }
-  sqlShim=null;emitter.emit("update");await init();startLoop();
+  sqlShim=null;emitter.emit("update");
+  if(held){heldLoop=true;return;}   // started by release()
+  await init();startLoop();
 }
+/** HOLD (above). Resolves once nothing of the engine's is at the node any more (three quiet looks), or after maxMs. */
+async function hold(maxMs) {
+  if (!held) { held = true; heldLoop = !!scanTimer; stopLoop(); }
+  const end = Date.now() + (maxMs || 15000);
+  for (let quiet = 0; quiet < 3 && Date.now() < end;) { await new Promise(function (r) { setTimeout(r, 100); }); quiet = busy ? 0 : quiet + 1; }
+  flush();
+}
+function release() { if (!held) return; held = false; if (heldLoop) startLoop(); }
 
 // ---- helpers ----
 function currentBlock() {
@@ -232,6 +251,7 @@ function serializeMyPool(p, snap) {
 
 // ---- the block-poll loop (mirrors mail.js startLoop) ----
 function startLoop() {
+  if (held) { heldLoop = true; return; }   // started by release()
   if (scanTimer) return;
   var tick = function () {
     currentBlock().then(function (tip) {
@@ -750,7 +770,7 @@ async function consolidationCheck() {
 module.exports = {
   consolidationCheck,
   completeBackup, completeBackupRequired, validateCompleteRecipes,
-  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate,
+  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate, hold, release,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,

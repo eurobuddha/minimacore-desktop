@@ -132,6 +132,7 @@ class NodeManager extends EventEmitter {
     this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
     this.rpc = (cmd) => rpcCall(this.rpcPort(), config.rpcSecret(), cmd);   // this node's RPC (the tests put a stand-in here too)
     this.keyModeChecked = false;  // the running node's keys were read and are of the recorded mode (once per start)
+    this.walletCheck = null;      // owed after a wallet-replacing megammrsync: { before, held, final, tries } (runResync, walletSettle)
     this.keyModeAlert = "";       // the running node was found in the OTHER mode and stopped: no start until the app is reopened
     // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
     // not from `status` (the chain is up well before the account has attached to the relays).
@@ -434,6 +435,7 @@ class NodeManager extends EventEmitter {
       return;
     }
     this.proc = p;
+    if (this.walletCheck) this.walletCheck.final = true;   // megammrsync has ended with the old process: what this node holds is the result
     this.startedTs = Date.now();
     const cfg = config.load();
     try {
@@ -516,24 +518,53 @@ class NodeManager extends EventEmitter {
    * restart"), and its process may exit by itself: that exit is expected here, not an error. The node is then
    * started again through the ordinary start(), so every key-mode check runs on it (the gate on the start command
    * before java, the node's real mode once it answers). A refused command leaves the node as it was.
+   *
+   * A command that replaces the wallet (phrase: or file:), since 0.18.116:
+   *  1. the trading engines are stopped BEFORE it is sent and stay stopped (onEnginesHold: AtomiX, PandaPools,
+   *     Dexicon), so none signs between the node's wallet swap and its shutdown;
+   *  2. the wallet is identified before (walletMark) and after, and the engines' stores are set aside
+   *     (onWalletReplaced) only when the wallet IS another one. A failed or unanswered command on an unchanged wallet
+   *     moves nothing: atomix.sqlite holds the claim secrets of swaps in flight. The same wallet restored again
+   *     keeps every store;
+   *  3. the engines are released (onEnginesRelease) once that is settled, on their own stores or on new ones.
+   * When the wallet could not be identified beforehand (a locked node), there is nothing to compare: the stores are
+   * set aside as before 0.18.116 (after a success, and when the result is not known). Never deleted either way.
    */
   async runResync(cmd) {
     const restore = require("./restore"), replaces = restore.replacesWalletFromPhrase(cmd) || restore.loadsBackupFile(cmd);
     this.resyncing = true; this.emit("status", this.snapshot());
     try {
+      let w = null;
+      if (replaces) {
+        try { if (typeof this.onEnginesHold === "function") await this.onEnginesHold(); }
+        catch (e) { await this.releaseEngines(); throw new Error("The trading engines could not be stopped (" + ((e && e.message) || e) + "), so the wallet was not replaced. Nothing was changed."); }
+        w = this.walletCheck = { before: await this.walletMark(), held: true, final: false, tries: 0 };
+        this.log("[app] wallet replacement: AtomiX, PandaPools and Dexicon are stopped until it is settled" + (w.before ? "" : "; this wallet could not be identified beforehand (is the node locked?), so the old stores will be set aside without a comparison"));
+      }
+      // nothing to compare with: as before 0.18.116
+      const legacy = async () => { await this.walletReplaced(true); this.walletCheck = null; await this.releaseEngines(); };
       let j;
       try { j = await this.rpc(cmd); }
       catch (e) {
-        // The result is not known: the wallet may be another one already, or become one. Everything bound to the old
-        // identity is set aside NOW, by the main process, whatever the window does next.
-        await this.walletReplaced(replaces);
-        if (this.proc) throw new Error(e.message + ". The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.");
-        await this.start();
+        if (this.proc) {
+          // No answer, and the node is still there: it may still be resyncing, and may still swap the wallet. What
+          // can be read is read now; the check stays owed (the health poll asks again, and at the next start).
+          if (w) { if (w.before) await this.walletSettle(); else await legacy(); }
+          throw new Error(e.message + ". The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.");
+        }
+        if (w && !w.before) await legacy();   // node stopped: set aside before it is started again
+        await this.start();                   // w.before known: settled by the health poll before the node is called "running"
         throw new Error("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.");
       }
-      // The wallet was replaced: the node is stopped, the old identity's stores are set aside, and only then is the
-      // node started again. No engine meets the new wallet with the old wallet's records, not even for one tick.
-      if (j && j.status === true) { await this.stop(); await this.walletReplaced(replaces); await this.start(); }
+      if (j && j.status === true) {
+        await this.stop();
+        if (w && !w.before) await legacy();   // node stopped, the old identity's stores set aside, only then started again
+        await this.start();                   // w.before known: compared before the node is called "running" (walletSettle)
+      } else if (w) {
+        // Refused. The command has ended, so what the wallet is now is final.
+        if (w.before) { w.final = true; await this.walletSettle(); }
+        else { this.walletCheck = null; await this.releaseEngines(); }
+      }
       return j;
     } finally { this.resyncing = false; this.emit("status", this.snapshot()); }
   }
@@ -543,6 +574,49 @@ class NodeManager extends EventEmitter {
   async walletReplaced(replaces) {
     if (!replaces || typeof this.onWalletReplaced !== "function") return;
     try { await this.onWalletReplaced(); } catch (e) { this.log("[app] WALLET REPLACED, but not every old store could be set aside: " + ((e && e.message) || e)); }
+  }
+  async releaseEngines() {
+    try { if (typeof this.onEnginesRelease === "function") await this.onEnginesRelease(); } catch (e) { this.log("[app] the trading engines could not be started again: " + ((e && e.message) || e)); }
+  }
+  /** Which wallet is under the node: a digest of the node's own one-way derivation from its seed (`seedrandom`, as
+   *  AtomiX and Dexicon derive their identities). Equal = the same seed, different = another one. null = it could
+   *  not be read (no answer, a locked node): then nothing is concluded. The value itself is never kept or logged. */
+  async walletMark() {
+    try {
+      const r = await this.rpc("seedrandom modifier:minimacore-desktop-wallet-mark-v1");
+      const v = r && r.status === true && r.pending !== true && r.response ? String(r.response.seedrandom || "") : "";
+      return /^0x[0-9A-Fa-f]{64}$/.test(v) ? require("crypto").createHash("sha256").update(v.toLowerCase()).digest("hex") : null;
+    } catch (e) { return null; }
+  }
+  /**
+   * Settle an owed wallet check (runResync) from what the node says NOW. Called by runResync, and by the health
+   * poll before the node is called "running" and on every tick while a check is owed.
+   *  - the same wallet: the engines are released on their stores, untouched. The check ends once it is final (the
+   *    command was refused, or the node has been started again since); until then the node may still swap.
+   *  - another wallet: the engines are held, the stores set aside, the engines released on new ones.
+   *  - not readable: nothing is concluded and the engines stay as they are; asked again on the next tick.
+   * Returns false while a restarted node must not be called "running" yet (not readable; given up after 6 tries,
+   * the engines then stay stopped until it can be read).
+   */
+  async walletSettle() {
+    const w = this.walletCheck; if (!w) return true;
+    const now = await this.walletMark();
+    if (this.walletCheck !== w) return true;
+    if (!now) {
+      if (w.final && ++w.tries === 7) this.log("[app] the wallet cannot be identified after the restore (is the node locked?): AtomiX, PandaPools and Dexicon stay stopped, and their stores untouched, until it can be read");
+      return !w.final || !w.held || w.tries > 6;
+    }
+    if (now === w.before) {
+      if (w.final) { this.walletCheck = null; this.log("[app] the wallet is the same one as before: every store stays in place"); }
+      if (w.held) { w.held = false; await this.releaseEngines(); }
+      return true;
+    }
+    this.log("[app] the node now holds ANOTHER wallet: the old wallet's stores are set aside (never deleted)");
+    if (!w.held && typeof this.onEnginesHold === "function") { try { await this.onEnginesHold(); } catch (e) {} }
+    this.walletCheck = null;
+    await this.walletReplaced(true);
+    await this.releaseEngines();
+    return true;
   }
 
   // ---- health ----
@@ -592,6 +666,8 @@ class NodeManager extends EventEmitter {
         }
         // Before the app calls the node "running" (which starts every module on it): are its keys of the recorded mode?
         if (!this.keyModeChecked && !(await this.verifyKeyMode())) return;
+        // ...and, after a wallet-replacing megammrsync, is the wallet another one? (the old stores are set aside first)
+        if (this.walletCheck && !(await this.walletSettle())) return;
         if (!this.proc || this.state === "stopping") return;
         if (this.state !== "running") this.setState("running");
         else this.emit("status", this.snapshot());

@@ -323,6 +323,27 @@ test("a wallet reset moves the store aside (never deleted) and starts empty; the
   assert.equal(cold.status().started, false, "a reset does not start an engine the node has not started");
 });
 
+// 0.18.116 (M2): held around a wallet-replacing megammrsync. Nothing starts it, no screen reaches the node through it,
+// and the store stays where it is: released on the same wallet, it goes on with every record.
+test("hold: the engine is stopped and stays stopped (node status, timer, a screen), the store is not moved; release and start bring it back on the same records", async () => {
+  const { host, node, dir } = await boot();
+  await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"0xAB\":{\"id\":\"0xAB\"}}')");
+  const id = host.status().publicId;
+  host.hold();
+  assert.equal(host.status().started, false); assert.equal(host.status().ready, false);
+  await new Promise(r => setTimeout(r, 120)); node.seen.length = 0;
+  await host.start();                                         // the node says "running" again
+  await assert.rejects(host.init(), /stopped while the wallet is being replaced/);
+  await assert.rejects(host.command({ op: "cmd", command: "txnsign id:x publickey:auto" }), /stopped while the wallet is being replaced/);
+  await new Promise(r => setTimeout(r, 150));
+  assert.equal(host.status().started, false, "sticky"); assert.deepEqual(node.seen, [], "nothing reached the node while held");
+  assert.deepEqual(fs.readdirSync(dir).filter(f => /legacy/.test(f)), [], "the store was not moved aside");
+  host.release(); await host.start();
+  await M.until(() => host.status().ready && host.status().restingReady);
+  assert.equal(host.status().publicId, id);
+  assert.deepEqual((await sql(host, "SELECT v FROM ax_kv WHERE k='pending_takes'")).map(r => r.V), ['{"0xAB":{"id":"0xAB"}}'], "the take awaiting an answer is still known");
+});
+
 // 0.18.106 (HIGH): the wallet was replaced and nothing invalidated the store (the window was closed, runResync threw,
 // the app crashed, or the move aside failed). The engine must not trade the old wallet's orders on the new wallet.
 const LIVE_ORDER = (address) => ({ orderId: "0x" + "1".repeat(32), side: "sell", price: "0.0123", amount: "100", remaining: "100", coins: ["0x" + "C0".repeat(32)], scripts: [], address, seq: Date.now(), expiry: Math.floor(Date.now() / 1000) + 3600, status: "live" });

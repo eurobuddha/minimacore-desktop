@@ -507,6 +507,101 @@ test("a wallet-replacing megammrsync calls onWalletReplaced after the old node i
   } finally { m.onWalletReplaced = null; calls.restore(); }
 });
 
+// ---- 0.18.116: the stores are set aside only when the wallet IS another one; the engines are held meanwhile ----
+const PHRASE = 'megammrsync action:resync host:megammr.example:9001 phrase:"ONE TWO THREE"';
+/** A node whose wallet is w.seed (null: it cannot be read), an event list, and the three hooks. sync(w, ev) answers megammrsync. */
+function walletNode(m, calls, sync) {
+  const w = { seed: "A" }, ev = [];
+  m.rpc = async (c) => {
+    if (c === "quit") { setImmediate(() => calls.proc.emit("exit", 0, null)); return { status: true }; }
+    if (/^seedrandom /.test(c)) { if (w.seed === null) return { status: false, error: "locked" }; return { status: true, response: { seedrandom: "0x" + require("crypto").createHash("sha256").update(w.seed).digest("hex") } }; }
+    if (/^megammrsync/.test(c)) { ev.push("sent"); return sync(w, ev); }
+    return { status: true, response: {} };
+  };
+  m.onEnginesHold = async () => { ev.push("hold"); }; m.onEnginesRelease = () => { ev.push("release"); };
+  m.onWalletReplaced = async () => { ev.push("replaced:" + m.state); };
+  return { w, ev };
+}
+async function resyncCase(sync, body) {
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true, walletDone: true });
+  const m = manager(true), calls = fakeJava(m);
+  try { await m.start(); m.state = "running"; await body(m, calls, walletNode(m, calls, sync)); }
+  finally { m.onWalletReplaced = m.onEnginesHold = m.onEnginesRelease = null; m.walletCheck = null; calls.restore(); }
+}
+test("0.18.116: the same wallet restored again keeps every store; the engines are stopped before the command and released after the restart", async () => {
+  await resyncCase(() => ({ status: true, response: {} }), async (m, calls, { ev }) => {
+    assert.equal((await m.runResync(PHRASE)).status, true);
+    assert.deepEqual(ev, ["hold", "sent"], "held before the command; nothing decided while the node is down"); assert.equal(calls.length, 2);
+    calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 50));   // the health poll, as the app runs it
+    assert.deepEqual(ev, ["hold", "sent", "release"], "no store set aside"); assert.equal(m.walletCheck, null); assert.equal(m.state, "running");
+  });
+});
+test("0.18.116: another wallet after a restore: the stores are set aside before the node is called running, with the engines held", async () => {
+  await resyncCase((w) => { w.seed = "B"; return { status: true, response: {} }; }, async (m, calls, { ev }) => {
+    await m.runResync(PHRASE);
+    calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual(ev, ["hold", "sent", "replaced:starting", "release"]); assert.equal(m.state, "running");
+  });
+});
+test("0.18.116: RPC timed out, wallet unchanged: nothing is set aside, the engines go on; when the node swaps later they are held and the stores set aside", async () => {
+  await resyncCase(() => { throw new Error("RPC timeout"); }, async (m, calls, { w, ev }) => {
+    await assert.rejects(m.runResync(PHRASE), /may still be resyncing/);
+    assert.deepEqual(ev, ["hold", "sent", "release"]); assert.ok(m.walletCheck, "the check stays owed: the node may still swap");
+    assert.equal(await m.walletSettle(), true); assert.deepEqual(ev, ["hold", "sent", "release"], "asked again, still the same wallet");
+    w.seed = "B";
+    await m.walletSettle();
+    assert.deepEqual(ev.slice(3), ["hold", "replaced:running", "release"]); assert.equal(m.walletCheck, null);
+  });
+});
+test("0.18.116: RPC failed after the swap (node still there): the stores are set aside, the engines never released in between", async () => {
+  await resyncCase((w) => { w.seed = "B"; throw new Error("socket hang up"); }, async (m, calls, { ev }) => {
+    await assert.rejects(m.runResync(PHRASE), /may still be resyncing/);
+    assert.deepEqual(ev, ["hold", "sent", "replaced:running", "release"]);
+  });
+});
+test("0.18.116: the node died before it answered: started again, and decided from the wallet it then holds (same: untouched; another: set aside; unreadable: held, nothing moved)", async () => {
+  for (const [after, want] of [["A", ["release"]], ["B", ["replaced:starting", "release"]]]) {
+    await resyncCase((w) => { w.seed = after; calls0.proc.emit("exit", 1, null); throw new Error("socket hang up"); }, async (m, calls, { ev }) => {
+      calls0 = calls;
+      await assert.rejects(m.runResync(PHRASE), /result is not known/);
+      assert.deepEqual(ev, ["hold", "sent"]); assert.equal(calls.length, 2);
+      assert.equal(await m.walletSettle(), true);
+      assert.deepEqual(ev.slice(2), want);
+    });
+  }
+  await resyncCase((w) => { w.seed = null; calls0.proc.emit("exit", 1, null); throw new Error("socket hang up"); }, async (m, calls, { w, ev }) => {
+    calls0 = calls;
+    await assert.rejects(m.runResync(PHRASE), /result is not known/);
+    assert.equal(await m.walletSettle(), false, "not readable: the node is not called running yet");
+    assert.deepEqual(ev, ["hold", "sent"], "nothing guessed: no store moved, no engine started");
+    for (let i = 0; i < 6; i++) await m.walletSettle();
+    assert.equal(await m.walletSettle(), true, "the node is not held back for ever"); assert.deepEqual(ev, ["hold", "sent"], "but the engines stay stopped");
+    assert.ok(m.logs.some(l => /cannot be identified after the restore/.test(l)));
+    w.seed = "A"; await m.walletSettle();
+    assert.deepEqual(ev, ["hold", "sent", "release"]);
+  });
+});
+let calls0 = null;
+test("0.18.116: a refused command on an unchanged wallet moves nothing and releases the engines; engines that cannot be stopped mean the command is not sent", async () => {
+  await resyncCase(() => ({ status: false, error: "Could not connect to host" }), async (m, calls, { ev }) => {
+    assert.equal((await m.runResync(PHRASE)).status, false);
+    assert.deepEqual(ev, ["hold", "sent", "release"]); assert.equal(m.walletCheck, null);
+    ev.length = 0; m.onEnginesHold = async () => { throw new Error("AtomiX busy"); };
+    await assert.rejects(m.runResync(PHRASE), /could not be stopped \(AtomiX busy\).*Nothing was changed/);
+    assert.deepEqual(ev, ["release"], "never sent");
+    // a chain-only resync holds nothing
+    ev.length = 0; m.onEnginesHold = async () => { ev.push("hold"); };
+    await m.runResync("megammrsync action:resync host:megammr.example:9001");
+    assert.deepEqual(ev, ["sent"]);
+  });
+});
+
+test("0.18.116: main.js holds and releases all three trading engines", () => {
+  const main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8");
+  const hold = /node\.onEnginesHold = [^\n]+/.exec(main)[0], rel = /node\.onEnginesRelease = [^\n]+/.exec(main)[0];
+  for (const e of ["atomix", "pandapools", "dexicon"]) { assert.ok(hold.includes(e + ".hold()"), e + " held"); assert.ok(rel.includes(e + ".release()"), e + " released"); }
+});
+
 test("M2: the restart is refused like any start when the start command is wrong; a refused or unanswered megammrsync restarts nothing", async () => {
   freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
   const m = manager(true); let calls = fakeJava(m);

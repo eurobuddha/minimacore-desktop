@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.116] — A failed or repeated wallet restore no longer sets the swap store aside (review, M2)
+
+- **The fault.** `runResync` set every engine store aside whenever a wallet-replacing `megammrsync` (phrase or file) did not answer, also when the node was still running on the unchanged wallet. `atomix.sqlite` holds the claim secrets of swaps in flight; AtomiX then started again on an empty store. On the success path the three engines kept ticking between the node's wallet swap and its shutdown.
+- **Held first.** Before such a command is sent, AtomiX, PandaPools and Dexicon are stopped and stay stopped (`hold()` in each host: no timer, no start by a node status, no action from a screen, and no signing command reaches the node; reads and `txndelete` still do, so a chain in flight ends cleanly; `hold()` waits up to 15 s for what is at the node). If they cannot be stopped the command is not sent.
+- **Moved only on evidence.** The wallet is identified before and after (`node-manager.walletMark`: a digest of the node's one-way `seedrandom` derivation; the value is never kept or logged). Another wallet: the stores are set aside (never deleted) before the restarted node is called running, then the engines start on new ones. The same wallet (the same phrase again, a refused command, a timeout before any swap): every store stays where it is and the engines go on. Not readable: nothing is concluded, the engines stay stopped, asked again every 10 s.
+- **A timeout with the node still running** leaves the check owed: megammrsync can outlast the 180 s RPC limit and swap the wallet afterwards. It is asked again on every health tick and at the next node start; when the wallet has changed the engines are held again and the stores set aside.
+- **Still decided without a comparison:** a wallet that could not be identified before the command (a locked node). The stores are then set aside after a success and after an unknown result, as since 0.18.106.
+- Tests: `scripts/keymode-test.cjs` (six, every branch: same wallet, another wallet, timed out and unchanged then swapped later, failed after the swap, node died with each outcome and unreadable, refused, engines that cannot be stopped), `scripts/engine-abort.test.cjs` (AtomiX and PandaPools held), `scripts/dexicon-host.test.cjs` (Dexicon held).
+
 ## [0.18.115] — Dexicon ① MxUSD: the halt card, the rescue tools and Market offline (Phase 3c)
 
 - **The halt card** (`DoorsTab.paintRescue`). The engine's identity watch has always stopped new liabilities when the node no longer owns AtomiX's keys; the old desktop panel never showed it. `main/atomix.js` `status()` now carries the watch's verdict (`halt`, read only, null unless halted; every key and address whole), and room ① shows the card above Swap, Market and OTC and above the wallet in Assets: what stopped, that swaps in flight keep settling, the orphaned Minima key, the stale and the current Ethereum address, and the rescue before anything else.

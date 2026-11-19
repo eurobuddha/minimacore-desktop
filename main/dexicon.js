@@ -136,6 +136,8 @@ function makeHost(opts = {}) {
   let epoch = 0;   // bumped by drop(): everything built before it is disowned
   let asideOwed = false;   // the store on disk belongs to another wallet: it is moved aside before any store is opened
   let problem = "";        // why Dexicon is not running although the node is, in plain words (status().problem)
+  let held = false;        // HOLD (0.18.116): a command that may replace the wallet is running in the node; no engine, no bridge, until release()
+  const HELD = "Dexicon is stopped while the wallet is being replaced. It starts again by itself.";
   // opts.signal: a SIGNING command still waiting in the process-wide queue (main/noderun.js) when its engine is
   // dropped is rejected there and never reaches the node (0.18.107)
   let runner = opts.runner || ((cmd, o) => {
@@ -228,6 +230,7 @@ function makeHost(opts = {}) {
   function fire(event, extra) { if (serviceHandler) { try { serviceHandler(toVm(Object.assign({ event }, extra))); } catch (e) { log("handler error: " + e.message); } } }
 
   async function init() {
+    if (held) throw new Error(HELD);
     if (ready) return;
     if (initPromise) return initPromise;
     const mine = epoch;
@@ -285,7 +288,7 @@ function makeHost(opts = {}) {
   /** Start with the node (main.js calls this once the node is "running": after the wallet exists and the key-mode
    *  gate has passed). Nothing is sent to the node before that. */
   function start() {
-    if (timer) return Promise.resolve();
+    if (held || timer) return Promise.resolve();
     startedAt = Date.now();
     timer = setInterval(() => { if (!ready) { init().catch(() => {}); return; } fire("MDS_TIMER_10SECONDS"); blockWatch(); }, tickMs);   // a failed init is tried again
     if (timer.unref) timer.unref();
@@ -300,6 +303,9 @@ function makeHost(opts = {}) {
     if (ctx || initPromise) { drop(); emitter.emit("update"); } else flush();
   }
   function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
+  /** HOLD: stopped, and not started again by a node status, the timer or a screen until release(). The store stays. */
+  function hold() { if (!held) { held = true; log("held: a command that may replace the wallet is about to run"); } stop(); }
+  function release() { held = false; }   // main.js starts it again when the node is running
 
   /**
    * The wallet under the app was replaced (main/restore.js): the identity (seedrandom of the OLD seed), the orders it
@@ -399,6 +405,7 @@ function makeHost(opts = {}) {
   }
   /** The one entry for the screens: { op: "cmd", command } | { op: "sql", query } | { op: "comms", message } | { op: "net", method, url, body }. */
   async function command(a) {
+    if (held) throw new Error(HELD);   // the page's own txnsign / txnpost included
     const op = a && a.op;
     if (op === "cmd") return pageCmd(a.command);
     if (op === "sql") return pageSql(a.query);
@@ -407,7 +414,7 @@ function makeHost(opts = {}) {
     throw new Error("unknown Dexicon op");
   }
 
-  return { emitter, init, start, stop, flush, invalidate, status, activeWork, book, mine, command, storePath,
+  return { emitter, init, start, stop, hold, release, flush, invalidate, status, activeWork, book, mine, command, storePath,
     identitySeed,
     _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),
