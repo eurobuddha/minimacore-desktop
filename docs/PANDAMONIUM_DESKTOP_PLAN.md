@@ -193,3 +193,21 @@ Owner decisions added 19 Nov 2026 (evening):
 - The app keeps a notifier for Parlons calls and messages while the panel lives in the browser: a desktop
   notification (and dock/taskbar attention for a call) raised by the app; clicking it opens the Parlons panel in the
   browser. Phase 4 must find how the app learns of them from the node without the embedded view.
+
+## 9. Checks that need a real node (owner, on the dev node; nothing here is proven yet)
+
+Phases 0 to 2 were verified by tests and a browser preview only. The app has not been launched.
+
+- [ ] The app starts, shows the shell, and every moved view opens (tabs, tray apps, overflow menu).
+- [ ] Drag to reorder: tray rows and Wallet token rows.
+- [ ] Send, Split and Consolidate on small amounts; Receive's Get Address.
+- [ ] History: sync, export, import of the exported file, a transaction's chain-inclusion check.
+- [ ] Shutdown warning names a live swap / maker order / pool operation; Start node afterwards.
+- [ ] Block time and footer time show in the local timezone.
+- [ ] `-blockaskeyuses true -lowram true` is accepted by the new jars, inside the Parlons args string too.
+- [ ] `keys` over the Parlons admin RPC shows 64/3 (classic) or 128/4 (block) on real wallets, and nothing else.
+- [ ] The node starts with the stripped environment, including the keets sidecar.
+- [ ] megammrsync: whether the node exits, and that the app restarts it cleanly, including a sync over 180 s.
+- [ ] Restore from seed and from a backup file end to end; the mode question; the refusal while a swap is open.
+- [ ] P2P Chance settle-only on a wallet that has an open offer (it should be withdrawn automatically).
+- [ ] `pandapools.activity()` rows carry `txpowid` and `confirmed:false` while pending (the Shutdown warning uses it).
