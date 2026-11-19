@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.73] — shell: fixes from the side-by-side with the Fold
+
+- After comparing each screen with the Fold captures: the toolbar title, the tray heading and the tray rows are Manrope 600 (the phone sets them in its system face at medium weight, which is heavier than Manrope 500), and the "MINIMA" label beside Total balance sits on the figure's baseline.
+- `scripts/dev-preview/shots/` holds the final captures (fixture data): Wallet, Apps, Node, tray, overflow menu, ETH Wallet, Mail and Receive in dark and light, plus a 1440 x 900 window and a 680 px wide one.
+
 ## [0.18.72] — Node tab laid out as Pandamonium's
 
 - The Node tab is the phone's: a NODE card (Status with its dot, Block, Block time, Connections, Incoming, Random peer) and an IDENTITY card (Key uses as the large figure, Minima version, App version). Key uses, the random peer and the incoming count come from the same three read-only commands the phone uses (`keys`, `peers`, `network`), at most every 30 seconds while the tab is showing.

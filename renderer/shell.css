@@ -10,6 +10,9 @@
    Letter spacing: the phone's Body text inherits Material 3's .03em and its Caption
    text .018em; they are part of how it looks, so they are set here too.
 
+   The toolbar title and the tray are set in the system face at medium weight on
+   the phone (Roboto); here they are Manrope 600, the nearest weight by eye.
+
    Weights: the phone's TextAppearances ask for 600 to 800, but the app on the
    device draws body text, numerals, buttons and eyebrows at Manrope Regular.
    The phone wins, so those are 400 here. Tab labels are 600 on the phone too.
@@ -68,7 +71,7 @@
 .bar__more--update::after { content: ""; }
 /* "Minima Core" over "Pandamonium": the pair is centred in the bar, the two lines share a left edge */
 .bar__titles { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: left; white-space: nowrap; pointer-events: none; }
-.bar__brand { font-size: 16px; font-weight: 500; line-height: 21px; color: var(--bar-brand); }
+.bar__brand { font-size: 16px; font-weight: 600; line-height: 21px; color: var(--bar-brand); }
 .bar__sub { font-size: 12px; font-weight: 500; line-height: 16px; color: var(--bar-sub); }
 .bar__page { font-size: 18px; font-weight: 700; letter-spacing: -.01em; color: var(--text); margin: 0 0 0 12px; }
 
@@ -123,12 +126,12 @@
 /* ---------------------------------------------------------------- app tray (PandamoniumHooks) */
 .tray { flex: 0 0 330px; width: 330px; max-width: 88vw; height: 100%; display: flex; flex-direction: column;
   padding: 18px 16px 12px; background: var(--tray-panel); color: var(--tray-text); }
-.tray__title { font-size: 25px; font-weight: 500; line-height: 33px; }
+.tray__title { font-size: 25px; font-weight: 600; line-height: 33px; }
 .tray__sub { font-size: 12px; font-weight: 500; line-height: 16px; color: var(--tray-muted); padding: 4px 0 18px; }
 .tray__list { flex: 1 1 0; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
 .tray__row { width: 100%; height: 50px; margin: 0 0 4px; padding: 0 12px 0 16px; display: flex; align-items: center; gap: 12px;
   border: 0; border-radius: 10px; background: var(--tray-panel); color: var(--tray-text); cursor: pointer; text-align: left;
-  font: 500 16px/1.2 var(--sans); }
+  font: 600 16px/1.2 var(--sans); }
 .tray__row:hover { background: #212A2F; }
 .tray__ic { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; display: block; fill: currentColor; }
 img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
@@ -157,7 +160,7 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .wal-total { display: flex; align-items: flex-end; padding: 5px 16px 0; }
 .wal-total__n { flex: 1 1 auto; min-width: 0; font-size: 26px; font-weight: 400; line-height: 36px;
   color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; user-select: text; }
-.wal-total .eyebrow { margin: 0 0 6px 8px; }
+.wal-total .eyebrow { margin: 0 0 9px 8px; }
 .wal-actions { display: flex; gap: 12px; padding: 21px 16px 8px; }
 .wal-actions .btn { flex: 1 1 0; min-height: 42px; height: 42px; font-size: 16px; font-weight: 400; }
 .wal-eyebrow { padding: 18px 16px 8px; line-height: 16px; }
