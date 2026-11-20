@@ -131,6 +131,50 @@ function usesFingerprint(keys) {
 }
 
 /**
+ * THE SIGN GATE. Before a transaction of this app is signed (txnsign) or posted (txnpost), what the NODE holds under
+ * its id (`txnlist id:`) is checked against what was meant (p), never against what the engine believes it built:
+ *   - exactly one input and one output, and no transaction state;
+ *   - the input is the planned coin; one token in and out; the output's amount equals the input's and the plan's,
+ *     exactly (nothing burnt, nothing kept back: a whole-coin spend, as the native's every transaction is);
+ *   - collect: the input sits at a FutureCash contract address; the output pays the stake's own payout, which is an
+ *     address of this wallet (and the input's state 2, where the node shows it);
+ *   - sweep: the input sits on the address it was planned from, which is an address of this wallet that is at risk or
+ *     retired; the output pays the configured safe destination.
+ * Anything else is refused with the reason; the caller logs the whole transaction and deletes it.
+ * p = { kind, coinid, tokenid, amount, to, contracts, own(addr), from, mayMove(addr), safe }.
+ */
+function gateCheck(txn, p) {
+  const no = (why) => ({ ok: false, why });
+  const ins = txn && txn.inputs, outs = txn && txn.outputs;
+  if (!Array.isArray(ins) || !Array.isArray(outs)) return no("the node did not show the transaction's inputs and outputs");
+  if (ins.length !== 1 || outs.length !== 1) return no(ins.length + " inputs and " + outs.length + " outputs, where one of each was built");
+  if (Array.isArray(txn.state) && txn.state.length) return no("the transaction carries state");
+  const i = ins[0] || {}, out = outs[0] || {};
+  if (!HEX64.test(String(i.coinid || "")) || lc(i.coinid) !== lc(p.coinid)) return no("its input is coin " + i.coinid + ", not " + p.coinid);
+  const tok = lc(i.tokenid);
+  if (!/^0x[0-9a-f]{2,64}$/.test(tok) || lc(out.tokenid) !== tok || tok !== lc(p.tokenid)) return no("the token is not the same in the input (" + i.tokenid + "), the output (" + out.tokenid + ") and the plan (" + p.tokenid + ")");
+  const amtIn = outAmount(i), amtOut = outAmount(out);
+  if (!AMOUNT.test(amtIn) || toUnits(amtIn) <= 0n) return no("the input's amount is not stated");
+  if (!decEq(amtIn, amtOut) || !decEq(amtIn, p.amount)) return no(amtIn + " goes in, " + amtOut + " comes out, " + p.amount + " was planned");
+  if (out.storestate === true) return no("the output keeps state");
+  if (p.kind === "collect") {
+    if (!(p.contracts || []).some(a => lc(a) === lc(i.address))) return no("its input is not at the FutureCash contract (" + i.address + ")");
+    if (canon(out.address) !== canon(p.to)) return no("its output pays " + out.address + ", not the stake's payout " + p.to);
+    const s2 = state(i, ST_RECIPIENT);
+    if (s2 != null && canon(s2) !== canon(p.to)) return no("the stake's own payout is " + s2 + ", not " + p.to);
+    if (!p.own || !p.own(p.to)) return no("the payout " + p.to + " is not an address of this wallet");
+    return { ok: true };
+  }
+  if (p.kind === "sweep") {
+    if (canon(i.address) !== canon(p.from)) return no("its input is on " + i.address + ", not " + p.from);
+    if (!p.own || !p.own(p.from) || !p.mayMove || !p.mayMove(p.from)) return no("the coin is on " + p.from + ", which is not an at-risk or retired address of this wallet");
+    if (!p.safe || canon(p.to) !== canon(p.safe) || canon(out.address) !== canon(p.safe)) return no("its output pays " + out.address + ", not the safe destination " + p.safe);
+    return { ok: true };
+  }
+  return no("an unknown kind of transaction");
+}
+
+/**
  * create(o): o = { run(cmd) -> the node's reply (rpcCall, owner "futurecash"), dir() -> userData, get(url) -> parsed JSON
  * or null (the audit host), log(line), notify(title, body), now() }.
  */
@@ -183,6 +227,7 @@ function create(o) {
   /** The node stopped (or the app is frozen): a pass under way ends first, then the store is closed. */
   async function stop() {
     if (passing) await passing.catch(() => {});
+    await turn;   // an action the screens asked for ends first too
     const s = store; store = null; scriptsCache = null; atRisk.clear(); lastTip = 0; if (s) s.close();
   }
 
@@ -398,7 +443,8 @@ function create(o) {
    * never a reused default). The amount is shape-checked and sent as typed (never through a number). → { ok, matBlock,
    * payout, command } or { ok: false, error }.
    */
-  async function lock(amount, blocks, recipient) {
+  function lock(amount, blocks, recipient) { return exclusive(() => lockNow(amount, blocks, recipient)); }
+  async function lockNow(amount, blocks, recipient) {
     if (!store) return { ok: false, error: "Future Cash Next has not started yet." };
     const amt = String(amount == null ? "" : amount).trim(), rcp = String(recipient == null ? "" : recipient).trim();
     if (!AMOUNT.test(amt) || toUnits(amt) <= 0n) return { ok: false, error: "Enter a positive amount." };
@@ -423,6 +469,139 @@ function create(o) {
     return { ok: true, matBlock: mat, payout, amount: amt };
   }
 
+  // ---- one thing at a time: a pass and every action the screens ask for share this turn ----
+  let turn = Promise.resolve();
+  function exclusive(fn) { const p = turn.then(fn, fn); turn = p.then(() => {}, () => {}); return p; }
+
+  // ---- transactions (Tx.java) ----
+  let seq = 0;
+  const stage = (c) => String(c).split(" ")[0];
+  /** Node.coinState: "gone" (rolled back by a reorg) kept apart from "spent". */
+  async function coinState(id) {
+    const r = await call("coins coinid:" + id);
+    if (!ok(r) || !Array.isArray(r.response)) return "UNKNOWN";
+    if (!r.response.length) return "GONE";
+    return r.response[0] && r.response[0].spent === true ? "SPENT" : "UNSPENT";
+  }
+  /**
+   * Tx.run: the steps in order, each checked before the next; the sign gate asked before the step that signs and the
+   * step that posts; txndelete on EVERY path. A reply with no boolean status is an unknown outcome, never a success.
+   * txnpost's status:true is the post, not the confirmation (mining is asynchronous): the coin's state decides later.
+   */
+  async function runTx(kind, steps, plan) {
+    const id = "FC" + kind + now() + "_" + (++seq % 1000000);
+    try {
+      for (const step of steps) {
+        const c = step.split("%ID%").join(id), verb = stage(c);
+        if (plan && (verb === "txnsign" || verb === "txnpost")) {
+          const t = await call("txnlist id:" + id), txn = ok(t) && t.response && t.response.transaction;
+          const v = txn ? gateCheck(txn, plan) : { ok: false, why: "the node could not show the transaction" };
+          if (!v.ok) {
+            activity("error", "Refused by the sign gate before " + verb + ": " + v.why + " | coin:" + plan.coinid);
+            log("SIGN GATE REFUSED " + verb + " of " + id + ": " + v.why + "; plan " + JSON.stringify(Object.assign({}, plan, { own: undefined, mayMove: undefined })) + "; the node's transaction " + JSON.stringify(txn || t));
+            return { ok: false, error: "Refused before signing: " + v.why + ". Nothing was " + (verb === "txnsign" ? "signed" : "posted") + ".", refused: true };
+          }
+        }
+        const r = await call(c);
+        if (r == null) return { ok: false, error: "Minima Core didn't respond (at " + verb + ")" };
+        if (typeof r.status !== "boolean") return { ok: false, error: "Couldn't read Minima Core's reply to " + verb + " — it may have succeeded. Check the Activity log before retrying." };
+        if (r.pending === true) return { ok: false, error: "The embedded node did not authorize the request. Check its status before retrying.", notPaired: true };
+        if (r.status !== true) return { ok: false, error: (r.error ? String(r.error) : "failed") + " (at " + verb + ")" };
+      }
+      return { ok: true };
+    } finally { await call("txndelete id:" + id); }
+  }
+  /** Tx.checkParts: nothing malformed reaches a command (a coin at the shared contract carries anyone's state). */
+  function parts(coinid, address, amount, tokenid) {
+    if (!HEX64.test(String(coinid))) return "Refusing to spend a malformed coin id.";
+    if (!validAddr(address)) return "This payment's destination looks malformed — refusing.";
+    if (!/^0x[0-9a-fA-F]{2,64}$/.test(String(tokenid))) return "This payment's token id looks malformed — refusing.";
+    if (!AMOUNT.test(String(amount))) return "This payment's amount looks malformed — refusing.";
+    if (toUnits(amount) === 0n) return "Refusing to post a zero-amount output — the coin's amount didn't parse.";
+    return "";
+  }
+  /** Tx.collect: no signature (the contract pins the payout); create, input, output, basics, post. */
+  async function collectTx(coinid, payout, amount, tokenid, sets) {
+    const bad = parts(coinid, payout, amount, tokenid);
+    if (bad) return { ok: false, error: bad };
+    return runTx("COL", ["txncreate id:%ID%", "txninput id:%ID% coinid:" + coinid, "txnoutput id:%ID% address:" + payout + " amount:" + amount + " tokenid:" + tokenid + " storestate:false",
+      "txnbasics id:%ID%", "txnpost id:%ID%"], { kind: "collect", coinid, tokenid, amount, to: payout, contracts: contracts(), own: (a) => owns(sets, a) });
+  }
+
+  // ---- collect by hand (Guardian.collectNow) ----
+  /** One matured stake, now. Refused for an at-risk payout (the rescue owns those) and without a usable audit. */
+  function collectNow(coinid) { return exclusive(() => collectOne(coinid)); }
+  async function collectOne(coinid) {
+    const err = (e) => ({ ok: false, error: e });
+    if (!store) return Object.assign(err("Future Cash Next has not started yet."), { stop: true });
+    if (!HEX64.test(String(coinid))) return err("Not a valid coin id.");
+    const t = await tip(), r = await call("coins coinid:" + coinid);
+    if (!ok(r) || !Array.isArray(r.response)) return err("Could not read the complete stake list. Refresh and retry.");
+    const coin = r.response.find(c => c && lc(c.coinid) === lc(coinid) && c.spent !== true);
+    if (!coin) return err("Stake not found — it may already be collected.");
+    if (!isStake(coin, contracts())) return err("Not a FutureCash stake.");
+    if (!matured(coin, t)) return err("Not matured yet — unlocks at block " + state(coin, ST_FUTUREBLOCK) + " (now " + t + ").");
+    const payout = state(coin, ST_RECIPIENT), sets = await scriptTable(false);
+    if (!owns(sets, payout)) return err("That stake doesn't pay out to this node — it isn't yours to collect.");
+    loadAtRisk(sets);
+    if (atRisk.has(canon(payout))) return err("This stake pays out to an at-risk address — the Guardian rescues it with collect + sweep instead. Set up rescue on the Guardian tab.");
+    if (!(await verdict()).ok) return Object.assign(err("Run a key audit first, then collect."), { stop: true });
+    const amount = outAmount(coin), tokenid = String(coin.tokenid || "0x00"), id = String(coin.coinid);
+    // recorded as posted BEFORE the post (an atomic claim): a pass running next sees it, and Quit, Freeze and a wallet
+    // replacement know a collect is out until the chain says how it ended
+    if (!store.collectExists(id)) store.insertCollect(id, payout, tokenid, amount, num(state(coin, ST_FUTUREBLOCK)), false);
+    if (!store.claimForPost(id, S.COLLECT_POSTED_SAFE, t)) return err("This stake is already being collected.");
+    const res = await collectTx(id, payout, amount, tokenid, sets);
+    if (!res.ok) { store.setCollectStatus(id, S.DETECTED); return Object.assign(err(res.error), { stop: !!res.notPaired }); }
+    activity("info", "Manual collect posted: " + amount + " | stake:" + id + " | to:" + payout);
+    return { ok: true, amount };
+  }
+  /** Collect all now: every ready stake on a clean payout; a refusal that would stop every other one stops the loop. */
+  function collectAll() {
+    return exclusive(async () => {
+      let done = 0, last = null;
+      const list = (await stakesRead()).stakes;
+      for (const st of list) {
+        if (!st.ready || st.atRisk) continue;
+        const r = await collectOne(st.coinid);
+        if (r.ok) done++;
+        else { last = r.error; if (r.stop) break; }   // a blocking condition fails every remaining stake the same way
+      }
+      return { ok: done > 0, done, error: done ? null : (last || "Nothing to collect.") };
+    });
+  }
+
+  // ---- reconcile (Guardian.collectMatured's first half, reconcileCollects) ----
+  /** A DETECTED stake gone from the scan: spent means collected (by this app or anyone: the contract paid its payout). */
+  async function settleDetected(seen, budget) {
+    for (const row of store.collects(S.DETECTED)) {
+      if (seen.has(lc(row.coinid))) continue;
+      if (budget.reads-- <= 0) return;
+      const st = await coinState(row.coinid);
+      // the native sets COLLECTED here whatever the payout, so a clean stake collected by hand was then swept too; on the
+      // desktop a clean payout ends as COLLECTED_SAFE: only an at-risk payout is ever queued for a sweep
+      if (st === "SPENT") store.setCollectStatus(row.coinid, row.atRisk ? S.COLLECTED : S.COLLECTED_SAFE);
+    }
+  }
+  async function reconcileCollects(t, budget) {
+    for (const row of store.collects(S.COLLECT_POSTED, S.COLLECT_POSTED_SAFE)) {
+      if (budget.reads-- <= 0) return;
+      const safe = row.status === S.COLLECT_POSTED_SAFE && !row.atRisk, st = await coinState(row.coinid);
+      if (st === "SPENT") {
+        store.setCollectStatus(row.coinid, safe ? S.COLLECTED_SAFE : S.COLLECTED);
+        if (safe) notify("Future Cash", "Collected " + row.amount + " safely");
+        activity("info", "Collected " + row.amount + (safe ? " [safe]" : " [rescue → sweeping next]") + " | stake:" + row.coinid + " | on:" + row.payout);
+        continue;
+      }
+      if (t - row.collectBlock >= RETRY_BLOCKS) {
+        store.setCollectStatus(row.coinid, S.DETECTED);
+        if (row.attempts === MAX_ATTEMPTS) { notify("Future Cash", "A collection keeps failing — check this node"); activity("error", "Collect still failing after " + row.attempts + " tries | stake:" + row.coinid + " | to:" + row.payout); }
+        else activity("warn", "Collect retry scheduled | stake:" + row.coinid + " | to:" + row.payout);
+      }
+    }
+  }
+  function notify(title, body) { try { if (store && store.kv.is(K.NOTIFY, true) && o.notify) o.notify(title, body); } catch (e) {} }
+
   // ---- detection (Guardian.detect) ----
   async function detect(sets) {
     const seen = new Map();
@@ -437,29 +616,32 @@ function create(o) {
 
   // ---- the pass ----
   /**
-   * One pass on a new block. Read side only in this version: what is staked to this wallet is recorded (detect) for the
-   * screens; nothing is posted.
+   * One pass on a new block: what is staked to this wallet is recorded (detect), and what was posted is followed to its
+   * end (reconcile). Nothing is posted by a pass in this version.
    */
   function pass(t) {
     if (!store || passing) return passing || Promise.resolve(false);
-    passing = (async () => {
+    passing = exclusive(async () => {
       try {
+        if (!store) return false;
         if (!t) t = await tip();
         if (!t) return false;
         lastTip = t; kv().set(K.LAST_TIP, String(t));
-        const sets = await scriptTable(false);
+        const sets = await scriptTable(false), budget = { reads: CAP_READS, posts: CAP_POSTS };
         loadAtRisk(sets);
-        await detect(sets);
+        const seen = await detect(sets);
+        await settleDetected(seen, budget);
+        await reconcileCollects(t, budget);
         return true;
       } catch (e) { activity("error", "Guardian pass failed — will retry next block: " + ((e && e.message) || e)); return false; }
-      finally { passing = null; }
-    })();
+    }).finally(() => { passing = null; });
     return passing;
   }
 
   // ---- the read model for the screens ----
   /** Guardian.listStakes: soonest unlock first. */
-  async function stakes() {
+  function stakes() { return exclusive(stakesRead); }
+  async function stakesRead() {
     if (!store) throw new Error("Future Cash Next has not started yet.");
     const t = await tip(), sets = await scriptTable(false);
     loadAtRisk(sets);
@@ -495,9 +677,9 @@ function create(o) {
   }
   function activityLog() { try { const a = JSON.parse(kv().get(K.LOG, "[]")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
-  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress,
+  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll,
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }
 
 module.exports = { create, SCRIPT, KNOWN_ADDRESS, SECONDS_PER_BLOCK, K, S, CAP_POSTS, CAP_READS, SCRIPTS_EVERY, MIN_DEFAULTS_KEEP, FRESH_MS, MAX_MS,
-  canon, mxToHex, scriptAddress, state, outAmount, sum, decEq, looksLikeFutureCash, isStake, matured, hasOwnKey, usesFingerprint, validAddr, validHexAddr, validMx };
+  gateCheck, canon, mxToHex, scriptAddress, state, outAmount, sum, decEq, looksLikeFutureCash, isStake, matured, hasOwnKey, usesFingerprint, validAddr, validHexAddr, validMx };

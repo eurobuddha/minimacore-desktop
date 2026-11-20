@@ -64,10 +64,16 @@ function standIn(o = {}) {
       return { status: true, response: { address, script: m[2] } };
     }
     if (c === "newaddress") { const k = "0x" + (n.minted = (n.minted || 0x50) + 1).toString(16).repeat(32).slice(0, 64).toUpperCase(); n.keys.push(k); const address = ADDR(k); n.scripts.push({ address, miniaddress: require("../main/keyuses.js").addressOf(k).mx, script: SIGN(k), publickey: k, default: false, track: true }); return { status: true, response: { address, miniaddress: require("../main/keyuses.js").addressOf(k).mx, script: SIGN(k), publickey: k } }; }
+    if ((m = /^txncreate id:(\S+)$/.exec(c))) { n.txns = n.txns || {}; n.txns[m[1]] = { inputs: [], outputs: [], state: [] }; return { status: true, response: { id: m[1] } }; }
+    if ((m = /^txninput id:(\S+) coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const coin = n.coins[U(m[2])] || Object.values(n.at).flat().find(x => U(x.coinid) === U(m[2])); if (!coin) return { status: false, error: "coin not found" }; n.txns[m[1]].inputs.push(JSON.parse(JSON.stringify(coin))); return { status: true }; }
+    if ((m = /^txnoutput id:(\S+) address:(\S+) amount:(\S+) tokenid:(\S+) storestate:false$/.exec(c))) { n.txns[m[1]].outputs.push(m[4] === "0x00" ? { address: m[2], amount: m[3], tokenid: m[4], storestate: false } : { address: m[2], amount: "0.000001", tokenamount: m[3], tokenid: m[4], storestate: false }); return { status: true }; }
+    if ((m = /^txnlist id:(\S+)$/.exec(c))) { const t = n.txns[m[1]]; return t ? { status: true, response: { id: m[1], transaction: n.tamper ? n.tamper(JSON.parse(JSON.stringify(t))) : t } } : { status: false, error: "no such txn" }; }
+    if ((m = /^(txnbasics|txnsign|txnpost) id:(\S+)/.exec(c))) { if (m[1] === "txnpost") n.posted = (n.posted || []).concat(m[2]); return { status: true, response: m[1] === "txnpost" ? { txpowid: ID(999) } : {} }; }
+    if ((m = /^txndelete id:(\S+)$/.exec(c))) { delete (n.txns || {})[m[1]]; return { status: true }; }
     if (/^send /.test(c)) { n.sends = (n.sends || []).concat(c); return { status: true, response: { txpowid: ID(777) } }; }
     if (/^coins relevant:true sendable:true checkmempool:true tokenid:0x00/.test(c)) return { status: true, response: [] };
     if ((m = /^coins relevant:true address:(0x[0-9A-Fa-f]+)$/.exec(c))) return { status: true, response: (n.at[U(m[1])] || []).filter(x => !x.spent) };
-    if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])]; return { status: true, response: x ? [x] : [] }; }
+    if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])] || Object.values(n.at).flat().find(y => U(y.coinid) === U(m[1])); return { status: true, response: x ? [x] : [] }; }
     if (c === "status") return { status: true, response: { locked: false } };
     return { status: false, error: "the stand-in does not know: " + c };
   }
@@ -204,4 +210,113 @@ test("lock: a locked vault is said before newaddress, and a node that parks the 
   assert.ok(!node.sent.includes("newaddress"));
   const p = await engine({ answer: { "send ": async () => ({ status: true, pending: true }) } });
   assert.match((await p.e.lock("1", 72, PAY0)).error, /did not authorize/);
+});
+
+/** An engine with a fresh, complete audit and the given stakes at the contract. */
+async function audited(nodeOpts, extra) {
+  const x = await engine(nodeOpts, extra), kv = x.e._store().kv, keys = (await x.node.run("keys action:list")).response.keys;
+  kv.set(FC.K.AUDIT_USES, FC.usesFingerprint(keys)); kv.setBool(FC.K.AUDIT_OK, true); kv.set(FC.K.AUDIT_AT, String(Date.now()));
+  return x;
+}
+const steps = (sent) => sent.filter(c => /^txn/.test(c)).map(c => c.replace(/id:FC[A-Z]+\d+_\d+/, "id:ID"));
+
+test("collect by hand: the native's five steps, the node's transaction checked before the post, then txndelete", async () => {
+  const s1 = stake(1, PAY0, { mature: 140, amount: "12.5" });
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  node.sent.length = 0;
+  const r = await e.collectNow(ID(1));
+  assert.deepEqual(r, { ok: true, amount: "12.5" });
+  assert.deepEqual(steps(node.sent), ["txncreate id:ID", "txninput id:ID coinid:" + ID(1), "txnoutput id:ID address:" + PAY0 + " amount:12.5 tokenid:0x00 storestate:false",
+    "txnbasics id:ID", "txnlist id:ID", "txnpost id:ID", "txndelete id:ID"]);
+  assert.equal(e._store().collect(ID(1)).status, "COLLECT_POSTED_SAFE", "recorded before the post");
+  assert.match((await e.collectNow(ID(1))).error, /already being collected/, "a second click posts nothing");
+});
+
+test("collect by hand is refused: not matured, not ours, at risk, no audit, malformed id; nothing is built", async () => {
+  const at = { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 999 }), stake(2, STRANGER, { mature: 1 }), stake(3, PAY1, { mature: 1 })] };
+  const { e, node } = await audited({ at });
+  e._store().kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY1]));
+  node.sent.length = 0;
+  assert.match((await e.collectNow(ID(1))).error, /Not matured yet — unlocks at block 999 \(now 150\)/);
+  assert.match((await e.collectNow(ID(2))).error, /doesn't pay out to this node/);
+  assert.match((await e.collectNow(ID(3))).error, /at-risk address/);
+  assert.match((await e.collectNow("0x12;send")).error, /Not a valid coin id/);
+  assert.match((await e.collectNow(ID(4))).error, /Stake not found/);
+  e._store().kv.setBool(FC.K.AUDIT_OK, false); e._store().kv.set(FC.K.ATRISK_ADDRS, "[]");
+  assert.match((await e.collectNow(ID(3))).error, /Run a key audit first/);
+  assert.deepEqual(node.sent.filter(c => /^txn/.test(c)), []);
+});
+
+test("the sign gate refuses every wrong shape: nothing is posted, the transaction is deleted, the whole of it is logged", async () => {
+  const tampers = {
+    "two outputs": (t) => (t.outputs.push({ address: STRANGER, amount: "1", tokenid: "0x00" }), t),
+    "another payee": (t) => (t.outputs[0].address = STRANGER, t),
+    "less out than in (a burn)": (t) => (t.outputs[0].amount = "12.4", t),
+    "another token": (t) => (t.outputs[0].tokenid = "0xAB", t),
+    "an input not at the contract": (t) => (t.inputs[0].address = PAY1, t),
+    "another coin": (t) => (t.inputs[0].coinid = ID(5), t),
+    "a second input": (t) => (t.inputs.push(Object.assign({}, t.inputs[0], { coinid: ID(6) })), t),
+    "transaction state": (t) => (t.state = [{ port: 1, data: "1" }], t),
+    "the stake's state names another payout": (t) => (t.inputs[0].state[2].data = PAY1, t),
+    "a state-keeping output": (t) => (t.outputs[0].storestate = true, t),
+    "no inputs listed": (t) => (delete t.inputs, t)
+  };
+  for (const [name, tamper] of Object.entries(tampers)) {
+    const { e, node, logs } = await audited({ at: { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 140, amount: "12.5" })] }, tamper });
+    node.sent.length = 0;
+    const r = await e.collectNow(ID(1));
+    assert.equal(r.ok, false, name); assert.match(r.error, /^Refused before signing: .*Nothing was posted\.$/, name);
+    assert.ok(!node.sent.some(c => /^txnpost/.test(c)), name + ": not posted");
+    assert.ok(/^txndelete id:FCCOL/.test(node.sent[node.sent.length - 1]), name + ": deleted");
+    assert.ok(logs.some(l => /SIGN GATE REFUSED txnpost .*the node's transaction \{/.test(l)), name + ": logged whole");
+    assert.equal(e._store().collect(ID(1)).status, "DETECTED", name + ": free to try again");
+  }
+});
+
+test("the gate's own rules, as a pure function", () => {
+  const coin = stake(1, PAY0, { amount: "5" }), txn = () => ({ inputs: [JSON.parse(JSON.stringify(coin))], outputs: [{ address: PAY0, amount: "5.000", tokenid: "0x00", storestate: false }], state: [] });
+  const plan = { kind: "collect", coinid: ID(1), tokenid: "0x00", amount: "5", to: PAY0, contracts: [FC.KNOWN_ADDRESS], own: (a) => FC.canon(a) === FC.canon(PAY0) };
+  assert.deepEqual(FC.gateCheck(txn(), plan), { ok: true });
+  assert.equal(FC.gateCheck(txn(), Object.assign({}, plan, { own: () => false })).ok, false, "a payout of another wallet");
+  assert.equal(FC.gateCheck(txn(), Object.assign({}, plan, { amount: "4" })).ok, false);
+  assert.equal(FC.gateCheck(txn(), Object.assign({}, plan, { kind: "send" })).ok, false);
+  const tok = { inputs: [Object.assign(JSON.parse(JSON.stringify(coin)), { tokenid: "0xAB", amount: "0.001", tokenamount: "7" })], outputs: [{ address: PAY0, amount: "0.001", tokenid: "0xAB" }], state: [] };
+  assert.equal(FC.gateCheck(tok, Object.assign({}, plan, { tokenid: "0xAB", amount: "7" })).ok, false, "a token output whose amount the node does not state is refused");
+  tok.outputs[0].tokenamount = "7"; assert.equal(FC.gateCheck(tok, Object.assign({}, plan, { tokenid: "0xAB", amount: "7" })).ok, true);
+});
+
+test("txndelete follows a failure at every step, and a missing or unreadable reply is never a success", async () => {
+  for (const at of ["txncreate", "txninput", "txnoutput", "txnbasics", "txnpost"]) {
+    for (const reply of [{ status: false, error: "boom" }, null, { status: "yes" }]) {
+      const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 140 })] }, answer: { [at]: async () => (reply === null ? Promise.reject(new Error("timeout")) : reply) } });
+      node.sent.length = 0;
+      const r = await e.collectNow(ID(1));
+      assert.equal(r.ok, false, at);
+      assert.match(r.error, reply === null ? new RegExp("didn't respond \\(at " + at + "\\)") : reply.status === false ? new RegExp("boom \\(at " + at + "\\)") : /it may have succeeded/, at);
+      assert.ok(/^txndelete id:FCCOL/.test(node.sent[node.sent.length - 1]), at + ": deleted");
+    }
+  }
+});
+
+test("a posted collect is followed to its end: spent is collected; unspent after 8 blocks is tried again; the fifth failure is said", async () => {
+  const s1 = stake(1, PAY0, { mature: 140 });
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] }, coins: {} });
+  await e.collectNow(ID(1));
+  node.n.coins[ID(1)] = Object.assign({}, s1, { spent: false });
+  node.n.tip = 155; await e.pass(155);
+  assert.equal(e._store().collect(ID(1)).status, "COLLECT_POSTED_SAFE", "unspent, inside the retry window");
+  node.n.tip = 158; await e.pass(158);
+  assert.equal(e._store().collect(ID(1)).status, "DETECTED", "8 blocks on, unspent: tried again");
+  await e.collectNow(ID(1)); node.n.coins[ID(1)].spent = true; node.n.at[FC.KNOWN_ADDRESS] = [];
+  await e.pass(159);
+  assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE");
+  assert.ok(e.activity().some(l => l.msg.startsWith("Collected 10 [safe] | stake:" + ID(1))));
+});
+
+test("a clean stake collected elsewhere ends COLLECTED_SAFE, never queued for a sweep (the desktop's one change to the native here)", async () => {
+  const s1 = stake(1, PAY0, { mature: 140 });
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  await e.pass(150); assert.equal(e._store().collect(ID(1)).status, "DETECTED");
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(1)] = Object.assign({}, s1, { spent: true });
+  await e.pass(151); assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE");
 });

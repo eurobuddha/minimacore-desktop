@@ -420,7 +420,8 @@ ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audi
 // "futurecash" (the signing queue and the coin guard see it); the key audit through the KeyUses host. It runs while the
 // node runs: its store is this wallet's own file, and one pass is made on each new block.
 const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c, { owner: "futurecash" }), dir: () => app.getPath("userData"),
-  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l) });
+  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l),
+  notify: (title, body) => { try { const n = new Notification({ title: String(title), body: String(body), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ } } });
 const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
 let fcBlock = 0;
 node.on("status", (s) => {
@@ -430,7 +431,7 @@ node.on("status", (s) => {
 });
 // The screens' calls, by name: nothing else reaches the engine.
 const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),
-  lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient) };
+  lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient), collect: (coinid) => futurecash.collectNow(coinid), collectAll: () => futurecash.collectAll() };
 ipcMain.handle("mcd:fc", (_e, op, ...args) => { if (typeof op !== "string" || !Object.hasOwn(FC_OPS, op)) throw new Error("Unknown Future Cash action."); requireRunning(); return FC_OPS[op](...args); });
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
