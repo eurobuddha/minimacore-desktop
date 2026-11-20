@@ -438,7 +438,7 @@ const DexUI = (() => {
 
   // ---- Orders (OrdersTab.java) and History (HistoryTab.java) ----
   const idLine = (label, value) => (value ? `<div class="dx-id" data-copy="${esc(value)}" title="${th("Click to copy")}">${esc(label)} ${esc(value)}</div>` : "");
-  const stamp = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, "0"); return p(d.getDate()) + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()] + " " + p(d.getHours()) + ":" + p(d.getMinutes()); };
+  const stamp = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, "0"); return I18N.t("{day} {month}", { day: p(d.getDate()), month: I18N.t(I18N.MONTHS[d.getMonth()]) }) + " " + p(d.getHours()) + ":" + p(d.getMinutes()); };
   const seg = (names, on, attr) => `<div class="dx-seg" role="group">${names.map((n, i) => `<button ${attr}="${i}" aria-pressed="${i === on}">${n}</button>`).join("")}</div>`;
   function makerCard() {
     const c = X.mm || {}, mode = !c.enabled ? "OFF" : c.peg ? I18N.t("PEGGED · MEXC") : "MANUAL", status = X.kv.mm_status || "", pool = X.kv.mm_pool || "";
@@ -505,7 +505,7 @@ const DexUI = (() => {
       out.push(`<button class="dx-card dx-led" data-fill="${i}"><span class="dx-led__ic" data-tone="${fs.tone}">⇄</span><span class="dx-led__m"><b>${f.status === "done" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))}</b>`
         + `<span class="dx-led__a">${buy ? tr("{f} MxUSD → {filled} MINIMA", { f: esc(C.fmt(C.fillUsd(f))), filled: esc(f.filled) }) : tr("{filled} MINIMA → {f} MxUSD", { filled: esc(f.filled), f: esc(C.fmt(C.fillUsd(f))) })}</span>`
         + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? th("you were the maker") : th("fast book")} · ${esc(fs.text)}</span></span>`
-        + `<span class="dx-led__r">${f.status === "done" ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${fs.chip}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>`);
+        + `<span class="dx-led__r">${f.status === "done" ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${th(fs.chip)}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>`);
     });
     return out.join("") + DexAx.part("history") + DexPools.part("history");
   }
@@ -561,8 +561,8 @@ const DexUI = (() => {
         const chip = m ? m.chip(a, tip) : String(a.stage || ""), status = m ? m.status(a, tip, now) : String(a.stage || ""), tone = /DONE|CONFIRMED/.test(chip) ? "ok" : /FAILED|REFUSED|DROPPED|LOST/.test(chip) ? "bad" : "live";
         if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
         out.push(`<button class="dx-card dx-led" data-act="${i}"><span class="dx-led__ic" data-tone="${tone}">${tone === "ok" ? "✓" : tone === "bad" ? "!" : "…"}</span><span class="dx-led__m"><b>${tone === "ok" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))} MINIMA</b>`
-          + `<span class="dx-led__a">${tr("{minima} MINIMA @ {price}", { minima: esc(a.amount || a.minima || ""), price: esc(a.price || "") })}</span><span class="dx-led__s">${stamp(ms)} · ${a.route === "FAST" ? "fast book" : "on-chain"} · ${esc(status)}</span></span>`
-          + `<span class="dx-led__r"><span class="dx-chip" data-tone="${tone}">${esc(chip)}</span><span class="dx-led__t">▸</span></span></button>`);
+          + `<span class="dx-led__a">${tr("{minima} MINIMA @ {price}", { minima: esc(a.amount || a.minima || ""), price: esc(a.price || "") })}</span><span class="dx-led__s">${stamp(ms)} · ${a.route === "FAST" ? th("fast book") : th("on-chain")} · ${esc(status)}</span></span>`
+          + `<span class="dx-led__r"><span class="dx-chip" data-tone="${tone}">${esc(I18N.t(chip))}</span><span class="dx-led__t">▸</span></span></button>`);
       });
     } else {
       const tape = X.svc && Array.isArray(X.svc.tape) ? X.svc.tape : [];

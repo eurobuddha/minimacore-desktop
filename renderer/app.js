@@ -1053,7 +1053,7 @@ function clock(t) { const m = /\b\d\d:\d\d:\d\d\b/.exec(String(t || "")); return
 function blockTime(t) {
   t = String(t || "").trim();
   const m = /^\w{3} (\w{3}) (\d{1,2}) (\d\d:\d\d:\d\d) (\S+) (\d{4})$/.exec(t);
-  if (m) return m[1] + " " + Number(m[2]) + ", " + m[5] + ", " + m[3] + " " + m[4];
+  if (m) return I18N.t("{month} {day}, {year}, {time} {zone}", { month: I18N.t(m[1]), day: Number(m[2]), year: m[5], time: m[3], zone: m[4] });   // the node's English month, said in the app's language
   return /^no blocks/i.test(t) ? I18N.t("No blocks yet") : clock(t) ? t : "";
 }
 function paintFooter(s) {
@@ -3619,7 +3619,7 @@ async function refreshShopBadge() {
   try { const n = await api.shopNewCount(); const b = el("shopBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; paintTrayDot(); } catch (e) {}
 }
 function shopGo(view, nav) { shopView = view; shopNav = nav || {}; renderMiniMall(); }
-function shopPill(status) { const s = status === "INQUIRY" ? "ENQUIRY" : String(status || ""); return `<span class="mm-pill" style="background:${Object.hasOwn(SHOP_PILL, status) ? SHOP_PILL[status] : "#9A9AA8"}">${esc(s)}</span>`; }
+function shopPill(status) { const s = status === "INQUIRY" ? N_("ENQUIRY") : String(status || ""); return `<span class="mm-pill" style="background:${Object.hasOwn(SHOP_PILL, status) ? SHOP_PILL[status] : "#9A9AA8"}">${esc(t(s))}</span>`; }   // the state as the wire has it, said in the app's language (a state the catalog does not know is shown as it came)
 function shopAgo(ms) { const d = Date.now() - (Number(ms) || 0); return d < 60000 ? "just now" : d < 3600000 ? t("{d}m ago", { d: Math.floor(d / 60000) }) : d < 86400000 ? t("{d}h ago", { d: Math.floor(d / 3600000) }) : t("{d}d ago", { d: Math.floor(d / 86400000) }); }
 /** A screen of one of the three apps: its bar (back, title, icons on the right), then the page. */
 function shopFrame(title, back, icons, body, foot) {
@@ -3654,7 +3654,7 @@ async function renderShopInbox() {
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
     `<div class="mm-ver">${th("miniMall Inbox")}</div>
      <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>
-     <div class="mm-chips">${["ALL", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${s}</button>`).join("")}</div>
+     <div class="mm-chips">${[N_("ALL"), N_("PENDING"), N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${th(s)}</button>`).join("")}</div>
      ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
         <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.amount)} ${esc(SHOP.cur(o.currency))}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
   el("mmCard").onclick = shopVendorCard;
@@ -3682,7 +3682,7 @@ async function renderShopSellOrder(ref) {
      <div class="mm-sec">${th("Delivery")}</div>${shopKv(t("Method"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("Address"), o.delivery, true) : ""}
      ${o.note ? `<div class="mm-sec">${th("Buyer note")}</div><div class="mm-card">${esc(o.note)}</div>` : ""}
      ${shopKv(t("Buyer key"), o.counterparty || "", true)}
-     ${enquiry ? "" : `<div class="mm-sec">${th("Update status")}</div><div class="mm-grid">${["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${s}</button>`).join("")}</div>
+     ${enquiry ? "" : `<div class="mm-sec">${th("Update status")}</div><div class="mm-grid">${[N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${th(s)}</button>`).join("")}</div>
        <div class="mm-hint">${!o.paid ? th("Awaiting payment first. PAID is set by the payment itself, when it arrives.") : next ? tr("Next: {next}.", { next: next }) : th("This order is delivered.")}</div>`}
      <div class="mm-sec">${enquiry ? th("Conversation") : th("Message the buyer")}</div><div class="mm-thread">${shopThread(d.chat, t("Buyer"))}</div>
      <div class="mm-send"><input class="mm-in-f" id="shopMsg" placeholder="${th("Reply…")}" aria-label="${th("Reply")}" autocomplete="off" /><button class="mm-btn" id="shopSend">${th("Send")}</button></div>`);

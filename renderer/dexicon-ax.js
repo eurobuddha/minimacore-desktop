@@ -125,7 +125,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     return { hash: s.hash, live: running, terminal: terminal(s), maker, created: Number(s.created) || 0,
       title: maker ? I18N.t("AtomiX · your market filled") : s.direction === "ERC20_TO_MINIMA" ? I18N.t("AtomiX entry") : I18N.t("AtomiX exit"),
       amount: s.sellamount + " " + sell + " → " + s.buyamount + " " + buy, sub: roleLabel(s.role) + " · " + outcome,
-      chip: running ? "LIVE" : complete ? "DONE" : refunded ? "REFUNDED" : "FAILED", tone: running ? "live" : complete ? "ok" : "bad", lines, refund, ids };
+      chip: running ? I18N.N_("LIVE") : complete ? I18N.N_("DONE") : refunded ? I18N.N_("REFUNDED") : I18N.N_("FAILED"), tone: running ? "live" : complete ? "ok" : "bad", lines, refund, ids };
   }
   const HIDE_ASK = (maker) => I18N.t("This only removes the card from Swap and Activity. If any funds were locked on-chain they still refund by themselves at the timelock: hiding doesn't touch them. {maker}", { maker: (maker ? I18N.t("It stays in History with Check now and Unhide; your own lock returns by itself after its timelock.") : I18N.t("It stays in History, with Check now, Refund now and Unhide.")) });
   /** History (0.18.132): every finished swap AND every hidden one, finished or not. A hidden swap that still needs the
@@ -210,7 +210,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** YOUR OFFER at a glance (MarketTab.renderMyOffer), from the maker's read model and my own levels in the book. */
   function offerState(mc, book, src) {
     const c = (mc && mc.cfg) || {}, st = (mc && mc.state) || {}, man = (mc && mc.manual) || {}, rows = [];
-    for (const [side, name] of [["asks", "ASK"], ["bids", "BID"]]) for (const r of (book && book[side]) || []) if (r.mine) rows.push(name + "  " + fmtPx(r.p) + "   " + abbrev(r.cap));
+    for (const [side, name] of [["asks", I18N.N_("ASK")], ["bids", I18N.N_("BID")]]) for (const r of (book && book[side]) || []) if (r.mine) rows.push(I18N.t(name) + "  " + fmtPx(r.p) + "   " + abbrev(r.cap));
     const set = c.step > 0 || (man.bids || []).length > 0 || (man.asks || []).length > 0, live = rows.length > 0 && !st.withdrawn;
     return { live, rows: live ? rows : [], text: !mc ? "…" : st.withdrawn ? I18N.t("Withdrawn: your offer is off the book, or leaving it within about a block.") : live ? I18N.t("Live{src} · kept on the book while this app and the node run.", { src: (c.pegEnable ? (" " + I18N.t("· pegged to {src}", { src: src })) : "") })
       : set ? I18N.t("Saved, not on the book. Publish puts it there.") : I18N.t("Off — edit your order, then Publish."), ago: mc && mc.lastPublishMs ? mc.lastPublishMs : 0 };
@@ -479,7 +479,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** A swap's card: the same one on Swap (IN PROGRESS), in Activity and in History. */
   function swapCard(s, hideable, unhide) {
     const it = swapItem(s, S.answers[s.hash]);
-    return `<div class="dx-card ax-swap"><div class="dx-row"><b class="ax-t13">${esc(it.title)}</b><span class="dx-row"><span class="dx-chip" data-tone="${it.tone}">${it.chip}</span>${hideable ? `<button class="ax-x" data-axhide="${esc(it.hash)}" aria-label="${th("Hide this swap's card")}">✕</button>` : ""}</span></div>`
+    return `<div class="dx-card ax-swap"><div class="dx-row"><b class="ax-t13">${esc(it.title)}</b><span class="dx-row"><span class="dx-chip" data-tone="${it.tone}">${th(it.chip)}</span>${hideable ? `<button class="ax-x" data-axhide="${esc(it.hash)}" aria-label="${th("Hide this swap's card")}">✕</button>` : ""}</span></div>`
       + `<div class="ax-amt">${esc(it.amount)}</div><div class="ax-dim">${esc(D.relTime ? D.relTime(it.created) + " · " : "")}${esc(it.sub)}</div>`
       + it.lines.map((l) => `<div class="ax-line">${esc(l)}</div>`).join("") + it.ids.map((x) => idLine(x[0], x[1])).join("")
       + `<div class="ax-acts"><button class="dx-btn" data-axcheck="${esc(it.hash)}">${th("Check now")}</button>${unhide ? `<button class="dx-btn" data-axunhide="${esc(it.hash)}">${th("Unhide")}</button>` : ""}${it.refund ? `<button class="dx-btn${it.refund.enabled ? " dx-btn--go" : ""}" data-axrefund="${esc(it.hash)}"${it.refund.enabled ? "" : " disabled"}>${esc(it.refund.label)}</button>` : ""}</div></div>`;

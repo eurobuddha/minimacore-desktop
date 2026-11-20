@@ -93,7 +93,7 @@
   // ---------------------------------------------------------------- time, in the APK's words
   function pad2(n) { return n < 10 ? "0" + n : String(n); }
   function clock(ms) { var d = new Date(Number(ms)); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
-  var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MON = I18N.MONTHS;   // English short names: translated where a date is shown
   function ago(n, unit) { return new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "always" }).format(-n, unit); }   // "5 minutes ago", worded in the language on show
   /** The phone's Language.since: now · 33 minutes ago · 5 hours ago · 3 days ago */
   function since(ms) {
@@ -110,7 +110,7 @@
     if (age < 3600000) return since(t);
     if (age < 86400000) return clock(t);
     if (age < 7 * 86400000) return since(t);
-    return d.getDate() + " " + MON[d.getMonth()];
+    return I18N.t("{day} {month}", { day: d.getDate(), month: I18N.t(MON[d.getMonth()]) });
   }
   function dayStart(ms) { var d = new Date(Number(ms)); d.setHours(0, 0, 0, 0); return d.getTime(); }
   /** Today · Yesterday · "7 Mar 2026" — MainActivity.dateLabel() */
@@ -119,7 +119,7 @@
     if (days === 0) return I18N.t("Today");
     if (days === 1) return I18N.t("Yesterday");
     var d = new Date(Number(ms));
-    return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear();
+    return I18N.t("{day} {month} {year}", { day: d.getDate(), month: I18N.t(MON[d.getMonth()]), year: d.getFullYear() });
   }
   function groupInt(n) { return String(Number(n) || 0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 

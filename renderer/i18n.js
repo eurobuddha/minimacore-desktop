@@ -55,6 +55,9 @@
   const th = (key, p) => fill(esc(text(key, p)), p, esc);
   const tr = (key, p) => fill(esc(text(key, p)), p, str);
   const N_ = (key) => key;
+  /** The short month names as the app writes them in English: catalog keys, translated where a date is shown
+   *  (t("{day} {month}") and its variants put day, month and year in each language's order). */
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   /** The English plural "s" for a count, and nothing in any other language: for the few sentences still built around
    *  an English noun + "s" (their translations are worded so that the count needs no ending: "orders: 3"). */
   const s = (n) => (lang === "en" && Number(n) !== 1 ? "s" : "");
@@ -89,7 +92,7 @@
     for (const [sel, attr, key] of PAGE) for (const n of scope.querySelectorAll(sel)) { if (attr) n.setAttribute(attr, t(key)); else n.textContent = t(key); }
   }
 
-  const I18N = { CODES, NAMES, TAGS, PAGE, pick, supported, add, set, apply, t, th, tr, tIn, N_, L_, s,
+  const I18N = { CODES, NAMES, TAGS, PAGE, MONTHS, pick, supported, add, set, apply, t, th, tr, tIn, N_, L_, s,
     lang: () => lang, tag: () => TAGS[lang],
     languages: () => CODES.filter(c => CAT[c]),                 // the languages that have a catalog, in the phone's order
     onChange: (fn) => { listeners.push(fn); },

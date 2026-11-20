@@ -177,7 +177,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (a.originalTxpowid && String(a.originalTxpowid).toLowerCase() !== String(a.txpowid).toLowerCase()) ids.push(["original submission", a.originalTxpowid]);
     if (a.verifiedAt) lines.push(I18N.t("Checked {verifiedAt}", { verifiedAt: since(a.verifiedAt, now) }));
     if (a.failed) lines.push(a.failMsg ? failText(I18N.t("This"), a.failMsg, null, 0, true) : I18N.t("It was not sent. No funds moved."));   // a row the engine marked failed: nothing was sent
-    return { title: (ACT_NAME[a.type] && I18N.t(ACT_NAME[a.type])) || String(a.type || I18N.t("Pool transaction")), chip: a.failed ? "FAILED" : a.statusText || I18N.t("Waiting for node check"), tone, summary: swapSummary(a), lines, ids, done: !!(a.failed || a.confirmed) };
+    return { title: (ACT_NAME[a.type] && I18N.t(ACT_NAME[a.type])) || String(a.type || I18N.t("Pool transaction")), chip: a.failed ? I18N.t("FAILED") : a.statusText || I18N.t("Waiting for node check"), tone, summary: swapSummary(a), lines, ids, done: !!(a.failed || a.confirmed) };
   }
   /** One transaction of any pool (ActivityView.globalRow). */
   function feedItem(f, now) {

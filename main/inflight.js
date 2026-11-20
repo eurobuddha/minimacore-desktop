@@ -11,11 +11,11 @@
  */
 const HOUR = 3600000;
 
-/** "at 14:05", or "at 14:05 on 21 Nov" when that is not today. Local time, 24 h. */
-function clock(ms, nowMs) {
-  const d = new Date(ms), n = new Date(nowMs), two = (x) => String(x).padStart(2, "0");
-  const t = two(d.getHours()) + ":" + two(d.getMinutes());
-  return d.toDateString() === n.toDateString() ? t : t + " on " + d.getDate() + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+/** "at 14:05", or "at 14:05 on 21 Nov" when that is not today. Local time, 24 h. t: the translator of the warning (English when none). */
+function clock(ms, nowMs, t) {
+  const d = new Date(ms), n = new Date(nowMs), two = (x) => String(x).padStart(2, "0"), say = t || EN;
+  const hm = two(d.getHours()) + ":" + two(d.getMinutes());
+  return d.toDateString() === n.toDateString() ? hm : say("{time} on {day} {month}", { time: hm, day: d.getDate(), month: say(I18N.MONTHS[d.getMonth()]) });
 }
 
 // The words come from the shared catalog (renderer/i18n.js). EN says them in English whatever the app's language: for
@@ -39,7 +39,7 @@ function inFlight(work, how, nowMs, t) {
       const at = Number(ax.nearestMs) || 0;
       const when = !at ? t("can time out")
         : at <= nowMs ? (k === 1 ? t("can time out: the time limit of its lock has already passed and its refund is waiting to be made") : t("can time out: the time limit of the first lock has already passed and its refund is waiting to be made"))
-        : (ax.nearestApprox ? t("can time out at about {time}", { time: clock(at, nowMs) }) : t("can time out at {time}", { time: clock(at, nowMs) })) + (k === 1 ? "" : " " + t("(the first of them)"));
+        : (ax.nearestApprox ? t("can time out at about {time}", { time: clock(at, nowMs, t) }) : t("can time out at {time}", { time: clock(at, nowMs, t) })) + (k === 1 ? "" : " " + t("(the first of them)"));
       busy.push(t("{n} AtomiX swaps are not finished. A swap in progress cannot settle {off} and {when}. {back} well before then: if the other side completes its part in the meantime, this app must be running to claim yours.", { n: k, off, when, back }));
     }
     if (ax.maker) busy.push(t("Your AtomiX market is on the book. Its orders stay there, but a swap someone starts against them is not answered {off}.", { off }));

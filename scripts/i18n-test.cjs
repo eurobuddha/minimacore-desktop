@@ -220,6 +220,7 @@ test("no code decides by matching text that is translated (regex, ===, includes,
     "renderer/dexicon-pp.js timed out": "the PandaPools engine's raw message, before it is put into words",
     "renderer/mail.js validate the recipient": "main/mail.js's own English error",
     "renderer/mail.js may have been submitted": "main/mail.js's own English error, read from the raw message (never translated)",
+    "renderer/dexicon-ui.js CONFIRMED": "the Exchange engine's own stage name (dexicon/lib/activity.js chip), read for its tone before it is translated for the screen",
     "main/atomix.js timed out": "an Ethereum RPC or network error text",
     "main/node-manager.js  Parlons Node ": "a line of the parlons-node jar's own log",
     "main/pandapools.js  MINIMA for ": "the PandaPools engine's English summary of a swap"
@@ -256,4 +257,30 @@ test("every text about a one-time key says one-time key in each language", () =>
   const WORD = { zh: /一次性/, ru: /одноразов/i, uk: /одноразов/i };
   for (const code of OTHERS) for (const [k, v] of Object.entries(I18N.catalog(code))) if (/one-time key/i.test(k))
     for (const s of (v && typeof v === "object" ? Object.values(v) : [v])) assert.match(s, WORD[code], code + ": " + k);
+});
+
+// 0.19.161: the short tables read at load that 0.19.141 to 0.19.144 did not reach: month names, Dexicon's single-word chips,
+// miniMall's order states. The values stay English (compared, stored, sent); they are said in the app's language where drawn.
+test("months, chips and order states are said in each language where drawn; the values stay English", () => {
+  for (const c of OTHERS) require("../renderer/i18n/" + c + ".js");
+  const inflight = require("../main/inflight.js"), NOW = new Date(2026, 10, 20, 12, 0).getTime(), JUL = new Date(2026, 6, 16, 9, 5).getTime();
+  assert.equal(inflight.clock(JUL, NOW), "09:05 on 16 Jul", "English as before");
+  const src = (f) => fs.readFileSync(path.join(R, f), "utf8"), app = src("app.js");
+  const blockTime = new Function(app.match(/function clock\(t\) \{[^\n]*\}/)[0] + "\n" + app.slice(app.indexOf("function blockTime(t) {"), app.indexOf("\n}", app.indexOf("function blockTime(t) {")) + 2) + "; return blockTime;")();
+  assert.equal(blockTime("Thu Jul 16 14:54:04 BST 2026"), "Jul 16, 2026, 14:54:04 BST", "English as before");
+  try {
+    for (const code of OTHERS) {
+      I18N.set(code);
+      for (const [i, m] of I18N.MONTHS.entries()) { assert.notEqual(I18N.t(m), m, code + " " + m); assert.ok(I18N.t(m) && !/[A-Za-z]{3}/.test(I18N.t(m)), code + ": " + I18N.t(m)); void i; }
+      const said = inflight.clock(JUL, NOW, I18N.t);
+      assert.ok(said.includes(I18N.t("Jul")) && said.includes("09:05") && said.includes("16") && !/ on |Jul/.test(said), code + ": " + said);
+      const bt = blockTime("Thu Jul 16 14:54:04 BST 2026"); assert.ok(bt.includes(I18N.t("Jul")) && bt.includes("2026") && bt.includes("14:54:04 BST") && !/Jul/.test(bt), code + ": " + bt);
+      for (const w of ["LIVE", "DONE", "FAILED", "REFUNDED", "LOST", "UNKNOWN", "WAITING", "BID", "ASK", "ENQUIRY", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED", "UNDERPAID", "WRONG_TOKEN", "ALL", "SETTLING", "IN BLOCK", "CO-SIGNED"]) assert.notEqual(I18N.t(w), w, code + ": " + w);
+    }
+  } finally { I18N.set("en"); }
+  // drawn through the catalog; the value under it unchanged
+  assert.ok(app.includes('data-chip="${s}" aria-pressed="${shopFilter === s}">${th(s)}</button>') && app.includes('data-advance="${s}"${s === next ? "" : " disabled"}>${th(s)}</button>') && app.includes("${esc(t(s))}</span>`; }"), "miniMall: the state is translated where shown, the data value is the wire's");
+  assert.ok(src("dexicon-ax.js").includes('<span class="dx-chip" data-tone="${it.tone}">${th(it.chip)}</span>') && src("dexicon-ui.js").includes('${th(fs.chip)}</span>') && src("dexicon-ui.js").includes("${esc(I18N.t(chip))}</span>"));
+  assert.ok(/var MON = I18N\.MONTHS;/.test(src("mail.js")) && src("mail.js").includes('I18N.t("{day} {month} {year}"') && src("dexicon-ui.js").includes('month: I18N.t(I18N.MONTHS[d.getMonth()])'));
+  const AX = require("../renderer/dexicon-ax.js"); assert.equal(AX.dealStatus({ status: "COMPLETE" }), "Complete");
 });
