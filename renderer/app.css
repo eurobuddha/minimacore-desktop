@@ -67,7 +67,7 @@ select.field__input option { background: var(--surface2); color: var(--text); }
 
 /* ---- minimaMail ---- */
 /* The Mail panel's styles moved to mail.css (scoped .mailapp / .mm-*, APK palette). .mail-ver stays:
-   the AtomiX and Parlons headers wear it, and #view-minimall owns .mail-thread further down. */
+   the AtomiX and Parlons headers wear it. */
 .mail-ver { font-size: 11px; font-weight: 600; color: var(--dim); vertical-align: middle; }
 .btn--danger { background: none; color: var(--red); border-color: var(--red); }
 .btn--danger:hover { filter: brightness(1.12); }

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.111] — The Mail palette test follows miniMall's new screens (0.19.110 was committed with it failing)
+
+- `scripts/mail-test.cjs` still required the shared sheet to carry `#view-minimall .mail-thread`, the class miniMall's old order screen borrowed from Mail. Since 0.19.110 miniMall's screens are its own (`.mm-thread` in `renderer/apps.css`) and the rule was removed with them, so the test failed in that commit. It now checks the opposite: no screen outside Mail wears a mail thread class. A comment in `renderer/app.css` that named the old rule is corrected. No behaviour changes.
+
 ## [0.19.110] — miniMall as Pandamonium shows it: the launcher and the three apps' own screens (Phase 5a)
 
 - **miniMall opens on Pandamonium's launcher page** (`MallActivity`: `#12171B`, cards `#192024` with a `#344144` outline, the lime `›`): "Shop, create storefronts and manage orders." and three cards, **miniMall**, **miniMall Studio**, **miniMall Inbox**. The three stay in one tray app, as kept by the owner; each card opens that app's own screens in its own design (`Design.java` of `apks/merchshop`, `merchstudio`, `merchinbox`: `#0A0A0F` / `#15151F` / `#1F1F2B`, accent `#F7931A`, the bar with ‹ and the title).

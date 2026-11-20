@@ -131,7 +131,9 @@ test("the panel's palette cannot leak into the rest of the app", () => {
     assert.ok(!app.includes(dead + " "), dead + " should have moved out of app.css");
   }
   assert.ok(app.includes(".mail-ver"), ".mail-ver stays — the AtomiX and Parlons headers wear it");
-  assert.ok(app.includes("#view-minimall .mail-thread"), "miniMall keeps its own .mail-thread");
+  // 0.19.110: miniMall's screens are its own apps' now (.mm-thread in apps.css); it wears no mail class any more
+  const appJs = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(!app.includes(".mail-thread") && !/mail-(?:thread|bubble)/.test(appJs), "no screen outside Mail wears a mail thread class");
 });
 
 // ---------------------------------------------------------------- the panel actually renders
