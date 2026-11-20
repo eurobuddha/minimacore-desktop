@@ -1034,7 +1034,16 @@ function maxKeyUses(k) {
 // website" banner, the MegaMMR gate, the one-time key-uses acknowledgement with its on-chain check, the two-click confirm,
 // the UNKNOWN-status lock. NOT reproduced, on purpose: "Remember me" (the original stores the seed in plain text),
 // "Generate secret key", and a per-send key-uses figure the user may lower (main keeps a durable counter that only grows).
-let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwAmbiguous = false, wwMode = null;
+let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwMode = null;
+// The wallets (by address) whose last send's status is UNKNOWN. NOT cleared by Logout or by leaving the screen (0.19.123:
+// logging out and in again offered Send at once, with the possible first payment unchecked): only "I've checked" clears one.
+// In memory, as everything on this screen: a restart of the app starts clean.
+const WW_UNKNOWN = new Set();
+function wwUnknown(address, set) {
+  const k = String(address || "").toLowerCase(); if (!k) return false;
+  if (set === true) WW_UNKNOWN.add(k); else if (set === false) WW_UNKNOWN.delete(k);
+  return WW_UNKNOWN.has(k);
+}
 let wwTab = "balance", wwSearch = "", wwForm = { to: "", amt: "", tok: "0x00" };
 
 // The 4 render "modes". A LIVE update (block tick / status push) must ONLY re-render when the mode CHANGES —
@@ -1043,7 +1052,7 @@ let wwTab = "balance", wwSearch = "", wwForm = { to: "", amt: "", tok: "0x00" };
 function currentWwMode() { if (!running) return "waiting"; if (!wwMegammrOn()) return "gate"; if (!wwSeed || !wwAddr) return "unlock"; return "wallet"; }
 function wwLiveRender() { if (activeView === "webwallet" && currentWwMode() !== wwMode) renderWebWallet(); }
 function onWebWalletUpdate() { wwLiveRender(); }
-function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwAmbiguous = false; wwTab = "balance"; wwSearch = ""; wwForm = { to: "", amt: "", tok: "0x00" }; }
+function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwTab = "balance"; wwSearch = ""; wwForm = { to: "", amt: "", tok: "0x00" }; }
 function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
 // A token is named from its id where the id is known; an unnamed token (main hands back the start of its id) shows its whole id.
 function wwName(b) { const k = PayLabel.token(b.tokenid); if (k.known) return k.name === "MINIMA" ? "Minima" : k.name; const n = String(b.name || ""); return !n || String(b.tokenid).startsWith(n) || /^(minima|mxusdt?)$/i.test(n.trim()) ? String(b.tokenid) : n; }
@@ -1146,9 +1155,9 @@ function renderWwWallet(body) {
       : `<div class="ww-safe ww-safe--warn"><b>Confirm the secret key uses before sending.</b> How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; <b>a figure that is too low can reuse a signing key and lose your funds</b>.${wwKuSuggest > 0 ? ` <b>The chain shows at least ${esc(String(wwKuSuggest))}.</b>` : ""}
            <label class="ww-label" for="wwKuIn">Secret key uses</label><input class="ww-in" id="wwKuIn" type="number" min="0" step="1" placeholder="Amount of times" value="${esc(String(kuDefault))}" />
            <div class="ww-two"><button class="ww-btn ww-btn--dark" id="wwKuCheck">Check on-chain</button><button class="ww-btn" id="wwKuConfirm">Confirm</button></div></div>`);
-    const ambig = wwAmbiguous ? `<div class="ww-safe ww-safe--warn"><b>⚠ The last send's status is UNKNOWN.</b> The node did not confirm it, and the payment may have gone through. Check <b>History</b> and your balance before sending again, or you could pay twice.
+    const unknown = wwUnknown(a.address), ambig = unknown ? `<div class="ww-safe ww-safe--warn"><b>⚠ The last send's status is UNKNOWN.</b> The node did not confirm it, and the payment may have gone through. Check <b>History</b> and your balance before sending again, or you could pay twice.
         <button class="ww-btn ww-btn--dark" id="wwAmbigClear">I've checked: let me send again</button></div>` : "";
-    const off = ((a.isNodeSeed || ku.ack) && !wwAmbiguous) ? "" : "disabled";
+    const off = ((a.isNodeSeed || ku.ack) && !unknown) ? "" : "disabled";
     const toks = wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }];
     page = `<label class="ww-label" for="wwTok">Token</label><select class="ww-in" id="wwTok" ${off}>${toks.map(b => `<option value="${esc(b.tokenid)}"${b.tokenid === wwForm.tok ? " selected" : ""}>${esc(wwName(b))}${b.confirmed != null ? "  (" + esc(b.confirmed) + ")" : ""}</option>`).join("")}</select>
       <label class="ww-label" for="wwAmt">Amount</label><input class="ww-in" id="wwAmt" placeholder="Enter amount" value="${esc(wwForm.amt)}" inputmode="decimal" autocomplete="off" ${off} />
@@ -1169,7 +1178,7 @@ function renderWwWallet(body) {
   }
   if (wwTab === "receive") { el("wwAddrBox").onclick = el("wwCopyAddr").onclick = () => copy(recv); return; }
   for (const [id, k] of [["wwTo", "to"], ["wwAmt", "amt"], ["wwTok", "tok"]]) el(id).oninput = el(id).onchange = () => { wwForm[k] = el(id).value; };
-  const ambigBtn = el("wwAmbigClear"); if (ambigBtn) ambigBtn.addEventListener("click", () => { wwAmbiguous = false; renderWebWallet(); });
+  const ambigBtn = el("wwAmbigClear"); if (ambigBtn) ambigBtn.addEventListener("click", () => { wwUnknown(wwAddr && wwAddr.address, false); renderWebWallet(); });
   if (a.isNodeSeed) {
     el("wwSendBtn").addEventListener("click", () => wwDoSend());   // node wallet: no key-uses gate, node manages keys
   } else if (!ku.ack) {
@@ -1207,12 +1216,14 @@ async function wwLogout() {
 async function wwDoSend() {
   const btn = el("wwSendBtn"), f = { seed: wwSeed, to: el("wwTo").value, amount: el("wwAmt").value, tokenid: el("wwTok").value };
   const bad = AppsAct.ww.problem(f); if (bad) { toast(bad, "err"); return; }
+  if (wwUnknown(wwAddr && wwAddr.address)) { toast("The last send's status is UNKNOWN. Check History and your balance, then choose \"I've checked\".", "err"); return; }
   if (!wwArmed) {   // two-click confirm — sends are irreversible
     wwArmed = true; btn.textContent = "Click again to confirm: this cannot be undone";
     setTimeout(() => { if (wwArmed) { wwArmed = false; if (btn.isConnected) btn.textContent = "Send"; } }, 4000);
     return;
   }
   wwArmed = false; btn.disabled = true; btn.textContent = "Sending...";
+  const from = wwAddr.address;   // the wallet this send leaves: the screen may be logged out before the answer is here
   const r = await AppsAct.ww.send(api, f);
   if (r && r.ok) {
     toast("Your transaction has been successfully sent!" + (r.txnid ? " " + r.txnid : ""), "ok", r.txnid || null);
@@ -1222,10 +1233,10 @@ async function wwDoSend() {
     renderWebWallet();
   } else if (r && r.ambiguous) {
     // M1: don't offer a one-click retry — surface the unknown state, refresh balances, and gate re-send behind
-    // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while wwAmbiguous).
-    wwAmbiguous = true;
+    // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while this wallet is in WW_UNKNOWN).
+    wwUnknown(from, true);
     toast(r.message || "Send status unknown: check before trying again", "err");
-    wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
+    if (wwAddr) wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else {
     toast((r && (r.message || r.err)) || "Send failed", "err");

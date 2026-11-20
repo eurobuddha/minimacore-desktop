@@ -394,6 +394,25 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
   assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "e8957bd3b8cdbd8f7d0c7653e4addb45f8ed1da0a04cb32acda873c0d0023252", "main/webwallet.js is the file of 0.19.107");
 });
+test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and outlives Logout and leaving the screen; only \"I've checked\" clears it", () => {
+  const line = (re) => app.match(re)[0];
+  const W = new Function("let wwSeed = 's', wwAddr = { address: 'MxA' }, wwBal = [1], wwKu = {}, wwArmed = true, wwKuSuggest = 3, wwTab = 'send', wwSearch = 'x', wwForm = {};\nconst WW_UNKNOWN = new Set();\n"
+    + app.slice(app.indexOf("function wwUnknown("), app.indexOf("\n}", app.indexOf("function wwUnknown(")) + 2) + "\n" + line(/function wwLock\(\) \{[^\n]*\}/) + "\nreturn { wwUnknown, wwLock, seed: () => wwSeed };")();
+  const A = "MxG0" + "A".repeat(56), B = "MxG0" + "B".repeat(56);
+  assert.equal(W.wwUnknown(A), false);
+  assert.equal(W.wwUnknown(A, true), true, "an ambiguous send from A");
+  W.wwLock(); assert.equal(W.seed(), null, "Logout (and leaving the screen) clears the seed");
+  assert.equal(W.wwUnknown(A), true, "and NOT the lock: logging in again does not offer Send");
+  assert.equal(W.wwUnknown(A.toLowerCase()), true, "the same address in another case is the same wallet"); assert.equal(W.wwUnknown(B), false, "another wallet is not locked by it");
+  assert.equal(W.wwUnknown(""), false); assert.equal(W.wwUnknown(null, true), false, "no address: nothing is recorded");
+  assert.equal(W.wwUnknown(A, false), false, "I've checked"); assert.equal(W.wwUnknown(A), false);
+  const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {"));
+  assert.ok(!/wwAmbiguous/.test(ww), "the per-session flag that Logout reset is gone");
+  assert.equal((ww.match(/wwUnknown\([^)]*, false\)/g) || []).length, 1, "cleared in exactly one place");
+  assert.ok(/id="wwAmbigClear"/.test(ww) && /ambigBtn\.addEventListener\("click", \(\) => \{ wwUnknown\(wwAddr && wwAddr\.address, false\);/.test(ww), "and that place is the \"I've checked\" button");
+  assert.ok(/const from = wwAddr\.address;[^\n]*\n\s*const r = await AppsAct\.ww\.send\(api, f\);/.test(ww) && /wwUnknown\(from, true\);/.test(ww), "recorded for the wallet the send left, even if the screen was logged out before the answer");
+  assert.ok(/if \(wwUnknown\(wwAddr && wwAddr\.address\)\) \{ toast\("The last send's status is UNKNOWN\./.test(ww) && /const off = \(\(a\.isNodeSeed \|\| ku\.ack\) && !unknown\) \? "" : "disabled";/.test(ww), "Send is off, and refuses, while it stands");
+});
 
 // ---- Minima Faucet ----
 test("Faucet screen: the original's one screen; the request is still main/faucet.js's, to its one pinned host, with a checked address", () => {

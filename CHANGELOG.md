@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.123] — Web Wallet: the UNKNOWN lock survives Logout (review fix)
+
+- **Found in review:** after a send whose status the node did not confirm, Send is blocked until the user says "I've checked". The block was a flag of the open session: Logout, or leaving the screen (which logs out), reset it, so logging in again offered Send at once and the same payment could be made twice.
+- **Now** the lock belongs to the wallet address. Logout and leaving the screen leave it in place; logging in to that wallet again shows the warning and keeps Send off; another wallet is not affected; only "I've checked: let me send again" clears it. The send itself also refuses while the lock stands, and the lock is recorded for the wallet the send left even if the screen was logged out before the answer came.
+- It is held in memory, as everything on this screen: restarting the app starts clean.
+
 ## [0.19.122] — Terminal: a chain of commands is never pinned, the note says what the app does, long output is copied whole (review fix)
 
 - **Found in review:** the beacon-dust pin appends `fromaddress:` to the end of a MINIMA `send`. For a chain typed in the Terminal (`send …; status`) the end is the LAST command: the send went out unpinned and the last command was given a stray parameter. A command that contains `;` is now never pinned (`main/sendpin.js`, for every caller) and goes to the node exactly as typed.
