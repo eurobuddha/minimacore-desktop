@@ -187,14 +187,14 @@
         </div>
       </section>
 
+      <!-- Logs: Pandamonium's LogsView (view_logs.xml): Pause, Clear, Save to file (the phone's Share), the filter, the verbosity chips, the log. -->
       <section class="view" id="view-logs">
-        <div class="view__desc">Live node output. Watch what happens after a Terminal command.</div>
-        <pre class="logbox logsout" id="logsBox"></pre>
-        <div class="seg" style="margin-top:8px">
-          <label class="chip" id="logsFollowChip" style="cursor:pointer"><input type="checkbox" id="logsFollow" checked style="vertical-align:middle;margin-right:5px">Follow</label>
-          <button class="btn btn--sm btn--outline" id="logsCopy">Copy</button>
-          <button class="btn btn--sm btn--outline" id="logsClear">Clear view</button>
+        <div class="logs-ctl">
+          <div class="logs-btns"><button class="logs-btn" id="logsPause">Pause</button><button class="logs-btn" id="logsClear">Clear</button><button class="logs-btn" id="logsSave">Save to file</button></div>
+          <input class="logs-filter" id="logsFilter" placeholder="Filter" aria-label="Filter the log" autocomplete="off" spellcheck="false" />
         </div>
+        <div class="logs-chips" id="logsChips" role="group" aria-label="What the node logs"></div>
+        <div class="logs-scroll" id="logsScroll"><pre class="logs-text" id="logsBox"></pre></div>
       </section>
 
       <section class="view" id="view-settings">

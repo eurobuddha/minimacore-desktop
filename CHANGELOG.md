@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.116] — Logs as Pandamonium's: Pause, the filter, the verbosity chips, Save to file (Phase 5a)
+
+- **The screen is Pandamonium's Logs** (apks/base `view_logs.xml`, `LogsView`): three equal buttons **Pause** (Resume) | **Clear** | **Save to file** (the phone's Share), the **Filter** field (any case, anywhere in the line), the row of chips **Scripts, Mining, Blocks, Networking, Initial block download (IBD), Maxima**, and the log in monospace beneath, in the shell's colours, light and dark.
+- **The chips drive the node's `logs` command**, as on the phone: a chip sends `logs <key>:true` or `logs <key>:false`, and every chip then shows what the node answered, not what was clicked; the first time the screen is shown with the node running it asks plain `logs` for the present state. They are disabled while the node is stopped.
+- **The 30,000-character rule** is the phone's: the screen shows the last 30,000 characters of the lines that match the filter; a live line is appended, and once the text is over the limit it is cut to its last 30,000 characters first. Paused, live lines are not drawn; Resume draws the buffer again.
+- **Save to file** asks where, then the main process writes what the screen shows (the filtered text). Log lines can carry text a remote party chose: they are written to the screen as text only, never as markup, and a Parlons message line keeps who sent it and never the message (redacted in the node manager before a line reaches the screen, and again by the main process on every line that goes into the file). The file is readable by the user only.
+- Gone: the "Follow" tick (the phone always follows, and Pause holds the view still) and "Copy" (Save to file, or select the text).
+
 ## [0.19.115] — Terminal as Pandamonium's, with Run, the banner and coloured JSON (Phase 5a)
 
 - **The screen is Pandamonium's Terminal** (apks/base `view_terminal.xml`, `TerminalView`): the MINIMA banner with "Welcome to Minima Core <node version>" and "You can run commands in this Terminal..", the output beneath it in monospace, and at the bottom the command field ("Enter command") with the orange **Run** button. It wears the shell's own colours in light and dark, as on the phone. Enter still runs; an empty Run does nothing; output is kept to 20,000 characters, as the phone keeps it.

@@ -318,3 +318,21 @@ img.mm-prod__im { cursor: zoom-in; }
 #view-terminal { --t-cmd: #ffd479; --t-accent: #3fd0c9; --t-key: #6ea8fe; --t-str: #7ee787; --t-num: #f0a45d; --t-bool: #d2a8ff; --t-null: #7f909e; --t-err: #ff6b6b; }
 @media (prefers-color-scheme: light) { #view-terminal { --t-cmd: #8A5A00; --t-accent: #0F766E; --t-key: #1D4ED8; --t-str: #15803D; --t-num: #B45309; --t-bool: #7E22CE; --t-null: #6B7280; --t-err: #B91C1C; } }
 .term-out .j-key { color: var(--t-key); } .term-out .j-str { color: var(--t-str); } .term-out .j-num { color: var(--t-num); } .term-out .j-bool { color: var(--t-bool); } .term-out .j-null { color: var(--t-null); } .term-out .j-err { color: var(--t-err); font-weight: 600; }
+
+/* ---- Logs (apks/base view_logs.xml, LogsView: the shell's own tokens, light and dark) ---- */
+#view-logs.view--active { display: flex; flex-direction: column; height: 100%; padding: 0; background: var(--bg); }
+.logs-ctl { flex: 0 0 auto; padding: 8px; background: var(--surface); }
+.logs-btns { display: flex; gap: 6px; }
+.logs-btn { flex: 1 1 0; min-height: 48px; border: 1px solid var(--border); border-radius: 13px; background: none; color: var(--text); font: 700 15px/1 "Manrope", system-ui, sans-serif; cursor: pointer; }
+.logs-btn:hover { background: var(--surface2); }
+.logs-filter { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px 12px; border: 1px solid transparent; border-radius: 10px; background: var(--surface2); color: var(--text); font-family: var(--mono); font-size: 13px; }
+.logs-filter::placeholder { color: var(--dim2); }
+.logs-filter:focus-visible { outline: none; border-color: var(--orange); }
+.logs-chips { flex: 0 0 auto; display: flex; gap: 8px; padding: 0 8px 6px; background: var(--surface); overflow-x: auto; }
+.logs-chip { flex: 0 0 auto; height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--dim); font: 500 13px/1 "Manrope", system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
+.logs-chip--on { border-color: transparent; background: var(--accent-bg); color: var(--orange); }
+.logs-chip--on::before { content: "✓ "; }
+.logs-chip:disabled { opacity: .5; cursor: default; }
+.logs-btn:focus-visible, .logs-chip:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+.logs-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.logs-text { margin: 0; padding: 16px; font-family: var(--mono); font-size: 12px; line-height: 1.3; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }

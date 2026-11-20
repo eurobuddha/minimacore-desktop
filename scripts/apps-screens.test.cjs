@@ -68,3 +68,43 @@ test("Terminal: what CAN be added to a typed MINIMA send is the old beacon-dust 
   assert.ok(/ipcMain\.handle\("mcd:cmd"[\s\S]{0,700}restore\.loadsBackupFile\(command\)[\s\S]{0,900}restore\.backupCommandProblem\(command\)/.test(mainJs), "restore, restoresync and megammrsync file: are still refused on the command channel");
   assert.ok(/const run = \(c\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\);/.test(mainJs), "a Terminal command goes through rpcCall (signing queue and coin guard) as the wallet");
 });
+
+// ---- Logs ----
+test("Logs: Pandamonium's screen (Pause, Clear, the Share as Save to file, Filter, the six verbosity chips, the log)", () => {
+  const view = html.slice(html.indexOf('id="view-logs"'), html.indexOf('id="view-settings"'));
+  assert.deepEqual([...view.matchAll(/class="logs-btn" id="(\w+)">([^<]+)</g)].map(m => m[1] + "=" + m[2]), ["logsPause=Pause", "logsClear=Clear", "logsSave=Save to file"]);
+  assert.ok(/id="logsFilter" placeholder="Filter"/.test(view) && view.indexOf("logsFilter") < view.indexOf("logsChips") && view.indexOf("logsChips") < view.indexOf("logsBox"));
+  const { LOGS_CHIPS } = lift(["LOGS_CHIPS"]);
+  assert.deepEqual(LOGS_CHIPS, [["scripts", "Scripts"], ["mining", "Mining"], ["blocks", "Blocks"], ["networking", "Networking"], ["ibd", "Initial block download (IBD)"], ["maxima", "Maxima"]], "LogsView.CHIP_KEYS, in order");
+  assert.ok(/tryCmd\("logs " \+ k \+ ":" \+ \(logsOn\[k\] \? "false" : "true"\)\)/.test(app) && /tryCmd\("logs"\)/.test(app), "a chip sends `logs <key>:true|false`; the first show asks plain `logs`");
+  const logs = app.slice(app.indexOf("let logLines = [];"), app.indexOf("boot();\ninitLogs();"));
+  assert.ok(!/innerHTML = [^`]*line|insertAdjacentHTML/.test(logs) && /box\.textContent = logsAppend\(box\.textContent, line\)/.test(logs) && /box\.textContent = logsRender\(logLines, logsFilter\)/.test(logs), "log lines are written with textContent only");
+  assert.ok(!/esc\(l(?:ine)?\)/.test(logs), "no log line is ever put into markup");
+});
+test("Logs: the 30,000-character rule, the filter and the chips' state are LogsView's", () => {
+  const { logsRender, logsAppend, logsSync } = lift(["logsRender", "logsAppend", "logsSync"], "const LOGS_CHARS = 30000; const LOGS_CHIPS = [['scripts'], ['mining'], ['blocks'], ['networking'], ['ibd'], ['maxima']]; let logsOn = {}; const state = () => logsOn;\n");
+  const lines = ["Minima @ 1 : Block 10 received", "Minima @ 2 : MINING started", "[parlons-node] node: up", "Minima @ 3 : block 11 received"];
+  assert.equal(logsRender(lines, ""), lines.join("\n"));
+  assert.equal(logsRender(lines, "BLOCK"), lines[0] + "\n" + lines[3], "a filter matches any case, anywhere in the line");
+  assert.equal(logsRender(lines, "nothing"), "");
+  const many = Array.from({ length: 600 }, (_, i) => "line " + String(i).padStart(3, "0") + " " + "x".repeat(90));
+  const shown = logsRender(many, "");
+  assert.equal(shown.length, 30000); assert.ok(shown.endsWith(many[599]), "the newest text is kept, the oldest is cut");
+  assert.equal(logsAppend("", "a"), "a"); assert.equal(logsAppend("a", "b"), "a\nb");
+  const over = "y".repeat(30001), next = logsAppend(over, "tail");
+  assert.equal(next, "y".repeat(30000) + "\ntail", "over the limit: the last 30,000 characters, then the line");
+  assert.equal(logsAppend("y".repeat(30000), "z").length, 30002, "at the limit the line is appended (it may pass the limit until the next line, as on the phone)");
+});
+test("Logs, Save to file: every line is redacted again in the main process; a Parlons message never reaches the file with its words", () => {
+  const { forFile, SAVE_MAX } = require("../main/nodelog");
+  const key = "0x" + "AB".repeat(162), text = ["Minima @ 1 : Block 10 received", "[parlons-node] message from " + key + ": meet me at the usual place", "[parlons-node] message from someone odd: secret words", "[parlons-node] message from " + key + ": (text not logged)"].join("\n");
+  const out = forFile(text).split("\n");
+  assert.equal(out[0], "Minima @ 1 : Block 10 received");
+  assert.equal(out[1], "[parlons-node] message from " + key + ": (text not logged)", "the sender's key whole, the words gone");
+  assert.equal(out[2], "[parlons-node] message from (sender not shown): (text not logged)");
+  assert.equal(out[3], out[1], "an already redacted line is unchanged");
+  assert.ok(!/usual place|secret words/.test(out.join("\n")));
+  assert.ok(forFile("x".repeat(SAVE_MAX + 10)).length <= SAVE_MAX + 1);
+  assert.ok(/ipcMain\.handle\("mcd:logsSave"[\s\S]{0,700}dialog\.showSaveDialog\([\s\S]{0,500}require\("\.\/nodelog"\)\.forFile\(text\)/.test(mainJs), "the file is written by the main process, after a dialog, from forFile()");
+  assert.ok(/parlonsNotify\.redact\(l\)/.test(R("main/node-manager.js")), "lines are redacted before they reach the view (node-manager, unchanged)");
+});

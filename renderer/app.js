@@ -3238,23 +3238,60 @@ function renderNode(s) {
 }
 
 let logLines = [];
-const LOG_MAX = 2000;
+const LOG_MAX = 2000;       // lines kept for the Node tab's box and the Logs screen (the main process holds 800 and the whole log on disk)
+const LOGS_CHARS = 30000;   // the Logs screen shows at most this much text, as the phone's LogsView
+const LOGS_CHIPS = [["scripts", "Scripts"], ["mining", "Mining"], ["blocks", "Blocks"], ["networking", "Networking"], ["ibd", "Initial block download (IBD)"], ["maxima", "Maxima"]];
+let logsPaused = false, logsFilter = "", logsSeeded = false, logsOn = {};
 async function initLogs() { logLines = await api.nodeLogs(); paintLogs(); }
-function appendLog(line) { if (!line) return; logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX); paintLogs(); }
+/** The text of the Logs screen: the lines that match the filter (any case), joined, and of that the last 30,000 characters. */
+function logsRender(lines, filter) { const f = String(filter || "").toLowerCase(); return (f ? lines.filter(l => String(l).toLowerCase().includes(f)) : lines).join("\n").slice(-LOGS_CHARS); }
+/** One more line on the text already shown (LogsView: over the limit, the last 30,000 characters and the line; else the line appended). */
+function logsAppend(text, line) { return text.length > LOGS_CHARS ? text.slice(-LOGS_CHARS) + "\n" + line : (text ? text + "\n" : "") + line; }
+function appendLog(line) {
+  if (!line) return; logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX);
+  const nodeBox = el("logbox"); if (nodeBox && viewActive("node")) { nodeBox.textContent = logLines.join("\n"); nodeBox.scrollTop = nodeBox.scrollHeight; }
+  const box = el("logsBox");
+  if (!box || !viewActive("logs") || logsPaused) return;   // paused: live lines are not drawn; Resume draws the whole buffer again
+  if (logsFilter && !String(line).toLowerCase().includes(logsFilter.toLowerCase())) return;
+  box.textContent = logsAppend(box.textContent, line);     // textContent only: a log line can carry a peer's text
+  el("logsScroll").scrollTop = el("logsScroll").scrollHeight;
+}
 function viewActive(v) { const s = document.getElementById("view-" + v); return !!(s && s.classList.contains("view--active")); }
 function paintLogs() {
-  const text = logLines.join("\n");
-  const nodeBox = el("logbox"); if (nodeBox && viewActive("node")) { nodeBox.textContent = text; nodeBox.scrollTop = nodeBox.scrollHeight; }
-  const logsBox = el("logsBox");
-  if (logsBox && viewActive("logs")) { logsBox.textContent = text; const follow = el("logsFollow"); if (!follow || follow.checked) logsBox.scrollTop = logsBox.scrollHeight; }
+  const nodeBox = el("logbox"); if (nodeBox && viewActive("node")) { nodeBox.textContent = logLines.join("\n"); nodeBox.scrollTop = nodeBox.scrollHeight; }
+  const box = el("logsBox");
+  if (box && viewActive("logs")) { box.textContent = logsRender(logLines, logsFilter); el("logsScroll").scrollTop = el("logsScroll").scrollHeight; }
 }
-// ---- Logs tab (full live node output) ----
+/** The node's answer to `logs` says what it logs now: the chips follow it, never the click. */
+function logsSync(r) {
+  const resp = r && r.status !== false && r.response && typeof r.response === "object" ? r.response : null; if (!resp) return false;
+  for (const [k] of LOGS_CHIPS) if (k in resp) logsOn[k] = resp[k] === true || resp[k] === "true";
+  return true;
+}
+function paintLogChips() {
+  el("logsChips").innerHTML = LOGS_CHIPS.map(([k, label]) => `<button class="logs-chip${logsOn[k] ? " logs-chip--on" : ""}" role="switch" aria-checked="${!!logsOn[k]}" data-logchip="${k}"${running ? "" : " disabled"}>${label}</button>`).join("");
+  el("logsChips").querySelectorAll("[data-logchip]").forEach(c => { c.onclick = async () => {
+    const k = c.dataset.logchip; c.disabled = true;
+    const r = await tryCmd("logs " + k + ":" + (logsOn[k] ? "false" : "true"));
+    if (!logsSync({ response: r })) toast("The node did not answer.", "warn");
+    paintLogChips(); const again = el("logsChips").querySelector(`[data-logchip="${k}"]`); if (again) again.focus();
+  }; });
+}
+// ---- Logs (overflow menu): Pandamonium's LogsView over the node's output ----
 async function renderLogs() {
   logLines = await api.nodeLogs();
   paintLogs();
-  const box = el("logsBox"); if (box) box.scrollTop = box.scrollHeight;
-  el("logsCopy").onclick = () => copy(logLines.join("\n"));
+  el("logsPause").textContent = logsPaused ? "Resume" : "Pause";
+  el("logsPause").onclick = () => { logsPaused = !logsPaused; el("logsPause").textContent = logsPaused ? "Resume" : "Pause"; if (!logsPaused) paintLogs(); };
   el("logsClear").onclick = () => { logLines = []; paintLogs(); };
+  el("logsFilter").value = logsFilter;
+  el("logsFilter").oninput = () => { logsFilter = el("logsFilter").value; paintLogs(); };
+  el("logsSave").onclick = async () => {
+    const text = el("logsBox").textContent; if (!text.trim()) return;   // as the phone's Share: nothing to share, nothing happens
+    try { const p = await api.logsSave(text); if (p) toast("Saved to " + p, "ok"); } catch (e) { toast("Could not save: " + ipcError(e), "warn"); }
+  };
+  paintLogChips();
+  if (running && !logsSeeded) { logsSeeded = logsSync({ response: await tryCmd("logs") }); paintLogChips(); }   // what the node logs now
 }
 
 boot();

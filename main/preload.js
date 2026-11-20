@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
   nodeReclaim: () => ipcRenderer.invoke("mcd:nodeReclaim"),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
+  logsSave: (text) => ipcRenderer.invoke("mcd:logsSave", text),   // Logs, Save to file: redacted again in the main process; resolves the path or null
   portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
 
   // Parlons account (the Parlons Node hosts it under this node's seed)

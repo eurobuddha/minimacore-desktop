@@ -45,6 +45,7 @@
   const SHOP_ORDER = (ref, role, status, paid, ago) => ({ ref, role, shopId: "preview-shop", shopName: "Preview Shop (fake)", status, amount: "27.500000", currency: "USDT", paid, paidAmount: paid ? "27.5" : "", date: Date.now() - ago, unread: role === "sell" && !paid,
     items: [{ product: "Fake mug", quantity: 2, unitPrice: "12.5", lineTotal: "25.000000" }], shipping: "Domestic", delivery: "1 Preview Street, Nowhere", note: "Preview note", counterparty: "0x" + "B0FA4E".repeat(11).slice(0, 64) });
   const SHOP_ORDERS = [SHOP_ORDER("ORD-FAKE0001", "sell", "PENDING", false, 240000), SHOP_ORDER("ORD-FAKE0002", "sell", "PAID", true, 7200000), SHOP_ORDER("ORD-FAKE0003", "buy", "PENDING", false, 90000000)];
+  const LOGS_ON = { scripts: false, mining: false, blocks: true, networking: false, ibd: false, maxima: false };
   const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
   const AX_BOOK = { scanned: 3, makers: 2, bestBid: 0.99, bestAsk: 1.01, bidCap: 100, askCap: 100, currency: "mxusdt", label: "mxUSDT", pricingParity: true,
     bids: [{ signer: FAKE_PK("D1"), p: 0.99, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 0.985, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 0.98, cap: 10000, mine: false }],
@@ -147,6 +148,7 @@
     vault: () => ({ phrase: FAKE_SEED, locked: false }),
     backup: () => ({ backup: { file: "/Users/preview/Library/Application Support/minimaCore/node-data/minima-backup-20261119-135600.bak" } }),
     megammrsync: () => ({ message: "preview" }),
+    logs: (c) => { const m = /(\w+):(true|false)/.exec(c); if (m) LOGS_ON[m[1]] = m[2] === "true"; return Object.assign({}, LOGS_ON); },
     checkaddress: () => ({ simple: true }),
     getaddress: () => ({ address: PK("D1"), miniaddress: ADDR }),
     keys: () => keys,
@@ -216,7 +218,7 @@
     getConfig: async () => ({ setupDone: !Q.get("fr"), walletDone: !Q.get("fr"), megammrHost: "megammr.example:9001", contribute: false, network: "mainnet", basePort: 9001, nodeKind: "parlons", labels: Q.get("view") === "settings" ? { [ADDR]: "Savings (fixture)" } : {}, params: {}, heapMb: 0, openAtLogin: false, walletMode: "new" }),
     saveConfig: async (p) => Object.assign(await fixtures.getConfig(), p),
     nodeStatus: async () => status, nodeStart: async () => status, nodeStop: async () => status, nodeRestart: async () => status,
-    nodeLogs: async () => ["Minima @ 19/11/2026 13:54:04 [88.7 MB] : Connected to the blockchain", "Minima @ 19/11/2026 13:54:31 [76.1 MB] : Block 2428089 received"],
+    nodeLogs: async () => ["[parlons-node] message from 0x" + "FA4E".repeat(81) + ": (text not logged)", "Minima @ 19/11/2026 13:54:04 [88.7 MB] : Connected to the blockchain", "Minima @ 19/11/2026 13:54:31 [76.1 MB] : Block 2428089 received"],
     appVersion: async () => "0.0.0-preview",
     updateStatus: async () => ({ available: Q.get("update") === "1", version: "9.9.9", running: "0.0.0-preview" }),
     tokenIcon: async () => null, keyAudit: async () => null, keyReuse: async () => null,
@@ -322,6 +324,7 @@
       { tokenid: "0x" + "5A1E".repeat(16), name: "0x5A1E5A1E5A", confirmed: "7", unconfirmed: "0", sendable: "0", decimals: 0 }],
     wwKeyuses: async () => ({ keyuses: 3, ack: Q.get("ww") === "ack" }), wwAckKeyuses: async (a, n) => ({ keyuses: n, ack: true }),
     wwSend: async () => (Q.get("wws") === "unknown" ? { ok: false, ambiguous: true, message: "Send status UNKNOWN (preview)" } : { ok: true, txnid: FAKE_PK("7E") }), wwEnableMegammr: async () => true,
+    logsSave: async () => "/Users/preview/Documents/minima-node-log-preview.txt",
     faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
     // miniMall: ?shop=empty
     shopInit: async () => ({ publicId: FAKE_PK("5A"), vendorAddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1" }), shopVendorCard: async () => FAKE_PK("5A") + "|MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1",

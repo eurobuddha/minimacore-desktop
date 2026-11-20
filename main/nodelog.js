@@ -37,4 +37,15 @@ function createNodeLog(dir, opts) {
   return { append, file, older };
 }
 
-module.exports = { createNodeLog, DEFAULT_MAX_BYTES };
+/**
+ * The text the Logs screen hands over for "Save to file" (0.19.116), as it goes to disk: every line passes the Parlons
+ * redaction again (a message line keeps who and that, never the message's words), whatever the screen sent, and the
+ * whole is bounded. The screen only ever holds redacted lines; this does not rely on it.
+ */
+const SAVE_MAX = 2 * 1024 * 1024;
+function forFile(text) {
+  const { redact } = require("./parlons-notify");
+  return String(text == null ? "" : text).slice(-SAVE_MAX).split(/\r?\n/).map(l => redact(l)).join("\n") + "\n";
+}
+
+module.exports = { createNodeLog, DEFAULT_MAX_BYTES, forFile, SAVE_MAX };
