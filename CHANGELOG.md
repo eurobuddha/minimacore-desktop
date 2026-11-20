@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.153] — Logs: the RPC secret, bare seed words and bidi controls scrubbed
+
+- The node prints its own start parameters, `-rpcpassword` among them, so the RPC secret went into the Logs view and `node.log`. `main/nodelog.js` `scrub` now takes it out of every line (only a secret of 8 characters or more is looked for), before the 400-character cut; a seed phrase given as bare words or as a reply's JSON is redacted as the quoted form was, without eating the rest of the line; bidirectional text controls are stripped. Port of 0.19.121 (the released app has no Save to file, so `forFile` is not ported). Test: `scripts/node-log-test.cjs` (`npm run test:node-log`, in CI).
+
 ## [0.18.152] — one gated way to the ETH private key
 
 - Both `mcd:axExportKey` (AtomiX panel) and `mcd:ewExportKey` (ETH Wallet) handed the key to any caller in the window with no check. `mcd:axExportKey` and its bridge are removed; `mcd:ewExportKey` now needs the typed phrase SHOW KEY and, where the system offers it, the Touch ID prompt, both checked in the main process (`main/ethwallet.js` `exportKeyGated`). The AtomiX panel's Export key opens the same dialog and holds no key. The key is shown as text in one node, says when no system check took place, and closes after 60 seconds and when the window is left. A copied key goes to the clipboard through the main process and is cleared after 60 seconds and at quit, only if the clipboard still holds it (`main/clipsecret.js`). Port of 0.19.108 / 0.19.120. Test: `scripts/ethkey-test.cjs` (`npm run test:ethkey`, in CI); `scripts/panels-test.cjs` updated for the intended change.

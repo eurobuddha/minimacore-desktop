@@ -16,7 +16,7 @@ const path = require("path");
 const config = require("./config");
 const portmap = require("./portmap");
 const { rpcCall } = require("./rpc");
-const { createNodeLog } = require("./nodelog");
+const { createNodeLog, scrub } = require("./nodelog");
 
 const LOG_MAX_LINES = 800;
 // Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
@@ -121,6 +121,7 @@ class NodeManager extends EventEmitter {
     this.state = "stopped";       // stopped | starting | running | stopping | error
     this.lastError = null;
     this.logs = [];
+    this.secret = "";             // the RPC secret of this node start, for log() to take out of every line (0.18.153)
     this.health = null;           // { block, version, connections, incoming, acceptingInLinks, p2pAddress }
     this.healthTimer = null;
     this.healthTick = 0;
@@ -383,7 +384,8 @@ class NodeManager extends EventEmitter {
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
-    this.log("[app] starting node: java " + redactArgs(args, config.rpcSecret()));
+    this.secret = config.rpcSecret();   // kept for log(): the node prints its own start parameters, and no line may carry this
+    this.log("[app] starting node: java " + redactArgs(args, this.secret));
     let p;
     try {
       p = spawn(this.javaPath(), args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -534,8 +536,9 @@ class NodeManager extends EventEmitter {
       }
       // Redact a seed phrase / private key if the node ever echoes one into an error line (the Web Wallet derives
       // & signs over loopback via `keys genkey phrase:"…"` / `sendfrom … privatekey:0x…`), so they can NEVER end
-      // up in the Logs view.
-      l = l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
+      // up in the Logs view; and the RPC secret, which the node prints with its start parameters; and the
+      // bidirectional controls (main/nodelog.js scrub). Before the 400-character cut, so no part of one is left.
+      l = scrub(l, this.secret);
       this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
       // The same redacted line, on disk and untruncated (main/nodelog.js): the RAM ring holds ~800 lines,
       // and the one line that explained a lost swap had rolled out of it long before anyone looked.

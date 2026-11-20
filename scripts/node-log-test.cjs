@@ -43,5 +43,46 @@ ok("an unwritable directory never throws", () => {
   log.append("dropped");   // must not throw
 });
 
+// ---- 0.18.153: what no line may carry ----
+const { scrub } = require("../main/nodelog");
+const SECRET = "Zk3_rpc-secret-0123456789abcdefXY";
+ok("the RPC secret is taken out wherever it stands: line start, middle, end, twice", () => {
+  assert.equal(scrub(SECRET + " is the password", SECRET), "••• is the password");
+  assert.equal(scrub("Minima @ 1 : args -rpcpassword " + SECRET + " -daemon true", SECRET), "Minima @ 1 : args -rpcpassword ••• -daemon true");
+  assert.equal(scrub(SECRET + SECRET + " x " + SECRET, SECRET), "•••••• x •••");
+  assert.equal(scrub("https://user:" + SECRET + "@127.0.0.1:9005/status", SECRET), "https://user:•••@127.0.0.1:9005/status");
+});
+ok("a short or empty secret blanks nothing", () => {
+  const line = "Minima @ 1 : Block 10 received, 7 coins";
+  for (const s of ["", "1", "7 coins", null, undefined, 12345678]) assert.equal(scrub(line, s), line, String(s));
+  assert.equal(scrub("abcdefgh", "abcdefgh"), "•••", "8 characters is the least that is looked for");
+});
+ok("a seed phrase is redacted quoted, as JSON, and as bare words, without eating the rest of the line", () => {
+  assert.equal(scrub('megammrsync action:resync phrase:"ONE TWO THREE" host:x:9001'), 'megammrsync action:resync phrase:"•••" host:x:9001');
+  assert.equal(scrub('{"command":"vault","response":{"phrase":"ONE TWO THREE","seed":"0x01"}}'), '{"command":"vault","response":{"phrase":"•••","seed":"0x01"}}');
+  assert.equal(scrub("megammrsync action:resync phrase:ONE TWO THREE host:megammr.example:9001 keyuses:1000"), "megammrsync action:resync phrase:••• host:megammr.example:9001 keyuses:1000");
+  const words = Array.from({ length: 30 }, (_, i) => "W" + "abcdefghijklmnopqrstuvwxyzABCD"[i]);
+  assert.equal(scrub("phrase:" + words.join(" ")), "phrase:••• " + words.slice(24).join(" "), "24 words at most");
+  assert.equal(scrub("an unrelated line: phrase: none given, 12 blocks"), "an unrelated line: phrase: none given, 12 blocks");
+  assert.equal(scrub("sendfrom privatekey:0xABCDEF0123 amount:1"), "sendfrom privatekey:••• amount:1");
+});
+ok("bidirectional controls are stripped", () => {
+  assert.equal(scrub("[parlons-node] message from 0xAB\u202E: \u2066gnp.exe\u2069\u200E\u200F\u202A\u202B\u202C\u202D\u2067\u2068 end"), "[parlons-node] message from 0xAB: gnp.exe end");
+});
+ok("node-manager log(): the Logs view and node.log never carry the secret, a bare seed or a bidi control, also across the 400-character cut", () => {
+  const Module = require("module"), realLoad = Module._load, udir = path.join(dir, "nm");
+  Module._load = function (r) { if (r === "electron") return { app: { getPath: () => udir, getVersion: () => "t", isPackaged: false, getAppPath: () => "." } }; return realLoad.apply(this, arguments); };
+  let m; try { m = require("../main/node-manager"); } finally { Module._load = realLoad; }
+  m.secret = SECRET;
+  const last = (line) => { m.log(line); return m.logs[m.logs.length - 1]; };
+  assert.equal(last("Minima @ 1 : -rpcpassword " + SECRET + " -daemon"), "Minima @ 1 : -rpcpassword ••• -daemon");
+  for (const at of [380, 395, 399, 400]) { const shown = last("x".repeat(at) + SECRET + " tail"); assert.ok(!shown.includes(SECRET.slice(0, 4)) && !shown.includes(SECRET.slice(-4)), at + ": " + shown.slice(370)); }
+  assert.equal(last("megammrsync phrase:ONE TWO THREE host:a.example:9001"), "megammrsync phrase:••• host:a.example:9001");
+  assert.equal(last("a\u202Eb\u2066c\u200F"), "abc");
+  const disk = fs.readFileSync(path.join(udir, "node.log"), "utf8");
+  assert.ok(!disk.includes(SECRET) && !disk.includes("ONE TWO THREE") && !/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/.test(disk), "the file on disk has the same lines");
+  assert.ok(/this\.secret = config\.rpcSecret\(\);[^\n]*\n\s*this\.log\("\[app\] starting node: java "/.test(fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8")), "held from the moment the node is given it");
+});
+
 console.log(fail === 0 ? "\n✅ NODE LOG PASS — " + pass + " checks" : "\n❌ NODE LOG FAIL — " + fail + " failed");
 process.exit(fail ? 1 : 0);
