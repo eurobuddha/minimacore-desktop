@@ -2771,10 +2771,12 @@ async function renderSettings() {
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
   const kind = CFG.nodeKind === "minima" ? "minima" : "parlons";
   const sec = (title, body, id) => `<div class="eyebrow home-eyebrow">${title}</div><div class="card home-card set-card"${id ? ` id="${id}"` : ""}>${body}</div>`;
+  // Which app this is (main/flavor.js): a copy that does not update itself has no feed to check and no Download button.
+  const fl = (await api.flavor().catch(() => null)) || { updates: true, loginItem: true, name: "Minima Core" };
   host.innerHTML =
     sec("This computer", `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setAutostartL">Open at login</span><button class="switch switch--m2" role="switch" id="setAutostart" aria-checked="${CFG.openAtLogin ? "true" : "false"}" aria-labelledby="setAutostartL"></button></div>
       <p class="ps-note">Start Minima Core, and so your node, when you log in to this computer. It opens to the tray on Mac. Uses the login items on Mac and Windows and the autostart folder on Linux.</p>`) +
-    sec("Updates", `<p class="set-text">Minima Core checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.</p>
+    sec("Updates", !fl.updates ? `<p class="set-text">${esc(fl.name)} does not update itself: it reads no update feed and downloads nothing. A newer build is installed by hand.</p>` : `<p class="set-text">Minima Core checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.</p>
       <p class="set-text" id="updBody">Checking…</p>
       <div class="home-actions set-actions"><button class="btn btn--outline" id="updCheck">Check now</button><button class="btn btn--primary" id="updGet" hidden>Download</button></div>
       <div class="status" id="updStatus"></div>`, "updCard") +
@@ -2818,9 +2820,9 @@ async function renderSettings() {
     else b.textContent = "You run the newest build, v" + u.running + (u.checkedAt ? " (checked " + new Date(u.checkedAt).toLocaleTimeString() + ")" : "") + ".";
     g.hidden = !u.available;
   };
-  api.updateStatus().then(drawUpdate).catch(() => {});
-  el("updCheck").onclick = async () => { el("updStatus").textContent = "Checking…"; try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = e.message || String(e); } };
-  el("updGet").onclick = async () => {
+  if (fl.updates) api.updateStatus().then(drawUpdate).catch(() => {});
+  if (el("updCheck")) el("updCheck").onclick = async () => { el("updStatus").textContent = "Checking…"; try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = e.message || String(e); } };
+  if (el("updGet")) el("updGet").onclick = async () => {
     el("updGet").disabled = true; el("updStatus").textContent = "Downloading — the file is verified against the feed before it is saved…";
     try { const r = await api.updateDownload(); el("updStatus").textContent = "Saved and verified: " + r.path + " — install it over this app, then relaunch."; drawUpdate(r.status); }
     catch (e) { el("updStatus").textContent = e.message || String(e); }
@@ -3162,10 +3164,10 @@ function renderNode(s) {
     ${row("Network", esc(CFG.network))}
     ${row("RPC port", esc(s.rpcPort || CFG.basePort + 4))}
     ${s.lastError ? `<div class="home-row"><span class="home-row__k">Error</span><span class="home-row__v" style="color:var(--red)">${esc(s.lastError)}</span></div>` : ""}
-    ${s.portOwner ? row("Port held by", "pid " + esc(s.portOwner.pid) + " · " + esc(s.portOwner.command)) : ""}
+    ${s.portOwner ? row("Port " + esc(s.portOwner.port || CFG.basePort) + " held by", "pid " + esc(s.portOwner.pid) + " · " + esc(s.portOwner.command)) : ""}
     <div class="home-actions">
       <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? "Start node" : "Restart node"}</button>
-      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">Stop any node on port ${esc(CFG.basePort)} and start</button>` : ""}
+      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">Start again</button>` : ""}
       ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib">${contributing ? "Stop contributing to the network" : "Contribute to the network"}</button>` : ""}
       <button class="btn btn--outline" id="nReconfig">Reconfigure node</button>
     </div>
@@ -3187,7 +3189,7 @@ function renderNode(s) {
   el("nReconfig").onclick = () => selectTab("params");
   el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
   const nReclaim = el("nReclaim");
-  if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = "Stopping…"; try { await api.nodeReclaim(); toast("Node restarting…", "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
+  if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = "Starting…"; try { await api.nodeReclaim(); toast("Node restarting…", "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
   // The in-app jar updater is disabled — the node jar ships with the app. See main/updater.js.
   paintLogs();   // refresh the Node-tab log pane now that this view is active
 }

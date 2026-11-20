@@ -122,22 +122,16 @@ test("live scripts: `balance` is sent first; any non-zero balance refuses unless
   } finally { fs.rmSync(probe, { force: true }); }
 });
 
-// ---- the TEST copy of the app (scripts/dev-run.sh, main/testprofile.js) ----
-test("TEST profile: refused on, inside or around the real install's folder (any letter case); otherwise its own keychain service name", () => {
-  const { profile } = require("../main/testprofile.js"), REAL = "/Users/x/Library/Application Support/minimaCore";
-  assert.deepEqual(profile({}, REAL), { on: false, dir: "", keychainSuffix: "", error: "" }, "not asked for: the real names, unchanged");
-  for (const bad of [REAL, REAL + "/", REAL + "/node-data", "/Users/x/Library/Application Support/MINIMACORE/sub", "/Users/x/Library/Application Support", "/Users/x", "relative/folder"]) {
-    const p = profile({ MCD_TEST_PROFILE: bad }, REAL);
-    assert.ok(p.on && p.error && p.keychainSuffix === "", bad + " must be refused: " + JSON.stringify(p));
-  }
-  const a = profile({ MCD_TEST_PROFILE: "/Users/x/Library/Application Support/MinimaCoreDesktop-TEST" }, REAL), b = profile({ MCD_TEST_PROFILE: "/tmp/other-test" }, REAL);
-  assert.equal(a.error, ""); assert.match(a.keychainSuffix, /^\.test\.[0-9a-f]{64}$/); assert.notEqual(a.keychainSuffix, b.keychainSuffix, "one name per profile folder");
-  const cfg = fs.readFileSync(path.join(ROOT, "main/config.js"), "utf8"), main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8");
-  assert.match(cfg, /const KEYCHAIN_SERVICE = "com\.eurobuddha\.minimacore\.rpc" \+ require\("\.\/testprofile"\)\.keychainSuffix;/, "every keychain read and write goes under the profile's own service name");
-  assert.equal((cfg.match(/"com\.eurobuddha\.minimacore/g) || []).length, 1, "and there is one service name in the app");
-  assert.ok(main.indexOf('require("./testprofile")') < main.indexOf('require("./config")') && main.indexOf('require("./testprofile")') < main.indexOf("requestSingleInstanceLock"), "the profile is set before the config, the keychain or the single-instance lock is touched");
-  assert.match(main, /if \(!testProfile\.on\) updater\.start\(\);/, "a TEST copy does not read the update feed");
-  assert.match(fs.readFileSync(path.join(ROOT, "main/loginitem.js"), "utf8"), /if \(process\.env\.MCD_TEST_PROFILE\) return \{ ok: false, on, note: "not registered: TEST profile" \};/);
+// ---- the TEST copy of the app (scripts/dev-run.sh, main/flavor.js) ----
+// What the TEST profile may and may not be is tested with the flavours, in scripts/flavor-test.cjs (0.19.105).
+test("TEST profile: one mechanism (main/flavor.js) sets the folder, the name and the keychain service before anything reads them", () => {
+  const cfg = fs.readFileSync(path.join(ROOT, "main/config.js"), "utf8"), main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), fl = fs.readFileSync(path.join(ROOT, "main/flavor.js"), "utf8");
+  assert.match(cfg, /const KEYCHAIN_SERVICE = flavor\.keychainService;/, "every keychain read and write goes under the flavour's (and the profile's) own service name");
+  assert.equal((cfg.match(/com\.eurobuddha\./g) || []).length, 0, "no service name is written in main/config.js");
+  assert.ok(main.indexOf('require("./flavor")') < main.indexOf('require("./config")') && main.indexOf('require("./flavor")') < main.indexOf("requestSingleInstanceLock"), "applied before the config, the keychain or the single-instance lock is touched");
+  assert.match(fl, /const released = path\.join\(String\(appData \|\| ""\), RELEASED\.userData\)/, "the released folder comes from appData, never from userData");
+  assert.match(fs.readFileSync(path.join(ROOT, "main/updater.js"), "utf8"), /const OFF = !flavor\.updates \|\| flavor\.test;/, "a TEST copy does not read the update feed");
+  assert.match(fs.readFileSync(path.join(ROOT, "main/loginitem.js"), "utf8"), /if \(flavor\.test\) return \{ ok: false, on, note: "not registered: TEST profile" \};/);
 });
 
 test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies jars only with --jars; fetches nothing; opens no debugging port", () => {
@@ -146,7 +140,8 @@ test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies 
   assert.equal((sh.replace(/<<MSG[\s\S]*?\nMSG\n/, "").match(/^\s*cp /gm) || []).length, 1, "one copy, the --jars one (the copy commands in the refusal are text)");
   assert.ok(sh.indexOf('if [ -n "$JARS" ]; then') < sh.indexOf('cp "${found[0]}"') && sh.indexOf('cp "${found[0]}"') < sh.indexOf("\nfi\nmissing=0"), "and it is inside the --jars branch");
   for (const must of ["is, or is inside, the real install's folder", "contains the real install's folder", "was not created by this script", "something is already listening on port(s)", "12001 is the real app's default base port",
-    "shasum -a 256", "minima-1.1.2.31-euro5.jar", "parlons-node-0.2.153.jar", "desktop/minimacore-desktop/resources/minima.jar", 'MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT" --user-data-dir="$PROFILE"'])
+    "shasum -a 256", "minima-1.1.2.31-euro5.jar", "parlons-node-0.2.153.jar", "desktop/minimacore-desktop/resources/minima.jar", 'MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT"\n', "17001 is Pandamonium Desktop's default base port"])
     assert.ok(sh.includes(must), "dev-run.sh: " + must);
-  assert.ok(sh.indexOf("for off in 0 1 2 3 4 584 586") < sh.indexOf('mkdir -p "$PROFILE"'), "the ports are probed before anything is created");
+  assert.ok(sh.indexOf("for off in 0 1 2 3 4 5 584 586") < sh.indexOf('mkdir -p "$PROFILE"'), "the ports are probed before anything is created");
+  assert.ok(!/--user-data-dir=/.test(sh.replace(/^\s*#.*$/gm, "")), "the app is started without --user-data-dir: it refuses the switch and sets its folder itself (0.19.105)");
 });

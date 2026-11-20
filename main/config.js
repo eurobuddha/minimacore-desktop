@@ -13,9 +13,12 @@ const path = require("path");
 const PARAMS = require("../renderer/params.js");   // shared minima.jar param manifest (dual CJS/global)
 const keymode = require("./keymode");
 
-// A TEST profile (main/testprofile.js) has its own service name: under the real one it would read the real install's
-// RPC secret and OVERWRITE its mail and shop identities and P2P Chance preimages with its own node's.
-const KEYCHAIN_SERVICE = "com.eurobuddha.minimacore.rpc" + require("./testprofile").keychainSuffix;
+// The ONE keychain service every secret of this app sits under (the RPC secret, the secret start-up parameters, the
+// mail and shop identities, the P2P Chance preimages), each as its own account. It follows the app's flavour, and a
+// TEST profile adds its own suffix (main/flavor.js): under another app's name this one would read that app's RPC
+// secret and OVERWRITE its mail and shop identities with its own node's.
+const flavor = require("./flavor");
+const KEYCHAIN_SERVICE = flavor.keychainService;
 const KEYCHAIN_ACCOUNT = "minima";
 
 // which manifest flags are secret (stored in the Keychain, never in config.json)
@@ -62,7 +65,8 @@ const DEFAULTS = {
   // duty. A hardcoded address that moves silently breaks seed RESTORE for every new install, and the
   // user cannot tell a moved host from a broken restore. DNS lets the host move without a release.
   megammrHost: "eurobuddha.com:9001",  // megammrsync host for a seed RESTORE (app concept, not a jar param)
-  basePort: 12001,           // -port. 12001 avoids 9001 jar / 11001 android / 14001 classic / 16001 desktop
+  basePort: flavor.basePort, // -port. The released app: 12001 (avoids 9001 jar / 11001 android / 14001 classic / 16001 desktop).
+                             // Another flavour has its own default (main/flavor.js), so both can run at once.
   contribute: false,         // "Contribute to the network": -server role + UPnP/NAT-PMP port mapping
   rpcPortManual: "",         // -rpc override; blank → basePort + 4
   params: PARAMS.defaultParams(),   // EVERY other minima.jar startup flag, user-editable at first run

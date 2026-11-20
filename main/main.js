@@ -5,7 +5,7 @@
  * the IPC handlers here, which proxy to the local RPC using the main-held secret. On launch we start the
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
-const testProfile = require("./testprofile");   // FIRST: a TEST copy moves userData and its keychain names before anything reads them
+const flavor = require("./flavor");   // FIRST: which app this is. A flavour or a TEST profile sets the name, userData and the keychain names before anything reads them
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, nativeTheme, shell, Notification, session, clipboard, powerMonitor } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -98,7 +98,7 @@ function createWindow() {
     // title bar is kept (no hiddenInset): the shell's own toolbar has the tray button where the Mac's
     // traffic lights would sit. The background is Pandamonium's core_bg for the system theme.
     width: 932, height: 732, minWidth: 440, minHeight: 640,
-    title: testProfile.on ? "Minima Core — TEST PROFILE" : "Minima Core",
+    title: flavor.test ? flavor.windowTitle + " — TEST PROFILE" : flavor.windowTitle,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0F1114" : "#F4F5F7",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -109,8 +109,8 @@ function createWindow() {
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-  if (testProfile.on) {   // a TEST copy says so in the title bar, on every screen and on the Dock icon
-    win.on("page-title-updated", (e) => e.preventDefault());
+  if (flavor.id || flavor.test) win.on("page-title-updated", (e) => e.preventDefault());   // the page's own <title> is the released app's: the window keeps this app's name
+  if (flavor.test) {   // a TEST copy says so in the title bar, on every screen and on the Dock icon
     win.webContents.on("did-finish-load", () => win.webContents.insertCSS('body::after{content:"TEST PROFILE";position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;background:#B00020;color:#fff;font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.08em;padding:4px 10px;border-radius:0 0 6px 6px;pointer-events:none}').catch(() => {}));
     try { if (app.dock) app.dock.setBadge("TEST"); } catch (e) {}
   }
@@ -172,7 +172,7 @@ function setupTray() {
   try {
     tray = new Tray(img);
     const menu = () => Menu.buildFromTemplate([
-      { label: "minimaCore — " + node.state, enabled: false },
+      { label: flavor.productName + " — " + node.state, enabled: false },
       { type: "separator" },
       { label: "Show", click: () => { if (win) win.show(); else createWindow(); } },
       { label: "Restart node", click: () => node.restart() },
@@ -180,7 +180,7 @@ function setupTray() {
       { type: "separator" },
       { label: "Quit", click: () => app.quit() }
     ]);
-    tray.setToolTip(testProfile.on ? "minimaCore — TEST PROFILE" : "minimaCore");
+    tray.setToolTip(flavor.test ? flavor.productName + " — TEST PROFILE" : flavor.productName);
     tray.setContextMenu(menu());
     node.on("status", () => tray && tray.setContextMenu(menu()));
   } catch (e) { /* tray optional */ }
@@ -218,6 +218,8 @@ ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? ""
 ipcMain.handle("mcd:copyRpcPassword", () => { clipboard.writeText(config.rpcSecret()); return true; });
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
+// Which app this is, for the screens: its name, and whether it updates itself and may open at login (main/flavor.js).
+ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, title: flavor.windowTitle, updates: !updater.OFF, loginItem: flavor.loginItem && !flavor.test, basePort: flavor.basePort }));
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
@@ -807,7 +809,8 @@ app.whenReady().then(() => {
   if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
-  if (!testProfile.on) updater.start();   // a TEST copy never reads the update feed or offers an installer
+  updater.start();   // does nothing for a flavour that does not update itself, and for a TEST copy (main/updater.js OFF)
+  if (flavor.id) { try { app.setAboutPanelOptions({ applicationName: flavor.productName, applicationVersion: app.getVersion() }); } catch (e) {} }   // About says which app this is
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); else if (win) { win.show(); win.focus(); } });
 });
 
@@ -846,7 +849,7 @@ app.on("before-quit", (e) => {
     const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
       ask: async (w) => {
         if (win && !win.isDestroyed()) { win.show(); win.focus(); }
-        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: "Minima Core", message: w.title, detail: w.message });
+        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle, message: w.title, detail: w.message });
         return r.response === 0 || systemQuit.on();   // the system asked while the question was open: it is not held
       } }).catch(() => true);
     quitAsking = false;

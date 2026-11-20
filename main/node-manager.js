@@ -19,6 +19,7 @@ const { rpcCall } = require("./rpc");
 const { createNodeLog } = require("./nodelog");
 const keymode = require("./keymode");
 const PARAMS = require("../renderer/params.js");
+const flavor = require("./flavor");
 
 const LOG_MAX_LINES = 800;
 // Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
@@ -141,6 +142,7 @@ class NodeManager extends EventEmitter {
     this.wasMapped = false;
     this.lastNetRestart = 0;
     this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
+    this.sys = { listeners, commandOf, alive, killPid, sleep };   // what is asked of the OS about other processes (scripts/flavor-test.cjs puts stand-ins here)
     this.rpc = (cmd) => rpcCall(this.rpcPort(), config.rpcSecret(), cmd);   // this node's RPC (the tests put a stand-in here too)
     this.keyModeChecked = false;  // the running node's keys were read and are of the recorded mode (once per start)
     this.polled = false;          // this node start has answered a health poll: its boot is over (the boot line is believed only before)
@@ -353,48 +355,75 @@ class NodeManager extends EventEmitter {
   }
 
   /**
-   * A node this app started earlier and never stopped (the app crashed, was force-quit, or its stop
-   * threw) keeps the port and the H2 databases, and the next start died with "already in use" /
-   * "Database may be already in use" — seen live 2026-09-07 with a java left behind since the day
-   * before. Before spawning: find such a node — by our pidfile, and by whoever LISTENS on our
-   * port — and if its command line says it is a minima/parlons node on our port or data folder,
-   * stop it (RPC quit, SIGTERM, SIGKILL; bounded) and wait for the port. A port held by anything
-   * else is reported, never fought. Returns "" (go ahead) or the reason not to start.
+   * EVERY TCP port this app's node listens on, each derived from the base port (or, for the RPC, set by hand):
+   *   base        the node's P2P port; when contributing, the Maxima relay shares it
+   *   base + 4    the node's RPC (rpcPortManual overrides)
+   *   base + 5    the keets sidecar's loopback API (the sidecar's own default: its --port + 5), when keets is on
+   *   base + 584  the Parlons wallet gateway, and base + 586 the Parlons panel (Parlons Node kind)
+   * base + 1 to base + 3 are Minima's by convention (its MiniDapp System); this node line has none and binds none.
+   */
+  ports() {
+    const cfg = config.load(), b = cfg.basePort, out = [{ port: b, what: "the node's P2P port" }, { port: this.rpcPort(), what: "the node's RPC" }];
+    let keets = false; try { keets = !!config.effectiveParams().keets; } catch (e) {}
+    if (keets) out.push({ port: b + 5, what: "the keets sidecar" });
+    if (this.kind() === "parlons") out.push({ port: b + 584, what: "the Parlons wallet gateway" }, { port: this.panelPort(), what: "the Parlons panel" });
+    return out;
+  }
+
+  /** Is this command line a node of THIS profile? A minima / parlons-node jar AND this profile's own data folder,
+   *  whole (followed by a space, a quote or the end: /x/node-data is not /x/node-data-2). */
+  ownNode(cmd) {
+    const dir = this.dataDir(); cmd = String(cmd || "");
+    if (!dir || !/(minima|parlons-node)\.jar/.test(cmd)) return false;
+    return cmd.endsWith(dir) || [" ", '"', "'"].some(end => cmd.includes(dir + end));
+  }
+
+  /**
+   * Before spawning. Two separate things (0.19.105; before this, anything LISTENING on our port whose command line
+   * named a node jar and "-port <ours>" was stopped: a node of ANOTHER app or profile on that port would have been
+   * sent `quit`, SIGTERM and SIGKILL):
+   *
+   * 1. OUR OWN node from an earlier launch (the app crashed, was force-quit, or its stop threw) still holds the port
+   *    and the H2 databases. It is found ONLY through this profile's own pidfile, and is ours ONLY while that pid
+   *    still runs a node jar on THIS profile's data folder (pids are reused: on 17 Nov 2026 a pidfile's pid had become
+   *    a macOS XPC service). That one process is stopped: RPC `quit` when it is the one listening on our RPC port,
+   *    then SIGTERM, then SIGKILL, each bounded.
+   * 2. Every port the node needs (ports()) must then be free. A port held by ANYTHING ELSE is reported, with the
+   *    port and what holds it, and the node is not started. That process is never sent a command or a signal.
+   *
+   * Returns "" (go ahead) or the reason not to start.
    */
   async reclaimStaleNode() {
-    const cfg = config.load();
-    const port = cfg.basePort, dataDir = cfg.dataFolder || config.defaultDataFolder();
-    const candidates = new Map();   // pid → command
-    const isOurs = (cmd) => /(minima|parlons-node)\.jar/.test(cmd)
-      && (cmd.includes(dataDir) || cmd.includes("-port " + port) || cmd.includes("-Dparlons.node.port=" + port));
+    const S = this.sys;
+    this.portOwner = null;
+    let mine = 0;
     try {
-      const pf = JSON.parse(fs.readFileSync(this.pidfilePath(), "utf8"));
-      // A pid from an earlier launch is only "our node" while that pid still runs OUR jar. Pids are reused: on
-      // 17 Nov 2026 DexiconPro's pidfile pid had become a macOS XPC service, this code reported "port in use by
-      // ThemeWidgetControlViewService" and the node was never started - silently, without a log line.
-      if (pf && pf.pid && alive(pf.pid) && isOurs(commandOf(pf.pid))) candidates.set(pf.pid, commandOf(pf.pid));
+      const pf = JSON.parse(fs.readFileSync(this.pidfilePath(), "utf8")), pid = pf && Number(pf.pid);
+      if (pid > 0 && pid !== process.pid && S.alive(pid) && this.ownNode(S.commandOf(pid))) mine = pid;
       else try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
     } catch (e) { /* no pidfile */ }
-    for (const pid of listeners(port)) if (!candidates.has(pid)) candidates.set(pid, commandOf(pid));
-    if (candidates.has(process.pid)) candidates.delete(process.pid);
-    for (const [pid, cmd] of candidates) {
-      if (!isOurs(cmd)) {
-        this.portOwner = { pid, command: cmd || "(unknown)" };
-        const why = "port " + port + " is in use by " + (cmd ? cmd.slice(0, 120) : "another program") + " (pid " + pid + ") — choose another base port in Settings, or stop that program";
-        this.log("[app] node NOT started: " + why);
-        return why;
-      }
-      this.log("[app] a node from an earlier launch is still running (pid " + pid + ") — stopping it before starting");
-      try { await Promise.race([rpcCall(this.rpcPort(), config.rpcSecret(), "quit"), sleep(8000)]); } catch (e) {}
-      for (let i = 0; i < 16 && alive(pid); i++) await sleep(500);
-      if (alive(pid)) { killPid(pid, "SIGTERM"); for (let i = 0; i < 10 && alive(pid); i++) await sleep(500); }
-      if (alive(pid)) { killPid(pid, "SIGKILL"); for (let i = 0; i < 6 && alive(pid); i++) await sleep(500); }
-      if (alive(pid)) return "could not stop the node left running by an earlier launch (pid " + pid + ")";
-      this.log("[app] reclaimed a node left running by an earlier launch (pid " + pid + ")");
+    if (mine) {
+      this.log("[app] this app's node from an earlier launch is still running (pid " + mine + ") — stopping it before starting");
+      // `quit` goes to whoever answers on the RPC port: sent only when that IS the process just identified
+      if (S.listeners(this.rpcPort()).includes(mine)) { try { await Promise.race([this.rpc("quit"), S.sleep(8000)]); } catch (e) {} }
+      for (let i = 0; i < 16 && S.alive(mine); i++) await S.sleep(500);
+      if (S.alive(mine)) { S.killPid(mine, "SIGTERM"); for (let i = 0; i < 10 && S.alive(mine); i++) await S.sleep(500); }
+      if (S.alive(mine)) { S.killPid(mine, "SIGKILL"); for (let i = 0; i < 6 && S.alive(mine); i++) await S.sleep(500); }
+      if (S.alive(mine)) return "could not stop this app's node left running by an earlier launch (pid " + mine + ")";
+      this.log("[app] stopped this app's node left running by an earlier launch (pid " + mine + ")");
     }
-    for (let i = 0; i < 10 && listeners(port).length; i++) await sleep(500);   // the kernel releases the socket
+    for (const { port, what } of this.ports()) {
+      let held = S.listeners(port).filter(pid => pid !== process.pid);
+      for (let i = 0; mine && i < 10 && held.length; i++) { await S.sleep(500); held = S.listeners(port).filter(pid => pid !== process.pid); }   // the kernel releases our old node's socket
+      if (!held.length) continue;
+      const pid = held[0], cmd = S.commandOf(pid);
+      this.portOwner = { pid, port, command: cmd || "(unknown)" };
+      const why = "Port " + port + " (" + what + ") is in use by " + (cmd ? cmd.slice(0, 160) : "another program") + " (pid " + pid + "). " + flavor.productName
+        + " did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.";
+      this.log("[app] node NOT started: " + why);
+      return why;
+    }
     try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
-    this.portOwner = null;
     return "";
   }
 
@@ -736,8 +765,8 @@ class NodeManager extends EventEmitter {
     // when the node has died by itself, and changes nothing else.)
     if (/Database may be already in use|locked by another process|Address already in use|BindException/i.test(l)) {
       this.fatalHint = /Address already in use|BindException/i.test(l)
-        ? "another node is still listening on port " + config.load().basePort + " — Restart node stops it and starts again"
-        : "another node still holds this data folder's databases — Restart node stops it and starts again";
+        ? "a port this node needs is already in use (base port " + config.load().basePort + "). Start again: this app's own earlier node is stopped first; any other program is named and left alone"
+        : "another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first";
     }
     this.log(l);
   }
