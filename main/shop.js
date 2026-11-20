@@ -263,11 +263,12 @@ async function scanPayments(depth) {
   capSeen();
   let changed = false;
   for (const c of coins) {
-    const id = c.coinid; if (!id || seenPayCoins.has(id)) continue; seenPayCoins.add(id);
-    const refHex = statePort(c, 1); if (!refHex) continue;
-    const ref = hexToText(refHex); if (!ref) continue;
-    const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;
-    const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN);
+    const id = c.coinid; if (!id || seenPayCoins.has(id)) continue;
+    const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); continue; }
+    const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); continue; }
+    const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;   // not marked seen: a payment that arrives before its order is matched once the order is in
+    seenPayCoins.add(id);
+    const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
     if (outcome && outcome !== "ALREADY") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
   }
   return changed;

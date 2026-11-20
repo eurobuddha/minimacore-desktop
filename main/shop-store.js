@@ -10,18 +10,21 @@ const listing = require("./shop-listing");
 
 const WRITE_DEBOUNCE_MS = 300;
 
-let mem = null;   // { shops:{shopId:cfg}, orders:{ref:order}, chat:{randomid:msg}, meta:{} }
+let mem = null;   // { shops:{shopId:cfg}, orders:{ref:order}, chat:{randomid:msg}, meta:{}, counted:{coinid:ref} }
+// counted (0.18.163): every payment coin already added to an order, kept ON DISK. The scanner's own "seen" set is in
+// memory only, so after a restart its backfill counted the same coin again and a half-paid order became PAID.
+const COUNTED_MAX = 100000, ORDER_COINS_MAX = 1000;
 let writeTimer = null;
 
 function filePath() { return path.join(app.getPath("userData"), "shop.json"); }
 function ensureLoaded() {
   if (mem) return;
-  mem = { shops: {}, orders: {}, chat: {}, meta: {} };
+  mem = { shops: {}, orders: {}, chat: {}, meta: {}, counted: {} };
   let raw = null;
   try { raw = fs.readFileSync(filePath(), "utf8"); } catch (e) { return; }   // first run
   try {
     const j = JSON.parse(raw);
-    if (j) { mem.shops = j.shops || {}; mem.orders = j.orders || {}; mem.chat = j.chat || {}; mem.meta = j.meta || {}; }
+    if (j) { mem.shops = j.shops || {}; mem.orders = j.orders || {}; mem.chat = j.chat || {}; mem.meta = j.meta || {}; mem.counted = j.counted || {}; }
   } catch (e) {
     // Source of truth — never silently clobber a corrupt file; preserve it and start fresh.
     try { fs.renameSync(filePath(), filePath() + ".corrupt-" + Date.now()); } catch (e2) {}
@@ -34,17 +37,18 @@ function persistSoon() {
     try {
       const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
       const tmp = path.join(dir, "shop.json.tmp");
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta }));
+      fs.writeFileSync(tmp, snapshot());
       fs.renameSync(tmp, filePath());
     } catch (e) {}
   }, WRITE_DEBOUNCE_MS);
 }
+function snapshot() { return JSON.stringify({ version: 1, shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta, counted: mem.counted }); }
 function flush() {   // synchronous — for fund-relevant writes (a recorded order/payment must survive a crash)
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   try {
     const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
     const tmp = path.join(dir, "shop.json.tmp");
-    fs.writeFileSync(tmp, JSON.stringify({ version: 1, shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta }));
+    fs.writeFileSync(tmp, snapshot());
     fs.renameSync(tmp, filePath());
   } catch (e) {}
 }
@@ -116,9 +120,17 @@ function ensureChecked(o) {
  *  what is compared (0.18.159): PAID iff the token matches AND the order matches the vendor's listing AND the CUMULATIVE
  *  paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED and is never paid (the
  *  vendor checks it by hand: handCheck); one due 0 or less is BAD_TOTAL. Never clobbers a vendor-progressed status (CONFIRMED+). */
-function recordPayment(ref, paidAmount, paidTokenid) {
+function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   ensureLoaded(); const o = mem.orders[ref]; if (!o) return null;
   if (o.paid) return "ALREADY";
+  // A coin is counted once, for one order, across restarts (0.18.163). No coin id: nothing can be told apart, so nothing is counted.
+  const cid = typeof coinid === "string" ? coinid.toLowerCase() : "";
+  if (!/^0x[0-9a-f]{1,128}$/.test(cid)) return null;
+  if (mem.counted[cid] || (o.coins || []).includes(cid)) return "ALREADY";
+  if ((o.coins || []).length >= ORDER_COINS_MAX) return null;
+  o.coins = (o.coins || []).concat(cid);
+  mem.counted[cid] = ref;
+  const ids = Object.keys(mem.counted); if (ids.length > COUNTED_MAX) for (const k of ids.slice(0, ids.length - COUNTED_MAX)) delete mem.counted[k];   // the oldest go first; the order's own list still holds them
   ensureChecked(o);
   if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {
     o.paidTokenid = paidTokenid;
@@ -150,7 +162,7 @@ function getMeta(k) { ensureLoaded(); return mem.meta[k]; }
 function addChat(m) { ensureLoaded(); if (mem.chat[m.randomid]) return false; mem.chat[m.randomid] = m; persistSoon(); return true; }
 function chat(ref) { ensureLoaded(); return Object.values(mem.chat).filter(m => m.ref === ref).sort((a, b) => (a.date || 0) - (b.date || 0)); }
 
-function clear() { mem = { shops: {}, orders: {}, chat: {}, meta: {} }; flush(); }
+function clear() { mem = { shops: {}, orders: {}, chat: {}, meta: {}, counted: {} }; flush(); }
 function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta }; }
 
 module.exports = {

@@ -26,7 +26,8 @@ const M = store._money;
 process.on("exit", () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {} });
 
 const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-let n = 0;
+let n = 0, cn = 0;
+const coin = () => "0xF00D" + (++cn).toString(16);   // a fresh payment coin id (0.18.163: every counted coin has one)
 // An incoming order to the vendor's own shop "tea" (Tea 1.5 x up to 10, Domestic delivery 0.2). Since 0.18.159 what is
 // due comes from that listing; the buyer's amount is kept only to be shown.
 store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }, { id: "p2", name: "Free sample", price: "0", maxUnits: "1" }],
@@ -50,21 +51,21 @@ test("decCmp: exact decimal compare; an unreadable figure is null, never 0", () 
 test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.000000001), the listing decides what is due", () => {
   for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
-    assert.equal(store.recordPayment(ref, "0.000000001", "0x00"), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
-    assert.equal(store.recordPayment(ref, "3.199999999", "0x00"), "PAID", "3.2 received = 3.2 due");
+    assert.equal(store.recordPayment(ref, "0.000000001", "0x00", coin()), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
+    assert.equal(store.recordPayment(ref, "3.199999999", "0x00", coin()), "PAID", "3.2 received = 3.2 due");
     assert.equal(store.order(ref).due, "3.2");
   }
   const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
-  assert.equal(store.recordPayment(free, "5", "0x00"), "BAD_TOTAL", "nothing due by the listing: never paid"); assert.equal(store.order(free).paid, false);
+  assert.equal(store.recordPayment(free, "5", "0x00", coin()), "BAD_TOTAL", "nothing due by the listing: never paid"); assert.equal(store.order(free).paid, false);
 });
 
 test("recordPayment: exact, cumulative, and only in the order's token", () => {
   let ref = sellOrder("3.2");
-  assert.equal(store.recordPayment(ref, "3.199999999999999999", "0x00"), "UNDERPAID");
-  assert.equal(store.recordPayment(ref, "0.000000000000000001", "0x00"), "PAID");
-  assert.equal(store.recordPayment(ref, "1", "0x00"), "ALREADY");
+  assert.equal(store.recordPayment(ref, "3.199999999999999999", "0x00", coin()), "UNDERPAID");
+  assert.equal(store.recordPayment(ref, "0.000000000000000001", "0x00", coin()), "PAID");
+  assert.equal(store.recordPayment(ref, "1", "0x00", coin()), "ALREADY");
   ref = sellOrder("3.2", MXUSD);
-  assert.equal(store.recordPayment(ref, "100", "0x00"), "WRONG_TOKEN");
+  assert.equal(store.recordPayment(ref, "100", "0x00", coin()), "WRONG_TOKEN");
 });
 
 // ---- 0.18.159: the vendor's own listing ----
@@ -96,7 +97,7 @@ test("listing.check: every way an order departs from the listing is a problem", 
 });
 test("an order that does not match is UNCHECKED, never paid by any amount, and can be confirmed only after the vendor checks it by hand", async () => {
   const ref = sellOrder("1000", "0x00", { items: [{ product: "Tea", quantity: 2, unitPrice: "0.000000001" }] });
-  assert.equal(store.recordPayment(ref, "1000000", "0x00"), "UNCHECKED");
+  assert.equal(store.recordPayment(ref, "1000000", "0x00", coin()), "UNCHECKED");
   const o = store.order(ref); assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.match(o.problems[0], /is not your price 1\.5/);
   assert.equal(store.mayAdvance(o), false);
   await assert.rejects(shop.advanceStatus(ref, "CONFIRMED"), /Check it by hand first/);
@@ -233,3 +234,32 @@ test("vendor: a phone-placed order to my shop is checked against my listing and 
   paid = "3.199999999"; await shop.scanOnce();
   o = store.order("ORD-PHONE1"); assert.equal(o.paid, true); assert.equal(o.status, "PAID");
 });
+
+// ---- 0.18.163: a coin counts once across restarts ----
+const freshModules = () => { for (const k of Object.keys(require.cache)) if (k.includes(path.join(__dirname, "..", "main"))) delete require.cache[k];
+  return { store: require("../main/shop-store"), shop: require("../main/shop"), sc: require("../main/shopcrypto") }; };
+test("H1: after a restart the backfill does not count the same payment coin again (a half-paid order stays half paid)", async () => {
+  let m = freshModules();
+  m.store.saveShop({ shopId: "half", shopName: "Half", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] }); m.store.flush();
+  const VADDR = "MxG0" + "C".repeat(56); let pay = [], msg = [];
+  const runner = async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
+    : c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: msg } : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] };
+  m.shop._setRunner(runner); await m.shop.init();
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("h1 buyer");
+  const order = { type: "ORDER", ref: "ORD-HALF", randomid: "r", from: buyer.publicId, to: me.publicId, date: Date.now(), shopId: "half", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" };
+  msg = [{ coinid: "0xA1", state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify(order))) } }];
+  pay = [{ coinid: "0xB1", tokenid: "0x00", amount: "5", state: { "1": "0x" + Buffer.from("ORD-HALF").toString("hex") } }];
+  await m.shop.scanOnce();
+  assert.equal(m.store.order("ORD-HALF").paidAmount, "5"); m.store.flush();
+  m = freshModules(); m.shop._setRunner(runner); await m.shop.init();   // the app restarts: the scanner's memory is gone
+  await m.shop.scanOnce();
+  const o = m.store.order("ORD-HALF");
+  assert.equal(o.paidAmount, "5", "the same coin is not added twice"); assert.equal(o.paid, false); assert.equal(o.status, "UNDERPAID");
+  assert.equal(m.store.recordPayment("ORD-HALF", "5", "0x00", "0xb1"), "ALREADY", "a counted coin in any letter case");
+  assert.equal(m.store.recordPayment("ORD-HALF", "5", "0x00"), null, "no coin id: nothing is counted");
+  m.store.upsertOrder({ ref: "ORD-OTHER", role: "sell", shopId: "half", amount: "5", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], shipping: "" });
+  assert.equal(m.store.recordPayment("ORD-OTHER", "5", "0x00", "0xB1"), "ALREADY", "one coin never counts for two orders");
+  pay = pay.concat([{ coinid: "0xB2", tokenid: "0x00", amount: "5", state: { "1": "0x" + Buffer.from("ORD-HALF").toString("hex") } }]);
+  await m.shop.scanOnce(); assert.equal(m.store.order("ORD-HALF").paid, true, "a second, different coin completes it");
+});
+

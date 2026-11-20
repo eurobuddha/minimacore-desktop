@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.163] — miniMall vendor: a payment coin counts once, across restarts
+
+- The scanner remembered the payment coins it had counted in memory only, so after a restart its backfill counted the same coin again and a half-paid order became PAID. Every counted coin id is now kept in `shop.json`: on the order (up to 1000) and in one global list (up to 100000, oldest first out) so one coin never counts for two orders; `recordPayment(ref, amount, token, coinid)` answers ALREADY for a counted coin and counts nothing without a coin id. A payment that arrives before its order is no longer marked seen, so it is matched once the order is in. Test: `scripts/shop-test.cjs` (from the reviewer's probe).
+
 ## [0.18.162] — the key audit reply is capped at 512 KB
 
 - The KeyUses audit replies (`mcd:keyAudit`, `mcd:keyReuse`) were read up to netfetch's general 8 MB cap. They are now dropped, not parsed, above 512 KB, as the phone's AuditApi and the dev branch (0.19.137) do: `netfetch.fetchJson` `opts.maxBytes` may lower the cap, never raise it. Test: `scripts/netfetch-test.cjs`.
