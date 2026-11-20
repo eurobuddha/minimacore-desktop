@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.112] — The Mail palette test passes again (0.19.110 and 0.19.111 were committed with it failing)
+
+- 0.19.111 changed the test and said it passed; it did not. The new assertion also reads `renderer/app.js`, where an old comment above the Mail panel still named the removed rule. The comment is corrected and the whole check list is green. From this version on a commit on this branch is made by a script that runs every suite first and refuses when one fails. No behaviour changes in 0.19.111 or here.
+
 ## [0.19.111] — The Mail palette test follows miniMall's new screens (0.19.110 was committed with it failing)
 
 - `scripts/mail-test.cjs` still required the shared sheet to carry `#view-minimall .mail-thread`, the class miniMall's old order screen borrowed from Mail. Since 0.19.110 miniMall's screens are its own (`.mm-thread` in `renderer/apps.css`) and the rule was removed with them, so the test failed in that commit. It now checks the opposite: no screen outside Mail wears a mail thread class. A comment in `renderer/app.css` that named the old rule is corrected. No behaviour changes.

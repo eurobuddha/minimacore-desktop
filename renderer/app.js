@@ -1958,7 +1958,7 @@ function showPayResult(ok, message, txid, ambiguous) {
 }
 
 // ---- minimaMail — the panel lives in renderer/mail.js (APK parity, its own palette) -----------------------
-// The old panel was ~590 lines here, shared app.css classes with miniMall (#view-minimall owns .mail-thread),
+// The old panel was ~590 lines here, shared app.css classes with miniMall,
 // and could not carry the APK's paper palette without leaking it into every other tab. app.js keeps only the
 // wiring: shared dialogs and helpers go in through MailPanel.init, so neither file reaches into the other.
 MailPanel.init({
