@@ -2772,11 +2772,11 @@ function appendTerm(text, kind) {
 // passes a wallet command through unchanged unless it is switched to Enforce (Settings, Coin guard).
 // The same rule as the main process (main/sendpin.js pinSend): MINIMA is no tokenid at all or exactly tokenid:0x00, and a chain (;) is never pinned.
 function termSendNote(c) { const t = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c); return /^send\s/i.test(c) && !c.includes(";") && !/\bfromaddress:/i.test(c) && (!t || t[1].toLowerCase() === "0x00") ? "note: a MINIMA send with no fromaddress: may be given one of this wallet's own addresses, so that the node does not choose a coin it cannot sign. The reply's params show what was sent. Type fromaddress: yourself to choose." : ""; }
-// `vault` and `seedrandom` (any action, any case, anywhere in a `;` chain) show what controls the funds (0.19.176, owner
+// `vault`, `seedrandom` and `keys action:genkey` (0.19.177) (any action, any case, anywhere in a `;` chain) show what controls the funds (0.19.176, owner
 // decision): the main process runs one only after the phrase typed for that exact command and the system's prompt
 // (main/seedgate.js secretKind, the same rule). The command is not kept in the history; its reply is shown in its own
 // window for a minute at most and is never in the Terminal's output or its Copy output.
-function termSecretKind(c) { let k = null; for (const p of String(c).split(";")) { const v = (p.trim().split(/\s+/)[0] || "").toLowerCase(); if (v === "vault") return "seed"; if (v === "seedrandom") k = "key"; } return k; }
+function termSecretKind(c) { let k = null; for (const p of String(c).split(";")) { const q = p.trim(), v = (q.split(/\s+/)[0] || "").toLowerCase(); if (v === "vault") return "seed"; if (v === "seedrandom" || (v === "keys" && /(^|\s)action:\s*"?genkey\b/i.test(q))) k = "key"; } return k; }
 async function termRun() {
   const inp = el("termIn"), c = inp.value.trim(); if (!c) return;   // an empty Run does nothing
   inp.value = ""; termSugClose();

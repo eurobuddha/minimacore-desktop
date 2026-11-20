@@ -10,13 +10,14 @@
 "use strict";
 const SEED_PHRASE = "SHOW SEED", KEY_PHRASE = "SHOW KEY", PASS_MS = 60000;
 
-/** "seed" when any command of a `;` chain is `vault` (any action, any case), "key" when one is `seedrandom`, else null. */
+/** "seed" when any command of a `;` chain is `vault` (any action, any case), "key" when one is `seedrandom` or
+ *  `keys action:genkey` (it prints a new private key; 0.19.177, as the released desktop's cmdgate.js), else null. */
 function secretKind(command) {
   let kind = null;
   for (const part of String(command == null ? "" : command).split(";")) {
-    const verb = (part.trim().split(/\s+/)[0] || "").toLowerCase();
+    const p = part.trim(), verb = (p.split(/\s+/)[0] || "").toLowerCase();
     if (verb === "vault") return "seed";
-    if (verb === "seedrandom") kind = "key";
+    if (verb === "seedrandom" || (verb === "keys" && /(^|\s)action:\s*"?genkey\b/i.test(p))) kind = "key";
   }
   return kind;
 }

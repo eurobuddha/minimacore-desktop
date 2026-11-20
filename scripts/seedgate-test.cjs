@@ -7,6 +7,7 @@ const G = require("../main/seedgate.js");
 const SRC = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const VECTORS = [["vault", "seed"], ["VAULT action:seed", "seed"], ["  Vault  action:wipekeys", "seed"], ["vault action:passwordlock password:x", "seed"], ["balance;vault", "seed"], ["balance ; VaUlT", "seed"],
   ["seedrandom modifier:ethbridge", "key"], ["SEEDRANDOM", "key"], ["status;seedrandom modifier:x", "key"], ["seedrandom;vault", "seed"],
+  ["keys action:genkey", "key"], ["KEYS Action:GenKey", "key"], ["status; keys action:\"genkey\"", "key"], ["keys action:list", null], ["keys", null], ["keys action:genkeys", null], ["keys publickey:genkey", null],
   ["vaults", null], ["balance vault", null], ["send amount:1 address:vault", null], ["", null], ["status", null], ["seedrandomx", null], [";;", null]];
 const os = (o) => { const asked = []; return { asked, can: () => !!o.can, prompt: async (why) => { asked.push(why); if (o.refuse) throw new Error("no"); } }; };
 

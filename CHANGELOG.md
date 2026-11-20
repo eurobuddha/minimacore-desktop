@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.177] — The seed gate covers keys action:genkey too
+
+- **Parity with the released desktop (its 0.18.173, `84d946b`, `main/cmdgate.js`):** `keys action:genkey` prints a new private key, so it is gated like `seedrandom` (SHOW KEY, Touch ID where there is one, that exact command once within 60 seconds), in the main process and in the Terminal's question. Other `keys` commands are unchanged.
+- **Kept different on purpose:** the released desktop refuses a `;` chain that holds a gated command; here the whole chain is gated and runs once its own pass is given (the owner's rule: "anywhere in a `;` chain"), so a chain is never half run.
+- Test (`scripts/seedgate-test.cjs`): `keys action:genkey` in any case, quoted, or inside a chain is gated; `keys`, `keys action:list`, `genkeys` and a `genkey` that is not the action are not; the window and main agree. It fails on 0.19.176.
+
 ## [0.19.176] — The Terminal gates vault and seedrandom; Show seed phrase asks first
 
 - **Owner decision (20 Nov 2026):** the commands that show what controls the funds no longer run on a bare call. `vault` (any action, any letter case, anywhere in a `;` chain) answers with the wallet's seed phrase or handles its keys; `seedrandom` (any modifier) answers with a key made from the seed. Before, the Terminal ran both like any other command, kept them in its history and its Copy output, and Backup & Recovery's "Show seed phrase" put the seed on screen with one click.
