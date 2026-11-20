@@ -22,6 +22,7 @@ const netfetch = require("./netfetch");
 const histDb = require("./history-db");
 const faucet = require("./faucet");
 const keyuses = require("./keyuses");
+const explorer = require("./explorer");
 const mail = require("./mail");
 const chat = require("./chat");
 const pandapools = require("./pandapools");
@@ -347,6 +348,9 @@ ipcMain.handle("mcd:applyJarUpdate", async () => { throw new Error("The in-app n
 // token icons + history store + CSV export (no requireRunning — these render off the local store / cache)
 ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
 ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
+
+// Minima Explorer (main/explorer.js): a kind and one checked value in, one of seven node READS out, through rpcCall.
+ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return explorer.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 
 // KeyUses reuse audit — the ONLY user-initiated external call. Host is HARD-PINNED to eurobuddha.com (no
 // user-controlled host → no SSRF surface); pubkeys/addrs are hex-validated before they reach the query string.

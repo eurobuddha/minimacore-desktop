@@ -391,3 +391,80 @@ img.mm-prod__im { cursor: zoom-in; }
 .kx-addr:hover, .kx-addr:active { color: #F7931A; }
 .kx-cov { padding: 14px 2px 0; font-size: 10.5px; line-height: 1.45; color: #8D8B89; }
 .kx :focus-visible { outline: 2px solid #F7931A; outline-offset: 2px; }
+
+/* ---- Minima Explorer (apks/base integrated/blockexplorer: MainActivity + Design.java; its own dark and light palettes) ---- */
+#view-explorer { padding: 0; min-height: 100%; }
+.ex { --x-bg: #0A0A0F; --x-card: #15151F; --x-card2: #1F1F2B; --x-accent: #F7931A; --x-soft: #2A1E0E; --x-text: #FFFFFF; --x-dim: #9A9AA8; --x-dim2: #6A6A78; --x-div: #2A2A38; --x-green: #2ECC71; --x-red: #E74C3C; --x-blue: #5B8DEF;
+  min-height: calc(100vh - 52px); background: var(--x-bg); color: var(--x-text); font-family: var(--app-font); }
+.ex--light { --x-bg: #F5F5F7; --x-card: #FFFFFF; --x-card2: #EDEDF2; --x-accent: #E07E00; --x-soft: #FDEBD2; --x-text: #1C1C22; --x-dim: #5F5F6B; --x-dim2: #8A8A96; --x-div: #E2E2EA; --x-green: #178F4C; --x-red: #C22B20; --x-blue: #2F5FD0; }
+.ex button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.ex :focus-visible { outline: 2px solid var(--x-accent); outline-offset: 2px; }
+.ex-mono, .ex-id { font-family: var(--app-mono); overflow-wrap: anywhere; }
+.ex-head { display: flex; align-items: center; padding: 14px 14px 12px 18px; background: var(--x-card); }
+.ex-title { flex: 1; font-size: 18px; font-weight: 700; letter-spacing: .02em; color: var(--x-accent); }
+.ex-tip { padding: 6px; font-family: var(--app-mono); font-size: 13px; color: var(--x-green); }
+.ex .ex-theme { padding: 2px 4px 2px 10px; font-size: 17px; color: var(--x-dim); }
+.ex-search { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px; background: var(--x-card); }
+.ex-in { flex: 1; min-width: 0; height: 42px; box-sizing: border-box; padding: 0 14px; border: 0; border-radius: 12px; background: var(--x-card2); color: var(--x-text); font-family: var(--app-mono); font-size: 13px; }
+.ex-in::placeholder { color: var(--x-dim2); }
+.ex .ex-go { padding: 9px 16px; border-radius: 12px; background: var(--x-accent); color: #0A0A0F; font-size: 13px; font-weight: 700; }
+.ex-pair { padding: 16px; background: var(--x-card); }
+.ex-pair b { display: block; font-size: 14px; color: var(--x-accent); }
+.ex-pair span { display: block; padding-top: 4px; font-size: 12px; color: var(--x-dim); }
+.ex-stats { display: flex; padding: 12px 4px 4px 12px; }
+.ex-tile { flex: 1 1 0; min-width: 0; margin-right: 8px; padding: 12px 14px; border-radius: 14px; background: var(--x-card); border: 1px solid transparent; }
+.ex-tile--hero { border-color: var(--x-accent); }
+.ex-tile__l { font-size: 10px; letter-spacing: .1em; color: var(--x-dim2); }
+.ex-tile__v { font-size: 17px; font-weight: 500; overflow-wrap: anywhere; }
+.ex-tile--hero .ex-tile__v { color: var(--x-accent); }
+.ex-sec { display: flex; align-items: center; padding: 10px 18px 4px; font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--x-dim); }
+.ex-sec span:first-child { flex: 1; }
+.ex-sec__s { font-weight: 400; letter-spacing: 0; color: var(--x-dim2); }
+.ex-block { display: flex; align-items: center; margin: 4px 12px; padding: 12px 12px 12px 14px; border-radius: 14px; background: var(--x-card); cursor: pointer; }
+.ex-block__l { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ex-block__n { font-size: 16px; font-weight: 500; }
+.ex-block__s { font-family: var(--app-mono); font-size: 11px; color: var(--x-dim2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ex-id[data-copy] { cursor: copy; }
+.ex-pill { flex: none; margin-left: 8px; padding: 4px 10px; border-radius: 100px; background: var(--x-card2); color: var(--x-dim2); font-size: 10px; font-weight: 700; }
+.ex-pill--tx { background: var(--x-soft); color: var(--x-accent); }
+.ex-chev { flex: none; padding-left: 8px; font-size: 18px; color: var(--x-dim2); }
+.ex-more { display: block; width: calc(100% - 24px); box-sizing: border-box; margin: 6px 12px 10px; padding: 14px 16px; font-size: 13px; text-align: center; color: var(--x-dim); }
+.ex-more--end { color: var(--x-dim2); }
+.ex .ex-more--btn { border-radius: 14px; background: var(--x-card); color: var(--x-accent); text-align: center; }
+.ex-back { display: flex; align-items: center; padding: 12px 14px 6px; font-size: 13px; color: var(--x-dim); }
+.ex .ex-back__b { padding: 4px 12px 4px 4px; font-size: 14px; color: var(--x-accent); }
+.ex-page { padding: 0 12px 20px; }
+.ex-card { margin-top: 10px; padding: 14px 16px; border-radius: 16px; background: var(--x-card); border: 1px solid transparent; }
+.ex-card--hero { border-color: var(--x-div); }
+.ex-big { font-size: 28px; font-weight: 500; color: var(--x-accent); }
+.ex-big--txn { font-size: 20px; color: var(--x-text); }
+.ex-when { font-size: 12px; color: var(--x-dim); white-space: pre-wrap; }
+.ex-conf { padding-top: 4px; font-family: var(--app-mono); font-size: 12px; color: var(--x-green); min-height: 15px; }
+.ex-conf--off { color: var(--x-dim2); }
+.ex .ex-copy { display: block; width: 100%; padding: 4px 0; }
+.ex-copy__k { display: block; font-size: 11px; color: var(--x-dim); white-space: pre-wrap; }
+.ex-copy .ex-mono { display: block; font-size: 12px; }
+.ex-kv { display: flex; gap: 16px; padding: 4px 0; font-size: 13px; }
+.ex-kv span { flex: 1; color: var(--x-dim); }
+.ex-kv b { font-weight: 400; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.ex-linkrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; padding: 5px 0; }
+.ex-linkrow__l { flex: 0 0 100%; font-size: 11px; color: var(--x-dim); }
+.ex .ex-link { flex: 1 1 0; min-width: 0; font-family: var(--app-mono); font-size: 13px; color: var(--x-accent); overflow-wrap: anywhere; white-space: pre-wrap; }
+.ex .ex-cp { flex: none; padding: 2px 8px; border: 1px solid var(--x-div); border-radius: 100px; font-size: 11px; color: var(--x-dim); }
+.ex .ex-cp--raw { display: inline-block; margin-top: 8px; }
+.ex-h { padding-bottom: 6px; font-size: 10px; font-weight: 700; letter-spacing: .12em; color: var(--x-dim); white-space: pre-wrap; }
+.ex-none { padding: 4px 0; font-size: 13px; color: var(--x-dim2); }
+.ex-coin { padding: 6px 0; }
+.ex-coin + .ex-coin { border-top: 1px solid var(--x-div); }
+.ex-amt { font-size: 15px; font-weight: 700; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ex-amt--in { color: var(--x-red); } .ex-amt--out { color: var(--x-green); }
+.ex .ex-coin__a { display: block; font-family: var(--app-mono); font-size: 12px; color: var(--x-dim); overflow-wrap: anywhere; white-space: pre-wrap; }
+.ex .ex-addr { display: block; font-family: var(--app-mono); font-size: 16px; overflow-wrap: anywhere; }
+.ex-rec { display: flex; align-items: center; padding: 8px 0; cursor: pointer; }
+.ex-rec + .ex-rec { border-top: 1px solid var(--x-div); }
+.ex-kind { flex: none; padding: 3px 8px; border-radius: 100px; background: var(--x-card2); color: var(--x-blue); font-size: 10px; font-weight: 700; }
+.ex-kind--blk { color: var(--x-accent); }
+.ex-rec__mid { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-left: 10px; font-size: 13px; }
+.ex-rec__sub { font-size: 11px; color: var(--x-dim2); white-space: pre-wrap; }
+.ex .ex-rawbtn { font-size: 13px; color: var(--x-dim); white-space: pre-wrap; }
+.ex-raw { margin: 0; padding-top: 8px; overflow-x: auto; font-family: var(--app-mono); font-size: 10px; color: var(--x-dim); }

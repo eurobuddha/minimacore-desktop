@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.129] — Minima Explorer, as Pandamonium shows it
+
+- **A new tray app, Minima Explorer** (after ETH Wallet, where Pandamonium has it), with its Apps row (Hide and Freeze). Pandamonium's native explorer (`apks/base` `integrated/blockexplorer`, `1c60c2593325f70cba5089e2ba430925d6ccca3c`; standalone `apks/blockexplorer` 0.1.10), reproduced: the header with the tip and the theme button, the search row, the three tiles, LATEST BLOCKS with "Load older blocks", and the pushed pages with Back: block detail, transaction (inputs, outputs, state variables, the confirmations line), address results, and "View raw JSON". Its own dark and light palettes, as the original (it does not follow the system; the choice is remembered).
+- **Read only, and bounded.** The screen names a kind and one value; `main/explorer.js` builds one of the seven reads the original sends (`block`, `status`, `txpow action:info`, `txpow block:N`, `txpow txpowid:`, `txpow onchain:`, `txpow address:`) and refuses anything that is not a whole number, a 0x hex string or an Mx address, so typed text can never add a parameter or a second command. Blocks are read one at a time, 16 to a page, with the original's 60 ms pause. An address's records are cut to the first 200 and the total is said. No `coins`, no history scan.
+- **Identifiers whole.** The phone cuts ids and addresses to 10…8 characters in the list, the links, the difficulty, coin addresses and the address page. Here every one is whole and one click from the clipboard (link rows carry a Copy button beside the link; a message that something was not found copies the value when clicked).
+- **Different from the phone, on purpose:** a new block's small gap is added above the list in the right order (the original inserts each at the top, which reverses a gap of more than one); "Copy JSON" replaces long-press; a token is named MxUSD only by its id, and any other token's name is shown with its whole id; values the node did not give read "Not given" / "Not read yet"; the block time tile is cut to one decimal, not rounded; "yes, also a block" without the dash.
+- Tests: `scripts/explorer-test.cjs` (10, the list walker and the pages run against a stand-in node). Captures: `scripts/dev-preview/shots/*-explorer*.png`.
+
 ## [0.19.128] — Settings and the footer never show a key-use figure that was not read
 
 - **Settings, "Signing keys":** the most-used key was worked out with `parseInt(uses) || 0` and a capacity that fell back to 262144. A counter the node did not give read as 0, and a block-key wallet could be measured against the classic capacity; the highest use and the highest capacity could also come from two different keys. The card now shows the key nearest its own capacity, in the node's own whole numbers, or says "The node's key uses could not be read" and shows no figure. The percentage is cut, not rounded.

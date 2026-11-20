@@ -27,7 +27,7 @@ test("every existing view still has its screen, and each is reachable from its n
   const sub = app.match(/const SUB_TITLE = \{([^}]+)\}/)[1];
   for (const v of ["receive", "send", "logs", "terminal", "settings"]) assert.ok(sub.includes(v + ":"), v + " is a titled sub screen");
   const tray = [...app.match(/const TRAY_APPS = \[([\s\S]+?)\n\];/)[1].matchAll(/id: "([a-z]+)", name: "([^"]+)"/g)].map(m => m[1] + "=" + m[2]);
-  assert.deepEqual(tray, ["core=Minima Core", "mail=MinimaMail", "ethwallet=ETH Wallet", "vestr=Minima Vestr", "keyuses=KeyUses", "faucet=Minima Faucet",
+  assert.deepEqual(tray, ["core=Minima Core", "mail=MinimaMail", "ethwallet=ETH Wallet", "explorer=Minima Explorer", "vestr=Minima Vestr", "keyuses=KeyUses", "faucet=Minima Faucet",
     "minimall=miniMall", "webwallet=Web Wallet", "parlons=Parlons"], "the tray's default order; no row for an app the desktop does not have");
   assert.ok(/id="walSend"/.test(html) && /id="walReceive"/.test(html), "Send and Receive open from the Wallet's buttons");
 });

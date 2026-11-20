@@ -331,6 +331,25 @@
       FROZEN_IDS = on ? FROZEN_IDS.concat(id) : FROZEN_IDS.filter(x => x !== id); return FROZEN_IDS.slice(); },
     logsSave: async () => "/Users/preview/Documents/minima-node-log-preview.txt",
     faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
+    // Minima Explorer: ?ex=fail (the node does not answer)  &do=<clicks>  &fill=%23exSearch=<text>. Every id and address is invented.
+    explorer: async (kind, arg) => {
+      if (Q.get("ex") === "fail") throw new Error("node not running");
+      const TIP = 2428092, id = (n) => "0x000000" + (String(n) + "FA4E").repeat(15).slice(0, 58), ok = (response) => ({ status: true, response });
+      const coin = (n, amount, tok) => Object.assign({ coinid: FAKE_PK("C" + n), amount, address: FAKE_PK("AD" + n), miniaddress: "MxG08" + ("FAKE0" + n).repeat(12).slice(0, 58), tokenid: "0x00" }, tok || {});
+      const txn = (n) => ({ txpowid: id("7" + n), isblock: false, istransaction: true, size: 2104, burn: "0.010000", header: { block: String(TIP - 6), timemilli: String(now - 430000) },
+        body: { txn: { inputs: [coin(1, "125.500000")], outputs: [coin(2, "25.5"), coin(3, "99.99"), coin(4, "0.000000000000000000000001", { tokenid: MXUSD, tokenamount: "12.250000", token: { name: { name: "MxUSD" } } }), coin(5, "0.0000001", { tokenid: NFT, tokenamount: "1", token: { name: "Preview token (fake)" } })],
+          state: [{ port: 0, type: 1, data: FAKE_PK("5A") }, { port: 1, type: 4, data: "[preview state]" }] }, txnlist: [] } });
+      const block = (h) => ({ txpowid: id(h), isblock: true, istransaction: false, superblock: h % 7 === 0 ? 2 : 0, size: 826, burn: "0", header: { block: String(h), timemilli: String(now - (TIP - h) * 50000 - 4000), blkdiff: "0xD9DBDB8F" + "FA4E".repeat(14), cascadelevels: 32, superparents: [{ difficulty: 0, count: 1, parent: id(h - 1) }] },
+        body: { txnlist: h === TIP - 6 ? [id("7a")] : h === TIP - 11 ? [id("7b"), id("7c"), id("7d")] : [] } });
+      if (kind === "tip") return ok({ block: String(TIP), date: BLOCK_TIME });
+      if (kind === "status") return ok({ chain: { block: TIP, speed: "0.019920318", weight: "1" } });
+      if (kind === "info") return ok({ txpowdb: { size: 4093 } });
+      if (kind === "block") { const h = Number(arg); return h > TIP - 40 && h <= TIP ? ok(block(h)) : { status: false, error: "TxPoW not found @ height " + arg }; }
+      if (kind === "onchain") return ok({ found: true, block: String(TIP - 6), confirmations: "6" });
+      if (kind === "txpow") { if (arg.startsWith("0x0000007")) return ok(txn(arg.slice(9, 10))); const h = Number((arg.match(/^0x000000(\d{7})/) || [])[1]); return h ? ok(block(h)) : { status: false, error: "TxPoW not found" }; }
+      if (kind === "address") return arg.includes("FAKE") || arg.startsWith("0xAD") ? Object.assign(ok([txn("a"), block(TIP - 11), txn("b")]), {}) : ok([]);
+      throw new Error("unknown read");
+    },
     // KeyUses: ?ku=ok|block|reuse|risk|partial|fail  (every key and address invented; the Mx strings are not real addresses)
     keyUsesAudit: async () => {
       const ku = Q.get("ku") || "ok"; if (ku === "fail") return { ok: false, error: "Could not reach the audit service. Check your connection and try again." };

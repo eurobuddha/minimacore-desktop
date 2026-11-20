@@ -221,5 +221,47 @@
     }
   };
 
-  return { eth: eth, vestr: vestr, shop: shop, ww: ww, keyuses: keyuses };
+  // ---- Minima Explorer (main/explorer.js): how chain data is READ for the screen. Pandamonium's blockexplorer Util + MainActivity. ----
+  var digits = function (v) { v = typeof v === "number" && isFinite(v) ? String(v) : v; return typeof v === "string" && /^[0-9]{1,18}$/.test(v) ? v.replace(/^0+(?=\d)/, "") : ""; };
+  var explorer = {
+    PAGE: 16, FETCH_GAP_MS: 60, MAX_LIVE_GAP: 5,   // MainActivity's constants: blocks per page, the pause between two block reads, the gap above which the list starts again
+    /** What the search box holds (MainActivity.doSearch): → { kind: "block" | "txpow" | "address", arg } , { kind: "bad" } or null for nothing typed. */
+    classify: function (q) {
+      q = text(q); if (!q) return null;
+      if (/^[0-9]+$/.test(q)) return q.length > 15 ? { kind: "bad" } : { kind: "block", arg: digits(q) };
+      if (/^0x[0-9a-fA-F]+$/.test(q)) return { kind: "txpow", arg: q };          // a TxPoW id or an address: the id is tried first
+      if (/^Mx[0-9A-Za-z]+$/.test(q)) return { kind: "address", arg: q };
+      return { kind: "bad" };
+    },
+    /** 1234567 → "1,234,567", from the digits themselves; "" for anything that is not a whole number. */
+    groupNum: function (v) { return digits(v).replace(/\B(?=(\d{3})+(?!\d))/g, ","); },
+    isMinima: function (tid) { return tid == null || tid === "" || tid === "0x00"; },
+    /** Util.tidyAmount: trailing zeros off a decimal string. The node's own digits; no number is made of them. */
+    tidyAmount: function (a) {
+      a = a == null ? "" : String(a); if (!a) return "0";
+      if (a.indexOf(".") < 0) return a;
+      a = a.replace(/0+$/, "").replace(/\.$/, "");
+      return a || "0";
+    },
+    /** Util.coinAmount: a token's human figure is `tokenamount`; Minima's is `amount`. */
+    coinAmount: function (c) { c = c || {}; return !explorer.isMinima(c.tokenid) && c.tokenamount != null && c.tokenamount !== "" ? explorer.tidyAmount(c.tokenamount) : explorer.tidyAmount(c.amount == null ? "0" : c.amount); },
+    /** A coin's token name as its creator wrote it (a string, or an object with a name), or "". Untrusted: the screen shows the token id beside it. */
+    tokenName: function (c) { var t = c && c.token, n = t && t.name; n = n && typeof n === "object" ? n.name : n; return typeof n === "string" && n.charAt(0) !== "{" ? n : ""; },
+    height: function (txpow) { return digits(txpow && txpow.header && txpow.header.block); },
+    timeMilli: function (txpow) { var d = digits(txpow && txpow.header && txpow.header.timemilli); return d ? Number(d) : 0; },
+    /** How many transactions a block row counts (BlockAdapter): the list, plus its own when the TxPoW is one. */
+    txCount: function (txpow) { var l = txpow && txpow.body && txpow.body.txnlist; return (Array.isArray(l) ? l.length : 0) + (txpow && txpow.istransaction === true ? 1 : 0); },
+    /** The BLOCK TIME tile: seconds per block from the node's blocks-per-second figure, cut to one decimal. "" when it was not given. */
+    blockTime: function (speed) { var s = Number(speed); if (!(s > 0) || !isFinite(s)) return ""; var t = Math.floor(10 / s); return Math.floor(t / 10) + "." + (t % 10) + " s"; },
+    /** The found record's page (showTxpowSmart): a block gets the block page, anything else the transaction page. */
+    pageOf: function (txpow) { return txpow && txpow.isblock === true ? "block" : "txn"; },
+    /** The confirmations line under a transaction, from the reply to `txpow onchain:` (showTxnDetail). */
+    onchain: function (j) {
+      var r = j && j.status === true && j.response;
+      if (r && r.found === true) return { ok: true, text: "✓ on chain · block " + (digits(r.block) || "?") + " · confirmations: " + (digits(r.confirmations) || "?") };
+      return { ok: false, text: "not found on chain (mempool or pruned)" };
+    }
+  };
+
+  return { eth: eth, vestr: vestr, shop: shop, ww: ww, keyuses: keyuses, explorer: explorer };
 });

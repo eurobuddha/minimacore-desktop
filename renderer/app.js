@@ -194,7 +194,8 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
+  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
+  if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
@@ -788,11 +789,12 @@ async function postBootRestore() {
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", dexicon: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
 const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params", backup: "Backup & Recovery" };
 // The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
-// (Future Cash Next, Minima Explorer, Entropy) get a row when their phase builds them: no dead rows.
+// (Future Cash Next, Entropy) get a row when their phase builds them: no dead rows.
 const TRAY_APPS = [
   { id: "core", name: "Minima Core" },
   { id: "mail", name: "MinimaMail", icon: "icons/mail.png", badge: "mailBadge" },
   { id: "ethwallet", name: "ETH Wallet", icon: "icons/ethwallet.png" },
+  { id: "explorer", name: "Minima Explorer", icon: "icons/explorer.svg" },
   { id: "vestr", name: "Minima Vestr", icon: "icons/vestr.png" },
   { id: "keyuses", name: "KeyUses", icon: "icons/keyuses.svg" },
   { id: "faucet", name: "Minima Faucet", icon: "icons/faucet.svg" },
@@ -1277,6 +1279,7 @@ function renderActive() {
   else if (activeView === "apps") renderApps();
   else if (activeView === "faucet") renderFaucet();
   else if (activeView === "keyuses") renderKeyUses();
+  else if (activeView === "explorer") renderExplorer();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
 function startRefresh() {
