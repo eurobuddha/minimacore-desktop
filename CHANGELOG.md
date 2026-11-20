@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.169] — Logs: a seed field is scrubbed
+
+- A reply's `"seed":"…"` (the vault's seed), `"seedphrase"` and `"mnemonic"` fields are now redacted like `"phrase"`. Log files written before this version are not touched. Test: `scripts/node-log-test.cjs`.
+
 ## [0.18.168] — miniMall: listing problems name MxUSD
 
 - A currency mismatch in an order check named the wire value ("USDT"); it now reads MxUSD. Test: `scripts/shop-test.cjs`.

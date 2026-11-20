@@ -42,7 +42,7 @@ function createNodeLog(dir, opts) {
  * (0.18.153, from 0.19.121):
  *  - the RPC secret, wherever it stands (the node prints its own start parameters, -rpcpassword among them). Only a
  *    secret of 8 characters or more is looked for, so a short or empty value can never blank the log;
- *  - a seed phrase: phrase:"…", "phrase":"…" as a reply's JSON has it, and phrase: followed by bare words (up to 24;
+ *  - a seed phrase: phrase:"…", "phrase":"…" as a reply's JSON has it (and "seed", "seedphrase", "mnemonic", 0.18.169), and phrase: followed by bare words (up to 24;
  *    a word that is the next parameter's name, as in "host:", ends it, so the rest of the line stays);
  *  - a private key after privatekey:;
  *  - the bidirectional controls (U+202A to U+202E, U+2066 to U+2069, U+200E, U+200F): a line a remote party wrote
@@ -52,7 +52,7 @@ const BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g;
 function scrub(line, secret) {
   let l = String(line).replace(BIDI, "");
   if (typeof secret === "string" && secret.length >= 8) l = l.split(secret).join("•••");
-  return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/"phrase"\s*:\s*"[^"]*"/g, '"phrase":"•••"')
+  return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/"(phrase|seed|seedphrase|mnemonic)"\s*:\s*"[^"]*"/g, '"$1":"•••"')
     .replace(/phrase:[A-Za-z]+\b(?!:)(?: [A-Za-z]+\b(?!:)){0,23}/g, "phrase:•••")
     .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
 }

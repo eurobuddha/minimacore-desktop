@@ -59,7 +59,8 @@ ok("a short or empty secret blanks nothing", () => {
 });
 ok("a seed phrase is redacted quoted, as JSON, and as bare words, without eating the rest of the line", () => {
   assert.equal(scrub('megammrsync action:resync phrase:"ONE TWO THREE" host:x:9001'), 'megammrsync action:resync phrase:"•••" host:x:9001');
-  assert.equal(scrub('{"command":"vault","response":{"phrase":"ONE TWO THREE","seed":"0x01"}}'), '{"command":"vault","response":{"phrase":"•••","seed":"0x01"}}');
+  assert.equal(scrub('{"command":"vault","response":{"phrase":"ONE TWO THREE","seed":"0x01"}}'), '{"command":"vault","response":{"phrase":"•••","seed":"•••"}}', "the vault's seed too (0.18.169)");
+  assert.equal(scrub('{"seedphrase" : "A B","mnemonic":"C D","seeds":"keep"}'), '{"seedphrase":"•••","mnemonic":"•••","seeds":"keep"}');
   assert.equal(scrub("megammrsync action:resync phrase:ONE TWO THREE host:megammr.example:9001 keyuses:1000"), "megammrsync action:resync phrase:••• host:megammr.example:9001 keyuses:1000");
   const words = Array.from({ length: 30 }, (_, i) => "W" + "abcdefghijklmnopqrstuvwxyzABCD"[i]);
   assert.equal(scrub("phrase:" + words.join(" ")), "phrase:••• " + words.slice(24).join(" "), "24 words at most");
