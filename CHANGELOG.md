@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.160] — Logs: whole lines only, so a split secret is still scrubbed
+
+- The node's stdout and stderr arrive in chunks, and each chunk was logged as if it were whole lines: a line split across two chunks became two lines, so a secret split there passed the 0.18.153 scrub in two halves. `nodeSaid` (from the dev branch) keeps the unfinished last line of each stream for the next chunk and logs only whole lines (a line over 64K is cut there); what is left is logged when the node exits. Test: `scripts/node-log-test.cjs`.
+
 ## [0.18.159] — miniMall vendor: an order is due what the vendor's own listing says
 
 - An incoming order's items, prices and total were the buyer's own figures, so a buyer could write a total of 0.000000001 for real goods, pay that and see the order PAID. `main/shop-listing.js` `check` now recomputes what is due from the vendor's OWN stored shop: each line a listed product (name, and NFT token id / edition / bundle where present), at the listed price, a whole quantity above zero within stock, plus the listed delivery fee, exact BigInt; the order's currency must be the shop's. `recordPayment` compares the coins with that figure only: PAID when received >= due > 0. An order that does not match is UNCHECKED ("Unchecked: the items or total do not match your shop; check by hand"), never paid by any amount, and Confirm / Ship / Deliver are refused (main process and screen) until the vendor answers an explicit "I checked this order by hand" question. Phone-placed orders (items as a JSON string, delivery by id) are now read; they were stored with no items before. Same rule as the phone Inbox 0.5.18 (`Listing.check`). Test: `scripts/shop-test.cjs`.

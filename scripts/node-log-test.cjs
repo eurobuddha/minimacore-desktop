@@ -84,5 +84,20 @@ ok("node-manager log(): the Logs view and node.log never carry the secret, a bar
   assert.ok(/this\.secret = config\.rpcSecret\(\);[^\n]*\n\s*this\.log\("\[app\] starting node: java "/.test(fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8")), "held from the moment the node is given it");
 });
 
+// ---- 0.18.160: whole lines only, so a secret split across two stdout chunks is still scrubbed ----
+ok("node-manager nodeSaid(): a line split across chunks is logged once, whole and scrubbed; a last unended line is kept for the next chunk", () => {
+  const m = require("../main/node-manager"); m.secret = SECRET; m.carry = { out: "", err: "" };
+  const before = m.logs.length;
+  m.nodeSaid("out", "Minima @ 2 : params -rpcpassword " + SECRET.slice(0, 10));
+  assert.equal(m.logs.length, before, "nothing logged until the line ends");
+  m.nodeSaid("out", SECRET.slice(10) + " -daemon\nnext li");
+  assert.deepEqual(m.logs.slice(before), ["Minima @ 2 : params -rpcpassword ••• -daemon"]);
+  m.nodeSaid("err", "stderr has its own " + SECRET.slice(0, 5)); m.nodeSaid("out", "ne\n"); m.nodeSaid("err", SECRET.slice(5) + "\n");
+  assert.deepEqual(m.logs.slice(before + 1), ["next line", "stderr has its own •••"]);
+  const disk = fs.readFileSync(path.join(dir, "nm", "node.log"), "utf8"); assert.ok(!disk.includes(SECRET.slice(0, 10)) && !disk.includes(SECRET.slice(10)), "no half on disk either");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8");
+  assert.ok(/p\.stdout\.on\("data", d => this\.nodeSaid\("out", d\)\);/.test(src) && /p\.stderr\.on\("data", d => this\.nodeSaid\("err", d\)\);/.test(src), "both streams of the node go through it");
+});
+
 console.log(fail === 0 ? "\n✅ NODE LOG PASS — " + pass + " checks" : "\n❌ NODE LOG FAIL — " + fail + " failed");
 process.exit(fail ? 1 : 0);

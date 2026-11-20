@@ -18,6 +18,7 @@ const portmap = require("./portmap");
 const { rpcCall } = require("./rpc");
 const { createNodeLog, scrub } = require("./nodelog");
 
+const LINE_MAX = 64 * 1024;   // a "line" the node never ends is cut here (0.18.160)
 const LOG_MAX_LINES = 800;
 // Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
 // The stock RPC ones are replaced by the node's loopback admin RPC (-Dparlons.node.rpc=true), which the
@@ -122,6 +123,7 @@ class NodeManager extends EventEmitter {
     this.lastError = null;
     this.logs = [];
     this.secret = "";             // the RPC secret of this node start, for log() to take out of every line (0.18.153)
+    this.carry = { out: "", err: "" };   // the unfinished last line of each of the node's streams (0.18.160)
     this.health = null;           // { block, version, connections, incoming, acceptingInLinks, p2pAddress }
     this.healthTimer = null;
     this.healthTick = 0;
@@ -384,6 +386,7 @@ class NodeManager extends EventEmitter {
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
+    this.carry = { out: "", err: "" };
     this.secret = config.rpcSecret();   // kept for log(): the node prints its own start parameters, and no line may carry this
     this.log("[app] starting node: java " + redactArgs(args, this.secret));
     let p;
@@ -402,10 +405,11 @@ class NodeManager extends EventEmitter {
         dataDir: cfg.dataFolder || config.defaultDataFolder(), startedAt: this.startedTs }));
     } catch (e) {}
     if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
-    p.stdout.on("data", d => this.log(String(d)));
-    p.stderr.on("data", d => this.log(String(d)));
+    p.stdout.on("data", d => this.nodeSaid("out", d));
+    p.stderr.on("data", d => this.nodeSaid("err", d));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     p.on("exit", (code, sig) => {
+      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.log(rest); }   // a last line with no line end
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
@@ -522,6 +526,18 @@ class NodeManager extends EventEmitter {
     }
     if (l.includes("REFUSING to start")) { this.parlons.error = l.replace(/^\[parlons-node\]\s*/, "").slice(0, 300); changed = true; }
     if (changed) this.emit("status", this.snapshot());
+  }
+  /**
+   * The node's own output, one stream's chunk (0.18.160, from the dev branch). A pipe hands over chunks, not lines: a
+   * line split across two chunks was logged as two lines, so a secret split there passed the scrub in two halves. Only
+   * whole lines go to log(); the unfinished last one waits for the next chunk (a line over LINE_MAX is cut there).
+   */
+  nodeSaid(stream, chunk) {
+    const parts = (this.carry[stream] + String(chunk)).split("\n");
+    let rest = parts.pop();
+    if (rest.length > LINE_MAX) { parts.push(rest); rest = ""; }
+    this.carry[stream] = rest;
+    if (parts.length) this.log(parts.join("\n"));
   }
   log(line) {
     for (let l of String(line).split("\n")) {
