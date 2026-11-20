@@ -286,8 +286,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       stuck, todo,
       tools: (h.ethMismatch ? [["axw", "key", I18N.t("Export the stale ETH key")], ["axw", "sweep", I18N.t("↑  Sweep funds to the node wallet")]] : []).concat(u.length ? [["axgo", "activity", I18N.t("Open Activity")]] : []) };
   }
-  /** Market offline (MakerService.maybeOfflineAlert): the node is not running while a market or OTC offer was being kept on the book. */
-  const offline = (nodeRunning, wasLive, swaps) => (!nodeRunning && wasLive ? I18N.t("Market offline: your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. {swaps} Once the node runs, your market is published again by itself.", { swaps: stoppedNote(swaps) }) : "");
+  /** Market offline (MakerService.maybeOfflineAlert): the node is not running while a market or OTC offer was being kept on the book.
+   *  The body of the card ("" = no card); its title, "Market offline", is drawn apart, so nothing is cut out of a translated sentence. */
+  const offline = (nodeRunning, wasLive, swaps) => (!nodeRunning && wasLive ? I18N.t("Your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. {swaps} Once the node runs, your market is published again by itself.", { swaps: stoppedNote(swaps) }) : "");
 
   // ======================================================================== Act: the money actions, no DOM
   // ui = { confirm(title, text, okLabel) → Promise<bool>, say(text, kind) }. Every function here makes the SAME
@@ -447,7 +448,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function banners() {
     const out = [];
     const off = offline(D.running(), pref("dexicon_ax_market_live") === "1", S.swaps);
-    if (off) out.push(`<div class="dx-card ax-alert" role="alert"><b class="ax-t14">${th("Market offline")}</b><div class="ax-dim">${esc(off.replace(/^Market offline: y/, "Y"))}</div><button class="dx-btn ax-btn--s" data-axstart="1">${th("Start the node")}</button></div>`);
+    if (off) out.push(`<div class="dx-card ax-alert" role="alert"><b class="ax-t14">${th("Market offline")}</b><div class="ax-dim">${esc(off)}</div><button class="dx-btn ax-btn--s" data-axstart="1">${th("Start the node")}</button></div>`);
     else if (!D.running()) out.push(`<div class="dx-state" role="status">${tr("The node is stopped, so nothing here can trade and nothing can settle. {swaps}", { swaps: esc(stoppedNote(S.swaps)) })}</div>`);
     if (halted()) out.push(haltHtml());
     else if (!S.st.ready && S.st.error) out.push(`<div class="dx-state dx-state--error" role="alert">${esc(DexCore.storeError("AtomiX", "swap store", S.st.error, AX_AFTER))} <button class="dx-btn ax-btn--s" data-axaside="1"${DexCore.gate.on ? " disabled" : ""}>${th("Set the store aside and start empty")}</button></div>`);

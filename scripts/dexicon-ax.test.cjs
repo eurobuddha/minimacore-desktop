@@ -404,13 +404,23 @@ test("M5: a stopped node: the unfinished swaps are counted from the list and the
   assert.equal(AX.offline(true, true, []), ""); assert.equal(AX.offline(false, false, []), "");
   const a = SW({}), b = SW({ hash: PK("57"), timelock: 2417800 }), c = SW({ hash: PK("58"), timelock: 1795000000, legIsMinima: false }), done = SW({ hash: PK("59"), status: "COMPLETE", timelock: 5 });
   const t = AX.offline(false, true, [a, b, c, done]);
-  assert.match(t, /^Market offline: your Minima node isn't running.* You were not filled by this\. 3 swaps are not finished\..* LOSES that claim if the node stays off past its deadline\. Start the node now\. Nearest deadline of your own locks: block 2417800 \(Minima\) and 2026-11-18 \d\d:\d\d:\d\d UTC \(Ethereum\)\./);
+  assert.match(t, /^Your Minima node isn't running.* You were not filled by this\. 3 swaps are not finished\..* LOSES that claim if the node stays off past its deadline\. Start the node now\. Nearest deadline of your own locks: block 2417800 \(Minima\) and 2026-11-18 \d\d:\d\d:\d\d UTC \(Ethereum\)\./);
   assert.ok(!/are refunded at their deadline once the node runs/.test(t), "the false promise is gone");
   assert.match(AX.offline(false, true, []), /None of your swaps is unfinished\./); assert.match(AX.offline(false, true, null), /have not been read yet: if one is not finished, start the node now/);
   assert.match(AX.stoppedNote([SW({ status: "ERROR" })]), /^1 swap is not finished/, "a swap in ERROR may still hold a lock");
   const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.match(src, /if \(!D\.running\(\)\) \{ const sw = await api\(\)\.axSwaps\(\)/, "the list is read from the engine's store with the node off");
   assert.match(src, /offline\(D\.running\(\), pref\("dexicon_ax_market_live"\) === "1", S\.swaps\)/);
+  // 0.19.151: the card's title is drawn apart from its body; nothing is stripped from a (translated) sentence, so no language shows the title twice
+  assert.ok(!/\.replace\(\/\^Market offline/.test(src), "no text is cut out of the sentence");
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  try {
+    for (const code of ["zh", "ru", "uk"]) {
+      I18N.set(code);
+      const body = AX.offline(false, true, []), title = I18N.t("Market offline");
+      assert.ok(body && !body.includes(title) && !/Market offline|node isn't running/.test(body), code + ": the body says it once, in " + code + ": " + body);
+    }
+  } finally { I18N.set("en"); }
 });
 
 // 0.18.118 (H2): the room's money actions that had no in-flight state of their own

@@ -1360,7 +1360,6 @@
   "Export the stale ETH key": "导出旧 ETH 密钥",
   "↑  Sweep funds to the node wallet": "↑  将资金转至节点钱包",
   "Open Activity": "打开活动",
-  "Market offline: your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. {swaps} Once the node runs, your market is published again by itself.": "市场离线：您的 Minima 节点没有运行，因此您已发布的 AtomiX 市场会从订单簿上消失，没有人能与您交易。您并未因此成交。{swaps} 节点运行后，您的市场会自行重新发布。",
   "Enter how much {ccy} to {sell}. Nothing was sent.": "请输入要{sell}的 {ccy} 数量。未发送任何内容。",
   "{err} Nothing was sent.": "{err} 未发送任何内容。",
   "Switch to {to}?": "切换至 {to}？",
@@ -2643,7 +2642,8 @@
   "your router": "您的路由器",
   "{lan} (this computer)": "{lan}（此电脑）",
   "This install holds a block key wallet, and that cannot be changed. Words used in a classic key wallet would open an empty wallet here. Restore them on a fresh install.": "本次安装使用的是区块密钥钱包，且无法更改。曾用于经典密钥钱包的单词在这里只会打开一个空钱包。请在全新安装中恢复它们。",
-  "This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install.": "本次安装使用的是经典密钥钱包，且无法更改。曾用于区块密钥钱包的单词在这里只会打开一个空钱包。请在全新安装中恢复它们。"
+  "This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install.": "本次安装使用的是经典密钥钱包，且无法更改。曾用于区块密钥钱包的单词在这里只会打开一个空钱包。请在全新安装中恢复它们。",
+  "Your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. {swaps} Once the node runs, your market is published again by itself.": "您的 Minima 节点没有运行，因此您已发布的 AtomiX 市场会从订单簿上消失，没有人能与您交易。您并未因此成交。{swaps} 节点运行后，您的市场会自行重新发布。"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
@@ -3410,7 +3410,6 @@
     "No unfinished swap.",
     "Export the stale ETH key",
     "Open Activity",
-    "Market offline: your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. {swaps} Once the node runs, your market is published again by itself.",
     "Enter how much {ccy} to {sell}. Nothing was sent.",
     "{err} Nothing was sent.",
     "Your live market on the current book is withdrawn first, then AtomiX moves to the {to} book. Any in-flight swap still settles.",
@@ -4282,6 +4281,7 @@
     "your router",
     "{lan} (this computer)",
     "This install holds a block key wallet, and that cannot be changed. Words used in a classic key wallet would open an empty wallet here. Restore them on a fresh install.",
-    "This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install."
+    "This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install.",
+    "Your Minima node isn't running, so your published AtomiX market drops off the book and nobody can trade with you. You were not filled by this. {swaps} Once the node runs, your market is published again by itself."
   ]
 });

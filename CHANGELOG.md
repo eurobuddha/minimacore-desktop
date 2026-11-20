@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.151] — Room ①: the "Market offline" card says its title once, in every language
+
+- **Fixed (review of 0.19.140 to 0.19.144):** the card shown when the node is off while your AtomiX market was on the book drew the title "Market offline" and then the full sentence with the words "Market offline: y" cut off its front by a text match. In Chinese, Russian and Ukrainian the match never hit, so the title appeared twice. `offline()` now returns the body sentence only ("Your Minima node isn't running, …"), and the card draws its title apart; nothing is cut out of a translated text. The English card reads exactly as before.
+- Test: `scripts/dexicon-ax.test.cjs` builds the card's body in Chinese, Russian and Ukrainian and requires it without the title, and checks that no text is stripped by a match. It fails on the 0.19.150 code.
+
 ## [0.19.150] — Room ②: the pool chart's font is a plain CSS value again
 
 - **Fixed (review of 0.19.140 to 0.19.144):** the extraction wrapped the pool chart's font family (`"Inter, sans-serif"`) in `I18N.t()`, and the three catalogs carried it as a text "rightly the same" and for review. It is a CSS value, not a text: unwrapped in `renderer/dexicon-pp.js` and removed from the catalogs and their lists. Nothing on screen changes.
