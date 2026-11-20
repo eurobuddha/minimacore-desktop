@@ -4863,10 +4863,65 @@
   "Let Future Cash Next sign by itself?": "Дозволити Future Cash Next підписувати самостійно?",
   "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.": "Поки працює захисник, Future Cash Next підписує та надсилає транзакції двох видів, коли біля екрана нікого немає:\n\n• Отримання дозрілої ставки на її власну адресу виплати. Це адреса цього гаманця, і контракт не допускає іншої.\n• Переказ монети з адреси цього гаманця, одноразовий ключ якої використовувався більше одного разу або яку виведено з обігу, на вашу безпечну адресу:\n{safe}\n\nПерш ніж щось підписати, застосунок звіряє власну копію транзакції на вузлі з цими двома видами, а все інше відхиляє та записує в журнал. Більше нічого само не підписується.\n\nВи можете відкликати це будь-коли на вкладці «Захисник» (Підпис у фоні). Захисник тоді зупиниться.",
   "a Future Cash Next transaction": "транзакція Future Cash Next",
-  "Future Cash Next": "Future Cash Next"
+  "Future Cash Next": "Future Cash Next",
+  "Future Cash Next collects and sweeps (Future Cash Next could not be asked)": "отримання та перекази Future Cash Next (Future Cash Next не вдалося опитати)",
+  "Future Cash Next collects and sweeps (Future Cash Next has not started)": "отримання та перекази Future Cash Next (Future Cash Next не запущено)",
+  "While the app is closed": "Поки застосунок закрито",
+  "While the node is stopped": "Поки вузол зупинено",
+  "{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.": {
+    "one": "{n} отримання або переказ Future Cash Next ще не завершено. {off} застосунок не може довести їх до кінця, а монета, отримана на адресу під загрозою, не переказується на вашу безпечну адресу.",
+    "few": "{n} отримання або перекази Future Cash Next ще не завершено. {off} застосунок не може довести їх до кінця, а монета, отримана на адресу під загрозою, не переказується на вашу безпечну адресу.",
+    "many": "{n} отримань або переказів Future Cash Next ще не завершено. {off} застосунок не може довести їх до кінця, а монета, отримана на адресу під загрозою, не переказується на вашу безпечну адресу.",
+    "other": "{n} отримання або перекази Future Cash Next ще не завершено. {off} застосунок не може довести їх до кінця, а монета, отримана на адресу під загрозою, не переказується на вашу безпечну адресу."
+  },
+  "Future Cash Next is still moving funds. It can be frozen once they settle.\n\n{list}": "Future Cash Next ще переміщує кошти. Його можна заморозити, коли їх буде завершено.\n\n{list}",
+  "Future Cash Next could not be asked about its collects and sweeps": "не вдалося опитати Future Cash Next про отримання та перекази",
+  "Future Cash Next has not started, so its collects and sweeps could not be read": "Future Cash Next не запущено, тому його отримання та перекази прочитати не вдалося",
+  "{n} collects are posted and not confirmed yet": {
+    "one": "{n} отримання надіслано, ще не підтверджено",
+    "few": "{n} отримання надіслано, ще не підтверджено",
+    "many": "{n} отримань надіслано, ще не підтверджено",
+    "other": "{n} отримання надіслано, ще не підтверджено"
+  },
+  "{n} collected coins on an at-risk address are waiting for their sweep": {
+    "one": "{n} отримана монета на адресі під загрозою чекає на переказ",
+    "few": "{n} отримані монети на адресі під загрозою чекають на переказ",
+    "many": "{n} отриманих монет на адресі під загрозою чекають на переказ",
+    "other": "{n} отримані монети на адресі під загрозою чекають на переказ"
+  },
+  "{n} sweeps are under way": {
+    "one": "{n} переказ виконується",
+    "few": "{n} перекази виконуються",
+    "many": "{n} переказів виконуються",
+    "other": "{n} перекази виконуються"
+  },
+  "Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again.": "Не вдалося запитати Future Cash Next, чи ще виконується отримання або переказ. Зачекайте трохи й спробуйте знову.",
+  "Future Cash Next could not open its store ({error}), so whether a collect or a sweep is still under way cannot be checked.": "Future Cash Next не зміг відкрити своє сховище ({error}), тому перевірити, чи ще виконується отримання або переказ, неможливо.",
+  "Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again.": "Future Cash Next не запущено (або заморожено), тому його отримання та перекази перевірити не вдалося. Запустіть вузол, розморозьте його на вкладці «Застосунки» й спробуйте знову.",
+  "{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}": {
+    "one": "{n} отримання або переказ Future Cash Next ще виконується, і завершити його можуть лише ключі цього гаманця: {ids}",
+    "few": "{n} отримання або перекази Future Cash Next ще виконуються, і завершити їх можуть лише ключі цього гаманця: {ids}",
+    "many": "{n} отримань або переказів Future Cash Next ще виконуються, і завершити їх можуть лише ключі цього гаманця: {ids}",
+    "other": "{n} отримання або перекази Future Cash Next ще виконуються, і завершити їх можуть лише ключі цього гаманця: {ids}"
+  }
 }, { same: ["Future Cash Next"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
   "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.",
-  "a Future Cash Next transaction"
+  "a Future Cash Next transaction",
+  "Future Cash Next collects and sweeps (Future Cash Next could not be asked)",
+  "Future Cash Next collects and sweeps (Future Cash Next has not started)",
+  "While the app is closed",
+  "While the node is stopped",
+  "{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.",
+  "Future Cash Next is still moving funds. It can be frozen once they settle.\n\n{list}",
+  "Future Cash Next could not be asked about its collects and sweeps",
+  "Future Cash Next has not started, so its collects and sweeps could not be read",
+  "{n} collects are posted and not confirmed yet",
+  "{n} collected coins on an at-risk address are waiting for their sweep",
+  "{n} sweeps are under way",
+  "Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again.",
+  "Future Cash Next could not open its store ({error}), so whether a collect or a sweep is still under way cannot be checked.",
+  "Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again.",
+  "{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}"
 ] });

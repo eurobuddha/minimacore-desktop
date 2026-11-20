@@ -48,6 +48,11 @@ test("Freeze: every refusal and every reason in its list", async () => {
     { atomix: { ready: false, hasStore: true }, pools: [{ type: "SWAP", ts: now }, { type: "ADD", ts: now }], ownPools: [{}, {}], dexicon: { ready: false, hasStore: true, takes: 3, unknown: 2, pending: 5 }, holds: [{}, {}], now },
     { atomix: { ready: true, swaps: [], otcDeals: 4 }, pools: [], ownPools: [], dexicon: { ready: false, hasStore: true }, holds: null }
   ]) check(await rejected(make({ dexiconWork: async () => w }).set("dexicon", true)));
+  // Future Cash Next (0.19.183): its own refusal and reasons (main/freeze.js futurecashBlockers)
+  const fc = (w) => freeze.create({ load: () => [], save() {}, engines: { futurecash: { start() {}, stop() {}, blockers: async () => freeze.futurecashBlockers(w) } }, readMs: 30 });
+  for (const w of [null, { ready: false, hasStore: true }, { ready: true, collects: ["a"], queued: ["b"], sweeps: ["c"] }, { ready: true, collects: ["a", "b"], queued: ["c", "d"], sweeps: ["e", "f"] }])
+    check(await rejected(fc(w).set("futurecash", true)));
+  check(await rejected(freeze.create({ load: () => [], save() {}, engines: { futurecash: { start() {}, stop() {}, blockers: () => new Promise(() => {}) } }, readMs: 30 }).set("futurecash", true)));
   for (const c of MS.codes().filter(c => /^(FREEZE|FZ)_/.test(c))) assert.ok(seen.has(c), "never said by main/freeze.js: " + c);
 });
 
@@ -66,7 +71,11 @@ test("Restoring a backup and replacing the wallet: every refusal, every line of 
     { atomix: { ready: false, hasStore: true, waitedMs: M }, pools: [{ txpowid: TX, confirmed: false }], dexicon: { ready: true, orders: [TX, TX], pending: 2, takes: 3 }, ownPools: [{ address: P, reserveM: "100.5", reserveT: "7", token: "MxUSD" }, { address: P, reserveM: "1", reserveT: "2", token: "Some Token" }] },
     { atomix: { ready: false, hasStore: true }, pools: [{ txpowid: TX, confirmed: false }, { txpowid: TX, confirmed: false }], casino: { offers: 1, bets: 2 } },
     { atomix: { ready: true, swaps: [TX], maker: true, otcOffer: true, otcDeals: 1 }, pools: [], casino: { offers: 0, bets: 1 } },
-    { atomix: { ready: true, swaps: [TX, TX], otcDeals: 2 }, pools: [], dexicon: undefined, ownPools: [{ address: P, reserveM: null }] }
+    { atomix: { ready: true, swaps: [TX, TX], otcDeals: 2 }, pools: [], dexicon: undefined, ownPools: [{ address: P, reserveM: null }] },
+    // Future Cash Next (0.19.183)
+    { atomix: { ready: true }, pools: [], futurecash: null }, { atomix: { ready: true }, pools: [], futurecash: { ready: false, hasStore: true } },
+    { atomix: { ready: true }, pools: [], futurecash: { ready: false, hasStore: true, error: "the Future Cash store failed its integrity check" } },
+    { atomix: { ready: true }, pools: [], futurecash: { ready: true, posted: 1, collects: [TX], queued: [], sweeps: [] } }, { atomix: { ready: true }, pools: [], futurecash: { ready: true, posted: 3, collects: [TX], queued: [TX], sweeps: [TX] } }
   ];
   for (const w of worlds) {
     const list = r.activeWorkList(w); assert.ok(list.length);

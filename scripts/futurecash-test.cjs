@@ -494,3 +494,52 @@ test("the coin guard: a collected coin waiting for its sweep is held for Future 
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
   assert.ok(src.includes('reserve.setHoldSource("futurecash", () => futurecash.coinHolds());'));
 });
+
+test("a collect or a sweep under way: the restore gate refuses with the coin ids whole, Quit and Shutdown say it, Freeze refuses; each in every language", async () => {
+  const restore = require("../main/restore.js"), { inFlight } = require("../main/inflight.js"), freeze = require("../main/freeze.js");
+  const I18N = require("../renderer/i18n.js"); for (const c of ["en", "zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const MS = require("../renderer/mainsaid.js");
+  const s1 = stake(1, PAY0, { mature: 140 });
+  const { e } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  assert.deepEqual(e.activeWork(), { ready: true, hasStore: true, collects: [], queued: [], sweeps: [], posted: 0 });
+  assert.deepEqual(restore.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], futurecash: e.activeWork() }), []);
+  await e.collectNow(ID(1));
+  const w = e.activeWork(); assert.equal(w.posted, 1);
+  const lines = restore.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], futurecash: w });
+  assert.deepEqual(lines, ["1 Future Cash Next collect or sweep is still under way, which only this wallet's keys can finish: " + ID(1)]);
+  const said = [restore.activeWorkProblem(lines), restore.activeWorkProblem(restore.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], futurecash: null })),
+    restore.activeWorkProblem(restore.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], futurecash: { ready: false, hasStore: true } })),
+    restore.skipWarning(restore.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], futurecash: { ready: false, hasStore: true, error: "damaged" } }))];
+  const fz = freeze.create({ load: () => [], save() {}, engines: { futurecash: { start() {}, stop() {}, blockers: async () => freeze.futurecashBlockers(w) } }, readMs: 50 });
+  await assert.rejects(fz.set("futurecash", true), (err) => (said.push(err.message), /still moving funds[\s\S]*• 1 collect is posted and not confirmed yet\./.test(err.message)));
+  const fz2 = freeze.create({ load: () => [], save() {}, engines: { futurecash: { start() {}, stop() {}, blockers: async () => freeze.futurecashBlockers(null) } }, readMs: 50 });
+  await assert.rejects(fz2.set("futurecash", true), (err) => (said.push(err.message), /could not be asked/.test(err.message)));
+  for (const m of said) {
+    I18N.set("en"); assert.ok(MS.read(m), "listed: " + m.slice(0, 120)); assert.equal(MS.say(m), m);
+    for (const c of ["zh", "ru", "uk"]) { I18N.set(c); const t = MS.say(m); assert.notEqual(t, m, c); assert.ok(!/Future Cash Next (could not|has not|is still|collect)/.test(t), c + ": an English sentence left: " + t.slice(0, 160)); }
+  }
+  I18N.set("en");
+  const q = inFlight({ futurecash: w, pools: [], atomix: { ready: true, swaps: [] }, dexicon: { ready: true } }, "quit", Date.now());
+  assert.ok(q.busy.some(b => /^1 Future Cash Next collect or sweep is under way\. While the app is closed the app cannot follow it/.test(b)), q.busy.join(" | "));
+  assert.ok(inFlight({ futurecash: null, pools: [], atomix: { ready: true, swaps: [] }, dexicon: { ready: true } }, "shutdown").unread.some(u => /Future Cash Next could not be asked/.test(u)));
+  assert.equal(inFlight({ pools: [], atomix: { ready: true, swaps: [] }, dexicon: { ready: true } }, "quit").any, false, "not asked: nothing said");
+  assert.deepEqual(freeze.futurecashBlockers({ ready: true, collects: [], queued: [], sweeps: [] }), []);
+  assert.ok(freeze.FREEZABLE.includes("futurecash"));
+});
+
+test("the store is this wallet's, moved aside (never deleted) when the wallet is replaced; main joins it to every gate", async () => {
+  const { e, dir } = await engine();
+  const file = e._store().file;
+  assert.ok(/futurecash[\\/]futurecash-pk-0x[0-9a-f]{64}\.sqlite$/.test(file), file);
+  const kept = await e.invalidate();
+  assert.ok(kept.startsWith(file + "-legacy-keys-") && fs.existsSync(kept) && !fs.existsSync(file));
+  assert.deepEqual(e.activeWork(), { ready: false, hasStore: false, error: "" });
+  fs.writeFileSync(path.join(dir, "futurecash", "futurecash-pk-0x" + "ab".repeat(32) + ".sqlite"), "not a database");
+  assert.equal(e.activeWork().hasStore, true, "a store that is not open counts as could not be read");
+  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
+  assert.ok(hook.includes('await each("Future Cash Next", () => futurecash.invalidate());'));
+  assert.equal((main.match(/futurecash: await Promise\.resolve\(\)\.then\(\(\) => futurecash\.activeWork\(\)\)\.catch\(\(\) => null\)/g) || []).length, 2, "the restore gate and Quit / Shutdown: a failed read is null");
+  assert.ok(main.includes('if (!freeze.start("futurecash")) return;'), "frozen: no pass");
+  assert.ok(/futurecash: \{ start: whenRunning\(\(\) => futurecash\.start\(\)\), stop: \(\) => futurecash\.stop\(\), blockers:/.test(main));
+});

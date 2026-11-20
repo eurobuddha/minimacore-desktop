@@ -139,6 +139,14 @@ function activeWorkList(r) {
     if (dx.pending) out.push(plural(dx.pending, "Dexicon order") + " still waiting for a block.");
     if (dx.takes) out.push(plural(dx.takes, "Dexicon trade") + " sent and not yet answered. Wait for " + (dx.takes === 1 ? "it" : "them") + " to settle (a few minutes).");
   }
+  // Future Cash Next (main/futurecash.js activeWork). undefined = not asked; null = it could not be asked (refused).
+  const fc = r && r.futurecash;
+  if (fc === null) out.push("Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again.");
+  else if (fc && !fc.ready) {
+    if (fc.hasStore && fc.error) { if (!skip) out.push("Future Cash Next could not open its store (" + fc.error + "), so whether a collect or a sweep is still under way cannot be checked. " + DEX_SKIP_HINT); }
+    else if (fc.hasStore) out.push("Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again.");
+  }
+  else if (fc && fc.posted) out.push(fc.posted + (fc.posted === 1 ? " Future Cash Next collect or sweep is" : " Future Cash Next collects or sweeps are") + " still under way, which only this wallet's keys can finish: " + fc.collects.concat(fc.queued, fc.sweeps).join(", "));
   const c = r && r.casino;
   if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
   return out;

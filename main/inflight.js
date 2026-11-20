@@ -7,7 +7,8 @@
  *   work = { atomix: main/atomix.js activeWork() | null,
  *            pools:  main/pandapools.js activeWork() (the activity rows) | null,
  *            dexicon: main/dexicon.js activeWork() | null,
- *            casino: { offers, bets } | null, casinoOn: is the settle-only loop switched on for this install }
+ *            casino: { offers, bets } | null, casinoOn: is the settle-only loop switched on for this install,
+ *            futurecash: main/futurecash.js activeWork() | null (absent: not asked) }
  */
 const HOUR = 3600000;
 
@@ -67,6 +68,12 @@ function inFlight(work, how, nowMs, t) {
     if (dx.unknown > 0) busy.push(t("{n} fills of your Exchange orders have an outcome that is not known yet (the node did not answer when they were posted). The chain decides; the app can only read the answer while it runs.", { n: dx.unknown }));
     if (dx.pending > 0) busy.push(t("{n} Exchange orders are still waiting for a block.", { n: dx.pending }));
   }
+
+  // ---- Future Cash Next: collects and sweeps posted or owed (undefined = not asked: no line) ----
+  const fc = work.futurecash;
+  if (fc === null) unread.push(t("Future Cash Next collects and sweeps (Future Cash Next could not be asked)"));
+  else if (fc && !fc.ready) { if (fc.hasStore) unread.push(t("Future Cash Next collects and sweeps (Future Cash Next has not started)")); }
+  else if (fc && fc.posted > 0) busy.push(t("{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.", { n: fc.posted, off: quit ? t("While the app is closed") : t("While the node is stopped") }));
 
   // ---- P2P Chance (removed in 0.18.68; bets already on the chain are still settled by this app) ----
   const c = work.casino;

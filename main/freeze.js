@@ -6,6 +6,8 @@
  *                           minimall  the scan for orders, payments and messages
  *                           vestr     its block poll
  *                           chat      the message drain and the file transfers' loop
+ *                           futurecash  its pass on every block (collect, sweep), refused while a collect or a sweep is under
+ *                                     way or that cannot be read (main/futurecash.js activeWork): engines.futurecash.blockers
  *                           dexicon   the three trading engines (AtomiX, PandaPools, the Exchange), by the same hold
  *                                     a wallet replacement uses: nothing is published, answered, scanned or signed
  *                           ethwallet, explorer, entropy, keyuses, faucet, webwallet   nothing: they do no work while closed (the switch only
@@ -36,7 +38,7 @@
  * The list is kept in the app's config (frozenApps) and honoured at startup: a frozen app's loop is never started
  * (every start site in main.js goes through start(id)), and Dexicon's engines are held before the node is up.
  */
-const FREEZABLE = ["mail", "ethwallet", "explorer", "vestr", "entropy", "keyuses", "faucet", "minimall", "webwallet", "dexicon", "chat"];
+const FREEZABLE = ["mail", "ethwallet", "futurecash", "explorer", "vestr", "entropy", "keyuses", "faucet", "minimall", "webwallet", "dexicon", "chat"];
 const NEVER = { core: "Minima Core is the node and the wallet. It cannot be frozen.", parlons: "Parlons is part of the node itself: its account runs inside it. It cannot be frozen. Hide takes it out of the drawer." };
 const clean = (list) => [...new Set((Array.isArray(list) ? list : []).filter(id => FREEZABLE.includes(id)))];
 
@@ -128,6 +130,10 @@ function create(o) {
           catch (err) { why = [err === LATE ? "what is in flight could not be read in time" : "what is in flight could not be read"]; }
           if (why.length) { if (gated) thaw(id); throw new Error("Dexicon is still watching funds in flight. It can be frozen once they settle.\n\n" + plural(why)); }
         }
+        if (e && e.blockers) {                      // an app that moves money by itself (Future Cash Next): refused while it has something to finish, or cannot say
+          let why; try { why = await timed(e.blockers(), o.readMs || READ_MS); } catch (err) { why = [err === LATE ? "what is in flight could not be read in time" : "what is in flight could not be read"]; }
+          if (why.length) throw new Error("Future Cash Next is still moving funds. It can be frozen once they settle.\n\n" + plural(why));
+        }
         frozen.add(id); o.save(list());             // recorded first: a crash while stopping leaves it frozen, never half running
         try { if (e && e.stop) await e.stop(); }
         catch (err) {                               // not stopped: not frozen, not saved, the hold released
@@ -149,4 +155,15 @@ function create(o) {
   return { isFrozen, list, start, set, applyAtStartup, nodeStopped, settle };
 }
 
-module.exports = { create, dexiconBlockers, clean, FREEZABLE, NEVER };
+/** Why Future Cash Next may not be frozen now (main/futurecash.js activeWork): [] = nothing under way. Pure. */
+function futurecashBlockers(w) {
+  if (w == null) return ["Future Cash Next could not be asked about its collects and sweeps"];
+  if (!w.ready) return w.hasStore ? ["Future Cash Next has not started, so its collects and sweeps could not be read"] : [];
+  const out = [], n = (k, one, many) => (k === 1 ? "1 " + one : k + " " + many);
+  if (w.collects && w.collects.length) out.push(n(w.collects.length, "collect is posted and not confirmed yet", "collects are posted and not confirmed yet"));
+  if (w.queued && w.queued.length) out.push(n(w.queued.length, "collected coin on an at-risk address is waiting for its sweep", "collected coins on an at-risk address are waiting for their sweep"));
+  if (w.sweeps && w.sweeps.length) out.push(n(w.sweeps.length, "sweep is under way", "sweeps are under way"));
+  return out;
+}
+
+module.exports = { create, dexiconBlockers, futurecashBlockers, clean, FREEZABLE, NEVER };

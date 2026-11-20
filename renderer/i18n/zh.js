@@ -4865,10 +4865,50 @@
   "Let Future Cash Next sign by itself?": "允许 Future Cash Next 自行签名？",
   "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.": "守护程序运行期间，Future Cash Next 会在无人值守时签署并发布两种交易：\n\n• 将已到期的质押领取到其自身的收款地址。该地址属于本钱包，合约不允许任何其他地址。\n• 将本钱包中一次性密钥被使用过不止一次的地址或已停用地址上的币，转移到您的安全目的地址：\n{safe}\n\n在签署任何内容之前，应用会按这两种形式核对节点自身保存的交易副本，其他任何形式都会被拒绝并记录。除此之外，不会自行签署任何内容。\n\n您可以随时在“守护程序”选项卡（后台签名）中收回此许可，守护程序随即停止。",
   "a Future Cash Next transaction": "一笔 Future Cash Next 交易",
-  "Future Cash Next": "Future Cash Next"
+  "Future Cash Next": "Future Cash Next",
+  "Future Cash Next collects and sweeps (Future Cash Next could not be asked)": "Future Cash Next 的领取和清扫（无法询问 Future Cash Next）",
+  "Future Cash Next collects and sweeps (Future Cash Next has not started)": "Future Cash Next 的领取和清扫（Future Cash Next 尚未启动）",
+  "While the app is closed": "应用关闭期间",
+  "While the node is stopped": "节点停止期间",
+  "{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.": {
+    "other": "Future Cash Next 有 {n} 项领取或清扫正在进行。{off}，应用无法跟进到完成，领取到有风险地址上的币也不会被转移到您的安全地址。"
+  },
+  "Future Cash Next is still moving funds. It can be frozen once they settle.\n\n{list}": "Future Cash Next 仍在转移资金。待其完成后即可冻结。\n\n{list}",
+  "Future Cash Next could not be asked about its collects and sweeps": "无法询问 Future Cash Next 的领取和清扫情况",
+  "Future Cash Next has not started, so its collects and sweeps could not be read": "Future Cash Next 尚未启动，因此无法读取其领取和清扫",
+  "{n} collects are posted and not confirmed yet": {
+    "other": "{n} 项领取已发布但尚未确认"
+  },
+  "{n} collected coins on an at-risk address are waiting for their sweep": {
+    "other": "有风险地址上有 {n} 枚已领取的币正在等待清扫"
+  },
+  "{n} sweeps are under way": {
+    "other": "{n} 项清扫正在进行"
+  },
+  "Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again.": "无法询问 Future Cash Next 是否仍有领取或清扫正在进行。请稍候再试。",
+  "Future Cash Next could not open its store ({error}), so whether a collect or a sweep is still under way cannot be checked.": "Future Cash Next 无法打开其存储（{error}），因此无法检查是否仍有领取或清扫正在进行。",
+  "Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again.": "Future Cash Next 尚未启动（或已冻结），因此无法检查其领取和清扫。请启动节点，在“应用”选项卡中解除冻结，然后重试。",
+  "{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}": {
+    "other": "Future Cash Next 仍有 {n} 项领取或清扫正在进行，只有本钱包的密钥才能完成：{ids}"
+  }
 }, { same: ["Future Cash Next"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
   "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.",
-  "a Future Cash Next transaction"
+  "a Future Cash Next transaction",
+  "Future Cash Next collects and sweeps (Future Cash Next could not be asked)",
+  "Future Cash Next collects and sweeps (Future Cash Next has not started)",
+  "While the app is closed",
+  "While the node is stopped",
+  "{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.",
+  "Future Cash Next is still moving funds. It can be frozen once they settle.\n\n{list}",
+  "Future Cash Next could not be asked about its collects and sweeps",
+  "Future Cash Next has not started, so its collects and sweeps could not be read",
+  "{n} collects are posted and not confirmed yet",
+  "{n} collected coins on an at-risk address are waiting for their sweep",
+  "{n} sweeps are under way",
+  "Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again.",
+  "Future Cash Next could not open its store ({error}), so whether a collect or a sweep is still under way cannot be checked.",
+  "Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again.",
+  "{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}"
 ] });

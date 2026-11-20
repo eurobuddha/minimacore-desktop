@@ -39,3 +39,26 @@
   "{n} Dexicon trades sent and not yet answered. Wait for them to settle (a few minutes).": { one: "{n} Dexicon trade sent and not yet answered. Wait for it to settle (a few minutes).", other: "{n} Dexicon trades sent and not yet answered. Wait for them to settle (a few minutes)." },
   "Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed.": { one: "Nothing consolidated: {n} coin is held for {why}, and consolidating chooses its own coins and could take it. Try again when it is free. Nothing was signed.", other: "Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed." }
 });
+// ---- Future Cash Next (0.19.181+): generated from the phone's own words where they exist; the rest is in the review list ----
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("en", {
+  "{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.": {
+    "one": "1 Future Cash Next collect or sweep is under way. {off} the app cannot follow it to its end, and a coin collected onto an at-risk address is not moved to your safe address.",
+    "other": "{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address."
+  },
+  "{n} collects are posted and not confirmed yet": {
+    "one": "{n} collect is posted and not confirmed yet",
+    "other": "{n} collects are posted and not confirmed yet"
+  },
+  "{n} collected coins on an at-risk address are waiting for their sweep": {
+    "one": "{n} collected coin on an at-risk address is waiting for its sweep",
+    "other": "{n} collected coins on an at-risk address are waiting for their sweep"
+  },
+  "{n} sweeps are under way": {
+    "one": "{n} sweep is under way",
+    "other": "{n} sweeps are under way"
+  },
+  "{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}": {
+    "one": "{n} Future Cash Next collect or sweep is still under way, which only this wallet's keys can finish: {ids}",
+    "other": "{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}"
+  }
+});

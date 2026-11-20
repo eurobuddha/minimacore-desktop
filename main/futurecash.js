@@ -180,7 +180,7 @@ function gateCheck(txn, p) {
  */
 function create(o) {
   const now = o.now || Date.now, log = (l) => { try { o.log && o.log("[futurecash] " + l); } catch (e) {} };
-  let store = null, walletKey = "", opening = null, startedAt = 0, openError = "";
+  let store = null, walletKey = "", opening = null, startedAt = 0, openError = "", lastFile = "";
   let scriptsCache = null;      // { block, rows, keys } — the node's script table and keys, read when needed
   const atRisk = new Set();
   let lastTip = 0, auditRunning = false, lastAudit = null, passing = null, lockSaid = false, offSaid = false, vaultWasLocked = false;
@@ -216,7 +216,7 @@ function create(o) {
       try {
         const pk = await firstKey();
         store = await require("./futurecash-store").open(path.join(storeDir(), storeName(pk)), { now });
-        walletKey = pk; startedAt = now(); openError = ""; scriptsCache = null;
+        walletKey = pk; startedAt = now(); openError = ""; scriptsCache = null; lastFile = store.file;
         log("store open for the wallet whose first key is " + pk);
         try { await registerContract(); } catch (e) { log("the contract could not be registered yet: " + ((e && e.message) || e)); }   // asked again on the next lock
       } catch (e) { openError = (e && e.message) || String(e); log("could not start: " + openError); throw e; }
@@ -938,6 +938,29 @@ function create(o) {
   }
   /** Store.resetHistory and the log: completed records only; in-flight work and the destination stay. */
   function resetHistory() { return exclusive(async () => { store.resetHistory(); kv().set(K.LOG, "[]"); return { ok: true }; }); }
+  // ---- what is in flight (restore gate, Quit and Shutdown, Freeze) ----
+  const anyStore = () => { try { return fs.readdirSync(storeDir()).some(f => /^futurecash-pk-0x[0-9a-f]{64}\.sqlite$/.test(f)); } catch (e) { return false; } };
+  /**
+   * What this app has under way that it must still act on: collects posted and not yet seen spent, at-risk collects
+   * whose coin is still to be found, and sweeps queued or posted (coin ids whole). { ready:false, hasStore } when the
+   * store is not open (frozen, starting, or failed: openError); throws when the store cannot be read.
+   */
+  function activeWork() {
+    if (!store) return { ready: false, hasStore: anyStore(), error: openError || "" };
+    const collects = store.collects(S.COLLECT_POSTED, S.COLLECT_POSTED_SAFE).map(r => r.coinid);
+    const queued = store.collects(S.COLLECTED).map(r => r.coinid);
+    const sweeps = store.sweeps(S.PENDING, S.SWEEP_POSTED).map(r => r.coinid);
+    return { ready: true, hasStore: true, collects, queued, sweeps, posted: collects.length + sweeps.length + queued.length };
+  }
+  /** The wallet was replaced (main.js onWalletReplaced, the node stopped): this wallet's store is moved aside, never deleted. */
+  async function invalidate() {
+    await stop();
+    const kept = lastFile ? require("./restore").moveAside(lastFile) : "";
+    if (kept) log("wallet replaced: the old wallet's Future Cash store is kept as " + kept);
+    lastFile = ""; walletKey = "";
+    return kept;
+  }
+
   // ---- the coin guard (main/reserve.js hold source "futurecash") ----
   /**
    * The coins this app is about to move and the wallet must not spend first: the coins collected onto an at-risk payout
@@ -1043,7 +1066,7 @@ function create(o) {
   function activityLog() { try { const a = JSON.parse(kv().get(K.LOG, "[]")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
   return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll, setSafeSameNode, setSafeExternal, stopRescue, setGuardian, setFlag, harden, retire, sweepAddress, recoverRetired, resetHistory,
-    rescueReady: () => { try { return rescueReady(); } catch (e) { return false; } }, coinHolds,
+    rescueReady: () => { try { return rescueReady(); } catch (e) { return false; } }, coinHolds, activeWork, invalidate,
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }
 

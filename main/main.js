@@ -284,6 +284,7 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
 const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
   casino: config.load().casinoEnabled ? casino.open() : null, poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
+  futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
   dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
 // MAIN process while the node is stopped and before it is started again, so it does not depend on the window being
@@ -298,6 +299,7 @@ node.onWalletReplaced = async () => {
   await each("AtomiX", () => atomix.invalidate());
   await each("Dexicon", () => dexicon.invalidate({ hold: true }));   // it starts with the node, on the new wallet
   await each("P2P Chance", () => casino.invalidate());
+  await each("Future Cash Next", () => futurecash.invalidate());   // its store is the old wallet's: moved aside, never deleted
   await each("coin reservations", () => reserve.invalidate());   // every reservation belongs to the old wallet's coins
   node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon and P2P Chance were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
   if (failed.length) throw new Error(failed.join("; "));
@@ -327,7 +329,8 @@ ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snap
 // What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  dexicon: await dexicon.activeWork().catch(() => null), casino: config.load().casinoEnabled ? casino.open() : null, casinoOn: !!config.load().casinoEnabled });
+  dexicon: await dexicon.activeWork().catch(() => null), casino: config.load().casinoEnabled ? casino.open() : null, casinoOn: !!config.load().casinoEnabled,
+  futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null) });
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one
 const freeze = require("./freeze").create({
@@ -336,6 +339,8 @@ const freeze = require("./freeze").create({
     mail: { start: whenRunning(() => mail.startLoop()), stop: () => mail.stopLoop() },
     minimall: { start: whenRunning(() => shop.startLoop()), stop: () => shop.stopLoop() },   // its start awaits the node (identity, first scan): never two at once, never retried on every status after a failure (main/freeze.js)
     vestr: { start: whenRunning(() => vestr.startLoop()), stop: () => vestr.stopLoop() },
+    // Future Cash Next: frozen, it makes no pass and holds no store open; never while a collect or a sweep is under way
+    futurecash: { start: whenRunning(() => futurecash.start()), stop: () => futurecash.stop(), blockers: async () => require("./freeze").futurecashBlockers(await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null)) },
     chat: { start: whenRunning(() => chat.startLoop()), stop: () => chat.stopLoop() },
     // The hold a wallet replacement uses; by the time start runs it is no longer in the frozen list. gate: before what is
     // in flight is read, nothing new can start (AtomiX and PandaPools held with their engines up; the Exchange takes no new command).
@@ -427,6 +432,7 @@ const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:
 let fcBlock = 0;
 node.on("status", (s) => {
   if (s.state !== "running") { fcBlock = 0; futurecash.stop().catch(() => {}); return; }
+  if (!freeze.start("futurecash")) return;   // frozen (Apps tab): no store open, no pass; a failed start waits for the next node
   const b = s.health && s.health.block;
   futurecash.start().then(() => { if (b && b !== fcBlock) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});
 });
