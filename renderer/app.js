@@ -2830,7 +2830,7 @@ async function renderShopOrderDetail(ref) {
   const d = await api.shopOrder(ref).catch(() => null);
   if (!d || !d.order) { shopOrderRef = null; return renderShopOrders(); }
   const o = d.order, isSell = o.role === "sell";
-  const items = (o.items || []).map(i => `<div class="row" style="justify-content:space-between"><span>${esc(i.product)}${i.size ? " · " + esc(i.size) : ""} × ${esc(String(i.quantity))}</span><span class="mono">${esc(i.lineTotal || "")}</span></div>`).join("");
+  const items = (o.items || []).filter(Boolean).map(i => `<div class="row" style="justify-content:space-between"><span>${esc(i.product)}${i.size ? " · " + esc(i.size) : ""} × ${esc(String(i.quantity))}</span><span class="mono">${esc(i.lineTotal || "")}</span></div>`).join("");
   const chat = (d.chat || []).map(m => `<div class="mail-bubble ${m.incoming ? "" : "mail-bubble--me"}"><div class="mail-bubble__body">${esc(m.message)}</div></div>`).join("");
   host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBack">← Orders</button>
     <div class="card" style="margin-top:8px"><div class="card__title">${esc(o.ref)} · ${isSell ? "incoming order" : "your order"}</div>

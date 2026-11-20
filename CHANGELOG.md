@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.183] — miniMall: ids a peer writes read own entries only
+
+- The store looked shops, orders and chat lines up with `map[id]`, so a buyer's `shopId:"__proto__"` found Object.prototype and passed as "a shop I made", and an order ref of `"__proto__"` let a payment write into the prototype. Every lookup by such an id now reads own entries only (`Object.hasOwn`); `"__proto__"` is never stored as a shop, order or chat id. The vendor order screen does not draw a stored null line (the stored order keeps it). Test: `scripts/shop-test.cjs`.
+
 ## [0.18.182] — CI runs the chat tests
 
 - `npm run test:chat` (the chat schema and `scripts/chat-peer-test.cjs`) is now a step of the build workflow.

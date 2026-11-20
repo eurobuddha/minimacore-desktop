@@ -331,3 +331,25 @@ test("dust (below 0.000001, or below the smaller of 1% of what is due and what i
   assert.equal(m.store.recordPayment(u, "0.0000009", "0x00", id()), "DUST", "an order with nothing due by the listing: the 0.000001 floor");
   assert.equal(m.store.recordPayment(u, "0.000001", "0x00", id()), "UNCHECKED");
 });
+
+// ---- 0.18.183: ids a peer writes read own entries only; a stored null line is not drawn ----
+test("'__proto__' as a shop id, an order ref or a chat id finds nothing and writes nothing into the prototype", async () => {
+  const m = freshModules(); m.shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: "MxG0" + "C".repeat(56) } } : { status: true, response: [] });
+  await m.shop.init();
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("proto buyer");
+  const base = { type: "ORDER", randomid: "r", from: buyer.publicId, to: me.publicId, date: Date.now(), items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" };
+  const msgs = [Object.assign({}, base, { ref: "ORD-PROTO1", shopId: "__proto__" }), Object.assign({}, base, { ref: "__proto__", shopId: "half" }),
+    Object.assign({}, base, { ref: "ORD-PROTO3", shopId: "constructor" })];
+  const coins = []; for (let i = 0; i < msgs.length; i++) coins.push({ coinid: "0xF1" + i, state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify(msgs[i]))) } });
+  m.shop._setRunner(async (c) => c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: coins } : { status: true, response: [] });
+  await m.shop.scanOnce();
+  assert.equal(m.store.order("ORD-PROTO1"), null, "no order for a shop named __proto__"); assert.equal(m.store.order("ORD-PROTO3"), null, "nor constructor");
+  assert.equal(m.store.order("__proto__"), null); assert.equal(m.store.shop("__proto__"), null); assert.equal(m.store.shop("toString"), null);
+  assert.equal(m.store.recordPayment("__proto__", "10", "0x00", "0xF1F1"), null);
+  assert.equal(m.store.upsertOrder({ ref: "__proto__", role: "sell" }), false);
+  assert.equal(m.store.addChat({ randomid: "__proto__", ref: "x" }), false);
+  assert.throws(() => m.store.saveShop({ shopId: "__proto__" }), /Invalid shop id/);
+  assert.equal({}.coins, undefined); assert.equal({}.paidAmount, undefined); assert.equal({}.status, undefined, "Object.prototype untouched");
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes("const items = (o.items || []).filter(Boolean).map(i =>"), "a stored null line is not drawn");
+});
