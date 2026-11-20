@@ -408,8 +408,10 @@ class NodeManager extends EventEmitter {
     p.stdout.on("data", d => this.nodeSaid("out", d));
     p.stderr.on("data", d => this.nodeSaid("err", d));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
+    // The last unended line is logged on "close" (0.18.166 review): "exit" can come before the streams have handed over their
+    // last chunk, which would then be lost or logged after the reset of the next start.
+    p.on("close", () => this.flushCarry());
     p.on("exit", (code, sig) => {
-      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.log(rest); }   // a last line with no line end
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
@@ -539,6 +541,8 @@ class NodeManager extends EventEmitter {
     this.carry[stream] = rest;
     if (parts.length) this.log(parts.join("\n"));
   }
+  /** Log what is left of each stream: a last line the node never ended. */
+  flushCarry() { for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.log(rest); } }
   log(line) {
     for (let l of String(line).split("\n")) {
       if (!l.trim()) continue;

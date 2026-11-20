@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.167] — Logs: the last unended line is logged on close
+
+- The node process's "exit" event can come before its streams have handed over their last chunk, so the unended last line (0.18.160) is now logged on "close" (`flushCarry`). Test: `scripts/node-log-test.cjs`.
+
 ## [0.18.166] — miniMall vendor: only the three statuses the screen offers
 
 - `advanceStatus` took any status the window passed (and sent it to the buyer). It now accepts only CONFIRMED, SHIPPED and DELIVERED, the three the vendor screen offers; the screen has no cancel or refund state. Test: `scripts/shop-test.cjs`.

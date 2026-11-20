@@ -99,5 +99,18 @@ ok("node-manager nodeSaid(): a line split across chunks is logged once, whole an
   assert.ok(/p\.stdout\.on\("data", d => this\.nodeSaid\("out", d\)\);/.test(src) && /p\.stderr\.on\("data", d => this\.nodeSaid\("err", d\)\);/.test(src), "both streams of the node go through it");
 });
 
+// ---- 0.18.167: the last unended line is logged when the streams close, not on exit ----
+ok("node-manager: a last line with no line end is logged on the process's close event, scrubbed", () => {
+  const m = require("../main/node-manager"); m.secret = SECRET; m.carry = { out: "", err: "" };
+  const before = m.logs.length;
+  m.nodeSaid("out", "last words -rpcpassword " + SECRET);
+  assert.equal(m.logs.length, before);
+  m.flushCarry(); assert.deepEqual(m.logs.slice(before), ["last words -rpcpassword •••"]); assert.deepEqual(m.carry, { out: "", err: "" });
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8");
+  assert.ok(/p\.on\("close", \(\) => this\.flushCarry\(\)\);/.test(src), "flushed on close");
+  const exitHandler = src.slice(src.indexOf('p.on("exit"'), src.indexOf("});", src.indexOf('p.on("exit"')));
+  assert.ok(!/carry|flushCarry/.test(exitHandler), "not on exit");
+});
+
 console.log(fail === 0 ? "\n✅ NODE LOG PASS — " + pass + " checks" : "\n❌ NODE LOG FAIL — " + fail + " failed");
 process.exit(fail ? 1 : 0);
