@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.159] — miniMall vendor: an order is due what the vendor's own listing says
+
+- An incoming order's items, prices and total were the buyer's own figures, so a buyer could write a total of 0.000000001 for real goods, pay that and see the order PAID. `main/shop-listing.js` `check` now recomputes what is due from the vendor's OWN stored shop: each line a listed product (name, and NFT token id / edition / bundle where present), at the listed price, a whole quantity above zero within stock, plus the listed delivery fee, exact BigInt; the order's currency must be the shop's. `recordPayment` compares the coins with that figure only: PAID when received >= due > 0. An order that does not match is UNCHECKED ("Unchecked: the items or total do not match your shop; check by hand"), never paid by any amount, and Confirm / Ship / Deliver are refused (main process and screen) until the vendor answers an explicit "I checked this order by hand" question. Phone-placed orders (items as a JSON string, delivery by id) are now read; they were stored with no items before. Same rule as the phone Inbox 0.5.18 (`Listing.check`). Test: `scripts/shop-test.cjs`.
+
 ## [0.18.158] — Web Wallet and Vestr: a token is shown with its whole id
 
 - Both screens showed a token by the name in its own metadata, so a token named "MINIMA" or "MxUSD" read as the real one, and the Web Wallet showed an unnamed token by the first 12 characters of its id. A token not known by its id is now its name (invisible, control and bidi characters taken out) with its whole token id beside it; a name that reads as Minima, MxUSD or USDT, or is only the start of the id, is not shown, the id alone is (`tokLabel`). Vestr's Collect button now escapes the token name it carries. Port of 0.19.124 (the dashes and table lookups of that commit have no counterpart here). Test: `scripts/webwallet-ui-test.cjs`.

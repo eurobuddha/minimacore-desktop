@@ -15,6 +15,7 @@ const { rpcCall } = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
 const sc = require("./shopcrypto");
 const store = require("./shop-store");
+const listing = require("./shop-listing");
 const SHOP = require("../renderer/shop-rules.js");   // which token a shop is paid in, what a price is (shared with the screen)
 
 const MINIMERCH = "0x4D494E494D45524348";   // ASCII "MINIMERCH" — the shared order channel (matches native)
@@ -182,8 +183,10 @@ async function retryPayment(ref) {
 
 // ---- VENDOR: advance an order's status (sends a sealed STATUS_UPDATE back to the buyer) ----
 async function advanceStatus(ref, status) {
-  await init();
   const o = store.order(ref); if (!o || o.role !== "sell") throw new Error("Order not found.");
+  // Confirm, ship, deliver: only an order paid by what my listing says is due, or one I checked by hand (0.18.159).
+  if (/^(CONFIRMED|SHIPPED|DELIVERED)$/.test(String(status)) && !store.mayAdvance(o)) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
+  await init();
   store.setStatus(ref, status);
   const msg = { type: T.STATUS_UPDATE, ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), status };
   await sendMerchMessage(o.counterparty, msg);
@@ -211,11 +214,15 @@ function routeIncoming(w, fromPublicId) {
     // The token this order must be paid in is MY shop's, never the currency the buyer wrote (0.18.151): a buyer who
     // wrote "Minima" on an order to an MxUSD shop had it marked paid by a payment in Minima.
     const tokenid = tokenFor(own.currency);
+    // What it is due is worked out from MY listing, never the buyer's total (0.18.159). items: an array (this desktop)
+    // or a JSON array string (the phone's wire shape); either is kept as an array.
+    const items = (listing.itemsOf(w.items) || []).slice(0, 40), chk = listing.check(own, { items, shipping: w.shipping, currency: w.currency });
     const isNew = store.upsertOrder({ ref: w.ref, role: "sell", counterparty: fromPublicId, buyerName: String(w.fromname || "").slice(0, 64),
-      shopId: w.shopId, shopName: own.shopName || String(w.shopName || ""), items: Array.isArray(w.items) ? w.items.slice(0, 40) : [], amount: String(w.amount || "0"), currency: tokenid === USDT_TOKEN ? "USDT" : "Minima",
+      shopId: w.shopId, shopName: own.shopName || String(w.shopName || ""), items, amount: String(w.amount || "0"), buyerCurrency: String(w.currency || "").slice(0, 20),
+      due: chk.problems.length ? "" : chk.due, problems: chk.problems.slice(0, 20).map(p => String(p).slice(0, 300)), currency: tokenid === USDT_TOKEN ? "USDT" : "Minima",
       tokenid, shipping: String(w.shipping || "").slice(0, 200), delivery: String(w.delivery || "").slice(0, 500), buyerPayaddr: String(w.buyerPayaddr || "").slice(0, 90),
-      status: w.type === T.INQUIRY ? "INQUIRY" : "PENDING", paid: false, date: Number(w.date) || Date.now(), unread: true, note: String(w.message || "").slice(0, 1000) });
-    if (isNew) emitter.emit("incoming", { ref: w.ref, shopName: own.shopName, amount: w.amount, currency: tokenid === USDT_TOKEN ? "MxUSD" : "Minima" });
+      status: w.type === T.INQUIRY ? "INQUIRY" : chk.problems.length ? "UNCHECKED" : "PENDING", paid: false, date: Number(w.date) || Date.now(), unread: true, note: String(w.message || "").slice(0, 1000) });
+    if (isNew) emitter.emit("incoming", { ref: w.ref, shopName: own.shopName, amount: chk.problems.length ? "" : chk.due, currency: tokenid === USDT_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {
     const o = store.order(w.ref);
     if (o && o.role === "buy" && o.counterparty === fromPublicId) store.setStatus(w.ref, w.status);   // only the vendor I bought from can advance MY buy order
@@ -301,18 +308,20 @@ function saveShop(cfg) { store.saveShop(cfg); emitter.emit("update"); return cfg
 function deleteShop(shopId) { store.deleteShop(shopId); emitter.emit("update"); }
 function ordersList() {
   return store.orders().map(o => ({ ref: o.ref, role: o.role, shopId: o.shopId, shopName: o.shopName, status: o.status,
-    amount: o.amount, currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread,
+    amount: o.amount, due: o.due || "", unchecked: !!(o.problems && o.problems.length), currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread,
     unpaid: !!store.getMeta("unpaid:" + o.ref), ambiguous: !!store.getMeta("ambiguous:" + o.ref) })).sort((a, b) => (b.date || 0) - (a.date || 0));
 }
 function orderDetail(ref) {
-  const o = store.order(ref); if (!o) return null; store.markOrderRead(ref);
+  const o = store.order(ref); if (!o) return null; store.markOrderRead(ref); if (o.role === "sell") store.ensureChecked(o);
   return { order: o, chat: store.chat(ref), unpaid: !!store.getMeta("unpaid:" + ref), ambiguous: !!store.getMeta("ambiguous:" + ref) };
 }
+/** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
+function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
   myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount,
-  placeOrder, retryPayment, advanceStatus, reply, checkImported,
+  placeOrder, retryPayment, advanceStatus, reply, checkImported, vendorCheck,
   _setRunner, MINIMERCH, USDT_TOKEN, tokenFor
 };

@@ -6,6 +6,7 @@
 const { app } = require("electron");
 const fs = require("fs");
 const path = require("path");
+const listing = require("./shop-listing");
 
 const WRITE_DEBOUNCE_MS = 300;
 
@@ -83,7 +84,7 @@ function decAdd(a, b) {
 }
 
 // ---- orders (dedup on ref; never regress a progressed status) ----
-const STATUS_RANK = { PENDING: 0, INQUIRY: 0, UNDERPAID: 1, WRONG_TOKEN: 1, BAD_TOTAL: 1, PAID: 2, CONFIRMED: 3, SHIPPED: 4, DELIVERED: 5 };
+const STATUS_RANK = { PENDING: 0, INQUIRY: 0, UNDERPAID: 1, WRONG_TOKEN: 1, BAD_TOTAL: 1, UNCHECKED: 1, PAID: 2, CONFIRMED: 3, SHIPPED: 4, DELIVERED: 5 };
 /** Insert an order if new (dedup on ref). Returns true if newly inserted. Never overwrites an existing order. */
 function upsertOrder(o) {
   ensureLoaded();
@@ -102,23 +103,44 @@ function setStatus(ref, status) {
   if (nxt <= cur) return false;
   o.status = status; flush(); return true;
 }
-/** Record a matched payment against an order. Accumulates across coins (decimal-safe); PAID iff token matches AND
- *  the order's total is a readable figure above zero AND the CUMULATIVE paid amount >= it. A total that is not
- *  (the buyer wrote it: "abc", "1e3", "-5", "0") is BAD_TOTAL and is never paid. Never clobbers a vendor-progressed status (CONFIRMED+). */
+/** What an order is due by the vendor's own listing (main/shop-listing.js), worked out once and kept on the order:
+ *  o.due (the recomputed total, "" when it could not be) and o.problems (every way the order departs from the listing).
+ *  An order stored before 0.18.159 is checked here the first time it is needed, against the shop as it is now. */
+function ensureChecked(o) {
+  if (Array.isArray(o.problems)) return o;
+  const c = listing.check(shop(o.shopId), { items: o.items, shipping: o.shipping, currency: o.buyerCurrency || o.currency });
+  o.due = c.problems.length ? "" : c.due; o.problems = c.problems;
+  return o;
+}
+/** Record a matched payment against an order. Accumulates across coins (decimal-safe). The buyer's own total is never
+ *  what is compared (0.18.159): PAID iff the token matches AND the order matches the vendor's listing AND the CUMULATIVE
+ *  paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED and is never paid (the
+ *  vendor checks it by hand: handCheck); one due 0 or less is BAD_TOTAL. Never clobbers a vendor-progressed status (CONFIRMED+). */
 function recordPayment(ref, paidAmount, paidTokenid) {
   ensureLoaded(); const o = mem.orders[ref]; if (!o) return null;
   if (o.paid) return "ALREADY";
+  ensureChecked(o);
   if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {
     o.paidTokenid = paidTokenid;
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
-  const outcome = !payableTotal(o.amount) ? "BAD_TOTAL" : decGte(o.paidAmount, o.amount) ? "PAID" : "UNDERPAID";
+  const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") o.paid = true;
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
   flush(); return outcome;
 }
+/** The vendor's explicit "I checked this order by hand" for an order that does not match the listing: only then can it
+ *  be confirmed, shipped or delivered without being PAID. Nothing else changes (it is still not paid). */
+function handCheck(ref) {
+  ensureLoaded(); const o = mem.orders[ref];
+  if (!o || o.role !== "sell") return false;
+  ensureChecked(o); if (!o.problems.length) return false;
+  o.handChecked = true; flush(); return true;
+}
+/** May the vendor confirm / ship / deliver this order? Paid by the listing's figure, or checked by hand. */
+function mayAdvance(o) { return !!(o && (o.paid || o.handChecked)); }
 function markOrderRead(ref) { ensureLoaded(); const o = mem.orders[ref]; if (o && o.unread) { o.unread = false; persistSoon(); return true; } return false; }
 function setMeta(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 function setMetaSync(k, v) { ensureLoaded(); mem.meta[k] = v; flush(); }   // fund-relevant flags (unpaid/ambiguous) must survive a crash
@@ -133,7 +155,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, setStatus, recordPayment, markOrderRead,
+  upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, mayAdvance, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
   _money: { decCmp, decGte, decAdd, payableTotal }
 };

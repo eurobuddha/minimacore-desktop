@@ -2758,8 +2758,8 @@ function renderShopSub() {
   else renderShopStudio();
 }
 function shopStatusPill(status, unpaid) {
-  const cls = ({ DELIVERED: "ok", SHIPPED: "ok", PAID: "acc", CONFIRMED: "acc", UNDERPAID: "warn", WRONG_TOKEN: "warn", BAD_TOTAL: "warn" })[status] || "";
-  const label = unpaid && status === "PENDING" ? "unpaid" : status === "BAD_TOTAL" ? "invalid total" : String(status || "").toLowerCase();
+  const cls = ({ DELIVERED: "ok", SHIPPED: "ok", PAID: "acc", CONFIRMED: "acc", UNDERPAID: "warn", WRONG_TOKEN: "warn", BAD_TOTAL: "warn", UNCHECKED: "warn" })[status] || "";
+  const label = unpaid && status === "PENDING" ? "unpaid" : status === "BAD_TOTAL" ? "nothing due" : String(status || "").toLowerCase();
   return `<span class="shop-pill ${cls}">${esc(label)}</span>`;
 }
 
@@ -2772,7 +2772,7 @@ async function renderShopOrders() {
   if (!orders.length) { host.innerHTML = `<div class="card"><div class="empty">No orders yet. Orders to your shops (Selling) and orders you place (Buying) both land here.<br>Your shop id: ${id}</div></div>`; return; }
   const row = o => `<div class="card shop-order" data-oref="${esc(o.ref)}"><div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><span class="mono">${esc(o.ref)}</span>${o.unread ? ' <span class="shop-dot"></span>' : ""}<div class="view__desc" style="margin:2px 0 0">${esc(o.shopName || "")}</div></div>
-      <div style="text-align:right"><div class="mono">${esc(o.amount)} ${esc(ShopRules.cur(o.currency))}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
+      <div style="text-align:right"><div class="mono">${esc(o.role === "sell" && o.due ? o.due : o.amount)} ${esc(ShopRules.cur(o.currency))}${o.role === "sell" && o.unchecked ? " (buyer's figure)" : ""}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
   const sec = (title, list) => list.length ? `<div class="ax-seclabel">${title}</div>` + list.map(row).join("") : "";
   host.innerHTML = sec("SELLING · orders to your shops", orders.filter(o => o.role === "sell")) + sec("BUYING · orders you placed", orders.filter(o => o.role === "buy"));
   host.querySelectorAll("[data-oref]").forEach(r => r.onclick = () => { shopOrderRef = r.dataset.oref; renderShopOrders(); });
@@ -2788,10 +2788,11 @@ async function renderShopOrderDetail(ref) {
     <div class="card" style="margin-top:8px"><div class="card__title">${esc(o.ref)} · ${isSell ? "incoming order" : "your order"}</div>
       ${shopStatusPill(o.status, d.unpaid)}
       <div class="view__desc" style="margin-top:6px">${esc(o.shopName || "")}</div>${items}
-      <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>Total</span><span class="mono">${esc(o.amount)} ${esc(ShopRules.cur(o.currency))}</span></div>
+      <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>${isSell ? "Buyer's total" : "Total"}</span><span class="mono">${esc(o.amount)} ${esc(ShopRules.cur(o.currency))}</span></div>
+      ${isSell ? shopCheckBlock(o) : ""}
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
-      ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Awaiting payment"}</div>` : ""}
+      ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "Your listing says nothing is due for this order, so it is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Received so far: " + esc(o.paidAmount || "0")}</div>` : ""}
       ${(!isSell && d.ambiguous) ? `<div class="shop-warn" style="margin-top:8px">⚠ The payment timed out — it may already have gone through. Check your Balance/History before sending again, to avoid paying twice.</div>` : ""}
       ${(!isSell && d.unpaid && !d.ambiguous && !o.paid) ? `<button class="btn btn--primary btn--full" id="shopRetry" style="margin-top:8px">Retry payment</button>` : ""}
       ${isSell ? shopAdvanceRow(o) : ""}
@@ -2802,11 +2803,28 @@ async function renderShopOrderDetail(ref) {
   el("shopBack").onclick = () => { shopOrderRef = null; renderShopOrders(); };
   if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; try { await api.shopRetryPay(ref); toast("Payment sent ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
+  if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {
+    const yes = await showConfirm("Checked by hand?", "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
+      + "\n\nThe buyer's total: " + o.amount + " " + ShopRules.cur(o.currency) + " (their own figure)\nReceived so far: " + (o.paidAmount || "0") + " " + ShopRules.cur(o.currency)
+      + "\n\nConfirm only if you have checked the items and the payment yourself. It lets you confirm, ship and deliver this order.", "I checked it", true);
+    if (!yes) return;
+    try { await api.shopVendorCheck(ref); toast("Marked as checked by hand", "ok"); } catch (e) { toast(e.message || "failed", "warn"); }
+    renderShopOrderDetail(ref);
+  };
   document.querySelectorAll("[data-advance]").forEach(b => b.onclick = async () => { b.disabled = true; try { await api.shopAdvance(ref, b.dataset.advance); toast("Status updated ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); });
+}
+// What the vendor's own listing says about an incoming order (0.18.159): due by the listing, or unchecked with the reasons.
+function shopCheckBlock(o) {
+  const cur = esc(ShopRules.cur(o.currency));
+  if (o.status === "INQUIRY") return "";
+  if (!(o.problems || []).length) return `<div class="row" style="justify-content:space-between;font-weight:700"><span>Due by your listing</span><span class="mono">${esc(o.due)} ${cur}</span></div>`;
+  return `<div class="shop-warn" style="margin-top:8px"><b>Unchecked: the items or total do not match your shop; check by hand.</b> It is never marked paid by the buyer's figure.
+      <div style="white-space:pre-wrap;overflow-wrap:anywhere">${(o.problems || []).map(p => "• " + esc(p)).join("\n")}</div>
+      ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>`;
 }
 function shopAdvanceRow(o) {
   if (o.status === "INQUIRY") return "";
-  if (!o.paid) return `<div class="view__desc" style="margin-top:8px">Awaiting payment before you can confirm.</div>`;
+  if (!o.paid && !o.handChecked) return `<div class="view__desc" style="margin-top:8px">${(o.problems || []).length ? "Check this order by hand before you can confirm it." : "Awaiting payment before you can confirm."}</div>`;
   const flow = ["CONFIRMED", "SHIPPED", "DELIVERED"], rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 };
   const cur = rank[o.status] != null ? rank[o.status] : -1, next = flow[cur + 1];
   if (!next) return `<div class="view__desc" style="margin-top:8px">Order delivered ✓</div>`;
