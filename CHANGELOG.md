@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.188] — plain reasons before a command, and quoted file paths
+
+- A chat picture whose file name or folder holds ";" or a quote, and a Vestr password with ";", are now refused with a plain reason before anything is sent (0.18.177 refused them only at the command). The `file:` path of `keets action:fetch` and `keets action:publish` is now quoted: the app's data folder holds a space ("Application Support"), and the node's parser takes a quoted value whole and drops the quotes (as it does for `backup password:"x"`; not run against a node here). A picture's extension is checked (anything else becomes .jpg). Test: `scripts/inject-test.cjs`.
+
 ## [0.18.187] — a send that repeats a parameter is refused
 
 - The node keeps the LAST of a repeated parameter, but the send pin read the first `tokenid:` and `amount:` and matched `fromaddress:` anywhere, also inside a state's JSON. `mcd:cmd` now refuses a send that names amount, tokenid, address or fromaddress more than once, with a plain message; the pin reads the last value of each and a top-level `fromaddress:` only. Test: `scripts/sendpin-test.cjs`.

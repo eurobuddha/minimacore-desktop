@@ -76,3 +76,18 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
   const line = ww.status().log.slice(-1)[0];
   assert.ok(line.includes("token " + MXUSD) && line.includes("from " + FROM) && line.includes("to " + TO), line);
 });
+
+// ---- 0.18.188: a plain reason before anything is sent; file paths quoted ----
+test("a chat file path or a Vestr password with ';' is refused with a plain reason; keets file paths are quoted", async () => {
+  const chat = require("../main/chat"), vestr = require("../main/vestr"), sent = [];
+  chat._setRunner(async (c) => { sent.push(c); return { status: true, response: { url: "keets://" + "ab".repeat(32) + "/chat/img-1.png" } }; });
+  const TO = "0x" + "AB".repeat(32);
+  await assert.rejects(chat.sendImageFile(TO, "/Users/me/Pictures/cat;vault action:wipekeys.png"), /holds a ; or a " , which a node command cannot carry\. Rename the file or move it/);
+  await assert.rejects(chat.sendImageFile(TO, '/Users/me/a"b.png'), /cannot carry/);
+  assert.deepEqual(sent, []);
+  await chat.sendImageFile(TO, "/Users/me/My Pictures/cat.PNG").catch(() => {});
+  assert.match(sent[0], /^keets action:publish path:\/chat\/img-\d+\.png file:"\/Users\/me\/My Pictures\/cat\.PNG"$/, "the path quoted, spaces and all; the extension checked");
+  await assert.rejects(vestr.create({ tokenid: "0x00", amount: "1", beneficiary: "Mx" + "A".repeat(50), startMs: 1, endMs: 2, password: "pa;ss" }), /can't contain ; \(the node would read what follows as a second command\)/);
+  const src = rd("main/chat.js");
+  assert.ok(src.includes("' file:" + String.fromCharCode(34) + "' + f + '" + String.fromCharCode(34) + "'"), "fetch quotes its file path too");
+});
