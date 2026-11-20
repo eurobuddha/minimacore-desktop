@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.179] — Logs: a privatekey field is scrubbed
+
+- A reply's `"privatekey":"…"` field (as `keys action:genkey` answers) is now redacted like `"phrase"` and `"seed"`, in any letter case. Test: `scripts/node-log-test.cjs`.
+
 ## [0.18.178] — screens refuse ; in typed text that goes into a node command
 
 - The two restore screens (seed), the Web Wallet unlock (seed), the Settings resync (phrase, file, password) and the backup password put typed text into a node command through the Terminal's channel, where chains are allowed; a ";" in them started a second command. Each now refuses ";" with the quote and backslash it already refused. Test: `scripts/webwallet-ui-test.cjs`.
