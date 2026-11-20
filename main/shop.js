@@ -184,8 +184,10 @@ async function retryPayment(ref) {
 // ---- VENDOR: advance an order's status (sends a sealed STATUS_UPDATE back to the buyer) ----
 async function advanceStatus(ref, status) {
   const o = store.order(ref); if (!o || o.role !== "sell") throw new Error("Order not found.");
+  // The vendor's screen offers exactly these three (shopAdvanceRow); nothing else is a status a vendor sets (0.18.166).
+  if (typeof status !== "string" || !/^(CONFIRMED|SHIPPED|DELIVERED)$/.test(status)) throw new Error("Unknown order status.");
   // Confirm, ship, deliver: only an order paid by what my listing says is due, or one I checked by hand (0.18.159).
-  if (/^(CONFIRMED|SHIPPED|DELIVERED)$/.test(String(status)) && !store.mayAdvance(o)) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
+  if (!store.mayAdvance(o)) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
   await init();
   store.setStatus(ref, status);
   const msg = { type: T.STATUS_UPDATE, ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), status };

@@ -298,3 +298,13 @@ test("H2: a save that fails is logged, not swallowed", () => {
   try { m.store.setMetaSync("k", 1); } finally { fs.writeFileSync = real; console.error = err; }
   assert.match(errs.join(), /\[miniMall\] shop\.json could not be saved: disk full/);
 });
+
+// ---- 0.18.166: a vendor sets only the three statuses the screen offers ----
+test("L1: advanceStatus accepts only CONFIRMED, SHIPPED, DELIVERED", async () => {
+  const m = freshModules(); const ref = "ORD-L1";
+  m.store.upsertOrder({ ref, role: "sell", shopId: "half", amount: "1", currency: "Minima", tokenid: "0x00", status: "PAID", paid: true, items: [], shipping: "", counterparty: "0x00" });
+  for (const bad of ["PAID", "PENDING", "REFUNDED", "confirmed", "CONFIRMED ", "__proto__", "x".repeat(100), null, 5, ["CONFIRMED"]]) await assert.rejects(m.shop.advanceStatus(ref, bad), /Unknown order status/, JSON.stringify(bad));
+  assert.equal(m.store.order(ref).status, "PAID");
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(/const flow = \["CONFIRMED", "SHIPPED", "DELIVERED"\]/.test(app), "the screen offers exactly these");
+});

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.166] — miniMall vendor: only the three statuses the screen offers
+
+- `advanceStatus` took any status the window passed (and sent it to the buyer). It now accepts only CONFIRMED, SHIPPED and DELIVERED, the three the vendor screen offers; the screen has no cancel or refund state. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.165] — Settings: the seed phrase is shown only through a gate
 
 - Settings' "Reveal seed phrase" put the seed on the screen with one click. It now asks for the typed phrase SHOW SEED and, where the system offers it, the Touch ID prompt, both checked in the main process before the node is asked for its seed (`main/seedgate.js`, `mcd:seedReveal`). The phrase is shown as text, says when no system check took place, and hides itself after 60 seconds and when the window is left. No copy is offered (the screen never had one). Not changed: the Terminal still accepts `vault` and `seedrandom` (an open owner decision), and the first-run backup screen still shows the new seed with one click. Test: `scripts/ethkey-test.cjs`.
