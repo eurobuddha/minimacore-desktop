@@ -6,11 +6,13 @@
 # - its own folder (default ~/Library/Application Support/MinimaCoreDesktop-TEST): config, node data, wallet,
 #   every engine's store. Refused if it is, is inside, or contains the real minimaCore folder, or if it already
 #   holds something this script did not create.
-# - its own ports: basePort (default 23001; the real app's default is 12001) and base+1..+4, +584, +586 are
+# - its own ports: basePort (default 23001; the real app's default is 12001) and base+1..+5, +584, +586 are
 #   probed EVERY run and the run is refused if anything listens on one. (The app stops "a node left running on
 #   our port" before starting its own: on a port another node holds, that would be that node.) The port is
 #   written into the profile's config.json on the first run only; later runs read it from there.
-# - its own keychain names, no login item, no update feed (main/testprofile.js, switched on by MCD_TEST_PROFILE).
+# - its own keychain names, no login item, no update feed (main/flavor.js, switched on by MCD_TEST_PROFILE).
+#   The app is started WITHOUT --user-data-dir: it sets its folder itself and refuses that switch (0.19.105; with
+#   the switch the app's own "is this the real folder?" check compared the profile with itself).
 # - node jars: never fetched. Missing jars are a refusal with the copy commands; --jars <dir> copies them.
 #   The sha256 of every jar that will run is printed.
 set -euo pipefail
@@ -99,12 +101,13 @@ fi
 case "$PORT" in ''|*[!0-9]*) refuse "the base port must be a number: $PORT" ;; esac
 [ "$PORT" -ge 1024 ] && [ "$PORT" -le 64900 ] || refuse "the base port must be between 1024 and 64900: $PORT"
 [ "$PORT" != 12001 ] || refuse "12001 is the real app's default base port. Choose another with --port."
+[ "$PORT" != 17001 ] || refuse "17001 is Pandamonium Desktop's default base port. Choose another with --port."
 busy=""
-for off in 0 1 2 3 4 584 586; do
+for off in 0 1 2 3 4 5 584 586; do
   n=$((PORT + off))
   if lsof -nP -iTCP:"$n" -sTCP:LISTEN >/dev/null 2>&1 || nc -z -G 1 127.0.0.1 "$n" >/dev/null 2>&1; then busy="$busy $n"; fi
 done
-[ -z "$busy" ] || refuse "something is already listening on port(s)$busy (base port $PORT uses $PORT to $((PORT + 4)), $((PORT + 584)) and $((PORT + 586))). If that is this TEST profile's own node from an earlier run, stop it first; otherwise choose another base with --port on a new profile."
+[ -z "$busy" ] || refuse "something is already listening on port(s)$busy (base port $PORT uses $PORT to $((PORT + 5)), $((PORT + 584)) and $((PORT + 586))). If that is this TEST profile's own node from an earlier run, stop it first; otherwise choose another base with --port on a new profile."
 
 # ---- first run: the folder, its mark, its port ----
 mkdir -p "$PROFILE"
@@ -112,7 +115,7 @@ mkdir -p "$PROFILE"
 [ -f "$CONF" ] || { printf '{\n  "basePort": %s\n}\n' "$PORT" > "$CONF"; echo "first run: base port $PORT written to $CONF"; }
 
 echo "TEST profile : $PROFILE"
-echo "ports        : $PORT (node), $((PORT + 4)) (RPC), $((PORT + 584)) and $((PORT + 586)) (Parlons)"
+echo "ports        : $PORT (node), $((PORT + 4)) (RPC), $((PORT + 5)) (keets sidecar), $((PORT + 584)) and $((PORT + 586)) (Parlons)"
 echo "java         : $JAVA"
 echo "jars that will run (sha256):"
 for jar in minima.jar parlons-node.jar; do echo "  $(shasum -a 256 "$RES/$jar" | cut -d' ' -f1)  $RES/$jar"; done
@@ -121,4 +124,4 @@ echo "  (package.json pins parlons-node.jar at $PIN)"
 echo "keychain     : its own service name (com.eurobuddha.minimacore.rpc.test.<sha256 of the folder>), its own Safe Storage key"
 echo "starting. The window title, a red tag on every screen and the Dock badge say TEST."
 unset ELECTRON_RUN_AS_NODE
-MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT" --user-data-dir="$PROFILE"
+MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT"

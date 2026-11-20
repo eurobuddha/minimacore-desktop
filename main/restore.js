@@ -95,6 +95,10 @@ function activeWorkList(r) {
   // which since 0.18.137 leaves out every line that ends in a hint, not only Dexicon's). The store is moved aside, never deleted.
   const skip = !!(r && r.skipDexicon), mins = (ms) => Math.floor(Number(ms) / 60000);
   if (!ax) out.push("AtomiX could not be asked whether a swap is in flight. Wait a moment and try again.");
+  // 0.19.101: AtomiX is not READY but its store is open, and the store names unfinished swaps (main/atomix.js
+  // storeSwaps). That is a refusal like any swap in flight, with no way past it: not "cannot be checked".
+  else if (!ax.ready && Array.isArray(ax.swaps) && ax.swaps.length)
+    out.push(plural(ax.swaps.length, "AtomiX swap") + " still in flight, read from AtomiX's store while AtomiX itself has not finished starting (the app holds what is needed to claim or refund " + (ax.swaps.length === 1 ? "it" : "them") + "): " + ax.swaps.join(", "));
   else if (!ax.ready) {
     if (ax.hasStore && ax.error) { if (!skip) out.push("AtomiX could not open its swap store (" + ax.error + "), so whether a swap is in flight, or a maker order or an OTC deal is open, cannot be checked. " + DEX_SKIP_HINT); }
     else if (ax.hasStore && Number(ax.waitedMs) >= DEX_STUCK_MS) { if (!skip) out.push("AtomiX has not finished starting after " + mins(ax.waitedMs) + " minutes, so whether a swap is in flight, or a maker order or an OTC deal is open, cannot be checked. " + DEX_SKIP_HINT); }

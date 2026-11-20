@@ -200,7 +200,7 @@ class PortMapper extends EventEmitter {
       const { default: NatAPI } = await import("@silentbot1/nat-api");
       if (!this.enabled || gen !== this.gen) return;
 
-      const client = new NatAPI({ ttl: MAP_TTL_S, description: "minimaCore Minima node", autoUpdate: true });
+      const client = new NatAPI({ ttl: MAP_TTL_S, description: require("./flavor").productName + " Minima node", autoUpdate: true });
       this.client = client;
 
       // External IP first: no answer at all → the router speaks neither NAT-PMP nor UPnP. A private/

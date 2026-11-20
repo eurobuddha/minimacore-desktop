@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("mcd", {
   setNodeKind: (kind) => ipcRenderer.invoke("mcd:setNodeKind", kind),
 
   // app updates from the minimaCore store feed
+  flavor: () => ipcRenderer.invoke("mcd:flavor"),   // which app this is: { id, name, title, updates, loginItem, basePort }
   updateStatus: () => ipcRenderer.invoke("mcd:updateStatus"),
   updateCheck: () => ipcRenderer.invoke("mcd:updateCheck"),
   updateDownload: () => ipcRenderer.invoke("mcd:updateDownload"),
@@ -177,6 +178,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ppActivity: () => ipcRenderer.invoke("mcd:ppActivity"),
   ppStatement: () => ipcRenderer.invoke("mcd:ppStatement"),
   ppConsolidationCheck: () => ipcRenderer.invoke("mcd:ppConsolidationCheck"),
+  reserveReleaseAll: () => ipcRenderer.invoke("mcd:reserveReleaseAll"),   // Settings, "Release all holds": { released, kept }
   reserved: () => ipcRenderer.invoke("mcd:reserved"),   // coins held by AtomiX, PandaPools, Dexicon: { coins:[{coinid, owner, why, state…}], funds:[{tokenid, held, free, why}] }
   ppFeed: () => ipcRenderer.invoke("mcd:ppFeed"),
   ppScan: () => ipcRenderer.invoke("mcd:ppScan"),

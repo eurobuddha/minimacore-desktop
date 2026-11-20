@@ -4,4 +4,5 @@ resources/jre/
 *.log
 .DS_Store
 resources/parlons-node.jar
+resources-*/
 pandaapps/

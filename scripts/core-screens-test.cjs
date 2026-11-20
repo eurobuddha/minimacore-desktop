@@ -315,7 +315,7 @@ test("Startup Params refuses -blockaskeyuses and -lowram; the tray line shows th
 test("Settings holds the desktop's own items in the shell's style, and no second command box", () => {
   const body = app.slice(app.indexOf("async function renderSettings()"), app.indexOf("function keysInfo("));
   const titles = [...body.matchAll(/sec\("([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(titles, ["This computer", "Updates", "Node", "Signing keys", "Address key uses", "Signing keys", "Address labels", "History"]);
+  assert.deepEqual(titles, ["This computer", "Updates", "Node", "Signing keys", "Address key uses", "Signing keys", "Address labels", "History", "Coin guard"]);
   assert.ok(!/diagCmd|diagGo|diagOut|Diagnostics/.test(app), "the Diagnostics command box is gone: the Terminal is the one place to type a node command");
   assert.ok(!/api\.cmd\(/.test(body), "Settings sends no free-text command");
   assert.ok(!/vault|megammrsync|backup password/.test(body), "seed, resync and backup live in Backup & Recovery");
@@ -348,7 +348,7 @@ test("H3: Restore from file asks the backup's key mode on every node, and the ma
   assert.ok(!/megammrsync|cmd\(/.test(file), "the page sends no restore command of its own");
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
   assert.ok(/"mcd:restoreBackup", \(_e, o\) => restore\.restoreBackup\(o, \{ keyMode: config\.load\(\)\.keyMode, supported: node\.blockKeysSupported\(\),/.test(main), "with the recorded mode and the jar's capability, read in the main process");
-  assert.ok(main.indexOf("restore.loadsBackupFile(command)") > main.indexOf('"mcd:cmd"') && main.indexOf("restore.loadsBackupFile(command)") < main.indexOf("pinMinimaSend(run, command)"), "and the general command channel refuses a backup-file restore before anything runs");
+  assert.ok(main.indexOf("restore.loadsBackupFile(command)") > main.indexOf('"mcd:cmd"') && main.indexOf("restore.loadsBackupFile(command)") < main.indexOf("pinMinimaSend(run, command,"), "and the general command channel refuses a backup-file restore before anything runs");
 });
 
 test("M4: the note under the mode question says what is true: the choice is kept, and the other mode needs a fresh install", () => {

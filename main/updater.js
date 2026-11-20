@@ -22,6 +22,13 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const config = require("./config");
+const flavor = require("./flavor");
+
+// A flavour that does not update itself (main/flavor.js `updates`), and a TEST profile, NEVER read a feed: not at
+// start, not when asked, and nothing is downloaded. The feed names the RELEASED app's installer; offered here it
+// would be installed by a user who believes it is this app's update. Refused in every entry point of this file.
+const OFF = !flavor.updates || flavor.test;
+const OFF_WHY = flavor.productName + " does not update itself. A newer build is installed by hand.";
 
 const DEFAULT_FEED = "https://eurobuddha.com/pandaapps/minimacore-desktop.json";
 const CHECK_EVERY_MS = 6 * 3600_000;
@@ -50,6 +57,7 @@ function schemeOk(u) {
 
 function get(url, { timeout = 20000, maxRedirects = 5 } = {}) {
   return new Promise((resolve, reject) => {
+    if (OFF) { reject(new Error(OFF_WHY)); return; }   // the one function every request of this file passes
     const u = new URL(url);
     // The scheme was checked on the URL we were HANDED; a redirect is a new URL and gets the same check.
     // Without this, one 302 to http:// silently downgraded the whole transfer — and for the feed, which is
@@ -70,6 +78,7 @@ function get(url, { timeout = 20000, maxRedirects = 5 } = {}) {
 
 /** Read the feed and remember what it says. Never throws; the reason lands in status.error. */
 async function check() {
+  if (OFF) { status = Object.assign({}, status, { available: false, file: "", sha256: "", size: 0, error: "" }); return status; }
   try {
     const url = feedUrl();
     const u = new URL(url);
@@ -90,6 +99,7 @@ async function check() {
 
 /** Download the platform file to ~/Downloads, verify sha256, reveal it. Returns the path. */
 async function download() {
+  if (OFF) throw new Error(OFF_WHY);
   if (!status.available || !status.file) throw new Error("no update to download");
   const u = new URL(status.file);
   if (!schemeOk(u)) throw new Error("refusing a non-https download");
@@ -113,11 +123,11 @@ async function download() {
 }
 
 function start() {
-  if (timer) return;
+  if (OFF || timer) return;
   setTimeout(() => check().catch(() => {}), 8000);
   timer = setInterval(() => check().catch(() => {}), CHECK_EVERY_MS);
   if (timer.unref) timer.unref();
 }
-function current() { return Object.assign({ feed: feedUrl(), platform: platformKey(), running: app.getVersion() }, status); }
+function current() { return Object.assign({ feed: OFF ? "" : feedUrl(), platform: platformKey(), running: app.getVersion(), off: OFF, offWhy: OFF ? OFF_WHY : "" }, status, OFF ? { available: false } : {}); }
 
-module.exports = { check, download, start, current, cmpVersion, DEFAULT_FEED };
+module.exports = { check, download, start, current, cmpVersion, DEFAULT_FEED, OFF };

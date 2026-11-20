@@ -35,11 +35,13 @@ const fromUnits = (u) => { const s = u.toString().padStart(SCALE + 1, "0"), f = 
  */
 async function pinSend(runner, command, opts) {
   const c = String(command), o = opts || {};
-  const tok = /\btokenid:(0x[0-9A-Fa-f]+)/.exec(c), token = tok ? tok[1] : "0x00", minima = token.toLowerCase() === "0x00";
+  const tok = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c), token = tok ? tok[1] : "0x00", minima = token.toLowerCase() === "0x00";
   const out = { command: c, pinned: false, token, need: "0", blocked: false, heldUnits: 0n, freeUnits: 0n, held: [] };
-  if (!/^send\s/.test(c) || /\bfromaddress:/.test(c)) return out;
+  if (!/^send\s/i.test(c) || /\bfromaddress:/i.test(c)) return out;   // the node lower-cases the verb: SEND is a send
   if (!minima && !o.tokens) return out;   // an explicit non-MINIMA token → not beacon-polluted
-  const held = o.held || ((id) => require("./reserve").foreign(o.owner || "wallet", id));
+  // Default: what the shared reservation holds, and only while its sends are ENFORCED (main/reserve.js sendHeld). In
+  // "observe" and "off" nothing is held for a pin, so this pin is exactly the beacon-dust pin it was before 0.18.144.
+  const held = o.held || ((id) => require("./reserve").sendHeld(o.owner || "wallet", id));
   // minCoinage: only consider coins at least N blocks deep. AtomiX's order-book publish needs this — a
   // publish's own CHANGE output is a brand-new coin that immediately becomes the smallest one, and pinning
   // to a coin the node will not spend yet makes the send unfundable, so every publish poisoned the next.

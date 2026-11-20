@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.19.9",
+  "version": "0.19.106",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -14,6 +14,8 @@
     "dist:mac": "electron-builder --mac --arm64",
     "dist:mac:signed": "KEETS_REQUIRE_DEPS=1 node --test scripts/keets-test.cjs && APPLE_KEYCHAIN_PROFILE=minimadesk npm run dist:mac && scripts/notarize-dmg.sh && scripts/verify-mac.sh",
     "dist:win": "electron-builder --win",
+    "dist:pandamonium": "node scripts/build-flavor.cjs pandamonium",
+    "test:flavor": "node --test scripts/flavor-test.cjs",
     "dist:linux": "electron-builder --linux",
     "test:node-log": "node scripts/node-log-test.cjs",
     "test:loginitem": "node --test scripts/loginitem-test.cjs",
@@ -179,5 +181,27 @@
     "sql.js": "^1.13.0"
   },
   "parlonsNode": "0.2.152",
-  "parlonsNodeSha256": "1b3a0dc7921675d54e96a611be5a37194116227c4529e32d8aeb74bb72ec1fd1"
+  "parlonsNodeSha256": "1b3a0dc7921675d54e96a611be5a37194116227c4529e32d8aeb74bb72ec1fd1",
+  "flavor": "",
+  "flavors": {
+    "pandamonium": {
+      "productName": "Pandamonium Desktop",
+      "appId": "com.eurobuddha.pandamonium.desktop",
+      "userData": "PandamoniumDesktop",
+      "keychainService": "com.eurobuddha.pandamonium.desktop.rpc",
+      "basePort": 17001,
+      "updates": false,
+      "loginItem": false,
+      "windowTitle": "Pandamonium Desktop",
+      "artifact": "PandamoniumDesktop",
+      "autostartFile": "pandamonium-desktop.desktop",
+      "jars": {
+        "dir": "resources-pandamonium",
+        "parlonsNode": "0.2.153",
+        "parlonsNodeSha256": "c2b8cb33b07b78197cc4ed0b5c82cf3f14b6407095f20963971d6b932b25e6af",
+        "minima": "1.1.2.31-euro5",
+        "minimaSha256": "93111abb83f2239970257e692026b6033f3b1caeaf31db52604b9f531a0617ea"
+      }
+    }
+  }
 }

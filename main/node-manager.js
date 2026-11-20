@@ -20,6 +20,7 @@ const { rpcCall } = require("./rpc");
 const { createNodeLog } = require("./nodelog");
 const keymode = require("./keymode");
 const PARAMS = require("../renderer/params.js");
+const flavor = require("./flavor");
 
 const LOG_MAX_LINES = 800;
 // Minima flags the Parlons Node refuses at boot (MinimaFlags.EXCLUDED): the app never passes them.
@@ -45,6 +46,7 @@ const HEALTH_EVERY_MS = 10_000;
 const BLOCK_BOOT_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Using NEW Block number as key uses keys!$/;
 const PARLONS = { version: /^\[parlons-node\] Parlons Node (\d+\.\d+\.\d+) /, up: "[parlons-node] account up: ", cape: "[parlons-node] Maxima cape up on port ",
   failed: ["[parlons-node] account layer FAILED to start: ", "[parlons-node] Maxima cape FAILED to start: "], refusing: "[parlons-node] REFUSING to start: " };
+const CONT_MAX = 64;           // the most lines read as the continuation of one cut line (nodeLine)
 const LINE_MAX = 64 * 1024;   // a "line" the node never ends is cut here (it is then judged as the pieces it arrives in)
 const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
 
@@ -142,10 +144,12 @@ class NodeManager extends EventEmitter {
     this.wasMapped = false;
     this.lastNetRestart = 0;
     this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
+    this.sys = { listeners, commandOf, alive, killPid, sleep };   // what is asked of the OS about other processes (scripts/flavor-test.cjs puts stand-ins here)
     this.rpc = (cmd) => rpcCall(this.rpcPort(), config.rpcSecret(), cmd);   // this node's RPC (the tests put a stand-in here too)
     this.keyModeChecked = false;  // the running node's keys were read and are of the recorded mode (once per start)
     this.polled = false;          // this node start has answered a health poll: its boot is over (the boot line is believed only before)
     this.carry = { out: "", err: "" };   // the unfinished last line of each of the node's streams
+    this.cont = { out: null, err: null };   // per stream: what follows is the CONTINUATION of a cut line, read by nothing (nodeLine)
     this.walletCheck = null;      // owed after a wallet-replacing megammrsync: { before, held, final, tries } (runResync, walletSettle)
     this.keyModeAlert = "";       // the running node was found in the OTHER mode and stopped: no start until the app is reopened
     // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
@@ -354,48 +358,75 @@ class NodeManager extends EventEmitter {
   }
 
   /**
-   * A node this app started earlier and never stopped (the app crashed, was force-quit, or its stop
-   * threw) keeps the port and the H2 databases, and the next start died with "already in use" /
-   * "Database may be already in use" — seen live 2026-09-07 with a java left behind since the day
-   * before. Before spawning: find such a node — by our pidfile, and by whoever LISTENS on our
-   * port — and if its command line says it is a minima/parlons node on our port or data folder,
-   * stop it (RPC quit, SIGTERM, SIGKILL; bounded) and wait for the port. A port held by anything
-   * else is reported, never fought. Returns "" (go ahead) or the reason not to start.
+   * EVERY TCP port this app's node listens on, each derived from the base port (or, for the RPC, set by hand):
+   *   base        the node's P2P port; when contributing, the Maxima relay shares it
+   *   base + 4    the node's RPC (rpcPortManual overrides)
+   *   base + 5    the keets sidecar's loopback API (the sidecar's own default: its --port + 5), when keets is on
+   *   base + 584  the Parlons wallet gateway, and base + 586 the Parlons panel (Parlons Node kind)
+   * base + 1 to base + 3 are Minima's by convention (its MiniDapp System); this node line has none and binds none.
+   */
+  ports() {
+    const cfg = config.load(), b = cfg.basePort, out = [{ port: b, what: "the node's P2P port" }, { port: this.rpcPort(), what: "the node's RPC" }];
+    let keets = false; try { keets = !!config.effectiveParams().keets; } catch (e) {}
+    if (keets) out.push({ port: b + 5, what: "the keets sidecar" });
+    if (this.kind() === "parlons") out.push({ port: b + 584, what: "the Parlons wallet gateway" }, { port: this.panelPort(), what: "the Parlons panel" });
+    return out;
+  }
+
+  /** Is this command line a node of THIS profile? A minima / parlons-node jar AND this profile's own data folder,
+   *  whole (followed by a space, a quote or the end: /x/node-data is not /x/node-data-2). */
+  ownNode(cmd) {
+    const dir = this.dataDir(); cmd = String(cmd || "");
+    if (!dir || !/(minima|parlons-node)\.jar/.test(cmd)) return false;
+    return cmd.endsWith(dir) || [" ", '"', "'"].some(end => cmd.includes(dir + end));
+  }
+
+  /**
+   * Before spawning. Two separate things (0.19.105; before this, anything LISTENING on our port whose command line
+   * named a node jar and "-port <ours>" was stopped: a node of ANOTHER app or profile on that port would have been
+   * sent `quit`, SIGTERM and SIGKILL):
+   *
+   * 1. OUR OWN node from an earlier launch (the app crashed, was force-quit, or its stop threw) still holds the port
+   *    and the H2 databases. It is found ONLY through this profile's own pidfile, and is ours ONLY while that pid
+   *    still runs a node jar on THIS profile's data folder (pids are reused: on 17 Nov 2026 a pidfile's pid had become
+   *    a macOS XPC service). That one process is stopped: RPC `quit` when it is the one listening on our RPC port,
+   *    then SIGTERM, then SIGKILL, each bounded.
+   * 2. Every port the node needs (ports()) must then be free. A port held by ANYTHING ELSE is reported, with the
+   *    port and what holds it, and the node is not started. That process is never sent a command or a signal.
+   *
+   * Returns "" (go ahead) or the reason not to start.
    */
   async reclaimStaleNode() {
-    const cfg = config.load();
-    const port = cfg.basePort, dataDir = cfg.dataFolder || config.defaultDataFolder();
-    const candidates = new Map();   // pid → command
-    const isOurs = (cmd) => /(minima|parlons-node)\.jar/.test(cmd)
-      && (cmd.includes(dataDir) || cmd.includes("-port " + port) || cmd.includes("-Dparlons.node.port=" + port));
+    const S = this.sys;
+    this.portOwner = null;
+    let mine = 0;
     try {
-      const pf = JSON.parse(fs.readFileSync(this.pidfilePath(), "utf8"));
-      // A pid from an earlier launch is only "our node" while that pid still runs OUR jar. Pids are reused: on
-      // 17 Nov 2026 DexiconPro's pidfile pid had become a macOS XPC service, this code reported "port in use by
-      // ThemeWidgetControlViewService" and the node was never started - silently, without a log line.
-      if (pf && pf.pid && alive(pf.pid) && isOurs(commandOf(pf.pid))) candidates.set(pf.pid, commandOf(pf.pid));
+      const pf = JSON.parse(fs.readFileSync(this.pidfilePath(), "utf8")), pid = pf && Number(pf.pid);
+      if (pid > 0 && pid !== process.pid && S.alive(pid) && this.ownNode(S.commandOf(pid))) mine = pid;
       else try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
     } catch (e) { /* no pidfile */ }
-    for (const pid of listeners(port)) if (!candidates.has(pid)) candidates.set(pid, commandOf(pid));
-    if (candidates.has(process.pid)) candidates.delete(process.pid);
-    for (const [pid, cmd] of candidates) {
-      if (!isOurs(cmd)) {
-        this.portOwner = { pid, command: cmd || "(unknown)" };
-        const why = "port " + port + " is in use by " + (cmd ? cmd.slice(0, 120) : "another program") + " (pid " + pid + ") — choose another base port in Settings, or stop that program";
-        this.log("[app] node NOT started: " + why);
-        return why;
-      }
-      this.log("[app] a node from an earlier launch is still running (pid " + pid + ") — stopping it before starting");
-      try { await Promise.race([rpcCall(this.rpcPort(), config.rpcSecret(), "quit"), sleep(8000)]); } catch (e) {}
-      for (let i = 0; i < 16 && alive(pid); i++) await sleep(500);
-      if (alive(pid)) { killPid(pid, "SIGTERM"); for (let i = 0; i < 10 && alive(pid); i++) await sleep(500); }
-      if (alive(pid)) { killPid(pid, "SIGKILL"); for (let i = 0; i < 6 && alive(pid); i++) await sleep(500); }
-      if (alive(pid)) return "could not stop the node left running by an earlier launch (pid " + pid + ")";
-      this.log("[app] reclaimed a node left running by an earlier launch (pid " + pid + ")");
+    if (mine) {
+      this.log("[app] this app's node from an earlier launch is still running (pid " + mine + ") — stopping it before starting");
+      // `quit` goes to whoever answers on the RPC port: sent only when that IS the process just identified
+      if (S.listeners(this.rpcPort()).includes(mine)) { try { await Promise.race([this.rpc("quit"), S.sleep(8000)]); } catch (e) {} }
+      for (let i = 0; i < 16 && S.alive(mine); i++) await S.sleep(500);
+      if (S.alive(mine)) { S.killPid(mine, "SIGTERM"); for (let i = 0; i < 10 && S.alive(mine); i++) await S.sleep(500); }
+      if (S.alive(mine)) { S.killPid(mine, "SIGKILL"); for (let i = 0; i < 6 && S.alive(mine); i++) await S.sleep(500); }
+      if (S.alive(mine)) return "could not stop this app's node left running by an earlier launch (pid " + mine + ")";
+      this.log("[app] stopped this app's node left running by an earlier launch (pid " + mine + ")");
     }
-    for (let i = 0; i < 10 && listeners(port).length; i++) await sleep(500);   // the kernel releases the socket
+    for (const { port, what } of this.ports()) {
+      let held = S.listeners(port).filter(pid => pid !== process.pid);
+      for (let i = 0; mine && i < 10 && held.length; i++) { await S.sleep(500); held = S.listeners(port).filter(pid => pid !== process.pid); }   // the kernel releases our old node's socket
+      if (!held.length) continue;
+      const pid = held[0], cmd = S.commandOf(pid);
+      this.portOwner = { pid, port, command: cmd || "(unknown)" };
+      const why = "Port " + port + " (" + what + ") is in use by " + (cmd ? cmd.slice(0, 160) : "another program") + " (pid " + pid + "). " + flavor.productName
+        + " did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.";
+      this.log("[app] node NOT started: " + why);
+      return why;
+    }
     try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
-    this.portOwner = null;
     return "";
   }
 
@@ -416,7 +447,7 @@ class NodeManager extends EventEmitter {
     this.lastError = null;
     this.fatalHint = "";
     this.parlons = { ready: false, error: "", version: "", cape: false };
-    this.keyModeChecked = false; this.polled = false; this.carry = { out: "", err: "" };
+    this.keyModeChecked = false; this.polled = false; this.carry = { out: "", err: "" }; this.cont = { out: null, err: null };
     if (this.keyModeAlert) { this.lastError = this.keyModeAlert; this.log("[app] node NOT started: " + this.keyModeAlert); this.setState("error"); return; }
     // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
     // jar that cannot run it is REFUSED, never started classic (that would add classic keys to it for good).
@@ -461,7 +492,7 @@ class NodeManager extends EventEmitter {
     p.stderr.on("data", d => this.nodeSaid("err", d));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     p.on("exit", (code, sig) => {
-      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.nodeLine(rest); }   // a last line with no line end
+      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.nodeLine(rest, k); }   // a last line with no line end
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
@@ -717,14 +748,34 @@ class NodeManager extends EventEmitter {
   nodeSaid(stream, chunk) {
     const parts = (this.carry[stream] + String(chunk)).split(/[\r\n]/);
     let rest = parts.pop();
+    const ended = parts.length;   // these were ended by a line end; one more is a line cut at LINE_MAX
     if (rest.length > LINE_MAX) { parts.push(rest); rest = ""; }
     this.carry[stream] = rest;
-    for (const l of parts) this.nodeLine(l);
+    parts.forEach((l, i) => {
+      this.nodeLine(l, stream);
+      // What follows a line cut at LINE_MAX, up to that line's own end, is the rest of the SAME line: whoever filled
+      // it chose where the cut falls, so the rest could begin exactly as one of the node's own lines does.
+      if (i >= ended) this.cont[stream] = { until: null, left: 1 };
+    });
   }
   /** One physical line of the node's output: control characters out, then what it may tell the app, then the log. */
-  nodeLine(raw) {
+  nodeLine(raw, stream = "out") {
     const l = String(raw).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "");
+    // A CONTINUATION is never a fresh line (0.19.4's guard, back in 0.19.106): the rest of a line cut at LINE_MAX, and
+    // what follows a call-signal or greeting line that a peer's own line end cut short, up to the line carrying the
+    // node's ending (parlonsNotify.unfinished). It is logged, marked, and read by nothing: no flag, no boot line, no
+    // notification. (A peer who also imitates the node's ending is not caught here: plan section 11.)
+    const c = this.cont[stream];
+    if (c) {
+      if ((c.until && c.until.test(l)) || --c.left <= 0) this.cont[stream] = null;
+      if (l.trim()) this.log("(continued) " + parlonsNotify.redact(l));
+      return;
+    }
     if (!l.trim()) return;
+    // ponytail: a run ends after CONT_MAX lines even without its ending, so a call line this table does not know
+    // cannot silence the rest of the node's output for good.
+    const until = parlonsNotify.unfinished(l);
+    if (until) this.cont[stream] = { until, left: CONT_MAX };
     // This branch only (0.19.3): a Parlons message or call line carries text a REMOTE party chose. It is read by the
     // notifier's anchored parser and by nothing below, and a message's own words stay out of the Logs view and node.log.
     if (parlonsNotify.isChatter(l)) {
@@ -744,15 +795,18 @@ class NodeManager extends EventEmitter {
     // when the node has died by itself, and changes nothing else.)
     if (/Database may be already in use|locked by another process|Address already in use|BindException/i.test(l)) {
       this.fatalHint = /Address already in use|BindException/i.test(l)
-        ? "another node is still listening on port " + config.load().basePort + " — Restart node stops it and starts again"
-        : "another node still holds this data folder's databases — Restart node stops it and starts again";
+        ? "a port this node needs is already in use (base port " + config.load().basePort + "). Start again: this app's own earlier node is stopped first; any other program is named and left alone"
+        : "another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first";
     }
     this.log(l);
   }
   /** The Parlons Node narrates its account in its log; that is the honest readiness signal. Only ITS OWN status lines:
    *  each by the exact prefix the jar prints it with, from the first character of a physical line (nodeLine). */
   watchParlonsLine(l) {
-    if (!l.startsWith("[parlons-node] ")) return;
+    // ...and only UNTIL THE ACCOUNT IS UP for this node start: every one of these is a boot line (ParlonsNodeMain prints
+    // the version, the cape and a start failure before "account up"), and nothing a peer sends through the account
+    // exists before it. After it, a forged line, even a whole one, changes no flag.
+    if (this.parlons.ready || !l.startsWith("[parlons-node] ")) return;
     let changed = false;
     const m = PARLONS.version.exec(l);
     if (m && !this.parlons.version) { this.parlons.version = m[1]; changed = true; }

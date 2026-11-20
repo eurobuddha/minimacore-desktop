@@ -10,6 +10,8 @@ const PP = require("../renderer/dexicon-pp.js"), C = require("../renderer/dexico
 const src = (f) => fs.readFileSync(path.join(R, f), "utf8");
 
 const PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
+/** another token's label since 0.19.102: the mark first, then the name inside a direction isolate (U+2068 … U+2069) */
+const NOT = (name) => "(not MxUSD) \u2068" + name + "\u2069", NOTID = (tok, name) => "(not MxUSD, token " + tok + ") \u2068" + name + "\u2069";
 const MXUSD = PP.MXUSD;
 const POOL = { address: PK("B1"), opk: PK("0B"), oadr: PK("0A"), tok: MXUSD, tokName: "USDT", tokDecimals: 8, reserveM: "40000", reserveT: "128.4", spot: "0.00321", feeGrowthPct: "0.07" };
 const T = { tok: MXUSD, name: "MxUSD" };
@@ -120,8 +122,8 @@ test("amounts are cut, never rounded; the balance line is cut to 6 decimals, the
 });
 test("the dollar token is MxUSD by its token id; a token that only calls itself USDT is said to be another token", () => {
   assert.equal(PP.tokLabel(MXUSD, "USDT"), "MxUSD"); assert.equal(PP.tokLabel(MXUSD.toLowerCase(), ""), "MxUSD");
-  assert.equal(PP.tokLabel(PK("EE"), "USDT"), "USDT (not MxUSD)"); assert.equal(PP.tokLabel(PK("EE"), "mxUSDT"), "mxUSDT (not MxUSD)");
-  assert.equal(PP.tokLabel(PK("EE"), ""), "unnamed token (not MxUSD)"); assert.equal(PP.pairName({ tok: PK("EE"), name: PP.tokLabel(PK("EE"), "") }), "MINIMA / unnamed token (not MxUSD)  ·  token " + PK("EE"), "an unnamed token is named by its whole id");
+  assert.equal(PP.tokLabel(PK("EE"), "USDT"), NOT("USDT")); assert.equal(PP.tokLabel(PK("EE"), "mxUSDT"), NOT("mxUSDT"));
+  assert.equal(PP.tokLabel(PK("EE"), ""), NOT("unnamed token")); assert.equal(PP.pairName({ tok: PK("EE"), name: PP.tokLabel(PK("EE"), "") }), "MINIMA / " + NOT("unnamed token") + "  ·  token " + PK("EE"), "an unnamed token is named by its whole id");
   assert.equal(PP.mx("12 mxUSDT"), "12 MxUSD");
   assert.deepEqual(PP.pairs([POOL, Object.assign({}, POOL, { address: PK("B2") })]), [T]);
   const pp = src("dexicon-pp.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "").replace(/USDT\/MINIMA \(MEXC\)/g, "").replace(/usdt\?|m\?x\?USDT|not MxUSD/g, "");
@@ -132,21 +134,21 @@ test("a look-alike token is never MxUSD: marked, its whole id in the pair name a
   const FAKE = PK("EE"), ZW = "\u200b", names = ["MxUSD ", "MxUSD" + ZW, "\u041cxUSD", "Mx\u0055\u0405D", "ＭｘＵＳＤ", "USDT", "mxusdt", "M x U S D", "Tether USDT"];
   for (const n of names) {
     const label = PP.tokLabel(FAKE, n);
-    assert.notEqual(label, "MxUSD", JSON.stringify(n)); assert.ok(label.endsWith(" (not MxUSD)"), JSON.stringify(n) + " is marked: " + label);
+    assert.notEqual(label, "MxUSD", JSON.stringify(n)); assert.ok(label.startsWith("(not MxUSD) \u2068") && label.endsWith("\u2069"), JSON.stringify(n) + " is marked, the mark FIRST: " + label);
     assert.ok(!/[\u200b\u202e]/.test(label), "no zero-width or direction character reaches the screen");
     assert.equal(PP.imitates(FAKE, n), true, JSON.stringify(n) + " imitates the dollar token");
   }
-  assert.equal(PP.tokLabel(FAKE, "\u202eDSUxM"), "DSUxM (not MxUSD)", "a direction override is removed: the name is shown as its letters are, and the mark stays after it");
+  assert.equal(PP.tokLabel(FAKE, "\u202eDSUxM"), NOT("DSUxM"), "a direction override is removed: the name is shown as its letters are");
   assert.equal(PP.imitates(FAKE, "PANDA"), false); assert.equal(PP.imitates(MXUSD, "USDT"), false, "the real one imitates nothing");
-  assert.equal(PP.tokLabel(FAKE, "PANDA"), "PANDA (not MxUSD)", "EVERY other token is marked, whatever its name");
+  assert.equal(PP.tokLabel(FAKE, "PANDA"), NOT("PANDA"), "EVERY other token is marked, whatever its name");
   // a fake pool deeper than the real one, so the scan lists it first: the real MxUSD is still first and the default
   const fakePool = { address: PK("F1"), tok: FAKE, tokName: "MxUSD ", reserveM: "900000", reserveT: "1" }, panda = { address: PK("F2"), tok: PK("AB"), tokName: "PANDA", reserveM: "5", reserveT: "5" };
   const list = PP.pairs([fakePool, panda, POOL]);
   assert.deepEqual(list.map((t) => t.tok), [MXUSD, FAKE, PK("AB")]); assert.deepEqual(list[0], T); assert.equal(list[1].fake, true); assert.equal(list[2].fake, undefined);
   assert.equal(PP.chosen(list, "").t.tok, MXUSD, "nothing chosen: MxUSD");
   assert.equal(PP.chosen(PP.pairs([fakePool, panda]), "").t.tok, FAKE, "with no MxUSD pool the first pair is another token, and it is marked");
-  assert.equal(PP.pairName(list[1]), "MINIMA / MxUSD (not MxUSD)  ·  token " + FAKE, "the pair name carries the whole token id");
-  assert.equal(PP.poolLine(list[1], { pools: 1, depth: "900000" }), "MINIMA / MxUSD (not MxUSD)  ·  token " + FAKE + "   ·   1 pool   ·   depth 900000 MINIMA");
+  assert.equal(PP.pairName(list[1]), "MINIMA / " + NOT("MxUSD") + "  ·  token " + FAKE, "the pair name carries the whole token id");
+  assert.equal(PP.poolLine(list[1], { pools: 1, depth: "900000" }), "MINIMA / " + NOT("MxUSD") + "  ·  token " + FAKE + "   ·   1 pool   ·   depth 900000 MINIMA");
   assert.equal(PP.poolLine(T, { pools: 1, depth: "40000" }), "MINIMA / MxUSD   ·   1 pool   ·   depth 40000 MINIMA");
   // the selection is a token id: a rescan that reorders or drops pools never moves it to another token
   assert.equal(PP.chosen(PP.pairs([POOL, panda, fakePool]), PK("AB")).t.tok, PK("AB")); assert.equal(PP.chosen(PP.pairs([panda, fakePool, POOL]), PK("AB").toLowerCase()).t.tok, PK("AB"));
@@ -155,19 +157,19 @@ test("a look-alike token is never MxUSD: marked, its whole id in the pair name a
   assert.ok(PP.lostLine(PK("AB")).includes("(token " + PK("AB") + ")")); assert.match(PP.lostLine(PK("AB")), /no other pair was selected for you/);
   // the review: the pair with the whole id, and the warning in its own line for a name that imitates
   const rv = PP.swapReview(QUOTE, "250", list[1], true).text;
-  assert.match(rv, /\nReceive {2}0\.79832711 MxUSD \(not MxUSD\)\n/); assert.ok(rv.includes("\nPool pair  MINIMA / MxUSD (not MxUSD)  ·  token " + FAKE + "\n\nThis token is not MxUSD. Its name imitates it.\n"));
+  assert.ok(rv.includes("\nReceive  0.79832711 " + NOT("MxUSD") + "\n")); assert.ok(rv.includes("\nPool pair  MINIMA / " + NOT("MxUSD") + "  ·  token " + FAKE + "\n\nThis token is not MxUSD. Its name imitates it.\n"));
   const rp = PP.swapReview(QUOTE, "250", list[2], true).text; assert.ok(rp.includes("token " + PK("AB"))); assert.ok(!rp.includes("imitates"));
   const rm = PP.swapReview(QUOTE, "250", T, true).text; assert.ok(rm.includes("\nPool pair  MINIMA / MxUSD\n")); assert.ok(!rm.includes("imitates") && !rm.includes("not MxUSD"));
   // the click: the engine is asked about the token id that was selected, nothing else
   const r = recorder({ ppQuote: QUOTE, ppSwap: { txpowid: PK("71"), totalOut: "0.79832711" }, ppWhy: null }), u = ui(true);
   await PP.Act.swap(r.api, u, list[1], true, "250");
-  assert.deepEqual(r.money()[0], ["ppQuote", [FAKE, true, "250"]]); assert.match(u.said.at(-1)[0], /receive 0\.79832711 MxUSD \(not MxUSD\) when/, "the result marks it too");
+  assert.deepEqual(r.money()[0], ["ppQuote", [FAKE, true, "250"]]); assert.ok(u.said.at(-1)[0].includes("receive 0.79832711 " + NOT("MxUSD") + " when"), "the result marks it too");
   // every screen that names a token: Pools, combined, My LP, Wallet, Activity
-  assert.equal(PP.poolCard(fakePool).title, "MINIMA / MxUSD (not MxUSD)  ·  token " + FAKE); assert.equal(PP.combinedCard({ tok: FAKE, name: "MxUSD ", count: 1, totalMinima: "1", totalToken: "1", price: "1", depth: "1" }).title, "MINIMA / MxUSD (not MxUSD)  ·  token " + FAKE + "  ·  combined");
-  assert.match(PP.lpRows(Object.assign({}, MINE, { tok: FAKE, tokName: "USDT" }))[0][1], /USDT \(not MxUSD\)$/);
+  assert.equal(PP.poolCard(fakePool).title, "MINIMA / " + NOT("MxUSD") + "  ·  token " + FAKE); assert.equal(PP.combinedCard({ tok: FAKE, name: "MxUSD ", count: 1, totalMinima: "1", totalToken: "1", price: "1", depth: "1" }).title, "MINIMA / " + NOT("MxUSD") + "  ·  token " + FAKE + "  ·  combined");
+  assert.equal(PP.lpRows(Object.assign({}, MINE, { tok: FAKE, tokName: "USDT" }))[0][1].endsWith(NOT("USDT")), true);
   // records are labelled by the glue, by token id: the screen rewrites no word of them
-  assert.equal(PP.actItem({ type: "SWAP", summary: "Sold 5 MINIMA for 3 Tether USDT (not MxUSD, token " + FAKE + ")", ts: 1 }, 2).summary, "Sold 5 MINIMA for 3 Tether USDT (not MxUSD, token " + FAKE + ")");
-  assert.equal(PP.feedItem({ kind: "SWAP", minimaIn: true, minimaAmt: "1", tokenAmt: "2", tokenLabel: "Tether USDT (not MxUSD, token " + FAKE + ")", ts: 1 }, 2).title, "MINIMA sale · 1 MINIMA / 2 Tether USDT (not MxUSD, token " + FAKE + ")");
+  assert.equal(PP.actItem({ type: "SWAP", summary: "Sold 5 MINIMA for 3 " + NOTID(FAKE, "Tether USDT"), ts: 1 }, 2).summary, "Sold 5 MINIMA for 3 " + NOTID(FAKE, "Tether USDT"));
+  assert.equal(PP.feedItem({ kind: "SWAP", minimaIn: true, minimaAmt: "1", tokenAmt: "2", tokenLabel: NOTID(FAKE, "Tether USDT"), ts: 1 }, 2).title, "MINIMA sale · 1 MINIMA / 2 " + NOTID(FAKE, "Tether USDT"));
   const pp = src("dexicon-pp.js");
   assert.match(pp, /if \(S\.pools && chosen\(toks\(\), S\.sel\)\.lost\) \{ S\.lost = S\.sel; S\.sel = NONE;/, "a rescan that loses the selected token clears the selection");
   assert.match(pp, /<option value="\$\{esc\(x\.tok\)\}"/, "the pair list is keyed by token id, not by position"); assert.ok(!/S\.sel = Number|toks\(\)\[S\.sel\]/.test(pp));
@@ -178,11 +180,15 @@ test("the glue labels a token in a record by its id: MxUSD only for the real id,
   try {
     const L = h.api._labelById, FAKE = PK("EE");
     assert.equal(L(MXUSD, "USDT"), "MxUSD"); assert.equal(L(MXUSD.toLowerCase(), "anything"), "MxUSD");
-    assert.equal(L(FAKE, "MxUSD"), "MxUSD (not MxUSD, token " + FAKE + ")"); assert.equal(L(FAKE, "Tether USDT"), "Tether USDT (not MxUSD, token " + FAKE + ")");
-    assert.equal(L(FAKE, "MxUSD\u200b "), "MxUSD (not MxUSD, token " + FAKE + ")"); assert.equal(L(FAKE, ""), "unnamed token (not MxUSD, token " + FAKE + ")");
+    assert.equal(L(FAKE, "MxUSD"), NOTID(FAKE, "MxUSD")); assert.equal(L(FAKE, "Tether USDT"), NOTID(FAKE, "Tether USDT"));
+    assert.equal(L(FAKE, "MxUSD\u200b "), NOTID(FAKE, "MxUSD")); assert.equal(L(FAKE, ""), NOTID(FAKE, "unnamed token"));
+    assert.equal(L(FAKE, "\u3164\u2800MxUSD\u115f" + "x".repeat(60)), NOTID(FAKE, "MxUSD" + "x".repeat(27) + "…"), "0.19.102: fillers out, the name capped at 32, the id whole and first");
+    const done = "Sold 5 MINIMA for 3 " + NOTID(FAKE, "USDT");
+    assert.equal(h.api._relabelSwap({ type: "SWAP", summary: done }, { history: { deltas: JSON.stringify({ "0x00": "-5", [FAKE]: "3" }) } }).summary, done, "a record labelled already is not labelled twice");
+    assert.equal(h.api._relabelSwap({ type: "SWAP", summary: "Sold 5 MINIMA for 3 USDT (not MxUSD, token " + FAKE + ")" }, { history: { deltas: JSON.stringify({ "0x00": "-5", [FAKE]: "3" }) } }).summary, "Sold 5 MINIMA for 3 USDT (not MxUSD, token " + FAKE + ")", "nor one labelled the old way (0.18.135)");
     const R2 = h.api._relabelSwap, hist = (tok) => ({ history: { deltas: JSON.stringify({ "0x00": "-5", [tok]: "3" }) } });
     assert.equal(R2({ type: "SWAP", summary: "Sold 5 MINIMA for 3 USDT" }, hist(MXUSD)).summary, "Sold 5 MINIMA for 3 MxUSD", "an old record of the real token");
-    assert.equal(R2({ type: "SWAP", summary: "Sold 5 MINIMA for 3 USDT" }, hist(FAKE)).summary, "Sold 5 MINIMA for 3 USDT (not MxUSD, token " + FAKE + ")", "an old record of a token that called itself USDT");
+    assert.equal(R2({ type: "SWAP", summary: "Sold 5 MINIMA for 3 USDT" }, hist(FAKE)).summary, "Sold 5 MINIMA for 3 " + NOTID(FAKE, "USDT"), "an old record of a token that called itself USDT");
     assert.equal(R2({ type: "SWAP", summary: "Sold 5 MINIMA for 3 Tether USDT" }, {}).summary, "Sold 5 MINIMA for 3 Tether USDT", "no history: left exactly as recorded, no word rewritten");
     assert.equal(R2({ type: "CREATE", summary: "Created a pool with 5 MINIMA" }, hist(MXUSD)).summary, "Created a pool with 5 MINIMA");
     const g = fs.readFileSync(path.join(ROOT, "main/pandapools.js"), "utf8");
@@ -426,7 +432,7 @@ test("Pools: every pool with its address whole, the depth added exactly, and the
   assert.equal(card.title, "MINIMA / MxUSD"); assert.deepEqual(card.rows.map((r) => r[0]), ["reserves", "spot price", "fees accrued (K/KMIN−1)", "pool"]);
   assert.deepEqual(card.rows[3], ["pool", PK("B1") + "  (click to copy)", PK("B1")], "the address whole on the screen, and whole on the clipboard");
   const other = PP.poolCard(pools[2]);
-  assert.equal(other.title, "MINIMA / USDT (not MxUSD)  ·  token " + PK("EE")); assert.deepEqual(other.rows[3], ["token", PK("EE"), PK("EE")], "another token's id is shown whole");
+  assert.equal(other.title, "MINIMA / " + NOT("USDT") + "  ·  token " + PK("EE")); assert.deepEqual(other.rows[3], ["token", PK("EE"), PK("EE")], "another token's id is shown whole");
   const comb = PP.combinedCard({ tok: MXUSD, name: "USDT", count: 2, totalMinima: "866751.25", totalToken: "2783.56526575", price: "0.003211499999", depth: "866751.25" });
   assert.equal(comb.title, "MINIMA / MxUSD  ·  combined"); assert.deepEqual(comb.rows.map((r) => r[1]), ["2", "866751.25 MINIMA  ·  2783.56526575 MxUSD", "0.00321149 MxUSD / MINIMA", "866751.25 MINIMA"]);
   // the old panel's Pools tab makes reads only (ppPools, and ppAggregate for Combined): nothing there to carry over as a money call
@@ -688,4 +694,32 @@ test("a message never sends the reader to a menu entry that does not exist; a ba
   assert.match(PP.backupEnd({ path: "/x/y.ppbackup" }, true).text, /saved and checked.* Saved as \/x\/y\.ppbackup$/);
   assert.match(pp, /d\.addEventListener\("cancel", \(\) => \{ if \(gone\) return; gone = true; d\.remove\(\); resolve\(working \? \{ pending: true \} : null\); \}\);/, "Esc while the action works resolves 'pending', not 'nothing'");
   assert.match(pp, /if \(b\.dataset\.x === "0"\) return end\(working \? \{ pending: true \} : null\);/); assert.match(pp, /return !!got && !got\.pending;/);
+});
+
+// ---- 0.19.102: the token label ----
+test("token label: the mark first, the name capped, invisible and filler characters stripped, right-to-left text isolated; the closed pair picker never reads as plain MINIMA / MxUSD for another token", () => {
+  const FAKE = PK("EE"), FSI = "\u2068", PDI = "\u2069";
+  // invisible and filler code points: none reaches the label, and a name made only of them is no name
+  for (const junk of ["\u2800", "\u3164", "\u115f", "\u1160", "\uffa0", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u200e", "\u200f", "\u202a", "\u202b", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069", "\u034f", "\ufe0f", "\u00ad", "\u0000", "\u001b"]) {
+    const cp = "U+" + junk.codePointAt(0).toString(16).toUpperCase();
+    assert.equal(PP.tokLabel(FAKE, "Mx" + junk + "USD"), NOT("MxUSD"), cp + " inside a name is dropped");
+    assert.equal(PP.tokLabel(FAKE, junk + junk + junk), NOT("unnamed token"), cp + " alone is no name");
+    assert.equal(PP.imitates(FAKE, "Mx" + junk + "USD"), true, cp + " does not hide an imitation");
+  }
+  assert.equal(PP.tokLabel(FAKE, "MxUSD\u2003\u00a0\u3000  \t x"), NOT("MxUSD x"), "any run of space characters is one space");
+  // the cap: by code point (an astral letter is one), the mark still first, the id still whole in the pair name
+  const long = "MxUSD" + "\u{1F43C}".repeat(40), lab = PP.tokLabel(FAKE, long);
+  assert.equal(lab, NOT("MxUSD" + "\u{1F43C}".repeat(27) + "…")); assert.equal(Array.from(lab).length, "(not MxUSD) ".length + 2 + 33);
+  assert.equal(PP.tokLabel(FAKE, "x".repeat(32)), NOT("x".repeat(32)), "32 is not cut");
+  assert.ok(PP.pairName({ tok: FAKE, name: lab }).endsWith("  ·  token " + FAKE));
+  // right-to-left: the name sits inside FSI … PDI, with the mark before the isolate and the id after it
+  const rtl = "\u05e9\u05dc\u05d5\u05dd USD", pr = PP.pairName({ tok: FAKE, name: PP.tokLabel(FAKE, rtl) });
+  assert.equal(pr, "MINIMA / (not MxUSD) " + FSI + rtl + PDI + "  ·  token " + FAKE);
+  assert.ok(pr.indexOf("(not MxUSD)") < pr.indexOf(FSI) && pr.indexOf(PDI) < pr.indexOf("token " + FAKE));
+  assert.equal((pr.match(/[\u2066-\u2069\u202a-\u202e]/g) || []).length, 2, "exactly one isolate pair, and none from the name itself");
+  // the closed picker shows the START of the option's text: cut anywhere, it never reads as the real pair
+  const opt = PP.pairName({ tok: FAKE, name: PP.tokLabel(FAKE, "MxUSD") }), real = PP.pairName({ tok: MXUSD, name: PP.tokLabel(MXUSD, "") });
+  assert.equal(real, "MINIMA / MxUSD");
+  for (let n = 1; n <= opt.length; n++) { const cut = opt.slice(0, n).replace(/[\u2068\u2069]/g, "").trim(); assert.notEqual(cut, real, "cut at " + n); assert.ok(n < 13 || cut.startsWith("MINIMA / (not"), "from the 13th character on the mark is in view: " + cut); }
+  assert.equal(PP.tokLabel(MXUSD, "\u202eanything"), "MxUSD", "the real token is labelled by its id alone");
 });

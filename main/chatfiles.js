@@ -461,7 +461,7 @@ function spaceFreeDir(dir, shortOf) {
 async function markDownloaded(dest, platform = process.platform, execFile = require("child_process").execFile) {
   try {
     if (platform === "darwin") await new Promise((res) => execFile("/usr/bin/xattr",
-      ["-w", "com.apple.quarantine", "0081;" + Math.floor(Date.now() / 1000).toString(16) + ";minimaCore;", dest], { timeout: 5000 }, () => res()));
+      ["-w", "com.apple.quarantine", "0081;" + Math.floor(Date.now() / 1000).toString(16) + ";" + require("./flavor").productName + ";", dest], { timeout: 5000 }, () => res()));
     else if (platform === "win32") await fsp.writeFile(dest + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
   } catch (e) { /* never fails the save */ }
 }

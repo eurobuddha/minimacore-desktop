@@ -76,7 +76,8 @@ function lastNodeFailure() { return lastFail; }
  *  has started since); waitedMs: how long it has been trying. A damaged pandapools.sqlite fails its integrity check on
  *  EVERY start, so without these the room said "starting" for ever and the restore gate never opened. */
 let initError = "", firstTry = 0;
-function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry }; }
+function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry,
+  store: storeFile() }; }   // store: the whole path, for the set-aside dialog ("quit, then rename it back")
 function storeFile() { return path.join(dataDir || app.getPath("userData"), "pandapools.sqlite"); }
 /** A store that cannot be opened is MOVED ASIDE under a dated name (main/restore.js moveAside), never deleted, so the
  *  engine can start on an empty one; the pools are then restored from the user's backup file. Only when the last start
@@ -84,6 +85,11 @@ function storeFile() { return path.join(dataDir || app.getPath("userData"), "pan
 function setAsideStore() {
   if (ready || !initError) throw new Error("PandaPools' store is open, so nothing was moved.");
   if (held) throw new Error(HELD);
+  // 0.19.101: an init may be in flight on this very file (the scan loop tries again): it is disowned first (its epoch
+  // check then ends it), so it cannot finish beside the init that starts on the empty store.
+  contextEpoch++;
+  if (ctx && ctx.ActivityChain) { try { ctx.ActivityChain.stop(); } catch (e) {} }
+  ctx = null; sqlShim = null; serviceHandler = null;
   const kept = require("./restore").moveAside(storeFile());
   initError = ""; initPromise = null; firstTry = 0; emitter.emit("update");
   return kept;
@@ -150,8 +156,11 @@ function onNodeRestarted() {
   if (ready && serviceHandler) serviceHandler({ event: "inited" });
 }
 /** Wallet identity changes invalidate live work, never the saved recipes or usage floors. */
+/** The shared coin reservation (main/reserve.js) drops this engine's unfinished builds. Never throws: a stop must stop. */
+function releaseBuilds() { try { require("./reserve").releaseOwner("pandapools"); } catch (e) {} }
 async function invalidate() {
   quarantineRequired=true;stopLoop();contextEpoch++;poolAbort.aborted=true;poolAbort={aborted:false};
+  releaseBuilds();
   const old=ctx,storage=sqlShim;
   if(old&&old.ActivityChain)old.ActivityChain.stop();
   ready=false;ctx=null;serviceHandler=null;initPromise=null;
@@ -171,6 +180,7 @@ async function invalidate() {
 async function hold(maxMs) {
   if (!held) { held = true; heldLoop = !!scanTimer; stopLoop(); }
   await quiet(maxMs || 15000);
+  releaseBuilds();   // the engine is stopped: its unfinished builds died with it (posted coins stay held)
 }
 /** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
  *  Also awaited before the node is told to quit (main.js onStopping). */
@@ -355,8 +365,12 @@ function myPools() {
  */
 function labelById(tok, name) {
   if (isMarketFed(tok)) return "MxUSD";
-  var n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
-  return (n && n.toLowerCase() !== String(tok || "").toLowerCase() ? n : "unnamed token") + " (not MxUSD, token " + tok + ")";
+  // 0.19.102, as renderer/dexicon-pp.js tokLabel: the mark and the whole id FIRST; the name without invisible and
+  // filler characters, capped at 32 code points, inside a direction isolate (U+2068 … U+2069).
+  var n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/[\p{Z}\s]+/gu, " ").trim();
+  if (!n || n.toLowerCase() === String(tok || "").toLowerCase()) n = "unnamed token";
+  var a = Array.from(n); if (a.length > 32) n = a.slice(0, 32).join("") + "…";
+  return "(not MxUSD, token " + tok + ") \u2068" + n + "\u2069";
 }
 function activityLabels() { var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "MxUSD"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = labelById(p.tok, p.tokName); }); return labels; }
 /** A swap recorded before 0.18.135 ends in the token's NAME as the engine read it ("… for 10 USDT"). Where the node's own
@@ -364,7 +378,7 @@ function activityLabels() { var labels = {}; labels[USDT_TOKENID.toLowerCase()] 
  *  exactly as recorded (never guessed, never reworded). */
 function relabelSwap(model, row) {
   var m = /^((?:Sold|Bought) \S+ MINIMA for \S+) (.+)$/.exec((model && model.summary) || ""), h = row && row.history;
-  if (!m || model.type !== "SWAP" || !h || /\(not MxUSD, token 0x[0-9A-Fa-f]+\)$/.test(m[2])) return model;
+  if (!m || model.type !== "SWAP" || !h || /^\(not MxUSD, token 0x[0-9A-Fa-f]+\) |\(not MxUSD, token 0x[0-9A-Fa-f]+\)$/.test(m[2])) return model;   // labelled already (the mark first since 0.19.102; last before)
   var ids = []; try { ids = Object.keys(JSON.parse(h.deltas || "{}")).filter(function (t) { return t !== "0x00"; }); } catch (e) {}
   if (ids.length === 1) model.summary = m[1] + " " + labelById(ids[0], m[2]);
   return model;

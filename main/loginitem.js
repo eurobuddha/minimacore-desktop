@@ -14,12 +14,13 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-const DESKTOP_FILE = "minimacore.desktop";
+const flavor = require("./flavor");
+const DESKTOP_FILE = flavor.autostartFile;   // the released app: minimacore.desktop
 
 function linuxAutostartPath() { return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "autostart", DESKTOP_FILE); }
 
 function linuxDesktopEntry(exec) {
-  return ["[Desktop Entry]", "Type=Application", "Name=minimaCore", "Comment=Start the minimaCore node at login",
+  return ["[Desktop Entry]", "Type=Application", "Name=" + flavor.productName, "Comment=Start the " + flavor.productName + " node at login",
     "Exec=" + exec, "Terminal=false", "X-GNOME-Autostart-enabled=true", ""].join("\n");
 }
 
@@ -28,7 +29,8 @@ function apply(app, on) {
   on = !!on;
   try {
     if (!app.isPackaged) return { ok: false, on, note: "not registered: development build" };
-    if (process.env.MCD_TEST_PROFILE) return { ok: false, on, note: "not registered: TEST profile" };   // the OS list is not kept per profile
+    if (flavor.test) return { ok: false, on, note: "not registered: TEST profile" };   // the OS list is not kept per profile
+    if (!flavor.loginItem) return { ok: false, on, note: "not registered: " + flavor.productName + " does not open at login" };   // this flavour never registers itself with the OS
     if (process.platform === "linux") {
       const p = linuxAutostartPath();
       if (on) {

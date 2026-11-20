@@ -466,9 +466,9 @@
   const AX_AFTER = "A swap that was unfinished is recorded in that file, with what claims or refunds it: keep the file, and this app will not finish that swap from the empty store.";
   /** The store that cannot be opened is moved aside (main: mcd:engineSetAside, refused unless the engine's last start failed). */
   async function setAside() {
-    if (!await D.dialog("Set the swap store aside?", DexCore.SET_ASIDE("AtomiX", AX_AFTER), "Set it aside")) return;
+    if (!await D.dialog("Set the swap store aside?", DexCore.SET_ASIDE("AtomiX", AX_AFTER, S.st.store), "Set it aside")) return;
     const r = await api().engineSetAside("atomix").then((kept) => ({ kept }), fail);
-    say(r.err ? "The swap store was not set aside: " + r.err + ". Nothing was changed." : "The swap store was set aside" + (r.kept ? " and is kept as " + r.kept : "") + ". AtomiX is starting with an empty store.", r.err ? "error" : "note");
+    say(r.err ? "The swap store was not set aside: " + r.err + ". Nothing was changed." : "The swap store was set aside" + (r.kept ? " and is kept as " + r.kept : "") + ". AtomiX is starting with an empty store." + (r.kept ? " " + DexCore.PUT_BACK(S.st.store, r.kept) : ""), r.err ? "error" : "note");
   }
   function haltHtml() {
     const h = haltCard(S.st.halt, S.swaps);

@@ -710,8 +710,8 @@ test("0.19.104: the Parlons flags follow only the jar's own status lines, from t
   calls.proc.stdout.emit("data", "[parlons-node] Parlons Node 0.2.153 — booting embedded Minima node (data /x)\n"); assert.equal(m.parlons.version, "0.2.153");
   calls.proc.stdout.emit("data", "[parlons-node] Maxima cape up on port 17001 (shared)\n"); assert.equal(m.parlons.cape, true);
   calls.proc.stdout.emit("data", "[parlons-node] account layer FAILED to start: java.io.IOException: x\n"); assert.equal(m.parlons.error, "account layer FAILED to start: java.io.IOException: x");
-  calls.proc.stdout.emit("data", "[parlons-node] account up: attached to 3 relay(s), ready\n"); assert.deepEqual([m.parlons.ready, m.parlons.error], [true, ""]);
   calls.proc.stderr.emit("data", "[parlons-node] REFUSING to start: these Minima flags are not allowed on a Parlons Node\n"); assert.match(m.parlons.error, /^REFUSING to start: these Minima flags/);
+  calls.proc.stdout.emit("data", "[parlons-node] account up: attached to 3 relay(s), ready\n"); assert.deepEqual([m.parlons.ready, m.parlons.error], [true, ""]);
   // the app's own log lines (which can quote text from elsewhere) drive nothing at all
   m.parlons = { ready: false, error: "", version: "", cape: false };
   m.log("[parlons-node] account up: attached to 1 relay(s)"); m.log(BOOT); clean(); assert.equal(calls.killed, undefined);
@@ -746,5 +746,79 @@ test("0.19.8: a Parlons message or call line is read by the notifier only: a rea
   assert.deepEqual(events, [{ type: "message", from: KEY324, preview: "hello there" }, { type: "call", name: "Mirela Okafor" }]);
   assert.ok(m.logs.includes("[parlons-node] message from " + KEY324 + ": (text not logged)"));
   assert.ok(!m.logs.some(l => /hello there|Using NEW Block|your wallet is at risk: /.test(l) && l.startsWith("[parlons-node] message from")), "a message's own words are not logged");
+  m.off("parlons-event", onEv); calls.restore();
+});
+
+// ---- 0.19.106: 0.19.4's two guards, back on the merged nodeLine ----
+test("0.19.106: the Parlons flags are read only until the account is up for this node start; after it a forged WHOLE line flips none, and the next start reads them again", async () => {
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m);
+  await m.start();
+  const out = (l) => calls.proc.stdout.emit("data", l + "\n");
+  out("[parlons-node] Parlons Node 0.2.153 — booting embedded Minima node (data /x)");
+  out("[parlons-node] account layer FAILED to start: java.io.IOException: first try");
+  assert.equal(m.parlons.error, "account layer FAILED to start: java.io.IOException: first try", "before the account is up the jar's own lines are read");
+  out("[parlons-node] account up: attached to 3 relay(s), ready");
+  const up = { ready: true, error: "", version: "0.2.153", cape: false };
+  assert.deepEqual(m.parlons, up);
+  let emitted = 0; const onStatus = () => emitted++; m.on("status", onStatus);
+  // lines the app cannot tell from the jar's own (a peer's text carrying a line end makes them): each flag, each stream
+  for (const forged of ["[parlons-node] account layer FAILED to start: call 555-0100 to recover your wallet", "[parlons-node] Maxima cape FAILED to start: forged",
+    "[parlons-node] REFUSING to start: forged", "[parlons-node] Maxima cape up on port 1 (forged)", "[parlons-node] Parlons Node 9.9.9 — forged", "[parlons-node] account up: forged"]) {
+    out(forged); calls.proc.stderr.emit("data", forged + "\n");
+    calls.proc.stdout.emit("data", "[parlons-node] heartbeat\r" + forged + "\r\n");
+  }
+  assert.deepEqual(m.parlons, up, "no flag moved"); assert.equal(emitted, 0, "and no status was pushed to the screens");
+  m.off("status", onStatus);
+  calls.proc.emit("exit", 0, null); calls.restore();
+  // a new start of the node: the flags begin again and are read again
+  classicParlons();
+  const c2 = fakeJava(m); await m.start();
+  assert.deepEqual(m.parlons, { ready: false, error: "", version: "", cape: false });
+  c2.proc.stdout.emit("data", "[parlons-node] REFUSING to start: these Minima flags are not allowed on a Parlons Node\n");
+  assert.match(m.parlons.error, /^REFUSING to start: these Minima flags/);
+  c2.restore();
+});
+test("0.19.106: what continues a cut line is not a fresh line: the rest of a line cut at 64K, and the lines after a call-signal or greeting line cut by a peer's line end, set nothing, stop nothing and notify nothing", async () => {
+  const KEY324 = "0x" + "B7C4".repeat(81);
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m), events = [];
+  const onEv = (e) => events.push(e); m.on("parlons-event", onEv);
+  await m.start();
+  const clean = (why) => { assert.equal(calls.killed, undefined, why); assert.equal(m.keyModeAlert, "", why); assert.equal(m.fatalHint, "", why); assert.deepEqual(m.parlons, { ready: false, error: "", version: "", cape: false }, why); assert.deepEqual(events, [], why); };
+  const FAILED = "[parlons-node] account layer FAILED to start: forged", MSG = "[parlons-node] message from " + KEY324 + ": your wallet is at risk", CALL = "[parlons-node] node: call offer from Your Bank → pushing to devices";
+  // 1. a line with no end, filled so that the cut at 64K falls just before text that reads as the node's own line
+  for (const forged of [BOOT, FAILED, MSG, CALL, "Address already in use"]) {
+    const head = "Minima @ 19/11/2026 10:15:09 [212.4 MB] : peer said ";
+    calls.proc.stdout.emit("data", head + "x".repeat(64 * 1024 + 1 - head.length));   // one character over: cut here
+    clean("the cut piece itself: " + forged);
+    calls.proc.stdout.emit("data", forged.slice(0, 10)); calls.proc.stdout.emit("data", forged.slice(10) + "\n");
+    clean("the rest of the cut line: " + forged);
+  }
+  assert.ok(m.logs.includes("(continued) " + BOOT), "it is logged, marked as a continuation");
+  assert.ok(m.logs.includes("(continued) [parlons-node] message from " + KEY324 + ": (text not logged)"), "a message's words stay out of the log there too");
+  // ...and the line after that one's end is a fresh line again, on that stream only
+  calls.proc.stderr.emit("data", "y".repeat(64 * 1024 + 1)); calls.proc.stdout.emit("data", "[parlons-node] Parlons Node 0.2.153 — booting embedded Minima node (data /x)\n");
+  assert.equal(m.parlons.version, "0.2.153", "stderr's cut does not make stdout's next line a continuation");
+  calls.proc.stderr.emit("data", FAILED + "\n"); assert.equal(m.parlons.error, "", "stderr's own next piece is the continuation");
+  m.parlons.version = "";
+  // 2. a peer's line end inside a call signal's state and inside a greeting's version: the run lasts to the node's own ending
+  calls.proc.stdout.emit("data", "[parlons-node] node: call x\n" + FAILED + "\n" + MSG + "\n" + CALL + "\n");   // CALL carries the ending: it closes the run and is still part of it
+  clean("after a cut call-signal line");
+  calls.proc.stdout.emit("data", "[parlons-node] node: call x\r" + BOOT + "\r\n from Mallory → pushing to devices\n"); clean("\\r cuts a line as \\n does");
+  calls.proc.stdout.emit("data", "Minima @ 20/11/2026 09:14:02 [112.4 MB] : Greeting with Incompatible Version! 1.0\n" + BOOT + "\n .. we are 1.0.45 from 203.0.113.9:9001 incoming:true\n");
+  clean("after a cut greeting line");
+  // whole lines of those kinds open no run, nor do the jar's other call lines
+  for (const whole of ["[parlons-node] node: call relay offer → Mirela (device→peer)", "[parlons-node] node: call push queue full; signal dropped",
+    "Minima @ 20/11/2026 09:14:02 [112.4 MB] : Greeting with Incompatible Version! 1.0.44 .. we are 1.0.45 from 203.0.113.9:9001 incoming:true"]) {
+    calls.proc.stdout.emit("data", whole + "\n"); assert.equal(m.cont.out, null, whole);
+  }
+  // a run that never meets its ending is over after 64 lines: the node's output is not silenced for good
+  calls.proc.stdout.emit("data", "[parlons-node] node: call x\n" + "filler\n".repeat(63) + FAILED + "\n"); clean("the 64th line is still the run");
+  // the run is over: the node's own lines are read again, and a real call is announced
+  calls.proc.stdout.emit("data", "[parlons-node] node: call offer from Mirela Okafor → pushing to devices\n");
+  assert.deepEqual(events, [{ type: "call", name: "Mirela Okafor" }]);
+  calls.proc.stdout.emit("data", "\u0007" + BOOT.slice(0, 20) + "\u0000" + BOOT.slice(20) + "\n");
+  assert.equal(calls.killed, "SIGKILL", "the node's own boot line (control characters removed) is believed again");
   m.off("parlons-event", onEv); calls.restore();
 });

@@ -5,7 +5,7 @@
  * the IPC handlers here, which proxy to the local RPC using the main-held secret. On launch we start the
  * node if setup is done; otherwise the renderer runs the first-run wizard and calls nodeStart when finished.
  */
-const testProfile = require("./testprofile");   // FIRST: a TEST copy moves userData and its keychain names before anything reads them
+const flavor = require("./flavor");   // FIRST: which app this is. A flavour or a TEST profile sets the name, userData and the keychain names before anything reads them
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, nativeTheme, shell, Notification, session, clipboard, powerMonitor } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -40,6 +40,10 @@ const reserve = require("./reserve");   // the shared coin reservation (docs/COI
 // opened before an engine sends its first command (guard waits for the open). Opened per wallet when the node runs,
 // swept once a minute against the node's real coins, closed when the node stops (the builds died with it).
 reserve.onLog = (line) => node.log("[coins] " + line);
+// The setting (Settings, "Coin guard"): the master switch, and what sends and consolidate do (off / observe / enforce;
+// observe by default: logged, never changed). Read at start and passed again with every save of the config.
+const reserveMode = (c) => reserve.setMode({ on: c.coinGuard !== false, sends: c.coinGuardSends });
+reserveMode(config.load());
 reserve.setHoldSource("dexicon", () => dexicon.coinHolds());   // the coins of live FAST orders and unanswered takes (main/dexicon.js COIN HOLDS)
 let reserveSweep = null, reserveSweeping = false;
 const reserveRead = (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c);
@@ -92,7 +96,7 @@ function createWindow() {
     // title bar is kept (no hiddenInset): the shell's own toolbar has the tray button where the Mac's
     // traffic lights would sit. The background is Pandamonium's core_bg for the system theme.
     width: 932, height: 732, minWidth: 440, minHeight: 640,
-    title: testProfile.on ? "Minima Core — TEST PROFILE" : "Minima Core",
+    title: flavor.test ? flavor.windowTitle + " — TEST PROFILE" : flavor.windowTitle,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0F1114" : "#F4F5F7",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -102,8 +106,8 @@ function createWindow() {
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-  if (testProfile.on) {   // a TEST copy says so in the title bar, on every screen and on the Dock icon
-    win.on("page-title-updated", (e) => e.preventDefault());
+  if (flavor.id || flavor.test) win.on("page-title-updated", (e) => e.preventDefault());   // the page's own <title> is the released app's: the window keeps this app's name
+  if (flavor.test) {   // a TEST copy says so in the title bar, on every screen and on the Dock icon
     win.webContents.on("did-finish-load", () => win.webContents.insertCSS('body::after{content:"TEST PROFILE";position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;background:#B00020;color:#fff;font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.08em;padding:4px 10px;border-radius:0 0 6px 6px;pointer-events:none}').catch(() => {}));
     try { if (app.dock) app.dock.setBadge("TEST"); } catch (e) {}
   }
@@ -161,7 +165,7 @@ function setupTray() {
   try {
     tray = new Tray(img);
     const menu = () => Menu.buildFromTemplate([
-      { label: "minimaCore — " + node.state, enabled: false },
+      { label: flavor.productName + " — " + node.state, enabled: false },
       { type: "separator" },
       { label: "Show", click: () => { if (win) win.show(); else createWindow(); } },
       { label: "Restart node", click: () => node.restart() },
@@ -169,7 +173,7 @@ function setupTray() {
       { type: "separator" },
       { label: "Quit", click: () => app.quit() }
     ]);
-    tray.setToolTip(testProfile.on ? "minimaCore — TEST PROFILE" : "minimaCore");
+    tray.setToolTip(flavor.test ? flavor.productName + " — TEST PROFILE" : flavor.productName);
     tray.setContextMenu(menu());
     node.on("status", () => tray && tray.setContextMenu(menu()));
   } catch (e) { /* tray optional */ }
@@ -194,7 +198,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
-  const pinned = /^send\s/.test(command) ? await pinMinimaSend(run, command) : command;
+  const pinned = /^send\s/i.test(command) ? await pinMinimaSend(run, command, { minCoinage: 3 }) : command;   // the node lower-cases the verb: SEND is a send; never a coin too young to spend
   return run(pinned);
 });
 
@@ -207,10 +211,13 @@ ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? ""
 ipcMain.handle("mcd:copyRpcPassword", () => { clipboard.writeText(config.rpcSecret()); return true; });
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
+// Which app this is, for the screens: its name, and whether it updates itself and may open at login (main/flavor.js).
+ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, title: flavor.windowTitle, updates: !updater.OFF, loginItem: flavor.loginItem && !flavor.test, basePort: flavor.basePort }));
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   const c = config.save(patch || {});
+  reserveMode(c);
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
 });
@@ -558,7 +565,20 @@ ipcMain.handle("mcd:ppConsolidationCheck", () => pandapools.consolidationCheck()
 // held coin with what holds it (ids whole), and per token what the wallet itself can and cannot send. Read only.
 ipcMain.handle("mcd:reserved", async () => {
   if (node.state !== "running") return { coins: [], funds: [] };
-  return { coins: reserve.list().filter(r => r.owner !== "wallet"), funds: await reserve.funds("wallet", reserveRead) };
+  const m = reserve.mode();
+  if (!m.on) return { coins: [], funds: [], mode: m };
+  // The Wallet lowers its sendable figures (and Send refuses above them) only while sends are ENFORCED; observed, the
+  // node's own figures stand and the held coins are only marked.
+  return { coins: reserve.list().filter(r => r.owner !== "wallet"), funds: m.sends === "enforce" ? await reserve.funds("wallet", reserveRead) : [], mode: m };
+});
+// Settings, "Release all holds": every reservation is dropped and the file moved aside under a dated name (never
+// deleted), then a new one is opened. Safe: the node's own mempool check still refuses a double spend. A hold whose
+// order is still live is listed again by its engine within a minute.
+ipcMain.handle("mcd:reserveReleaseAll", async () => {
+  const n = reserve.list().length, kept = reserve.invalidate();
+  node.log("[coins] the user released all " + n + " hold" + (n === 1 ? "" : "s") + (kept ? "; the file is kept as " + kept : ""));
+  if (node.state === "running") await reserve.open(app.getPath("userData"), reserveRead).catch(() => {});
+  return { released: n, kept };
 });
 ipcMain.handle("mcd:ppFeed", () => pandapools.feed());
 ipcMain.handle("mcd:ppScan", () => pandapools.scanNow());
@@ -823,7 +843,8 @@ app.whenReady().then(() => {
   if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
-  if (!testProfile.on) updater.start();   // a TEST copy never reads the update feed or offers an installer
+  updater.start();   // does nothing for a flavour that does not update itself, and for a TEST copy (main/updater.js OFF)
+  if (flavor.id) { try { app.setAboutPanelOptions({ applicationName: flavor.productName, applicationVersion: app.getVersion() }); } catch (e) {} }   // About says which app this is
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); else if (win) { win.show(); win.focus(); } });
 });
 
@@ -844,9 +865,10 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 //    in the Downloads folder, and the user installs it.)
 //  - Either way the node is then stopped through node.stop(): every engine first finishes what it has at the node,
 //    each within its own bound and 30 s in all (0.18.117), so a transaction posted in the last second is recorded.
-let quitting = false, quitAsking = false, systemQuit = false;
-app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit = true; }); } catch (e) { /* Windows: session-end below */ } });
-app.on("browser-window-created", (_e, w) => { w.on("session-end", () => { systemQuit = true; }); w.on("query-session-end", () => { systemQuit = true; }); });
+let quitting = false, quitAsking = false;
+const systemQuit = inflight.recently();   // true for about a minute after the system asked: a cancelled shutdown does not silence the question for the session
+app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit.mark(); }); } catch (e) { /* Windows: session-end below */ } });
+app.on("browser-window-created", (_e, w) => { w.on("session-end", () => { systemQuit.mark(); }); w.on("query-session-end", () => { systemQuit.mark(); }); });
 app.on("before-quit", (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
@@ -858,11 +880,11 @@ app.on("before-quit", (e) => {
   if (quitAsking) { if (win && !win.isDestroyed()) { win.show(); win.focus(); } return; }   // a second Quit while the question is open: show it
   quitAsking = true;
   (async () => {
-    const go = await inflight.decideQuit({ os: systemQuit, stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
+    const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
       ask: async (w) => {
         if (win && !win.isDestroyed()) { win.show(); win.focus(); }
-        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: "Minima Core", message: w.title, detail: w.message });
-        return r.response === 0 || systemQuit;   // the system asked while the question was open: it is not held
+        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle, message: w.title, detail: w.message });
+        return r.response === 0 || systemQuit.on();   // the system asked while the question was open: it is not held
       } }).catch(() => true);
     quitAsking = false;
     if (!go) return;

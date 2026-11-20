@@ -145,7 +145,7 @@ test("RULE 2 on the rooms: the dollar token is written MxUSD; the engine's own k
   assert.ok(pp.includes('"Get MxUSD first"'), "the create gate names the token correctly");
   const PP = require("../renderer/dexicon-pp.js"), AX = require("../renderer/dexicon-ax.js");
   assert.equal(PP.tokLabel(PP.MXUSD || "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "USDT"), "MxUSD", "by token id, whatever the name says");
-  assert.equal(PP.tokLabel("0x" + "EE".repeat(32), "MxUSD"), "MxUSD (not MxUSD)");
+  assert.equal(PP.tokLabel("0x" + "EE".repeat(32), "MxUSD"), "(not MxUSD) \u2068MxUSD\u2069");
   // room 1 reads the engine's "mxusdt" key and "mxUSDT" label and writes MxUSD: every literal left is a key, a storage name or the rewrite itself
   for (const line of ax.split("\n").filter((l) => /mxusdt/i.test(l))) assert.ok(/["'`]mxusdt["'`]|mxusdt:|\.mxusdt|mxUSDT\/gi?|\/.*mxusdt.*\/i?/i.test(line), "room 1 shows mxUSDT to the user: " + line.trim().slice(0, 160));
   assert.equal(AX.ccyName ? AX.ccyName("mxusdt") : "MxUSD", "MxUSD");

@@ -76,9 +76,10 @@ test("wiring: one gather for Shutdown and Quit; the quit is asked before the nod
   assert.match(pre, /inFlight: \(how\) => ipcRenderer\.invoke\("mcd:inFlight", how\)/); assert.match(app, /api\.inFlight\("shutdown"\)/);
   assert.ok(!/mcd:ppWork|mcd:dxWork/.test(main + pre), "the two reads the old Shutdown warning used are gone with it");
   const q = main.slice(main.indexOf('app.on("before-quit"'), main.indexOf("// ---- ", main.indexOf('app.on("before-quit"')) > 0 ? undefined : undefined);
-  const order = ["if (quitting) return;", "e.preventDefault();", "inflight.decideQuit({ os: systemQuit, stopped: node.state === \"stopped\", gather: inFlightWork", "if (!go) return;", "quitting = true;", "await node.stop()", "app.quit();"].map((x) => q.indexOf(x));
+  const order = ["if (quitting) return;", "e.preventDefault();", "inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === \"stopped\", gather: inFlightWork", "if (!go) return;", "quitting = true;", "await node.stop()", "app.quit();"].map((x) => q.indexOf(x));
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "held, asked, and only then the node is stopped and the app quits: " + order);
-  assert.match(main, /powerMonitor\.on\("shutdown", \(\) => \{ systemQuit = true; \}\)/); assert.match(main, /w\.on\("session-end", \(\) => \{ systemQuit = true; \}\)/);
+  assert.match(main, /powerMonitor\.on\("shutdown", \(\) => \{ systemQuit\.mark\(\); \}\)/); assert.match(main, /w\.on\("session-end", \(\) => \{ systemQuit\.mark\(\); \}\)/);
+  assert.match(main, /const systemQuit = inflight\.recently\(\);/); assert.ok(!/systemQuit = true|os: systemQuit,|\|\| systemQuit;/.test(main), "no flag that stays set for the session");
   assert.match(main, /buttons: \["Quit anyway", "Stay open"\], defaultId: 1, cancelId: 1/, "Enter and Esc both stay open");
   assert.match(main, /win\.on\("close", e => \{ if \(quitting\) return; e\.preventDefault\(\); if \(process\.platform === "darwin"\) win\.hide\(\); else app\.quit\(\); \}\);/, "off the Mac, closing the window asks through the same quit");
   assert.match(main, /node\.onStopping = \(\) => Promise\.all\(\[dexicon\.stop\(\), atomix\.quiet\(10000\), pandapools\.quiet\(10000\)\]\);/, "the bounded drain every quit goes through (0.18.117)");
@@ -96,4 +97,19 @@ test("AtomiX activeWork gives the nearest time limit of an unfinished swap: seco
     atomix._setCtx({ READY: true, AX: A([{ hash: "0xB", status: "LOCKED", myTimelock: TIP + 36, myLegIsMinima: true }]) });
     assert.equal((await atomix._activeWorkFrom(atomix._ctx().AX, 0, NOW)).nearestMs, null, "not known is null, never a guess");
   } finally { atomix._setCtx(null); }
+});
+
+// ---- 0.19.103 ----
+test("a cancelled system shutdown does not silence the Quit question for the session: the system's word lasts about a minute", async () => {
+  const { recently, decideQuit } = require("../main/inflight"), clock = { t: 1e12 }, sys = recently(undefined, () => clock.t);
+  assert.equal(sys.on(), false, "never asked");
+  sys.mark(); assert.equal(sys.on(), true);
+  clock.t += 59999; assert.equal(sys.on(), true, "inside the minute a real shutdown is still not held");
+  clock.t += 1; assert.equal(sys.on(), false, "a minute on, the shutdown was cancelled: it is the user's quit again");
+  // through the quit itself: the same work in flight, asked or not by the clock alone
+  const work = async () => ({ atomix: { ready: true, swaps: ["0x" + "51".repeat(32)], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], dexicon: { ready: true, orders: [], pending: 0, takes: 0, unknown: 0 } });
+  const quit = async () => { const asked = []; const go = await decideQuit({ os: sys.on(), stopped: false, gather: work, log() {}, ask: async (w) => { asked.push(w.title); return false; } }); return { go, asked: asked.length }; };
+  sys.mark(); assert.deepEqual(await quit(), { go: true, asked: 0 }, "the system is shutting down: not held");
+  clock.t += 61000; assert.deepEqual(await quit(), { go: false, asked: 1 }, "later, Cmd-Q with a swap in flight is asked again");
+  sys.mark(); clock.t += 30000; sys.mark(); clock.t += 45000; assert.equal(sys.on(), true, "a second word from the system starts the minute again");
 });

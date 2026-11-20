@@ -149,7 +149,7 @@ async function create(opts) {
   const state = '{"0":"' + addr0x + '","1":"' + amount + '","2":"' + startBlock + '","3":"' + endBlock + '","4":"' + minblockwait + '","5":"' + now + '","6":"' + Number(startMs) + '","7":"' + (Number(graceHours) || 0) + '","8":"' + Number(endMs) + '","199":"' + uid + '"}';
   let cmd = "send debug:false " + (password ? 'password:"' + password + '" ' : "") + "amount:" + amount + " address:" + CONTRACT + " tokenid:" + tokenid + " state:" + state;
   if (burn && Number(burn) > 0) cmd += " burn:" + burn;
-  if (tokenid === "0x00") cmd = await pinMinimaSend(runner, cmd);   // MINIMA lock: dodge shared-node beacon-dust NPE
+  if (tokenid === "0x00") cmd = await pinMinimaSend(runner, cmd, { minCoinage: 3 });   // MINIMA lock: dodge shared-node beacon-dust NPE
   const res = await runner(cmd);
   if (res && (res.status || res.pending)) { emitter.emit("update"); return { ok: true, uid }; }
   throw new Error((res && res.error) || "Lock failed");

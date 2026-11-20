@@ -8,7 +8,7 @@
 const test = require("node:test"), assert = require("node:assert");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), { spawnSync } = require("node:child_process");
 const ROOT = path.resolve(__dirname, "..");
-const NODE_VARS = ["AX_TEST_NODE_RPC", "AX_TEST_NODE_CONTAINER", "AX_TEST_NODE_I_OWN_THIS", "AX_TEST_NODE_EXPECT_ETH", "AX_TEST_CDP_PORT"];
+const NODE_VARS = ["AX_TEST_NODE_RPC", "AX_TEST_NODE_CONTAINER", "AX_TEST_NODE_I_OWN_THIS", "AX_TEST_NODE_ADDRESS", "AX_TEST_NODE_EXPECT_ETH", "AX_TEST_CDP_PORT"];
 
 /** Runs a script with only the stand-in programs on PATH. → { status, out, marks: the programs that were started } */
 function run(script, env = {}, args = []) {
@@ -63,8 +63,10 @@ test("a named and owned node in a container is reached through docker exec of TH
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "hermetic-bin-")), mark = path.join(bin, "STARTED");
     fs.writeFileSync(path.join(bin, "docker"), "#!/bin/sh\necho \"docker $*\" >> \"" + mark + "\"\nexit 1\n", { mode: 0o755 });
     const r = spawnSync(process.execPath, [probe], { env: { PATH: bin, AX_TEST_NODE_RPC: "http://127.0.0.1:19005", AX_TEST_NODE_CONTAINER: "some-test-node", AX_TEST_NODE_I_OWN_THIS: "yes" }, encoding: "utf8", timeout: 30000 });
-    assert.equal(fs.readFileSync(mark, "utf8").trim(), "docker exec some-test-node curl -s -m 60 http://127.0.0.1:19005/status", r.stdout + r.stderr);
-    assert.match(r.stdout, /About to use the node at http:\/\/127\.0\.0\.1:19005 inside the docker container some-test-node\. It will be sent:\n  - status \(a read\)/);
+    // 0.19.103: the FIRST thing sent is `balance`; the stand-in docker answers nothing, so the script stops there and `status` is never sent
+    assert.equal(fs.readFileSync(mark, "utf8").trim(), "docker exec some-test-node curl -s -m 60 http://127.0.0.1:19005/balance", r.stdout + r.stderr);
+    assert.equal(r.status, 2); assert.match(r.stderr, /REFUSED: the node did not answer `balance`.*Nothing else was sent\./s);
+    assert.match(r.stdout, /About to use the node at http:\/\/127\.0\.0\.1:19005 inside the docker container some-test-node\. It will be sent:\n  - balance \(a read, sent FIRST[^\n]*\n  - checkaddress [^\n]*\n  - status \(a read\)/);
     fs.rmSync(bin, { recursive: true, force: true });
   } finally { fs.rmSync(probe, { force: true }); }
 });
@@ -85,22 +87,51 @@ test("no script, package script or workflow names a node: no container name, no 
   assert.ok(!/\|\|\s*["']\w/.test(code(tn).replace(/\|\| ""/g, "")), "test-node.cjs has no default node");
 });
 
-// ---- the TEST copy of the app (scripts/dev-run.sh, main/testprofile.js) ----
-test("TEST profile: refused on, inside or around the real install's folder (any letter case); otherwise its own keychain service name", () => {
-  const { profile } = require("../main/testprofile.js"), REAL = "/Users/x/Library/Application Support/minimaCore";
-  assert.deepEqual(profile({}, REAL), { on: false, dir: "", keychainSuffix: "", error: "" }, "not asked for: the real names, unchanged");
-  for (const bad of [REAL, REAL + "/", REAL + "/node-data", "/Users/x/Library/Application Support/MINIMACORE/sub", "/Users/x/Library/Application Support", "/Users/x", "relative/folder"]) {
-    const p = profile({ MCD_TEST_PROFILE: bad }, REAL);
-    assert.ok(p.on && p.error && p.keychainSuffix === "", bad + " must be refused: " + JSON.stringify(p));
+// ---- 0.19.103: a node that holds funds is refused unless the caller names one of ITS OWN addresses ----
+test("live scripts: `balance` is sent first; any non-zero balance refuses unless AX_TEST_NODE_ADDRESS is an address that node itself owns", async () => {
+  const { balanceProblem } = require("./test-node.cjs"), MINE = "0x" + "AB".repeat(32), THEIRS = "0x" + "CD".repeat(32);
+  const node = (rows, own) => { const sent = []; return { sent, send: async (c) => { sent.push(c); if (c === "balance") return { status: true, response: rows }; if (/^checkaddress address:/.test(c)) return { status: true, response: c.endsWith(own || "-") ? { simple: true, relevant: true } : {} }; throw new Error("sent before the check: " + c); } }; };
+  const zero = [{ tokenid: "0x00", confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0", total: "1000000000" }];
+  const e = node(zero); assert.equal(await balanceProblem(e.send, ""), ""); assert.deepEqual(e.sent, ["balance"], "an empty node: one read, no address needed");
+  for (const rows of [[{ tokenid: "0x00", confirmed: "0.000000001", unconfirmed: "0", sendable: "0" }], [{ tokenid: "0x00", confirmed: "0", unconfirmed: "5", sendable: "0" }], zero.concat([{ tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", confirmed: "12.5", unconfirmed: "0", sendable: "12.5" }])]) {
+    const n = node(rows, MINE);
+    assert.match(await balanceProblem(n.send, ""), /^this node HOLDS FUNDS: .*AX_TEST_NODE_ADDRESS.*Nothing else was sent\.$/); assert.deepEqual(n.sent, ["balance"]);
+    assert.match(await balanceProblem(n.send, THEIRS), /is NOT one of its own\. This is not the node you named the address of\. Nothing else was sent\.$/, "the address of ANOTHER node: a wrong container name cannot pass");
+    assert.equal(await balanceProblem(n.send, MINE), "", "its own address: allowed");
+    assert.match(await balanceProblem(n.send, "0x1234"), /is not a Minima address/);
   }
-  const a = profile({ MCD_TEST_PROFILE: "/Users/x/Library/Application Support/MinimaCoreDesktop-TEST" }, REAL), b = profile({ MCD_TEST_PROFILE: "/tmp/other-test" }, REAL);
-  assert.equal(a.error, ""); assert.match(a.keychainSuffix, /^\.test\.[0-9a-f]{64}$/); assert.notEqual(a.keychainSuffix, b.keychainSuffix, "one name per profile folder");
-  const cfg = fs.readFileSync(path.join(ROOT, "main/config.js"), "utf8"), main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8");
-  assert.match(cfg, /const KEYCHAIN_SERVICE = "com\.eurobuddha\.minimacore\.rpc" \+ require\("\.\/testprofile"\)\.keychainSuffix;/, "every keychain read and write goes under the profile's own service name");
-  assert.equal((cfg.match(/"com\.eurobuddha\.minimacore/g) || []).length, 1, "and there is one service name in the app");
-  assert.ok(main.indexOf('require("./testprofile")') < main.indexOf('require("./config")') && main.indexOf('require("./testprofile")') < main.indexOf("requestSingleInstanceLock"), "the profile is set before the config, the keychain or the single-instance lock is touched");
-  assert.match(main, /if \(!testProfile\.on\) updater\.start\(\);/, "a TEST copy does not read the update feed");
-  assert.match(fs.readFileSync(path.join(ROOT, "main/loginitem.js"), "utf8"), /if \(process\.env\.MCD_TEST_PROFILE\) return \{ ok: false, on, note: "not registered: TEST profile" \};/);
+  const custody = (await balanceProblem(node([{ tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", confirmed: "1", unconfirmed: "0", sendable: "1" }]).send, ""));
+  assert.ok(custody.includes("token 0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90"), "a token id is printed whole");
+  // unreadable is never "empty"
+  assert.match(await balanceProblem(async () => { throw new Error("ECONNREFUSED"); }, MINE), /did not answer `balance`/);
+  assert.match(await balanceProblem(async () => ({ status: false, error: "x" }), MINE), /could not be read/);
+  assert.match(await balanceProblem(async (c) => (c === "balance" ? { status: true, response: [{ tokenid: "0x00", confirmed: "1", unconfirmed: "0", sendable: "1" }] } : { status: false }), MINE), /is NOT one of its own/);
+  // through testNode: the caller's first command waits for the check, and a refusal ends the script before it is sent
+  const probe = path.join(os.tmpdir(), "hermetic-bal-" + process.pid + ".cjs");
+  fs.writeFileSync(probe, `const sent = []; const t = require(${JSON.stringify(path.join(ROOT, "scripts/test-node.cjs"))});
+    const rows = JSON.parse(process.env.ROWS);
+    const n = t.testNode(["vault action:seed"], process.env, async (c) => { sent.push(c); process.stdout.write("SENT " + c + "\\n"); if (c === "balance") return { status: true, response: rows }; if (/^checkaddress/.test(c)) return { status: true, response: c.endsWith(process.env.OWN) ? { simple: true } : {} }; return { status: true, response: {} }; });
+    Promise.all([n.run("vault action:seed"), n.run("keys")]).then(() => { process.stdout.write("DONE " + sent.join(" | ") + "\\n"); });`);
+  try {
+    const go = (env) => spawnSync(process.execPath, [probe], { env: Object.assign({ PATH: "/nonexistent", AX_TEST_NODE_RPC: "http://127.0.0.1:1", AX_TEST_NODE_I_OWN_THIS: "yes", OWN: MINE }, env), encoding: "utf8", timeout: 30000 });
+    const funded = JSON.stringify([{ tokenid: "0x00", confirmed: "7", unconfirmed: "0", sendable: "7" }]);
+    let r = go({ ROWS: JSON.stringify(zero) }); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /DONE balance \| vault action:seed \| keys\n$/, "one balance read, then the commands");
+    r = go({ ROWS: funded }); assert.equal(r.status, 2); assert.ok(!/SENT vault|SENT keys/.test(r.stdout), "the seed read never left"); assert.match(r.stderr, /REFUSED: this node HOLDS FUNDS: MINIMA \(confirmed 7, unconfirmed 0\)/);
+    r = go({ ROWS: funded, AX_TEST_NODE_ADDRESS: THEIRS }); assert.equal(r.status, 2); assert.ok(!/SENT vault/.test(r.stdout)); assert.match(r.stderr, /is NOT one of its own/);
+    r = go({ ROWS: funded, AX_TEST_NODE_ADDRESS: MINE }); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /DONE balance \| checkaddress address:0xAB[AB]{62} \| vault action:seed \| keys\n$/);
+  } finally { fs.rmSync(probe, { force: true }); }
+});
+
+// ---- the TEST copy of the app (scripts/dev-run.sh, main/flavor.js) ----
+// What the TEST profile may and may not be is tested with the flavours, in scripts/flavor-test.cjs (0.19.105).
+test("TEST profile: one mechanism (main/flavor.js) sets the folder, the name and the keychain service before anything reads them", () => {
+  const cfg = fs.readFileSync(path.join(ROOT, "main/config.js"), "utf8"), main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), fl = fs.readFileSync(path.join(ROOT, "main/flavor.js"), "utf8");
+  assert.match(cfg, /const KEYCHAIN_SERVICE = flavor\.keychainService;/, "every keychain read and write goes under the flavour's (and the profile's) own service name");
+  assert.equal((cfg.match(/com\.eurobuddha\./g) || []).length, 0, "no service name is written in main/config.js");
+  assert.ok(main.indexOf('require("./flavor")') < main.indexOf('require("./config")') && main.indexOf('require("./flavor")') < main.indexOf("requestSingleInstanceLock"), "applied before the config, the keychain or the single-instance lock is touched");
+  assert.match(fl, /const released = path\.join\(String\(appData \|\| ""\), RELEASED\.userData\)/, "the released folder comes from appData, never from userData");
+  assert.match(fs.readFileSync(path.join(ROOT, "main/updater.js"), "utf8"), /const OFF = !flavor\.updates \|\| flavor\.test;/, "a TEST copy does not read the update feed");
+  assert.match(fs.readFileSync(path.join(ROOT, "main/loginitem.js"), "utf8"), /if \(flavor\.test\) return \{ ok: false, on, note: "not registered: TEST profile" \};/);
 });
 
 test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies jars only with --jars; fetches nothing; opens no debugging port", () => {
@@ -109,7 +140,8 @@ test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies 
   assert.equal((sh.replace(/<<MSG[\s\S]*?\nMSG\n/, "").match(/^\s*cp /gm) || []).length, 1, "one copy, the --jars one (the copy commands in the refusal are text)");
   assert.ok(sh.indexOf('if [ -n "$JARS" ]; then') < sh.indexOf('cp "${found[0]}"') && sh.indexOf('cp "${found[0]}"') < sh.indexOf("\nfi\nmissing=0"), "and it is inside the --jars branch");
   for (const must of ["is, or is inside, the real install's folder", "contains the real install's folder", "was not created by this script", "something is already listening on port(s)", "12001 is the real app's default base port",
-    "shasum -a 256", "minima-1.1.2.31-euro5.jar", "parlons-node-0.2.153.jar", "desktop/minimacore-desktop/resources/minima.jar", 'MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT" --user-data-dir="$PROFILE"'])
+    "shasum -a 256", "minima-1.1.2.31-euro5.jar", "parlons-node-0.2.153.jar", "desktop/minimacore-desktop/resources/minima.jar", 'MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT"\n', "17001 is Pandamonium Desktop's default base port"])
     assert.ok(sh.includes(must), "dev-run.sh: " + must);
-  assert.ok(sh.indexOf("for off in 0 1 2 3 4 584 586") < sh.indexOf('mkdir -p "$PROFILE"'), "the ports are probed before anything is created");
+  assert.ok(sh.indexOf("for off in 0 1 2 3 4 5 584 586") < sh.indexOf('mkdir -p "$PROFILE"'), "the ports are probed before anything is created");
+  assert.ok(!/--user-data-dir=/.test(sh.replace(/^\s*#.*$/gm, "")), "the app is started without --user-data-dir: it refuses the switch and sets its folder itself (0.19.105)");
 });

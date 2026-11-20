@@ -98,4 +98,12 @@ async function decideQuit(d) {
   return go;
 }
 
-module.exports = { inFlight, decideQuit, clock };
+/**
+ * "The system asked this app to quit" (logout, restart, power off), true for a while after the system said so and
+ * then no longer (0.19.103). It used to be a flag that stayed set for the rest of the session: a shutdown the user
+ * CANCELLED (macOS asks every app first, and any app may refuse) left it set, and every later Quit went through with
+ * no question, whatever was in flight. A real shutdown ends the app well inside the minute.
+ */
+function recently(ms = 60000, now = Date.now) { let at = 0; return { mark() { at = now(); }, on: () => at > 0 && now() - at < ms }; }
+
+module.exports = { inFlight, decideQuit, clock, recently };
