@@ -2038,7 +2038,7 @@ async function renderSettings() {
     } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
     el("setKindApply").disabled = false;
   };
-  el("setReveal").onclick = async () => { const v = await tryCmd("vault"); const p = seedFrom(v); if (!p) { toast("Couldn't read the seed.", "err"); return; } el("setSeed").style.display = ""; el("setSeed").textContent = p; };
+  el("setReveal").onclick = () => settingsRevealSeed();
   el("setRestore").onclick = () => showRestoreOverlay();
   el("setResyncAdv").onclick = () => { el("setResyncAdvBox").style.display = el("setResyncAdv").checked ? "" : "none"; };
   el("setResync").onclick = async () => {
@@ -2663,6 +2663,21 @@ function ewSettingsDialog(b) {
 
 // 0.18.152: the typed phrase, then the system's prompt where Electron offers one (Touch ID on a Mac that has it), both
 // checked in the main process. The ETH Wallet and the AtomiX panel both come here; no other way to the key exists.
+// Settings' Reveal seed phrase (0.18.165): the typed phrase, then the system's prompt where there is one, both checked in
+// the main process (main/seedgate.js). The phrase is shown as text for a minute at most and only while the window is in front.
+async function settingsRevealSeed() {
+  const typed = await showPrompt("Reveal seed phrase", "", "SHOW SEED", { ok: "Show the seed",
+    message: "Anyone who sees these words controls every coin of this wallet, permanently. Only continue if you are alone. Type SHOW SEED to continue." });
+  if (typed == null) return;
+  let r; try { r = await api.seedReveal(typed); } catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /SHOW SEED/.test(m) ? "Type SHOW SEED exactly to continue." : "Couldn't read the seed.", "err"); return; }
+  const box = el("setSeed"); if (!box || !r || !r.phrase) { toast("Couldn't read the seed.", "err"); return; }
+  box.style.display = ""; box.textContent = r.phrase + (r.system === true ? "" : "\n\nNo system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.") + "\n\nThis hides itself after 60 seconds, and when you leave this window.";
+  r.phrase = null;
+  const hidden = () => { if (document.hidden) hide(); };
+  const hide = () => { clearTimeout(timer); window.removeEventListener("blur", hide); document.removeEventListener("visibilitychange", hidden); box.textContent = ""; box.style.display = "none"; };
+  const timer = setTimeout(hide, 60000);
+  window.addEventListener("blur", hide); document.addEventListener("visibilitychange", hidden);
+}
 async function ewExportKey() {
   const typed = await showPrompt("Export ETH private key", "", "SHOW KEY", { ok: "Show the key",
     message: "This key controls your ETH funds, and it is the key AtomiX swaps sign with. Anyone who sees it can take them, permanently. It is derived from your Minima node seed. Never share it or type it into a website. Type SHOW KEY to continue." });

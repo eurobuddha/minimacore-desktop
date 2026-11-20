@@ -546,6 +546,9 @@ ipcMain.handle("mcd:ewRemoveToken", (_e, addr) => ethwallet.removeToken(addr));
 ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
 ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
 ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
+// The seed phrase for Settings' Reveal (0.18.165): the typed phrase and the system's prompt, both here (main/seedgate.js).
+ipcMain.handle("mcd:seedReveal", (_e, typed) => { requireRunning(); const { systemPreferences } = require("electron"); return require("./seedgate").revealSeedGated(typed, {
+  can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 // The ETH key: the typed phrase and, where the system offers one, its own prompt, both here (main/ethwallet.js exportKeyGated).
 ipcMain.handle("mcd:ewExportKey", (_e, typed) => { const { systemPreferences } = require("electron"); return ethwallet.exportKeyGated(typed, {
   can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }); });

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.165] — Settings: the seed phrase is shown only through a gate
+
+- Settings' "Reveal seed phrase" put the seed on the screen with one click. It now asks for the typed phrase SHOW SEED and, where the system offers it, the Touch ID prompt, both checked in the main process before the node is asked for its seed (`main/seedgate.js`, `mcd:seedReveal`). The phrase is shown as text, says when no system check took place, and hides itself after 60 seconds and when the window is left. No copy is offered (the screen never had one). Not changed: the Terminal still accepts `vault` and `seedrandom` (an open owner decision), and the first-run backup screen still shows the new seed with one click. Test: `scripts/ethkey-test.cjs`.
+
 ## [0.18.164] — miniMall: a peer's message is never stored as sent
 
 - An order line was stored as the buyer sent it, so items nested 12,000 arrays deep made every later save of `shop.json` throw (the error was swallowed: nothing was saved for the session), and a nested `quantity` (or any field turned into text) threw and stopped the whole order scan. Every stored line is now rebuilt from capped primitives only (product 200, quantity 12, unitPrice 80, lineTotal 80, size 60, nftTokenId 66, nftStateIdx 12, nftBundle 12; anything else dropped); the buyer's amount (80) and every other string a peer sends are primitives cut to length, never converted or used as a key as they came (shopId, status, randomid, date too); one stored order is at most 48 KB; each coin of the scan is handled on its own (a failure is logged and the batch goes on); a save that fails is logged. Test: `scripts/shop-test.cjs`.

@@ -78,3 +78,35 @@ test("the key dialog: the key is text in one node, Copy goes through the secret 
   t.E.win.blur(); assert.equal(t.E.removed, 1, "the window lost focus"); assert.equal(t.E.timers[0].on, false);
   t = make(); t.fn("0xKEY", true); t.E.doc.visibilitychange(); assert.equal(t.E.removed, 0, "still visible"); t.E.hidden = true; t.E.doc.visibilitychange(); assert.equal(t.E.removed, 1, "hidden");
 });
+
+// ---- 0.18.165: Settings' Reveal seed phrase goes through the same kind of gate ----
+test("seed reveal: no node command without the typed phrase and, where offered, the system's prompt", async () => {
+  const { revealSeedGated } = require("../main/seedgate");
+  const sent = [], run = async (c) => { sent.push(c); return { status: true, response: { phrase: "ONE TWO THREE" } }; };
+  for (const typed of [undefined, "", "show seed", "SHOW KEY", "yes"]) await assert.rejects(revealSeedGated(typed, { can: () => true, prompt: async () => {} }, run), /Type SHOW SEED/);
+  await assert.rejects(revealSeedGated("SHOW SEED", { can: () => true, prompt: async () => { throw new Error("no"); } }, run), /^Error: Cancelled$/);
+  assert.deepEqual(sent, [], "nothing asked of the node before both checks");
+  assert.deepEqual(await revealSeedGated(" SHOW SEED ", { can: () => true, prompt: async () => {} }, run), { phrase: "ONE TWO THREE", system: true });
+  assert.deepEqual(await revealSeedGated("SHOW SEED", null, run), { phrase: "ONE TWO THREE", system: false });
+  assert.deepEqual(sent, ["vault", "vault"]);
+  await assert.rejects(revealSeedGated("SHOW SEED", null, async () => ({ status: true, response: {} })), /Couldn't read the seed/);
+  assert.ok(/ipcMain\.handle\("mcd:seedReveal", \(_e, typed\) => \{ requireRunning\(\);[^\n]*revealSeedGated\(typed, \{/.test(mainJs));
+  assert.ok(/el\("setReveal"\)\.onclick = \(\) => settingsRevealSeed\(\);/.test(app) && !/setReveal[^\n]*tryCmd\("vault"\)/.test(app), "Settings no longer reads the seed with one click");
+});
+test("seed reveal screen: shown as text, hidden after 60 s and when the window is left", async () => {
+  const i = app.indexOf("\nasync function settingsRevealSeed("), src = app.slice(i, app.indexOf("\n}\n", i) + 3);
+  const make = (answer) => {
+    const E = { timers: [], win: {}, doc: {}, hidden: false, box: { style: { display: "none" }, textContent: "" }, toasts: [] };
+    const bag = (b) => ({ addEventListener: (n, f) => { b[n] = f; }, removeEventListener: (n, f) => { if (b[n] === f) delete b[n]; } });
+    const document = Object.assign({ get hidden() { return E.hidden; } }, bag(E.doc));
+    const fn = new Function("document", "window", "el", "api", "toast", "showPrompt", "setTimeout", "clearTimeout", src + "\nreturn settingsRevealSeed;")(
+      document, bag(E.win), (id) => (id === "setSeed" ? E.box : null), { seedReveal: async (t) => { E.typed = t; return answer; } }, (t) => E.toasts.push(t), async () => "SHOW SEED",
+      (f, ms) => { E.timers.push({ f, ms, on: true }); return E.timers.length - 1; }, (t) => { if (E.timers[t]) E.timers[t].on = false; });
+    return { E, fn };
+  };
+  let t = make({ phrase: "ONE TWO", system: false }); await t.fn();
+  assert.equal(t.E.typed, "SHOW SEED"); assert.ok(t.E.box.textContent.startsWith("ONE TWO\n\nNo system check took place")); assert.equal(t.E.timers[0].ms, 60000);
+  t.E.timers[0].f(); assert.equal(t.E.box.textContent, ""); assert.equal(t.E.box.style.display, "none"); assert.deepEqual(Object.keys(t.E.win), []);
+  t = make({ phrase: "ONE TWO", system: true }); await t.fn(); assert.ok(!/No system check/.test(t.E.box.textContent));
+  t.E.win.blur(); assert.equal(t.E.box.textContent, "", "hidden when the window is left");
+});
