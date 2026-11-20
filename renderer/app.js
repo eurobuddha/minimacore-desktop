@@ -1971,7 +1971,7 @@ function showPayResult(ok, message, txid, ambiguous) {
 // and could not carry the APK's paper palette without leaking it into every other tab. app.js keeps only the
 // wiring: shared dialogs and helpers go in through MailPanel.init, so neither file reaches into the other.
 MailPanel.init({
-  api, esc, el, toast, copy, short, relTime,
+  api, esc, el, toast, copy, relTime,
   showPrompt, showConfirm, showActionSheet, scanQR,
   TOK
 });

@@ -154,3 +154,22 @@ test("the overflow menu is reachable from sub screens and tray apps; an overlayi
   for (const mode of ["sub", "app"]) assert.ok(!hides.includes('data-mode="' + mode + '"] .bar__more'), mode + " screens keep the overflow button");
   assert.ok(/el\("stage"\)\.inert = open && NARROW\.matches/.test(app) && /id="stage"/.test(html), "the screen under an overlaying tray is inert");
 });
+
+
+// 0.19.126: 0.19.125 removed a helper and left its name in MailPanel.init's list, at the top level of app.js: a
+// ReferenceError there stops the script, and with it every screen. No test read the file as a program. This one runs
+// the top level of the renderer's own script against stand-ins: a name that nothing defines throws here.
+function rendererTopLevel(appSource) {
+  const any = () => new Proxy(function () {}, { get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? () => any() : any()), apply: () => any(), construct: () => any() });   // a then() that never answers: boot() stops at its first await
+  const known = new Set(["window", "document", "localStorage", "navigator", "location", "requestAnimationFrame",   // the browser's
+    "MailPanel", "ChatPanel", "TOK", "DexPools", "DexUI", "DexAx", "PoolCalc", "AppsAct"]);                         // the other renderer scripts' (index.html loads them first)
+  const scope = new Proxy({}, { has: (_t, k) => known.has(k), get: (_t, k) => (k === Symbol.unscopables ? undefined : any()) });
+  const src = appSource.replace(/^"use strict";$/mg, "");
+  new Function("__scope", "with (__scope) { (function () { 'use strict';\n" + src + "\n})(); }")(scope);
+}
+test("the renderer's top level runs: no name is used there that nothing defines", () => {
+  rendererTopLevel(app);
+  assert.throws(() => rendererTopLevel(app.replace("api, esc, el, toast, copy, relTime,", "api, esc, el, toast, copy, short, relTime,")), /ReferenceError: short is not defined/, "the 0.19.125 slip is caught");
+  const order = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(order[order.length - 1], "app.js", "app.js is loaded last, after every script whose names it uses");
+});

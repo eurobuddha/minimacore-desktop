@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.126] — 0.19.125 did not load: a removed helper was still named at the top of the renderer
+
+- **The slip:** 0.19.125 removed `short()` and its call sites, but its name was still in the list of helpers handed to the Mail panel (`MailPanel.init({ …, short, … })`), which runs when `renderer/app.js` is loaded. That is a ReferenceError at the top level: the script stops there and no screen is wired. The whole check list was green, because no test ran the file as a program. It was found in the dev preview's console. 0.19.125 must not be built or run.
+- **Fixed:** the name is out of the list (Mail never used it).
+- **Pinned:** `scripts/shell-test.cjs` now runs the top level of `renderer/app.js` against stand-ins; a name nothing defines fails the test, and the test proves it by putting the 0.19.125 line back.
+
 ## [0.19.125] — The send result's transaction id is one click from the clipboard; the helper that once shortened identifiers is gone
 
 - **The wallet send's result dialog** printed its transaction id through `short(txid, 20)`. That helper has returned the whole string since identifiers stopped being shortened, so the id was already whole, but it was plain text in a box that did not wrap a 66-character word. The id is now the app's usual copyable identifier (click it, or "Copy tx id" as before) and wraps inside the dialog.
