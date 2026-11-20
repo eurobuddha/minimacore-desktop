@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.152] — A broken language catalog can no longer stop the main process
+
+- **Fixed (review of 0.19.140 to 0.19.144):** `main/lang.js` is required at the top of `main/main.js` and loaded the four catalogs with plain `require` calls: a catalog file that failed to load (a syntax slip in a later edit) would have stopped the main process before the window opened. Each catalog is now loaded on its own; one that fails is left out (that language is not offered, a saved or system choice of it falls back to English), the others load, and the reason is written once to stderr.
+- Test: `scripts/i18n-test.cjs` loads `main/lang.js` in a child process with the Russian catalog made to throw: the process runs, Russian falls back to English, Chinese still works. It fails on the 0.19.151 code.
+
 ## [0.19.151] — Room ①: the "Market offline" card says its title once, in every language
 
 - **Fixed (review of 0.19.140 to 0.19.144):** the card shown when the node is off while your AtomiX market was on the book drew the title "Market offline" and then the full sentence with the words "Market offline: y" cut off its front by a text match. In Chinese, Russian and Ukrainian the match never hit, so the title appeared twice. `offline()` now returns the body sentence only ("Your Minima node isn't running, …"), and the card draws its title apart; nothing is cut out of a translated text. The English card reads exactly as before.

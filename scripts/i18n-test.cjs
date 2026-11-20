@@ -192,3 +192,16 @@ test("no CSS value is a catalog key, and the pool chart's font is a plain value"
   for (const code of OTHERS) for (const k of Object.keys(I18N.catalog(code))) assert.ok(!/(^|,\s*)(sans-serif|serif|monospace)$|^#[0-9A-Fa-f]{3,8}$|^var\(--/.test(k), code + ": " + k);
   assert.ok(fs.readFileSync(path.join(R, "dexicon-pp.js"), "utf8").includes('font: "Inter, sans-serif"'));
 });
+
+// 0.19.152: a catalog that throws while loading must not stop the main process (main.js requires lang.js at its top)
+test("main/lang.js: a broken catalog is skipped and the app runs in English", () => {
+  const { spawnSync } = require("node:child_process");
+  const probe = `const M = require("module"), real = M.prototype._compile;
+    M.prototype._compile = function (src, file) { if (/i18n[\\\\/]ru\\.js$/.test(file)) throw new SyntaxError("Unexpected token (a broken catalog)"); return real.apply(this, arguments); };
+    const lang = require(${JSON.stringify(path.join(ROOT, "main", "lang.js"))});
+    process.stdout.write(JSON.stringify({ broken: lang.broken, saved: lang.resolve("ru", ""), sys: lang.resolve("", "ru-RU"), set: lang.set("ru"), now: lang.current(), zh: lang.set("zh"), t: lang.t("Language") }));`;
+  const r = spawnSync(process.execPath, ["-e", probe], { encoding: "utf8", env: { PATH: process.env.PATH }, timeout: 30000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { broken: ["ru"], saved: "en", sys: "en", set: false, now: "en", zh: true, t: "语言" }, "Russian is not offered; the others load; nothing stops");
+  assert.match(r.stderr, /\[lang\] the ru catalog could not be loaded, so it is not offered: Unexpected token/);
+});
