@@ -562,6 +562,46 @@ test("H2: the Trade button takes one click at a time, sends what was reviewed, a
   assert.deepEqual(JSON.parse(JSON.stringify(seen.filter(a => a.op === "cmd"))), [{ op: "cmd", command: "block", epoch: 1 }]);
 });
 
+// 0.19.145: whether the buttons are live is decided from what the blocker IS, never from its (translated) text. In 0.19.142 to
+// 0.19.144 the test was /No relay answers/ on the sentence shown: in zh, ru and uk BUY, SELL and BOOK / POOL went dead whenever no relay answered.
+test("Trade buttons: no relay answering leaves BUY / SELL and BOOK / POOL live in every language; no relay set at all stops them", async () => {
+  const vm = require("node:vm"), I18N = require("../renderer/i18n.js");
+  for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const run = async (code, relays) => {
+    const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+      appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
+    const els = {}, listeners = {}, status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays, price: {} };
+    const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+      document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
+    win.window = win;
+    win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async () => ({ status: true, rows: [] }),
+      dxBook: async () => ({ fast: [], book: [{ side: "sell", price: "0.0031", minima: "500" }], poolAsks: [], poolBids: [], pools: [] }),
+      cmd: async () => ({ status: true, response: [{ tokenid: "0x00", sendable: "1000" }, { tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", sendable: "10" }] }) };
+    Object.assign(win, require("./i18n-plain.cjs").globals());
+    I18N.set(code);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+    const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r)); };
+    const shell = win.document.getElementById("shell"); shell.dataset.mode = "dex";
+    win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+    win.DexUI.paint("dexicon"); win.DexUI.render(); await settle();
+    const frame = shell.children.find(c => c.tag === "iframe");
+    listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: { ready: true, relays: relays.map(url => ({ url, state: "bad" })), log: [], fast: [], amount: "", trading: false } } });
+    els.dxPrice.value = "0.0032"; els.dxAmount.value = "100"; els.dxPrice.oninput(); await settle();
+    return els;
+  };
+  try {
+    for (const code of ["en", "zh", "ru", "uk"]) {
+      let els = await run(code, ["https://relay.example/dex-relay"]);
+      assert.equal(els.dxState.hidden, false); assert.equal(els.dxState.textContent, I18N.t("No relay answers right now, so the FAST book may be out of date and a FAST order may not be heard. On-chain orders and pools still work."), code + ": the warning is said, in " + code);
+      assert.equal(els.dxCta.disabled, false, code + ": BUY / SELL stays live when no relay answers");
+      assert.equal(els.dxCta2.disabled, false, code + ": BOOK / POOL (on-chain) stays live when no relay answers");
+      els = await run(code, []);
+      assert.equal(els.dxState.textContent, I18N.t("No relay is set, so there is no FAST book and a FAST order cannot be published. Add a relay in Settings."), code);
+      assert.equal(els.dxCta.disabled, true, code + ": no relay set: stopped"); assert.equal(els.dxCta2.disabled, true, code);
+    }
+  } finally { I18N.set("en"); }
+});
+
 test("the page is served from two pinned folders and nowhere else; its frame has no network", () => {
   const { roomFile, CSP } = require("../main/dexicon-room.js");
   const rel = (f) => f && path.relative(path.join(__dirname, ".."), f);

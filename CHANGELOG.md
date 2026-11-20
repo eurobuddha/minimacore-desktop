@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.145] — Dexicon Trade: the buttons stay live in every language when no relay answers
+
+- **Fixed (from the review of 0.19.140 to 0.19.144):** the Exchange Trade ticket decided whether BUY / SELL and the on-chain BOOK / POOL button were live by matching the English words "No relay answers" in the warning it showed. Since that warning was translated, in 简体中文, Русский and Українська both buttons were disabled whenever no relay answered, even though on-chain orders and pools still work. `blocker()` in `renderer/dexicon-ui.js` now returns what stops trading as `{ text, soft }`, and the buttons follow `soft`, never the text. English behaviour is unchanged.
+- Test: `scripts/dexicon-ui.test.cjs` runs the Trade screen in English, Chinese, Russian and Ukrainian: with no relay answering both buttons are live and the warning is shown in that language; with no relay set at all both are stopped. It fails on the old code in Chinese.
+
 ## [0.19.144] — The main process speaks the app's language: the Quit and Shutdown warning, the tray menu, dialogs, notices
 
 - **The warning before a Quit or a Shutdown** (`main/inflight.js`: unfinished AtomiX swaps, a market or OTC offer on the book, unconfirmed pool transactions, Exchange trades waiting, what could not be checked) is said in the app's language, title, text and both buttons ("Quit anyway" / "Stay open"). It is still ONE builder: each sentence is a catalog key, counts are plural keys ("1 AtomiX swap is…", "2 AtomiX swaps are…"; one / few / many in Russian and Ukrainian), and a translator is passed in. The English it produces is word for word what it was (the nine tests of `scripts/inflight-test.cjs` are unchanged). **The log line on disk stays English**: `decideQuit` builds the same facts a second time with the English translator (`I18N.tIn("en")`).

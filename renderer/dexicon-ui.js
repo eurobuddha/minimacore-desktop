@@ -192,17 +192,18 @@ const DexUI = (() => {
   const fundsNow = () => C.funds(X.bal && X.bal.minima, X.bal && X.bal.mxusd, X.orders, X.fills);
   const lad = () => C.ladder(X.book, X.group);
 
-  /** What stops trading right now, in plain words (empty: nothing does). */
+  /** What stops trading right now: { text, soft } in plain words, or null when nothing does. soft: the FAST layer may be
+   *  deaf but on-chain orders and pools still work, so the buttons stay live. Decided here, never from the (translated) text. */
   function blocker() {
-    if (node.state !== "running") return I18N.t("The node is stopped, so nothing here can trade. Start it and Dexicon comes back by itself.");
-    if (st && st.problem) return st.problem;   // the engine host's own plain sentence (a store that could not be moved aside)
-    if (!st || !st.started || !st.ready) return I18N.t("Dexicon is still starting: it is reading this wallet's trading identity from the node. Nothing can be sent yet.");
-    if (Page.failed) return C.PAGE_FAILED;
-    if (Page.state.idError) return I18N.t("The trading identity could not be read: {idError}", { idError: Page.state.idError });
-    if (!Page.state.ready && !Page.stub) return I18N.t("Dexicon is still starting. Nothing can be sent yet.");
-    if (!(st.relays || []).length) return I18N.t("No relay is set, so there is no FAST book and a FAST order cannot be published. Add a relay in Settings.");
-    if (relayDown()) return I18N.t("No relay answers right now, so the FAST book may be out of date and a FAST order may not be heard. On-chain orders and pools still work.");
-    return "";
+    if (node.state !== "running") return { text: I18N.t("The node is stopped, so nothing here can trade. Start it and Dexicon comes back by itself.") };
+    if (st && st.problem) return { text: st.problem };   // the engine host's own plain sentence (a store that could not be moved aside)
+    if (!st || !st.started || !st.ready) return { text: I18N.t("Dexicon is still starting: it is reading this wallet's trading identity from the node. Nothing can be sent yet.") };
+    if (Page.failed) return { text: C.PAGE_FAILED };
+    if (Page.state.idError) return { text: I18N.t("The trading identity could not be read: {idError}", { idError: Page.state.idError }) };
+    if (!Page.state.ready && !Page.stub) return { text: I18N.t("Dexicon is still starting. Nothing can be sent yet.") };
+    if (!(st.relays || []).length) return { text: I18N.t("No relay is set, so there is no FAST book and a FAST order cannot be published. Add a relay in Settings.") };
+    if (relayDown()) return { text: I18N.t("No relay answers right now, so the FAST book may be out of date and a FAST order may not be heard. On-chain orders and pools still work."), soft: true };
+    return null;
   }
   const relayDown = () => { const r = (Page.state.relays || []).filter(x => !x.found); return r.length > 0 && !r.some(x => x.state === "ok") && r.some(x => x.state === "bad"); };
 
@@ -236,7 +237,7 @@ const DexUI = (() => {
       // Orders (0.18.121): what the page and the service last said is shown here too. The market maker's dialogs are the
       // page's own, and what they answer (a ladder that was not saved, a refused cancel or change) was only in the Trade log.
       const says = tab === "orders" ? C.pageSays(Page.state, X.svc) : { lines: [] };
-      const why = blocker(), top = (why ? `<div class="dx-state" role="status">${esc(why)}</div>` : "") + (X.said ? `<div class="dx-state dx-state--${X.said.kind}" role="alert">${esc(X.said.text)}</div>` : "")
+      const why = blocker(), top = (why ? `<div class="dx-state" role="status">${esc(why.text)}</div>` : "") + (X.said ? `<div class="dx-state dx-state--${X.said.kind}" role="alert">${esc(X.said.text)}</div>` : "")
         + (says.lines.length ? `<div class="dx-state${says.error ? " dx-state--error" : ""}" role="status">${says.lines.slice(-4).map(esc).join("<br>")}</div>` : "");
       body.innerHTML = top + (tab === "orders" ? ordersHtml() : tab === "history" ? historyHtml() : tab === "activity" ? activityHtml() : tab === "assets" ? assetsHtml() : settingsHtml());
     }
@@ -301,7 +302,7 @@ const DexUI = (() => {
   function paintTrade() {
     if (!$("dxPrice")) return;
     const why = blocker(), L = lad(), relays = (Page.state.relays || []).filter(r => !r.found), anyOk = relays.some(r => r.state === "ok") || (Page.stub && !relayDown());
-    $("dxState").hidden = !why; $("dxState").textContent = why;
+    $("dxState").hidden = !why; $("dxState").textContent = why ? why.text : "";
     const sync = $("dxSync"), nRelays = ((st && st.relays) || []).length;
     sync.textContent = !nRelays ? I18N.t("● no relays") : relayDown() ? I18N.t("● no relay answers") : anyOk ? I18N.t("● live") : I18N.t("● connecting"); sync.dataset.ok = anyOk && !relayDown() ? "1" : "0";
     $("dxMid").textContent = L.mid ? C.fmtPrice(L.mid) : "…";
@@ -350,7 +351,7 @@ const DexUI = (() => {
     $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? I18N.t("Exceeds your free {buy} by {short} (free {free})", { buy: (buy ? "MxUSD" : "MINIMA"), short: C.fmt(pl.short), free: C.fmtBal(pl.free) }) : "";
     $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>${th("Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.")}</p>`;
-    const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !/No relay answers/.test(why);
+    const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !why.soft;
     for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
     cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(I18N.t("{take} NOW · FAST", { take: side + C.fmt(pl.take) })) + "<small>" + th("instant ·") + " " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? th("BUY MINIMA") : th("SELL MINIMA");
     cta.disabled = trading || dead || short || !f.known || !!typo || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
