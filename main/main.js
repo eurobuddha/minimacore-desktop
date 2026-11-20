@@ -429,7 +429,8 @@ node.on("status", (s) => {
   futurecash.start().then(() => { if (b && b !== fcBlock) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});
 });
 // The screens' calls, by name: nothing else reaches the engine.
-const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity() };
+const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),
+  lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient) };
 ipcMain.handle("mcd:fc", (_e, op, ...args) => { if (typeof op !== "string" || !Object.hasOwn(FC_OPS, op)) throw new Error("Unknown Future Cash action."); requireRunning(); return FC_OPS[op](...args); });
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)

@@ -27,7 +27,7 @@ const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const keyuses = require("./keyuses");
-const { toUnits, fromUnits } = require("./sendpin");
+const { toUnits, fromUnits, pinMinimaSend } = require("./sendpin");
 
 // ---- FutureCashContract.java, verbatim ----
 /** The contract. Registered verbatim; its address is the hash of this exact text (scripts/futurecash-test.cjs pins both). */
@@ -174,6 +174,7 @@ function create(o) {
         store = await require("./futurecash-store").open(path.join(storeDir(), storeName(pk)), { now });
         walletKey = pk; startedAt = now(); openError = ""; scriptsCache = null;
         log("store open for the wallet whose first key is " + pk);
+        try { await registerContract(); } catch (e) { log("the contract could not be registered yet: " + ((e && e.message) || e)); }   // asked again on the next lock
       } catch (e) { openError = (e && e.message) || String(e); log("could not start: " + openError); throw e; }
       finally { opening = null; }
     })();
@@ -331,6 +332,97 @@ function create(o) {
     } finally { auditRunning = false; }
   }
 
+  // ---- the contract (Wallet.registerContract) ----
+  const cleanScript = (x) => String(x == null ? "" : x).replace(/\s+/g, " ").trim();
+  async function scriptRow(addr) {
+    if (!validAddr(addr)) return null;   // the command-injection choke point (Node.validAddr)
+    const r = await call("scripts address:" + addr), row = rowsOf(r)[0];
+    return row && row.script ? row : null;
+  }
+  function cacheContract(addr) {
+    if (!HEX64.test(String(addr || ""))) return null;
+    const prev = kv().get(K.SCRIPT_ADDRESS, null);
+    kv().set(K.SCRIPT_ADDRESS, addr);
+    if (addr !== prev) activity("info", "FutureCash contract address | address:" + addr);
+    return addr;
+  }
+  async function registerNow() {
+    const r = await call("newscript trackall:false clean:true script:\"" + SCRIPT + "\"");
+    return cacheContract(ok(r) && r.response ? r.response.address : "");
+  }
+  /**
+   * The contract must be in THIS node's script table (asked of the node at every start, never taken from the cache
+   * alone), tracked with trackall:false (a stake is then kept only because its payout is ours). newscript is not an
+   * idempotent no-op (core removes, then adds), so it is sent only when the row is really missing or wrongly scoped.
+   */
+  async function registerContract() {
+    const cached = kv().get(K.SCRIPT_ADDRESS, null);
+    if (cached) {
+      const row = await scriptRow(cached);
+      if (row && row.track === true) { activity("warn", "Repairing contract registration — this node was tracking every FutureCash/Maximize stake on the chain, not just yours"); return registerNow(); }
+      if (row) return cached;
+      return registerNow();
+    }
+    const r = await call("scripts");
+    for (const row of ok(r) && Array.isArray(r.response) ? r.response : []) {
+      if (row && cleanScript(row.script) === cleanScript(SCRIPT)) return row.track === true ? registerNow() : cacheContract(row.address);
+    }
+    return registerNow();
+  }
+  async function contractAddress() { return kv().get(K.SCRIPT_ADDRESS, null) || registerContract(); }
+
+  // ---- the rescue destination and the payout address (Wallet.cleanAddress) ----
+  /** Wallet.vaultLocked: a reply that does not say "unlocked" is locked. */
+  async function vaultLocked() {
+    const r = await call("status"), resp = r && r.response;
+    return !ok(r) || !resp || typeof resp.locked !== "boolean" || resp.locked;
+  }
+  /** One fresh clean address on THIS node (a `newaddress`), minted once and kept as one blob {mx, hex}. */
+  async function cleanAddress() {
+    const have = cleanAddr();
+    if (have) return { ok: true, value: have.mx, hex: have.hex };
+    if (await vaultLocked()) return { ok: false, error: "Your node's keys are locked, so it can't make a new address. Unlock your node (Vault), then try again." };
+    const r = await call("newaddress");
+    if (r && r.pending === true) return { ok: false, error: "The embedded node did not authorize the request. Check its status before retrying." };
+    const resp = (r && r.response) || {}, mx = String(resp.miniaddress || ""), hex = String(resp.address || "");
+    if (!validMx(mx) || !validHexAddr(hex) || mxToHex(mx) !== "0x" + hex.slice(2).toUpperCase()) return { ok: false, error: r && r.error ? "Couldn't make a fresh address on this node. (" + r.error + ")" : "Couldn't make a fresh address on this node." };
+    kv().set(K.CLEAN_ADDR, JSON.stringify({ mx, hex }));
+    scriptsCache = null;   // a new row in the script table
+    activity("info", "Clean same-node destination set | address:" + mx);
+    return { ok: true, value: mx, hex };
+  }
+
+  // ---- lock (Guardian.createFutureCash, with the screen's recipient rules) ----
+  /**
+   * Lock `amount` MINIMA until tip + blocks, payable only to the recipient (blank = a fresh clean address of this node,
+   * never a reused default). The amount is shape-checked and sent as typed (never through a number). → { ok, matBlock,
+   * payout, command } or { ok: false, error }.
+   */
+  async function lock(amount, blocks, recipient) {
+    if (!store) return { ok: false, error: "Future Cash Next has not started yet." };
+    const amt = String(amount == null ? "" : amount).trim(), rcp = String(recipient == null ? "" : recipient).trim();
+    if (!AMOUNT.test(amt) || toUnits(amt) <= 0n) return { ok: false, error: "Enter a positive amount." };
+    const n = Number(blocks);
+    if (!Number.isSafeInteger(n) || n <= 0 || n > 100000000) return { ok: false, error: "Pick a maturity time in the future." };
+    let payout;
+    if (!rcp) { const c = await cleanAddress(); if (!c.ok) return c; payout = c.hex; }
+    else if (HEX64.test(rcp)) payout = rcp;
+    else if (validMx(rcp)) payout = mxToHex(rcp);
+    if (!payout || !HEX64.test(payout)) return { ok: false, error: "Couldn't resolve that recipient address." };
+    const contract = await contractAddress();
+    if (!contract) return { ok: false, error: "Could not register the FutureCash contract." };
+    const t = await tip();
+    if (!t) return { ok: false, error: "Could not read the chain tip." };
+    const mat = t + n;
+    const st = "{\"0\":\"0xFF\",\"1\":\"" + mat + "\",\"2\":\"" + payout + "\",\"3\":\"" + now() + "\",\"4\":\"" + n + "\"}";
+    const cmd = await pinMinimaSend(o.run, "send amount:" + amt + " address:" + contract + " state:" + st, { minCoinage: 3, owner: "futurecash" });
+    const r = await call(cmd);
+    if (r && r.pending === true) return { ok: false, error: "The embedded node did not authorize the request. Check its status before locking again." };
+    if (!ok(r)) return { ok: false, error: (r && r.error) || "no reply from Minima Core" };
+    activity("info", "Locked " + amt + " · matures block " + mat + " | to:" + payout);
+    return { ok: true, matBlock: mat, payout, amount: amt };
+  }
+
   // ---- detection (Guardian.detect) ----
   async function detect(sets) {
     const seen = new Map();
@@ -403,7 +495,7 @@ function create(o) {
   }
   function activityLog() { try { const a = JSON.parse(kv().get(K.LOG, "[]")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
-  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict,
+  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress,
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }
 
