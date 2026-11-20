@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.147] — Mail: the publish notice says "public and permanent" in every language, in the language on show
+
+- **Fixed (review of 0.19.140 to 0.19.144):** the one-time notice before Mail first publishes your six-word address left its safety sentence in English in every language ("It is public and permanent: anyone can read it, and it cannot be removed from the chain."): it was not wrapped and was in no catalog. It is now translated in 简体中文, Русский and Українська (new texts, listed for native review).
+- The notice was also put together once, when the screen's script loaded, so after a language switch it stayed in the first language. It is now built each time it is shown.
+- Test: `scripts/mail-address-test.cjs` builds the notice from the shipped source in English, Chinese, Russian and Ukrainian and requires the permanence sentence in that language and no English copy of it. It fails on the 0.19.146 code.
+
 ## [0.19.146] — miniMall: delivery labels stay English in the shop file and in orders, and are translated only where shown
 
 - **Fixed (review of 0.19.140 to 0.19.144):** since 0.19.143 a new shop, and an existing one opened in the Studio, took the labels of its three delivery methods (Digital, Domestic, International) in the app's language. Those labels are wire values: they are saved in the `.shop` file, sent in each order, and sent back by buyers, so a Russian vendor's shop file and its buyers' orders carried Russian. `standardShipping()` is English again (`N_`), and `normalizeShipping()` once more gives the English labels it gave before 0.19.143, so a saved or exported shop is byte for byte what 0.19.142 wrote. A shop already saved with translated labels by a 0.19.143 or 0.19.144 development build is left as it is (no migration).

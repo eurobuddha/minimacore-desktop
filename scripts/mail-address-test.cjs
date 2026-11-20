@@ -232,7 +232,21 @@ test("0.19.9: the words of the two dialogs: what is published, that it is public
   new Function("window", require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(root, "renderer", "mail.js"), "utf8")))(win);
   const ui = win.MailPanel._test({});
   for (const need of [/six words, your Mail key and a signature/, /0\.000000001 MINIMA/, /public and permanent/, /cannot be removed/, /links your Mail address to that wallet address/, /Don't publish/])
-    assert.match(ui.NOTICE_TEXT, need);
+    assert.match(ui.noticeText(), need);
+  // 0.19.147: the permanence sentence was left out of the translation; the notice is built when shown, in that moment's language
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const live = { PayLabel: win.PayLabel, micon: () => "" };
+  new Function("window", fs.readFileSync(path.join(root, "renderer", "mail.js"), "utf8"))(live);   // the shipped source, not the plain view
+  const notice = live.MailPanel._test({}).noticeText, PERM = "It is public and permanent: anyone can read it, and it cannot be removed from the chain.";
+  try {
+    for (const code of ["en", "zh", "ru", "uk"]) {
+      I18N.set(code);
+      const said = notice();
+      assert.ok(said.includes(I18N.t(PERM)), code + ": the permanence sentence is in the notice");
+      if (code !== "en") { assert.notEqual(I18N.t(PERM), PERM, code + ": translated"); assert.ok(!said.includes(PERM), code + ": no English left in it"); }
+      assert.ok(said.startsWith(I18N.t("Mail can publish your six-word address so that people can write to you from the words alone.\n\n")), code + ": built in the language on show");
+    }
+  } finally { I18N.set("en"); }
   const t = ui.confirmText({ key: KEY, via: "beacon", block: 2427890, first: 2400000, tip: 2427900, confirm: true });
   assert.ok(t.includes(KEY), "the whole key, not a short form"); assert.match(t, /first seen by this node at block 2400000 \(about 16 days ago, 27900 blocks\), last renewed at block 2427890/);
   assert.match(ui.confirmText({ key: KEY, via: "beacon", block: 0, first: 0, tip: 5, confirm: true }), /could not tell how old/);

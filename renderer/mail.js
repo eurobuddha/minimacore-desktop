@@ -411,18 +411,20 @@
    * says nothing; it has no wording to take. Publishing stays the default (the first button); "Don't publish" turns it
    * off (it can be turned on later under Your key). Nothing is posted until one of the two is chosen.
    */
-  var NOTICE_TEXT = L_("Mail can publish your six-word address so that people can write to you from the words alone.\n\n")
-    + L_("What is published: your six words, your Mail key and a signature, in a coin on the Minima chain (it costs 0.000000001 MINIMA, and is renewed when needed).\n\n")
-    + "It is public and permanent: anyone can read it, and it cannot be removed from the chain. "
-    + L_("The coin is paid from one of your wallet's addresses, so it links your Mail address to that wallet address for anyone who looks.\n\n")
-    + L_("If you choose \"Don't publish\", people need your contact link or Mail key to write to you. You can change this later under Your key.");
+  function noticeText() {   // built when shown, in the language of that moment
+    return I18N.t("Mail can publish your six-word address so that people can write to you from the words alone.\n\n")
+      + I18N.t("What is published: your six words, your Mail key and a signature, in a coin on the Minima chain (it costs 0.000000001 MINIMA, and is renewed when needed).\n\n")
+      + I18N.t("It is public and permanent: anyone can read it, and it cannot be removed from the chain.") + " "
+      + I18N.t("The coin is paid from one of your wallet's addresses, so it links your Mail address to that wallet address for anyone who looks.\n\n")
+      + I18N.t("If you choose \"Don't publish\", people need your contact link or Mail key to write to you. You can change this later under Your key.");
+  }
   var noticeAsked = false;
   async function publishNotice() {
     if (noticeAsked || MODAL || !ID) return;
     noticeAsked = true;
     try {
       if (!await D.api.mailPublishNotice()) { noticeAsked = false; return; }   // answered, already public, or not known yet (asked again at the next draw)
-      var publish = await mmDialog({ title: I18N.t("Publish your Mail address?"), message: NOTICE_TEXT, ok: I18N.t("Publish my address"), cancel: I18N.t("Don't publish"), wide: true });
+      var publish = await mmDialog({ title: I18N.t("Publish your Mail address?"), message: noticeText(), ok: I18N.t("Publish my address"), cancel: I18N.t("Don't publish"), wide: true });
       ID = await D.api.mailPublishAnswer(publish === true);
       noticeAsked = false;   // answered: main says no from here on (and another wallet's Mail is asked for itself)
       render();
@@ -1097,5 +1099,5 @@
   g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge, backup: doBackup, restore: doRestore,
     _open: function (what, a, b) { if (what === "thread") openThread(a, b || "", "", "inbox"); else if (what === "compose") openCompose(a); else if (what === "funds") sendFunds(a, b || ""); else { VIEW = what; PEER = null; render(); } },   // the dev preview drives screens through this
     _pure: { decCmp: decCmp, looksLikeMinimaAddress: looksLikeMinimaAddress },
-    _test: function (deps) { D = deps; return { bubble: bubble, previewText: previewText, verifyShown: verifyShown, confirmText: confirmText, NOTICE_TEXT: NOTICE_TEXT }; } };   // backup and restore are also opened from Backup & Recovery
+    _test: function (deps) { D = deps; return { bubble: bubble, previewText: previewText, verifyShown: verifyShown, confirmText: confirmText, noticeText: noticeText }; } };   // backup and restore are also opened from Backup & Recovery
 })(window);
