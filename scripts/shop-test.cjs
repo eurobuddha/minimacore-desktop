@@ -235,7 +235,7 @@ test("vendor: a phone-placed order to my shop is checked against my listing and 
   o = store.order("ORD-PHONE1"); assert.equal(o.paid, true); assert.equal(o.status, "PAID");
 });
 
-// ---- 0.18.163: a coin counts once across restarts ----
+// ---- 0.18.163: a coin counts once across restarts; a buyer's object is never stored as sent ----
 const freshModules = () => { for (const k of Object.keys(require.cache)) if (k.includes(path.join(__dirname, "..", "main"))) delete require.cache[k];
   return { store: require("../main/shop-store"), shop: require("../main/shop"), sc: require("../main/shopcrypto") }; };
 test("H1: after a restart the backfill does not count the same payment coin again (a half-paid order stays half paid)", async () => {
@@ -263,3 +263,38 @@ test("H1: after a restart the backfill does not count the same payment coin agai
   await m.shop.scanOnce(); assert.equal(m.store.order("ORD-HALF").paid, true, "a second, different coin completes it");
 });
 
+test("H2: an item nested 12,000 arrays deep, or a nested quantity, is never stored; the store still saves and the batch goes on", async () => {
+  const m = freshModules(); m.shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: "MxG0" + "C".repeat(56) } } : { status: true, response: [] });
+  await m.shop.init();
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("h2 buyer"), deep = "[".repeat(12000) + "]".repeat(12000);
+  const base = { type: "ORDER", randomid: "r", from: buyer.publicId, to: me.publicId, date: Date.now(), shopId: "half", amount: "10", currency: "Minima", shipping: "" };
+  const wire = (o, raw) => JSON.stringify(o).split('"@@"').join(raw);
+  const msgs = [
+    wire(Object.assign({}, base, { ref: "ORD-EVIL", items: [{ product: "Tea", quantity: 1, unitPrice: "10", x: "@@" }] }), deep),
+    wire(Object.assign({}, base, { ref: "ORD-QTY", items: [{ product: "Tea", quantity: "@@", unitPrice: "10" }], fromname: "@@" }), deep),
+    wire(Object.assign({}, base, { ref: "ORD-STR", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], shipping: "@@", delivery: "@@", amount: "@@", date: "@@" }), deep),
+    JSON.stringify(Object.assign({}, base, { ref: "ORD-LATER", items: [{ product: "Tea", quantity: 1, unitPrice: "10", lineTotal: "10".repeat(500) }], amount: "9".repeat(5000), note: "x" }))];
+  const coins = [];
+  for (let i = 0; i < msgs.length; i++) coins.push({ coinid: "0xE" + i, state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(msgs[i])) } });
+  m.shop._setRunner(async (c) => c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: coins } : { status: true, response: [] });
+  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
+  try { await m.shop.scanOnce(); } finally { console.error = err; }
+  for (const ref of ["ORD-EVIL", "ORD-QTY", "ORD-STR", "ORD-LATER"]) assert.ok(m.store.order(ref), ref + " was received (the batch was not stopped)");
+  assert.deepEqual(m.store.order("ORD-EVIL").items, [{ product: "Tea", quantity: 1, unitPrice: "10" }], "a line is rebuilt from its capped primitive fields only");
+  assert.deepEqual(m.store.order("ORD-QTY").items, [{ product: "Tea", unitPrice: "10" }]); assert.equal(m.store.order("ORD-QTY").buyerName, "");
+  const st = m.store.order("ORD-STR"); assert.equal(st.shipping, ""); assert.equal(st.delivery, ""); assert.equal(st.amount, "0"); assert.equal(typeof st.date, "number");
+  const later = m.store.order("ORD-LATER"); assert.equal(later.amount.length, 80, "the buyer's amount is cut to 80"); assert.equal(later.items[0].lineTotal.length, 80);
+  m.store.flush();
+  const disk = JSON.parse(fs.readFileSync(path.join(DIR, "shop.json"), "utf8"));
+  for (const ref of ["ORD-EVIL", "ORD-QTY", "ORD-STR", "ORD-LATER"]) assert.ok(disk.orders[ref], ref + " is on disk");
+  for (const ref of Object.keys(disk.orders)) assert.ok(Buffer.byteLength(JSON.stringify(disk.orders[ref])) <= 48 * 1024, ref + " is bounded");
+  assert.deepEqual(errs, [], "nothing failed");
+});
+
+test("H2: a save that fails is logged, not swallowed", () => {
+  const m = freshModules(); m.store.order("x");
+  const errs = [], err = console.error, real = fs.writeFileSync; console.error = (...a) => errs.push(a.join(" "));
+  fs.writeFileSync = () => { throw new Error("disk full"); };
+  try { m.store.setMetaSync("k", 1); } finally { fs.writeFileSync = real; console.error = err; }
+  assert.match(errs.join(), /\[miniMall\] shop\.json could not be saved: disk full/);
+});

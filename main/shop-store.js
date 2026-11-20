@@ -39,10 +39,12 @@ function persistSoon() {
       const tmp = path.join(dir, "shop.json.tmp");
       fs.writeFileSync(tmp, snapshot());
       fs.renameSync(tmp, filePath());
-    } catch (e) {}
+    } catch (e) { saveFailed(e); }
   }, WRITE_DEBOUNCE_MS);
 }
 function snapshot() { return JSON.stringify({ version: 1, shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta, counted: mem.counted }); }
+// A failed save is said, not swallowed (0.18.163): it left every order of the session unsaved without a word.
+function saveFailed(e) { console.error("[miniMall] shop.json could not be saved: " + String((e && e.message) || e).slice(0, 300)); }
 function flush() {   // synchronous — for fund-relevant writes (a recorded order/payment must survive a crash)
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   try {
@@ -50,7 +52,7 @@ function flush() {   // synchronous — for fund-relevant writes (a recorded ord
     const tmp = path.join(dir, "shop.json.tmp");
     fs.writeFileSync(tmp, snapshot());
     fs.renameSync(tmp, filePath());
-  } catch (e) {}
+  } catch (e) { saveFailed(e); }
 }
 
 // ---- shops (my authored catalogs) ----

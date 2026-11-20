@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.164] — miniMall: a peer's message is never stored as sent
+
+- An order line was stored as the buyer sent it, so items nested 12,000 arrays deep made every later save of `shop.json` throw (the error was swallowed: nothing was saved for the session), and a nested `quantity` (or any field turned into text) threw and stopped the whole order scan. Every stored line is now rebuilt from capped primitives only (product 200, quantity 12, unitPrice 80, lineTotal 80, size 60, nftTokenId 66, nftStateIdx 12, nftBundle 12; anything else dropped); the buyer's amount (80) and every other string a peer sends are primitives cut to length, never converted or used as a key as they came (shopId, status, randomid, date too); one stored order is at most 48 KB; each coin of the scan is handled on its own (a failure is logged and the batch goes on); a save that fails is logged. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.163] — miniMall vendor: a payment coin counts once, across restarts
 
 - The scanner remembered the payment coins it had counted in memory only, so after a restart its backfill counted the same coin again and a half-paid order became PAID. Every counted coin id is now kept in `shop.json`: on the order (up to 1000) and in one global list (up to 100000, oldest first out) so one coin never counts for two orders; `recordPayment(ref, amount, token, coinid)` answers ALREADY for a counted coin and counts nothing without a coin id. A payment that arrives before its order is no longer marked seen, so it is matched once the order is in. Test: `scripts/shop-test.cjs` (from the reviewer's probe).
