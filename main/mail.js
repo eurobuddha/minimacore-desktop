@@ -289,6 +289,23 @@ async function queryCoinsDegrading(depth) {
   }
   return { coins: null, depth: 0 };
 }
+// ---- what a peer sent, as it may be stored (0.18.171) ----
+// A message is a peer's JSON. Nothing in it is stored, converted or used as a key as it came: a field is a plain value
+// cut to its length, or empty. The caps keep every real message whole: one coin carries at most 90,000 hex characters,
+// so no field of a real message is longer than 45,000 characters (this app's composer sends under 24,500 bytes in all).
+const PEER_CAP = { fromname: 200, subject: 1000, message: 45000, randomid: 128, amount: 80, tokenid: 66, tokenname: 200, txpowid: 130, image: 45000, payaddr: 90, type: 20 };
+const MSG_MAX_BYTES = 100 * 1024;   // one stored message, whole
+function peerStr(v, n) { return typeof v === "string" ? v.slice(0, n) : typeof v === "number" && Number.isFinite(v) ? String(v).slice(0, n) : ""; }
+/** The stored form of a peer's message: every field a plain capped value; a picture is bare base64 or nothing (the screen
+ *  shows it only as data:image/jpeg;base64,…). */
+function peerFields(m) {
+  const f = {};
+  for (const [k, n] of Object.entries(PEER_CAP)) f[k] = peerStr(m[k], n);
+  if (!/^[A-Za-z0-9+/=\r\n]*$/.test(f.image)) f.image = "";
+  if (f.payaddr && !looksLikeMinimaAddress(f.payaddr)) f.payaddr = "";
+  return f;
+}
+
 /** Trial-decrypt a page of coins into the store. `historical` suppresses the payaddr auto-reply: a backfill
  *  walks over months of old requests and must not answer any of them with a real coin. Returns {fresh,lastFresh,paLearned}. */
 async function processCoins(coins, historical) {
@@ -301,11 +318,15 @@ async function processCoins(coins, historical) {
     if (seenCoins.has(seenKey)) continue;                          // already trial-decrypted this session
     if (seenCoins.size > 40000) seenCoins.clear();
     seenCoins.add(seenKey);
+    // One coin's message never stops the pass (0.18.171): a failure is logged and the next coin is read.
+    try {
     let o; try { o = await mc.open(identity, blob); } catch (e) { o = null; }
     if (!o || !o.valid) continue;
-    let m; try { m = JSON.parse(Buffer.from(o.plaintext).toString("utf8")); } catch (e) { continue; }
-    if (o.fromPublicId !== m.from) continue;             // signed-from must equal claimed sender
-    if (m.to !== identity.publicId) continue;            // addressed to me
+    let raw; try { raw = JSON.parse(Buffer.from(o.plaintext).toString("utf8")); } catch (e) { continue; }
+    if (!raw || typeof raw !== "object" || typeof raw.from !== "string") continue;
+    if (o.fromPublicId !== raw.from) continue;           // signed-from must equal claimed sender
+    if (raw.to !== identity.publicId) continue;          // addressed to me
+    const m = Object.assign(peerFields(raw), { from: raw.from, to: raw.to });
     // Learn the peer's pay address (piggybacked on EVERY message/control coin) — once per pass, newest coin first.
     if (m.payaddr && !paSeen.has(m.from)) {
       paSeen.add(m.from);
@@ -328,11 +349,14 @@ async function processCoins(coins, historical) {
       }
       continue;
     }
+    if (!m.randomid) continue;                           // no plain id: it cannot be told apart from another message
     const local = { hashref: threadKey(m.from, m.to, m.subject || ""), fromname: m.fromname || "", frompublickey: m.from,
       topublickey: m.to, subject: m.subject || "", message: m.message || "", randomid: m.randomid, incoming: true, read: false,
-      date: parseInt(m.date, 10) || Date.now(), status: "received", sentblock: 0, type: m.type || "text",
+      date: typeof raw.date === "number" && Number.isFinite(raw.date) ? raw.date : (parseInt(peerStr(raw.date, 20), 10) || Date.now()), status: "received", sentblock: 0, type: m.type || "text",
       amount: m.amount, tokenid: m.tokenid, tokenname: m.tokenname, txpowid: m.txpowid, image: m.image, payaddr: m.payaddr || "" };
+    if (Buffer.byteLength(JSON.stringify(local)) > MSG_MAX_BYTES) { try { node.log("[mail] a message of " + m.from + " is over " + MSG_MAX_BYTES + " bytes and was not stored"); } catch (e) {} continue; }
     if (store.addMessage(local)) { fresh++; lastFresh = local; }
+    } catch (e) { try { node.log("[mail] the message in coin " + String(coin.coinid || "") + " could not be read: " + String((e && e.message) || e).slice(0, 200)); } catch (e2) {} }
   }
   return { fresh, paLearned, lastFresh };
 }
@@ -689,7 +713,7 @@ module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   sendMessage, pay, requestPayaddr, resolvePayaddr, myReceivingAddress, looksLikeMinimaAddress,
   myIdentity, shareString, resolveRecipient, setPublication, checkOwnBeacon, setName, threads, thread, readMessage, threadWith, contacts, addContact,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
-  _setRunner, CHAINMAIL, threadKey,
+  _setRunner, CHAINMAIL, threadKey, _processCoins: processCoins, _peerFields: peerFields,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)
   _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget,
   _limits: { POLL_DEPTH, WINDOW_DEPTH, MIN_DEPTH, BACKFILL_CHUNK, GAP_MARGIN } };

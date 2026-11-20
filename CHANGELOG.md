@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.171] — Mail: a peer's message is never stored as sent
+
+- Mail stored a peer's `fromname`, `subject`, `message`, `randomid`, `amount`, `tokenid`, `tokenname`, `txpowid`, `image` and `payaddr` (and the `pa:` meta) as they came, so a nested object could break every save of `mail.json` (failures were swallowed) or stop the scan. Each is now a plain value cut to a length that keeps every real message whole (a coin carries at most 90,000 hex characters, so message and picture 45,000, subject 1,000, names 200, amount 80, ids 66 to 130, address 90); a picture is bare base64 or nothing; a pay address (and the `pa:` meta) is kept only when it is a Minima address; a message with no plain id is not stored; one stored message is at most 100 KB; each coin of the scan is read on its own (a failure is logged and the pass goes on); a failed save is logged. Test: `scripts/mail-peer-test.cjs` (in `npm run test:mail`, in CI).
+
 ## [0.18.170] — Vestr amounts never rounded; the vendor id whole
 
 - Vestr showed every amount through `toLocaleString` with 8 decimals, which rounds (0.999999999 read 1), and its calculator through `toFixed`. `vFmt` now shows the node's figure as written (an exponent form written out exactly), and the calculator's estimates are cut to 6 and 8 decimals, never rounded. miniMall Studio showed the vendor id cut to 18 characters; it now shows the vendor id and payout address whole and click-to-copy. Test: `scripts/webwallet-ui-test.cjs`.

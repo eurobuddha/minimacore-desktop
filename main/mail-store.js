@@ -38,7 +38,7 @@ function persistSoon() {
       const tmp = path.join(dir, "mail.json.tmp");
       fs.writeFileSync(tmp, JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
       fs.renameSync(tmp, filePath());
-    } catch (e) { /* retried next write */ }
+    } catch (e) { console.error("[mail] mail.json could not be saved (retried on the next write): " + String((e && e.message) || e).slice(0, 300)); }   // said, not swallowed (0.18.171)
   }, WRITE_DEBOUNCE_MS);
 }
 const keyOf = (m) => m.hashref + "|" + m.randomid;
