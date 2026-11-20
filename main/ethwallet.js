@@ -19,7 +19,7 @@ async function status() {
   const s = atomix.status();
   let address = s.eth || null, rpc = null;
   if (s.ready) { try { const w = await atomix.ethWallet(); address = w.address; rpc = w.rpc; } catch (e) {} }
-  return { ready: !!s.ready, address, rpc, block: s.block };
+  return { ready: !!s.ready, address, rpc, block: s.block, halt: !!s.halt };
 }
 
 // The reads/actions below delegate straight to the AtomiX glue. Each throws "AtomiX engine not booted yet" until
@@ -32,9 +32,34 @@ const sendMax     = (asset) => atomix.ethSendMax(asset);
 const sendReview  = (asset, to, amt) => atomix.ethSendReview(asset, to, amt);
 const sendExecute = (asset, to, amt, tier) => atomix.ethSendExecute(asset, to, amt, tier);
 const exportKey   = () => atomix.exportKey();
+
+/**
+ * The key for the screen (0.19.108). Never handed over on a bare call: the caller must pass the phrase the user typed,
+ * and where the system can ask "is it you" (os.can(): Touch ID on a Mac that has it) it is asked here, in the main
+ * process, and a refusal ends it. The phone's ETH Wallet does the same with the device's lock screen before it shows
+ * the key. os = { can() -> bool, prompt(reason) -> Promise } (main.js passes Electron's systemPreferences).
+ */
+const EXPORT_PHRASE = "SHOW KEY";
+async function exportKeyGated(typed, os) {
+  if (String(typed == null ? "" : typed).trim() !== EXPORT_PHRASE) throw new Error("Type " + EXPORT_PHRASE + " exactly to continue.");
+  let ask = false; try { ask = !!(os && os.can()); } catch (e) { ask = false; }
+  if (ask) { try { await os.prompt("show the ETH private key"); } catch (e) { throw new Error("Cancelled"); } }
+  return atomix.exportKey();
+}
+
+/**
+ * Swaps of AtomiX (Dexicon room 1) that are not finished: they sign with THIS address and pay their gas from its ETH.
+ * { known, swaps: [hash, …] }; known false = could not be asked (said on the send review, never read as "none").
+ */
+async function swapsInFlight() {
+  const w = await atomix.activeWork().catch(() => null);
+  if (!w) return { known: false, swaps: [] };
+  if (Array.isArray(w.swaps)) return { known: true, swaps: w.swaps.slice() };
+  return { known: !w.ready && !w.hasStore, swaps: [] };   // not started and no store on disk: there is no swap to have
+}
 const setRpc      = (url) => atomix.ethSetRpc(url);
 
 module.exports = {
   emitter, status, balances, tokens, addToken, removeToken,
-  sendMax, sendReview, sendExecute, exportKey, setRpc
+  sendMax, sendReview, sendExecute, exportKey, exportKeyGated, swapsInFlight, EXPORT_PHRASE, setRpc
 };

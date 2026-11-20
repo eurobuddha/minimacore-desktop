@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("mcd", {
   // reliable clipboard write via the MAIN process (the renderer's navigator.clipboard silently rejects when the
   // window isn't focused, leaving stale data on the clipboard while the UI still says "Copied"). Returns true on ok.
   clip: (text) => ipcRenderer.invoke("mcd:clip", text),
+  clipSecret: (text) => ipcRenderer.invoke("mcd:clipSecret", text),   // cleared from the clipboard after a minute
   keyMode: () => ipcRenderer.invoke("mcd:keyMode"),
   recordKeyMode: (mode) => ipcRenderer.invoke("mcd:recordKeyMode", mode),
   restoreBackup: (o) => ipcRenderer.invoke("mcd:restoreBackup", o),
@@ -251,7 +252,8 @@ contextBridge.exposeInMainWorld("mcd", {
   ewSendMax: (asset) => ipcRenderer.invoke("mcd:ewSendMax", asset),
   ewSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:ewSendReview", asset, to, amt),
   ewSend: (asset, to, amt, tier) => ipcRenderer.invoke("mcd:ewSend", asset, to, amt, tier),
-  ewExportKey: () => ipcRenderer.invoke("mcd:ewExportKey"),
+  ewExportKey: (typed) => ipcRenderer.invoke("mcd:ewExportKey", typed),   // the typed phrase; the main process checks it and asks the system where it can
+  ewSwaps: () => ipcRenderer.invoke("mcd:ewSwaps"),   // AtomiX swaps in flight on this same address: { known, swaps }
   ewSetRpc: (url) => ipcRenderer.invoke("mcd:ewSetRpc", url),
   onEthWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:ethwallet", h); return () => ipcRenderer.removeListener("mcd:ethwallet", h); },
 

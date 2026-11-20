@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.108] — ETH Wallet as the original in Pandamonium (Phase 5a)
+
+- **The screen is the Android ETH Wallet's** (apks/base `integrated/ethwallet`, `Design.java`: page `#0A0A0F`, cards `#15151F`, pills `#1F1F2B`, accent `#F7931A`): the title with the "Mainnet · real funds" pill, the version line, the address card with the whole address, one card per asset (the token's whole contract address above its balance), the two rows of three pills (Send, Receive, Refresh; Add token, Etherscan, Settings), full width at any window size. Its dialogs are the original's: Receive, Send (token line, recipient, Scan QR, amount, MAX), Confirm send (addresses whole with the first 8 and last 6 characters in orange, Low / Medium / High, the fee line), Sent, Add token, the token menu, RPC endpoint, and Settings with the original's six entries in its order, now including **View last transaction** and **Switch wallet source**.
+- **Export private key is never one click.** The original asks "I understand", then the phone's lock screen. Here the user types `SHOW KEY`, and the main process checks that phrase again and, on a Mac with Touch ID, asks the system's prompt before the key leaves it (`ethwallet.exportKeyGated`; a bare call to the old handler no longer returns a key). The copied key is cleared from the clipboard after 60 seconds unless something else was copied.
+- **Sending while a swap is in flight is said.** This address is the one Dexicon ① MxUSD swaps sign with. The send review reads the unfinished swaps (`mcd:ewSwaps`) and says in red how many there are and that they need this ETH for gas, or that it could not be checked. A send to the wallet's own address is refused before the fee is estimated.
+- **Left out, with the reason on screen:** "Import key". On the phone it gives ETH Wallet a key of its own while swaps keep the node's key. The desktop has one Ethereum engine and one key; importing would either add a second key store and signer or replace the key swaps in flight need. "Switch wallet source" says so.
+- **Differences kept:** balances are cut to six decimals as on the phone (never rounded); token logos are drawn as lettered discs (the phone fetches them from a CDN, the desktop makes no such request); a token's menu is on a ⋮ button and on right click (the phone's long press); "click" for "tap"; the original's long dashes are not in the wording.
+- **Money unchanged:** every call that spends or shows the key is in `renderer/apps-act.js` and run against the calls of the screen it replaced (`scripts/apps-money.test.cjs`, 8 tests): review then send with the typed text as the amount, Max, add and remove token, the RPC endpoint.
+
 ## [0.19.107] — Pandamonium Desktop: the system's camera and microphone questions name Pandamonium Desktop
 
 - **Found while checking the merge**: the text macOS shows when the app first asks for the microphone (a Chat voice note, 0.19.2) or the camera (the QR scanner) is written into the app when it is built, and a flavour's build took the released app's wording: "Minima Core uses your microphone…" inside Pandamonium Desktop.

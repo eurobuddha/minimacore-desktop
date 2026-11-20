@@ -206,6 +206,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
 // to the renderer navigator.clipboard's focus/permission failures (which silently left stale data on the clipboard
 // while the UI still said "Copied"). Coerce nullish to "" so it never writes the string "null"/"undefined".
 ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? "" : String(text)); return true; });
+// A secret on the clipboard (the ETH key): cleared after a minute, unless something else was copied since.
+ipcMain.handle("mcd:clipSecret", (_e, text) => { const t = String(text == null ? "" : text); clipboard.writeText(t); setTimeout(() => { try { if (t && clipboard.readText() === t) clipboard.clear(); } catch (e) {} }, 60000); return true; });
 
 // Startup Params "Copy RPC password": main process to clipboard. The password is never returned to the renderer.
 ipcMain.handle("mcd:copyRpcPassword", () => { clipboard.writeText(config.rpcSecret()); return true; });
@@ -740,7 +742,10 @@ ipcMain.handle("mcd:ewRemoveToken", (_e, addr) => ethwallet.removeToken(addr));
 ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
 ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
 ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
-ipcMain.handle("mcd:ewExportKey", () => ethwallet.exportKey());
+// The key leaves the main process only after the typed phrase and, on a Mac with Touch ID, the system's own prompt (0.19.108).
+ipcMain.handle("mcd:ewExportKey", (_e, typed) => { const { systemPreferences } = require("electron"); return ethwallet.exportKeyGated(typed, {
+  can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }); });
+ipcMain.handle("mcd:ewSwaps", () => ethwallet.swapsInFlight());
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 

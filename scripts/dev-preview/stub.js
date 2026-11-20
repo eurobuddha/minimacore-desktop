@@ -33,6 +33,9 @@
   try { localStorage.setItem("dexicon_ax_market_live", Q.get("axlive") === "1" ? "1" : "0"); } catch (e) {}
   const AXS = Q.get("axs") || "", AX_MINIMA = AXS === "minima" || AXS === "idle";
   const FAKE_ETH = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0001", FAKE_ETH2 = "0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0002", FAKE_TX = "0x" + "FA4E00".repeat(10) + "0001";
+  const EW_ADDR = "0xFA4E00000000000000000000000000000000FA4E";   // obviously fake
+  const EW_TOKENS = [{ symbol: "USDT", address: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 }, { symbol: "USDC", address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6 },
+    { symbol: "DAI", address: "0x6b175474e89094c44da98b954eedeac495271d0f", decimals: 18 }, { symbol: "WETH", address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", decimals: 18 }];
   const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
   const AX_BOOK = { scanned: 3, makers: 2, bestBid: 0.99, bestAsk: 1.01, bidCap: 100, askCap: 100, currency: "mxusdt", label: "mxUSDT", pricingParity: true,
     bids: [{ signer: FAKE_PK("D1"), p: 0.99, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 0.985, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 0.98, cap: 10000, mine: false }],
@@ -294,10 +297,16 @@
     ppRestore: async () => ({ restored: 1, total: 2, details: ["Pool " + FAKE_PK("B002") + ": both reserves verified on this node.", "Pool " + FAKE_PK("B009") + ": the reserve coins were not found on this node or in the archive."], warn: "Owner signing stays paused until you confirm the wallet's signing state." }),
     ppStatement: async () => (PP_MINE.length ? { csv: "pool,date\n", rows: 12, pools: 1, backfilled: true } : { csv: "", rows: 0, pools: 0, backfilled: true }),
     ppConsolidationCheck: async () => (PPS === "ownerkey" ? "Nothing consolidated: your wallet holds a pool owner key that cannot sign.\n\nThe owner key " + FAKE_PK("0B2") + " has an unknown number of signatures used. Confirm the wallet's signing state in My LP first." : null),
-    ewStatus: async () => ({ ready: true }),
-    ewBalances: async () => ({ address: "0x4B1D9E27A6C0F3581E2D7B9A4C6E8F0A1B3D5C7E", eth: "0.0425", tokens: [
-      { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", balance: "125.5", decimals: 6 }] }),
-    ewTokens: async () => [],
+    // ETH Wallet: ?ew=setup|norpc|halt  &ewswap=1|unknown (a swap in flight on the same address, or "could not be checked")
+    ewStatus: async () => ({ ready: Q.get("ew") !== "setup", address: EW_ADDR, rpc: "https://ethereum-rpc.publicnode.com", halt: Q.get("ew") === "halt" }),
+    ewBalances: async () => { if (Q.get("ew") === "norpc") throw new Error("preview: no RPC"); return { address: EW_ADDR, eth: "0.042518339", tokens: EW_TOKENS.map((t, i) => Object.assign({ balance: i ? "0" : "125.5" }, t)) }; },
+    ewSwaps: async () => (Q.get("ewswap") === "unknown" ? { known: false, swaps: [] } : { known: true, swaps: Q.get("ewswap") ? [FAKE_TX] : [] }),
+    ewSendMax: async (a) => (a === "eth" ? "0.04188" : "125.5"),
+    ewSendReview: async (a, to, amt) => (/^0x[0-9a-fA-F]{40}$/.test(to) ? { ok: true, sym: a === "eth" ? "ETH" : "USDT", decimals: 18, capped: Q.get("ew") === "capped",
+      fees: { low: { fee: "0.000063", gwei: "3" }, med: { fee: "0.0000819", gwei: "3.9" }, high: { fee: "0.0001071", gwei: "5.1" } } } : { err: "Enter a valid Ethereum address (0x + 40 hex characters)." }),
+    ewSend: async () => ({ tx: FAKE_TX }), ewExportKey: async () => "0x" + "FA4E".repeat(16), ewSetRpc: async () => ({ ok: true }), ewAddToken: async () => ({ token: { symbol: "FAKE" } }), ewRemoveToken: async () => true,
+    clipSecret: async () => true,
+    ewTokens: async () => EW_TOKENS,
     shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
     vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
@@ -432,6 +441,13 @@
       // Backup & Recovery: ?view=backup&bk=create|restore|resync|keys, &seed=1 shows the (fake) seed, &bkdone=1 a finished backup
       if (view === "backup" && Q.get("bk")) { bkOpen(Q.get("bk")); if (Q.get("seed") === "1") el("bkShow").click();
         if (Q.get("bkdone") === "1") { el("bkPw").value = el("bkPw2").value = "preview1"; el("bkGo").click(); } }
+      // The tray apps (Phase 5a): ?do=<selector>|<selector>… clicks each in turn (450 ms apart); ?fill=<selector>=<text>|… types first
+      if (Q.get("do") || Q.get("fill")) setTimeout(async () => {
+        const fill = () => (Q.get("fill") || "").split("|").filter(Boolean).forEach(f => { const i = f.indexOf("="), n = document.querySelector(f.slice(0, i)); if (n) { n.value = f.slice(i + 1); n.dispatchEvent(new Event("input", { bubbles: true })); } });
+        fill();
+        for (const sel of (Q.get("do") || "").split("|").filter(Boolean)) { const n = document.querySelector(sel); if (n) n.click(); await new Promise(r => setTimeout(r, 450)); fill(); }
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      }, 600);
       if (Q.get("scroll")) setTimeout(() => { el("main").scrollTop = parseInt(Q.get("scroll"), 10); }, 500);
       if (Q.get("menu") === "1") { openMenu(); document.activeElement.blur(); }
     } catch (e) { document.title = "PREVIEW ERROR " + e.message; console.error(e); }
