@@ -29,6 +29,8 @@ function itemsOf(items) {
   if (typeof items === "string" && items.trim()) { try { const a = JSON.parse(items); return Array.isArray(a) ? a : null; } catch (e) { return null; } }
   return null;
 }
+// A currency as the user reads it (0.18.168): the wire value "USDT" is MxUSD on Minima.
+const label = (c) => (/^(usdt|mxusdt)$/i.test(String(c)) ? "MxUSD" : typeof c === "string" ? c.slice(0, 20) : "");
 const tokenOf = (c) => (/^(usdt|mxusdt)$/i.test(String(c)) ? "MXUSD" : /^minima$/i.test(String(c)) ? "MINIMA" : "");
 const wholeOf = (v) => (typeof v === "number" ? (Number.isSafeInteger(v) ? v : null) : typeof v === "string" && /^\d{1,9}$/.test(v) ? Number(v) : null);
 
@@ -41,7 +43,7 @@ function check(listing, order) {
   const problems = [];
   if (!listing || !Array.isArray(listing.products)) return { due: "", problems: ["the shop this order names is not one of your shops on this computer"] };
   if (!tokenOf(listing.currency) || tokenOf(order.currency) !== tokenOf(listing.currency))
-    problems.push("the order's currency (" + String(order.currency).slice(0, 20) + ") is not your shop's (" + String(listing.currency).slice(0, 20) + ")");
+    problems.push("the order's currency (" + label(order.currency) + ") is not your shop's (" + label(listing.currency) + ")");
   const items = itemsOf(order.items);
   if (!items || !items.length) problems.push("the order has no items that can be read");
   let dp = 0; const lines = [];

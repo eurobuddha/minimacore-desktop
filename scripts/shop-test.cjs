@@ -88,7 +88,7 @@ test("listing.check: every way an order departs from the listing is a problem", 
     [tea({ nftTokenId: "0x" + "AB".repeat(32) }), /not in your listing/], [tea({ nftStateIdx: 3 }), /not in your listing/], [[], /no items/], ["not json", /no items/], [[null], /cannot be read/]])
     assert.match(P(items).join(" | "), why, JSON.stringify(items));
   assert.match(P(tea({}), "Express").join(), /delivery method "Express" is not in your listing/);
-  assert.match(P(tea({}), null, "USDT").join(), /currency \(USDT\) is not your shop's \(Minima\)/);
+  assert.match(P(tea({}), null, "USDT").join(), /currency \(MxUSD\) is not your shop's \(Minima\)/);
   assert.match(P(tea({}), null, null, null).join(), /not one of your shops/);
   assert.match(P(tea({}), null, null, Object.assign({}, TEA, { products: TEA.products.concat([{ name: "Tea", price: "9" }]) })).join(), /listed more than once/);
   const nft = { shopId: "n", currency: "Minima", shipping: [], products: [{ name: "Art", price: "5", nftTokenId: "0xAA", nftStateIdx: 2 }] };
@@ -210,7 +210,7 @@ test("vendor: an order to an MxUSD shop that says Minima must still be paid in M
   const o = store.order("ORD-VEND1");
   assert.ok(o, "the order was received"); assert.equal(o.tokenid, MXUSD); assert.equal(o.currency, "USDT");
   assert.equal(o.paid, false, "5 Minima does not pay a 5 MxUSD order"); assert.equal(o.paidTokenid, "0x00");
-  assert.match(o.problems.join(), /currency \(Minima\) is not your shop's \(USDT\)/, "and since 0.18.159 the order is UNCHECKED against the listing");
+  assert.match(o.problems.join(), /currency \(Minima\) is not your shop's \(MxUSD\)/, "and since 0.18.159 the order is UNCHECKED against the listing");
 });
 
 // ---- 0.18.159: a phone-placed order (wire: items as a JSON string, shipping by id) is checked and paid end to end ----
@@ -307,4 +307,9 @@ test("L1: advanceStatus accepts only CONFIRMED, SHIPPED, DELIVERED", async () =>
   assert.equal(m.store.order(ref).status, "PAID");
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(/const flow = \["CONFIRMED", "SHIPPED", "DELIVERED"\]/.test(app), "the screen offers exactly these");
+});
+
+test("L3: currencies in a listing problem read MxUSD, never USDT", () => {
+  const p = L.check({ currency: "mxUSDT", products: [], shipping: [] }, { items: [], shipping: "", currency: "Minima" }).problems.join(" ");
+  assert.match(p, /not your shop's \(MxUSD\)/); assert.ok(!/USDT/i.test(p), p);
 });

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.168] — miniMall: listing problems name MxUSD
+
+- A currency mismatch in an order check named the wire value ("USDT"); it now reads MxUSD. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.167] — Logs: the last unended line is logged on close
 
 - The node process's "exit" event can come before its streams have handed over their last chunk, so the unended last line (0.18.160) is now logged on "close" (`flushCarry`). Test: `scripts/node-log-test.cjs`.
