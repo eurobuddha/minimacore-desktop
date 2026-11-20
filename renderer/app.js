@@ -2680,10 +2680,12 @@ function termNode(it) {
   for (const [cls, t] of termJsonParts(it.text)) { if (!cls) { line.appendChild(document.createTextNode(t)); continue; } const sp = document.createElement("span"); sp.className = cls; sp.textContent = t; line.appendChild(sp); }
   return line;
 }
-function termText() { return TERM_ITEMS.map(it => (it.kind === "cmd" ? "> " : "") + it.text).join("\n"); }
+/** What "Copy output" copies: a reply too long for the screen is copied WHOLE (`full`), not as the tail that is shown. */
+function termText() { return TERM_ITEMS.map(it => (it.kind === "cmd" ? "> " : "") + (it.full || it.text)).join("\n"); }
 function appendTerm(text, kind) {
   let it = { kind: kind || "json", text: String(text) };
-  if (it.text.length > TERM_MAX) it = { kind: it.kind === "json" ? "note" : it.kind, text: "…\n" + it.text.slice(-TERM_MAX) };   // one oversized reply: its tail
+  // one oversized reply: the screen shows its tail and says so; the whole reply is kept for Copy output while it is on screen
+  if (it.text.length > TERM_MAX) it = { kind: it.kind === "json" ? "note" : it.kind, full: it.text, text: "[This output is cut: the last " + TERM_MAX + " of its " + it.text.length + " characters are shown. Copy output copies all of it.]\n" + it.text.slice(-TERM_MAX) };
   TERM_ITEMS.push(it);
   let size = TERM_ITEMS.reduce((n, x) => n + x.text.length + 1, 0), dropped = 0;
   while (size > TERM_MAX && TERM_ITEMS.length > 1) { size -= TERM_ITEMS.shift().text.length + 1; dropped++; }
@@ -2695,7 +2697,8 @@ function appendTerm(text, kind) {
 // A typed `send` is the user's own command. One thing can be added to it on the way, and the Terminal says so: a MINIMA send
 // with no fromaddress: may be given one (main.js, the pin that keeps the node off coins it cannot sign). The coin guard itself
 // passes a wallet command through unchanged unless it is switched to Enforce (Settings, Coin guard).
-function termSendNote(c) { return /^send\s/i.test(c) && !/\bfromaddress:/i.test(c) && !/\btokenid:0x(?!0+\b)[0-9A-Fa-f]+/i.test(c) ? "note: a MINIMA send with no fromaddress: may be given one of this wallet's own addresses, so that the node does not choose a coin it cannot sign. The reply's params show what was sent. Type fromaddress: yourself to choose." : ""; }
+// The same rule as the main process (main/sendpin.js pinSend): MINIMA is no tokenid at all or exactly tokenid:0x00, and a chain (;) is never pinned.
+function termSendNote(c) { const t = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c); return /^send\s/i.test(c) && !c.includes(";") && !/\bfromaddress:/i.test(c) && (!t || t[1].toLowerCase() === "0x00") ? "note: a MINIMA send with no fromaddress: may be given one of this wallet's own addresses, so that the node does not choose a coin it cannot sign. The reply's params show what was sent. Type fromaddress: yourself to choose." : ""; }
 async function termRun() {
   const inp = el("termIn"), c = inp.value.trim(); if (!c) return;   // an empty Run does nothing
   inp.value = ""; termSugClose();

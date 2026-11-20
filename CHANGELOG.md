@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.122] — Terminal: a chain of commands is never pinned, the note says what the app does, long output is copied whole (review fix)
+
+- **Found in review:** the beacon-dust pin appends `fromaddress:` to the end of a MINIMA `send`. For a chain typed in the Terminal (`send …; status`) the end is the LAST command: the send went out unpinned and the last command was given a stray parameter. A command that contains `;` is now never pinned (`main/sendpin.js`, for every caller) and goes to the node exactly as typed.
+- **The note agrees with the main process.** The Terminal said a send "may be given a fromaddress:" for `tokenid:0x0` and `tokenid:0x000` as well; the main process pins only a send with no token id or exactly `tokenid:0x00`. The note now uses the same rule, and is not shown for a chain. Tested as one list run through both.
+- **Long output.** A reply of more than 20,000 characters is shown as its last 20,000, and the screen now says so in words ("This output is cut: the last 20000 of its N characters are shown. Copy output copies all of it."). **Copy output** copies the whole reply while it is on the screen (it copied only the tail).
+- Not changed: whether the Terminal should bypass the pin altogether is the owner's call (plan, open questions).
+
 ## [0.19.121] — Logs: the RPC secret, bare seed words and text-direction controls never reach a log line (review fix)
 
 - **Found in review:** the node prints its own start parameters, and with them `-rpcpassword` and its value. The app's own "starting node" line hid it; the node's line did not, so the RPC password could be read in the Logs view, in `node.log` and in a saved log file.

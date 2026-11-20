@@ -68,6 +68,38 @@ test("Terminal: what CAN be added to a typed MINIMA send is the old beacon-dust 
   assert.ok(/ipcMain\.handle\("mcd:cmd"[\s\S]{0,700}restore\.loadsBackupFile\(command\)[\s\S]{0,900}restore\.backupCommandProblem\(command\)/.test(mainJs), "restore, restoresync and megammrsync file: are still refused on the command channel");
   assert.ok(/const run = \(c\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\);/.test(mainJs), "a Terminal command goes through rpcCall (signing queue and coin guard) as the wallet");
 });
+test("Terminal (0.19.122): a chain is never pinned; the note agrees with the main process on what a MINIMA send is", async () => {
+  const { pinMinimaSend, pinSend } = require("../main/sendpin"), A = "0x" + "AB".repeat(32); let asked = 0;
+  const run = async (c) => { asked++; return c.startsWith("coins ") ? { status: true, response: [{ coinid: "0x01", amount: "5", address: A }] } : c.startsWith("checkaddress") ? { status: true, response: { simple: true } } : { status: true }; };
+  for (const chain of ["send amount:1 address:0xCD; status", "send amount:1 address:0xCD;send amount:2 address:0xEF", "send amount:1 address:0xCD tokenid:0x00 ; balance"]) {
+    asked = 0;
+    assert.equal(await pinMinimaSend(run, chain, { minCoinage: 3 }), chain, "sent as typed: no fromaddress: on the last command of the chain");
+    assert.equal(asked, 0, "and no coin is looked up for it");
+  }
+  const { termSendNote } = lift(["termSendNote"]);
+  // one list, both sides: the note is shown exactly when the main process would pin
+  for (const c of ["send amount:1 address:0xCD", "SEND amount:1 address:0xCD", "send amount:1 address:0xCD tokenid:0x00", "send amount:1 address:0xCD tokenid:0X00", "send amount:1 address:0xCD tokenid:0x0", "send amount:1 address:0xCD tokenid:0x000",
+    "send amount:1 address:0xCD tokenid:0x0000000000000000000000000000000000000000000000000000000000000000", "send amount:1 address:0xCD tokenid:0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "send amount:1 address:0xCD fromaddress:0xEE",
+    "send amount:1 address:0xCD; status", "status; send amount:1 address:0xCD", "sendpoll action:list", "status"]) {
+    const pinned = (await pinSend(run, c, { minCoinage: 3, tokens: false, held: () => null })).pinned;
+    assert.equal(termSendNote(c) !== "", pinned, c + (pinned ? " is pinned and must say so" : " is not pinned and must not say it may be"));
+  }
+  assert.equal(termSendNote("send amount:1 address:0xCD tokenid:0x000"), "", "only exactly 0x00 is MINIMA to the pin (the old note also spoke for 0x0 and 0x000)");
+});
+test("Terminal (0.19.122): a reply too long for the screen is shown as its tail, said to be cut, and copied whole", () => {
+  const T = lift(["termText", "appendTerm"], "let TERM_ITEMS = []; const TERM_MAX = 20000; const el = () => null;\n");
+  const big = JSON.stringify({ response: Array.from({ length: 3000 }, (_, i) => "0x" + String(i).padStart(64, "A")) });
+  assert.ok(big.length > 20000);
+  T.appendTerm("coins", "cmd"); T.appendTerm(big, "json");
+  const copied = T.termText();
+  assert.ok(copied.endsWith(big), "Copy output has the whole reply, first character to last"); assert.ok(copied.includes("0x" + "0".padStart(64, "A")), "its beginning too");
+  const shown = new Function("TERM_MAX", "el", "let TERM_ITEMS = [];" + source("appendTerm") + "\nappendTerm(arguments[2], 'json'); return TERM_ITEMS;")(20000, () => null, big);
+  assert.equal(shown.length, 1);
+  assert.ok(shown[0].text.startsWith("[This output is cut: the last 20000 of its " + big.length + " characters are shown. Copy output copies all of it.]\n"), "the screen says it is cut and how to get it whole");
+  assert.equal(shown[0].text.split("\n").slice(1).join("\n"), big.slice(-20000)); assert.equal(shown[0].full, big);
+  T.appendTerm("status", "cmd"); T.appendTerm('{"status":true}', "json");
+  assert.ok(!T.termText().includes(big.slice(0, 200)) && T.termText().endsWith('> status\n{"status":true}'), "once it has scrolled off the screen it is no longer kept");
+});
 
 // ---- Logs ----
 test("Logs: Pandamonium's screen (Pause, Clear, the Share as Save to file, Filter, the six verbosity chips, the log)", () => {

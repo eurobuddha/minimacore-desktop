@@ -38,6 +38,9 @@ async function pinSend(runner, command, opts) {
   const tok = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c), token = tok ? tok[1] : "0x00", minima = token.toLowerCase() === "0x00";
   const out = { command: c, pinned: false, token, need: "0", blocked: false, heldUnits: 0n, freeUnits: 0n, held: [] };
   if (!/^send\s/i.test(c) || /\bfromaddress:/i.test(c)) return out;   // the node lower-cases the verb: SEND is a send
+  // A chain (cmd1; cmd2) is never pinned (0.19.122): the pin is appended to the END of the text, so in a chain it landed
+  // on the LAST command, a stray parameter there, while the send itself went out unpinned. The node splits on every ";".
+  if (c.includes(";")) return out;
   if (!minima && !o.tokens) return out;   // an explicit non-MINIMA token → not beacon-polluted
   // Default: what the shared reservation holds, and only while its sends are ENFORCED (main/reserve.js sendHeld). In
   // "observe" and "off" nothing is held for a pin, so this pin is exactly the beacon-dust pin it was before 0.18.144.
