@@ -52,9 +52,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     },
     /** The review (the beneficiary whole: this covenant has no cancel), then the one call. → { ok } | { cancelled } | { err }. */
     create: function (api, ui, f, tokenName, graceName) {
+      // graceName: the English period name (what a contract records); translated only in the review text below, where it is shown
       var opts = { tokenid: f.tokenid, amount: text(f.amount), beneficiary: text(f.beneficiary), startMs: f.startMs, endMs: f.endMs,
         graceHours: Number(f.graceHours) || 0, burn: fee(f.burn), password: f.password || "" };
-      return ui.confirm(I18N.t("Create vesting contract?"), I18N.t("Lock {amount} {tokenName}\n\nWithdrawal address\n{beneficiary}\n\nCollection: {graceName}, from start to end.\nCheck the address above character by character. This cannot be cancelled.", { amount: opts.amount, tokenName: tokenName, beneficiary: opts.beneficiary, graceName: graceName }), I18N.t("Lock funds"), false).then(function (yes) {
+      return ui.confirm(I18N.t("Create vesting contract?"), I18N.t("Lock {amount} {tokenName}\n\nWithdrawal address\n{beneficiary}\n\nCollection: {graceName}, from start to end.\nCheck the address above character by character. This cannot be cancelled.", { amount: opts.amount, tokenName: tokenName, beneficiary: opts.beneficiary, graceName: I18N.t(graceName) }), I18N.t("Lock funds"), false).then(function (yes) {
         if (!yes) return { cancelled: true };
         return api.vestrCreate(opts).then(function () { return { ok: true }; }, errOf);
       });
@@ -234,7 +235,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       if (f && f.classic) { var pct = Math.min(100, Math.floor(f.classic.used * 100 / f.classic.cap));
         rows.push({ family: "classic", label: I18N.t("Classic keys: most-used key"), value: I18N.t("{used} of {cap} signatures · {count}", { used: keyuses.num(f.classic.used), cap: keyuses.num(f.classic.cap), count: n(f.classic.count) }), pct: pct, warn: pct >= 80,
           note: pct >= 80 ? I18N.t("A classic signing key is {pct}% used. Generate fresh keys or restore with the correct key uses before it is exhausted.", { pct: pct }) : "" }); }
-      if (f && f.block) rows.push({ family: "block", label: I18N.t("Block-based keys: key block position"), value: "position " + keyuses.num(f.block.used) + " of " + keyuses.num(f.block.cap) + " · " + n(f.block.count), pct: null, warn: false,
+      if (f && f.block) rows.push({ family: "block", label: I18N.t("Block-based keys: key block position"), value: I18N.t("position {used} of {cap} · {count}", { used: keyuses.num(f.block.used), cap: keyuses.num(f.block.cap), count: n(f.block.count) }), pct: null, warn: false,
         note: I18N.t("A block-based key's position follows the chain's block number. It is not a count of signatures, so it is not compared with classic keys.") });
       return rows;
     },
@@ -257,7 +258,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
           blocks: [{ label: KU.causes, body: KU.causesBody }] };   // the advice there is to move, so no keyuses estimate is shown (as the original)
       else if (r.verdict === "RISK_HEURISTIC") out = { tone: "risk", title: KU.riskTitle, body: KU.riskBody, blocks: reco([{ label: KU.causes, body: KU.causesBody }, { label: KU.keyAudit, body: KU.riskBody }]) };
       else out = { tone: r.complete ? "ok" : "warn", title: r.complete ? KU.okTitle : KU.partial, body: r.complete ? KU.explain : KU.incomplete, blocks: reco([]) };
-      out.scope = "Checked scope: " + keyuses.num(r.classicKeys) + " classic · " + keyuses.num(r.blockKeys) + " block-based keys held by this node.";
+      out.scope = I18N.t("Checked scope: {classic} classic · {block} block-based keys held by this node.", { classic: keyuses.num(r.classicKeys), block: keyuses.num(r.blockKeys) });
       out.gap = KU.gap;
       return out;
     },

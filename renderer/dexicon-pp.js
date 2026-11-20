@@ -630,8 +630,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
         <div class="pp-acts">${lpBtn(I18N.t("Check for reserves"), "pprecover", p.address)}${lpBtn(I18N.t("It's closed: put it away"), "ppretire", p.address)}</div></div>`;
       const r = Number(p.kratio), warn = needsMigrate(p), pct = isFinite(r) && r > 0 ? Math.max(4, Math.min(100, r / 2 * 100)) : 0;
       return `<div class="dx-card pp-card"><b class="pp-ct">${esc(pairName({ tok: p.tok, name }))}</b>${ids}${hold}${lpRows(p).map((x) => kv(x[0], esc(x[1]), x[2] ? "pp-" + x[2] : "")).join("")}
-        ${pct ? `<div class="pp-health"><div class="pp-kv"><span>${th("Floor headroom")}</span><span class="${warn ? "pp-warn" : "pp-dimv"}">${tr("K/KMIN {r} · {warn}", { r: cutNum(Math.trunc(r * 100) / 100), warn: warn ? "migrate soon" : "healthy" })}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
-        <div class="pp-acts">${lpBtn(warn ? I18N.t("Add (full)") : "Add", "ppadd", p.address)}${lpBtn("Migrate", "ppmig", p.address, warn ? "dx-btn--go" : "")}${lpBtn("Close", "ppclose", p.address)}</div>
+        ${pct ? `<div class="pp-health"><div class="pp-kv"><span>${th("Floor headroom")}</span><span class="${warn ? "pp-warn" : "pp-dimv"}">${tr("K/KMIN {r} · {warn}", { r: cutNum(Math.trunc(r * 100) / 100), warn: warn ? th("migrate soon") : th("healthy") })}</span></div><div class="pp-bar"><i style="width:${pct.toFixed(1)}%"${warn ? ' data-warn="1"' : ""}></i></div></div>` : ""}
+        <div class="pp-acts">${lpBtn(warn ? I18N.t("Add (full)") : I18N.t("Add"), "ppadd", p.address)}${lpBtn(I18N.t("Migrate"), "ppmig", p.address, warn ? "dx-btn--go" : "")}${lpBtn(I18N.t("Close"), "ppclose", p.address)}</div>
         <button class="pp-link" data-ppcalc="${esc(p.address)}">${th("What if the price moves?  Pool calculator ›")}</button></div>`;
     }).join("");
   }

@@ -231,7 +231,7 @@
     var st = m.status || "sent", ic, cls, lbl;
     if (st === "posting") { ic = "ring"; cls = "mm-posting"; lbl = I18N.t("Posting to chain…"); }
     else if (st === "failed") { ic = "close"; cls = "mm-failed"; lbl = I18N.t("Failed — didn't reach the chain"); }
-    else if (st === "confirmed") { ic = "check"; cls = "mm-ok"; lbl = I18N.t("Confirmed") + (m.sentblock ? " · block " + groupInt(m.sentblock) : ""); }
+    else if (st === "confirmed") { ic = "check"; cls = "mm-ok"; lbl = m.sentblock ? I18N.t("Confirmed · block {block}", { block: groupInt(m.sentblock) }) : I18N.t("Confirmed"); }
     else { ic = "chain"; cls = "mm-chain"; lbl = I18N.t("On-chain{sentblock} — confirming", { sentblock: (m.sentblock ? (" " + I18N.t("· blk {sentblock}", { sentblock: groupInt(m.sentblock) })) : "") }); }
     return '<div class="mm-stat ' + cls + '">' + g.micon(ic) + "<span>" + D.esc(lbl) + "</span>"
       + (withRetry && st === "failed"
@@ -362,7 +362,7 @@
       var ic = st === "posting" ? ["ring", "mm-a"] : st === "failed" ? ["close", "mm-r"]
         : st === "confirmed" ? ["check", "mm-g"] : ["chain", "mm-g"];
       var lbl = st === "posting" ? I18N.t("Posting to chain…") : st === "failed" ? I18N.t("Failed — retry from Outbox")
-        : st === "confirmed" ? I18N.t("Confirmed") : "On-chain" + (m.sentblock ? " · blk " + groupInt(m.sentblock) : "");
+        : st === "confirmed" ? I18N.t("Confirmed") : I18N.t("On-chain") + (m.sentblock ? " " + I18N.t("· blk {sentblock}", { sentblock: groupInt(m.sentblock) }) : "");
       foot += "<span>·</span>" + g.micon(ic[0], ic[1])
         + '<span class="mm-lbl' + (st === "posting" ? " mm-posting" : st === "failed" ? " mm-failed" : "") + '">' + D.esc(lbl) + "</span>";
     }
@@ -488,7 +488,7 @@
       b.onclick = async function (e) {
         e.stopPropagation();
         b.disabled = true;
-        try { await D.api.mailRetry(b.dataset.retry, b.dataset.rid); D.toast("Re-posting…", "ok"); }
+        try { await D.api.mailRetry(b.dataset.retry, b.dataset.rid); D.toast(I18N.t("Re-posting…"), "ok"); }
         catch (err) { D.toast(errText(err), "err"); b.disabled = false; }
         render();
       };

@@ -157,3 +157,32 @@ test("main/lang.js: the saved language wins, then the system's, then English; an
   assert.equal(lang.init("", "en-GB"), "en"); assert.equal(lang.set("de"), false); assert.equal(lang.set(null), false); assert.equal(lang.set({}), false); assert.equal(lang.current(), "en");
   for (const c of OTHERS) { assert.equal(lang.set(c), true); assert.equal(lang.current(), c); } lang.set("en");
 });
+
+// 0.19.149: English the review of 0.19.140 to 0.19.144 found inside translated screens. Each is display-only (read in the code
+// before it was wrapped); a value that is compared, sent or stored stays English and is translated where shown.
+test("the English the review found in translated screens is said in every language", async () => {
+  for (const c of OTHERS) require("../renderer/i18n/" + c + ".js");
+  const AX = require("../renderer/dexicon-ax.js"), Act = require("../renderer/apps-act.js");
+  try {
+    for (const code of OTHERS) {
+      I18N.set(code);
+      for (const [st, en] of [["COMPLETE", "Complete"], ["REJECTED", "Rejected"], ["EXPIRED", "Expired"]]) { const s = AX.dealStatus({ status: st }); assert.equal(s, I18N.t(en)); assert.notEqual(s, en, code + " " + st); }
+      const sig = Act.keyuses.signing({ block: { used: 2427000, cap: 3000000, count: 2 } });
+      assert.ok(!/^position /.test(sig[0].value) && sig[0].value.includes(Act.keyuses.num(2427000)) && sig[0].value.includes(Act.keyuses.num(3000000)), code + ": " + sig[0].value);
+      const v = Act.keyuses.verdict({ verdict: "OK", complete: true, classicKeys: 64, blockKeys: 32 });
+      assert.ok(!/^Checked scope/.test(v.scope) && v.scope.includes("64") && v.scope.includes("32"), code + ": " + v.scope);
+      let said = null, sent = null;
+      await Act.vestr.create({ vestrCreate: async (o) => { sent = o; } }, { confirm: async (t, m) => { said = m; return true; } }, { tokenid: "0x00", amount: "5", beneficiary: "MxG0X", startMs: 1, endMs: 2, graceHours: "24", burn: "", password: "" }, "Minima", "Daily");
+      assert.ok(said.includes(I18N.t("Daily")) && !/\bDaily\b/.test(said), code + ": the period's name is shown translated");
+      assert.equal(sent.graceHours, 24, "what is sent is the number of hours, as before"); assert.ok(!JSON.stringify(sent).includes(I18N.t("Daily")));
+    }
+  } finally { I18N.set("en"); }
+  // the rest: the bare English is gone from the source (each now goes through t / th)
+  const src = (f) => fs.readFileSync(path.join(R, f), "utf8");
+  for (const [f, bare] of [["dexicon-ax.js", ': "a few blocks"'], ["dexicon-ax.js", 'HIDE_ASK(s.role === "RESPONDER"), "Hide")'], ["dexicon-ax.js", '}), "Set", {'], ["dexicon-ax.js", '? "less than a minute ago"'], ["dexicon-ax.js", '"sells up to "'],
+    ["dexicon-ui.js", '? "you were the maker"'], ["dexicon-ui.js", 'dialog("History"'], ["dexicon-ui.js", 'dialog("Trade"'], ["dexicon-ui.js", 'dialog("Activity"'], ["dexicon-ui.js", ': "on-chain book and pools"'], ["dexicon-ui.js", 'title="Click to copy"'], ["dexicon-ui.js", '  available<br>'], ["dexicon-ui.js", '? "no live orders"'], ["dexicon-ui.js", '(buy ? "Paid " : "Received ")'],
+    ["dexicon-pp.js", '? "migrate soon" : "healthy"'], ["dexicon-pp.js", ': "Add", "ppadd"'], ["dexicon-pp.js", 'lpBtn("Migrate"'], ["dexicon-pp.js", 'lpBtn("Close"'],
+    ["mail.js", '" · block " + groupInt'], ["mail.js", ': "On-chain" +'], ["mail.js", 'D.toast("Re-posting…"'],
+    ["app.js", 'stat.textContent = "connecting…"'], ["app.js", "this Mac's IP address"], ["app.js", "(this Mac)"], ["app.js", ': "your router"'], ["app.js", "{ mode: KEYMODE.mode, mode2: mode }"]])
+    assert.ok(!src(f).includes(bare), f + " still has " + bare);
+});

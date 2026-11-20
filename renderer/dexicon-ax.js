@@ -111,7 +111,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     let refund = null;
     if (v) {
       const when = (t) => (v.blocks ? "block " + t : new Date(t * 1000).toLocaleString());
-      const left = (t) => { const d = t - v.cur + 1; if (v.blocks) return v.cur ? d + (" " + I18N.t(d === 1 ? "block" : "blocks")) : "a few blocks"; return d >= 3600 ? Math.floor(d / 3600) + "h " + Math.ceil((d % 3600) / 60) + "m" : I18N.t("{d} min", { d: Math.ceil(d / 60) }); };
+      const left = (t) => { const d = t - v.cur + 1; if (v.blocks) return v.cur ? d + (" " + I18N.t(d === 1 ? "block" : "blocks")) : I18N.t("a few blocks"); return d >= 3600 ? Math.floor(d / 3600) + "h " + Math.ceil((d % 3600) / 60) + "m" : I18N.t("{d} min", { d: Math.ceil(d / 60) }); };
       if (v.steps && v.steps.length) lines.push("✓ " + v.steps.map(mx).join(" · ✓ "));
       if (st === "STARTED" && !v.timedOut && v.cur < v.respondBy) lines.push(I18N.t("Maker must respond by {respondBy}", { respondBy: when(v.respondBy) }));
       if (v.notice) lines.push((v.notice.state === "declined" ? (I18N.t("Maker declined:") + " ") : (I18N.t("Maker is retrying:") + " ")) + mx(v.notice.reason));
@@ -219,7 +219,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function dealStatus(d) {
     const st = String(d.status || "");
     return st === "PROPOSED" || st === "COUNTERED" ? (d.whoseTurn === "ME" ? I18N.t("Your move: accept, counter or reject") : I18N.t("Waiting for the counterparty…"))
-      : st === "AGREED" ? I18N.t("Agreed: settling") : st === "EXECUTING" ? I18N.t("Executing: the swap's two sides are locking") : st === "COMPLETE" ? "Complete" : st === "REJECTED" ? "Rejected" : st === "EXPIRED" ? "Expired" : st.toLowerCase();
+      : st === "AGREED" ? I18N.t("Agreed: settling") : st === "EXECUTING" ? I18N.t("Executing: the swap's two sides are locking") : st === "COMPLETE" ? I18N.t("Complete") : st === "REJECTED" ? I18N.t("Rejected") : st === "EXPIRED" ? I18N.t("Expired") : st.toLowerCase();
   }
   const dealCanAct = (d) => d.whoseTurn === "ME" && (d.status === "PROPOSED" || d.status === "COUNTERED");
   /** Why an OTC offer's terms cannot be sent ("" = they can): both plain positive numbers, the amount within the LP's size. */
@@ -489,7 +489,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   }
   async function hide(hash) {
     const s = (S.swaps || []).find((x) => x.hash === hash); if (!s) return;
-    if (!terminal(s) && !await D.dialog(I18N.t("Hide this swap?"), HIDE_ASK(s.role === "RESPONDER"), "Hide")) return;
+    if (!terminal(s) && !await D.dialog(I18N.t("Hide this swap?"), HIDE_ASK(s.role === "RESPONDER"), I18N.t("Hide"))) return;
     S.hidden.add(hash); pref("dexicon_ax_hidden", [...S.hidden].slice(-400).join(",")); paint();
   }
 
@@ -581,7 +581,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   }
   const stageRow = (r) => `<div class="ax-stage" data-state="${r.state}"><i></i><span>${esc(r.text)}</span></div>`;
   async function customSlip() {
-    const v = await D.dialog(I18N.t("Max slippage"), I18N.t("The most above the best price you'll pay per {ccy} when a buy fills across deeper levels (0.1 to 50 %).", { ccy: ccy() }), "Set", { label: I18N.t("Max slippage, percent"), value: String(S.slip) });
+    const v = await D.dialog(I18N.t("Max slippage"), I18N.t("The most above the best price you'll pay per {ccy} when a buy fills across deeper levels (0.1 to 50 %).", { ccy: ccy() }), I18N.t("Set"), { label: I18N.t("Max slippage, percent"), value: String(S.slip) });
     if (v == null) return;
     const n = slipOf(v); if (n == null) return say(I18N.t("Enter a percent between 0.1 and 50. The slippage was not changed."), "note");
     S.slip = n; pref("dexicon_ax_slip", String(n)); paint(); preview();
@@ -590,7 +590,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   // ---- Market (MarketTab.java) ----
   const WHY_MARKET = L_("Here you are the maker: publish a ladder of prices at which you sell and buy the active coin against ERC20 USDT. Takers lock their side first; this app answers automatically while it is running, so keep it open and the node online. Peg the ladder to the live price and it reprices itself; if the price feed fails, it is withdrawn for safety. Withdraw takes your offer off the book in about a block. One market at a time: the ⇄ pill switches it.");
   const src = () => ((S.book ? S.book.pricingParity : S.st.currency === "mxusdt") ? "Parity" : "MEXC");
-  const agoMin = (ms) => { const m = Math.floor(Math.max(0, Date.now() - Number(ms)) / 60000); return m < 1 ? "less than a minute ago" : I18N.t("{m} min ago", { m: m }); };
+  const agoMin = (ms) => { const m = Math.floor(Math.max(0, Date.now() - Number(ms)) / 60000); return m < 1 ? I18N.t("less than a minute ago") : I18N.t("{m} min ago", { m: m }); };
   function half(row, bid) {
     if (!row) return `<div class="ax-half${bid ? " ax-half--bid" : ""}"><span class="ax-q"><span class="ax-sz">—</span></span></div>`;
     const take = !row.mine && row.cap > 0, q = bid ? `<span class="ax-sz">${abbrev(row.cap)}</span><span class="ax-px">${fmtPx(row.p)}</span>` : `<span class="ax-px">${fmtPx(row.p)}</span><span class="ax-sz">${abbrev(row.cap)}</span>`;
@@ -623,7 +623,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); cv.setTransform(dpr, 0, 0, dpr, 0, 0);
     const padL = 56, padR = 8, padT = 8, padB = 16, css = getComputedStyle(canvas), ACC = css.getPropertyValue("--ax-acc").trim() || "#F7931A", DIM = css.getPropertyValue("--dx-dim2").trim() || "#6F7583";
     cv.clearRect(0, 0, w, h); cv.font = '11px "JetBrains Mono", ui-monospace, monospace'; cv.fillStyle = DIM;
-    if (!data || data.length < 2) { cv.fillText(!data || !data.length ? I18N.t("Collecting market data…") : "need 2+ trades to chart", padL, h / 2); return; }
+    if (!data || data.length < 2) { cv.fillText(!data || !data.length ? I18N.t("Collecting market data…") : I18N.t("need 2+ trades to chart"), padL, h / 2); return; }
     let minP = Infinity, maxP = -Infinity, minB = Infinity, maxB = -Infinity;
     data.forEach((t) => { minP = Math.min(minP, t.price); maxP = Math.max(maxP, t.price); minB = Math.min(minB, t.createdBlock); maxB = Math.max(maxB, t.createdBlock); });
     if (maxP <= minP) maxP = minP + Math.max(minP * 0.001, 1e-9); if (maxB <= minB) maxB = minB + 1;
@@ -725,8 +725,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (!o) out.push(`<div class="ax-dim">${th("Reading the OTC board…")}</div>`);
     else if (!o.board.length) out.push(`<div class="ax-dim">${th("No OTC LPs online right now.")}</div>`);
     else o.board.forEach((lp) => {
-      const sides = [Number(lp.sell) > 0 ? "sells up to " + lp.sell + " " + c : "", Number(lp.buy) > 0 ? "buys up to " + lp.buy + " " + c : ""].filter(Boolean).join("   ·   ");
-      out.push(`<div class="dx-card"><b class="ax-t13">${esc(sides || "no size offered")}</b>${idLine(I18N.t("LP id"), lp.cid)}<div class="ax-acts">${Number(lp.sell) > 0 ? `<button class="dx-btn ax-go" data-axlp="${esc(lp.cid)}" data-sell="${esc(lp.sell)}" data-buy="${esc(lp.buy)}" data-side="SELL"${dis}>${tr("Buy {c}", { c: esc(c) })}</button>` : ""}${Number(lp.buy) > 0 ? `<button class="dx-btn" data-axlp="${esc(lp.cid)}" data-sell="${esc(lp.sell)}" data-buy="${esc(lp.buy)}" data-side="BUY"${dis}>${tr("Sell {c}", { c: esc(c) })}</button>` : ""}</div></div>`);
+      const sides = [Number(lp.sell) > 0 ? I18N.t("sells up to {n} {c}", { n: lp.sell, c: c }) : "", Number(lp.buy) > 0 ? I18N.t("buys up to {n} {c}", { n: lp.buy, c: c }) : ""].filter(Boolean).join("   ·   ");
+      out.push(`<div class="dx-card"><b class="ax-t13">${esc(sides || I18N.t("no size offered"))}</b>${idLine(I18N.t("LP id"), lp.cid)}<div class="ax-acts">${Number(lp.sell) > 0 ? `<button class="dx-btn ax-go" data-axlp="${esc(lp.cid)}" data-sell="${esc(lp.sell)}" data-buy="${esc(lp.buy)}" data-side="SELL"${dis}>${tr("Buy {c}", { c: esc(c) })}</button>` : ""}${Number(lp.buy) > 0 ? `<button class="dx-btn" data-axlp="${esc(lp.cid)}" data-sell="${esc(lp.sell)}" data-buy="${esc(lp.buy)}" data-side="BUY"${dis}>${tr("Sell {c}", { c: esc(c) })}</button>` : ""}</div></div>`);
     });
     out.push(`<div class="dx-label ax-sec">${th("MY DEALS")}</div>`);
     if (o && !o.deals.length) out.push(`<div class="ax-dim">${th("No OTC deals yet.")}</div>`);
@@ -801,7 +801,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (ds.axtake) { S.sell = ds.axtake === "bid"; S.typed = null; return D.go("swap"); }   // a bid is where you SELL, an ask where you BUY; the amount and the review are on Swap
     if (ds.axhide) return hide(ds.axhide);
     if (ds.axunhide) { S.hidden.delete(ds.axunhide); pref("dexicon_ax_hidden", [...S.hidden].join(",")); return paint(); }
-    if (ds.axrefund) return one(async () => { S.answers[ds.axrefund] = "Asking for the refund…"; paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); });
+    if (ds.axrefund) return one(async () => { S.answers[ds.axrefund] = I18N.t("Asking for the refund…"); paint(); S.answers[ds.axrefund] = await Act.refundNow(api(), ui, ds.axrefund); return reload(); });
     if (ds.axcsv) return Act.exportCsv(api(), ui);
     if (ds.axstart) return D.start();
     if (ds.axw) return one(() => walletAct(ds.axw));

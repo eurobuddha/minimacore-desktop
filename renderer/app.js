@@ -293,7 +293,9 @@ function restoreMode(host) {
   const picked = host.querySelector('.modeq .opt[aria-checked="true"]');
   if (!picked) return { error: t("Choose which kind of wallet these words were used in.") };
   const mode = picked.dataset.mode;
-  if (KEYMODE.mode && KEYMODE.mode !== mode) return { error: t("This install holds a {mode} key wallet, and that cannot be changed. Words used in a {mode2} key wallet would open an empty wallet here. Restore them on a fresh install.", { mode: KEYMODE.mode, mode2: mode }) };
+  if (KEYMODE.mode && KEYMODE.mode !== mode) return { error: KEYMODE.mode === "block"   // the two modes are "classic" and "block": one whole sentence each, never a raw mode word inside a translation
+    ? t("This install holds a block key wallet, and that cannot be changed. Words used in a classic key wallet would open an empty wallet here. Restore them on a fresh install.")
+    : t("This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install.") };
   return { mode };
 }
 /**
@@ -691,10 +693,10 @@ function showStarting() {
 }
 function updateSetupProgress(s) {
   const stat = el("startStat"); if (!stat) return;
-  if (s.state === "starting") stat.textContent = "connecting…";
+  if (s.state === "starting") stat.textContent = t("connecting…");
   else if (s.state === "running" && s.health) stat.textContent = t("● {connections} peers · block #{block}", { connections: (s.health.connections || 0), block: (s.health.block || 0) });
   else if (s.state === "error") {
-    stat.textContent = "⚠ " + (s.lastError || "node error"); stat.style.color = "var(--red)";
+    stat.textContent = "⚠ " + (s.lastError || t("node error")); stat.style.color = "var(--red)";
     if (!el("startBack")) {   // a way out, to change a port or a parameter and try again
       stat.insertAdjacentHTML("afterend", `<button class="btn btn--outline ps-btn" id="startBack">${th("Back")}</button>`);
       el("startBack").onclick = () => { RESTORE = null; showSetup(); };
@@ -3140,8 +3142,8 @@ function contribHelp(s, h, pm) {
  */
 function forwardHowTo(pm) {
   const port = CFG.basePort;
-  const lan = pm.lanIp || "this Mac's IP address";
-  const router = pm.routerName ? esc(pm.routerName) : "your router";
+  const lan = pm.lanIp || t("this computer's IP address");
+  const router = pm.routerName ? esc(pm.routerName) : th("your router");
   const admin = pm.gatewayIp ? `<a href="http://${esc(pm.gatewayIp)}" target="_blank">http://${esc(pm.gatewayIp)}</a>` : th("your router's admin page");
   return `<div class="howto">
     <div class="howto__h">${tr("How to open port {port} yourself", { port: esc(port) })}</div>
@@ -3149,7 +3151,7 @@ function forwardHowTo(pm) {
     <div class="kv"><span class="kv__k">${th("Protocol")}</span><span class="kv__v">${th("TCP")}</span></div>
     <div class="kv"><span class="kv__k">${th("External port")}</span><span class="kv__v">${esc(port)}</span></div>
     <div class="kv"><span class="kv__k">${th("Internal port")}</span><span class="kv__v">${esc(port)}</span></div>
-    <div class="kv"><span class="kv__k">${th("Send to")}</span><span class="kv__v">${tr("{lan} (this Mac)", { lan: esc(lan) })}</span></div>
+    <div class="kv"><span class="kv__k">${th("Send to")}</span><span class="kv__v">${tr("{lan} (this computer)", { lan: esc(lan) })}</span></div>
     <div class="howto__b">${tr("Also reserve {b}{lan}{_b} for this computer in your router's DHCP settings: otherwise the address can change and the forward will quietly stop working.{routerName}", { b: "<b>", _b: "</b>", lan: esc(lan), routerName: pm.routerName ? (" " + tr("Searching for “{router} port forwarding” will show the exact screens.", { router: router })) : "" })}</div>
   </div>`;
 }

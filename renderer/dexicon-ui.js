@@ -307,7 +307,7 @@ const DexUI = (() => {
     sync.textContent = !nRelays ? I18N.t("● no relays") : relayDown() ? I18N.t("● no relay answers") : anyOk ? I18N.t("● live") : I18N.t("● connecting"); sync.dataset.ok = anyOk && !relayDown() ? "1" : "0";
     $("dxMid").textContent = L.mid ? C.fmtPrice(L.mid) : "…";
     $("dxSpread").textContent = L.spread ? I18N.t("spread {spread}", { spread: C.fmt(L.spread) }) : "";
-    $("dxKind").textContent = I18N.t("{bestBid} · FAST + BOOK + POOL", { bestBid: (!L.mid ? "no live orders" : L.bestBid && L.bestAsk ? I18N.t("mid of best bid / best ask") : L.bestBid ? "best bid only" : "best ask only") });
+    $("dxKind").textContent = I18N.t("{bestBid} · FAST + BOOK + POOL", { bestBid: (!L.mid ? I18N.t("no live orders") : L.bestBid && L.bestAsk ? I18N.t("mid of best bid / best ask") : L.bestBid ? I18N.t("best bid only") : I18N.t("best ask only")) });
     $("dxBidsN").textContent = I18N.t("{fast} fast · {book} book order{book2}", { fast: L.count.fast, book: L.count.book, book2: I18N.s(L.count.book) });
     $("dxAsksN").textContent = I18N.t("{pools} pool{pools2}", { pools: L.count.pools, pools2: I18N.s(L.count.pools) });
     // the only outside price shown is MEXC's, with the label the engine's read model gives it
@@ -328,9 +328,9 @@ const DexUI = (() => {
   function paintFunds() {
     const f = fundsNow(), b = $("dxFunds"); if (!b) return;
     const value = f.known && X.lastMid ? "≈ " + C.fmt(C.down(C.add(C.add(f.mxusd, f.mxusdSettling), C.mul(C.add(f.minima, f.minimaSettling), X.lastMid)), 4)) + " MxUSD @ mid " + C.fmtPrice(X.lastMid) : "";
-    const block = (name, a, o, s2) => `<div><b>${name}</b><br>${C.fmtBal(a)}  available<br>${C.fmtBal(o)}  in your orders<br>+${C.fmtBal(s2)}  settling<br>${C.fmtBal(C.add(a, s2))}  total</div>`;
+    const block = (name, a, o, s2) => `<div><b>${name}</b><br>${C.fmtBal(a)}  ${th("available")}<br>${C.fmtBal(o)}  ${th("in your orders")}<br>+${C.fmtBal(s2)}  ${th("settling")}<br>${C.fmtBal(C.add(a, s2))}  ${th("total")}</div>`;
     b.innerHTML = `<div class="dx-row"><span class="dx-h">${tr("YOUR FUNDS  {fundsBig}", { fundsBig: X.fundsBig ? "▾" : "▸" })}</span><span class="dx-fval">${esc(value)}</span></div>`
-      + (!f.known ? `<div class="dx-fsmall">${esc(X.balErr || (node.state === "running" ? "reading…" : "node stopped"))}</div>`
+      + (!f.known ? `<div class="dx-fsmall">${esc(X.balErr || (node.state === "running" ? I18N.t("reading…") : I18N.t("node stopped")))}</div>`
         : X.fundsBig ? `<div class="dx-fcols">${block("MINIMA", f.minima, f.minimaOrders, f.minimaSettling)}${block("MxUSD", f.mxusd, f.mxusdOrders, f.mxusdSettling)}</div>`
         : `<div class="dx-fsmall">${tr("{minima} MINIMA  ·  {mxusd} MxUSD  available", { minima: C.fmtBal(f.minima), mxusd: C.fmtBal(f.mxusd) })}</div>`);
   }
@@ -338,7 +338,7 @@ const DexUI = (() => {
     if (!$("dxPrice")) return;
     const buy = X.buy, f = fundsNow(), pl = C.plan(book(), buy, $("dxPrice").value, $("dxAmount").value, f), why = blocker(), side = buy ? "BUY " : "SELL ";
     $("dxBuy").setAttribute("aria-pressed", buy ? "true" : "false"); $("dxSell").setAttribute("aria-pressed", buy ? "false" : "true");
-    $("dxAvail").textContent = !f.known ? I18N.t("Available: … ({balErr})", { balErr: (X.balErr || "not read yet") }) : I18N.t("Available: {buy}{buy2}  ·  tap for max\n({minima} MINIMA · {mxusd} MxUSD in wallet)", { buy: C.fmtBal(C.freeFor(f, buy)), buy2: (buy ? " MxUSD" : " MINIMA"), minima: C.fmtBal(f.minima), mxusd: C.fmtBal(f.mxusd) });
+    $("dxAvail").textContent = !f.known ? I18N.t("Available: … ({balErr})", { balErr: (X.balErr || I18N.t("not read yet")) }) : I18N.t("Available: {buy}{buy2}  ·  tap for max\n({minima} MINIMA · {mxusd} MxUSD in wallet)", { buy: C.fmtBal(C.freeFor(f, buy)), buy2: (buy ? " MxUSD" : " MINIMA"), minima: C.fmtBal(f.minima), mxusd: C.fmtBal(f.mxusd) });
     let total = I18N.t("Total: …");
     if (pl.ok) {
       const all = C.mul(pl.amount, pl.price);
@@ -504,16 +504,16 @@ const DexUI = (() => {
       if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
       out.push(`<button class="dx-card dx-led" data-fill="${i}"><span class="dx-led__ic" data-tone="${fs.tone}">⇄</span><span class="dx-led__m"><b>${f.status === "done" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))}</b>`
         + `<span class="dx-led__a">${buy ? tr("{f} MxUSD → {filled} MINIMA", { f: esc(C.fmt(C.fillUsd(f))), filled: esc(f.filled) }) : tr("{filled} MINIMA → {f} MxUSD", { filled: esc(f.filled), f: esc(C.fmt(C.fillUsd(f))) })}</span>`
-        + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? "you were the maker" : "fast book"} · ${esc(fs.text)}</span></span>`
+        + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? th("you were the maker") : th("fast book")} · ${esc(fs.text)}</span></span>`
         + `<span class="dx-led__r">${f.status === "done" ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${fs.chip}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>`);
     });
     return out.join("") + DexAx.part("history") + DexPools.part("history");
   }
   function fillFacts(f) {
     const buy = f.side === "buy", fs = C.fillState(f);
-    return [I18N.t("{filled} MINIMA at {price} MxUSD per MINIMA", { filled: (buy ? (I18N.t("Bought") + " ") : (I18N.t("Sold") + " ")) + f.filled, price: C.fmtPrice(C.dec(f.price)) }), (buy ? "Paid " : "Received ") + C.fmt(C.fillUsd(f)) + " MxUSD", I18N.t("State: {chip}, {fs}", { chip: fs.chip, fs: fs.text }),
+    return [I18N.t("{filled} MINIMA at {price} MxUSD per MINIMA", { filled: (buy ? (I18N.t("Bought") + " ") : (I18N.t("Sold") + " ")) + f.filled, price: C.fmtPrice(C.dec(f.price)) }), (buy ? I18N.t("Paid {usd} MxUSD", { usd: C.fmt(C.fillUsd(f)) }) : I18N.t("Received {usd} MxUSD", { usd: C.fmt(C.fillUsd(f)) })), I18N.t("State: {chip}, {fs}", { chip: fs.chip, fs: fs.text }),
       I18N.t("When: {ts}", { ts: new Date((Number(f.ts) || 0) * 1000).toString() }), I18N.t("Your side: {role}", { role: (f.role === "maker" ? I18N.t("maker (your FAST order was taken)") : I18N.t("taker (you took a FAST order)")) }), "",
-      "txpow id (before mining)\n" + (f.txpowid || ""), "order\n" + (f.orderId || ""), "counterparty\n" + (f.maker || f.taker || f.counterparty || ""), "output coins\n" + ((f.coins || []).join("\n") || "not recorded")].join("\n");
+      "txpow id (before mining)\n" + (f.txpowid || ""), "order\n" + (f.orderId || ""), "counterparty\n" + (f.maker || f.taker || f.counterparty || ""), "output coins\n" + ((f.coins || []).join("\n") || I18N.t("not recorded"))].join("\n");
   }
   async function onTabClick(e) {
     if (await DexAx.click(e)) return;   // AtomiX's own controls on the shared screens
@@ -521,12 +521,12 @@ const DexUI = (() => {
     const ds = b.dataset;
     if (ds.sub != null) { X.sub = Number(ds.sub); return draw(); }
     if (ds.oact) return money(() => orderAction(ds.oact, ds.kind, ds.id, ds.price));
-    if (ds.info) return void dialog("History", HIST_INFO, "");
-    if (ds.fill != null) return void dialog("Trade", fillFacts(X.fills[Number(ds.fill)]), "");
+    if (ds.info) return void dialog(I18N.t("History"), HIST_INFO, "");
+    if (ds.fill != null) return void dialog(I18N.t("Trade"), fillFacts(X.fills[Number(ds.fill)]), "");
     if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say(I18N.t("Saved {fills} fills.", { fills: X.fills.length }), "note"); } catch (err) { say(err && err.message); } return; }
     if (ds.asub != null) { X.asub = Number(ds.asub); return draw(); }
-    if (ds.act != null) return void dialog("Activity", actFacts(X.acts[Number(ds.act)]), "");
-    if (ds.ainfo) return void dialog("Activity", ACT_INFO, "");
+    if (ds.act != null) return void dialog(I18N.t("Activity"), actFacts(X.acts[Number(ds.act)]), "");
+    if (ds.ainfo) return void dialog(I18N.t("Activity"), ACT_INFO, "");
     if (ds.asset) { X.open[ds.asset] = !X.open[ds.asset]; return draw(); }
     if (ds.room != null) return opts.go(C.ROOMS[Number(ds.room)].view);
     if (ds.relay) {
@@ -577,7 +577,7 @@ const DexUI = (() => {
   }
   function actFacts(a) {
     const m = A(), tip = (st && st.block) || 0, L = [I18N.t("{minima} MINIMA at {price} MxUSD per MINIMA", { minima: (a.side === "buy" || a.buy === true ? (I18N.t("BUY") + " ") : (I18N.t("SELL") + " ")) + (a.amount || a.minima || ""), price: (a.price || "") }),
-      I18N.t("Route: {route}{role}", { route: (a.route === "FAST" ? I18N.t("FAST book") : "on-chain book and pools"), role: (a.role ? I18N.t(", you were the {role}", { role: a.role }) : "") }), I18N.t("State: {stage}", { stage: (m ? m.chip(a, tip) + ". " + m.status(a, tip, Date.now()) : a.stage) }), I18N.t("Started: {ts}", { ts: new Date(Number(a.ts) || 0).toString() }), ""];
+      I18N.t("Route: {route}{role}", { route: (a.route === "FAST" ? I18N.t("FAST book") : I18N.t("on-chain book and pools")), role: (a.role ? I18N.t(", you were the {role}", { role: a.role }) : "") }), I18N.t("State: {stage}", { stage: (m ? m.chip(a, tip) + ". " + m.status(a, tip, Date.now()) : a.stage) }), I18N.t("Started: {ts}", { ts: new Date(Number(a.ts) || 0).toString() }), ""];
     for (const [k, label] of [["txpowid", "txpow id (before mining)"], ["orderId", "order"], ["counterparty", "counterparty"], ["id", "activity id"]]) if (a[k]) L.push(label + "\n" + a[k]);
     for (const [k, label] of [["outs", "output coins"], ["ins", "input coins"]]) if (Array.isArray(a[k]) && a[k].length) L.push(label + "\n" + a[k].join("\n"));
     return L.join("\n");
@@ -588,13 +588,13 @@ const DexUI = (() => {
       + (X.open[key] && f.known ? `<span class="dx-asset__more">${tr("{inOrders}  promised by your live FAST orders (still in your wallet)\n{inOrders2}  free for a new order\n+{settling}  settling: traded, waiting for a block", { inOrders: esc(C.fmt(inOrders)), inOrders2: esc(C.fmt(C.sub(avail, inOrders))), settling: esc(C.fmt(settling)) })}</span>` : "") + `</button>`;
     return (!f.known ? `<div class="dx-state dx-state--note">${esc(X.balErr || I18N.t("The balance has not been read yet."))}</div>` : "")
       + asset("minima", "MINIMA", f.minima, f.minimaOrders, f.minimaSettling) + asset("mxusd", "MxUSD", f.mxusd, f.mxusdOrders, f.mxusdSettling) + DexAx.part("assets")   // the phone's order: the two coins, Ethereum, then the rest
-      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">${th("RECEIVE MINIMA OR MxUSD")}</span>${addr ? `<button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">${th("Copy")}</button>` : ""}</div><div class="dx-addr" ${addr ? `data-copy="${esc(addr)}" title="Click to copy"` : ""}>${esc(addr || I18N.t("The address appears when Dexicon has read the chain."))}</div></div>`
-      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">${th("YOUR TRADING ID")}</span>${id ? `<button class="dx-btn dx-btn--side" data-copy="${esc(id)}">${th("Copy")}</button>` : ""}</div><div class="dx-addr" ${id ? `data-copy="${esc(id)}" title="Click to copy"` : ""}>${esc(id || I18N.t("Not read yet."))}</div>`
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">${th("RECEIVE MINIMA OR MxUSD")}</span>${addr ? `<button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">${th("Copy")}</button>` : ""}</div><div class="dx-addr" ${addr ? `data-copy="${esc(addr)}" title="${th("Click to copy")}"` : ""}>${esc(addr || I18N.t("The address appears when Dexicon has read the chain."))}</div></div>`
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">${th("YOUR TRADING ID")}</span>${id ? `<button class="dx-btn dx-btn--side" data-copy="${esc(id)}">${th("Copy")}</button>` : ""}</div><div class="dx-addr" ${id ? `data-copy="${esc(id)}" title="${th("Click to copy")}"` : ""}>${esc(id || I18N.t("Not read yet."))}</div>`
       + `<div class="dx-sub dx-sub--sans">${th("Other traders see this ID when you trade on the fast book. It is made from your node's seed, so it stays the same if you reinstall. It is not an address: never send coins to it.")}</div></div>`;
   }
   function settingsHtml() {
     const relays = Page.state.relays || [], px = st && st.price;
-    const health = (r) => (r.found ? "found through " + r.meta.replace(/^via\s*/, "") : r.state === "ok" ? (I18N.t("OK ·") + " ") + r.meta : r.state === "bad" ? I18N.t("ERROR · {meta}", { meta: r.meta }) : "not polled yet");
+    const health = (r) => (r.found ? "found through " + r.meta.replace(/^via\s*/, "") : r.state === "ok" ? (I18N.t("OK ·") + " ") + r.meta : r.state === "bad" ? I18N.t("ERROR · {meta}", { meta: r.meta }) : I18N.t("not polled yet"));
     return DexAx.part("settings") + `<div class="dx-card"><div class="dx-h">${th("WALLET")}</div><div class="dx-sub dx-sub--sans">${th("Dexicon trades with this node's own wallet: the node signs every trade with its own keys. Your node's seed phrase backs up everything here.")}</div></div>`
       + `<div class="dx-card"><div class="dx-h">${th("ADD RELAY")}</div><div class="dx-sub dx-sub--sans">${th("A Dexicon relay is the dexrelay cape of parlons-node.jar / maxima-server.jar. Orders are published to EVERY relay here; the book is the union. On the desktop a relay must be an https address.")}</div>`
       + `<input class="dx-in dx-in--s" id="dxRelayIn" placeholder="${th("https://relay.example/dex-relay")}" aria-label="${th("Relay address")}" autocomplete="off" spellcheck="false"><div class="dx-mm__b"><button class="dx-btn dx-btn--acc" data-relay="add">${th("ADD")}</button><button class="dx-btn dx-btn--acc" data-relay="discover">${th("DISCOVER")}</button></div></div>`
