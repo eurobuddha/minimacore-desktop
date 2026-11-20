@@ -195,7 +195,9 @@
     blockLabel: "Node seed · block-based", blockNote: "Block-based keys use a block-derived leaf position. A classic keyuses recovery estimate does not apply to these keys.",
     reco: "Classic recovery estimate: review before use", keyAudit: "Key audit",
     mismatch: "The server’s address differs from the locally derived address. Treat the audit as incomplete.",
-    exhaustion: "A key is near its signature capacity. Review it before signing again."
+    exhaustion: "A key is near its signature capacity. Review it before signing again.",
+    // said INSIDE the verdict, beside the checked scope: "no reuse in the checked keys" is not a clean bill for the keys that were not checked
+    gap: "Not checked here: the keys this wallet's seed gives in the other key mode (the phone checks 64 classic and 32 block-based keys derived from the seed), and minimaWallet's keys. If this seed was ever used in the other mode or in another wallet app, those keys can have been reused and this result does not show it."
   };
   var keyuses = {
     COPY: KU, UNAVAILABLE: "The node’s keys could not be read. Check that the node is running, then run the audit again.",
@@ -220,6 +222,8 @@
           blocks: [{ label: KU.causes, body: KU.causesBody }] };   // the advice there is to move, so no keyuses estimate is shown (as the original)
       else if (r.verdict === "RISK_HEURISTIC") out = { tone: "risk", title: KU.riskTitle, body: KU.riskBody, blocks: reco([{ label: KU.causes, body: KU.causesBody }, { label: KU.keyAudit, body: KU.riskBody }]) };
       else out = { tone: r.complete ? "ok" : "warn", title: r.complete ? KU.okTitle : KU.partial, body: r.complete ? KU.explain : KU.incomplete, blocks: reco([]) };
+      out.scope = "Checked scope: " + keyuses.num(r.classicKeys) + " classic · " + keyuses.num(r.blockKeys) + " block-based keys held by this node.";
+      out.gap = KU.gap;
       return out;
     },
     /** The table's sections (renderKeySections): classic keys, then block keys; empty ones left out; rows numbered inside each. */

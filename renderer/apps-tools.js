@@ -32,9 +32,8 @@ function keyUsesResults(r) {
       <div class="kx-cell" role="cell">${esc(K.num(x.local))}</div><div class="kx-cell" role="cell">${esc(K.num(x.sigs))}</div><div class="kx-cell" role="cell">${esc(K.num(x.coins))}</div></div>`; };
   const head = `<div class="kx-row kx-row--head" role="row"><div class="kx-cell kx-cell--addr" role="columnheader">Address (click to copy)</div><div class="kx-cell" role="columnheader">Local uses</div><div class="kx-cell" role="columnheader">Spend blocks</div><div class="kx-cell" role="columnheader">Spent coins</div></div>`;
   return (r.complete ? "" : notice(C.incomplete, "warn"))
-    + `<div class="kx-scope">Checked scope: ${esc(r.classicKeys)} classic · ${esc(r.blockKeys)} block-based keys</div>`
     + (r.mismatch ? notice(C.mismatch, "risk") : "") + (r.exhaustion ? notice(C.exhaustion, "warn") : "")
-    + `<div class="kx-verdict kx-verdict--${v.tone}"><h2 class="kx-verdict__t">${esc(v.title)}</h2><p class="kx-verdict__b">${esc(v.body)}</p>${v.blocks.map(block).join("")}</div>`
+    + `<div class="kx-verdict kx-verdict--${v.tone}"><h2 class="kx-verdict__t">${esc(v.title)}</h2><p class="kx-verdict__b"><b>${esc(v.scope)}</b> ${esc(v.gap)}</p><p class="kx-verdict__b">${esc(v.body)}</p>${v.blocks.map(block).join("")}</div>`
     + `<div class="kx-card kx-card--table">${K.sections(r).map(s => `<div class="kx-section" role="table" aria-label="${esc(s.title)}"><h3 class="kx-section__t">${esc(s.title)}</h3>${head}${s.rows.map((x, i) => row(x, i + 1)).join("")}</div>`).join("")}
       <div class="kx-cov">${r.tip > 0 ? "Archive coverage to block " + esc(r.tip) + "." : "The archive did not say which block it reaches."} Spend blocks can undercount signatures. Only default addresses are checked; custom scripts and multisig usage are not included. A clear result is not proof that a key is safe.</div></div>`;
 }

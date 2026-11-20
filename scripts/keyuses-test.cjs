@@ -79,8 +79,8 @@ test("the audit sends one read to the node and the keys and addresses to the one
   assert.ok(!/require\("(https?|net|electron|child_process)"\)/.test(src), "the module opens no socket of its own");
   assert.equal(K.BASE, "https://eurobuddha.com");
   const mainJs = R("main/main.js");
-  assert.ok(/ipcMain\.handle\("mcd:keyUsesAudit", \(\) => \{ requireRunning\(\); return keyuses\.audit\(\{ run: \(c\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\), get: \(url\) => netfetch\.fetchJson\(url, \{ noRedirect: true \}\) \}\); \}\);/.test(mainJs),
-    "main: the handler takes nothing from the renderer, reads through rpcCall, and follows no redirect");
+  assert.ok(/ipcMain\.handle\("mcd:keyUsesAudit", \(\) => \{ requireRunning\(\); return keyuses\.audit\(\{ run: \(c\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\), get: \(url\) => netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\) \}\); \}\);/.test(mainJs),
+    "main: the handler takes nothing from the renderer, reads through rpcCall, follows no redirect and reads at most 512 KB");
   assert.ok(!/mcd:keyReuse/.test(mainJs) && !/keyReuse/.test(R("main/preload.js")), "the old address-list endpoint for the renderer is gone");
 });
 
@@ -143,10 +143,55 @@ test("keys that change while the server is asked (a signature was made) refuse t
   assert.equal((await K.audit(world([classic(0, 1)], server, [classic(0, 1)]).io)).ok, true);
 });
 
+// 0.19.137 (review)
+test("the verdict itself says what was not checked: 'no reuse in the checked keys' is never a clean bill for the seed's other keys", async () => {
+  const ok = await K.audit(world([classic(0, 1), classic(1, 0)], answers([usage(0, 1, 1), usage(1, 0, 0)], [clean(0), clean(1)])).io);
+  assert.equal(ok.verdict, "OK"); assert.equal(ok.complete, true);
+  const v = Act.verdict(ok);
+  assert.equal(v.title, "No known key reuse was found in the checked keys.");
+  assert.equal(v.scope, "Checked scope: 2 classic · 0 block-based keys held by this node.");
+  assert.ok(v.gap.startsWith("Not checked here: the keys this wallet's seed gives in the other key mode") && v.gap.includes("those keys can have been reused and this result does not show it"));
+  for (const r of [ok, Object.assign({}, ok, { verdict: "RISK_HEURISTIC" }), Object.assign({}, ok, { verdict: "REUSE_WARN", worstReuse: 2 }), Object.assign({}, ok, { complete: false })]) assert.equal(Act.verdict(r).gap, v.gap, "every verdict carries it");
+  const tools = R("renderer/apps-tools.js");
+  assert.ok(/<h2 class="kx-verdict__t">\$\{esc\(v\.title\)\}<\/h2><p class="kx-verdict__b"><b>\$\{esc\(v\.scope\)\}<\/b> \$\{esc\(v\.gap\)\}<\/p><p class="kx-verdict__b">\$\{esc\(v\.body\)\}<\/p>/.test(tools), "drawn inside the verdict card, right under its title, the scope and the gap side by side");
+  assert.ok(!/kx-scope/.test(tools), "the scope is said once, in the verdict");
+});
+
+test("the lookups go one at a time, and the first failure stops them: no further public key or address leaves", async () => {
+  const keys = Array.from({ length: 150 }, (_, i) => ({ size: 64, depth: 3, uses: 0, maxuses: 262144, publickey: "0x" + i.toString(16).toUpperCase().padStart(64, "0") }));   // 3 chunks of keys, 3 of addresses
+  let open = 0, most = 0; const urls = [];
+  const server = (failAt) => async (url) => { urls.push(url); open++; most = Math.max(most, open); await new Promise(r => setImmediate(r)); open--;
+    if (urls.length === failAt) return null;
+    const list = decodeURIComponent(url.split("=")[1]).split(",");
+    return url.includes("/keyaudit?") ? { status: true, archive_tip: 5, keys: list.map(pk => ({ publickey: pk, address: K.addressOf(pk).hex, spend_blocks: 0, spent_coins: 0 })) } : { status: true, results: list.map(a => ({ address: a, reused: false, reuse_count: 0 })) }; };
+  const sel = K.select({ status: true, response: { keys } });
+  const all = await K.lookup(sel, server(0));
+  assert.equal(most, 1, "never two requests at once"); assert.equal(urls.length, 6); assert.equal(all.usage.length, 150); assert.equal(all.reuse.length, 150);
+  assert.deepEqual(urls.map(u => u.slice(0, u.indexOf("=") + 1)), ["https://eurobuddha.com/keyaudit?keys=", "https://eurobuddha.com/keyaudit?keys=", "https://eurobuddha.com/keyaudit?keys=", "https://eurobuddha.com/reuse?addrs=", "https://eurobuddha.com/reuse?addrs=", "https://eurobuddha.com/reuse?addrs="]);
+  assert.deepEqual(urls.map(u => decodeURIComponent(u.split("=")[1]).split(",").length), [64, 64, 22, 64, 64, 22]);
+  for (const failAt of [1, 2, 4]) { urls.length = 0; await assert.rejects(K.lookup(sel, server(failAt)), /no answer/); assert.equal(urls.length, failAt, "request " + failAt + " failed: nothing was sent after it"); }
+  urls.length = 0; const io = { run: async () => ({ status: true, response: { keys } }), get: server(2) };
+  assert.deepEqual(await K.audit(io), { ok: false, error: K.MSG.network }); assert.equal(urls.length, 2, "the audit stops with it: 86 of the 150 public keys were never sent");
+});
+
+test("a reply may weigh 512 KB, as the phone's; a full reply for the largest request is far below that", () => {
+  assert.equal(K.MAX_BODY_BYTES, 512 * 1024); assert.equal(K.CHUNK, 64);
+  // the server's rows (mds/keyuses backend/KeyUsesServer.java), every field at its longest
+  const long = 9223372036854775807n.toString(), pk = "0x" + "F".repeat(64), mx = "Mx" + "W".repeat(64);
+  const auditRow = `{"publickey":"${pk}","address":"${pk}","miniaddress":"${mx}","spend_blocks":${long},"spent_coins":${long},"firstblock":${long},"lastblock":${long},"reused":false,"reuse_count":${long}}`;
+  const reuseRow = `{"input":"${pk}","address":"${pk}","miniaddress":"${mx}","reused":false,"reuse_count":${long},"balance":"${"9".repeat(20)}.${"9".repeat(44)}"}`;
+  const full = (row, n) => Buffer.byteLength(`{"status":true,"archive_tip":${long},"reuse_included":true,"reused_total":${long},"keys":[` + Array(n).fill(row).join(",") + "]}");
+  assert.ok(auditRow.length < 450 && reuseRow.length < 450, auditRow.length + " and " + reuseRow.length + " bytes a row at the very most");
+  assert.ok(full(auditRow, 64) < 29 * 1024 && full(reuseRow, 64) < 29 * 1024, "64 rows: " + full(auditRow, 64) + " and " + full(reuseRow, 64) + " bytes");
+  assert.ok(full(auditRow, 256) < 115 * 1024, "even the server's own limit of 256 rows: " + full(auditRow, 256) + " bytes");
+  const mainJs = R("main/main.js");
+  assert.equal((mainJs.match(/netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\)/g) || []).length, 2, "both of the app's calls to the audit service: no redirect, 512 KB");
+});
+
 test("the screen: Pandamonium's KeyUses, every identifier whole and copyable, nothing from outside written as HTML", () => {
   const tools = R("renderer/apps-tools.js"), css = R("renderer/apps.css"), html = R("renderer/index.html"), app = R("renderer/app.js");
   const body = tools.slice(tools.indexOf("// ---- KeyUses"), tools.indexOf("// ---- Minima Explorer") > 0 ? tools.indexOf("// ---- Minima Explorer") : tools.length);
-  for (const said of ["Key audit", "KeyUses", "Run audit", "Auditing your keys…", "Only public keys and addresses are sent to eurobuddha.com for the audit.", "Local uses", "Spend blocks", "Spent coins", "Checked scope: ", "eurobuddha · Minima Ecosystem · KeyUses"])
+  for (const said of ["Key audit", "KeyUses", "Run audit", "Auditing your keys…", "Only public keys and addresses are sent to eurobuddha.com for the audit.", "Local uses", "Spend blocks", "Spent coins", "eurobuddha · Minima Ecosystem · KeyUses"])
     assert.ok(body.includes(said), said);
   assert.ok(/data-copy="\$\{esc\(x\.address\)\}"[^>]*>\$\{esc\(x\.address\)\}</.test(body), "an address is shown whole and one click copies it whole");
   assert.ok(!/slice\(|substr|…\$\{|\.\.\.\$\{/.test(body.replace(/Auditing your keys…/, "")), "nothing is cut");

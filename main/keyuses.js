@@ -25,6 +25,10 @@ const crypto = require("crypto");
 
 const BASE = "https://eurobuddha.com";            // AuditApi.BASE: the only host this module ever names
 const CHUNK = 64;                                 // AuditApi.CHUNK: entries per request (URL length)
+// AuditApi.MAX_BODY_BYTES: the most one reply may weigh. A full reply is far below it: the server (mds/keyuses
+// backend/KeyUsesServer.java) answers a /keyaudit row with nine fields and a /reuse row with six, under 450 bytes each
+// even with every count at its longest, so 64 rows are under 29 KB (and the server's own limit of 256 rows under 115 KB).
+const MAX_BODY_BYTES = 512 * 1024;
 const KEYUSES_MARGIN = 256, REUSE_RED_ABOVE = 3, EXHAUSTION_SLACK = 1000;   // KeyAudit's constants
 const SHAPES = { classic: { size: 64, depth: 3, maxuses: 262144 }, block: { size: 128, depth: 4, maxuses: 268435456 } };
 const PK = /^0x[0-9a-fA-F]{64}$/;
@@ -135,15 +139,17 @@ function join(keys, usage, reuse) {
     worstReuse, recommendedKeyUses: classicKeys ? recommended + KEYUSES_MARGIN : 0, mismatch, exhaustion, complete, classicKeys, blockKeys };
 }
 
-/** AuditApi.audit: both endpoints, in chunks. get(url) → the parsed JSON or null. Throws on any chunk that did not answer status:true. */
+/**
+ * AuditApi.audit: both endpoints, in chunks. get(url) → the parsed JSON or null. Throws on the first chunk that did not
+ * answer status:true. ONE REQUEST AT A TIME, in order (the phone sends them side by side): when one fails, the public
+ * keys and addresses of the chunks after it are never sent.
+ */
 async function lookup(keys, get) {
   const chunks = (list) => { const out = []; for (let i = 0; i < list.length; i += CHUNK) out.push(list.slice(i, i + CHUNK)); return out; };
   const ask = async (url) => { const j = await get(url); if (!j || j.status !== true) throw new Error("no answer"); return j; };
   let tip = -1; const usage = [], reuse = [];
-  await Promise.all([
-    ...chunks(keys.map(k => k.publickey)).map(async (c) => { const j = await ask(BASE + "/keyaudit?keys=" + encodeURIComponent(c.join(","))); const t = whole(j.archive_tip); if (t != null && t > tip) tip = t; usage.push(...parseUsage(j.keys)); }),
-    ...chunks(keys.map(k => k.address.hex)).map(async (c) => { const j = await ask(BASE + "/reuse?addrs=" + encodeURIComponent(c.join(","))); reuse.push(...parseReuse(j.results)); })
-  ]);
+  for (const c of chunks(keys.map(k => k.publickey))) { const j = await ask(BASE + "/keyaudit?keys=" + encodeURIComponent(c.join(","))); const t = whole(j.archive_tip); if (t != null && t > tip) tip = t; usage.push(...parseUsage(j.keys)); }
+  for (const c of chunks(keys.map(k => k.address.hex))) { const j = await ask(BASE + "/reuse?addrs=" + encodeURIComponent(c.join(","))); reuse.push(...parseReuse(j.results)); }
   return { usage, reuse, tip };
 }
 
@@ -176,4 +182,4 @@ async function audit(io) {
   return Object.assign({ ok: true, tip: found.tip }, join(keys, found.usage, found.reuse));
 }
 
-module.exports = { audit, onchainUses, select, join, lookup, parseUsage, parseReuse, addressOf, selfTest, whole, BASE, SHAPES, MSG };
+module.exports = { audit, onchainUses, select, join, lookup, parseUsage, parseReuse, addressOf, selfTest, whole, BASE, SHAPES, MSG, CHUNK, MAX_BODY_BYTES };

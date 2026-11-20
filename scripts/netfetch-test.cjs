@@ -275,3 +275,23 @@ test('postText: 64K for everyone, up to 256K only when the caller asks (Dexicon 
     assert.strictEqual(seen.length, 2);
   } finally { restore(); }
 });
+
+// 0.19.137: KeyUses asks for the phone's 512 KB reply limit (AuditApi.MAX_BODY_BYTES); every other caller keeps 8 MB.
+test('fetchJson: a caller may ask for a smaller reply limit (maxBytes); a reply over it is dropped, not parsed', async () => {
+  stubDns([[{ address: '93.184.216.34', family: 4 }]]);
+  const answer = (bytes) => { https.request = (a, b, cb) => {   // a stand-in server: 200, JSON of exactly `bytes` bytes, in 64K pieces
+      const req = new EventEmitter(); req.setTimeout = () => {}; req.destroy = () => { req.destroyed = true; };
+      req.end = () => setImmediate(() => { const res = new EventEmitter(); res.statusCode = 200; res.headers = { 'content-type': 'application/json' }; res.resume = () => {}; cb(res);
+        const body = Buffer.from('{"status":true,"pad":"' + 'x'.repeat(bytes - 24) + '"}'); assert.strictEqual(body.length, bytes);
+        for (let i = 0; i < body.length && !req.destroyed; i += 65536) res.emit('data', body.subarray(i, i + 65536));
+        if (!req.destroyed) res.emit('end'); });
+      return req; }; };
+  try {
+    const cap = 512 * 1024, url = 'https://audit.example.test/keyaudit?keys=0x00';
+    answer(cap); assert.strictEqual((await netfetch.fetchJson(url, { noRedirect: true, maxBytes: cap })).status, true, 'exactly the limit is read');
+    answer(cap + 1); assert.strictEqual(await netfetch.fetchJson(url, { noRedirect: true, maxBytes: cap }), null, 'one byte over: dropped');
+    answer(cap + 1); assert.strictEqual((await netfetch.fetchJson(url, { noRedirect: true })).status, true, 'a caller that asks for no limit keeps the shared 8 MB');
+    answer(cap + 1); assert.strictEqual((await netfetch.fetchJson(url, { maxBytes: 1e12 })).status, true, 'nobody can ask for more than the shared limit: the request is treated as none');
+    answer(2000); assert.strictEqual(await netfetch.fetchJson(url, { maxBytes: 1000 }), null);
+  } finally { restore(); }
+});

@@ -366,10 +366,11 @@ ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return exp
 // on-chain" or "Confirm" in the Web Wallet's send form, never by itself. The host is the one pinned in keyuses.js,
 // the key is checked as 0x + 64 hex before it reaches the query string, no redirect is followed, and the answer is a
 // whole number or null (not read), never a default.
-ipcMain.handle("mcd:keyAudit", (_e, publicKey) => keyuses.onchainUses(publicKey, (url) => netfetch.fetchJson(url, { noRedirect: true })));
-// The KeyUses app (main/keyuses.js): the node's keys are read here through rpcCall, the two lookups go to the one pinned
-// host with no redirect followed, and the renderer is handed the joined result. It names no host and no key itself.
-ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audit({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), get: (url) => netfetch.fetchJson(url, { noRedirect: true }) }); });
+ipcMain.handle("mcd:keyAudit", (_e, publicKey) => keyuses.onchainUses(publicKey, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));
+// The KeyUses app (main/keyuses.js): the node's keys are read here through rpcCall, the lookups go to the one pinned
+// host one at a time with no redirect followed and a reply of at most 512 KB, and the renderer is handed the joined
+// result. It names no host and no key itself.
+ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audit({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }) }); });
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
 ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });

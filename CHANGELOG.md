@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.137] — KeyUses: what was not checked is said in the verdict; lookups one at a time
+
+- **The verdict says what it does not cover.** "No known key reuse was found in the checked keys." stood alone, with the gap (the keys the same seed gives in the other key mode, and minimaWallet's keys, which the phone checks and the desktop does not) only in the explainer at the bottom. The verdict card now opens with the checked scope and that gap, side by side, for every verdict. The separate scope line above the card is gone (said once).
+- **Lookups go one at a time and stop at the first failure.** They were all sent at once, so when the service failed on one request the public keys and addresses of every other chunk had already left. Now a failed request ends the audit and nothing after it is sent.
+- **A reply may weigh at most 512 KB**, the phone's limit (`AuditApi.MAX_BODY_BYTES`), instead of the shared 8 MB (`netfetch.fetchJson` `opts.maxBytes`: a caller may ask for a smaller limit, never a larger one). Worked out from the server's rows (`mds/keyuses` `backend/KeyUsesServer.java`): a row is under 450 bytes with every field at its longest, so a full reply for the 64 entries of one request is under 29 KB, and the server's own limit of 256 entries under 115 KB. The Web Wallet's one-key check uses the same limit.
+- Tests: `scripts/keyuses-test.cjs` (15), `scripts/netfetch-test.cjs` (13, a stand-in server; no socket is opened).
+
 ## [0.19.136] — Minima Explorer: the latest-blocks list loses no block
 
 - **A new block during a page load was lost for good.** The new blocks were read "by gap" from a remembered tip, the read was skipped while "Load older" (or the first page) was running, and the tip was moved on regardless, so those blocks were never asked for again. Now the tip the node gave (`EX.seen`) and the tip the list has reached (`EX.tip`, the one shown) are two values: the new blocks are walked from the tip down to the list's own top block, and a walker that ends brings the list up to date if it fell behind meanwhile.
