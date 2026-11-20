@@ -158,6 +158,8 @@ const cmdGate = require("./cmdgate").create({ can: () => { const { systemPrefere
 ipcMain.handle("mcd:cmdGate", (_e, command, typed) => cmdGate.arm(command, typed));
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
+  // A control character in a command is refused (0.18.174): the node trims and reads them in ways the checks here cannot follow.
+  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
   const gated = require("./cmdgate").refusal(command, cmdGate.take); if (gated) throw new Error(gated);
   requireRunning();
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);

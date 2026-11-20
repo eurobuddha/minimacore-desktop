@@ -13,18 +13,20 @@
  */
 const PASS_MS = 60000;
 const PHRASE = { seed: "SHOW SEED", key: "SHOW KEY" };
+const NAMES = "vault, seedrandom and keys action:genkey";
 
-/** The secret kind of ONE command (no ";"): "seed", "key" or "". The node lower-cases the verb. */
+const V = require("./cmdverb");
+/** The secret kind of ONE command (no ";"): "seed", "key" or "". Read the way the node reads it, over-blocking
+ *  (main/cmdverb.js, 0.18.174: `"vault"`, U+0001 + vault, va"ul"t, keys action :genkey were run by the node and passed). */
 function kindOf(part) {
-  const p = String(part).trim(), verb = (p.split(/\s+/)[0] || "").toLowerCase();
-  if (verb === "vault") return "seed";
-  if (verb === "seedrandom") return "key";
-  if (verb === "keys" && /(^|\s)action:\s*"?genkey\b/i.test(p)) return "key";
+  if (V.beginsAs(part, "vault")) return "seed";
+  if (V.beginsAs(part, "seedrandom")) return "key";
+  if (V.beginsAs(part, "keys") && /genkey/.test(V.fold(String(part).replace(/"/g, "")))) return "key";
   return "";
 }
 /** → { kind: "seed"|"key"|"", chain: bool }: the strongest kind anywhere in the text (the node splits on every ";"). */
 function classify(command) {
-  const parts = String(command == null ? "" : command).split(";");
+  const parts = V.parts(command);
   let kind = "";
   for (const p of parts) { const k = kindOf(p); if (k === "seed" || (k && !kind)) kind = k; }
   return { kind, chain: parts.length > 1 };
@@ -35,6 +37,7 @@ function create(os, now) {
   const clock = now || Date.now;
   let pass = null;   // { command, until }
   async function arm(command, typed) {
+    pass = null;   // any try, passed or not, clears an earlier pass (0.18.174)
     const c = String(command == null ? "" : command), { kind, chain } = classify(c);
     if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error("Run this command on its own, not in a chain with ;.");
@@ -56,9 +59,9 @@ function create(os, now) {
 function refusal(command, take) {
   const { kind, chain } = classify(command);
   if (!kind) return "";
-  if (chain) return "GATED: this chain holds a command that shows a seed or a private key. Run that command on its own.";
+  if (chain) return "GATED: this chain holds " + NAMES + ", which show a seed or a private key. Run that command on its own.";
   if (take(command)) return "";
-  return "GATED:" + kind + ": this command shows " + (kind === "seed" ? "the seed phrase" : "a private key") + ". Type " + PHRASE[kind] + " to run it.";
+  return "GATED:" + kind + ": " + NAMES + " show a seed or a private key; this one shows " + (kind === "seed" ? "the seed phrase" : "a private key") + ". Type " + PHRASE[kind] + " to run it.";
 }
 
 module.exports = { classify, create, refusal, PHRASE, PASS_MS };
