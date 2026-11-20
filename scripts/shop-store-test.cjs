@@ -54,7 +54,7 @@ test("recordPayment: the same coin id (any letter case) counts once; coins of th
   assert.equal(store.order(ref).status, "UNDERPAID", "a wrong coin does not undo a partial payment"); assert.equal(store.order(ref).paidTokenid, "0x00");
   assert.equal(store.recordPayment(ref, "0xB3", "1.6", "0x00"), "PAID"); assert.equal(store.order(ref).paidAmount, "3.2"); assert.equal(store.order(ref).paid, true);
   assert.equal(store.recordPayment(ref, "0xB4", "5", "0x00"), "ALREADY", "PAID locks");
-  assert.deepEqual(store.order(ref).coins, ["0xb1", "0xb2", "0xb3"], "the ids are kept on the order, so they survive a restart");
+  assert.deepEqual(store.order(ref).coins, ["0xb1", "0xb3"], "the ids of counted coins are kept on the order, so they survive a restart; a wrong coin is never counted, so never kept");
 });
 test("recordPayment: a stranger's tiny coin of another token never blocks the honest payment", () => {
   const ref = sellOrder("3.2");
@@ -220,4 +220,21 @@ test("a coin whose message cannot be read is said in the log and the rest of the
     assert.equal(said.length, 3, "said again after a good save"); 
   } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
   assert.ok(/require\("\.\/shop-store"\)\.setLog\(\(m\) => node\.log\("\[app\] " \+ m\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")), "main.js says it in the Logs view");
+});
+
+// ---- 0.19.170: the counted coins of an order are bounded; past the bound the order waits for a check by hand ----
+test("recordPayment: at most MAX_PAY_COINS counted coins per order; more makes it UNCHECKED, never PAID, and the vendor may check it by hand", () => {
+  const ref = sellOrder("3.2"), N = store.MAX_PAY_COINS;
+  assert.equal(N, 500);
+  for (let i = 0; i < N; i++) assert.equal(store.recordPayment(ref, "0xD" + i, "0.000000001", "0x00"), "UNDERPAID");
+  for (let i = 0; i < 50; i++) store.recordPayment(ref, "0xE" + i, "1", MXUSD);   // wrong coins: never kept
+  assert.equal(store.order(ref).coins.length, N);
+  assert.equal(store.recordPayment(ref, "0xF1", "3.2", "0x00"), "UNCHECKED", "the coin past the bound is not counted");
+  const o = store.order(ref);
+  assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.equal(o.coins.length, N); assert.equal(o.paidAmount, "0.000000500");
+  assert.match(o.problems.join(), /more than 500 payment coins came for this order; check the payment by hand/);
+  assert.equal(store.recordPayment(ref, "0xF2", "3.2", "0x00"), "UNCHECKED"); assert.equal(o.problems.length, 1, "said once");
+  assert.equal(store.handCheck(ref), true, "the vendor may check it by hand");
+  const I18N = require("../renderer/i18n.js"), MS = require("../renderer/mainsaid.js");
+  try { for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); I18N.set(c); const s = MS.say(o.problems[0]); assert.ok(s.includes("500") && !/payment coins/.test(s), c + ": " + s); } } finally { I18N.set("en"); }
 });

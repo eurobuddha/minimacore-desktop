@@ -121,7 +121,7 @@ function ensureChecked(o) {
   return o;
 }
 /** Record ONE payment coin against an order. Coins of the order's token add up (decimal-safe), each coin id counted once
- *  for good: the ids are kept on the order, so a coin seen again after a restart, or once the in-memory "seen" set is
+ *  for good: the ids of counted coins (the right token only, at most MAX_PAY_COINS) are kept on the order, so a coin seen again after a restart, or once the in-memory "seen" set is
  *  cleared, never counts twice (0.19.167, as the phone Inbox 0.5.15, e2900eb9b3f8f74763c180fe602d41dd97c516c7). The
  *  buyer's own total is never what is compared (0.19.166, released 0.18.159): PAID iff the order matches the vendor's
  *  listing AND the CUMULATIVE paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED
@@ -130,20 +130,29 @@ function ensureChecked(o) {
  *  does not undo a partial payment, and a right-token coin moves WRONG_TOKEN on. Only PAID locks the order. Never
  *  clobbers a vendor-progressed status (CONFIRMED+). → the outcome, "ALREADY" when paid, or null (no such order, no coin
  *  id, or this coin counted before). */
+// ponytail: at most MAX_PAY_COINS counted coins per order (0.19.170). A coin carries one ref, so the order's own list is the
+// whole record of what was counted; past the cap nothing more is counted and the order waits for a check by hand.
+const MAX_PAY_COINS = 500;
+const TOO_MANY_COINS = "more than " + MAX_PAY_COINS + " payment coins came for this order; check the payment by hand";
 function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   ensureLoaded(); const o = mem.orders[ref]; if (!o) return null;
   if (o.paid) return "ALREADY";
   const id = String(coinid == null ? "" : coinid).toLowerCase();
-  if (!id) return null;
+  if (!id || id.length > 80) return null;
   o.coins = Array.isArray(o.coins) ? o.coins : [];
   if (o.coins.includes(id)) return null;
-  o.coins.push(id);
   ensureChecked(o);
-  if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {
+  if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {   // never counted, so never kept: a wrong coin seen again changes nothing
     if (!o.paidAmount) o.paidTokenid = paidTokenid;   // shown only while no coin of the right token has come
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
+  if (o.coins.length >= MAX_PAY_COINS) {
+    if (!o.problems.includes(TOO_MANY_COINS)) { o.problems.push(TOO_MANY_COINS); o.due = ""; }
+    if ((STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED) o.status = "UNCHECKED";   // from any state before PAID; never back from a vendor's
+    flush(); return "UNCHECKED";
+  }
+  o.coins.push(id);
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
   const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") o.paid = true;
@@ -176,5 +185,5 @@ module.exports = {
   saveShop, shops, shop, deleteShop,
   upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, mayAdvance, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, setLog, log,
-  _money: { decCmp, decGte, decAdd, payableTotal }
+  _money: { decCmp, decGte, decAdd, payableTotal }, MAX_PAY_COINS
 };

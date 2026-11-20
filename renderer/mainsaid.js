@@ -216,6 +216,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SL_PRICE", I18N.N_("{what}: the order's price {stated} is not your price {price}")],
     ["SL_TWICE", I18N.N_("{what} is listed more than once")],
     ["SL_UNLISTED", I18N.N_("{what} is not in your listing")],
+    ["SS_TOO_MANY_COINS", I18N.N_("more than {count} payment coins came for this order; check the payment by hand")],   // main/shop-store.js (0.19.170)
 
     // ---- Minima Vestr (main/vestr.js: pinned, its exact English) ----
     ["VESTR_AMOUNT", I18N.N_("Enter a valid amount to lock")],

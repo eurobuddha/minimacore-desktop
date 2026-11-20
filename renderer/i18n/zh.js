@@ -2833,6 +2833,7 @@
   "{what}: the order's price {stated} is not your price {price}": "{what}：订单中的价格 {stated} 不是您的价格 {price}",
   "{what} is listed more than once": "{what} 在列表中出现了不止一次",
   "{what} is not in your listing": "{what} 不在您的商品列表中",
+  "more than {count} payment coins came for this order; check the payment by hand": "此订单收到的付款币超过 {count} 个；请人工核对付款",
   "Enter a valid amount to lock": "请输入有效的锁定数量",
   "Enter a beneficiary address": "请输入受益人地址",
   "Invalid token id": "代币 ID 无效",
@@ -2931,7 +2932,7 @@
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
-  // translated for the desktop (the phone has no such text): 1906 keys for native review
+  // translated for the desktop (the phone has no such text): 1907 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4755,6 +4756,7 @@
     "{what}: the order's price {stated} is not your price {price}",
     "{what} is listed more than once",
     "{what} is not in your listing",
+    "more than {count} payment coins came for this order; check the payment by hand",
     "Enter a valid amount to lock",
     "Enter a beneficiary address",
     "Invalid token id",

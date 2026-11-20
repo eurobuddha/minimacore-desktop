@@ -2833,6 +2833,7 @@
   "{what}: the order's price {stated} is not your price {price}": "{what}: ціна в замовленні {stated} не дорівнює вашій ціні {price}",
   "{what} is listed more than once": "{what} зазначено в каталозі більше одного разу",
   "{what} is not in your listing": "{what} немає у вашому каталозі",
+  "more than {count} payment coins came for this order; check the payment by hand": "за цим замовленням надійшло понад {count} платіжних монет; перевірте оплату вручну",
   "Enter a valid amount to lock": "Введіть допустиму суму для блокування",
   "Enter a beneficiary address": "Введіть адресу отримувача",
   "Invalid token id": "Неправильний ID токена",
@@ -2931,7 +2932,7 @@
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "OK ·", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)", "• {item}.", "Dexicon", "{day} {month}", "{day} {month} {year}"],
-  // translated for the desktop (the phone has no such text): 1904 keys for native review
+  // translated for the desktop (the phone has no such text): 1905 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4755,6 +4756,7 @@
     "{what}: the order's price {stated} is not your price {price}",
     "{what} is listed more than once",
     "{what} is not in your listing",
+    "more than {count} payment coins came for this order; check the payment by hand",
     "Enter a valid amount to lock",
     "Enter a beneficiary address",
     "Invalid token id",

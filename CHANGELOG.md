@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.170] — miniMall vendor: the counted payment coins of an order are bounded
+
+- **From the release review (H1):** counted payment coin ids lived only in memory in the released desktop; here they are kept on the order since 0.19.167 (the reviewer's restart probe leaves a half-paid order UNDERPAID on this branch). What was left: the list had no bound, and wrong-token coins were kept in it too, so anyone could grow an order's record (and `shop.json`) one tiny coin at a time.
+- **Now:** only coins that are counted (the order's own token) are kept, at most 500 per order (`MAX_PAY_COINS`). A coin of another token is never counted, so it is not kept and seeing it again changes nothing. A coin past the bound is not counted: the order becomes `UNCHECKED` with "more than 500 payment coins came for this order; check the payment by hand" (said in the four languages, `SS_TOO_MANY_COINS`), is never PAID by itself, and the vendor may check it by hand. A coin id longer than 80 characters is not counted.
+- **Globally:** a payment coin carries the one ref it was sent with, so it can only ever count for that order; the order's own list is the whole record, and it is bounded.
+- **Pin:** `main/shop-store.js` is sha256-pinned in `scripts/apps-money.test.cjs`; the pin is updated on purpose to this file.
+- Test (`scripts/shop-store-test.cjs`): 500 counted coins and 50 wrong ones keep a list of 500; the 501st is not counted and the order is UNCHECKED, said once, never paid, and may be checked by hand; the reason is translated. The kept list holds counted coins only. They fail on 0.19.169.
+
 ## [0.19.169] — Mail: what a sender writes is stored as capped primitives
 
 - **The same pattern as the miniMall finding (0.19.168), checked in Mail and Chat:** Mail stored an incoming message's fields as the sender wrote them (subject, message, name, ids, payment fields, picture, pay address), so a sender could make every save of `mail.json` throw with one field nested 12,000 arrays deep, or end a whole scan page with a value whose `String()` throws. Chat is not affected: `main/chatschema.js` `chatDecode` already keeps only strings and numbers.
