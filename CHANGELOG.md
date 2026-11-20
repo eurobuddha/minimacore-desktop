@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.153] — Room ②: a failed pool action's card ends the same way in every language
+
+- **Fixed (found by the new matcher scan of this phase):** a pool operation the engine marked failed showed its reason and then "Nothing was sent and no funds moved." The card made that ending by cutting the English words "Look at Activity: if no new line is there, …" off a longer sentence. In Chinese, Russian and Ukrainian there was nothing English to cut, so the card pointed at Activity (the screen it is on) instead of saying that nothing was sent. `failText()` now takes a flag and picks the right whole sentence; nothing is cut out of a translated text. The subjects "This" and "That" put in front of a failure, and "no reason was given", are translated too. English reads as before.
+- Test: `scripts/dexicon-pp.test.cjs` builds a failed Activity card in all four languages and requires the "nothing was sent" sentence of that language. It fails on the 0.19.152 code.
+
 ## [0.19.152] — A broken language catalog can no longer stop the main process
 
 - **Fixed (review of 0.19.140 to 0.19.144):** `main/lang.js` is required at the top of `main/main.js` and loaded the four catalogs with plain `require` calls: a catalog file that failed to load (a syntax slip in a later edit) would have stopped the main process before the window opened. Each catalog is now loaded on its own; one that fails is left out (that language is not offered, a saved or system choice of it falls back to English), the others load, and the reason is written once to stderr.

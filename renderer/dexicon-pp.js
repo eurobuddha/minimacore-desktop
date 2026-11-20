@@ -176,7 +176,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (a.txpowid) ids.push(["transaction", a.txpowid]);
     if (a.originalTxpowid && String(a.originalTxpowid).toLowerCase() !== String(a.txpowid).toLowerCase()) ids.push(["original submission", a.originalTxpowid]);
     if (a.verifiedAt) lines.push(I18N.t("Checked {verifiedAt}", { verifiedAt: since(a.verifiedAt, now) }));
-    if (a.failed) lines.push(a.failMsg ? failText("This", a.failMsg).replace(/ Look at Activity: if no new line is there, nothing was sent and no funds moved\.$/, " Nothing was sent and no funds moved.") : I18N.t("It was not sent. No funds moved."));
+    if (a.failed) lines.push(a.failMsg ? failText(I18N.t("This"), a.failMsg, null, 0, true) : I18N.t("It was not sent. No funds moved."));   // a row the engine marked failed: nothing was sent
     return { title: (ACT_NAME[a.type] && I18N.t(ACT_NAME[a.type])) || String(a.type || I18N.t("Pool transaction")), chip: a.failed ? "FAILED" : a.statusText || I18N.t("Waiting for node check"), tone, summary: swapSummary(a), lines, ids, done: !!(a.failed || a.confirmed) };
   }
   /** One transaction of any pool (ActivityView.globalRow). */
@@ -268,7 +268,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
    * fixed sentences; the ones a reader cannot act on are said in plain words, with the node's own answer beside them
    * (node = ppWhy(): the node's last refusal of a pool command, used only when it came after `since`).
    */
-  function failText(what, raw, node, since) {
+  /** sentNothing: the engine already knows nothing was sent (a failed Activity row): the last sentence says so instead of
+   *  pointing at Activity. Chosen here, never by cutting words out of a (translated) sentence. */
+  function failText(what, raw, node, since, sentNothing) {
     raw = bare(raw);
     const said = node && node.error && Number(node.at) >= Number(since || 0) ? (" " + I18N.t("The node's last answer while this ran (its \"")) + node.verb + "\" command): " + mx(node.error).replace(/[.\s]+$/, "") + "." : "";
     if (/BACKUP_REQUIRED/.test(raw)) return I18N.t("{what} was not done and no funds moved. Before another pool can be created or migrated, the encrypted backup of your pools and this node must be saved and checked. Open My LP, choose Back up / restore pools, save the backup, then try again.", { what: what });
@@ -276,7 +278,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (/Could not identify the input signing key/i.test(raw)) return I18N.t("{what} was not done and nothing was signed: the node could not say which key signs one of the coins it would spend.{said} Wait until the node has caught up with the chain, then try again.", { what: what, said: said });
     if (/quote expired/i.test(raw)) return I18N.t("{what} was not sent and no funds moved: the quote was too old. Enter the amount again for a fresh one.", { what: what });
     if (/timed out/i.test(raw)) return I18N.t("It is not known whether this was sent: no answer came in time.{said} Look at Activity and at your balance before trying again, and do not repeat it until you have.", { said: said });
-    return I18N.t("{what} did not go through: {v}.{said} Look at Activity: if no new line is there, nothing was sent and no funds moved.", { what: what, v: (mx(raw).replace(/[.\s]+$/, "") || "no reason was given"), said: said });
+    const v = mx(raw).replace(/[.\s]+$/, "") || I18N.t("no reason was given");
+    return sentNothing ? I18N.t("{what} did not go through: {v}.{said} Nothing was sent and no funds moved.", { what: what, v: v, said: said })
+      : I18N.t("{what} did not go through: {v}.{said} Look at Activity: if no new line is there, nothing was sent and no funds moved.", { what: what, v: v, said: said });
   }
 
   // ======================================================================== Act: the money actions, no DOM
@@ -651,8 +655,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const pool = (address) => (S.mine || []).find((p) => p.address === address);
   /** every money action of the screen: Dexicon's one gate, the buttons off while it runs, then a fresh read */
   /** a READ (the statement, a reserve check): nothing is signed, so it does not hold the money gate; one at a time of its own */
-  const reading = (fn) => { if (S.reading) return; S.reading = true; (async () => { try { await fn(); } catch (e) { say(failText("That", e), "error"); } })().then(() => { S.reading = false; load(S.tab).then(paint, paint); }); };
-  const act = (fn) => D.money(async () => { paint(); try { await fn(); } catch (e) { say(failText("That", e), "error"); } load(S.tab).then(paint, paint); }).then(paint, paint);
+  const reading = (fn) => { if (S.reading) return; S.reading = true; (async () => { try { await fn(); } catch (e) { say(failText(I18N.t("That"), e), "error"); } })().then(() => { S.reading = false; load(S.tab).then(paint, paint); }); };
+  const act = (fn) => D.money(async () => { paint(); try { await fn(); } catch (e) { say(failText(I18N.t("That"), e), "error"); } load(S.tab).then(paint, paint); }).then(paint, paint);
   async function addSheet(p) {
     const name = tokLabel(p.tok, p.tokName);
     // ONE field: the engine takes the MINIMA amount and works the token side out itself (Act.deposit)

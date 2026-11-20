@@ -216,6 +216,18 @@ test("a failed action: the engine's fixed sentences are said in plain words, wit
   assert.match(PP.failText("The swap", "This quote expired — re-enter the amount to get a fresh quote."), /was not sent and no funds moved/);
   assert.match(PP.failText("The swap", "txncheck failed"), /^The swap did not go through: txncheck failed\. Look at Activity: if no new line is there, nothing was sent and no funds moved\.$/);
   assert.match(PP.failText("The swap", ""), /no reason was given/);
+  // 0.19.153: a failed Activity row says "Nothing was sent and no funds moved." in every language; it was made by cutting the
+  // English "Look at Activity…" off a sentence that, in zh / ru / uk, had no English to cut
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  try {
+    for (const code of ["en", "zh", "ru", "uk"]) {
+      I18N.set(code);
+      const line = PP.actItem({ type: "SWAP", failed: true, failMsg: "txncheck failed", ts: 1 }, 2).lines[1];
+      assert.equal(line, I18N.t("{what} did not go through: {v}.{said} Nothing was sent and no funds moved.", { what: I18N.t("This"), v: "txncheck failed", said: "" }), code);
+      assert.notEqual(line, I18N.t("{what} did not go through: {v}.{said} Look at Activity: if no new line is there, nothing was sent and no funds moved.", { what: I18N.t("This"), v: "txncheck failed", said: "" }), code + ": not the Activity advice");
+    }
+    I18N.set("en"); assert.equal(PP.actItem({ type: "SWAP", failed: true, failMsg: "txncheck failed", ts: 1 }, 2).lines[1], "This did not go through: txncheck failed. Nothing was sent and no funds moved.", "English as before");
+  } finally { I18N.set("en"); }
 });
 
 // ---- 0.18.136: what is reviewed is what is sent ----
