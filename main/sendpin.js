@@ -24,7 +24,10 @@ async function pinMinimaSend(runner, command, opts) {
   // control character or `fromaddress : 0x…` used to slip past /^send\s/ and /\bfromaddress:/.
   if (!V.is(c, "send")) return c;
   const pt = V.paramsText(c);
-  if (/\bfromaddress:/i.test(pt)) return c;
+  // A parameter is read as the node reads it (0.18.187): a top-level `name:` only (not inside a state's JSON), and the
+  // LAST one when a name repeats (mcd:cmd refuses a send that repeats one; this is the second line).
+  const last = (name) => { const all = [...pt.matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))]; return all.length ? all[all.length - 1][1] : null; };
+  if (last("fromaddress") != null) return c;
   // minCoinage: only consider coins at least N blocks deep. AtomiX's order-book publish needs this — a
   // publish's own CHANGE output is a brand-new coin that immediately becomes the smallest one, and pinning
   // to a coin the node will not spend yet makes the send unfundable, so every publish poisoned the next.
@@ -33,10 +36,10 @@ async function pinMinimaSend(runner, command, opts) {
   // exclude: addresses (any case) the caller has already tried and the node refused. Lets a caller rotate to
   // the next candidate instead of re-pinning the same one — the AtomiX publish retry uses this.
   const exclude = new Set([...((opts && opts.exclude) || [])].map(a => String(a).toLowerCase()));
-  const tok = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(pt);
-  if (tok && tok[1].toLowerCase() !== "0x00") return c;   // an explicit non-MINIMA token → not beacon-polluted
-  const am = /\bamount:([0-9.]+)/i.exec(pt);
-  const need = am ? am[1] : "0";
+  const tok = last("tokenid");
+  if (tok != null && tok.toLowerCase() !== "0x00") return c;   // an explicit non-MINIMA token (or one that cannot be read) → not beacon-polluted
+  const am = last("amount");
+  const need = am != null && /^[0-9.]+$/.test(am) ? am : "0";
   // Minima amounts carry up to 44 decimals, well past a double's ~15–17 significant digits, so "does this
   // coin cover the amount" is decided on the DECIMAL STRINGS. Comparing as floats made a coin fractionally
   // short read as covering; pinning to it then makes the send unfundable — the very failure this file exists

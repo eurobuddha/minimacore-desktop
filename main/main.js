@@ -162,6 +162,13 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   // A control character in a command is refused (0.18.174): the node trims and reads them in ways the checks here cannot follow.
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
+  // A send that names amount, tokenid, address or fromaddress twice is refused (0.18.187): the node keeps the LAST one,
+  // and the beacon-dust pin and every review here read a parameter once.
+  for (const part of require("./cmdverb").parts(command)) {
+    if (!require("./cmdverb").is(part, "send")) continue;
+    const twice = require("./cmdverb").repeated(part, ["amount", "tokenid", "address", "fromaddress"]);
+    if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
+  }
   const gated = require("./cmdgate").refusal(command, cmdGate.take); if (gated) throw new Error(gated);
   requireRunning();
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);

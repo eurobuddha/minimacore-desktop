@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.187] — a send that repeats a parameter is refused
+
+- The node keeps the LAST of a repeated parameter, but the send pin read the first `tokenid:` and `amount:` and matched `fromaddress:` anywhere, also inside a state's JSON. `mcd:cmd` now refuses a send that names amount, tokenid, address or fromaddress more than once, with a plain message; the pin reads the last value of each and a top-level `fromaddress:` only. Test: `scripts/sendpin-test.cjs`.
+
 ## [0.18.186] — the Touch ID marker
 
 - The marker that makes a Mac whose Touch ID cannot prompt refuse (0.18.176) was written before the prompt, even when it then failed, and held no sign of which Mac wrote it. It is now written only after a Touch ID prompt succeeded, holds an identifier of this Mac (a hash of its built-in network card address), and a marker from another Mac (a copied profile) is ignored. The refusal names the file's whole path and says what to do in both cases: Touch ID locked (lock the screen and log in with the password) or no longer on this Mac (quit the app and delete the file; the confirmation window is then used). Test: `scripts/ethkey-test.cjs`.

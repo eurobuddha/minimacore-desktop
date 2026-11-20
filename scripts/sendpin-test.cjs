@@ -38,3 +38,18 @@ test("the RPC write timeout reads the verb as the node does", () => {
   for (const c of ['"send" amount:1', "\u0002vault", 'v"ault"', "status;send amount:1", "SEEDRANDOM modifier:x"]) assert.equal(_timeoutFor(c), 180000, JSON.stringify(c));
   for (const c of ["status", "balance", '"status"']) assert.equal(_timeoutFor(c), 30000, c);
 });
+
+// ---- 0.18.187: the last tokenid/amount, a top-level fromaddress only; mcd:cmd refuses a send that repeats one ----
+test("the pin reads the LAST tokenid and amount and a top-level fromaddress only, as the node does", async () => {
+  const MX = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  let r = rig(); assert.equal(await pinMinimaSend(r.run, "send amount:1 address:0xCD tokenid:0x00 tokenid:" + MX), "send amount:1 address:0xCD tokenid:0x00 tokenid:" + MX, "the last tokenid is MxUSD: not pinned");
+  r = rig(); const c = "send amount:1 address:0xCD tokenid:" + MX + " tokenid:0x00"; assert.equal(await pinMinimaSend(r.run, c), c + " fromaddress:" + A, "the last tokenid is MINIMA: pinned");
+  r = rig(); const st = 'send amount:1 address:0xCD state:{"1":"fromaddress:0xEE"}'; assert.equal(await pinMinimaSend(r.run, st), st + " fromaddress:" + A, "fromaddress: inside a state's JSON is not the parameter");
+  r = rig(); const big = "send amount:1 amount:9 address:0xCD"; await pinMinimaSend(r.run, big);
+  assert.ok(r.asked.some(q => q.startsWith("coins ")), "the amount looked for is the last one (9)");
+  const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(/repeated\(part, \["amount", "tokenid", "address", "fromaddress"\]\);\n\s*if \(twice\.length\) throw new Error\("This send names "/.test(main), "mcd:cmd refuses a send that repeats one");
+  const V = require("../main/cmdverb");
+  assert.deepEqual(V.repeated("send amount:1 address:0xA address : 0xB", ["amount", "tokenid", "address", "fromaddress"]), ["address"]);
+  assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x"}', ["address"]), [], "a key inside a state's JSON is not a parameter");
+});
