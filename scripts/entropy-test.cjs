@@ -144,7 +144,7 @@ test("a node that answers `hash` with a value of its choosing gets no roll: wron
   // five dice at once, one lie among five truthful answers: the whole throw is refused
   const mixed = engine({ hash: (k, i, truth) => (k === 3 ? one : truth) });
   await assert.rejects(Promise.all(Array.from({ length: 5 }, () => mixed.enRollOne())), BAD);
-  assert.ok(/if \(why !== EN_NODE_BAD\) return enStatus\("Entropy source error: nothing recorded\. Try again\.", true\);\s*entropyNode\(\);[^\n]*\n\s*return enStatus\(EN_NODE_BAD \+ " Nothing was recorded\.", true\);/.test(src), "the screen says so, records nothing, and proves the node again before the next roll");
+  assert.ok(/if \(why !== EN_NODE_BAD\) return enStatus\("Entropy source error: nothing recorded\. Try again\.", true\);\s*entropyNode\(\);[^\n]*\n\s*return enStatus\(t\("\{ennodebad\} Nothing was recorded\.", \{ ennodebad: t\(EN_NODE_BAD\) \}\), true\);/.test(src), "the screen says so, records nothing, and proves the node again before the next roll");
   assert.ok(/if \(!got\) \{\s*enStopDice\(1\); EN\.busy = false; EN\.auto = false;/.test(src), "and auto-roll stops");
 });
 
@@ -171,7 +171,7 @@ test("\"verified\" rests on the same check: a lying node is never shown as a sec
     assert.equal((await e.enRandomN()).src, "device-only");
   }
   const off = engine({ running: false }); off.EN.nodeOk = true; await off.enVerify(); assert.equal(off.EN.nodeOk, false); assert.deepEqual(off.asked, [], "a stopped node is not asked");
-  assert.ok(/set\(true, "BIP39 self-test ✓ node SHA3 \+ device CSPRNG verified"\)/.test(src) && /"the node's answers did not match" : "node commands failed"\) \+ ": device CSPRNG only \(single source\)"/.test(src));
+  assert.ok(/set\(true, "BIP39 self-test ✓ node SHA3 \+ device CSPRNG verified"\)/.test(src) && /t\("\{ennodebad\}: device CSPRNG only \(single source\)", \{ ennodebad: \(e && e\.message === EN_NODE_BAD \? "the node's answers did not match" : "node commands failed"\) \}\)/.test(src));
 });
 
 test("a rejected value is thrown again with new values on both sides; a source that rejects 26 times, or answers badly, records nothing", async () => {
@@ -216,7 +216,7 @@ test("the phrase stays in the page: no storage, no clipboard, no log, no IPC but
   assert.ok(/function entropyTab\(tab\) \{\s*EN\.tab = tab;\s*if \(EN\.done && EN\.revealed\) \{ EN\.revealed = false; enWords\(\); \}/.test(code), "a tab switch conceals it");
   assert.ok(/EN\.run\+\+; EN\.faces = \[\]; EN\.audits = \[\]; EN\.phrase = null;/.test(code), "Wipe drops the rolls, the audit values and the phrase");
   assert.ok(/if \(run !== EN\.run\) return;/.test(code), "a throw that answers after a Wipe is not recorded");
-  assert.ok(/if \(EN\.busy \|\| EN\.done \|\| enBlocked\(\)\) return;/.test(code) && /if \(EN\.selfErr\) return lwStatus\("Blocked: startup self-test failed/.test(code), "nothing is generated before the self-test has passed");
+  assert.ok(/if \(EN\.busy \|\| EN\.done \|\| enBlocked\(\)\) return;/.test(code) && /if \(EN\.selfErr\) return lwStatus\(t\("Blocked: startup self-test failed/.test(code), "nothing is generated before the self-test has passed");
   assert.ok(/type="\$\{L\.hidden \? "password" : "text"\}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/.test(code), "typed seed words are kept from autocomplete and spell-check");
 });
 
@@ -262,7 +262,7 @@ test("the window hidden or closed, the node stopped, a wallet restore, Hide and 
   assert.ok(/waitingForNode = false;\n    entropyNode\(\);/.test(app), "the node came back: an open screen proves it again (stopped to running, as running to stopped)");
   assert.ok(/async function walletReplaced\(\) \{\n  resetMailState\(\); resetPpState\(\); resetAxState\(\); entropyErased\("the wallet was replaced\."\);/.test(app));
   assert.ok(/const id = sw\.dataset\.hide, now = hiddenApps\(\);\n    if \(id === "entropy"\) entropyErased\("Entropy was hidden\."\);/.test(app) && /const id = sw\.dataset\.freeze; sw\.disabled = true;\n    if \(id === "entropy"\) entropyErased\("Entropy was frozen\."\);/.test(app));
-  assert.ok(/if \(open && activeView === "entropy"\) \{ renderEntropy\(\); if \(had\) enStatus\("Everything on this screen was erased: " \+ why, true\); \}/.test(src), "a screen still open is drawn again, empty, and says why");
+  assert.ok(/if \(open && activeView === "entropy"\) \{ renderEntropy\(\); if \(had\) enStatus\(t\("Everything on this screen was erased: \{why\}", \{ why: why \}\), true\); \}/.test(src), "a screen still open is drawn again, empty, and says why");
 });
 
 test("five minutes without input erases, with a countdown through the last minute; a click or a key starts the five minutes again", () => {

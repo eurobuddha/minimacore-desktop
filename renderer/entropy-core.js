@@ -13,6 +13,7 @@
  *   a die face    SHA3(node random ++ device random) → the first 4 bytes as a number n → n % 6 + 1, and n at or above
  *                 floor(2^32 / 6) * 6 is thrown again, so the face is exactly uniform
  */
+if (typeof I18N === "undefined" && typeof require === "function") require("./i18n.js");   // loaded by a test or the main process: the same t(), th(), tr() the window has
 (function (root, make) { if (typeof module === "object" && module.exports) module.exports = make(); else root.EntropyCore = make(); })(this, function () {
   "use strict";
   var WORDS = null, INDEX = null;
@@ -78,7 +79,7 @@
         ["ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote"]];
       for (var i = 0; i < v.length; i++) {
         var got = await entropyBitsToWords(hexToBits(v[i][0]));
-        if (got.join(" ") !== v[i][1]) return "BIP39 vector " + (i + 1) + " failed";
+        if (got.join(" ") !== v[i][1]) return t("BIP39 vector {i} failed", { i: (i + 1) });
         if (!(await check(got))) return "check() rejects valid vector " + (i + 1);
       }
       // the dice vector: its phrase was produced by the genuine iancoleman code
@@ -102,15 +103,15 @@
       if (hex !== WORDLIST_SHA256) return "wordlist digest wrong";
       return null;
     };
-    return run().catch(function (e) { return "self-test exception: " + ((e && e.message) || e); });
+    return run().catch(function (e) { return (t("self-test exception:") + " ") + ((e && e.message) || e); });
   }
 
   // ---- a die face (RollEngine) ----
   /** The node's hash of (node random ++ device random) → { n, face }, { reject: true } (thrown again: no modulo bias), or { error }. */
   function faceFromHash(hash) {
-    if (typeof hash !== "string" || hash.indexOf("0x") !== 0 || hash.length < 10) return { error: "Node hash failed" };
+    if (typeof hash !== "string" || hash.indexOf("0x") !== 0 || hash.length < 10) return { error: t("Node hash failed") };
     var h = hash.substring(2, 10);
-    if (!/^[0-9a-fA-F]{8}$/.test(h)) return { error: "Node hash unparseable" };   // a malformed hash fails loudly, it is never mis-read
+    if (!/^[0-9a-fA-F]{8}$/.test(h)) return { error: t("Node hash unparseable") };   // a malformed hash fails loudly, it is never mis-read
     var n = parseInt(h, 16);
     if (n >= REJECT_THRESHOLD) return { reject: true };
     return { n: n, face: (n % 6) + 1 };
@@ -136,13 +137,13 @@
   function summary(faces, audits, allBits, entBits, words) {
     var count = {}, order = [], i;
     for (i = 0; i < audits.length; i++) { if (!(audits[i].src in count)) { count[audits[i].src] = 0; order.push(audits[i].src); } count[audits[i].src]++; }
-    var lines = [faces.length + " rolls → " + allBits + " unbiased bits → " + entBits + " entropy bits + " + (entBits / 32) + "-bit SHA-256 checksum = " + words + " words",
+    var lines = [t("{faces} rolls → {allBits} unbiased bits → {entBits} entropy bits + {entBits2}-bit SHA-256 checksum = {words} words", { faces: faces.length, allBits: allBits, entBits: entBits, entBits2: (entBits / 32), words: words }),
       "sources: " + order.map(function (s) { return count[s] + " × " + (SOURCE_LABEL[s] || s); }).join(", ")];
-    if (SRC.DEVICE_ONLY in count) lines.push("⚠ some rolls used a single entropy source (node unavailable)");
+    if (SRC.DEVICE_ONLY in count) lines.push(t("⚠ some rolls used a single entropy source (node unavailable)"));
     if (SRC.PHYSICAL in count) {
       var fc = {}, kinds = 0, max = 0;
       for (i = 0; i < faces.length; i++) { if (!fc[faces[i]]) { fc[faces[i]] = 0; kinds++; } if (++fc[faces[i]] > max) max = fc[faces[i]]; }
-      if (kinds < 4 || max * 2 > faces.length) lines.push("⚠ roll distribution looks non-random: use a real, fair die");
+      if (kinds < 4 || max * 2 > faces.length) lines.push(t("⚠ roll distribution looks non-random: use a real, fair die"));
     }
     return lines;
   }
@@ -150,7 +151,7 @@
   function auditLog(audits) {
     return audits.map(function (a, i) {
       if (a.src === SRC.PHYSICAL) return "#" + (i + 1) + " face:" + a.face + " (physical)";
-      if (a.src === SRC.DEVICE_ONLY) return "#" + (i + 1) + " face:" + a.face + " (device CSPRNG only)";
+      if (a.src === SRC.DEVICE_ONLY) return "#" + (i + 1) + " face:" + a.face + (" " + t("(device CSPRNG only)"));
       return "#" + (i + 1) + " A:" + a.a + " B:" + a.b + " n:" + a.n + " face:" + a.face;
     }).join("\n");
   }

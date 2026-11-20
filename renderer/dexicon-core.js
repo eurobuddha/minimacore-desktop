@@ -363,7 +363,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (m < 60) return rel(m, "minute"); const h = Math.floor(m / 60); if (h < 24) return rel(h, "hour"); return rel(Math.floor(h / 24), "day"); }
   // words chosen by a count in rooms ① and ② (I18N.t(n === 1 ? "part" : "parts")): named here so every catalog must hold them
   const COUNT_WORDS = [N_("are"), N_("block"), N_("blocks"), N_("coin"), N_("coins"), N_("is"), N_("its"), N_("maker"), N_("makers"), N_("need"), N_("needs"), N_("part"), N_("parts"), N_("swap is"), N_("swaps are"), N_("their"), N_("time."), N_("times."),
-    N_("pool"), N_("saved pool"), N_("visible pool"), N_("owner key"), N_("transaction")];
+    N_("it"), N_("them"), N_("key"), N_("keys"), N_("pool"), N_("saved pool"), N_("visible pool"), N_("owner key"), N_("transaction")];
 
   // ---- what the screens may ask for: the page's twelve actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
   const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"];

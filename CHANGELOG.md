@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.143] — Mail, Chat and the tray apps in the four languages
+
+- **Translated:** MinimaMail (folders, lists, threads, compose, payments, contacts, the six-word address notice, settings, backup), Chat (list, thread, attachments, voice, the failure and restore dialogs with the RESTORE warning), ETH Wallet (send, review, tokens, RPC, the key export gate), Minima Vestr, miniMall (Shop, Studio, Inbox), Web Wallet (with its four safety notices), KeyUses (the verdicts and what was not checked), Minima Explorer, Entropy (every warning and note) and the Parlons screen. Mail and Chat take most of their words from the phone.
+- **Kept as they are:** the word to type in the key export gate (`SHOW KEY`, still checked in the main process against the same constant) and RESTORE; a peer's text (subjects, messages, names, shop and product names); addresses, hashes and amounts; the names of the apps; a Vestr contract's recorded period name (the English name is what is sent; it is translated only where shown); miniMall order states as the wire has them.
+- **One constant put back by hand:** the extraction made Entropy's `EN_NODE_BAD` a text that translates itself, but it is an Error's message and compared with `===`: in another language a bad node answer would have been reported as "node commands failed". It is a plain string again and translated only where shown. Every other self-translating constant was checked for a comparison (none has one).
+- **Words the phone uses in another sense** ("You" in a message preview, the nouns after a count) are worded for the desktop and listed for review.
+- Times such as "12 minutes ago" and "now" in Mail come from `Intl.RelativeTimeFormat`.
+- Tests: the suites of these screens assert what they did (pins that changed shape say the new shape; sandboxes get the helpers); `scripts/i18n-test.cjs` holds 2,536 keys to its rules.
+
 ## [0.19.142] — Dexicon in the four languages: its chrome and rooms ①, ② and ③
 
 - **Translated:** the status strip, the room pills and the bottom tabs; room ① (Swap, Market, OTC, the halt card, the wallet actions), room ② (Swap, Pools, My LP, Wallet, Activity, Create in four steps, Back up / restore, the recovery texts), room ③ (Trade, Orders, History, Activity, Assets, Settings), the pool calculator, and every review, refusal and confirmation these screens show. The phone's own Dexicon words are used wherever the phone has the same English text (`apks/base` `dexicon-l10n`).

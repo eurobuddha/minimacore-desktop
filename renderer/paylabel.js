@@ -8,6 +8,7 @@
  *  - a received payment is "not verified" until this node has found the transaction on chain paying this wallet that
  *    amount of that token (main/payverify.js). Only then does a bubble say "sent you" and "Received".
  */
+if (typeof I18N === "undefined" && typeof require === "function") require("./i18n.js");   // loaded by a test or the main process: the same t(), th(), tr() the window has
 (function (root, make) { if (typeof module === "object" && module.exports) module.exports = make(); else root.PayLabel = make(); })(this, function () {
   "use strict";
   var MINIMA = "0x00", MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
@@ -27,18 +28,18 @@
   function describe(p) {
     var t = token(p.tokenid), ok = p.status === "received";
     return {
-      head: !p.incoming ? "You sent" : (p.who || "They") + (ok ? " sent you" : " says they sent you"),
+      head: !p.incoming ? I18N.t("You sent") : (p.who || I18N.t("They")) + (ok ? " sent you" : " says they sent you"),
       amount: String(p.amount == null ? "" : p.amount), token: t.name,
-      tokenLine: t.known ? "" : (t.id ? "Token id: " + t.id : "No token id was given"),
-      state: !p.incoming ? "" : ok ? "Received: this node found the payment to this wallet on chain"
-        : "Not verified: this node has not found this payment. Check your balance before relying on it.",
+      tokenLine: t.known ? "" : (t.id ? I18N.t("Token id: {id}", { id: t.id }) : I18N.t("No token id was given")),
+      state: !p.incoming ? "" : ok ? I18N.t("Received: this node found the payment to this wallet on chain")
+        : I18N.t("Not verified: this node has not found this payment. Check your balance before relying on it."),
       verified: !p.incoming || ok
     };
   }
   /** One line for a list row or a notification. Never the token id (a row is cut short; the bubble has it whole). */
   function preview(p) {
     var t = token(p.tokenid), what = String(p.amount == null ? "" : p.amount) + (t.known ? " " + t.name : " of another token");
-    return !p.incoming || p.status === "received" ? what : "Payment notice, not verified: " + what;
+    return !p.incoming || p.status === "received" ? what : I18N.t("Payment notice, not verified: {what}", { what: what });
   }
   return { MINIMA: MINIMA, MXUSD: MXUSD, token: token, key: key, describe: describe, preview: preview };
 });

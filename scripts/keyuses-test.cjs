@@ -93,8 +93,8 @@ test("a clean wallet of each mode: OK, every row checked; the classic estimate o
   const b = await K.audit(world([block(0, 2428101), block(1, 2428090)], answers([usage(0, 5000000, 9), usage(1, 0, 0)], [clean(0), clean(1)])).io);
   assert.equal(b.verdict, "OK", "a block key's leaf position is never compared with spend counts, however large they are");
   assert.equal(b.recommendedKeyUses, 0); assert.equal(b.blockKeys, 2); assert.ok(b.rows.every(r => !r.risk && r.maxuses === 268435456));
-  assert.deepEqual(Act.verdict(b).blocks.map(x => x.label), ["Node seed · block-based"], "no keyuses estimate is offered for block keys");
-  assert.deepEqual(Act.verdict(c).blocks, [{ label: "Classic recovery estimate: review before use", cmd: "keyuses:296" }]);
+  assert.deepEqual(Act.verdict(b).blocks.map(x => String(x.label)), ["Node seed · block-based"], "no keyuses estimate is offered for block keys");
+  assert.deepEqual(JSON.parse(JSON.stringify(Act.verdict(c).blocks)), [{ label: "Classic recovery estimate: review before use", cmd: "keyuses:296" }]);   // a label fixed at load is a String that translates when shown: read as text
 });
 
 test("more spend blocks than a classic counter is AT RISK; witnessed reuse outranks it, amber to 3 and red above", async () => {

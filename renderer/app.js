@@ -1105,46 +1105,46 @@ function wwName(b) { const k = PayLabel.token(b.tokenid); return k.known ? (k.na
  *  A name that reads as Minima or MxUSD, or is only the start of the id, is not shown: the id alone is. */
 function nameWithId(tid, name) {
   const n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/\s+/g, " ").trim();
-  return n && !String(tid).startsWith(n) && !/^(minima|mxusdt?)$/i.test(n) ? n + " (token " + tid + ")" : String(tid);
+  return n && !String(tid).startsWith(n) && !/^(minima|mxusdt?)$/i.test(n) ? t("{n} (token {tid})", { n: n, tid: tid }) : String(tid);
 }
-const WW_SAFE = `<div class="ww-safe"><b>Runs entirely on this computer.</b> Your secret key is sent only to your own local node (127.0.0.1) to derive keys and sign. It never leaves this machine and is never saved.
-  <br><b>Never type your secret key into a website Web Wallet.</b> A hosted site can steal it (that has drained wallets).</div>`;
+const wwSafe = () => `<div class="ww-safe">${tr("{b}Runs entirely on this computer.{_b} Your secret key is sent only to your own local node (127.0.0.1) to derive keys and sign. It never leaves this machine and is never saved.", { b: "<b>", _b: "</b>" })}
+  <br>${tr("{b}Never type your secret key into a website Web Wallet.{_b} A hosted site can steal it (that has drained wallets).", { b: "<b>", _b: "</b>" })}</div>`;   // drawn when shown, so it is in the language of that moment
 const wwCard = (inner) => `<div class="ww"><div class="ww-card">${inner}</div></div>`;
 
 async function renderWebWallet() {
   const body = el("webwalletBody");
   wwMode = currentWwMode();   // record what we're about to render, so wwLiveRender only re-renders on a real change
-  if (!running) { body.innerHTML = wwCard(`<h1 class="ww-h1">Minima Web Wallet</h1><p class="ww-p">Waiting for the node…</p>`); return; }
+  if (!running) { body.innerHTML = wwCard(`<h1 class="ww-h1">${th("Minima Web Wallet")}</h1><p class="ww-p">${th("Waiting for the node…")}</p>`); return; }
   if (!wwMegammrOn()) return renderWwGate(body);
   if (!wwSeed || !wwAddr) return renderWwUnlock(body);
   return renderWwWallet(body);
 }
 
 function renderWwGate(body) {
-  body.innerHTML = wwCard(`<h1 class="ww-h1">Minima Web Wallet is unavailable!</h1><p class="ww-p">A -megammr node is required to use this Wallet.</p><hr class="ww-hr">
-    <p class="ww-p">The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.</p>
-    <button class="ww-btn" id="wwEnableBtn">Enable MegaMMR &amp; restart node</button>`);
+  body.innerHTML = wwCard(`<h1 class="ww-h1">${th("Minima Web Wallet is unavailable!")}</h1><p class="ww-p">${th("A -megammr node is required to use this Wallet.")}</p><hr class="ww-hr">
+    <p class="ww-p">${th("The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.")}</p>
+    <button class="ww-btn" id="wwEnableBtn">${th("Enable MegaMMR & restart node")}</button>`);
   el("wwEnableBtn").addEventListener("click", async () => {
-    const b = el("wwEnableBtn"); b.disabled = true; b.textContent = "Restarting node…";
-    try { await api.wwEnableMegammr(); toast("MegaMMR enabled. The node is restarting", "ok"); }
-    catch (e) { toast("Could not enable MegaMMR", "err"); b.disabled = false; b.textContent = "Enable MegaMMR & restart node"; }
+    const b = el("wwEnableBtn"); b.disabled = true; b.textContent = t("Restarting node…");
+    try { await api.wwEnableMegammr(); toast(t("MegaMMR enabled. The node is restarting"), "ok"); }
+    catch (e) { toast(t("Could not enable MegaMMR"), "err"); b.disabled = false; b.textContent = t("Enable MegaMMR & restart node"); }
   });
 }
 
 function renderWwUnlock(body) {
-  body.innerHTML = wwCard(`<h1 class="ww-h1">Minima Web Wallet</h1><p class="ww-p">Login with your secret key.</p><hr class="ww-hr">${WW_SAFE}
-    <div class="ww-field"><input class="ww-in" id="wwSeedIn" type="password" placeholder="Enter a secret key" aria-label="Secret key" autocomplete="off" spellcheck="false" />
-      <button class="ww-eye" id="wwEye" aria-label="Show the secret key" aria-pressed="false">Show</button></div>
-    <p class="ww-fine">24 words or your own phrase: any phrase is accepted. Enter it EXACTLY as created: capitals, spaces and hyphens (-) all count. <b>Do not share this key with anyone!</b></p>
-    <button class="ww-btn" id="wwUnlockBtn">Login</button>`);
-  el("wwEye").onclick = () => { const i = el("wwSeedIn"), on = i.type === "password"; i.type = on ? "text" : "password"; el("wwEye").textContent = on ? "Hide" : "Show"; el("wwEye").setAttribute("aria-pressed", on); };
+  body.innerHTML = wwCard(`<h1 class="ww-h1">${th("Minima Web Wallet")}</h1><p class="ww-p">${th("Login with your secret key.")}</p><hr class="ww-hr">${wwSafe()}
+    <div class="ww-field"><input class="ww-in" id="wwSeedIn" type="password" placeholder="${th("Enter a secret key")}" aria-label="${th("Secret key")}" autocomplete="off" spellcheck="false" />
+      <button class="ww-eye" id="wwEye" aria-label="${th("Show the secret key")}" aria-pressed="false">${th("Show")}</button></div>
+    <p class="ww-fine">${tr("24 words or your own phrase: any phrase is accepted. Enter it EXACTLY as created: capitals, spaces and hyphens (-) all count. {b}Do not share this key with anyone!{_b}", { b: "<b>", _b: "</b>" })}</p>
+    <button class="ww-btn" id="wwUnlockBtn">${th("Login")}</button>`);
+  el("wwEye").onclick = () => { const i = el("wwSeedIn"), on = i.type === "password"; i.type = on ? "text" : "password"; el("wwEye").textContent = on ? t("Hide") : t("Show"); el("wwEye").setAttribute("aria-pressed", on); };
   const go = async () => {
     // Pass the phrase VERBATIM (only trim leading/trailing whitespace) — the node hashes it faithfully, so
     // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard.
     const seed = String(el("wwSeedIn").value || "").trim();
-    if (!seed) { toast("Enter your secret key.", "err"); return; }
-    if (/["\\\n\r\t]/.test(seed)) { toast("The key has a \", \\ or line break the command can't carry. Enter it as one clean line.", "err"); return; }
-    const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = "Logging in…";
+    if (!seed) { toast(t("Enter your secret key."), "err"); return; }
+    if (/["\\\n\r\t]/.test(seed)) { toast(t("The key has a \", \\ or line break the command can't carry. Enter it as one clean line."), "err"); return; }
+    const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = t("Logging in…");
     try {
       wwAddr = await api.wwDerive(seed);
       wwSeed = seed;
@@ -1157,8 +1157,8 @@ function renderWwUnlock(body) {
       el("wwSeedIn").value = "";
       renderWebWallet();
     } catch (e) {
-      toast((e && e.message) || "Could not log in", "err");
-      b.disabled = false; b.textContent = "Login";
+      toast((e && e.message) || t("Could not log in"), "err");
+      b.disabled = false; b.textContent = t("Login");
     }
   };
   el("wwUnlockBtn").addEventListener("click", go);
@@ -1173,15 +1173,15 @@ function wwTokens(q) { q = String(q || "").trim().toLowerCase(); return wwBal.fi
 function wwPaintTokens() {
   const list = wwTokens(wwSearch), host = el("wwTokList"); if (!host) return;
   host.innerHTML = list.map(b => `<button class="ww-tok" data-tok="${esc(b.tokenid)}"><span class="ww-tok__ic" aria-hidden="true">${esc(wwName(b).slice(0, 1).toUpperCase())}</span>
-      <span class="ww-tok__main"><b>${esc(wwName(b))}</b><span>${wwAmount(b)}</span></span></button>`).join("") || `<p class="ww-p ww-center">${wwBal.length ? "No results found" : "No balance yet for this wallet."}</p>`;
+      <span class="ww-tok__main"><b>${esc(wwName(b))}</b><span>${wwAmount(b)}</span></span></button>`).join("") || `<p class="ww-p ww-center">${wwBal.length ? th("No results found") : th("No balance yet for this wallet.")}</p>`;
   host.querySelectorAll("[data-tok]").forEach(r => { r.onclick = () => wwTokenDetail(wwBal.find(b => b.tokenid === r.dataset.tok)); });
 }
 function wwTokenDetail(b) {
   if (!b) return;
   const row = (k, v) => `<div class="ww-drow"><span>${k}</span><b>${v}</b></div>`;
-  const d = openDlg("wwTokDlg", wwName(b), `<div class="ww-detail">${b.tokenid === "0x00" ? `<p class="ww-p">Minima's Official Token</p>` : ""}<div class="ww-dbox"><div class="ww-dbox__t">Details</div>
-    ${row("Balance", wwAmount(b))}${row("Token ID", `<span class="ww-id">${esc(b.tokenid)}</span>`)}${b.decimals != null ? row("Decimals", esc(String(b.decimals))) : ""}</div></div>`,
-    `<button class="dlg__btn" id="wwTokCopy">Copy token ID</button>`);
+  const d = openDlg("wwTokDlg", wwName(b), `<div class="ww-detail">${b.tokenid === "0x00" ? `<p class="ww-p">${th("Minima's Official Token")}</p>` : ""}<div class="ww-dbox"><div class="ww-dbox__t">${th("Details")}</div>
+    ${row(t("Balance"), wwAmount(b))}${row(t("Token ID"), `<span class="ww-id">${esc(b.tokenid)}</span>`)}${b.decimals != null ? row(t("Decimals"), esc(String(b.decimals))) : ""}</div></div>`,
+    `<button class="dlg__btn" id="wwTokCopy">${th("Copy token ID")}</button>`);
   if (d) el("wwTokCopy").onclick = () => copy(b.tokenid);
 }
 
@@ -1191,33 +1191,33 @@ function renderWwWallet(body) {
   const tab = (id, label) => `<button class="ww-tab${wwTab === id ? " ww-tab--on" : ""}" role="tab" aria-selected="${wwTab === id}" data-wwtab="${id}">${label}</button>`;
   let page = "";
   if (wwTab === "balance") {
-    page = `<h6 class="ww-h6">Tokens</h6><div class="ww-searchrow"><input class="ww-search" id="wwSearch" type="search" placeholder="Search tokens" aria-label="Search tokens" value="${esc(wwSearch)}" autocomplete="off" />
-      <button class="ww-round" id="wwRefresh" aria-label="Refresh" title="Refresh">↻</button></div><div class="ww-toks" id="wwTokList"></div>`;
+    page = `<h6 class="ww-h6">${th("Tokens")}</h6><div class="ww-searchrow"><input class="ww-search" id="wwSearch" type="search" placeholder="${th("Search tokens")}" aria-label="${th("Search tokens")}" value="${esc(wwSearch)}" autocomplete="off" />
+      <button class="ww-round" id="wwRefresh" aria-label="${th("Refresh")}" title="${th("Refresh")}">↻</button></div><div class="ww-toks" id="wwTokList"></div>`;
   } else if (wwTab === "receive") {
     let qr = "";
     try { if (typeof qrcode !== "undefined") { const q = qrcode(0, "M"); q.addData(recv); q.make(); qr = `<div class="ww-qr">${q.createImgTag(4, 0)}</div>`; } } catch (e) {}
-    page = `${qr}<div class="ww-addr" id="wwAddrBox">${esc(recv)}</div><button class="ww-btn" id="wwCopyAddr">Copy</button>`;
+    page = `${qr}<div class="ww-addr" id="wwAddrBox">${esc(recv)}</div><button class="ww-btn" id="wwCopyAddr">${th("Copy")}</button>`;
   } else {
     const kuDefault = Math.max(Number(ku.keyuses) || 0, wwKuSuggest == null ? 0 : wwKuSuggest);
     const kuPanel = a.isNodeSeed
-      ? `<p class="ww-fine">This is <b>your node's own wallet</b>: the balance is the whole wallet's, across every address. Sends go through the node, which chooses the coins and manages its signing keys itself.</p>`
+      ? `<p class="ww-fine">${tr("This is {b}your node's own wallet{_b}: the balance is the whole wallet's, across every address. Sends go through the node, which chooses the coins and manages its signing keys itself.", { b: "<b>", _b: "</b>" })}</p>`
       : (ku.ack
-      ? `<label class="ww-label">Secret key uses</label><div class="ww-kuline"><span>The next send signs at use <b>${esc(String(ku.keyuses))}</b>. The app counts every send and never counts down.</span><button class="ww-link" id="wwKuEdit">Raise it</button></div>`
-      : `<div class="ww-safe ww-safe--warn"><b>Confirm the secret key uses before sending.</b> How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; <b>a figure that is too low can reuse a signing key and lose your funds</b>.${wwKuSuggest != null ? ` <b>The chain shows ${esc(String(wwKuSuggest))} so far.</b>` : ""}
-           <p class="ww-fine">Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.</p>
-           <label class="ww-label" for="wwKuIn">Secret key uses</label><input class="ww-in" id="wwKuIn" type="number" min="0" step="1" placeholder="Amount of times" value="${esc(String(kuDefault))}" />
-           <div class="ww-two"><button class="ww-btn ww-btn--dark" id="wwKuCheck">Check on-chain</button><button class="ww-btn" id="wwKuConfirm">Confirm</button></div></div>`);
-    const unknown = wwUnknown(a.address), ambig = unknown ? `<div class="ww-safe ww-safe--warn"><b>⚠ The last send's status is UNKNOWN.</b> The node did not confirm it, and the payment may have gone through. Check <b>History</b> and your balance before sending again, or you could pay twice.
-        <button class="ww-btn ww-btn--dark" id="wwAmbigClear">I've checked: let me send again</button></div>` : "";
+      ? `<label class="ww-label">${th("Secret key uses")}</label><div class="ww-kuline"><span>${th("The next send signs at use")} <b>${esc(String(ku.keyuses))}</b>${th(". The app counts every send and never counts down.")}</span><button class="ww-link" id="wwKuEdit">${th("Raise it")}</button></div>`
+      : `<div class="ww-safe ww-safe--warn">${tr("{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.", { b: "<b>", _b: "</b>" })}${wwKuSuggest != null ? ` <b>${tr("The chain shows {wwKuSuggest} so far.", { wwKuSuggest: esc(String(wwKuSuggest)) })}</b>` : ""}
+           <p class="ww-fine">${th("Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.")}</p>
+           <label class="ww-label" for="wwKuIn">${th("Secret key uses")}</label><input class="ww-in" id="wwKuIn" type="number" min="0" step="1" placeholder="${th("Amount of times")}" value="${esc(String(kuDefault))}" />
+           <div class="ww-two"><button class="ww-btn ww-btn--dark" id="wwKuCheck">${th("Check on-chain")}</button><button class="ww-btn" id="wwKuConfirm">${th("Confirm")}</button></div></div>`);
+    const unknown = wwUnknown(a.address), ambig = unknown ? `<div class="ww-safe ww-safe--warn">${tr("{b}⚠ The last send's status is UNKNOWN.{_b} The node did not confirm it, and the payment may have gone through. Check {b}History{_b} and your balance before sending again, or you could pay twice.", { b: "<b>", _b: "</b>" })}
+        <button class="ww-btn ww-btn--dark" id="wwAmbigClear">${th("I've checked: let me send again")}</button></div>` : "";
     const off = ((a.isNodeSeed || ku.ack) && !unknown) ? "" : "disabled";
     const toks = wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }];
-    page = `<label class="ww-label" for="wwTok">Token</label><select class="ww-in" id="wwTok" ${off}>${toks.map(b => `<option value="${esc(b.tokenid)}"${b.tokenid === wwForm.tok ? " selected" : ""}>${esc(wwName(b))}${b.confirmed != null ? "  (" + esc(b.confirmed) + ")" : ""}</option>`).join("")}</select>
-      <label class="ww-label" for="wwAmt">Amount</label><input class="ww-in" id="wwAmt" placeholder="Enter amount" value="${esc(wwForm.amt)}" inputmode="decimal" autocomplete="off" ${off} />
-      <label class="ww-label" for="wwTo">Recipient address</label><input class="ww-in" id="wwTo" placeholder="Enter recipient address (Mx or 0x)" value="${esc(wwForm.to)}" autocomplete="off" spellcheck="false" ${off} />
-      ${kuPanel}${ambig}<button class="ww-btn" id="wwSendBtn" ${off}>Send</button>`;
+    page = `<label class="ww-label" for="wwTok">${th("Token")}</label><select class="ww-in" id="wwTok" ${off}>${toks.map(b => `<option value="${esc(b.tokenid)}"${b.tokenid === wwForm.tok ? " selected" : ""}>${esc(wwName(b))}${b.confirmed != null ? "  (" + esc(b.confirmed) + ")" : ""}</option>`).join("")}</select>
+      <label class="ww-label" for="wwAmt">${th("Amount")}</label><input class="ww-in" id="wwAmt" placeholder="${th("Enter amount")}" value="${esc(wwForm.amt)}" inputmode="decimal" autocomplete="off" ${off} />
+      <label class="ww-label" for="wwTo">${th("Recipient address")}</label><input class="ww-in" id="wwTo" placeholder="${th("Enter recipient address (Mx or 0x)")}" value="${esc(wwForm.to)}" autocomplete="off" spellcheck="false" ${off} />
+      ${kuPanel}${ambig}<button class="ww-btn" id="wwSendBtn" ${off}>${th("Send")}</button>`;
   }
-  body.innerHTML = wwCard(`<div class="ww-top"><h1 class="ww-h1">Minima Web Wallet</h1><button class="ww-link" id="wwLockBtn">Logout</button></div>
-    <div class="ww-tabs" role="tablist">${tab("balance", "Balance")}${tab("send", "Send")}${tab("receive", "Receive")}</div>${page}`);
+  body.innerHTML = wwCard(`<div class="ww-top"><h1 class="ww-h1">${th("Minima Web Wallet")}</h1><button class="ww-link" id="wwLockBtn">${th("Logout")}</button></div>
+    <div class="ww-tabs" role="tablist">${tab("balance", t("Balance"))}${tab("send", t("Send"))}${tab("receive", t("Receive"))}</div>${page}`);
 
   body.querySelectorAll("[data-wwtab]").forEach(b => { b.onclick = () => { wwTab = b.dataset.wwtab; wwArmed = false; renderWebWallet(); }; });
   el("wwLockBtn").addEventListener("click", wwLogout);
@@ -1237,24 +1237,24 @@ function renderWwWallet(body) {
     // The chain's figure for this key, read on the user's click only. → a whole number, or null: not read (never 0 for "unknown").
     const readOnchain = async () => { let n = null; try { n = await api.keyAudit(a.publickey); } catch (e) { n = null; } if (wwAddr === a) wwKuSuggest = AppsAct.ww.confirmUses(0, n); return AppsAct.ww.confirmUses(0, n); };
     el("wwKuConfirm").addEventListener("click", async () => {
-      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value; btn.disabled = true; btn.textContent = "Checking the chain…";
+      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value; btn.disabled = true; btn.textContent = t("Checking the chain…");
       const n = AppsAct.ww.confirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
       if (wwAddr !== a) return;                                   // logged out while the chain was being read
       if (n == null) {
-        toast("Not confirmed: this key's on-chain uses could not be read, and a figure that is too low can lose funds. Check your connection and try again.", "err");
-        if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; }
+        toast(t("Not confirmed: this key's on-chain uses could not be read, and a figure that is too low can lose funds. Check your connection and try again."), "err");
+        if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); }
         return;
       }
-      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Secret key uses confirmed: " + n, "ok"); }
-      catch (e) { toast("Could not save the secret key uses", "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; } }
+      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast(t("Secret key uses confirmed: {n}", { n: n }), "ok"); }
+      catch (e) { toast(t("Could not save the secret key uses"), "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); } }
     });
     el("wwKuCheck").addEventListener("click", async () => {
-      const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = "Checking…";
+      const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = t("Checking…");
       const onchain = await readOnchain();
       if (wwAddr !== a || !btn.isConnected) return;
-      if (onchain == null) toast("The on-chain uses could not be read. Nothing was changed.", "err");
-      else { el("wwKuIn").value = String(AppsAct.ww.confirmUses(el("wwKuIn").value, onchain)); toast("On-chain uses: " + onchain + " (set as minimum)", "ok"); }
-      btn.disabled = false; btn.textContent = "Check on-chain";
+      if (onchain == null) toast(t("The on-chain uses could not be read. Nothing was changed."), "err");
+      else { el("wwKuIn").value = String(AppsAct.ww.confirmUses(el("wwKuIn").value, onchain)); toast(t("On-chain uses: {onchain} (set as minimum)", { onchain: onchain }), "ok"); }
+      btn.disabled = false; btn.textContent = t("Check on-chain");
     });
   } else {
     const ed = el("wwKuEdit"); if (ed) ed.addEventListener("click", () => { wwKu.ack = false; renderWebWallet(); });
@@ -1264,26 +1264,25 @@ function renderWwWallet(body) {
 // The original's logout dialog, without showing the secret key back (it is not put on screen again once typed).
 async function wwLogout() {
   const ku = wwKu || { keyuses: 0 }, node = wwAddr && wwAddr.isNodeSeed;
-  const ok = await showConfirm("Log out of this session", "If you haven't stored your secret key then this is your last chance! It is not kept by this app: after Logout it is gone from memory.\n\n"
-    + (node ? "" : "Secret key uses: " + ku.keyuses + "\nWe recommend taking a note of your secret key uses. This should be increased each time you send a transaction."), "Logout", false);
+  const ok = await showConfirm(t("Log out of this session"), t("If you haven't stored your secret key then this is your last chance! It is not kept by this app: after Logout it is gone from memory.\n\n{keyuses}", { keyuses: (node ? "" : t("Secret key uses: {keyuses}\nWe recommend taking a note of your secret key uses. This should be increased each time you send a transaction.", { keyuses: ku.keyuses })) }), t("Logout"), false);
   if (!ok) return;
-  wwLock(); renderWebWallet(); toast("Logged out", "ok");
+  wwLock(); renderWebWallet(); toast(t("Logged out"), "ok");
 }
 
 async function wwDoSend() {
   const btn = el("wwSendBtn"), f = { seed: wwSeed, to: el("wwTo").value, amount: el("wwAmt").value, tokenid: el("wwTok").value };
   const bad = AppsAct.ww.problem(f); if (bad) { toast(bad, "err"); return; }
-  if (wwUnknown(wwAddr && wwAddr.address)) { toast("The last send's status is UNKNOWN. Check History and your balance, then choose \"I've checked\".", "err"); return; }
+  if (wwUnknown(wwAddr && wwAddr.address)) { toast(t("The last send's status is UNKNOWN. Check History and your balance, then choose \"I've checked\"."), "err"); return; }
   if (!wwArmed) {   // two-click confirm — sends are irreversible
-    wwArmed = true; btn.textContent = "Click again to confirm: this cannot be undone";
-    setTimeout(() => { if (wwArmed) { wwArmed = false; if (btn.isConnected) btn.textContent = "Send"; } }, 4000);
+    wwArmed = true; btn.textContent = t("Click again to confirm: this cannot be undone");
+    setTimeout(() => { if (wwArmed) { wwArmed = false; if (btn.isConnected) btn.textContent = t("Send"); } }, 4000);
     return;
   }
   wwArmed = false; btn.disabled = true; btn.textContent = "Sending...";
   const from = wwAddr.address;   // the wallet this send leaves: the screen may be logged out before the answer is here
   const r = await AppsAct.ww.send(api, f);
   if (r && r.ok) {
-    toast("Your transaction has been successfully sent!" + (r.txnid ? " " + r.txnid : ""), "ok", r.txnid || null);
+    toast(t("Your transaction has been successfully sent!{txnid}", { txnid: (r.txnid ? " " + r.txnid : "") }), "ok", r.txnid || null);
     wwForm.to = ""; wwForm.amt = "";
     wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
     wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
@@ -1292,12 +1291,12 @@ async function wwDoSend() {
     // M1: don't offer a one-click retry — surface the unknown state, refresh balances, and gate re-send behind
     // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while this wallet is in WW_UNKNOWN).
     wwUnknown(from, true);
-    toast(r.message || "Send status unknown: check before trying again", "err");
+    toast(r.message || t("Send status unknown: check before trying again"), "err");
     if (wwAddr) wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else {
-    toast((r && (r.message || r.err)) || "Send failed", "err");
-    btn.disabled = false; btn.textContent = "Send";
+    toast((r && (r.message || r.err)) || t("Send failed"), "err");
+    btn.disabled = false; btn.textContent = t("Send");
   }
 }
 
@@ -3321,7 +3320,7 @@ function resetAxState() { DexAx.reset(); }
 // A button with `on` closes the dialog itself (close(value)); any other closes it with its `v`. → { root, done, close }.
 let ADLG_N = 0;
 function appDlg(o) {
-  const opener = document.activeElement, id = "adlg" + (++ADLG_N), buttons = o.buttons || [{ label: "Close", v: null }];
+  const opener = document.activeElement, id = "adlg" + (++ADLG_N), buttons = o.buttons || [{ label: t("Close"), v: null }];
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay overlay--adlg" id="${id}" data-modal><div class="adlg ${o.cls || ""}" role="dialog" aria-modal="true" aria-labelledby="${id}T" tabindex="-1">
     <h2 class="adlg__title" id="${id}T">${esc(o.title)}</h2><div class="adlg__body">${o.body || ""}</div>
     <div class="adlg__btns">${buttons.map((b, i) => `<button class="adlg__btn${b.neutral ? " adlg__btn--neutral" : ""}" data-v="${i}">${esc(b.label)}</button>`).join("")}</div></div></div>`);
@@ -3339,7 +3338,7 @@ function appDlg(o) {
 }
 /** A dialog that is a list to pick from (Android's setItems). → the picked index, or null. */
 function appPick(title, items) {
-  const d = appDlg({ title, cls: "adlg--list", body: items.map((t, i) => `<button class="adlg__item" data-i="${i}">${esc(t)}</button>`).join(""), buttons: [{ label: "Cancel", v: null }] });
+  const d = appDlg({ title, cls: "adlg--list", body: items.map((t, i) => `<button class="adlg__item" data-i="${i}">${esc(t)}</button>`).join(""), buttons: [{ label: I18N.t("Cancel"), v: null }] });
   d.root.querySelectorAll(".adlg__item").forEach(b => { b.onclick = (e) => { e.stopPropagation(); d.close(+b.dataset.i); }; });
   return d.done;
 }
@@ -3371,38 +3370,38 @@ async function renderEthWallet() {
   const host = el("ewBody"); if (!host) return;
   const st = await api.ewStatus().catch(() => ({ ready: false }));
   ewStatusCache = st;
-  const head = (upd) => `<div class="ew-hd"><h1 class="ew-title">ETH Wallet</h1><span class="ew-pill ew-pill--net">Mainnet · real funds</span></div>
-    <div class="ew-sub">v${esc(APP_VERSION)}  ·  node-derived${upd ? "  ·  updated " + esc(since(ewAt)) : ""}</div>`;
+  const head = (upd) => `<div class="ew-hd"><h1 class="ew-title">${th("ETH Wallet")}</h1><span class="ew-pill ew-pill--net">${th("Mainnet · real funds")}</span></div>
+    <div class="ew-sub">${tr("v{appversion}  ·  node-derived{ewAt}", { appversion: esc(APP_VERSION), ewAt: upd ? ("  " + tr("·  updated {ewAt}", { ewAt: esc(since(ewAt)) })) : "" })}</div>`;
   if (!st.ready) {
-    host.innerHTML = `<div class="ew">${running ? "" : `<button class="ew-banner" id="ewRetry">The node is not running. Start it on the Node tab, then come back: this wallet sets itself up.</button>`}
-      ${head(false)}<div class="ew-line">${st.frozen ? "Dexicon is frozen. Unfreeze it on the Apps tab to use this wallet." : "Setting up wallet…"}</div>
-      ${running && !st.frozen ? `<div class="ew-note">The key is derived from this node (the same one Dexicon ① MxUSD swaps with). The node must be running and unlocked.</div>
-      <div class="ew-acts"><button class="ew-pill ew-act" id="ewRetry">↻  Refresh</button></div>` : ""}</div>`;
-    if (el("ewRetry")) el("ewRetry").onclick = () => { toast("Retrying…"); renderEthWallet(); };
+    host.innerHTML = `<div class="ew">${running ? "" : `<button class="ew-banner" id="ewRetry">${th("The node is not running. Start it on the Node tab, then come back: this wallet sets itself up.")}</button>`}
+      ${head(false)}<div class="ew-line">${st.frozen ? th("Dexicon is frozen. Unfreeze it on the Apps tab to use this wallet.") : th("Setting up wallet…")}</div>
+      ${running && !st.frozen ? `<div class="ew-note">${th("The key is derived from this node (the same one Dexicon ① MxUSD swaps with). The node must be running and unlocked.")}</div>
+      <div class="ew-acts"><button class="ew-pill ew-act" id="ewRetry">${th("↻  Refresh")}</button></div>` : ""}</div>`;
+    if (el("ewRetry")) el("ewRetry").onclick = () => { toast(I18N.t("Retrying…")); renderEthWallet(); };
     return;
   }
   const read = await api.ewBalances().catch(() => null);
   if (read) ewAt = Date.now();
   // no answer from the Ethereum RPC: the screen is still drawn, with "Not read yet" where a balance would be (the phone draws a dash there)
   const b = read || { address: st.address || "", eth: null, tokens: (await api.ewTokens().catch(() => [])).map(t => Object.assign({ balance: null }, t)) };
-  const val = (v, sym) => (v == null ? "Not read yet" : ewCut(v) + " " + sym);
+  const val = (v, sym) => (v == null ? I18N.t("Not read yet") : ewCut(v) + " " + sym);
   const asset = (key, icon, title, value, menu) => `<div class="ew-card ew-asset" role="button" tabindex="0" data-ewasset="${esc(key)}">${icon}
       <div class="ew-asset__main"><div class="ew-asset__t">${esc(title)}</div><div class="ew-asset__v">${esc(value)}</div></div>
-      ${menu ? `<button class="ew-more" data-ewmenu="${esc(key)}" aria-label="Options for ${esc(menu)}" title="Token options">⋮</button>` : ""}</div>`;
+      ${menu ? `<button class="ew-more" data-ewmenu="${esc(key)}" aria-label="${tr("Options for {menu}", { menu: esc(menu) })}" title="${th("Token options")}">⋮</button>` : ""}</div>`;
   host.innerHTML = `<div class="ew">${head(!!ewAt)}
-    ${st.halt ? `<div class="ew-warn">⚠ Dexicon ① MxUSD is halted: this node's keys are not the ones it saved. Read its notice before sending anything from here.</div>` : ""}
-    <div class="ew-card ew-addr" role="button" tabindex="0" id="ewAddrCard"><div class="ew-asset__t">Your address  ·  click to receive</div><div class="ew-addr__v">${esc(b.address)}</div></div>
-    ${asset("eth", ewEthIcon(), "Ethereum", val(b.eth, "ETH"))}
-    ${read ? "" : `<div class="ew-warn">⚠ RPC: the Ethereum endpoints did not answer. Refresh, or set another one in Settings.</div>`}
+    ${st.halt ? `<div class="ew-warn">${th("⚠ Dexicon ① MxUSD is halted: this node's keys are not the ones it saved. Read its notice before sending anything from here.")}</div>` : ""}
+    <div class="ew-card ew-addr" role="button" tabindex="0" id="ewAddrCard"><div class="ew-asset__t">${th("Your address  ·  click to receive")}</div><div class="ew-addr__v">${esc(b.address)}</div></div>
+    ${asset("eth", ewEthIcon(), I18N.t("Ethereum"), val(b.eth, "ETH"))}
+    ${read ? "" : `<div class="ew-warn">${th("⚠ RPC: the Ethereum endpoints did not answer. Refresh, or set another one in Settings.")}</div>`}
     ${b.tokens.map(t => asset(t.address, ewTokIcon(t.symbol), t.address, val(t.balance, t.symbol), t.symbol)).join("")}
-    <div class="ew-acts"><button class="ew-pill ew-act" id="ewSend">↑  Send</button><button class="ew-pill ew-act" id="ewReceive">↓  Receive</button><button class="ew-pill ew-act" id="ewRefresh">↻  Refresh</button></div>
-    <div class="ew-acts ew-acts--2"><button class="ew-pill ew-act" id="ewAddTok">+  Add token</button><button class="ew-pill ew-act" id="ewScanSite">↗  Etherscan</button><button class="ew-pill ew-act" id="ewSettings">⚙  Settings</button></div></div>`;
+    <div class="ew-acts"><button class="ew-pill ew-act" id="ewSend">${th("↑  Send")}</button><button class="ew-pill ew-act" id="ewReceive">${th("↓  Receive")}</button><button class="ew-pill ew-act" id="ewRefresh">${th("↻  Refresh")}</button></div>
+    <div class="ew-acts ew-acts--2"><button class="ew-pill ew-act" id="ewAddTok">${th("+  Add token")}</button><button class="ew-pill ew-act" id="ewScanSite">${th("↗  Etherscan")}</button><button class="ew-pill ew-act" id="ewSettings">${th("⚙  Settings")}</button></div></div>`;
   cardKeys(host);
-  const send = (key) => { if (!read) { toast("The balances have not been read yet. Refresh first.", "warn"); return; } ewSendDialog(b, key); };
+  const send = (key) => { if (!read) { toast(I18N.t("The balances have not been read yet. Refresh first."), "warn"); return; } ewSendDialog(b, key); };
   el("ewAddrCard").onclick = () => ewReceive(b.address);
   el("ewSend").onclick = () => send("eth");
   el("ewReceive").onclick = () => ewReceive(b.address);
-  el("ewRefresh").onclick = () => { toast("Refreshing…"); renderEthWallet(); };
+  el("ewRefresh").onclick = () => { toast(I18N.t("Refreshing…")); renderEthWallet(); };
   el("ewAddTok").onclick = () => ewAddTokenDialog();
   el("ewScanSite").onclick = () => ewOpen(EW_ETHERSCAN + "address/" + b.address);
   el("ewSettings").onclick = () => ewSettingsDialog(b);
@@ -3416,97 +3415,95 @@ async function renderEthWallet() {
 function ewReceive(addr) {
   let qr = "";
   if (typeof qrcode !== "undefined") { const q = qrcode(0, "M"); q.addData(addr); q.make(); qr = `<div class="ew-qr">${q.createImgTag(5, 0)}</div>`; }
-  appDlg({ title: "Receive", body: `${qr}<div class="ew-mono ew-sel">${esc(addr)}</div><div class="ew-fine">Same address on all EVM networks. Send only Ethereum-mainnet assets here.</div>`,
-    buttons: [{ label: "Close", v: null }, { label: "Copy", on: () => { api.clip(addr); toast("Address copied", "ok"); } }] });
+  appDlg({ title: t("Receive"), body: `${qr}<div class="ew-mono ew-sel">${esc(addr)}</div><div class="ew-fine">${th("Same address on all EVM networks. Send only Ethereum-mainnet assets here.")}</div>`,
+    buttons: [{ label: t("Close"), v: null }, { label: t("Copy"), on: () => { api.clip(addr); toast(t("Address copied"), "ok"); } }] });
 }
 
 function ewSendDialog(b, startAsset) {
-  const assets = [{ key: "eth", sym: "ETH", label: "ETH · Ethereum", bal: b.eth }].concat(b.tokens.map(t => ({ key: t.address, sym: t.symbol, label: t.symbol + " · " + t.address, bal: t.balance })));
+  const assets = [{ key: "eth", sym: "ETH", label: I18N.t("ETH · Ethereum"), bal: b.eth }].concat(b.tokens.map(t => ({ key: t.address, sym: t.symbol, label: t.symbol + " · " + t.address, bal: t.balance })));
   let cur = assets.find(a => a.key === startAsset) || assets[0], busy = false;
-  const d = appDlg({ title: "Send", body: `<button class="ew-tokline" id="ewTokLine"></button>
-      <input class="adlg__in ew-mono" id="ewTo" placeholder="Recipient 0x…" aria-label="Recipient address" autocomplete="off" spellcheck="false" />
-      <div><button class="ew-pill" id="ewScan">⌗  Scan QR</button></div>
-      <input class="adlg__in" id="ewAmt" placeholder="Amount" aria-label="Amount" inputmode="decimal" autocomplete="off" />
+  const d = appDlg({ title: I18N.t("Send"), body: `<button class="ew-tokline" id="ewTokLine"></button>
+      <input class="adlg__in ew-mono" id="ewTo" placeholder="${th("Recipient 0x…")}" aria-label="${th("Recipient address")}" autocomplete="off" spellcheck="false" />
+      <div><button class="ew-pill" id="ewScan">${th("⌗  Scan QR")}</button></div>
+      <input class="adlg__in" id="ewAmt" placeholder="${th("Amount")}" aria-label="${th("Amount")}" inputmode="decimal" autocomplete="off" />
       <div><button class="ew-pill ew-pill--dim" id="ewMax">MAX</button></div>`,
-    buttons: [{ label: "Cancel", v: null }, { label: "Review", on: async (_root, close) => {
+    buttons: [{ label: I18N.t("Cancel"), v: null }, { label: I18N.t("Review"), on: async (_root, close) => {
       if (busy) return; busy = true;
-      toast("Estimating fee…");
+      toast(I18N.t("Estimating fee…"));
       const r = await AppsAct.eth.review(api, b.address, cur.key, el("ewTo").value, el("ewAmt").value);
       busy = false;
       if (r.err) { toast(r.err, "warn"); return; }
       close(); ewConfirmSend(b, cur, r);
     } }] });
-  const paint = () => { el("ewTokLine").textContent = "Token: " + cur.label + "  (click to change · balance " + ewCut(cur.bal) + ")"; };
+  const paint = () => { el("ewTokLine").textContent = I18N.t("Token: {label}  (click to change · balance {bal})", { label: cur.label, bal: ewCut(cur.bal) }); };
   paint();
-  el("ewTokLine").onclick = async () => { const i = await appPick("Send which token", assets.map(a => a.label)); if (i != null) { cur = assets[i]; if (d.root.isConnected) paint(); } };
-  el("ewScan").onclick = async () => { const got = await scanQR("Scan recipient address"); const m = /0x[0-9a-fA-F]{40}/.exec(String(got || "")); if (m && d.root.isConnected) el("ewTo").value = m[0]; };
-  el("ewMax").onclick = async () => { if (cur.key === "eth") toast("Reserving gas…"); const m = await AppsAct.eth.max(api, cur.key); if (m != null && d.root.isConnected) el("ewAmt").value = m; };
+  el("ewTokLine").onclick = async () => { const i = await appPick(I18N.t("Send which token"), assets.map(a => a.label)); if (i != null) { cur = assets[i]; if (d.root.isConnected) paint(); } };
+  el("ewScan").onclick = async () => { const got = await scanQR(I18N.t("Scan recipient address")); const m = /0x[0-9a-fA-F]{40}/.exec(String(got || "")); if (m && d.root.isConnected) el("ewTo").value = m[0]; };
+  el("ewMax").onclick = async () => { if (cur.key === "eth") toast(I18N.t("Reserving gas…")); const m = await AppsAct.eth.max(api, cur.key); if (m != null && d.root.isConnected) el("ewAmt").value = m; };
 }
 
 /** What a send from this address means for a swap in flight: said on the review, in red, when there is one or when it cannot be known. */
 function ewSwapWarning(sw) {
-  if (!sw || !sw.known) return "⚠ Could not check whether a Dexicon ① MxUSD swap is in flight. Swaps sign with this same address and need its ETH for gas: look at Dexicon, Activity before sending.";
+  if (!sw || !sw.known) return t("⚠ Could not check whether a Dexicon ① MxUSD swap is in flight. Swaps sign with this same address and need its ETH for gas: look at Dexicon, Activity before sending.");
   const k = sw.swaps.length; if (!k) return "";
-  return "⚠ " + (k === 1 ? "1 swap of Dexicon ① MxUSD is" : k + " swaps of Dexicon ① MxUSD are") + " in flight. " + (k === 1 ? "It signs" : "They sign")
-    + " with this same address and " + (k === 1 ? "needs" : "need") + " ETH here for gas to claim or refund. Sending ETH out now can leave a swap unable to finish before its time limit. Wait until Dexicon, Activity shows "
-    + (k === 1 ? "it" : "them") + " finished, or leave enough ETH for gas.";
+  return t("⚠ {k} in flight. {k2} with this same address and {k3} ETH here for gas to claim or refund. Sending ETH out now can leave a swap unable to finish before its time limit. Wait until Dexicon, Activity shows {k4} finished, or leave enough ETH for gas.", { k: (k === 1 ? t("1 swap of Dexicon ① MxUSD is") : t("{k} swaps of Dexicon ① MxUSD are", { k: k })), k2: (k === 1 ? t("It signs") : t("They sign")), k3: (I18N.t(k === 1 ? "needs" : "need")), k4: (I18N.t(k === 1 ? "it" : "them")) });
 }
 // Confirm: the three fee tiers of the original (Medium first), the fee of each read by the main process.
 async function ewConfirmSend(b, cur, r) {
   let tier = "med", sending = false;
   const swap = ewSwapWarning(await api.ewSwaps().catch(() => null));
-  const label = { low: "Low", med: "Medium", high: "High" };
-  const d = appDlg({ title: "Confirm send", body: `<div class="ew-kv">Your address:</div>${ewBlock(b.address)}
-      <div class="ew-kv">Send:  ${esc(r.amt)} ${esc(cur.sym)}</div>
-      ${cur.key === "eth" ? "" : `<div class="ew-kv">${esc(cur.sym)} contract:</div>${ewBlock(cur.key)}`}
-      <div class="ew-asset__t ew-gap">To</div>${ewBlock(r.to)}
-      <div class="ew-asset__t ew-gap">Network fee</div>
+  const label = { low: I18N.t("Low"), med: I18N.t("Medium"), high: I18N.t("High") };
+  const d = appDlg({ title: I18N.t("Confirm send"), body: `<div class="ew-kv">${th("Your address:")}</div>${ewBlock(b.address)}
+      <div class="ew-kv">${tr("Send:  {amt} {sym}", { amt: esc(r.amt), sym: esc(cur.sym) })}</div>
+      ${cur.key === "eth" ? "" : `<div class="ew-kv">${tr("{sym} contract:", { sym: esc(cur.sym) })}</div>${ewBlock(cur.key)}`}
+      <div class="ew-asset__t ew-gap">${th("To")}</div>${ewBlock(r.to)}
+      <div class="ew-asset__t ew-gap">${th("Network fee")}</div>
       <div class="ew-tiers">${["low", "med", "high"].map(t => `<button class="ew-pill ew-tier" data-ewtier="${t}">${label[t]}</button>`).join("")}</div>
       <div class="ew-fee" id="ewFee"></div>
-      ${r.capped ? `<div class="ew-warn">⚠ Unusually high network fee. Your RPC endpoint may be faulty or hostile: check it in Settings before sending.</div>` : ""}
+      ${r.capped ? `<div class="ew-warn">${th("⚠ Unusually high network fee. Your RPC endpoint may be faulty or hostile: check it in Settings before sending.")}</div>` : ""}
       <div class="ew-warn" id="ewFeeShare" hidden></div>
       ${swap ? `<div class="ew-warn" id="ewSwapWarn">${esc(swap)}</div>` : ""}`,
-    buttons: [{ label: "Cancel", v: null }, { label: "Send", on: async (_root, close) => {
+    buttons: [{ label: I18N.t("Cancel"), v: null }, { label: I18N.t("Send"), on: async (_root, close) => {
       if (sending) return; sending = true;
-      toast("Broadcasting…");
+      toast(I18N.t("Broadcasting…"));
       const s = await AppsAct.eth.send(api, cur.key, r.to, r.amt, tier);
       close();
       // uncertain = the broadcast may or may not have gone out: never said as sent, never as a clean failure
-      if (s && s.uncertain) appDlg({ title: "Not confirmed", body: `<p>${esc(s.err)}</p><p>Do not send it again until its outcome is checked.</p>`, buttons: [{ label: "Close", v: null }, { label: "View address on Etherscan", on: () => ewOpen(EW_ETHERSCAN + "address/" + b.address) }] });
-      else if (!s || s.err) toast("Send failed: " + ((s && s.err) || "no answer"), "warn");
+      if (s && s.uncertain) appDlg({ title: I18N.t("Not confirmed"), body: `<p>${esc(s.err)}</p><p>${th("Do not send it again until its outcome is checked.")}</p>`, buttons: [{ label: I18N.t("Close"), v: null }, { label: I18N.t("View address on Etherscan"), on: () => ewOpen(EW_ETHERSCAN + "address/" + b.address) }] });
+      else if (!s || s.err) toast(I18N.t("Send failed: {err}", { err: ((s && s.err) || "no answer") }), "warn");
       else {
         store("ewLastTx", s.tx);
-        appDlg({ title: "Sent", body: `<p>Broadcast.</p><div class="ew-mono ew-sel">${esc(s.tx)}</div>`, buttons: [{ label: "Close", v: null }, { label: "View on Etherscan", on: () => ewOpen(EW_ETHERSCAN + "tx/" + s.tx) }] });
+        appDlg({ title: I18N.t("Sent"), body: `<p>${th("Broadcast.")}</p><div class="ew-mono ew-sel">${esc(s.tx)}</div>`, buttons: [{ label: I18N.t("Close"), v: null }, { label: I18N.t("View on Etherscan"), on: () => ewOpen(EW_ETHERSCAN + "tx/" + s.tx) }] });
       }
       if (activeView === "ethwallet") renderEthWallet();
     } }] });
   const paint = () => {
     const f = r.fees && r.fees[tier];
-    el("ewFee").textContent = f ? "~" + TOK.tidyAmount(f.fee) + " ETH  ·  " + TOK.tidyAmount(f.gwei) + " gwei" : "";
+    el("ewFee").textContent = f ? I18N.t("~{fee} ETH  ·  {gwei} gwei", { fee: TOK.tidyAmount(f.fee), gwei: TOK.tidyAmount(f.gwei) }) : "";
     d.root.querySelectorAll("[data-ewtier]").forEach(x => { const on = x.dataset.ewtier === tier; x.classList.toggle("ew-tier--on", on); x.setAttribute("aria-pressed", on); });
     const share = cur.key === "eth" && f && Number(r.amt) > 0 ? Math.floor(Number(f.fee) / Number(r.amt) * 100) : 0, box = el("ewFeeShare");
-    box.hidden = !(share > 25); box.textContent = "⚠ The fee is about " + share + "% of the amount you're sending.";
+    box.hidden = !(share > 25); box.textContent = I18N.t("⚠ The fee is about {share}% of the amount you're sending.", { share: share });
   };
   d.root.querySelectorAll("[data-ewtier]").forEach(x => { x.onclick = () => { tier = x.dataset.ewtier; paint(); }; });
   paint();
 }
 
 async function ewAddTokenDialog() {
-  const d = appDlg({ title: "Add token", body: `<p>Paste an ERC20 contract address. Symbol + decimals are read from the chain.</p>
-      <input class="adlg__in ew-mono" id="ewTokIn" placeholder="0x… contract" aria-label="Token contract address" autocomplete="off" spellcheck="false" />`,
-    buttons: [{ label: "Cancel", v: null }, { label: "Add", on: async (_root, close) => {
-      const addr = el("ewTokIn").value; if (!String(addr).trim()) { toast("Bad contract address", "warn"); return; }
-      close(); toast("Reading token…");
+  const d = appDlg({ title: t("Add token"), body: `<p>${th("Paste an ERC20 contract address. Symbol + decimals are read from the chain.")}</p>
+      <input class="adlg__in ew-mono" id="ewTokIn" placeholder="${th("0x… contract")}" aria-label="${th("Token contract address")}" autocomplete="off" spellcheck="false" />`,
+    buttons: [{ label: t("Cancel"), v: null }, { label: t("Add"), on: async (_root, close) => {
+      const addr = el("ewTokIn").value; if (!String(addr).trim()) { toast(t("Bad contract address"), "warn"); return; }
+      close(); toast(t("Reading token…"));
       const r = await AppsAct.eth.addToken(api, addr);
-      toast(r && r.err ? r.err : "Added " + (r && r.token ? r.token.symbol : "token"), r && r.err ? "warn" : "ok");
+      toast(r && r.err ? r.err : t("Added {symbol}", { symbol: (r && r.token ? r.token.symbol : "token") }), r && r.err ? "warn" : "ok");
       if (r && !r.err && activeView === "ethwallet") renderEthWallet();
     } }] });
   return d.done;
 }
 
 async function ewTokenMenu(b, addr) {
-  const t = b.tokens.find(x => x.address === addr) || { symbol: "Token", address: addr };
-  const i = await appPick(t.symbol + " · " + addr, ["Send " + t.symbol, "View on Etherscan", "Copy contract address", "Remove from list"]);
+  const t = b.tokens.find(x => x.address === addr) || { symbol: I18N.t("Token"), address: addr };
+  const i = await appPick(t.symbol + " · " + addr, [I18N.t("Send {symbol}", { symbol: t.symbol }), I18N.t("View on Etherscan"), I18N.t("Copy contract address"), I18N.t("Remove from list")]);
   if (i === 0) ewSendDialog(b, addr);
   else if (i === 1) ewOpen(EW_ETHERSCAN + "token/" + addr + "?a=" + b.address);
   else if (i === 2) copy(addr);
@@ -3514,29 +3511,29 @@ async function ewTokenMenu(b, addr) {
 }
 
 async function ewSettingsDialog(b) {
-  const i = await appPick("Settings", ["Export private key", "RPC endpoint", "Add token", "View address on Etherscan", "View last transaction", "Switch wallet source"]);
+  const i = await appPick(t("Settings"), [t("Export private key"), t("RPC endpoint"), t("Add token"), t("View address on Etherscan"), t("View last transaction"), t("Switch wallet source")]);
   if (i === 0) ewExportKey();
   else if (i === 1) ewRpcDialog();
   else if (i === 2) ewAddTokenDialog();
-  else if (i === 3) { if (b.address) ewOpen(EW_ETHERSCAN + "address/" + b.address); else toast("No address yet", "warn"); }
-  else if (i === 4) { const tx = store("ewLastTx"); if (/^0x[0-9a-fA-F]{64}$/.test(tx || "")) ewOpen(EW_ETHERSCAN + "tx/" + tx); else toast("No transaction sent from this device yet"); }
-  else if (i === 5) appDlg({ title: "Switch wallet source", body: `<p>On the desktop this wallet always uses the embedded wallet: the key this node derives, which is also the key Dexicon ① MxUSD swaps sign with.</p>
-      <p>Importing another key is not offered here. One Ethereum key serves this wallet and the swaps, and replacing it while a swap is in flight would leave that swap unable to claim or refund. (Nothing here moves funds.)</p>` });
+  else if (i === 3) { if (b.address) ewOpen(EW_ETHERSCAN + "address/" + b.address); else toast(t("No address yet"), "warn"); }
+  else if (i === 4) { const tx = store("ewLastTx"); if (/^0x[0-9a-fA-F]{64}$/.test(tx || "")) ewOpen(EW_ETHERSCAN + "tx/" + tx); else toast(t("No transaction sent from this device yet")); }
+  else if (i === 5) appDlg({ title: t("Switch wallet source"), body: `<p>${th("On the desktop this wallet always uses the embedded wallet: the key this node derives, which is also the key Dexicon ① MxUSD swaps sign with.")}</p>
+      <p>${th("Importing another key is not offered here. One Ethereum key serves this wallet and the swaps, and replacing it while a swap is in flight would leave that swap unable to claim or refund. (Nothing here moves funds.)")}</p>` });
 }
 
 // Export: the phone asks "I understand", then the device's own lock screen ("Confirm it's you"), then shows the key. Here: the
 // typed phrase, then the system's prompt where Electron offers one (Touch ID on a Mac that has it), both checked in the main process.
 function ewExportKey() {
   let busy = false;
-  appDlg({ title: "Export private key", body: `<p>Anyone who sees this key can take these funds, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.</p>
-      <p>It is also the key Dexicon ① MxUSD swaps sign with.</p>
-      <label class="adlg__lbl" for="ewExpIn">Type ${esc(AppsAct.eth.EXPORT_PHRASE)} to confirm it's you</label>
+  appDlg({ title: t("Export private key"), body: `<p>${th("Anyone who sees this key can take these funds, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.")}</p>
+      <p>${th("It is also the key Dexicon ① MxUSD swaps sign with.")}</p>
+      <label class="adlg__lbl" for="ewExpIn">${tr("Type {exportphrase} to confirm it's you", { exportphrase: esc(AppsAct.eth.EXPORT_PHRASE) })}</label>
       <input class="adlg__in" id="ewExpIn" autocomplete="off" spellcheck="false" />`,
-    buttons: [{ label: "Cancel", v: null }, { label: "I understand, show it", on: async (_root, close) => {
+    buttons: [{ label: t("Cancel"), v: null }, { label: t("I understand, show it"), on: async (_root, close) => {
       if (busy) return; busy = true;
       const r = await AppsAct.eth.exportKey(api, el("ewExpIn").value);
       busy = false;
-      if (r.err) { toast(/cancel/i.test(r.err) ? "Cancelled" : r.err, "warn"); return; }
+      if (r.err) { toast(/cancel/i.test(r.err) ? t("Cancelled") : r.err, "warn"); return; }
       close();
       ewRevealKey(r.key, r.system); r.key = null;
     } }] });
@@ -3545,10 +3542,10 @@ function ewExportKey() {
  *  and out of this function. Copy goes through the main process, which clears the clipboard again (main/clipsecret.js). */
 function ewRevealKey(key, system) {
   let k = String(key || ""); key = null;
-  const d = appDlg({ title: "Private key", body: `<div class="ew-warn">Anyone with this key controls these funds. Never share it.</div>
-      ${system ? "" : `<div class="ew-warn">No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.</div>`}
-      <div class="ew-mono ew-sel" id="ewKeyText"></div><div class="ew-fine">This closes by itself after 60 seconds, and when you leave this window.</div>`,
-    buttons: [{ label: "Close", v: null }, { label: "Copy", on: () => { if (!k) return; api.clipSecret(k); toast("Key copied. The clipboard is cleared in 60 seconds and when the app quits", "ok"); } }] });
+  const d = appDlg({ title: t("Private key"), body: `<div class="ew-warn">${th("Anyone with this key controls these funds. Never share it.")}</div>
+      ${system ? "" : `<div class="ew-warn">${th("No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.")}</div>`}
+      <div class="ew-mono ew-sel" id="ewKeyText"></div><div class="ew-fine">${th("This closes by itself after 60 seconds, and when you leave this window.")}</div>`,
+    buttons: [{ label: t("Close"), v: null }, { label: t("Copy"), on: () => { if (!k) return; api.clipSecret(k); toast(t("Key copied. The clipboard is cleared in 60 seconds and when the app quits"), "ok"); } }] });
   d.root.querySelector("#ewKeyText").textContent = k;   // as text, in this one node, which close() removes
   const end = () => d.close(null), hidden = () => { if (document.hidden) end(); };
   const timer = setTimeout(end, 60000);
@@ -3560,11 +3557,11 @@ function ewRevealKey(key, system) {
 async function ewRpcDialog() {
   const st = await api.ewStatus().catch(() => ({}));
   const say = (r, ok) => { if (r && r.err) { toast(r.err, "warn"); return false; } toast(ok, "ok"); return true; };
-  appDlg({ title: "RPC endpoint", body: `<input class="adlg__in ew-mono" id="ewRpcIn" placeholder="https://…" aria-label="RPC endpoint" value="${esc((st && st.rpc) || "")}" autocomplete="off" spellcheck="false" />
-      <div class="ew-fine">Falls back to public keyless nodes automatically if this one fails. Only public https hosts are accepted. Dexicon ① MxUSD settles its swaps through the same endpoint.</div>`,
-    buttons: [{ label: "Default", neutral: true, on: async (_root, close) => { if (say(await AppsAct.eth.setRpc(api, ""), "Using the default public RPCs")) close(); } },
-      { label: "Cancel", v: null },
-      { label: "Save", on: async (_root, close) => { if (say(await AppsAct.eth.setRpc(api, el("ewRpcIn").value), "RPC saved")) close(); } }] });
+  appDlg({ title: t("RPC endpoint"), body: `<input class="adlg__in ew-mono" id="ewRpcIn" placeholder="${th("https://…")}" aria-label="${th("RPC endpoint")}" value="${esc((st && st.rpc) || "")}" autocomplete="off" spellcheck="false" />
+      <div class="ew-fine">${th("Falls back to public keyless nodes automatically if this one fails. Only public https hosts are accepted. Dexicon ① MxUSD settles its swaps through the same endpoint.")}</div>`,
+    buttons: [{ label: t("Default"), neutral: true, on: async (_root, close) => { if (say(await AppsAct.eth.setRpc(api, ""), t("Using the default public RPCs"))) close(); } },
+      { label: t("Cancel"), v: null },
+      { label: t("Save"), on: async (_root, close) => { if (say(await AppsAct.eth.setRpc(api, el("ewRpcIn").value), t("RPC saved"))) close(); } }] });
 }
 
 // live push: refresh the passive dashboard only, and never while a dialog is open (the frozen-form rule)
@@ -3600,7 +3597,7 @@ let shopDraft = null;           // Studio: the shop being built
 let shopUpdateTimer = null;
 const SHOP = AppsAct.shop;
 const SHOP_PILL = { DELIVERED: "#2ECC71", SHIPPED: "#2ECC71", PAID: "#F7931A", CONFIRMED: "#F7931A", UNDERPAID: "#E74C3C", WRONG_TOKEN: "#E74C3C" };
-const SHOP_APPS = [["shop", "miniMall", "Browse your shops, place orders and track deliveries."], ["studio", "miniMall Studio", "Build a storefront for your products."], ["inbox", "miniMall Inbox", "Manage customer orders, payments and deliveries."]];
+const SHOP_APPS = [["shop", "miniMall", L_("Browse your shops, place orders and track deliveries.")], ["studio", "miniMall Studio", L_("Build a storefront for your products.")], ["inbox", "miniMall Inbox", L_("Manage customer orders, payments and deliveries.")]];
 
 async function onShopUpdate() {
   if (shopUpdateTimer) clearTimeout(shopUpdateTimer);
@@ -3617,10 +3614,10 @@ async function refreshShopBadge() {
 }
 function shopGo(view, nav) { shopView = view; shopNav = nav || {}; renderMiniMall(); }
 function shopPill(status) { const s = status === "INQUIRY" ? "ENQUIRY" : String(status || ""); return `<span class="mm-pill" style="background:${Object.hasOwn(SHOP_PILL, status) ? SHOP_PILL[status] : "#9A9AA8"}">${esc(s)}</span>`; }
-function shopAgo(ms) { const d = Date.now() - (Number(ms) || 0); return d < 60000 ? "just now" : d < 3600000 ? Math.floor(d / 60000) + "m ago" : d < 86400000 ? Math.floor(d / 3600000) + "h ago" : Math.floor(d / 86400000) + "d ago"; }
+function shopAgo(ms) { const d = Date.now() - (Number(ms) || 0); return d < 60000 ? "just now" : d < 3600000 ? t("{d}m ago", { d: Math.floor(d / 60000) }) : d < 86400000 ? t("{d}h ago", { d: Math.floor(d / 3600000) }) : t("{d}d ago", { d: Math.floor(d / 86400000) }); }
 /** A screen of one of the three apps: its bar (back, title, icons on the right), then the page. */
 function shopFrame(title, back, icons, body, foot) {
-  el("shopBody").innerHTML = `<div class="mm"><div class="mm-bar">${back ? `<button class="mm-bar__b" id="mmBack" aria-label="Back">‹</button>` : ""}<span class="mm-bar__t">${esc(title)}</span>
+  el("shopBody").innerHTML = `<div class="mm"><div class="mm-bar">${back ? `<button class="mm-bar__b" id="mmBack" aria-label="${th("Back")}">‹</button>` : ""}<span class="mm-bar__t">${esc(title)}</span>
       ${(icons || []).map(([id, glyph, label]) => `<button class="mm-bar__b" id="${id}" aria-label="${esc(label)}" title="${esc(label)}">${glyph}</button>`).join("")}</div>
     <div class="mm-page" id="shopSub">${body}</div>${foot || ""}</div>`;
   if (back) el("mmBack").onclick = back;
@@ -3635,11 +3632,11 @@ async function renderMiniMall() {
   if (shopView === "studio") return renderShopStudio();
   if (shopView === "inbox") return renderShopInbox();
   // Pandamonium's launcher page (MallActivity): its own colours, not the three apps'
-  host.innerHTML = `<div class="mall"><h1 class="mall__t">miniMall</h1><div class="mall__d">Shop, create storefronts and manage orders.</div>
+  host.innerHTML = `<div class="mall"><h1 class="mall__t">miniMall</h1><div class="mall__d">${th("Shop, create storefronts and manage orders.")}</div>
     ${SHOP_APPS.map(([id, name, d]) => `<div class="mall__card" role="button" tabindex="0" data-mall="${id}"><img class="mall__ic" src="icons/minimall.png" alt="" />
       <div class="mall__main"><div class="mall__n">${name}${id === "inbox" ? `<span class="tab-badge" id="mallNew" hidden></span>` : ""}</div><div class="mall__s">${d}</div></div><span class="mall__go" aria-hidden="true">›</span></div>`).join("")}</div>`;
   cardKeys(host);
-  host.querySelectorAll("[data-mall]").forEach(c => { c.onclick = () => { if (!running) { toast("Start the node first", "warn"); return; } shopGo(c.dataset.mall); }; });
+  host.querySelectorAll("[data-mall]").forEach(c => { c.onclick = () => { if (!running) { toast(t("Start the node first"), "warn"); return; } shopGo(c.dataset.mall); }; });
   api.shopNewCount().then(n => { const b = el("mallNew"); if (b && n > 0) { b.textContent = n; b.hidden = false; } }).catch(() => {});
 }
 
@@ -3648,9 +3645,9 @@ async function renderShopInbox() {
   if (shopNav.screen === "order") return renderShopSellOrder(shopNav.ref);
   const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []);
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
-  shopFrame(mine.length === 1 ? mine[0].shopName : "Orders", () => shopGo("home"), [["mmCard", "≡", "Vendor Card"]],
-    `<div class="mm-ver">miniMall Inbox</div>
-     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? "✓ Ready to receive orders  ·  shop key " + idHtml(shopIdentity.publicId) : "Connecting to your node…"}</div>
+  shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
+    `<div class="mm-ver">${th("miniMall Inbox")}</div>
+     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>
      <div class="mm-chips">${["ALL", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${s}</button>`).join("")}</div>
      ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
         <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.amount)} ${esc(SHOP.cur(o.currency))}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
@@ -3660,37 +3657,37 @@ async function renderShopInbox() {
 }
 async function shopVendorCard() {
   const card = await api.shopVendorCard().catch(() => "");
-  if (!card) { toast("Connect to your node first.", "warn"); return; }
+  if (!card) { toast(t("Connect to your node first."), "warn"); return; }
   let qr = ""; if (typeof qrcode !== "undefined") { try { const q = qrcode(0, "L"); q.addData(card); q.make(); qr = `<div class="ew-qr">${q.createImgTag(3, 0)}</div>`; } catch (e) {} }
-  appDlg({ title: "Vendor Card", body: `<p>This is your public shop key + receiving address. It is safe to share: a shop you build in miniMall Studio carries it, so that orders reach you.</p>${qr}<div class="ew-mono ew-sel">${esc(card)}</div>`,
-    buttons: [{ label: "Close", v: null }, { label: "Copy", on: () => { api.clip(card); toast("Copied", "ok"); } }] });
+  appDlg({ title: t("Vendor Card"), body: `<p>${th("This is your public shop key + receiving address. It is safe to share: a shop you build in miniMall Studio carries it, so that orders reach you.")}</p>${qr}<div class="ew-mono ew-sel">${esc(card)}</div>`,
+    buttons: [{ label: t("Close"), v: null }, { label: t("Copy"), on: () => { api.clip(card); toast(t("Copied"), "ok"); } }] });
 }
-function shopThread(chat, them) { return (chat || []).map(m => `<div class="mm-msg${m.incoming ? "" : " mm-msg--me"}">${m.incoming ? them : "You"}: ${esc(m.message)}</div>`).join(""); }
-function shopItems(o) { return (o.items || []).map(i => `<div>• ${esc(i.product)}${i.size ? " (" + esc(i.size) + ")" : ""}  x${esc(String(i.quantity))}  = ${esc(i.lineTotal || "")}</div>`).join("") || "<div>(no items listed)</div>"; }
+function shopThread(chat, them) { return (chat || []).map(m => `<div class="mm-msg${m.incoming ? "" : " mm-msg--me"}">${m.incoming ? them : th("You")}: ${esc(m.message)}</div>`).join(""); }
+function shopItems(o) { return (o.items || []).map(i => `<div>• ${esc(i.product)}${i.size ? " (" + esc(i.size) + ")" : ""}  x${esc(String(i.quantity))}  = ${esc(i.lineTotal || "")}</div>`).join("") || "<div>" + th("(no items listed)") + "</div>"; }
 const shopKv = (k, v, copyable) => `<div class="mm-kv"><span>${k}</span>${copyable ? `<button class="mm-kv__v mm-kv__v--copy" data-copy="${esc(v)}">${esc(v)}</button>` : `<span class="mm-kv__v">${esc(v)}</span>`}</div>`;
 async function renderShopSellOrder(ref) {
   const d = await api.shopOrder(ref).catch(() => null);
-  if (!d || !d.order || d.order.role !== "sell") { shopFrame("Orders", () => shopGo("inbox"), [], `<div class="mm-empty">Order not found.</div>`); return; }
+  if (!d || !d.order || d.order.role !== "sell") { shopFrame(t("Orders"), () => shopGo("inbox"), [], `<div class="mm-empty">${th("Order not found.")}</div>`); return; }
   const o = d.order, cur = SHOP.cur(o.currency), enquiry = o.status === "INQUIRY", next = SHOP.nextStatus(o);
   shopFrame((o.items && o.items[0] && o.items[0].product) || o.ref, () => shopGo("inbox"), [],
-    `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? "  paid " + esc(o.paidAmount || o.amount) + " " + esc(cur) : "  awaiting payment"}</span></div>
-     <div class="mm-sec">Items</div><div class="mm-card">${shopItems(o)}</div>
-     ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Shop", o.shopName || "")}
-     <div class="mm-sec">Delivery</div>${shopKv("Method", o.shipping || "Not given")}${o.delivery ? shopKv("Address", o.delivery, true) : ""}
-     ${o.note ? `<div class="mm-sec">Buyer note</div><div class="mm-card">${esc(o.note)}</div>` : ""}
-     ${shopKv("Buyer key", o.counterparty || "", true)}
-     ${enquiry ? "" : `<div class="mm-sec">Update status</div><div class="mm-grid">${["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${s}</button>`).join("")}</div>
-       <div class="mm-hint">${!o.paid ? "Awaiting payment first. PAID is set by the payment itself, when it arrives." : next ? "Next: " + next + "." : "This order is delivered."}</div>`}
-     <div class="mm-sec">${enquiry ? "Conversation" : "Message the buyer"}</div><div class="mm-thread">${shopThread(d.chat, "Buyer")}</div>
-     <div class="mm-send"><input class="mm-in-f" id="shopMsg" placeholder="Reply…" aria-label="Reply" autocomplete="off" /><button class="mm-btn" id="shopSend">Send</button></div>`);
+    `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? ("  " + tr("paid {amount} {cur}", { amount: esc(o.paidAmount || o.amount), cur: esc(cur) })) : "  awaiting payment"}</span></div>
+     <div class="mm-sec">${th("Items")}</div><div class="mm-card">${shopItems(o)}</div>
+     ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
+     <div class="mm-sec">${th("Delivery")}</div>${shopKv(t("Method"), o.shipping || t("Not given"))}${o.delivery ? shopKv(t("Address"), o.delivery, true) : ""}
+     ${o.note ? `<div class="mm-sec">${th("Buyer note")}</div><div class="mm-card">${esc(o.note)}</div>` : ""}
+     ${shopKv(t("Buyer key"), o.counterparty || "", true)}
+     ${enquiry ? "" : `<div class="mm-sec">${th("Update status")}</div><div class="mm-grid">${["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${s}</button>`).join("")}</div>
+       <div class="mm-hint">${!o.paid ? th("Awaiting payment first. PAID is set by the payment itself, when it arrives.") : next ? tr("Next: {next}.", { next: next }) : th("This order is delivered.")}</div>`}
+     <div class="mm-sec">${enquiry ? th("Conversation") : th("Message the buyer")}</div><div class="mm-thread">${shopThread(d.chat, t("Buyer"))}</div>
+     <div class="mm-send"><input class="mm-in-f" id="shopMsg" placeholder="${th("Reply…")}" aria-label="${th("Reply")}" autocomplete="off" /><button class="mm-btn" id="shopSend">${th("Send")}</button></div>`);
   shopWireOrder(ref, () => renderShopSellOrder(ref));
 }
 function shopWireOrder(ref, again) {
   el("shopSub").querySelectorAll("[data-copy]").forEach(b => { b.onclick = () => copy(b.dataset.copy); });
-  el("shopSub").querySelectorAll("[data-advance]").forEach(b => { b.onclick = async () => { b.disabled = true; const r = await SHOP.advance(api, ref, b.dataset.advance); if (r.err) shopSay(r.err); else toast("Marked " + b.dataset.advance, "ok"); again(); }; });
-  const send = async () => { const r = await SHOP.reply(api, ref, el("shopMsg").value); if (r && r.err) { toast("Reply failed: " + r.err, "warn"); return; } if (r) again(); };
+  el("shopSub").querySelectorAll("[data-advance]").forEach(b => { b.onclick = async () => { b.disabled = true; const r = await SHOP.advance(api, ref, b.dataset.advance); if (r.err) shopSay(r.err); else toast(t("Marked {advance}", { advance: b.dataset.advance }), "ok"); again(); }; });
+  const send = async () => { const r = await SHOP.reply(api, ref, el("shopMsg").value); if (r && r.err) { toast(t("Reply failed: {err}", { err: r.err }), "warn"); return; } if (r) again(); };
   el("shopSend").onclick = send; el("shopMsg").onkeydown = (e) => { if (e.key === "Enter") send(); };
-  if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; const r = await SHOP.retryPay(api, ref); if (r.err) toast("Payment failed: " + r.err, "warn"); else toast("Payment sent.", "ok"); again(); };
+  if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; const r = await SHOP.retryPay(api, ref); if (r.err) toast(t("Payment failed: {err}", { err: r.err }), "warn"); else toast(t("Payment sent."), "ok"); again(); };
 }
 
 // ---------------- miniMall (merchshop): shops, a storefront, the cart, checkout, my orders ----------------
@@ -3700,20 +3697,20 @@ async function renderShopApp() {
   if (n === "order") return renderShopBuyOrder(shopNav.ref);
   if (n === "checkout" && shopLoaded) return renderShopCheckout();
   if (n === "store" && shopLoaded) return renderShopStore();
-  const mine = await api.shopMyShops().catch(() => []), row = (s, how, i) => `<div class="mm-row" role="button" tabindex="0" data-${how}="${i}"><div class="mm-row__t mm-row__t--big">${esc(s.shopName)}</div><div class="mm-row__s">${(s.products || []).length} products  ·  ${esc(SHOP.cur(s.currency))}</div></div>`;
-  shopFrame("miniMall", () => shopGo("home"), [["mmOrders", "🧾", "My orders"]],
-    `<div class="mm-ver">miniMall Shop</div>
+  const mine = await api.shopMyShops().catch(() => []), row = (s, how, i) => `<div class="mm-row" role="button" tabindex="0" data-${how}="${i}"><div class="mm-row__t mm-row__t--big">${esc(s.shopName)}</div><div class="mm-row__s">${tr("{products} products  ·  {currency}", { products: (s.products || []).length, currency: esc(SHOP.cur(s.currency)) })}</div></div>`;
+  shopFrame("miniMall", () => shopGo("home"), [["mmOrders", "🧾", t("My orders")]],
+    `<div class="mm-ver">${th("miniMall Shop")}</div>
      ${shopAdded.map((s, i) => row(s, "added", i)).join("")}
-     ${shopAdded.length ? "" : `<div class="mm-empty">No shops yet.\n\nClick “Add a shop” below and pick a .shop file a vendor shared with you.</div>`}
-     ${mine.length ? `<div class="mm-sec">Your own shops (as a buyer sees them)</div>${mine.map((s, i) => row(s, "mine", i)).join("")}` : ""}`,
-    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopAdd">＋  Add a shop</button></div>`);
+     ${shopAdded.length ? "" : `<div class="mm-empty">${th("No shops yet.\n\nClick “Add a shop” below and pick a .shop file a vendor shared with you.")}</div>`}
+     ${mine.length ? `<div class="mm-sec">${th("Your own shops (as a buyer sees them)")}</div>${mine.map((s, i) => row(s, "mine", i)).join("")}` : ""}`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopAdd">${th("＋  Add a shop")}</button></div>`);
   el("mmOrders").onclick = () => shopGo("shop", { screen: "orders" });
   const open = (s) => { const why = SHOP.problem(s); if (why) { toast(why, "warn"); return; } shopLoaded = s; shopCart = {}; shopShipId = null; shopGo("shop", { screen: "store" }); };   // a shop whose token does not match its currency is never opened
   el("shopAdd").onclick = async () => {
     try { const cfg = await api.shopImport(); if (!cfg) return;
       const why = SHOP.problem(cfg); if (why) { toast(why, "warn"); return; }
-      shopAdded = shopAdded.filter(s => s.shopId !== cfg.shopId).concat(cfg); toast("Added " + cfg.shopName, "ok"); open(cfg);
-    } catch (e) { toast("Couldn't read that file.", "warn"); }
+      shopAdded = shopAdded.filter(s => s.shopId !== cfg.shopId).concat(cfg); toast(t("Added {shopName}", { shopName: cfg.shopName }), "ok"); open(cfg);
+    } catch (e) { toast(t("Couldn't read that file."), "warn"); }
   };
   el("shopSub").querySelectorAll("[data-added]").forEach(c => { c.onclick = () => open(shopAdded[+c.dataset.added]); });
   el("shopSub").querySelectorAll("[data-mine]").forEach(c => { c.onclick = () => open(mine[+c.dataset.mine]); });
@@ -3721,60 +3718,60 @@ async function renderShopApp() {
 function renderShopStore() {
   const s = shopLoaded, cur = SHOP.cur(s.currency), count = Object.values(shopCart).reduce((a, b) => a + b, 0);
   shopFrame(s.shopName, () => shopGo("shop"), [],
-    `<div class="mm-dim mm-pays">Pays in ${esc(cur)}</div>
+    `<div class="mm-dim mm-pays">${tr("Pays in {cur}", { cur: esc(cur) })}</div>
      ${(s.products || []).map(p => { const q = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99; return `<div class="mm-prod">
         ${SHOP.image(p.image) ? `<img class="mm-prod__im" src="${esc(SHOP.image(p.image))}" alt="" data-zoom="${esc(p.id)}" />` : `<div class="mm-prod__im"></div>`}
         <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name)}</div><div class="mm-prod__d">${esc(p.description || "")}</div><div class="mm-prod__p">${esc(p.price)} ${esc(cur)}</div></div>
-        <div class="mm-step"><button class="mm-step__b" data-dec="${esc(p.id)}" aria-label="One fewer ${esc(p.name)}"${q <= 0 ? " disabled" : ""}>–</button><span class="mm-step__q">${q}</span><button class="mm-step__b" data-inc="${esc(p.id)}" aria-label="One more ${esc(p.name)}"${q >= cap ? " disabled" : ""}>+</button></div></div>`; }).join("")}`,
-    `<div class="mm-foot mm-foot--cart"><span>${count ? count + " items  ·  " + esc(SHOP.cartTotal(s, shopCart, null)) + " " + esc(cur) : "Cart empty"}</span><button class="mm-btn mm-btn--on" id="shopCheckout">Checkout</button></div>`);
+        <div class="mm-step"><button class="mm-step__b" data-dec="${esc(p.id)}" aria-label="${tr("One fewer {name}", { name: esc(p.name) })}"${q <= 0 ? " disabled" : ""}>–</button><span class="mm-step__q">${q}</span><button class="mm-step__b" data-inc="${esc(p.id)}" aria-label="${tr("One more {name}", { name: esc(p.name) })}"${q >= cap ? " disabled" : ""}>+</button></div></div>`; }).join("")}`,
+    `<div class="mm-foot mm-foot--cart"><span>${count ? tr("{count} items  ·  {shopCart} {cur}", { count: count, shopCart: esc(SHOP.cartTotal(s, shopCart, null)), cur: esc(cur) }) : th("Cart empty")}</span><button class="mm-btn mm-btn--on" id="shopCheckout">${th("Checkout")}</button></div>`);
   const cap = (id) => { const p = (s.products || []).find(x => x.id === id); return p ? (Number(p.maxUnits) || 99) : 99; };
   el("shopSub").querySelectorAll("[data-inc]").forEach(b => { b.onclick = () => { const id = b.dataset.inc; shopCart[id] = Math.min(cap(id), (shopCart[id] || 0) + 1); renderShopStore(); }; });
   el("shopSub").querySelectorAll("[data-dec]").forEach(b => { b.onclick = () => { const id = b.dataset.dec; shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; renderShopStore(); }; });
   el("shopSub").querySelectorAll("[data-zoom]").forEach(im => { im.onclick = () => { const p = s.products.find(x => x.id === im.dataset.zoom); appDlg({ title: p.name, body: `<img class="mm-zoom" src="${esc(SHOP.image(p.image))}" alt="" /><p>${esc(p.description || "")}</p>` }); }; });
-  el("shopCheckout").onclick = () => { if (!count) { toast("Add an item first (use + above).", "warn"); return; } shopGo("shop", { screen: "checkout" }); };
+  el("shopCheckout").onclick = () => { if (!count) { toast(t("Add an item first (use + above)."), "warn"); return; } shopGo("shop", { screen: "checkout" }); };
 }
 function renderShopCheckout() {
   const s = shopLoaded, cur = SHOP.cur(s.currency), ship = SHOP.shipOf(s, shopShipId), items = SHOP.orderItems(s, shopCart);
   const sums = SHOP.totals(s, shopCart, shopShipId), total = sums.total || "0.000000";
-  shopFrame("Checkout", () => shopGo("shop", { screen: "store" }), [],
+  shopFrame(t("Checkout"), () => shopGo("shop", { screen: "store" }), [],
     `<div class="mm-card">${items.map(i => `<div class="mm-kv"><span class="mm-kv__v">${esc(i.product)} × ${i.quantity}</span><span>${esc(i.lineTotal)}</span></div>`).join("")}</div>
-     ${(s.shipping || []).length ? `<div class="mm-sec">Delivery method</div><div class="mm-opts">${s.shipping.map(sh => `<button class="mm-btn${ship && ship.id === sh.id ? " mm-btn--on" : ""}" data-ship="${esc(sh.id)}" aria-pressed="${!!(ship && ship.id === sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? "  +" + esc(String(sh.fee)) : "  · free"}</button>`).join("")}</div>` : ""}
-     <div class="mm-sec">Delivery address / email</div><textarea class="mm-in-f" id="shopDelivery" rows="2" placeholder="Where should this go? (or email for digital)" aria-label="Delivery address or email"></textarea>
-     <div class="mm-sec">Message to seller (optional)</div><input class="mm-in-f" id="shopNote" placeholder="Anything the vendor should know" aria-label="Message to seller" autocomplete="off" />
-     <div class="mm-totals">${shopKv("Items", sums.itemsTotal || "0.000000")}${shopKv("Shipping", sums.fee || "0.000000")}${shopKv("Total", total + " " + cur)}</div>
-     <div class="mm-hint">Your address and message are encrypted: only the vendor can read them.</div>`,
-    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopPay">Pay ${esc(total)} ${esc(cur)}</button></div>`);
+     ${(s.shipping || []).length ? `<div class="mm-sec">${th("Delivery method")}</div><div class="mm-opts">${s.shipping.map(sh => `<button class="mm-btn${ship && ship.id === sh.id ? " mm-btn--on" : ""}" data-ship="${esc(sh.id)}" aria-pressed="${!!(ship && ship.id === sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? "  +" + esc(String(sh.fee)) : ("  " + th("· free"))}</button>`).join("")}</div>` : ""}
+     <div class="mm-sec">${th("Delivery address / email")}</div><textarea class="mm-in-f" id="shopDelivery" rows="2" placeholder="${th("Where should this go? (or email for digital)")}" aria-label="${th("Delivery address or email")}"></textarea>
+     <div class="mm-sec">${th("Message to seller (optional)")}</div><input class="mm-in-f" id="shopNote" placeholder="${th("Anything the vendor should know")}" aria-label="${th("Message to seller")}" autocomplete="off" />
+     <div class="mm-totals">${shopKv(t("Items"), sums.itemsTotal || "0.000000")}${shopKv(t("Shipping"), sums.fee || "0.000000")}${shopKv(t("Total"), total + " " + cur)}</div>
+     <div class="mm-hint">${th("Your address and message are encrypted: only the vendor can read them.")}</div>`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopPay">${tr("Pay {total} {cur}", { total: esc(total), cur: esc(cur) })}</button></div>`);
   const keep = () => ({ d: el("shopDelivery").value, n: el("shopNote").value });
   el("shopSub").querySelectorAll("[data-ship]").forEach(b => { b.onclick = () => { const k = keep(); shopShipId = b.dataset.ship; renderShopCheckout(); el("shopDelivery").value = k.d; el("shopNote").value = k.n; }; });
   el("shopPay").onclick = async () => {
     const btn = el("shopPay"); if (btn.disabled) return; btn.disabled = true;
-    const r = await SHOP.place(api, { confirm: (title, text) => appDlg({ title, body: `<p class="mm-payq">${esc(text)}</p>`, buttons: [{ label: "Back", v: false }, { label: "Pay", v: true }] }).done, busy: () => toast("Sending your order and payment…") },
+    const r = await SHOP.place(api, { confirm: (title, text) => appDlg({ title, body: `<p class="mm-payq">${esc(text)}</p>`, buttons: [{ label: t("Back"), v: false }, { label: t("Pay"), v: true }] }).done, busy: () => toast(t("Sending your order and payment…")) },
       s, shopCart, shopShipId, el("shopDelivery").value, el("shopNote").value);
     if (r.cancelled) { btn.disabled = false; return; }
-    if (r.err) { toast(r.refused ? r.err : "Order failed: " + r.err, "warn"); btn.disabled = false; return; }
-    if (r.payError) toast("Order sent, but payment failed. Open the order to retry. (" + r.payError + ")", "warn"); else toast("Order placed!", "ok");
+    if (r.err) { toast(r.refused ? r.err : t("Order failed: {err}", { err: r.err }), "warn"); btn.disabled = false; return; }
+    if (r.payError) toast(t("Order sent, but payment failed. Open the order to retry. ({payError})", { payError: r.payError }), "warn"); else toast(t("Order placed!"), "ok");
     shopCart = {}; shopGo("shop", { screen: "order", ref: r.ref });
   };
 }
 async function renderShopMyOrders() {
   const list = (await api.shopOrders().catch(() => [])).filter(o => o.role === "buy");
-  shopFrame("My orders", () => shopGo("shop"), [],
+  shopFrame(t("My orders"), () => shopGo("shop"), [],
     list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${esc(o.shopName || o.ref)}</span>${shopPill(o.status)}</div>
-      <div class="mm-row__s">${esc(o.amount)} ${esc(SHOP.cur(o.currency))}  ·  ${shopAgo(o.date)}${o.ambiguous ? "  ·  payment not confirmed" : o.unpaid && !o.paid ? "  ·  not paid" : ""}</div></div>`).join("") || `<div class="mm-empty">No orders yet.</div>`);
+      <div class="mm-row__s">${esc(o.amount)} ${esc(SHOP.cur(o.currency))}  ·  ${shopAgo(o.date)}${o.ambiguous ? ("  " + th("·  payment not confirmed")) : o.unpaid && !o.paid ? ("  " + th("·  not paid")) : ""}</div></div>`).join("") || `<div class="mm-empty">${th("No orders yet.")}</div>`);
   el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("shop", { screen: "order", ref: r.dataset.oref }); });
 }
 async function renderShopBuyOrder(ref) {
   const d = await api.shopOrder(ref).catch(() => null);
-  if (!d || !d.order || d.order.role !== "buy") { shopFrame("My orders", () => shopGo("shop", { screen: "orders" }), [], `<div class="mm-empty">Order not found.</div>`); return; }
+  if (!d || !d.order || d.order.role !== "buy") { shopFrame(t("My orders"), () => shopGo("shop", { screen: "orders" }), [], `<div class="mm-empty">${th("Order not found.")}</div>`); return; }
   const o = d.order, cur = SHOP.cur(o.currency);
   shopFrame(o.shopName || o.ref, () => shopGo("shop", { screen: "orders" }), [],
     `<div class="mm-line">${shopPill(o.status)}</div>
-     <div class="mm-sec">Order</div><div class="mm-card">${shopItems(o)}</div>
-     ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Delivery", o.shipping || "Not given")}${o.delivery ? shopKv("To", o.delivery) : ""}
-     ${d.ambiguous ? `<div class="mm-warn">⚠ The payment timed out: it may already have gone through. Check your Wallet and History before sending again, so that you do not pay twice.</div>` : ""}
-     ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">Retry payment</button>` : ""}
-     <div class="mm-sec">Messages with the vendor</div><div class="mm-thread">${shopThread(d.chat, "Vendor") || `<div class="mm-dim">No messages yet. Say hello below.</div>`}</div>`,
-    `<div class="mm-foot mm-send"><input class="mm-in-f" id="shopMsg" placeholder="Message the vendor…" aria-label="Message the vendor" autocomplete="off" /><button class="mm-btn" id="shopSend">Send</button></div>`);
+     <div class="mm-sec">${th("Order")}</div><div class="mm-card">${shopItems(o)}</div>
+     ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Delivery"), o.shipping || t("Not given"))}${o.delivery ? shopKv(t("To"), o.delivery) : ""}
+     ${d.ambiguous ? `<div class="mm-warn">${th("⚠ The payment timed out: it may already have gone through. Check your Wallet and History before sending again, so that you do not pay twice.")}</div>` : ""}
+     ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">${th("Retry payment")}</button>` : ""}
+     <div class="mm-sec">${th("Messages with the vendor")}</div><div class="mm-thread">${shopThread(d.chat, t("Vendor")) || `<div class="mm-dim">${th("No messages yet. Say hello below.")}</div>`}</div>`,
+    `<div class="mm-foot mm-send"><input class="mm-in-f" id="shopMsg" placeholder="${th("Message the vendor…")}" aria-label="${th("Message the vendor")}" autocomplete="off" /><button class="mm-btn" id="shopSend">${th("Send")}</button></div>`);
   shopWireOrder(ref, () => renderShopBuyOrder(ref));
 }
 
@@ -3787,38 +3784,38 @@ async function renderShopStudio() {
   if (d) return renderShopProducts(d);
   const mine = await api.shopMyShops().catch(() => []);
   shopFrame("miniMall Studio", () => shopGo("home"), [],
-    `<div class="mm-status ${shopIdentity ? "mm-status--ok" : "mm-status--acc"}">${shopIdentity ? "✓ Shop key ready (from this node's seed)" : "Connecting to your node…"}</div>
+    `<div class="mm-status ${shopIdentity ? "mm-status--ok" : "mm-status--acc"}">${shopIdentity ? th("✓ Shop key ready (from this node's seed)") : th("Connecting to your node…")}</div>
      ${mine.map(s => `<div class="mm-row"><div class="mm-row__top"><span class="mm-row__t mm-row__t--big">${esc(s.shopName)}</span>
-        <span class="mm-opts"><button class="mm-btn" data-editshop="${esc(s.shopId)}">Edit</button><button class="mm-btn" data-exportshop="${esc(s.shopId)}">Export .shop</button></span></div>
-        <div class="mm-row__s">${(s.products || []).length} products  ·  ${esc(SHOP.cur(s.currency))}</div></div>`).join("")
-       || `<div class="mm-empty">Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to build your first shop.</div>`}`,
-    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopNew">＋  New shop</button></div>`);
+        <span class="mm-opts"><button class="mm-btn" data-editshop="${esc(s.shopId)}">${th("Edit")}</button><button class="mm-btn" data-exportshop="${esc(s.shopId)}">${th("Export .shop")}</button></span></div>
+        <div class="mm-row__s">${tr("{products} products  ·  {currency}", { products: (s.products || []).length, currency: esc(SHOP.cur(s.currency)) })}</div></div>`).join("")
+       || `<div class="mm-empty">${th("Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to build your first shop.")}</div>`}`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopNew">${th("＋  New shop")}</button></div>`);
   el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: SHOP.standardShipping(), products: [] }; shopGo("studio"); };
   el("shopSub").querySelectorAll("[data-editshop]").forEach(b => { b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); shopDraft.shipping = SHOP.normalizeShipping(shopDraft.shipping); shopGo("studio"); }; });
-  el("shopSub").querySelectorAll("[data-exportshop]").forEach(b => { b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast("Exported to " + p, "ok"); }; });
+  el("shopSub").querySelectorAll("[data-exportshop]").forEach(b => { b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast(t("Exported to {p}", { p: p }), "ok"); }; });
 }
 function renderShopProducts(d) {
   const cur = SHOP.cur(d.currency), listed = d.products.filter(p => p.name && Number(p.price) > 0).length;
-  shopFrame(d.shopId ? d.shopName || "Your shop" : "miniMall Studio", () => { shopDraft = null; shopGo("studio"); }, [],
-    `<div class="mm-seg"><span class="mm-btn mm-btn--on">Products · ${d.products.length}</span></div>
+  shopFrame(d.shopId ? d.shopName || t("Your shop") : "miniMall Studio", () => { shopDraft = null; shopGo("studio"); }, [],
+    `<div class="mm-seg"><span class="mm-btn mm-btn--on">${tr("Products · {products}", { products: d.products.length })}</span></div>
      ${d.products.map((p, i) => `<div class="mm-prod" role="button" tabindex="0" data-prod="${i}">${SHOP.image(p.image) ? `<img class="mm-prod__im mm-prod__im--s" src="${esc(SHOP.image(p.image))}" alt="" />` : `<div class="mm-prod__im mm-prod__im--s"></div>`}
-        <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name || "Unnamed product")}</div><div class="mm-prod__d${Number(p.price) > 0 ? "" : " mm-red"}">${Number(p.price) > 0 ? esc(String(p.price)) + " " + esc(cur) + " · ×" + esc(String(p.maxUnits || 10)) : "no price"}</div></div></div>`).join("")
-       || `<div class="mm-empty">Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to add your first product.</div>`}
-     <button class="mm-btn mm-btn--cta mm-gap" id="sdAddProd">＋  Add product</button>`,
-    `<div class="mm-foot"><button class="mm-btn mm-btn--cta${listed ? " mm-btn--on" : ""}" id="sdNext">${listed ? "Continue · " + listed + " in shop  →" : "Add a product to continue"}</button></div>`);
-  el("sdAddProd").onclick = () => { if (d.products.length >= 40) { toast("A shop holds at most 40 listings.", "warn"); return; } d.products.push({ id: "p" + Date.now().toString(36), name: "", description: "", mode: "units", price: "", maxUnits: "10", image: "" }); shopGo("studio", { screen: "product", pi: d.products.length - 1 }); };
+        <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name || t("Unnamed product"))}</div><div class="mm-prod__d${Number(p.price) > 0 ? "" : " mm-red"}">${Number(p.price) > 0 ? esc(String(p.price)) + " " + esc(cur) + " · ×" + esc(String(p.maxUnits || 10)) : "no price"}</div></div></div>`).join("")
+       || `<div class="mm-empty">${th("Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to add your first product.")}</div>`}
+     <button class="mm-btn mm-btn--cta mm-gap" id="sdAddProd">${th("＋  Add product")}</button>`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--cta${listed ? " mm-btn--on" : ""}" id="sdNext">${listed ? tr("Continue · {listed} in shop  →", { listed: listed }) : th("Add a product to continue")}</button></div>`);
+  el("sdAddProd").onclick = () => { if (d.products.length >= 40) { toast(t("A shop holds at most 40 listings."), "warn"); return; } d.products.push({ id: "p" + Date.now().toString(36), name: "", description: "", mode: "units", price: "", maxUnits: "10", image: "" }); shopGo("studio", { screen: "product", pi: d.products.length - 1 }); };
   el("shopSub").querySelectorAll("[data-prod]").forEach(c => { c.onclick = () => shopGo("studio", { screen: "product", pi: +c.dataset.prod }); });
   el("sdNext").onclick = () => { if (listed) shopGo("studio", { screen: "details" }); };
 }
 function renderShopProduct(d, i) {
   const p = d.products[i];
-  shopFrame("Your product", () => { read(); shopGo("studio"); }, [],
-    `<div class="mm-photo" id="sdPhoto" role="button" tabindex="0">${SHOP.image(p.image) ? `<img src="${esc(SHOP.image(p.image))}" alt="" />` : ""}<span>${SHOP.image(p.image) ? "Click to change the photo" : "Click to add a photo"}</span></div>
-     <div class="mm-sec">Name</div><input class="mm-in-f" id="sdPName" placeholder="Product name" value="${esc(p.name || "")}" autocomplete="off" />
-     <div class="mm-sec">About</div><input class="mm-in-f" id="sdPDesc" placeholder="Description (optional)" value="${esc(p.description || "")}" autocomplete="off" />
-     <div class="mm-sec">Price (${esc(SHOP.cur(d.currency))})</div><input class="mm-in-f" id="sdPPrice" inputmode="decimal" placeholder="0" value="${esc(p.price || "")}" autocomplete="off" />
-     <div class="mm-sec">Stock (max per order)</div><input class="mm-in-f" id="sdPMax" inputmode="numeric" placeholder="10" value="${esc(p.maxUnits || "")}" autocomplete="off" />
-     <button class="mm-btn mm-btn--on mm-btn--cta mm-gap" id="sdPDone">Done</button><button class="mm-btn mm-btn--cta mm-red" id="sdPDel">Remove product</button>`);
+  shopFrame(t("Your product"), () => { read(); shopGo("studio"); }, [],
+    `<div class="mm-photo" id="sdPhoto" role="button" tabindex="0">${SHOP.image(p.image) ? `<img src="${esc(SHOP.image(p.image))}" alt="" />` : ""}<span>${SHOP.image(p.image) ? th("Click to change the photo") : th("Click to add a photo")}</span></div>
+     <div class="mm-sec">${th("Name")}</div><input class="mm-in-f" id="sdPName" placeholder="${th("Product name")}" value="${esc(p.name || "")}" autocomplete="off" />
+     <div class="mm-sec">${th("About")}</div><input class="mm-in-f" id="sdPDesc" placeholder="${th("Description (optional)")}" value="${esc(p.description || "")}" autocomplete="off" />
+     <div class="mm-sec">${tr("Price ({currency})", { currency: esc(SHOP.cur(d.currency)) })}</div><input class="mm-in-f" id="sdPPrice" inputmode="decimal" placeholder="0" value="${esc(p.price || "")}" autocomplete="off" />
+     <div class="mm-sec">${th("Stock (max per order)")}</div><input class="mm-in-f" id="sdPMax" inputmode="numeric" placeholder="10" value="${esc(p.maxUnits || "")}" autocomplete="off" />
+     <button class="mm-btn mm-btn--on mm-btn--cta mm-gap" id="sdPDone">${th("Done")}</button><button class="mm-btn mm-btn--cta mm-red" id="sdPDel">${th("Remove product")}</button>`);
   function read() { if (!el("sdPName")) return; p.name = el("sdPName").value; p.description = el("sdPDesc").value; p.price = el("sdPPrice").value; p.maxUnits = el("sdPMax").value; }
   const photo = el("sdPhoto"), take = async (f) => { if (!f) return; read(); p.image = await shopResizeImage(f); renderShopProduct(d, i); };
   photo.onclick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.onchange = () => take(inp.files[0]); inp.click(); };
@@ -3827,20 +3824,20 @@ function renderShopProduct(d, i) {
   el("sdPDel").onclick = () => { d.products.splice(i, 1); shopGo("studio"); };
 }
 function renderShopDetails(d) {
-  shopFrame("Your shop", () => { read(); shopGo("studio"); }, [],
-    `<div class="mm-sec">Shop name</div><input class="mm-in-f" id="sdName" value="${esc(d.shopName)}" placeholder="e.g. Zebra Gallery" autocomplete="off" />
-     <div class="mm-sec">Pays in</div><div class="mm-seg"><button class="mm-btn${d.currency === "Minima" ? " mm-btn--on" : ""}" data-cur="Minima" aria-pressed="${d.currency === "Minima"}">Minima</button><button class="mm-btn${d.currency !== "Minima" ? " mm-btn--on" : ""}" data-cur="USDT" aria-pressed="${d.currency !== "Minima"}">MxUSD</button></div>
-     <div class="mm-sec">Shipping (label + fee)</div>${d.shipping.map((sh, i) => `<div class="mm-kv"><span class="mm-kv__v">${esc(sh.label)}</span>${sh.id === "digital" ? `<span>free</span>` : `<input class="mm-in-f mm-in-f--fee" data-si="${i}" inputmode="decimal" placeholder="0" aria-label="${esc(sh.label)} fee" value="${esc(sh.fee || "")}" autocomplete="off" />`}</div>`).join("")}
-     <div class="mm-sec">Vendor card (from this node: how orders reach you)</div><div class="mm-card ew-mono">${esc(d.vendorPublicId || "")}|${esc(d.vendorAddress || "")}</div>
-     <div class="mm-hint">${d.products.filter(p => p.name && Number(p.price) > 0).length} products  ·  pays in ${esc(SHOP.cur(d.currency))}</div>`,
-    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="sdSave">${d.shopId ? "Save" : "Save & export .shop"}</button></div>`);
+  shopFrame(t("Your shop"), () => { read(); shopGo("studio"); }, [],
+    `<div class="mm-sec">${th("Shop name")}</div><input class="mm-in-f" id="sdName" value="${esc(d.shopName)}" placeholder="${th("e.g. Zebra Gallery")}" autocomplete="off" />
+     <div class="mm-sec">${th("Pays in")}</div><div class="mm-seg"><button class="mm-btn${d.currency === "Minima" ? " mm-btn--on" : ""}" data-cur="Minima" aria-pressed="${d.currency === "Minima"}">Minima</button><button class="mm-btn${d.currency !== "Minima" ? " mm-btn--on" : ""}" data-cur="USDT" aria-pressed="${d.currency !== "Minima"}">MxUSD</button></div>
+     <div class="mm-sec">${th("Shipping (label + fee)")}</div>${d.shipping.map((sh, i) => `<div class="mm-kv"><span class="mm-kv__v">${esc(sh.label)}</span>${sh.id === "digital" ? `<span>free</span>` : `<input class="mm-in-f mm-in-f--fee" data-si="${i}" inputmode="decimal" placeholder="0" aria-label="${tr("{label} fee", { label: esc(sh.label) })}" value="${esc(sh.fee || "")}" autocomplete="off" />`}</div>`).join("")}
+     <div class="mm-sec">${th("Vendor card (from this node: how orders reach you)")}</div><div class="mm-card ew-mono">${esc(d.vendorPublicId || "")}|${esc(d.vendorAddress || "")}</div>
+     <div class="mm-hint">${tr("{price} products  ·  pays in {currency}", { price: d.products.filter(p => p.name && Number(p.price) > 0).length, currency: esc(SHOP.cur(d.currency)) })}</div>`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="sdSave">${d.shopId ? th("Save") : th("Save & export .shop")}</button></div>`);
   function read() { if (!el("sdName")) return; d.shopName = el("sdName").value.trim(); el("shopSub").querySelectorAll("[data-si]").forEach(inp => { if (d.shipping[+inp.dataset.si]) d.shipping[+inp.dataset.si].fee = inp.value; }); }
   el("shopSub").querySelectorAll("[data-cur]").forEach(b => { b.onclick = () => { read(); d.currency = b.dataset.cur; renderShopDetails(d); }; });
   el("sdSave").onclick = async () => {
     read();
     const r = await SHOP.save(api, d);
     if (r.err) { shopSay(r.err); return; }
-    shopDraft = null; toast("Shop saved", "ok"); if (r.exported) toast("Exported to " + r.exported, "ok");
+    shopDraft = null; toast(t("Shop saved"), "ok"); if (r.exported) toast(t("Exported to {exported}", { exported: r.exported }), "ok");
     shopGo("studio");
   };
 }
@@ -3866,8 +3863,8 @@ async function chanceLeftCard() {
   let o = null; try { o = await api.casinoOpen(); } catch (e) {}
   const n = (k, one, many) => k + " " + (k === 1 ? one : many);
   const parts = []; if (o && o.offers) parts.push(n(o.offers, "open offer", "open offers")); if (o && o.bets) parts.push(n(o.bets, "bet in play", "bets in play"));
-  host.innerHTML = !parts.length ? "" : `<div class="card"><div class="card__title">P2P Chance has been removed</div>
-      <div class="view__desc">P2P Chance is no longer part of this app, and no new games can be started. You still have <b>${esc(parts.join(" and "))}</b>. There is nothing you need to do: open offers are withdrawn and their stake returned to your wallet, and bets in play are settled automatically. Keep the app open with your node running until this card disappears.</div></div>`;
+  host.innerHTML = !parts.length ? "" : `<div class="card"><div class="card__title">${th("P2P Chance has been removed")}</div>
+      <div class="view__desc">${th("P2P Chance is no longer part of this app, and no new games can be started. You still have")} <b>${esc(parts.join(" and "))}</b>${th(". There is nothing you need to do: open offers are withdrawn and their stake returned to your wallet, and bets in play are settled automatically. Keep the app open with your node running until this card disappears.")}</div></div>`;
 }
 
 // ============================ Minima Vestr ============================
@@ -3882,8 +3879,8 @@ let vestrSub = null;             // null | "create" | "calc" | { coinid } (a con
 let vestrUpdateTimer = null;
 let vestrTokMap = null;          // tokenid → name
 let vestrBusy = false;           // a create or a collect is with the node
-const VESTR_GRACE = [["None", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
-const VESTR_TABS = [["creator", "✎", "Creator"], ["collector", "❖", "Collector"], ["about", "ⓘ", "About"]];
+const VESTR_GRACE = [[N_("None"), 0], [N_("Daily"), 24], [N_("Weekly"), 168], [N_("Monthly"), 720], [N_("Every 3 Months"), 2190], [N_("Every 6 Months"), 4320], [N_("Yearly"), 8640]];   // the English name is what a contract records (create's last argument); translated where shown
+const VESTR_TABS = [["creator", "✎", N_("Creator")], ["collector", "❖", N_("Collector")], ["about", "ⓘ", N_("About")]];
 
 function vAmt(v) { return TOK.tidyAmount(String(v == null ? "0" : v)) || "0"; }   // the node's own figure: never rounded
 // A token is named from its id where the id is known (Minima, the one MxUSD); another token's own name is shown WITH its whole
@@ -3894,8 +3891,8 @@ function vTok(tid) {
 }
 function vRel(ms) {
   if (!(ms > 0)) return "";
-  const d = ms - Date.now(), a = Math.abs(d), u = a >= 86400000 ? Math.floor(a / 86400000) + " day(s)" : a >= 3600000 ? Math.floor(a / 3600000) + " hour(s)" : Math.floor(a / 60000) + " min(s)";
-  return d > 0 ? "in " + u : u + " ago";
+  const d = ms - Date.now(), a = Math.abs(d), u = a >= 86400000 ? t("{a} day(s)", { a: Math.floor(a / 86400000) }) : a >= 3600000 ? t("{a} hour(s)", { a: Math.floor(a / 3600000) }) : t("{a} min(s)", { a: Math.floor(a / 60000) });
+  return d > 0 ? "in " + u : t("{u} ago", { u: u });
 }
 function vStatus(text, ok) { const s = el("vsStatus"); if (!s) return; s.textContent = text; s.hidden = !text; s.className = "vs-status " + (ok ? "vs-status--ok" : "vs-status--err"); }
 function vestrGo(tab, sub) { vestrTab = tab || vestrTab; vestrSub = sub || null; renderVestr(); }
@@ -3915,16 +3912,16 @@ async function renderVestr() {
   if (!vestrTokMap && running) { try { const t = await api.vestrTokens(); vestrTokMap = {}; (t || []).forEach(x => { vestrTokMap[x.tokenid] = x.name; }); } catch (e) {} }
   const st = await api.vestrStatus().catch(() => ({}));
   const keep = el("vdBurn") ? el("vdBurn").value : null;   // the fee typed on a contract's screen outlives a redraw on a new block
-  const title = vestrSub === "create" ? "Create a contract" : vestrSub === "calc" ? "Calculate a contract" : vestrSub ? "Contract" : "";
+  const title = vestrSub === "create" ? I18N.t("Create a contract") : vestrSub === "calc" ? I18N.t("Calculate a contract") : vestrSub ? I18N.t("Contract") : "";
   host.innerHTML = `<div class="vs">${vestrSub
-      ? `<div class="vs-head vs-head--sub"><button class="vs-back" id="vsBack" aria-label="Back">‹</button><span class="vs-head__sub">${title}</span></div>`
+      ? `<div class="vs-head vs-head--sub"><button class="vs-back" id="vsBack" aria-label="${th("Back")}">‹</button><span class="vs-head__sub">${title}</span></div>`
       : `<div class="vs-head"><span class="vs-head__t">vestr</span><span class="vs-head__b">${st && st.block ? "#" + esc(String(st.block)) : ""}</span></div>`}
     <div class="vs-page" id="vestrSub"></div>
-    ${vestrSub ? "" : `<div class="vs-nav" role="tablist">${VESTR_TABS.map(([id, g, l]) => `<button class="vs-tab${vestrTab === id ? " vs-tab--on" : ""}" role="tab" aria-selected="${vestrTab === id}" data-vtab="${id}"><span class="vs-tab__g" aria-hidden="true">${g}</span><span class="vs-tab__l">${l}</span></button>`).join("")}</div>`}</div>`;
+    ${vestrSub ? "" : `<div class="vs-nav" role="tablist">${VESTR_TABS.map(([id, g, l]) => `<button class="vs-tab${vestrTab === id ? " vs-tab--on" : ""}" role="tab" aria-selected="${vestrTab === id}" data-vtab="${id}"><span class="vs-tab__g" aria-hidden="true">${g}</span><span class="vs-tab__l">${th(l)}</span></button>`).join("")}</div>`}</div>`;
   host.querySelectorAll("[data-vtab]").forEach(b => { b.onclick = () => vestrGo(b.dataset.vtab); });
   if (el("vsBack")) el("vsBack").onclick = () => vestrGo();
   const page = el("vestrSub");
-  if (!running) { page.innerHTML = `<div class="vs-banner"><div class="vs-banner__t">vestr is not enabled yet</div><div class="vs-banner__d">The node is not running. Start it on the Node tab, then come back.</div></div>`; return; }
+  if (!running) { page.innerHTML = `<div class="vs-banner"><div class="vs-banner__t">${th("vestr is not enabled yet")}</div><div class="vs-banner__d">${th("The node is not running. Start it on the Node tab, then come back.")}</div></div>`; return; }
   if (vestrSub === "create") return renderVestrCreate(page);
   if (vestrSub === "calc") return renderVestrCalc(page);
   if (vestrSub) return renderVestrDetail(page, vestrSub.coinid, keep);
@@ -3937,27 +3934,27 @@ function vestrCard(v) {
   const tok = vTok(v.tokenid), when = (ms, a, b) => { const r = vRel(ms); return r ? (r.startsWith("in ") ? a + " " + r : b + " " + r) : ""; };
   return `<div class="vs-card" role="button" tabindex="0" data-vcoin="${esc(v.coinid)}">
     <div class="vs-card__hd"><span class="vs-card__ic" aria-hidden="true">${esc(tok.slice(0, 1).toUpperCase())}</span>
-      <div class="vs-card__tt"><div class="vs-card__id">Contract ${esc(v.uid)}</div><div class="vs-card__amt">${esc(vAmt(v.amount))} ${esc(tok)}</div></div></div>
-    <div class="vs-card__bd"><div class="vs-card__l"><div>Total vested: ${esc(vAmt(v.total))}</div><div>Collected: ${esc(decSub(String(v.total), String(v.amount)))}</div></div>
-      <div class="vs-card__r"><div>Collection: ${esc(v.graceLabel)}</div><div>${esc(when(v.startMs, "starts", "started"))}</div><div>${esc(when(v.endMs, "ends", "ended"))}</div></div></div></div>`;
+      <div class="vs-card__tt"><div class="vs-card__id">${tr("Contract {uid}", { uid: esc(v.uid) })}</div><div class="vs-card__amt">${esc(vAmt(v.amount))} ${esc(tok)}</div></div></div>
+    <div class="vs-card__bd"><div class="vs-card__l"><div>${th("Total vested:")} ${esc(vAmt(v.total))}</div><div>${th("Collected:")} ${esc(decSub(String(v.total), String(v.amount)))}</div></div>
+      <div class="vs-card__r"><div>${th("Collection:")} ${esc(v.graceLabel)}</div><div>${esc(when(v.startMs, "starts", "started"))}</div><div>${esc(when(v.endMs, "ends", "ended"))}</div></div></div></div>`;
 }
 async function renderVestrList(page) {
   let vs = null; try { vs = await api.vestrList(); } catch (e) {}
   if (el("vestrSub") !== page) return;
-  const cards = !vs ? `<div class="vs-empty">The contracts could not be read from the node. This screen tries again on the next block.</div>`
-    : vs.length ? vs.map(vestrCard).join("") : `<div class="vs-empty">${vestrTab === "creator" ? "You have no vesting contracts yet." : "Nothing to collect yet."}</div>`;
+  const cards = !vs ? `<div class="vs-empty">${th("The contracts could not be read from the node. This screen tries again on the next block.")}</div>`
+    : vs.length ? vs.map(vestrCard).join("") : `<div class="vs-empty">${vestrTab === "creator" ? th("You have no vesting contracts yet.") : th("Nothing to collect yet.")}</div>`;
   page.innerHTML = vestrTab === "creator"
-    ? `<button class="vs-cta" id="vsCreate">＋  Create a contract</button><button class="vs-cta vs-cta--2" id="vsCalc">≈  Calculate a contract</button><h2 class="vs-h">My contracts</h2>${cards}`
-    : `<h1 class="vs-h1">Collect</h1><div class="vs-blurb">Open a contract to withdraw the tokens that have vested.</div>${cards}`;
+    ? `<button class="vs-cta" id="vsCreate">${th("＋  Create a contract")}</button><button class="vs-cta vs-cta--2" id="vsCalc">${th("≈  Calculate a contract")}</button><h2 class="vs-h">${th("My contracts")}</h2>${cards}`
+    : `<h1 class="vs-h1">${th("Collect")}</h1><div class="vs-blurb">${th("Open a contract to withdraw the tokens that have vested.")}</div>${cards}`;
   cardKeys(page);
   if (el("vsCreate")) { el("vsCreate").onclick = () => vestrGo(null, "create"); el("vsCalc").onclick = () => vestrGo(null, "calc"); }
   page.querySelectorAll("[data-vcoin]").forEach(c => { c.onclick = () => vestrGo(null, { coinid: c.dataset.vcoin }); });
 }
 function renderVestrAbout(page) {
   page.innerHTML = `<h1 class="vs-about__t">vestr</h1>
-    <div class="vs-about__d">Lock tokens in a vesting contract that releases gradually over time. Create a contract, track it, and withdraw what has vested.</div>
-    <button class="vs-cta" id="vsAbCreate">Create a contract</button><button class="vs-cta vs-cta--dark" id="vsAbCollect">Collect from a contract</button>
-    <div class="vs-about__f">Contracts are an on-chain Minima smart contract, fully interoperable with the vestr MiniDapp.</div>`;
+    <div class="vs-about__d">${th("Lock tokens in a vesting contract that releases gradually over time. Create a contract, track it, and withdraw what has vested.")}</div>
+    <button class="vs-cta" id="vsAbCreate">${th("Create a contract")}</button><button class="vs-cta vs-cta--dark" id="vsAbCollect">${th("Collect from a contract")}</button>
+    <div class="vs-about__f">${th("Contracts are an on-chain Minima smart contract, fully interoperable with the vestr MiniDapp.")}</div>`;
   el("vsAbCreate").onclick = () => vestrGo("creator"); el("vsAbCollect").onclick = () => vestrGo("collector");
 }
 
@@ -3966,81 +3963,81 @@ async function renderVestrDetail(page, coinid, keepFee) {
   let vs = null; try { vs = await api.vestrList(); } catch (e) {}
   if (el("vestrSub") !== page) return;
   const v = (vs || []).find(x => x.coinid === coinid);
-  if (!v) { page.innerHTML = `<div class="vs-empty">${vs ? "This contract is no longer in the list. If you have just collected its last tokens, it is finished." : "The contract could not be read from the node."}</div>`; return; }
+  if (!v) { page.innerHTML = `<div class="vs-empty">${vs ? th("This contract is no longer in the list. If you have just collected its last tokens, it is finished.") : th("The contract could not be read from the node.")}</div>`; return; }
   const tok = vTok(v.tokenid), can = !!v.canCollectNow;
   const row = (k, val) => `<div class="vs-row"><span>${k}</span><b>${esc(val)}</b></div>`;
   const copyRow = (k, val) => `<button class="vs-copy" data-copy="${esc(val)}"><span>${k}</span><code>${esc(val)}</code></button>`;
-  page.innerHTML = `<div class="vs-hero${can ? " vs-hero--on" : ""}"><div class="vs-hero__l">Available to collect</div><div class="vs-hero__v">${esc(vAmt(v.cancollect))} ${esc(tok)}</div></div>
-    ${row("Collected", decSub(String(v.total), String(v.amount)))}${row("Total vested", vAmt(v.total))}${row("Remaining in contract", vAmt(v.amount))}${row("Collect every", v.graceLabel)}
-    ${row("Grace remaining", v.mustwait && Number(v.mustwaitblocks) > 0 ? vAmt(v.mustwaitblocks) + " blocks" : "ready")}${row("Starts", vRel(v.startMs))}${row("Ends", vRel(v.endMs))}
-    ${row("Start block", String(v.startBlock))}${row("End block", String(v.endBlock))}
-    ${copyRow("Token id", v.tokenid)}${copyRow("Coin id", v.coinid)}${copyRow("Withdrawal address", v.beneficiary)}${copyRow("Contract id", v.uid)}
-    <label class="vs-label" for="vdBurn">Network fee (burn, optional)</label><input class="vs-in" id="vdBurn" inputmode="decimal" placeholder="0" autocomplete="off" />
-    <button class="vs-cta vs-cta--form" id="vdCollect"${can ? "" : " disabled"}>${can ? "Collect " + esc(vAmt(v.cancollect)) + " " + esc(tok) : "Nothing to collect yet"}</button>
+  page.innerHTML = `<div class="vs-hero${can ? " vs-hero--on" : ""}"><div class="vs-hero__l">${th("Available to collect")}</div><div class="vs-hero__v">${esc(vAmt(v.cancollect))} ${esc(tok)}</div></div>
+    ${row(t("Collected"), decSub(String(v.total), String(v.amount)))}${row(t("Total vested"), vAmt(v.total))}${row(t("Remaining in contract"), vAmt(v.amount))}${row(t("Collect every"), v.graceLabel)}
+    ${row(t("Grace remaining"), v.mustwait && Number(v.mustwaitblocks) > 0 ? t("{mustwaitblocks} blocks", { mustwaitblocks: vAmt(v.mustwaitblocks) }) : "ready")}${row(t("Starts"), vRel(v.startMs))}${row(t("Ends"), vRel(v.endMs))}
+    ${row(t("Start block"), String(v.startBlock))}${row(t("End block"), String(v.endBlock))}
+    ${copyRow(t("Token id"), v.tokenid)}${copyRow(t("Coin id"), v.coinid)}${copyRow(t("Withdrawal address"), v.beneficiary)}${copyRow(t("Contract id"), v.uid)}
+    <label class="vs-label" for="vdBurn">${th("Network fee (burn, optional)")}</label><input class="vs-in" id="vdBurn" inputmode="decimal" placeholder="0" autocomplete="off" />
+    <button class="vs-cta vs-cta--form" id="vdCollect"${can ? "" : " disabled"}>${can ? tr("Collect {cancollect} {tok}", { cancollect: esc(vAmt(v.cancollect)), tok: esc(tok) }) : th("Nothing to collect yet")}</button>
     <div class="vs-status" id="vsStatus" hidden></div>`;
   if (keepFee) el("vdBurn").value = keepFee;
   page.querySelectorAll("[data-copy]").forEach(b => { b.onclick = () => copy(b.dataset.copy); });
   el("vdCollect").onclick = async () => {
     if (vestrBusy) return; vestrBusy = true;
-    const btn = el("vdCollect"); btn.disabled = true; vStatus("Collecting…", true);
+    const btn = el("vdCollect"); btn.disabled = true; vStatus(t("Collecting…"), true);
     const r = await AppsAct.vestr.collect(api, coinid, el("vdBurn").value);
     vestrBusy = false;
     if (!el("vsStatus")) return;
-    if (r.err) { vStatus("Failed: " + r.err, false); btn.disabled = false; return; }
-    vStatus("✓ Collected. The tokens will arrive shortly.", true);
+    if (r.err) { vStatus(t("Failed: {err}", { err: r.err }), false); btn.disabled = false; return; }
+    vStatus(t("✓ Collected. The tokens will arrive shortly."), true);
     setTimeout(() => { if (vestrSub && vestrSub.coinid === coinid) vestrGo("collector"); }, 1400);
   };
 }
 
 // ---- Create a contract (CreateContractActivity) ----
 function vestrForm(extra) {
-  return `<label class="vs-label" for="vcAmt">Token amount</label><input class="vs-in" id="vcAmt" inputmode="decimal" placeholder="0.0" autocomplete="off" />
-    <label class="vs-label" for="vcStart">Contract start</label><input class="vs-in" id="vcStart" type="datetime-local" aria-label="Select start date & time" />
-    <label class="vs-label" for="vcEnd">Contract end</label><input class="vs-in" id="vcEnd" type="datetime-local" aria-label="Select end date & time" />
-    <label class="vs-label" for="vcGrace">${extra ? "Grace period (time between collections)" : "Grace period"}</label>
-    <select class="vs-in" id="vcGrace">${VESTR_GRACE.map(([l, h]) => `<option value="${h}"${l === "Daily" ? " selected" : ""}>${l}</option>`).join("")}</select>`;
+  return `<label class="vs-label" for="vcAmt">${th("Token amount")}</label><input class="vs-in" id="vcAmt" inputmode="decimal" placeholder="0.0" autocomplete="off" />
+    <label class="vs-label" for="vcStart">${th("Contract start")}</label><input class="vs-in" id="vcStart" type="datetime-local" aria-label="${th("Select start date & time")}" />
+    <label class="vs-label" for="vcEnd">${th("Contract end")}</label><input class="vs-in" id="vcEnd" type="datetime-local" aria-label="${th("Select end date & time")}" />
+    <label class="vs-label" for="vcGrace">${extra ? th("Grace period (time between collections)") : th("Grace period")}</label>
+    <select class="vs-in" id="vcGrace">${VESTR_GRACE.map(([l, h]) => `<option value="${h}"${l === "Daily" ? " selected" : ""}>${th(l)}</option>`).join("")}</select>`;
 }
 const vestrWhen = (id) => { const v = el(id).value; return v ? new Date(v).getTime() : NaN; };
 async function renderVestrCreate(page) {
   let toks = []; try { toks = await api.vestrTokens(); } catch (e) {}
   let mine = ""; try { mine = await api.vestrMyAddress(); } catch (e) {}
   if (el("vestrSub") !== page) return;
-  page.innerHTML = `<label class="vs-label" for="vcTok">Token</label>
+  page.innerHTML = `<label class="vs-label" for="vcTok">${th("Token")}</label>
     <select class="vs-in" id="vcTok">${(toks || []).map(t => `<option value="${esc(t.tokenid)}">${esc(vTok(t.tokenid))}  (${esc(vAmt(t.sendable))})</option>`).join("") || '<option value="0x00">Minima</option>'}</select>
-    <label class="vs-label" for="vcAddr">Withdrawal address</label><input class="vs-in vs-in--mono" id="vcAddr" placeholder="Mx… or 0x…" value="${esc(mine)}" autocomplete="off" spellcheck="false" />
+    <label class="vs-label" for="vcAddr">${th("Withdrawal address")}</label><input class="vs-in vs-in--mono" id="vcAddr" placeholder="${th("Mx… or 0x…")}" value="${esc(mine)}" autocomplete="off" spellcheck="false" />
     ${vestrForm(true)}
-    <label class="vs-label" for="vcBurn">Burn (optional, MINIMA)</label><input class="vs-in" id="vcBurn" inputmode="decimal" placeholder="0" autocomplete="off" />
-    <label class="vs-label" for="vcPw">Vault password (only if your node is locked)</label><input class="vs-in" id="vcPw" type="password" placeholder="Vault password" autocomplete="off" />
-    <button class="vs-cta vs-cta--form" id="vcCreate">Review &amp; create</button><div class="vs-status" id="vsStatus" hidden></div>`;
+    <label class="vs-label" for="vcBurn">${th("Burn (optional, MINIMA)")}</label><input class="vs-in" id="vcBurn" inputmode="decimal" placeholder="0" autocomplete="off" />
+    <label class="vs-label" for="vcPw">${th("Vault password (only if your node is locked)")}</label><input class="vs-in" id="vcPw" type="password" placeholder="${th("Vault password")}" autocomplete="off" />
+    <button class="vs-cta vs-cta--form" id="vcCreate">${th("Review & create")}</button><div class="vs-status" id="vsStatus" hidden></div>`;
   el("vcCreate").onclick = async () => {
     if (vestrBusy) return;
     const f = { tokenid: el("vcTok").value, amount: el("vcAmt").value, beneficiary: el("vcAddr").value, startMs: vestrWhen("vcStart"), endMs: vestrWhen("vcEnd"), graceHours: el("vcGrace").value, burn: el("vcBurn").value, password: el("vcPw").value };
     const bad = AppsAct.vestr.createProblem(f, Date.now()); if (bad) { vStatus(bad, false); return; }
-    vestrBusy = true; el("vcCreate").disabled = true; vStatus("Creating contract…", true);
+    vestrBusy = true; el("vcCreate").disabled = true; vStatus(I18N.t("Creating contract…"), true);
     // The review the button's name promises (the phone sends at once). The address is whole, on its own line: there is no cancel in this covenant.
     const r = await AppsAct.vestr.create(api, { confirm: showConfirm }, f, vTok(f.tokenid), (VESTR_GRACE.find(g => g[1] === Number(f.graceHours)) || [""])[0]);
     vestrBusy = false;
     if (!el("vcCreate")) return;
     if (r.cancelled) { el("vcCreate").disabled = false; vStatus("", true); return; }
     if (r.err) { el("vcCreate").disabled = false; vStatus(r.err, false); return; }
-    vStatus("✓ Contract created. It will appear in your contracts shortly.", true);
+    vStatus(I18N.t("✓ Contract created. It will appear in your contracts shortly."), true);
     setTimeout(() => { if (vestrSub === "create") vestrGo("creator"); }, 1400);
   };
 }
 
 // ---- Calculate a contract (CalculatorActivity): one figure, nothing sent ----
 function renderVestrCalc(page) {
-  page.innerHTML = `${vestrForm(false)}<button class="vs-cta vs-cta--form" id="vkGo">Calculate</button><div class="vs-status" id="vsStatus" hidden></div>`;
+  page.innerHTML = `${vestrForm(false)}<button class="vs-cta vs-cta--form" id="vkGo">${th("Calculate")}</button><div class="vs-status" id="vsStatus" hidden></div>`;
   el("vkGo").onclick = async () => {
     const amt = el("vcAmt").value.trim(), s = vestrWhen("vcStart"), e = vestrWhen("vcEnd"), hours = Number(el("vcGrace").value) || 0;
-    if (!/^\d+(\.\d+)?$/.test(amt) || !(Number(amt) > 0)) return vStatus("Enter a valid amount.", false);
-    if (!isFinite(s) || !isFinite(e)) return vStatus("Pick start and end dates.", false);
-    if (!(e > s)) return vStatus("End must be after the start.", false);
+    if (!/^\d+(\.\d+)?$/.test(amt) || !(Number(amt) > 0)) return vStatus(t("Enter a valid amount."), false);
+    if (!isFinite(s) || !isFinite(e)) return vStatus(t("Pick start and end dates."), false);
+    if (!(e > s)) return vStatus(t("End must be after the start."), false);
     const r = await api.vestrCalculate(amt, s, e, hours).catch(() => null);
-    if (!r) return vStatus("The figure could not be worked out.", false);
+    if (!r) return vStatus(t("The figure could not be worked out."), false);
     // an estimate, cut and never rounded up, never more than the whole amount (the phone's paymentPerGrace)
     const cut = (x, dp) => { const m = Math.pow(10, dp); return String(Math.min(Number(amt), Math.floor(x * m) / m)); };
-    vStatus(hours > 0 ? "Released per period (" + (VESTR_GRACE.find(g => g[1] === hours) || [""])[0] + "): " + cut(r.perPeriod, 2) : "Released per block: " + cut(r.perBlock, 8), true);
+    vStatus(hours > 0 ? t("Released per period ({hours}): {perPeriod}", { hours: t((VESTR_GRACE.find(g => g[1] === hours) || [""])[0]), perPeriod: cut(r.perPeriod, 2) }) : t("Released per block: {perBlock}", { perBlock: cut(r.perBlock, 8) }), true);
   };
 }
 
@@ -4053,51 +4050,51 @@ let parlonsRenderSeq = 0;
 /** Open the panel in the system browser with a fresh one-time link (only ever the node's loopback panel; main/parlons.js). */
 async function openParlons() {
   const ok = await api.parlonsOpenExternal().catch(() => false);
-  if (!ok) toast("The account has no sign-in link yet. Try again in a moment.", "err");
+  if (!ok) toast(t("The account has no sign-in link yet. Try again in a moment."), "err");
   return ok;
 }
 async function renderParlons() {
   const seq = ++parlonsRenderSeq;
   const strip = el("parlonsStrip"), body = el("parlonsBody");
   function retry(message) {
-    strip.innerHTML = `<div class="parlons-strip"><span>${esc(message)}</span><button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>`;
+    strip.innerHTML = `<div class="parlons-strip"><span>${esc(message)}</span><button class="btn btn--sm btn--outline" id="parlonsReload">${th("Reload")}</button></div>`;
     body.innerHTML = `<div class="spin" role="status">${esc(message)}</div>`;
     el("parlonsReload").onclick = () => renderParlons();
   }
   const st = await api.parlonsStatus().catch(() => null);
   if (seq !== parlonsRenderSeq) return;
-  if (!st) { retry("Could not check the account. Reload to try again."); return; }
+  if (!st) { retry(t("Could not check the account. Reload to try again.")); return; }
   if (st.kind !== "parlons") {
     strip.innerHTML = "";
     body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
-      <div class="view__desc">Your node can host your Parlons account: private chat, calls and payments under this node's own seed, with your phones and computers paired to it. This install still runs the plain Minima node.</div>
-      ${st.blocker ? `<div class="status status--warn">${esc(st.blocker)}</div>` : `<button class="btn btn--primary btn--full" id="parlonsSwitch">Switch to the Parlons Node (restarts the node; wallet and data stay)</button>`}
+      <div class="view__desc">${th("Your node can host your Parlons account: private chat, calls and payments under this node's own seed, with your phones and computers paired to it. This install still runs the plain Minima node.")}</div>
+      ${st.blocker ? `<div class="status status--warn">${esc(st.blocker)}</div>` : `<button class="btn btn--primary btn--full" id="parlonsSwitch">${th("Switch to the Parlons Node (restarts the node; wallet and data stay)")}</button>`}
       </div>`;
     const b = el("parlonsSwitch");
     if (b) b.onclick = async () => {
-      if (!await showConfirm("Switch this node to the Parlons Node?",
-          "Same chain, same wallet, same data folder — plus your Parlons account. The node restarts now.", "Switch")) return;
-      b.disabled = true; b.textContent = "Switching…";
-      try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast("Parlons Node starting…", "ok"); renderParlons(); }
-      catch (e) { toast(e.message || String(e), "err"); b.disabled = false; b.textContent = "Switch to the Parlons Node"; }
+      if (!await showConfirm(t("Switch this node to the Parlons Node?"),
+          t("Same chain, same wallet, same data folder — plus your Parlons account. The node restarts now."), t("Switch"))) return;
+      b.disabled = true; b.textContent = t("Switching…");
+      try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast(t("Parlons Node starting…"), "ok"); renderParlons(); }
+      catch (e) { toast(e.message || String(e), "err"); b.disabled = false; b.textContent = t("Switch to the Parlons Node"); }
     };
     return;
   }
   if (!st.ready || st.error) {
-    strip.innerHTML = `<div class="parlons-strip"><span>${st.error ? "Account error" : "Starting the account…"}${st.version ? " · Parlons Node " + esc(st.version) : ""}</span>
-        <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
+    strip.innerHTML = `<div class="parlons-strip"><span>${st.error ? th("Account error") : th("Starting the account…")}${st.version ? (" " + tr("· Parlons Node {version}", { version: esc(st.version) })) : ""}</span>
+        <button class="btn btn--sm btn--outline" id="parlonsReload">${th("Reload")}</button></div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
     el("parlonsReload").onclick = () => renderParlons();
-    body.innerHTML = `<div class="spin">${st.error ? "The account did not start. See Logs in the menu." : "Waiting for the account to attach to the network…"}</div>`;
+    body.innerHTML = `<div class="spin">${st.error ? th("The account did not start. See Logs in the menu.") : th("Waiting for the account to attach to the network…")}</div>`;
     return;
   }
   // Parlons is its own app and opens in your browser (owner decision, 19 Nov 2026): nothing of it is embedded here.
   strip.innerHTML = "";
   body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
-    <div class="view__desc">Parlons opens in your browser, signed in to the account on this node. Each time, the app asks the node for a new one-time link, and only for this computer.</div>
-    <button class="btn btn--primary btn--full" id="parlonsOpen">Open Parlons in the browser</button>
-    ${st.address ? `<div class="view__desc" style="margin-top:14px">Your Parlons address</div><div class="addrbox__addr" id="parlonsAddr" title="Copy" style="cursor:copy;overflow-wrap:anywhere">${esc(st.address)}</div>` : ""}
-    <div class="view__desc" style="margin-top:14px">While the node runs, this app tells you when a Parlons message arrives. It tells you of an incoming call only while Parlons is open in a browser tab or a paired phone is in reach: with neither, the node declines the call at once and tells nothing. Calls are answered in the Parlons tab.</div>
-    ${st.version ? `<div class="view__desc" style="margin-top:8px">Parlons Node ${esc(st.version)}</div>` : ""}</div>`;
+    <div class="view__desc">${th("Parlons opens in your browser, signed in to the account on this node. Each time, the app asks the node for a new one-time link, and only for this computer.")}</div>
+    <button class="btn btn--primary btn--full" id="parlonsOpen">${th("Open Parlons in the browser")}</button>
+    ${st.address ? `<div class="view__desc" style="margin-top:14px">${th("Your Parlons address")}</div><div class="addrbox__addr" id="parlonsAddr" title="${th("Copy")}" style="cursor:copy;overflow-wrap:anywhere">${esc(st.address)}</div>` : ""}
+    <div class="view__desc" style="margin-top:14px">${th("While the node runs, this app tells you when a Parlons message arrives. It tells you of an incoming call only while Parlons is open in a browser tab or a paired phone is in reach: with neither, the node declines the call at once and tells nothing. Calls are answered in the Parlons tab.")}</div>
+    ${st.version ? `<div class="view__desc" style="margin-top:8px">${tr("Parlons Node {version}", { version: esc(st.version) })}</div>` : ""}</div>`;
   el("parlonsOpen").onclick = openParlons;
-  const addr = el("parlonsAddr"); if (addr) addr.onclick = () => { copy(st.address); toast("Copied.", "ok"); };
+  const addr = el("parlonsAddr"); if (addr) addr.onclick = () => { copy(st.address); toast(t("Copied."), "ok"); };
 }

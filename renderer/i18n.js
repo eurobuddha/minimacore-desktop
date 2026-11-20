@@ -38,8 +38,8 @@
   const str = (v) => String(v == null ? "" : v);
 
   /** The text for a key in the current language: the catalog's, else English's own plural entry, else the key itself. */
-  function text(key, p) {
-    key = String(key);
+  function text(key, p, use) {
+    key = String(key); const lang = use || current();   // `use`: a given language whatever is on show (tIn: a log line stays English)
     let v = lang !== "en" && CAT[lang] && own(CAT[lang], key) ? CAT[lang][key] : own(CAT.en, key) ? CAT.en[key] : key, code = v === key || !CAT[lang] || !own(CAT[lang], key) ? "en" : lang;
     if (v && typeof v === "object") {
       let form = "other";
@@ -48,7 +48,10 @@
     }
     return typeof v === "string" && v ? v : key;
   }
+  const current = () => lang;
   const t = (key, p) => fill(text(key, p), p, str);
+  /** t() in one given language, whatever language is on show. */
+  const tIn = (code) => (key, p) => fill(text(key, p, supported(code) ? code : "en"), p, str);
   const th = (key, p) => fill(esc(text(key, p)), p, esc);
   const tr = (key, p) => fill(esc(text(key, p)), p, str);
   const N_ = (key) => key;
@@ -86,7 +89,7 @@
     for (const [sel, attr, key] of PAGE) for (const n of scope.querySelectorAll(sel)) { if (attr) n.setAttribute(attr, t(key)); else n.textContent = t(key); }
   }
 
-  const I18N = { CODES, NAMES, TAGS, PAGE, pick, supported, add, set, apply, t, th, tr, N_, L_, s,
+  const I18N = { CODES, NAMES, TAGS, PAGE, pick, supported, add, set, apply, t, th, tr, tIn, N_, L_, s,
     lang: () => lang, tag: () => TAGS[lang],
     languages: () => CODES.filter(c => CAT[c]),                 // the languages that have a catalog, in the phone's order
     onChange: (fn) => { listeners.push(fn); },

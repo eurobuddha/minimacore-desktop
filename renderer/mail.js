@@ -29,8 +29,8 @@
   var COMPOSE = null;           // { to, subject, body } kept across a re-render so typing is never lost
   var booted = false;
 
-  var FOLDERS = [["inbox", "Inbox", "inbox"], ["outbox", "Outbox", "outbox"], ["sent", "Sent", "send"], ["archive", "Archive", "archive"],
-    ["contacts", "Contacts", "contacts"], ["key", "Your key", "key"], ["settings", "Settings", "settings"]];
+  var FOLDERS = [["inbox", N_("Inbox"), "inbox"], ["outbox", N_("Outbox"), "outbox"], ["sent", N_("Sent"), "send"], ["archive", N_("Archive"), "archive"],
+    ["contacts", N_("Contacts"), "contacts"], ["key", N_("Your key"), "key"], ["settings", N_("Settings"), "settings"]];   // names translated where drawn
 
   function init(deps) { D = deps; }
   /**
@@ -41,9 +41,9 @@
    */
   function errText(e) {
     var m = String((e && e.message) || e || "").replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "");
-    if (/No Coins of tokenid/i.test(m)) return "Your node had no coin old enough to spend just then — it needs a few blocks. Try again in a minute.";
-    if (/Insufficient funds/i.test(m)) return "Not enough MINIMA in this node's wallet to send.";
-    if (/may have been submitted/i.test(m)) return "The node didn't answer in time — check before sending again.";
+    if (/No Coins of tokenid/i.test(m)) return I18N.t("Your node had no coin old enough to spend just then — it needs a few blocks. Try again in a minute.");
+    if (/Insufficient funds/i.test(m)) return I18N.t("Not enough MINIMA in this node's wallet to send.");
+    if (/may have been submitted/i.test(m)) return I18N.t("The node didn't answer in time — check before sending again.");
     return m;
   }
   function reset() { MODAL = 0; PAYFILL = null; threadOrigin = "inbox"; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
@@ -61,7 +61,7 @@
    */
   function nameFor(id, msg) {
     if (!id) return "(unknown)";
-    if (ID && id === ID.publicId) return "You";
+    if (ID && id === ID.publicId) return I18N.t("You");
     for (var i = 0; i < CONTACTS.length; i++) if (CONTACTS[i].publicId === id) {
       if (typeof CONTACTS[i].username === "string" && CONTACTS[i].username.trim() && CONTACTS[i].username.toLowerCase() !== id.toLowerCase()) return CONTACTS[i].username;
       break;
@@ -94,11 +94,11 @@
   function pad2(n) { return n < 10 ? "0" + n : String(n); }
   function clock(ms) { var d = new Date(Number(ms)); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  function ago(n, unit) { return n + " " + unit + (n === 1 ? "" : "s") + " ago"; }
+  function ago(n, unit) { return new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "always" }).format(-n, unit); }   // "5 minutes ago", worded in the language on show
   /** The phone's Language.since: now · 33 minutes ago · 5 hours ago · 3 days ago */
   function since(ms) {
     var diff = Date.now() - Number(ms);
-    if (diff < 60000) return "now";
+    if (diff < 60000) return new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "auto" }).format(0, "second");   // "now", in the language on show
     if (diff < 3600000) return ago(Math.floor(diff / 60000), "minute");
     if (diff < 86400000) return ago(Math.floor(diff / 3600000), "hour");
     return ago(Math.floor(diff / 86400000), "day");
@@ -116,8 +116,8 @@
   /** Today · Yesterday · "7 Mar 2026" — MainActivity.dateLabel() */
   function dayLabel(ms) {
     var days = Math.round((dayStart(Date.now()) - dayStart(ms)) / 86400000);
-    if (days === 0) return "Today";
-    if (days === 1) return "Yesterday";
+    if (days === 0) return I18N.t("Today");
+    if (days === 1) return I18N.t("Yesterday");
     var d = new Date(Number(ms));
     return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear();
   }
@@ -126,7 +126,7 @@
   // ---------------------------------------------------------------- message helpers
   function previewText(m) {
     if (!m) return "";
-    if (m.type === "image") return "Photo";
+    if (m.type === "image") return I18N.t("Photo");
     if (m.type === "payment") return g.PayLabel.preview({ incoming: !!m.incoming, amount: D.TOK.tidyAmount(m.amount || ""), tokenid: m.tokenid, status: payStatus(m) }) + (m.message ? " — " + oneLine(m.message) : "");
     return oneLine(m.message || "");
   }
@@ -166,21 +166,21 @@
   function header() {
     var title = "";
     FOLDERS.forEach(function (f) { if (f[0] === VIEW) title = f[1]; });
-    return '<div class="mm-head"><button class="mm-ibtn" type="button" id="mmMenu" aria-label="Open menu" aria-haspopup="true" aria-expanded="false">' + g.micon("menu") + "</button>"
-      + '<h2 class="mm-title">' + D.esc(title) + "</h2></div>";
+    return '<div class="mm-head"><button class="mm-ibtn" type="button" id="mmMenu" aria-label="' + I18N.th("Open menu") + '" aria-haspopup="true" aria-expanded="false">' + g.micon("menu") + "</button>"
+      + '<h2 class="mm-title">' + I18N.th(title) + "</h2></div>";
   }
   function drawer() {
     var items = FOLDERS.map(function (f, i) {
       var n = f[0] === "inbox" ? unreadCount() : f[0] === "outbox" ? OUT.length : 0, sel = VIEW === f[0];
       return (i === 4 ? '<div class="mm-navsep"></div>' : "")
         + '<button type="button" class="mm-nav' + (sel ? " mm-sel" : "") + '" data-f="' + f[0] + '"' + (sel ? ' aria-current="page"' : "") + ">"
-        + g.micon(f[2]) + '<span class="mm-grow">' + D.esc(f[1]) + "</span>" + (n ? '<span class="mm-cnt">' + n + "</span>" : "") + "</button>";
+        + g.micon(f[2]) + '<span class="mm-grow">' + I18N.th(f[1]) + "</span>" + (n ? '<span class="mm-cnt">' + n + "</span>" : "") + "</button>";
     }).join("");
     return '<div class="mm-scrim" id="mmScrim" hidden></div>'
-      + '<nav class="mm-drawer" id="mmDrawer" aria-label="Mail folders" hidden>'
+      + '<nav class="mm-drawer" id="mmDrawer" aria-label="' + I18N.th("Mail folders") + '" hidden>'
       + '<div class="mm-dhead"><div class="mm-brand">MINIMA <i>MAIL</i></div>'
-      + '<div class="mm-self">' + D.esc(ID && ID.words ? "you · " + ID.words : "Connecting to your node…") + "</div></div>"
-      + items + '<div class="mm-grow"></div><div class="mm-dver">Minima Mail' + (VERSION ? " v" + D.esc(VERSION) : "") + "</div></nav>";
+      + '<div class="mm-self">' + D.esc(ID && ID.words ? I18N.t("you · {words}", { words: ID.words }) : I18N.t("Connecting to your node…")) + "</div></div>"
+      + items + '<div class="mm-grow"></div><div class="mm-dver">' + I18N.th("Minima Mail") + '' + (VERSION ? " v" + D.esc(VERSION) : "") + "</div></nav>";
   }
   function setDrawer(open) {
     var d = D.el("mmDrawer"), s = D.el("mmScrim"), b = D.el("mmMenu");
@@ -194,14 +194,14 @@
   function freshness() {
     var st = STATUS || {};
     var bf = st.backfill || {};
-    var cls = "mm-fresh", text, act = "Check now";
-    if (!st.scannedTip) { cls += " mm-cold"; text = "Connecting to your node…"; }
+    var cls = "mm-fresh", text, act = I18N.t("Check now");
+    if (!st.scannedTip) { cls += " mm-cold"; text = I18N.t("Connecting to your node…"); }
     else if (bf.active) {
       cls += " mm-busy";
-      text = "Catching up — block " + groupInt(bf.floor || 0) + " of " + groupInt(st.scannedTip);
+      text = I18N.t("Catching up — block {bf} of {scannedTip}", { bf: groupInt(bf.floor || 0), scannedTip: groupInt(st.scannedTip) });
     } else {
-      text = "Checked block " + st.scannedTip + " · " + (st.lastScanMs ? since(st.lastScanMs) : "now");   // the phone prints the block plainly
-      if (bf.done) act = "Check now";
+      text = I18N.t("Checked block {scannedTip} · {lastScanMs}", { scannedTip: st.scannedTip, lastScanMs: (st.lastScanMs ? since(st.lastScanMs) : new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "auto" }).format(0, "second")) });   // the phone prints the block plainly
+      if (bf.done) act = I18N.t("Check now");
     }
     return '<div class="' + cls + '" id="mmFresh"><span class="mm-dot"></span>'
       + '<span class="mm-grow">' + D.esc(text) + "</span>"
@@ -220,7 +220,7 @@
       + avatar(peer, nm, 44)
       + '<span class="mm-mid mm-inbox-preview">'
       + (subject ? '<span class="mm-subj">' + D.esc(subject) + '</span>' : '')
-      + '<span class="mm-snip">' + D.esc((m.incoming ? "" : "You: ") + previewText(m)) + '</span>'
+      + '<span class="mm-snip">' + D.esc((m.incoming ? "" : (I18N.t("You:") + " ")) + previewText(m)) + '</span>'
       + '<span class="mm-l1"><span class="mm-nm">' + D.esc(nm) + '</span>'
       + '<span class="mm-time">' + D.esc(rel(m.date)) + '</span></span></span>'
       + (unread ? '<span class="mm-udot"></span>' : "") + "</button>";
@@ -229,20 +229,20 @@
    *  protocol has no read receipt at all; what a sender can actually know is whether the coin reached a block. */
   function statusLine(m, withRetry) {
     var st = m.status || "sent", ic, cls, lbl;
-    if (st === "posting") { ic = "ring"; cls = "mm-posting"; lbl = "Posting to chain…"; }
-    else if (st === "failed") { ic = "close"; cls = "mm-failed"; lbl = "Failed — didn't reach the chain"; }
-    else if (st === "confirmed") { ic = "check"; cls = "mm-ok"; lbl = "Confirmed" + (m.sentblock ? " · block " + groupInt(m.sentblock) : ""); }
-    else { ic = "chain"; cls = "mm-chain"; lbl = "On-chain" + (m.sentblock ? " · blk " + groupInt(m.sentblock) : "") + " — confirming"; }
+    if (st === "posting") { ic = "ring"; cls = "mm-posting"; lbl = I18N.t("Posting to chain…"); }
+    else if (st === "failed") { ic = "close"; cls = "mm-failed"; lbl = I18N.t("Failed — didn't reach the chain"); }
+    else if (st === "confirmed") { ic = "check"; cls = "mm-ok"; lbl = I18N.t("Confirmed") + (m.sentblock ? " · block " + groupInt(m.sentblock) : ""); }
+    else { ic = "chain"; cls = "mm-chain"; lbl = I18N.t("On-chain{sentblock} — confirming", { sentblock: (m.sentblock ? (" " + I18N.t("· blk {sentblock}", { sentblock: groupInt(m.sentblock) })) : "") }); }
     return '<div class="mm-stat ' + cls + '">' + g.micon(ic) + "<span>" + D.esc(lbl) + "</span>"
       + (withRetry && st === "failed"
         ? '<button class="mm-retry" type="button" data-retry="' + D.esc(m.hashref) + '" data-rid="' + D.esc(m.randomid) + '">'
-          + g.micon("refresh") + "Retry</button>"
+          + g.micon("refresh") + "" + I18N.th("Retry") + "</button>"
         : "") + "</div>";
   }
   function statusRow(m, withRetry) {
     var subject = (m.subject || "").trim();
     return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-message="' + D.esc(m.randomid) + '" data-message-thread="' + D.esc(m.hashref) + '" data-subject="' + D.esc(m.subject || "") + '">'
-      + '<div class="mm-sto"><b>To ' + D.esc(nameFor(m.topublickey, m)) + " — " + D.esc(subject || "(no subject)") + "</b>"
+      + '<div class="mm-sto"><b>' + I18N.th("To") + ' ' + D.esc(nameFor(m.topublickey, m)) + " — " + D.esc(subject || I18N.t("(no subject)")) + "</b>"
       + "<span>" + D.esc(rel(m.date)) + "</span></div>"
       + '<div class="mm-ssnip">' + D.esc(previewText(m)) + "</div>"
       + statusLine(m, withRetry) + "</div>";
@@ -273,27 +273,27 @@
       var list = f === "inbox" ? THREADS : ARCHIVED;
       if (!list.length) {
         return '<div class="mm-empty">' + (f === "inbox"
-          ? "No mail yet.\nCompose a message to get started." : "No archived threads.") + "</div>";
+          ? I18N.t("No mail yet.\nCompose a message to get started.") : I18N.t("No archived threads.")) + "</div>";
       }
       return '<div class="mm-list">' + list.map(threadRow).join("") + "</div>";
     }
     if (f === "outbox") {
       return OUT.length ? OUT.map(function (m) { return statusRow(m, true); }).join("")
-        : '<div class="mm-empty">Outbox is empty — everything you sent has reached the chain.</div>';
+        : '<div class="mm-empty">' + I18N.th("Outbox is empty — everything you sent has reached the chain.") + '</div>';
     }
     if (f === "sent") {
       return SENTL.length ? SENTL.map(function (m) { return statusRow(m, false); }).join("")
-        : '<div class="mm-empty">Nothing sent yet.</div>';
+        : '<div class="mm-empty">' + I18N.th("Nothing sent yet.") + '</div>';
     }
     if (f === "contacts") {
-      var add = '<button class="mm-tbtn" id="mmAddContact" type="button">Add contact</button>';
-      if (!CONTACTS.length) return add + '<div class="mm-empty">No contacts yet.</div>';
+      var add = '<button class="mm-tbtn" id="mmAddContact" type="button">' + I18N.th("Add contact") + '</button>';
+      if (!CONTACTS.length) return add + '<div class="mm-empty">' + I18N.th("No contacts yet.") + '</div>';
       return add + '<div class="mm-list">'  + CONTACTS.map(function (c) {
         var nm = c.username || c.words || shortKey(c.publicId);
         return '<button class="mm-row" type="button" data-contact="' + D.esc(c.publicId) + '" style="border-bottom:0">'
           + avatar(c.publicId, nm, 44)
           + '<span class="mm-mid"><span class="mm-nm" style="color:var(--mm-text);font-weight:700;font-size:15px">' + D.esc(nm) + "</span>"
-          + '<span class="mm-contact-address mm-key" title="Copy address words">' + D.esc(c.words || c.publicId) + "</span></span></button>";
+          + '<span class="mm-contact-address mm-key" title="' + I18N.th("Copy address words") + '">' + D.esc(c.words || c.publicId) + "</span></span></button>";
       }).join("") + "</div>";
     }
     if (f === "key") return identityBody();
@@ -304,46 +304,46 @@
     var pid = (ID && ID.publicId) || "";
     return '<div class="mm-id">' + avatar(pid, ID && ID.name, 72)
       + (ID && ID.words ? '<div class="mm-idkey">' + D.esc(ID.words) + '</div>'
-        + '<button class="mm-abtn" id="mmPublish" type="button">' + (ID.published ? "Stop publishing address" : "Publish my address") + '</button>'
-        + '<div class="mm-idcap" role="status" id="mmBeaconStatus">Checking beacon…</div>'
-        + '<button class="mm-tbtn" id="mmWords" type="button">Copy address words</button>'
-        + '<button class="mm-tbtn" id="mmLink" type="button">Copy contact link</button>' : '')
+        + '<button class="mm-abtn" id="mmPublish" type="button">' + (ID.published ? I18N.t("Stop publishing address") : I18N.t("Publish my address")) + '</button>'
+        + '<div class="mm-idcap" role="status" id="mmBeaconStatus">' + I18N.th("Checking beacon…") + '</div>'
+        + '<button class="mm-tbtn" id="mmWords" type="button">' + I18N.th("Copy address words") + '</button>'
+        + '<button class="mm-tbtn" id="mmLink" type="button">' + I18N.th("Copy contact link") + '</button>' : '')
       + '<div class="mm-qr" id="mmQr"></div>'
-      + '<div class="mm-idcap">Have someone scan this, or share your key:</div>'
-      + '<div class="mm-idkey" id="mmShare" title="Click to copy">' + D.esc(pid || "(connecting to your node…)") + "</div>"
-      + '<button class="mm-abtn" type="button" id="mmCopyKey">Copy my key</button>'
+      + '<div class="mm-idcap">' + I18N.th("Have someone scan this, or share your key:") + '</div>'
+      + '<div class="mm-idkey" id="mmShare" title="' + I18N.th("Click to copy") + '">' + D.esc(pid || I18N.t("(connecting to your node…)")) + "</div>"
+      + '<button class="mm-abtn" type="button" id="mmCopyKey">' + I18N.th("Copy my key") + '</button>'
       + (ID && ID.payaddr
-        ? '<div class="mm-idcap">Your Minima receiving address (so people can pay you):</div>'
-          + '<div class="mm-idkey" id="mmPay" title="Click to copy">' + D.esc(ID.payaddr) + "</div>" : "")
-      + '<button class="mm-tbtn" type="button" id="mmBackup">Back up identity + messages</button>'
-      + '<button class="mm-tbtn" type="button" id="mmRestore">Restore from a backup</button></div>';
+        ? '<div class="mm-idcap">' + I18N.th("Your Minima receiving address (so people can pay you):") + '</div>'
+          + '<div class="mm-idkey" id="mmPay" title="' + I18N.th("Click to copy") + '">' + D.esc(ID.payaddr) + "</div>" : "")
+      + '<button class="mm-tbtn" type="button" id="mmBackup">' + I18N.th("Back up identity + messages") + '</button>'
+      + '<button class="mm-tbtn" type="button" id="mmRestore">' + I18N.th("Restore from a backup") + '</button></div>';
   }
 
   function settingsBody() {
     var st = STATUS || {}, bf = st.backfill || {};
-    var sweep = bf.active ? "Sweeping — block " + groupInt(bf.floor || 0)
-      : bf.done ? "Complete — the node serves no further back"
-      : "Ready";
+    var sweep = bf.active ? I18N.t("Sweeping — block {bf}", { bf: groupInt(bf.floor || 0) })
+      : bf.done ? I18N.t("Complete — the node serves no further back")
+      : I18N.t("Ready");
     var dark = ID && ID.theme === "dark";
-    return '<div class="mm-grp">Appearance</div>'
-      + '<div class="mm-set"><span class="mm-m"><span class="mm-tt">Theme</span><span class="mm-dd">Paper by day, dark by night — your call</span></span>'
-      + '<span class="mm-seg" role="group" aria-label="Theme"><button type="button" data-theme="light" aria-pressed="' + !dark + '">Paper</button>'
-      + '<button type="button" data-theme="dark" aria-pressed="' + !!dark + '">Dark</button></span></div>'
-      + '<div class="mm-grp">Identity</div>'
-      + '<button class="mm-set mm-tap" type="button" id="mmSetName"><span class="mm-m"><span class="mm-tt">Display name</span>'
-      + '<span class="mm-dd">Sent with every message, so people see who you are</span></span>'
-      + '<span class="mm-vv">' + D.esc((ID && ID.name) || "(not set)") + "</span>" + g.micon("chev") + "</button>"
-      + '<button class="mm-set mm-tap" type="button" id="mmGoKey"><span class="mm-m"><span class="mm-tt">Your key &amp; backup</span>'
-      + '<span class="mm-dd">QR, export, restore</span></span>' + g.micon("chev") + "</button>"
-      + '<div class="mm-grp">History</div>'
-      + '<button class="mm-set mm-tap" type="button" id="mmSweep"><span class="mm-m"><span class="mm-tt">Fetch older mail</span>'
-      + '<span class="mm-dd">Walk back through the chain for messages that arrived while this app was closed</span></span>'
+    return '<div class="mm-grp">' + I18N.th("Appearance") + '</div>'
+      + '<div class="mm-set"><span class="mm-m"><span class="mm-tt">' + I18N.th("Theme") + '</span><span class="mm-dd">' + I18N.th("Paper by day, dark by night — your call") + '</span></span>'
+      + '<span class="mm-seg" role="group" aria-label="' + I18N.th("Theme") + '"><button type="button" data-theme="light" aria-pressed="' + !dark + '">' + I18N.th("Paper") + '</button>'
+      + '<button type="button" data-theme="dark" aria-pressed="' + !!dark + '">' + I18N.th("Dark") + '</button></span></div>'
+      + '<div class="mm-grp">' + I18N.th("Identity") + '</div>'
+      + '<button class="mm-set mm-tap" type="button" id="mmSetName"><span class="mm-m"><span class="mm-tt">' + I18N.th("Display name") + '</span>'
+      + '<span class="mm-dd">' + I18N.th("Sent with every message, so people see who you are") + '</span></span>'
+      + '<span class="mm-vv">' + D.esc((ID && ID.name) || I18N.t("(not set)")) + "</span>" + g.micon("chev") + "</button>"
+      + '<button class="mm-set mm-tap" type="button" id="mmGoKey"><span class="mm-m"><span class="mm-tt">' + I18N.th("Your key & backup") + '</span>'
+      + '<span class="mm-dd">' + I18N.th("QR, export, restore") + '</span></span>' + g.micon("chev") + "</button>"
+      + '<div class="mm-grp">' + I18N.th("History") + '</div>'
+      + '<button class="mm-set mm-tap" type="button" id="mmSweep"><span class="mm-m"><span class="mm-tt">' + I18N.th("Fetch older mail") + '</span>'
+      + '<span class="mm-dd">' + I18N.th("Walk back through the chain for messages that arrived while this app was closed") + '</span></span>'
       + '<span class="mm-vv">' + D.esc(sweep) + "</span>" + g.micon("chev") + "</button>"
-      + '<div class="mm-grp">About</div>'
-      + '<button class="mm-set mm-tap" type="button" id="mmHelp"><span class="mm-m"><span class="mm-tt">How delivery works</span>'
-      + '<span class="mm-dd">Messages travel as coins — next block, ~1–3 min</span></span>' + g.micon("chev") + "</button>"
-      + '<div class="mm-set"><span class="mm-m"><span class="mm-tt">Version</span>'
-      + '<span class="mm-dd">minimaCore Desktop</span></span><span class="mm-vv" id="mmVer"></span></div>';
+      + '<div class="mm-grp">' + I18N.th("About") + '</div>'
+      + '<button class="mm-set mm-tap" type="button" id="mmHelp"><span class="mm-m"><span class="mm-tt">' + I18N.th("How delivery works") + '</span>'
+      + '<span class="mm-dd">' + I18N.th("Messages travel as coins — next block, ~1–3 min") + '</span></span>' + g.micon("chev") + "</button>"
+      + '<div class="mm-set"><span class="mm-m"><span class="mm-tt">' + I18N.th("Version") + '</span>'
+      + '<span class="mm-dd">' + I18N.th("minimaCore Desktop") + '</span></span><span class="mm-vv" id="mmVer"></span></div>';
   }
 
   // ---------------------------------------------------------------- thread
@@ -361,8 +361,8 @@
       var st = m.status || "sent";
       var ic = st === "posting" ? ["ring", "mm-a"] : st === "failed" ? ["close", "mm-r"]
         : st === "confirmed" ? ["check", "mm-g"] : ["chain", "mm-g"];
-      var lbl = st === "posting" ? "Posting to chain…" : st === "failed" ? "Failed — retry from Outbox"
-        : st === "confirmed" ? "Confirmed" : "On-chain" + (m.sentblock ? " · blk " + groupInt(m.sentblock) : "");
+      var lbl = st === "posting" ? I18N.t("Posting to chain…") : st === "failed" ? I18N.t("Failed — retry from Outbox")
+        : st === "confirmed" ? I18N.t("Confirmed") : "On-chain" + (m.sentblock ? " · blk " + groupInt(m.sentblock) : "");
       foot += "<span>·</span>" + g.micon(ic[0], ic[1])
         + '<span class="mm-lbl' + (st === "posting" ? " mm-posting" : st === "failed" ? " mm-failed" : "") + '">' + D.esc(lbl) + "</span>";
     }
@@ -371,7 +371,7 @@
   /** The APK's grouping rule: a footer closes a run when the sender flips, more than five minutes pass, the day
    *  changes, the message is the last one, or it is still posting / has failed (a stuck or failed send must always show its state). */
   function convHtml(msgs) {
-    if (!msgs.length) return '<div class="mm-empty">No messages yet — say hi.</div>';
+    if (!msgs.length) return '<div class="mm-empty">' + I18N.th("No messages yet — say hi.") + '</div>';
     var html = "", lastDay = null;
     for (var i = 0; i < msgs.length; i++) {
       var m = msgs[i], next = msgs[i + 1];
@@ -391,7 +391,7 @@
     var host = D.el("mailBody");
     if (!host) return;
     if (!booted) {
-      host.innerHTML = shellOpen() + '<div class="mm-empty">Connecting to your node…</div></div>';
+      host.innerHTML = shellOpen() + '<div class="mm-empty">' + I18N.th("Connecting to your node…") + '</div></div>';
       try { ID = await D.api.mailInit(); } catch (e) {
         host.innerHTML = shellOpen() + '<div class="mm-empty">' + D.esc(errText(e)) + "</div></div>";
         return;
@@ -411,18 +411,18 @@
    * says nothing; it has no wording to take. Publishing stays the default (the first button); "Don't publish" turns it
    * off (it can be turned on later under Your key). Nothing is posted until one of the two is chosen.
    */
-  var NOTICE_TEXT = "Mail can publish your six-word address so that people can write to you from the words alone.\n\n"
-    + "What is published: your six words, your Mail key and a signature, in a coin on the Minima chain (it costs 0.000000001 MINIMA, and is renewed when needed).\n\n"
+  var NOTICE_TEXT = L_("Mail can publish your six-word address so that people can write to you from the words alone.\n\n")
+    + L_("What is published: your six words, your Mail key and a signature, in a coin on the Minima chain (it costs 0.000000001 MINIMA, and is renewed when needed).\n\n")
     + "It is public and permanent: anyone can read it, and it cannot be removed from the chain. "
-    + "The coin is paid from one of your wallet's addresses, so it links your Mail address to that wallet address for anyone who looks.\n\n"
-    + "If you choose \"Don't publish\", people need your contact link or Mail key to write to you. You can change this later under Your key.";
+    + L_("The coin is paid from one of your wallet's addresses, so it links your Mail address to that wallet address for anyone who looks.\n\n")
+    + L_("If you choose \"Don't publish\", people need your contact link or Mail key to write to you. You can change this later under Your key.");
   var noticeAsked = false;
   async function publishNotice() {
     if (noticeAsked || MODAL || !ID) return;
     noticeAsked = true;
     try {
       if (!await D.api.mailPublishNotice()) { noticeAsked = false; return; }   // answered, already public, or not known yet (asked again at the next draw)
-      var publish = await mmDialog({ title: "Publish your Mail address?", message: NOTICE_TEXT, ok: "Publish my address", cancel: "Don't publish", wide: true });
+      var publish = await mmDialog({ title: I18N.t("Publish your Mail address?"), message: NOTICE_TEXT, ok: I18N.t("Publish my address"), cancel: I18N.t("Don't publish"), wide: true });
       ID = await D.api.mailPublishAnswer(publish === true);
       noticeAsked = false;   // answered: main says no from here on (and another wallet's Mail is asked for itself)
       render();
@@ -440,17 +440,14 @@
   }
   function confirmText(d) {
     var how = d.via === "beacon"
-      ? "This key was found on chain from the six words. It is not one of your contacts and you have not written to it before.\n\n"
-        + (d.first && d.tip >= d.first ? "Its address beacon was first seen by this node at block " + d.first + " (" + ageWords(d.tip - d.first) + " ago, " + (d.tip - d.first) + " blocks)"
-            + (d.block > d.first ? ", last renewed at block " + d.block : "") + ". "
-          : "This node could not tell how old its address beacon is. ")
-        + "A beacon published very recently deserves more care."
-      : "This key is known only from mail it sent you. It is not one of your contacts and you have not written to it before.";
-    return how + "\n\nSix words can be imitated by another key. Check the whole Mail key with the person, by another way, before you send:\n\n" + d.key;
+      ? I18N.t("This key was found on chain from the six words. It is not one of your contacts and you have not written to it before.\n\n{block}A beacon published very recently deserves more care.", { block: (d.first && d.tip >= d.first ? (I18N.t("Its address beacon was first seen by this node at block {first} ({first2} ago, {first3} blocks){block}.", { first: d.first, first2: ageWords(d.tip - d.first), first3: (d.tip - d.first), block: (d.block > d.first ? I18N.t(", last renewed at block {block}", { block: d.block }) : "") }) + " ")
+          : (I18N.t("This node could not tell how old its address beacon is.") + " ")) })
+      : I18N.t("This key is known only from mail it sent you. It is not one of your contacts and you have not written to it before.");
+    return I18N.t("{how}\n\nSix words can be imitated by another key. Check the whole Mail key with the person, by another way, before you send:\n\n{key}", { how: how, key: d.key });
   }
   async function confirmRecipient(d) {
     if (!d || !d.confirm) return true;
-    var ok = await mmDialog({ title: "Is this the right person?", message: confirmText(d), ok: "Yes, send to this key", cancel: "Cancel", neutral: "Copy key", wide: true,
+    var ok = await mmDialog({ title: I18N.t("Is this the right person?"), message: confirmText(d), ok: I18N.t("Yes, send to this key"), cancel: I18N.t("Cancel"), neutral: I18N.t("Copy key"), wide: true,
       onNeutral: function () { D.copy(d.key); } });
     if (ok !== true) return false;
     await D.api.mailConfirmRecipient(d.key);
@@ -465,7 +462,7 @@
     var showFresh = f === "inbox";   // the phone: the freshness line and the compose button are the Inbox's
     host.innerHTML = shellOpen() + header() + (showFresh ? freshness() : "")
       + '<div class="mm-body" id="mmBody">' + folderBody(f) + "</div>"
-      + (showFresh ? '<button class="mm-fab" type="button" id="mmFab" aria-label="New message">' + g.micon("pen") + "</button>" : "")
+      + (showFresh ? '<button class="mm-fab" type="button" id="mmFab" aria-label="' + I18N.th("New message") + '">' + g.micon("pen") + "</button>" : "")
       + drawer() + "</div>";
     wireShell(host);
     if (f === "key") drawQr();
@@ -473,7 +470,7 @@
     if (add) add.onclick = async function () {
       var value = await enterAddress();
       if (!value) return;
-      var name = await D.showPrompt("Contact name", "", "Name");
+      var name = await D.showPrompt(I18N.t("Contact name"), "", I18N.t("Name"));
       if (!name) return;
       try { await D.api.mailAddContact(value, name.trim()); render(); } catch (e) { D.toast(errText(e), "err"); }
     };
@@ -497,7 +494,7 @@
     host.querySelectorAll("[data-contact]").forEach(function (b) {
       b.onclick = function (event) {
         const address = event.target.closest(".mm-contact-address");
-        if (address) { D.copy(address.textContent); D.toast("Address copied.", "ok"); return; }
+        if (address) { D.copy(address.textContent); D.toast(I18N.t("Address copied."), "ok"); return; }
         openCompose({ to: b.dataset.contact });
       };
       b.oncontextmenu = function (e) { e.preventDefault(); contactMenu(b.dataset.contact); };
@@ -519,7 +516,7 @@
     for (let i = 0; i < 6; i++) {
       const box = document.createElement("input");
       box.className = "field__input"; box.setAttribute("list", choices.id); box.autocomplete = "off";
-      box.setAttribute("aria-label", "Address word " + (i + 1)); box.placeholder = String(i + 1);
+      box.setAttribute("aria-label", I18N.t("Address word {i}", { i: (i + 1) })); box.placeholder = String(i + 1);
       box.spellcheck = false;
       function advance() { if (boxes[i + 1]) boxes[i + 1].focus(); }
       box.oninput = event => {
@@ -545,7 +542,7 @@
         if (parts.length < 2) return;
         event.preventDefault();
         const start = parts.length === 6 ? 0 : i;
-        if (start + parts.length > 6) { box.value = ""; changed(); box.setCustomValidity("Enter six address words."); box.reportValidity(); box.setCustomValidity(""); return; }
+        if (start + parts.length > 6) { box.value = ""; changed(); box.setCustomValidity(I18N.t("Enter six address words.")); box.reportValidity(); box.setCustomValidity(""); return; }
         parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
         boxes[Math.min(5, start + parts.length)].focus(); changed(true);
       };
@@ -558,11 +555,11 @@
     const dictionary = await D.api.mailAddressWords();
     const overlay = document.createElement("div");
     overlay.className = "overlay mail-address-entry";
-    overlay.innerHTML = '<form class="modal"><div class="modal__title">Mail address</div>'
-      + '<textarea class="field__input" rows="2" aria-label="Contact link or Mail key" placeholder="Paste a contact link or Mail key"></textarea>'
-      + '<fieldset><legend>Or enter six address words</legend><div class="mm-word-grid"></div></fieldset>'
-      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">Cancel</button>'
-      + '<button type="submit" class="btn btn--primary">Use address</button></div></form>';
+    overlay.innerHTML = '<form class="modal"><div class="modal__title">' + I18N.th("Mail address") + '</div>'
+      + '<textarea class="field__input" rows="2" aria-label="' + I18N.th("Contact link or Mail key") + '" placeholder="' + I18N.th("Paste a contact link or Mail key") + '"></textarea>'
+      + '<fieldset><legend>' + I18N.th("Or enter six address words") + '</legend><div class="mm-word-grid"></div></fieldset>'
+      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">' + I18N.th("Cancel") + '</button>'
+      + '<button type="submit" class="btn btn--primary">' + I18N.th("Use address") + '</button></div></form>';
     const form = overlay.querySelector("form"), raw = form.querySelector("textarea");
     const grid = form.querySelector(".mm-word-grid"), status = form.querySelector('[role="status"]');
     const { boxes, complete } = addressBoxes(grid, dictionary,
@@ -577,7 +574,7 @@
         event.preventDefault();
         if (raw.value.trim()) { done(raw.value.trim()); return; }
         const values = boxes.map(box => complete(box.value)), bad = values.findIndex(w => !dictionary.includes(w));
-        if (bad >= 0) { status.textContent = "Check word " + (bad + 1); boxes[bad].focus(); return; }
+        if (bad >= 0) { status.textContent = I18N.t("Check word {bad}", { bad: (bad + 1) }); boxes[bad].focus(); return; }
         done(values.join("-"));
       };
       form.querySelector('button[type="button"]').onclick = () => done(null);
@@ -608,15 +605,15 @@
       };
     });
     D.el("mmSetName").onclick = async function () {
-      var n = await D.showPrompt("Display name", (ID && ID.name) || "", "Your name",
-        { message: "Sent with every message so your contacts see a name instead of a key." });
+      var n = await D.showPrompt(I18N.t("Display name"), (ID && ID.name) || "", I18N.t("Your name"),
+        { message: I18N.t("Sent with every message so your contacts see a name instead of a key.") });
       if (n == null) return;
       ID = await D.api.mailSetName(String(n).trim());
-      D.toast("Name saved ✓", "ok"); render();
+      D.toast(I18N.t("Name saved ✓"), "ok"); render();
     };
     D.el("mmGoKey").onclick = function () { VIEW = "key"; render(); };
     D.el("mmSweep").onclick = async function () {
-      try { await D.api.mailBackfill(); D.toast("Fetching older mail…", "ok"); } catch (e) { D.toast(errText(e), "err"); }
+      try { await D.api.mailBackfill(); D.toast(I18N.t("Fetching older mail…"), "ok"); } catch (e) { D.toast(errText(e), "err"); }
       render();
     };
     D.el("mmHelp").onclick = showAbout;
@@ -624,8 +621,8 @@
   }
 
   async function toggleAddress(key, enabled) {
-    if (enabled && !await D.showConfirm("Keep this address discoverable?",
-        "Your node publishes a signed public card and renews it when needed. Each post spends one nano-Minima and a signing operation.", "Enable")) return;
+    if (enabled && !await D.showConfirm(I18N.t("Keep this address discoverable?"),
+        I18N.t("Your node publishes a signed public card and renews it when needed. Each post spends one nano-Minima and a signing operation."), I18N.t("Enable"))) return;
     try { ID = await D.api.mailPublishAddress(key, enabled); render(); }
     catch (e) { D.toast(errText(e), "err"); }
   }
@@ -638,9 +635,9 @@
         if (!indicator?.isConnected || VIEW !== "key") return;
         try {
           const proof = await D.api.mailCheckOwnBeacon();
-          indicator.textContent = proof ? (proof.block ? "Beacon live · block " + proof.block : "Beacon live on this node")
-            : (ID.published ? "Beacon not yet visible on this node" : "Publication off · no visible beacon");
-        } catch (e) { indicator.textContent = "Could not verify beacon: " + errText(e); }
+          indicator.textContent = proof ? (proof.block ? I18N.t("Beacon live · block {block}", { block: proof.block }) : I18N.t("Beacon live on this node"))
+            : (ID.published ? I18N.t("Beacon not yet visible on this node") : I18N.t("Publication off · no visible beacon"));
+        } catch (e) { indicator.textContent = I18N.t("Could not verify beacon: {e}", { e: errText(e) }); }
         if (indicator.isConnected && VIEW === "key") setTimeout(check, 15000);
       }
       check();
@@ -654,9 +651,9 @@
         box.innerHTML = q.createImgTag(4, 8);
         var sh = D.el("mmShare"), ck = D.el("mmCopyKey");
         if (sh) sh.onclick = function () { D.copy(share); };
-        if (ck) ck.onclick = function () { D.copy(share); D.toast("Key copied ✓", "ok"); };
+        if (ck) ck.onclick = function () { D.copy(share); D.toast(I18N.t("Key copied ✓"), "ok"); };
       }).catch(function () {});
-      var pay = D.el("mmPay"); if (pay) pay.onclick = function () { D.copy(ID.payaddr); D.toast("Copied ✓", "ok"); };
+      var pay = D.el("mmPay"); if (pay) pay.onclick = function () { D.copy(ID.payaddr); D.toast(I18N.t("Copied ✓"), "ok"); };
       D.el("mmBackup").onclick = doBackup;
       D.el("mmRestore").onclick = doRestore;
     } catch (e) {}
@@ -677,16 +674,16 @@
     var title = SUBJ || nm;
     const address = peerWords.get(PEER) || PEER;
     var sub = SUBJ && nm !== address ? nm + " · " + address : address;
-    if (!SUBJ && nm === address) title = "Conversation";
+    if (!SUBJ && nm === address) title = I18N.t("Conversation");
     host.innerHTML = shellOpen()
-      + '<div class="mm-cbar"><button class="mm-ibtn" type="button" id="mmBack" aria-label="Back">' + g.micon("back") + "</button>"
+      + '<div class="mm-cbar"><button class="mm-ibtn" type="button" id="mmBack" aria-label="' + I18N.th("Back") + '">' + g.micon("back") + "</button>"
       + avatar(PEER, nm, 34)
       + '<span class="mm-ctitles"><span class="mm-ct">' + D.esc(title) + '</span><span class="mm-cs">' + D.esc(sub) + "</span></span>"
-      + '<button class="mm-ibtn" type="button" id="mmThreadMenu" aria-label="Details">' + g.micon("dots") + "</button></div>"
+      + '<button class="mm-ibtn" type="button" id="mmThreadMenu" aria-label="' + I18N.th("Details") + '">' + g.micon("dots") + "</button></div>"
       + '<div class="mm-body" id="mmConv">' + convHtml(msgs) + "</div>"
-      + '<div class="mm-comp"><button class="mm-ibtn mm-plus" type="button" id="mmPlus" aria-label="Attach or send funds">' + g.micon("plus") + "</button>"
-      + '<input class="mm-reply" id="mmReply" placeholder="Reply" autocomplete="off" />'
-      + '<button class="mm-send" type="button" id="mmSend" aria-label="Send">' + g.micon("up") + "</button></div>"
+      + '<div class="mm-comp"><button class="mm-ibtn mm-plus" type="button" id="mmPlus" aria-label="' + I18N.th("Attach or send funds") + '">' + g.micon("plus") + "</button>"
+      + '<input class="mm-reply" id="mmReply" placeholder="' + I18N.th("Reply") + '" autocomplete="off" />'
+      + '<button class="mm-send" type="button" id="mmSend" aria-label="' + I18N.th("Send") + '">' + g.micon("up") + "</button></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
     var conv = D.el("mmConv"); if (conv) conv.scrollTop = conv.scrollHeight;
     verifyShown(msgs, function () { if (!MODAL && VIEW === "thread" && PEER === peer && HASH === hash && SUBJ === subject) render(); });
@@ -718,23 +715,23 @@
     catch (error) { dictionary = []; D.toast(errText(error), "err"); }
     if (VIEW !== "compose" || COMPOSE !== c) return;
     host.innerHTML = shellOpen()
-      + '<div class="mm-chead"><button class="mm-ibtn" type="button" id="mmCancel" aria-label="Close">' + g.micon("close") + "</button>"
-      + '<span class="mm-t">New message</span>'
-      + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "Send</button></div>"
-      + '<div class="mm-f"><span class="mm-lab">To</span>'
+      + '<div class="mm-chead"><button class="mm-ibtn" type="button" id="mmCancel" aria-label="' + I18N.th("Close") + '">' + g.micon("close") + "</button>"
+      + '<span class="mm-t">' + I18N.th("New message") + '</span>'
+      + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "" + I18N.th("Send") + "</button></div>"
+      + '<div class="mm-f"><span class="mm-lab">' + I18N.th("To") + '</span>'
       + '<button id="mmCompactTo" type="button" hidden></button>'
       + '<div class="mm-word-grid" id="mmToWords"></div>'
-      + '<textarea rows="1" class="mm-monoin" id="mmTo" placeholder="Six words, contact link or Mail key" autocomplete="off" spellcheck="false">' + D.esc(c.to) + '</textarea>'
-      + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmEnterWords">Enter words</button><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "Scan</button>"
-      + '<button class="mm-outchip" type="button" id="mmPick" aria-label="Pick a contact">' + g.micon("contacts") + "</button></span></div>"
-      + '<div class="mm-recipient-state"><span id="mmLookup" role="status"></span> <button hidden id="mmRetryLookup" type="button">Retry lookup</button></div>'
-      + '<div class="mm-f"><span class="mm-lab">Subject</span>'
-      + '<input id="mmSubj" placeholder="(optional — subjects make their own thread)" autocomplete="off" value="' + D.esc(c.subject) + '" /></div>'
-      + '<textarea class="mm-cbody" id="mmBodyIn" placeholder="Write your message…">' + D.esc(c.body) + "</textarea>"
-      + '<div class="mm-attach"><button class="mm-chip" type="button" id="mmPhoto">' + g.micon("photo") + "Photo</button>"
-      + '<button class="mm-chip" type="button" id="mmFunds">' + g.micon("coin") + "Send funds</button></div>"
+      + '<textarea rows="1" class="mm-monoin" id="mmTo" placeholder="' + I18N.th("Six words, contact link or Mail key") + '" autocomplete="off" spellcheck="false">' + D.esc(c.to) + '</textarea>'
+      + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmEnterWords">' + I18N.th("Enter words") + '</button><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "" + I18N.th("Scan") + "</button>"
+      + '<button class="mm-outchip" type="button" id="mmPick" aria-label="' + I18N.th("Pick a contact") + '">' + g.micon("contacts") + "</button></span></div>"
+      + '<div class="mm-recipient-state"><span id="mmLookup" role="status"></span> <button hidden id="mmRetryLookup" type="button">' + I18N.th("Retry lookup") + '</button></div>'
+      + '<div class="mm-f"><span class="mm-lab">' + I18N.th("Subject") + '</span>'
+      + '<input id="mmSubj" placeholder="' + I18N.th("(optional — subjects make their own thread)") + '" autocomplete="off" value="' + D.esc(c.subject) + '" /></div>'
+      + '<textarea class="mm-cbody" id="mmBodyIn" placeholder="' + I18N.th("Write your message…") + '">' + D.esc(c.body) + "</textarea>"
+      + '<div class="mm-attach"><button class="mm-chip" type="button" id="mmPhoto">' + g.micon("photo") + "" + I18N.th("Photo") + "</button>"
+      + '<button class="mm-chip" type="button" id="mmFunds">' + g.micon("coin") + "" + I18N.th("Send funds") + "</button></div>"
       + '<div class="mm-hint">' + g.micon("chain")
-      + "<span>Delivered with the next block — usually 1–3 minutes. Your message waits in the Outbox until it's on-chain.</span></div>"
+      + "<span>" + I18N.th("Delivered with the next block — usually 1–3 minutes. Your message waits in the Outbox until it's on-chain.") + "</span></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
     const raw = D.el("mmTo"), grid = D.el("mmToWords"), toggle = D.el("mmEnterWords");
     const status = D.el("mmLookup"), retry = D.el("mmRetryLookup");
@@ -747,7 +744,7 @@
       compact.hidden = !folded; chips.hidden = folded;
       compact.textContent = folded ? raw.value : "";
       raw.hidden = !asRaw || folded; grid.hidden = asRaw || folded;
-      toggle.textContent = asRaw ? "Enter words" : "Link or Mail key";
+      toggle.textContent = asRaw ? I18N.t("Enter words") : I18N.t("Link or Mail key");
       toggle.disabled = !dictionary.length;
     }
     function useRaw(text) { mode(true); raw.value = text; raw.focus(); keep(); check(); }
@@ -770,11 +767,11 @@
       status.textContent = ""; retry.hidden = true;
       if (!/^(?:0x)?[0-9a-f]{128}(?:\||$)/i.test(text) && !text.includes("minimamail:") &&
           !(text.split(/[\s-]+/).length === 6 && text.toLowerCase().split(/[\s-]+/).every(word => dictionary.includes(word)))) return;
-      status.textContent = "Looking up address…";
+      status.textContent = I18N.t("Looking up address…");
       try {
         const found = await D.api.mailResolveDetail(text);
         if (request !== revision || !raw.isConnected) return;
-        detail = found; resolved = found.key; status.textContent = found.confirm ? "Recipient found: you will be asked to check the key before sending" : "Recipient ready";
+        detail = found; resolved = found.key; status.textContent = found.confirm ? I18N.t("Recipient found: you will be asked to check the key before sending") : I18N.t("Recipient ready");
         actions.forEach(button => { button.disabled = sending; });
       } catch (error) {
         if (request !== revision || !raw.isConnected) return;
@@ -792,8 +789,8 @@
     check();
     D.el("mmCancel").onclick = function () { COMPOSE = null; VIEW = "inbox"; render(); };
     D.el("mmPick").onclick = function () {
-      if (!CONTACTS.length) { D.toast("No contacts yet — paste a Mail key instead.", ""); return; }
-      D.showActionSheet("Send to", CONTACTS.map(function (ct) {
+      if (!CONTACTS.length) { D.toast(I18N.t("No contacts yet — paste a Mail key instead."), ""); return; }
+      D.showActionSheet(I18N.t("Send to"), CONTACTS.map(function (ct) {
         return { label: ct.username || shortKey(ct.publicId), onclick: function () { useRaw(ct.publicId); } };
       }));
     };
@@ -802,7 +799,7 @@
       else { mode(false); wordsChanged(); boxes[Math.max(0, boxes.findIndex(box => !dictionary.includes(box.value)))].focus(); }
     };
     D.el("mmScan").onclick = async function () {
-      var v = await D.scanQR("Scan a Mail key").catch(function () { return null; });
+      var v = await D.scanQR(I18N.t("Scan a Mail key")).catch(function () { return null; });
       if (v) { useRaw(String(v).trim()); }
     };
     D.el("mmPhoto").onclick = function () { D.el("mmFile").click(); };
@@ -821,7 +818,7 @@
   async function doSend(to) {
     var subject = D.el("mmSubj").value.trim();
     var body = D.el("mmBodyIn").value.trim();
-    if (!body) { D.toast("Write a message first.", "err"); return; }
+    if (!body) { D.toast(I18N.t("Write a message first."), "err"); return; }
     var btn = D.el("mmDoSend"); btn.disabled = true;
     try {
       await D.api.mailSend(to, { message: body, subject: subject });
@@ -868,9 +865,9 @@
     } catch (e) { D.toast(errText(e), "err"); }
   }
   function plusMenu() {
-    D.showActionSheet("Attach", [
-      { label: "Photo", onclick: function () { D.el("mmFile").click(); } },
-      { label: "Send funds", onclick: function () { sendFunds(PEER, SUBJ); } }
+    D.showActionSheet(I18N.t("Attach"), [
+      { label: I18N.t("Photo"), onclick: function () { D.el("mmFile").click(); } },
+      { label: I18N.t("Send funds"), onclick: function () { sendFunds(PEER, SUBJ); } }
     ]);
   }
   // ---------------------------------------------------------------- dialogs and menus, in Mail's own look
@@ -885,12 +882,12 @@
       var host = root(); if (!host) return resolve(null);
       var opener = document.activeElement, ov = document.createElement("div");
       ov.className = "mm-ov";
-      ov.innerHTML = '<div class="mm-dlg' + (o.wide ? " mm-dlg--wide" : "") + '" role="dialog" aria-modal="true" aria-label="' + D.esc(o.title || "Mail") + '">'
+      ov.innerHTML = '<div class="mm-dlg' + (o.wide ? " mm-dlg--wide" : "") + '" role="dialog" aria-modal="true" aria-label="' + D.esc(o.title || I18N.t("Mail")) + '">'
         + (o.title ? '<div class="mm-dtitle">' + D.esc(o.title) + "</div>" : "")
         + '<div class="mm-dbody">' + (o.html != null ? o.html : '<div class="mm-dmsg">' + D.esc(o.message || "") + "</div>") + "</div>"
         + '<div class="mm-dstatus" role="alert"></div>'
         + '<div class="mm-dbtns">' + (o.neutral ? '<button type="button" class="mm-dbtn mm-dneutral">' + D.esc(o.neutral) + "</button>" : "") + '<span class="mm-grow"></span>'
-        + (o.cancel === false ? "" : '<button type="button" class="mm-dbtn mm-dcancel">' + D.esc(o.cancel || "Cancel") + "</button>")
+        + (o.cancel === false ? "" : '<button type="button" class="mm-dbtn mm-dcancel">' + D.esc(o.cancel || I18N.t("Cancel")) + "</button>")
         + (o.ok === false ? "" : '<button type="button" class="mm-dbtn mm-dok' + (o.danger ? " mm-danger" : "") + '">' + D.esc(o.ok || "OK") + "</button>") + "</div></div>";
       MODAL++;
       host.appendChild(ov);
@@ -950,49 +947,49 @@
     var known = await D.api.mailResolvePayaddr(peer).catch(function () { return ""; });
     if (!known) { try { await D.api.mailRequestPayaddr(peer); } catch (e) {} }
     var tokens = await D.api.mailPayOptions().catch(function () { return []; });
-    if (!tokens || !tokens.length) { D.toast("No funds available to send.", "err"); return; }
+    if (!tokens || !tokens.length) { D.toast(I18N.t("No funds available to send."), "err"); return; }
     var mine = (ID && ID.payaddr) || "", who = nameFor(peer, null);
-    var pick = await mmDialog({ title: "Send funds to " + who, ok: "Review",
-      html: '<div class="mm-flab" id="mmTokLab">Token</div><div class="mm-radio" role="radiogroup" aria-labelledby="mmTokLab">'
+    var pick = await mmDialog({ title: I18N.t("Send funds to {who}", { who: who }), ok: I18N.t("Review"),
+      html: '<div class="mm-flab" id="mmTokLab">' + I18N.th("Token") + '</div><div class="mm-radio" role="radiogroup" aria-labelledby="mmTokLab">'
         + tokens.map(function (t, i) {
           return '<label><input type="radio" name="mmTok" value="' + i + '"' + (i === 0 ? " checked" : "") + "><span>" + D.esc(t.name + "  ·  " + t.balance) + "</span></label>";
         }).join("") + "</div>"
-        + '<label class="mm-flab" for="mmAmt">Amount</label><input class="mm-inp" id="mmAmt" inputmode="decimal" placeholder="0.0" autocomplete="off">'
-        + '<label class="mm-flab" for="mmPayAddr">Their Minima receiving address</label>'
-        + '<input class="mm-inp mm-inp--mono" id="mmPayAddr" placeholder="0x… / Mx… address" autocomplete="off" spellcheck="false" value="' + D.esc(known || "") + '">'
-        + '<div class="mm-fhint" id="mmPayHint">' + (known ? "Auto-filled from their messages." : "Auto-fills when they message you / are online. Or scan their QR, or paste their address.") + "</div>"
-        + '<button type="button" class="mm-tbtn" id="mmPayScan">Scan their QR for their address</button>'
-        + '<div class="mm-fhint mm-fhint--addr">You\'ll receive at: ' + D.esc(mine || "(getting your address…)") + "</div>"
-        + '<label class="mm-flab" for="mmMemo">Note (optional)</label><input class="mm-inp" id="mmMemo" placeholder="What\'s it for?" autocomplete="off">',
+        + '<label class="mm-flab" for="mmAmt">' + I18N.th("Amount") + '</label><input class="mm-inp" id="mmAmt" inputmode="decimal" placeholder="0.0" autocomplete="off">'
+        + '<label class="mm-flab" for="mmPayAddr">' + I18N.th("Their Minima receiving address") + '</label>'
+        + '<input class="mm-inp mm-inp--mono" id="mmPayAddr" placeholder="' + I18N.th("0x… / Mx… address") + '" autocomplete="off" spellcheck="false" value="' + D.esc(known || "") + '">'
+        + '<div class="mm-fhint" id="mmPayHint">' + (known ? I18N.t("Auto-filled from their messages.") : I18N.t("Auto-fills when they message you / are online. Or scan their QR, or paste their address.")) + "</div>"
+        + '<button type="button" class="mm-tbtn" id="mmPayScan">' + I18N.th("Scan their QR for their address") + '</button>'
+        + '<div class="mm-fhint mm-fhint--addr">' + I18N.th("You'll receive at:") + ' ' + D.esc(mine || I18N.t("(getting your address…)")) + "</div>"
+        + '<label class="mm-flab" for="mmMemo">' + I18N.th("Note (optional)") + '</label><input class="mm-inp" id="mmMemo" placeholder="' + I18N.th("What's it for?") + '" autocomplete="off">',
       onOpen: function (box) {
         var addr = box.querySelector("#mmPayAddr");
         PAYFILL = function () {                          // the handshake answered while the sheet is open
           if (!addr.isConnected) { PAYFILL = null; return; }
           if (addr.value.trim()) return;
-          D.api.mailResolvePayaddr(peer).then(function (a) { if (a && addr.isConnected && !addr.value.trim()) { addr.value = a; box.querySelector("#mmPayHint").textContent = "Auto-filled from their messages."; } }).catch(function () {});
+          D.api.mailResolvePayaddr(peer).then(function (a) { if (a && addr.isConnected && !addr.value.trim()) { addr.value = a; box.querySelector("#mmPayHint").textContent = I18N.t("Auto-filled from their messages."); } }).catch(function () {});
         };
         box.querySelector("#mmPayScan").onclick = async function () {
-          var v = await D.scanQR("Scan their Mail-key QR for their address").catch(function () { return null; });
+          var v = await D.scanQR(I18N.t("Scan their Mail-key QR for their address")).catch(function () { return null; });
           if (!v) return;
           var parts = String(v).split("|"), a = (parts[1] || parts[0]).trim();
-          if (looksLikeMinimaAddress(a)) addr.value = a; else box.say("That QR does not carry a Minima receiving address.");
+          if (looksLikeMinimaAddress(a)) addr.value = a; else box.say(I18N.t("That QR does not carry a Minima receiving address."));
         };
       },
       onOk: function (box) {
         var sel = box.querySelector('input[name="mmTok"]:checked'); if (!sel) return false;
         var t = tokens[parseInt(sel.value, 10)], amount = box.querySelector("#mmAmt").value.trim(), addr = box.querySelector("#mmPayAddr").value.trim();
-        if (!amount) { box.say("Enter an amount."); return false; }
-        if (!/^[0-9]*\.?[0-9]+$/.test(amount)) { box.say("Invalid amount."); return false; }
-        if (!/[1-9]/.test(amount)) { box.say("Enter an amount."); return false; }
-        if (decCmp(amount, t.balance) > 0) { box.say("Insufficient balance."); return false; }
-        if (!looksLikeMinimaAddress(addr)) { box.say("Enter " + who + "'s Minima receiving address (0x… or Mx…)."); return false; }
+        if (!amount) { box.say(I18N.t("Enter an amount.")); return false; }
+        if (!/^[0-9]*\.?[0-9]+$/.test(amount)) { box.say(I18N.t("Invalid amount.")); return false; }
+        if (!/[1-9]/.test(amount)) { box.say(I18N.t("Enter an amount.")); return false; }
+        if (decCmp(amount, t.balance) > 0) { box.say(I18N.t("Insufficient balance.")); return false; }
+        if (!looksLikeMinimaAddress(addr)) { box.say(I18N.t("Enter {who}'s Minima receiving address (0x… or Mx…).", { who: who })); return false; }
         return { token: t, amount: amount, addr: addr, memo: box.querySelector("#mmMemo").value };
       } });
     PAYFILL = null;
     if (!pick) return;
-    if (!await mmConfirm("Send " + pick.amount + " " + pick.token.name + "?",
-        "To " + who + "\n" + pick.addr + "\n\nThis sends real funds and cannot be undone.", "Send")) return;
-    var done = null, wait = mmDialog({ title: "Sending " + pick.amount + " " + pick.token.name, message: "Posting to the chain — this can take a few seconds…",
+    if (!await mmConfirm(I18N.t("Send {amount} {name}?", { amount: pick.amount, name: pick.token.name }),
+        I18N.t("To {who}\n{addr}\n\nThis sends real funds and cannot be undone.", { who: who, addr: pick.addr }), I18N.t("Send"))) return;
+    var done = null, wait = mmDialog({ title: I18N.t("Sending {amount} {name}", { amount: pick.amount, name: pick.token.name }), message: I18N.t("Posting to the chain — this can take a few seconds…"),
       ok: false, cancel: false, onOpen: function (_box, close) { done = close; } });
     var result, failure = null;
     try { result = await D.api.mailPay(peer, pick.addr, pick.amount, pick.token.tokenid, pick.token.name, pick.memo, subject || ""); }
@@ -1001,25 +998,24 @@
     if (failure) {
       // An RPC timeout is AMBIGUOUS — the coin may well have gone out. Never invite a retry that double-spends.
       var msg = String((failure && failure.message) || failure || "");
-      await mmDialog({ title: "Payment failed", cancel: false, ok: "OK",
-        message: /may have been submitted/i.test(msg) ? "The node didn't answer in time. The payment may have been sent: check your balance and History before sending again."
-          : /validate the recipient/i.test(msg) ? "Couldn't validate the recipient address — not sending." : "Payment failed: " + errText(failure) });
+      await mmDialog({ title: I18N.t("Payment failed"), cancel: false, ok: I18N.t("OK"),
+        message: /may have been submitted/i.test(msg) ? I18N.t("The node didn't answer in time. The payment may have been sent: check your balance and History before sending again.")
+          : /validate the recipient/i.test(msg) ? I18N.t("Couldn't validate the recipient address — not sending.") : I18N.t("Payment failed: {failure}", { failure: errText(failure) }) });
     } else {
       var txid = (result && result.txpowid) || "";
-      await mmDialog({ title: "Payment sent", cancel: false, ok: "OK", neutral: txid ? "Copy tx id" : null,
-        message: "Sent " + pick.amount + " " + pick.token.name + " to " + who + "." + (txid ? "\n\nTx: " + txid : "")
-          + (result && result.receiptFailed ? "\n\nThe payment went through, but the receipt message to them did not post." : ""),
-        onNeutral: function () { copied(txid, "Copied."); } });
+      await mmDialog({ title: I18N.t("Payment sent"), cancel: false, ok: I18N.t("OK"), neutral: txid ? I18N.t("Copy tx id") : null,
+        message: I18N.t("Sent {amount} {name} to {who}.{txid}{receiptFailed}", { amount: pick.amount, name: pick.token.name, who: who, txid: (txid ? ("\n\n" + I18N.t("Tx:") + " ") + txid : ""), receiptFailed: (result && result.receiptFailed ? ("\n\n" + I18N.t("The payment went through, but the receipt message to them did not post.")) : "") }),
+        onNeutral: function () { copied(txid, I18N.t("Copied.")); } });
     }
     render();
   }
 
   // ---------------------------------------------------------------- menus, backup, about
   function rowMenu(hashref, archived) {
-    D.showActionSheet("Thread", [
-      { label: archived ? "Unarchive" : "Archive", onclick: async function () { await D.api.mailSetArchived(hashref, !archived); render(); } },
-      { label: "Delete", danger: true, onclick: async function () {
-        if (!await D.showConfirm("Delete this thread?", "Every message in it is removed from this computer. It cannot be undone.", "Delete", true)) return;
+    D.showActionSheet(I18N.t("Thread"), [
+      { label: archived ? I18N.t("Unarchive") : I18N.t("Archive"), onclick: async function () { await D.api.mailSetArchived(hashref, !archived); render(); } },
+      { label: I18N.t("Delete"), danger: true, onclick: async function () {
+        if (!await D.showConfirm(I18N.t("Delete this thread?"), I18N.t("Every message in it is removed from this computer. It cannot be undone."), I18N.t("Delete"), true)) return;
         await D.api.mailDeleteThread(hashref); render();
       } }
     ]);
@@ -1027,16 +1023,16 @@
   function threadMenu() {
     var known = CONTACTS.some(function (c) { return c.publicId === PEER; });
     D.showActionSheet(nameFor(PEER, null), [
-      { label: known ? "Rename contact" : "Add to contacts", onclick: async function () {
-        var n = await D.showPrompt(known ? "Rename contact" : "Add to contacts", "", "Name");
+      { label: known ? I18N.t("Rename contact") : I18N.t("Add to contacts"), onclick: async function () {
+        var n = await D.showPrompt(known ? I18N.t("Rename contact") : I18N.t("Add to contacts"), "", I18N.t("Name"));
         if (n == null) return;
         if (known) await D.api.mailRenameContact(PEER, String(n).trim());
         else await D.api.mailAddContact(PEER, String(n).trim());
         render();
       } },
-      { label: "Copy their Mail key", onclick: function () { D.copy(PEER); D.toast("Copied ✓", "ok"); } },
-      { label: "Delete thread", danger: true, onclick: async function () {
-        if (!await D.showConfirm("Delete this thread?", "Every message in it is removed from this computer.", "Delete", true)) return;
+      { label: I18N.t("Copy their Mail key"), onclick: function () { D.copy(PEER); D.toast(I18N.t("Copied ✓"), "ok"); } },
+      { label: I18N.t("Delete thread"), danger: true, onclick: async function () {
+        if (!await D.showConfirm(I18N.t("Delete this thread?"), I18N.t("Every message in it is removed from this computer."), I18N.t("Delete"), true)) return;
         if (HASH) await D.api.mailDeleteThread(HASH);
         VIEW = "inbox"; PEER = null; render();
       } }
@@ -1045,43 +1041,39 @@
   function contactMenu(peer) {
     var published = !!CONTACTS.find(c => c.publicId === peer && c.published);
     D.showActionSheet(nameFor(peer, null), [
-      { label: "Send a message", onclick: function () { openCompose({ to: peer }); } },
-      { label: "Rename", onclick: async function () {
-        var n = await D.showPrompt("Rename contact", "", "Name"); if (n == null) return;
+      { label: I18N.t("Send a message"), onclick: function () { openCompose({ to: peer }); } },
+      { label: I18N.t("Rename"), onclick: async function () {
+        var n = await D.showPrompt(I18N.t("Rename contact"), "", I18N.t("Name")); if (n == null) return;
         await D.api.mailRenameContact(peer, String(n).trim()); render();
       } },
-      { label: published ? "Stop relaying address" : "Relay signed address", onclick: () => toggleAddress(peer, !published) },
-      { label: "Copy address words", onclick: () => D.copy(CONTACTS.find(c => c.publicId === peer).words || peer) },
-      { label: "Copy Mail key", onclick: function () { D.copy(peer); D.toast("Copied ✓", "ok"); } },
-      { label: "Remove", danger: true, onclick: async function () {
-        if (!await D.showConfirm("Remove this contact?", "Their messages stay; only the saved name goes.", "Remove", true)) return;
+      { label: published ? I18N.t("Stop relaying address") : I18N.t("Relay signed address"), onclick: () => toggleAddress(peer, !published) },
+      { label: I18N.t("Copy address words"), onclick: () => D.copy(CONTACTS.find(c => c.publicId === peer).words || peer) },
+      { label: I18N.t("Copy Mail key"), onclick: function () { D.copy(peer); D.toast(I18N.t("Copied ✓"), "ok"); } },
+      { label: I18N.t("Remove"), danger: true, onclick: async function () {
+        if (!await D.showConfirm(I18N.t("Remove this contact?"), I18N.t("Their messages stay; only the saved name goes."), I18N.t("Remove"), true)) return;
         await D.api.mailRemoveContact(peer); render();
       } }
     ]);
   }
   async function doBackup() {
-    var pass = await D.showPrompt("Back up identity", "", "Passphrase (min 8 characters)",
-      { password: true, ok: "Back up", message: "The file holds your private key, so it is encrypted with this passphrase — you need it to restore." });
+    var pass = await D.showPrompt(I18N.t("Back up identity"), "", I18N.t("Passphrase (min 8 characters)"),
+      { password: true, ok: I18N.t("Back up"), message: I18N.t("The file holds your private key, so it is encrypted with this passphrase — you need it to restore.") });
     if (pass == null) return;
-    if (pass.length < 8) { D.toast("Use a passphrase of at least 8 characters.", "err"); return; }
-    if (!/^[\x20-\x7e]+$/.test(pass)) { D.toast("Use plain ASCII — the phone app cannot read other characters.", "err"); return; }
-    try { var p = await D.api.mailExportBackup(pass); D.toast(p ? "Backed up → " + p : "Cancelled", p ? "ok" : ""); }
+    if (pass.length < 8) { D.toast(I18N.t("Use a passphrase of at least 8 characters."), "err"); return; }
+    if (!/^[\x20-\x7e]+$/.test(pass)) { D.toast(I18N.t("Use plain ASCII — the phone app cannot read other characters."), "err"); return; }
+    try { var p = await D.api.mailExportBackup(pass); D.toast(p ? I18N.t("Backed up → {p}", { p: p }) : I18N.t("Cancelled"), p ? "ok" : ""); }
     catch (e) { D.toast(errText(e), "err"); }
   }
   async function doRestore() {
-    var pass = await D.showPrompt("Restore from a backup", "", "Backup passphrase",
-      { password: true, ok: "Restore", message: "This replaces the identity, contacts and messages on this computer." });
+    var pass = await D.showPrompt(I18N.t("Restore from a backup"), "", I18N.t("Backup passphrase"),
+      { password: true, ok: I18N.t("Restore"), message: I18N.t("This replaces the identity, contacts and messages on this computer.") });
     if (pass == null) return;
-    try { await D.api.mailImportBackup(pass); D.toast("Restored ✓", "ok"); booted = false; render(); }
+    try { await D.api.mailImportBackup(pass); D.toast(I18N.t("Restored ✓"), "ok"); booted = false; render(); }
     catch (e) { D.toast(errText(e), "err"); }
   }
   function showAbout() {
-    D.showConfirm("How delivery works",
-      "Every message is a tiny coin (0.000000001 MINIMA) sent to one shared address, carrying a sealed blob only "
-      + "the recipient can open. It is delivered with the next block — usually 1 to 3 minutes — and waits in your "
-      + "Outbox until it is on-chain.\n\nYour identity comes from this node's seed. There is no server and no "
-      + "Maxima involved.\n\nThis does NOT interoperate with the web ChainMail MiniDapp — it is its own on-chain "
-      + "network, shared with the Minima Mail phone app.", "Close");
+    D.showConfirm(I18N.t("How delivery works"),
+      I18N.t("Every message is a tiny coin (0.000000001 MINIMA) sent to one shared address, carrying a sealed blob only the recipient can open. It is delivered with the next block — usually 1 to 3 minutes — and waits in your Outbox until it is on-chain.\n\nYour identity comes from this node's seed. There is no server and no Maxima involved.\n\nThis does NOT interoperate with the web ChainMail MiniDapp — it is its own on-chain network, shared with the Minima Mail phone app."), I18N.t("Close"));
   }
 
   // ---------------------------------------------------------------- live updates

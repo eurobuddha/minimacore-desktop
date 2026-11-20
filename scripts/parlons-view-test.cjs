@@ -3,6 +3,7 @@
  * Run: node --test scripts/parlons-view-test.cjs
  */
 const test = require('node:test');
+require('../renderer/i18n.js');   // t(), th(), tr() as the window has them: code lifted out of the renderer reads as before
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,7 +14,7 @@ function fixture(status) {
   const nodes = new Map(); let opened = 0; const toasts = [];
   function el(id) { if (!nodes.has(id)) nodes.set(id, { innerHTML: '' }); return nodes.get(id); }
   const api = { parlonsStatus: async () => status, parlonsOpenExternal: async () => { opened++; return true; } };
-  const ctx = vm.createContext({ api, el, esc: String, toast: (m) => toasts.push(m), copy() {}, showConfirm: async () => false });
+  const ctx = vm.createContext({ ...require('./i18n-plain.cjs').globals(), api, el, esc: String, toast: (m) => toasts.push(m), copy() {}, showConfirm: async () => false });
   const from = source.indexOf('let parlonsLastSig = "";'), to = source.indexOf('\n}', source.indexOf('async function renderParlons()')) + 2;
   vm.runInContext(source.slice(from, to) + '\nglobalThis.renderPanel = renderParlons; globalThis.openPanel = openParlons;', ctx);
   return { ctx, api, el, toasts, render: () => ctx.renderPanel(), open: () => ctx.openPanel(), get opened() { return opened; } };
