@@ -256,3 +256,13 @@ test("advanceStatus: only CONFIRMED, then SHIPPED, then DELIVERED, each in turn,
   await assert.rejects(shop.advanceStatus(enquiry, "CONFIRMED"), /next step/);
   const I18N = require("../renderer/i18n.js"), MS = require("../renderer/mainsaid.js"); assert.ok(MS.has("That is not this order's next step.", "SHOP_NOT_NEXT"));
 });
+
+// ---- 0.19.174 (as released 0.18.163): a payment mined before its order is counted once the order is in ----
+test("vendor: a payment that arrives before its order is counted when the order comes, and once", async () => {
+  const pay = [{ coinid: "0xEARLY1", ref: "ORD-LATE", amount: "3.2", tokenid: "0x00" }];
+  await scan([], pay);
+  assert.equal(store.order("ORD-LATE"), null, "no order yet");
+  await scan([{ type: "ORDER", ref: "ORD-LATE", shopId: "tea", items: [{ product: "Tea", quantity: 2, unitPrice: "1.5" }], amount: "3.2", currency: "Minima", shipping: "Domestic" }], pay);
+  const o = store.order("ORD-LATE"); assert.equal(o.paid, true); assert.equal(o.status, "PAID"); assert.equal(o.paidAmount, "3.2");
+  await scan([], pay); assert.equal(store.order("ORD-LATE").paidAmount, "3.2", "and only once");
+});

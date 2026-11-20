@@ -7,9 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.174] — miniMall vendor: a payment mined before its order is counted when the order comes
+
+- **Found while comparing with the released desktop (its 0.18.163, `b349fde`):** `scanPayments` marked every payment coin as seen before it looked for its order, so a payment mined in an earlier block than its order message (the buyer's app sends the message first, but the two need not land in the same block) was skipped for the rest of the session and the order stayed unpaid until the app was restarted.
+- **Now:** a coin whose order is not in the store yet is not marked seen; it is read again on the next scan and counted when the order has come (the store counts each coin once, 0.19.167). A coin with no readable ref, or for an order that is already paid or is not a sale, is marked seen as before.
+- **Pin:** `main/shop.js` is sha256-pinned in `scripts/apps-money.test.cjs`; the pin is updated on purpose to this file.
+- Also: the 0.19.173 entry no longer names a version it could not vouch for.
+- Test (`scripts/shop-store-test.cjs`): a payment scanned before its order is counted when the order arrives (PAID), and a later scan does not count it again. It fails on 0.19.173.
+
 ## [0.19.173] — Logs: the node's last line is written out when its output has ended
 
-- **From the release review:** the unfinished last line of each of the node's streams (kept back since 0.19.103 until its line end comes) was written out on the process's `exit` event. Node fires `exit` before the pipes are drained, so output arriving after it waited for a line end that never came and was lost, often the last words of a node that died.
+- **From the release review:** the unfinished last line of each of the node's streams (kept back until its line end comes) was written out on the process's `exit` event. Node fires `exit` before the pipes are drained, so output arriving after it waited for a line end that never came and was lost, often the last words of a node that died.
 - **Now:** it is written out on `close`, which comes once both streams have ended, so the last line is whole. Output still arriving from a process that a new start has replaced is no longer mixed into the new process's lines, and its `close` leaves the new process's buffers alone.
 - Test (`scripts/keymode-test.cjs`, on the stand-in java of the key-mode tests): a half line before `exit` and its rest after it are logged as one line on `close`, after "node exited", with the error stream's unfinished line; a replaced process's late output and its close do not touch the new process's lines. It fails on 0.19.172.
 

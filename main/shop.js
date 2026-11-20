@@ -290,11 +290,15 @@ async function scanPayments(depth) {
   capSeen();
   let changed = false;
   for (const c of coins) {
-    const id = c.coinid; if (!id || seenPayCoins.has(id)) continue; seenPayCoins.add(id);
+    const id = c.coinid; if (!id || seenPayCoins.has(id)) continue;
     try {   // one coin at a time (0.19.168)
-      const refHex = statePort(c, 1); if (!refHex) continue;
-      const ref = hexToText(refHex); if (!ref) continue;
-      const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;
+      const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); continue; }
+      const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); continue; }
+      // Not marked seen while its order is not here yet (0.19.174, as released 0.18.163): a payment mined before its
+      // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
+      const o = store.order(ref); if (!o) continue;
+      seenPayCoins.add(id);
+      if (o.role !== "sell" || o.paid) continue;
       const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
       if (outcome && outcome !== "ALREADY") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
     } catch (e) { store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); }
