@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.162] — the key audit reply is capped at 512 KB
+
+- The KeyUses audit replies (`mcd:keyAudit`, `mcd:keyReuse`) were read up to netfetch's general 8 MB cap. They are now dropped, not parsed, above 512 KB, as the phone's AuditApi and the dev branch (0.19.137) do: `netfetch.fetchJson` `opts.maxBytes` may lower the cap, never raise it. Test: `scripts/netfetch-test.cjs`.
+
 ## [0.18.161] — no script reaches a node or a docker container by itself
 
 - `scripts/atomix-unit.js` (run in CI), `atomix-boot-gate.js` and `atomix-s2-gate.js` ran `docker exec` into a fixed container name whenever docker answered; on the owner's machine that container is a custody wallet, and the scripts booted the AtomiX engine on it and read its seed. They now reach only a node the caller names (`scripts/test-node.cjs` from the dev branch 0.18.140 / 0.19.103: `AX_TEST_NODE_RPC`, optionally `AX_TEST_NODE_CONTAINER`, `AX_TEST_NODE_I_OWN_THIS=yes`, and for a node that holds funds `AX_TEST_NODE_ADDRESS` confirmed by that node; `balance` is sent first). With none named the gates refuse and atomix-unit skips its one live check, and atomix-unit fails if it starts any child process. No container name, address or port of any node is written in the scripts; the boot gate's expected Ethereum address is `AX_TEST_NODE_EXPECT_ETH`. `cdp-eval.js` names no app port (`AX_TEST_CDP_PORT`). Test: `scripts/test-node-test.cjs` (`npm run test:test-node`, in CI).

@@ -227,5 +227,24 @@ test('fetchJson with noRedirect never follows a redirect; without it, it does (r
     assert.deepEqual(asked.map(u => new URL(u).hostname), ['first.example', 'elsewhere.example']);
   } finally { restore(); }
   const mainJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'main', 'main.js'), 'utf8');
-  assert.equal((mainJs.match(/netfetch\.fetchJson\(KEYUSES_BASE \+ [^\n]*, \{ noRedirect: true \}\)/g) || []).length, 2, 'both key audit handlers ask with noRedirect');
+  assert.equal((mainJs.match(/netfetch\.fetchJson\(KEYUSES_BASE \+ [^\n]*, \{ noRedirect: true[ ,}]/g) || []).length, 2, 'both key audit handlers ask with noRedirect');
+});
+
+// ---- 0.18.162: the key audit's reply may weigh at most 512 KB ----
+test('fetchJson opts.maxBytes drops a reply over it (never raises the 8 MB cap); the key audit asks for 512 KB', async () => {
+  stubDns([[{ address: '93.184.216.34', family: 4 }]]);
+  const body = Buffer.from(JSON.stringify({ keys: 'x'.repeat(600 * 1024) }));
+  const fake = (_u, _o, cb) => { const req = new EventEmitter(); req.end = () => {}; req.setTimeout = () => {}; req.destroy = () => {};
+    setImmediate(() => { const res = new EventEmitter(); res.resume = () => {}; res.statusCode = 200; res.headers = { 'content-type': 'application/json' }; cb(res);
+      for (let i = 0; i < body.length; i += 64 * 1024) res.emit('data', body.subarray(i, i + 64 * 1024)); res.emit('end'); });
+    return req; };
+  http.request = fake; https.request = fake;
+  try {
+    assert.equal(await netfetch.fetchJson('https://audit.example/keyaudit?keys=0xAB', { maxBytes: 512 * 1024 }), null, '600 KB over a 512 KB cap');
+    assert.ok(await netfetch.fetchJson('https://audit.example/keyaudit?keys=0xAB'), 'no cap asked: the 8 MB one');
+    assert.ok(await netfetch.fetchJson('https://audit.example/keyaudit?keys=0xAB', { maxBytes: 64 * 1024 * 1024 }), 'a larger cap is never granted, but 600 KB is under 8 MB');
+  } finally { restore(); }
+  const mainJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  assert.ok(/const KEYUSES_MAX_BYTES = 512 \* 1024;/.test(mainJs));
+  assert.equal((mainJs.match(/\{ noRedirect: true, maxBytes: KEYUSES_MAX_BYTES \}/g) || []).length, 2, 'both key audit handlers');
 });

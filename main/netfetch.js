@@ -113,7 +113,8 @@ function acquire() {
 function release() { active--; const next = queue.shift(); if (next) { active++; next(); } }
 
 // ---- capped GET (follows redirects, re-guarding each hop) -------------------
-function getCapped(urlStr, redirectsLeft, accept) {
+function getCapped(urlStr, redirectsLeft, accept, cap) {
+  const limit = cap > 0 && cap < MAX_BYTES ? cap : MAX_BYTES;   // a caller may ask for a SMALLER limit (fetchJson opts.maxBytes), never a larger one
   return new Promise((resolveRaw) => {
     // SETTLE EXACTLY ONCE, ALWAYS. Every caller holds a pool slot across this promise and releases it in a
     // `finally`, so a promise that never settles holds that slot for the life of the process — four of those
@@ -136,14 +137,14 @@ function getCapped(urlStr, redirectsLeft, accept) {
           res.resume();
           if (redirectsLeft <= 0) return resolve(null);
           const next = new URL(res.headers.location, u).toString();
-          return resolve(getCapped(next, redirectsLeft - 1, accept));
+          return resolve(getCapped(next, redirectsLeft - 1, accept, cap));
         }
         if (res.statusCode !== 200) { res.resume(); return resolve(null); }
         const ctype = String(res.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
         const chunks = []; let total = 0;
         res.on("data", d => {
           total += d.length;
-          if (total > MAX_BYTES) { req.destroy(); return resolve(null); }
+          if (total > limit) { req.destroy(); return resolve(null); }
           chunks.push(d);
         });
         res.on("end", () => resolve({ buf: Buffer.concat(chunks), ctype }));
@@ -195,7 +196,8 @@ async function fetchJson(url, opts) {
   await acquire();
   try {
     // opts.noRedirect (0.18.156): the key audit's host is pinned; a redirect would carry the keys in its query elsewhere
-    const r = await getCapped(url.trim(), opts && opts.noRedirect ? 0 : MAX_REDIRECTS, "application/json");
+    // opts.maxBytes (0.18.162, the key audit: 512 KB as the phone's AuditApi): a reply over it is dropped, not parsed
+    const r = await getCapped(url.trim(), opts && opts.noRedirect ? 0 : MAX_REDIRECTS, "application/json", opts && opts.maxBytes);
     if (!r || !r.buf || !r.buf.length) return null;
     try { return JSON.parse(r.buf.toString("utf8")); } catch (e) { return null; }
   } finally { release(); }

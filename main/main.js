@@ -227,16 +227,19 @@ ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
 // netfetch.fetchJson is capped + never throws, so an unreachable service just returns null (graceful degrade).
 const KEYUSES_BASE = "https://eurobuddha.com";
 const HEX_KEY = /^0x[0-9a-fA-F]{64}$/;         // 32-byte WOTS public key
+// The most one audit reply may weigh (the phone's AuditApi.MAX_BODY_BYTES): a /keyaudit row is under 450 bytes, so a
+// whole wallet's keys answer in well under it; a bigger reply is dropped, not parsed (0.18.162).
+const KEYUSES_MAX_BYTES = 512 * 1024;
 const HEX_ADDR = /^0x[0-9a-fA-F]{2,80}$/;      // Minima address — 0x + hex, generously bounded (hex-only, no metachars)
 ipcMain.handle("mcd:keyAudit", (_e, pubkeys) => {
   const list = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(k => HEX_KEY.test(k));
   if (!list.length) return null;
-  return netfetch.fetchJson(KEYUSES_BASE + "/keyaudit?keys=" + encodeURIComponent(list.join(",")), { noRedirect: true });
+  return netfetch.fetchJson(KEYUSES_BASE + "/keyaudit?keys=" + encodeURIComponent(list.join(",")), { noRedirect: true, maxBytes: KEYUSES_MAX_BYTES });
 });
 ipcMain.handle("mcd:keyReuse", (_e, addrs) => {
   const list = (Array.isArray(addrs) ? addrs : []).map(String).filter(a => HEX_ADDR.test(a));
   if (!list.length) return null;
-  return netfetch.fetchJson(KEYUSES_BASE + "/reuse?addrs=" + encodeURIComponent(list.join(",")), { noRedirect: true });
+  return netfetch.fetchJson(KEYUSES_BASE + "/reuse?addrs=" + encodeURIComponent(list.join(",")), { noRedirect: true, maxBytes: KEYUSES_MAX_BYTES });
 });
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
