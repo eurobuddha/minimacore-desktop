@@ -2601,11 +2601,15 @@
   "provided via the Wallet section (restore fast-syncs with megammrsync)": "通过“钱包”部分提供（恢复时使用 megammrsync 快速同步）",
   "provided via the Wallet section": "通过“钱包”部分提供",
   "free": "免费",
-  "It is public and permanent: anyone can read it, and it cannot be removed from the chain.": "它是公开且永久的：任何人都能读取，而且无法从链上删除。"
+  "It is public and permanent: anyone can read it, and it cannot be removed from the chain.": "它是公开且永久的：任何人都能读取，而且无法从链上删除。",
+  "{who} sent you": "{who} 向您发送了",
+  "{who} says they sent you": "{who} 称已向您发送",
+  "another token": "其他代币",
+  "{amount} of another token": "{amount} 个其他代币"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "Inter, sans-serif", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
-  // translated for the desktop (the phone has no such text): 1597 keys for native review
+  // translated for the desktop (the phone has no such text): 1601 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4203,6 +4207,10 @@
     "provided via the Wallet section (restore fast-syncs with megammrsync)",
     "provided via the Wallet section",
     "free",
-    "It is public and permanent: anyone can read it, and it cannot be removed from the chain."
+    "It is public and permanent: anyone can read it, and it cannot be removed from the chain.",
+    "{who} sent you",
+    "{who} says they sent you",
+    "another token",
+    "{amount} of another token"
   ]
 });

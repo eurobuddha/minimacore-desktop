@@ -28,8 +28,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function describe(p) {
     var t = token(p.tokenid), ok = p.status === "received";
     return {
-      head: !p.incoming ? I18N.t("You sent") : (p.who || I18N.t("They")) + (ok ? " sent you" : " says they sent you"),
-      amount: String(p.amount == null ? "" : p.amount), token: t.name,
+      head: !p.incoming ? I18N.t("You sent") : ok ? I18N.t("{who} sent you", { who: p.who || I18N.t("They") }) : I18N.t("{who} says they sent you", { who: p.who || I18N.t("They") }),
+      amount: String(p.amount == null ? "" : p.amount), token: t.known ? t.name : I18N.t("another token"),   // token().name stays English: it is compared
       tokenLine: t.known ? "" : (t.id ? I18N.t("Token id: {id}", { id: t.id }) : I18N.t("No token id was given")),
       state: !p.incoming ? "" : ok ? I18N.t("Received: this node found the payment to this wallet on chain")
         : I18N.t("Not verified: this node has not found this payment. Check your balance before relying on it."),
@@ -38,7 +38,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   }
   /** One line for a list row or a notification. Never the token id (a row is cut short; the bubble has it whole). */
   function preview(p) {
-    var t = token(p.tokenid), what = String(p.amount == null ? "" : p.amount) + (t.known ? " " + t.name : " of another token");
+    var t = token(p.tokenid), amount = String(p.amount == null ? "" : p.amount), what = t.known ? amount + " " + t.name : I18N.t("{amount} of another token", { amount: amount });
     return !p.incoming || p.status === "received" ? what : I18N.t("Payment notice, not verified: {what}", { what: what });
   }
   return { MINIMA: MINIMA, MXUSD: MXUSD, token: token, key: key, describe: describe, preview: preview };

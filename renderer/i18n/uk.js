@@ -2601,11 +2601,15 @@
   "provided via the Wallet section (restore fast-syncs with megammrsync)": "задається в розділі «Гаманець» (відновлення швидко синхронізується через megammrsync)",
   "provided via the Wallet section": "задається в розділі «Гаманець»",
   "free": "безкоштовно",
-  "It is public and permanent: anyone can read it, and it cannot be removed from the chain.": "Це публічно й назавжди: будь-хто може це прочитати, і видалити це з ланцюга неможливо."
+  "It is public and permanent: anyone can read it, and it cannot be removed from the chain.": "Це публічно й назавжди: будь-хто може це прочитати, і видалити це з ланцюга неможливо.",
+  "{who} sent you": "{who} надіслав(ла) вам",
+  "{who} says they sent you": "{who} стверджує, що надіслав(ла) вам",
+  "another token": "інший токен",
+  "{amount} of another token": "{amount} іншого токена"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "Inter, sans-serif", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "OK ·", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)"],
-  // translated for the desktop (the phone has no such text): 1597 keys for native review
+  // translated for the desktop (the phone has no such text): 1601 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4203,6 +4207,10 @@
     "provided via the Wallet section (restore fast-syncs with megammrsync)",
     "provided via the Wallet section",
     "free",
-    "It is public and permanent: anyone can read it, and it cannot be removed from the chain."
+    "It is public and permanent: anyone can read it, and it cannot be removed from the chain.",
+    "{who} sent you",
+    "{who} says they sent you",
+    "another token",
+    "{amount} of another token"
   ]
 });

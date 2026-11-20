@@ -56,6 +56,25 @@ test("a received payment is a claim until found: the words say so", () => {
   assert.equal(L.preview({ incoming: false, amount: "2", tokenid: "0x00" }), "2 MINIMA");
 });
 
+// 0.19.148: the head of a payment bubble was the name plus English words ("Mirela" + " sent you") in every language
+test("payment words in every language: the head, another token and the preview are said in the app's language; the figures and names are as given", () => {
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  try {
+    for (const code of ["en", "zh", "ru", "uk"]) {
+      I18N.set(code);
+      const found = L.describe({ incoming: true, who: "Mirela", amount: "12.5", tokenid: MXUSD, status: "received" }), claim = L.describe({ incoming: true, who: "Mallory", amount: "5000", tokenid: FAKE });
+      assert.equal(found.head, I18N.t("{who} sent you", { who: "Mirela" })); assert.equal(claim.head, I18N.t("{who} says they sent you", { who: "Mallory" }));
+      assert.equal(L.describe({ incoming: true, who: "", amount: "1", tokenid: MXUSD }).head, I18N.t("{who} says they sent you", { who: I18N.t("They") }));
+      assert.equal(claim.token, I18N.t("another token")); assert.equal(found.token, "MxUSD"); assert.equal(found.amount, "12.5");
+      assert.equal(L.token(FAKE).name, "another token", "the name token() gives is English in every language (it is compared)");
+      assert.equal(L.preview({ incoming: true, amount: "5000", tokenid: FAKE, status: "received" }), I18N.t("{amount} of another token", { amount: "5000" }));
+      assert.equal(L.preview({ incoming: true, amount: "5000", tokenid: MXUSD, status: "received" }), "5000 MxUSD");
+      if (code !== "en") for (const s of [found.head, claim.head, claim.token]) assert.ok(!/sent you|another token/.test(s), code + ": no English left: " + s);
+      assert.ok(found.head.includes("Mirela") && claim.head.includes("Mallory"), code + ": the name as given");
+    }
+  } finally { I18N.set("en"); }
+});
+
 test("check: received only when the transaction is on chain and pays this wallet exactly that amount of that token id", async () => {
   const ok = async (p, n) => V.check(Object.assign({ txid: TXID, tokenid: MXUSD, amount: "12.5" }, p), n.run);
   let n = nodeWith({ outputs: [out(MINE, MXUSD, "12.5"), out(THEIRS, MXUSD, "87.5")] });

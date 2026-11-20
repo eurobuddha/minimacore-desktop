@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.148] — Payment bubbles in Mail and Chat: "sent you" and "says they sent you" in every language
+
+- **Fixed (review of 0.19.140 to 0.19.144):** a payment bubble's head was the sender's name followed by English words ("Mirela" + " sent you" / " says they sent you") in every language. It is now two sentences with the name as a value: `{who} sent you` (this node found the payment) and `{who} says they sent you` (a claim not yet found). The words for a token that is neither MINIMA nor MxUSD ("another token", and "5000 of another token" in a list row or a notice) are translated too. The name `PayLabel.token()` gives stays English (code compares it); only what is shown changed. Amounts, names and token ids are as given.
+- New texts are listed for native review.
+- Test: `scripts/payverify-test.cjs` describes a found payment, a claim and another token in English, Chinese, Russian and Ukrainian and requires the language's words with the name and figures as given. It fails on the 0.19.147 code.
+
 ## [0.19.147] — Mail: the publish notice says "public and permanent" in every language, in the language on show
 
 - **Fixed (review of 0.19.140 to 0.19.144):** the one-time notice before Mail first publishes your six-word address left its safety sentence in English in every language ("It is public and permanent: anyone can read it, and it cannot be removed from the chain."): it was not wrapped and was in no catalog. It is now translated in 简体中文, Русский and Українська (new texts, listed for native review).
