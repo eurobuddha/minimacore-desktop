@@ -206,12 +206,16 @@ function routeIncoming(w, fromPublicId) {
   if (!w || w.from !== fromPublicId || !w.ref) return;   // envelope `from` must match the sealed sender (anti-spoof)
   if (typeof w.ref !== "string" || w.ref.length > 64) return;
   if (w.type === T.ORDER || w.type === T.INQUIRY) {
-    if (!store.shop(w.shopId)) return;   // only accept orders/enquiries for a shop I actually authored — else any coin to my identity could inject bogus orders + flush-amplify
+    const own = store.shop(w.shopId);
+    if (!own) return;   // only accept orders/enquiries for a shop I actually authored — else any coin to my identity could inject bogus orders + flush-amplify
+    // The token this order must be paid in is MY shop's, never the currency the buyer wrote (0.19.165, released 0.18.151):
+    // a buyer who wrote "Minima" on an order to an MxUSD shop had it marked paid by a payment in Minima.
+    const tokenid = tokenFor(own.currency);
     const isNew = store.upsertOrder({ ref: w.ref, role: "sell", counterparty: fromPublicId, buyerName: String(w.fromname || "").slice(0, 64),
-      shopId: w.shopId, shopName: (store.shop(w.shopId) || {}).shopName || String(w.shopName || ""), items: Array.isArray(w.items) ? w.items.slice(0, 40) : [], amount: String(w.amount || "0"), currency: w.currency === "USDT" ? "USDT" : "Minima",
-      tokenid: tokenFor(w.currency), shipping: String(w.shipping || "").slice(0, 200), delivery: String(w.delivery || "").slice(0, 500), buyerPayaddr: String(w.buyerPayaddr || "").slice(0, 90),
+      shopId: w.shopId, shopName: own.shopName || String(w.shopName || ""), items: Array.isArray(w.items) ? w.items.slice(0, 40) : [], amount: String(w.amount || "0"), currency: tokenid === MXUSD_TOKEN ? "USDT" : "Minima",
+      tokenid, shipping: String(w.shipping || "").slice(0, 200), delivery: String(w.delivery || "").slice(0, 500), buyerPayaddr: String(w.buyerPayaddr || "").slice(0, 90),
       status: w.type === T.INQUIRY ? "INQUIRY" : "PENDING", paid: false, date: Number(w.date) || Date.now(), unread: true, note: String(w.message || "").slice(0, 1000) });
-    if (isNew) emitter.emit("incoming", { ref: w.ref, shopName: w.shopName, amount: w.amount, currency: w.currency });
+    if (isNew) emitter.emit("incoming", { ref: w.ref, shopName: own.shopName, amount: w.amount, currency: tokenid === MXUSD_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {
     const o = store.order(w.ref);
     if (o && o.role === "buy" && o.counterparty === fromPublicId) store.setStatus(w.ref, w.status);   // only the vendor I bought from can advance MY buy order

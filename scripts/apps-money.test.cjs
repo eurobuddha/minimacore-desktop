@@ -337,8 +337,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   assert.match(mall, /idHtml\(shopIdentity\.publicId\)/);
   const sha = (f) => require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", f))).digest("hex");
   // Each pin is a file CHANGED ON PURPOSE, never by a screen change: main/shop.js in 0.19.118 (the token paid follows the currency; a
-  // mismatching tokenid is refused; plain amounts); main/shop-store.js in 0.19.164 (an unreadable, zero or negative buyer total is never paid: BAD_TOTAL)
-  for (const [f, want, ver] of [["main/shop.js", "d90041499905001e1565c0bd60ed86b5042770cfadf5fc5eff7b2f81d832123c", "0.19.118"], ["main/shop-store.js", "eac6a80c8b10d7e16ea0876eaae743e62e68a561d795b88b977385b3e2f4a491", "0.19.164"],
+  // mismatching tokenid is refused; plain amounts) and 0.19.165 (an incoming order is paid in the token of the vendor's own shop); main/shop-store.js in 0.19.164 (an unreadable, zero or negative buyer total is never paid: BAD_TOTAL)
+  for (const [f, want, ver] of [["main/shop.js", "1e3dfc57dab27e5dcb8b5ed2b7ba4ec244f9ad0b16723a8a3cae47d31b36fcda", "0.19.165"], ["main/shop-store.js", "eac6a80c8b10d7e16ea0876eaae743e62e68a561d795b88b977385b3e2f4a491", "0.19.164"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

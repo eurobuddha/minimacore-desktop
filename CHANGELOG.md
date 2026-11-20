@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.165] — miniMall vendor: an order is paid in the token of the vendor's own shop
+
+- **Ported from the released desktop (read only):** `desktop/minimacore-desktop-sec` 0.18.151 (`dc757ddc7c90d24ea3d40a1a1b100612fdfb909b`). `routeIncoming` in `main/shop.js` took the token an incoming order must be paid in from the currency the BUYER wrote (`tokenFor(w.currency)`), so an order to an MxUSD shop that said "Minima" was marked paid by a payment in Minima.
+- **Now:** the token and the currency come from the vendor's own stored shop (`tokenFor(own.currency)`), and so does the shop's name on the order and in the notice; the notice says MxUSD, never USDT. The wire value "USDT" in the stored order is unchanged.
+- **Pin:** `main/shop.js` is sha256-pinned in `scripts/apps-money.test.cjs`; the pin is updated on purpose to this file.
+- Test: `scripts/shop-store-test.cjs` runs the real `main/shop.js` over the real store (stand-in crypto and node): an order to an MxUSD shop that says Minima is stored as MxUSD, keeps the vendor's shop name, and 5 Minima leaves it `WRONG_TOKEN`, not paid. It fails on 0.19.164.
+
 ## [0.19.164] — miniMall vendor: a malformed, zero or negative buyer total is never paid
 
 - **Ported from the released desktop (read only):** `desktop/minimacore-desktop-sec` 0.18.149 (`7d73315f6420a515f5b9e04c50983663f20f7830`). `main/shop-store.js` `decCmp` answered 0 ("equal") for a figure it could not read, so an incoming order whose total the buyer wrote as "abc" or "1e3" counted as paid by any coin; a total of 0 or below was accepted too.
