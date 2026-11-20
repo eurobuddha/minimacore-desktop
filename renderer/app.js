@@ -367,7 +367,7 @@ function showSetup() {
       const keyuses = parseInt(el("rKeyuses").value, 10);
       host = el("rHost").value.trim() || CFG.megammrHost;
       if (!seed) { toast("Enter your seed phrase."); return; }
-      if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
+      if (/["\\;]/.test(seed)) { toast("This seed contains a \", \\ or ; the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
       if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
       if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
       if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
@@ -498,7 +498,7 @@ function showRestoreOverlay() {
     const keyuses = parseInt(el("orKeyuses").value, 10);
     const host = el("orHost").value.trim() || CFG.megammrHost;
     if (!seed) { toast("Enter your seed phrase."); return; }
-    if (/["\\]/.test(seed)) { toast("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
+    if (/["\\;]/.test(seed)) { toast("This seed contains a \", \\ or ; the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
     if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
     if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
     if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
@@ -675,7 +675,7 @@ function renderWwUnlock(body) {
     // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard (app.js:2784).
     const seed = String(el("wwSeedIn").value || "").trim();
     if (!seed) { toast("Enter your seed phrase.", "err"); return; }
-    if (/["\\\n\r\t]/.test(seed)) { toast("Seed has a \", \\ or line break the command can't carry — enter it as one clean line.", "err"); return; }
+    if (/["\\;\n\r\t]/.test(seed)) { toast("Seed has a \", \\, ; or line break the command can't carry — enter it as one clean line.", "err"); return; }
     const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = "Deriving…";
     try {
       wwAddr = await api.wwDerive(seed);
@@ -2082,15 +2082,15 @@ async function renderSettings() {
       const phrase = el("setResyncPhrase").value.trim(), keyuses = el("setResyncKeyuses").value.trim();
       const keys = el("setResyncKeys").value.trim(), file = el("setResyncFile").value.trim(), password = el("setResyncPassword").value;
       if (phrase) {
-        if (/["\\\n\r\t]/.test(phrase)) { toast("Seed phrase has a \", \\ or line break the command can't carry.", "err"); return; }
+        if (/["\\;\n\r\t]/.test(phrase)) { toast("Seed phrase has a \", \\, ; or line break the command can't carry.", "err"); return; }
         if (!/^\d+$/.test(keyuses)) { toast("Enter key-uses when providing a seed (0 if brand new) — reusing WOTS keys can lose funds.", "err"); return; }
         cmdStr += ` phrase:"${phrase}"` + (el("setResyncAnyphrase").checked ? " anyphrase:true" : "");
         resetsWallet = true;
       }
       if (keyuses) { if (!/^\d+$/.test(keyuses)) { toast("Key-uses must be a whole number.", "err"); return; } cmdStr += ` keyuses:${keyuses}`; }
       if (keys) { if (!/^\d+$/.test(keys)) { toast("Keys must be a whole number.", "err"); return; } cmdStr += ` keys:${keys}`; }
-      if (file) { if (/[\s"\\]/.test(file)) { toast("File path can't contain spaces or quotes.", "err"); return; } cmdStr += ` file:${file}`; }
-      if (password) { if (/[\s"\\]/.test(password)) { toast("Password can't contain spaces or quotes.", "err"); return; } cmdStr += ` password:${password}`; }
+      if (file) { if (/[\s"\\;]/.test(file)) { toast("File path can't contain spaces, quotes or ;.", "err"); return; } cmdStr += ` file:${file}`; }
+      if (password) { if (/[\s"\\;]/.test(password)) { toast("Password can't contain spaces, quotes or ;.", "err"); return; } cmdStr += ` password:${password}`; }
     }
     const warn = resetsWallet
       ? "⚠ This RESETS your wallet to the entered seed (regenerates keys, sets key-uses). Continue?"
@@ -2111,7 +2111,7 @@ async function renderSettings() {
     // A `"` closes password:"…" early, so the node encrypted the backup under a DIFFERENT password than the
     // one typed and reported success — the user only finds out when a restore fails, with funds behind it.
     // The resync handler forty lines up already guards its password this way; this one didn't.
-    if (/["\\]/.test(pw) || /[\n\r\t]/.test(pw)) {
+    if (/["\\;]/.test(pw) || /[\n\r\t]/.test(pw)) {
       toast("Backup password can't contain a \" or \\ or a line break — the node can't carry it safely.", "err"); return;
     }
     try { await cmd(`backup password:"${pw}"`); toast("Encrypted backup written to the node data folder ✓", "ok"); }

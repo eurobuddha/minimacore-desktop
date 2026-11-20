@@ -84,3 +84,16 @@ test("miniMall Studio shows the vendor id and address whole and copyable", () =>
   assert.ok(app.includes('<div class="mono shop-card" style="overflow-wrap:anywhere">${idHtml(d.vendorPublicId || "")} | ${idHtml(d.vendorAddress || "")}</div>'));
   assert.ok(!/vendorPublicId \|\| ""\)\.slice\(/.test(app));
 });
+
+// ---- 0.18.178: the screens that put typed text into a node command refuse ";" (the node starts a second command there) ----
+test("restore, resync, Web Wallet and backup screens refuse ';' in a seed, a file path or a password", () => {
+  const BS = String.fromCharCode(92), count = (s) => app.split(s).length - 1;
+  const checks = [
+    ["if (/[\"" + BS + BS + ";]/.test(seed))", 2, "both restore screens"],
+    ["if (/[\"" + BS + BS + ";" + BS + "n" + BS + "r" + BS + "t]/.test(seed))", 1, "Web Wallet unlock"],
+    ["if (/[\"" + BS + BS + ";" + BS + "n" + BS + "r" + BS + "t]/.test(phrase))", 1, "Settings resync phrase"],
+    ["if (/[" + BS + "s\"" + BS + BS + ";]/.test(file))", 1, "resync file"], ["if (/[" + BS + "s\"" + BS + BS + ";]/.test(password))", 1, "resync password"],
+    ["if (/[\"" + BS + BS + ";]/.test(pw)", 1, "backup password"]];
+  for (const [text, n, what] of checks) assert.equal(count(text), n, what + ": " + text);
+  const seedRe = new RegExp("[\"" + BS + BS + ";]"); for (const s of ["apple; vault", 'a"b', "a" + BS + "b"]) assert.ok(seedRe.test(s)); assert.ok(!seedRe.test("apple banana cherry"));
+});

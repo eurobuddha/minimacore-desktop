@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.178] — screens refuse ; in typed text that goes into a node command
+
+- The two restore screens (seed), the Web Wallet unlock (seed), the Settings resync (phrase, file, password) and the backup password put typed text into a node command through the Terminal's channel, where chains are allowed; a ";" in them started a second command. Each now refuses ";" with the quote and backslash it already refused. Test: `scripts/webwallet-ui-test.cjs`.
+
 ## [0.18.177] — a command the app builds is one command
 
 - The node splits a command text on every ";", even inside quotes and JSON. A Web Wallet "seed" pasted with a ";" put a second command after `keys action:genkey phrase:"…"`; a Vestr contract coin (anyone can make one that names this wallet) whose state held a ";" did the same through `runscript … prevstate:` and `txnstate`; a peer's chat media ref (`keets://\\S+`) through `keets action:fetch`; a Vestr password through `send password:"…"`. `main/rpc.js` `oneCommand` now refuses any ";" and every command Mail, miniMall, Chat, Vestr and the Web Wallet build goes through it (nothing is sent); the Web Wallet phrase check also refuses ";" and DEL (any other phrase still passes: anyphrase); a media ref is `keets://` + path characters only. The Terminal's own chains (mcd:cmd) and the AtomiX, PandaPools and casino engines (their own `txnbasics;txnpost`) are not changed. Test: `scripts/inject-test.cjs` (`npm run test:inject`, in CI).
