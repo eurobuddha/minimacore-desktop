@@ -241,7 +241,7 @@ test("collect by hand is refused: not matured, not ours, at risk, no audit, malf
   const { e, node } = await audited({ at });
   e._store().kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY1]));
   node.sent.length = 0;
-  assert.match((await e.collectNow(ID(1))).error, /Not matured yet — unlocks at block 999 \(now 150\)/);
+  assert.match((await e.collectNow(ID(1))).error, /Not matured yet: unlocks at block 999 \(now 150\)/);
   assert.match((await e.collectNow(ID(2))).error, /doesn't pay out to this node/);
   assert.match((await e.collectNow(ID(3))).error, /at-risk address/);
   assert.match((await e.collectNow("0x12;send")).error, /Not a valid coin id/);
@@ -561,4 +561,19 @@ test("the screens: every action that moves coins is asked first, every call is a
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(/\{ id: "ethwallet", [^\n]+\n  \{ id: "futurecash", name: "Future Cash Next", icon: "icons\/futurecash\.svg" \}/.test(app), "the tray row after ETH Wallet, with the ported icon");
   assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "icons", "futurecash.svg"), "utf8").includes('fill="#F7931A"'));
+});
+
+test("what the engine says to the screens is listed (mainsaid FC_*), each template still in main/futurecash.js, and said in zh, ru and uk", async () => {
+  const I18N = require("../renderer/i18n.js"); for (const c of ["en", "zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const MS = require("../renderer/mainsaid.js"), src = ["futurecash.js", "futurecash-store.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "main", f), "utf8")).join("\n");
+  const codes = MS.codes().filter(c => /^FC_/.test(c)); assert.ok(codes.length >= 50);
+  for (const c of codes) for (const part of MS.template(c).split(/\{\w+\}/).filter(p => p.length > 12)) assert.ok(src.includes(part), c + ": " + part);
+  const said = [];
+  const { e } = await audited({ at: { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 999 }), stake(2, STRANGER, { mature: 1 })] } });
+  said.push((await e.collectNow(ID(1))).error, (await e.collectNow(ID(2))).error, (await e.collectNow("x")).error, (await e.lock("0", 72, "")).error, (await e.lock("1", 72, "Mx1")).error, (await e.setSafeExternal("x")).error, (await e.retire(PAY0)).error);
+  for (const m of said) {
+    I18N.set("en"); assert.ok(MS.read(m), "listed: " + m); assert.equal(MS.say(m), m);
+    for (const c of ["zh", "ru", "uk"]) { I18N.set(c); assert.notEqual(MS.say(m), m, c + ": " + m); }
+  }
+  I18N.set("en");
 });

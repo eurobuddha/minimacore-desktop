@@ -315,7 +315,7 @@ function create(o) {
     if (next === prev) return;
     kv().set(K.SAFE_REUSED, next);
     if (!next) activity("info", "Safe destination re-checked and clean");
-    else activity("error", "Your SAFE destination is a REUSED address (signed " + count + "x) — rescuing there would move your money onto another exposed key. Set a fresh safe address. | address:" + addr);
+    else activity("error", "Your SAFE destination is a REUSED address (signed " + count + "x): rescuing there would move your money onto another exposed key. Set a fresh safe address. | address:" + addr);
   }
   function safeReused() { try { const o2 = JSON.parse(kv().get(K.SAFE_REUSED, "") || "null"); return o2 && o2.addr ? { addr: String(o2.addr), count: Number(o2.count) || 0 } : null; } catch (e) { return null; } }
   function safeIsReused(safe) { const b = safeReused(); return !!(b && safe && canon(b.addr) === canon(safe)); }
@@ -404,7 +404,7 @@ function create(o) {
     const cached = kv().get(K.SCRIPT_ADDRESS, null);
     if (cached) {
       const row = await scriptRow(cached);
-      if (row && row.track === true) { activity("warn", "Repairing contract registration — this node was tracking every FutureCash/Maximize stake on the chain, not just yours"); return registerNow(); }
+      if (row && row.track === true) { activity("warn", "Repairing contract registration: this node was tracking every FutureCash/Maximize stake on the chain, not just yours"); return registerNow(); }
       if (row) return cached;
       return registerNow();
     }
@@ -499,12 +499,12 @@ function create(o) {
           if (!v.ok) {
             activity("error", "Refused by the sign gate before " + verb + ": " + v.why + " | coin:" + plan.coinid);
             log("SIGN GATE REFUSED " + verb + " of " + id + ": " + v.why + "; plan " + JSON.stringify(Object.assign({}, plan, { own: undefined, mayMove: undefined })) + "; the node's transaction " + JSON.stringify(txn || t));
-            return { ok: false, error: "Refused before signing: " + v.why + ". Nothing was " + (verb === "txnsign" ? "signed" : "posted") + ".", refused: true };
+            return { ok: false, error: "Refused before signing: " + v.why + (verb === "txnsign" ? ". Nothing was signed." : ". Nothing was posted."), refused: true };
           }
         }
         const r = await call(c);
         if (r == null) return { ok: false, error: "Minima Core didn't respond (at " + verb + ")" };
-        if (typeof r.status !== "boolean") return { ok: false, error: "Couldn't read Minima Core's reply to " + verb + " — it may have succeeded. Check the Activity log before retrying." };
+        if (typeof r.status !== "boolean") return { ok: false, error: "Couldn't read Minima Core's reply to " + verb + ": it may have succeeded. Check the Activity log before retrying." };
         if (r.pending === true) return { ok: false, error: "The embedded node did not authorize the request. Check its status before retrying.", notPaired: true };
         if (r.status !== true) return { ok: false, error: (r.error ? String(r.error) : "failed") + " (at " + verb + ")" };
       }
@@ -514,10 +514,10 @@ function create(o) {
   /** Tx.checkParts: nothing malformed reaches a command (a coin at the shared contract carries anyone's state). */
   function parts(coinid, address, amount, tokenid) {
     if (!HEX64.test(String(coinid))) return "Refusing to spend a malformed coin id.";
-    if (!validAddr(address)) return "This payment's destination looks malformed — refusing.";
-    if (!/^0x[0-9a-fA-F]{2,64}$/.test(String(tokenid))) return "This payment's token id looks malformed — refusing.";
-    if (!AMOUNT.test(String(amount))) return "This payment's amount looks malformed — refusing.";
-    if (toUnits(amount) === 0n) return "Refusing to post a zero-amount output — the coin's amount didn't parse.";
+    if (!validAddr(address)) return "This payment's destination looks malformed: refusing.";
+    if (!/^0x[0-9a-fA-F]{2,64}$/.test(String(tokenid))) return "This payment's token id looks malformed: refusing.";
+    if (!AMOUNT.test(String(amount))) return "This payment's amount looks malformed: refusing.";
+    if (toUnits(amount) === 0n) return "Refusing to post a zero-amount output: the coin's amount didn't parse.";
     return "";
   }
   /** Tx.collect: no signature (the contract pins the payout); create, input, output, basics, post. */
@@ -538,13 +538,13 @@ function create(o) {
     const t = await tip(), r = await call("coins coinid:" + coinid);
     if (!ok(r) || !Array.isArray(r.response)) return err("Could not read the complete stake list. Refresh and retry.");
     const coin = r.response.find(c => c && lc(c.coinid) === lc(coinid) && c.spent !== true);
-    if (!coin) return err("Stake not found — it may already be collected.");
+    if (!coin) return err("Stake not found: it may already be collected.");
     if (!isStake(coin, contracts())) return err("Not a FutureCash stake.");
-    if (!matured(coin, t)) return err("Not matured yet — unlocks at block " + state(coin, ST_FUTUREBLOCK) + " (now " + t + ").");
+    if (!matured(coin, t)) return err("Not matured yet: unlocks at block " + state(coin, ST_FUTUREBLOCK) + " (now " + t + ").");
     const payout = state(coin, ST_RECIPIENT), sets = await scriptTable(false);
-    if (!owns(sets, payout)) return err("That stake doesn't pay out to this node — it isn't yours to collect.");
+    if (!owns(sets, payout)) return err("That stake doesn't pay out to this node: it isn't yours to collect.");
     loadAtRisk(sets);
-    if (atRisk.has(canon(payout))) return err("This stake pays out to an at-risk address — the Guardian rescues it with collect + sweep instead. Set up rescue on the Guardian tab.");
+    if (atRisk.has(canon(payout))) return err("This stake pays out to an at-risk address: the Guardian rescues it with collect + sweep instead. Set up rescue on the Guardian tab.");
     if (!(await verdict()).ok) return Object.assign(err("Run a key audit first, then collect."), { stop: true });
     const amount = outAmount(coin), tokenid = String(coin.tokenid || "0x00"), id = String(coin.coinid);
     // recorded as posted BEFORE the post (an atomic claim): a pass running next sees it, and Quit, Freeze and a wallet
@@ -595,7 +595,7 @@ function create(o) {
       }
       if (t - row.collectBlock >= RETRY_BLOCKS) {
         store.setCollectStatus(row.coinid, S.DETECTED);
-        if (row.attempts === MAX_ATTEMPTS) { notify("Future Cash", "A collection keeps failing — check this node"); activity("error", "Collect still failing after " + row.attempts + " tries | stake:" + row.coinid + " | to:" + row.payout); }
+        if (row.attempts === MAX_ATTEMPTS) { notify("Future Cash", "A collection keeps failing: check this node"); activity("error", "Collect still failing after " + row.attempts + " tries | stake:" + row.coinid + " | to:" + row.payout); }
         else activity("warn", "Collect retry scheduled | stake:" + row.coinid + " | to:" + row.payout);
       }
     }
@@ -647,14 +647,14 @@ function create(o) {
       const a = String(addr == null ? "" : addr).trim();
       if (!validMx(a) || !mxToHex(a)) return { ok: false, error: "Not a valid Mx address (must start with Mx)." };
       const count = await reuseOf(a);
-      if (count > 0) return { ok: false, error: "That address has already signed " + count + " time(s) — its key is reused. Sweeping your rescued money there would move it onto another exposed key. Use a fresh address from a clean wallet." };
+      if (count > 0) return { ok: false, error: "That address has already signed " + count + " time(s): its key is reused. Sweeping your rescued money there would move it onto another exposed key. Use a fresh address from a clean wallet." };
       const local = "That address belongs to THIS node. Use an EXTERNAL wallet (a different node/seed) with fresh keys.";
       const sets = await scriptTable(true);
       if (sets.tracked.has(canon(a)) || hasOwnKey(await scriptRow(a))) return { ok: false, error: local };
       kv().set(K.SAFE_MODE, "external"); kv().set(K.SAFE_ADDRESS, a);
       setSafeReused("", 0);   // a flag of the previous destination described that one, not this
       kv().setBool(K.ENABLED, true);
-      activity("info", (count === 0 ? "Safe address set (external), verified clean" : "Safe address set (external) — reuse check UNVERIFIED, will re-check") + " | address:" + a);
+      activity("info", (count === 0 ? "Safe address set (external), verified clean" : "Safe address set (external): reuse check UNVERIFIED, will re-check") + " | address:" + a);
       activity("info", "At-risk rescue ENABLED");
       return { ok: true, value: a, verified: count === 0 };
     });
@@ -666,7 +666,7 @@ function create(o) {
     return exclusive(async () => {
       if (!store) return { ok: false, error: "Future Cash Next has not started yet." };
       if (!on) { kv().setBool(K.GUARDIAN_ON, false); activity("info", "Guardian stopped"); return { ok: true }; }
-      if (!rescueReady()) return { ok: false, needsRescue: true, error: "Pick where rescued funds should go — the guardian needs a destination." };
+      if (!rescueReady()) return { ok: false, needsRescue: true, error: "Pick where rescued funds should go: the guardian needs a destination." };
       if (!granted()) return { ok: false, needsGrant: true, error: "Background signing is not allowed on this computer." };
       kv().setBool(K.GUARDIAN_ON, true); activity("info", "Guardian started");
       return { ok: true };
@@ -722,9 +722,9 @@ function create(o) {
       if (!store.claimForPost(row.coinid, bareSafe ? S.COLLECT_POSTED_SAFE : S.COLLECT_POSTED, t)) continue;
       const res = await collectTx(row.coinid, row.payout, row.amount, row.tokenid, sets);
       if (res.ok) {
-        notify("Future Cash", "Collecting matured " + row.amount + (bareSafe ? "" : " — will sweep to safe"));
+        notify("Future Cash", "Collecting matured " + row.amount + (bareSafe ? "" : ": will sweep to safe"));
         activity("info", "Collecting " + row.amount + (bareSafe ? " [safe]" : " [rescue]") + " | stake:" + row.coinid + " | to:" + row.payout);
-      } else activity("error", "Collect post failed | stake:" + row.coinid + " | to:" + row.payout + " — " + res.error);
+      } else activity("error", "Collect post failed | stake:" + row.coinid + " | to:" + row.payout + ": " + res.error);
       if (res.refused) store.setCollectStatus(row.coinid, S.DETECTED);
     }
   }
@@ -752,19 +752,19 @@ function create(o) {
         claimed.add(lc(c.coinid));
         store.insertSweep(String(c.coinid), addr, String(c.tokenid || "0x00"), outAmount(c));
         syncHolds();
-        activity("info", "Stranded " + outAmount(c) + " | coin:" + c.coinid + " | on retired:" + addr + " — queued to sweep to safe");
+        activity("info", "Stranded " + outAmount(c) + " | coin:" + c.coinid + " | on retired:" + addr + ": queued to sweep to safe");
       }
     }
   }
   async function sweepPending(t, safe, sets, budget) {
     for (const row of store.sweeps(S.PENDING)) {
       const key = await signKeyFor(row.address);
-      if (!owns(sets, row.address) || !key) { activity("error", "Can't sweep — no signing key for this address on this node | coin:" + row.coinid + " | on:" + row.address); continue; }
+      if (!owns(sets, row.address) || !key) { activity("error", "Can't sweep: no signing key for this address on this node | coin:" + row.coinid + " | on:" + row.address); continue; }
       if (budget.posts-- <= 0) return;
       if (!store.claimSweepForPost(row.coinid, t)) continue;
       const res = await sweepTx(row.coinid, row.address, safe, row.amount, row.tokenid, key, sets);
       if (res.ok) activity("info", "Sweeping " + row.amount + " | coin:" + row.coinid + " | from:" + row.address + " | to:" + safe);
-      else { activity("error", "Sweep post failed | coin:" + row.coinid + " | from:" + row.address + " — " + res.error); if (res.refused) store.setSweepStatus(row.coinid, S.PENDING, null); }
+      else { activity("error", "Sweep post failed | coin:" + row.coinid + " | from:" + row.address + ": " + res.error); if (res.refused) store.setSweepStatus(row.coinid, S.PENDING, null); }
       syncHolds();
     }
   }
@@ -790,7 +790,7 @@ function create(o) {
       const st = await coinState(row.coinid);
       if (st === "GONE") {   // the collect that made this coin was rolled back: nothing swept, nothing stolen
         store.deleteSweep(row.coinid);
-        activity("warn", "Sweep abandoned — the collected coin was rolled back by a chain reorg; the stake will be collected again | coin:" + row.coinid + " | on:" + row.address);
+        activity("warn", "Sweep abandoned: the collected coin was rolled back by a chain reorg; the stake will be collected again | coin:" + row.coinid + " | on:" + row.address);
         continue;
       }
       if (st === "SPENT") {
@@ -799,20 +799,20 @@ function create(o) {
         if (a.coinid) { markSwept(row, a.coinid, safe, t); continue; }
         if (a.reliable && t - row.sweepBlock >= VERIFY_GRACE) {
           store.setSweepStatus(row.coinid, S.TAKEN, null);
-          notify("Future Cash ⚠️", "A collected stake (" + row.amount + ") was spent but did NOT reach your safe address. Your old key may be compromised — check now.");
-          activity("error", "⚠️ ALERT: a collected stake was spent but NOT seen at your safe — check for key-reuse loss | coin:" + row.coinid + " | from:" + row.address);
+          notify("Future Cash ⚠️", "A collected stake (" + row.amount + ") was spent but did NOT reach your safe address. Your old key may be compromised: check now.");
+          activity("error", "⚠️ ALERT: a collected stake was spent but NOT seen at your safe: check for key-reuse loss | coin:" + row.coinid + " | from:" + row.address);
           continue;
         }
         if (!a.reliable && t - row.sweepBlock >= VERIFY_MAX) {
           store.setSweepStatus(row.coinid, S.SWEPT, "unverified");
-          notify("Future Cash", "A stake was spent but the node couldn't confirm it reached your safe address — please verify it arrived.");
-          activity("warn", "Sweep spent but UNVERIFIED — please check it arrived | coin:" + row.coinid + " | from:" + row.address);
+          notify("Future Cash", "A stake was spent but the node couldn't confirm it reached your safe address: please verify it arrived.");
+          activity("warn", "Sweep spent but UNVERIFIED: please check it arrived | coin:" + row.coinid + " | from:" + row.address);
         }
         continue;
       }
       if (t - row.sweepBlock >= RETRY_BLOCKS) {
         store.setSweepStatus(row.coinid, S.PENDING, null);
-        if (row.attempts === MAX_ATTEMPTS) { notify("Future Cash", "A sweep keeps failing — funds still on an exposed address. Is your vault unlocked?"); activity("error", "Sweep still failing after " + row.attempts + " tries | coin:" + row.coinid + " | from:" + row.address); }
+        if (row.attempts === MAX_ATTEMPTS) { notify("Future Cash", "A sweep keeps failing: funds still on an exposed address. Is your vault unlocked?"); activity("error", "Sweep still failing after " + row.attempts + " tries | coin:" + row.coinid + " | from:" + row.address); }
         else activity("warn", "Sweep retry scheduled | coin:" + row.coinid + " | from:" + row.address);
       }
     }
@@ -863,16 +863,16 @@ function create(o) {
       if (!store) return err("Future Cash Next has not started yet.");
       if (!validAddr(addr)) return err("Invalid address.");
       if (!running()) return err("Start the guardian first: a retired address can still be paid, and only the running guardian moves what arrives there to your safe address.");
-      if (await addressHasStakes(addr)) return err("Stakes still pay out to this address — they'd land here when they mature and get stuck on the nulled key. Leave it live; the guardian keeps sweeping.");
+      if (await addressHasStakes(addr)) return err("Stakes still pay out to this address: they'd land here when they mature and get stuck on the nulled key. Leave it live; the guardian keeps sweeping.");
       const row = await scriptRow(addr);
       if (!row) return err("Address not found on this node.");
       if (row.default !== true) return err("Not an active default change address (already retired, or not one of yours).");
       const script = String(row.script || "");
-      if (!/^RETURN SIGNEDBY\(0x[0-9a-fA-F]{64}\)$/i.test(script.replace(/\s+/g, " ").trim()) || script.includes('"')) return err("Unexpected script for a default address — not retiring.");
+      if (!/^RETURN SIGNEDBY\(0x[0-9a-fA-F]{64}\)$/i.test(script.replace(/\s+/g, " ").trim()) || script.includes('"')) return err("Unexpected script for a default address: not retiring.");
       let flagged = []; try { flagged = JSON.parse(kv().get(K.ATRISK_ADDRS, "[]")); } catch (e) {}
       if (!(Array.isArray(flagged) ? flagged : []).some(a => canon(a) === canon(row.address))) return err("Only an address the key audit found at risk is retired here.");
       const hex = String(row.address), r = await call("coins address:" + hex);
-      if (!ok(r) || !Array.isArray(r.response)) return err("Couldn't check this address's coins right now — try again in a moment.");
+      if (!ok(r) || !Array.isArray(r.response)) return err("Couldn't check this address's coins right now: try again in a moment.");
       const unspent = r.response.filter(c => c && c.spent !== true).length;
       if (unspent > 0) return err("This address still holds " + unspent + " coin(s). Sweep them to safety first (they're on an exposed key), then retire it.");
       const sets = await scriptTable(true), defaults = sets.rows.filter(x => x && x.default === true).length;
@@ -882,9 +882,9 @@ function create(o) {
       if (n && n.pending === true) return err("The embedded node did not authorize the request. Check its status before retrying.");
       if (!ok(n)) return err((n && n.error) || "command failed");
       const v = await scriptRow(hex);
-      if (v && v.default === true) return err("Retire didn't take effect — the address is still a default.");
+      if (v && v.default === true) return err("Retire didn't take effect: the address is still a default.");
       store.addRetired(hex, String(row.miniaddress || ""), script, lastTip);
-      activity("info", "Retired a reused default address — off the change rotation, kept watch-only | address:" + hex);
+      activity("info", "Retired a reused default address: off the change rotation, kept watch-only | address:" + hex);
       return { ok: true, value: hex };
     });
   }
@@ -896,7 +896,7 @@ function create(o) {
     if (!row) { rep.error = "Address not found on this node."; return rep; }
     if (!(row.publickey && row.publickey !== "0x00") && !/SIGNEDBY\(/i.test(String(row.script || ""))) { rep.error = "That isn't one of your signable addresses."; return rep; }
     const from = String(row.address), key = await signKeyFor(from);
-    if (!key) { rep.error = "This node has no signing key for that address — it can't be swept from here."; return rep; }
+    if (!key) { rep.error = "This node has no signing key for that address: it can't be swept from here."; return rep; }
     const sets = await scriptTable(true); loadAtRisk(sets);
     if (!atRisk.has(canon(from))) { rep.error = "Only an address the key audit found at risk, or a retired one, is swept here."; return rep; }
     const dest = await sweepDestination();
@@ -914,7 +914,7 @@ function create(o) {
       else {
         store.deleteSweep(id); syncHolds();
         if (r.notPaired) { rep.error = r.error; return rep; }
-        rep.failed++; rep.error = r.error; activity("warn", "Couldn't sweep | coin:" + id + " | on:" + from + " — " + r.error);
+        rep.failed++; rep.error = r.error; activity("warn", "Couldn't sweep | coin:" + id + " | on:" + from + ": " + r.error);
       }
     }
     rep.ok = rep.swept > 0 || (!rep.failed && !rep.error);
@@ -1000,7 +1000,7 @@ function create(o) {
         let canSweep = false, vault = false;
         if (go && rescueOn && safe && safeUsable(safe, sets)) {
           vault = await vaultLocked();
-          if (vault) { if (!lockSaid) { lockSaid = true; activity("warn", "Vault locked — rescue paused until you unlock it"); } }
+          if (vault) { if (!lockSaid) { lockSaid = true; activity("warn", "Vault locked: rescue paused until you unlock it"); } }
           else { lockSaid = false; canSweep = true; }
         }
         vaultWasLocked = vault;
@@ -1009,8 +1009,8 @@ function create(o) {
           if (!offSaid) {
             offSaid = true;
             const why = badSafe ? "your safe destination is flagged as a REUSED address" : !safe ? "no safe destination is set" : "your safe destination is no longer usable";
-            activity("error", "Rescue is OFF — " + why + ". At-risk stakes will be left locked in the contract (safe, but not collected) until you fix it.");
-            notify("Future Cash: rescue is off", "The guardian can't move an at-risk stake to safety — " + why + ".");
+            activity("error", "Rescue is OFF: " + why + ". At-risk stakes will be left locked in the contract (safe, but not collected) until you fix it.");
+            notify("Future Cash: rescue is off", "The guardian can't move an at-risk stake to safety: " + why + ".");
           }
         } else offSaid = false;
         if (go) await collectMatured(t, seen, kv().is(K.AUTO_COLLECT_SAFE, false), rescueOn, (await verdict()).ok, canSweep && !badSafe, sets, budget);
@@ -1021,7 +1021,7 @@ function create(o) {
         await reconcileSweeps(t, safe, budget);
         syncHolds();
         return true;
-      } catch (e) { activity("error", "Guardian pass failed — will retry next block: " + ((e && e.message) || e)); return false; }
+      } catch (e) { activity("error", "Guardian pass failed: will retry next block: " + ((e && e.message) || e)); return false; }
     }).finally(() => { passing = null; });
     return passing;
   }
