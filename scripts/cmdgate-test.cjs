@@ -166,3 +166,23 @@ test("a failed try clears an earlier pass; the refusal names every gated command
   await assert.rejects(g.arm("vault", "wrong"), /Type SHOW SEED/);
   assert.match(G.refusal("vault", g.take), /^GATED:seed: vault, seedrandom and keys action:genkey show a seed or a private key/);
 });
+
+// ---- 0.18.184: the check shows the whole command, and the pass is for exactly that text ----
+test("a gated command is shown whole: too long or a repeated parameter is refused (the node keeps the last); the reason says what is shown", async () => {
+  for (const mac of [true, false]) {
+    let seen = null;
+    const g = G.create(SYS({ can: () => mac, prompt: async (r) => { seen = { touchId: r }; }, confirm: async (d) => { seen = { box: d }; return true; } }));
+    const hidden = "keys action:list" + " ".repeat(mac ? 70 : 600) + "action:genkey";
+    await assert.rejects(g.arm(hidden, "SHOW KEY"), /names action more than once/, "the reviewer's proof: shown as keys action:list, run as genkey");
+    assert.equal(seen, null, "nothing was asked"); assert.match(G.refusal(hidden, g.take), /^GATED:key:/, "and it does not run");
+    await assert.rejects(g.arm("keys action:genkey phrase:" + "x".repeat(80), "SHOW KEY"), /longer than the check can show in full \(80 characters\)/);
+    for (const dup of ['vault action:seed action:wipekeys', 'keys action:genkey "action":list', 'seedrandom modifier:a modifier : b']) await assert.rejects(g.arm(dup, dup.startsWith("vault") ? "SHOW SEED" : "SHOW KEY"), /more than once/, dup);
+    const c = "keys   action:genkey\u202e  phrase:x";
+    await g.arm(c, "SHOW KEY");
+    const text = mac ? seen.touchId : seen.box;
+    assert.ok(text.includes("keys action:genkey phrase:x"), "the whole command, white space collapsed, the bidi control a space: " + JSON.stringify(text));
+    assert.ok(mac ? text === "show a private key by running: keys action:genkey phrase:x" : text.startsWith("This shows a private key."), JSON.stringify(text));
+    assert.match(G.refusal("keys action:genkey phrase:x", g.take), /^GATED:key:/, "the pass is for the exact original text only");
+    await g.arm(c, "SHOW KEY"); assert.equal(G.refusal(c, g.take), "");
+  }
+});

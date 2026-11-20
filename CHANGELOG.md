@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.184] — the secret-command check shows the whole command
+
+- The Touch ID prompt showed the first 80 characters of a gated command (the confirmation window 600) and approved the whole text, and the node keeps the LAST of a repeated parameter: `keys action:list` + 70 spaces + `action:genkey` read as harmless and ran genkey. The check now shows the whole command (control and bidirectional characters as spaces, white space collapsed) after the words "show a seed phrase / a private key by running:"; a gated command longer than 80 characters is refused, and so is one that names any parameter twice (`main/cmdverb.js` `repeated`). The pass stays bound to the exact original text. Test: `scripts/cmdgate-test.cjs` (the reviewer's proof).
+
 ## [0.18.183] — miniMall: ids a peer writes read own entries only
 
 - The store looked shops, orders and chat lines up with `map[id]`, so a buyer's `shopId:"__proto__"` found Object.prototype and passed as "a shop I made", and an order ref of `"__proto__"` let a payment write into the prototype. Every lookup by such an id now reads own entries only (`Object.hasOwn`); `"__proto__"` is never stored as a shop, order or chat id. The vendor order screen does not draw a stored null line (the stored order keeps it). Test: `scripts/shop-test.cjs`.

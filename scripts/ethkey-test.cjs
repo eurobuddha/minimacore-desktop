@@ -128,7 +128,7 @@ test("syscheck: Touch ID when it can prompt; refused (not phrase only) once Touc
   await assert.rejects(create(io({ prompt: async () => { throw new Error("no"); } })).check("r", "d"), /^Error: Cancelled$/);
   const G = require("../main/cmdgate"); asked = [];
   await G.create(create(io({}))).arm("vault action:seed", "SHOW SEED");
-  assert.deepEqual(asked, ["run the Terminal command vault action:seed"]);
+  assert.deepEqual(asked, ["show a seed phrase by running: vault action:seed"], "CHANGED on purpose (0.18.184): says what is shown, then the whole command");
   for (const [name, re] of [["mcd:seedReveal", /revealSeedGated\(typed, sysCheck,/], ["mcd:ewExportKey", /exportKeyGated\(typed, sysCheck\)/]]) assert.ok(re.test(mainJs), name + " uses the system check");
   assert.ok(/const cmdGate = require\("\.\/cmdgate"\)\.create\(sysCheck\);/.test(mainJs) && !/canPromptTouchID/.test(mainJs), "one system check for every gate");
 });

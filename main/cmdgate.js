@@ -12,6 +12,7 @@
  * it must be run on its own. Every other command passes unchanged.
  */
 const PASS_MS = 60000;
+const SHOW_MAX = 80;   // what the Touch ID prompt shows of a command after its fixed words (its reason is cut at 120)
 const PHRASE = { seed: "SHOW SEED", key: "SHOW KEY" };
 const NAMES = "vault, seedrandom and keys action:genkey";
 
@@ -43,9 +44,17 @@ function create(sys, now) {
     if (chain) throw new Error("Run this command on its own, not in a chain with ;.");
     if (String(typed == null ? "" : typed).trim() !== PHRASE[kind]) throw new Error("Type " + PHRASE[kind] + " exactly to continue.");
     if (!sys || typeof sys.check !== "function") throw new Error("No system check is available. Nothing was run.");
-    // the Touch ID reason and the confirmation name the exact command (0.18.176), cut to what the prompt can show
-    const one = c.replace(/[\u0000-\u001f\u007f]/g, " ");
-    const s = await sys.check("run the Terminal command " + one.slice(0, 80), "This Terminal command will run once and its answer will be shown:\n\n" + one.slice(0, 600));
+    // What the check shows is the WHOLE command (0.18.184): it used to show the first 80 / 600 characters and approve the
+    // rest, and the node keeps the LAST repeated parameter, so "keys action:list" + spaces + "action:genkey" read harmless.
+    // Control and bidirectional characters become spaces and runs of white space one space; a command that cannot be
+    // shown whole in the Touch ID prompt is refused, and so is one that repeats a parameter. The pass is bound to the
+    // exact text that was asked about.
+    const shown = c.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+    if (shown.length > SHOW_MAX) throw new Error("This command is longer than the check can show in full (" + SHOW_MAX + " characters). Shorten it and run it again. Nothing was run.");
+    const twice = V.repeated(c);
+    if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");
+    const what = kind === "seed" ? "a seed phrase" : "a private key";
+    const s = await sys.check("show " + what + " by running: " + shown, "This shows " + what + ". This Terminal command will run once:\n\n" + shown);
     pass = { command: c, until: clock() + PASS_MS };
     return { system: s.biometric === true, kind };
   }

@@ -34,4 +34,17 @@ function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(pref
 /** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value). */
 function paramsText(part) { return jtrim(String(part).replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
 
-module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText };
+/** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb, read
+ *  from paramsText (quotes dropped, " : " closed up). The node keeps the LAST of a repeated name. */
+function paramNames(part) {
+  const t = paramsText(part), rest = t.replace(/^\S+/, "");
+  return [...rest.matchAll(/(?:^|\s)([A-Za-z0-9_.-]+):/g)].map(m => fold(m[1]));
+}
+/** The names that appear more than once in ONE command (lower-cased). */
+function repeated(part, only) {
+  const seen = new Set(), twice = new Set();
+  for (const n of paramNames(part)) { if (only && !only.includes(n)) continue; if (seen.has(n)) twice.add(n); seen.add(n); }
+  return [...twice];
+}
+
+module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, paramNames, repeated };
