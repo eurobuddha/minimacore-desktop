@@ -37,8 +37,21 @@ function paramsText(part) { return jtrim(String(part).replace(/"/g, "")).replace
 /** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb, read
  *  from paramsText (quotes dropped, " : " closed up). The node keeps the LAST of a repeated name. */
 function paramNames(part) {
-  const t = paramsText(part), rest = t.replace(/^\S+/, "");
+  const rest = namesText(part).replace(/^\S+/, "");
   return [...rest.matchAll(/(?:^|\s)([A-Za-z0-9_.-]+):/g)].map(m => fold(m[1]));
+}
+/** The text the parameter NAMES are read from (0.18.189): quotes become spaces (a name glued after a closing quote,
+ *  `action:"list"action:genkey`, is its own name, as the node reads it), whatever stands inside {…} or […] is blanked
+ *  (a key in a state's JSON is not a parameter), and " : " is closed up. Values that need quotes are not read here. */
+function namesText(part) {
+  const s = jtrim(String(part)).replace(/"/g, " ");
+  let out = "", depth = 0;
+  for (const ch of s) {
+    if (ch === "{" || ch === "[") { depth++; out += ch; continue; }
+    if ((ch === "}" || ch === "]") && depth > 0) { depth--; out += ch; continue; }
+    out += depth > 0 ? " " : ch;
+  }
+  return out.replace(/[ \t]*:[ \t]*/g, ":");
 }
 /** The names that appear more than once in ONE command (lower-cased). */
 function repeated(part, only) {
@@ -47,4 +60,4 @@ function repeated(part, only) {
   return [...twice];
 }
 
-module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, paramNames, repeated };
+module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, namesText, paramNames, repeated };

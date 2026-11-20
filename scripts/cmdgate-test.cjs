@@ -186,3 +186,13 @@ test("a gated command is shown whole: too long or a repeated parameter is refuse
     await g.arm(c, "SHOW KEY"); assert.equal(G.refusal(c, g.take), "");
   }
 });
+
+// ---- 0.18.189: a name glued after a closing quote is its own name ----
+test("a parameter name glued after a quoted value counts as a repeat; a key inside JSON does not", async () => {
+  const V = require("../main/cmdverb");
+  assert.deepEqual(V.repeated('keys action:"list"action:genkey'), ["action"]);
+  assert.deepEqual(V.repeated('send amount:1 address:0xA tokenid:"0xFF"tokenid:0x00', ["tokenid"]), ["tokenid"]);
+  assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x","1":"tokenid:0x00"}', ["amount", "tokenid", "address", "fromaddress"]), [], "keys inside a state's JSON are not parameters");
+  const g = G.create(SYS({}));
+  await assert.rejects(g.arm('keys action:"list"action:genkey', "SHOW KEY"), /names action more than once/);
+});

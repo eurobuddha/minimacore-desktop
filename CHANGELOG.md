@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.189] — a parameter name glued after a quote counts
+
+- Parameter names were read with quotes dropped, so a name glued after a closing quote (`keys action:"list"action:genkey`, `send … tokenid:"0xFF"tokenid:0x00`) ran together with the value before it and was not seen as a repeat. Names are now read with quotes as spaces and with whatever stands inside {…} or […] blanked (a key in a state's JSON is not a parameter); the send pin reads its values the same way. Tests: `scripts/cmdgate-test.cjs`, `scripts/sendpin-test.cjs`.
+
 ## [0.18.188] — plain reasons before a command, and quoted file paths
 
 - A chat picture whose file name or folder holds ";" or a quote, and a Vestr password with ";", are now refused with a plain reason before anything is sent (0.18.177 refused them only at the command). The `file:` path of `keets action:fetch` and `keets action:publish` is now quoted: the app's data folder holds a space ("Application Support"), and the node's parser takes a quoted value whole and drops the quotes (as it does for `backup password:"x"`; not run against a node here). A picture's extension is checked (anything else becomes .jpg). Test: `scripts/inject-test.cjs`.

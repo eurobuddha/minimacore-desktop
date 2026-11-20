@@ -53,3 +53,11 @@ test("the pin reads the LAST tokenid and amount and a top-level fromaddress only
   assert.deepEqual(V.repeated("send amount:1 address:0xA address : 0xB", ["amount", "tokenid", "address", "fromaddress"]), ["address"]);
   assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x"}', ["address"]), [], "a key inside a state's JSON is not a parameter");
 });
+
+test("0.18.189: the pin sees a tokenid glued after a quoted value", async () => {
+  const MX = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  let r = rig(), c = 'send amount:1 address:0xCD tokenid:"0x00"tokenid:' + MX;
+  assert.equal(await pinMinimaSend(r.run, c), c, "the last tokenid is MxUSD: not pinned"); assert.deepEqual(r.asked, []);
+  r = rig(); c = 'send amount:1 address:0xCD tokenid:"' + MX + '"tokenid:0x00';
+  assert.equal(await pinMinimaSend(r.run, c), c + " fromaddress:" + A, "the last tokenid is MINIMA (read as its own name after the quote): pinned");
+});
