@@ -602,7 +602,9 @@ test("a pool store that cannot be opened: the error is carried and said, the res
   const pp = src("dexicon-pp.js"), main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), app = src("app.js");
   assert.match(pp, /else if \(!S\.st\.ready && S\.st\.error\) out\.push\(/); assert.match(pp, /data-ppaside="1"/); assert.match(pp, /api\(\)\.engineSetAside\("pandapools"\)/);
   assert.match(main, /poolsState: pandapools\.status\(\), ownPools: await pandapools\.ownPools\(\)\.catch\(\(\) => null\)/); assert.match(main, /ipcMain\.handle\("mcd:engineSetAside"/); assert.match(main, /restore\.skipWarning\(await walletWork\(false\)\)/);
-  assert.match(app, /unchecked = \/you can go on without this check\\\.\/\.test\(why\), pools = \/You can go on after confirming this\\\.\/\.test\(why\)/);
+  assert.match(app, /unchecked = has\("REPLACE_SKIP_HINT"\), pools = has\("REPLACE_CONFIRM_HINT"\)/);   // 0.19.157: by the codes of what main said (renderer/mainsaid.js), not its words
+  const MS = require("../renderer/mainsaid.js"), open = restore.activeWorkProblem(restore.activeWorkList({ atomix: { ready: true }, pools: null, poolsState: { error: "SQLITE_CORRUPT" } }));
+  assert.ok(MS.has(open, "REPLACE_SKIP_HINT") && MS.has(open, "RP_PP_STORE") && !MS.has(open, "REPLACE_CONFIRM_HINT"), "what the screen decides from is read from main's own refusal");
 });
 test("AtomiX's store gets the same treatment: an init that never succeeds is named, can be passed by a confirm, and the file is only ever moved aside", async () => {
   const restore = require("../main/restore.js"), atomix = require("../main/atomix"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-bad-")), file = path.join(dir, "atomix.sqlite"), junk = Buffer.from("not a swap database ".repeat(64));

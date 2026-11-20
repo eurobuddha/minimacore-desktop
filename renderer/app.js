@@ -502,7 +502,10 @@ function renderParams(host, firstRun, done) {
   };
 }
 // Electron wraps a main-process refusal as "Error invoking remote method 'x': Error: the message".
-function ipcError(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+/** What the main process said, as it said it (English): for code that must decide from it (through MainSaid.has, by code). */
+function ipcRaw(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+/** What the main process said, for the screen: in the app's language when it is one of its listed sentences (renderer/mainsaid.js). */
+function ipcError(e) { return MainSaid.say(ipcRaw(e)); }
 
 // ---- Backup & Recovery (the phone's BackupActivity hub, over the backup, resync, restore and vault commands
 // the Settings cards ran). One view; BK_PAGE says which of the phone's screens it shows ("" = the hub).
@@ -537,10 +540,11 @@ function resyncCommand(o) {
 // Resolves true when the caller may try once more.
 async function offerWithoutDexicon(e) {
   // 0.18.137: also AtomiX or PandaPools that cannot be checked, and the warning about this wallet's own open pools
-  const why = ipcError(e), unchecked = /you can go on without this check\./.test(why), pools = /You can go on after confirming this\./.test(why);
+  // decided by the CODES of what the main process said (renderer/mainsaid.js), never by its words, which may be on screen translated
+  const why = ipcRaw(e), has = (code) => MainSaid.has(why, code), unchecked = has("REPLACE_SKIP_HINT"), pools = has("REPLACE_CONFIRM_HINT");
   if (!unchecked && !pools) return false;
-  let warning; try { warning = await api.dxSkipWarning(); } catch (err) { return false; }
-  const dexOnly = unchecked && !pools && !/(AtomiX|PandaPools) (could not open|has not finished starting after)/.test(why);
+  let warning; try { warning = MainSaid.say(await api.dxSkipWarning()); } catch (err) { return false; }
+  const dexOnly = unchecked && !pools && !["RP_AX_STORE", "RP_AX_STUCK", "RP_PP_STORE", "RP_PP_STUCK"].some(has);
   if (!await showConfirm(dexOnly ? t("Go on without checking Dexicon?") : pools && !unchecked ? t("Replace the wallet these pools belong to?") : t("Replace the wallet without these checks?"), warning, dexOnly ? t("Go on without the check") : pools && !unchecked ? t("I have its 24 words: go on") : t("Go on without the check"), true)) return false;
   try { await api.dxSkipCheck(); return true; } catch (err) { toast(ipcError(err), "err"); return false; }
 }
