@@ -31,6 +31,7 @@ const SCAN_EVERY_MS = 10000;
  * mid-sweep resumes instead of restarting.
  */
 const address = require("./mailaddress");
+const paylabel = require("../renderer/paylabel.js");
 const POLL_DEPTH = 32;            // steady state: a few blocks of margin over the ~50s block time
 const WINDOW_DEPTH = 1024;        // one pass ceiling (~14h). Past ~1024 the tree cascades — AtomiX's REFUND_SCAN_DEPTH.
 const MIN_DEPTH = 4;
@@ -396,7 +397,7 @@ async function scanOnce() {
   if (out.fresh || out.paLearned) emitter.emit("update");   // paLearned → an open send-funds sheet can live-fill the address
   if (out.fresh && out.lastFresh) {                          // live (not backfill) → surface an OS notification
     const nm = (store.getContact(out.lastFresh.frompublickey) || {}).username || out.lastFresh.fromname || "";
-    const preview = out.lastFresh.type === "image" ? "📷 Photo" : out.lastFresh.type === "payment" ? "💰 Payment" : (out.lastFresh.message || "");
+    const preview = out.lastFresh.type === "image" ? "📷 Photo" : out.lastFresh.type === "payment" ? paylabel.preview({ incoming: true, amount: out.lastFresh.amount, tokenid: out.lastFresh.tokenid }) : (out.lastFresh.message || "");
     emitter.emit("incoming", { count: out.fresh, from: out.lastFresh.frompublickey, name: nm, preview });
   }
   return out.fresh;

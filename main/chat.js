@@ -24,6 +24,7 @@ const store = require("./chat-store");
 const schema = require("./chatschema");
 const chatfiles = require("./chatfiles");
 const voice = require("./chatvoice");
+const paylabel = require("../renderer/paylabel.js");
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
@@ -248,7 +249,7 @@ async function pollOnce() {
       const isNew = store.addMessage({
         msgid, pubkey: msg.from, incoming: true,
         body: m.body, name: m.name, ref: m.ref,
-        state: m.state, amt: m.amt, tokname: m.tokname, txid: m.txid,
+        state: m.state, amt: m.amt, tok: m.tok, tokname: m.tokname, txid: m.txid,   // tok: the token ID, the only thing a payment is named from (0.19.7)
         ts: m.ts || parseInt(msg.ts) || Date.now(),
         via: msg.via, read: false
       });
@@ -265,7 +266,7 @@ async function pollOnce() {
         lastName = m.name || (store.getContact(msg.from) || {}).name || msg.from;
         lastPreview = m.state === "image" ? "📷 Photo"
                     : m.state === "audio" ? "🎤 Voice note"
-                    : m.state === "payment" ? "💸 " + m.amt + " " + (m.tokname || "Minima")
+                    : m.state === "payment" ? paylabel.preview({ incoming: true, amount: m.amt, tokenid: m.tok })   // a claim until this node finds it
                     : m.state === "file" ? "File: " + m.body
                     : m.body;
       }

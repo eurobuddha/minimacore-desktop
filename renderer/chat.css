@@ -92,6 +92,9 @@
 .chat-bubble__body { font-size: 15px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
 .chat-bubble__attach { font-size: 13px; font-style: italic; margin-top: 4px; cursor: pointer; }
 .chat-bubble__attach:hover { text-decoration: underline; }
+.chat-bubble__tok { font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.chat-bubble__paystate { font-size: 11px; margin-top: 4px; opacity: .85; }
+.chat-bubble__paystate--no { font-weight: 600; opacity: 1; }
 .chat-bubble__meta { align-self: flex-end; font-size: 11px; opacity: .7; margin-top: 2px; white-space: pre; }
 .chat-bubble__meta--read { color: var(--k-read); opacity: 1; }
 .chat-img { width: 240px; max-height: 320px; object-fit: contain; display: block; cursor: zoom-in; border-radius: 6px; margin-bottom: 4px; }

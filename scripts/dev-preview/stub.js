@@ -235,7 +235,7 @@
       t(120, true, "Are you still coming by boat?"), t(118, false, "Yes, the six o'clock one.", { peerread: true }),
       t(60, true, "0:07|48c9e6a47b3d5f8e9c6a4b7d8f6e4c3a", { state: "audio", ref: "keets://" + "fa4e".repeat(16) + "/chat/vn-1760000000000.m4a?hash=" + "fa4e".repeat(16) }),
       t(40, false, "harbour-timetable.pdf", { state: "file", ref: "pf1:FAKE", msgid: "kf-" + "fa4e".repeat(8) }),
-      t(30, false, "", { state: "payment", amt: "2.5", tokname: "MxUSD", txid: "0x" + "FA4E".repeat(16) }),
+      t(30, false, "", { state: "payment", amt: "2.5", tok: MXUSD, tokname: "MxUSD", txid: "0x" + "FA4E".repeat(16) }),
       t(5, true, "See you at the harbour at six.")]; },
     chatContacts: async () => [{ pubkey: PK("31"), name: "Mirela Okafor" }, { pubkey: PK("32"), name: "Jonas Petrov" }, { pubkey: PK("33"), name: "Ines Halloran" }],
     chatFileOffer: async () => ({ id: "fa4e".repeat(8), name: "harbour-timetable.pdf", mime: "application/pdf", size: 3460300, ref: "pf1:FAKE", peer: PK("31"), mine: true, sent: true, running: false, done: 3460300, error: "", ready: true, canSave: true, canRemove: true, canRun: false,

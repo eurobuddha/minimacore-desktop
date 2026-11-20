@@ -495,6 +495,17 @@ ipcMain.handle("mcd:mailImportBackup", async (_e, passphrase) => {
 
 // forward mail updates to the window; start the scan loop once the node is running
 mail.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:mail"); });
+// A payment message is its sender's claim (0.19.7). The screens ask here whether this node has found it; what is not
+// found is looked for again on each new block, within main/payverify.js's limits. Reads only, never the signing queue.
+const payverify = require("./payverify").create({ run: (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c),
+  onChange: () => { mail.emitter.emit("update"); chat.emitter.emit("update"); } });
+ipcMain.handle("mcd:payCheck", (_e, txid, tokenid, amount) => node.state === "running" ? payverify.ask({ txid, tokenid, amount }) : "unverified");
+let payBlock = 0;
+node.on("status", (s) => {
+  if (s.state !== "running") { if (s.state === "starting") { payverify.reset(); payBlock = 0; } return; }
+  const b = s.health && s.health.block;
+  if (b && b !== payBlock) { payBlock = b; payverify.onBlock().catch(() => {}); }
+});
 // OS notification on a fresh incoming message when the window isn't focused (mirrors the native "New mail")
 mail.emitter.on("incoming", (info) => {
   try {

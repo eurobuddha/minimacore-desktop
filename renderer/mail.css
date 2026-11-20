@@ -160,6 +160,9 @@
 .mailapp .mm-pay .mm-phead .mm-ic { width: 12px; height: 12px; }
 .mailapp .mm-pay .mm-pamt { font-size: 20px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .mailapp .mm-pay .mm-pmemo { font-size: 13px; margin-top: 4px; opacity: .95; }
+.mailapp .mm-pay .mm-ptok { display: block; font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.mailapp .mm-pay .mm-pstate { display: block; font-size: 11px; margin-top: 5px; font-weight: 600; }
+.mailapp .mm-pay .mm-pstate.mm-pok { font-weight: 400; opacity: .85; }
 .mailapp .mm-img { display: block; width: 220px; max-width: 100%; height: auto; border-radius: 14px; cursor: zoom-in; }
 
 .mailapp .mm-comp { display: flex; align-items: center; gap: 8px; background: var(--mm-surface); padding: 8px 10px; flex: 0 0 auto; border-top: 1px solid var(--mm-hairline); }

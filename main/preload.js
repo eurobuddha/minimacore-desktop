@@ -124,6 +124,8 @@ contextBridge.exposeInMainWorld("mcd", {
   chatStatus: () => ipcRenderer.invoke("mcd:chatStatus"),
   chatMedia: (ref) => ipcRenderer.invoke("mcd:chatMedia", ref),
   chatSendPayment: (to, amount, token) => ipcRenderer.invoke("mcd:chatSendPayment", to, amount, token),
+  // has this node found the payment a Mail or Chat message claims? "received" | "unverified" (main/payverify.js; reads only)
+  payCheck: (txid, tokenid, amount) => ipcRenderer.invoke("mcd:payCheck", txid, tokenid, amount),
   chatRequestPayAddr: (to) => ipcRenderer.invoke("mcd:chatRequestPayAddr", to),
   chatPayAddr: (to) => ipcRenderer.invoke("mcd:chatPayAddr", to),
   chatSendImage: (to) => ipcRenderer.invoke("mcd:chatSendImage", to),

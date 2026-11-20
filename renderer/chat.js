@@ -83,7 +83,7 @@
     const you = m.incoming ? "" : "You: ";
     if (m.state === "image") return you + "📷 " + (m.body || "Photo");
     if (m.state === "audio") return you + "🎤 Voice note · " + (m.body || "").split("|")[0];
-    if (m.state === "payment") return you + "💸 " + (m.amt || "") + " " + (m.tokname || "Minima");
+    if (m.state === "payment") return you + "💸 " + PayLabel.preview({ incoming: !!m.incoming, amount: m.amt || "", tokenid: m.tok, status: payStatus(m) });
     if (m.state === "file") return you + "File: " + (m.body || "");
     return you + (m.body || "");
   }
@@ -326,6 +326,25 @@
     } catch (e) { D.toast("Voice note not available yet — try again shortly", "err"); }
   }
 
+  // A payment message is the sender's claim (renderer/paylabel.js). PAID: what this node answered for it.
+  const PAID = new Map();
+  const payKey = (m) => PayLabel.key(m.txid, m.tok, m.amt);
+  const payStatus = (m) => PAID.get(payKey(m)) || "unverified";
+  function payHtml(m) {
+    const d = PayLabel.describe({ incoming: !!m.incoming, who: "", amount: m.amt || "", tokenid: m.tok, status: payStatus(m) });
+    const head = !m.incoming ? "Payment sent" : d.verified ? "Payment received" : "Payment notice";
+    return `<div class="chat-bubble__body">💸 ${head}\n${h(d.amount)} ${h(d.token)}</div>`
+      + (d.tokenLine ? `<div class="chat-bubble__tok">${h(d.tokenLine)}</div>` : "")
+      + (d.state ? `<div class="chat-bubble__paystate${d.verified ? "" : " chat-bubble__paystate--no"}">${h(d.state)}</div>` : "")
+      + `<div class="chat-bubble__attach">Tap for txid</div>`;
+  }
+  /** Ask the node once for a received payment being shown; the bubble is redrawn in place if it was found. */
+  async function verifyPayment(m, redraw) {
+    if (!m.incoming || payStatus(m) === "received") return;
+    let s = "unverified";
+    try { s = await D.api.payCheck(m.txid || "", m.tok || "", m.amt || ""); } catch (e) { /* stays not verified */ }
+    if (s === "received") { PAID.set(payKey(m), s); redraw(); }
+  }
   function bubbleFor(m) {
     const row = document.createElement("div");
     row.className = "chat-row " + (m.incoming ? "chat-row--in" : "chat-row--out");
@@ -360,14 +379,15 @@
       b.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div><button type="button" class="chat-bubble__attach chat-bubble__attach--btn">Open file transfer</button>${metaHtml(m)}`;
       b.querySelector(".chat-bubble__attach").onclick = () => fileSheet(m.pubkey, m.ref);
     } else if (m.state === "payment") {
-      const tok = m.tokname || "Minima";
-      b.innerHTML = `<div class="chat-bubble__body">💸 ${m.incoming ? "Payment received" : "Payment sent"}\n${h(m.amt || "")} ${h(tok)}</div>
-        <div class="chat-bubble__attach">Tap for txid</div>${metaHtml(m)}`;
-      b.querySelector(".chat-bubble__attach").onclick = async () => {
-        const v = await dialog({ title: "Transaction id", body: `<div class="chat-dialog__mono">${h(m.txid || "")}</div>`,
-          actions: [{ label: "Copy", value: "copy" }, { label: "Close", value: null }] });
-        if (v === "copy") { await D.copy(m.txid || ""); D.toast("Transaction id copied", "ok"); }
+      const draw = () => {
+        b.innerHTML = payHtml(m) + metaHtml(m);
+        b.querySelector(".chat-bubble__attach").onclick = async () => {
+          const v = await dialog({ title: "Transaction id", body: `<div class="chat-dialog__mono">${h(m.txid || "")}</div>`,
+            actions: [{ label: "Copy", value: "copy" }, { label: "Close", value: null }] });
+          if (v === "copy") { await D.copy(m.txid || ""); D.toast("Transaction id copied", "ok"); }
+        };
       };
+      draw(); verifyPayment(m, draw);
     } else {
       b.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div>${m.ref ? `<div class="chat-bubble__attach">Attachment — tap to copy link</div>` : ""}${metaHtml(m)}`;
       if (m.ref) b.querySelector(".chat-bubble__attach").onclick = async () => { await D.copy(m.ref); D.toast("Link copied", "ok"); };
@@ -724,6 +744,7 @@
       const t = threads.find(x => x.unread > 0) || threads[0];
       if (t) select(t.pubkey);
     },
+    _test(deps) { D = deps; return { payHtml, preview, verifyPayment }; },
     reset() { me = { pubkey: "", name: "" }; sel = null; threads = []; booted = false; if (player) { player.pause(); player = null; playingRef = ""; } }
   };
 })();

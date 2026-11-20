@@ -127,8 +127,32 @@
   function previewText(m) {
     if (!m) return "";
     if (m.type === "image") return "Photo";
-    if (m.type === "payment") return D.TOK.tidyAmount(m.amount || "") + " " + (m.tokenname || "MINIMA") + (m.message ? " — " + oneLine(m.message) : "");
+    if (m.type === "payment") return g.PayLabel.preview({ incoming: !!m.incoming, amount: D.TOK.tidyAmount(m.amount || ""), tokenid: m.tokenid, status: payStatus(m) }) + (m.message ? " — " + oneLine(m.message) : "");
     return oneLine(m.message || "");
+  }
+  // A payment message is the sender's claim. PAID holds what this node has answered for it ("received" once found on
+  // chain paying this wallet); everything else is shown as not verified. Asked when a thread is drawn (verifyShown).
+  const PAID = new Map();
+  function payKey(m) { return g.PayLabel.key(m.txpowid, m.tokenid, m.amount); }
+  function payStatus(m) { return PAID.get(payKey(m)) || "unverified"; }
+  function payInner(m) {
+    var d = g.PayLabel.describe({ incoming: !!m.incoming, who: nameFor(m.frompublickey, m), amount: D.TOK.tidyAmount(m.amount || ""), tokenid: m.tokenid, status: payStatus(m) });
+    return '<span class="mm-pay"><span class="mm-phead">' + g.micon("coin") + D.esc(d.head) + "</span>"
+      + '<span class="mm-pamt">' + D.esc(d.amount) + "&nbsp;&nbsp;" + D.esc(d.token) + "</span>"
+      + (d.tokenLine ? '<span class="mm-ptok">' + D.esc(d.tokenLine) + "</span>" : "")
+      + (m.message ? '<span class="mm-pmemo">' + D.esc(m.message) + "</span>" : "")
+      + (d.state ? '<span class="mm-pstate' + (d.verified ? " mm-pok" : "") + '">' + D.esc(d.state) + "</span>" : "") + "</span>";
+  }
+  /** Ask the node about each received payment in the thread just drawn; redraw once if an answer changed a bubble. */
+  async function verifyShown(msgs, redraw) {
+    var changed = false;
+    for (const m of msgs || []) {
+      if (m.type !== "payment" || !m.incoming || payStatus(m) === "received") continue;
+      var s = "unverified";
+      try { s = await D.api.payCheck(m.txpowid || "", m.tokenid || "", m.amount || ""); } catch (e) { /* stays not verified */ }
+      if (s === "received") { PAID.set(payKey(m), s); changed = true; }
+    }
+    if (changed && redraw) redraw();
   }
   function oneLine(s) { var t = String(s || "").replace(/\s+/g, " ").trim(); return t.length > 64 ? t.slice(0, 64) + "…" : t; }
   function otherOf(t) {
@@ -326,12 +350,8 @@
   function bubble(m, showFooter, showName) {
     var mine = !m.incoming, inner;
     if (m.type === "image" && m.image) inner = '<img class="mm-img" src="data:image/jpeg;base64,' + D.esc(m.image) + '" alt="Photo">';
-    else if (m.type === "payment") {
-      inner = '<span class="mm-pay"><span class="mm-phead">' + g.micon("coin")
-        + (mine ? "You sent" : D.esc(nameFor(m.frompublickey, m)) + " sent you") + "</span>"
-        + '<span class="mm-pamt">' + D.esc(D.TOK.tidyAmount(m.amount || "")) + "&nbsp;&nbsp;" + D.esc(m.tokenname || "MINIMA") + "</span>"
-        + (m.message ? '<span class="mm-pmemo">' + D.esc(m.message) + "</span>" : "") + "</span>";
-    } else inner = D.esc(m.message || "");
+    else if (m.type === "payment") inner = payInner(m);
+    else inner = D.esc(m.message || "");
     var html = '<div class="mm-mrow ' + (mine ? "mm-out" : "mm-in") + '"><div class="mm-bub">'
       + (showName && !mine ? '<span class="mm-sname">' + D.esc(nameFor(m.frompublickey, m)) + "</span>" : "")
       + inner + "</div></div>";
@@ -616,6 +636,7 @@
       + '<button class="mm-send" type="button" id="mmSend" aria-label="Send">' + g.micon("up") + "</button></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
     var conv = D.el("mmConv"); if (conv) conv.scrollTop = conv.scrollHeight;
+    verifyShown(msgs, function () { if (!MODAL && VIEW === "thread" && PEER === peer && HASH === hash && SUBJ === subject) render(); });
     D.el("mmBack").onclick = function () { VIEW = threadOrigin; PEER = null; render(); };
     D.el("mmThreadMenu").onclick = function () { threadMenu(); };
     D.el("mmPlus").onclick = function () { plusMenu(); };
@@ -1029,5 +1050,6 @@
 
   g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge, backup: doBackup, restore: doRestore,
     _open: function (what, a, b) { if (what === "thread") openThread(a, b || "", "", "inbox"); else if (what === "compose") openCompose(a); else if (what === "funds") sendFunds(a, b || ""); else { VIEW = what; PEER = null; render(); } },   // the dev preview drives screens through this
-    _pure: { decCmp: decCmp, looksLikeMinimaAddress: looksLikeMinimaAddress } };   // backup and restore are also opened from Backup & Recovery
+    _pure: { decCmp: decCmp, looksLikeMinimaAddress: looksLikeMinimaAddress },
+    _test: function (deps) { D = deps; return { bubble: bubble, previewText: previewText, verifyShown: verifyShown }; } };   // backup and restore are also opened from Backup & Recovery
 })(window);
