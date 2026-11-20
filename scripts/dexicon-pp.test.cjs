@@ -468,6 +468,17 @@ test("the room: PandaPools' five tabs in its order, each remembered; the old pan
   assert.match(app, /function onPandapoolsUpdate\(\) \{ DexPools\.onUpdate\(\); \}/);
   for (const f of ["pools.js", "pools.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
   assert.ok(fs.existsSync(path.join(R, "poolcalc.js")) && html.includes('src="poolcalc.js"') && /DexPools\.init\(\{[^\n]*PoolCalc/.test(app), "the calculator stays: room ② opens the same PoolCalc.form");
+  // 0.19.156: the calculator read "1,5" as 15 (it stripped commas and spaces). A comma, a space or any other character is now
+  // refused with a plain sentence, as the send paths refuse it; the prices it writes into its own field carry no grouping comma.
+  const box = Object.assign({ console }, require("./i18n-plain.cjs").globals()); require("vm").runInNewContext(fs.readFileSync(path.join(R, "poolcalc.js"), "utf8") + ";globalThis.PC = PoolCalc;", box);
+  const PC = box.PC;
+  for (const [t, v] of [["1.5", 1.5], ["100000", 100000], [".5", 0.5], ["5.", 5], [" 2 ", 2]]) assert.deepEqual(PC.readNumber(t), { v, bad: false }, t);
+  assert.deepEqual(PC.readNumber(""), { v: NaN, bad: false }, "empty: not entered yet");
+  for (const t of ["1,5", "1,234.5", "1 000", "1.2.3", "1e5", "-1", "12abc", "0x10", "١٢"]) { const r = PC.readNumber(t); assert.ok(r.bad && Number.isNaN(r.v), "refused: " + t); }
+  for (const p of [1234.5, 1000, 2500000.7, 0.00123, 5]) { const s = PC.inputPrice(p); assert.ok(!s.includes(",") && PC.readNumber(s).bad === false, p + " -> " + s); }
+  assert.equal(PC.fmtPrice(2500000.7), "2,500,001", "what is SHOWN keeps its grouping"); assert.equal(PC.inputPrice(2500000.7), "2500001");
+  const pcSrc = fs.readFileSync(path.join(R, "poolcalc.js"), "utf8");
+  assert.ok(/function num\(inp\) \{ return readNumber\(inp\.value\)\.v; \}/.test(pcSrc) && !/inP\.value = fmtPrice/.test(pcSrc) && /readNumber\(i\.value\)\.bad/.test(pcSrc), "every field is read through readNumber, and a refused one stops the figures");
 });
 
 // ---- the glue: read-only additions ----

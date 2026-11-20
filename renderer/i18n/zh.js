@@ -2647,11 +2647,12 @@
   "This": "此操作",
   "That": "该操作",
   "no reason was given": "未给出原因",
-  "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.": "使用相同种子的独立签名器、恢复旧计数器或旧钱包快照都可能重复使用一次性密钥。本审计不会更改计数器或签署交易。"
+  "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.": "使用相同种子的独立签名器、恢复旧计数器或旧钱包快照都可能重复使用一次性密钥。本审计不会更改计数器或签署交易。",
+  "Type each number with digits and at most one decimal point, for example 1234.5: no comma and no space.": "每个数字只能由数字和最多一个小数点组成，例如 1234.5：不要逗号，也不要空格。"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
-  // translated for the desktop (the phone has no such text): 1638 keys for native review
+  // translated for the desktop (the phone has no such text): 1639 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4290,6 +4291,7 @@
     "{what} did not go through: {v}.{said} Nothing was sent and no funds moved.",
     "This",
     "That",
-    "no reason was given"
+    "no reason was given",
+    "Type each number with digits and at most one decimal point, for example 1234.5: no comma and no space."
   ]
 });

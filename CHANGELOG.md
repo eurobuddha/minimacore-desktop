@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.156] — Pool calculator: a comma is refused, not read as a separator ("1,5" was 15)
+
+- **Fixed (pre-existing, more likely now that Russian and Ukrainian users type a decimal comma):** the what-if pool calculator in room ② read its five number fields by deleting commas and spaces first, so "1,5" was taken as 15, "0,5" % as a 5 % fee and "1 000" as 1000. It now reads a field only when it is digits with at most one decimal point; anything else (a comma, a space, a sign, an exponent, letters) is refused and the calculator says so in a plain sentence instead of showing figures, as the send paths refuse such input. A comma is not accepted as a decimal separator. The prices the calculator writes into its own price field (from the slider and the chips) no longer carry the thousands commas it shows elsewhere, so they read back. The calculator builds no transaction; nothing sent or stored changed.
+- Test: `scripts/dexicon-pp.test.cjs` reads accepted and refused entries through the calculator's reader, checks that every price it writes back reads as a number, and that every field goes through the reader. It fails on the 0.19.155 code.
+
 ## [0.19.155] — KeyUses: the Russian and Ukrainian "Common causes" say again that a one-time key is reused
 
 - **Fixed (review of 0.19.140 to 0.19.144):** the KeyUses verdict's "Common causes" text in Russian and Ukrainian (the phone's wording) said only that independent signers, an old counter or an old wallet snapshot "can lead to a repeat", losing what is repeated: a one-time key, the very reason for the risk. Both now say "can lead to reuse of a one-time key" in full, with the rest of the sentence (this audit never changes counters or signs transactions) kept. Listed for native review. Chinese already said it.

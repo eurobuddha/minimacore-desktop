@@ -59,6 +59,16 @@ var PoolCalc = (function () {
     }
 
     /** A price: plain decimal, no exponent, trailing zeros stripped (0.005 stays "0.005", 50 stays "50"). */
+    /** A number typed into the calculator: digits and at most one decimal point, nothing else. A comma is refused, never
+     *  read as a separator ("1,5" used to be read as 15, "1 000" as 1000). → { v: number | NaN, bad: true when the text is not such a number }. */
+    function readNumber(text) {
+        var t = String(text == null ? "" : text).trim();
+        if (t === "") return { v: NaN, bad: false };
+        if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(t)) return { v: NaN, bad: true };
+        var v = parseFloat(t); return { v: isFinite(v) ? v : NaN, bad: false };
+    }
+    /** A price the calculator writes into its own price field: fmtPrice without the thousands commas, so it reads back. */
+    function inputPrice(p) { var s = fmtPrice(p); return s === "—" ? "" : s.replace(/,/g, ""); }
     function fmtPrice(p) {
         p = Number(p);
         if (isNaN(p) || !isFinite(p) || p <= 0) return "—";
@@ -169,7 +179,7 @@ var PoolCalc = (function () {
         var derived = note("");
         sub(I18N.t("Price now"));
         var p0seed = Number(inY.value) / Number(inX.value);
-        var inP = field(I18N.t("MINIMA price in {tok}", { tok: tok }), "p", fmtPrice(p0seed));
+        var inP = field(I18N.t("MINIMA price in {tok}", { tok: tok }), "p", inputPrice(p0seed));
         inP.style.fontSize = "20px";
         var slider = h('<input type="range" class="pc-range" min="-4" max="4" step="0.01" value="0" aria-label="' + th("Price as a multiple of entry, logarithmic") + '">');
         root.appendChild(slider);
@@ -196,9 +206,9 @@ var PoolCalc = (function () {
         note(I18N.t("MINIMA in pool = √(K ÷ price); token in pool = √(K × price). Each 4× move in price moves each reserve 2×. The pool is 50 % MINIMA and 50 % token by value at every price — only the counts change. Neither side ever reaches zero: 90 % of one side is gone at ×100 or ÷100, 99 % at ×10,000 or ÷10,000."));
 
         var syncing = false;
-        function num(inp) { var v = parseFloat(String(inp.value).replace(/[,\s]/g, "")); return isFinite(v) ? v : NaN; }
+        function num(inp) { return readNumber(inp.value).v; }
         function entryPrice() { var x0 = num(inX), y0 = num(inY); return (x0 > 0 && y0 > 0) ? y0 / x0 : NaN; }
-        function setPriceFromMultiple(m) { var p0 = entryPrice(); if (isNaN(p0)) return; syncing = true; inP.value = fmtPrice(p0 * m); syncing = false; render(); }
+        function setPriceFromMultiple(m) { var p0 = entryPrice(); if (isNaN(p0)) return; syncing = true; inP.value = inputPrice(p0 * m); syncing = false; render(); }
         function setTok(t) { tok = t; root.querySelectorAll("[data-pc-label]").forEach(function (e) {
             var k = e.getAttribute("data-pc-label");
             if (k === "y0") e.innerText = I18N.t("{v} you add", { v: t }); else if (k === "p") e.innerText = I18N.t("MINIMA price in {v}", { v: t });
@@ -210,6 +220,11 @@ var PoolCalc = (function () {
             if (isNaN(fee)) fee = 0; if (isNaN(vol)) vol = 0;
             var r = compute(x0, y0, p, fee, vol);
             var outs = [oMin, oTok, oRatio, oVal, oHold, oMove, oFees, oK, oBE];
+            if ([inX, inY, inP, inFee, inVol].some(function (i) { return readNumber(i.value).bad; })) {
+                derived.innerText = I18N.t("Type each number with digits and at most one decimal point, for example 1234.5: no comma and no space.");
+                outs.forEach(function (o) { o.innerText = "—"; }); oHold.style.color = "";
+                draw(canvas, null, 0, 0, 0, tok, opts.colors); return;
+            }
             if (!r) {
                 derived.innerText = I18N.t("Enter a MINIMA amount, a {tok} amount and a price above zero.", { tok: tok });
                 outs.forEach(function (o) { o.innerText = "—"; }); oHold.style.color = "";
@@ -233,7 +248,7 @@ var PoolCalc = (function () {
         }
         function onStartChanged() {   // a new starting pool keeps the same RELATIVE move
             var p0 = entryPrice(); if (isNaN(p0)) { render(); return; }
-            syncing = true; inP.value = fmtPrice(p0 * Math.pow(10, parseFloat(slider.value))); syncing = false; render();
+            syncing = true; inP.value = inputPrice(p0 * Math.pow(10, parseFloat(slider.value))); syncing = false; render();
         }
         inX.addEventListener("input", onStartChanged); inY.addEventListener("input", onStartChanged);
         inTok.addEventListener("input", function () { setTok(inTok.value.trim() || "token"); render(); });
@@ -243,5 +258,5 @@ var PoolCalc = (function () {
         return { el: root, render: render };
     }
 
-    return { compute: compute, fmt: fmt, fmtPrice: fmtPrice, fmtMove: fmtMove, draw: draw, form: form };
+    return { compute: compute, fmt: fmt, fmtPrice: fmtPrice, fmtMove: fmtMove, draw: draw, form: form, readNumber: readNumber, inputPrice: inputPrice };
 })();
