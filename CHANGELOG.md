@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.155] — KeyUses: the Russian and Ukrainian "Common causes" say again that a one-time key is reused
+
+- **Fixed (review of 0.19.140 to 0.19.144):** the KeyUses verdict's "Common causes" text in Russian and Ukrainian (the phone's wording) said only that independent signers, an old counter or an old wallet snapshot "can lead to a repeat", losing what is repeated: a one-time key, the very reason for the risk. Both now say "can lead to reuse of a one-time key" in full, with the rest of the sentence (this audit never changes counters or signs transactions) kept. Listed for native review. Chinese already said it.
+- Test: `scripts/i18n-test.cjs` requires every text about a one-time key to say "one-time key" in each language (一次性 / одноразов…). It fails on the 0.19.154 catalogs.
+
 ## [0.19.154] — Tests: code that matches translated text is refused; the apostrophe rule; the shell, Send and Split run in every language
 
 - **A scan of the code that decides by text** (`scripts/i18n-test.cjs`): every regex literal, and every string compared with `===`, `!==`, a `case`, `includes`, `startsWith`, `endsWith` or `indexOf`, in the shipped renderer and main files (vendored engines and catalogs excluded), is checked against the translated catalog keys. A phrase of 9 or more characters found inside a translated key, or a whole translated key, fails the test unless it is on a short allow-list with its reason (eight cases: engine and node texts that reach the code in English before anything is translated, and the miniMall delivery label, a wire value). The scan finds the 0.19.144 Trade-button match on a probe; it found the room ② failure-card defect fixed in 0.19.153.

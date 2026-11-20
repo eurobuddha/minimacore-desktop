@@ -248,3 +248,11 @@ test("no code decides by matching text that is translated (regex, ===, includes,
   const probe = []; scan("renderer/probe.js", 'const dead = !!why && !/No relay answers/.test(why); if (s === "Market offline") x(); if (m.includes("a FAST order may not be heard")) y();', probe);
   assert.equal(probe.length, 3, probe.join("\n"));
 });
+
+// 0.19.155: a safety reason must keep its reason. The phone's Russian and Ukrainian for KeyUses' "Common causes" said only
+// "can lead to a repeat", losing what is repeated; every text about a one-time key must say "one-time key" in each language.
+test("every text about a one-time key says one-time key in each language", () => {
+  const WORD = { zh: /一次性/, ru: /одноразов/i, uk: /одноразов/i };
+  for (const code of OTHERS) for (const [k, v] of Object.entries(I18N.catalog(code))) if (/one-time key/i.test(k))
+    for (const s of (v && typeof v === "object" ? Object.values(v) : [v])) assert.match(s, WORD[code], code + ": " + k);
+});

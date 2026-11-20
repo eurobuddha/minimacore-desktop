@@ -972,7 +972,6 @@
   "Classic counter is behind recorded usage": "Классический счётчик отстаёт от записанного использования",
   "The archive shows more spend blocks than the stored classic counter. Review these keys before signing again. Block-based leaf positions are not compared with spend counts.": "В архиве больше блоков расходов, чем в сохранённом классическом счётчике. Проверьте эти ключи перед новой подписью. Позиции листьев блочных ключей не сравниваются с числом расходов.",
   "Common causes": "Возможные причины",
-  "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.": "Независимые подписанты с одним seed, старый счётчик или старый снимок кошелька могут привести к повтору. Проверка не меняет счётчики и не подписывает транзакции.",
   "No known key reuse was found in the checked keys.": "Среди проверенных ключей известного повторного использования не найдено.",
   "Audit needs review": "Проверка требует внимания",
   "Some public audit results are missing or inconsistent. Those rows remain unknown. Confirmed reuse findings still apply.": "Некоторые публичные результаты отсутствуют или не согласуются. Эти строки остаются неизвестными. Подтверждённые повторы остаются значимыми.",
@@ -2647,11 +2646,12 @@
   "{what} did not go through: {v}.{said} Nothing was sent and no funds moved.": "{what}: операция не прошла, причина: {v}.{said} Ничего не отправлено, средства не перемещались.",
   "This": "Это",
   "That": "Это",
-  "no reason was given": "причина не указана"
+  "no reason was given": "причина не указана",
+  "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.": "Независимые подписанты с одной и той же сид-фразой, восстановление старого счётчика или более старого снимка кошелька могут привести к повторному использованию одноразового ключа. Эта проверка никогда не меняет счётчики и не подписывает транзакции."
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)"],
-  // translated for the desktop (the phone has no such text): 1638 keys for native review
+  // translated for the desktop (the phone has no such text): 1639 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4290,6 +4290,7 @@
     "{what} did not go through: {v}.{said} Nothing was sent and no funds moved.",
     "This",
     "That",
-    "no reason was given"
+    "no reason was given",
+    "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions."
   ]
 });

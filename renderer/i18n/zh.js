@@ -972,7 +972,6 @@
   "Classic counter is behind recorded usage": "经典计数器落后于已记录的使用量",
   "The archive shows more spend blocks than the stored classic counter. Review these keys before signing again. Block-based leaf positions are not compared with spend counts.": "档案显示的支出区块数超过已存储的经典计数器。再次签名前请复核这些密钥。区块密钥的叶位置不会与支出次数比较。",
   "Common causes": "常见原因",
-  "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.": "使用相同种子的独立签名器、恢复旧计数器或旧钱包快照都可能重复使用一次性密钥。本审计不会更改计数器或签署交易。",
   "No known key reuse was found in the checked keys.": "在已检查的密钥中未发现已知的重复使用。",
   "Audit needs review": "审计需要复核",
   "Some public audit results are missing or inconsistent. Those rows remain unknown. Confirmed reuse findings still apply.": "部分公开审计结果缺失或不一致。这些行仍标记为未知。已确认的重复使用结果仍然有效。",
@@ -2647,7 +2646,8 @@
   "{what} did not go through: {v}.{said} Nothing was sent and no funds moved.": "{what}未成功：{v}。{said} 未发送任何内容，资金未移动。",
   "This": "此操作",
   "That": "该操作",
-  "no reason was given": "未给出原因"
+  "no reason was given": "未给出原因",
+  "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.": "使用相同种子的独立签名器、恢复旧计数器或旧钱包快照都可能重复使用一次性密钥。本审计不会更改计数器或签署交易。"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
