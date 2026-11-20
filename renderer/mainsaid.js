@@ -359,7 +359,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["MAIN_TOO_LARGE_64", I18N.N_("That file is larger than 64 MB.")],
     ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")],
     // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
-    ["MAIN_SECRET_CMD", I18N.N_("vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.")],
+    ["MAIN_CONTROL_CHAR", I18N.N_("This command holds a control character. Type it again without one.")],
+    ["SG_GATED_SEED", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.")],
+    ["SG_GATED_KEY", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.")],
+    ["SG_CHAIN", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.")],
     ["MAIN_FIRSTRUN_SEED", I18N.N_("The seed is shown here only while a new wallet is being made.")],
     ["SG_NO_CHECK", I18N.N_("This command needs no check.")],
     ["SG_NO_SEED", I18N.N_("Couldn't read the seed.")]

@@ -24,9 +24,12 @@
   "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.": "这会显示控制您资金的内容。任何看到它的人都能永久且不可逆转地拿走这些资金。只有在您独自一人并且清楚知道为什么需要它时才继续。",
   "Anyone who sees this can take your funds. Never share it.": "任何看到它的人都能拿走您的资金。切勿分享。",
   "The reply is shown in its own window for 60 seconds and is not kept here.": "回复会在单独的窗口中显示 60 秒，不会保留在这里。",
-  "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.": "vault 和 seedrandom 会显示控制您资金的内容：请在终端中输入该命令，终端会先要求您输入确认短语。",
   "The seed is shown here only while a new wallet is being made.": "只有在创建新钱包时才会在这里显示助记词。",
   "This command needs no check.": "此命令无需核对。",
+  "This command holds a control character. Type it again without one.": "此命令含有控制字符。请重新输入，不要带控制字符。",
+  "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.": "vault、seedrandom 和 keys action:genkey 会显示助记词或私钥；此命令会显示助记词。请在终端中输入 SHOW SEED 来运行它。",
+  "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.": "vault、seedrandom 和 keys action:genkey 会显示助记词或私钥；此命令会显示私钥。请在终端中输入 SHOW KEY 来运行它。",
+  "vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.": "vault、seedrandom 和 keys action:genkey 会显示助记词或私钥，而这串命令中含有其中之一。请单独运行该命令，不要用 ; 与其他命令连在一起。",
   "Couldn't read the seed.": "无法读取助记词。",
   "Key uses": "密钥使用次数",
   "0 only if this seed has never signed": "仅当此种子从未签名时才填 0",
@@ -4853,9 +4856,12 @@
     "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.",
     "Anyone who sees this can take your funds. Never share it.",
     "The reply is shown in its own window for 60 seconds and is not kept here.",
-    "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.",
     "The seed is shown here only while a new wallet is being made.",
     "This command needs no check.",
+    "This command holds a control character. Type it again without one.",
+    "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.",
+    "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.",
+    "vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.",
     "Couldn't read the seed."
   ]
 });

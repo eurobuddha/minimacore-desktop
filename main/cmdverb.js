@@ -1,0 +1,52 @@
+/*
+ * cmdverb.js: which command the node runs for a piece of command text. Ported unchanged (below this header) from the
+ * released desktop's main/cmdverb.js (0.18.174 and 0.18.184, security/backport-2026-11-20 d0260c91ea325f6c442ef77646372a066993af24)
+ * in 0.19.187. Every verb check in the main process goes through here: the secret-command gate (main/seedgate.js), and
+ * the readers of command text after it (the signing queue, the send pin, the coin guard, the RPC timeout, the restore
+ * checks, the Dexicon bridge).
+ *
+ * The node does not read a command the way a /^send\s/ test does. CMDHandler trims the text the Java way (every char
+ * U+0000 to U+0020 at both ends), runMultiCommand splits on every ";", and getCommand reads the first token two ways:
+ * a fast path where ":" is a token of its own and a "quoted" first word is the command, and a slow path that drops
+ * quotes. So `"vault"`, U+0001 + `vault`, `va"ul"t`, `"send" amount:1 …` and `keys action :genkey` are all run as written
+ * by the node, and slipped past the old checks. verbs() OVER-approximates both readings (lower-cased the way Java's
+ * equalsIgnoreCase folds, JS whitespace wider than Java's); a gate built on it may block a text the node would refuse
+ * anyway, never the reverse.
+ */
+const jtrim = (s) => String(s).replace(/^[\u0000- ]+|[\u0000- ]+$/g, "");   // Java String.trim()
+const fold = (s) => String(s).toUpperCase().toLowerCase();                          // Kelvin sign → k, long s → s
+
+/** The commands of a text, as the node splits them (every ";", empty pieces dropped). */
+function parts(command) { return String(command == null ? "" : command).split(";").map(jtrim).filter(Boolean); }
+
+/** Every verb the node may read for ONE command (no ";"). */
+function verbs(part) {
+  const p = jtrim(part), out = new Set();
+  const f = /"([^"]*)"|([^\s"]+)/.exec(p.replace(/:/g, " : "));            // fast path: ":" its own token, a quoted first word
+  if (f) out.add(fold(jtrim(f[1] != null ? f[1] : f[2])));
+  const slow = jtrim(p.replace(/"/g, ""));                                   // slow path: quotes dropped
+  out.add(fold(slow.split(/[\u0000- \s:]/)[0] || ""));
+  out.delete("");
+  return [...out];
+}
+/** Is this ONE command run as `verb`? */
+function is(part, verb) { return verbs(part).includes(verb); }
+/** Does this ONE command begin with `prefix`, however it is quoted or trimmed (for gates: over-blocks on purpose)? */
+function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(prefix)) || fold(jtrim(String(part).replace(/"/g, ""))).startsWith(prefix); }
+/** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value). */
+function paramsText(part) { return jtrim(String(part).replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
+
+/** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb, read
+ *  from paramsText (quotes dropped, " : " closed up). The node keeps the LAST of a repeated name. */
+function paramNames(part) {
+  const t = paramsText(part), rest = t.replace(/^\S+/, "");
+  return [...rest.matchAll(/(?:^|\s)([A-Za-z0-9_.-]+):/g)].map(m => fold(m[1]));
+}
+/** The names that appear more than once in ONE command (lower-cased). */
+function repeated(part, only) {
+  const seen = new Set(), twice = new Set();
+  for (const n of paramNames(part)) { if (only && !only.includes(n)) continue; if (seen.has(n)) twice.add(n); seen.add(n); }
+  return [...twice];
+}
+
+module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, paramNames, repeated };

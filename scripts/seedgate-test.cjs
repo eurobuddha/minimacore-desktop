@@ -5,18 +5,118 @@
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
 const G = require("../main/seedgate.js");
 const SRC = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+// CHANGED on purpose (0.19.187): read as the node reads a command (main/cmdverb.js), over-blocking: "vaults", "seedrandomx",
+// "keys action:genkeys" and "keys publickey:genkey" now count as gated (the node answers the first two as missingcmd anyway).
 const VECTORS = [["vault", "seed"], ["VAULT action:seed", "seed"], ["  Vault  action:wipekeys", "seed"], ["vault action:passwordlock password:x", "seed"], ["balance;vault", "seed"], ["balance ; VaUlT", "seed"],
   ["seedrandom modifier:ethbridge", "key"], ["SEEDRANDOM", "key"], ["status;seedrandom modifier:x", "key"], ["seedrandom;vault", "seed"],
-  ["keys action:genkey", "key"], ["KEYS Action:GenKey", "key"], ["status; keys action:\"genkey\"", "key"], ["keys action:list", null], ["keys", null], ["keys action:genkeys", null], ["keys publickey:genkey", null],
-  ["vaults", null], ["balance vault", null], ["send amount:1 address:vault", null], ["", null], ["status", null], ["seedrandomx", null], [";;", null]];
+  ["keys action:genkey", "key"], ["KEYS Action:GenKey", "key"], ["status; keys action:\"genkey\"", "key"], ["keys action:list", null], ["keys", null], ["keys action:genkeys", "key"], ["keys publickey:genkey", "key"],
+  ["vaults", "seed"], ["balance vault", null], ["send amount:1 address:vault", null], ["", null], ["status", null], ["seedrandomx", "key"], [";;", null],
+  ["\"vault\"", "seed"], ["\u0001vault", "seed"], ["va\"ul\"t", "seed"], ["\"seedrandom\" modifier:x", "key"], ["keys \"action\":genkey", "key"], ["keys action :genkey", "key"], ["keys action : genkey", "key"]];
 const os = (o) => { const asked = []; return { asked, can: () => !!o.can, prompt: async (why) => { asked.push(why); if (o.refuse) throw new Error("no"); } }; };
 
-test("which commands are gated: vault (any action) and seedrandom (any modifier), in any case, anywhere in a ; chain; nothing else", () => {
+test("which commands are gated: vault (any action), seedrandom (any modifier) and keys with genkey, however quoted, spaced or chained; nothing else", () => {
   for (const [c, k] of VECTORS) assert.equal(G.secretKind(c), k, JSON.stringify(c));
-  // the Terminal decides the same way before it asks (renderer/app.js termSecretKind)
-  const app = SRC("renderer/app.js"), fn = app.match(/function termSecretKind\(c\) \{[^\n]*\}/)[0];
-  const termSecretKind = new Function(fn + "; return termSecretKind;")();
-  for (const [c] of VECTORS) assert.equal(termSecretKind(c), G.secretKind(c), "the window and main agree: " + JSON.stringify(c));
+  // 0.19.187: the window no longer decides; it has no reader of its own (renderer/app.js termRun asks main first)
+  assert.ok(!/function termSecretKind/.test(SRC("renderer/app.js")), "no second reader in the window");
+});
+
+// ---- 0.19.187: the node's own reading of 68 command texts (the released review ran them through minima-core's
+// CommandRunner.getCommand: [class:name params] per ";" piece; copied from the released scripts/cmdgate-test.cjs). Every
+// text the node runs as vault, seedrandom or keys with a genkey action must be gated; the plain commands must not be. ----
+const NODE_READS = [
+  ["vault", "[vault:vault {}]"],
+  [" vault ", "[vault:vault {}]"],
+  ["\tvault\n", "[vault:vault {}]"],
+  ["VAULT", "[vault:vault {}]"],
+  ["Vault action:seed", "[vault:vault {\"action\":\"seed\"}]"],
+  ["\"vault\"", "[vault:vault {}]"],
+  ["\"vault\" action:seed", "[vault:vault {\"action\":\"seed\"}]"],
+  ["'vault'", "[missingcmd:missingcmd {}]"],
+  ["\u0001vault", "[vault:vault {}]"],
+  ["\u001fvault action:seed", "[vault:vault {\"action\":\"seed\"}]"],
+  ["\u0000vault", "[vault:vault {}]"],
+  ["\u007fvault", "[missingcmd:missingcmd {}]"],
+  ["\u200bvault", "[missingcmd:missingcmd {}]"],
+  ["\ufeffvault", "[missingcmd:missingcmd {}]"],
+  ["\u00a0vault", "[missingcmd:missingcmd {}]"],
+  ["vault\u00a0action:seed", "[missingcmd:missingcmd {}]"],
+  ["%76ault", "[missingcmd:missingcmd {}]"],
+  ["vault;", "[vault:vault {}]"],
+  [";;vault", "[vault:vault {}]"],
+  ["status;vault", "[status:status {}] [vault:vault {}]"],
+  ["status;\u0001vault", "[status:status {}] [vault:vault {}]"],
+  ["action:seed vault", "[missingcmd:missingcmd {}]"],
+  ["vault:seed", "[missingcmd:missingcmd {}]"],
+  ["vault action:seed\u0000", "[vault:vault {\"action\":\"seed\"}]"],
+  ["seedrandom modifier:ethbridge", "[seedrandom:seedrandom {\"modifier\":\"ethbridge\"}]"],
+  ["\"seedrandom\" modifier:ethbridge", "[seedrandom:seedrandom {\"modifier\":\"ethbridge\"}]"],
+  ["\u0002seedrandom modifier:x", "[seedrandom:seedrandom {\"modifier\":\"x\"}]"],
+  ["SEEDRANDOM modifier:x", "[seedrandom:seedrandom {\"modifier\":\"x\"}]"],
+  ["keys action:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:GENKEY", "[keys:keys {\"action\":\"GENKEY\"}]"],
+  ["keys action :genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action : genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys \"action\":genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys \"action\" : \"genkey\"", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys \"action:genkey\"", "[keys:keys {}]"],
+  ["keys action:\"genkey\"", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys\taction:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:genkey phrase:x", "[keys:keys {\"action\":\"genkey\",\"phrase\":\"x\"}]"],
+  ["keys phrase:x action:genkey", "[keys:keys {\"phrase\":\"x\",\"action\":\"genkey\"}]"],
+  ["\"keys\" action:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:list action:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:genkey{", "[keys:keys {\"action\":\"genkey{\"}]"],
+  ["keys  action:{genkey}", "[missingcmd:missingcmd {}]"],
+  ["keys action:[genkey]", "[missingcmd:missingcmd {}]"],
+  ["keys action:gen\u200bkey", "[keys:keys {\"action\":\"gen\\u200Bkey\"}]"],
+  ["k\u0435ys action:genkey", "[missingcmd:missingcmd {}]"],
+  ["keys action\t:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:\tgenkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:\u0001genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["\u212aeys action:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["va\"ul\"t phrase:{}", "[vault:vault {\"phrase\":{}}]"],
+  ["va\"ul\"t action:seed x:[1]", "[vault:vault {\"action\":\"seed\",\"x\":[1]}]"],
+  ["seed\"random\" modifier:a{", "[seedrandom:seedrandom {\"modifier\":\"a{\"}]"],
+  ["ke\"ys\" action:gen\"key\" x:{}", "[keys:keys {\"action\":\"genkey\",\"x\":{}}]"],
+  ["\"vault\"action:seed", "[vault:vault {\"action\":\"seed\"}]"],
+  ["\"vault\"\u0001", "[vault:vault {}]"],
+  ["vault", "[vault:vault {}]"],
+  ["balance", "[balance:balance {}]"],
+  ["keys action:list", "[keys:keys {\"action\":\"list\"}]"],
+  ["send amount:1 address:0xAA", "[send:send {\"amount\":\"1\",\"address\":\"0xAA\"}]"],
+  ["backup password:\"x\"", "[backup:backup {\"password\":\"x\"}]"],
+  ["megammrsync action:resync phrase:\"x\" host:h:9001", "[megammrsync:megammrsync {\"action\":\"resync\",\"phrase\":\"x\",\"host\":\"h:9001\"}]"],
+  ["\"keys\"action:genkey", "[keys:keys {\"action\":\"genkey\"}]"],
+  ["keys action:\"gen\"key", "[keys:keys {\"action\":\"gen\"}]"],
+  ["v\"\"ault", "[missingcmd:missingcmd {}]"],
+  ["\u0001\"vault\"", "[vault:vault {}]"],
+  ["\"\"vault", "[missingcmd:missingcmd {}]"],
+  ["keys action:{\"a\":1} action:genkey", "[keys:keys {\"action\":\"genkey\"}]"]
+];
+
+test("every text the node runs as a gated command is gated (68 variants: quotes, control characters, ':' spacing, case, chains)", () => {
+  let gatedByNode = 0;
+  for (const [text, node] of NODE_READS) {
+    const runs = [...node.matchAll(/\[(\w+):(\w+) (\{.*?\})\]/g)].map(m => ({ name: m[2], params: m[3] }));
+    const mustGate = runs.some(r => r.name === "vault" || r.name === "seedrandom" || (r.name === "keys" && /genkey/i.test(r.params)));
+    const k = G.classify(text).kind;
+    if (mustGate) { gatedByNode++; assert.notEqual(k, "", JSON.stringify(text) + " is run by the node as " + node + " and must be gated"); assert.notEqual(G.refusal(text, () => false), "", JSON.stringify(text) + " is refused without a pass"); }
+    if (["balance", "keys action:list", "send amount:1 address:0xAA", 'backup password:"x"', 'megammrsync action:resync phrase:"x" host:h:9001'].includes(text)) assert.equal(k, "", text + " is not gated");
+  }
+  assert.equal(gatedByNode, 46, "46 of the 68 texts are run by the node as a gated command");
+});
+
+test("a chain that holds a gated command is refused, never gated whole (as released 0.18.174); the refusal names all three commands", async () => {
+  const g = G.create(os({ can: false }));
+  for (const c of ["status;vault", "balance;seedrandom modifier:x", "keys action:list;keys action:genkey", "vault;", ";;vault"]) {
+    const chain = G.classify(c).chain;
+    const why = G.refusal(c, () => true);   // even with a pass at hand
+    if (chain) { assert.match(why, /^vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one\. Run that command on its own/, c); await assert.rejects(g.open(c, G.classify(c).kind === "seed" ? "SHOW SEED" : "SHOW KEY"), /this chain of commands holds one/, c); }
+    else assert.equal(why, "", c + " is one command (empty pieces are dropped)");
+  }
+  assert.equal(G.refusal("vault", () => false), "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.");
+  assert.equal(G.refusal("keys action:genkey", () => false), "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.");
+  assert.equal(G.refusal("balance", () => false), "");
 });
 
 test("the gate: the phrase for the kind, then the system's prompt, then that exact command once within a minute", async () => {
@@ -48,7 +148,7 @@ test("Show seed phrase (Backup & Recovery): the same checks before the node is a
 
 test("main: the general command channel refuses vault and seedrandom without a pass; the window reaches the seed only through the gates", () => {
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
-  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n  requireRunning\(\);\n  if \(seedgate\.secretKind\(command\) && !secretGate\.take\(command\)\) throw new Error\("vault and seedrandom show what controls your funds/.test(h), "the first thing the handler checks");
+  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
   assert.ok(/if \(!firstRunOpen \|\| c\.walletDone \|\| c\.walletMode !== "new"\) throw new Error\("The seed is shown here only while a new wallet is being made\."\);/.test(main) && /if \(c\.walletDone\) firstRunOpen = false;/.test(main), "the first-run seed: only in that step");
   assert.equal((main.match(/"vault"/g) || []).length, 1, "main asks for the vault in one place of its own (the first-run step); the reveal is in seedgate.js");
@@ -57,6 +157,8 @@ test("main: the general command channel refuses vault and seedrandom without a p
     const s = SRC("renderer/" + f); assert.ok(!/(cmd|tryCmd)\(\s*["'`](vault|seedrandom)/i.test(s), f + " asks the node for a secret directly");
   }
   const app = SRC("renderer/app.js"), run = app.slice(app.indexOf("async function termRun()"), app.indexOf("function renderTerminal()"));
+  assert.ok(run.indexOf("try { r = await api.cmd(c); } catch (x) { err = x; }") < run.indexOf("if (secret) {"), "main is asked first: its refusal decides");
+  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : null;/.test(run), "decided by main's code, never by words on screen or a reader of its own");
   assert.ok(run.indexOf("if (secret) {") < run.indexOf("TERM_HIST.push(c)") && /secretReveal\(c, JSON\.stringify\(r, null, 2\), !!\(g && g\.system\)\);[^\n]*\n\s*\}\);\n\s*return;\n\s*\}/.test(run), "a secret command returns before the history and the output");
   assert.ok(/appendTerm\(c\.split\(\/\\s\+\/\)\[0\], "cmd"\)/.test(run), "only its verb is shown in the output");
   const reveal = app.slice(app.indexOf("function secretReveal("), app.indexOf("// Export: the phone asks"));

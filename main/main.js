@@ -216,8 +216,11 @@ ipcMain.handle("mcd:firstRunSeed", async () => {
 
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
+  // control characters refused (0.19.187, released 0.18.174): the node reads them in ways no check here follows
+  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
   requireRunning();
-  if (seedgate.secretKind(command) && !secretGate.take(command)) throw new Error("vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.");
+  // vault / seedrandom / keys genkey read as the node reads them: only with a pass; a chain is refused. The deciding check.
+  const gated = seedgate.refusal(command, secretGate.take); if (gated) throw new Error(gated);
   // A backup file brings its own keys, in its own key mode: only Backup & Recovery restores one, after the mode check.
   if (restore.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
   // Replacing the wallet from a seed phrase resets every identity made from the old one: refused while work that needs the old keys is open.

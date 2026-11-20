@@ -24,9 +24,12 @@
   "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.": "Тут буде показано те, що керує вашими коштами. Будь-хто, хто це побачить, зможе забрати їх назавжди й безповоротно. Продовжуйте, лише якщо ви наодинці й точно знаєте, навіщо вам це потрібно.",
   "Anyone who sees this can take your funds. Never share it.": "Будь-хто, хто це побачить, зможе забрати ваші кошти. Ніколи нікому це не показуйте.",
   "The reply is shown in its own window for 60 seconds and is not kept here.": "Відповідь показується в окремому вікні протягом 60 секунд і тут не зберігається.",
-  "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.": "vault і seedrandom показують те, що керує вашими коштами: введіть команду в Терміналі, він спершу попросить фразу підтвердження.",
   "The seed is shown here only while a new wallet is being made.": "Сід-фраза показується тут лише під час створення нового гаманця.",
   "This command needs no check.": "Цій команді перевірка не потрібна.",
+  "This command holds a control character. Type it again without one.": "У цій команді є керівний символ. Введіть її знову без нього.",
+  "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.": "vault, seedrandom і keys action:genkey показують сід-фразу або закритий ключ; ця команда показує сід-фразу. Щоб виконати її, введіть SHOW SEED у Терміналі.",
+  "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.": "vault, seedrandom і keys action:genkey показують сід-фразу або закритий ключ; ця команда показує закритий ключ. Щоб виконати її, введіть SHOW KEY у Терміналі.",
+  "vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.": "vault, seedrandom і keys action:genkey показують сід-фразу або закритий ключ, а в цьому ланцюжку команд є одна з них. Виконайте цю команду окремо, не в ланцюжку через ;.",
   "Couldn't read the seed.": "Не вдалося прочитати сід-фразу.",
   "Key uses": "Кількість використань ключів",
   "0 only if this seed has never signed": "0, лише якщо ця сід-фраза ще ніколи не підписувала",
@@ -4851,9 +4854,12 @@
     "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.",
     "Anyone who sees this can take your funds. Never share it.",
     "The reply is shown in its own window for 60 seconds and is not kept here.",
-    "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.",
     "The seed is shown here only while a new wallet is being made.",
     "This command needs no check.",
+    "This command holds a control character. Type it again without one.",
+    "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.",
+    "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.",
+    "vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.",
     "Couldn't read the seed."
   ]
 });
