@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.115] — Terminal as Pandamonium's, with Run, the banner and coloured JSON (Phase 5a)
+
+- **The screen is Pandamonium's Terminal** (apks/base `view_terminal.xml`, `TerminalView`): the MINIMA banner with "Welcome to Minima Core <node version>" and "You can run commands in this Terminal..", the output beneath it in monospace, and at the bottom the command field ("Enter command") with the orange **Run** button. It wears the shell's own colours in light and dark, as on the phone. Enter still runs; an empty Run does nothing; output is kept to 20,000 characters, as the phone keeps it.
+- **Kept from the desktop:** completion with its parameter hints, the command history on the arrow keys, Copy output and Clear (small, at the top right), the one-line warning that commands run at once.
+- **Coloured JSON**, as `mds/terminalIDE` colours it: keys, strings, numbers, true, null, and red for `false` and for strings that say error, invalid or fail; the command echo after an accent ">". terminalIDE is dark only, so the light theme has darker inks of the same hues. The output is built from text nodes: a reply is never written as HTML.
+- **A typed `send` and the coin guard (checked, executed test):** in the default Observe mode the guard forwards a wallet `send` byte for byte, whatever another part of the app holds, and only logs what Enforce would have done. One thing can still be added to a typed send, and it is not the guard: since 0.16.x the app appends `fromaddress:<one of the wallet's addresses>` to a MINIMA send that names none, so that the node does not pick a coin it cannot sign. That is unchanged; the Terminal now says so under such a command, and the node's reply shows the parameters it received. A send that carries its own `fromaddress:`, and any token send, goes out as typed.
+- `restore`, `restoresync` and `megammrsync file:` are still refused here (0.18.95).
+
 ## [0.19.114] — Minima Faucet as its one screen in Pandamonium (Phase 5a)
 
 - **The screen is Pandamonium's Faucet** (apks/base `integrated/faucet`): "MINIMA FAUCET" in orange, "Get Free Minima", "Receive 0.0001 Minima to try out the blockchain.", the "Minima Address" field ("Paste or fetch an address…"), the outlined "Get My Address", the orange "Request Minima", the answer in green or red beneath, the help line and the footer, on `#0A0A0F`, centred. The address field is two lines so that a whole Mx address is in view.

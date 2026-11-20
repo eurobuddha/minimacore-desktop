@@ -38,7 +38,7 @@ body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 .addrbox { border-radius: 10px; }
 
 /* Terminal + Logs — fill the available height */
-#view-terminal.view--active, #view-logs.view--active { display: flex; flex-direction: column; height: 100%; }
+#view-logs.view--active { display: flex; flex-direction: column; height: 100%; }
 .termout, .logsout { flex: 1 1 auto; max-height: none; min-height: 200px; user-select: text; color: var(--text);
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 13px; margin: 0; }
 #view-terminal .field__input { flex: 0 0 auto; }

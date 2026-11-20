@@ -169,17 +169,21 @@
         </div>
       </section>
 
+      <!-- Terminal: Pandamonium's TerminalView (view_terminal.xml): the banner and the output scroll, the command field and Run beneath. -->
       <section class="view" id="view-terminal">
-        <div class="view__desc" style="color:var(--amber)">Commands run against your live node immediately. There is no confirmation step.</div>
-        <pre class="logbox termout" id="termOut"></pre>
-        <div class="termwrap">
-          <div class="termsug" id="termSug" style="display:none"></div>
-          <div class="termhint" id="termHint" style="display:none"></div>
-          <input class="field__input" id="termIn" placeholder="a node command, e.g. status  ·  ↑/↓ history · Tab completes" autocomplete="off" spellcheck="false" />
+        <div class="term-scroll" id="termScroll">
+          <div class="term-tools"><button class="term-tool" id="termCopy">Copy output</button><button class="term-tool" id="termClear">Clear</button></div>
+          <pre class="term-banner" id="termBanner"></pre>
+          <div class="term-warn">Commands run against your live node immediately. There is no confirmation step.</div>
+          <div class="term-out" id="termOut" aria-live="polite"></div>
         </div>
-        <div class="seg" style="margin-top:8px">
-          <button class="btn btn--sm btn--outline" id="termClear">Clear</button>
-          <button class="btn btn--sm btn--outline" id="termCopy">Copy output</button>
+        <div class="term-row">
+          <div class="termwrap">
+            <div class="termsug" id="termSug" style="display:none"></div>
+            <div class="termhint" id="termHint" style="display:none"></div>
+            <input class="term-in" id="termIn" placeholder="Enter command" aria-label="Node command" autocomplete="off" spellcheck="false" />
+          </div>
+          <button class="term-run" id="termRun">Run</button>
         </div>
       </section>
 

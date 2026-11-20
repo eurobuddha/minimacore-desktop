@@ -22,7 +22,6 @@ const ICON_CACHE = new Map();// tokenid → { icon: dataURI|null, valid: bool|nu
 let HIST_SYNCING = false;    // guard against overlapping history syncs
 let histOldestOffset = 0;    // how deep "Load older" has paged
 // terminal state
-let TERM_OUT = "";
 const TERM_HIST = [];
 let termIdx = -1;
 let SUG_ITEMS = [];          // current autocomplete suggestions (from TermComplete.suggest)
@@ -2651,29 +2650,76 @@ function termSugAccept(item) {
   inp.setSelectionRange(c, c);
   termSugUpdate();                                    // Tab flows onward: command → params → values
 }
-function appendTerm(s) {
-  TERM_OUT += (TERM_OUT ? "\n" : "") + s;
-  if (TERM_OUT.length > 20000) TERM_OUT = TERM_OUT.slice(TERM_OUT.length - 20000);
-  const out = el("termOut"); if (out) { out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight; }
+// ---- Terminal: Pandamonium's TerminalView (banner, output, the command field and Run), the desktop's completion kept ----
+// Output is built from text nodes only (a reply can carry any text a peer put on the chain); JSON is coloured as
+// mds/terminalIDE colours it (keys, strings, numbers, true / false, null; `false` and failure words in red).
+const TERM_MAX = 20000;   // characters kept, as the phone's boundedAppend: older output is dropped from the head
+const TERM_BANNER = ["**********************************************", "*  __  __  ____  _  _  ____  __  __    __    *", "* (  \\/  )(_  _)( \\( )(_  _)(  \\/  )  /__\\   *",
+  "*  )    (  _)(_  )  (  _)(_  )    (  /(__)\\  *", "* (_/\\/\\_)(____)(_)\\_)(____)(_/\\/\\_)(__)(__) *", "*                                            *", "**********************************************"];
+let TERM_ITEMS = [];      // [{ kind: "cmd" | "json" | "err" | "note", text }]
+/** The coloured pieces of a pretty-printed JSON text: [[class | "", text], …]. Pure (scripts/apps-screens.test.cjs). */
+function termJsonParts(text) {
+  const out = [], re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+  let at = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > at) out.push(["", text.slice(at, m.index)]);
+    if (m[1] && m[2]) { out.push(["j-key", m[1]]); out.push(["", m[2]]); }
+    else if (m[1]) out.push([/error|invalid|fail/i.test(m[1]) ? "j-err" : "j-str", m[1]]);
+    else if (m[3]) out.push([m[3] === "false" ? "j-err" : "j-bool", m[3]]);
+    else out.push([m[0] === "null" ? "j-null" : "j-num", m[0]]);
+    at = re.lastIndex;
+  }
+  if (at < text.length) out.push(["", text.slice(at)]);
+  return out;
+}
+function termNode(it) {
+  const line = document.createElement("div"); line.className = "term-line term-line--" + it.kind;
+  if (it.kind !== "json") { line.textContent = it.text; return line; }
+  for (const [cls, t] of termJsonParts(it.text)) { if (!cls) { line.appendChild(document.createTextNode(t)); continue; } const sp = document.createElement("span"); sp.className = cls; sp.textContent = t; line.appendChild(sp); }
+  return line;
+}
+function termText() { return TERM_ITEMS.map(it => (it.kind === "cmd" ? "> " : "") + it.text).join("\n"); }
+function appendTerm(text, kind) {
+  let it = { kind: kind || "json", text: String(text) };
+  if (it.text.length > TERM_MAX) it = { kind: it.kind === "json" ? "note" : it.kind, text: "…\n" + it.text.slice(-TERM_MAX) };   // one oversized reply: its tail
+  TERM_ITEMS.push(it);
+  let size = TERM_ITEMS.reduce((n, x) => n + x.text.length + 1, 0), dropped = 0;
+  while (size > TERM_MAX && TERM_ITEMS.length > 1) { size -= TERM_ITEMS.shift().text.length + 1; dropped++; }
+  const out = el("termOut"); if (!out) return;
+  for (; dropped > 0 && out.firstChild; dropped--) out.removeChild(out.firstChild);
+  out.appendChild(termNode(it));
+  el("termScroll").scrollTop = el("termScroll").scrollHeight;
+}
+// A typed `send` is the user's own command. One thing can be added to it on the way, and the Terminal says so: a MINIMA send
+// with no fromaddress: may be given one (main.js, the pin that keeps the node off coins it cannot sign). The coin guard itself
+// passes a wallet command through unchanged unless it is switched to Enforce (Settings, Coin guard).
+function termSendNote(c) { return /^send\s/i.test(c) && !/\bfromaddress:/i.test(c) && !/\btokenid:0x(?!0+\b)[0-9A-Fa-f]+/i.test(c) ? "note: a MINIMA send with no fromaddress: may be given one of this wallet's own addresses, so that the node does not choose a coin it cannot sign. The reply's params show what was sent. Type fromaddress: yourself to choose." : ""; }
+async function termRun() {
+  const inp = el("termIn"), c = inp.value.trim(); if (!c) return;   // an empty Run does nothing
+  inp.value = ""; termSugClose();
+  TERM_HIST.push(c); termIdx = TERM_HIST.length;
+  appendTerm(c, "cmd");
+  const note = termSendNote(c); if (note) appendTerm(note, "note");
+  try { const r = await api.cmd(c); appendTerm(JSON.stringify(r, null, 2), "json"); }
+  catch (err) { appendTerm("error: " + ipcError(err), "err"); }
+  inp.focus();
 }
 function renderTerminal() {
   const out = el("termOut"), inp = el("termIn");
-  out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight;
-  el("termClear").onclick = () => { TERM_OUT = ""; out.textContent = ""; };
-  el("termCopy").onclick = () => copy(TERM_OUT);
+  api.nodeStatus().then(s => { el("termBanner").textContent = TERM_BANNER.join("\n") + "\nWelcome to Minima Core " + ((s && s.health && s.health.version) || "") + "\nYou can run commands in this Terminal.."; }).catch(() => {});
+  if (!el("termBanner").textContent) el("termBanner").textContent = TERM_BANNER.join("\n");
+  out.textContent = ""; TERM_ITEMS.forEach(it => out.appendChild(termNode(it)));
+  el("termScroll").scrollTop = el("termScroll").scrollHeight;
+  el("termClear").onclick = () => { TERM_ITEMS = []; out.textContent = ""; inp.focus(); };
+  el("termCopy").onclick = () => copy(termText());
+  el("termRun").onclick = termRun;
   inp.onkeydown = async (e) => {
     if (e.key === "Enter") {                          // Enter ALWAYS submits, dropdown open or not
-      const c = inp.value.trim(); if (!c) return;
-      inp.value = ""; termSugClose();
-      TERM_HIST.push(c); termIdx = TERM_HIST.length;
-      appendTerm("> " + c);
-      try { const r = await api.cmd(c); appendTerm(JSON.stringify(r, null, 2)); }
-      catch (err) { appendTerm("error: " + (err && err.message || err)); }
+      termRun();
     } else if (e.key === "Escape") {                  // the escape hatch to reach ↑ history while suggestions are up
       if (SUG_ITEMS.length) { e.preventDefault(); termSugClose(); }
     } else if (e.key === "Tab") {
-      e.preventDefault();
-      if (SUG_ITEMS.length) termSugAccept(SUG_ITEMS[Math.min(SUG_SEL, SUG_ITEMS.length - 1)]);
+      if (SUG_ITEMS.length) { e.preventDefault(); termSugAccept(SUG_ITEMS[Math.min(SUG_SEL, SUG_ITEMS.length - 1)]); }   // with nothing to complete, Tab moves on to Run
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.preventDefault();
       const d = e.key === "ArrowDown" ? 1 : -1;
