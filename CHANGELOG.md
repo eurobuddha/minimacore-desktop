@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.155] — Web Wallet: the UNKNOWN lock is kept per wallet address
+
+- After a send the node did not confirm, the Web Wallet disabled Send until "I've checked", but Lock (or leaving the screen) reset that flag, so unlocking again offered Send at once with the possible first payment unchecked. The lock is now kept per wallet address across Lock and leaving the screen, only "I've checked" clears it, and the send itself refuses while it stands. Port of 0.19.123. Test: `scripts/webwallet-ui-test.cjs` (`npm run test:webwallet-ui`, in CI).
+
 ## [0.18.154] — a chain of commands is never given the send pin
 
 - `main/sendpin.js` `pinMinimaSend` appended `fromaddress:` to the end of the command text, so for a Terminal chain (`send …; status`) it landed on the LAST command as a stray parameter while the send itself went out unpinned. A chain is now sent as typed. Port of the main-process part of 0.19.122 (the released Terminal has no pin note and keeps its own output handling). Test: `scripts/sendpin-test.cjs` (`npm run test:sendpin`, in CI).

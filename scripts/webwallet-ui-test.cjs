@@ -1,0 +1,31 @@
+/*
+ * webwallet-ui-test.cjs — the Web Wallet screen's safety rules (renderer/app.js), run against stand-ins: no node, no network.
+ * Run: node --test scripts/webwallet-ui-test.cjs
+ */
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("fs");
+const path = require("path");
+
+const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+const fnSrc = (name) => { const i = app.indexOf("\nfunction " + name + "("); assert.ok(i >= 0, name); return app.slice(i + 1, app.indexOf("\n}", i) + 2); };
+const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {"));
+
+// ---- 0.18.155 ----
+test("the UNKNOWN lock belongs to the wallet address and outlives Lock and leaving the screen; only \"I've checked\" clears it", () => {
+  const W = new Function("let wwSeed = 's', wwAddr = { address: 'MxA' }, wwBal = [1], wwKu = {}, wwArmed = true, wwKuSuggest = 3;\nconst WW_UNKNOWN = new Set();\n"
+    + fnSrc("wwUnknown") + "\n" + app.match(/function wwLock\(\) \{[^\n]*\}/)[0] + "\nreturn { wwUnknown, wwLock, seed: () => wwSeed };")();
+  const A = "MxG0" + "A".repeat(56), B = "MxG0" + "B".repeat(56);
+  assert.equal(W.wwUnknown(A), false);
+  assert.equal(W.wwUnknown(A, true), true, "an ambiguous send from A");
+  W.wwLock(); assert.equal(W.seed(), null, "Lock (and leaving the screen) clears the seed");
+  assert.equal(W.wwUnknown(A), true, "and NOT the lock: unlocking again does not offer Send");
+  assert.equal(W.wwUnknown(A.toLowerCase()), true, "the same address in another case"); assert.equal(W.wwUnknown(B), false, "another wallet is not locked by it");
+  assert.equal(W.wwUnknown(null, true), false, "no address: nothing is recorded");
+  assert.equal(W.wwUnknown(A, false), false, "I've checked");
+  assert.ok(!/wwAmbiguous/.test(ww), "the per-session flag that Lock reset is gone");
+  assert.equal((ww.match(/wwUnknown\([^)]*, false\)/g) || []).length, 1, "cleared in exactly one place");
+  assert.ok(/ambigBtn\.addEventListener\("click", \(\) => \{ wwUnknown\(wwAddr && wwAddr\.address, false\);/.test(ww), "and that place is the \"I've checked\" button");
+  assert.ok(/const from = wwAddr\.address;[^\n]*\n\s*let r;\n\s*try \{ r = await api\.wwSend\(/.test(ww) && /wwUnknown\(from, true\);/.test(ww), "recorded for the wallet the send left, even if the screen was locked before the answer");
+  assert.ok(/if \(wwUnknown\(wwAddr && wwAddr\.address\)\) \{ toast\("The last send's status is UNKNOWN\./.test(ww) && /const sendDisabled = \(\(a\.isNodeSeed \|\| ku\.ack\) && !unknown\) \? "" : "disabled";/.test(ww), "Send is off, and refuses, while it stands");
+});

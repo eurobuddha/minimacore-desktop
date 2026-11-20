@@ -97,6 +97,10 @@ jobs:
       - name: Verify send pin
         run: npm run test:sendpin
 
+      # The Web Wallet screen: the UNKNOWN-send lock per wallet, and what leaves this computer only on a click.
+      - name: Verify Web Wallet screen rules
+        run: npm run test:webwallet-ui
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
