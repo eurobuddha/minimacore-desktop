@@ -146,3 +146,23 @@ test("screen: Pay asks first, with the amount sent, the token id and the vendor'
   E = await run(shopOf({ tokenid: MXUSD }), true);
   assert.equal(E.asked.length, 0); assert.equal(E.placed.length, 0); assert.match(E.toasts[0], /names another token/);
 });
+
+// ---- 0.18.151: the vendor's side takes the token from its own shop, not from the buyer's order ----
+test("vendor: an order to an MxUSD shop that says Minima must still be paid in MxUSD", async () => {
+  const me = shop.myIdentity(); assert.ok(me && me.publicId, "the identity of the placeOrder test above");
+  const buyer = await sc.deriveIdentity("a buyer for the vendor test");
+  store.saveShop({ shopId: "own-mxusd", shopName: "Mine", currency: "USDT", tokenid: MXUSD, products: [], shipping: [] });
+  const order = { type: "ORDER", ref: "ORD-VEND1", randomid: "r1", from: buyer.publicId, to: me.publicId, date: Date.now(), shopId: "own-mxusd", shopName: "Mine",
+    items: [{ product: "Tea", quantity: 1 }], amount: "5", currency: "Minima", tokenid: "0x00" };
+  const blob = await sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify(order), "utf8"));
+  const refHex = "0x" + Buffer.from("ORD-VEND1", "utf8").toString("hex");
+  shop._setRunner(async (c) => {
+    if (c.startsWith("coins address:" + shop.MINIMERCH)) return { status: true, response: [{ coinid: "0xC1", state: { "99": "0x" + blob } }] };
+    if (c.startsWith("coins address:" + me.vendorAddress)) return { status: true, response: [{ coinid: "0xC2", tokenid: "0x00", amount: "5", state: { "1": refHex } }] };
+    return { status: true, response: [] };
+  });
+  await shop.scanOnce();
+  const o = store.order("ORD-VEND1");
+  assert.ok(o, "the order was received"); assert.equal(o.tokenid, MXUSD); assert.equal(o.currency, "USDT");
+  assert.equal(o.paid, false, "5 Minima does not pay a 5 MxUSD order"); assert.equal(o.status, "WRONG_TOKEN");
+});

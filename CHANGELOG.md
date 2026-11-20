@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.151] — miniMall vendor: an order is paid in the shop's own token
+
+- An incoming order took its token from the currency the BUYER wrote (`routeIncoming`, `tokenFor(w.currency)`): an order to an MxUSD shop that said "Minima" was marked PAID by a payment in Minima. The token, the currency and the new-order notification now come from the vendor's own stored shop. Orders and totals show the currency as MxUSD. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.150] — miniMall pays the token its currency names
 
 - A `.shop` that says Minima and carries the MxUSD token id (or any token id that is not its currency's) is refused on import, on opening a stored shop, before Pay and in the main process before the order message (`placeOrder`) and on Retry payment; the token paid is the one the currency names. Pay now asks first and shows the amount sent, the token id and the vendor's address whole, each on its own line. Prices and fees are plain decimals; totals are exact in BigInt (six decimals as before, the exact figure when a price has more). Product pictures are inline `data:image` pictures or nothing. The Studio currency button reads MxUSD. Rules shared by screen and main process in `renderer/shop-rules.js`. Port of 0.19.118. Test: `scripts/shop-test.cjs`.

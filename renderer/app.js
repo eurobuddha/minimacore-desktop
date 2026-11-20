@@ -2708,7 +2708,7 @@ async function renderShopOrders() {
   if (!orders.length) { host.innerHTML = `<div class="card"><div class="empty">No orders yet. Orders to your shops (Selling) and orders you place (Buying) both land here.<br>Your shop id: ${id}</div></div>`; return; }
   const row = o => `<div class="card shop-order" data-oref="${esc(o.ref)}"><div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><span class="mono">${esc(o.ref)}</span>${o.unread ? ' <span class="shop-dot"></span>' : ""}<div class="view__desc" style="margin:2px 0 0">${esc(o.shopName || "")}</div></div>
-      <div style="text-align:right"><div class="mono">${esc(o.amount)} ${esc(o.currency)}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
+      <div style="text-align:right"><div class="mono">${esc(o.amount)} ${esc(ShopRules.cur(o.currency))}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
   const sec = (title, list) => list.length ? `<div class="ax-seclabel">${title}</div>` + list.map(row).join("") : "";
   host.innerHTML = sec("SELLING · orders to your shops", orders.filter(o => o.role === "sell")) + sec("BUYING · orders you placed", orders.filter(o => o.role === "buy"));
   host.querySelectorAll("[data-oref]").forEach(r => r.onclick = () => { shopOrderRef = r.dataset.oref; renderShopOrders(); });
@@ -2724,7 +2724,7 @@ async function renderShopOrderDetail(ref) {
     <div class="card" style="margin-top:8px"><div class="card__title">${esc(o.ref)} · ${isSell ? "incoming order" : "your order"}</div>
       ${shopStatusPill(o.status, d.unpaid)}
       <div class="view__desc" style="margin-top:6px">${esc(o.shopName || "")}</div>${items}
-      <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>Total</span><span class="mono">${esc(o.amount)} ${esc(o.currency)}</span></div>
+      <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>Total</span><span class="mono">${esc(o.amount)} ${esc(ShopRules.cur(o.currency))}</span></div>
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
       ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Awaiting payment"}</div>` : ""}
