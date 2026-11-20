@@ -14,12 +14,17 @@
  *  ` fromaddress:<addr>` appended — only for a MINIMA (0x00) `send` that doesn't already pin one. A MINIMA send is
  *  either an explicit `tokenid:0x00` OR one with NO tokenid at all (the node defaults to MINIMA). A non-0x00 token
  *  send is untouched (beacon dust is MINIMA-only). */
+const V = require("./cmdverb");
 async function pinMinimaSend(runner, command, opts) {
   const c = String(command);
-  if (!/^send\s/.test(c) || /\bfromaddress:/.test(c)) return c;
   // A chain (cmd1; cmd2) is never pinned (0.18.154): the pin is appended to the END of the text, so in a chain it landed
   // on the LAST command, a stray parameter there, while the send itself went out unpinned. The node splits on every ";".
   if (c.includes(";")) return c;
+  // The verb and the parameters are read as the node reads them (main/cmdverb.js, 0.18.175): `"send" …`, a leading
+  // control character or `fromaddress : 0x…` used to slip past /^send\s/ and /\bfromaddress:/.
+  if (!V.is(c, "send")) return c;
+  const pt = V.paramsText(c);
+  if (/\bfromaddress:/i.test(pt)) return c;
   // minCoinage: only consider coins at least N blocks deep. AtomiX's order-book publish needs this — a
   // publish's own CHANGE output is a brand-new coin that immediately becomes the smallest one, and pinning
   // to a coin the node will not spend yet makes the send unfundable, so every publish poisoned the next.
@@ -28,9 +33,9 @@ async function pinMinimaSend(runner, command, opts) {
   // exclude: addresses (any case) the caller has already tried and the node refused. Lets a caller rotate to
   // the next candidate instead of re-pinning the same one — the AtomiX publish retry uses this.
   const exclude = new Set([...((opts && opts.exclude) || [])].map(a => String(a).toLowerCase()));
-  const tok = /\btokenid:(0x[0-9A-Fa-f]+)/.exec(c);
+  const tok = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(pt);
   if (tok && tok[1].toLowerCase() !== "0x00") return c;   // an explicit non-MINIMA token → not beacon-polluted
-  const am = /\bamount:([0-9.]+)/.exec(c);
+  const am = /\bamount:([0-9.]+)/i.exec(pt);
   const need = am ? am[1] : "0";
   // Minima amounts carry up to 44 decimals, well past a double's ~15–17 significant digits, so "does this
   // coin cover the amount" is decided on the DECIMAL STRINGS. Comparing as floats made a coin fractionally

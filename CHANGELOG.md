@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.175] — every verb check reads the command as the node does
+
+- The beacon-dust send pin (`main/sendpin.js` and `mcd:cmd`) decided with `/^send\\s/` and `/\\bfromaddress:/`, and the RPC timeout with `startsWith`: `"send" …`, a leading control character, `s"en"d`, `amount : 1` or `fromaddress : 0x…` typed in the Terminal skipped them. They now read the verb and the parameters through `main/cmdverb.js` (the node's trim, quoted first word, quotes dropped, `:` spacing closed up). This version has no signing queue or coin reservation module. The AtomiX and casino send checks read commands their own engines build, never typed text, and are not changed. Tests: `scripts/sendpin-test.cjs`.
+
 ## [0.18.174] — the secret-command gate reads a command as the node does
 
 - The 0.18.173 gate read the first word with a JS split, but the node trims every character U+0000 to U+0020, takes a "quoted" first word as the command, makes ":" a token of its own and, on its slow path, drops quotes: `"vault"`, U+0001 + `vault`, `"seedrandom" modifier:ethbridge`, `keys action :genkey`, `va"ul"t phrase:{}` and others were run by the node ungated (22 of the 68 texts the release review ran through minima-core's CommandRunner). `main/cmdverb.js` now over-approximates both of the node's readings (Java trim, case folded as equalsIgnoreCase does) and the gate uses it; all 68 texts and the node's reading of each are in the test. `mcd:cmd` refuses any command text holding a control character other than tab and line end. Any gate try, passed or not, clears an earlier pass. The refusal names vault, seedrandom and keys action:genkey. Chains holding one of them stay refused. Test: `scripts/cmdgate-test.cjs`.

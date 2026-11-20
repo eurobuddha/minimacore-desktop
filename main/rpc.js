@@ -20,9 +20,9 @@ const WRITE_PREFIXES = ["send", "txn", "tokencreate", "consolidate", "burn", "va
   "archive", "megammr", "mysql", "reset", "seedrandom", "quit", "newaddress", "newscript", "coinimport",
   "cointrack", "removescript", "sign", "multisig"];
 
-function timeoutFor(command) {
-  const c = command.trim().toLowerCase();
-  return WRITE_PREFIXES.some(p => c.startsWith(p)) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
+const V = require("./cmdverb");
+function timeoutFor(command) {   // the verb read as the node reads it, in every piece of a chain (main/cmdverb.js, 0.18.175)
+  return V.parts(command).some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 
 /** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
@@ -70,4 +70,4 @@ function rpcCall(port, secret, command) {
   });
 }
 
-module.exports = { rpcCall };
+module.exports = { rpcCall, _timeoutFor: timeoutFor };
