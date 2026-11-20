@@ -416,6 +416,22 @@ ipcMain.handle("mcd:keyAudit", (_e, publicKey) => keyuses.onchainUses(publicKey,
 // result. It names no host and no key itself.
 ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audit({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }) }); });
 
+// Future Cash Next (main/futurecash.js): the native app's engine, here. Every node command through rpcCall as owner
+// "futurecash" (the signing queue and the coin guard see it); the key audit through the KeyUses host. It runs while the
+// node runs: its store is this wallet's own file, and one pass is made on each new block.
+const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c, { owner: "futurecash" }), dir: () => app.getPath("userData"),
+  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l) });
+const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
+let fcBlock = 0;
+node.on("status", (s) => {
+  if (s.state !== "running") { fcBlock = 0; futurecash.stop().catch(() => {}); return; }
+  const b = s.health && s.health.block;
+  futurecash.start().then(() => { if (b && b !== fcBlock) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});
+});
+// The screens' calls, by name: nothing else reaches the engine.
+const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity() };
+ipcMain.handle("mcd:fc", (_e, op, ...args) => { if (typeof op !== "string" || !Object.hasOwn(FC_OPS, op)) throw new Error("Unknown Future Cash action."); requireRunning(); return FC_OPS[op](...args); });
+
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
 ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });

@@ -144,12 +144,12 @@ function join(keys, usage, reuse) {
  * answer status:true. ONE REQUEST AT A TIME, in order (the phone sends them side by side): when one fails, the public
  * keys and addresses of the chunks after it are never sent.
  */
-async function lookup(keys, get) {
+async function lookup(keys, get, extra) {   // extra: more 0x addresses for the same /reuse batch (Future Cash Next's rescue destinations, AuditRunner)
   const chunks = (list) => { const out = []; for (let i = 0; i < list.length; i += CHUNK) out.push(list.slice(i, i + CHUNK)); return out; };
   const ask = async (url) => { const j = await get(url); if (!j || j.status !== true) throw new Error("no answer"); return j; };
   let tip = -1; const usage = [], reuse = [];
   for (const c of chunks(keys.map(k => k.publickey))) { const j = await ask(BASE + "/keyaudit?keys=" + encodeURIComponent(c.join(","))); const t = whole(j.archive_tip); if (t != null && t > tip) tip = t; usage.push(...parseUsage(j.keys)); }
-  for (const c of chunks(keys.map(k => k.address.hex))) { const j = await ask(BASE + "/reuse?addrs=" + encodeURIComponent(c.join(","))); reuse.push(...parseReuse(j.results)); }
+  for (const c of chunks(keys.map(k => k.address.hex).concat((extra || []).filter(a => /^0x[0-9a-fA-F]{64}$/.test(a))))) { const j = await ask(BASE + "/reuse?addrs=" + encodeURIComponent(c.join(","))); reuse.push(...parseReuse(j.results)); }
   return { usage, reuse, tip };
 }
 

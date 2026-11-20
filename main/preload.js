@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld("mcd", {
   secureScreen: (on) => ipcRenderer.invoke("mcd:secureScreen", on === true),   // ask the system to keep the window out of screen captures while a seed phrase can be on screen → { on, platform }: what was set, not a promise
   explorer: (kind, arg) => ipcRenderer.invoke("mcd:explorer", kind, arg),   // Minima Explorer: one of seven node reads, built and checked in the main process (main/explorer.js)
   keyUsesAudit: () => ipcRenderer.invoke("mcd:keyUsesAudit"),   // the KeyUses app: the whole audit runs in the main process (main/keyuses.js)
+  fc: (op, ...args) => ipcRenderer.invoke("mcd:fc", op, ...args),   // Future Cash Next: one named action of main/futurecash.js (main.js FC_OPS)
 
   // local transaction-history DB (SQLite; our own source of truth — survives node pruning + restarts)
   histGet: (limit) => ipcRenderer.invoke("mcd:histGet", limit),
@@ -294,6 +295,7 @@ contextBridge.exposeInMainWorld("mcd", {
   vestrCollect: (coinid, burn) => ipcRenderer.invoke("mcd:vestrCollect", coinid, burn),
   vestrCalculate: (amount, startMs, endMs, graceHours) => ipcRenderer.invoke("mcd:vestrCalculate", amount, startMs, endMs, graceHours),
   onVestr: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:vestr", h); return () => ipcRenderer.removeListener("mcd:vestr", h); },
+  onFutureCash: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:futurecash", h); return () => ipcRenderer.removeListener("mcd:futurecash", h); },
 
   // Web Wallet (local, megammr-gated). Seed is passed to main for loopback signing only; never persisted.
   wwMegammr: () => ipcRenderer.invoke("mcd:wwMegammr"),
