@@ -3,8 +3,9 @@
 // here reaches a node or the network (the module itself opens no socket: it is handed run() and get()).
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const K = require("../main/keyuses.js"), Act = require("../renderer/apps-act.js").keyuses;
-const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+const R = (f) => { const s = fs.readFileSync(path.join(__dirname, "..", f), "utf8"); return /^renderer\/[^/]+\.js$/.test(f) ? require("./i18n-plain.cjs").plain(s) : s; };   // a renderer script: as it read before its text was wrapped for translation
 
 // MinimaAddressTest.GOLDENS (apks/base integrated/futurecash-next, 1c60c2593325f70cba5089e2ba430925d6ccca3c), copied whole
 const GOLDENS = [

@@ -4,7 +4,8 @@
 // the same user input must still put the same bytes on the wire, behind the same checks, in the same order.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
-const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
+const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"));
 const mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
 
 const TO = "MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1";

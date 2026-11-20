@@ -5,6 +5,7 @@
 // Nothing here reaches a node, Ethereum or the network: any call that is not a recorded stand-in throws.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path"), vm = require("vm");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 require("./dexicon-mock.cjs");   // FIRST: the real rpcCall and the real network throw from here on
 const os = require("os");
 const R = path.join(__dirname, "..", "renderer");
@@ -100,7 +101,7 @@ test("Refund now and Check now: axRefundNow(hash) and axInspect(hash), as the ol
 });
 test("there is no way to cancel a swap: no action, no button, no call", () => {
   assert.deepEqual(Object.keys(AX.Act).filter((k) => /cancel|abort/i.test(k)), []);
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8")).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
   assert.ok(!/data-ax(cancel|abort)|>\s*Cancel (swap|lock)/i.test(src), "no cancel control is drawn");
   assert.ok(!/api\(\)\.ax[A-Za-z]*(Cancel|Abort)/.test(src));
 });
@@ -117,7 +118,7 @@ test("the token is MxUSD wherever a user reads it; USDT names only the Ethereum 
   assert.equal(AX.tok(AX.MXUSD), "MxUSD"); assert.equal(AX.tok("0x00"), "MINIMA"); assert.equal(AX.tok("USDT"), "USDT");
   assert.equal(AX.mx("You locked 100 mxUSDT for USDT"), "You locked 100 MxUSD for USDT");
   assert.equal(AX.MXUSD, "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8")).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
   const shown = [...src.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((m) => m[1] || m[2] || "").filter((t) => /mxusdt/i.test(t));
   assert.deepEqual(shown.filter((t) => !/^(mxusdt|\^mxusdt\?\$)$/i.test(t) && !/data-axccy|=== "mxusdt"/.test(t)), [], "mxUSDT appears only as the engine's key");
 });
@@ -178,7 +179,7 @@ test("the room: the phone's six tabs, opened on Swap at every start; Activity, A
   C.pickTab(mem, "market"); assert.equal(C.tabOf(mem), "market", "and the tab is kept while the app runs");
 });
 test("the old AtomiX panel is gone: no file, no tag, no wiring; room ① is the only AtomiX screen", () => {
-  const html = fs.readFileSync(path.join(R, "index.html"), "utf8"), app = fs.readFileSync(path.join(R, "app.js"), "utf8");
+  const html = fs.readFileSync(path.join(R, "index.html"), "utf8"), app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "app.js"), "utf8"));
   for (const f of ["atomix-ui.js", "atomix-ui.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
   assert.ok(!/atomix-ui|axBody|class="axapp"/.test(html)); assert.ok(!/AtomixPanel/.test(app));
   assert.match(html, /<div class="dxapp" id="dxAxBody"><\/div>/);
@@ -366,7 +367,7 @@ test("M3: a hidden swap is always reachable: History lists every finished swap a
   const list = AX.historyList([live, hiddenLive, done], new Set([PK("52")]));
   assert.deepEqual(list.map((x) => x.hash), [PK("52"), PK("53")], "the hidden swap in flight first, then the finished one; a visible swap in flight stays in Activity");
   assert.match(AX.HIDE_ASK(false), /It stays in History, with Check now, Refund now and Unhide\.$/); assert.match(AX.HIDE_ASK(true), /Check now and Unhide/);
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.match(src, /historyList\(swaps, S\.hidden\)[^\n]*swapCard\(x, false, S\.hidden\.has\(x\.hash\)\)/, "History draws them with the Unhide button");
   assert.match(src, /data-axunhide="\$\{esc\(it\.hash\)\}"/); assert.match(src, /if \(ds\.axunhide\) \{ S\.hidden\.delete\(ds\.axunhide\)/);
 });
@@ -391,7 +392,7 @@ test("M4: the halt card is written from the facts: which key, what still settles
   const b = AX.haltCard({ minimaMismatch: true, ethMismatch: true, orphanedPk: PK("A1"), staleEth: ETH, nodeEth: TO }, []);
   assert.match(b.which, /^Both /); assert.equal(b.count, "No unfinished swap."); assert.deepEqual(b.tools.map((t) => t[1]), ["key", "sweep"]);
   assert.equal(AX.haltCard({ minimaMismatch: true }, null).count, "Your swaps have not been read yet.");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(!/axInvalidate/.test(src), "the screens never reset the AtomiX store");
   assert.match(src, /if \(halted\(\)\) return say\("Halted: this node no longer owns the keys AtomiX uses here\. Nothing was sent\./, "no take while halted");
   assert.ok(!/halted\(\)[^\n]*ax(refund|check)/.test(src), "Refund now and Check now are never gated: settlement is not frozen");
@@ -407,7 +408,7 @@ test("M5: a stopped node: the unfinished swaps are counted from the list and the
   assert.ok(!/are refunded at their deadline once the node runs/.test(t), "the false promise is gone");
   assert.match(AX.offline(false, true, []), /None of your swaps is unfinished\./); assert.match(AX.offline(false, true, null), /have not been read yet: if one is not finished, start the node now/);
   assert.match(AX.stoppedNote([SW({ status: "ERROR" })]), /^1 swap is not finished/, "a swap in ERROR may still hold a lock");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.match(src, /if \(!D\.running\(\)\) \{ const sw = await api\(\)\.axSwaps\(\)/, "the list is read from the engine's store with the node off");
   assert.match(src, /offline\(D\.running\(\), pref\("dexicon_ax_market_live"\) === "1", S\.swaps\)/);
 });
@@ -421,7 +422,7 @@ test("Refund now and the wallet actions run one at a time: a second click while 
   release(); await first;
   await one(async () => { runs++; }); assert.equal(runs, 2, "free again afterwards");
   await assert.rejects(one(async () => { throw new Error("x"); })); await one(async () => { runs++; }); assert.equal(runs, 3, "also after a failure");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.match(src, /if \(ds\.axrefund\) return one\(/); assert.match(src, /if \(ds\.axw\) return one\(/);
 });
 
@@ -545,7 +546,7 @@ test("M2: only a known pre-lock refusal says nothing was locked; every other out
   assert.match(AX.takeResult({ ok: 0, of: 2, hashes: [], reasons: ["part 1: that market was just withdrawn — refreshing the book, try again in a moment", "part 2: maker vanished from the reviewed book"] }).text, /Nothing was locked\.$/);
   assert.match(AX.takeResult({ ok: 0, of: 2, hashes: [], stopped: "Sweep stopped at part 1: cmd failed: send — timed out" }).text, UNSURE);
   assert.match(AX.takeResult({ ok: 1, of: 2, hashes: [], reasons: ["part 2: socket hang up"] }).text, /^1 of 2 parts locked\. part 2: socket hang up\. Nothing is swapped yet.* For the rest: No lock was confirmed/);
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(!/nothing was spent/i.test(src), "the screens never claim nothing was spent");
 });
 
@@ -556,7 +557,7 @@ test("M6: an OTC LP's button names the LP by its id and its sizes; a row that mo
   assert.equal(AX.lpPick([B, A], "lp-A", "500", "0"), A, "found by id, wherever it now is (an index would have named B)");
   assert.equal(AX.lpPick([B], "lp-A", "500", "0"), null, "the LP left: nothing");
   assert.equal(AX.lpPick([{ ...A, sell: 50 }], "lp-A", "500", "0"), null, "the same LP with other sizes: nothing");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(!/data-axlp="\$\{i\}"/.test(src) && !/o\.board\[Number\(ds\.axlp\)\]/.test(src), "no row is named by its position");
   assert.match(src, /data-axlp="\$\{esc\(lp\.cid\)\}" data-sell="\$\{esc\(lp\.sell\)\}" data-buy="\$\{esc\(lp\.buy\)\}" data-side="SELL"/);
   assert.equal((src.match(/lpPick\(/g) || []).length, 2, "checked at the click and again after the terms dialog");
@@ -577,7 +578,7 @@ test("lows: a swap in ERROR whose window is open is not finished: it stays In pr
   assert.ok(it.lines.some((l) => /^Stopped with an error\. If a lock was made it can still be refunded/.test(l)));
   const st = AX.stages(true, "MxUSD", true, { minima: "1" }, [open], Date.now());
   assert.equal(st.check, open.hash, "Check now is offered for it"); assert.ok(st.rows.some((r) => /^Stopped with an error: see it under In progress/.test(r.text)));
-  assert.ok(!/see the swap below/.test(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8")));
+  assert.ok(!/see the swap below/.test(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"))));
   assert.equal(AX.launch("minima", [open], false, false).idle, false, "MINIMA mode is not called idle over it");
   assert.match(AX.launch("minima", [], false, null).text, /OTC was not checked: look at the OTC tab/, "what was not read is not asserted");
   assert.equal(AX.launch("minima", [], false, true).idle, false, "a live OTC availability keeps the room in MINIMA mode");
@@ -588,11 +589,11 @@ test("lows: a swap in ERROR whose window is open is not finished: it stays In pr
 test("lows: a rung's size is the number as typed: not six significant figures, not an exponent (the old panel's fmtPx(size) did both; parity ends here on purpose)", () => {
   assert.equal(AX.rungSize("1234567.89"), "1234567.89"); assert.equal(AX.fmtPx(1234567.89), "1.23457e+6", "what the old editor wrote");
   assert.equal(AX.rungSize("0.000000123"), "0.000000123"); assert.equal(AX.rungSize("250"), "250"); assert.equal(AX.rungSize("abc"), ""); assert.equal(AX.rungSize("0"), "");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(!/fmtPx\(size\)/.test(src), "no size passes through the price format");
 });
 test("lows: no private busy gate: the label is set and cleared in one place (try/finally) and closing the editor does not clear it; a switch clears OTC and the offline flag", () => {
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(!/if \(S\.busy\) return/.test(src), "DexCore.money is the gate");
   assert.equal((src.match(/S\.busy = /g) || []).length, 2, "only busyWhile writes it");
   assert.match(src, /const busyWhile = async \(label, fn\) => \{ S\.busy = label; try \{ return await fn\(\); \} finally \{ S\.busy = false; \} \};/);
@@ -604,7 +605,7 @@ test("wide layout: the phone's own words and order on Market and OTC (its long d
   assert.equal(AX.midLine("Parity", 1, 1000, 17000), "Parity mid 1  (bid 1 / ask 1)  ·  16s ago");
   assert.equal(AX.midLine("MEXC", 0.004321, 0, 5), "MEXC mid 0.004321", "no bid or ask is invented for MEXC, and no age without a stamp");
   assert.equal(AX.offerState({ cfg: {}, manual: { bids: [], asks: [] }, state: {} }, { bids: [], asks: [] }, "Parity").text, "Off — edit your order, then Publish.");
-  const src = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"), css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8")), css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8");
   assert.match(src, /order book\. Tap a level to take it, use the Swap page, or publish your own offer\./);
   assert.match(src, /why\("otc", "OTC — A PRIVATE DEAL", WHY_OTC\)/); assert.match(src, /why\("market", "YOUR AtomiX MARKET", WHY_MARKET\)/);
   assert.match(src, /return v === "1" \|\| \(v == null && key !== "swap"\);/, "Market's and OTC's explainers are open until folded");
@@ -674,7 +675,7 @@ test("set aside: an init in flight is disowned first (no second engine), and the
     await late;
     assert.equal("swaps" in (await atomix.activeWork()), false, "the disowned init did not become the engine: no store is open");
   } finally { atomix._setCtx(null); atomix._setStore(null); fs.rmSync(dir, { recursive: true, force: true }); }
-  const g = {}; require("vm").runInNewContext(fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-core.js"), "utf8") + "\n;this.C = typeof DexCore !== 'undefined' ? DexCore : null;", Object.assign(g, { window: g, document: { addEventListener() {} }, localStorage: { getItem() { return null; }, setItem() {} }, console }));
+  const g = {}; require("vm").runInNewContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-core.js"), "utf8")) + "\n;this.C = typeof DexCore !== 'undefined' ? DexCore : null;", Object.assign(g, { window: g, document: { addEventListener() {} }, localStorage: { getItem() { return null; }, setItem() {} }, console }));
   const C = g.C || g.DexCore; assert.ok(C && C.SET_ASIDE, "DexCore loaded");
   const F = "/Users/x/Library/Application Support/minimaCore/atomix.sqlite", text = C.SET_ASIDE("AtomiX", "after.", F);
   assert.ok(text.includes("To put it back: quit the app, then rename " + F + "-legacy-keys-(the date) back to " + F), text);

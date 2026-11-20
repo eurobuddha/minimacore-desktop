@@ -42,8 +42,8 @@
     --radius-card: 16px;
     --radius: 12px;
     --radius-btn: 13px;
-    --sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    --mono: "Geist Mono", ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
+    --sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;   /* Manrope here is Latin only: Cyrillic falls to the system font, Chinese to the named system CJK fonts (none is downloaded) */
+    --mono: "Geist Mono", ui-monospace, "SF Mono", "Roboto Mono", Menlo, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace;
     --chrome-font: var(--sans);
 }
 /* values/colors.xml (light) */

@@ -5,9 +5,10 @@
 // Nothing here reaches a node or the network: any call that is not a recorded stand-in throws.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path"), vm = require("vm"), os = require("os");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const ROOT = path.join(__dirname, ".."), R = path.join(ROOT, "renderer");
 const PP = require("../renderer/dexicon-pp.js"), C = require("../renderer/dexicon-core.js");
-const src = (f) => fs.readFileSync(path.join(R, f), "utf8");
+const src = (f) => require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, f), "utf8"));   // as it read before its text was wrapped for translation
 
 const PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
 /** another token's label since 0.19.102: the mark first, then the name inside a direction isolate (U+2068 … U+2069) */

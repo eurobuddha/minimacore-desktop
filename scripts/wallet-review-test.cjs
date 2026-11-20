@@ -3,7 +3,8 @@
 // scripts/wallet-money-test.cjs does. Nothing here talks to a node.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
-const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
+const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"));
 
 function source(name) {
   const m = app.match(new RegExp("\\n((?:async )?(?:const|function) " + name + "\\b[^\\n]*)")); assert.ok(m, name + " found in app.js");
@@ -278,7 +279,7 @@ test("Wallet list: the headline and the rows leave out what the engines hold; a 
   assert.match(app, /if \(heldLine\(tid\)\) parts\.push\(heldLine\(tid\)\);/);
   assert.match(app, /<span class="balrow__amt">\$\{esc\(summaryAmount\(free\)\)\}<\/span>/);
   assert.match(app, /sendable: freeOf\(b\), held: heldLine\(b\.tokenid \|\| MINIMA\),/);
-  assert.match(app, /Not sendable now: " \+ tokOf\(tok\)\.held \+ "\. Nothing was sent\."/, "Send refuses over the free funds with the reason, before the review");
+  assert.match(app, /"Not sendable now: \{held\}\. Nothing was sent\.", \{ held: tokOf\(tok\)\.held \}/, "Send refuses over the free funds with the reason, before the review");
   const held = new Function("TOK", "const MINIMA = '0x00';\n" + HELD_SRC + "HELD = { coins: {}, funds: { '0x00': { held: '7', free: '1', why: 'an AtomiX swap' } } }; return { free: freeOf({ sendable: '5' }), line: heldLine('0x00'), other: freeOf({ tokenid: '0xAB', sendable: '9' }) };")(TOK);
   assert.deepEqual(held, { free: "0", line: "held 7 for an AtomiX swap", other: "9" }, "never below zero; another token is untouched");
 });

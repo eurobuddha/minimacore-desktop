@@ -1,7 +1,8 @@
 // Terminal, Logs and the Apps tab's Freeze (Phase 5a). Executed where the logic is pure; nothing here reaches a node.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
-const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
+const R = (f) => { const s = fs.readFileSync(path.join(__dirname, "..", f), "utf8"); return /^renderer\/[^/]+\.js$/.test(f) ? require("./i18n-plain.cjs").plain(s) : s; };   // a renderer script: as it read before its text was wrapped for translation
 const app = R("renderer/app.js"), html = R("renderer/index.html"), mainJs = R("main/main.js");
 // a one-line definition, or a block that ends at the first "}" in column 0 (as scripts/wallet-money-test.cjs)
 function source(name) {
@@ -331,7 +332,7 @@ test("Freeze (g, h, i): ETH Wallet says Dexicon is frozen; a frozen engine's ref
   dx.release();
   assert.ok(/eng\.setHeldReason\(\(\) => \(freeze\.isFrozen\("dexicon"\) \?/.test(mainJs), "main.js gives the three engines the reason");
   // i: visible text, tied to the switch
-  assert.ok(app.includes('${noIce ? `<div class="apps-row__state" id="appsWhy-${a.id}">${esc(noIce)}</div>` : ""}') && app.includes('${noIce ? ` disabled aria-describedby="appsWhy-${a.id}"` : ""}'), "the reason is text on the row, and described-by for the switch");
+  assert.ok(app.includes('${noIce ? `<div class="apps-row__state" id="appsWhy-${a.id}">${esc(t(noIce))}</div>` : ""}') && app.includes('${noIce ? ` disabled aria-describedby="appsWhy-${a.id}"` : ""}'), "the reason is text on the row, and described-by for the switch");
   assert.ok(!/class="apps-row__hide"\$\{noIce \? ` title=/.test(app), "no longer only a title");
   const NO_FREEZE = new Function("return " + app.match(/const NO_FREEZE = (\{[^\n]*\});/)[1])();
   assert.deepEqual(NO_FREEZE, { core: "Cannot be frozen: Minima Core is the node and the wallet.", parlons: "Cannot be frozen: Parlons is part of the node itself." });

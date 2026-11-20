@@ -5,8 +5,9 @@
 // purpose (the key export), the test says what changed. Nothing here reaches a node, Ethereum or the network.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const Act = require("../renderer/apps-act.js");
-const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"));
 
 /** window.mcd as a recorder: a call with no planned answer throws, so nothing unplanned (and nothing real) is reached. */
 function recorder(answers) {
@@ -101,7 +102,7 @@ test("ETH Wallet, main process: no key without the phrase; the system's prompt i
 });
 // 0.19.120: one gated way to a key, a clipboard that forgets, a dialog that closes itself
 test("key export: no ungated path is left; Dexicon room 1 uses ETH Wallet's dialog and never holds the key in its page", () => {
-  const mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), preload = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), ax = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ax.js"), "utf8");
+  const mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), preload = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), ax = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ax.js"), "utf8"));
   assert.ok(!/axExportKey/.test(mainJs) && !/axExportKey/.test(preload) && !/axExportKey/.test(ax) && !/axExportKey/.test(app), "mcd:axExportKey and its bridge are gone");
   const handlers = [...mainJs.matchAll(/ipcMain\.handle\("(mcd:[A-Za-z]+)"[^\n]*(?:exportKey|privKey)[^\n]*/g)].map(m => m[1]);
   assert.deepEqual(handlers, ["mcd:ewExportKey"], "one IPC handler can answer with a key, and it is the gated one");

@@ -3,8 +3,9 @@
 // Nothing here reaches a node.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const M = require("../main/explorer.js"), X = require("../renderer/apps-act.js").explorer;
-const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+const R = (f) => { const s = fs.readFileSync(path.join(__dirname, "..", f), "utf8"); return /^renderer\/[^/]+\.js$/.test(f) ? require("./i18n-plain.cjs").plain(s) : s; };   // a renderer script: as it read before its text was wrapped for translation
 const tools = R("renderer/apps-tools.js"), src = tools.slice(tools.indexOf("// ---- Minima Explorer"), tools.indexOf("// ---- Entropy") > 0 ? tools.indexOf("// ---- Entropy") : tools.length);
 const ID = (n) => "0x" + String(n).padStart(64, "0"), ADDR = "0x" + "AB".repeat(32), MX = "MxG081SDHCPHCMDEM4NU4GW54FSPPY9ASN55JJNKB8JYKYSE8BSPRQ985WP0KH6";
 

@@ -8,7 +8,7 @@
 .shell { --dx-bg: #0B0D12; --dx-surface: #12151C; --dx-surface2: #1B1F28; --dx-border: rgba(255,255,255,.07); --dx-text: #EEF0F4;
   --dx-dim: #8B909C; --dx-dim2: #6F7583; --dx-accent: #F7931A; --dx-accent-soft: rgba(247,147,26,.2); --dx-grad: #FFAB3D;
   --dx-on-accent: #0B0D12; --dx-in: #3FD0A2; --dx-red: #FF5C5C; --dx-on-side: #FFFFFF;
-  --dx-sans: "Inter", system-ui, sans-serif; --dx-mono: "JetBrains Mono", ui-monospace, monospace; }
+  --dx-sans: "Inter", system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; --dx-mono: "JetBrains Mono", ui-monospace, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace; }
 .shell[data-dx="DAYLIGHT"] { --dx-bg: #F3F4F7; --dx-surface: #FFFFFF; --dx-surface2: #EDEEF2; --dx-border: #E6E8EE; --dx-text: #181B22;
   --dx-dim: #8B909C; --dx-dim2: #A6ABB6; --dx-accent-soft: rgba(247,147,26,.12); --dx-on-accent: #201400; --dx-in: #12A97E; --dx-red: #E5484D; }
 

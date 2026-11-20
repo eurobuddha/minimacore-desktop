@@ -597,7 +597,7 @@ test("sends 'off': a send and a consolidate cost no read and say nothing; the ma
 });
 
 test("Release all holds: Settings asks plainly, the main process invalidates (file kept aside) and opens a new file", async () => {
-  const main = SRC("main/main.js"), app = SRC("renderer/app.js"), pre = SRC("main/preload.js");
+  const main = SRC("main/main.js"), app = require("./i18n-plain.cjs").plain(SRC("renderer/app.js")), pre = SRC("main/preload.js");
   assert.match(main, /ipcMain\.handle\("mcd:reserveReleaseAll", async \(\) => \{\s+const n = reserve\.list\(\)\.length, kept = reserve\.invalidate\(\);/);
   assert.match(main, /if \(node\.state === "running"\) await reserve\.open\(app\.getPath\("userData"\), reserveRead\)/);
   assert.match(pre, /reserveReleaseAll: \(\) => ipcRenderer\.invoke\("mcd:reserveReleaseAll"\)/);

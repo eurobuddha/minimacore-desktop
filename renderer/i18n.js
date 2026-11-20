@@ -21,7 +21,7 @@
   const CODES = ["en", "zh", "ru", "uk"];
   const NAMES = { en: "English", zh: "简体中文", ru: "Русский", uk: "Українська" };   // each in its own language, as the phone's chooser
   const TAGS = { en: "en", zh: "zh-Hans", ru: "ru", uk: "uk" };
-  const CAT = { en: {} }, REVIEW = {}, RULES = {}, listeners = [];
+  const CAT = { en: {} }, REVIEW = {}, SAME = {}, RULES = {}, listeners = [];
   let lang = "en";
 
   /** A system or browser language tag to one of the four: any Chinese is 简体中文 (the only Chinese the phone has); anything else unknown is English. */
@@ -51,10 +51,13 @@
   const tr = (key, p) => fill(esc(text(key, p)), p, str);
   const N_ = (key) => key;
 
-  function add(code, entries, review) {
+  /** A catalog, or more of one. meta.review: keys translated for the desktop (no phone text existed), for a native speaker to check.
+   *  meta.same: keys whose text is rightly the same as the English (a name, a unit). */
+  function add(code, entries, meta) {
     if (!supported(code)) throw new Error("i18n: unknown language " + code);
     CAT[code] = Object.assign(CAT[code] || {}, entries);
-    if (review) REVIEW[code] = (REVIEW[code] || []).concat(review);
+    if (meta && meta.review) REVIEW[code] = (REVIEW[code] || []).concat(meta.review);
+    if (meta && meta.same) SAME[code] = (SAME[code] || []).concat(meta.same);
   }
   /** Switch language. False for a language with no catalog loaded (the picker never offers one). */
   function set(code) {
@@ -65,19 +68,20 @@
     for (const fn of listeners.slice()) { try { fn(code); } catch (e) { /* one screen's repaint must not stop the others */ } }
     return true;
   }
-  /** The page's own fixed text: data-i18n="key" (the element's text), data-i18n-placeholder / -aria-label / -title / -alt (that attribute). */
+  /** The page's own fixed text. Two ways in: data-i18n="key" on an element (its text), and the PAGE table
+   *  (renderer/i18n/start.js): [selector, attribute or "" for the text, key], for the markup of index.html as it stands. */
+  const PAGE = [];
   function apply(scope) {
     if (!scope || !scope.querySelectorAll) return;
     for (const n of scope.querySelectorAll("[data-i18n]")) n.textContent = t(n.getAttribute("data-i18n"));
-    for (const a of ["placeholder", "aria-label", "title", "alt"])
-      for (const n of scope.querySelectorAll("[data-i18n-" + a + "]")) n.setAttribute(a, t(n.getAttribute("data-i18n-" + a)));
+    for (const [sel, attr, key] of PAGE) for (const n of scope.querySelectorAll(sel)) { if (attr) n.setAttribute(attr, t(key)); else n.textContent = t(key); }
   }
 
-  const I18N = { CODES, NAMES, TAGS, pick, supported, add, set, apply, t, th, tr, N_,
+  const I18N = { CODES, NAMES, TAGS, PAGE, pick, supported, add, set, apply, t, th, tr, N_,
     lang: () => lang, tag: () => TAGS[lang],
     languages: () => CODES.filter(c => CAT[c]),                 // the languages that have a catalog, in the phone's order
     onChange: (fn) => { listeners.push(fn); },
-    catalog: (code) => CAT[code] || null, review: (code) => (REVIEW[code] || []).slice() };
+    catalog: (code) => CAT[code] || null, review: (code) => (REVIEW[code] || []).slice(), same: (code) => (SAME[code] || []).slice() };
 
   root.I18N = I18N; root.t = t; root.th = th; root.tr = tr; root.N_ = N_;
   if (typeof module !== "undefined" && module.exports) module.exports = I18N;

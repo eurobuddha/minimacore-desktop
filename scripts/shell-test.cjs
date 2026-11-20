@@ -2,16 +2,17 @@
 // so a later change cannot quietly bring back the old seventeen-tab strip or the theme toggle.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const R = path.join(__dirname, "..", "renderer");
 const html = fs.readFileSync(path.join(R, "index.html"), "utf8");
-const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
+const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "app.js"), "utf8"));
 const css = fs.readFileSync(path.join(R, "style.css"), "utf8");
 const shell = fs.readFileSync(path.join(R, "shell.css"), "utf8");
 
 test("the tab strip is Pandamonium's six, in order, and nothing else is a tab", () => {
   const tabs = [...html.matchAll(/<button class="tab[^"]*"[^>]*data-tab="([a-z]+)"/g)].map(m => m[1]);
   assert.deepEqual(tabs, ["wallet", "dexicon", "history", "apps", "chat", "node"]);
-  const labels = [...html.matchAll(/<span class="tab__l">([^<]+)</g)].map(m => m[1]);
+  const labels = [...html.matchAll(/<span class="tab__l"[^>]*>([^<]+)</g)].map(m => m[1]);
   assert.deepEqual(labels, ["Wallet", "Dexicon", "History", "Apps", "Chat", "Node"], "sentence case, as the phone");
   assert.ok(!/data-view="(receive|send|terminal|logs|settings|mail|ethwallet|vestr|minimall|webwallet|parlons)"/.test(html), "the old tabs are not tabs");
 });

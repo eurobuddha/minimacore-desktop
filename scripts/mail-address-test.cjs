@@ -229,7 +229,7 @@ test("0.19.9: six words found only through a beacon: the whole key and the beaco
 
 test("0.19.9: the words of the two dialogs: what is published, that it is public and permanent and linked to a wallet address; the whole key and the beacon's age", () => {
   const win = { PayLabel: require("../renderer/paylabel.js"), micon: () => "" };
-  new Function("window", fs.readFileSync(path.join(root, "renderer", "mail.js"), "utf8"))(win);
+  new Function("window", require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(root, "renderer", "mail.js"), "utf8")))(win);
   const ui = win.MailPanel._test({});
   for (const need of [/six words, your Mail key and a signature/, /0\.000000001 MINIMA/, /public and permanent/, /cannot be removed/, /links your Mail address to that wallet address/, /Don't publish/])
     assert.match(ui.NOTICE_TEXT, need);

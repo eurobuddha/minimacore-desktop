@@ -3,8 +3,9 @@
 // the die by its exact rule, and the screen by what it may and may not do with the phrase. Nothing reaches a node.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path"), nodeCrypto = require("crypto");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const C = require("../renderer/entropy-core.js"), WORDS = require("../renderer/wordentry.js").WORDS, M = require("../main/entropy.js");
-const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+const R = (f) => { const s = fs.readFileSync(path.join(__dirname, "..", f), "utf8"); return /^renderer\/[^/]+\.js$/.test(f) ? require("./i18n-plain.cjs").plain(s) : s; };   // a renderer script: as it read before its text was wrapped for translation
 const tools = R("renderer/apps-tools.js"), src = tools.slice(tools.indexOf("// ---- Entropy: Pandamonium's seed dice"));
 C.init(WORDS);
 const pick = (n) => Array.from({ length: n }, () => WORDS[nodeCrypto.randomInt(2048)]);

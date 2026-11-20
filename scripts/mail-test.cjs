@@ -11,6 +11,7 @@
  * Run: node --test scripts/mail-test.cjs
  */
 const test = require("node:test");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const assert = require("node:assert");
 
 const backup = require("../main/mailbackup");
@@ -103,11 +104,11 @@ test("the Mail panel and its icon set load, and every icon it asks for is define
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   const ctx = vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(dir, "mailicons.js"), "utf8"), ctx, { filename: "mailicons.js" });
-  vm.runInContext(fs.readFileSync(path.join(dir, "mail.js"), "utf8"), ctx, { filename: "mail.js" });
+  vm.runInContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(dir, "mail.js"), "utf8")), ctx, { filename: "mail.js" });
 
   assert.equal(typeof sandbox.micon, "function", "micon is exported");
   assert.ok(sandbox.MailPanel && typeof sandbox.MailPanel.render === "function", "MailPanel is exported");
-  const src = fs.readFileSync(path.join(dir, "mail.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(dir, "mail.js"), "utf8"));
   const used = [...new Set([...src.matchAll(/micon\("([a-z]+)"/g)].map((m) => m[1]))];
   assert.ok(used.length > 10, "the panel actually uses the icon set");
   assert.deepEqual(used.filter((n) => !sandbox.micon.names.includes(n)), [], "no icon is referenced without being defined");
@@ -132,7 +133,7 @@ test("the panel's palette cannot leak into the rest of the app", () => {
   }
   assert.ok(app.includes(".mail-ver"), ".mail-ver stays — the AtomiX and Parlons headers wear it");
   // 0.19.110: miniMall's screens are its own apps' now (.mm-thread in apps.css); it wears no mail class any more
-  const appJs = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  const appJs = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"));
   assert.ok(!app.includes(".mail-thread") && !/mail-(?:thread|bubble)/.test(appJs), "no screen outside Mail wears a mail thread class");
 });
 
@@ -157,7 +158,7 @@ function panel() {
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   const ctx = vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(dir, "mailicons.js"), "utf8"), ctx, { filename: "mailicons.js" });
-  vm.runInContext(fs.readFileSync(path.join(dir, "mail.js"), "utf8"), ctx, { filename: "mail.js" });
+  vm.runInContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(dir, "mail.js"), "utf8")), ctx, { filename: "mail.js" });
   return sandbox;
 }
 const ME = "0x" + "11".repeat(64), PEER = "0x" + "ab".repeat(64);
@@ -292,7 +293,7 @@ test("a mail send pins to a coin the node will actually spend", async () => {
 
 test("main/mail.js actually passes that minimum age on both of its sends", () => {
   const fs = require("fs"), path = require("path");
-  const src = fs.readFileSync(path.join(__dirname, "..", "main", "mail.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "main", "mail.js"), "utf8"));
   const calls = [...src.matchAll(/pinMinimaSend\(nodeCmd,[^)]*\)/g)].map((m) => m[0]);
   assert.ok(calls.length >= 2, "both the message send and the payment send go through the pin");
   for (const c of calls) assert.ok(/minCoinage/.test(c), "every pinned mail send sets minCoinage: " + c.slice(0, 80));
@@ -302,7 +303,7 @@ test("main/mail.js actually passes that minimum age on both of its sends", () =>
 
 test("a send failure is explained in words, not dumped as an IPC stack", () => {
   const fs = require("fs"), path = require("path");
-  const src = fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.js"), "utf8");
+  const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.js"), "utf8"));
   // Electron wraps anything main throws as "Error invoking remote method '…': Error: …". Showing that to a
   // person is noise, and the node's funding refusal is misleading on a full wallet.
   assert.ok(/Error invoking remote method/.test(src), "the IPC wrapper is stripped somewhere");

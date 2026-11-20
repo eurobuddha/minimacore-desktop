@@ -5,7 +5,7 @@
  * No Electron here: main.js passes the saved value and the system's language in.
  */
 const I18N = require("../renderer/i18n.js");
-for (const code of ["en"]) require("../renderer/i18n/" + code + ".js");
+for (const code of ["en", "zh", "ru", "uk"]) require("../renderer/i18n/" + code + ".js");
 
 /** The language to run in: the saved one if it is one of the four, else the system's, else English. */
 function resolve(saved, system) { const c = I18N.supported(saved) ? saved : I18N.pick(system); return I18N.catalog(c) ? c : "en"; }

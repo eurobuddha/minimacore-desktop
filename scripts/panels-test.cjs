@@ -13,6 +13,7 @@
  * the generalisation of the single-sheet check that shipped with Mail in 0.17.15.
  */
 const test = require("node:test");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const assert = require("node:assert");
 const fs = require("fs");
 const vm = require("vm");
@@ -106,7 +107,7 @@ test("no panel wrapper declares a property that app.css's .overlay owns, unless 
 
 // ------------------------------------------------------------------ P2P Chance is gone (0.18.68)
 test("P2P Chance left the app: no tab, no screen, no way to start a game — only the settle status is wired", () => {
-  const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
+  const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "app.js"), "utf8"));
   const html = fs.readFileSync(path.join(R, "index.html"), "utf8");
   const preload = fs.readFileSync(path.join(R, "..", "main", "preload.js"), "utf8");
   const main = fs.readFileSync(path.join(R, "..", "main", "main.js"), "utf8");
@@ -132,7 +133,7 @@ test("P2P Chance left the app: no tab, no screen, no way to start a game — onl
 //                           room dialogs sit inside #shell, which carries the one Dexicon theme
 const code = (f) => fs.readFileSync(path.join(R, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 test("rooms 1 and 2: the old panels are gone, and nothing they were wired with is left", () => {
-  const app = fs.readFileSync(path.join(R, "app.js"), "utf8"), html = fs.readFileSync(path.join(R, "index.html"), "utf8");
+  const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "app.js"), "utf8")), html = fs.readFileSync(path.join(R, "index.html"), "utf8");
   for (const f of ["pools.js", "pools.css", "atomix-ui.js", "atomix-ui.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
   assert.ok(!/PoolsPanel|AtomixPanel|renderPandapools|ppBody|axBody/.test(app + html), "no wiring, element, sheet or script of the old panels");
   assert.ok(/function resetPpState\(\) \{ DexPools\.reset\(\); \}/.test(app) && /function resetAxState\(\) \{ DexAx\.reset\(\); \}/.test(app), "a wallet reset clears the rooms");
@@ -151,13 +152,13 @@ test("RULE 2 on the rooms: the dollar token is written MxUSD; the engine's own k
   assert.equal(AX.ccyName ? AX.ccyName("mxusdt") : "MxUSD", "MxUSD");
 });
 test("quote race on the rooms: a late answer never repaints over a newer amount, and clearing the amount retires the quote in flight", () => {
-  const pp = fs.readFileSync(path.join(R, "dexicon-pp.js"), "utf8"), ax = fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8");
+  const pp = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-pp.js"), "utf8")), ax = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(pp.includes('if (!amountOk(a)) { S.qseq++; S.q = null;'), "room 2: the early return bumps the quote sequence (the old ppQuoteSeq++)");
   assert.ok(/const seq = \+\+S\.qseq, dir = S\.dir, r = await api\(\)\.ppQuote\(t\.tok, dir, a\)[^\n]*\n\s*if \(seq !== S\.qseq \|\| !\$\("ppQuote"\)\) return;/.test(pp), "room 2: an answer to an older question is dropped");
   assert.ok(pp.includes('if (S.tab === "swap" && $("ppAmt") && !C.gate.on) requote();'), "room 2: the quote on screen is asked again when the pools move, as the old panel did (0.18.141)");
   assert.ok(/sell !== S\.sell \|\| amt !== amount\(\)/.test(ax), "room 1: a preview for another side or amount is dropped");
 });
 test("scrim: a room dialog is a native <dialog> with its own backdrop, so no wrapper can paint over it", () => {
-  const css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8"), ui = fs.readFileSync(path.join(R, "dexicon-ui.js"), "utf8");
+  const css = fs.readFileSync(path.join(R, "dexicon.css"), "utf8"), ui = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ui.js"), "utf8"));
   assert.ok(/\.dx-dlg::backdrop \{ background: rgba\(0,0,0,\.55\); \}/.test(css)); assert.ok(/showModal\(\)/.test(ui));
 });

@@ -2,6 +2,7 @@
 // one scan loop. The store, the keychain, the crypto and the node are stand-ins: nothing here reaches a node or a file.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), path = require("path");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", VENDOR = "0x" + "AB".repeat(32), VID = "0x" + "5A".repeat(32);
 const standIn = (rel, exports) => { const p = require.resolve(path.join(__dirname, "..", rel)); require.cache[p] = { id: p, filename: p, loaded: true, children: [], paths: [], exports }; };
 const db = { orders: {}, meta: {} };

@@ -3,8 +3,9 @@
 // lifted out of renderer/app.js and run.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const R = path.join(__dirname, "..");
-const app = fs.readFileSync(path.join(R, "renderer", "app.js"), "utf8");
+const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "renderer", "app.js"), "utf8"));
 const html = fs.readFileSync(path.join(R, "renderer", "index.html"), "utf8");
 const mainJs = fs.readFileSync(path.join(R, "main", "main.js"), "utf8");
 

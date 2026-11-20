@@ -910,7 +910,7 @@ test("the screens' SQL is an allow-list: the page's own statements on ax_kv and 
   const logs = []; host.emitter.on("log", l => logs.push(l));
   const run = (query) => host.command({ op: "sql", query });
   // every statement the page and the native screens issue (lib/mdsw.js kvInit/kvGet/kvSet/kvDel, ui/app.js, ui/activity.js, renderer/dexicon-ui.js load)
-  const mdsw = fs.readFileSync(path.join(M.root, "main/dexicon/lib/mdsw.js"), "utf8"), ui = fs.readFileSync(path.join(M.root, "renderer/dexicon-ui.js"), "utf8");
+  const mdsw = fs.readFileSync(path.join(M.root, "main/dexicon/lib/mdsw.js"), "utf8"), ui = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(M.root, "renderer/dexicon-ui.js"), "utf8"));
   for (const lit of ["CREATE TABLE IF NOT EXISTS `ax_kv` (`k` varchar(200) NOT NULL PRIMARY KEY, `v` text NOT NULL)", "SELECT v FROM ax_kv WHERE k='", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('", "DELETE FROM ax_kv WHERE k='"]) assert.ok(mdsw.includes(lit), "the engine still writes: " + lit);
   assert.ok(ui.includes("SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','activity')"));
   for (const q of ["CREATE TABLE IF NOT EXISTS `ax_kv` (`k` varchar(200) NOT NULL PRIMARY KEY, `v` text NOT NULL)", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"o1\":{\"sent\":1,\"note\":\"it''s; DROP TABLE ax_kv; --\"}}')",
@@ -1005,7 +1005,7 @@ test("a Dexicon that cannot be checked does not block a wallet restore for ever:
   assert.ok(fs.readFileSync(kept).equals(damaged));
   await host.start(); await M.until(() => host.status().ready && host.status().restingReady);
   // main.js: the skip is checked again in the main process, lasts two minutes, and is logged
-  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
+  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8"));
   assert.ok(main.includes("if (!restore.onlyDexiconUnchecked(list)) throw new Error(") && main.includes("dexSkipUntil = Date.now() + 120000;") && main.includes("const list = await walletWork(false);"));
   assert.ok(/async function offerWithoutDexicon\(e\) \{[\s\S]*?showConfirm\(dexOnly \? "Go on without checking Dexicon\?" : [^\n]*?, warning, dexOnly \? "Go on without the check" : [^\n]*?, true\)[\s\S]*?await api\.dxSkipCheck\(\)/.test(app), "the screen warns first, then asks main");
 });
@@ -1047,7 +1047,7 @@ test("the on-chain engine's start is not tried again while a start is still runn
 });
 
 test("the app wiring: started and stopped with the node, reset by the MAIN process before the node restarts, flushed on quit, one bridge", () => {
-  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8");
+  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8"));
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
   assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", async (e, a) => {') && main.includes("  return dexicon.command(a);\n});"));
   assert.ok(/const inFlightWork = async \(\) => \(\{[^\n]*\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\)/.test(main) && /api\.inFlight\("shutdown"\)/.test(app), "the Shutdown and Quit warnings ask for takes awaiting an answer; a failed read is null (0.18.142: main/inflight.js)");

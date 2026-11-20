@@ -115,12 +115,12 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const tidyAmount = (s) => { s = String(s == null ? "" : s); return s.indexOf(".") < 0 ? s : s.replace(/0+$/, "").replace(/\.$/, ""); };
 function mailPanel(api) {
   const win = { PayLabel: L, micon: () => "" };
-  new Function("window", fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.js"), "utf8"))(win);
+  new Function("window", require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.js"), "utf8")))(win);
   return win.MailPanel._test({ api, esc, TOK: { tidyAmount } });
 }
 function chatPanel(api) {
   const win = {};
-  new Function("window", "PayLabel", "document", fs.readFileSync(path.join(__dirname, "..", "renderer", "chat.js"), "utf8"))(win, L, {});
+  new Function("window", "PayLabel", "document", require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "chat.js"), "utf8")))(win, L, {});
   return win.ChatPanel._test({ api, esc });
 }
 const text = (html) => html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();

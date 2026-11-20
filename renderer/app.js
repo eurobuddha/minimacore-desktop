@@ -67,7 +67,7 @@ function toast(msg, kind, copyText) {
   t.textContent = msg + (copyText ? "  ⧉" : "");
   t.style.display = "";
   t.onclick = copyText ? (() => copy(copyText)) : null;
-  t.title = copyText ? "Click to copy the full id" : "";
+  t.title = copyText ? I18N.t("Click to copy the full id") : "";
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; t.onclick = null; }, copyText ? 8000 : 3200);
 }
 // Copy through the MAIN process (api.clip → clipboard.writeText) — reliable regardless of window focus. The old
@@ -78,7 +78,7 @@ async function copy(text) {
   let ok = false;
   try { ok = !!(await api.clip(s)); } catch (e) { ok = false; }
   if (!ok) { try { await navigator.clipboard.writeText(s); ok = true; } catch (e) { ok = false; } }
-  toast(ok ? "Copied ✓" : "Copy failed: select the text and press ⌘C", ok ? "ok" : "err");
+  toast(ok ? t("Copied ✓") : t("Copy failed: select the text and press ⌘C"), ok ? "ok" : "err");
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 /**
@@ -93,7 +93,7 @@ function idHtml(value, shown) {
   const v = String(value == null ? "" : value);
   if (!v) return "";
   const disp = shown || v;   // RULE 1: the whole value by default; .idcopy wraps it
-  return `<span class="idcopy" data-copy="${esc(v)}" title="${esc(v)}\n(click to copy)">${esc(disp)}</span>`;
+  return `<span class="idcopy" data-copy="${esc(v)}" title="${tr("{v}\n(click to copy)", { v: esc(v) })}">${esc(disp)}</span>`;
 }
 
 // ---- theme -----------------------------------------------------------------
@@ -128,7 +128,7 @@ async function boot() {
   api.appVersion().then(v => { APP_VERSION = v || ""; }).catch(() => {});
   // App updates: the store feed is checked in the main process; the menu gains an "Update" item when a newer build exists.
   const refreshUpdatePill = async () => {
-    try { const u = await api.updateStatus(); const b = el("hdrUpdate"); if (!b) return; b.hidden = !u.available; if (u.available) b.textContent = "Update to " + u.version; el("moreBtn").classList.toggle("bar__more--update", !!u.available); } catch (e) {}
+    try { const u = await api.updateStatus(); const b = el("hdrUpdate"); if (!b) return; b.hidden = !u.available; if (u.available) b.textContent = t("Update to {version}", { version: u.version }); el("moreBtn").classList.toggle("bar__more--update", !!u.available); } catch (e) {}
   };
   el("hdrUpdate").addEventListener("click", () => openSettingsAt("updCard"));
   if (api.onOpenUpdate) api.onOpenUpdate(() => el("hdrUpdate").click());
@@ -162,14 +162,14 @@ async function boot() {
 // The tray's bottom line, as the phone's drawer: the mode this wallet really runs in.
 function paintKeyMode(mode) {
   if (mode) KEYMODE.mode = mode;
-  el("trayMode").textContent = KEYMODE.mode === "block" ? "Block key uses · low-RAM node" : "Classic mode";
+  el("trayMode").textContent = KEYMODE.mode === "block" ? t("Block key uses · low-RAM node") : t("Classic mode");
 }
 // The running node was found in the other key mode and stopped (main/node-manager.js verifyKeyMode): the message
 // stays over the whole window, with nothing to dismiss it. Quitting the app is the way on.
 function showKeyModeBlock(msg) {
   if (el("keyModeBlock")) return;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="keyModeBlock" data-modal><div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="kmbTitle">
-    <div class="modal__title" id="kmbTitle">Node stopped: wrong key mode</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(msg)}</div></div></div>`);
+    <div class="modal__title" id="kmbTitle">${th("Node stopped: wrong key mode")}</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(msg)}</div></div></div>`);
   el("shell").inert = true;
 }
 function onStatus(s) {
@@ -196,7 +196,7 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); entropyErased("the node stopped."); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
+  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
@@ -224,32 +224,32 @@ function showSetup() {
   frScreen("", null, "fr-launch").innerHTML = `
     <div class="fr-top"><button class="fr-lang" id="frLang">${th("Language")}</button></div>
     <div class="fr-hero">${CORE_MARK.replace("tray__ic", "fr-logo")}
-      <div class="fr-name">MINIMA CORE</div>
-      <p class="fr-intro">Your own node, on your computer.\nChoose how to begin.</p></div>
+      <div class="fr-name">${th("MINIMA CORE")}</div>
+      <p class="fr-intro">${th("Your own node, on your computer.\nChoose how to begin.")}</p></div>
     <div class="fr-btns">
-      <button class="btn btn--primary ps-btn ps-btn--main" id="frNew">New Wallet</button>
-      <button class="btn btn--outline ps-btn ps-btn--main" id="frRestore">Restore Wallet</button>
-      <button class="btn btn--outline ps-btn ps-btn--main" id="frParams">Startup Params</button>
+      <button class="btn btn--primary ps-btn ps-btn--main" id="frNew">${th("New Wallet")}</button>
+      <button class="btn btn--outline ps-btn ps-btn--main" id="frRestore">${th("Restore Wallet")}</button>
+      <button class="btn btn--outline ps-btn ps-btn--main" id="frParams">${th("Startup Params")}</button>
     </div>`;
   el("frLang").onclick = chooseLanguage;
   el("frNew").onclick = () => frStart(null);
   el("frRestore").onclick = () => frRestore();
-  el("frParams").onclick = () => renderParams(frScreen("Startup Params", showSetup), true, showSetup);
+  el("frParams").onclick = () => renderParams(frScreen(t("Startup Params"), showSetup), true, showSetup);
 }
 function hideSetup() { el("setup").style.display = "none"; el("setupBody").innerHTML = ""; el("shell").inert = false; }
 
 // Restore Wallet: the phone's "Restore & resync" screen, with one box per word.
 function frRestore() {
-  if (CFG.network === "solo") { toast("A solo network has no MegaMMR node to restore from. Change the network in Startup Params first.", "err"); return; }
-  const body = frScreen("Restore Wallet", showSetup);
+  if (CFG.network === "solo") { toast(t("A solo network has no MegaMMR node to restore from. Change the network in Startup Params first."), "err"); return; }
+  const body = frScreen(t("Restore Wallet"), showSetup);
   body.innerHTML = `
-    <h2 class="ps-h">Restore &amp; resync</h2>
-    <p class="ps-intro">Enter your seed phrase, key uses and the address of a Minima MegaMMR node.\n\nEnter key uses above the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds: if unsure, set it higher.</p>
-    <div class="eyebrow ps-label">Seed phrase</div><div id="frWords"></div>
+    <h2 class="ps-h">${th("Restore & resync")}</h2>
+    <p class="ps-intro">${th("Enter your seed phrase, key uses and the address of a Minima MegaMMR node.\n\nEnter key uses above the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds: if unsure, set it higher.")}</p>
+    <div class="eyebrow ps-label">${th("Seed phrase")}</div><div id="frWords"></div>
     ${modeQuestionHtml()}
-    <div class="eyebrow ps-label">Key uses</div><input class="field__input ps-field" id="frUses" inputmode="numeric" autocomplete="off" placeholder="0 only if this seed has never signed" />
-    <div class="eyebrow ps-label">MegaMMR node</div><input class="field__input ps-field" id="frHost" autocomplete="off" spellcheck="false" value="${esc(CFG.megammrHost)}" />
-    <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">Proceed</button>`;
+    <div class="eyebrow ps-label">${th("Key uses")}</div><input class="field__input ps-field" id="frUses" inputmode="numeric" autocomplete="off" placeholder="${th("0 only if this seed has never signed")}" />
+    <div class="eyebrow ps-label">${th("MegaMMR node")}</div><input class="field__input ps-field" id="frHost" autocomplete="off" spellcheck="false" value="${esc(CFG.megammrHost)}" />
+    <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">${th("Proceed")}</button>`;
   const words = WordEntry.create(el("frWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
   wireModeQuestion(body);
   el("frGo").onclick = async () => {
@@ -265,22 +265,22 @@ function frRestore() {
 // "Which mode were these words used in?" Shown only when this node can run block keys; otherwise every wallet is classic.
 function modeQuestionHtml() {
   if (!KEYMODE.supported) return "";
-  return `<div class="eyebrow ps-label">Which kind of wallet were these words used in?</div>
-    <div class="modeq" role="radiogroup" aria-label="Which kind of wallet were these words used in?">
-      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>Block key uses</b><span>A wallet made in Pandamonium on a phone, or made new in this app.</span></button>
-      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>Classic</b><span>A wallet made in an older Minima Core, in MinimaClassic, or with Classic mode switched on.</span></button>
+  return `<div class="eyebrow ps-label">${th("Which kind of wallet were these words used in?")}</div>
+    <div class="modeq" role="radiogroup" aria-label="${th("Which kind of wallet were these words used in?")}">
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>${th("Block key uses")}</b><span>${th("A wallet made in Pandamonium on a phone, or made new in this app.")}</span></button>
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>${th("Classic")}</b><span>${th("A wallet made in an older Minima Core, in MinimaClassic, or with Classic mode switched on.")}</span></button>
     </div>
-    <p class="ps-note">The same 24 words give different addresses in each mode. Choose with care: the choice is recorded for this install and cannot be changed afterwards. If you choose the wrong one, the wallet opens with no funds in it. Nothing is lost, but the other mode then needs a fresh install of the app, where you choose again.</p>`;
+    <p class="ps-note">${th("The same 24 words give different addresses in each mode. Choose with care: the choice is recorded for this install and cannot be changed afterwards. If you choose the wrong one, the wallet opens with no funds in it. Nothing is lost, but the other mode then needs a fresh install of the app, where you choose again.")}</p>`;
 }
 // Restore from a backup FILE: the file brings its wallet's keys as they are, so its mode must be this install's.
 // Always asked, also on a node that runs classic keys only: a block backup restored there is the forbidden mix.
 // The file cannot answer for itself (everything in it is encrypted under the backup password).
 function backupModeQuestionHtml() {
-  const q = "Was this backup made by a wallet using block key uses, such as Pandamonium on a phone with default settings, or classic keys?";
+  const q = t("Was this backup made by a wallet using block key uses, such as Pandamonium on a phone with default settings, or classic keys?");
   return `<div class="eyebrow ps-label">${q}</div>
     <div class="modeq" role="radiogroup" aria-label="${q}">
-      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>Block key uses</b><span>Pandamonium on a phone with default settings, or a wallet made new in an app that uses block key uses.</span></button>
-      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>Classic keys</b><span>An older Minima Core, MinimaClassic, or a wallet made with Classic mode switched on.</span></button>
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="block"><b>${th("Block key uses")}</b><span>${th("Pandamonium on a phone with default settings, or a wallet made new in an app that uses block key uses.")}</span></button>
+      <button type="button" class="opt" role="radio" aria-checked="false" data-mode="classic"><b>${th("Classic keys")}</b><span>${th("An older Minima Core, MinimaClassic, or a wallet made with Classic mode switched on.")}</span></button>
     </div>`;
 }
 function wireModeQuestion(host) {
@@ -291,9 +291,9 @@ function wireModeQuestion(host) {
 function restoreMode(host) {
   if (!KEYMODE.supported) return { mode: "classic" };
   const picked = host.querySelector('.modeq .opt[aria-checked="true"]');
-  if (!picked) return { error: "Choose which kind of wallet these words were used in." };
+  if (!picked) return { error: t("Choose which kind of wallet these words were used in.") };
   const mode = picked.dataset.mode;
-  if (KEYMODE.mode && KEYMODE.mode !== mode) return { error: "This install holds a " + KEYMODE.mode + " key wallet, and that cannot be changed. Words used in a " + mode + " key wallet would open an empty wallet here. Restore them on a fresh install." };
+  if (KEYMODE.mode && KEYMODE.mode !== mode) return { error: t("This install holds a {mode} key wallet, and that cannot be changed. Words used in a {mode2} key wallet would open an empty wallet here. Restore them on a fresh install.", { mode: KEYMODE.mode, mode2: mode }) };
   return { mode };
 }
 /**
@@ -307,9 +307,9 @@ async function resolveSeed(words) {
   if (typed == null) { toast(words.problem(), "err"); return ""; }
   if (!words.isAnyPhrase()) return WordEntry.minimaForm(typed);
   if (!WordEntry.allListWords(typed)) return typed.trim();
-  const pick = await new Promise(res => showActionSheet("These are list words", [
-    { label: "Minima's form", onclick: () => res("minima") }, { label: "Exactly as typed", onclick: () => res("typed") }],
-    "A wallet made by Minima uses its own form of the words (capitals, single spaces). Older apps could make a wallet from the words exactly as they were typed. Choose \"Exactly as typed\" only for such a wallet: otherwise you open a different, empty wallet.", () => res("")));
+  const pick = await new Promise(res => showActionSheet(t("These are list words"), [
+    { label: t("Minima's form"), onclick: () => res("minima") }, { label: t("Exactly as typed"), onclick: () => res("typed") }],
+    t("A wallet made by Minima uses its own form of the words (capitals, single spaces). Older apps could make a wallet from the words exactly as they were typed. Choose \"Exactly as typed\" only for such a wallet: otherwise you open a different, empty wallet."), () => res("")));
   return pick === "minima" ? WordEntry.minimaForm(typed) : pick === "typed" ? typed.trim() : "";
 }
 // New Wallet or a restore: save the config, then start the node. restore = { seed, keyuses, host } or null.
@@ -350,11 +350,11 @@ function applyNetPreset(P, net, server, customPeer, peersUrl) {
 }
 // What Save writes, or why it cannot. f = { net, server, basePort, rpcPort, dataFolder, customPeer, extraArgs, P }.
 function paramsPatch(f, cfg) {
-  if (f.net === "custom" && !f.customPeer) return { error: "Enter a host:port for the custom peer." };
+  if (f.net === "custom" && !f.customPeer) return { error: t("Enter a host:port for the custom peer.") };
   const keyArg = MINIMA_PARAMS.keyModeArg(f.extraArgs);
-  if (keyArg) return { error: keyArg + " cannot be set here. The wallet's key mode sets it." };
+  if (keyArg) return { error: t("{keyArg} cannot be set here. The wallet's key mode sets it.", { keyArg: keyArg }) };
   const ownedArg = MINIMA_PARAMS.reservedArg(f.extraArgs);
-  if (ownedArg) return { error: ownedArg + " cannot be set here. The app sets it itself." };
+  if (ownedArg) return { error: t("{ownedArg} cannot be set here. The app sets it itself.", { ownedArg: ownedArg }) };
   return { patch: {
     network: f.net, basePort: parseInt(f.basePort, 10) || cfg.basePort, rpcPortManual: f.rpcPort,
     contribute: !!f.server && f.net !== "solo", dataFolder: f.dataFolder || "",
@@ -375,63 +375,63 @@ function renderParams(host, firstRun, done) {
   const rpcPort = parseInt(CFG.rpcPortManual, 10) || (CFG.basePort + 4);
   const plain = CFG.nodeKind === "minima";
   host.innerHTML = `
-    <h2 class="ps-h">Startup parameters</h2>
-    <p class="ps-intro">Configure how the node starts. Changes take effect when the node restarts.</p>
-    ${firstRun && KEYMODE.supported && !KEYMODE.mode ? psSwitch("pClassic", "Classic mode", FR_CLASSIC, "On: the wallet is made with classic keys. Off (default): block key uses on a low-RAM node (-blockaskeyuses -lowram); classic mode uses more RAM.\n\nThis is chosen once, before the wallet exists, and cannot be changed afterwards. The same seed produces different addresses in each mode: to restore a wallet, choose the mode it was made in.") : ""}
-    ${psSwitch("pServer", "Server mode (-server)", !!CFG.contribute, "Accept incoming connections instead of client-only. Needs a reachable port (router forward / hotspot).")}
-    ${psSwitch("pMega", "MegaMMR (-megammr)", P.megammr === true, "Keep the full Mega MMR so this node can serve seed resyncs. Uses significantly more RAM and storage.")}
-    <div class="ps-sw"><span class="ps-sw__t">RPC (-rpcenable)</span><span class="ps-sw__on">Always on</span></div>
+    <h2 class="ps-h">${th("Startup parameters")}</h2>
+    <p class="ps-intro">${th("Configure how the node starts. Changes take effect when the node restarts.")}</p>
+    ${firstRun && KEYMODE.supported && !KEYMODE.mode ? psSwitch("pClassic", t("Classic mode"), FR_CLASSIC, t("On: the wallet is made with classic keys. Off (default): block key uses on a low-RAM node (-blockaskeyuses -lowram); classic mode uses more RAM.\n\nThis is chosen once, before the wallet exists, and cannot be changed afterwards. The same seed produces different addresses in each mode: to restore a wallet, choose the mode it was made in.")) : ""}
+    ${psSwitch("pServer", t("Server mode (-server)"), !!CFG.contribute, t("Accept incoming connections instead of client-only. Needs a reachable port (router forward / hotspot)."))}
+    ${psSwitch("pMega", t("MegaMMR (-megammr)"), P.megammr === true, t("Keep the full Mega MMR so this node can serve seed resyncs. Uses significantly more RAM and storage."))}
+    <div class="ps-sw"><span class="ps-sw__t">${th("RPC (-rpcenable)")}</span><span class="ps-sw__on">${th("Always on")}</span></div>
     <p class="ps-note">${plain
-      ? `HTTP RPC interface on port ${esc(rpcPort)}. This app talks to its node through it, so it cannot be switched off. Anything that can reach the port can command this node, so it is never started without Basic auth: user minima, password below.`
-      : `RPC interface on port ${esc(rpcPort)}, on this computer only. This app talks to its node through it, so it cannot be switched off. The Parlons Node takes no RPC password.`}</p>
-    ${plain ? `<button class="btn btn--outline ps-btn ps-btn--copy" id="pRpcCopy">Copy RPC password</button>` : ""}
-    ${psSwitch("pKeets", "Keets transport (-keets)", P.keets === true, "On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart.")}
-    <div class="eyebrow ps-label">Extra arguments (advanced)</div>
-    <textarea class="field__input ps-field" id="extraArgs" rows="2" spellcheck="false" placeholder="-p2pnodes host:port -txpowdbstore 3 …">${esc(CFG.extraArgs || "")}</textarea>
-    <p class="ps-note ps-note--gap">Space-separated flags passed to the node at boot, after the parameters below. Quotes are respected. -blockaskeyuses and -lowram are not allowed here: the wallet's key mode sets them.</p>
-    <details class="ps-adv"><summary>All parameters</summary>
-      <div class="setup-sec"><div class="setup-sec__h">Network</div>
-        <label class="opt" data-net="mainnet"><b>Mainnet</b><span>Join the live Minima network.</span></label>
-        <label class="opt" data-net="solo"><b>Solo / test</b><span>A private local chain that mines its own blocks. Safe for trying things out.</span></label>
-        <label class="opt" data-net="custom"><b>Custom peer</b><span>Connect to a specific host:port you provide.</span></label>
-        <input class="field__input" id="customPeer" placeholder="host:port" style="display:none;margin-top:4px" value="${esc(CFG.customConnect || "")}" />
-        <div class="ps-note">A network is a preset: it fills the parameters below, and you can still change any of them.</div>
+      ? tr("HTTP RPC interface on port {rpcPort}. This app talks to its node through it, so it cannot be switched off. Anything that can reach the port can command this node, so it is never started without Basic auth: user minima, password below.", { rpcPort: esc(rpcPort) })
+      : tr("RPC interface on port {rpcPort}, on this computer only. This app talks to its node through it, so it cannot be switched off. The Parlons Node takes no RPC password.", { rpcPort: esc(rpcPort) })}</p>
+    ${plain ? `<button class="btn btn--outline ps-btn ps-btn--copy" id="pRpcCopy">${th("Copy RPC password")}</button>` : ""}
+    ${psSwitch("pKeets", t("Keets transport (-keets)"), P.keets === true, t("On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart."))}
+    <div class="eyebrow ps-label">${th("Extra arguments (advanced)")}</div>
+    <textarea class="field__input ps-field" id="extraArgs" rows="2" spellcheck="false" placeholder="${th("-p2pnodes host:port -txpowdbstore 3 …")}">${esc(CFG.extraArgs || "")}</textarea>
+    <p class="ps-note ps-note--gap">${th("Space-separated flags passed to the node at boot, after the parameters below. Quotes are respected. -blockaskeyuses and -lowram are not allowed here: the wallet's key mode sets them.")}</p>
+    <details class="ps-adv"><summary>${th("All parameters")}</summary>
+      <div class="setup-sec"><div class="setup-sec__h">${th("Network")}</div>
+        <label class="opt" data-net="mainnet"><b>${th("Mainnet")}</b><span>${th("Join the live Minima network.")}</span></label>
+        <label class="opt" data-net="solo"><b>${th("Solo / test")}</b><span>${th("A private local chain that mines its own blocks. Safe for trying things out.")}</span></label>
+        <label class="opt" data-net="custom"><b>${th("Custom peer")}</b><span>${th("Connect to a specific host:port you provide.")}</span></label>
+        <input class="field__input" id="customPeer" placeholder="${th("host:port")}" style="display:none;margin-top:4px" value="${esc(CFG.customConnect || "")}" />
+        <div class="ps-note">${th("A network is a preset: it fills the parameters below, and you can still change any of them.")}</div>
       </div>
-      <div class="setup-sec"><div class="setup-sec__h">Core</div>
-        <div class="field"><div class="field__label">Data folder (-data / -basefolder)</div>
-          <div class="seg"><input class="field__input" id="dataFolder" placeholder="(default app folder)" value="${esc(CFG.dataFolder || "")}" readonly />
-          <button class="btn btn--outline btn--sm" id="pickFolder">Choose…</button></div></div>
-        <div class="field"><div class="field__label">Minima port (-port)</div>
+      <div class="setup-sec"><div class="setup-sec__h">${th("Core")}</div>
+        <div class="field"><div class="field__label">${th("Data folder (-data / -basefolder)")}</div>
+          <div class="seg"><input class="field__input" id="dataFolder" placeholder="${th("(default app folder)")}" value="${esc(CFG.dataFolder || "")}" readonly />
+          <button class="btn btn--outline btn--sm" id="pickFolder">${th("Choose…")}</button></div></div>
+        <div class="field"><div class="field__label">${th("Minima port (-port)")}</div>
           <input class="field__input" id="basePort" value="${esc(CFG.basePort)}" inputmode="numeric" /></div>
-        <div class="field"><div class="field__label">RPC port (-rpc)</div>
-          <input class="field__input" id="rpcPort" value="${esc(CFG.rpcPortManual || "")}" placeholder="(auto: Minima port + 4)" inputmode="numeric" /></div>
+        <div class="field"><div class="field__label">${th("RPC port (-rpc)")}</div>
+          <input class="field__input" id="rpcPort" value="${esc(CFG.rpcPortManual || "")}" placeholder="${th("(auto: Minima port + 4)")}" inputmode="numeric" /></div>
       </div>
-      <div class="setup-sec"><div class="setup-sec__h">Every startup parameter</div>
+      <div class="setup-sec"><div class="setup-sec__h">${th("Every startup parameter")}</div>
         <div id="advParams"></div>
-        <div class="setup-sec__sub" style="margin-top:12px">Managed by the app</div>
-        ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${esc(m.note)}</span></div>`).join("")}
+        <div class="setup-sec__sub" style="margin-top:12px">${th("Managed by the app")}</div>
+        ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${th(m.note)}</span></div>`).join("")}
       </div>
     </details>
-    <button class="btn btn--outline ps-btn ps-btn--save" id="pSave">Save</button>
-    ${firstRun ? "" : `<button class="btn btn--primary ps-btn ps-btn--main" id="pSaveRestart">Save &amp; Restart Node</button>`}`;
+    <button class="btn btn--outline ps-btn ps-btn--save" id="pSave">${th("Save")}</button>
+    ${firstRun ? "" : `<button class="btn btn--primary ps-btn ps-btn--main" id="pSaveRestart">${th("Save & Restart Node")}</button>`}`;
 
   // ---- the full editor (rebuilt from P so the switches and presets show through) ----
   function paramControl(it, val) {
     const id = "p_" + it.flag;
     if (it.type === "bool") {
       return `<label class="prow"><input type="checkbox" id="${id}" data-flag="${esc(it.flag)}" ${val === true ? "checked" : ""}/>
-        <span class="prow__l">${esc(it.label)}</span><span class="prow__h">${esc(it.help)}</span></label>`;
+        <span class="prow__l">${th(it.label)}</span><span class="prow__h">${th(it.help)}</span></label>`;
     }
     const isSecret = it.type === "secret";
     const shown = isSecret ? "" : (val === true || val == null ? "" : val);
-    const ph = isSecret && val === true ? "•••••••• (stored — leave blank to keep)" : "";
-    return `<div class="field prow"><label class="prow__l" for="${id}">${esc(it.label)}</label>
+    const ph = isSecret && val === true ? t("•••••••• (stored: leave blank to keep)") : "";
+    return `<div class="field prow"><label class="prow__l" for="${id}">${th(it.label)}</label>
       <input class="field__input" id="${id}" type="${isSecret ? "password" : "text"}" data-flag="${esc(it.flag)}" ${isSecret ? 'data-secret="1"' : ''} ${isSecret && val === true ? 'data-set="1"' : ''} value="${esc(shown)}" placeholder="${esc(ph)}" ${it.type === "int" ? 'inputmode="numeric"' : ''}/>
-      <div class="prow__h">${esc(it.help)}</div></div>`;
+      <div class="prow__h">${th(it.help)}</div></div>`;
   }
   function renderAdvanced() {
     $("advParams").innerHTML = MINIMA_PARAMS.GROUPS.map(g => `
-      <div class="adv-group"><div class="adv-group__h">${esc(g.group)}</div>
+      <div class="adv-group"><div class="adv-group__h">${th(g.group)}</div>
       ${g.items.map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
     $("advParams").querySelectorAll("[data-flag]").forEach(inp => {
       const f = inp.dataset.flag;
@@ -461,7 +461,7 @@ function renderParams(host, firstRun, done) {
   $("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) $("dataFolder").value = f; };
   if ($("pRpcCopy")) $("pRpcCopy").onclick = async () => {   // the password goes from the main process to the clipboard; it never reaches this page
     let ok = false; try { ok = !!(await api.copyRpcPassword()); } catch (e) {}
-    toast(ok ? "RPC password copied" : "Could not copy the RPC password", ok ? "ok" : "err");
+    toast(ok ? t("RPC password copied") : t("Could not copy the RPC password"), ok ? "ok" : "err");
   };
   // Draw the editor from what is saved. The preset is applied only when the user picks a network or flips a
   // switch, so opening this screen and pressing Save changes nothing.
@@ -488,13 +488,13 @@ function renderParams(host, firstRun, done) {
   $("pSave").onclick = async () => {
     const patch = collect(); if (!patch) return;
     try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
-    toast("Saved - applies when the node restarts", "ok"); leave();
+    toast(t("Saved - applies when the node restarts"), "ok"); leave();
   };
   if ($("pSaveRestart")) $("pSaveRestart").onclick = async () => {
     const patch = collect(); if (!patch) return;
-    if (!await showConfirm("Restart node?", "The node will shut down cleanly and start again with the new parameters. This takes a minute.", "Restart")) return;
+    if (!await showConfirm(t("Restart node?"), t("The node will shut down cleanly and start again with the new parameters. This takes a minute."), t("Restart"))) return;
     try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
-    toast("Restarting the node…"); leave();
+    toast(t("Restarting the node…")); leave();
     waitingForNode = true;
     if (running) await api.nodeRestart(); else await api.nodeStart();   // reconfigure = restart to apply
   };
@@ -505,8 +505,8 @@ function ipcError(e) { return String((e && e.message) || e).replace(/^Error invo
 // ---- Backup & Recovery (the phone's BackupActivity hub, over the backup, resync, restore and vault commands
 // the Settings cards ran). One view; BK_PAGE says which of the phone's screens it shows ("" = the hub).
 let BK_PAGE = "";
-const BK_TITLE = { "": "Backup & Recovery", create: "Create backup", restore: "Restore from file", resync: "Resync node", keys: "Private keys" };
-function bkOpen(page) { BK_PAGE = page; el("barPage").textContent = BK_TITLE[page]; el("main").scrollTop = 0; renderBackup(); }
+const BK_TITLE = { "": N_("Backup & Recovery"), create: N_("Create backup"), restore: N_("Restore from file"), resync: N_("Resync node"), keys: N_("Private keys") };   // translated where shown
+function bkOpen(page) { BK_PAGE = page; el("barPage").textContent = t(BK_TITLE[page]); el("main").scrollTop = 0; renderBackup(); }
 /**
  * megammrsync, built in ONE place for every screen that runs it (chain resync, rebuild from a phrase, the
  * first-run restore). A backup FILE is restored by the main process, after its key-mode check (main/restore.js). Returns { error } or { cmd, resetsWallet }. The node's command
@@ -517,13 +517,13 @@ function resyncCommand(o) {
   const host = String(o.host || "").trim();
   const phrase = String(o.phrase || "").trim();   // a free-form phrase is hashed as typed: trim the ends only, never the inside
   const keyuses = String(o.keyuses == null ? "" : o.keyuses).trim();
-  if (o.needPhrase && !phrase) return { error: "Enter your seed phrase." };
-  if (/["\\]/.test(phrase)) return { error: "This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal." };
-  if (phrase.includes(";")) return { error: "This seed contains a semicolon (;), which the node reads as the end of the command. Remove it or restore via the node's own command line." };
-  if (/[\n\r\t]/.test(phrase)) return { error: "Remove the line breaks and tabs: enter your seed as one clean line (they change the derived wallet)." };
-  if (!/^[\w.\-]+:\d+$/.test(host)) return { error: "MegaMMR host must be host:port." };
-  if (phrase && !/^\d+$/.test(keyuses)) return { error: "Enter the key uses for this seed (0 if brand new). Too low reuses one-time keys and can lose funds." };
-  if (keyuses && !/^\d+$/.test(keyuses)) return { error: "Key uses must be a whole number." };
+  if (o.needPhrase && !phrase) return { error: t("Enter your seed phrase.") };
+  if (/["\\]/.test(phrase)) return { error: t("This seed contains a \" or \\ the restore can't carry safely. Remove it or restore via the node terminal.") };
+  if (phrase.includes(";")) return { error: t("This seed contains a semicolon (;), which the node reads as the end of the command. Remove it or restore via the node's own command line.") };
+  if (/[\n\r\t]/.test(phrase)) return { error: t("Remove the line breaks and tabs: enter your seed as one clean line (they change the derived wallet).") };
+  if (!/^[\w.\-]+:\d+$/.test(host)) return { error: t("MegaMMR host must be host:port.") };
+  if (phrase && !/^\d+$/.test(keyuses)) return { error: t("Enter the key uses for this seed (0 if brand new). Too low reuses one-time keys and can lose funds.") };
+  if (keyuses && !/^\d+$/.test(keyuses)) return { error: t("Key uses must be a whole number.") };
   let cmd = `megammrsync action:resync host:${host}`;
   if (phrase) cmd += ` phrase:"${phrase}"` + (o.anyphrase ? " anyphrase:true" : "");
   if (keyuses) cmd += ` keyuses:${keyuses}`;
@@ -539,7 +539,7 @@ async function offerWithoutDexicon(e) {
   if (!unchecked && !pools) return false;
   let warning; try { warning = await api.dxSkipWarning(); } catch (err) { return false; }
   const dexOnly = unchecked && !pools && !/(AtomiX|PandaPools) (could not open|has not finished starting after)/.test(why);
-  if (!await showConfirm(dexOnly ? "Go on without checking Dexicon?" : pools && !unchecked ? "Replace the wallet these pools belong to?" : "Replace the wallet without these checks?", warning, dexOnly ? "Go on without the check" : pools && !unchecked ? "I have its 24 words: go on" : "Go on without the check", true)) return false;
+  if (!await showConfirm(dexOnly ? t("Go on without checking Dexicon?") : pools && !unchecked ? t("Replace the wallet these pools belong to?") : t("Replace the wallet without these checks?"), warning, dexOnly ? t("Go on without the check") : pools && !unchecked ? t("I have its 24 words: go on") : t("Go on without the check"), true)) return false;
   try { await api.dxSkipCheck(); return true; } catch (err) { toast(ipcError(err), "err"); return false; }
 }
 // The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is
@@ -547,64 +547,64 @@ async function offerWithoutDexicon(e) {
 // The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
 // node.onWalletReplaced, 0.18.106): that must not depend on this window being open. Here only the screen is cleared.
 async function walletReplaced() {
-  resetMailState(); resetPpState(); resetAxState(); entropyErased("the wallet was replaced.");
+  resetMailState(); resetPpState(); resetAxState(); entropyErased(t("the wallet was replaced."));
   resetWalletFigures(); api.nodeStatus().then(paintFooter);
 }
 // A backup password as the node can carry it (the phone's rule): letters and numbers only. A quote used to
 // close password:"…" early, so the node encrypted under a DIFFERENT password than the one typed.
 function backupPasswordProblem(pw, again) {
-  if (!pw) return "Enter a backup password.";
-  if (!/^[A-Za-z0-9]+$/.test(pw)) return "Letters and numbers only";
-  if (pw !== again) return "The two passwords do not match";
+  if (!pw) return t("Enter a backup password.");
+  if (!/^[A-Za-z0-9]+$/.test(pw)) return t("Letters and numbers only");
+  if (pw !== again) return t("The two passwords do not match");
   return "";
 }
 function renderBackup() {
   const host = el("backupBody"), $ = (id) => host.querySelector("#" + id);
-  el("barPage").textContent = BK_TITLE[BK_PAGE];
+  el("barPage").textContent = t(BK_TITLE[BK_PAGE]);
   const head = (h, intro) => `<h2 class="ps-h">${esc(h)}</h2><p class="ps-intro">${esc(intro)}</p>`;
   const field = (id, label, attrs) => `<div class="eyebrow ps-label">${esc(label)}</div><input class="field__input ps-field" id="${id}" autocomplete="off" spellcheck="false" ${attrs || ""}/>`;
-  const stopped = `<div class="ps-tile ps-tile--strong" role="status">The node is not running. Start the node before backing up or restoring.</div>`;
-  if (BK_PAGE && !running) { host.innerHTML = head(BK_TITLE[BK_PAGE], "") + stopped; return; }
+  const stopped = `<div class="ps-tile ps-tile--strong" role="status">${th("The node is not running. Start the node before backing up or restoring.")}</div>`;
+  if (BK_PAGE && !running) { host.innerHTML = head(t(BK_TITLE[BK_PAGE]), "") + stopped; return; }
 
   if (BK_PAGE === "") {
-    const rows = [["create", "Create backup", "Write an encrypted .bak of this node into its data folder."],
-      ["restore", "Restore from file", "Put a backup back on this node, then catch up to the chain tip from a MegaMMR node."],
-      ["chat", "Chat backup", "Save or restore your keets chat address, contacts and messages."],
-      ["mail", "Mail backup", "Save or restore your MinimaMail identity, contacts and messages."],
-      ["resync", "Resync node", "Rebuild this node's chain from a MegaMMR node. Your wallet and seed phrase are not touched."],
-      ["keys", "Private keys", "Seed phrase, or rebuild this wallet from a phrase."]];
-    host.innerHTML = head("Backup & Recovery", "Save a copy of this node, put it back, or rebuild it from another node.") + (running ? "" : stopped) +
+    const rows = [["create", t("Create backup"), t("Write an encrypted .bak of this node into its data folder.")],
+      ["restore", t("Restore from file"), t("Put a backup back on this node, then catch up to the chain tip from a MegaMMR node.")],
+      ["chat", t("Chat backup"), t("Save or restore your keets chat address, contacts and messages.")],
+      ["mail", t("Mail backup"), t("Save or restore your MinimaMail identity, contacts and messages.")],
+      ["resync", t("Resync node"), t("Rebuild this node's chain from a MegaMMR node. Your wallet and seed phrase are not touched.")],
+      ["keys", t("Private keys"), t("Seed phrase, or rebuild this wallet from a phrase.")]];
+    host.innerHTML = head(t("Backup & Recovery"), t("Save a copy of this node, put it back, or rebuild it from another node.")) + (running ? "" : stopped) +
       `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
     host.querySelectorAll(".bk-row").forEach(b => b.onclick = () => {
       const k = b.dataset.bk;
-      if (k === "chat") showActionSheet("Chat backup", [{ label: "Back up chats", onclick: () => ChatPanel.backup() }, { label: "Restore chats", onclick: () => ChatPanel.restore() }]);
-      else if (k === "mail") showActionSheet("Mail backup", [{ label: "Back up identity", onclick: () => MailPanel.backup() }, { label: "Restore from a backup", onclick: () => MailPanel.restore() }]);
+      if (k === "chat") showActionSheet(t("Chat backup"), [{ label: t("Back up chats"), onclick: () => ChatPanel.backup() }, { label: t("Restore chats"), onclick: () => ChatPanel.restore() }]);
+      else if (k === "mail") showActionSheet(t("Mail backup"), [{ label: t("Back up identity"), onclick: () => MailPanel.backup() }, { label: t("Restore from a backup"), onclick: () => MailPanel.restore() }]);
       else bkOpen(k);
     });
     return;
   }
 
   if (BK_PAGE === "create") {
-    host.innerHTML = head("Create backup", "Writes one encrypted .bak file holding this node's wallet, chain and archive. The node keeps running.") +
-      field("bkPw", "Password", 'type="password" placeholder="letters and numbers only"') +
-      field("bkPw2", "Confirm password", 'type="password" placeholder="type it again"') +
-      `<div class="ps-tile">This password is the only thing protecting your private keys inside the file. There is no way to recover the backup without it, and no way to reset it later.</div>
-      <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo">Create backup</button>
+    host.innerHTML = head(t("Create backup"), t("Writes one encrypted .bak file holding this node's wallet, chain and archive. The node keeps running.")) +
+      field("bkPw", t("Password"), `type="password" placeholder="${th("letters and numbers only")}"`) +
+      field("bkPw2", t("Confirm password"), `type="password" placeholder="${th("type it again")}"`) +
+      `<div class="ps-tile">${th("This password is the only thing protecting your private keys inside the file. There is no way to recover the backup without it, and no way to reset it later.")}</div>
+      <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo">${th("Create backup")}</button>
       <div class="bk-status" id="bkStatus" role="status"></div><div id="bkOut"></div>`;
     $("bkGo").onclick = async () => {
       const pw = $("bkPw").value, st = $("bkStatus");
       const why = backupPasswordProblem(pw, $("bkPw2").value);
       if (why) { toast(why, "err"); return; }
-      $("bkGo").disabled = true; $("bkGo").textContent = "Creating…";
-      st.textContent = "Writing the backup. The node is locked while it copies, so this can take a while.";
+      $("bkGo").disabled = true; $("bkGo").textContent = t("Creating…");
+      st.textContent = t("Writing the backup. The node is locked while it copies, so this can take a while.");
       try {
         const r = await cmd(`backup password:"${pw}"`);
         const b = (r && r.backup) || r || {}, file = b.file || "";
         $("bkPw").value = ""; $("bkPw2").value = "";
-        st.textContent = file ? "Backup created. Saved in the node folder as" : "Backup created in the node's data folder.";
-        $("bkOut").innerHTML = file ? `<div class="bk-mono" id="bkPath">${esc(file)}</div><button class="btn btn--outline ps-btn" data-copy="${esc(file)}">Copy full path</button>` : "";
-      } catch (e) { st.textContent = "Backup failed. " + e.message; }
-      $("bkGo").disabled = false; $("bkGo").textContent = "Create backup";
+        st.textContent = file ? t("Backup created. Saved in the node folder as") : t("Backup created in the node's data folder.");
+        $("bkOut").innerHTML = file ? `<div class="bk-mono" id="bkPath">${esc(file)}</div><button class="btn btn--outline ps-btn" data-copy="${esc(file)}">${th("Copy full path")}</button>` : "";
+      } catch (e) { st.textContent = t("Backup failed. {message}", { message: e.message }); }
+      $("bkGo").disabled = false; $("bkGo").textContent = t("Create backup");
     };
     return;
   }
@@ -621,59 +621,59 @@ function renderBackup() {
       if (built.resetsWallet) await walletReplaced();
       // The node shut itself down at the end and the main process started it again, through every start check.
       const after = await api.nodeStatus();
-      if (after.state === "error") { st.textContent = label + " finished, but the node was not started again. " + (after.lastError || ""); btn.disabled = false; btn.textContent = btn.dataset.label; return; }
-      toast(label + " complete ✓ The node is restarting.", "ok"); bkOpen("");
-    } catch (e) { st.textContent = label + " not completed. " + ipcError(e); btn.disabled = false; btn.textContent = btn.dataset.label; }
+      if (after.state === "error") { st.textContent = t("{label} finished, but the node was not started again. {lastError}", { label: label, lastError: (after.lastError || "") }); btn.disabled = false; btn.textContent = btn.dataset.label; return; }
+      toast(t("{label} complete ✓ The node is restarting.", { label: label }), "ok"); bkOpen("");
+    } catch (e) { st.textContent = t("{label} not completed. {e}", { label: label, e: ipcError(e) }); btn.disabled = false; btn.textContent = btn.dataset.label; }
   };
-  const hostField = field("bkHost", "MegaMMR node", `value="${esc(CFG.megammrHost)}"`);
+  const hostField = field("bkHost", t("MegaMMR node"), `value="${esc(CFG.megammrHost)}"`);
   const built = (o) => Object.assign(resyncCommand(o), { host: String(o.host || "").trim() });
 
   if (BK_PAGE === "resync") {
-    host.innerHTML = head("Resync node", "Choose a Minima MegaMMR node to resync from. Use the format host:port.") + hostField +
-      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Resync">Resync</button><div class="bk-status" id="bkStatus" role="status"></div>`;
-    $("bkGo").onclick = () => { const h = $("bkHost").value.trim(); run("bkGo", "Resync", built({ host: h }), "Resync this node?",
-      "Minima will rebuild its chain data from " + h + ".\n\n• Your wallet and seed phrase are not touched.\n• Any transaction still waiting to be mined is dropped.\n\nThis can take a while on a slow connection.", "Resync"); };
+    host.innerHTML = head(t("Resync node"), t("Choose a Minima MegaMMR node to resync from. Use the format host:port.")) + hostField +
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Resync")}">${th("Resync")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    $("bkGo").onclick = () => { const h = $("bkHost").value.trim(); run("bkGo", t("Resync"), built({ host: h }), t("Resync this node?"),
+      t("Minima will rebuild its chain data from {h}.\n\n• Your wallet and seed phrase are not touched.\n• Any transaction still waiting to be mined is dropped.\n\nThis can take a while on a slow connection.", { h: h }), t("Resync")); };
     return;
   }
 
   if (BK_PAGE === "restore") {
-    host.innerHTML = head("Restore from file", "Replaces this node's wallet and chain with the contents of a backup, then catches up to the chain tip from a MegaMMR node.") +
-      field("bkFile", "Backup file", 'placeholder="a .bak file in the node folder, or its full path"') +
-      field("bkFilePw", "Backup password", 'type="password" placeholder="the password used when it was made"') + backupModeQuestionHtml() + hostField +
-      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Restore this node">Restore this node</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    host.innerHTML = head(t("Restore from file"), t("Replaces this node's wallet and chain with the contents of a backup, then catches up to the chain tip from a MegaMMR node.")) +
+      field("bkFile", t("Backup file"), `placeholder="${th("a .bak file in the node folder, or its full path")}"`) +
+      field("bkFilePw", t("Backup password"), `type="password" placeholder="${th("the password used when it was made")}"`) + backupModeQuestionHtml() + hostField +
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Restore this node")}">${th("Restore this node")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
     wireModeQuestion(host);
     $("bkGo").onclick = async () => { const f = $("bkFile").value.trim(), picked = host.querySelector('.modeq .opt[aria-checked="true"]');
       const o = { host: $("bkHost").value.trim(), file: f, password: $("bkFilePw").value, mode: picked ? picked.dataset.mode : "" };
       // The main process checks the backup's key mode and builds the command; a refusal comes before the question below.
       try { $("bkStatus").textContent = ""; await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { if (!await offerWithoutDexicon(e)) { $("bkStatus").textContent = ipcError(e); return; } }
-      run("bkGo", "Restore", { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, "Replace this node?",
-      "Minima will replace its wallet and chain with " + f + ".\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", "Restore"); };
+      run("bkGo", t("Restore"), { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, t("Replace this node?"),
+      t("Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", { f: f }), t("Restore")); };
     return;
   }
 
   // Private keys: the seed phrase, and the rebuild of this wallet from a phrase.
-  host.innerHTML = head("Private keys", "Anyone who reads these words owns your funds. Write them down somewhere only you can reach: never in a photo, a note app or a message.") +
-    `<div class="eyebrow ps-label">Seed</div>
+  host.innerHTML = head(t("Private keys"), t("Anyone who reads these words owns your funds. Write them down somewhere only you can reach: never in a photo, a note app or a message.")) +
+    `<div class="eyebrow ps-label">${th("Seed")}</div>
     <div class="seedcard" id="bkSeed" hidden></div>
-    <button class="btn btn--outline ps-btn" id="bkShow">Show seed phrase</button>
-    <div class="eyebrow ps-label bk-gap">Rebuild wallet from seed phrase</div>
-    <p class="ps-note ps-note--body">Replace this node's wallet with the one for a seed phrase, then resync from a MegaMMR node. Destructive.</p>
-    <div class="eyebrow ps-label">Seed phrase</div><div id="bkWords"></div>` + modeQuestionHtml() +
-    field("bkUses", "Key uses", 'inputmode="numeric" placeholder="higher than any previous rebuild of this seed"') + hostField +
-    `<button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="Rebuild">Rebuild</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    <button class="btn btn--outline ps-btn" id="bkShow">${th("Show seed phrase")}</button>
+    <div class="eyebrow ps-label bk-gap">${th("Rebuild wallet from seed phrase")}</div>
+    <p class="ps-note ps-note--body">${th("Replace this node's wallet with the one for a seed phrase, then resync from a MegaMMR node. Destructive.")}</p>
+    <div class="eyebrow ps-label">${th("Seed phrase")}</div><div id="bkWords"></div>` + modeQuestionHtml() +
+    field("bkUses", t("Key uses"), `inputmode="numeric" placeholder="${th("higher than any previous rebuild of this seed")}"`) + hostField +
+    `<button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Rebuild")}">${th("Rebuild")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
   $("bkShow").onclick = async () => {
     const box = $("bkSeed");
-    if (!box.hidden) { box.hidden = true; box.textContent = ""; $("bkShow").textContent = "Show seed phrase"; return; }
+    if (!box.hidden) { box.hidden = true; box.textContent = ""; $("bkShow").textContent = t("Show seed phrase"); return; }
     const p = seedFrom(await tryCmd("vault"));
-    if (!p) { toast("The node did not return a seed phrase.", "err"); return; }
-    box.textContent = p; box.hidden = false; $("bkShow").textContent = "Hide seed phrase";
+    if (!p) { toast(t("The node did not return a seed phrase."), "err"); return; }
+    box.textContent = p; box.hidden = false; $("bkShow").textContent = t("Hide seed phrase");
   };
   const words = WordEntry.create($("bkWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
   wireModeQuestion(host);
   $("bkGo").onclick = async () => { const km = restoreMode(host); if (km.error) { toast(km.error, "err"); return; }
     const seed = await resolveSeed(words); if (!seed) return;
-    run("bkGo", "Rebuild", built({ host: $("bkHost").value, phrase: seed, anyphrase: true, keyuses: $("bkUses").value, needPhrase: true }), "Rebuild this wallet?",
-    "Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds.", "Rebuild"); };
+    run("bkGo", t("Rebuild"), built({ host: $("bkHost").value, phrase: seed, anyphrase: true, keyuses: $("bkUses").value, needPhrase: true }), t("Rebuild this wallet?"),
+    t("Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds."), t("Rebuild")); };
 }
 
 // ---- starting / progress screen ---------------------------------------------
@@ -682,21 +682,21 @@ function showStarting() {
   frScreen("", null).innerHTML = `
     <div class="setup-progress">
       <div class="spin spin--lg"></div>
-      <div class="setup-progress__title" id="startTitle">Starting your node…</div>
+      <div class="setup-progress__title" id="startTitle">${th("Starting your node…")}</div>
       <div class="view__desc" id="startSub">${restore
-        ? "Starting the node on " + esc(CFG.network) + ", then restoring your seed from the MegaMMR node."
-        : "Starting the node and connecting to the " + esc(CFG.network) + " network."}</div>
-      <div class="setup-progress__stat" id="startStat">connecting…</div>
+        ? tr("Starting the node on {network}, then restoring your seed from the MegaMMR node.", { network: esc(CFG.network) })
+        : tr("Starting the node and connecting to the {network} network.", { network: esc(CFG.network) })}</div>
+      <div class="setup-progress__stat" id="startStat">${th("connecting…")}</div>
     </div>`;
 }
 function updateSetupProgress(s) {
   const stat = el("startStat"); if (!stat) return;
   if (s.state === "starting") stat.textContent = "connecting…";
-  else if (s.state === "running" && s.health) stat.textContent = "● " + (s.health.connections || 0) + " peers · block #" + (s.health.block || 0);
+  else if (s.state === "running" && s.health) stat.textContent = t("● {connections} peers · block #{block}", { connections: (s.health.connections || 0), block: (s.health.block || 0) });
   else if (s.state === "error") {
     stat.textContent = "⚠ " + (s.lastError || "node error"); stat.style.color = "var(--red)";
     if (!el("startBack")) {   // a way out, to change a port or a parameter and try again
-      stat.insertAdjacentHTML("afterend", `<button class="btn btn--outline ps-btn" id="startBack">Back</button>`);
+      stat.insertAdjacentHTML("afterend", `<button class="btn btn--outline ps-btn" id="startBack">${th("Back")}</button>`);
       el("startBack").onclick = () => { RESTORE = null; showSetup(); };
     }
   }
@@ -709,12 +709,12 @@ function runPostBoot() { if (RESTORE) postBootRestore(); else postBootNewSeed();
 // NEW wallet: the node made the seed. Show it (the phone's "Your recovery seed"), then have it typed back
 // before the wallet opens. No resync: a new node just follows the tip.
 async function postBootNewSeed() {
-  const body = frScreen("New Wallet", null);
+  const body = frScreen(t("New Wallet"), null);
   body.innerHTML = `
-    <h2 class="ps-h">Your recovery seed</h2>
-    <p class="ps-intro">Write these words down and keep them safe. Anyone with this seed controls your funds, and it cannot be recovered if lost.</p>
-    <div class="seedcard fr-seed" id="frSeed">Reading from the node…</div>
-    <button class="btn btn--primary ps-btn ps-btn--main fr-proceed" id="frSaved" disabled>I've saved it. Proceed</button>`;
+    <h2 class="ps-h">${th("Your recovery seed")}</h2>
+    <p class="ps-intro">${th("Write these words down and keep them safe. Anyone with this seed controls your funds, and it cannot be recovered if lost.")}</p>
+    <div class="seedcard fr-seed" id="frSeed">${th("Reading from the node…")}</div>
+    <button class="btn btn--primary ps-btn ps-btn--main fr-proceed" id="frSaved" disabled>${th("I've saved it. Proceed")}</button>`;
   let phrase = "";
   for (let i = 0; i < 20 && !phrase && el("frSeed"); i++) {   // the vault answers a moment after the node does
     phrase = String(seedFrom(await tryCmd("vault")) || "").trim();
@@ -722,8 +722,8 @@ async function postBootNewSeed() {
   }
   if (!el("frSeed")) return;
   if (!phrase) {
-    el("frSeed").textContent = "The node did not return a seed phrase.";
-    el("frSaved").disabled = false; el("frSaved").textContent = "Try again"; el("frSaved").onclick = postBootNewSeed;
+    el("frSeed").textContent = t("The node did not return a seed phrase.");
+    el("frSaved").disabled = false; el("frSaved").textContent = t("Try again"); el("frSaved").onclick = postBootNewSeed;
     return;
   }
   el("frSeed").textContent = phrase;
@@ -732,12 +732,12 @@ async function postBootNewSeed() {
 }
 // The phone's confirm-entry screen: the words are typed back, one box per word, and must be this wallet's.
 function confirmNewSeed(phrase) {
-  const body = frScreen("New Wallet", postBootNewSeed);
+  const body = frScreen(t("New Wallet"), postBootNewSeed);
   body.innerHTML = `
-    <h2 class="ps-h">Confirm your seed</h2>
-    <p class="ps-intro">Type in your seed phrase to confirm you have saved it.</p>
-    <div class="eyebrow ps-label">Seed phrase</div><div id="frWords"></div>
-    <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">Proceed</button>`;
+    <h2 class="ps-h">${th("Confirm your seed")}</h2>
+    <p class="ps-intro">${th("Type in your seed phrase to confirm you have saved it.")}</p>
+    <div class="eyebrow ps-label">${th("Seed phrase")}</div><div id="frWords"></div>
+    <button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="frGo">${th("Proceed")}</button>`;
   const words = WordEntry.create(el("frWords"), { clearClipboard: () => api.clip("") });
   el("frGo").onclick = async () => {
     const typed = words.phrase();
@@ -745,13 +745,13 @@ function confirmNewSeed(phrase) {
     const miss = seedMismatch(phrase, typed);
     if (miss) { toast(miss, "err"); return; }
     CFG = await api.saveConfig({ walletDone: true });
-    hideSetup(); renderActive(); toast("Wallet ready ✓", "ok");
+    hideSetup(); renderActive(); toast(t("Wallet ready ✓"), "ok");
   };
 }
 // "" when the typed words are the wallet's seed, else which word to check. Case and spacing are not the point here.
 function seedMismatch(phrase, typed) {
   const want = WordEntry.splitPasted(phrase), got = WordEntry.splitPasted(typed);
-  for (let i = 0; i < Math.max(want.length, got.length); i++) if (want[i] !== got[i]) return "Word " + (i + 1) + " is not the word of this wallet. Check what you wrote down.";
+  for (let i = 0; i < Math.max(want.length, got.length); i++) if (want[i] !== got[i]) return t("Word {i} is not the word of this wallet. Check what you wrote down.", { i: (i + 1) });
   return "";
 }
 
@@ -761,9 +761,9 @@ async function postBootRestore() {
   frScreen("", null).innerHTML = `
     <div class="setup-progress">
       <div class="spin spin--lg"></div>
-      <div class="setup-progress__title">Restoring your wallet…</div>
-      <div class="view__desc">Restoring your seed from the MegaMMR node (${esc(host)}).</div>
-      <div class="setup-progress__stat" id="rStat">resyncing…</div>
+      <div class="setup-progress__title">${th("Restoring your wallet…")}</div>
+      <div class="view__desc">${tr("Restoring your seed from the MegaMMR node ({host}).", { host: esc(host) })}</div>
+      <div class="setup-progress__stat" id="rStat">${th("resyncing…")}</div>
     </div>`;
   try {
     const built = resyncCommand({ host, phrase: seed, anyphrase: true, keyuses, needPhrase: true });
@@ -774,12 +774,12 @@ async function postBootRestore() {
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     const after = await api.nodeStatus();   // the node shut itself down at the end; the main process started it again
     hideSetup(); renderActive();
-    if (after.state === "error") toast("Wallet restored, but the node was not started again. " + (after.lastError || ""), "err");
-    else toast("Wallet restored ✓ The node is restarting.", "ok");
+    if (after.state === "error") toast(t("Wallet restored, but the node was not started again. {lastError}", { lastError: (after.lastError || "") }), "err");
+    else toast(t("Wallet restored ✓ The node is restarting."), "ok");
   } catch (e) {
     const st = el("rStat"); if (st) { st.textContent = "⚠ " + ipcError(e); st.style.color = "var(--red)"; }
     el("setupBody").insertAdjacentHTML("beforeend",
-      `<button class="btn btn--primary ps-btn" id="rRetry">Retry</button><button class="btn btn--outline ps-btn" id="rBack">Back</button>`);
+      `<button class="btn btn--primary ps-btn" id="rRetry">${th("Retry")}</button><button class="btn btn--outline ps-btn" id="rBack">${th("Back")}</button>`);
     el("rRetry").onclick = () => postBootRestore();
     el("rBack").onclick = () => { RESTORE = null; showSetup(); };
   }
@@ -791,7 +791,7 @@ async function postBootRestore() {
 //   a SUB screen      a back arrow and the screen's title, as the phone's own Receive / Send / Logs / Terminal
 //   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", dexicon: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
-const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params", backup: "Backup & Recovery" };
+const SUB_TITLE = { receive: N_("Receive"), send: N_("Send"), logs: N_("Logs"), terminal: N_("Terminal"), settings: N_("Settings"), params: N_("Startup Params"), backup: N_("Backup & Recovery") };   // translated where shown
 // The tray, in Pandamonium's default order (PandamoniumDestinations). An app the desktop does not have yet
 // (Future Cash Next) gets a row when it is built: no dead rows.
 const TRAY_APPS = [
@@ -843,7 +843,7 @@ function selectTab(view) {
   if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; else lastShellView = view; }
   el("shell").dataset.mode = mode;
   el("shell").dataset.tab = tab;
-  el("barPage").textContent = SUB_TITLE[view] || "";
+  el("barPage").textContent = t(SUB_TITLE[view] || "");
   document.querySelectorAll(".tab").forEach(b => {
     const on = b.dataset.tab === tab;
     b.classList.toggle("tab--active", on); b.setAttribute("aria-selected", on ? "true" : "false"); b.tabIndex = on ? 0 : -1;
@@ -866,12 +866,12 @@ function initShell() {
     const next = shown[(i + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
     e.preventDefault(); next.focus(); next.click();
   });
-  DexUI.init({ go: selectTab, leave: () => selectTab(lastShellView), start: () => { toast("Starting the node…"); api.nodeStart(); } });
+  DexUI.init({ go: selectTab, leave: () => selectTab(lastShellView), start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
   el("backBtn").onclick = () => (activeView === "backup" && BK_PAGE ? bkOpen("") : selectTab(lastTabView));   // a Backup & Recovery screen goes back to its hub
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
-  el("stopStart").onclick = () => { toast("Starting the node…"); api.nodeStart(); };
+  el("stopStart").onclick = () => { toast(t("Starting the node…")); api.nodeStart(); };
   el("trayLang").onclick = () => { if (NARROW.matches) setTray(false); chooseLanguage(); };
 
   // tray
@@ -926,7 +926,7 @@ function initTrayOrder(list) {
   list.querySelectorAll(".tray__row").forEach(r => {
     if (r.dataset.app === "core") return;
     r.draggable = true;
-    r.title = "Drag to reorder, or Alt+Up / Alt+Down";
+    r.title = t("Drag to reorder, or Alt+Up / Alt+Down");
     r.addEventListener("dragstart", (e) => { dragged = r; r.classList.add("tray__row--drag"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", r.dataset.app); });
     r.addEventListener("dragend", () => { r.classList.remove("tray__row--drag"); dragged = null; save(); });
     r.addEventListener("dragover", (e) => {
@@ -984,7 +984,7 @@ function resetWalletFigures() {
   el("faucetBody").innerHTML = "";
   FOOT_KEYS = null; FOOT_KEYS_AT = 0; NODE_DASH = {}; NODE_DASH_AT = 0; BAL_BY_TID = {}; RECV_ADDR = null; WAL_DRAG = null;
 }
-function waitHtml() { return nodeState === "stopped" ? `<div class="empty">The node is stopped.</div>` : `<div class="spin">Waiting for the node…</div>`; }
+function waitHtml() { return nodeState === "stopped" ? `<div class="empty">${th("The node is stopped.")}</div>` : `<div class="spin">${th("Waiting for the node…")}</div>`; }
 function openMenu() { el("moreMenu").hidden = false; el("moreBtn").setAttribute("aria-expanded", "true"); const f = el("moreMenu").querySelector(".menu__item:not([hidden])"); if (f) f.focus(); }
 function closeMenu() { el("moreMenu").hidden = true; el("moreBtn").setAttribute("aria-expanded", "false"); }
 function openSettingsAt(cardId) {
@@ -1000,9 +1000,9 @@ async function menuAction(act) {
     // What is in flight, from the engines' own records, said by the main process (main/inflight.js): the same
     // source and the same words as the Quit warning. A read that fails is said, not shown as idle.
     const w = await Promise.race([api.inFlight("shutdown").catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
-      || { title: "Shut down the node?", message: "Could not be checked: whether a swap, a pool operation or an Exchange trade is in flight. Look at the Dexicon tab before you shut down.\n\nThe node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again." };
-    if (!await showConfirm(w.title, w.message, "Shut down", true)) return;
-    toast("Shutting down the node…");
+      || { title: t("Shut down the node?"), message: t("Could not be checked: whether a swap, a pool operation or an Exchange trade is in flight. Look at the Dexicon tab before you shut down.\n\nThe node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again.") };
+    if (!await showConfirm(w.title, w.message, t("Shut down"), true)) return;
+    toast(t("Shutting down the node…"));
     try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
   }
 }
@@ -1028,7 +1028,7 @@ function chooseLanguage() {
 let LAST_STATUS = null;
 function relang() {
   I18N.apply(document);
-  el("barPage").textContent = SUB_TITLE[activeView] || "";
+  el("barPage").textContent = activeView === "backup" ? t(BK_TITLE[BK_PAGE]) : t(SUB_TITLE[activeView] || "");
   if (LAST_STATUS) { paintKeyMode(); paintFooter(LAST_STATUS); } else paintKeyMode();
   if (el("setup").style.display !== "none") { if (el("frLang")) showSetup(); return; }   // first run: only the launcher is redrawn (the seed screens hold typed words)
   const v = el("view-" + activeView);
@@ -1048,14 +1048,14 @@ function blockTime(t) {
   t = String(t || "").trim();
   const m = /^\w{3} (\w{3}) (\d{1,2}) (\d\d:\d\d:\d\d) (\S+) (\d{4})$/.exec(t);
   if (m) return m[1] + " " + Number(m[2]) + ", " + m[5] + ", " + m[3] + " " + m[4];
-  return /^no blocks/i.test(t) ? "No blocks yet" : clock(t) ? t : "";
+  return /^no blocks/i.test(t) ? I18N.t("No blocks yet") : clock(t) ? t : "";
 }
 function paintFooter(s) {
   const h = s.health || {}, up = s.state === "running";
   el("footDot").dataset.state = s.state || "";
-  const keyLabel = KEYMODE.mode === "block" ? "Last key block: " : "Key uses: ";   // the phone's two wordings
-  el("footL").textContent = up ? (FOOT_KEYS == null ? "Awaiting blocks…" : keyLabel + FOOT_KEYS)
-    : s.state === "error" ? "Node error" : s.resyncing ? "Restarting after resync…" : s.state === "stopped" ? "Node stopped" : "Awaiting blocks…";
+  const keyLabel = KEYMODE.mode === "block" ? (t("Last key block:") + " ") : (t("Key uses:") + " ");   // the phone's two wordings
+  el("footL").textContent = up ? (FOOT_KEYS == null ? t("Awaiting blocks…") : keyLabel + FOOT_KEYS)
+    : s.state === "error" ? t("Node error") : s.resyncing ? t("Restarting after resync…") : s.state === "stopped" ? t("Node stopped") : t("Awaiting blocks…");
   const at = clock(h.time);
   el("footR").textContent = up && h.block ? h.block + (at ? " @ " + at : "") : "";
   if (up && Date.now() - FOOT_KEYS_AT > 60000) {       // one read-only `keys` a minute at most
@@ -1344,7 +1344,7 @@ async function renderBalances() {
   walDragCheck();
   if (WAL_DRAG) return;                                  // a drag that began while the node was answering: its row must not be rebuilt under it
   // a failed read is not an empty wallet: no old total above it, and no zero row
-  if (!bal) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = `<div class="empty">The balance could not be read. It is read again every 15 seconds.</div>`; return; }
+  if (!bal) { el("walTotal").textContent = NO_FIGURE; WAL_MINIMA = null; paintWalBreakdown(); host.innerHTML = `<div class="empty">${th("The balance could not be read. It is read again every 15 seconds.")}</div>`; return; }
   await loadHeld();                                      // what the engines hold: left out of every "sendable" below
   BAL_AT = Date.now();                                   // drives the breakdown's "updated ..."
   // The phone always shows a Minima row, at 0 for a wallet that holds nothing yet.
@@ -1376,7 +1376,7 @@ let HELD = { coins: {}, funds: {} };
 async function loadHeld() {
   try {
     const r = await api.reserved(), coins = {}, funds = {};
-    for (const c of (r && r.coins) || []) coins[String(c.coinid).toLowerCase()] = String(c.why || "another part of the app");
+    for (const c of (r && r.coins) || []) coins[String(c.coinid).toLowerCase()] = String(c.why || t("another part of the app"));
     for (const f of (r && r.funds) || []) funds[String(f.tokenid).toLowerCase()] = f;
     HELD = { coins, funds };
   } catch (e) {}
@@ -1384,7 +1384,7 @@ async function loadHeld() {
 const heldOf = (tid) => HELD.funds[String(tid || MINIMA).toLowerCase()] || null;
 /** What the wallet itself can send of this balance row: the node's sendable less what is held (never below 0). */
 const freeOf = (b) => { const h = heldOf(b.tokenid || MINIMA); return h ? decSub(b.sendable || "0", h.held) : (b.sendable || "0"); };
-const heldLine = (tid) => { const h = heldOf(tid); return h ? "held " + TOK.tidyAmount(h.held) + " for " + h.why : ""; };
+const heldLine = (tid) => { const h = heldOf(tid); return h ? t("held {amount} for {why}", { amount: TOK.tidyAmount(h.held), why: h.why }) : ""; };
 let BAL_BY_TID = {};       // tokenid → last balance row, so a row click can open its dialog without refetching
 let BAL_AT = 0;            // when the last `balance` reply landed: the breakdown's "updated ..."
 let WAL_MINIMA = null;     // the MINIMA balance row behind "Total balance" (null: not read)
@@ -1409,7 +1409,7 @@ function initTokenOrder(host) {
   rows().forEach(r => {
     if (r.dataset.tokenid === MINIMA) return;
     r.draggable = true;
-    r.title = "Drag to reorder, or Alt+Up / Alt+Down";
+    r.title = I18N.t("Drag to reorder, or Alt+Up / Alt+Down");
     r.addEventListener("dragstart", (e) => { WAL_DRAG = r; r.classList.add("balrow--drag"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", r.dataset.tokenid); });
     r.addEventListener("dragend", () => { r.classList.remove("balrow--drag"); WAL_DRAG = null; save(); });
     r.addEventListener("dragover", (e) => {
@@ -1444,28 +1444,27 @@ function summaryAmount(s) {
 }
 /** "now", "31 minutes ago", "1 hour ago", "3 days ago": how the phone says how long ago. */
 function since(ms) {
-  const d = Math.max(0, Date.now() - ms), n = (v, unit) => v + " " + unit + (v === 1 ? "" : "s") + " ago";
-  if (d < 60000) return "now";
+  // Intl.RelativeTimeFormat words it in the language on show (the phone uses ICU's formatter the same way); in English: "31 minutes ago", "1 hour ago".
+  const d = Math.max(0, Date.now() - ms), n = (v, unit) => new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "always" }).format(-v, unit);
+  if (d < 60000) return new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "auto" }).format(0, "second");
   if (d < 3600000) return n(Math.floor(d / 60000), "minute");
   if (d < 86400000) return n(Math.floor(d / 3600000), "hour");
   return n(Math.floor(d / 86400000), "day");
 }
-function coinCount(n) { n = parseInt(n, 10) || 0; return n + (n === 1 ? " coin" : " coins"); }
+function coinCount(n) { n = parseInt(n, 10) || 0; return t("{n} coins", { n }); }   // a plural: "1 coin", "4 coins" (the forms are in the catalogs)
 
 /** What makes up the header number, behind the expand arrow (collapsed by default, as the phone). */
 function paintWalBreakdown() {
   const b = WAL_MINIMA, box = el("walBreakdown");
-  box.textContent = !b ? "Node not connected"
-    : `confirmed ${summaryAmount(b.confirmed || "0")}  ·  locked ≈ ${summaryAmount(decSub(b.confirmed || "0", b.sendable || "0"))}`
-      + (heldLine(MINIMA) ? "  ·  " + heldLine(MINIMA) : "")
-      + `  ·  unconfirmed ${summaryAmount(b.unconfirmed || "0")}  ·  ${coinCount(b.coins)}  ·  updated ${since(BAL_AT)}  ·  click a token for coins`;
+  box.textContent = !b ? t("Node not connected")
+    : t("confirmed {confirmed}  ·  locked ≈ {sendable}{minima}  ·  unconfirmed {unconfirmed}  ·  {coins}  ·  updated {balat}  ·  click a token for coins", { confirmed: summaryAmount(b.confirmed || "0"), sendable: summaryAmount(decSub(b.confirmed || "0", b.sendable || "0")), minima: (heldLine(MINIMA) ? "  ·  " + heldLine(MINIMA) : ""), unconfirmed: summaryAmount(b.unconfirmed || "0"), coins: coinCount(b.coins), balat: since(BAL_AT) });
 }
 function toggleWalBreakdown() {
   const box = el("walBreakdown"), show = box.hidden;
   paintWalBreakdown();
   box.hidden = !show;
   el("walHead").setAttribute("aria-expanded", show ? "true" : "false");
-  el("walHead").setAttribute("aria-label", show ? "Hide balance details" : "Show balance details");
+  el("walHead").setAttribute("aria-label", show ? t("Hide balance details") : t("Show balance details"));
 }
 
 /** Is this balance row a 1-of-1 NFT? (non-Minima, total supply 1, no fractional decimals) */
@@ -1497,9 +1496,9 @@ function balCardHtml(b) {
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0";   // balance.java always emits both; guard so a malformed row can't blank the whole list
   const positive = (v) => /[1-9]/.test(String(v || "")) && !String(v).startsWith("-");
   const locked = decSub(confirmed, sendable), parts = [], free = freeOf(b);   // free: less what the engines hold
-  if (positive(locked)) parts.push("locked " + summaryAmount(locked));
+  if (positive(locked)) parts.push(t("locked {amount}", { amount: summaryAmount(locked) }));
   if (heldLine(tid)) parts.push(heldLine(tid));
-  if (positive(b.unconfirmed)) parts.push("unconfirmed " + summaryAmount(b.unconfirmed));
+  if (positive(b.unconfirmed)) parts.push(t("unconfirmed {amount}", { amount: summaryAmount(b.unconfirmed) }));
   if (parseInt(b.coins, 10) > 0) parts.push(coinCount(b.coins));
   return `<div class="balrow" data-tokenid="${esc(tid)}" tabindex="0" role="button">
     ${iconCell}
@@ -1542,15 +1541,15 @@ function applyIcon(w, e) {
 /** Consolidate one token's coins: say what will happen, check the pool owner keys, then run the node's own command.
  *  The confirmation and the owner-key check are PandaPools' (WalletTools.showConsolidate, checkConsolidation). */
 async function consolidateToken(tid, name) {
-  if (!validTok(tid)) { toast("Token id must be a 0x… hex value.", "err"); return false; }
+  if (!validTok(tid)) { toast(t("Token id must be a 0x… hex value."), "err"); return false; }
   const cmdText = "consolidate tokenid:" + tid;
-  if (!await showConfirm("Consolidate " + name + "?",
-        "Combine your " + name + " wallet coins into fewer, larger ones?\n\nMinimaCore selects the coins itself with its standard consolidation command. Only spendable coins are merged. No burn fee.\n\n" + cmdText,
-        "Consolidate", false)) return false;
+  if (!await showConfirm(t("Consolidate {name}?", { name: name }),
+        t("Combine your {name} wallet coins into fewer, larger ones?\n\nMinimaCore selects the coins itself with its standard consolidation command. Only spendable coins are merged. No burn fee.\n\n{cmdText}", { name: name, cmdText: cmdText }),
+        t("Consolidate"), false)) return false;
   const why = await api.ppConsolidationCheck();
-  if (why) { await showConfirm("Not consolidated", why, "OK", false); return false; }
+  if (why) { await showConfirm(t("Not consolidated"), why, t("OK"), false); return false; }
   await cmd(cmdText);
-  toast("Consolidation submitted ✓ Coins merge over the next blocks.", "ok");
+  toast(t("Consolidation submitted ✓ Coins merge over the next blocks."), "ok");
   return true;
 }
 let SEND_PRESELECT = null;   // tokenid to preselect in the Send tab (set by the modal's Send action)
@@ -1582,7 +1581,7 @@ async function showTokenDetail(b) {
   const sendable = b.sendable || "0";
   const locked = decSub(b.confirmed || "0", sendable);
   const tick = isNative ? "MINIMA" : (TOK.ticker(b.token) || "");
-  const desc = isNative ? "The native coin of the Minima blockchain." : TOK.metaField(b.token, "description");
+  const desc = isNative ? t("The native coin of the Minima blockchain.") : TOK.metaField(b.token, "description");
   const owner = isNative ? "" : TOK.metaField(b.token, "owner");
   const website = isNative ? "" : TOK.metaField(b.token, "external_url");
   const webv = TOK.webvalidateUrl(b.token);
@@ -1619,27 +1618,27 @@ async function showTokenDetail(b) {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="tokDetail"><div class="modal modal--token">
     <div class="tokd-hero">
       ${heroIcon}
-      <div class="tokd-name">${esc(name)}${nft ? " · NFT" : (isNative ? "" : " · token")}</div>
+      <div class="tokd-name">${esc(name)}${nft ? (" " + th("· NFT")) : (isNative ? "" : (" " + th("· token")))}</div>
       ${desc ? `<div class="tokd-desc">${esc(desc)}</div>` : ""}
     </div>
-    <div class="kv"><span class="kv__k">Spendable</span><span class="kv__v kv__v--green">${esc(TOK.tidyAmount(freeOf(b)))}${tick ? " " + esc(tick) : ""}</span></div>
-    ${heldOf(tid) ? `<div class="kv"><span class="kv__k">Held</span><span class="kv__v">${esc(TOK.tidyAmount(heldOf(tid).held))} for ${esc(heldOf(tid).why)}</span></div>` : ""}
-    ${locked !== "0" ? `<div class="kv"><span class="kv__k">🔒 Locked</span><span class="kv__v">${esc(TOK.tidyAmount(locked))}</span></div>` : ""}
-    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">Pending</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
-    <div class="kv"><span class="kv__k">Coins</span><span class="kv__v">${coins}</span></div>
-    <div class="kv"><span class="kv__k">Supply</span><span class="kv__v">${esc(supply)}</span></div>
-    <div class="kv" id="tokdDec" hidden><span class="kv__k">Decimals</span><span class="kv__v"></span></div>
-    ${owner ? `<div class="kv"><span class="kv__k">Owner</span><span class="kv__v tokd-wrap">${esc(owner)}</span></div>` : ""}
-    <div class="view__sub">Token ID</div>
-    <div class="kv__v tokd-id" id="tokdId" title="click to copy">${esc(tid)}</div>
-    ${safeLinkRow("Website", website)}
-    ${safeLinkRow("Validation", webv)}
+    <div class="kv"><span class="kv__k">${th("Spendable")}</span><span class="kv__v kv__v--green">${esc(TOK.tidyAmount(freeOf(b)))}${tick ? " " + esc(tick) : ""}</span></div>
+    ${heldOf(tid) ? `<div class="kv"><span class="kv__k">${th("Held")}</span><span class="kv__v">${tr("{held} for {why}", { held: esc(TOK.tidyAmount(heldOf(tid).held)), why: esc(heldOf(tid).why) })}</span></div>` : ""}
+    ${locked !== "0" ? `<div class="kv"><span class="kv__k">${th("🔒 Locked")}</span><span class="kv__v">${esc(TOK.tidyAmount(locked))}</span></div>` : ""}
+    ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">${th("Pending")}</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
+    <div class="kv"><span class="kv__k">${th("Coins")}</span><span class="kv__v">${coins}</span></div>
+    <div class="kv"><span class="kv__k">${th("Supply")}</span><span class="kv__v">${esc(supply)}</span></div>
+    <div class="kv" id="tokdDec" hidden><span class="kv__k">${th("Decimals")}</span><span class="kv__v"></span></div>
+    ${owner ? `<div class="kv"><span class="kv__k">${th("Owner")}</span><span class="kv__v tokd-wrap">${esc(owner)}</span></div>` : ""}
+    <div class="view__sub">${th("Token ID")}</div>
+    <div class="kv__v tokd-id" id="tokdId" title="${th("click to copy")}">${esc(tid)}</div>
+    ${safeLinkRow(t("Website"), website)}
+    ${safeLinkRow(t("Validation"), webv)}
     ${extraRows}
     <div class="seg" style="margin-top:12px">
-      <button class="btn btn--outline btn--full" id="tokdReceive">Receive</button>
-      <button class="btn btn--primary btn--full" id="tokdSend">Send ${esc(tick || name)}</button>
+      <button class="btn btn--outline btn--full" id="tokdReceive">${th("Receive")}</button>
+      <button class="btn btn--primary btn--full" id="tokdSend">${tr("Send {name}", { name: esc(tick || name) })}</button>
     </div>
-    <button class="btn btn--outline btn--full" id="tokdClose" style="margin-top:8px">Close</button>
+    <button class="btn btn--outline btn--full" id="tokdClose" style="margin-top:8px">${th("Close")}</button>
   </div></div>`);
 
   const close = () => { const o = el("tokDetail"); if (o) o.remove(); };
@@ -1675,7 +1674,7 @@ function openDlg(id, title, bodyHtml, buttonsHtml) {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay overlay--dlg" id="${id}" data-modal><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="${id}Title" tabindex="-1">
     <h2 class="dlg__title" id="${id}Title">${esc(title)}</h2>
     <div class="dlg__body">${bodyHtml}</div>
-    <div class="dlg__btns">${buttonsHtml}<span class="dlg__gap"></span><button class="dlg__btn" data-close>Close</button></div></div></div>`);
+    <div class="dlg__btns">${buttonsHtml}<span class="dlg__gap"></span><button class="dlg__btn" data-close>${th("Close")}</button></div></div></div>`);
   const root = el(id);
   const close = () => { if (!root.isConnected) return; root.remove(); if (opener && opener.isConnected) opener.focus(); };
   root.onclick = (e) => { if (e.target === root || e.target.closest("[data-close]")) close(); };
@@ -1706,18 +1705,18 @@ async function showCoins(b) {
   const tid = b.tokenid || MINIMA, isNative = tid === MINIMA, name = TOK.tokenName(b.token, tid);
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0", locked = decSub(confirmed, sendable);
   await loadHeld();
-  const head = `sendable ${TOK.tidyAmount(freeOf(b))}` + (heldLine(tid) ? `  ·  ${heldLine(tid)}` : "") + (locked !== "0" ? `  ·  locked ${TOK.tidyAmount(locked)}` : "") + `  ·  confirmed ${TOK.tidyAmount(confirmed)}`;
+  const head = t("sendable {amount}", { amount: TOK.tidyAmount(freeOf(b)) }) + (heldLine(tid) ? `  ·  ${heldLine(tid)}` : "") + (locked !== "0" ? "  ·  " + t("locked {amount}", { amount: TOK.tidyAmount(locked) }) : "") + "  ·  " + t("confirmed {amount}", { amount: TOK.tidyAmount(confirmed) });
   const canSplit = !isNftBal(b) && Number(sendable) > 0;
-  const d = openDlg("coinsDlg", name + " coins",
+  const d = openDlg("coinsDlg", t("{name} coins", { name: name }),
     `<div class="coins-head">${esc(head)}</div>
-     <div class="coins-status" id="coinsStatus">Reading coins…</div>
+     <div class="coins-status" id="coinsStatus">${th("Reading coins…")}</div>
      <div class="coins-list" id="coinsList" hidden></div>
      <div class="coins-foot" id="coinsFoot" hidden></div>
      <div class="coins-tools" id="coinsTools"${canSplit ? "" : " hidden"}>
-       <button class="btn btn--outline" id="coinsSplit"${canSplit ? "" : " hidden"} title="Split some of this into several equal coins, so you can make several sends without waiting for change">Split</button>
-       <button class="btn btn--outline" id="coinsConsolidate" hidden>Consolidate</button>
+       <button class="btn btn--outline" id="coinsSplit"${canSplit ? "" : " hidden"} title="${th("Split some of this into several equal coins, so you can make several sends without waiting for change")}">${th("Split")}</button>
+       <button class="btn btn--outline" id="coinsConsolidate" hidden>${th("Consolidate")}</button>
      </div>`,
-    `<button class="dlg__btn" id="coinsCopyTid">Copy token ID</button>${isNative ? "" : `<button class="dlg__btn" id="coinsTokInfo">Token details</button>`}`);
+    `<button class="dlg__btn" id="coinsCopyTid">${th("Copy token ID")}</button>${isNative ? "" : `<button class="dlg__btn" id="coinsTokInfo">${th("Token details")}</button>`}`);
   if (!d) return;                                                    // this dialog is already open
   el("coinsCopyTid").onclick = () => copy(tid);                      // the whole token id; the dialog stays open
   if (el("coinsTokInfo")) el("coinsTokInfo").onclick = () => showTokenDetail(b);
@@ -1729,8 +1728,8 @@ async function showCoins(b) {
     btn.disabled = false;
   };
   const status = (text, kind) => { const s = el("coinsStatus"); if (!s) return; s.textContent = text; s.className = "coins-status" + (kind ? " coins-status--" + kind : ""); s.hidden = false; };
-  if (!validTok(tid)) { status("Invalid token ID. Refresh the balance before sending.", "bad"); return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
-  if (!running) { status("Node not started. No coin data yet.", "warn"); return; }
+  if (!validTok(tid)) { status(t("Invalid token ID. Refresh the balance before sending."), "bad"); return; }   // tid is node-sourced, but never interpolate an unvalidated value into a command
+  if (!running) { status(t("Node not started. No coin data yet."), "warn"); return; }
   // Two reads: every relevant coin, then the sendable ones. The node's coin JSON carries no "sendable" flag,
   // so the LOCKED chips come from the difference. If the second read fails nothing is claimed either way:
   // no chips, no "sendable" in a coin's detail, and the footer says the check could not be made.
@@ -1739,7 +1738,7 @@ async function showCoins(b) {
   let all, sendableIds = null;
   const before = await balTotal();
   try { all = await cmd(`coins relevant:true tokenid:${tid} simplestate:false`) || []; }
-  catch (e) { if (d.root.isConnected) status("Coins query failed: " + (e.message || String(e)), "bad"); return; }   // a failed read is not an empty wallet
+  catch (e) { if (d.root.isConnected) status(t("Coins query failed: {e}", { e: (e.message || String(e)) }), "bad"); return; }   // a failed read is not an empty wallet
   try { sendableIds = new Set((await cmd(`coins relevant:true sendable:true tokenid:${tid} simplestate:false`) || []).map(c => c.coinid)); } catch (e) {}
   const after = await balTotal();
   // Pool covenant addresses this install knows about, so a reserve coin can be named as such.
@@ -1751,21 +1750,21 @@ async function showCoins(b) {
     }
   } catch (e) { /* Pools engine not up: coins still list, without the pool tag */ }
   if (!d.root.isConnected) return;                                   // closed while the node was answering
-  if (!all.length) { status("No coins for this token."); return; }
+  if (!all.length) { status(t("No coins for this token.")); return; }
   const amountOf = (c) => String(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
   const isSendable = (c) => (sendableIds ? sendableIds.has(c.coinid) : null);   // null: not known, and never shown as "sendable"
   const heldWhy = (c) => HELD.coins[String(c.coinid || "").toLowerCase()] || "";
   const tagOf = (c) => {
     const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
-    if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="coin-chip">POOL</span>`;
-    if (ad === PANDA_SENTINEL.toLowerCase()) return `<span class="coin-chip">BEACON</span>`;
+    if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="coin-chip">${th("POOL")}</span>`;
+    if (ad === PANDA_SENTINEL.toLowerCase()) return `<span class="coin-chip">${th("BEACON")}</span>`;
     const why = heldWhy(c);   // held by AtomiX, PandaPools or Dexicon: said in plain words on the row, not only in a tooltip
-    if (why) return `<span class="coin-chip coin-chip--locked">HELD</span><span class="coin-held">${esc(why)}</span>`;
+    if (why) return `<span class="coin-chip coin-chip--locked">${th("HELD")}</span><span class="coin-held">${esc(why)}</span>`;
     return "";
   };
   const list = el("coinsList");
   list.innerHTML = all.map((c, i) => `<div class="coin-row" data-i="${i}" tabindex="0" role="button">
-      <div class="coin-row__top"><span class="coin-amt">${esc(TOK.tidyAmount(amountOf(c)))}</span>${isSendable(c) === false ? `<span class="coin-chip coin-chip--locked">LOCKED</span>` : ""}${tagOf(c)}</div>
+      <div class="coin-row__top"><span class="coin-amt">${esc(TOK.tidyAmount(amountOf(c)))}</span>${isSendable(c) === false ? `<span class="coin-chip coin-chip--locked">${th("LOCKED")}</span>` : ""}${tagOf(c)}</div>
       <div class="coin-row__cid">${esc(String(c.coinid || ""))}</div>
     </div>`).join("");
   list.querySelectorAll(".coin-row").forEach(r => {
@@ -1789,8 +1788,7 @@ async function showCoins(b) {
 // a failed read, or a block landing in between, shows no warning.
 function coinsFootText(count, locked, sum, before, after) {
   const warn = before != null && after != null && absCmp(before, after) === 0 && absCmp(sum, after) !== 0;
-  return { warn, text: coinCount(count) + "  ·  " + (locked == null ? "locked coins could not be checked" : "Locked: " + locked) + "  ·  sum " + TOK.tidyAmount(sum)
-    + (warn ? `\n⚠ These coins add up to ${TOK.tidyAmount(sum)}. The balance, confirmed and unconfirmed, is ${TOK.tidyAmount(after)}.` : "") };
+  return { warn, text: t("{count}  ·  {locked}  ·  sum {sum}{warn}", { count: coinCount(count), locked: (locked == null ? t("locked coins could not be checked") : t("Locked: {locked}", { locked: locked })), sum: TOK.tidyAmount(sum), warn: (warn ? ("\n" + t("⚠ These coins add up to {sum}. The balance, confirmed and unconfirmed, is {after}.", { sum: TOK.tidyAmount(sum), after: TOK.tidyAmount(after) })) : "") }) };
 }
 
 /** Everything the node knows about one coin (the phone's CoinDetailDialog). No value is shortened and each
@@ -1799,16 +1797,16 @@ function coinsFootText(count, locked, sum, before, after) {
 function showCoinDetail(c, sendable, held) {
   const state = (c.state == null || (Array.isArray(c.state) ? !c.state.length : (typeof c.state === "object" ? !Object.keys(c.state).length : c.state === "")))
     ? "(none)" : (typeof c.state === "string" ? c.state : JSON.stringify(c.state, null, 2));
-  const rows = [["Coin ID", c.coinid], ["Amount", c.amount], ["Token amount", c.tokenamount], ["Token ID", c.tokenid], ["Address", c.address],
-    ["Mini address", c.miniaddress], ["Sendable", sendable == null ? null : held ? "not by the wallet while it is held" : sendable ? "yes" : "no, locked in a contract"], ["Held for", held || null], ["Created", c.created], ["Age", c.age],
-    ["MMR entry", c.mmrentry], ["Spent", c.spent], ["Store state", c.storestate], ["State", state]]
+  const rows = [[t("Coin ID"), c.coinid], [t("Amount"), c.amount], [t("Token amount"), c.tokenamount], [t("Token ID"), c.tokenid], [t("Address"), c.address],
+    [t("Mini address"), c.miniaddress], [t("Sendable"), sendable == null ? null : held ? t("not by the wallet while it is held") : sendable ? t("yes") : t("no, locked in a contract")], [t("Held for"), held || null], [t("Created"), c.created], [t("Age"), c.age],
+    [t("MMR entry"), c.mmrentry], [t("Spent"), c.spent], [t("Store state"), c.storestate], [t("State"), state]]
     .filter(([, v]) => v != null && String(v) !== "" && String(v) !== "null").map(([k, v]) => [k, String(v)]);
   const raw = JSON.stringify(c, null, 2);
-  const d = openDlg("coinDlg", sendable == null ? "Coin" : held ? "Coin, held" : sendable ? "Coin, sendable" : "Coin, locked",
-    (sendable == null ? `<div class="coins-status coins-status--warn">Whether this coin is sendable could not be checked.</div>` : "") + rows.map(([k, v], i) => `<div class="cd-row"><div class="eyebrow">${esc(k)}</div>
-        <div class="cd-row__line"><div class="cd-row__v">${esc(v)}</div><button class="dlg__btn dlg__btn--sm" data-i="${i}" aria-label="Copy ${esc(k)}">COPY</button></div></div>`).join("")
-      + `<div class="eyebrow cd-raw-h">Raw JSON</div><pre class="cd-raw">${esc(raw)}</pre>`,
-    `<button class="dlg__btn" id="coinCopyJson">Copy JSON</button>`);
+  const d = openDlg("coinDlg", sendable == null ? t("Coin") : held ? t("Coin, held") : sendable ? t("Coin, sendable") : t("Coin, locked"),
+    (sendable == null ? `<div class="coins-status coins-status--warn">${th("Whether this coin is sendable could not be checked.")}</div>` : "") + rows.map(([k, v], i) => `<div class="cd-row"><div class="eyebrow">${esc(k)}</div>
+        <div class="cd-row__line"><div class="cd-row__v">${esc(v)}</div><button class="dlg__btn dlg__btn--sm" data-i="${i}" aria-label="${tr("Copy {k}", { k: esc(k) })}">${th("COPY")}</button></div></div>`).join("")
+      + `<div class="eyebrow cd-raw-h">${th("Raw JSON")}</div><pre class="cd-raw">${esc(raw)}</pre>`,
+    `<button class="dlg__btn" id="coinCopyJson">${th("Copy JSON")}</button>`);
   if (!d) return;                                                    // a coin's detail is already open
   d.root.querySelectorAll(".cd-row [data-i]").forEach(b => b.onclick = () => copy(rows[parseInt(b.dataset.i, 10)][1]));
   el("coinCopyJson").onclick = () => copy(raw);
@@ -1820,11 +1818,11 @@ function splitDialog(tok, name) {
   if (document.querySelectorAll("#splitOv").length) return;          // one Split dialog at a time
   const opener = document.activeElement;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="splitOv" data-modal><div class="modal" role="dialog" aria-modal="true" aria-labelledby="spTitle">
-    <div class="modal__title" id="spTitle">Split ${esc(name)}</div>
-    <div class="view__desc">Split your own coins into equal pieces (useful for parallel sends).</div>
-    <div class="field"><div class="field__label">Amount to split</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
-    <div class="field"><div class="field__label">Into how many coins (2 to 20)</div><input class="field__input" id="spN" value="10" /></div>
-    <div class="seg"><button class="btn btn--outline btn--full" id="spCancel">Cancel</button><button class="btn btn--primary btn--full" id="spGo">Split</button></div></div></div>`);
+    <div class="modal__title" id="spTitle">${tr("Split {name}", { name: esc(name) })}</div>
+    <div class="view__desc">${th("Split your own coins into equal pieces (useful for parallel sends).")}</div>
+    <div class="field"><div class="field__label">${th("Amount to split")}</div><input class="field__input" id="spAmt" placeholder="0.0" /></div>
+    <div class="field"><div class="field__label">${th("Into how many coins (2 to 20)")}</div><input class="field__input" id="spN" value="10" /></div>
+    <div class="seg"><button class="btn btn--outline btn--full" id="spCancel">${th("Cancel")}</button><button class="btn btn--primary btn--full" id="spGo">${th("Split")}</button></div></div></div>`);
   const ov = el("splitOv"), go = el("spGo"), cancel = el("spCancel");
   let busy = false;                                                  // a split is with the node: no close and no second submit until it answers
   const close = () => { if (busy) return; ov.remove(); if (opener && opener.isConnected) opener.focus(); };
@@ -1835,13 +1833,13 @@ function splitDialog(tok, name) {
   go.onclick = async () => {
     if (busy) return;
     const amt = el("spAmt").value.trim(), n = parseInt(el("spN").value, 10) || 0;
-    if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
-    if (n < 2 || n > 20) { toast("Split into 2 to 20 coins."); return; }
-    if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
+    if (!validAmt(amt)) { toast(t("Enter a positive amount (digits only)."), "err"); return; }
+    if (n < 2 || n > 20) { toast(t("Split into 2 to 20 coins.")); return; }
+    if (!validTok(tok)) { toast(t("Token id must be a 0x… hex value."), "err"); return; }
     busy = true; go.disabled = cancel.disabled = true;
     let sent = false;
     try { const a = await cmd("getaddress"); const addr = a.miniaddress || a.address;
-      await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast("Split ✓", "ok"); sent = true; }
+      await cmd(`send address:${addr} amount:${amt} split:${n}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : "")); toast(t("Split ✓"), "ok"); sent = true; }
     catch (e) { toast(e.message, "err"); }
     busy = false; go.disabled = cancel.disabled = false;             // the buttons held above, not looked up again: after a split the dialog is gone
     if (sent) close();
@@ -1857,7 +1855,7 @@ async function renderReceive() {
   el("recvGet").onclick = getRecvAddress;
   if (!running) {
     RECV_ADDR = null; drawQR(""); el("recvLabelBox").innerHTML = "";
-    el("recvAddr").textContent = nodeState === "stopped" ? "The node is stopped." : "Waiting for the node…";
+    el("recvAddr").textContent = nodeState === "stopped" ? t("The node is stopped.") : t("Waiting for the node…");
     return;
   }
   if (RECV_ADDR) setRecv(RECV_ADDR); else await getRecvAddress();
@@ -1868,8 +1866,8 @@ async function getRecvAddress() {
   btn.disabled = false;
   const addr = r && (r.miniaddress || r.address);
   if (addr) setRecv(addr);
-  else if (RECV_ADDR) toast("The node did not give an address. The one shown is still yours.", "err");
-  else el("recvAddr").textContent = "The address could not be read. Press Get Address to try again.";
+  else if (RECV_ADDR) toast(t("The node did not give an address. The one shown is still yours."), "err");
+  else el("recvAddr").textContent = t("The address could not be read. Press Get Address to try again.");
 }
 function setRecv(addr) {
   RECV_ADDR = addr;
@@ -1879,21 +1877,21 @@ function setRecv(addr) {
 }
 // The desktop's own addition, under the phone's layout: a name for this address, shown in History and its exports.
 function renderRecvLabel(addr) {
-  el("recvLabelBox").innerHTML = `<label class="field__label" for="recvLabelIn">Label this address (optional)</label>
-    <div class="seg"><input class="field__input" id="recvLabelIn" placeholder="e.g. Savings" value="${esc(labelFor(addr))}" />
-      <button class="btn btn--outline btn--sm" id="recvLabelSave">Save</button></div>`;
+  el("recvLabelBox").innerHTML = `<label class="field__label" for="recvLabelIn">${th("Label this address (optional)")}</label>
+    <div class="seg"><input class="field__input" id="recvLabelIn" placeholder="${th("e.g. Savings")}" value="${esc(labelFor(addr))}" />
+      <button class="btn btn--outline btn--sm" id="recvLabelSave">${th("Save")}</button></div>`;
   el("recvLabelSave").onclick = async () => {
     const name = el("recvLabelIn").value.trim();
     const labels = Object.assign({}, CFG.labels);
     if (name) labels[addr] = name; else delete labels[addr];
     CFG = await api.saveConfig({ labels });
-    toast(name ? "Label saved ✓" : "Label removed", "ok");
+    toast(name ? t("Label saved ✓") : t("Label removed"), "ok");
   };
 }
 function drawQR(text) {
   const host = el("qr"); host.innerHTML = "";
   if (!text || text.indexOf("0x") === 0 && text.length < 5 || typeof qrcode === "undefined") return;
-  try { const qr = qrcode(0, "M"); qr.addData(text); qr.make(); host.innerHTML = qr.createImgTag(6, 24); host.querySelector("img").alt = "Receive QR code"; }
+  try { const qr = qrcode(0, "M"); qr.addData(text); qr.make(); host.innerHTML = qr.createImgTag(6, 24); host.querySelector("img").alt = t("Receive QR code"); }
   catch (e) { /* address too long for one QR — the copyable text still works */ }
 }
 
@@ -1903,7 +1901,7 @@ function showActionSheet(title, items, message, onCancel) {
   const rows = items.map((it, i) => `<button class="btn ${it.danger ? "btn--danger" : "btn--outline"} btn--full" data-i="${i}" style="margin-top:6px">${esc(it.label)}</button>`).join("");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="sheetOv"><div class="modal">
     <div class="modal__title">${esc(title)}</div>${message ? `<div class="view__desc">${esc(message)}</div>` : ""}${rows}
-    <button class="btn btn--outline btn--full" id="sheetCancel" style="margin-top:12px">Cancel</button></div></div>`);
+    <button class="btn btn--outline btn--full" id="sheetCancel" style="margin-top:12px">${th("Cancel")}</button></div></div>`);
   const ov = el("sheetOv"); const close = () => { if (ov) ov.remove(); };
   const cancel = () => { close(); if (onCancel) onCancel(); };
   ov.querySelectorAll("button[data-i]").forEach(b => b.onclick = () => { close(); const it = items[parseInt(b.dataset.i, 10)]; if (it && it.onclick) it.onclick(); });
@@ -1917,7 +1915,7 @@ function showPrompt(title, initial, placeholder, opts) {
       <div class="modal__title">${esc(title)}</div>
       ${opts.message ? `<div class="view__desc">${esc(opts.message)}</div>` : ""}
       <input class="field__input" id="promptInput" type="${opts.password ? "password" : "text"}" value="${esc(initial || "")}" placeholder="${esc(placeholder || "")}" autocomplete="off" />
-      <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="promptCancel">Cancel</button><button class="btn btn--primary btn--full" id="promptOk">${esc(opts.ok || "OK")}</button></div></div></div>`);
+      <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="promptCancel">${th("Cancel")}</button><button class="btn btn--primary btn--full" id="promptOk">${esc(opts.ok || t("OK"))}</button></div></div></div>`);
     const ov = el("promptOv"); const done = (v) => { if (ov) ov.remove(); resolve(v); };
     const inp = el("promptInput"); inp.focus(); if (!opts.password) inp.select();
     inp.onkeydown = (e) => { if (e.key === "Enter") done(inp.value); if (e.key === "Escape") done(null); };
@@ -1935,8 +1933,8 @@ function showConfirm(title, message, okLabel, danger) {
     const opener = document.activeElement;
     document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="confirmOv" data-modal><div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
       <div class="modal__title" id="cfTitle">${esc(title)}</div><div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message || "")}</div>
-      <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="cfCancel">Cancel</button>
-        <button class="btn ${danger ? "btn--danger" : "btn--primary"} btn--full" id="cfOk">${esc(okLabel || "OK")}</button></div></div></div>`);
+      <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="cfCancel">${th("Cancel")}</button>
+        <button class="btn ${danger ? "btn--danger" : "btn--primary"} btn--full" id="cfOk">${esc(okLabel || t("OK"))}</button></div></div></div>`);
     const ov = el("confirmOv"); const done = (v) => { ov.remove(); if (opener && opener.isConnected) opener.focus(); resolve(v); };
     el("cfOk").onclick = () => done(true); el("cfCancel").onclick = () => done(false);
     ov.onclick = (e) => { if (e.target === ov) done(false); };
@@ -1954,15 +1952,15 @@ function scanQR(purpose) {
   return new Promise((resolve) => {
     const hasBD = typeof window.BarcodeDetector !== "undefined";
     document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="scanOv"><div class="modal" style="max-width:360px">
-      <div class="modal__title">${esc(purpose || "Scan QR")}</div>
+      <div class="modal__title">${esc(purpose || I18N.t("Scan QR"))}</div>
       <div id="scanArea" style="text-align:center">
         ${hasBD ? `<video id="scanVideo" autoplay playsinline muted style="width:100%;max-height:280px;border-radius:8px;background:#000"></video>`
-                : `<div class="view__desc">This build can't open the webcam. Choose a QR image, or paste one with ⌘V.</div>`}
+                : `<div class="view__desc">${th("This build can't open the webcam. Choose a QR image, or paste one with ⌘V.")}</div>`}
       </div>
-      <div class="view__desc" id="scanHint" style="margin-top:6px">${hasBD ? "Point the QR at your webcam — or use an image." : ""}</div>
+      <div class="view__desc" id="scanHint" style="margin-top:6px">${hasBD ? th("Point the QR at your webcam, or use an image.") : ""}</div>
       <input type="file" id="scanFile" accept="image/*" hidden />
-      <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="scanImg">Use an image</button><button class="btn btn--outline btn--full" id="scanCancel">Cancel</button></div>
-      <div class="view__desc" style="margin-top:6px;font-size:11px">Tip: you can paste a QR image with ⌘V.</div>
+      <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="scanImg">${th("Use an image")}</button><button class="btn btn--outline btn--full" id="scanCancel">${th("Cancel")}</button></div>
+      <div class="view__desc" style="margin-top:6px;font-size:11px">${th("Tip: you can paste a QR image with ⌘V.")}</div>
     </div></div>`);
     const ov = el("scanOv");
     let stream = null, raf = null, detector = null, done = false;
@@ -1979,27 +1977,27 @@ function scanQR(purpose) {
       return null;
     };
     const decodeImageFile = async (file) => {
-      if (!hasBD) { toast("QR image decoding isn't available in this build.", "err"); return null; }
+      if (!hasBD) { toast(I18N.t("QR image decoding isn't available in this build."), "err"); return null; }
       try { const bmp = await createImageBitmap(file); return await detectFrom(bmp); } catch (e) { return null; }
     };
     async function onPaste(e) {
       const items = (e.clipboardData && e.clipboardData.items) || [];
       for (const it of items) if (it.type && it.type.indexOf("image") === 0) {
-        const f = it.getAsFile(); if (f) { const v = await decodeImageFile(f); if (v) finish(v); else toast("No QR found in that image.", "err"); }
+        const f = it.getAsFile(); if (f) { const v = await decodeImageFile(f); if (v) finish(v); else toast(I18N.t("No QR found in that image."), "err"); }
       }
     }
     document.addEventListener("paste", onPaste);
     el("scanCancel").onclick = () => finish(null);
     ov.onclick = (e) => { if (e.target.id === "scanOv") finish(null); };
     el("scanImg").onclick = () => el("scanFile").click();
-    el("scanFile").onchange = async () => { const f = el("scanFile").files[0]; if (!f) return; const v = await decodeImageFile(f); if (v) finish(v); else toast("No QR found in that image.", "err"); };
+    el("scanFile").onchange = async () => { const f = el("scanFile").files[0]; if (!f) return; const v = await decodeImageFile(f); if (v) finish(v); else toast(I18N.t("No QR found in that image."), "err"); };
     if (hasBD) {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(s => {
         stream = s; const v = el("scanVideo"); if (!v) { s.getTracks().forEach(t => t.stop()); return; }
         v.srcObject = s;
         const tick = async () => { if (done) return; const val = await detectFrom(v); if (val) return finish(val); if (!done) raf = requestAnimationFrame(tick); };
         v.onloadedmetadata = () => { raf = requestAnimationFrame(tick); };
-      }).catch(err => { const h = el("scanHint"); if (h) h.textContent = "Camera unavailable (" + ((err && err.name) || "denied") + "). Use an image, or paste one."; });
+      }).catch(err => { const h = el("scanHint"); if (h) h.textContent = I18N.t("Camera unavailable ({name}). Use an image, or paste one.", { name: ((err && err.name) || "denied") }); });
     }
   });
 }
@@ -2009,15 +2007,15 @@ function showProgress(title, message) {
   return { close: () => { const o = el("progOv"); if (o) o.remove(); } };
 }
 function showPayResult(ok, message, txid, ambiguous) {
-  const title = ambiguous ? "⚠ Payment status unknown" : (ok ? "✓ Payment sent" : "Payment failed");
+  const title = ambiguous ? t("⚠ Payment status unknown") : (ok ? t("✓ Payment sent") : t("Payment failed"));
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="prOv"><div class="modal">
     <div class="modal__title">${title}</div>
-    <div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message)}${ok && txid ? "\n\nTx: " + idHtml(txid) : ""}</div>
-    ${ok && txid ? `<button class="btn btn--outline btn--full" id="prCopy" style="margin-top:8px">Copy tx id</button>` : ""}
-    <button class="btn btn--primary btn--full" id="prOk" style="margin-top:8px">OK</button></div></div>`);
+    <div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message)}${ok && txid ? ("\n\n" + th("Tx:") + " ") + idHtml(txid) : ""}</div>
+    ${ok && txid ? `<button class="btn btn--outline btn--full" id="prCopy" style="margin-top:8px">${th("Copy tx id")}</button>` : ""}
+    <button class="btn btn--primary btn--full" id="prOk" style="margin-top:8px">${th("OK")}</button></div></div>`);
   const ov = el("prOv"); const close = () => { if (ov) ov.remove(); };
   el("prOk").onclick = close; ov.onclick = (e) => { if (e.target.id === "prOv") close(); };
-  if (el("prCopy")) el("prCopy").onclick = () => { copy(txid); toast("Copied.", "ok"); };
+  if (el("prCopy")) el("prCopy").onclick = () => { copy(txid); toast(t("Copied."), "ok"); };
 }
 
 // ---- minimaMail — the panel lives in renderer/mail.js (APK parity, its own palette) -----------------------
@@ -2030,7 +2028,7 @@ MailPanel.init({
   TOK
 });
 function renderMail() {
-  if (!running) { el("mailBody").innerHTML = `<div class="empty">Start your node to use Mail.</div>`; return; }
+  if (!running) { el("mailBody").innerHTML = `<div class="empty">${th("Start your node to use Mail.")}</div>`; return; }
   MailPanel.render();
 }
 function resetMailState() { MailPanel.reset(); }
@@ -2044,7 +2042,7 @@ async function refreshMailBadge() {
 // ---- KeetChat — the panel lives in renderer/chat.js (keets transport; main/chat.js owns the inbox) --------
 ChatPanel.init({ api, esc, el, toast, copy, showPrompt, showConfirm });
 function renderChat() {
-  if (!running) { el("chatBody").innerHTML = `<div class="empty">Start your node to use Chat.</div>`; return; }
+  if (!running) { el("chatBody").innerHTML = `<div class="empty">${th("Start your node to use Chat.")}</div>`; return; }
   ChatPanel.render();
 }
 function onChatUpdate() { ChatPanel.onUpdate(); refreshChatBadge(); }
@@ -2098,7 +2096,7 @@ async function loadOwnAddresses() {
 function histOwnership(addr) {
   if (!HIST_OWN || !HIST_OWN.size || !addr) return "";
   const has = (set) => set.has(String(addr)) || set.has(String(addr).toLowerCase());
-  return has(HIST_OWN) ? "YOURS" : (HIST_CONTRACT && has(HIST_CONTRACT)) ? "CONTRACT" : "EXTERNAL";
+  return has(HIST_OWN) ? N_("YOURS") : (HIST_CONTRACT && has(HIST_CONTRACT)) ? N_("CONTRACT") : N_("EXTERNAL");   // compared as written; translated where shown
 }
 // Does this transaction touch one of the wallet's own addresses at all? One that does not is contract or
 // external activity the node adopted; "Hide foreign contract activity" leaves those rows out.
@@ -2125,7 +2123,7 @@ async function renderHistory() {
 // so a background sync re-rendering the list cannot take the focus out of the search field.
 function initHistory() {
   if (HIST_WIRED) return; HIST_WIRED = true;
-  el("histSync").onclick = () => { if (running) histSync({ older: false }); else toast("The node is not running.", "err"); };
+  el("histSync").onclick = () => { if (running) histSync({ older: false }); else toast(t("The node is not running."), "err"); };
   el("histSearch").oninput = (e) => { HIST_FILTER.search = e.target.value.trim(); HIST_DISPLAY = HIST_STEP; clearTimeout(histSearchTimer); histSearchTimer = setTimeout(renderHistoryList, 200); };
   const menu = el("histMenu"), btn = el("histMenuBtn");
   const close = () => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); };
@@ -2156,19 +2154,19 @@ function histMenuAction(act) {
 }
 // Sync now, with the phone's signs of it: the button shows "⟳ …" and the status line "Syncing…".
 async function histSync(opts) {
-  el("histSync").textContent = "⟳ …"; el("histStatus").textContent = "Syncing…";
+  el("histSync").textContent = "⟳ …"; el("histStatus").textContent = t("Syncing…");
   let r = null;
   try { r = await syncHistory(opts); } catch (e) { r = { reachable: false }; }
   if (!r.busy) { HIST_LAST_OK = !!r.reachable; if (r.reachable) HIST_LAST_SYNC = Date.now(); }
-  el("histSync").textContent = "⟳ Sync";
+  el("histSync").textContent = t("⟳ Sync");
   paintHistStatus();
 }
 async function paintHistStatus() {
   const box = el("histStatus"); if (!box || HIST_SYNCING) return;
   let total = 0; try { total = ((await api.histStats()) || {}).count || 0; } catch (e) {}
-  if (!total && running && !HIST_LAST_OK) { box.textContent = "Couldn't read history. The node may be busy. Press Sync to retry."; return; }
-  box.textContent = total + (total === 1 ? " transaction" : " transactions")
-    + (HIST_TIP > 0 ? " · synced to block " + HIST_TIP : "")
+  if (!total && running && !HIST_LAST_OK) { box.textContent = t("Couldn't read history. The node may be busy. Press Sync to retry."); return; }
+  box.textContent = t("{n} transactions", { n: total })
+    + (HIST_TIP > 0 ? (" " + t("· synced to block {histtip}", { histtip: HIST_TIP })) : "")
     + (HIST_LAST_SYNC ? " · " + since(HIST_LAST_SYNC) : "")
     + (running ? "" : " · " + (nodeState === "stopped" ? "the node is stopped" : "waiting for the node"));
 }
@@ -2177,12 +2175,12 @@ async function paintHistStatus() {
 async function ensureHistFilter() {
   const host = el("histFilter"); if (!host) return;
   const toks = await api.histTokens().catch(() => []);
-  const tokOpts = [`<option value="">All tokens</option>`].concat(
+  const tokOpts = [`<option value="">${th("All tokens")}</option>`].concat(
     (toks || []).map(t => `<option value="${esc(t.tokenid)}"${t.tokenid === HIST_FILTER.token ? " selected" : ""}>${esc(t.name || TOK.shortId(t.tokenid))}</option>`)
   ).join("");
-  const dirs = [["", "All"], ["in", "In"], ["out", "Out"], ["self", "Self"], ["split", "Split"], ["consolidation", "Consol."]];
+  const dirs = [["", I18N.t("All")], ["in", I18N.t("In")], ["out", I18N.t("Out")], ["self", I18N.t("Self")], ["split", I18N.t("Split")], ["consolidation", I18N.t("Consol.")]];
   host.innerHTML = `
-    <select id="histToken" class="field__input hist-tokensel" aria-label="Token">${tokOpts}</select>
+    <select id="histToken" class="field__input hist-tokensel" aria-label="${th("Token")}">${tokOpts}</select>
     <div class="hist-dirs" id="histDir">${dirs.map(([v, l]) => `<button class="btn btn--sm ${HIST_FILTER.direction === v ? "chip--active" : ""}" data-dir="${v}">${l}</button>`).join("")}</div>`;
   if (HIST_FILTER.token || HIST_FILTER.direction) host.hidden = false;
   el("histToken").onchange = (e) => { HIST_FILTER.token = e.target.value; HIST_DISPLAY = HIST_STEP; renderHistoryList(); };
@@ -2200,17 +2198,17 @@ async function renderHistoryList() {
   try { const b = await tryCmd("block"); HIST_TIP = parseInt((b && (b.block != null ? b.block : b)), 10) || HIST_TIP; } catch (e) {}
   paintHistStatus();
   host.innerHTML = HIST_ROWS.length ? HIST_ROWS.map(histRowHtml).join("")
-    : (histFilterActive() || stored.length ? `<div class="hist-empty">No matching transactions.</div>` : "");   // nothing stored yet: the status line says "0 transactions", as the phone
+    : (histFilterActive() || stored.length ? `<div class="hist-empty">${th("No matching transactions.")}</div>` : "");   // nothing stored yet: the status line says "0 transactions", as the phone
   host.querySelectorAll(".hrow").forEach(node => {
     node.onclick = () => { const row = HIST_ROWS.find(x => x.txpowid === node.dataset.txid); if (row) showHistoryDetail(row); };
     node.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); node.click(); } };
   });
   // Pager: more matching rows in the DB → "Show more"; else, unfiltered + running → fetch older from the node.
   if (stored.length >= HIST_DISPLAY) {
-    el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histMoreBtn">Show more</button>`;
+    el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histMoreBtn">${th("Show more")}</button>`;
     el("histMoreBtn").onclick = () => { HIST_DISPLAY += HIST_STEP; renderHistoryList(); };
   } else if (running && !histFilterActive() && stored.length) {
-    el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histOlder">Fetch older from node</button>`;
+    el("histMore").innerHTML = `<button class="btn btn--outline btn--full" id="histOlder">${th("Fetch older from node")}</button>`;
     el("histOlder").onclick = () => histSync({ older: true });
   } else {
     el("histMore").innerHTML = "";
@@ -2225,19 +2223,20 @@ function histRowHtml(r) {
   let l1;
   if (r.kind === "buy" || r.kind === "sell") {
     const c = tradeCounter(r);
-    l1 = (r.kind === "buy" ? "Bought " : "Sold ") + TOK.tidyAmount(r.amount) + " MINIMA" + (c ? " for " + TOK.tidyAmount(c.amt) + " " + c.name : "");
+    l1 = c ? (r.kind === "buy" ? t("Bought {amount} MINIMA for {price} {token}", { amount: TOK.tidyAmount(r.amount), price: TOK.tidyAmount(c.amt), token: c.name }) : t("Sold {amount} MINIMA for {price} {token}", { amount: TOK.tidyAmount(r.amount), price: TOK.tidyAmount(c.amt), token: c.name }))
+      : (r.kind === "buy" ? t("Bought {amount} MINIMA", { amount: TOK.tidyAmount(r.amount) }) : t("Sold {amount} MINIMA", { amount: TOK.tidyAmount(r.amount) }));
   } else if (r.kind === "split" || r.kind === "consolidation")
-    l1 = (r.kind === "split" ? "Split · " + r.outCount : "Consolidation · " + r.inCount) + " coins";
+    l1 = r.kind === "split" ? t("Split · {n} coins", { n: r.outCount }) : t("Consolidation · {n} coins", { n: r.inCount });
   else {
     const sign = r.direction === "in" ? "+" : r.direction === "out" ? "−" : "";
     l1 = sign + TOK.tidyAmount(r.amount) + "  " + r.tokenName;
   }
   const who = labelFor(r.counterparty) || r.counterparty, tag = histOwnership(r.counterparty);
-  const l2 = [who, tag, histWhen(r.time)].filter(Boolean).join("  ·  ");
+  const l2 = [who, tag && t(tag), histWhen(r.time)].filter(Boolean).join("  ·  ");
   return `<div class="hrow ${cls}" data-txid="${esc(r.txpowid)}" tabindex="0" role="button">
     <div class="hrow__g">${glyph}</div>
     <div class="hrow__mid"><div class="hrow__l1">${esc(l1)}</div><div class="hrow__l2">${esc(l2)}</div></div>
-    <div class="hrow__r">Unverified</div></div>`;
+    <div class="hrow__r">${th("Unverified")}</div></div>`;
 }
 /** "31 minutes ago" inside a week, then the date (the phone's relative()). */
 function histWhen(ms) {
@@ -2254,13 +2253,13 @@ function chainStatus(j) {
     if (!j || j.status !== true || j.pending === true) return "Unverified";
     const r = j.response;
     if (!r || typeof r !== "object") return "Unverified";
-    if (r.found === false) return "Not found on this node, unverified";
+    if (r.found === false) return t("Not found on this node, unverified");
     if (r.found !== true) return "Unverified";
     if (typeof r.blockid !== "string" || !/^0x[0-9a-f]{64}$/i.test(r.blockid) || /^0x0+$/i.test(r.blockid)) return "Unverified";
     const whole = (k) => { if (typeof r[k] !== "string" || !/^[0-9]{1,30}$/.test(r[k])) throw new Error(k); return BigInt(r[k]); };
     const block = whole("block"), tip = whole("tip"), depth = whole("confirmations");
     if (block <= 0n || tip - block !== depth) return "Unverified";
-    return (depth >= 3n ? "Confirmed" : "In block") + " #" + block + " · " + depth + " confirmations";
+    return t("{n} #{block} · {depth} confirmations", { n: (depth >= 3n ? t("Confirmed") : t("In block")), block: block, depth: depth });
   } catch (e) { return "Unverified"; }
 }
 // The counter (token) leg of a buy/sell row, read from the persisted difference map → {amt, name}.
@@ -2285,37 +2284,37 @@ function showHistoryDetail(r) {
   }).join("<br>") : "none");
   const isTrade = r.kind === "buy" || r.kind === "sell";
   const tc = isTrade ? tradeCounter(r) : null;
-  const kind = isTrade ? (r.kind === "buy" ? "Bought MINIMA" : "Sold MINIMA")
-    : (r.kind !== "normal" ? (r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? "Received" : r.direction === "out" ? "Sent" : "Self"));
-  const amtStr = (isTrade && tc) ? `${esc(TOK.tidyAmount(r.amount))} MINIMA for ${esc(TOK.tidyAmount(tc.amt))} ${esc(tc.name)}` : `${esc(TOK.tidyAmount(r.amount))} ${esc(r.tokenName)}`;
+  const kind = isTrade ? (r.kind === "buy" ? I18N.t("Bought MINIMA") : I18N.t("Sold MINIMA"))
+    : (r.kind !== "normal" ? I18N.t(r.kind[0].toUpperCase() + r.kind.slice(1)) : (r.direction === "in" ? I18N.t("Received") : r.direction === "out" ? I18N.t("Sent") : I18N.t("Self")));
+  const amtStr = (isTrade && tc) ? I18N.t("{amount} MINIMA for {amt} {name}", { amount: esc(TOK.tidyAmount(r.amount)), amt: esc(TOK.tidyAmount(tc.amt)), name: esc(tc.name) }) : `${esc(TOK.tidyAmount(r.amount))} ${esc(r.tokenName)}`;
   const burnStr = (r.burn != null && r.burn !== "" && !/^0*\.?0*$/.test(String(r.burn))) ? esc(TOK.tidyAmount(r.burn)) + " MINIMA" : "0";
-  const feeRow = r.burn != null ? `<div class="kv"><span class="kv__k">Fee (burn)</span><span class="kv__v">${burnStr}</span></div>` : "";
-  const sizeRow = r.size ? `<div class="kv"><span class="kv__k">Size</span><span class="kv__v">${esc(r.size)} bytes</span></div>` : "";
-  const txState = (r.state && r.state.length) ? `<div class="view__sub">Transaction state</div><div class="kv__v" style="text-align:left">${r.state.map(s => `[${esc(String(s.port))}] ${esc(String(s.data))}`).join("<br>")}</div>` : "";
+  const feeRow = r.burn != null ? `<div class="kv"><span class="kv__k">${th("Fee (burn)")}</span><span class="kv__v">${burnStr}</span></div>` : "";
+  const sizeRow = r.size ? `<div class="kv"><span class="kv__k">${th("Size")}</span><span class="kv__v">${tr("{size} bytes", { size: esc(r.size) })}</span></div>` : "";
+  const txState = (r.state && r.state.length) ? `<div class="view__sub">${th("Transaction state")}</div><div class="kv__v" style="text-align:left">${r.state.map(s => `[${esc(String(s.port))}] ${esc(String(s.data))}`).join("<br>")}</div>` : "";
   // Optional block-explorer link — off unless the user sets CFG.explorerBase; the local DB is the source of truth.
-  const explorer = (CFG && CFG.explorerBase && r.txpowid) ? safeLinkRow("Explorer", String(CFG.explorerBase) + encodeURIComponent(r.txpowid)) : "";
+  const explorer = (CFG && CFG.explorerBase && r.txpowid) ? safeLinkRow(I18N.t("Explorer"), String(CFG.explorerBase) + encodeURIComponent(r.txpowid)) : "";
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
-    <div class="modal__title">Transaction</div>
-    <div class="kv"><span class="kv__k">Type</span><span class="kv__v">${esc(kind)}</span></div>
-    <div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${amtStr}</span></div>
+    <div class="modal__title">${th("Transaction")}</div>
+    <div class="kv"><span class="kv__k">${th("Type")}</span><span class="kv__v">${esc(kind)}</span></div>
+    <div class="kv"><span class="kv__k">${th("Amount")}</span><span class="kv__v">${amtStr}</span></div>
     ${feeRow}
-    <div class="kv"><span class="kv__k">Created at height (not confirmation)</span><span class="kv__v">${esc(r.block)}</span></div>
-    <div class="kv"><span class="kv__k">On chain</span><span class="kv__v" id="histChain">Checking chain inclusion…</span></div>
-    <div class="kv"><span class="kv__k">Time</span><span class="kv__v">${esc(timeStr)}</span></div>
+    <div class="kv"><span class="kv__k">${th("Created at height (not confirmation)")}</span><span class="kv__v">${esc(r.block)}</span></div>
+    <div class="kv"><span class="kv__k">${th("On chain")}</span><span class="kv__v" id="histChain">${th("Checking chain inclusion…")}</span></div>
+    <div class="kv"><span class="kv__k">${th("Time")}</span><span class="kv__v">${esc(timeStr)}</span></div>
     ${sizeRow}
-    <div class="kv"><span class="kv__k">Txpow id</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(r.txpowid)}</span></div>
-    <div class="kv"><span class="kv__k">${r.direction === "in" ? "From" : "To"}</span><span class="kv__v">${esc(who)}</span></div>
+    <div class="kv"><span class="kv__k">${th("Txpow id")}</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(r.txpowid)}</span></div>
+    <div class="kv"><span class="kv__k">${r.direction === "in" ? th("From") : th("To")}</span><span class="kv__v">${esc(who)}</span></div>
     ${explorer}
-    <div class="view__sub">Per-token effect</div><div class="kv__v" style="text-align:left">${deltas}</div>
+    <div class="view__sub">${th("Per-token effect")}</div><div class="kv__v" style="text-align:left">${deltas}</div>
     ${txState}
-    <div class="view__sub">Inputs (${r.inCount})</div><div class="kv__v" style="text-align:left">${bd(r.inputs)}</div>
-    <div class="view__sub">Outputs (${r.outCount})</div><div class="kv__v" style="text-align:left">${bd(r.outputs)}</div>
-    <button class="btn btn--outline btn--full" id="histClose">Close</button></div></div>`);
+    <div class="view__sub">${tr("Inputs ({inCount})", { inCount: r.inCount })}</div><div class="kv__v" style="text-align:left">${bd(r.inputs)}</div>
+    <div class="view__sub">${tr("Outputs ({outCount})", { outCount: r.outCount })}</div><div class="kv__v" style="text-align:left">${bd(r.outputs)}</div>
+    <button class="btn btn--outline btn--full" id="histClose">${th("Close")}</button></div></div>`);
   el("histTxid").onclick = () => copy(r.txpowid);
   // Ask the node whether this transaction is in a block on the chain it follows. Read-only; the id is checked before it goes into the command.
   const chain = el("histChain"), said = (t) => { if (chain.isConnected) chain.textContent = t; };
-  if (!/^0x[0-9a-f]{64}$/i.test(String(r.txpowid || "")) || !running) said("Unverified");
-  else api.cmd("txpow onchain:" + r.txpowid).then(j => said(chainStatus(j)), () => said("Unverified, node check unavailable"));
+  if (!/^0x[0-9a-f]{64}$/i.test(String(r.txpowid || "")) || !running) said(I18N.t("Unverified"));
+  else api.cmd("txpow onchain:" + r.txpowid).then(j => said(chainStatus(j)), () => said(I18N.t("Unverified, node check unavailable")));
   const close = () => { const o = el("histDetail"); if (o) o.remove(); };
   el("histClose").onclick = close;
   el("histDetail").onclick = (e) => { if (e.target.id === "histDetail") close(); };
@@ -2324,9 +2323,9 @@ function relTime(ms) {
   if (!ms) return "";
   const d = Date.now() - ms, m = Math.floor(d / 60000), h = Math.floor(d / 3600000), days = Math.floor(d / 86400000);
   if (d < 60000) return "just now";
-  if (m < 60) return m + "m ago";
-  if (h < 24) return h + "h ago";
-  if (days < 30) return days + "d ago";
+  if (m < 60) return t("{m}m ago", { m: m });
+  if (h < 24) return t("{h}h ago", { h: h });
+  if (days < 30) return t("{days}d ago", { days: days });
   return new Date(ms).toLocaleDateString();
 }
 
@@ -2585,7 +2584,7 @@ async function copyHistory() {
   const rows = await histExportRows();
   const lines = rows.map(r => histCells(r).join("\t"));
   copy([HIST_COLS.join("\t"), ...lines].join("\n"));
-  toast(`Copied ${rows.length} rows ✓`, "ok");
+  toast(t("Copied {rows} rows ✓", { rows: rows.length }), "ok");
 }
 // The whole local history as one JSON file to keep (the phone's "Export as JSON (backup)"): the same envelope,
 // with the desktop's richer rows inside. Every stored row, whatever the screen is filtered to.
@@ -2593,7 +2592,7 @@ async function exportHistoryJson() {
   const rows = (await api.histGet()) || [];
   const text = JSON.stringify({ app: "minima-history", version: 1, source: "minimacore-desktop", exported_at: Date.now(), count: rows.length, tx: rows });
   const p = await api.exportCsv(text, "minima-history.json");
-  toast(p ? `Exported ${rows.length} transaction${rows.length === 1 ? "" : "s"} ✓` : "Export cancelled", p ? "ok" : "");
+  toast(p ? t("Exported {n} transactions ✓", { n: rows.length }) : t("Export cancelled"), p ? "ok" : "");
 }
 // One record of an export file → a row for the local store, or null if it is not one. Reads the desktop's
 // own rows and the phone's (HistoryEntry.toJson: received / sent / self, timemilli, inputs and deltas as JSON
@@ -2651,7 +2650,7 @@ function histImportPlan(records, known, cap) {
     else { seen.add(row.txpowid); fresh.push(row); }
   }
   const refuse = cap > 0 && known.size + fresh.length > cap
-    ? `Nothing was imported. The file would add ${fresh.length} transactions to the ${known.size} already stored, and the store holds ${cap} at most.` : "";
+    ? t("Nothing was imported. The file would add {fresh} transactions to the {size} already stored, and the store holds {cap} at most.", { fresh: fresh.length, size: known.size, cap: cap }) : "";
   return { fresh, same, invalid, refuse };
 }
 // "Import history (restore / merge)": rows the store does not have are added, in one write; a row it already
@@ -2660,7 +2659,7 @@ function histImportPlan(records, known, cap) {
 // replaces it with the node's own row.
 async function importHistory() {
   let text;
-  try { text = await api.importJson(); } catch (e) { toast("Import failed: " + (e.message || e), "err"); return; }
+  try { text = await api.importJson(); } catch (e) { toast(t("Import failed: {e}", { e: (e.message || e) }), "err"); return; }
   if (text == null) return;                                          // cancelled
   try {
     const arr = JSON.parse(text).tx;
@@ -2669,10 +2668,10 @@ async function importHistory() {
     const plan = histImportPlan(arr, known, ((await api.histStats()) || {}).cap);
     if (plan.refuse) { toast(plan.refuse, "err"); return; }
     const res = plan.fresh.length ? await api.histImport(plan.fresh) : { added: 0 };
-    if (res.refused) { toast(`Nothing was imported. The file would add ${res.fresh} transactions to the ${res.existing} already stored, and the store holds ${res.cap} at most.`, "err"); return; }
-    toast(`Added ${res.added} of ${arr.length}. Already stored: ${plan.same + (plan.fresh.length - res.added)}.` + (plan.invalid ? ` Not valid, left out: ${plan.invalid}.` : ""), "ok");
+    if (res.refused) { toast(t("Nothing was imported. The file would add {fresh} transactions to the {existing} already stored, and the store holds {cap} at most.", { fresh: res.fresh, existing: res.existing, cap: res.cap }), "err"); return; }
+    toast(t("Added {added} of {arr}. Already stored: {added2}.{invalid}", { added: res.added, arr: arr.length, added2: plan.same + (plan.fresh.length - res.added), invalid: (plan.invalid ? (" " + t("Not valid, left out: {invalid}.", { invalid: plan.invalid })) : "") }), "ok");
     await ensureHistFilter(); await renderHistoryList();
-  } catch (e) { toast("Import failed: " + (e.message || e), "err"); }
+  } catch (e) { toast(t("Import failed: {e}", { e: (e.message || e) }), "err"); }
 }
 async function exportHistory() {
   const rows = await histExportRows();
@@ -2682,7 +2681,7 @@ async function exportHistory() {
   const lines = rows.map(r => histCells(r).map(q).join(","));
   const csv = [HIST_COLS.join(","), ...lines].join("\r\n");
   const p = await api.exportCsv(csv, "minima-history.csv");
-  toast(p ? "Saved CSV ✓" : "Export cancelled", p ? "ok" : "");
+  toast(p ? t("Saved CSV ✓") : t("Export cancelled"), p ? "ok" : "");
 }
 
 // ---- Terminal (full node console — runs commands immediately, no guard) ----
@@ -2703,7 +2702,7 @@ function termSugRender() {
   box.innerHTML = SUG_ITEMS.map((it, i) =>
     `<div class="termsug__row${i === SUG_SEL ? " termsug__row--sel" : ""}" data-i="${i}">` +
     `<span class="termsug__l">${esc(it.label)}</span>` +
-    (it.required ? `<span class="termsug__req">required</span>` : "") +
+    (it.required ? `<span class="termsug__req">${th("required")}</span>` : "") +
     (it.desc ? `<span class="termsug__d">${esc(it.desc)}</span>` : "") + `</div>`).join("");
   box.style.display = "";
   // mousedown (not click): fires before the input's blur, and preventDefault keeps focus in the input
@@ -2756,7 +2755,7 @@ function termText() { return TERM_ITEMS.map(it => (it.kind === "cmd" ? "> " : ""
 function appendTerm(text, kind) {
   let it = { kind: kind || "json", text: String(text) };
   // one oversized reply: the screen shows its tail and says so; the whole reply is kept for Copy output while it is on screen
-  if (it.text.length > TERM_MAX) it = { kind: it.kind === "json" ? "note" : it.kind, full: it.text, text: "[This output is cut: the last " + TERM_MAX + " of its " + it.text.length + " characters are shown. Copy output copies all of it.]\n" + it.text.slice(-TERM_MAX) };
+  if (it.text.length > TERM_MAX) it = { kind: it.kind === "json" ? "note" : it.kind, full: it.text, text: t("[This output is cut: the last {termmax} of its {it} characters are shown. Copy output copies all of it.]\n{termmax2}", { termmax: TERM_MAX, it: it.text.length, termmax2: it.text.slice(-TERM_MAX) }) };
   TERM_ITEMS.push(it);
   let size = TERM_ITEMS.reduce((n, x) => n + x.text.length + 1, 0), dropped = 0;
   while (size > TERM_MAX && TERM_ITEMS.length > 1) { size -= TERM_ITEMS.shift().text.length + 1; dropped++; }
@@ -2782,7 +2781,7 @@ async function termRun() {
 }
 function renderTerminal() {
   const out = el("termOut"), inp = el("termIn");
-  api.nodeStatus().then(s => { el("termBanner").textContent = TERM_BANNER.join("\n") + "\nWelcome to Minima Core " + ((s && s.health && s.health.version) || "") + "\nYou can run commands in this Terminal.."; }).catch(() => {});
+  api.nodeStatus().then(s => { el("termBanner").textContent = t("{termbanner}\nWelcome to Minima Core {version}\nYou can run commands in this Terminal..", { termbanner: TERM_BANNER.join("\n"), version: ((s && s.health && s.health.version) || "") }); }).catch(() => {});
   if (!el("termBanner").textContent) el("termBanner").textContent = TERM_BANNER.join("\n");
   out.textContent = ""; TERM_ITEMS.forEach(it => out.appendChild(termNode(it)));
   el("termScroll").scrollTop = el("termScroll").scrollHeight;
@@ -2824,8 +2823,8 @@ function renderTerminal() {
 // stops the app's background work and puts its tray row away; its data is kept, and unfreezing resumes it. The main process
 // decides whether an app may be frozen and says why not (Dexicon: never while money is in flight). Minima Core is neither.
 // Dexicon and Chat are tabs: they have no drawer row to hide, and opening the tab unfreezes them, as on the phone.
-const APPS_TABS = [{ id: "dexicon", name: "Dexicon", tab: true, icon: "minima-tile.svg" }, { id: "chat", name: "Chat", tab: true, icon: "minima-tile.svg" }];
-const NO_FREEZE = { core: "Cannot be frozen: Minima Core is the node and the wallet.", parlons: "Cannot be frozen: Parlons is part of the node itself." };
+const APPS_TABS = [{ id: "dexicon", name: "Dexicon", tab: true, icon: "minima-tile.svg" }, { id: "chat", name: N_("Chat"), tab: true, icon: "minima-tile.svg" }];
+const NO_FREEZE = { core: N_("Cannot be frozen: Minima Core is the node and the wallet."), parlons: N_("Cannot be frozen: Parlons is part of the node itself.") };   // translated where shown
 let FROZEN = [];   // ids, as the main process holds them (config frozenApps)
 function hiddenApps() { return String(store("shellHidden") || "").split(",").filter(id => id && id !== "core" && TRAY_APPS.some(a => a.id === id)); }
 function applyHiddenApps() {
@@ -2834,12 +2833,12 @@ function applyHiddenApps() {
   paintTrayDot();
 }
 /** The line under an app's name (IntegratedAppsAdapter): where it is, and " · Deep frozen" when it is. */
-function appsState(a, hidden, frozen) { return (a.id === "core" ? "Always on" : a.tab ? "A tab" : hidden ? "Hidden from drawer" : "In app drawer") + (frozen ? " · Deep frozen" : ""); }
+function appsState(a, hidden, frozen) { return (a.id === "core" ? t("Always on") : a.tab ? t("A tab") : hidden ? t("Hidden from drawer") : t("In app drawer")) + (frozen ? " · " + t("Deep frozen") : ""); }
 let THAW_FAILED = "";   // the app whose unfreeze-on-open failed: it is drawn frozen, with the reason said, and not asked again until the switch is used
 async function setFrozen(id, on) {
   THAW_FAILED = "";
   try { FROZEN = await api.freezeSet(id, on); }
-  catch (e) { openDlg("freezeNo", on ? "Not frozen" : "Still frozen", `<div class="apps-why">${esc(ipcError(e))}</div>`, ""); FROZEN = await api.freezeList().catch(() => FROZEN); }   // the list is read again: the screen shows what the main process holds
+  catch (e) { openDlg("freezeNo", on ? t("Not frozen") : t("Still frozen"), `<div class="apps-why">${esc(ipcError(e))}</div>`, ""); FROZEN = await api.freezeList().catch(() => FROZEN); }   // the list is read again: the screen shows what the main process holds
   applyHiddenApps();
 }
 // Opening a frozen app wakes it for good (PandamoniumHooks: "opening a frozen app unfreezes it").
@@ -2847,10 +2846,10 @@ function thawOnOpen() {
   const id = activeView === "chat" ? "chat" : TAB_OF[activeView] === "dexicon" ? "dexicon" : activeView;
   if (!FROZEN.includes(id) || THAW_FAILED === id) return false;
   const name = (TRAY_APPS.concat(APPS_TABS).find(a => a.id === id) || { name: id }).name;
-  api.freezeSet(id, false).then(l => { FROZEN = l; applyHiddenApps(); toast(name + " was frozen. It is running again."); renderActive(); })
+  api.freezeSet(id, false).then(l => { FROZEN = l; applyHiddenApps(); toast(t("{name} was frozen. It is running again.", { name: name })); renderActive(); })
     .catch(async (e) => {   // never a blank screen: the reason is said, and the app is drawn as it is (still frozen)
       THAW_FAILED = id; FROZEN = await api.freezeList().catch(() => FROZEN); applyHiddenApps();
-      openDlg("freezeNo", "Still frozen", `<div class="apps-why">${esc(name + " could not be unfrozen: " + ipcError(e) + "\n\nTry the Freeze switch on the Apps tab.")}</div>`, "");
+      openDlg("freezeNo", t("Still frozen"), `<div class="apps-why">${esc(t("{name} could not be unfrozen: {e}\n\nTry the Freeze switch on the Apps tab.", { name: name, e: ipcError(e) }))}</div>`, "");
       renderActive();
     });
   return true;
@@ -2861,21 +2860,21 @@ function renderApps() {
     const core = a.id === "core", off = hidden.includes(a.id), ice = FROZEN.includes(a.id), noIce = NO_FREEZE[a.id];
     return `<div class="apps-row">
     ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
-    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${appsState(a, off, ice)}</div>${noIce ? `<div class="apps-row__state" id="appsWhy-${a.id}">${esc(noIce)}</div>` : ""}</div>
-    <div class="apps-row__sw"><label class="apps-row__hide"><span>Hide</span><button class="switch" role="switch" aria-checked="${off}" aria-label="Hide ${esc(a.name)}" data-hide="${a.id}"${core || a.tab ? " disabled" : ""}></button></label>
-      <label class="apps-row__hide"><span>Freeze</span><button class="switch" role="switch" aria-checked="${ice}" aria-label="Freeze ${esc(a.name)}" data-freeze="${a.id}"${noIce ? ` disabled aria-describedby="appsWhy-${a.id}"` : ""}></button></label></div>
+    <div class="apps-row__main"><div class="apps-row__name">${esc(a.tab ? t(a.name) : a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${appsState(a, off, ice)}</div>${noIce ? `<div class="apps-row__state" id="appsWhy-${a.id}">${esc(t(noIce))}</div>` : ""}</div>
+    <div class="apps-row__sw"><label class="apps-row__hide"><span>${th("Hide")}</span><button class="switch" role="switch" aria-checked="${off}" aria-label="${tr("Hide {name}", { name: esc(a.name) })}" data-hide="${a.id}"${core || a.tab ? " disabled" : ""}></button></label>
+      <label class="apps-row__hide"><span>${th("Freeze")}</span><button class="switch" role="switch" aria-checked="${ice}" aria-label="${tr("Freeze {name}", { name: esc(a.name) })}" data-freeze="${a.id}"${noIce ? ` disabled aria-describedby="appsWhy-${a.id}"` : ""}></button></label></div>
   </div>`; }).join("");
   paintAppsCounts();
   el("appsList").querySelectorAll(".switch[data-hide]:not([disabled])").forEach(sw => sw.onclick = () => {
     const id = sw.dataset.hide, now = hiddenApps();
-    if (id === "entropy") entropyErased("Entropy was hidden.");
+    if (id === "entropy") entropyErased(t("Entropy was hidden."));
     store("shellHidden", (now.includes(id) ? now.filter(x => x !== id) : now.concat(id)).join(","));
     applyHiddenApps(); renderApps();
     const again = el("appsList").querySelector(`.switch[data-hide="${id}"]`); if (again) again.focus();
   });
   el("appsList").querySelectorAll(".switch[data-freeze]:not([disabled])").forEach(sw => sw.onclick = async () => {
     const id = sw.dataset.freeze; sw.disabled = true;
-    if (id === "entropy") entropyErased("Entropy was frozen.");
+    if (id === "entropy") entropyErased(t("Entropy was frozen."));
     await setFrozen(id, !FROZEN.includes(id));
     if (activeView === "apps") { renderApps(); const again = el("appsList").querySelector(`.switch[data-freeze="${id}"]`); if (again && !document.querySelector(".overlay--dlg")) again.focus(); }
   });
@@ -2885,31 +2884,31 @@ function renderApps() {
 async function renderFaucet() {
   const host = el("faucetBody");
   if (el("faucetGo")) { el("faucetBanner").hidden = running; return; }   // already drawn: keep what the user typed and the last answer
-  host.innerHTML = `<div class="fc"><div class="fc-brand">MINIMA FAUCET</div>
-    <div class="fc-banner" id="faucetBanner"${running ? " hidden" : ""}><b>The node is not ready</b><span>Start the node on the Node tab, then come back.</span></div>
-    <h1 class="fc-h1">Get Free Minima</h1><div class="fc-sub">Receive 0.0001 Minima to try out the blockchain.</div>
-    <label class="fc-label" for="faucetAddr">Minima Address</label>
-    <textarea class="fc-in" id="faucetAddr" rows="2" placeholder="Paste or fetch an address…" autocomplete="off" spellcheck="false"></textarea>
-    <button class="fc-btn fc-btn--line" id="faucetMine">Get My Address</button>
-    <button class="fc-btn" id="faucetGo">Request Minima</button>
+  host.innerHTML = `<div class="fc"><div class="fc-brand">${th("MINIMA FAUCET")}</div>
+    <div class="fc-banner" id="faucetBanner"${running ? " hidden" : ""}><b>${th("The node is not ready")}</b><span>${th("Start the node on the Node tab, then come back.")}</span></div>
+    <h1 class="fc-h1">${th("Get Free Minima")}</h1><div class="fc-sub">${th("Receive 0.0001 Minima to try out the blockchain.")}</div>
+    <label class="fc-label" for="faucetAddr">${th("Minima Address")}</label>
+    <textarea class="fc-in" id="faucetAddr" rows="2" placeholder="${th("Paste or fetch an address…")}" autocomplete="off" spellcheck="false"></textarea>
+    <button class="fc-btn fc-btn--line" id="faucetMine">${th("Get My Address")}</button>
+    <button class="fc-btn" id="faucetGo">${th("Request Minima")}</button>
     <div class="fc-status" id="faucetStatus" role="status" hidden></div>
-    <div class="fc-help">The faucet sends a tiny amount of Minima to your node so you can try creating custom tokens and testing transactions.</div>
-    <div class="fc-foot">eurobuddha · Minima Ecosystem</div></div>`;
+    <div class="fc-help">${th("The faucet sends a tiny amount of Minima to your node so you can try creating custom tokens and testing transactions.")}</div>
+    <div class="fc-foot">${th("eurobuddha · Minima Ecosystem")}</div></div>`;
   const say = (text, ok) => { const st = el("faucetStatus"); st.hidden = false; st.textContent = text; st.className = "fc-status " + (ok ? "fc-status--ok" : "fc-status--err"); };
   el("faucetMine").onclick = async () => {
-    const b = el("faucetMine"); b.disabled = true; b.textContent = "Fetching…";
+    const b = el("faucetMine"); b.disabled = true; b.textContent = t("Fetching…");
     const a = running ? await tryCmd("getaddress") : null, addr = a && (a.miniaddress || a.address);
-    if (addr) el("faucetAddr").value = addr; else say(a ? "Could not read address from response." : "The node did not respond. Check its status on the Node tab.", false);
-    b.disabled = false; b.textContent = "Get My Address";
+    if (addr) el("faucetAddr").value = addr; else say(a ? t("Could not read address from response.") : t("The node did not respond. Check its status on the Node tab."), false);
+    b.disabled = false; b.textContent = t("Get My Address");
   };
   el("faucetGo").onclick = async () => {
     const addr = el("faucetAddr").value.trim();
-    if (!addr) { say("Please enter a Minima address.", false); return; }
-    if (!validAddr(addr)) { say("That is not a Minima address (Mx… or 0x…).", false); return; }
-    const btn = el("faucetGo"); btn.disabled = true; btn.textContent = "Requesting…";
-    try { const r = await api.faucet(addr); say("Faucet: " + (r && r.message ? r.message : "Unexpected response from faucet."), !!(r && r.status)); }
-    catch (e) { say("Failed to reach the faucet. Try again later.", false); }
-    btn.disabled = false; btn.textContent = "Request Minima";
+    if (!addr) { say(t("Please enter a Minima address."), false); return; }
+    if (!validAddr(addr)) { say(t("That is not a Minima address (Mx… or 0x…)."), false); return; }
+    const btn = el("faucetGo"); btn.disabled = true; btn.textContent = t("Requesting…");
+    try { const r = await api.faucet(addr); say(t("Faucet: {message}", { message: (r && r.message ? r.message : t("Unexpected response from faucet.")) }), !!(r && r.status)); }
+    catch (e) { say(t("Failed to reach the faucet. Try again later."), false); }
+    btn.disabled = false; btn.textContent = t("Request Minima");
   };
 }
 // Settings: what is the desktop's own and has no screen on the phone (open at login, updates, which node, the
@@ -2925,55 +2924,55 @@ async function renderSettings() {
   // Which app this is (main/flavor.js): a copy that does not update itself has no feed to check and no Download button.
   const fl = (await api.flavor().catch(() => null)) || { updates: true, loginItem: true, name: "Minima Core" };
   host.innerHTML =
-    sec("This computer", `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setAutostartL">Open at login</span><button class="switch switch--m2" role="switch" id="setAutostart" aria-checked="${CFG.openAtLogin ? "true" : "false"}" aria-labelledby="setAutostartL"></button></div>
-      <p class="ps-note">Start Minima Core, and so your node, when you log in to this computer. It opens to the tray on Mac. Uses the login items on Mac and Windows and the autostart folder on Linux.</p>`) +
-    sec("Updates", !fl.updates ? `<p class="set-text">${esc(fl.name)} does not update itself: it reads no update feed and downloads nothing. A newer build is installed by hand.</p>` : `<p class="set-text">Minima Core checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.</p>
-      <p class="set-text" id="updBody">Checking…</p>
-      <div class="home-actions set-actions"><button class="btn btn--outline" id="updCheck">Check now</button><button class="btn btn--primary" id="updGet" hidden>Download</button></div>
+    sec(t("This computer"), `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setAutostartL">${th("Open at login")}</span><button class="switch switch--m2" role="switch" id="setAutostart" aria-checked="${CFG.openAtLogin ? "true" : "false"}" aria-labelledby="setAutostartL"></button></div>
+      <p class="ps-note">${th("Start Minima Core, and so your node, when you log in to this computer. It opens to the tray on Mac. Uses the login items on Mac and Windows and the autostart folder on Linux.")}</p>`) +
+    sec(t("Updates"), !fl.updates ? `<p class="set-text">${tr("{name} does not update itself: it reads no update feed and downloads nothing. A newer build is installed by hand.", { name: esc(fl.name) })}</p>` : `<p class="set-text">${th("Minima Core checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.")}</p>
+      <p class="set-text" id="updBody">${th("Checking…")}</p>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="updCheck">${th("Check now")}</button><button class="btn btn--primary" id="updGet" hidden>${th("Download")}</button></div>
       <div class="status" id="updStatus"></div>`, "updCard") +
-    sec("Node", `<p class="set-text">${kind === "parlons"
-        ? "This is the <b>Parlons Node</b>: a full Minima node plus your Parlons account (chat, calls, payments) under this node's seed, and a Maxima relay when you contribute. Parlons, in the app tray, is your account."
-        : "This is the <b>plain Minima node</b>. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder."}</p>
-      <label class="set-radio"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span>Parlons Node: the node and your Parlons account (recommended)</span></label>
-      <label class="set-radio"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span>Plain Minima node: no Parlons account</span></label>
-      <div class="eyebrow ps-label">Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)</div><input class="field__input ps-field" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" />
-      <div class="home-actions set-actions"><button class="btn btn--outline" id="setKindApply">Apply and restart the node</button></div>
+    sec(t("Node"), `<p class="set-text">${kind === "parlons"
+        ? tr("This is the {b}Parlons Node{_b}: a full Minima node plus your Parlons account (chat, calls, payments) under this node's seed, and a Maxima relay when you contribute. Parlons, in the app tray, is your account.", { b: "<b>", _b: "</b>" })
+        : tr("This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.", { b: "<b>", _b: "</b>" })}</p>
+      <label class="set-radio"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span>${th("Parlons Node: the node and your Parlons account (recommended)")}</span></label>
+      <label class="set-radio"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span>${th("Plain Minima node: no Parlons account")}</span></label>
+      <div class="eyebrow ps-label">${th("Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)")}</div><input class="field__input ps-field" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" />
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="setKindApply">${th("Apply and restart the node")}</button></div>
       <div class="status" id="setKindStatus"></div>`) +
-    (running ? sec("Signing keys", `<p class="set-text">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.</p>
+    (running ? sec(t("Signing keys"), `<p class="set-text">${th("Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.")}</p>
       ${ku ? AppsAct.keyuses.signing(ku).map(r => `<div class="health"><div class="health__row"><span>${esc(r.label)}</span><span>${esc(r.value)}</span></div>
         ${r.pct == null ? "" : `<div class="health__track"><div class="health__fill${r.warn ? " health__fill--warn" : ""}" style="width:${r.pct}%"></div></div>`}</div>
         ${r.note ? (r.warn ? `<div class="status status--warn">⚠ ${esc(r.note)}</div>` : `<p class="set-text">${esc(r.note)}</p>`) : ""}`).join("")
-        : `<div class="status status--warn">The node's key uses could not be read. Nothing is shown rather than a figure that was not read. KeyUses, in the app tray, reads them again.</div>`}`) +
-    sec("Address key uses", `<p class="set-text">KeyUses, in the app tray, lists every key of this node with its address and checks each against the chain for one-time signature reuse. It runs only when you press Run audit there.</p>
-      <div class="home-actions set-actions"><button class="btn btn--outline" id="kuOpen">Open KeyUses</button></div>`)
-      : sec("Signing keys", `<p class="set-text">${nodeState === "stopped" ? "The node is stopped." : "Waiting for the node…"}</p>`)) +
-    sec("Address labels", labelKeys.length ? labelKeys.map(a => `<div class="set-label"><div class="set-label__t"><b>${esc(labels[a])}</b><span>${esc(a)}</span></div><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("")
-      : `<p class="set-text">No labels yet. Name an address on the Receive screen.</p>`) +
-    sec("History", `<p class="set-text">Your transaction history is stored on this computer (the node prunes old data). Clear it if you switch wallets.</p>
-      <div class="home-actions set-actions"><button class="btn btn--outline" id="setClearHist">Clear local history</button></div>`) +
-    sec("Coin guard", `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setGuardL">Keep the trading engines off each other's coins</span><button class="switch switch--m2" role="switch" id="setGuard" aria-checked="${CFG.coinGuard !== false ? "true" : "false"}" aria-labelledby="setGuardL"></button></div>
-      <p class="ps-note">AtomiX, PandaPools, Dexicon and the wallet spend from one wallet. With this on, a coin one of them has put into a transaction, or that backs a live Dexicon order, is refused to the others before anything is signed. Off: nothing is checked and every command passes untouched.</p>
-      <div class="eyebrow ps-label">Sends and Consolidate</div>
-      <select class="field__input ps-field" id="setGuardSends" aria-label="Sends and Consolidate">
-        <option value="off"${CFG.coinGuardSends === "off" ? " selected" : ""}>Off: not looked at</option>
-        <option value="observe"${CFG.coinGuardSends !== "off" && CFG.coinGuardSends !== "enforce" ? " selected" : ""}>Observe: sent unchanged; the Logs say what would have been pinned or refused</option>
-        <option value="enforce"${CFG.coinGuardSends === "enforce" ? " selected" : ""}>Enforce: kept off held coins, or refused with the reason</option>
+        : `<div class="status status--warn">${th("The node's key uses could not be read. Nothing is shown rather than a figure that was not read. KeyUses, in the app tray, reads them again.")}</div>`}`) +
+    sec(t("Address key uses"), `<p class="set-text">${th("KeyUses, in the app tray, lists every key of this node with its address and checks each against the chain for one-time signature reuse. It runs only when you press Run audit there.")}</p>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="kuOpen">${th("Open KeyUses")}</button></div>`)
+      : sec(t("Signing keys"), `<p class="set-text">${nodeState === "stopped" ? th("The node is stopped.") : th("Waiting for the node…")}</p>`)) +
+    sec(t("Address labels"), labelKeys.length ? labelKeys.map(a => `<div class="set-label"><div class="set-label__t"><b>${esc(labels[a])}</b><span>${esc(a)}</span></div><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">${th("Delete")}</button></div>`).join("")
+      : `<p class="set-text">${th("No labels yet. Name an address on the Receive screen.")}</p>`) +
+    sec(t("History"), `<p class="set-text">${th("Your transaction history is stored on this computer (the node prunes old data). Clear it if you switch wallets.")}</p>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="setClearHist">${th("Clear local history")}</button></div>`) +
+    sec(t("Coin guard"), `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setGuardL">${th("Keep the trading engines off each other's coins")}</span><button class="switch switch--m2" role="switch" id="setGuard" aria-checked="${CFG.coinGuard !== false ? "true" : "false"}" aria-labelledby="setGuardL"></button></div>
+      <p class="ps-note">${th("AtomiX, PandaPools, Dexicon and the wallet spend from one wallet. With this on, a coin one of them has put into a transaction, or that backs a live Dexicon order, is refused to the others before anything is signed. Off: nothing is checked and every command passes untouched.")}</p>
+      <div class="eyebrow ps-label">${th("Sends and Consolidate")}</div>
+      <select class="field__input ps-field" id="setGuardSends" aria-label="${th("Sends and Consolidate")}">
+        <option value="off"${CFG.coinGuardSends === "off" ? " selected" : ""}>${th("Off: not looked at")}</option>
+        <option value="observe"${CFG.coinGuardSends !== "off" && CFG.coinGuardSends !== "enforce" ? " selected" : ""}>${th("Observe: sent unchanged; the Logs say what would have been pinned or refused")}</option>
+        <option value="enforce"${CFG.coinGuardSends === "enforce" ? " selected" : ""}>${th("Enforce: kept off held coins, or refused with the reason")}</option>
       </select>
-      <div class="home-actions set-actions"><button class="btn btn--outline" id="setGuardRelease">Release all holds</button></div>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="setGuardRelease">${th("Release all holds")}</button></div>
       <div class="status" id="setGuardStatus"></div>`) +
     `<div id="chanceLeft"></div>`;
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
-    if (u.error && !u.available) b.textContent = "Could not read the feed (" + u.error + "). Running v" + u.running + ".";
-    else if (u.available) b.innerHTML = "<b>Minima Core " + esc(u.version) + "</b> is available (you run v" + esc(u.running) + ")" + (u.date ? " · " + esc(u.date) : "") + (u.notes ? "<br>" + esc(u.notes) : "") + (u.downloaded ? "<br>Downloaded to " + esc(u.downloaded) : "");
-    else b.textContent = "You run the newest build, v" + u.running + (u.checkedAt ? " (checked " + new Date(u.checkedAt).toLocaleTimeString() + ")" : "") + ".";
+    if (u.error && !u.available) b.textContent = t("Could not read the feed ({error}). Running v{running}.", { error: u.error, running: u.running });
+    else if (u.available) b.innerHTML = tr("{b}Minima Core {version}{_b} is available (you run v{running})", { b: "<b>", _b: "</b>", version: esc(u.version), running: esc(u.running) }) + (u.date ? " · " + esc(u.date) : "") + (u.notes ? "<br>" + esc(u.notes) : "") + (u.downloaded ? "<br>" + tr("Downloaded to {path}", { path: esc(u.downloaded) }) : "");
+    else b.textContent = t("You run the newest build, v{running}{toLocaleTimeSt}.", { running: u.running, toLocaleTimeSt: (u.checkedAt ? (" " + t("(checked {toLocaleTimeSt})", { toLocaleTimeSt: new Date(u.checkedAt).toLocaleTimeString() })) : "") });
     g.hidden = !u.available;
   };
   if (fl.updates) api.updateStatus().then(drawUpdate).catch(() => {});
-  if (el("updCheck")) el("updCheck").onclick = async () => { el("updStatus").textContent = "Checking…"; try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = e.message || String(e); } };
+  if (el("updCheck")) el("updCheck").onclick = async () => { el("updStatus").textContent = t("Checking…"); try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = e.message || String(e); } };
   if (el("updGet")) el("updGet").onclick = async () => {
-    el("updGet").disabled = true; el("updStatus").textContent = "Downloading — the file is verified against the feed before it is saved…";
-    try { const r = await api.updateDownload(); el("updStatus").textContent = "Saved and verified: " + r.path + " — install it over this app, then relaunch."; drawUpdate(r.status); }
+    el("updGet").disabled = true; el("updStatus").textContent = t("Downloading: the file is verified against the feed before it is saved…");
+    try { const r = await api.updateDownload(); el("updStatus").textContent = t("Saved and verified: {path}: install it over this app, then relaunch.", { path: r.path }); drawUpdate(r.status); }
     catch (e) { el("updStatus").textContent = e.message || String(e); }
     el("updGet").disabled = false;
   };
@@ -2981,34 +2980,34 @@ async function renderSettings() {
     const want = (host.querySelector('input[name="setKind"]:checked') || {}).value === "minima" ? "minima" : "parlons";
     const heapMb = Math.max(0, parseInt(el("setHeap").value, 10) || 0);
     const stat = el("setKindStatus");
-    el("setKindApply").disabled = true; stat.textContent = "Restarting the node…";
+    el("setKindApply").disabled = true; stat.textContent = t("Restarting the node…");
     try {
       CFG = await api.saveConfig({ heapMb });
       await api.setNodeKind(want);
       CFG = await api.getConfig();
-      stat.textContent = want === "parlons" ? "Parlons Node starting. Open Parlons from the app tray." : "Plain Minima node starting.";
-      toast("Node restarting…", "ok");
+      stat.textContent = want === "parlons" ? t("Parlons Node starting. Open Parlons from the app tray.") : t("Plain Minima node starting.");
+      toast(t("Node restarting…"), "ok");
     } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
     el("setKindApply").disabled = false;
   };
   host.querySelectorAll(".lbl-del").forEach(btn => btn.onclick = async () => {
     const nl = Object.assign({}, CFG.labels); delete nl[btn.dataset.addr];
-    CFG = await api.saveConfig({ labels: nl }); toast("Label removed", "ok"); renderSettings();
+    CFG = await api.saveConfig({ labels: nl }); toast(t("Label removed"), "ok"); renderSettings();
   });
-  el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
-  el("setGuard").onclick = async () => { CFG = await api.saveConfig({ coinGuard: CFG.coinGuard === false }); toast(CFG.coinGuard !== false ? "Coin guard on" : "Coin guard off: nothing is checked", CFG.coinGuard !== false ? "ok" : "warn"); renderSettings(); };
-  el("setGuardSends").onchange = async () => { CFG = await api.saveConfig({ coinGuardSends: el("setGuardSends").value }); toast("Sends and Consolidate: " + CFG.coinGuardSends, "ok"); };
+  el("setClearHist").onclick = async () => { await api.histClear(); toast(t("Local history cleared ✓"), "ok"); };
+  el("setGuard").onclick = async () => { CFG = await api.saveConfig({ coinGuard: CFG.coinGuard === false }); toast(CFG.coinGuard !== false ? t("Coin guard on") : t("Coin guard off: nothing is checked"), CFG.coinGuard !== false ? "ok" : "warn"); renderSettings(); };
+  el("setGuardSends").onchange = async () => { CFG = await api.saveConfig({ coinGuardSends: el("setGuardSends").value }); toast(t("Sends and Consolidate: {coinGuardSends}", { coinGuardSends: CFG.coinGuardSends }), "ok"); };
   el("setGuardRelease").onclick = async () => {
-    if (!await showConfirm("Release all holds?", "Every coin the app is holding for a swap, a pool transaction or an order is released at once. The record of them is kept beside the new one under a dated name; nothing is deleted.\n\nThis cannot spend a coin twice: the node itself refuses a second spend. A transaction still being built may then fail and can be tried again. The coins of an order that is still live are held again within a minute; cancel the order to free them.", "Release all", true)) return;
-    try { const r = await api.reserveReleaseAll(); el("setGuardStatus").textContent = r.released + (r.released === 1 ? " hold" : " holds") + " released."; toast("Holds released", "ok"); }
+    if (!await showConfirm(t("Release all holds?"), t("Every coin the app is holding for a swap, a pool transaction or an order is released at once. The record of them is kept beside the new one under a dated name; nothing is deleted.\n\nThis cannot spend a coin twice: the node itself refuses a second spend. A transaction still being built may then fail and can be tried again. The coins of an order that is still live are held again within a minute; cancel the order to free them."), t("Release all"), true)) return;
+    try { const r = await api.reserveReleaseAll(); el("setGuardStatus").textContent = t("{n} holds released.", { n: r.released }); toast(t("Holds released"), "ok"); }
     catch (e) { el("setGuardStatus").textContent = e.message || String(e); }
   };
   el("setAutostart").onclick = async () => {
     const on = !CFG.openAtLogin;
     CFG = await api.saveConfig({ openAtLogin: on });
     const li = CFG.loginItem || {};
-    if (li.ok === false) toast((on ? "Saved, but not registered: " : "Saved, but could not unregister: ") + (li.note || "unknown error"), "warn");
-    else toast(on ? "Minima Core will open when you log in ✓" : "Minima Core will no longer open at login", "ok");
+    if (li.ok === false) toast((on ? t("Saved, but not registered: {why}", { why: li.note || t("unknown error") }) : t("Saved, but could not unregister: {why}", { why: li.note || t("unknown error") })), "warn");
+    else toast(on ? t("Minima Core will open when you log in ✓") : t("Minima Core will no longer open at login"), "ok");
     renderSettings();
   };
   chanceLeftCard();
@@ -3039,14 +3038,14 @@ function sendForm() {
     // Preselect the token if we arrived from a token page's "Send" action.
     const preselect = SEND_PRESELECT; SEND_PRESELECT = null;
     f.innerHTML = `
-      <label class="eyebrow" for="sTok">Token</label>
+      <label class="eyebrow" for="sTok">${th("Token")}</label>
       <select class="send-tok" id="sTok">${tokenOptions()}</select>
       <div class="send-avail" id="sAvail"></div>
-      <label class="eyebrow" for="sAmt">Amount</label>
-      <div class="send-line"><input class="send-in" id="sAmt" placeholder="0.0" inputmode="decimal" autocomplete="off" /><button class="btn btn--outline" id="sMax" type="button">Max</button></div>
-      <label class="eyebrow" for="sTo">To address</label>
-      <div class="send-line"><textarea class="send-in" id="sTo" rows="1" placeholder="Mx… or 0x…" autocomplete="off" spellcheck="false"></textarea></div>
-      <button class="btn btn--primary send-go" id="sGo">Send Funds</button>`;
+      <label class="eyebrow" for="sAmt">${th("Amount")}</label>
+      <div class="send-line"><input class="send-in" id="sAmt" placeholder="0.0" inputmode="decimal" autocomplete="off" /><button class="btn btn--outline" id="sMax" type="button">${th("Max")}</button></div>
+      <label class="eyebrow" for="sTo">${th("To address")}</label>
+      <div class="send-line"><textarea class="send-in" id="sTo" rows="1" placeholder="${th("Mx… or 0x…")}" autocomplete="off" spellcheck="false"></textarea></div>
+      <button class="btn btn--primary send-go" id="sGo">${th("Send Funds")}</button>`;
     // The address wraps so a pasted one can be read end to end before sending; Enter does not add a line.
     const grow = () => { const t = el("sTo"); t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; };
     el("sTo").oninput = grow;
@@ -3056,35 +3055,35 @@ function sendForm() {
     const sendableOf = (tid) => tokOf(tid).sendable || "0";
     const refreshAvail = () => {
       const t = tokOf(el("sTok").value);
-      el("sAvail").textContent = "sendable " + TOK.tidyAmount(t.sendable || "0") + (t.held ? "  ·  " + t.held : "");
+      el("sAvail").textContent = I18N.t("sendable {sendable}{held}", { sendable: TOK.tidyAmount(t.sendable || "0"), held: (t.held ? "  ·  " + t.held : "") });
     };
     el("sTok").onchange = refreshAvail;
     el("sMax").onclick = () => { el("sAmt").value = TOK.tidyAmount(sendableOf(el("sTok").value)); };
     refreshAvail();
     el("sGo").onclick = async () => {
       const to = el("sTo").value.trim(), amt = el("sAmt").value.trim(), tok = el("sTok").value;
-      if (!validAddr(to)) { toast("That doesn't look like a valid Mx… / 0x… address.", "err"); return; }
-      if (!validAmt(amt)) { toast("Enter a positive amount (digits only).", "err"); return; }
-      if (!validTok(tok)) { toast("Token id must be a 0x… hex value.", "err"); return; }
+      if (!validAddr(to)) { toast(I18N.t("That doesn't look like a valid Mx… / 0x… address."), "err"); return; }
+      if (!validAmt(amt)) { toast(I18N.t("Enter a positive amount (digits only)."), "err"); return; }
+      if (!validTok(tok)) { toast(I18N.t("Token id must be a 0x… hex value."), "err"); return; }
       const avail = sendableOf(tok);
-      if (absCmp(amt, avail) > 0) { toast("Amount exceeds your spendable balance (" + TOK.tidyAmount(avail) + "). " + (tokOf(tok).held ? "Not sendable now: " + tokOf(tok).held + ". Nothing was sent." : "The rest is locked in scripts/pools."), "err"); return; }
-      el("sGo").disabled = true; el("sGo").textContent = "Sending…";
+      if (absCmp(amt, avail) > 0) { toast(I18N.t("Amount exceeds your spendable balance ({avail}). {held}", { avail: TOK.tidyAmount(avail), held: (tokOf(tok).held ? I18N.t("Not sendable now: {held}. Nothing was sent.", { held: tokOf(tok).held }) : I18N.t("The rest is locked in scripts/pools.")) }), "err"); return; }
+      el("sGo").disabled = true; el("sGo").textContent = I18N.t("Sending…");
       try {
         const chk = await tryCmd(`checkaddress address:${to}`);   // reject a malformed/unparseable recipient
-        if (!chk) { toast("Couldn't validate the address (node busy?). Not sending.", "err"); el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return; }
+        if (!chk) { toast(I18N.t("Couldn't validate the address (node busy?). Not sending."), "err"); el("sGo").disabled = false; el("sGo").textContent = I18N.t("Send Funds"); return; }
         // Review before it leaves. Every OTHER send in this app confirms first — minimaMail pay, ETH send,
         // AtomiX swap, the PandaPools actions, Vestr — and this is the one people use most. The recipient is
         // shown IN FULL so a mistyped or clipboard-swapped address has somewhere to be caught.
         const tname = tokOf(tok).name || (tok === MINIMA ? "MINIMA" : tok);
-        if (!await showConfirm(`Send ${amt} ${tname}?`,
-              `To\n${to}\n\nAmount\n${amt} ${tname}\n\nCheck the address above. This sends real funds and cannot be undone.`,
-              "Send now", false)) {
-          el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return;
+        if (!await showConfirm(I18N.t("Send {amt} {tname}?", { amt: amt, tname: tname }),
+              I18N.t("To\n{to}\n\nAmount\n{amt} {tname}\n\nCheck the address above. This sends real funds and cannot be undone.", { to: to, amt: amt, tname: tname }),
+              I18N.t("Send now"), false)) {
+          el("sGo").disabled = false; el("sGo").textContent = I18N.t("Send Funds"); return;
         }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
-        toast("Sent ✓ " + ((r && r.txpowid) || ""), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
+        toast(I18N.t("Sent ✓ {txpowid}", { txpowid: ((r && r.txpowid) || "") }), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
       } catch (e) { toast(e.message, "err"); }
-      el("sGo").disabled = false; el("sGo").textContent = "Send Funds";
+      el("sGo").disabled = false; el("sGo").textContent = I18N.t("Send Funds");
     };
   }
 }
@@ -3114,23 +3113,23 @@ function isPrivateAddr(a) {
 function contribHelp(s, h, pm) {
   const port = CFG.basePort;
   if ((h.incoming || 0) > 0)
-    return { color: "var(--green)", text: "● Reachable — " + h.incoming + " incoming peer" + (h.incoming === 1 ? "" : "s") };
+    return { color: "var(--green)", text: t("● Reachable: {n} incoming peers", { n: h.incoming }) };
   if (pm.state === "double_nat")
-    return { color: "var(--amber)", text: "Your router is behind another one (carrier-grade NAT), so other nodes can't dial in. You still help by relaying blocks and transactions." };
+    return { color: "var(--amber)", text: t("Your router is behind another one (carrier-grade NAT), so other nodes can't dial in. You still help by relaying blocks and transactions.") };
   if (pm.state === "mapped") {
     const up = s.uptimeMs || 0;
     if (h.acceptingInLinks === false && up > 70 * 60_000)
-      return { color: "var(--amber)", text: "Your router accepted the request but nothing is getting through — some routers report success without actually opening the port. You'll need to forward it yourself. You're still helping by relaying meanwhile.", howto: true };
+      return { color: "var(--amber)", text: t("Your router accepted the request but nothing is getting through: some routers report success without actually opening the port. You'll need to forward it yourself. You're still helping by relaying meanwhile."), howto: true };
     if (up > CONTRIB_HINT_MS)
-      return { color: "var(--amber)", text: "No incoming peers yet. Other nodes normally dial back within minutes, so your router may have accepted the request without really opening the port — if this sticks, forward it yourself.", howto: true };
-    return { color: "", text: "Asked your router to open port " + port + " — not confirmed yet. Waiting for the first incoming peer." };
+      return { color: "var(--amber)", text: t("No incoming peers yet. Other nodes normally dial back within minutes, so your router may have accepted the request without really opening the port: if this sticks, forward it yourself."), howto: true };
+    return { color: "", text: t("Asked your router to open port {port}: not confirmed yet. Waiting for the first incoming peer.", { port: port }) };
   }
-  if (pm.state === "searching") return { color: "", text: "Asking your router to open port " + port + "…" };
+  if (pm.state === "searching") return { color: "", text: t("Asking your router to open port {port}…", { port: port }) };
   if (pm.state === "no_gateway")
-    return { color: "var(--amber)", text: "Your router didn't answer — automatic port opening (UPnP/NAT-PMP) is off or blocked. You can forward the port yourself, or keep helping as an outbound node.", howto: true };
+    return { color: "var(--amber)", text: t("Your router didn't answer: automatic port opening (UPnP/NAT-PMP) is off or blocked. You can forward the port yourself, or keep helping as an outbound node."), howto: true };
   if (pm.state === "mapping_refused")
-    return { color: "var(--amber)", text: "Your router refused to open port " + port + " — UPnP may be disabled, or that port is already forwarded to another device.", howto: true };
-  if (pm.state === "error") return { color: "var(--amber)", text: "Port mapping error — retrying automatically." };
+    return { color: "var(--amber)", text: t("Your router refused to open port {port}: UPnP may be disabled, or that port is already forwarded to another device.", { port: port }), howto: true };
+  if (pm.state === "error") return { color: "var(--amber)", text: t("Port mapping error: retrying automatically.") };
   return { color: "", text: "starting…" };
 }
 
@@ -3144,16 +3143,15 @@ function forwardHowTo(pm) {
   const port = CFG.basePort;
   const lan = pm.lanIp || "this Mac's IP address";
   const router = pm.routerName ? esc(pm.routerName) : "your router";
-  const admin = pm.gatewayIp ? `<a href="http://${esc(pm.gatewayIp)}" target="_blank">http://${esc(pm.gatewayIp)}</a>` : "your router's admin page";
+  const admin = pm.gatewayIp ? `<a href="http://${esc(pm.gatewayIp)}" target="_blank">http://${esc(pm.gatewayIp)}</a>` : th("your router's admin page");
   return `<div class="howto">
-    <div class="howto__h">How to open port ${esc(port)} yourself</div>
-    <div class="howto__b">In ${router}'s settings (${admin}), find <b>Port forwarding</b> and add:</div>
-    <div class="kv"><span class="kv__k">Protocol</span><span class="kv__v">TCP</span></div>
-    <div class="kv"><span class="kv__k">External port</span><span class="kv__v">${esc(port)}</span></div>
-    <div class="kv"><span class="kv__k">Internal port</span><span class="kv__v">${esc(port)}</span></div>
-    <div class="kv"><span class="kv__k">Send to</span><span class="kv__v">${esc(lan)} (this Mac)</span></div>
-    <div class="howto__b">Also reserve <b>${esc(lan)}</b> for this Mac in your router's DHCP settings — otherwise the
-      address can change and the forward will quietly stop working.${pm.routerName ? ` Searching for “${router} port forwarding” will show the exact screens.` : ""}</div>
+    <div class="howto__h">${tr("How to open port {port} yourself", { port: esc(port) })}</div>
+    <div class="howto__b">${tr("In {router}'s settings ({admin}), find {b}Port forwarding{_b} and add:", { router: router, admin: admin, b: "<b>", _b: "</b>" })}</div>
+    <div class="kv"><span class="kv__k">${th("Protocol")}</span><span class="kv__v">${th("TCP")}</span></div>
+    <div class="kv"><span class="kv__k">${th("External port")}</span><span class="kv__v">${esc(port)}</span></div>
+    <div class="kv"><span class="kv__k">${th("Internal port")}</span><span class="kv__v">${esc(port)}</span></div>
+    <div class="kv"><span class="kv__k">${th("Send to")}</span><span class="kv__v">${tr("{lan} (this Mac)", { lan: esc(lan) })}</span></div>
+    <div class="howto__b">${tr("Also reserve {b}{lan}{_b} for this computer in your router's DHCP settings: otherwise the address can change and the forward will quietly stop working.{routerName}", { b: "<b>", _b: "</b>", lan: esc(lan), routerName: pm.routerName ? (" " + tr("Searching for “{router} port forwarding” will show the exact screens.", { router: router })) : "" })}</div>
   </div>`;
 }
 
@@ -3191,42 +3189,42 @@ function renderNode(s) {
   const addrOk = showAddr && !!pm.externalIp && p2pIp === pm.externalIp;
   // Laid out as the phone's Node tab (view_home.xml): NODE, then IDENTITY. The desktop's own controls follow.
   const up = s.state === "running";
-  const status = up ? "Online" : s.state === "starting" ? "Waiting for node" : s.state === "error" ? "Error" : s.state === "stopped" ? "Stopped" : s.state === "stopping" ? "Stopping" : String(s.state);
+  const status = up ? t("Online") : s.state === "starting" ? t("Waiting for node") : s.state === "error" ? t("Error") : s.state === "stopped" ? t("Stopped") : s.state === "stopping" ? t("Stopping") : String(s.state);
   const when = blockTime(h.time);
   const D = up ? NODE_DASH : {};
   const row = (k, v, extra) => `<div class="home-row"${extra || ""}><span class="home-row__k">${k}</span><span class="home-row__v">${v}</span></div>`;
   c.innerHTML = `
-    <div class="eyebrow home-eyebrow">Node</div>
+    <div class="eyebrow home-eyebrow">${th("Node")}</div>
     <div class="card home-card">
-      <div class="home-row" data-state="${esc(s.state)}"><i class="home-dot"></i><span class="home-row__k">Status</span><span class="home-row__v home-status">${esc(status)}</span></div>
-      ${row("Block", esc(up ? (h.block ?? "") : ""))}
-      ${row("Block time", esc(up ? when : ""))}
-      ${row("Connections", esc(up ? (D.connected ?? h.connections ?? "") : ""))}
-      ${row("Incoming", esc(D.incoming ?? ""))}
-      ${row("Random peer", esc(D.peer ?? ""))}
+      <div class="home-row" data-state="${esc(s.state)}"><i class="home-dot"></i><span class="home-row__k">${th("Status")}</span><span class="home-row__v home-status">${esc(status)}</span></div>
+      ${row(t("Block"), esc(up ? (h.block ?? "") : ""))}
+      ${row(t("Block time"), esc(up ? when : ""))}
+      ${row(t("Connections"), esc(up ? (D.connected ?? h.connections ?? "") : ""))}
+      ${row(t("Incoming"), esc(D.incoming ?? ""))}
+      ${row(t("Random peer"), esc(D.peer ?? ""))}
     </div>
-    <div class="eyebrow home-eyebrow">Identity</div>
+    <div class="eyebrow home-eyebrow">${th("Identity")}</div>
     <div class="card home-card">
-      <div class="home-cap">Key uses</div>
-      <div class="home-num">${esc(D.keyuses ?? (up ? "Connecting…" : ""))}</div>
+      <div class="home-cap">${th("Key uses")}</div>
+      <div class="home-num">${esc(D.keyuses ?? (up ? t("Connecting…") : ""))}</div>
       ${row("Minima", esc(h.version || ""))}
-      ${row("App version", esc(APP_VERSION))}
+      ${row(t("App version"), esc(APP_VERSION))}
     </div>
-    <div class="eyebrow home-eyebrow">This computer</div>
+    <div class="eyebrow home-eyebrow">${th("This computer")}</div>
     <div class="card home-card">
-    ${row("Role", contributing ? "Contributing (server)" : "Light wallet")}
-    ${help ? `<div class="home-row"><span class="home-row__k">Network help</span><span class="home-row__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
+    ${row(t("Role"), contributing ? t("Contributing (server)") : t("Light wallet"))}
+    ${help ? `<div class="home-row"><span class="home-row__k">${th("Network help")}</span><span class="home-row__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
     ${help && help.howto ? forwardHowTo(pm) : ""}
-    ${contributing && showAddr ? row("Public address", esc(h.p2pAddress) + (addrOk ? " ✓" : "")) : ""}
-    ${row("Network", esc(CFG.network))}
-    ${row("RPC port", esc(s.rpcPort || CFG.basePort + 4))}
-    ${s.lastError ? `<div class="home-row"><span class="home-row__k">Error</span><span class="home-row__v" style="color:var(--red)">${esc(s.lastError)}</span></div>` : ""}
-    ${s.portOwner ? row("Port " + esc(s.portOwner.port || CFG.basePort) + " held by", "pid " + esc(s.portOwner.pid) + " · " + esc(s.portOwner.command)) : ""}
+    ${contributing && showAddr ? row(t("Public address"), esc(h.p2pAddress) + (addrOk ? " ✓" : "")) : ""}
+    ${row(t("Network"), esc(CFG.network))}
+    ${row(t("RPC port"), esc(s.rpcPort || CFG.basePort + 4))}
+    ${s.lastError ? `<div class="home-row"><span class="home-row__k">${th("Error")}</span><span class="home-row__v" style="color:var(--red)">${esc(s.lastError)}</span></div>` : ""}
+    ${s.portOwner ? row(t("Port {basePort} held by", { basePort: esc(s.portOwner.port || CFG.basePort) }), t("pid {pid} · {command}", { pid: esc(s.portOwner.pid), command: esc(s.portOwner.command) })) : ""}
     <div class="home-actions">
-      <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? "Start node" : "Restart node"}</button>
-      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">Start again</button>` : ""}
-      ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib">${contributing ? "Stop contributing to the network" : "Contribute to the network"}</button>` : ""}
-      <button class="btn btn--outline" id="nReconfig">Reconfigure node</button>
+      <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? th("Start node") : th("Restart node")}</button>
+      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">${th("Start again")}</button>` : ""}
+      ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib">${contributing ? th("Stop contributing to the network") : th("Contribute to the network")}</button>` : ""}
+      <button class="btn btn--outline" id="nReconfig">${th("Reconfigure node")}</button>
     </div>
     </div>`;
   if (up) refreshNodeDash();
@@ -3234,19 +3232,19 @@ function renderNode(s) {
   if (nContrib) nContrib.onclick = async () => {
     const turnOn = !contributing;
     const msg = turnOn
-      ? "Contribute to the network?\n\nYour node will accept incoming connections and help other nodes sync. This asks your router to open TCP " + CFG.basePort + " (UPnP), keeps ~50 days of block history (a one-time extra download), and restarts the node now.\n\nNot all routers allow this. If yours doesn't, you'll still help by relaying."
-      : "Stop contributing?\n\nYour node goes back to a light wallet (outbound connections only), the router port is closed, and the node restarts now.";
-    if (!await showConfirm(turnOn ? "Contribute to the network?" : "Stop contributing?",
-        msg.slice(msg.indexOf("\n\n") + 2), turnOn ? "Contribute" : "Stop", !turnOn)) return;
+      ? t("Contribute to the network?\n\nYour node will accept incoming connections and help other nodes sync. This asks your router to open TCP {basePort} (UPnP), keeps ~50 days of block history (a one-time extra download), and restarts the node now.\n\nNot all routers allow this. If yours doesn't, you'll still help by relaying.", { basePort: CFG.basePort })
+      : t("Stop contributing?\n\nYour node goes back to a light wallet (outbound connections only), the router port is closed, and the node restarts now.");
+    if (!await showConfirm(turnOn ? t("Contribute to the network?") : t("Stop contributing?"),
+        msg.slice(msg.indexOf("\n\n") + 2), turnOn ? t("Contribute") : t("Stop"), !turnOn)) return;
     const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     CFG = await api.saveConfig({ contribute: turnOn, params });
-    toast(turnOn ? "Contributing. Restarting node…" : "Back to light wallet. Restarting node…");
+    toast(turnOn ? t("Contributing. Restarting node…") : t("Back to light wallet. Restarting node…"));
     api.nodeRestart();
   };
   el("nReconfig").onclick = () => selectTab("params");
-  el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
+  el("nRestart").onclick = () => { toast(t("Restarting node…")); api.nodeRestart(); };
   const nReclaim = el("nReclaim");
-  if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = "Starting…"; try { await api.nodeReclaim(); toast("Node restarting…", "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
+  if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = t("Starting…"); try { await api.nodeReclaim(); toast(t("Node restarting…"), "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
   // The in-app jar updater is disabled — the node jar ships with the app. See main/updater.js.
   paintLogs();   // refresh the Node-tab log pane now that this view is active
 }
@@ -3254,7 +3252,7 @@ function renderNode(s) {
 let logLines = [];
 const LOG_MAX = 2000;       // lines kept for the Node tab's box and the Logs screen (the main process holds 800 and the whole log on disk)
 const LOGS_CHARS = 30000;   // the Logs screen shows at most this much text, as the phone's LogsView
-const LOGS_CHIPS = [["scripts", "Scripts"], ["mining", "Mining"], ["blocks", "Blocks"], ["networking", "Networking"], ["ibd", "Initial block download (IBD)"], ["maxima", "Maxima"]];
+const LOGS_CHIPS = [["scripts", N_("Scripts")], ["mining", N_("Mining")], ["blocks", N_("Blocks")], ["networking", N_("Networking")], ["ibd", N_("Initial block download (IBD)")], ["maxima", "Maxima"]];   // labels translated where shown
 let logsPaused = false, logsFilter = "", logsSeeded = false, logsOn = {};
 async function initLogs() { logLines = await api.nodeLogs(); paintLogs(); }
 /** The text of the Logs screen: the lines that match the filter (any case), joined, and of that the last 30,000 characters. */
@@ -3283,11 +3281,11 @@ function logsSync(r) {
   return true;
 }
 function paintLogChips() {
-  el("logsChips").innerHTML = LOGS_CHIPS.map(([k, label]) => `<button class="logs-chip${logsOn[k] ? " logs-chip--on" : ""}" role="switch" aria-checked="${!!logsOn[k]}" data-logchip="${k}"${running ? "" : " disabled"}>${label}</button>`).join("");
+  el("logsChips").innerHTML = LOGS_CHIPS.map(([k, label]) => `<button class="logs-chip${logsOn[k] ? " logs-chip--on" : ""}" role="switch" aria-checked="${!!logsOn[k]}" data-logchip="${k}"${running ? "" : " disabled"}>${th(label)}</button>`).join("");
   el("logsChips").querySelectorAll("[data-logchip]").forEach(c => { c.onclick = async () => {
     const k = c.dataset.logchip; c.disabled = true;
     const r = await tryCmd("logs " + k + ":" + (logsOn[k] ? "false" : "true"));
-    if (!logsSync({ response: r })) toast("The node did not answer.", "warn");
+    if (!logsSync({ response: r })) toast(t("The node did not answer."), "warn");
     paintLogChips(); const again = el("logsChips").querySelector(`[data-logchip="${k}"]`); if (again) again.focus();
   }; });
 }
@@ -3295,14 +3293,14 @@ function paintLogChips() {
 async function renderLogs() {
   logLines = await api.nodeLogs();
   paintLogs();
-  el("logsPause").textContent = logsPaused ? "Resume" : "Pause";
-  el("logsPause").onclick = () => { logsPaused = !logsPaused; el("logsPause").textContent = logsPaused ? "Resume" : "Pause"; if (!logsPaused) paintLogs(); };
+  el("logsPause").textContent = logsPaused ? t("Resume") : t("Pause");
+  el("logsPause").onclick = () => { logsPaused = !logsPaused; el("logsPause").textContent = logsPaused ? t("Resume") : t("Pause"); if (!logsPaused) paintLogs(); };
   el("logsClear").onclick = () => { logLines = []; paintLogs(); };
   el("logsFilter").value = logsFilter;
   el("logsFilter").oninput = () => { logsFilter = el("logsFilter").value; paintLogs(); };
   el("logsSave").onclick = async () => {
     const text = el("logsBox").textContent; if (!text.trim()) return;   // as the phone's Share: nothing to share, nothing happens
-    try { const p = await api.logsSave(text); if (p) toast("Saved to " + p, "ok"); } catch (e) { toast("Could not save: " + ipcError(e), "warn"); }
+    try { const p = await api.logsSave(text); if (p) toast(t("Saved to {p}", { p: p }), "ok"); } catch (e) { toast(t("Could not save: {e}", { e: ipcError(e) }), "warn"); }
   };
   paintLogChips();
   if (running && !logsSeeded) { logsSeeded = logsSync({ response: await tryCmd("logs") }); paintLogChips(); }   // what the node logs now
@@ -3313,8 +3311,8 @@ initLogs();
 
 // ---- AtomiX: room ① of Dexicon (renderer/dexicon-ax.js) over the window.mcd ax* calls. The panel it replaced
 // (renderer/atomix-ui.js) was removed in 0.18.141 after the parity audit (docs/DEXICON_PARITY_AUDIT.md).
-DexPools.init({ api, copy, tryCmd, TOK, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
-DexAx.init({ api, copy, relTime, exportKey: ewExportKey, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
+DexPools.init({ api, copy, tryCmd, TOK, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
+DexAx.init({ api, copy, relTime, exportKey: ewExportKey, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
 function resetAxState() { DexAx.reset(); }
 

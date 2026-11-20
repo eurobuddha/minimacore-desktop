@@ -11,6 +11,7 @@
  * Run: node --test scripts/chat-test.cjs
  */
 const test = require("node:test");
+require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
 const assert = require("node:assert");
 const fs = require("fs");
 const path = require("path");
@@ -68,7 +69,7 @@ test("desktop chatschema has not drifted from the canonical mds/keetchat copy", 
 });
 
 // ---------------------------------------------------------------- 0.19.2: what the phone's chat has and the desktop lacked
-const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+const read = (f) => { const s = fs.readFileSync(path.join(__dirname, "..", f), "utf8"); return /^renderer\/[^/]+\.js$/.test(f) ? require("./i18n-plain.cjs").plain(s) : s; };   // a renderer script: as it read before its text was wrapped for translation
 
 test("an inbound file offer becomes a row named after the file; receipts and broken offers are consumed; nothing downloads", () => {
   const src = read("main/chat.js");

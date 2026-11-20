@@ -4,7 +4,7 @@
  * originals do not (all are dark, Material 3). Values are the originals' (1 dp = 1 px, 1 sp = 1 px); each block names
  * its source. The originals use the system font (Roboto on Android).
  */
-:root { --app-font: Roboto, "Helvetica Neue", "Segoe UI", system-ui, sans-serif; --app-mono: "Roboto Mono", ui-monospace, Menlo, Consolas, monospace; }
+:root { --app-font: Roboto, "Helvetica Neue", "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; --app-mono: "Roboto Mono", ui-monospace, Menlo, Consolas, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace; }
 
 /* ---- the dialogs of these apps: a Material 3 dark AlertDialog (tonal surface, 28 corners, text buttons) ---- */
 .overlay--adlg { padding: 24px; }
