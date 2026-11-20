@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.131] — The renderer-load test runs the whole renderer
+
+- Tests only; nothing in the app changes. `scripts/shell-test.cjs` no longer keeps a list of the names the other renderer scripts provide. It reads the `<script src>` tags of `renderer/index.html` and (1) refuses a `renderer/*.js` file that no tag loads, (2) runs every file's top level, in tag order, in one vm context whose only stand-ins are the browser's own objects and the preload bridge, (3) checks that every name a script uses anywhere, also inside its functions, is defined once all have loaded.
+- Step 3 takes the names from TypeScript's checker over the same files with the browser's type library ("Cannot find name", and a property read off `window`). A name is settled when the vm context holds it, or when the file itself asks `typeof name` first. `typescript` 5.9.3 was already installed and locked as a dependency of the build tools; it is now named in `devDependencies` because a test requires it.
+- Proven by changing the input: each of the 20 tags dropped in turn, two wrong orders, an export renamed that is used only inside functions (`EntropyCore`), a function renamed in one script and called in another (`entropyNode`), a name read off `window` (`micon`), and the 0.19.125 slip (`short`). Each fails.
+- Limit: a script in a sub-folder (today only `dexicon/lib/activity.js`) is caught by its names, not by the folder rule.
+
 ## [0.19.130] — Entropy, as Pandamonium shows it
 
 - **A new tray app, Entropy** (after Minima Vestr, where Pandamonium has it), with its Apps row. Pandamonium's native Entropy (`apks/base` `integrated/entropy`, `1c60c2593325f70cba5089e2ba430925d6ccca3c`; standalone `apks/entropy` 0.1.14), reproduced: DICE ROLL (phrase length 12 to 24, five dice thrown from node and device randomness or real dice tapped in, the bits filling, the phrase concealed until asked, the roll history and the per-roll audit log) and LAST WORD (type N-1 words with completion after four letters, every valid last word worked out and checked, pick one or have one picked). Its own arcade palette, dark as the original.

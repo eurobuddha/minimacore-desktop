@@ -163,19 +163,46 @@ test("the overflow menu is reachable from sub screens and tray apps; an overlayi
 });
 
 // 0.19.126: 0.19.125 removed a helper and left its name in MailPanel.init's list, at the top level of app.js: a
-// ReferenceError there stops the script, and with it every screen. No test read the file as a program. This one runs
-// the top level of the renderer's two own scripts against stand-ins: a name that nothing defines throws here.
-function rendererTopLevel(appSource) {
+// ReferenceError there stops the script, and with it every screen. No test read the renderer as a program.
+// 0.19.131: this one does, the whole of it. The script list is index.html's own <script src> tags; nothing here names
+// a renderer script or one of its exports.
+//   1. every renderer/*.js on disk is loaded by a tag (a dropped tag fails even where the code tolerates the absence);
+//   2. every file's top level runs, in tag order, in ONE vm context whose only stand-ins are the browser's own objects
+//      (a name used at a top level before its script has loaded throws, as in the window);
+//   3. every name a script uses anywhere, also inside its functions, is defined once all have loaded. The names come
+//      from TypeScript's checker over the same files with the browser's own type library ("Cannot find name", and a
+//      property read off window); one is settled when the vm context holds it, or when the file itself asks
+//      `typeof name` first.
+const vm = require("node:vm"), ts = require("typescript");
+const readRenderer = (f) => fs.readFileSync(path.join(R, f), "utf8");
+function rendererLoads(page, read = readRenderer) {
   const any = () => new Proxy(function () {}, { get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? () => any() : any()), apply: () => any(), construct: () => any() });   // a then() that never answers: boot() stops at its first await
-  const known = new Set(["window", "document", "localStorage", "navigator", "location", "requestAnimationFrame",   // the browser's
-    "MailPanel", "ChatPanel", "TOK", "DexPools", "DexUI", "DexAx", "PoolCalc", "AppsAct", "EntropyCore", "WordEntry"]);                         // the other renderer scripts' (index.html loads them first)
-  const scope = new Proxy({}, { has: (_t, k) => known.has(k), get: (_t, k) => (k === Symbol.unscopables ? undefined : any()) });
-  const src = (fs.readFileSync(path.join(__dirname, "..", "renderer", "apps-tools.js"), "utf8") + "\n" + appSource).replace(/^"use strict";$/mg, "");
-  new Function("__scope", "with (__scope) { (function () { 'use strict';\n" + src + "\n})(); }")(scope);
+  const order = [...page.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]), box = {};
+  for (const f of fs.readdirSync(R)) if (f.endsWith(".js") && !order.includes(f)) throw new Error(f + ": no script tag loads it");
+  for (const k of ["document", "localStorage", "navigator", "location", "mcd", "crypto", "matchMedia", "addEventListener", "requestAnimationFrame", "setTimeout", "setInterval", "clearTimeout", "clearInterval"]) box[k] = any();   // the browser's, and the preload's bridge
+  box.window = box;
+  const ctx = vm.createContext(box);
+  for (const f of order) { try { vm.runInContext(read(f), ctx, { filename: f }); } catch (e) { throw new Error(f + ": " + e.name + ": " + e.message); } }
+  const host = ts.createCompilerHost({}), lib = host.getSourceFile.bind(host), files = new Map(order.map(f => [path.join(R, f), f]));
+  host.getSourceFile = (name, ...rest) => (files.has(name) ? ts.createSourceFile(name, read(files.get(name)), ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS) : lib(name, ...rest));
+  const prog = ts.createProgram([...files.keys()], { allowJs: true, checkJs: true, noEmit: true, noResolve: true, types: [], lib: ["lib.es2022.d.ts", "lib.dom.d.ts"], target: ts.ScriptTarget.ES2022 }, host);
+  for (const [file, f] of files) for (const d of prog.getSemanticDiagnostics(prog.getSourceFile(file))) {
+    const m = /^(?:Cannot find name|Property) '([A-Za-z_$][\w$]*)'(\.| does not exist on type 'Window & typeof globalThis')/.exec(ts.flattenDiagnosticMessageText(d.messageText, " "));
+    if (m && vm.runInContext("typeof " + m[1], ctx) === "undefined" && !new RegExp("typeof (?:window\\.)?" + m[1].replace(/\$/g, "\\$") + "\\b").test(read(f)))
+      throw new Error(f + ": ReferenceError: " + m[1] + " is not defined (line " + (prog.getSourceFile(file).getLineAndCharacterOfPosition(d.start).line + 1) + ")");
+  }
+  return order;
 }
-test("the renderer's top level runs: no name is used there that nothing defines", () => {
-  rendererTopLevel(app);
-  assert.throws(() => rendererTopLevel(app.replace("api, esc, el, toast, copy, relTime,", "api, esc, el, toast, copy, short, relTime,")), /ReferenceError: short is not defined/, "the 0.19.125 slip is caught");
-  const order = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
-  assert.ok(order.indexOf("apps-tools.js") >= 0 && order.indexOf("apps-tools.js") < order.indexOf("app.js") && order[order.length - 1] === "app.js", "app.js is loaded last, after every script whose names it uses");
+test("the renderer loads: every script of index.html, in its order, and no name is used that nothing defines", () => {
+  const order = rendererLoads(html), tag = (f) => '<script src="' + f + '"></script>';
+  assert.equal(order[order.length - 1], "app.js"); assert.ok(order.length >= 20);
+  const edit = (f, from, to) => (g) => { const s = readRenderer(g); if (g !== f) return s; assert.ok(s.includes(from), f + " has " + from); return s.split(from).join(to); };
+  assert.throws(() => rendererLoads(html, edit("app.js", "api, esc, el, toast, copy, relTime,", "api, esc, el, toast, copy, short, relTime,")), /app\.js: ReferenceError: short is not defined/, "the 0.19.125 slip is caught");
+  for (const f of order) assert.throws(() => rendererLoads(html.replace(tag(f), "")), /no script tag loads it|is not defined/, "a dropped tag: " + f);
+  const swap = (a, b) => html.replace(tag(a), "\u0000").replace(tag(b), tag(a)).replace("\u0000", tag(b));
+  assert.throws(() => rendererLoads(swap("apps-act.js", "app.js")), /app\.js: ReferenceError: \w+ is not defined/, "app.js before the scripts whose names its top level uses");
+  assert.throws(() => rendererLoads(swap("dexicon-core.js", "dexicon-ui.js")), /dexicon-ui\.js: ReferenceError: DexCore is not defined/);
+  assert.throws(() => rendererLoads(html, edit("entropy-core.js", "root.EntropyCore = make()", "root.EntropyKore = make()")), /apps-tools\.js: ReferenceError: EntropyCore is not defined/, "an export renamed, used only inside functions");
+  assert.throws(() => rendererLoads(html, edit("apps-tools.js", "function entropyNode()", "function entropyNodes()")), /app\.js: ReferenceError: entropyNode is not defined/, "a function renamed in one script and still called in another");
+  assert.throws(() => rendererLoads(html, edit("mailicons.js", "g.micon", "g.mikon")), /mail\.js: ReferenceError: micon is not defined/, "a name read off window");
 });
