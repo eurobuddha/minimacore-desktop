@@ -507,8 +507,8 @@
   const PP_AFTER = "Then restore your pools from your backup file: My LP, Back up / restore pools, Restore pools from a file. Your pools on the chain are not touched meanwhile, but they are not kept fresh until PandaPools knows them again.";
   /** The store that cannot be opened is moved aside (main: mcd:engineSetAside, refused unless the engine's last start failed). */
   async function setAside() {
-    if (!await D.dialog("Set the pool store aside?", C.SET_ASIDE("PandaPools", PP_AFTER), "Set it aside")) return;
-    try { const kept = await api().engineSetAside("pandapools"); say("The pool store was set aside" + (kept ? " and is kept as " + kept : "") + ". PandaPools is starting with an empty store: restore your pools from your backup file (My LP, Back up / restore pools).", "note"); }
+    if (!await D.dialog("Set the pool store aside?", C.SET_ASIDE("PandaPools", PP_AFTER, S.st.store), "Set it aside")) return;
+    try { const kept = await api().engineSetAside("pandapools"); say("The pool store was set aside" + (kept ? " and is kept as " + kept : "") + ". PandaPools is starting with an empty store: restore your pools from your backup file (My LP, Back up / restore pools)." + (kept ? " " + C.PUT_BACK(S.st.store, kept) : ""), "note"); }
     catch (e) { say("The pool store was not set aside: " + bare(e) + ". Nothing was changed.", "error"); }
   }
   const kv = (k, v, cls) => `<div class="pp-kv"><span>${esc(k)}</span><span class="${cls || ""}">${v}</span></div>`;

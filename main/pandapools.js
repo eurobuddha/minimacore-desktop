@@ -76,7 +76,8 @@ function lastNodeFailure() { return lastFail; }
  *  has started since); waitedMs: how long it has been trying. A damaged pandapools.sqlite fails its integrity check on
  *  EVERY start, so without these the room said "starting" for ever and the restore gate never opened. */
 let initError = "", firstTry = 0;
-function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry }; }
+function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry,
+  store: storeFile() }; }   // store: the whole path, for the set-aside dialog ("quit, then rename it back")
 function storeFile() { return path.join(dataDir || app.getPath("userData"), "pandapools.sqlite"); }
 /** A store that cannot be opened is MOVED ASIDE under a dated name (main/restore.js moveAside), never deleted, so the
  *  engine can start on an empty one; the pools are then restored from the user's backup file. Only when the last start
@@ -84,6 +85,11 @@ function storeFile() { return path.join(dataDir || app.getPath("userData"), "pan
 function setAsideStore() {
   if (ready || !initError) throw new Error("PandaPools' store is open, so nothing was moved.");
   if (held) throw new Error(HELD);
+  // 0.19.101: an init may be in flight on this very file (the scan loop tries again): it is disowned first (its epoch
+  // check then ends it), so it cannot finish beside the init that starts on the empty store.
+  contextEpoch++;
+  if (ctx && ctx.ActivityChain) { try { ctx.ActivityChain.stop(); } catch (e) {} }
+  ctx = null; sqlShim = null; serviceHandler = null;
   const kept = require("./restore").moveAside(storeFile());
   initError = ""; initPromise = null; firstTry = 0; emitter.emit("update");
   return kept;

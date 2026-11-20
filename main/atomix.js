@@ -331,8 +331,32 @@ function activeWorkFrom(A, tip, now) {
   });
 }
 async function activeWork() {
-  if (!ctx || !ctx.READY) return { ready: false, hasStore: fs.existsSync(path.join(dir(), "atomix.sqlite")), error: initError, waitedMs: firstTry ? Date.now() - firstTry : 0 };
+  if (!ctx || !ctx.READY) {
+    const w = { ready: false, hasStore: fs.existsSync(path.join(dir(), "atomix.sqlite")), error: initError, waitedMs: firstTry ? Date.now() - firstTry : 0 };
+    const open = storeSwaps(); if (open) w.swaps = open;   // the store is open though the service is not READY: its unfinished swaps are known
+    return w;
+  }
   return activeWorkFrom(ctx.AX, Number(lastTip) || 0, Date.now());
+}
+/**
+ * 0.19.101: the unfinished swaps, read STRAIGHT FROM THE OPEN STORE while the service is not READY (it boots only once
+ * the node has answered its identity reads, which a locked or slow node never does). Before this a wallet replacement
+ * could be confirmed past "cannot be checked" after two minutes, with a swap in flight in a store that was open all
+ * along. The same rule as the READY path (activeWorkFrom): not terminal, or ERROR and still inside its own timelock;
+ * when the window cannot be judged (the engine's rules are not loaded) an ERROR swap counts. Hashes whole.
+ * null = no open store, or it could not be read (then nothing is claimed and the old path stands).
+ */
+function storeSwaps() {
+  if (!sqlShim) return null;
+  try {
+    const r = sqlShim.sql("SELECT * FROM `swaps` WHERE `status` NOT IN ('COMPLETE','REFUNDED')");
+    if (!r || !r.status) return /no such table/i.test(String(r && r.error)) ? [] : null;   // a store with no swaps table yet has no swap
+    const T = ctx && ctx.AX && ctx.AX.trading, tip = Number(lastTip) || 0, now = Date.now(), f = (x, k) => (x[k.toUpperCase()] !== undefined ? x[k.toUpperCase()] : x[k]);
+    return (r.rows || []).filter(x => {
+      if (f(x, "status") !== "ERROR") return true;
+      try { return T ? !!T.withinWindow({ mytimelock: f(x, "mytimelock"), mylegminima: f(x, "mylegminima") }, tip, now) : true; } catch (e) { return true; }
+    }).map(x => String(f(x, "hash")));
+  } catch (e) { return null; }
 }
 
 /** Wallet/seed restore: the engine identity + swap DB belong to the OLD seed — set the DB aside and re-init
@@ -378,8 +402,12 @@ let initError = "", firstTry = 0;
 function setAsideStore() {
   if (ready || !initError) throw new Error("AtomiX's store is open, so nothing was moved.");
   if (held) throw new Error(HELD);
+  // An init may be in flight on this very file (the loop tries again every few seconds): it is disowned first, as
+  // invalidate() does, so it cannot finish beside the init that starts on the empty store (two engines on one wallet).
+  generation++;
   const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite"));
   if (kept) log("the swap database could not be opened (" + initError + "); it is kept as " + kept);
+  ctx = null; sqlShim = null; serviceHandler = null; vmJsonParse = null;
   initError = ""; initPromise = null; firstTry = 0; emitter.emit("update");
   return kept;
 }
@@ -388,6 +416,7 @@ function status() {
   const booted = !!(ctx && ctx.READY);
   return {
     ready: booted, error: booted ? "" : initError,
+    store: path.join(dir(), "atomix.sqlite"),   // the whole path, for the set-aside dialog ("quit, then rename it back")
     eth: booted && ctx.CTX && ctx.CTX.eth ? ctx.CTX.eth.address : null,
     minimaPk: booted && ctx.CTX && ctx.CTX.htlc ? ctx.CTX.htlc.publickey : null,
     currency: ctx && ctx.AX ? ctx.AX.trading.active().key : null,
@@ -1300,7 +1329,8 @@ module.exports = {
   _FUND_DURABLE_WRITE: FUND_DURABLE_WRITE,   // test-only: asserted against the SQL swapdb.js really emits
   _publishSendWithRetry: publishSendWithRetry, _makerStep: makerStep,
   _ctx: () => ctx, _fire: fire, _haltFrom: haltFrom,
-  _setCtx: (c) => { ctx = c; }, _gateEngine: gateEngine, _lastQuotes: () => lastQuotes, HALTED,   // test-only: the halt gate (scripts/dexicon-ax.test.cjs)
+  _setCtx: (c) => { ctx = c; }, _setStore: (st) => { sqlShim = st; },   // _setStore: test-only, the open store without a booted service (scripts/dexicon-ax.test.cjs)
+  _gateEngine: gateEngine, _lastQuotes: () => lastQuotes, HALTED,   // test-only: the halt gate (scripts/dexicon-ax.test.cjs)
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,
     ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,

@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.101] — Restore gate: unfinished AtomiX swaps are read from the open store; a store set aside disowns an init in flight
+
+- **The gap**: when AtomiX's store was open but its service had not become ready (it waits for the node's identity reads, which a locked or slow node never answers), a wallet replacement could be confirmed past "cannot be checked" after two minutes, with a swap in flight in that very store.
+- **Now**: the unfinished swaps are read straight from the store (`main/atomix.js` `storeSwaps`: not finished, or failed and still inside its own timelock) and any of them refuses the replacement, each hash whole. It is a refusal, not a check to skip. With no swap in the store the old wording and the old way on stand (a maker order or an OTC deal still cannot be read without the service).
+- **Set aside**: `setAsideStore` in AtomiX and PandaPools disowns an init that is still opening the file (generation / epoch bumped first), so it cannot finish beside the init that starts on the empty store. Confirmed by a test that fails without the bump.
+- **The dialog** names the store's whole path and says how to put it back: quit the app, then rename the dated file back. The note after the move repeats it with the real name.
+- **Not changed, seen while here**: Dexicon's takes read from its store while it is not ready (`activeWork().takes`) are still not used by the restore gate.
+- **Tests**: 2 new in `scripts/dexicon-ax.test.cjs`. Not run on a node.
+
 ## [0.19.100] — Coin reservation: sends and consolidate are observed, not enforced; the review's findings
 
 - **Why**: the security review of 0.18.143 to 0.18.147 said "do not ship fully enabled". An enforced `send` can only be pinned to an address, so a wallet with a live order could be refused a send it has the coins for.

@@ -618,3 +618,68 @@ test("wide layout: the phone's own words and order on Market and OTC (its long d
   assert.match(css, /\.ax-half--bid \.ax-tag \{ align-self: flex-start; text-align: left; \} \.ax-half:not\(\.ax-half--bid\) \.ax-tag \{ align-self: flex-end; text-align: right; \}/);
   assert.match(css, /\.ax-in--line \{[^}]*border-width: 0 0 1px;/);
 });
+
+// ---- 0.19.101: the restore gate reads the open store when the service is not READY ----
+test("restore gate: AtomiX's store open but the service not READY: unfinished swaps are read from the store and the wallet replacement is refused, with no way past", async () => {
+  const atomix = require("../main/atomix"), restore = require("../main/restore"), { createContext } = require("../main/atomix/loader"), { makeSqlShim } = require("../main/pandapools/sqlshim");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-gate-")), now = Math.floor(Date.now() / 1000);
+  try {
+    const shim = await makeSqlShim(path.join(dir, "atomix.sqlite"));
+    atomix._setDataDir(dir); atomix._setCtx(null); atomix._setStore(shim);
+    assert.deepEqual((await atomix.activeWork()).swaps, [], "a store with no swaps table yet has no swap");
+    const mds = { minidappuid: "", cmd: (c, cb) => cb({ status: false, error: "mock node" }), sql: (q, cb) => shim.sql(q, cb), net: { GET() { throw new Error("TEST LEAK: network"); }, POST() { throw new Error("TEST LEAK: network"); } }, notify() {}, log() {}, init() {} };
+    const c = createContext(mds);
+    await new Promise((res) => c.AX.swapdb.init(() => res()));
+    const put = (hash, status, tl, leg) => shim.sql("INSERT INTO `swaps` (`hash`,`status`,`mytimelock`,`mylegminima`,`created`) VALUES ('" + hash + "','" + status + "'," + tl + "," + leg + ",1)");
+    put(PK("51"), "STARTED", now + 3600, 0); put(PK("52"), "COMPLETE", 0, 0); put(PK("53"), "REFUNDED", 0, 0);
+    put(PK("54"), "ERROR", now - 30 * 86400, 0);   // failed long ago, far outside its window: not in flight
+    put(PK("55"), "ERROR", now + 3600, 0);          // failed, but a refund can still be due
+    put(PK("56"), "LOCKED", 0, 1);
+    atomix._setCtx(c);   // the engine's rules are loaded; c.READY is not set: the service never booted
+    const w = await atomix.activeWork();
+    assert.equal(w.ready, false); assert.deepEqual(w.swaps.slice().sort(), [PK("51"), PK("55"), PK("56")]);
+    for (const waitedMs of [1000, 10 * 60000]) for (const skipDexicon of [false, true]) {
+      const list = restore.activeWorkList({ atomix: Object.assign({}, w, { waitedMs }), pools: [], skipDexicon });
+      assert.equal(list.length, 1);
+      assert.ok(list[0].startsWith("3 AtomiX swaps still in flight, read from AtomiX's store while AtomiX itself has not finished starting"), list[0]);
+      for (const h of w.swaps) assert.ok(list[0].includes(h), "each hash whole");
+      assert.equal(restore.onlyDexiconUnchecked(list), false, "not a check to skip: a refusal");
+      assert.match(restore.activeWorkProblem(list), /Nothing was changed/);
+    }
+    // without the engine's rules an ERROR swap counts (it cannot be judged)
+    atomix._setCtx(null);
+    assert.deepEqual((await atomix.activeWork()).swaps.slice().sort(), [PK("51"), PK("54"), PK("55"), PK("56")]);
+    // no swap in the store: the old wording and the old way on stand
+    shim.sql("DELETE FROM `swaps`"); shim.flush();
+    const none = await atomix.activeWork(); assert.deepEqual(none.swaps, []);
+    assert.match(restore.activeWorkList({ atomix: Object.assign({}, none, { waitedMs: 121000 }), pools: [] })[0], /^AtomiX has not finished starting after 2 minutes.*you can go on without this check\.$/);
+    // a store that cannot be read claims nothing
+    atomix._setStore({ sql: () => ({ status: false, error: "disk I/O error" }) });
+    assert.equal("swaps" in (await atomix.activeWork()), false);
+  } finally { atomix._setCtx(null); atomix._setStore(null); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("set aside: an init in flight is disowned first (no second engine), and the dialog says how to put the file back, with the whole path", async () => {
+  const ax = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8"), pp = fs.readFileSync(path.join(__dirname, "..", "main", "pandapools.js"), "utf8");
+  assert.match(ax, /function setAsideStore\(\) \{[\s\S]{0,700}generation\+\+;\s+const kept = require\("\.\/restore"\)\.moveAside\(/);
+  assert.match(pp, /function setAsideStore\(\) \{[\s\S]{0,700}contextEpoch\+\+;[\s\S]{0,200}const kept = require\("\.\/restore"\)\.moveAside\(/);
+  // executed: an init that is still opening the store when it is set aside never becomes the engine
+  const atomix = require("../main/atomix"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "ax-aside-")), file = path.join(dir, "atomix.sqlite");
+  try {
+    fs.writeFileSync(file, Buffer.from("not a swap database ".repeat(64)));
+    atomix._setDataDir(dir); atomix._setRunner(async () => { throw new Error("a real rpcCall in a test"); });
+    await assert.rejects(atomix.init());
+    assert.equal(atomix.status().store, file, "status carries the whole path");
+    const late = atomix.init().catch(() => "failed");   // the loop's next try, in flight
+    const kept = atomix.setAsideStore();
+    assert.match(kept, /atomix\.sqlite-legacy-keys-\d{8}$/);
+    await late;
+    assert.equal("swaps" in (await atomix.activeWork()), false, "the disowned init did not become the engine: no store is open");
+  } finally { atomix._setCtx(null); atomix._setStore(null); fs.rmSync(dir, { recursive: true, force: true }); }
+  const g = {}; require("vm").runInNewContext(fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-core.js"), "utf8") + "\n;this.C = typeof DexCore !== 'undefined' ? DexCore : null;", Object.assign(g, { window: g, document: { addEventListener() {} }, localStorage: { getItem() { return null; }, setItem() {} }, console }));
+  const C = g.C || g.DexCore; assert.ok(C && C.SET_ASIDE, "DexCore loaded");
+  const F = "/Users/x/Library/Application Support/minimaCore/atomix.sqlite", text = C.SET_ASIDE("AtomiX", "after.", F);
+  assert.ok(text.includes("To put it back: quit the app, then rename " + F + "-legacy-keys-(the date) back to " + F), text);
+  assert.equal(C.PUT_BACK(F, F + "-legacy-keys-20261120"), "To put it back: quit the app, then rename " + F + "-legacy-keys-20261120 back to " + F + " (move the new, empty file out of the way first).");
+  for (const f of ["dexicon-ax.js", "dexicon-pp.js"]) { const s = fs.readFileSync(path.join(__dirname, "..", "renderer", f), "utf8"); assert.match(s, /SET_ASIDE\("(AtomiX|PandaPools)", (AX|PP)_AFTER, S\.st\.store\)/); assert.match(s, /PUT_BACK\(S\.st\.store, (r\.)?kept\)/); }
+});
