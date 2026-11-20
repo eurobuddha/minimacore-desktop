@@ -65,15 +65,19 @@ function standIn(o = {}) {
     }
     if (c === "newaddress") { const k = "0x" + (n.minted = (n.minted || 0x50) + 1).toString(16).repeat(32).slice(0, 64).toUpperCase(); n.keys.push(k); const address = ADDR(k); n.scripts.push({ address, miniaddress: require("../main/keyuses.js").addressOf(k).mx, script: SIGN(k), publickey: k, default: false, track: true }); return { status: true, response: { address, miniaddress: require("../main/keyuses.js").addressOf(k).mx, script: SIGN(k), publickey: k } }; }
     if ((m = /^txncreate id:(\S+)$/.exec(c))) { n.txns = n.txns || {}; n.txns[m[1]] = { inputs: [], outputs: [], state: [] }; return { status: true, response: { id: m[1] } }; }
-    if ((m = /^txninput id:(\S+) coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const coin = n.coins[U(m[2])] || Object.values(n.at).flat().find(x => U(x.coinid) === U(m[2])); if (!coin) return { status: false, error: "coin not found" }; n.txns[m[1]].inputs.push(JSON.parse(JSON.stringify(coin))); return { status: true }; }
+    if ((m = /^txninput id:(\S+) coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const coin = n.coins[U(m[2])] || [].concat(n.wallet || [], Object.values(n.at).flat()).find(x => U(x.coinid) === U(m[2])); if (!coin) return { status: false, error: "coin not found" }; n.txns[m[1]].inputs.push(JSON.parse(JSON.stringify(coin))); return { status: true }; }
     if ((m = /^txnoutput id:(\S+) address:(\S+) amount:(\S+) tokenid:(\S+) storestate:false$/.exec(c))) { n.txns[m[1]].outputs.push(m[4] === "0x00" ? { address: m[2], amount: m[3], tokenid: m[4], storestate: false } : { address: m[2], amount: "0.000001", tokenamount: m[3], tokenid: m[4], storestate: false }); return { status: true }; }
     if ((m = /^txnlist id:(\S+)$/.exec(c))) { const t = n.txns[m[1]]; return t ? { status: true, response: { id: m[1], transaction: n.tamper ? n.tamper(JSON.parse(JSON.stringify(t))) : t } } : { status: false, error: "no such txn" }; }
     if ((m = /^(txnbasics|txnsign|txnpost) id:(\S+)/.exec(c))) { if (m[1] === "txnpost") n.posted = (n.posted || []).concat(m[2]); return { status: true, response: m[1] === "txnpost" ? { txpowid: ID(999) } : {} }; }
     if ((m = /^txndelete id:(\S+)$/.exec(c))) { delete (n.txns || {})[m[1]]; return { status: true }; }
+    if ((m = /^coins address:(\S+)(?: checkmempool:true| tokenid:(\S+))?$/.exec(c))) {
+      const all = [].concat(n.wallet || [], Object.values(n.at).flat(), Object.values(n.coins));
+      return { status: true, response: all.filter(x => FC.canon(x.address) === FC.canon(m[1]) && (!m[2] || x.tokenid === m[2])) };
+    }
     if (/^send /.test(c)) { n.sends = (n.sends || []).concat(c); return { status: true, response: { txpowid: ID(777) } }; }
     if (/^coins relevant:true sendable:true checkmempool:true tokenid:0x00/.test(c)) return { status: true, response: [] };
     if ((m = /^coins relevant:true address:(0x[0-9A-Fa-f]+)$/.exec(c))) return { status: true, response: (n.at[U(m[1])] || []).filter(x => !x.spent) };
-    if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])] || Object.values(n.at).flat().find(y => U(y.coinid) === U(m[1])); return { status: true, response: x ? [x] : [] }; }
+    if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])] || [].concat(n.wallet || [], Object.values(n.at).flat()).find(y => U(y.coinid) === U(m[1])); return { status: true, response: x ? [x] : [] }; }
     if (c === "status") return { status: true, response: { locked: false } };
     return { status: false, error: "the stand-in does not know: " + c };
   }
@@ -319,4 +323,151 @@ test("a clean stake collected elsewhere ends COLLECTED_SAFE, never queued for a 
   await e.pass(150); assert.equal(e._store().collect(ID(1)).status, "DETECTED");
   node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(1)] = Object.assign({}, s1, { spent: true });
   await e.pass(151); assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE");
+});
+
+const SAFE_MX = "MxG081SDHCPHCMDEM4NU4GW54FSPPY9ASN55JJNKB8JYKYSE8BSPRQ985WP0KH6", SAFE_HEX = "0x3C6C5998B2CD75897F1212291FCCE6A9572E52CE77A2D13AD2BC7217CCEF4941";
+/** A guardian: audited, an external safe destination set, rescue on, the guardian on, and the grant given (unless grant:false). */
+async function guardian(nodeOpts, o = {}) {
+  let granted = o.grant !== false;
+  const x = await audited(nodeOpts, { granted: () => granted, get: async (url) => (url.includes("/reuse?") ? { status: true, results: [{ address: SAFE_HEX, reused: false, reuse_count: 0 }] } : null) });
+  const kv = x.e._store().kv;
+  assert.equal((await x.e.setSafeExternal(SAFE_MX)).ok, true);
+  kv.set(FC.K.ATRISK_ADDRS, JSON.stringify(o.atRisk || [PAY1]));
+  if (o.auto) kv.setBool(FC.K.AUTO_COLLECT_SAFE, true);
+  const g = await x.e.setGuardian(true);
+  x.grant = (v) => { granted = v; };
+  x.g = g;
+  return x;
+}
+
+test("no grant, nothing signed in the background: the guardian does not start and a pass only reads", async () => {
+  const at = { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 100 }), stake(2, PAY1, { mature: 100 })] };
+  const { e, node, g } = await guardian({ at }, { grant: false, auto: true });
+  assert.deepEqual([g.ok, g.needsGrant], [false, true]);
+  e._store().kv.setBool(FC.K.GUARDIAN_ON, true);   // even with the switch forced on
+  node.sent.length = 0; await e.pass(150);
+  assert.deepEqual(node.sent.filter(c => /^(txn|send|newscript|newaddress)/.test(c)), []);
+  assert.equal((await e.status()).running, false);
+});
+
+test("the guardian, granted: a clean matured stake is collected (auto-collect on); an at-risk one is collected, found, and swept to the safe destination", async () => {
+  const s0 = stake(1, PAY0, { mature: 100, amount: "3" }), s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s0, s1] } }, { auto: true });
+  assert.equal((await e.status()).running, true);
+  node.sent.length = 0; await e.pass(150);
+  const posted = steps(node.sent).filter(c => /^txnoutput/.test(c));
+  assert.deepEqual(posted, ["txnoutput id:ID address:" + PAY0 + " amount:3 tokenid:0x00 storestate:false", "txnoutput id:ID address:" + PAY1 + " amount:7 tokenid:0x00 storestate:false"]);
+  assert.equal(e._store().collect(ID(1)).status, "COLLECT_POSTED_SAFE"); assert.equal(e._store().collect(ID(2)).status, "COLLECT_POSTED");
+  // the chain: both stakes spent; the at-risk payout now holds the collected coin
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(1)] = Object.assign({}, s0, { spent: true }); node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  node.sent.length = 0; await e.pass(152);
+  assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE"); assert.equal(e._store().collect(ID(2)).status, "SWEEP_QUEUED");
+  assert.deepEqual(steps(node.sent), ["txncreate id:ID", "txninput id:ID coinid:" + ID(50), "txnoutput id:ID address:" + SAFE_MX + " amount:7 tokenid:0x00 storestate:false",
+    "txnlist id:ID", "txnsign id:ID publickey:" + KEY1, "txnbasics id:ID", "txnlist id:ID", "txnpost id:ID", "txndelete id:ID"], "the native's sweep: sign before basics, the gate before each");
+  assert.ok(node.sent.includes("coins address:" + PAY1 + " checkmempool:true"), "found by its own address");
+  // spent: an external safe cannot be looked at, so it is marked swept
+  node.n.wallet[0].spent = true; node.n.coins[ID(50)] = node.n.wallet[0];
+  await e.pass(153);
+  assert.equal(e._store().sweeps("SWEPT").length, 1);
+  assert.ok(e.activity().some(l => l.msg.startsWith("Secured 7 | coin:" + ID(50))));
+});
+
+test("the guardian waits rather than guess: no fresh audit, no clean collect; rescue off, no at-risk collect; a locked vault, nothing", async () => {
+  const at = { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 100 }), stake(2, PAY1, { mature: 100 })] };
+  const a = await guardian({ at }, { auto: true });
+  a.e._store().kv.setBool(FC.K.AUDIT_OK, false);
+  await a.e.pass(150);
+  assert.equal(a.e._store().collect(ID(1)).status, "DETECTED", "no audit: the clean stake stays in the contract");
+  assert.equal(a.e._store().collect(ID(2)).status, "COLLECT_POSTED", "the at-risk one does not need the audit");
+  const b = await guardian({ at, answer: { status: async () => ({ status: true, response: { locked: true } }) } });
+  b.node.sent.length = 0; await b.e.pass(150);
+  assert.deepEqual(b.node.sent.filter(c => /^txn/.test(c)), [], "a locked vault: nothing collected onto an exposed address");
+  assert.equal((await b.e.status()).vaultLocked, true);
+});
+
+test("a pass is bounded: at most 8 collects posted, the rest wait for the next block", async () => {
+  const many = []; for (let i = 1; i <= 11; i++) many.push(stake(i, PAY0, { mature: 100 }));
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: many } }, { auto: true });
+  node.sent.length = 0; await e.pass(150);
+  assert.equal(node.sent.filter(c => /^txnpost/.test(c)).length, FC.CAP_POSTS);
+  node.sent.length = 0; await e.pass(151);
+  assert.equal(node.sent.filter(c => /^txnpost/.test(c)).length, 3);
+});
+
+test("the sign gate on a sweep: another destination, or a coin on a clean address, is refused; nothing is signed", async () => {
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  for (const [name, tamper] of [["another destination", (t) => (t.outputs.length && (t.outputs[0].address = STRANGER), t)], ["a coin on another address", (t) => (t.inputs.length && (t.inputs[0].address = PAY2), t)]]) {
+    const { e, node, logs } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+    await e.pass(150);
+    node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+    node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+    node.n.tamper = (t) => (t.inputs[0] && t.inputs[0].coinid === ID(50) ? tamper(t) : t);
+    node.sent.length = 0; await e.pass(152);
+    assert.ok(!node.sent.some(c => /^txnsign/.test(c)), name + ": not signed");
+    assert.ok(!node.sent.some(c => /^txnpost/.test(c)), name + ": not posted");
+    assert.ok(logs.some(l => /SIGN GATE REFUSED txnsign/.test(l)), name + ": logged");
+    assert.equal(e._store().sweeps("PENDING").length, 1, name + ": left to try again");
+  }
+  assert.equal(FC.gateCheck({ inputs: [{ coinid: ID(1), address: PAY0, amount: "1", tokenid: "0x00" }], outputs: [{ address: SAFE_HEX, amount: "1", tokenid: "0x00" }] },
+    { kind: "sweep", coinid: ID(1), tokenid: "0x00", amount: "1", from: PAY0, to: SAFE_MX, safe: SAFE_MX, own: () => true, mayMove: () => false }).ok, false, "a clean address is never swept");
+});
+
+test("the rescue destination: a reused one, one of this node's own, or a malformed one is refused", async () => {
+  const x = await engine({}, { get: async () => ({ status: true, results: [{ address: SAFE_HEX, reused: true, reuse_count: 3 }] }) });
+  assert.match((await x.e.setSafeExternal(SAFE_MX)).error, /already signed 3 time\(s\)/);
+  const y = await engine({ keys: [KEY0, "0x0000000000000000000000000000000000000000000000000000000000000000"] }, { get: async () => null });
+  assert.match((await y.e.setSafeExternal(SAFE_MX)).error, /belongs to THIS node/);
+  assert.match((await y.e.setSafeExternal("Mx123;quit")).error, /Not a valid Mx address/);
+  const z = await engine({}, { get: async () => null });
+  const r = await z.e.setSafeExternal(SAFE_MX); assert.deepEqual([r.ok, r.verified], [true, false], "unknown reuse: accepted, re-checked by every audit");
+  assert.ok(z.e.activity().some(l => /reuse check UNVERIFIED/.test(l.msg)));
+  const same = await engine(); const sn = await same.e.setSafeSameNode();
+  assert.equal(sn.ok, true); assert.ok(same.node.sent.includes("newaddress"));
+});
+
+test("retire: only with the guardian running; never with coins, stakes paying it, or the change pool at 8; the native's newscript; recorded", async () => {
+  const keys = []; for (let i = 1; i <= 10; i++) keys.push("0x" + String(i).padStart(2, "0").repeat(32));
+  const RISK = ADDR(keys[1]);
+  const { e, node } = await guardian({ keys }, { atRisk: [RISK] });
+  e._store().kv.setBool(FC.K.GUARDIAN_ON, false);
+  assert.match((await e.retire(RISK)).error, /Start the guardian first/);
+  e._store().kv.setBool(FC.K.GUARDIAN_ON, true);
+  node.n.wallet = [{ coinid: ID(60), address: RISK, amount: "1", tokenid: "0x00", spent: false }];
+  assert.match((await e.retire(RISK)).error, /still holds 1 coin/);
+  node.n.wallet = []; node.n.at[FC.KNOWN_ADDRESS] = [stake(1, RISK, { mature: 999 })];
+  assert.match((await e.retire(RISK)).error, /Stakes still pay out/);
+  node.n.at[FC.KNOWN_ADDRESS] = [];
+  assert.match((await e.retire(ADDR(keys[2]))).error, /found at risk/, "an address the audit did not flag");
+  node.n.scripts.forEach((r, i) => { r.default = i < 8; });
+  assert.match((await e.retire(RISK)).error, /Keep at least 8/);
+  node.n.scripts.forEach((r) => { r.default = true; });
+  node.sent.length = 0;
+  const r = await e.retire(RISK);
+  assert.deepEqual(r, { ok: true, value: RISK });
+  assert.deepEqual(node.sent.filter(c => /^newscript/.test(c)), ['newscript trackall:true script:"RETURN SIGNEDBY(' + keys[1] + ')"']);
+  assert.deepEqual(e._store().retired().map(x => x.address), [RISK]);
+  assert.ok((await e._scripts(true)).retired.includes(RISK), "the node now lists it retired (key nulled, not default)");
+});
+
+test("coins stranded on a retired address are queued and swept to the safe destination with the address's own key", async () => {
+  const keys = [KEY0, KEY1, KEY2], RET = PAY2;
+  const { e, node } = await guardian({ keys });
+  const row = node.n.scripts.find(x => x.address === RET); row.default = false; row.publickey = "0x00";
+  node.n.wallet = [{ coinid: ID(70), address: RET, amount: "4", tokenid: "0x00", spent: false }];
+  node.sent.length = 0; await e.pass(160);
+  assert.ok(node.sent.includes("txnsign id:" + (node.sent.find(c => c.startsWith("txnsign")) || "").split(" ")[1].slice(3) + " publickey:" + KEY2), "the explicit key: auto cannot sign a retired address");
+  assert.equal(e._store().sweeps("SWEEP_POSTED").length, 1);
+});
+
+test("the grant: asked natively in main, written only by config.setFcGrant, never from a renderer patch; revocable", () => {
+  const cfg = fs.readFileSync(path.join(__dirname, "..", "main", "config.js"), "utf8"), main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(/if \(k === "fcGrant"\) continue;/.test(cfg), "sanitisePatch drops fcGrant: mcd:saveConfig cannot set it");
+  assert.equal((main.match(/config\.setFcGrant\(/g) || []).length, 2, "two writers: the grant after the native question, and Revoke");
+  const fn = main.slice(main.indexOf("async function fcGuardian"), main.indexOf("async function fcRevoke"));
+  assert.ok(fn.indexOf("dialog.showMessageBox(") > 0 && fn.indexOf("dialog.showMessageBox(") < fn.indexOf("config.setFcGrant(wk, Date.now())"), "the question comes before the grant");
+  assert.ok(/if \(r\.response !== 0\) return \{ ok: false, declined: true \};/.test(fn), "anything but Allow declines");
+  assert.ok(/revoke: \(\) => fcRevoke\(\)/.test(main));
+  const ops = main.slice(main.indexOf("const FC_OPS"), main.indexOf(" * THE ONE NATIVE GRANT"));
+  assert.ok(!/setFcGrant|fcGrant:/.test(ops.replace(/fcGuardian|fcRevoke/g, "")), "no screen op writes the grant directly");
 });

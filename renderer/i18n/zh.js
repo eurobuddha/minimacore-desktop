@@ -4859,3 +4859,13 @@
     "Couldn't read the seed."
   ]
 });
+// ---- Future Cash Next (0.19.181+): generated from the phone's own words where they exist; the rest is in the review list ----
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Allow background signing": "允许后台签名",
+  "Let Future Cash Next sign by itself?": "允许 Future Cash Next 自行签名？",
+  "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.": "守护程序运行期间，Future Cash Next 会在无人值守时签署并发布两种交易：\n\n• 将已到期的质押领取到其自身的收款地址。该地址属于本钱包，合约不允许任何其他地址。\n• 将本钱包中一次性密钥被使用过不止一次的地址或已停用地址上的币，转移到您的安全目的地址：\n{safe}\n\n在签署任何内容之前，应用会按这两种形式核对节点自身保存的交易副本，其他任何形式都会被拒绝并记录。除此之外，不会自行签署任何内容。\n\n您可以随时在“守护程序”选项卡（后台签名）中收回此许可，守护程序随即停止。"
+}, { review: [
+  "Allow background signing",
+  "Let Future Cash Next sign by itself?",
+  "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops."
+] });

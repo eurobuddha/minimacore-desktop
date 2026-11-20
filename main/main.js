@@ -420,7 +420,7 @@ ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audi
 // "futurecash" (the signing queue and the coin guard see it); the key audit through the KeyUses host. It runs while the
 // node runs: its store is this wallet's own file, and one pass is made on each new block.
 const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c, { owner: "futurecash" }), dir: () => app.getPath("userData"),
-  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l),
+  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk),
   notify: (title, body) => { try { const n = new Notification({ title: String(title), body: String(body), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ } } });
 const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
 let fcBlock = 0;
@@ -431,7 +431,38 @@ node.on("status", (s) => {
 });
 // The screens' calls, by name: nothing else reaches the engine.
 const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),
-  lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient), collect: (coinid) => futurecash.collectNow(coinid), collectAll: () => futurecash.collectAll() };
+  lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient), collect: (coinid) => futurecash.collectNow(coinid), collectAll: () => futurecash.collectAll(),
+  safeSameNode: () => futurecash.setSafeSameNode(), safeExternal: (addr) => futurecash.setSafeExternal(addr), stopRescue: () => futurecash.stopRescue(),
+  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), notify: (on) => futurecash.setFlag("notify", on === true),
+  harden: () => futurecash.harden(), retire: (addr) => futurecash.retire(addr), sweep: (addr) => futurecash.sweepAddress(addr), recover: () => futurecash.recoverRetired(),
+  resetHistory: () => futurecash.resetHistory(), guardian: (on) => fcGuardian(on === true), revoke: () => fcRevoke() };
+/**
+ * THE ONE NATIVE GRANT. Starting the guardian lets this app sign with nobody at the screen. The first time, for this
+ * wallet, the user is asked HERE, in a native dialog the window cannot answer for, what exactly will be signed; the answer
+ * is kept in the main config (config.setFcGrant, which no renderer patch can write). Without it nothing is signed in the
+ * background. Revoke (the Guardian tab) takes it back and stops the guardian.
+ */
+async function fcGuardian(on) {
+  if (!on) return futurecash.setGuardian(false);
+  if (!futurecash.rescueReady()) return futurecash.setGuardian(true);   // says what is missing (a destination)
+  const wk = futurecash.walletKey;
+  if (!config.fcGranted(wk)) {
+    const st = await futurecash.status(), safe = (st && st.safe) || "";
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", noLink: true, defaultId: 1, cancelId: 1,
+      buttons: [lang.t("Allow background signing"), lang.t("Cancel")], title: "Future Cash Next",
+      message: lang.t("Let Future Cash Next sign by itself?"),
+      detail: lang.t("While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.", { safe }) });
+    if (r.response !== 0) return { ok: false, declined: true };
+    config.setFcGrant(wk, Date.now());
+    node.log("[futurecash] the user allowed background signing for the wallet whose first key is " + wk);
+  }
+  return futurecash.setGuardian(true);
+}
+async function fcRevoke() {
+  const wk = futurecash.walletKey;
+  if (wk) { config.setFcGrant(wk, null); node.log("[futurecash] the user took back background signing for the wallet whose first key is " + wk); }
+  return futurecash.setGuardian(false);
+}
 ipcMain.handle("mcd:fc", (_e, op, ...args) => { if (typeof op !== "string" || !Object.hasOwn(FC_OPS, op)) throw new Error("Unknown Future Cash action."); requireRunning(); return FC_OPS[op](...args); });
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)

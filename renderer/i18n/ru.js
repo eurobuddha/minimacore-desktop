@@ -4857,3 +4857,13 @@
     "Couldn't read the seed."
   ]
 });
+// ---- Future Cash Next (0.19.181+): generated from the phone's own words where they exist; the rest is in the review list ----
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "Allow background signing": "Разрешить подпись в фоне",
+  "Let Future Cash Next sign by itself?": "Разрешить Future Cash Next подписывать самостоятельно?",
+  "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.": "Пока работает защитник, Future Cash Next подписывает и отправляет транзакции двух видов, когда у экрана никого нет:\n\n• Получение созревшей ставки на её собственный адрес выплаты. Это адрес этого кошелька, и контракт не допускает другого.\n• Перевод монеты с адреса этого кошелька, одноразовый ключ которого использовался больше одного раза или который выведен из оборота, на ваш безопасный адрес:\n{safe}\n\nПрежде чем что-либо подписать, приложение сверяет собственную копию транзакции на узле с этими двумя видами, а всё остальное отклоняет и записывает в журнал. Больше ничего само не подписывается.\n\nВы можете отозвать это в любой момент на вкладке «Защитник» (Подпись в фоне). Защитник тогда остановится."
+}, { review: [
+  "Allow background signing",
+  "Let Future Cash Next sign by itself?",
+  "While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops."
+] });

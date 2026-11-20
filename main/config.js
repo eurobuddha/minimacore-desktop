@@ -79,6 +79,8 @@ const DEFAULTS = {
   coinGuard: true,           // the shared coin reservation (main/reserve.js). false = the whole guard is a passthrough
   coinGuardSends: "observe", // what it does to `send` and `consolidate`: "off" | "observe" (log only, the default) | "enforce"
   frozenApps: [],            // the Apps tab's Freeze: ids of the apps whose background work is stopped (main/freeze.js)
+  fcGrant: {},               // Future Cash Next's ONE native grant, per wallet: { <the wallet's first public key>: ms granted }. Written only by
+                             // setFcGrant (main.js, after the native question); never from a renderer patch (sanitisePatch drops it)
   language: "",              // "en" | "zh" | "ru" | "uk": the language picked in "Language" ("" = the system's when it is one of the four, else English; main/lang.js)
   openAtLogin: false         // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
                              // Every key the renderer saves MUST be declared here — save() drops any key DEFAULTS
@@ -129,6 +131,7 @@ function sanitisePatch(cfg) {
     // Drop LOUDLY. A silent drop is what turned the 0.16.97 casinoDollar regression into a "broken button":
     // the setting could never persist, nothing threw, and nothing said why.
     if (k === "keyMode") continue;   // never from a patch: recordKeyMode() is its only writer
+    if (k === "fcGrant") continue;   // never from a patch: setFcGrant() is its only writer (the native grant, main.js)
     if (!(k in DEFAULTS)) { console.warn("[config] ignoring unknown config key '" + k + "' — add it to DEFAULTS if it should persist"); continue; }
     const v = cfg[k], want = typeof DEFAULTS[k];
     if (k === "params" || k === "labels") { if (v && typeof v === "object" && !Array.isArray(v)) out[k] = v; continue; }
@@ -216,6 +219,18 @@ function effectiveParams() {
   return out;
 }
 
+/** Future Cash Next's grant for one wallet (its first public key): at = ms when the user allowed it, or null to take it back. */
+function setFcGrant(walletKey, at) {
+  if (!/^0x[0-9a-f]{64}$/.test(String(walletKey))) throw new Error("Unknown wallet.");
+  const cur = load(), g = Object.assign({}, cur.fcGrant && typeof cur.fcGrant === "object" ? cur.fcGrant : {});
+  if (at) g[walletKey] = Number(at); else delete g[walletKey];
+  cur.fcGrant = g;
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
+  return g;
+}
+const fcGranted = (walletKey) => { const g = load().fcGrant; return !!(g && typeof g === "object" && Number(g[walletKey]) > 0); };
+
 /** Default node data folder (inside the app's own space, never the repo/cwd). */
 function defaultDataFolder() { return path.join(app.getPath("userData"), "node-data"); }
 
@@ -273,4 +288,4 @@ function setSecret(value, account) {
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }
 
-module.exports = { load, save, recordKeyMode, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+module.exports = { load, save, recordKeyMode, setFcGrant, fcGranted, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
