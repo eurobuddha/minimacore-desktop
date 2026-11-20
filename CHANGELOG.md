@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.138] — Settings: "Signing keys" per key family
+
+- The card showed one "most-used key" for the whole wallet, as "N / cap sigs", choosing between a classic key and a block-based key by share of capacity, and warned at 80% whatever the key was. A classic key's counter is a count of signatures; a block-based key's is its key block position, which follows the chain's block number. The two are not the same kind of figure.
+- Now one line per family the wallet has, with the two shapes `main/keyuses.js` uses (classic 64 / 3 / 262,144; block-based 128 / 4 / 268,435,456): "Classic keys: most-used key: N of 262,144 signatures", with the bar and the warning at 80%; "Block-based keys: key block position: position N of 268,435,456", with a sentence saying what it is, no bar and no warning. Neither is ranked against the other.
+- A key row that is not exactly one of the two shapes with a whole counter shows "could not be read", as before for an unread counter. The footer's fallback (a node whose `keys` answer has no `maxuses` line) takes the classic count when there is one, never the larger of two unlike figures.
+- Tests: `scripts/keyuses-test.cjs` (15).
+
 ## [0.19.137] — KeyUses: what was not checked is said in the verdict; lookups one at a time
 
 - **The verdict says what it does not cover.** "No known key reuse was found in the checked keys." stood alone, with the gap (the keys the same seed gives in the other key mode, and minimaWallet's keys, which the phone checks and the desktop does not) only in the explainer at the bottom. The verdict card now opens with the checked scope and that gap, side by side, for every verdict. The separate scope line above the card is gone (said once).

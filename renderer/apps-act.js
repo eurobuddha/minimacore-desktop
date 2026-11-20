@@ -203,6 +203,38 @@
     COPY: KU, UNAVAILABLE: "The node’s keys could not be read. Check that the node is running, then run the audit again.",
     /** A count the node or the server gave, grouped as the phone groups it; null (nothing was read) is said in words, never as 0. */
     num: function (v) { return typeof v === "number" && isFinite(v) ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "Not read"; },
+    // The two key shapes, as main/keyuses.js SHAPES (a test holds the two copies together). A classic key's counter is a
+    // count of SIGNATURES; a block-based key's is its KEY BLOCK POSITION (it follows the chain's block number), which is
+    // not a count of signatures and is never set beside a classic count.
+    SHAPES: { classic: { size: 64, depth: 3, maxuses: 262144 }, block: { size: 128, depth: 4, maxuses: 268435456 } },
+    /**
+     * The node's key list (`keys action:list`) by family → { classic, block }, each null or { used, cap, count } with
+     * `used` the highest counter of that family. → null when the list is empty or ANY row is not exactly a classic or a
+     * block key with a whole counter: an unread counter is never shown as 0 and no capacity is assumed.
+     */
+    families: function (keys) {
+      var whole = function (v) { if (typeof v === "number") return Number.isSafeInteger(v) ? v : null; return typeof v === "string" && /^-?\d{1,15}(\.0+)?$/.test(v) ? Number(v.split(".")[0]) : null; };
+      if (!Array.isArray(keys) || !keys.length) return null;
+      var out = { classic: null, block: null };
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i] || {}, size = whole(k.size), depth = whole(k.depth), cap = whole(k.maxuses), used = whole(k.uses), fam = null;
+        for (var f in keyuses.SHAPES) if (keyuses.SHAPES[f].size === size && keyuses.SHAPES[f].depth === depth && keyuses.SHAPES[f].maxuses === cap) fam = f;
+        if (!fam || used == null || used < 0) return null;
+        if (!out[fam]) out[fam] = { used: used, cap: cap, count: 0 };
+        out[fam].count++; if (used > out[fam].used) out[fam].used = used;
+      }
+      return out;
+    },
+    /** Settings' "Signing keys" card from families(): one line per family the wallet has. Only a classic line has a share, a bar and the 80% warning. */
+    signing: function (f) {
+      var rows = [], n = function (c) { return keyuses.num(c) + (c === 1 ? " key" : " keys"); };
+      if (f && f.classic) { var pct = Math.min(100, Math.floor(f.classic.used * 100 / f.classic.cap));
+        rows.push({ family: "classic", label: "Classic keys: most-used key", value: keyuses.num(f.classic.used) + " of " + keyuses.num(f.classic.cap) + " signatures · " + n(f.classic.count), pct: pct, warn: pct >= 80,
+          note: pct >= 80 ? "A classic signing key is " + pct + "% used. Generate fresh keys or restore with the correct key uses before it is exhausted." : "" }); }
+      if (f && f.block) rows.push({ family: "block", label: "Block-based keys: key block position", value: "position " + keyuses.num(f.block.used) + " of " + keyuses.num(f.block.cap) + " · " + n(f.block.count), pct: null, warn: false,
+        note: "A block-based key's position follows the chain's block number. It is not a count of signatures, so it is not compared with classic keys." });
+      return rows;
+    },
     /** The status chip of one row (MainActivity.row): → { label, tone: "ok" | "warn" | "risk" }. */
     chip: function (r) {
       if (r.reused) return { label: "REUSED" + (r.reuseCount > 0 ? " ×" + r.reuseCount : ""), tone: r.reuseCount > 3 ? "risk" : "warn" };

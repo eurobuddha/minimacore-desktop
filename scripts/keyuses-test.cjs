@@ -212,16 +212,36 @@ test("the screen: Pandamonium's KeyUses, every identifier whole and copyable, no
   assert.ok(require("../main/freeze.js").FREEZABLE.includes("keyuses"));
 });
 
-test("Settings and the footer (0.19.128): the most-used key is the node's own figure for either mode, and an unread counter shows nothing", () => {
+// 0.19.138 (review): the card ranked a block key's position against classic signature counts and called both "sigs".
+test("Settings' Signing keys: figures and the 80% warning per key family; a block key's position is never called signatures, ranked against classic counts, or warned about", () => {
   const app = R("renderer/app.js"), i = app.indexOf("\nfunction keysInfo(keys) {"), j = app.indexOf("\nfunction maxKeyUses(k) {");
-  const { keysInfo, maxKeyUses } = new Function(app.slice(i, app.indexOf("\n}", i) + 2) + app.slice(j, app.indexOf("\n}", j) + 2) + "\nreturn { keysInfo, maxKeyUses };")();
-  assert.deepEqual(keysInfo({ keys: [classic(0, 12), classic(1, 40), classic(2, 0)] }), { used: 40, cap: 262144, count: 3 });
-  assert.deepEqual(keysInfo({ keys: [block(0, 2428101), block(1, 2428090)] }), { used: 2428101, cap: 268435456, count: 2 }, "a block key is measured against its own capacity, not 262144");
-  assert.deepEqual(keysInfo({ keys: [classic(0, 200000), block(1, 2428101)] }), { used: 200000, cap: 262144, count: 2 }, "of two kinds, the one nearest its own capacity");
-  for (const bad of [null, undefined, {}, { keys: [] }, { keys: "x" }, { keys: [classic(0, undefined)] }, { keys: [classic(0, "many")] }, { keys: [classic(0, 5), classic(1, null)] }, { keys: [classic(0, 5, { maxuses: undefined })] }, { keys: [classic(0, -1)] }, { keys: [classic(0, 1.5)] }])
-    assert.equal(keysInfo(bad), null, JSON.stringify(bad));
+  const { keysInfo, maxKeyUses } = new Function("AppsAct", app.slice(i, app.indexOf("\n", i + 1) + 1) + app.slice(j, app.indexOf("\n}", j) + 2) + "\nreturn { keysInfo, maxKeyUses };")({ keyuses: Act });
+  assert.deepEqual(Act.SHAPES, K.SHAPES, "the same two shapes as main/keyuses.js");
+  assert.deepEqual(keysInfo({ keys: [classic(0, 12), classic(1, 40), classic(2, 0)] }), { classic: { used: 40, cap: 262144, count: 3 }, block: null });
+  assert.deepEqual(keysInfo({ keys: [block(0, 2428101), block(1, 2428090)] }), { classic: null, block: { used: 2428101, cap: 268435456, count: 2 } });
+  const both = keysInfo({ keys: [classic(0, 200000), block(1, 2428101), classic(2, 3)] });
+  assert.deepEqual(both, { classic: { used: 200000, cap: 262144, count: 2 }, block: { used: 2428101, cap: 268435456, count: 1 } }, "each family by itself: 2428101 is not 'more used' than 200000");
+  assert.deepEqual(keysInfo([classic(0, "5"), classic(1, "7.0")]), { classic: { used: 7, cap: 262144, count: 2 }, block: null }, "numbers as the node writes them");
+  for (const bad of [null, undefined, {}, { keys: [] }, { keys: "x" }, { keys: [classic(0, undefined)] }, { keys: [classic(0, "many")] }, { keys: [classic(0, 5), classic(1, null)] }, { keys: [classic(0, 5, { maxuses: undefined })] }, { keys: [classic(0, -1)] }, { keys: [classic(0, 1.5)] },
+    { keys: [classic(0, 5, { size: 128 })] }, { keys: [classic(0, 5, { maxuses: 268435456 })] }, { keys: [block(0, 5, { depth: 3 })] }, { keys: [classic(0, 5), { publickey: PK(1), uses: 1, maxuses: 1000 }] }])
+    assert.equal(keysInfo(bad), null, "not read, or not one of the two shapes: " + JSON.stringify(bad));
+  // the card
+  let rows = Act.signing(keysInfo({ keys: [classic(0, 40), classic(1, 12)] }));
+  assert.deepEqual(rows, [{ family: "classic", label: "Classic keys: most-used key", value: "40 of 262,144 signatures · 2 keys", pct: 0, warn: false, note: "" }]);
+  rows = Act.signing(keysInfo({ keys: [classic(0, 209715)] })); assert.equal(rows[0].pct, 79, "209715 of 262144 is 79.99…%: cut, not rounded up"); assert.equal(rows[0].warn, false);
+  rows = Act.signing(keysInfo({ keys: [classic(0, 209716)] })); assert.equal(rows[0].pct, 80); assert.equal(rows[0].warn, true); assert.equal(rows[0].note, "A classic signing key is 80% used. Generate fresh keys or restore with the correct key uses before it is exhausted."); assert.equal(rows[0].value, "209,716 of 262,144 signatures · 1 key");
+  rows = Act.signing(keysInfo({ keys: [block(0, 2428101), block(1, 2428090)] }));
+  assert.deepEqual(rows, [{ family: "block", label: "Block-based keys: key block position", value: "position 2,428,101 of 268,435,456 · 2 keys", pct: null, warn: false,
+    note: "A block-based key's position follows the chain's block number. It is not a count of signatures, so it is not compared with classic keys." }]);
+  for (const uses of [214748365, 268435455, 268435456]) { const r = Act.signing(keysInfo({ keys: [block(0, uses)] }))[0]; assert.equal(r.warn, false, "a block position at " + uses + " never raises the classic warning"); assert.equal(r.pct, null, "and has no share or bar"); assert.ok(!/sig/i.test(r.label + r.value), "nor the word signatures"); }
+  rows = Act.signing(both); assert.deepEqual(rows.map(r => r.family), ["classic", "block"]); assert.equal(rows[0].pct, 76); assert.equal(rows[0].warn, false, "the block key's larger number does not make the classic line warn");
+  assert.deepEqual(Act.signing(null), []);
+  assert.ok(/\$\{ku \? AppsAct\.keyuses\.signing\(ku\)\.map\(r => /.test(app) && !/sigs ·|Most-used key<\/span>|\$\{esc\(ku\.used\)\} \//.test(app), "the card is drawn from those lines, and the old single 'sigs' line is gone");
+  assert.ok(/\$\{r\.pct == null \? "" : `<div class="health__track">/.test(app) && /r\.warn \? `<div class="status status--warn">⚠ \$\{esc\(r\.note\)\}<\/div>` : `<p class="set-text">\$\{esc\(r\.note\)\}<\/p>`/.test(app));
+  // the footer
   assert.equal(maxKeyUses({ keys: [classic(0, undefined)] }), null, "the footer keeps 'Awaiting blocks…' rather than print 0");
   assert.equal(maxKeyUses(null), null); assert.equal(maxKeyUses({ keys: [classic(0, 7)], maxuses: 8 }), 8, "the node's own maxuses line is shown as the node gave it");
+  assert.equal(maxKeyUses({ keys: [classic(0, 7), block(1, 2428101)] }), 7, "without that line: the classic count, never the larger of two unlike figures"); assert.equal(maxKeyUses({ keys: [block(1, 2428101)] }), 2428101);
   assert.ok(/The node's key uses could not be read\. Nothing is shown rather than a figure that was not read\./.test(app));
   assert.ok(!/parseInt\(k\.uses, 10\) \|\| 0|cap \|\| 262144/.test(app), "no counter defaults to 0 and no capacity to the classic one");
 });

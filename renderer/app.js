@@ -1032,8 +1032,8 @@ function paintFooter(s) {
 function maxKeyUses(k) {
   if (!k) return null;
   if (k.maxuses != null && !Array.isArray(k)) return k.maxuses;
-  const info = keysInfo(k);
-  return info ? info.used : null;
+  const info = keysInfo(k), fam = info && (info.classic || info.block);   // never the larger of the two: a block position is not a signature count
+  return fam ? fam.used : null;
 }
 // ===================== Web Wallet (local, MegaMMR-gated) =====================
 // The screens of the official Minima Web Wallet 2.5.2 (mds/webWallet: its login card, the Balance / Send / Receive tabs, the
@@ -2884,8 +2884,6 @@ async function renderSettings() {
   const host = el("settingsBody");
   const keys = running ? await tryCmd("keys action:list") : null;
   const ku = keysInfo(keys);
-  const pct = ku ? Math.min(100, Math.floor(ku.used * 100 / ku.cap)) : 0;
-  const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
   const kind = CFG.nodeKind === "minima" ? "minima" : "parlons";
   const sec = (title, body, id) => `<div class="eyebrow home-eyebrow">${title}</div><div class="card home-card set-card"${id ? ` id="${id}"` : ""}>${body}</div>`;
@@ -2907,9 +2905,9 @@ async function renderSettings() {
       <div class="home-actions set-actions"><button class="btn btn--outline" id="setKindApply">Apply and restart the node</button></div>
       <div class="status" id="setKindStatus"></div>`) +
     (running ? sec("Signing keys", `<p class="set-text">Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.</p>
-      ${ku ? `<div class="health"><div class="health__row"><span>Most-used key</span><span>${esc(ku.used)} / ${esc(ku.cap)} sigs · ${esc(ku.count)} ${ku.count === 1 ? "key" : "keys"}</span></div>
-        <div class="health__track"><div class="health__fill${warn ? " health__fill--warn" : ""}" style="width:${pct}%"></div></div></div>
-      ${warn ? `<div class="status status--warn">⚠ A signing key is ${pct}% used. Generate fresh keys or restore with the correct key uses before it exhausts.</div>` : ""}`
+      ${ku ? AppsAct.keyuses.signing(ku).map(r => `<div class="health"><div class="health__row"><span>${esc(r.label)}</span><span>${esc(r.value)}</span></div>
+        ${r.pct == null ? "" : `<div class="health__track"><div class="health__fill${r.warn ? " health__fill--warn" : ""}" style="width:${r.pct}%"></div></div>`}</div>
+        ${r.note ? (r.warn ? `<div class="status status--warn">⚠ ${esc(r.note)}</div>` : `<p class="set-text">${esc(r.note)}</p>`) : ""}`).join("")
         : `<div class="status status--warn">The node's key uses could not be read. Nothing is shown rather than a figure that was not read. KeyUses, in the app tray, reads them again.</div>`}`) +
     sec("Address key uses", `<p class="set-text">KeyUses, in the app tray, lists every key of this node with its address and checks each against the chain for one-time signature reuse. It runs only when you press Run audit there.</p>
       <div class="home-actions set-actions"><button class="btn btn--outline" id="kuOpen">Open KeyUses</button></div>`)
@@ -2981,19 +2979,9 @@ async function renderSettings() {
   chanceLeftCard();
   if (el("kuOpen")) el("kuOpen").onclick = () => selectTab("keyuses");
 }
-// The most-used key (by share of its own capacity), in the node's own figures. null when the list is empty or any
-// counter or capacity is not a whole number: an unread counter is never shown as 0 and no capacity is assumed.
-function keysInfo(keys) {
-  const arr = Array.isArray(keys) ? keys : (keys && Array.isArray(keys.keys) ? keys.keys : []);
-  const whole = (v) => (typeof v === "number" ? (Number.isSafeInteger(v) ? v : null) : typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : null);
-  let top = null;
-  for (const k of arr) {
-    const used = whole(k && k.uses), cap = whole(k && k.maxuses);
-    if (used == null || used < 0 || !cap || cap < 0) return null;
-    if (!top || used * top.cap > top.used * cap) top = { used, cap };
-  }
-  return top && { used: top.used, cap: top.cap, count: arr.length };
-}
+// The node's keys by family (AppsAct.keyuses.families): { classic, block }, each null or { used, cap, count }. null when
+// the list is empty or any row is not a classic or block key with a whole counter: nothing is shown that was not read.
+function keysInfo(keys) { return AppsAct.keyuses.families(Array.isArray(keys) ? keys : keys && keys.keys); }
 // ---- Send ------------------------------------------------------------------
 async function renderSend() {
   const card = el("sendCard");
