@@ -267,7 +267,7 @@ async function scanPayments(depth) {
     const refHex = statePort(c, 1); if (!refHex) continue;
     const ref = hexToText(refHex); if (!ref) continue;
     const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;
-    const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN);
+    const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
     if (outcome && outcome !== "ALREADY") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
   }
   return changed;

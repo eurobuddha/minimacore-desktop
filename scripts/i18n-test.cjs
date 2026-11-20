@@ -216,6 +216,7 @@ test("no code decides by matching text that is translated (regex, ===, includes,
   const ALLOW = {
     "renderer/apps-act.js International": "a delivery label as stored and sent (a wire value), compared before it is translated for the screen",
     "renderer/app.js BAD_TOTAL": "a miniMall order state as stored (a wire value), compared before it is translated for the screen",
+    "main/shop-store.js WRONG_TOKEN": "the order state as stored (a wire value), compared in main; never translated there",
     "main/shop.js CONFIRMED": "the order state the vendor asks for (a wire value, sent to the buyer as it is), checked in main; never translated there",
     "main/shop.js DELIVERED": "the order state the vendor asks for (a wire value, sent to the buyer as it is), checked in main; never translated there",
     "renderer/dexicon-ax.js AtomiX is halted": "the AtomiX glue's own refusal (main/atomix.js), which reaches the window in English",

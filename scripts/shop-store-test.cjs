@@ -33,22 +33,43 @@ test("decCmp: exact decimal compare; an unreadable figure is null, never 0", () 
 test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.000000001), the listing decides what is due", () => {
   for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
-    assert.equal(store.recordPayment(ref, "0.000000001", "0x00"), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
-    assert.equal(store.recordPayment(ref, "3.199999999", "0x00"), "PAID", "3.2 received = 3.2 due");
+    assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
+    assert.equal(store.recordPayment(ref, "0xC0002", "3.199999999", "0x00"), "PAID", "3.2 received = 3.2 due");
     assert.equal(store.order(ref).due, "3.2");
   }
   const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
-  assert.equal(store.recordPayment(free, "5", "0x00"), "BAD_TOTAL", "nothing due by the listing: never paid"); assert.equal(store.order(free).paid, false);
-  assert.equal(store.recordPayment(free, "5", "0x00"), "BAD_TOTAL", "and a second coin does not change it"); assert.equal(store.order(free).paidAmount, "10", "what arrived is still recorded");
+  assert.equal(store.recordPayment(free, "0xC0003", "5", "0x00"), "BAD_TOTAL", "nothing due by the listing: never paid"); assert.equal(store.order(free).paid, false);
+  assert.equal(store.recordPayment(free, "0xC0004", "5", "0x00"), "BAD_TOTAL", "and a second coin does not change it"); assert.equal(store.order(free).paidAmount, "10", "what arrived is still recorded");
+});
+
+// ---- 0.19.167 (the phone Inbox 0.5.15): each coin id counted once, for good; a wrong coin never pays and never blocks ----
+test("recordPayment: the same coin id (any letter case) counts once; coins of the right token add up; a coin with no id counts nothing", () => {
+  const ref = sellOrder("3.2");
+  assert.equal(store.recordPayment(ref, "0xB1", "1.6", "0x00"), "UNDERPAID");
+  assert.equal(store.recordPayment(ref, "0xb1", "1.6", "0x00"), null, "the same coin again: nothing counted");
+  assert.equal(store.recordPayment(ref, "0xB1", "1.6", "0x00"), null);
+  assert.equal(store.order(ref).paidAmount, "1.6"); assert.equal(store.order(ref).status, "UNDERPAID");
+  for (const none of ["", null, undefined]) assert.equal(store.recordPayment(ref, none, "9", "0x00"), null, "no coin id: " + none);
+  assert.equal(store.recordPayment(ref, "0xB2", "9", MXUSD), "WRONG_TOKEN");
+  assert.equal(store.order(ref).status, "UNDERPAID", "a wrong coin does not undo a partial payment"); assert.equal(store.order(ref).paidTokenid, "0x00");
+  assert.equal(store.recordPayment(ref, "0xB3", "1.6", "0x00"), "PAID"); assert.equal(store.order(ref).paidAmount, "3.2"); assert.equal(store.order(ref).paid, true);
+  assert.equal(store.recordPayment(ref, "0xB4", "5", "0x00"), "ALREADY", "PAID locks");
+  assert.deepEqual(store.order(ref).coins, ["0xb1", "0xb2", "0xb3"], "the ids are kept on the order, so they survive a restart");
+});
+test("recordPayment: a stranger's tiny coin of another token never blocks the honest payment", () => {
+  const ref = sellOrder("3.2");
+  assert.equal(store.recordPayment(ref, "0xA1", "0.000000001", MXUSD), "WRONG_TOKEN");
+  assert.equal(store.recordPayment(ref, "0xA2", "0.000000001", "0x00"), "UNDERPAID"); assert.equal(store.order(ref).status, "UNDERPAID", "a right-token coin moves WRONG_TOKEN on");
+  assert.equal(store.recordPayment(ref, "0xA3", "3.2", "0x00"), "PAID"); assert.equal(store.order(ref).paid, true); assert.equal(store.order(ref).status, "PAID");
 });
 
 test("recordPayment: exact, cumulative, and only in the order's token", () => {
   let ref = sellOrder("3.2");
-  assert.equal(store.recordPayment(ref, "3.199999999999999999", "0x00"), "UNDERPAID");
-  assert.equal(store.recordPayment(ref, "0.000000000000000001", "0x00"), "PAID");
-  assert.equal(store.recordPayment(ref, "1", "0x00"), "ALREADY");
+  assert.equal(store.recordPayment(ref, "0xC0005", "3.199999999999999999", "0x00"), "UNDERPAID");
+  assert.equal(store.recordPayment(ref, "0xC0006", "0.000000000000000001", "0x00"), "PAID");
+  assert.equal(store.recordPayment(ref, "0xC0007", "1", "0x00"), "ALREADY");
   ref = sellOrder("3.2", MXUSD);
-  assert.equal(store.recordPayment(ref, "100", "0x00"), "WRONG_TOKEN");
+  assert.equal(store.recordPayment(ref, "0xC0008", "100", "0x00"), "WRONG_TOKEN");
 });
 
 // ---- 0.19.166 (released 0.18.159, the phone Inbox 0.5.18 Listing.check): the vendor's own listing ----
@@ -93,7 +114,7 @@ test("listing.check: every way an order departs from the listing is a problem, e
 });
 test("an order that does not match is UNCHECKED, never paid by any amount, and can be confirmed only after the vendor checks it by hand", async () => {
   const ref = sellOrder("1000", "0x00", { items: [{ product: "Tea", quantity: 2, unitPrice: "0.000000001" }] });
-  assert.equal(store.recordPayment(ref, "1000000", "0x00"), "UNCHECKED");
+  assert.equal(store.recordPayment(ref, "0xC0009", "1000000", "0x00"), "UNCHECKED");
   const o = store.order(ref); assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.match(o.problems[0], /is not your price 1\.5/);
   assert.equal(store.mayAdvance(o), false);
   await assert.rejects(shop.advanceStatus(ref, "CONFIRMED"), /Check it by hand first/);
@@ -118,7 +139,7 @@ standIn("main/node-manager.js", { rpcPort: () => 0 });
 standIn("main/rpc.js", { rpcCall: async () => { throw new Error("TEST LEAK: the real rpcCall"); } });
 standIn("main/shopcrypto.js", { ready: async () => {}, loadIdentity: () => ({ publicId: ME }), isValidPublicId: (v) => /^0x[0-9A-F]{64}$/i.test(String(v)), seal: async () => "ab",
   open: async (_id, blob) => ({ valid: true, fromPublicId: BUYER, plaintext: Buffer.from(String(blob).slice(2), "hex") }) });
-const shop = require("../main/shop");
+let shop = require("../main/shop");
 const hex = (s) => "0x" + Buffer.from(s, "utf8").toString("hex");
 /** One scan in which the MINIMERCH channel carries `orders` (wire objects from BUYER) and my address the `pays` coins ({ coinid, ref, amount, tokenid }). */
 async function scan(orders, pays) {
@@ -153,4 +174,17 @@ test("vendor: a phone-placed order to my shop is checked against my listing and 
   await scan([], [{ coinid: "0xD202", ref: "ORD-PHONE1", amount: "3.199999999", tokenid: "0x00" }]);
   o = store.order("ORD-PHONE1"); assert.equal(o.paid, true); assert.equal(o.status, "PAID");
   const listed = shop.ordersList().find(x => x.ref === "ORD-PHONE1"); assert.equal(listed.due, "3.2"); assert.equal(listed.unchecked, false);
+});
+
+// ---- 0.19.167: a restart forgets which coins the scan has seen; the store does not ----
+test("vendor: after a restart the same payment coin is seen again and is not counted twice", async () => {
+  const order = { type: "ORDER", ref: "ORD-AGAIN", shopId: "tea", shopName: "Tea", items: [{ product: "Tea", quantity: 2, unitPrice: "1.5" }], amount: "3.2", currency: "Minima", tokenid: "0x00", shipping: "Domestic" };
+  const half = [{ coinid: "0xE1", ref: "ORD-AGAIN", amount: "1.6", tokenid: "0x00" }];
+  await scan([order], half);
+  assert.equal(store.order("ORD-AGAIN").status, "UNDERPAID"); assert.equal(store.order("ORD-AGAIN").paidAmount, "1.6");
+  const p = require.resolve("../main/shop"); delete require.cache[p];
+  const before = shop; shop = require("../main/shop"); assert.notEqual(shop, before, "a fresh main/shop.js: its seen-coin set is empty");
+  await scan([], half);
+  const o = store.order("ORD-AGAIN");
+  assert.equal(o.paidAmount, "1.6", "the same 1.6 coin did not count again"); assert.equal(o.paid, false); assert.equal(o.status, "UNDERPAID");
 });

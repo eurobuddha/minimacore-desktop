@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.167] — miniMall vendor: each payment coin counts once, also after a restart
+
+- **Checked against the phone (read only):** the Inbox 0.5.15 (`apks/merchinbox-fix-2026-11-20`, `e2900eb9b3f8f74763c180fe602d41dd97c516c7`): coins of the order currency's token add up, each coin id counted once, and a wrong coin never pays or blocks. The desktop's `recordPayment` summed coins but knew no coin id: the only guard was the scan's in-memory "seen" set, which is empty after every restart (and cleared at 40,000 coins), and the first scan after a start reads the vendor's address again at its deepest (`depth:256`). An order paid in part was counted again at each restart, so a buyer who paid half saw it PAID after one restart of the vendor's app.
+- **Now:** `recordPayment(ref, coinid, amount, tokenid)` keeps every counted coin id (lower case) on the order itself, in the store, and a coin it has counted gives nothing; a call with no coin id counts nothing. `scanPayments` passes the coin's id. As on the phone, a coin of another token never pays and never blocks: it does not undo a partial payment, the token shown stays the right one once a right coin has come, and a right-token coin moves `WRONG_TOKEN` on (it stayed `WRONG_TOKEN` before). Only PAID locks the order.
+- **Not in the released desktop:** `desktop/minimacore-desktop-sec` (0.18.159) has the same restart double count; nothing there was changed.
+- **Pins:** `main/shop.js` and `main/shop-store.js` are sha256-pinned in `scripts/apps-money.test.cjs`; both pins are updated on purpose to these files.
+- Tests (`scripts/shop-store-test.cjs`): the same coin id in either letter case counts once, coins of the right token add up to PAID, a coin with no id counts nothing, a wrong coin after a partial payment keeps UNDERPAID, a stranger's tiny wrong coin then the honest payment is PAID, PAID locks; and through the real `main/shop.js` loaded afresh (an empty seen set, as after a restart) the same half payment is not counted twice. They fail on 0.19.166.
+
 ## [0.19.166] — miniMall vendor: an order is due what the vendor's own listing says
 
 - **Ported from the released desktop (read only):** `desktop/minimacore-desktop-sec` 0.18.159 (`1b7f8e8a836e67f7469f65d32e2f6828826129d9`, branch `security/backport-2026-11-20`), itself the rule of the phone Inbox 0.5.18 `Listing.check` (`apks/merchinbox-fix-2026-11-20`, `edb77da9c82a4197c04580f49e917505c1fa79e2`). An incoming order's items, prices and total were the buyer's own figures, so a buyer could write a total of 0.000000001 for real goods, pay that and see the order PAID.

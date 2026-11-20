@@ -113,24 +113,34 @@ function ensureChecked(o) {
   o.due = c.problems.length ? "" : c.due; o.problems = c.problems;
   return o;
 }
-/** Record a matched payment against an order. Accumulates across coins (decimal-safe). The buyer's own total is never
- *  what is compared (0.19.166, released 0.18.159): PAID iff the token matches AND the order matches the vendor's listing
- *  AND the CUMULATIVE paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED and is
- *  never paid (the vendor checks it by hand: handCheck); one due 0 or less, or not a readable figure, is BAD_TOTAL.
- *  Never clobbers a vendor-progressed status (CONFIRMED+). */
-function recordPayment(ref, paidAmount, paidTokenid) {
+/** Record ONE payment coin against an order. Coins of the order's token add up (decimal-safe), each coin id counted once
+ *  for good: the ids are kept on the order, so a coin seen again after a restart, or once the in-memory "seen" set is
+ *  cleared, never counts twice (0.19.167, as the phone Inbox 0.5.15, e2900eb9b3f8f74763c180fe602d41dd97c516c7). The
+ *  buyer's own total is never what is compared (0.19.166, released 0.18.159): PAID iff the order matches the vendor's
+ *  listing AND the CUMULATIVE paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED
+ *  and is never paid (the vendor checks it by hand: handCheck); one due 0 or less, or not a readable figure, is BAD_TOTAL.
+ *  A coin of another token never pays and never blocks a later honest payment (anyone can stamp a ref on a tiny coin): it
+ *  does not undo a partial payment, and a right-token coin moves WRONG_TOKEN on. Only PAID locks the order. Never
+ *  clobbers a vendor-progressed status (CONFIRMED+). → the outcome, "ALREADY" when paid, or null (no such order, no coin
+ *  id, or this coin counted before). */
+function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   ensureLoaded(); const o = mem.orders[ref]; if (!o) return null;
   if (o.paid) return "ALREADY";
+  const id = String(coinid == null ? "" : coinid).toLowerCase();
+  if (!id) return null;
+  o.coins = Array.isArray(o.coins) ? o.coins : [];
+  if (o.coins.includes(id)) return null;
+  o.coins.push(id);
   ensureChecked(o);
   if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {
-    o.paidTokenid = paidTokenid;
+    if (!o.paidAmount) o.paidTokenid = paidTokenid;   // shown only while no coin of the right token has come
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
   const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") o.paid = true;
-  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
+  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+
   flush(); return outcome;
 }
 /** The vendor's explicit "I checked this order by hand" for an order that does not match the listing: only then can it

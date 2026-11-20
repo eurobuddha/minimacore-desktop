@@ -339,8 +339,9 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // Each pin is a file CHANGED ON PURPOSE, never by a screen change: main/shop.js in 0.19.118 (the token paid follows the currency; a
   // mismatching tokenid is refused; plain amounts) 0.19.165 (an incoming order is paid in the token of the vendor's own shop) and 0.19.166 (what is due is the vendor's own listing's;
   // Confirm / Ship / Deliver only when paid or checked by hand); main/shop-store.js in 0.19.164 (an unreadable, zero or negative total is never
-  // paid: BAD_TOTAL) and 0.19.166 (paid by what the listing says is due; UNCHECKED; handCheck)
-  for (const [f, want, ver] of [["main/shop.js", "902c4efe3e19325ed284e3aec6aaedbc4015ba51aa4e527c001cb2327a2bc45f", "0.19.166"], ["main/shop-store.js", "a9b81634bc4c194b3f7acd818a38dae603b9b70e5d57b466e525ec9f0edfed8f", "0.19.166"],
+  // paid: BAD_TOTAL) and 0.19.166 (paid by what the listing says is due; UNCHECKED; handCheck); both in 0.19.167 (each payment coin id counted once,
+  // kept on the order; a wrong coin never pays or blocks)
+  for (const [f, want, ver] of [["main/shop.js", "6c1c237a26b07ed0317d1255b0bdf2fdfa07973a9d26f1d99866df93f79e6b44", "0.19.167"], ["main/shop-store.js", "c895d957b8aa7117229cae0bef483cb252405b35af39a939e4ecac038bb48c6d", "0.19.167"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 
