@@ -62,5 +62,64 @@
     collect: function (api, coinid, typed) { return api.vestrCollect(coinid, fee(typed)).then(function (r) { return r || { ok: true }; }, errOf); }
   };
 
-  return { eth: eth, vestr: vestr };
+  // ---- miniMall (main/shop.js) ----
+  // The figures an order carries are built exactly as the screens before built them (six decimals, as the phone apps send).
+  var MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  var shop = {
+    /** The label of a shop's currency: the wire value "USDT" is MxUSD on Minima. */
+    cur: function (c) { return /^(usdt|mxusdt)$/i.test(String(c)) ? "MxUSD" : String(c == null ? "" : c); },
+    slug: function (s) { return String(s || "shop").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shop"; },
+    standardShipping: function () { return [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0" }, { id: "international", label: "International", fee: "0" }]; },
+    normalizeShipping: function (list) { var by = {}; (list || []).forEach(function (s) { if (s && s.id) by[s.id] = s; }); return shop.standardShipping().map(function (std) { return { id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") }; }); },
+    shipOf: function (s, shipId) { if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(function (x) { return x.id === shipId; }) || s.shipping[0]; },
+    /** shipId "none": the items alone. */
+    cartTotal: function (s, cart, shipId) {
+      if (!s) return 0; var t = 0;
+      (s.products || []).forEach(function (p) { var q = cart[p.id] || 0; if (q) t += q * Number(p.price); });
+      var ship = shipId === "none" ? null : shop.shipOf(s, shipId); if (ship) t += Number(ship.fee) || 0;
+      return t;
+    },
+    orderItems: function (s, cart) { return (s.products || []).filter(function (p) { return cart[p.id]; }).map(function (p) { return { product: p.name, quantity: cart[p.id], unitPrice: String(p.price), lineTotal: (cart[p.id] * Number(p.price)).toFixed(6) }; }); },
+    /** Checkout. ui.confirm(title, text) -> bool (the original's "Pay …?" question). → { ref, payError } | { cancelled } | { err[, refused] }. */
+    place: function (api, ui, s, cart, shipId, delivery, note) {
+      var items = shop.orderItems(s, cart);
+      if (!items.length) return Promise.resolve({ err: "Cart is empty.", refused: true });
+      delivery = text(delivery); note = text(note);
+      if (!delivery) return Promise.resolve({ err: "Add a delivery address.", refused: true });
+      var ship = shop.shipOf(s, shipId), total = shop.cartTotal(s, cart, shipId).toFixed(6), cur = shop.cur(s.currency);
+      return Promise.resolve(ui.confirm("Pay " + total + " " + cur + "?", "This sends your encrypted order to " + s.shopName + " and pays " + total + " " + cur + ". Payment is final.")).then(function (yes) {
+        if (!yes) return { cancelled: true };
+        if (ui.busy) ui.busy();
+        return api.shopPlaceOrder(s, items, total, ship ? ship.label : "", delivery, note).catch(errOf);
+      });
+    },
+    retryPay: function (api, ref) { return api.shopRetryPay(ref).then(function () { return { ok: true }; }, errOf); },
+    /** The one status a vendor may set next (the screens before allowed exactly this): none before payment, none for an enquiry. */
+    nextStatus: function (o) {
+      if (!o || o.status === "INQUIRY" || !o.paid) return null;
+      var rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 }, cur = rank[o.status] != null ? rank[o.status] : -1;
+      return ["CONFIRMED", "SHIPPED", "DELIVERED"][cur + 1] || null;
+    },
+    advance: function (api, ref, status) { return api.shopAdvance(ref, status).then(function () { return { ok: true }; }, errOf); },
+    /** → null when there is nothing to send. */
+    reply: function (api, ref, typed) { var t = text(typed); if (!t) return Promise.resolve(null); return api.shopReply(ref, t).then(function () { return { ok: true }; }, errOf); },
+    /** The .shop a Studio draft becomes. */
+    cfgOf: function (d) {
+      return { shopName: d.shopName, shopId: d.shopId || shop.slug(d.shopName), vendorPublicId: d.vendorPublicId, vendorAddress: d.vendorAddress,
+        currency: d.currency, tokenid: d.currency === "Minima" ? "0x00" : MXUSD,
+        shipping: shop.normalizeShipping(d.shipping),
+        products: d.products.filter(function (p) { return p.name && Number(p.price) > 0; }).map(function (p) { return { id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price), maxUnits: String(Number(p.maxUnits) || 10), image: p.image || "" }; }) };
+    },
+    save: function (api, d) {
+      if (!d.shopName) return Promise.resolve({ err: "Give the shop a name" });
+      if (!d.products.length) return Promise.resolve({ err: "Add at least one product" });
+      var cfg = shop.cfgOf(d), wasNew = !d.shopId;
+      return api.shopSave(cfg).then(function () {
+        if (!wasNew) return { ok: true };
+        return api.shopExport(JSON.stringify(cfg, null, 2), cfg.shopId).then(function (p) { return { ok: true, exported: p || "" }; });
+      }).catch(errOf);
+    }
+  };
+
+  return { eth: eth, vestr: vestr, shop: shop };
 });

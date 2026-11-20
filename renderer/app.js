@@ -3475,14 +3475,27 @@ function onEthWalletUpdate() {
   }, 400);
 }
 
-// ============================ miniMall (shop · studio · orders) ============================
-let shopView = "orders";        // orders | shop | studio
+// ============================ miniMall ============================
+// Three Android apps in one tray app, as Pandamonium's MallActivity presents them: a launcher with three cards, each opening
+// its app's own screens (apks/merchshop "miniMall", apks/merchstudio "miniMall Studio", apks/merchinbox "miniMall Inbox";
+// each Design.java: #0A0A0F / #15151F / #1F1F2B, accent #F7931A), over main/shop.js. What orders, pays, marks and saves is
+// in renderer/apps-act.js (AppsAct.shop), pinned against the screens this replaced by scripts/apps-money.test.cjs.
+// The dollar token is MxUSD on every label; the value on the wire and in a .shop file stays "USDT".
+// Owed (main/shop.js cannot do them): Studio's NFTs tab and StateNFT collections, the Inbox's NFT delivery and its CSV
+// export, enquiries from a storefront, and keeping the buyer's list of added shops across restarts.
+let shopView = "home";          // home | shop | studio | inbox
+let shopNav = {};               // the open screen inside a section: { screen, ref, pi }
 let shopIdentity = null;        // { publicId, vendorAddress }
-let shopLoaded = null;          // the .shop config open in the Shop viewer
+let shopLoaded = null;          // the .shop open in the storefront
+let shopAdded = [];             // shops added in miniMall this session
 let shopCart = {};              // productId → qty
-let shopOrderRef = null;        // open order detail
-let shopDraft = null;           // Studio: the shop config being authored
+let shopShipId = null;
+let shopFilter = "ALL";         // the Inbox's status chip
+let shopDraft = null;           // Studio: the shop being built
 let shopUpdateTimer = null;
+const SHOP = AppsAct.shop;
+const SHOP_PILL = { DELIVERED: "#2ECC71", SHIPPED: "#2ECC71", PAID: "#F7931A", CONFIRMED: "#F7931A", UNDERPAID: "#E74C3C", WRONG_TOKEN: "#E74C3C" };
+const SHOP_APPS = [["shop", "miniMall", "Browse your shops, place orders and track deliveries."], ["studio", "miniMall Studio", "Build a storefront for your products."], ["inbox", "miniMall Inbox", "Manage customer orders, payments and deliveries."]];
 
 async function onShopUpdate() {
   if (shopUpdateTimer) clearTimeout(shopUpdateTimer);
@@ -3490,256 +3503,240 @@ async function onShopUpdate() {
     refreshShopBadge();
     if (activeView !== "minimall") return;
     if (el("shopBody") && el("shopBody").querySelector("input:focus, textarea:focus")) return;   // never stomp a form
-    if (shopView === "orders") renderShopSub();
+    if ([...document.querySelectorAll(".overlay")].some(o => getComputedStyle(o).display !== "none")) return;
+    if ((shopView === "inbox" || shopView === "shop") && (shopNav.screen === "orders" || shopNav.screen === "order" || (shopView === "inbox" && !shopNav.screen))) renderMiniMall();
   }, 350);
 }
 async function refreshShopBadge() {
   try { const n = await api.shopNewCount(); const b = el("shopBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; paintTrayDot(); } catch (e) {}
 }
+function shopGo(view, nav) { shopView = view; shopNav = nav || {}; renderMiniMall(); }
+function shopPill(status) { const s = status === "INQUIRY" ? "ENQUIRY" : String(status || ""); return `<span class="mm-pill" style="background:${SHOP_PILL[status] || "#9A9AA8"}">${esc(s)}</span>`; }
+function shopAgo(ms) { const d = Date.now() - (Number(ms) || 0); return d < 60000 ? "just now" : d < 3600000 ? Math.floor(d / 60000) + "m ago" : d < 86400000 ? Math.floor(d / 3600000) + "h ago" : Math.floor(d / 86400000) + "d ago"; }
+/** A screen of one of the three apps: its bar (back, title, icons on the right), then the page. */
+function shopFrame(title, back, icons, body, foot) {
+  el("shopBody").innerHTML = `<div class="mm"><div class="mm-bar">${back ? `<button class="mm-bar__b" id="mmBack" aria-label="Back">‹</button>` : ""}<span class="mm-bar__t">${esc(title)}</span>
+      ${(icons || []).map(([id, glyph, label]) => `<button class="mm-bar__b" id="${id}" aria-label="${esc(label)}" title="${esc(label)}">${glyph}</button>`).join("")}</div>
+    <div class="mm-page" id="shopSub">${body}</div>${foot || ""}</div>`;
+  if (back) el("mmBack").onclick = back;
+  cardKeys(el("shopBody"));
+}
+const shopSay = (e) => toast((e && e.message) || String(e || "failed"), "warn");
 
 async function renderMiniMall() {
   const host = el("shopBody"); if (!host) return;
-  if (!shopIdentity) { try { shopIdentity = await api.shopInit(); } catch (e) {} }
-  const tab = (v, label) => `<button class="btn btn--sm ${shopView === v ? "btn--primary" : "btn--outline"}" data-shopview="${v}">${label}</button>`;
-  host.innerHTML = `<div class="view__title" style="border:0;padding-bottom:2px">miniMall</div>
-    <div class="view__desc" style="margin-top:0">Your on-chain shops — author, sell, and receive orders. Interoperates with the miniMall apps on the same network.</div>
-    <div class="seg" style="margin-bottom:10px">${tab("orders", "Orders")}${tab("shop", "Shop")}${tab("studio", "Studio")}</div>
-    <div id="shopSub"></div>`;
-  document.querySelectorAll("#shopBody [data-shopview]").forEach(b => b.onclick = () => { shopView = b.dataset.shopview; shopOrderRef = null; renderMiniMall(); });
-  renderShopSub();
-}
-function renderShopSub() {
-  if (shopView === "orders") renderShopOrders();
-  else if (shopView === "shop") renderShopBrowse();
-  else renderShopStudio();
-}
-function shopStatusPill(status, unpaid) {
-  const cls = ({ DELIVERED: "ok", SHIPPED: "ok", PAID: "acc", CONFIRMED: "acc", UNDERPAID: "warn", WRONG_TOKEN: "warn" })[status] || "";
-  const label = unpaid && status === "PENDING" ? "unpaid" : String(status || "").toLowerCase();
-  return `<span class="shop-pill ${cls}">${esc(label)}</span>`;
+  if (!shopIdentity && running) { try { shopIdentity = await api.shopInit(); } catch (e) {} }
+  if (shopView === "shop") return renderShopApp();
+  if (shopView === "studio") return renderShopStudio();
+  if (shopView === "inbox") return renderShopInbox();
+  // Pandamonium's launcher page (MallActivity): its own colours, not the three apps'
+  host.innerHTML = `<div class="mall"><h1 class="mall__t">miniMall</h1><div class="mall__d">Shop, create storefronts and manage orders.</div>
+    ${SHOP_APPS.map(([id, name, d]) => `<div class="mall__card" role="button" tabindex="0" data-mall="${id}"><img class="mall__ic" src="icons/minimall.png" alt="" />
+      <div class="mall__main"><div class="mall__n">${name}${id === "inbox" ? `<span class="tab-badge" id="mallNew" hidden></span>` : ""}</div><div class="mall__s">${d}</div></div><span class="mall__go" aria-hidden="true">›</span></div>`).join("")}</div>`;
+  cardKeys(host);
+  host.querySelectorAll("[data-mall]").forEach(c => { c.onclick = () => { if (!running) { toast("Start the node first", "warn"); return; } shopGo(c.dataset.mall); }; });
+  api.shopNewCount().then(n => { const b = el("mallNew"); if (b && n > 0) { b.textContent = n; b.hidden = false; } }).catch(() => {});
 }
 
-// ---- Orders (miniMail): Selling (incoming to my shops) + Buying (my placed orders) ----
-async function renderShopOrders() {
-  const host = el("shopSub"); if (!host) return;
-  if (shopOrderRef) return renderShopOrderDetail(shopOrderRef);
-  const orders = await api.shopOrders().catch(() => []);
-  const id = shopIdentity ? idHtml(shopIdentity.publicId) : "…";   // RULE 1: the whole id, one click to copy (axShort left with the AtomiX panel)
-  if (!orders.length) { host.innerHTML = `<div class="card"><div class="empty">No orders yet. Orders to your shops (Selling) and orders you place (Buying) both land here.<br>Your shop id: ${id}</div></div>`; return; }
-  const row = o => `<div class="card shop-order" data-oref="${esc(o.ref)}"><div class="row" style="justify-content:space-between;align-items:flex-start">
-      <div><span class="mono">${esc(o.ref)}</span>${o.unread ? ' <span class="shop-dot"></span>' : ""}<div class="view__desc" style="margin:2px 0 0">${esc(o.shopName || "")}</div></div>
-      <div style="text-align:right"><div class="mono">${esc(o.amount)} ${esc(o.currency)}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
-  const sec = (title, list) => list.length ? `<div class="ax-seclabel">${title}</div>` + list.map(row).join("") : "";
-  host.innerHTML = sec("SELLING · orders to your shops", orders.filter(o => o.role === "sell")) + sec("BUYING · orders you placed", orders.filter(o => o.role === "buy"));
-  host.querySelectorAll("[data-oref]").forEach(r => r.onclick = () => { shopOrderRef = r.dataset.oref; renderShopOrders(); });
+// ---------------- miniMall Inbox (merchinbox): the orders customers placed with my shops ----------------
+async function renderShopInbox() {
+  if (shopNav.screen === "order") return renderShopSellOrder(shopNav.ref);
+  const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []);
+  const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
+  shopFrame(mine.length === 1 ? mine[0].shopName : "Orders", () => shopGo("home"), [["mmCard", "≡", "Vendor Card"]],
+    `<div class="mm-ver">miniMall Inbox</div>
+     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? "✓ Ready to receive orders  ·  shop key " + idHtml(shopIdentity.publicId) : "Connecting to your node…"}</div>
+     <div class="mm-chips">${["ALL", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${s}</button>`).join("")}</div>
+     ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
+        <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.amount)} ${esc(SHOP.cur(o.currency))}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
+  el("mmCard").onclick = shopVendorCard;
+  el("shopSub").querySelectorAll("[data-chip]").forEach(c => { c.onclick = () => { shopFilter = c.dataset.chip; renderShopInbox(); }; });
+  el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("inbox", { screen: "order", ref: r.dataset.oref }); });
 }
-async function renderShopOrderDetail(ref) {
-  const host = el("shopSub"); if (!host) return;
+async function shopVendorCard() {
+  const card = await api.shopVendorCard().catch(() => "");
+  if (!card) { toast("Connect to your node first.", "warn"); return; }
+  let qr = ""; if (typeof qrcode !== "undefined") { try { const q = qrcode(0, "L"); q.addData(card); q.make(); qr = `<div class="ew-qr">${q.createImgTag(3, 0)}</div>`; } catch (e) {} }
+  appDlg({ title: "Vendor Card", body: `<p>This is your public shop key + receiving address. It is safe to share: a shop you build in miniMall Studio carries it, so that orders reach you.</p>${qr}<div class="ew-mono ew-sel">${esc(card)}</div>`,
+    buttons: [{ label: "Close", v: null }, { label: "Copy", on: () => { api.clip(card); toast("Copied", "ok"); } }] });
+}
+function shopThread(chat, them) { return (chat || []).map(m => `<div class="mm-msg${m.incoming ? "" : " mm-msg--me"}">${m.incoming ? them : "You"}: ${esc(m.message)}</div>`).join(""); }
+function shopItems(o) { return (o.items || []).map(i => `<div>• ${esc(i.product)}${i.size ? " (" + esc(i.size) + ")" : ""}  x${esc(String(i.quantity))}  = ${esc(i.lineTotal || "")}</div>`).join("") || "<div>(no items listed)</div>"; }
+const shopKv = (k, v, copyable) => `<div class="mm-kv"><span>${k}</span>${copyable ? `<button class="mm-kv__v mm-kv__v--copy" data-copy="${esc(v)}">${esc(v)}</button>` : `<span class="mm-kv__v">${esc(v)}</span>`}</div>`;
+async function renderShopSellOrder(ref) {
   const d = await api.shopOrder(ref).catch(() => null);
-  if (!d || !d.order) { shopOrderRef = null; return renderShopOrders(); }
-  const o = d.order, isSell = o.role === "sell";
-  const items = (o.items || []).map(i => `<div class="row" style="justify-content:space-between"><span>${esc(i.product)}${i.size ? " · " + esc(i.size) : ""} × ${esc(String(i.quantity))}</span><span class="mono">${esc(i.lineTotal || "")}</span></div>`).join("");
-  const chat = (d.chat || []).map(m => `<div class="mail-bubble ${m.incoming ? "" : "mail-bubble--me"}"><div class="mail-bubble__body">${esc(m.message)}</div></div>`).join("");
-  host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBack">← Orders</button>
-    <div class="card" style="margin-top:8px"><div class="card__title">${esc(o.ref)} · ${isSell ? "incoming order" : "your order"}</div>
-      ${shopStatusPill(o.status, d.unpaid)}
-      <div class="view__desc" style="margin-top:6px">${esc(o.shopName || "")}</div>${items}
-      <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>Total</span><span class="mono">${esc(o.amount)} ${esc(o.currency)}</span></div>
-      ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
-      ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
-      ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : "Awaiting payment"}</div>` : ""}
-      ${(!isSell && d.ambiguous) ? `<div class="shop-warn" style="margin-top:8px">⚠ The payment timed out — it may already have gone through. Check your Balance/History before sending again, to avoid paying twice.</div>` : ""}
-      ${(!isSell && d.unpaid && !d.ambiguous && !o.paid) ? `<button class="btn btn--primary btn--full" id="shopRetry" style="margin-top:8px">Retry payment</button>` : ""}
-      ${isSell ? shopAdvanceRow(o) : ""}
-    </div>
-    <div class="card"><div class="card__title">Messages</div><div class="mail-thread" style="max-height:200px;overflow:auto">${chat || '<div class="empty">No messages yet.</div>'}</div>
-      <div class="row" style="margin-top:8px;gap:6px"><input class="field__input" id="shopMsg" placeholder="Message the ${isSell ? "buyer" : "vendor"}…" style="flex:1" autocomplete="off"/><button class="btn btn--outline btn--sm" id="shopSend">Send</button></div>
-    </div>`;
-  el("shopBack").onclick = () => { shopOrderRef = null; renderShopOrders(); };
-  if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; try { await api.shopRetryPay(ref); toast("Payment sent ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
-  el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
-  document.querySelectorAll("[data-advance]").forEach(b => b.onclick = async () => { b.disabled = true; try { await api.shopAdvance(ref, b.dataset.advance); toast("Status updated ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); });
+  if (!d || !d.order || d.order.role !== "sell") { shopFrame("Orders", () => shopGo("inbox"), [], `<div class="mm-empty">Order not found.</div>`); return; }
+  const o = d.order, cur = SHOP.cur(o.currency), enquiry = o.status === "INQUIRY", next = SHOP.nextStatus(o);
+  shopFrame((o.items && o.items[0] && o.items[0].product) || o.ref, () => shopGo("inbox"), [],
+    `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? "  paid " + esc(o.paidAmount || o.amount) + " " + esc(cur) : "  awaiting payment"}</span></div>
+     <div class="mm-sec">Items</div><div class="mm-card">${shopItems(o)}</div>
+     ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Shop", o.shopName || "")}
+     <div class="mm-sec">Delivery</div>${shopKv("Method", o.shipping || "—")}${shopKv("Address", o.delivery || "—", !!o.delivery)}
+     ${o.note ? `<div class="mm-sec">Buyer note</div><div class="mm-card">${esc(o.note)}</div>` : ""}
+     ${shopKv("Buyer key", o.counterparty || "", true)}
+     ${enquiry ? "" : `<div class="mm-sec">Update status</div><div class="mm-grid">${["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${s}</button>`).join("")}</div>
+       <div class="mm-hint">${!o.paid ? "Awaiting payment first. PAID is set by the payment itself, when it arrives." : next ? "Next: " + next + "." : "This order is delivered."}</div>`}
+     <div class="mm-sec">${enquiry ? "Conversation" : "Message the buyer"}</div><div class="mm-thread">${shopThread(d.chat, "Buyer")}</div>
+     <div class="mm-send"><input class="mm-in-f" id="shopMsg" placeholder="Reply…" aria-label="Reply" autocomplete="off" /><button class="mm-btn" id="shopSend">Send</button></div>`);
+  shopWireOrder(ref, () => renderShopSellOrder(ref));
 }
-function shopAdvanceRow(o) {
-  if (o.status === "INQUIRY") return "";
-  if (!o.paid) return `<div class="view__desc" style="margin-top:8px">Awaiting payment before you can confirm.</div>`;
-  const flow = ["CONFIRMED", "SHIPPED", "DELIVERED"], rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 };
-  const cur = rank[o.status] != null ? rank[o.status] : -1, next = flow[cur + 1];
-  if (!next) return `<div class="view__desc" style="margin-top:8px">Order delivered ✓</div>`;
-  return `<button class="btn btn--primary btn--full" data-advance="${next}" style="margin-top:8px">Mark ${next.toLowerCase()}</button>`;
+function shopWireOrder(ref, again) {
+  el("shopSub").querySelectorAll("[data-copy]").forEach(b => { b.onclick = () => copy(b.dataset.copy); });
+  el("shopSub").querySelectorAll("[data-advance]").forEach(b => { b.onclick = async () => { b.disabled = true; const r = await SHOP.advance(api, ref, b.dataset.advance); if (r.err) shopSay(r.err); else toast("Marked " + b.dataset.advance, "ok"); again(); }; });
+  const send = async () => { const r = await SHOP.reply(api, ref, el("shopMsg").value); if (r && r.err) { toast("Reply failed: " + r.err, "warn"); return; } if (r) again(); };
+  el("shopSend").onclick = send; el("shopMsg").onkeydown = (e) => { if (e.key === "Enter") send(); };
+  if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; const r = await SHOP.retryPay(api, ref); if (r.err) toast("Payment failed: " + r.err, "warn"); else toast("Payment sent.", "ok"); again(); };
 }
 
-// ---- Shop viewer: load a .shop → storefront → cart → checkout → order + payment ----
-async function renderShopBrowse() {
-  const host = el("shopSub"); if (!host) return;
-  if (!shopLoaded) {
-    const mine = await api.shopMyShops().catch(() => []);
-    host.innerHTML = `<div class="card"><div class="card__title">Open a shop</div>
-      <div class="view__desc">Load a <span class="mono">.shop</span> a vendor shared with you, or preview one of yours.</div>
-      <button class="btn btn--primary btn--full" id="shopOpenFile" style="margin-top:8px">Open a .shop file…</button></div>
-      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card shop-order" data-openmine="${esc(s.shopId)}"><div class="row" style="justify-content:space-between"><span>${esc(s.shopName)}</span><span class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</span></div></div>`).join("") : ""}`;
-    el("shopOpenFile").onclick = async () => { try { const cfg = await api.shopImport(); if (cfg) { shopLoaded = cfg; shopCart = {}; renderShopBrowse(); } } catch (e) { toast(e.message || "not a valid .shop", "warn"); } };
-    host.querySelectorAll("[data-openmine]").forEach(c => c.onclick = async () => { const mine2 = await api.shopMyShops(); shopLoaded = mine2.find(s => s.shopId === c.dataset.openmine); shopCart = {}; renderShopBrowse(); });
-    return;
-  }
-  const s = shopLoaded;
-  const cartCount = Object.values(shopCart).reduce((a, b) => a + b, 0);
-  const grid = (s.products || []).map(p => {
-    const qty = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99;
-    return `<div class="card shop-prod">
-      <div class="shop-prod-imgwrap" data-open="${esc(p.id)}" title="View details">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-prod-img shop-prod-noimg">🛍</div>`}<span class="shop-zoom">⤢</span></div>
-      <div class="shop-prod-name" data-open="${esc(p.id)}">${esc(p.name)}</div>
-      <div class="view__desc shop-prod-desc">${esc(p.description || "")}</div>
-      <div class="shop-prod-price mono">${esc(p.price)} ${esc(s.currency)}</div>
-      ${shopStepper(p.id, qty, cap)}
-    </div>`;
-  }).join("");
-  host.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><div><div class="card__title" style="margin:0">${esc(s.shopName)}</div><div class="view__desc">pays in ${esc(s.currency)}</div></div><button class="btn btn--sm btn--outline" id="shopClose">Close</button></div>
-    <div class="shop-grid">${grid}</div>
-    ${cartCount ? `<div class="shop-cartbar"><span>${cartCount} item(s) · <span class="mono">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></span><button class="btn btn--primary btn--sm" id="shopCheckout">Checkout</button></div>` : ""}`;
-  el("shopClose").onclick = () => { shopLoaded = null; shopCart = {}; renderShopBrowse(); };
-  host.querySelectorAll("[data-open]").forEach(e => e.onclick = () => shopProductModal(e.dataset.open));
-  host.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { const id = b.dataset.inc, cap = shopCapOf(id); shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); renderShopBrowse(); });
-  host.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const id = b.dataset.dec; shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; renderShopBrowse(); });
-  if (el("shopCheckout")) el("shopCheckout").onclick = shopOpenCheckout;
-}
-function shopStepper(id, qty, cap) {
-  return `<div class="shop-stepper"><button class="shop-step" data-dec="${esc(id)}" ${qty <= 0 ? "disabled" : ""}>−</button><span class="shop-qty mono">${qty}</span><button class="shop-step" data-inc="${esc(id)}" ${qty >= cap ? "disabled" : ""}>+</button></div>`;
-}
-function shopCapOf(id) { const p = (shopLoaded && shopLoaded.products || []).find(x => x.id === id); return p ? (Number(p.maxUnits) || 99) : 99; }
-// Rich product detail modal — big image, full description, qty + add-to-cart.
-function shopProductModal(id) {
-  const s = shopLoaded; const p = (s && s.products || []).find(x => x.id === id); if (!p) return;
-  const qty = shopCart[id] || 0, cap = Number(p.maxUnits) || 99;
-  let ov = document.getElementById("shopModalOv");
-  if (!ov) { ov = document.createElement("div"); ov.id = "shopModalOv"; ov.className = "shop-modal-ov"; document.body.appendChild(ov); }
-  ov.innerHTML = `<div class="shop-modal">
-    <button class="shop-modal-x" id="shopModalX" aria-label="Close">✕</button>
-    ${p.image ? `<img class="shop-modal-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-modal-img shop-prod-noimg" style="height:200px;font-size:56px">🛍</div>`}
-    <div class="shop-modal-body">
-      <div class="shop-modal-name">${esc(p.name)}</div>
-      <div class="shop-modal-price mono">${esc(p.price)} ${esc(s.currency)}</div>
-      <div class="shop-modal-desc">${esc(p.description || "No description.")}</div>
-      <div class="view__desc">Up to ${cap} per order · from ${esc(s.shopName)}</div>
-      <div class="shop-modal-buy">${shopStepper(id, qty, cap)}<button class="btn btn--primary" id="mAdd">${qty > 0 ? "In cart ✓" : "Add to cart"}</button></div>
-    </div></div>`;
-  const close = () => { const o = document.getElementById("shopModalOv"); if (o) o.remove(); document.removeEventListener("keydown", onKey); renderShopBrowse(); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
-  document.addEventListener("keydown", onKey);
-  el("shopModalX").onclick = close;
-  ov.onclick = (e) => { if (e.target === ov) close(); };
-  ov.querySelector("[data-inc]").onclick = () => { shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); shopProductModal(id); };
-  ov.querySelector("[data-dec]").onclick = () => { shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; shopProductModal(id); };
-  el("mAdd").onclick = () => { if (!shopCart[id]) shopCart[id] = 1; shopProductModal(id); };
-}
-function shopCartTotal() {
-  const s = shopLoaded; if (!s) return 0; let t = 0;
-  for (const p of (s.products || [])) { const q = shopCart[p.id] || 0; if (q) t += q * Number(p.price); }
-  const ship = shopSelectedShipping(); if (ship) t += Number(ship.fee) || 0;
-  return t;
-}
-let shopShipId = null;
-function shopSelectedShipping() { const s = shopLoaded; if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(x => x.id === shopShipId) || s.shipping[0]; }
-async function shopOpenCheckout() {
-  const s = shopLoaded;
-  const shipOpts = (s.shipping || []).map(sh => `<option value="${esc(sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? " (+" + esc(String(sh.fee)) + " " + esc(s.currency) + ")" : " (free)"}</option>`).join("");
-  const host = el("shopSub");
-  host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBackStore">← Store</button>
-    <div class="card" style="margin-top:8px"><div class="card__title">Checkout · ${esc(s.shopName)}</div>
-      ${(s.products || []).filter(p => shopCart[p.id]).map(p => `<div class="row" style="justify-content:space-between"><span>${esc(p.name)} × ${shopCart[p.id]}</span><span class="mono">${(shopCart[p.id] * Number(p.price)).toFixed(6)}</span></div>`).join("")}
-      ${shipOpts ? `<div class="field" style="margin-top:8px"><div class="field__label">Shipping</div><select class="field__input" id="shopShip">${shipOpts}</select></div>` : ""}
-      <div class="field"><div class="field__label">Delivery (address / email — encrypted, only the vendor sees it)</div><textarea class="field__input" id="shopDelivery" rows="2" placeholder="Where should this go?"></textarea></div>
-      <div class="field"><div class="field__label">Note (optional)</div><input class="field__input" id="shopNote" placeholder="Anything for the vendor?" autocomplete="off"/></div>
-      <div class="row" style="justify-content:space-between;margin-top:8px;font-weight:700"><span>Total</span><span class="mono" id="shopCkTotal">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></div>
-      <button class="btn btn--primary btn--full" id="shopPay" style="margin-top:10px">Pay & place order</button>
-      <div class="view__desc" style="margin-top:6px">Sends an encrypted order to the vendor + the ${esc(s.currency)} payment in one go.</div>
-    </div>`;
-  el("shopBackStore").onclick = () => renderShopBrowse();
-  if (el("shopShip")) el("shopShip").onchange = () => { shopShipId = el("shopShip").value; el("shopCkTotal").textContent = shopCartTotal().toFixed(6) + " " + s.currency; };
-  el("shopPay").onclick = shopDoPay;
-}
-async function shopDoPay() {
-  const s = shopLoaded; const btn = el("shopPay"); btn.disabled = true; btn.textContent = "Placing order…";
-  const items = (s.products || []).filter(p => shopCart[p.id]).map(p => ({ product: p.name, quantity: shopCart[p.id], unitPrice: String(p.price), lineTotal: (shopCart[p.id] * Number(p.price)).toFixed(6) }));
-  if (!items.length) { toast("Cart is empty", "warn"); btn.disabled = false; btn.textContent = "Pay & place order"; return; }
-  const ship = shopSelectedShipping(), total = shopCartTotal().toFixed(6);
-  const delivery = (el("shopDelivery") && el("shopDelivery").value.trim()) || "", note = (el("shopNote") && el("shopNote").value.trim()) || "";
-  try {
-    const r = await api.shopPlaceOrder(s, items, total, ship ? ship.label : "", delivery, note);
-    if (r.payError) toast("Order sent, but payment failed: " + r.payError + " — retry from Orders.", "warn");
-    else toast("Order placed ✓ " + r.ref, "ok");
-    shopCart = {}; shopLoaded = null; shopView = "orders"; shopOrderRef = null; renderMiniMall();
-  } catch (e) { toast(e.message || "order failed", "warn"); btn.disabled = false; btn.textContent = "Pay & place order"; }
-}
-
-// ---- Studio: author a .shop (auto vendor card from the node identity) ----
-function shopSlug(s) { return String(s || "shop").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shop"; }
-// Standard shipping: Digital (always free), Domestic + International (fees configurable).
-function shopStandardShipping() { return [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0" }, { id: "international", label: "International", fee: "0" }]; }
-function shopNormalizeShipping(list) { const by = {}; (list || []).forEach(s => { if (s && s.id) by[s.id] = s; }); return shopStandardShipping().map(std => ({ id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") })); }
-async function renderShopStudio() {
-  const host = el("shopSub"); if (!host) return;
-  if (!shopDraft) {
-    const mine = await api.shopMyShops().catch(() => []);
-    host.innerHTML = `<button class="btn btn--primary btn--full" id="shopNew">+ New shop</button>
-      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(s.shopName)}</b><div class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</div></div><div class="seg"><button class="btn btn--sm btn--outline" data-editshop="${esc(s.shopId)}">Edit</button><button class="btn btn--sm btn--outline" data-exportshop="${esc(s.shopId)}">Export</button></div></div></div>`).join("") : `<div class="card"><div class="empty">No shops yet. Create one — customers load the exported <span class="mono">.shop</span> file to buy.</div></div>`}`;
-    el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: shopStandardShipping(), products: [] }; renderShopStudio(); };
-    host.querySelectorAll("[data-editshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); shopDraft.shipping = shopNormalizeShipping(shopDraft.shipping); renderShopStudio(); });
-    host.querySelectorAll("[data-exportshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast("Exported → " + p, "ok"); });
-    return;
-  }
-  const d = shopDraft;
-  const prods = d.products.map((p, i) => `<div class="card shop-prod-edit">
-      <div class="row" style="justify-content:space-between"><b>Item ${i + 1}</b><button class="btn btn--sm btn--outline" data-delprod="${i}">Remove</button></div>
-      <div class="shop-imgdrop" data-imgi="${i}">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}"/>` : "drop / click to add a photo"}</div>
-      <input class="field__input" data-pf="name" data-pi="${i}" placeholder="Name" value="${esc(p.name || "")}" autocomplete="off"/>
-      <input class="field__input" data-pf="description" data-pi="${i}" placeholder="Description" value="${esc(p.description || "")}" autocomplete="off"/>
-      <div class="row" style="gap:6px"><input class="field__input" data-pf="price" data-pi="${i}" inputmode="decimal" placeholder="Price" value="${esc(p.price || "")}" style="flex:1" autocomplete="off"/><input class="field__input" data-pf="maxUnits" data-pi="${i}" inputmode="numeric" placeholder="Max qty" value="${esc(p.maxUnits || "")}" style="flex:1" autocomplete="off"/></div>
-    </div>`).join("");
-  const ship = d.shipping.map((sh, i) => sh.id === "digital"
-    ? `<div class="row" style="justify-content:space-between;margin-top:4px"><span>Digital</span><span class="view__desc">Free</span></div>`
-    : `<div class="row" style="align-items:center;justify-content:space-between;margin-top:4px"><span>${esc(sh.label)}</span><input class="field__input" data-sf="fee" data-si="${i}" inputmode="decimal" placeholder="Fee (${esc(d.currency)})" value="${esc(sh.fee || "")}" style="flex:0 0 130px;text-align:right" autocomplete="off"/></div>`).join("");
-  host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopStudioBack">← My shops</button>
-    <div class="card" style="margin-top:8px"><div class="card__title">${d.shopId ? "Edit shop" : "New shop"}</div>
-      <div class="field"><div class="field__label">Shop name</div><input class="field__input" id="sdName" value="${esc(d.shopName)}" placeholder="My Shop" autocomplete="off"/></div>
-      <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">MxUSD</button></div></div>
-      <div class="view__desc">Vendor card (auto-derived from your node — this is how buyers' orders reach you):</div>
-      <div class="mono shop-card">${esc((d.vendorPublicId || "").slice(0, 18))}… | ${esc(d.vendorAddress || "")}</div>
-    </div>
-    <div class="card"><div class="card__title">Shipping</div><div class="view__desc">Digital delivery is free. Set your Domestic &amp; International fees.</div>${ship}</div>
-    <div class="card"><div class="card__title">Products (max 40)</div>${prods || '<div class="empty">Add your first product.</div>'}<button class="btn btn--outline btn--full" id="sdAddProd" style="margin-top:8px">+ Add product</button></div>
-    <button class="btn btn--primary btn--full" id="sdSave">Save${d.shopId ? "" : " & export .shop"}</button>`;
-  const readForm = () => {
-    d.shopName = el("sdName").value.trim();
-    host.querySelectorAll("[data-pf]").forEach(inp => { const i = +inp.dataset.pi; d.products[i][inp.dataset.pf] = inp.value; });
-    host.querySelectorAll("[data-sf]").forEach(inp => { const i = +inp.dataset.si; if (d.shipping[i]) d.shipping[i].fee = inp.value; });
+// ---------------- miniMall (merchshop): shops, a storefront, the cart, checkout, my orders ----------------
+async function renderShopApp() {
+  const n = shopNav.screen;
+  if (n === "orders") return renderShopMyOrders();
+  if (n === "order") return renderShopBuyOrder(shopNav.ref);
+  if (n === "checkout" && shopLoaded) return renderShopCheckout();
+  if (n === "store" && shopLoaded) return renderShopStore();
+  const mine = await api.shopMyShops().catch(() => []), row = (s, how, i) => `<div class="mm-row" role="button" tabindex="0" data-${how}="${i}"><div class="mm-row__t mm-row__t--big">${esc(s.shopName)}</div><div class="mm-row__s">${(s.products || []).length} products  ·  ${esc(SHOP.cur(s.currency))}</div></div>`;
+  shopFrame("miniMall", () => shopGo("home"), [["mmOrders", "🧾", "My orders"]],
+    `<div class="mm-ver">miniMall Shop</div>
+     ${shopAdded.map((s, i) => row(s, "added", i)).join("")}
+     ${shopAdded.length ? "" : `<div class="mm-empty">No shops yet.\n\nClick “Add a shop” below and pick a .shop file a vendor shared with you.</div>`}
+     ${mine.length ? `<div class="mm-sec">Your own shops (as a buyer sees them)</div>${mine.map((s, i) => row(s, "mine", i)).join("")}` : ""}`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopAdd">＋  Add a shop</button></div>`);
+  el("mmOrders").onclick = () => shopGo("shop", { screen: "orders" });
+  const open = (s) => { shopLoaded = s; shopCart = {}; shopShipId = null; shopGo("shop", { screen: "store" }); };
+  el("shopAdd").onclick = async () => {
+    try { const cfg = await api.shopImport(); if (!cfg) return;
+      if (!cfg.shopName || !Array.isArray(cfg.products)) { toast("That doesn't look like a valid .shop file.", "warn"); return; }
+      shopAdded = shopAdded.filter(s => s.shopId !== cfg.shopId).concat(cfg); toast("Added " + cfg.shopName, "ok"); open(cfg);
+    } catch (e) { toast("Couldn't read that file.", "warn"); }
   };
-  el("shopStudioBack").onclick = () => { readForm(); shopDraft = null; renderShopStudio(); };
-  host.querySelectorAll("[data-cur]").forEach(b => b.onclick = () => { readForm(); d.currency = b.dataset.cur; renderShopStudio(); });
-  el("sdAddProd").onclick = () => { readForm(); if (d.products.length >= 40) return toast("Max 40 products", "warn"); d.products.push({ id: "p" + Date.now().toString(36), name: "", description: "", mode: "units", price: "", maxUnits: "10", image: "" }); renderShopStudio(); };
-  host.querySelectorAll("[data-delprod]").forEach(b => b.onclick = () => { readForm(); d.products.splice(+b.dataset.delprod, 1); renderShopStudio(); });
-  host.querySelectorAll(".shop-imgdrop").forEach(dz => {
-    const i = +dz.dataset.imgi;
-    const pick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.onchange = async () => { if (inp.files[0]) { readForm(); d.products[i].image = await shopResizeImage(inp.files[0]); renderShopStudio(); } }; inp.click(); };
-    dz.onclick = pick;
-    dz.ondragover = e => { e.preventDefault(); dz.classList.add("drag"); };
-    dz.ondragleave = () => dz.classList.remove("drag");
-    dz.ondrop = async e => { e.preventDefault(); dz.classList.remove("drag"); const f = e.dataTransfer.files[0]; if (f) { readForm(); d.products[i].image = await shopResizeImage(f); renderShopStudio(); } };
-  });
+  el("shopSub").querySelectorAll("[data-added]").forEach(c => { c.onclick = () => open(shopAdded[+c.dataset.added]); });
+  el("shopSub").querySelectorAll("[data-mine]").forEach(c => { c.onclick = () => open(mine[+c.dataset.mine]); });
+}
+function renderShopStore() {
+  const s = shopLoaded, cur = SHOP.cur(s.currency), count = Object.values(shopCart).reduce((a, b) => a + b, 0);
+  shopFrame(s.shopName, () => shopGo("shop"), [],
+    `<div class="mm-dim mm-pays">Pays in ${esc(cur)}</div>
+     ${(s.products || []).map(p => { const q = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99; return `<div class="mm-prod">
+        ${p.image ? `<img class="mm-prod__im" src="${esc(p.image)}" alt="" data-zoom="${esc(p.id)}" />` : `<div class="mm-prod__im"></div>`}
+        <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name)}</div><div class="mm-prod__d">${esc(p.description || "")}</div><div class="mm-prod__p">${esc(p.price)} ${esc(cur)}</div></div>
+        <div class="mm-step"><button class="mm-step__b" data-dec="${esc(p.id)}" aria-label="One fewer ${esc(p.name)}"${q <= 0 ? " disabled" : ""}>–</button><span class="mm-step__q">${q}</span><button class="mm-step__b" data-inc="${esc(p.id)}" aria-label="One more ${esc(p.name)}"${q >= cap ? " disabled" : ""}>+</button></div></div>`; }).join("")}`,
+    `<div class="mm-foot mm-foot--cart"><span>${count ? count + " items  ·  " + SHOP.cartTotal(s, shopCart, null).toFixed(6) + " " + esc(cur) : "Cart empty"}</span><button class="mm-btn mm-btn--on" id="shopCheckout">Checkout</button></div>`);
+  const cap = (id) => { const p = (s.products || []).find(x => x.id === id); return p ? (Number(p.maxUnits) || 99) : 99; };
+  el("shopSub").querySelectorAll("[data-inc]").forEach(b => { b.onclick = () => { const id = b.dataset.inc; shopCart[id] = Math.min(cap(id), (shopCart[id] || 0) + 1); renderShopStore(); }; });
+  el("shopSub").querySelectorAll("[data-dec]").forEach(b => { b.onclick = () => { const id = b.dataset.dec; shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; renderShopStore(); }; });
+  el("shopSub").querySelectorAll("[data-zoom]").forEach(im => { im.onclick = () => { const p = s.products.find(x => x.id === im.dataset.zoom); appDlg({ title: p.name, body: `<img class="mm-zoom" src="${esc(p.image)}" alt="" /><p>${esc(p.description || "")}</p>` }); }; });
+  el("shopCheckout").onclick = () => { if (!count) { toast("Add an item first (use + above).", "warn"); return; } shopGo("shop", { screen: "checkout" }); };
+}
+function renderShopCheckout() {
+  const s = shopLoaded, cur = SHOP.cur(s.currency), ship = SHOP.shipOf(s, shopShipId), items = SHOP.orderItems(s, shopCart);
+  const total = SHOP.cartTotal(s, shopCart, shopShipId).toFixed(6);
+  shopFrame("Checkout", () => shopGo("shop", { screen: "store" }), [],
+    `<div class="mm-card">${items.map(i => `<div class="mm-kv"><span class="mm-kv__v">${esc(i.product)} × ${i.quantity}</span><span>${esc(i.lineTotal)}</span></div>`).join("")}</div>
+     ${(s.shipping || []).length ? `<div class="mm-sec">Delivery method</div><div class="mm-opts">${s.shipping.map(sh => `<button class="mm-btn${ship && ship.id === sh.id ? " mm-btn--on" : ""}" data-ship="${esc(sh.id)}" aria-pressed="${!!(ship && ship.id === sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? "  +" + esc(String(sh.fee)) : "  · free"}</button>`).join("")}</div>` : ""}
+     <div class="mm-sec">Delivery address / email</div><textarea class="mm-in-f" id="shopDelivery" rows="2" placeholder="Where should this go? (or email for digital)" aria-label="Delivery address or email"></textarea>
+     <div class="mm-sec">Message to seller (optional)</div><input class="mm-in-f" id="shopNote" placeholder="Anything the vendor should know" aria-label="Message to seller" autocomplete="off" />
+     <div class="mm-totals">${shopKv("Items", SHOP.cartTotal(s, shopCart, "none").toFixed(6))}${shopKv("Shipping", ship ? String(Number(ship.fee) || 0) : "0")}${shopKv("Total", total + " " + cur)}</div>
+     <div class="mm-hint">Your address and message are encrypted: only the vendor can read them.</div>`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopPay">Pay ${esc(total)} ${esc(cur)}</button></div>`);
+  const keep = () => ({ d: el("shopDelivery").value, n: el("shopNote").value });
+  el("shopSub").querySelectorAll("[data-ship]").forEach(b => { b.onclick = () => { const k = keep(); shopShipId = b.dataset.ship; renderShopCheckout(); el("shopDelivery").value = k.d; el("shopNote").value = k.n; }; });
+  el("shopPay").onclick = async () => {
+    const btn = el("shopPay"); if (btn.disabled) return; btn.disabled = true;
+    const r = await SHOP.place(api, { confirm: (title, text) => appDlg({ title, body: `<p>${esc(text)}</p>`, buttons: [{ label: "Back", v: false }, { label: "Pay", v: true }] }).done, busy: () => toast("Sending your order and payment…") },
+      s, shopCart, shopShipId, el("shopDelivery").value, el("shopNote").value);
+    if (r.cancelled) { btn.disabled = false; return; }
+    if (r.err) { toast(r.refused ? r.err : "Order failed: " + r.err, "warn"); btn.disabled = false; return; }
+    if (r.payError) toast("Order sent, but payment failed. Open the order to retry. (" + r.payError + ")", "warn"); else toast("Order placed!", "ok");
+    shopCart = {}; shopGo("shop", { screen: "order", ref: r.ref });
+  };
+}
+async function renderShopMyOrders() {
+  const list = (await api.shopOrders().catch(() => [])).filter(o => o.role === "buy");
+  shopFrame("My orders", () => shopGo("shop"), [],
+    list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${esc(o.shopName || o.ref)}</span>${shopPill(o.status)}</div>
+      <div class="mm-row__s">${esc(o.amount)} ${esc(SHOP.cur(o.currency))}  ·  ${shopAgo(o.date)}${o.ambiguous ? "  ·  payment not confirmed" : o.unpaid && !o.paid ? "  ·  not paid" : ""}</div></div>`).join("") || `<div class="mm-empty">No orders yet.</div>`);
+  el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("shop", { screen: "order", ref: r.dataset.oref }); });
+}
+async function renderShopBuyOrder(ref) {
+  const d = await api.shopOrder(ref).catch(() => null);
+  if (!d || !d.order || d.order.role !== "buy") { shopFrame("My orders", () => shopGo("shop", { screen: "orders" }), [], `<div class="mm-empty">Order not found.</div>`); return; }
+  const o = d.order, cur = SHOP.cur(o.currency);
+  shopFrame(o.shopName || o.ref, () => shopGo("shop", { screen: "orders" }), [],
+    `<div class="mm-line">${shopPill(o.status)}</div>
+     <div class="mm-sec">Order</div><div class="mm-card">${shopItems(o)}</div>
+     ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Delivery", o.shipping || "—")}${shopKv("To", o.delivery || "—")}
+     ${d.ambiguous ? `<div class="mm-warn">⚠ The payment timed out: it may already have gone through. Check your Wallet and History before sending again, so that you do not pay twice.</div>` : ""}
+     ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">Retry payment</button>` : ""}
+     <div class="mm-sec">Messages with the vendor</div><div class="mm-thread">${shopThread(d.chat, "Vendor") || `<div class="mm-dim">No messages yet. Say hello below.</div>`}</div>`,
+    `<div class="mm-foot mm-send"><input class="mm-in-f" id="shopMsg" placeholder="Message the vendor…" aria-label="Message the vendor" autocomplete="off" /><button class="mm-btn" id="shopSend">Send</button></div>`);
+  shopWireOrder(ref, () => renderShopBuyOrder(ref));
+}
+
+// ---------------- miniMall Studio (merchstudio): products, then "Your shop", then the .shop file ----------------
+// The desktop keeps several shops (the phone's Studio builds one): the first screen lists them. No NFTs tab: owed, see the top.
+async function renderShopStudio() {
+  const d = shopDraft, n = shopNav.screen;
+  if (d && n === "product" && d.products[shopNav.pi]) return renderShopProduct(d, shopNav.pi);
+  if (d && n === "details") return renderShopDetails(d);
+  if (d) return renderShopProducts(d);
+  const mine = await api.shopMyShops().catch(() => []);
+  shopFrame("miniMall Studio", () => shopGo("home"), [],
+    `<div class="mm-status ${shopIdentity ? "mm-status--ok" : "mm-status--acc"}">${shopIdentity ? "✓ Shop key ready (from this node's seed)" : "Connecting to your node…"}</div>
+     ${mine.map(s => `<div class="mm-row"><div class="mm-row__top"><span class="mm-row__t mm-row__t--big">${esc(s.shopName)}</span>
+        <span class="mm-opts"><button class="mm-btn" data-editshop="${esc(s.shopId)}">Edit</button><button class="mm-btn" data-exportshop="${esc(s.shopId)}">Export .shop</button></span></div>
+        <div class="mm-row__s">${(s.products || []).length} products  ·  ${esc(SHOP.cur(s.currency))}</div></div>`).join("")
+       || `<div class="mm-empty">Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to build your first shop.</div>`}`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopNew">＋  New shop</button></div>`);
+  el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: SHOP.standardShipping(), products: [] }; shopGo("studio"); };
+  el("shopSub").querySelectorAll("[data-editshop]").forEach(b => { b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); shopDraft.shipping = SHOP.normalizeShipping(shopDraft.shipping); shopGo("studio"); }; });
+  el("shopSub").querySelectorAll("[data-exportshop]").forEach(b => { b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast("Exported to " + p, "ok"); }; });
+}
+function renderShopProducts(d) {
+  const cur = SHOP.cur(d.currency), listed = d.products.filter(p => p.name && Number(p.price) > 0).length;
+  shopFrame(d.shopId ? d.shopName || "Your shop" : "miniMall Studio", () => { shopDraft = null; shopGo("studio"); }, [],
+    `<div class="mm-seg"><span class="mm-btn mm-btn--on">Products · ${d.products.length}</span></div>
+     ${d.products.map((p, i) => `<div class="mm-prod" role="button" tabindex="0" data-prod="${i}">${p.image ? `<img class="mm-prod__im mm-prod__im--s" src="${esc(p.image)}" alt="" />` : `<div class="mm-prod__im mm-prod__im--s"></div>`}
+        <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name || "Unnamed product")}</div><div class="mm-prod__d${Number(p.price) > 0 ? "" : " mm-red"}">${Number(p.price) > 0 ? esc(String(p.price)) + " " + esc(cur) + " · ×" + esc(String(p.maxUnits || 10)) : "no price"}</div></div></div>`).join("")
+       || `<div class="mm-empty">Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to add your first product.</div>`}
+     <button class="mm-btn mm-btn--cta mm-gap" id="sdAddProd">＋  Add product</button>`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--cta${listed ? " mm-btn--on" : ""}" id="sdNext">${listed ? "Continue · " + listed + " in shop  →" : "Add a product to continue"}</button></div>`);
+  el("sdAddProd").onclick = () => { if (d.products.length >= 40) { toast("A shop holds at most 40 listings.", "warn"); return; } d.products.push({ id: "p" + Date.now().toString(36), name: "", description: "", mode: "units", price: "", maxUnits: "10", image: "" }); shopGo("studio", { screen: "product", pi: d.products.length - 1 }); };
+  el("shopSub").querySelectorAll("[data-prod]").forEach(c => { c.onclick = () => shopGo("studio", { screen: "product", pi: +c.dataset.prod }); });
+  el("sdNext").onclick = () => { if (listed) shopGo("studio", { screen: "details" }); };
+}
+function renderShopProduct(d, i) {
+  const p = d.products[i];
+  shopFrame("Your product", () => { read(); shopGo("studio"); }, [],
+    `<div class="mm-photo" id="sdPhoto" role="button" tabindex="0">${p.image ? `<img src="${esc(p.image)}" alt="" />` : ""}<span>${p.image ? "Click to change the photo" : "Click to add a photo"}</span></div>
+     <div class="mm-sec">Name</div><input class="mm-in-f" id="sdPName" placeholder="Product name" value="${esc(p.name || "")}" autocomplete="off" />
+     <div class="mm-sec">About</div><input class="mm-in-f" id="sdPDesc" placeholder="Description (optional)" value="${esc(p.description || "")}" autocomplete="off" />
+     <div class="mm-sec">Price (${esc(SHOP.cur(d.currency))})</div><input class="mm-in-f" id="sdPPrice" inputmode="decimal" placeholder="0" value="${esc(p.price || "")}" autocomplete="off" />
+     <div class="mm-sec">Stock (max per order)</div><input class="mm-in-f" id="sdPMax" inputmode="numeric" placeholder="10" value="${esc(p.maxUnits || "")}" autocomplete="off" />
+     <button class="mm-btn mm-btn--on mm-btn--cta mm-gap" id="sdPDone">Done</button><button class="mm-btn mm-btn--cta mm-red" id="sdPDel">Remove product</button>`);
+  function read() { if (!el("sdPName")) return; p.name = el("sdPName").value; p.description = el("sdPDesc").value; p.price = el("sdPPrice").value; p.maxUnits = el("sdPMax").value; }
+  const photo = el("sdPhoto"), take = async (f) => { if (!f) return; read(); p.image = await shopResizeImage(f); renderShopProduct(d, i); };
+  photo.onclick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.onchange = () => take(inp.files[0]); inp.click(); };
+  photo.ondragover = (e) => { e.preventDefault(); }; photo.ondrop = (e) => { e.preventDefault(); take(e.dataTransfer.files[0]); };
+  el("sdPDone").onclick = () => { read(); shopGo("studio"); };
+  el("sdPDel").onclick = () => { d.products.splice(i, 1); shopGo("studio"); };
+}
+function renderShopDetails(d) {
+  shopFrame("Your shop", () => { read(); shopGo("studio"); }, [],
+    `<div class="mm-sec">Shop name</div><input class="mm-in-f" id="sdName" value="${esc(d.shopName)}" placeholder="e.g. Zebra Gallery" autocomplete="off" />
+     <div class="mm-sec">Pays in</div><div class="mm-seg"><button class="mm-btn${d.currency === "Minima" ? " mm-btn--on" : ""}" data-cur="Minima" aria-pressed="${d.currency === "Minima"}">Minima</button><button class="mm-btn${d.currency !== "Minima" ? " mm-btn--on" : ""}" data-cur="USDT" aria-pressed="${d.currency !== "Minima"}">MxUSD</button></div>
+     <div class="mm-sec">Shipping (label + fee)</div>${d.shipping.map((sh, i) => `<div class="mm-kv"><span class="mm-kv__v">${esc(sh.label)}</span>${sh.id === "digital" ? `<span>free</span>` : `<input class="mm-in-f mm-in-f--fee" data-si="${i}" inputmode="decimal" placeholder="0" aria-label="${esc(sh.label)} fee" value="${esc(sh.fee || "")}" autocomplete="off" />`}</div>`).join("")}
+     <div class="mm-sec">Vendor card (from this node: how orders reach you)</div><div class="mm-card ew-mono">${esc(d.vendorPublicId || "")}|${esc(d.vendorAddress || "")}</div>
+     <div class="mm-hint">${d.products.filter(p => p.name && Number(p.price) > 0).length} products  ·  pays in ${esc(SHOP.cur(d.currency))}</div>`,
+    `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="sdSave">${d.shopId ? "Save" : "Save & export .shop"}</button></div>`);
+  function read() { if (!el("sdName")) return; d.shopName = el("sdName").value.trim(); el("shopSub").querySelectorAll("[data-si]").forEach(inp => { if (d.shipping[+inp.dataset.si]) d.shipping[+inp.dataset.si].fee = inp.value; }); }
+  el("shopSub").querySelectorAll("[data-cur]").forEach(b => { b.onclick = () => { read(); d.currency = b.dataset.cur; renderShopDetails(d); }; });
   el("sdSave").onclick = async () => {
-    readForm();
-    if (!d.shopName) return toast("Give the shop a name", "warn");
-    if (!d.products.length) return toast("Add at least one product", "warn");
-    const cfg = { shopName: d.shopName, shopId: d.shopId || shopSlug(d.shopName), vendorPublicId: d.vendorPublicId, vendorAddress: d.vendorAddress,
-      currency: d.currency, tokenid: d.currency === "Minima" ? "0x00" : "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
-      shipping: shopNormalizeShipping(d.shipping),
-      products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price), maxUnits: String(Number(p.maxUnits) || 10), image: p.image || "" })) };
-    await api.shopSave(cfg);
-    const wasNew = !d.shopId;
-    shopDraft = null;
-    toast("Shop saved ✓", "ok");
-    if (wasNew) { const p = await api.shopExport(JSON.stringify(cfg, null, 2), cfg.shopId); if (p) toast("Exported → " + p, "ok"); }
-    renderShopStudio();
+    read();
+    const r = await SHOP.save(api, d);
+    if (r.err) { shopSay(r.err); return; }
+    shopDraft = null; toast("Shop saved", "ok"); if (r.exported) toast("Exported to " + r.exported, "ok");
+    shopGo("studio");
   };
 }
 function shopResizeImage(file) {

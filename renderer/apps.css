@@ -131,3 +131,91 @@
 .vs-copy { display: block; width: 100%; padding: 8px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: copy; }
 .vs-copy span { display: block; font-size: 12px; color: #9A9AA8; }
 .vs-copy code { display: block; font-family: var(--app-mono); font-size: 12px; color: #FFFFFF; overflow-wrap: anywhere; }
+
+/* ---- miniMall: Pandamonium's launcher (MallActivity: #12171B, panel #192024, stroke #344144, accent #DAE199) ---- */
+#view-minimall.view--active { display: flex; flex-direction: column; height: 100%; padding: 0; background: #12171B; }
+#shopBody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.mall { padding: 16px 20px 24px; font-family: var(--app-font); color: #F4F4EB; }
+.mall__t { margin: 0; font-size: 22px; font-weight: 400; line-height: 40px; }
+.mall__d { padding: 14px 0 18px; font-size: 16px; color: #A1AEAC; }
+.mall__card { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; padding: 20px 18px; border: 1px solid #344144; border-radius: 16px; background: #192024; cursor: pointer; }
+.mall__card:hover { background: #1D262A; }
+.mall__card:focus-visible { outline: 2px solid #DAE199; outline-offset: 2px; }
+.mall__ic { flex: 0 0 48px; width: 48px; height: 48px; border-radius: 50%; }
+.mall__main { flex: 1; min-width: 0; }
+.mall__n { font-size: 18px; }
+.mall__n .tab-badge { margin-left: 8px; vertical-align: middle; }
+.mall__s { margin-top: 4px; font-size: 14px; color: #A1AEAC; }
+.mall__go { font-size: 28px; color: #DAE199; }
+
+/* ---- the three miniMall apps (apks/merchshop, merchinbox, merchstudio: Design.java, the same palette in each) ---- */
+.mm { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: #0A0A0F; color: #FFFFFF; font-family: var(--app-font); font-size: 14px; }
+.mm-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: #15151F; }
+.mm-bar__t { flex: 1; min-width: 0; padding-left: 8px; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-bar__b { flex: 0 0 auto; min-width: 44px; height: 44px; border: 0; border-radius: 22px; background: none; color: #FFFFFF; font-size: 22px; cursor: pointer; }
+.mm-bar__b:hover { background: #1F1F2B; }
+.mm-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 16px 20px; }
+.mm-foot { flex: 0 0 auto; padding: 10px 16px 14px; background: #0A0A0F; }
+.mm-foot--cart { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #15151F; white-space: pre; }
+.mm-ver { font-size: 10px; color: #9A9AA8; }
+.mm-status { padding: 6px 0; font-size: 12.5px; color: #9A9AA8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mm-status--ok { color: #2ECC71; }
+.mm-status--acc { color: #F7931A; }
+.mm-dim { color: #9A9AA8; }
+.mm-in { color: #2ECC71; }
+.mm-red, .mm-btn.mm-red { color: #E74C3C; }
+.mm-pays { padding: 4px 0 8px; }
+.mm-pill { display: inline-block; flex: 0 0 auto; padding: 6px 10px; border: 0; border-radius: 14px; background: #9A9AA8; color: #000000; font: inherit; font-size: 11px; line-height: 14px; }
+.mm-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 10px; }
+.mm-chip { padding: 7px 14px; background: #1F1F2B; color: #FFFFFF; cursor: pointer; }
+.mm-chip--on { background: #F7931A; color: #000000; }
+.mm-row { padding: 12px 0; border-bottom: 1px solid #15151F; cursor: pointer; }
+.mm-row__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mm-row__t { min-width: 0; font-size: 15px; font-weight: 700; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mm-row__t--big { font-size: 16px; }
+.mm-row__s { margin-top: 3px; font-size: 12px; color: #9A9AA8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mm-empty { padding: 56px 16px 0; font-size: 14px; color: #9A9AA8; text-align: center; white-space: pre-line; }
+.mm-sec { padding: 16px 0 6px; font-size: 11px; font-weight: 700; color: #9A9AA8; text-transform: uppercase; }
+.mm-card { padding: 12px 14px; border-radius: 12px; background: #15151F; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mm-line { padding: 8px 0 0; white-space: pre-wrap; }
+.mm-kv { display: flex; align-items: center; gap: 12px; padding: 5px 0; font-size: 13px; color: #9A9AA8; }
+.mm-kv > span:first-child { flex: 0 0 96px; }
+.mm-kv__v { flex: 1 1 auto !important; min-width: 0; color: #FFFFFF; overflow-wrap: anywhere; }
+.mm-kv__v--copy { padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: copy; }
+.mm-totals { margin-top: 12px; }
+.mm-hint { padding: 8px 0 0; font-size: 12px; color: #9A9AA8; }
+.mm-warn { margin: 10px 0; padding: 10px 12px; border: 1px solid #E74C3C; border-radius: 10px; color: #E74C3C; font-size: 12.5px; }
+.mm-btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 16px; border: 0; border-radius: 10px; background: #1F1F2B; color: #FFFFFF; font: inherit; font-size: 13px; white-space: pre; cursor: pointer; }
+.mm-btn--on { background: #F7931A; color: #000000; }
+.mm-btn--cta { display: flex; width: 100%; padding: 13px 16px; font-size: 14px; }
+.mm-btn:disabled { opacity: .4; cursor: default; }
+.mm-btn--on:disabled { opacity: 1; }
+.mm-gap { margin-top: 16px; margin-bottom: 8px; }
+.mm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mm-opts, .mm-seg { display: flex; flex-wrap: wrap; gap: 8px; }
+.mm-seg > * { flex: 1 1 0; font-size: 14px; }
+.mm-thread { font-size: 13px; line-height: 1.5; }
+.mm-msg { color: #FFFFFF; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mm-msg--me { color: #9A9AA8; }
+.mm-send { display: flex; gap: 8px; margin-top: 10px; }
+.mm-in-f { display: block; flex: 1 1 auto; width: 100%; box-sizing: border-box; padding: 10px 14px; border: 0; border-radius: 10px; background: #1F1F2B; color: #FFFFFF; font: inherit; font-size: 14px; resize: vertical; }
+.mm-in-f::placeholder { color: #9A9AA8; }
+.mm-in-f--fee { flex: 0 0 130px; width: 130px; text-align: right; }
+.mm-prod { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #15151F; }
+.mm-prod[role=button] { cursor: pointer; }
+.mm-prod__im { flex: 0 0 66px; width: 66px; height: 66px; border-radius: 10px; background: #1F1F2B; object-fit: cover; }
+img.mm-prod__im { cursor: zoom-in; }
+.mm-prod__im--s { flex-basis: 48px; width: 48px; height: 48px; cursor: inherit; }
+.mm-prod__main { flex: 1; min-width: 0; }
+.mm-prod__n { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.mm-prod__d { font-size: 12px; color: #9A9AA8; overflow-wrap: anywhere; }
+.mm-prod__p { font-size: 15px; font-weight: 700; color: #F7931A; }
+.mm-step { display: flex; align-items: center; gap: 4px; }
+.mm-step__b { width: 48px; height: 48px; border: 0; border-radius: 8px; background: #1F1F2B; color: #FFFFFF; font-size: 18px; cursor: pointer; }
+.mm-step__b:disabled { opacity: .4; }
+.mm-step__q { min-width: 28px; text-align: center; font-size: 15px; }
+.mm-photo { position: relative; display: flex; align-items: flex-end; justify-content: center; height: 200px; margin-top: 8px; border-radius: 12px; background: #1F1F2B; overflow: hidden; cursor: pointer; }
+.mm-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.mm-photo span { position: relative; padding: 6px 10px; margin-bottom: 10px; border-radius: 14px; background: rgba(0,0,0,.6); font-size: 12px; color: #FFFFFF; }
+.mm-zoom { display: block; max-width: 100%; max-height: 50vh; margin: 0 auto 12px; border-radius: 12px; }
+.mm :focus-visible { outline: 2px solid #F7931A; outline-offset: 2px; }

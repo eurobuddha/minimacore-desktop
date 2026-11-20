@@ -186,3 +186,75 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
   assert.ok(burned[burned.length - 1].startsWith("txndelete id:"), "txndelete runs after the post, as on every path");
   vestr._setRunner(() => { throw new Error("no node in a test"); });
 });
+
+// ---- miniMall ----
+const SHOPCFG = { shopName: "Zebra", shopId: "zebra", vendorPublicId: "0x" + "5A".repeat(32), vendorAddress: "MxG0VENDOR", currency: "USDT", tokenid: MXUSD,
+  shipping: [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "2.5" }, { id: "international", label: "International", fee: "6" }],
+  products: [{ id: "p1", name: "Mug", price: "12.5", maxUnits: "5" }, { id: "p2", name: "Print", price: "0.1", maxUnits: "9" }, { id: "p3", name: "Pin", price: "0.0000004", maxUnits: "9" }] };
+const OLD_SHOP = {   // renderer/app.js 0.19.107: shopCartTotal, shopSelectedShipping, shopDoPay, the order screen's three handlers, the Studio's save
+  ship: (s, shipId) => { if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(x => x.id === shipId) || s.shipping[0]; },
+  total: (s, cart, shipId) => { let t = 0; for (const p of (s.products || [])) { const q = cart[p.id] || 0; if (q) t += q * Number(p.price); } const ship = OLD_SHOP.ship(s, shipId); if (ship) t += Number(ship.fee) || 0; return t; },
+  pay: async (api, s, cart, shipId, deliveryField, noteField) => {
+    const items = (s.products || []).filter(p => cart[p.id]).map(p => ({ product: p.name, quantity: cart[p.id], unitPrice: String(p.price), lineTotal: (cart[p.id] * Number(p.price)).toFixed(6) }));
+    if (!items.length) return;
+    const ship = OLD_SHOP.ship(s, shipId), total = OLD_SHOP.total(s, cart, shipId).toFixed(6);
+    await api.shopPlaceOrder(s, items, total, ship ? ship.label : "", deliveryField.trim() || "", noteField.trim() || "").catch(() => {});
+  },
+  advanceRow: (o) => { if (o.status === "INQUIRY") return null; if (!o.paid) return null; const flow = ["CONFIRMED", "SHIPPED", "DELIVERED"], rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 }; const cur = rank[o.status] != null ? rank[o.status] : -1; return flow[cur + 1] || null; },
+  slug: (s) => String(s || "shop").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shop",
+  std: () => [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0" }, { id: "international", label: "International", fee: "0" }],
+  norm: (list) => { const by = {}; (list || []).forEach(s => { if (s && s.id) by[s.id] = s; }); return OLD_SHOP.std().map(std => ({ id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") })); },
+  save: async (api, d) => {
+    if (!d.shopName) return; if (!d.products.length) return;
+    const cfg = { shopName: d.shopName, shopId: d.shopId || OLD_SHOP.slug(d.shopName), vendorPublicId: d.vendorPublicId, vendorAddress: d.vendorAddress,
+      currency: d.currency, tokenid: d.currency === "Minima" ? "0x00" : "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", shipping: OLD_SHOP.norm(d.shipping),
+      products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price), maxUnits: String(Number(p.maxUnits) || 10), image: p.image || "" })) };
+    await api.shopSave(cfg);
+    if (!d.shopId) await api.shopExport(JSON.stringify(cfg, null, 2), cfg.shopId);
+  }
+};
+for (const [name, cart, shipId] of [["one item, the first delivery method", { p1: 1 }, null], ["three lines, international", { p1: 2, p2: 3, p3: 7 }, "international"], ["a method the shop does not have", { p2: 1 }, "moon"], ["an empty cart", {}, null]]) {
+  test(`miniMall checkout, ${name}: the order, its lines and its total are the old screen's, to the last digit`, async () => {
+    const log = await both({ shopPlaceOrder: { ref: "ORD-1", payError: null } }, (api) => OLD_SHOP.pay(api, SHOPCFG, cart, shipId, " 1 Street ", " hello "),
+      async (api) => { await Act.shop.place(api, { confirm: async () => true }, SHOPCFG, cart, shipId, " 1 Street ", " hello "); });
+    if (Object.keys(cart).length) { assert.equal(log.length, 1); assert.equal(typeof log[0][1][2], "string", "the total is text"); assert.equal(log[0][1][0].currency, "USDT", "the wire value of the currency is untouched"); }
+    else assert.deepEqual(log, []);
+  });
+}
+test("miniMall checkout: the original's question comes first and names MxUSD; Back sends nothing; no delivery address, no order", async () => {
+  let asked = null; const r = recorder({ shopPlaceOrder: { ref: "ORD-1" } });
+  assert.deepEqual(await Act.shop.place(r.api, { confirm: async (t, m) => { asked = [t, m]; return false; } }, SHOPCFG, { p1: 2 }, "domestic", "1 Street", ""), { cancelled: true });
+  assert.deepEqual(asked, ["Pay 27.500000 MxUSD?", "This sends your encrypted order to Zebra and pays 27.500000 MxUSD. Payment is final."]);
+  assert.deepEqual(r.log, []);
+  const none = await Act.shop.place(r.api, { confirm: async () => { throw new Error("never asked"); } }, SHOPCFG, { p1: 2 }, null, "  ", "");
+  assert.deepEqual(none, { err: "Add a delivery address.", refused: true });   // the original refuses this; the old desktop screen sent it
+  assert.deepEqual(r.log, []);
+  assert.match((await Act.shop.place(recorder({}).api, { confirm: async () => true }, SHOPCFG, { p1: 1 }, null, "x", "")).err, /unexpected call/);
+  assert.equal(Act.shop.cur("USDT"), "MxUSD"); assert.equal(Act.shop.cur("mxUSDT"), "MxUSD"); assert.equal(Act.shop.cur("Minima"), "Minima");
+});
+test("miniMall orders: a vendor may set exactly the status the old screen offered; retry, reply and advance make its calls", async () => {
+  for (const status of ["INQUIRY", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED", "UNDERPAID"]) for (const paid of [true, false])
+    assert.equal(Act.shop.nextStatus({ status, paid }), OLD_SHOP.advanceRow({ status, paid }), status + (paid ? " paid" : " unpaid"));
+  await both({ shopAdvance: { ok: true } }, (api) => api.shopAdvance("ORD-1", "CONFIRMED"), (api) => Act.shop.advance(api, "ORD-1", "CONFIRMED"));
+  await both({ shopRetryPay: {} }, (api) => api.shopRetryPay("ORD-1"), (api) => Act.shop.retryPay(api, "ORD-1"));
+  await both({ shopReply: { ok: true } }, async (api) => { const t = " hi ".trim(); if (t) await api.shopReply("ORD-1", t); }, (api) => Act.shop.reply(api, "ORD-1", " hi "));
+  const r = recorder({}); assert.equal(await Act.shop.reply(r.api, "ORD-1", "   "), null); assert.deepEqual(r.log, []);
+  assert.match((await Act.shop.retryPay(recorder({ shopRetryPay: () => Promise.reject(new Error("That payment may already have been sent")) }).api, "ORD-1")).err, /may already have been sent/);
+});
+test("miniMall Studio: the .shop saved and exported is the old screen's, byte for byte", async () => {
+  const draft = (patch) => Object.assign({ shopName: "Zebra Gallery!", currency: "USDT", vendorPublicId: "0x5A", vendorAddress: "MxV", shipping: [{ id: "domestic", label: "x", fee: "2.5" }, { id: "digital", label: "Digital", fee: "9" }],
+    products: [{ id: "p1", name: "Mug", description: "", price: "12.5", maxUnits: "", image: "" }, { id: "p2", name: "", price: "3", maxUnits: "2" }, { id: "p3", name: "Free", price: "0", maxUnits: "2" }] }, patch);
+  for (const patch of [{}, { shopId: "zebra", currency: "Minima" }, { shopName: "" }, { products: [] }])
+    await both({ shopSave: (c) => c, shopExport: "/tmp/x.shop" }, (api) => OLD_SHOP.save(api, draft(patch)), (api) => Act.shop.save(api, draft(patch)));
+  assert.equal(Act.shop.cfgOf(draft({})).tokenid, MXUSD); assert.equal(Act.shop.cfgOf(draft({})).currency, "USDT");
+});
+test("miniMall screens: MxUSD on every label, the vendor's key whole, every money call through AppsAct.shop; the store file is not the screens' to change", () => {
+  const mall = app.slice(app.indexOf("// ============================ miniMall"), app.indexOf("function shopResizeImage"));
+  assert.ok(!/api\.shop(?:PlaceOrder|RetryPay|Advance|Reply|Save)\(/.test(mall), "no direct money call in the screens");
+  assert.ok(!/>\s*(?:mx)?USDT\s*</i.test(mall) && !/mxUSDT/.test(mall), "no USDT label");
+  assert.ok(/data-cur="USDT"[^>]*>MxUSD</.test(mall), "Studio's 'Pays in' offers MxUSD and keeps the wire value");
+  assert.ok(!/vendorPublicId \|\| ""\)\.slice/.test(mall), "the vendor card is whole (it was cut to 18 characters)");
+  assert.match(mall, /idHtml\(shopIdentity\.publicId\)/);
+  const sha = (f) => require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", f))).digest("hex");
+  for (const [f, want] of [["main/shop.js","5af686b2e1086975f6120307abc00c0236ac473f26071e77246294304588abcd"],["main/shop-store.js","75b6697ef20a1f340638900bed90421e612b8c0f733a7d3719344b58d3cb50d0"],["main/shopcrypto.js","a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec"]]) assert.equal(sha(f), want, f + " is the file of 0.19.107");
+});

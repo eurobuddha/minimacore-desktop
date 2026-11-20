@@ -39,6 +39,12 @@
   const VEST = (n, tokenid, total, amount, can, o) => Object.assign({ coinid: "0x" + (n + "FA4E".repeat(16)).slice(0, 64), tokenid, uid: "0x" + (n + "00FA4E".repeat(11)).slice(0, 64), beneficiary: "0x" + ("FA4E".repeat(16)), total, amount, collected: "0",
     startBlock: 2400000, endBlock: 2555520, graceHours: 24, graceLabel: "Daily", startMs: Date.now() - 16 * 86400000, endMs: Date.now() + 74 * 86400000, createdMs: Date.now() - 17 * 86400000, cancollect: can, change: "0", mustwaitblocks: "0", cliffed: false, expired: false, mustwait: false, canCollectNow: Number(can) > 0, pctVested: 18 }, o);
   const VESTS = [VEST("A1", "0x00", "1000", "875.5", "12.5"), VEST("B2", "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "250", "250", "0", { graceLabel: "Weekly", graceHours: 168, startMs: Date.now() + 3 * 86400000, cliffed: true })];
+  const MY_SHOP = { shopName: "Preview Shop (fake)", shopId: "preview-shop", vendorPublicId: "0x" + "5AFA4E".repeat(11).slice(0, 64), vendorAddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1", currency: "USDT", tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
+    shipping: [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "2.5" }, { id: "international", label: "International", fee: "6" }],
+    products: [{ id: "p1", name: "Fake mug", description: "A mug that does not exist", mode: "units", price: "12.5", maxUnits: "5", image: "" }, { id: "p2", name: "Fake print", description: "Preview only", mode: "units", price: "40", maxUnits: "2", image: "" }] };
+  const SHOP_ORDER = (ref, role, status, paid, ago) => ({ ref, role, shopId: "preview-shop", shopName: "Preview Shop (fake)", status, amount: "27.500000", currency: "USDT", paid, paidAmount: paid ? "27.5" : "", date: Date.now() - ago, unread: role === "sell" && !paid,
+    items: [{ product: "Fake mug", quantity: 2, unitPrice: "12.5", lineTotal: "25.000000" }], shipping: "Domestic", delivery: "1 Preview Street, Nowhere", note: "Preview note", counterparty: "0x" + "B0FA4E".repeat(11).slice(0, 64) });
+  const SHOP_ORDERS = [SHOP_ORDER("ORD-FAKE0001", "sell", "PENDING", false, 240000), SHOP_ORDER("ORD-FAKE0002", "sell", "PAID", true, 7200000), SHOP_ORDER("ORD-FAKE0003", "buy", "PENDING", false, 90000000)];
   const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
   const AX_BOOK = { scanned: 3, makers: 2, bestBid: 0.99, bestAsk: 1.01, bidCap: 100, askCap: 100, currency: "mxusdt", label: "mxUSDT", pricingParity: true,
     bids: [{ signer: FAKE_PK("D1"), p: 0.99, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 0.985, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 0.98, cap: 10000, mine: false }],
@@ -310,7 +316,12 @@
     ewSend: async () => ({ tx: FAKE_TX }), ewExportKey: async () => "0x" + "FA4E".repeat(16), ewSetRpc: async () => ({ ok: true }), ewAddToken: async () => ({ token: { symbol: "FAKE" } }), ewRemoveToken: async () => true,
     clipSecret: async () => true,
     ewTokens: async () => EW_TOKENS,
-    shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
+    // miniMall: ?shop=empty
+    shopInit: async () => ({ publicId: FAKE_PK("5A"), vendorAddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1" }), shopVendorCard: async () => FAKE_PK("5A") + "|MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1",
+    shopNewCount: async () => (Q.get("shop") === "empty" ? 0 : 1), shopMyShops: async () => (Q.get("shop") === "empty" ? [] : [MY_SHOP]),
+    shopOrders: async () => (Q.get("shop") === "empty" ? [] : SHOP_ORDERS.map(o => Object.assign({ unpaid: o.ref === "ORD-FAKE0003", ambiguous: false }, o))),
+    shopOrder: async (ref) => { const o = SHOP_ORDERS.find(x => x.ref === ref); return o ? { order: o, chat: [{ incoming: true, message: "Preview message from the other side", date: Date.now() - 3600000 }, { incoming: false, message: "Preview reply", date: Date.now() - 1800000 }], unpaid: ref === "ORD-FAKE0003", ambiguous: false } : null; },
+    shopPlaceOrder: async () => ({ ref: "ORD-FAKE0003", payError: null }), shopRetryPay: async () => ({}), shopAdvance: async () => ({ ok: true }), shopReply: async () => ({ ok: true }), shopSave: async (c) => c, shopExport: async () => "/Users/preview/Documents/preview.shop", shopImport: async () => MY_SHOP,
     // Vestr: ?vs=empty (no contract)
     vestrStatus: async () => ({ ready: true, block: 2428094 }), vestrList: async () => (Q.get("vs") === "empty" ? [] : VESTS),
     vestrTokens: async () => [{ tokenid: "0x00", name: "MINIMA", sendable: "1250.75" }, { tokenid: MXUSD, name: "MxUSD", sendable: "300.50000001" }],
