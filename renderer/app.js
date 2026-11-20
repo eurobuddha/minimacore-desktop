@@ -438,9 +438,10 @@ function postBootNewSeed() {
     const typed = await showPrompt("Reveal my 24-word seed", "", "SHOW SEED", { ok: "Show the seed", message: "Anyone who sees these words controls every coin of this wallet. Only continue if you are alone. Type SHOW SEED to continue." });
     if (typed == null) return;
     let phrase = "";
-    try { const r = await api.seedReveal(typed); phrase = (r && r.phrase) || ""; } catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /SHOW SEED/.test(m) ? "Type SHOW SEED exactly to continue." : "Couldn't read the seed yet. Give the node a moment.", "err"); return; }
+    let sys = false;
+    try { const r = await api.seedReveal(typed); phrase = (r && r.phrase) || ""; sys = !!(r && r.system === true); } catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /SHOW SEED/.test(m) ? "Type SHOW SEED exactly to continue." : "Couldn't read the seed yet. Give the node a moment.", "err"); return; }
     if (!phrase) { toast("Couldn't read the seed yet. Give the node a moment.", "err"); return; }
-    el("seedBox").style.display = ""; el("seedBox").textContent = phrase;
+    el("seedBox").style.display = ""; el("seedBox").textContent = phrase + (sys ? "" : "\n\nNo Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks.");
     el("seedAck").style.display = ""; el("newGo").style.display = "";
   };
   el("newGo").onclick = async () => {
@@ -1869,12 +1870,13 @@ async function termSecret(c, kind) {
   const typed = await showPrompt(kind === "seed" ? "This command shows the seed phrase" : "This command shows a private key", "", phrase, { ok: "Run it once",
     message: "Anyone who sees the answer can take every coin it controls. It is shown apart from the Terminal, for a minute, and is not kept in the history or the output. Type " + phrase + " to run it." });
   if (typed == null) return;
-  let r;
-  try { await api.cmdGate(c, typed); r = await api.cmd(c); }
+  let r, g;
+  try { g = await api.cmdGate(c, typed); r = await api.cmd(c); }
   catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /exactly/.test(m) ? "Type " + phrase + " exactly to continue." : m.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "err"); return; }
   appendTerm("> (a command that shows a secret was run; its answer is not kept here)");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="termSecOv"><div class="modal"><div class="modal__title">Answer</div>
     <div class="view__desc" style="color:var(--red)">⚠ Keep this secret. This closes by itself after 60 seconds, and when you leave this window.</div>
+    ${g && g.system === true ? "" : `<div class="view__desc" style="color:var(--red)">No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks.</div>`}
     <pre class="mono" id="termSecText" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:50vh;overflow:auto"></pre>
     <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="termSecClose">Close</button></div></div></div>`);
   const ov = el("termSecOv"); el("termSecText").textContent = JSON.stringify(r, null, 2); r = null;
@@ -2702,7 +2704,7 @@ async function settingsRevealSeed() {
   if (typed == null) return;
   let r; try { r = await api.seedReveal(typed); } catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /SHOW SEED/.test(m) ? "Type SHOW SEED exactly to continue." : "Couldn't read the seed.", "err"); return; }
   const box = el("setSeed"); if (!box || !r || !r.phrase) { toast("Couldn't read the seed.", "err"); return; }
-  box.style.display = ""; box.textContent = r.phrase + (r.system === true ? "" : "\n\nNo system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.") + "\n\nThis hides itself after 60 seconds, and when you leave this window.";
+  box.style.display = ""; box.textContent = r.phrase + (r.system === true ? "" : "\n\nNo Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks.") + "\n\nThis hides itself after 60 seconds, and when you leave this window.";
   r.phrase = null;
   const hidden = () => { if (document.hidden) hide(); };
   const hide = () => { clearTimeout(timer); window.removeEventListener("blur", hide); document.removeEventListener("visibilitychange", hidden); box.textContent = ""; box.style.display = "none"; };
@@ -2723,7 +2725,7 @@ function ewRevealKey(key, system) {
   let k = String(key || ""); key = null;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewPkOv"><div class="modal">
     <div class="modal__title">ETH private key</div><div class="view__desc" style="color:var(--red)">⚠ Keep this secret. Anyone with this key controls these funds.</div>
-    ${system ? "" : `<div class="view__desc" style="color:var(--red)">No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.</div>`}
+    ${system ? "" : `<div class="view__desc" style="color:var(--red)">No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks.</div>`}
     <div class="mono" id="ewPkText" style="user-select:all;word-break:break-all;font-size:12px"></div>
     <div class="view__desc">This closes by itself after 60 seconds, and when you leave this window.</div>
     <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewPkClose">Close</button><button class="btn btn--primary btn--full" id="ewPkCopy">Copy key</button></div></div></div>`);

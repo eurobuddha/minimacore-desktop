@@ -32,8 +32,8 @@ function classify(command) {
   return { kind, chain: parts.length > 1 };
 }
 
-/** gate(os, now?) → { arm(command, typed) → { system }, take(command) → bool }. */
-function create(os, now) {
+/** gate(sys, now?) → { arm(command, typed) → { system, kind }, take(command) → bool }. sys: main/syscheck.js. */
+function create(sys, now) {
   const clock = now || Date.now;
   let pass = null;   // { command, until }
   async function arm(command, typed) {
@@ -42,10 +42,12 @@ function create(os, now) {
     if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error("Run this command on its own, not in a chain with ;.");
     if (String(typed == null ? "" : typed).trim() !== PHRASE[kind]) throw new Error("Type " + PHRASE[kind] + " exactly to continue.");
-    let ask = false; try { ask = !!(os && os.can()); } catch (e) { ask = false; }
-    if (ask) { try { await os.prompt(kind === "seed" ? "show the wallet's seed phrase" : "show a private key"); } catch (e) { pass = null; throw new Error("Cancelled"); } }
+    if (!sys || typeof sys.check !== "function") throw new Error("No system check is available. Nothing was run.");
+    // the Touch ID reason and the confirmation name the exact command (0.18.176), cut to what the prompt can show
+    const one = c.replace(/[\u0000-\u001f\u007f]/g, " ");
+    const s = await sys.check("run the Terminal command " + one.slice(0, 80), "This Terminal command will run once and its answer will be shown:\n\n" + one.slice(0, 600));
     pass = { command: c, until: clock() + PASS_MS };
-    return { system: ask, kind };
+    return { system: s.biometric === true, kind };
   }
   /** Used up by the one command it was passed for; a different command, a second run or a late one finds nothing. */
   function take(command) {

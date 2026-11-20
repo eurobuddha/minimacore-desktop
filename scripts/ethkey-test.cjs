@@ -5,6 +5,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert");
+const SYS = (o) => require("../main/syscheck").create(Object.assign({ can: () => false, prompt: async () => {}, confirm: async () => true, seen: () => false, markSeen: () => {} }, o));   // main/syscheck.js with stand-ins (0.18.176)
 const fs = require("fs");
 const path = require("path");
 const Module = require("module");
@@ -20,14 +21,14 @@ const mainJs = rd("main/main.js"), preload = rd("main/preload.js"), app = rd("re
 
 test("main process: no key without the typed phrase; the system's prompt is asked where there is one, and a refusal ends it", async () => {
   let asked = 0;
-  for (const typed of [undefined, null, "", "show key", "SHOW KEYS", "yes"]) await assert.rejects(ethwallet.exportKeyGated(typed, { can: () => true, prompt: async () => { asked++; } }), /Type SHOW KEY/, String(typed));
+  for (const typed of [undefined, null, "", "show key", "SHOW KEYS", "yes"]) await assert.rejects(ethwallet.exportKeyGated(typed, SYS({ can: () => true, prompt: async () => { asked++; } })), /Type SHOW KEY/, String(typed));
   assert.equal(asked, 0, "the phrase is checked before anything is prompted");
-  assert.deepEqual(await ethwallet.exportKeyGated(" SHOW KEY ", { can: () => true, prompt: async () => { asked++; } }), { key: "0xKEY", system: true });
+  assert.deepEqual(await ethwallet.exportKeyGated(" SHOW KEY ", SYS({ can: () => true, prompt: async () => { asked++; } })), { key: "0xKEY", system: true });
   assert.equal(asked, 1);
-  await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", { can: () => true, prompt: async () => { throw new Error("user cancelled"); } }), /^Error: Cancelled$/);
-  assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => false, prompt: async () => { throw new Error("never"); } }), { key: "0xKEY", system: false }, "no system prompt here: the answer says so");
-  assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => { throw new Error("x"); } }), { key: "0xKEY", system: false });
-  assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", null), { key: "0xKEY", system: false });
+  await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", SYS({ can: () => true, prompt: async () => { throw new Error("user cancelled"); } })), /^Error: Cancelled$/);
+  assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", SYS({ can: () => false, prompt: async () => { throw new Error("never"); } })), { key: "0xKEY", system: false }, "no system prompt here: the answer says so");
+  assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", SYS({ can: () => { throw new Error("x"); } })), { key: "0xKEY", system: false });
+  await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", null), /No system check is available/, "CHANGED on purpose (0.18.176): no system check at all is a refusal");
 });
 
 test("no ungated path is left: one IPC handler answers with a key, it is the gated one, and the AtomiX panel uses ETH Wallet's dialog", () => {
@@ -69,12 +70,12 @@ test("the key dialog: the key is text in one node, Copy goes through the secret 
   };
   let t = make(); t.fn("0xKEY", false);
   assert.ok(!t.E.html.includes("0xKEY"), "the key is not in the markup"); assert.equal(t.E.nodes.ewPkText.textContent, "0xKEY");
-  assert.match(t.E.html, /No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check\./);
+  assert.match(t.E.html, /No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks\./);
   assert.equal(t.E.timers[0].ms, 60000);
   t.E.nodes.ewPkCopy.onclick(); assert.deepEqual(t.E.copied, ["0xKEY"], "Copy goes through the main process's secret clipboard");
   t.E.timers[0].f(); assert.equal(t.E.removed, 1, "closed by itself after the minute"); assert.deepEqual(Object.keys(t.E.win), []); assert.deepEqual(Object.keys(t.E.doc), [], "its listeners are gone");
   t.E.nodes.ewPkCopy.onclick(); assert.deepEqual(t.E.copied, ["0xKEY"], "after closing, Copy has no key left");
-  t = make(); t.fn("0xKEY", true); assert.ok(!/No system check/.test(t.E.html));
+  t = make(); t.fn("0xKEY", true); assert.ok(!/No Touch ID check/.test(t.E.html));
   t.E.win.blur(); assert.equal(t.E.removed, 1, "the window lost focus"); assert.equal(t.E.timers[0].on, false);
   t = make(); t.fn("0xKEY", true); t.E.doc.visibilitychange(); assert.equal(t.E.removed, 0, "still visible"); t.E.hidden = true; t.E.doc.visibilitychange(); assert.equal(t.E.removed, 1, "hidden");
 });
@@ -83,14 +84,14 @@ test("the key dialog: the key is text in one node, Copy goes through the secret 
 test("seed reveal: no node command without the typed phrase and, where offered, the system's prompt", async () => {
   const { revealSeedGated } = require("../main/seedgate");
   const sent = [], run = async (c) => { sent.push(c); return { status: true, response: { phrase: "ONE TWO THREE" } }; };
-  for (const typed of [undefined, "", "show seed", "SHOW KEY", "yes"]) await assert.rejects(revealSeedGated(typed, { can: () => true, prompt: async () => {} }, run), /Type SHOW SEED/);
-  await assert.rejects(revealSeedGated("SHOW SEED", { can: () => true, prompt: async () => { throw new Error("no"); } }, run), /^Error: Cancelled$/);
+  for (const typed of [undefined, "", "show seed", "SHOW KEY", "yes"]) await assert.rejects(revealSeedGated(typed, SYS({ can: () => true }), run), /Type SHOW SEED/);
+  await assert.rejects(revealSeedGated("SHOW SEED", SYS({ can: () => true, prompt: async () => { throw new Error("no"); } }), run), /^Error: Cancelled$/);
   assert.deepEqual(sent, [], "nothing asked of the node before both checks");
-  assert.deepEqual(await revealSeedGated(" SHOW SEED ", { can: () => true, prompt: async () => {} }, run), { phrase: "ONE TWO THREE", system: true });
-  assert.deepEqual(await revealSeedGated("SHOW SEED", null, run), { phrase: "ONE TWO THREE", system: false });
+  assert.deepEqual(await revealSeedGated(" SHOW SEED ", SYS({ can: () => true }), run), { phrase: "ONE TWO THREE", system: true });
+  assert.deepEqual(await revealSeedGated("SHOW SEED", SYS({}), run), { phrase: "ONE TWO THREE", system: false });
   assert.deepEqual(sent, ["vault", "vault"]);
-  await assert.rejects(revealSeedGated("SHOW SEED", null, async () => ({ status: true, response: {} })), /Couldn't read the seed/);
-  assert.ok(/ipcMain\.handle\("mcd:seedReveal", \(_e, typed\) => \{ requireRunning\(\);[^\n]*revealSeedGated\(typed, \{/.test(mainJs));
+  await assert.rejects(revealSeedGated("SHOW SEED", SYS({}), async () => ({ status: true, response: {} })), /Couldn't read the seed/);
+  assert.ok(/ipcMain\.handle\("mcd:seedReveal", \(_e, typed\) => \{ requireRunning\(\);[^\n]*revealSeedGated\(typed, sysCheck,/.test(mainJs));
   assert.ok(/el\("setReveal"\)\.onclick = \(\) => settingsRevealSeed\(\);/.test(app) && !/setReveal[^\n]*tryCmd\("vault"\)/.test(app), "Settings no longer reads the seed with one click");
 });
 test("seed reveal screen: shown as text, hidden after 60 s and when the window is left", async () => {
@@ -105,8 +106,29 @@ test("seed reveal screen: shown as text, hidden after 60 s and when the window i
     return { E, fn };
   };
   let t = make({ phrase: "ONE TWO", system: false }); await t.fn();
-  assert.equal(t.E.typed, "SHOW SEED"); assert.ok(t.E.box.textContent.startsWith("ONE TWO\n\nNo system check took place")); assert.equal(t.E.timers[0].ms, 60000);
+  assert.equal(t.E.typed, "SHOW SEED"); assert.ok(t.E.box.textContent.startsWith("ONE TWO\n\nNo Touch ID check took place")); assert.equal(t.E.timers[0].ms, 60000);
   t.E.timers[0].f(); assert.equal(t.E.box.textContent, ""); assert.equal(t.E.box.style.display, "none"); assert.deepEqual(Object.keys(t.E.win), []);
-  t = make({ phrase: "ONE TWO", system: true }); await t.fn(); assert.ok(!/No system check/.test(t.E.box.textContent));
+  t = make({ phrase: "ONE TWO", system: true }); await t.fn(); assert.ok(!/No Touch ID check/.test(t.E.box.textContent));
   t.E.win.blur(); assert.equal(t.E.box.textContent, "", "hidden when the window is left");
+});
+
+// ---- 0.18.176: the system's own check ----
+test("syscheck: Touch ID when it can prompt; refused (not phrase only) once Touch ID worked here and cannot prompt now; a named confirmation where it never could", async () => {
+  const { create } = require("../main/syscheck");
+  let seen = false, asked = [], confirmed = [];
+  const io = (o) => Object.assign({ can: () => true, prompt: async (w) => { asked.push(w); }, confirm: async (d) => { confirmed.push(d); return true; }, seen: () => seen, markSeen: () => { seen = true; } }, o);
+  assert.deepEqual(await create(io({})).check("run the Terminal command vault action:seed", "detail"), { biometric: true });
+  assert.deepEqual(asked, ["run the Terminal command vault action:seed"], "the reason names the command"); assert.equal(seen, true, "Touch ID worked: remembered");
+  for (const can of [() => false, () => { throw new Error("x"); }]) await assert.rejects(create(io({ can })).check("r", "d"), /Touch ID has been used on this computer before but cannot be asked now/);
+  assert.deepEqual(confirmed, [], "no fall-back to a confirmation while it is remembered");
+  seen = false;
+  assert.deepEqual(await create(io({ can: () => false })).check("r", "This Terminal command will run once: vault"), { biometric: false });
+  assert.deepEqual(confirmed, ["This Terminal command will run once: vault"], "never available: the confirmation names what is shown");
+  await assert.rejects(create(io({ can: () => false, confirm: async () => false })).check("r", "d"), /^Error: Cancelled$/);
+  await assert.rejects(create(io({ prompt: async () => { throw new Error("no"); } })).check("r", "d"), /^Error: Cancelled$/);
+  const G = require("../main/cmdgate"); asked = [];
+  await G.create(create(io({}))).arm("vault action:seed", "SHOW SEED");
+  assert.deepEqual(asked, ["run the Terminal command vault action:seed"]);
+  for (const [name, re] of [["mcd:seedReveal", /revealSeedGated\(typed, sysCheck,/], ["mcd:ewExportKey", /exportKeyGated\(typed, sysCheck\)/]]) assert.ok(re.test(mainJs), name + " uses the system check");
+  assert.ok(/const cmdGate = require\("\.\/cmdgate"\)\.create\(sysCheck\);/.test(mainJs) && !/canPromptTouchID/.test(mainJs), "one system check for every gate");
 });

@@ -5,6 +5,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert");
+const SYS = (o) => require("../main/syscheck").create(Object.assign({ can: () => false, prompt: async () => {}, confirm: async () => true, seen: () => false, markSeen: () => {} }, o));   // main/syscheck.js with stand-ins (0.18.176)
 const fs = require("fs"), path = require("path");
 const G = require("../main/cmdgate");
 const rd = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
@@ -19,7 +20,7 @@ test("which commands are gated: vault (every action), seedrandom (every modifier
 
 test("no pass: refused; a pass is for one exact command, once, within 60 s; a chain is never run", async () => {
   let t = 1000; const os = { can: () => false };
-  const g = G.create(os, () => t);
+  const g = G.create(SYS(os), () => t);
   assert.match(G.refusal("vault", g.take), /^GATED:seed: vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase\. Type SHOW SEED to run it\.$/);
   assert.match(G.refusal("seedrandom modifier:x", g.take), /^GATED:key:.*Type SHOW KEY/);
   assert.equal(G.refusal("balance", g.take), "", "every other command runs unchanged");
@@ -36,10 +37,10 @@ test("no pass: refused; a pass is for one exact command, once, within 60 s; a ch
   assert.match(G.refusal("vault", g.take), /^GATED:seed:/, "and a mismatched try used it up");
   await g.arm("seedrandom modifier:x", "SHOW KEY"); t += 60001;
   assert.match(G.refusal("seedrandom modifier:x", g.take), /^GATED:key:/, "too late");
-  const asked = []; const g2 = G.create({ can: () => true, prompt: async (w) => { asked.push(w); throw new Error("no"); } }, () => t);
+  const asked = []; const g2 = G.create(SYS({ can: () => true, prompt: async (w) => { asked.push(w); throw new Error("no"); } }), () => t);
   await assert.rejects(g2.arm("vault", "SHOW SEED"), /^Error: Cancelled$/); assert.equal(asked.length, 1, "the system's prompt was asked");
   assert.match(G.refusal("vault", g2.take), /^GATED:seed:/, "a refused prompt leaves no pass");
-  const g3 = G.create({ can: () => true, prompt: async () => {} }, () => t);
+  const g3 = G.create(SYS({ can: () => true, prompt: async () => {} }), () => t);
   assert.deepEqual(await g3.arm("keys action:genkey", "SHOW KEY"), { system: true, kind: "key" }); assert.equal(G.refusal("keys action:genkey", g3.take), "");
 });
 
@@ -68,6 +69,8 @@ test("the gated answer: shown as text apart from the Terminal, closed after 60 s
   assert.ok(E.nodes.termSecText.textContent.includes("ONE TWO") && !E.html.includes("ONE TWO"), "the answer is text in one node");
   assert.ok(!E.appended.join().includes("ONE TWO") && !E.appended.join().includes("vault"), "nothing of it reaches the Terminal's output");
   assert.ok(!/copy/i.test(E.html), "no Copy");
+  assert.match(E.html, /No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks\./, "said when the gate did not report Touch ID (0.18.176)");
+  assert.ok(/textContent = phrase \+ \(sys \? "" : "\\n\\nNo Touch ID check took place/.test(app), "the first-run seed says so too");
   assert.equal(E.timers[0].ms, 60000); E.win.blur(); assert.equal(E.removed, 1, "closed when the window is left");
 });
 
@@ -158,7 +161,7 @@ test("every text the node runs as a gated command is gated (68 variants: quotes,
   assert.ok(/if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character/.test(main), "mcd:cmd refuses a control character first");
 });
 test("a failed try clears an earlier pass; the refusal names every gated command", async () => {
-  const g = G.create({ can: () => false });
+  const g = G.create(SYS({ can: () => false }));
   await g.arm("vault", "SHOW SEED");
   await assert.rejects(g.arm("vault", "wrong"), /Type SHOW SEED/);
   assert.match(G.refusal("vault", g.take), /^GATED:seed: vault, seedrandom and keys action:genkey show a seed or a private key/);

@@ -41,11 +41,13 @@ const exportKey   = () => atomix.exportKey();
  * os = { can() -> bool, prompt(reason) -> Promise } (main.js passes Electron's systemPreferences).
  */
 const EXPORT_PHRASE = "SHOW KEY";
-async function exportKeyGated(typed, os) {
+async function exportKeyGated(typed, sys) {
   if (String(typed == null ? "" : typed).trim() !== EXPORT_PHRASE) throw new Error("Type " + EXPORT_PHRASE + " exactly to continue.");
-  let ask = false; try { ask = !!(os && os.can()); } catch (e) { ask = false; }
-  if (ask) { try { await os.prompt("show the ETH private key"); } catch (e) { throw new Error("Cancelled"); } }
-  return { key: atomix.exportKey(), system: ask };   // system: the system's own check took place; false is said on the screen
+  if (!sys || typeof sys.check !== "function") throw new Error("No system check is available. Nothing was shown.");
+  // the system's own check (main/syscheck.js, 0.18.176): Touch ID; refused while Touch ID that worked before cannot be asked;
+  // a confirmation naming what is shown where Touch ID was never available
+  const s = await sys.check("show the ETH private key", "The ETH private key of this wallet (the key AtomiX swaps sign with) will be shown.");
+  return { key: atomix.exportKey(), system: s.biometric === true };   // system: Touch ID took place; false is said on the screen
 }
 const setRpc      = (url) => atomix.ethSetRpc(url);
 

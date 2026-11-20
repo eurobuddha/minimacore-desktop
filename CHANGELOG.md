@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.176] — one system check for every secret gate
+
+- The seed, ETH-key and Terminal gates each asked Touch ID where it could prompt and otherwise went on with the typed phrase alone, so a Mac whose Touch ID was locked after failed tries fell back to the phrase. `main/syscheck.js` is now the one system check of all three (after the typed phrase): Touch ID where it can prompt, with a reason that names what is shown (a Terminal command by its text, cut to 80); once Touch ID has worked on this install a marker file in the data folder says so, and while it is there a Mac that cannot prompt now is REFUSED with a plain message; where Touch ID was never available a main-process dialog shows exactly what will be shown (the command) and must be confirmed. The ETH key, Settings seed, first-run seed and Terminal answer dialogs say "No Touch ID check took place" when Touch ID did not take place. Tests: `scripts/ethkey-test.cjs`, `scripts/cmdgate-test.cjs`.
+
 ## [0.18.175] — every verb check reads the command as the node does
 
 - The beacon-dust send pin (`main/sendpin.js` and `mcd:cmd`) decided with `/^send\\s/` and `/\\bfromaddress:/`, and the RPC timeout with `startsWith`: `"send" …`, a leading control character, `s"en"d`, `amount : 1` or `fromaddress : 0x…` typed in the Terminal skipped them. They now read the verb and the parameters through `main/cmdverb.js` (the node's trim, quoted first word, quotes dropped, `:` spacing closed up). This version has no signing queue or coin reservation module. The AtomiX and casino send checks read commands their own engines build, never typed text, and are not changed. Tests: `scripts/sendpin-test.cjs`.

@@ -153,8 +153,10 @@ function requireRunning() {
 
 // Commands that print a seed or a private key (vault, seedrandom, keys action:genkey) run on this channel only after a fresh
 // gate for that exact command (main/cmdgate.js, 0.18.173): the typed phrase and the system's prompt, good for one run in 60 s.
-const cmdGate = require("./cmdgate").create({ can: () => { const { systemPreferences } = require("electron"); return process.platform === "darwin" && systemPreferences.canPromptTouchID(); },
-  prompt: (why) => require("electron").systemPreferences.promptTouchID(why) });
+// The system's own check of every secret gate (main/syscheck.js, 0.18.176): Touch ID; refused while Touch ID that worked
+// before cannot be asked; a main-process confirmation naming what is shown where Touch ID was never available.
+const sysCheck = require("./syscheck").forElectron(require("electron"), () => win);
+const cmdGate = require("./cmdgate").create(sysCheck);
 ipcMain.handle("mcd:cmdGate", (_e, command, typed) => cmdGate.arm(command, typed));
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
@@ -555,11 +557,9 @@ ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
 ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
 ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
 // The seed phrase for Settings' Reveal (0.18.165): the typed phrase and the system's prompt, both here (main/seedgate.js).
-ipcMain.handle("mcd:seedReveal", (_e, typed) => { requireRunning(); const { systemPreferences } = require("electron"); return require("./seedgate").revealSeedGated(typed, {
-  can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
+ipcMain.handle("mcd:seedReveal", (_e, typed) => { requireRunning(); return require("./seedgate").revealSeedGated(typed, sysCheck, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 // The ETH key: the typed phrase and, where the system offers one, its own prompt, both here (main/ethwallet.js exportKeyGated).
-ipcMain.handle("mcd:ewExportKey", (_e, typed) => { const { systemPreferences } = require("electron"); return ethwallet.exportKeyGated(typed, {
-  can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }); });
+ipcMain.handle("mcd:ewExportKey", (_e, typed) => ethwallet.exportKeyGated(typed, sysCheck));
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
