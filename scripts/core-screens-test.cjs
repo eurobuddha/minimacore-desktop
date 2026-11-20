@@ -184,7 +184,7 @@ function flow(opts) {
       cmd: async (c) => { log.push("cmd:" + c); return opts.cmdFails ? { status: false, error: "node says no" } : { status: true, response: {} }; },
       clip: async () => true
     },
-    toast: (m, k) => toasts.push((k || "") + ":" + m), ipcError: (e) => String(e && e.message || e), esc: (x) => String(x),
+    toast: (m, k) => toasts.push((k || "") + ":" + m), ipcError: (e) => String(e && e.message || e), esc: (x) => String(x), MainSaid: require("../renderer/mainsaid.js"),
     showStarting: () => log.push("showStarting"), showSetup: () => log.push("launcher"), hideSetup: () => log.push("hideSetup"), renderActive: () => log.push("renderActive"),
     walletReplaced: async () => log.push("walletReplaced"), postBootNewSeed: () => {},
     frScreen: () => ({ set innerHTML(v) {}, className: "" }),
@@ -335,7 +335,7 @@ test("M5: a node stopped for the wrong key mode puts one message over the whole 
   assert.equal(added.length, 1, "once");
   assert.ok(added[0].includes('role="alertdialog"') && added[0].includes("running with block keys &lt;b>") && !/<button/.test(added[0]), "the words, escaped, and no button");
   assert.equal(els.shell.inert, true, "nothing underneath can be used");
-  assert.ok(/function onStatus\(s\) \{\n  if \(s\.keyModeAlert\) showKeyModeBlock\(s\.keyModeAlert\);/.test(app), "shown on the first status that carries it");
+  assert.ok(/function onStatus\(s\) \{\n  if \(s\.keyModeAlert\) showKeyModeBlock\(MainSaid\.say\(s\.keyModeAlert\)\);/.test(app), "shown on the first status that carries it (0.19.158: in the app's language)");
 });
 
 test("H3: Restore from file asks the backup's key mode on every node, and the main process decides", async () => {

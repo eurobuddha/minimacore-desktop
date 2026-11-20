@@ -173,7 +173,7 @@ function showKeyModeBlock(msg) {
   el("shell").inert = true;
 }
 function onStatus(s) {
-  if (s.keyModeAlert) showKeyModeBlock(s.keyModeAlert);
+  if (s.keyModeAlert) showKeyModeBlock(MainSaid.say(s.keyModeAlert));
   LAST_STATUS = s;   // kept for a language change: the footer is painted again from it
   paintKeyMode(s.keyMode);
   paintFooter(s);
@@ -627,7 +627,7 @@ function renderBackup() {
       if (built.resetsWallet) await walletReplaced();
       // The node shut itself down at the end and the main process started it again, through every start check.
       const after = await api.nodeStatus();
-      if (after.state === "error") { st.textContent = t("{label} finished, but the node was not started again. {lastError}", { label: label, lastError: (after.lastError || "") }); btn.disabled = false; btn.textContent = btn.dataset.label; return; }
+      if (after.state === "error") { st.textContent = t("{label} finished, but the node was not started again. {lastError}", { label: label, lastError: MainSaid.say(after.lastError || "") }); btn.disabled = false; btn.textContent = btn.dataset.label; return; }
       toast(t("{label} complete ✓ The node is restarting.", { label: label }), "ok"); bkOpen("");
     } catch (e) { st.textContent = t("{label} not completed. {e}", { label: label, e: ipcError(e) }); btn.disabled = false; btn.textContent = btn.dataset.label; }
   };
@@ -700,7 +700,7 @@ function updateSetupProgress(s) {
   if (s.state === "starting") stat.textContent = t("connecting…");
   else if (s.state === "running" && s.health) stat.textContent = t("● {connections} peers · block #{block}", { connections: (s.health.connections || 0), block: (s.health.block || 0) });
   else if (s.state === "error") {
-    stat.textContent = "⚠ " + (s.lastError || t("node error")); stat.style.color = "var(--red)";
+    stat.textContent = "⚠ " + (s.lastError ? MainSaid.say(s.lastError) : t("node error")); stat.style.color = "var(--red)";
     if (!el("startBack")) {   // a way out, to change a port or a parameter and try again
       stat.insertAdjacentHTML("afterend", `<button class="btn btn--outline ps-btn" id="startBack">${th("Back")}</button>`);
       el("startBack").onclick = () => { RESTORE = null; showSetup(); };
@@ -780,7 +780,7 @@ async function postBootRestore() {
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     const after = await api.nodeStatus();   // the node shut itself down at the end; the main process started it again
     hideSetup(); renderActive();
-    if (after.state === "error") toast(t("Wallet restored, but the node was not started again. {lastError}", { lastError: (after.lastError || "") }), "err");
+    if (after.state === "error") toast(t("Wallet restored, but the node was not started again. {lastError}", { lastError: MainSaid.say(after.lastError || "") }), "err");
     else toast(t("Wallet restored ✓ The node is restarting."), "ok");
   } catch (e) {
     const st = el("rStat"); if (st) { st.textContent = "⚠ " + ipcError(e); st.style.color = "var(--red)"; }
@@ -2992,7 +2992,7 @@ async function renderSettings() {
       CFG = await api.getConfig();
       stat.textContent = want === "parlons" ? t("Parlons Node starting. Open Parlons from the app tray.") : t("Plain Minima node starting.");
       toast(t("Node restarting…"), "ok");
-    } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
+    } catch (e) { stat.textContent = ipcError(e); toast(ipcError(e), "err"); }
     el("setKindApply").disabled = false;
   };
   host.querySelectorAll(".lbl-del").forEach(btn => btn.onclick = async () => {
@@ -3223,7 +3223,7 @@ function renderNode(s) {
     ${contributing && showAddr ? row(t("Public address"), esc(h.p2pAddress) + (addrOk ? " ✓" : "")) : ""}
     ${row(t("Network"), esc(CFG.network))}
     ${row(t("RPC port"), esc(s.rpcPort || CFG.basePort + 4))}
-    ${s.lastError ? `<div class="home-row"><span class="home-row__k">${th("Error")}</span><span class="home-row__v" style="color:var(--red)">${esc(s.lastError)}</span></div>` : ""}
+    ${s.lastError ? `<div class="home-row"><span class="home-row__k">${th("Error")}</span><span class="home-row__v" style="color:var(--red)">${esc(MainSaid.say(s.lastError))}</span></div>` : ""}
     ${s.portOwner ? row(t("Port {basePort} held by", { basePort: esc(s.portOwner.port || CFG.basePort) }), t("pid {pid} · {command}", { pid: esc(s.portOwner.pid), command: esc(s.portOwner.command) })) : ""}
     <div class="home-actions">
       <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? th("Start node") : th("Restart node")}</button>
@@ -4074,7 +4074,7 @@ async function renderParlons() {
     strip.innerHTML = "";
     body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
       <div class="view__desc">${th("Your node can host your Parlons account: private chat, calls and payments under this node's own seed, with your phones and computers paired to it. This install still runs the plain Minima node.")}</div>
-      ${st.blocker ? `<div class="status status--warn">${esc(st.blocker)}</div>` : `<button class="btn btn--primary btn--full" id="parlonsSwitch">${th("Switch to the Parlons Node (restarts the node; wallet and data stay)")}</button>`}
+      ${st.blocker ? `<div class="status status--warn">${esc(MainSaid.say(st.blocker))}</div>` : `<button class="btn btn--primary btn--full" id="parlonsSwitch">${th("Switch to the Parlons Node (restarts the node; wallet and data stay)")}</button>`}
       </div>`;
     const b = el("parlonsSwitch");
     if (b) b.onclick = async () => {
@@ -4082,7 +4082,7 @@ async function renderParlons() {
           t("Same chain, same wallet, same data folder — plus your Parlons account. The node restarts now."), t("Switch"))) return;
       b.disabled = true; b.textContent = t("Switching…");
       try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast(t("Parlons Node starting…"), "ok"); renderParlons(); }
-      catch (e) { toast(e.message || String(e), "err"); b.disabled = false; b.textContent = t("Switch to the Parlons Node"); }
+      catch (e) { toast(ipcError(e), "err"); b.disabled = false; b.textContent = t("Switch to the Parlons Node"); }
     };
     return;
   }

@@ -26,6 +26,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   //   top: false     only read inside another message (a list item), never as a whole message
   //   nest: { param: { split: "separator", sub: [codes] } | { sub: [codes] } }   values that are sentences of main
   //   lower: true    the item may arrive with its first letter made a capital (main/freeze.js capitalises its list)
+  //   value: true    (in nest) the value is usually main's own (a program's command line) and only sometimes a listed sentence
   var T = [
     // ---- Freeze (main/freeze.js) ----
     ["FREEZE_CORE", I18N.N_("Minima Core is the node and the wallet. It cannot be frozen.")],
@@ -100,7 +101,59 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["RP_DX_TAKES", I18N.N_("{n} Dexicon trades sent and not yet answered. Wait for them to settle (a few minutes)."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_CASINO", I18N.N_("P2P Chance: {offers} and {bets} still open, which only this wallet's keys can settle."), { top: false, group: "REPLACE_ITEMS", nest: { offers: { sub: ["COUNT_OFFERS"] }, bets: { sub: ["COUNT_BETS"] } } }],
     ["COUNT_OFFERS", I18N.N_("{n} offers"), { top: false }],
-    ["COUNT_BETS", I18N.N_("{n} bets"), { top: false }]
+    ["COUNT_BETS", I18N.N_("{n} bets"), { top: false }],
+    ["TERMINAL_RESTORE", I18N.N_("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.")],
+
+    // ---- Key mode: what may start, and what was refused (main/keymode.js, main/node-manager.js, main/config.js, main/main.js) ----
+    ["KM_FOLDER_NOT_BLOCK", I18N.N_("The data folder holds node data that is not marked as a block key wallet, and this install is set up for block keys. The node was not started, because starting a classic wallet with block keys mixes the two kinds for good. If this is another wallet's folder, set the data folder back in Startup Params. If it is this wallet's own folder and its file {marker} was removed, the app cannot tell and will not guess: restore the wallet from its seed phrase in a fresh install.")],
+    ["KM_FOLDER_BLOCK", I18N.N_("The data folder holds a block key wallet, but this install is set up for classic keys. The node was not started, because that would add keys of the other kind to the wallet for good. Set the data folder back in Startup Params.")],
+    ["KM_UNSUPPORTED", I18N.N_("This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with.")],
+    ["KM_ARG_KEYMODE", I18N.N_("{arg} is in the extra arguments. The wallet's key mode sets it, so it cannot be passed by hand. Remove it in Startup Params.")],
+    ["KM_ARG_RESERVED", I18N.N_("{arg} is in the extra arguments. The app sets it itself, and a second one would override the app's. Remove it in Startup Params.")],
+    ["KM_DASH", I18N.N_("The value of -{param} starts with a dash. The node would read it as another parameter, so it was not started. Correct it in Startup Params.")],
+    ["KM_CONF_UNREADABLE", I18N.N_("The config file given with -conf could not be read, so it could not be checked: {file}. The node was not started.")],
+    ["KM_CONF_KEYFLAGS", I18N.N_("The config file given with -conf sets -blockaskeyuses or -lowram. The wallet's key mode sets them, so they cannot be passed by hand. Remove them from that file.")],
+    ["KM_CONF_OWNED", I18N.N_("The config file given with -conf sets {key}, which the app sets itself. Remove that line from the file.")],
+    ["KM_ARGV_FOLDER", I18N.N_("The node was not started: -{name} would point it at a folder other than this install's data folder. Remove it from the extra arguments in Startup Params.")],
+    ["KM_ARGV_PARLONS_DATA", I18N.N_("The node was not started: it would be pointed at a folder other than this install's data folder.")],
+    ["KM_ARGV_PARLONS_CONF", I18N.N_("The node was not started: a config file was given outside the app's own -conf parameter.")],
+    ["KM_ARGV_BLOCK_NONE", I18N.N_("The node was not started: its start command does not hold the block key flags, and this wallet uses block keys, which needs exactly -blockaskeyuses true -lowram true. Check the parameter values and extra arguments in Startup Params.")],
+    ["KM_ARGV_BLOCK", I18N.N_("The node was not started: its start command holds {found}, and this wallet uses block keys, which needs exactly -blockaskeyuses true -lowram true. Check the parameter values and extra arguments in Startup Params.")],
+    ["KM_ARGV_CLASSIC", I18N.N_("The node was not started: its start command holds {found}, and this wallet uses classic keys, which needs neither -blockaskeyuses nor -lowram. Check the parameter values and extra arguments in Startup Params.")],
+    ["KM_MARK_FAILED", I18N.N_("The data folder could not be marked as a block key wallet ({error}). The node was not started.")],
+    ["KM_ALERT_CLASSIC", I18N.N_("{what}, but this wallet is recorded as a classic key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. Do not start it again as it is: each start in the wrong mode can add more keys of the other kind to the wallet. Your seed phrase still controls your funds. Quit the app and ask for help before going on."), { nest: { what: { sub: "KM_WHAT" } } }],
+    ["KM_ALERT_BLOCK", I18N.N_("{what}, but this wallet is recorded as a block key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. Do not start it again as it is: each start in the wrong mode can add more keys of the other kind to the wallet. Your seed phrase still controls your funds. Quit the app and ask for help before going on."), { nest: { what: { sub: "KM_WHAT" } } }],
+    ["KM_WHAT_MIXED", I18N.N_("The wallet in this node holds keys of both kinds, classic and block"), { top: false, group: "KM_WHAT" }],
+    ["KM_WHAT_CLASSIC", I18N.N_("The node is running with classic keys"), { top: false, group: "KM_WHAT" }],
+    ["KM_WHAT_BLOCK", I18N.N_("The node is running with block keys"), { top: false, group: "KM_WHAT" }],
+    ["KM_WHAT_BOOT", I18N.N_("The node started in block key mode"), { top: false, group: "KM_WHAT" }],
+    ["KM_RECORD_UNSUPPORTED", I18N.N_("The node in this version of the app cannot run a block key wallet.")],
+    ["KM_KIND_UNSUPPORTED", I18N.N_("This wallet uses block key uses, and that node cannot run it.")],
+    ["KM_CFG_ARG", I18N.N_("{arg} cannot be set in the extra arguments. The wallet's key mode sets it.")],
+    ["KM_CFG_OWNED", I18N.N_("{arg} cannot be set in the extra arguments. The app sets it itself.")],
+    ["KM_CFG_UNKNOWN", I18N.N_("Unknown key mode.")],
+    ["KM_CFG_FIXED_CLASSIC", I18N.N_("This wallet's key mode is classic and cannot be changed.")],
+    ["KM_CFG_FIXED_BLOCK", I18N.N_("This wallet's key mode is block and cannot be changed.")],
+
+    // ---- Starting the node, switching its kind, replacing its wallet (main/node-manager.js) ----
+    ["NODE_PORT_IN_USE", I18N.N_("Port {port} ({what}) is in use by {program} (pid {pid}). {product} did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params."), { nest: { what: { sub: "PORT_WHAT" }, program: { sub: ["ANOTHER_PROGRAM"], value: true } } }],
+    ["PORT_P2P", I18N.N_("the node's P2P port"), { top: false, group: "PORT_WHAT" }],
+    ["PORT_RPC", I18N.N_("the node's RPC"), { top: false, group: "PORT_WHAT" }],
+    ["PORT_KEETS", I18N.N_("the keets sidecar"), { top: false, group: "PORT_WHAT" }],
+    ["PORT_GATEWAY", I18N.N_("the Parlons wallet gateway"), { top: false, group: "PORT_WHAT" }],
+    ["PORT_PANEL", I18N.N_("the Parlons panel"), { top: false, group: "PORT_WHAT" }],
+    ["ANOTHER_PROGRAM", I18N.N_("another program"), { top: false }],
+    ["NODE_OLD_STUCK", I18N.N_("could not stop this app's node left running by an earlier launch (pid {pid})")],
+    ["NODE_JAVA", I18N.N_("could not launch java: {error}")],
+    ["NODE_EXITED", I18N.N_("node exited unexpectedly ({code})")],
+    ["NODE_HINT_PORT", I18N.N_("a port this node needs is already in use (base port {port}). Start again: this app's own earlier node is stopped first; any other program is named and left alone")],
+    ["NODE_HINT_DB", I18N.N_("another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first")],
+    ["PARLONS_SOLO", I18N.N_("The Parlons Node is a mainnet node: a solo/private network needs the plain Minima node.")],
+    ["PARLONS_DBPASSWORD", I18N.N_("The Parlons Node cannot take -dbpassword (a wallet DB password): keep the plain Minima node, or set up again without one.")],
+    ["PARLONS_NO_JAR", I18N.N_("parlons-node.jar is not bundled in this build.")],
+    ["WR_ENGINES", I18N.N_("The trading engines could not be stopped ({error}), so the wallet was not replaced. Nothing was changed.")],
+    ["WR_NO_ANSWER", I18N.N_("{error}. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.")],
+    ["WR_STOPPED", I18N.N_("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.")]
   ];
 
   var BY = {}, GROUP = {}, TOP = [];
@@ -137,7 +190,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       Object.keys(nest).forEach(function (p) {
         if (params[p] == null) return;
         var how = nest[p], bits = how.split ? params[p].split(how.split) : [params[p]];
-        parts[p] = bits.map(function (b) { return { text: b, said: read(b, how.sub, how.lower) }; });
+        parts[p] = bits.map(function (b) { return { text: b, said: read(b, how.sub, how.lower), value: !!how.value }; });
       });
       return { code: list[i].code, key: list[i].key, params: params, parts: parts, lowered: t > 0 };
     }

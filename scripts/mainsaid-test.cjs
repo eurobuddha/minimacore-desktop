@@ -12,7 +12,7 @@ const LANGS = ["zh", "ru", "uk"];
 function codesOf(r, where) {
   assert.ok(r, "not a listed sentence of main: " + JSON.stringify(where).slice(0, 300));
   const out = [r.code];
-  for (const p of Object.keys(r.parts)) for (const b of r.parts[p]) out.push(...codesOf(b.said, b.text));
+  for (const p of Object.keys(r.parts)) for (const b of r.parts[p]) if (b.said || !b.value) out.push(...codesOf(b.said, b.text));   // a value that is not a sentence is kept as it came
   return out;
 }
 const seen = new Set();
@@ -94,4 +94,58 @@ test("the window: what main says reaches the screen through ipcError, and the re
   assert.ok(/warning = MainSaid\.say\(await api\.dxSkipWarning\(\)\)/.test(app) && !/you can go on without this check\\\./.test(app));
   const order = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
   assert.ok(order.indexOf("mainsaid.js") > order.indexOf("i18n/en.js") && order.indexOf("mainsaid.js") < order.indexOf("app.js"), "after the English plural forms it reads, before the screens");
+});
+
+test("Key mode: every reason the node is not started, run from main/keymode.js", () => {
+  const km = require("../main/keymode.js"), fs = require("fs"), os = require("os"), path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ms-km-")), conf = (text) => { const f = path.join(dir, "c" + Math.random().toString(36).slice(2) + ".conf"); fs.writeFileSync(f, text); return f; };
+  try {
+    for (const o of [{ mode: "" }, { mode: "block", folderMode: "classic" }, { mode: "classic", folderMode: "block" }, { mode: "block", supported: false },
+      { mode: "classic", supported: true, extraArgs: "-blockaskeyuses true" }, { mode: "classic", supported: true, extraArgs: "-rpc 9005" },
+      { mode: "classic", supported: true, params: { host: "-x" } }, { mode: "classic", supported: true, confFile: path.join(dir, "missing.conf") },
+      { mode: "classic", supported: true, confFile: conf("lowram=true") }, { mode: "classic", supported: true, confFile: conf("data=/tmp/x") }]) check(km.startProblem(o));
+    const D = path.join(dir, "data");
+    for (const [argv, mode] of [[["-data", "/elsewhere"], "classic"], [["-Dparlons.node.data=/elsewhere"], "classic"], [["-Dparlons.node.conf=/x"], "classic"],
+      [[], "block"], [["-blockaskeyuses", "true"], "block"], [["-lowram", "true"], "classic"]]) check(km.argvProblem(argv, mode, D));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// What node-manager, config and main.js say cannot all be run here (java, ports, Electron). Those templates are held to
+// the source instead: every fixed piece of each one (the text between its values) is in the file that says it, in order.
+test("node start, node kind, wallet replacement, config: each listed sentence is still in the file that says it", () => {
+  const fs = require("fs"), path = require("path"), read = (f) => fs.readFileSync(path.join(__dirname, "..", "main", f), "utf8");
+  const SRC = { NODE_: "node-manager.js", PORT_: "node-manager.js", ANOTHER_PROGRAM: "node-manager.js", PARLONS_: "node-manager.js", WR_: "node-manager.js", KM_ALERT_: "node-manager.js", KM_WHAT_: "node-manager.js",
+    KM_MARK_FAILED: "node-manager.js", KM_CFG_: "config.js", KM_RECORD_UNSUPPORTED: "main.js", KM_KIND_UNSUPPORTED: "main.js", TERMINAL_RESTORE: "main.js" };
+  const unescape = (s) => s.replace(/\\n/g, "\n").replace(/\\"/g, '"');
+  let n = 0;
+  for (const code of MS.codes()) {
+    const pre = Object.keys(SRC).find(p => code === p || (p.endsWith("_") && code.startsWith(p))); if (!pre) continue;
+    const src = unescape(read(SRC[pre])), tpl = MS.template(code); n++;
+    if (/^KM_(ALERT|CFG_FIXED|WHAT)_/.test(code)) continue;   // built around a mode word ("classic" / "block"): checked below as the builder main has
+    let at = 0;
+    for (const piece of tpl.split(/\{\w+\}/).map(x => x.trim()).filter(x => x.length >= 8)) {
+      const i = src.indexOf(piece, at); assert.ok(i >= 0, code + ": not in main/" + SRC[pre] + " (in this order): " + piece.slice(0, 100)); at = i + piece.length;
+    }
+  }
+  assert.ok(n >= 25, "the node-side templates are all checked (" + n + ")");
+  // the variants built from a mode word, as main builds them
+  const nm = read("node-manager.js"), cfg = read("config.js");
+  assert.ok(nm.includes('"The wallet in this node holds keys of both kinds, classic and block" : "The node is running with " + seen + " keys"') && nm.includes('"The node started in block key mode"'));
+  assert.ok(nm.includes('what + ", but this wallet is recorded as a " + mode + " key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. "'));
+  assert.ok(cfg.includes('"This wallet\'s key mode is " + cur.keyMode + " and cannot be changed."'));
+  // and they read back, in each language
+  for (const seen of ["classic", "block"]) for (const mode of ["classic", "block"]) if (seen !== mode) check(("The node is running with " + seen + " keys") + ", but this wallet is recorded as a " + mode + " key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. Do not start it again as it is: each start in the wrong mode can add more keys of the other kind to the wallet. Your seed phrase still controls your funds. Quit the app and ask for help before going on.");
+  check("The wallet in this node holds keys of both kinds, classic and block, but this wallet is recorded as a block key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. Do not start it again as it is: each start in the wrong mode can add more keys of the other kind to the wallet. Your seed phrase still controls your funds. Quit the app and ask for help before going on.");
+  check("The node started in block key mode, but this wallet is recorded as a classic key wallet. The node was stopped at once and will not be started again until the app is quit and reopened. Do not start it again as it is: each start in the wrong mode can add more keys of the other kind to the wallet. Your seed phrase still controls your funds. Quit the app and ask for help before going on.");
+  for (const m of ["classic", "block"]) check("This wallet's key mode is " + m + " and cannot be changed.");
+  check("Port 9001 (the node's RPC) is in use by another program (pid 77). minimaCore did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.");
+  for (const w of ["the node's P2P port", "the keets sidecar", "the Parlons wallet gateway", "the Parlons panel"]) check("Port 9001 (" + w + ") is in use by /usr/bin/java -jar x.jar (pid 77). minimaCore did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.");
+  for (const s of ["could not stop this app's node left running by an earlier launch (pid 12)", "could not launch java: ENOENT", "node exited unexpectedly (1)", "a port this node needs is already in use (base port 9001). Start again: this app's own earlier node is stopped first; any other program is named and left alone",
+    "another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first", "The data folder could not be marked as a block key wallet (EACCES). The node was not started.",
+    "The Parlons Node is a mainnet node: a solo/private network needs the plain Minima node.", "The Parlons Node cannot take -dbpassword (a wallet DB password): keep the plain Minima node, or set up again without one.", "parlons-node.jar is not bundled in this build.",
+    "The trading engines could not be stopped (busy), so the wallet was not replaced. Nothing was changed.", "timeout. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.",
+    "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.", "-blockaskeyuses cannot be set in the extra arguments. The wallet's key mode sets it.", "-rpc cannot be set in the extra arguments. The app sets it itself.", "Unknown key mode.",
+    "The node in this version of the app cannot run a block key wallet.", "This wallet uses block key uses, and that node cannot run it.", "Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first."]) check(s);
+  // the program on the port is a value: kept as it came
+  I18N.set("ru"); assert.ok(MS.say("Port 9001 (the node's RPC) is in use by /usr/bin/java -jar x.jar (pid 77). minimaCore did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.").includes("/usr/bin/java -jar x.jar")); I18N.set("en");
 });
