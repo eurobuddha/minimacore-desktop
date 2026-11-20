@@ -1956,7 +1956,7 @@ async function renderSettings() {
       <div id="kuList" class="ku-list">${kuRows.length ? kuRows.map(kuRowHtml).join("") : `<div class="view__desc">No keys reported.</div>`}</div>
       <button class="btn btn--outline btn--full" id="kuAudit" style="margin-top:10px">Deep reuse audit</button>
       <div class="status" id="kuAuditStatus"></div>
-      <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse — automatically when you open this panel, and when you tap the button. Nothing else leaves your node.</div>
+      <div class="view__desc" style="font-size:11px;margin-top:2px">The deep audit sends this node's public keys and their addresses to the KeyUses service (eurobuddha.com) to check the chain for real reuse. It runs only when you press the button. Nothing else leaves your node.</div>
     </div>
     <div class="card"><div class="card__title">Backup</div>
       <div class="view__desc">Writes an encrypted recovery backup into the node's data folder. Your seed phrase (above) is the ultimate backup.</div>
@@ -2101,10 +2101,10 @@ async function renderSettings() {
       toast("P2P Chance enabled ✓", "ok"); renderSettings();
     });
   };
-  // key-uses panel: copy an address on click, run the deep audit on demand, and auto-run it once on open (rate-limited).
+  // key-uses panel: copy an address on click, and run the deep audit ONLY on the button (0.18.157: opening Settings sent
+  // every public key of this node to the audit service by itself).
   if (el("kuList")) el("kuList").onclick = (e) => { const row = e.target.closest(".ku-row"); if (row && e.target.classList.contains("ku-addr") && row.dataset.addr) copy(row.dataset.addr); };
   if (el("kuAudit")) el("kuAudit").onclick = () => runKeyAudit(true);
-  runKeyAudit(false);
 }
 function keysInfo(keys) {
   try {

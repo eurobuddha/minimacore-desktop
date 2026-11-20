@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.157] — Settings: the deep key audit runs only on its button
+
+- Opening Settings sent every public key of this node (and then their addresses) to the KeyUses service by itself, every minute it was reopened. The deep reuse audit now runs only when "Deep reuse audit" is pressed, and the card says what is sent and to whom. The privacy part of 0.19.127 (the released app keeps its card; the KeyUses app is not ported). Test: `scripts/webwallet-ui-test.cjs`.
+
 ## [0.18.156] — Web Wallet: the public key leaves only on a click
 
 - Unlocking a foreign seed in the Web Wallet sent its public key to the key audit service (eurobuddha.com) by itself. Now nothing leaves at unlock: the on-chain key uses are read only when the user clicks Check on-chain or Confirm, the screen says before those buttons what is sent and to whom, and Confirm refuses while the figure is unread (it used to take an unreadable answer as 0, and a count that is too low reuses a one-time signature). The key audit requests follow no redirect (`netfetch.fetchJson` `noRedirect`). Port of 0.19.135. Tests: `scripts/webwallet-ui-test.cjs`, `scripts/netfetch-test.cjs`.

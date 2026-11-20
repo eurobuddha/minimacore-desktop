@@ -46,3 +46,11 @@ test("the public key is read against the chain only on a click; an unread figure
   assert.ok(/const n = wwConfirmUses\(typed, wwKuSuggest != null \? wwKuSuggest : await readOnchain\(\)\);[\s\S]{0,200}if \(n == null\) \{/.test(ww), "Confirm reads the chain and refuses while unread");
   assert.ok(/only this wallet's public key is sent to eurobuddha\.com/.test(ww), "the screen says what leaves");
 });
+
+// ---- 0.18.157: Settings' deep key audit ----
+test("Settings: the node's public keys go to the audit service only when the button is pressed, never on opening Settings", () => {
+  const calls = [...app.matchAll(/runKeyAudit\(([^)]*)\)/g)].map(m => m[1]).filter(a => a !== "force");
+  assert.deepEqual(calls, ["true"], "one call, from the button");
+  assert.ok(/el\("kuAudit"\)\.onclick = \(\) => runKeyAudit\(true\);/.test(app));
+  assert.ok(/It runs only when you press the button\./.test(app) && !/automatically when you open this panel/.test(app), "the screen says so");
+});
