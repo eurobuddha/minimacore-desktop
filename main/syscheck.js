@@ -5,7 +5,7 @@
  *
  *  - Touch ID where the Mac can prompt now; the reason names what is about to be shown (for a command: the command).
  *  - Once a Touch ID prompt has SUCCEEDED on this install, a file in the app's data folder says so, with an identifier of
- *    this Mac (0.18.186). While it is there and names this Mac, a Mac that cannot prompt now (Touch ID locked after failed
+ *    this Mac (0.18.186; its IOPlatformUUID since 0.18.191). While it is there and names this Mac, a Mac that cannot prompt now (Touch ID locked after failed
  *    tries, the sensor gone, a call that throws) is REFUSED with a plain message naming the file: it never falls back to
  *    the phrase alone. The renderer cannot remove that file; a file from another Mac (a copied profile) is ignored.
  *  - Where Touch ID was never available: a dialog from the main process shows exactly what is about to be shown and
@@ -40,13 +40,22 @@ function create(io) {
 }
 
 /** The real one: Electron's Touch ID, a main-process message box, and a marker file in userData. */
-/** An identifier of this Mac: a hash of its built-in network card's hardware address (en0), else of all of them. */
-function machineId() {
-  const os = require("os"), nets = os.networkInterfaces();
-  const macs = (k) => (nets[k] || []).map(n => n.mac).filter(m => m && m !== "00:00:00:00:00:00");
-  const list = macs("en0").length ? macs("en0") : Object.keys(nets).sort().flatMap(macs);
-  return require("crypto").createHash("sha256").update(os.platform() + "|" + [...new Set(list)].sort().join(",")).digest("hex");
+/** An identifier of this Mac (0.18.191): its IOPlatformUUID, read once with /usr/sbin/ioreg (absolute path, no shell),
+ *  then cached. "" when it cannot be read (not a Mac, ioreg missing): a marker is then taken as this Mac's. Never the
+ *  network interfaces (an adapter plugged in changed them). run: for tests only. */
+let cachedId = null;
+function machineId(run) {
+  if (cachedId != null && !run) return cachedId;
+  let id = "";
+  try {
+    const out = (run || ((f, a) => require("child_process").execFileSync(f, a, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] })))("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]);
+    const m = /"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f-]{8,64})"/.exec(String(out)); id = m ? m[1].toUpperCase() : "";
+  } catch (e) { id = ""; }
+  if (!run) cachedId = id;
+  return id;
 }
+/** Is a marker this Mac's? An id that cannot be read, on either side, counts as the same Mac. */
+function sameMac(markerId, hereId) { return !markerId || !hereId || markerId === hereId; }
 function forElectron(electron, win) {
   const { systemPreferences, dialog, app } = electron;
   const marker = () => path.join(app.getPath("userData"), "touchid-seen");
@@ -59,10 +68,10 @@ function forElectron(electron, win) {
         message: "Show a secret?", detail: detail + "\n\nNo biometric check is available on this computer: this confirmation and the typed phrase are the only checks." });
       return r.response === 1;
     },
-    seen: () => { const m = read(); return !!(m && m.machine === machineId()); },   // a marker from another Mac is ignored
-    markSeen: () => { const m = read(); if (!(m && m.machine === machineId())) fs.writeFileSync(marker(), JSON.stringify({ machine: machineId(), since: new Date().toISOString() }) + "\n", { mode: 0o600 }); },
+    seen: () => { const m = read(); return !!(m && sameMac(m.machine, machineId())); },   // a marker from another Mac is ignored
+    markSeen: () => { const m = read(); if (!(m && sameMac(m.machine, machineId()))) fs.writeFileSync(marker(), JSON.stringify({ machine: machineId(), since: new Date().toISOString() }) + "\n", { mode: 0o600 }); },
     where: () => marker()
   });
 }
 
-module.exports = { create, forElectron, machineId };
+module.exports = { create, forElectron, machineId, sameMac };

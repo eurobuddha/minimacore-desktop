@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.191] — the Touch ID marker names the Mac by its hardware UUID
+
+- The marker's machine identifier (0.18.186) was a hash of network-card addresses, which change when an adapter is plugged in. It is now the Mac's IOPlatformUUID, read once with `/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice` (absolute path, no shell) and cached; an identifier that cannot be read counts as the same Mac. Test: `scripts/ethkey-test.cjs`.
+
 ## [0.18.190] — miniMall vendor: an order's dust counts together
 
 - Coins below the dust line (0.18.181) were never counted, so a 9.9 payment and two top-ups of 0.05 left a 10 order unpaid. An order's dust coins are now gathered in memory and counted together once their sum covers what is still due (in any order, and again after a restart, when the scanner sees them anew); a flood of dust that never covers the remainder still writes nothing (an order keeps its 1000 largest in memory). Test: `scripts/shop-test.cjs`.

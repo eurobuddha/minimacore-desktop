@@ -153,3 +153,17 @@ test("the marker is written only after a Touch ID prompt succeeded, names this M
     assert.deepEqual(await sys.check("r", "d"), { biometric: false }, "a marker from another Mac is ignored: the confirmation window is used"); assert.equal(boxes, 1);
   } finally { Object.defineProperty(process, "platform", realPlatform); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- 0.18.191: the Mac is named by its IOPlatformUUID ----
+test("machine id: IOPlatformUUID from /usr/sbin/ioreg (no shell), never the network cards; unreadable counts as the same Mac", () => {
+  const { machineId, sameMac } = require("../main/syscheck");
+  let asked = null;
+  const out = '+-o J314sAP  <class IOPlatformExpertDevice>\n    {\n      "IOPlatformUUID" = "1a2b3c4d-0000-1111-2222-333344445555"\n    }';
+  assert.equal(machineId((f, a) => { asked = [f, a]; return out; }), "1A2B3C4D-0000-1111-2222-333344445555");
+  assert.deepEqual(asked, ["/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]], "absolute path, argument list (no shell)");
+  assert.equal(machineId(() => { throw new Error("no ioreg"); }), ""); assert.equal(machineId(() => "nothing here"), "");
+  assert.equal(sameMac("A", "A"), true); assert.equal(sameMac("A", "B"), false, "another Mac's marker");
+  assert.equal(sameMac("A", ""), true, "this Mac's id cannot be read: same Mac"); assert.equal(sameMac("", "B"), true, "a marker without an id: same Mac");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "syscheck.js"), "utf8");
+  assert.ok(!/networkInterfaces/.test(src) && /execFileSync\(f, a,/.test(src) && !/execSync\(|shell:\s*true/.test(src));
+});
