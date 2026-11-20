@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.8] — Log isolation brought to the same code as the side-by-side branch (its 0.19.104), so the two merge cleanly
+
+- **Why**: 0.19.4 here and 0.19.104 on the `pandamonium-sxs` branch fixed the same finding in two shapes. This version replaces 0.19.4's shape in `main/node-manager.js` with that branch's (commit ca9e922), ported by hand because this branch also has the Parlons notifier in the same function.
+- **The boot line** is now `/^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Using NEW Block number as key uses keys!$/` (`BLOCK_BOOT_LINE`, exported by the node manager; 0.19.4 allowed any text inside the memory brackets and kept it in `keymode.js`). Believed only before this start's first answered health poll (`polled`).
+- **The node's output** goes through `nodeSaid` (split on `\r` and `\n`, an unfinished line carried to the next chunk, per stream) and `nodeLine` (control characters removed, then the checks, then the log). `log()` no longer decides anything: it also takes the app's own lines. The Parlons flags by `startsWith` on the jar's exact prefixes (`PARLONS`).
+- **Only on this branch**: `nodeLine` hands a Parlons message or call line to the notifier's anchored parser and to nothing else, and logs it without the message's words.
+- **Removed, and what that costs**: 0.19.4's two extra guards are gone, so that the code is the same on both branches: (1) the "(continued)" run after a call-signal or greeting line cut by a peer's line end, which a peer could step around by imitating the node's line ending; (2) reading the Parlons flags only until the account is up. So a peer whose text carries a line end can again make a WHOLE line of its own: it can show a false Parlons account error or raise a notification. It still cannot stop the node once the node has answered its first health poll. This is the residual the other branch states too; it ends when maxima and core strip control characters from what they print (plan, section 11). If guard (2) is wanted back it is four words in `watchParlonsLine`, on both branches.
+- **Tests**: the other branch's four executed tests, taken as they are (`scripts/keymode-test.cjs`, named 0.19.104), and one for this branch: message and call lines carrying the block-mode line, a forged account error and "Address already in use" set nothing; a message under a 324-digit key cut across two chunks is notified once and logged without its text. `keymode-test.cjs` 40.
+
 ## [0.19.7] — Mail and Chat: a payment message is the sender's claim until this node has found the payment; the currency is named from the token id only
 
 - **Found in review (medium)**: a payment bubble showed what the SENDER wrote. Anyone can send a `payment` message with no payment behind it, or pay one unit of a worthless token they named "MxUSD"; the bubble then read "<name> sent you 5000 MxUSD" (Mail) or "Payment received 5000 MxUSD" (Chat).

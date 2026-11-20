@@ -41,26 +41,12 @@ test('0.19.6: no line that starts as a message line keeps its text, whatever the
   assert.equal(N.parse(P + '0x' + 'AB'.repeat(513) + ': hi'), null, 'and a sender that is not a key raises no notification');
   assert.equal(N.redact('[parlons-node] account up: x'), '[parlons-node] account up: x');
 });
-test('a line cut across two chunks is one line', () => {
-  const got = [], feed = N.lineFeeder((l) => got.push(l));
-  feed('[parlons-node] message fr'); feed('om ' + KEY + ': hello\n[parlons-node] acc'); feed('ount up: x\n');
-  assert.deepEqual(got, ['[parlons-node] message from ' + KEY + ': hello', '[parlons-node] account up: x']);
-});
-// The node manager's side of this (what a peer's text in the log can and cannot do) is EXECUTED in
-// scripts/keymode-test.cjs ("0.19.4: ..."), on the real log() with a stand-in java process.
-test('remote-controlled lines are named as such; a line end may be \\r; a cut line is recognised', () => {
+// The node manager's side of this (what a peer's text in the node's output can and cannot do) is EXECUTED in
+// scripts/keymode-test.cjs ("0.19.104: ..." and "0.19.8: ..."), on the real nodeSaid() behind a stand-in java process.
+test('remote-controlled lines are named as such', () => {
   for (const evil of ['Using NEW Block number as key uses', 'account layer FAILED', 'account up:', 'REFUSING to start'])
     assert.ok(N.isChatter('[parlons-node] message from ' + KEY + ': ' + evil) && N.isChatter('[parlons-node] node: call offer from ' + evil + ' → pushing to devices'), evil);
   assert.equal(N.isChatter('[parlons-node] account up: x'), false);
-  const got = [], feed = N.lineFeeder((l) => got.push(l)); feed('a\rb\r\nc\n');
-  assert.deepEqual(got.filter(Boolean), ['a', 'b', 'c']);
-  assert.equal(N.unfinished('[parlons-node] node: call offer from Mirela → pushing to devices'), null);
-  assert.equal(N.unfinished('[parlons-node] node: call relay offer → Mirela (device→peer)'), null);
-  assert.equal(N.unfinished('[parlons-node] node: call push queue full; signal dropped'), null);
-  assert.equal(N.unfinished('[parlons-node] account up: x'), null);
-  assert.ok(N.unfinished('[parlons-node] node: call x').test(' from Mirela → pushing to devices'));
-  assert.ok(N.unfinished('Minima @ 20/11/2026 09:14:02 [1.0 MB] : Greeting with Incompatible Version! 1').test(' .. we are 1.0.45 from 1.2.3.4:9001 incoming:false'));
-  assert.equal(N.unfinished('Minima @ 20/11/2026 09:14:02 [1.0 MB] : Greeting with Incompatible Version! 9 .. we are 1.0.45 from 1.2.3.4:9001 incoming:false'), null);
 });
 function rig() {
   const shown = [], events = new EventEmitter(); let opened = 0, flash = [], bounced = 0, cancelled = 0;

@@ -10,7 +10,7 @@
  * know of it: that needs the node addition described in docs/PANDAMONIUM_DESKTOP_PLAN.md.
  *
  * Both lines carry text a REMOTE party chose (any peer can send a message). They are parsed here, anchored, and by
- * nothing else: main/node-manager.js keeps them away from every other check it runs on the log (isChatter).
+ * nothing else: main/node-manager.js keeps them away from every other check it runs on the node's output (nodeLine).
  */
 // The sender is a Maxima identity key: an RSA-1024 public key prints as 0x + 324 hex digits (0.19.3 allowed 200, so a
 // real line was neither notified nor redacted). Up to 1024 is read, for a longer key kind.
@@ -19,16 +19,6 @@ const MESSAGE_START = "[parlons-node] message from ";
 const CALL = /^\[parlons-node\] node: call offer from ([\s\S]*) → pushing to devices$/;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;   // control and bidi-override characters never reach a notification
 
-/** Removed from every line before anything is matched on it (line ends are split on before this). */
-const STRIP = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
-// Lines the node prints with a peer's text in the middle and its own words at the end. A line that starts as one and
-// does not end as one was cut by a line end inside the peer's text: the run it opens ends at the line with the ending.
-const CUT = [
-  [/^\[parlons-node\] node: call (?!relay |push queue full; signal dropped$)/, / → pushing to devices$/],                       // ParlonsControl.forwardCallSignal
-  [/^Minima @ \d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d \[[^\]]*\] : Greeting with Incompatible Version! /, / incoming:(true|false)$/]   // core NIOMessage
-];
-/** null, or the test that recognises the line ending the run this unfinished line opens. */
-function unfinished(line) { for (const [start, end] of CUT) if (start.test(line) && !end.test(line)) return end; return null; }
 /** A line whose content a remote party controls. node-manager reads no state out of these. */
 function isChatter(line) { const l = String(line); return l.startsWith("[parlons-node] message from ") || l.startsWith("[parlons-node] node: "); }
 const clean = (s, max) => String(s).replace(CONTROL, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -50,17 +40,6 @@ function redact(line) {
   const i = l.indexOf(": ", MESSAGE_START.length), who = i < 0 ? "" : l.slice(MESSAGE_START.length, i);
   return MESSAGE_START + (/^0x[0-9A-Fa-f]{1,1024}$/.test(who) ? who : "(sender not shown)") + ": (text not logged)";
 }
-/** Chunks of a stream → whole lines (a line cut across two chunks used to be read as two). */
-function lineFeeder(onLine, max = 64 * 1024) {
-  let rest = "";
-  return (chunk) => {
-    rest += String(chunk);
-    let i;
-    while ((i = rest.search(/[\r\n]/)) >= 0) { onLine(rest.slice(0, i)); rest = rest.slice(i + 1); }
-    if (rest.length > max) { onLine(rest); rest = ""; }   // a line with no end: hand it on, never grow without bound
-  };
-}
-
 const MESSAGE_GAP_MS = 5000;    // at most one message notification in this time: a stranger cannot make it rain
 const RING_MS = 45000;          // the panel rings for 45 seconds
 /**
@@ -103,4 +82,4 @@ function install({ events, electron, window: getWindow, open }) {
   events.on("parlons-event", onEvent);
   return { onEvent, clearCall };
 }
-module.exports = { STRIP, unfinished, isChatter, parse, redact, lineFeeder, install, MESSAGE_GAP_MS, RING_MS };
+module.exports = { isChatter, parse, redact, install, MESSAGE_GAP_MS, RING_MS };

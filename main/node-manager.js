@@ -35,6 +35,17 @@ const PARLONS_REFUSED = new Set(["rpc", "rpcenable", "rpcpassword", "rpccrlf", "
 // is the one peer a fresh install has; if it moves, that install has no way onto the network at all.
 const PARLONS_DEFAULT_ROOTNODE = "eurobuddha.com:9001";
 const HEALTH_EVERY_MS = 10_000;
+// WHAT THE NODE PRINTS IS NOT ALL THE NODE'S OWN WORDS (0.19.104). Text from a remote party reaches its stdout: core
+// logs a P2P peer's greeting version as it came, and the Parlons account logs fields of a contact's message. A line is
+// therefore believed only when the WHOLE physical line is one the jar prints about itself:
+//  - the block-mode boot line, exactly as core prints it (MinimaDB.loadAllDB: MinimaLogger.log("Using NEW Block number
+//    as key uses keys!"), and MinimaLogger's prefix "Minima @ dd/MM/yyyy HH:mm:ss [<memory>] : "), anchored at both ends;
+//  - the Parlons Node's status lines by the exact prefix it prints them with (ParlonsNodeMain, MinimaFlags), from the
+//    first character of the line.
+const BLOCK_BOOT_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Using NEW Block number as key uses keys!$/;
+const PARLONS = { version: /^\[parlons-node\] Parlons Node (\d+\.\d+\.\d+) /, up: "[parlons-node] account up: ", cape: "[parlons-node] Maxima cape up on port ",
+  failed: ["[parlons-node] account layer FAILED to start: ", "[parlons-node] Maxima cape FAILED to start: "], refusing: "[parlons-node] REFUSING to start: " };
+const LINE_MAX = 64 * 1024;   // a "line" the node never ends is cut here (it is then judged as the pieces it arrives in)
 const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
 
 /** Split a raw-args string into argv tokens, honoring single/double quotes. */
@@ -133,6 +144,8 @@ class NodeManager extends EventEmitter {
     this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
     this.rpc = (cmd) => rpcCall(this.rpcPort(), config.rpcSecret(), cmd);   // this node's RPC (the tests put a stand-in here too)
     this.keyModeChecked = false;  // the running node's keys were read and are of the recorded mode (once per start)
+    this.polled = false;          // this node start has answered a health poll: its boot is over (the boot line is believed only before)
+    this.carry = { out: "", err: "" };   // the unfinished last line of each of the node's streams
     this.walletCheck = null;      // owed after a wallet-replacing megammrsync: { before, held, final, tries } (runResync, walletSettle)
     this.keyModeAlert = "";       // the running node was found in the OTHER mode and stopped: no start until the app is reopened
     // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
@@ -393,14 +406,6 @@ class NodeManager extends EventEmitter {
     try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
   }
 
-  /** What every node start begins from. bootLine: the node's own "block mode is ON" line is still believed (only
-   *  until this start's first health poll answers). openRun: see log(). */
-  resetStartState() {
-    this.parlons = { ready: false, error: "", version: "", cape: false };
-    this.keyModeChecked = false;
-    this.bootLine = true;
-    this.openRun = null;
-  }
   async start() {
     if (this.proc || this.starting) return;
     this.starting = true;
@@ -410,7 +415,8 @@ class NodeManager extends EventEmitter {
   async startInner() {
     this.lastError = null;
     this.fatalHint = "";
-    this.resetStartState();
+    this.parlons = { ready: false, error: "", version: "", cape: false };
+    this.keyModeChecked = false; this.polled = false; this.carry = { out: "", err: "" };
     if (this.keyModeAlert) { this.lastError = this.keyModeAlert; this.log("[app] node NOT started: " + this.keyModeAlert); this.setState("error"); return; }
     // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
     // jar that cannot run it is REFUSED, never started classic (that would add classic keys to it for good).
@@ -451,11 +457,11 @@ class NodeManager extends EventEmitter {
         dataDir: cfg.dataFolder || config.defaultDataFolder(), startedAt: this.startedTs }));
     } catch (e) {}
     if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
-    // whole lines only: a line cut across two chunks was read as two (and a parser looking for its start missed it)
-    p.stdout.on("data", parlonsNotify.lineFeeder(l => this.log(l)));
-    p.stderr.on("data", parlonsNotify.lineFeeder(l => this.log(l)));
+    p.stdout.on("data", d => this.nodeSaid("out", d));
+    p.stderr.on("data", d => this.nodeSaid("err", d));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     p.on("exit", (code, sig) => {
+      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.nodeLine(rest); }   // a last line with no line end
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
@@ -638,8 +644,8 @@ class NodeManager extends EventEmitter {
       if (!this.proc) return;
       try {
         const j = await this.rpc("status");
+        this.polled = true;   // the node answers: its boot is over, and with it the time in which its boot line is believed
         const r = (j && j.response) || {};
-        this.bootLine = false;   // the node answers: from here its log is never again read for the key mode (verifyKeyMode is)
         const prev = this.health || {};
         this.health = {
           version: r.version || "",
@@ -704,66 +710,62 @@ class NodeManager extends EventEmitter {
              uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
   }
   /**
-   * The Parlons Node narrates its account in its log; that is the honest readiness signal. Each flag is read only
-   * from a line that BEGINS exactly as the jar prints its own (ParlonsNodeMain / MinimaFlags), never from a phrase
-   * found somewhere in a line. And only until the account is up: every one of these is a boot line, and nothing a
-   * peer sends through the account (a message, a call signal) exists before it, so a line forged later changes nothing.
+   * The node's own output, one stream's chunk. Split into PHYSICAL lines, on \n and on \r, an unfinished last line
+   * kept for the next chunk; each line is judged alone (nodeLine), so text carrying a line end cannot bring a prefix
+   * of its own into the middle of a believed line, and a line is never judged by half.
    */
-  watchParlonsLine(l) {
-    if (this.parlons.ready || !l.startsWith("[parlons-node] ")) return;
-    let changed = false;
-    const m = /^\[parlons-node\] Parlons Node (\d+\.\d+\.\d+) /.exec(l);
-    if (m && !this.parlons.version) { this.parlons.version = m[1]; changed = true; }
-    if (l.startsWith("[parlons-node] account up: ")) { this.parlons.ready = true; this.parlons.error = ""; changed = true; }
-    if (l.startsWith("[parlons-node] Maxima cape up on port ")) { this.parlons.cape = true; changed = true; }
-    if (l.startsWith("[parlons-node] account layer FAILED to start: ") || l.startsWith("[parlons-node] Maxima cape FAILED to start: ") || l.startsWith("[parlons-node] REFUSING to start: ")) {
-      this.parlons.error = l.slice("[parlons-node] ".length, 300 + "[parlons-node] ".length); changed = true;
+  nodeSaid(stream, chunk) {
+    const parts = (this.carry[stream] + String(chunk)).split(/[\r\n]/);
+    let rest = parts.pop();
+    if (rest.length > LINE_MAX) { parts.push(rest); rest = ""; }
+    this.carry[stream] = rest;
+    for (const l of parts) this.nodeLine(l);
+  }
+  /** One physical line of the node's output: control characters out, then what it may tell the app, then the log. */
+  nodeLine(raw) {
+    const l = String(raw).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "");
+    if (!l.trim()) return;
+    // This branch only (0.19.3): a Parlons message or call line carries text a REMOTE party chose. It is read by the
+    // notifier's anchored parser and by nothing below, and a message's own words stay out of the Logs view and node.log.
+    if (parlonsNotify.isChatter(l)) {
+      try { const ev = parlonsNotify.parse(l); if (ev && this.proc) this.emit("parlons-event", ev); } catch (e) {}
+      this.log(parlonsNotify.redact(l));
+      return;
     }
+    try { this.watchParlonsLine(l); } catch (e) {}
+    // The node says so itself, as it opens its databases and before it loads the wallet: block mode is ON. For a
+    // classic wallet that is the forbidden start, caught earlier than any RPC could answer. Believed ONLY as the whole
+    // line core prints, and ONLY before this start's first answered health poll: a running node no longer prints it,
+    // and from then on the `keys` shape check (verifyKeyMode) is the authority.
+    if (!this.polled && this.proc && !this.keyModeAlert && BLOCK_BOOT_LINE.test(l) && config.load().keyMode !== "block")
+      this.keyModeMismatch("The node started in block key mode", config.load().keyMode, true);
+    // The two boot-time deaths a person cannot read out of a stack trace: another node still holds
+    // the H2 databases, or the port. Say so in the Node tab, in words, with the way out. (A hint only: it is shown
+    // when the node has died by itself, and changes nothing else.)
+    if (/Database may be already in use|locked by another process|Address already in use|BindException/i.test(l)) {
+      this.fatalHint = /Address already in use|BindException/i.test(l)
+        ? "another node is still listening on port " + config.load().basePort + " — Restart node stops it and starts again"
+        : "another node still holds this data folder's databases — Restart node stops it and starts again";
+    }
+    this.log(l);
+  }
+  /** The Parlons Node narrates its account in its log; that is the honest readiness signal. Only ITS OWN status lines:
+   *  each by the exact prefix the jar prints it with, from the first character of a physical line (nodeLine). */
+  watchParlonsLine(l) {
+    if (!l.startsWith("[parlons-node] ")) return;
+    let changed = false;
+    const m = PARLONS.version.exec(l);
+    if (m && !this.parlons.version) { this.parlons.version = m[1]; changed = true; }
+    if (l.startsWith(PARLONS.up)) { this.parlons.ready = true; this.parlons.error = ""; changed = true; }
+    if (l.startsWith(PARLONS.cape)) { this.parlons.cape = true; changed = true; }
+    if (PARLONS.failed.some(p => l.startsWith(p)) || l.startsWith(PARLONS.refusing)) { this.parlons.error = l.slice("[parlons-node] ".length).slice(0, 300); changed = true; }
     if (changed) this.emit("status", this.snapshot());
   }
   log(line) {
-    // Every physical line is judged alone (\r ends one as \n does: a terminal would show it as a new line), and with
-    // its control characters removed, so nothing invisible sits between a prefix and what is matched after it.
     for (let l of String(line).split(/[\r\n]/)) {
-      l = l.replace(parlonsNotify.STRIP, "");
       if (!l.trim()) continue;
-      // A line the node did not finish: a peer put a line end inside the text the node printed (a call signal's state,
-      // a greeting's version). What follows, up to the line that carries the node's own ending, is the peer's text:
-      // logged, read by nothing. (A peer who also forges the first line's ending is not caught here; see the plan.)
-      if (this.openRun) {
-        if (this.openRun.test(l)) this.openRun = null;
-        l = "(continued) " + l;
-        this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
-        this.diskLog().append(l);
-        continue;
-      }
-      this.openRun = parlonsNotify.unfinished(l);
-      // A Parlons message or call line carries text a REMOTE party chose. It is read by the notifier's anchored parser
-      // and by nothing below: before 0.19.3 a message containing "Using NEW Block number as key uses" stopped a
-      // classic wallet's node, and one containing "account layer FAILED" put the sender's text up as the account's error.
-      if (parlonsNotify.isChatter(l)) {
-        try { const ev = this.openRun ? null : parlonsNotify.parse(l); if (ev && this.proc) this.emit("parlons-event", ev); } catch (e) {}
-        l = parlonsNotify.redact(l);   // the message's own words stay out of the Logs view and node.log
-        this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
-        this.diskLog().append(l);
-        continue;
-      }
-      if (!this.openRun) {
-        try { this.watchParlonsLine(l); } catch (e) {}
-        // The node says so itself, as it opens its databases and before it loads the wallet: block mode is ON.
-        // For a classic wallet that is the forbidden start, caught earlier than any RPC could answer. Believed only
-        // when the WHOLE line is the node's own (MinimaLogger's prefix, MinimaDB.loadAllDB's words, nothing after), and
-        // only before this start's first health poll: after it, the keys the node really holds are the authority.
-        if (this.bootLine && keymode.BLOCK_BOOT_LINE.test(l) && this.proc && !this.keyModeAlert && config.load().keyMode !== "block")
-          this.keyModeMismatch("The node started in block key mode", config.load().keyMode, true);
-      }
-      // The two boot-time deaths a person cannot read out of a stack trace: another node still holds
-      // the H2 databases, or the port. Say so in the Node tab, in words, with the way out.
-      if (/Database may be already in use|locked by another process|Address already in use|BindException/i.test(l)) {
-        this.fatalHint = /Address already in use|BindException/i.test(l)
-          ? "another node is still listening on port " + config.load().basePort + " — Restart node stops it and starts again"
-          : "another node still holds this data folder's databases — Restart node stops it and starts again";
-      }
+      // What the node's output may TELL the app is decided in nodeLine (the node's streams only), never here: this
+      // function also takes the app's own lines and, through them, text that came from elsewhere.
       // Redact a seed phrase / private key if the node ever echoes one into an error line (the Web Wallet derives
       // & signs over loopback via `keys genkey phrase:"…"` / `sendfrom … privatekey:0x…`), so they can NEVER end
       // up in the Logs view.
@@ -779,3 +781,4 @@ class NodeManager extends EventEmitter {
 }
 
 module.exports = new NodeManager();
+module.exports.BLOCK_BOOT_LINE = BLOCK_BOOT_LINE;
