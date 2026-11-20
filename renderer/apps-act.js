@@ -121,5 +121,12 @@
     }
   };
 
-  return { eth: eth, vestr: vestr, shop: shop };
+  // ---- Web Wallet (main/webwallet.js) ----
+  var ww = {
+    problem: function (f) { if (!text(f.to)) return "Enter a recipient address"; if (!(Number(text(f.amount)) > 0)) return "Enter a valid amount"; return ""; },
+    /** → the main process's answer ({ ok, txnid } | { ambiguous, message } | { message }), or { err } when it threw. */
+    send: function (api, f) { return api.wwSend({ seed: f.seed, to: text(f.to), amount: text(f.amount), tokenid: f.tokenid }).catch(function (e) { return { message: String((e && e.message) || "Send failed") }; }); }
+  };
+
+  return { eth: eth, vestr: vestr, shop: shop, ww: ww };
 });

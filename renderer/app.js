@@ -1027,67 +1027,64 @@ function maxKeyUses(k) {
   return Array.isArray(arr) && arr.length ? keysInfo(k).used : null;
 }
 // ===================== Web Wallet (local, MegaMMR-gated) =====================
-// Access a wallet straight from a seed phrase, backed by the LOCAL -megammr node. The seed is passed to main
-// only for loopback signing (keys genkey → sendfrom on 127.0.0.1) and is never persisted. Held here in memory
-// while unlocked; cleared on Lock. See main/webwallet.js for the fund-critical send + keyuses handling.
+// The screens of the official Minima Web Wallet 2.5.2 (mds/webWallet: its login card, the Balance / Send / Receive tabs, the
+// token search and detail, the logout dialog; its colours and Manrope), over main/webwallet.js and the LOCAL -megammr node.
+// The seed is passed to main only for loopback signing (keys genkey → sendfrom on 127.0.0.1) and is never persisted: held
+// here in memory while logged in, cleared on Logout. Every desktop safeguard stays: the "never type your seed into a
+// website" banner, the MegaMMR gate, the one-time key-uses acknowledgement with its on-chain check, the two-click confirm,
+// the UNKNOWN-status lock. NOT reproduced, on purpose: "Remember me" (the original stores the seed in plain text),
+// "Generate secret key", and a per-send key-uses figure the user may lower (main keeps a durable counter that only grows).
 let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwAmbiguous = false, wwMode = null;
+let wwTab = "balance", wwSearch = "", wwForm = { to: "", amt: "", tok: "0x00" };
 
 // The 4 render "modes". A LIVE update (block tick / status push) must ONLY re-render when the mode CHANGES —
-// re-rendering the same mode rebuilds the panel and WIPES whatever the user is typing (the seed textarea, the send
-// form). User-initiated calls (tab select, unlock, refresh, lock, send) call renderWebWallet() directly instead.
+// re-rendering the same mode rebuilds the panel and WIPES whatever the user is typing (the seed field, the send
+// form). User-initiated calls (tab select, login, refresh, logout, send) call renderWebWallet() directly instead.
 function currentWwMode() { if (!running) return "waiting"; if (!wwMegammrOn()) return "gate"; if (!wwSeed || !wwAddr) return "unlock"; return "wallet"; }
 function wwLiveRender() { if (activeView === "webwallet" && currentWwMode() !== wwMode) renderWebWallet(); }
 function onWebWalletUpdate() { wwLiveRender(); }
-function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwAmbiguous = false; }
+function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwAmbiguous = false; wwTab = "balance"; wwSearch = ""; wwForm = { to: "", amt: "", tok: "0x00" }; }
 function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
+// A token is named from its id where the id is known; an unnamed token (main hands back the start of its id) shows its whole id.
+function wwName(b) { const k = PayLabel.token(b.tokenid); if (k.known) return k.name === "MINIMA" ? "Minima" : k.name; const n = String(b.name || ""); return !n || String(b.tokenid).startsWith(n) || /^(minima|mxusdt?)$/i.test(n.trim()) ? String(b.tokenid) : n; }
+const WW_SAFE = `<div class="ww-safe"><b>Runs entirely on this computer.</b> Your secret key is sent only to your own local node (127.0.0.1) to derive keys and sign. It never leaves this machine and is never saved.
+  <br><b>Never type your secret key into a website Web Wallet.</b> A hosted site can steal it (that has drained wallets).</div>`;
+const wwCard = (inner) => `<div class="ww"><div class="ww-card">${inner}</div></div>`;
 
 async function renderWebWallet() {
   const body = el("webwalletBody");
   wwMode = currentWwMode();   // record what we're about to render, so wwLiveRender only re-renders on a real change
-  if (!running) { body.innerHTML = `<div class="view__title">Web Wallet</div><div class="card"><div class="view__desc">Waiting for the node…</div></div>`; return; }
+  if (!running) { body.innerHTML = wwCard(`<h1 class="ww-h1">Minima Web Wallet</h1><p class="ww-p">Waiting for the node…</p>`); return; }
   if (!wwMegammrOn()) return renderWwGate(body);
   if (!wwSeed || !wwAddr) return renderWwUnlock(body);
   return renderWwWallet(body);
 }
 
 function renderWwGate(body) {
-  body.innerHTML = `
-    <div class="view__title">Web Wallet</div>
-    <div class="card">
-      <div class="view__desc"><b>A MegaMMR node is required.</b> The Web Wallet accesses a wallet from its seed
-        phrase, so the node must keep the full MegaMMR to serve coin data + proofs for your wallet's addresses.</div>
-      <div class="view__desc" style="opacity:.8">Enabling MegaMMR restarts the node and grows the node data over
-        time. This is a one-time change.</div>
-      <button class="btn btn--outline btn--full" id="wwEnableBtn">Enable MegaMMR &amp; restart node</button>
-    </div>`;
+  body.innerHTML = wwCard(`<h1 class="ww-h1">Minima Web Wallet is unavailable!</h1><p class="ww-p">A -megammr node is required to use this Wallet.</p><hr class="ww-hr">
+    <p class="ww-p">The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.</p>
+    <button class="ww-btn" id="wwEnableBtn">Enable MegaMMR &amp; restart node</button>`);
   el("wwEnableBtn").addEventListener("click", async () => {
     const b = el("wwEnableBtn"); b.disabled = true; b.textContent = "Restarting node…";
-    try { await api.wwEnableMegammr(); toast("MegaMMR enabled — node restarting", "ok"); }
+    try { await api.wwEnableMegammr(); toast("MegaMMR enabled. The node is restarting", "ok"); }
     catch (e) { toast("Could not enable MegaMMR", "err"); b.disabled = false; b.textContent = "Enable MegaMMR & restart node"; }
   });
 }
 
 function renderWwUnlock(body) {
-  body.innerHTML = `
-    <div class="view__title">Web Wallet</div>
-    <div class="card" style="border-color:var(--accent)">
-      <div class="view__desc"><b>Runs entirely on this computer.</b> Your seed is sent only to your own local node
-        (127.0.0.1) to derive keys and sign — it never leaves this machine and is never saved.
-        <br><b>Never type your seed into a website Web Wallet</b> — a hosted site can steal it (that has drained wallets).</div>
-    </div>
-    <div class="card">
-      <div class="field"><div class="field__label">Seed phrase</div>
-        <textarea class="field__input" id="wwSeedIn" rows="3" placeholder="24 words, or your own passphrase" autocomplete="off" spellcheck="false"></textarea>
-        <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as created — it is case- and spacing-sensitive.</div></div>
-      <button class="btn btn--outline btn--full" id="wwUnlockBtn">Unlock wallet</button>
-    </div>`;
-  el("wwUnlockBtn").addEventListener("click", async () => {
+  body.innerHTML = wwCard(`<h1 class="ww-h1">Minima Web Wallet</h1><p class="ww-p">Login with your secret key.</p><hr class="ww-hr">${WW_SAFE}
+    <div class="ww-field"><input class="ww-in" id="wwSeedIn" type="password" placeholder="Enter a secret key" aria-label="Secret key" autocomplete="off" spellcheck="false" />
+      <button class="ww-eye" id="wwEye" aria-label="Show the secret key" aria-pressed="false">Show</button></div>
+    <p class="ww-fine">24 words or your own phrase: any phrase is accepted. Enter it EXACTLY as created: capitals, spaces and hyphens (-) all count. <b>Do not share this key with anyone!</b></p>
+    <button class="ww-btn" id="wwUnlockBtn">Login</button>`);
+  el("wwEye").onclick = () => { const i = el("wwSeedIn"), on = i.type === "password"; i.type = on ? "text" : "password"; el("wwEye").textContent = on ? "Hide" : "Show"; el("wwEye").setAttribute("aria-pressed", on); };
+  const go = async () => {
     // Pass the phrase VERBATIM (only trim leading/trailing whitespace) — the node hashes it faithfully, so
-    // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard (app.js:2784).
+    // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard.
     const seed = String(el("wwSeedIn").value || "").trim();
-    if (!seed) { toast("Enter your seed phrase.", "err"); return; }
-    if (/["\\\n\r\t]/.test(seed)) { toast("Seed has a \", \\ or line break the command can't carry — enter it as one clean line.", "err"); return; }
-    const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = "Deriving…";
+    if (!seed) { toast("Enter your secret key.", "err"); return; }
+    if (/["\\\n\r\t]/.test(seed)) { toast("The key has a \", \\ or line break the command can't carry. Enter it as one clean line.", "err"); return; }
+    const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = "Logging in…";
     try {
       wwAddr = await api.wwDerive(seed);
       wwSeed = seed;
@@ -1100,93 +1097,86 @@ function renderWwUnlock(body) {
       el("wwSeedIn").value = "";
       renderWebWallet();
     } catch (e) {
-      toast((e && e.message) || "Could not unlock", "err");
-      b.disabled = false; b.textContent = "Unlock wallet";
+      toast((e && e.message) || "Could not log in", "err");
+      b.disabled = false; b.textContent = "Login";
     }
-  });
+  };
+  el("wwUnlockBtn").addEventListener("click", go);
+  el("wwSeedIn").onkeydown = (e) => { if (e.key === "Enter") go(); };
+}
+
+// Match the original webWallet EXACTLY: display `confirmed`, and append "/<unconfirmed>" only when there is a
+// pending amount. It never shows `sendable` — a foreign megammr seed reports sendable:0 (the node holds none of its
+// keys) even though the coins are real and spendable via sendfrom, so showing sendable made a 655k wallet read "0".
+function wwAmount(b) { return esc(b.confirmed) + (b.unconfirmed && String(b.unconfirmed) !== "0" ? `<small>/${esc(b.unconfirmed)}</small>` : ""); }
+function wwTokens(q) { q = String(q || "").trim().toLowerCase(); return wwBal.filter(b => !q || wwName(b).toLowerCase().includes(q) || String(b.tokenid).toLowerCase().includes(q)); }
+function wwPaintTokens() {
+  const list = wwTokens(wwSearch), host = el("wwTokList"); if (!host) return;
+  host.innerHTML = list.map(b => `<button class="ww-tok" data-tok="${esc(b.tokenid)}"><span class="ww-tok__ic" aria-hidden="true">${esc(wwName(b).slice(0, 1).toUpperCase())}</span>
+      <span class="ww-tok__main"><b>${esc(wwName(b))}</b><span>${wwAmount(b)}</span></span></button>`).join("") || `<p class="ww-p ww-center">${wwBal.length ? "No results found" : "No balance yet for this wallet."}</p>`;
+  host.querySelectorAll("[data-tok]").forEach(r => { r.onclick = () => wwTokenDetail(wwBal.find(b => b.tokenid === r.dataset.tok)); });
+}
+function wwTokenDetail(b) {
+  if (!b) return;
+  const row = (k, v) => `<div class="ww-drow"><span>${k}</span><b>${v}</b></div>`;
+  const d = openDlg("wwTokDlg", wwName(b), `<div class="ww-detail">${b.tokenid === "0x00" ? `<p class="ww-p">Minima's Official Token</p>` : ""}<div class="ww-dbox"><div class="ww-dbox__t">Details</div>
+    ${row("Balance", wwAmount(b))}${row("Token ID", `<span class="ww-id">${esc(b.tokenid)}</span>`)}${b.decimals != null ? row("Decimals", esc(String(b.decimals))) : ""}</div></div>`,
+    `<button class="dlg__btn" id="wwTokCopy">Copy token ID</button>`);
+  if (d) el("wwTokCopy").onclick = () => copy(b.tokenid);
 }
 
 function renderWwWallet(body) {
   const a = wwAddr, ku = wwKu || { keyuses: 0, ack: false };
   const recv = a.miniaddress || a.address;
-  let qrHtml = "";
-  try { if (typeof qrcode !== "undefined") { const qr = qrcode(0, "M"); qr.addData(recv); qr.make(); qrHtml = `<div style="background:#fff;padding:8px;border-radius:8px;width:fit-content;margin:6px auto">${qr.createImgTag(4, 6)}</div>`; } } catch (e) {}
+  const tab = (id, label) => `<button class="ww-tab${wwTab === id ? " ww-tab--on" : ""}" role="tab" aria-selected="${wwTab === id}" data-wwtab="${id}">${label}</button>`;
+  let page = "";
+  if (wwTab === "balance") {
+    page = `<h6 class="ww-h6">Tokens</h6><div class="ww-searchrow"><input class="ww-search" id="wwSearch" type="search" placeholder="Search tokens" aria-label="Search tokens" value="${esc(wwSearch)}" autocomplete="off" />
+      <button class="ww-round" id="wwRefresh" aria-label="Refresh" title="Refresh">↻</button></div><div class="ww-toks" id="wwTokList"></div>`;
+  } else if (wwTab === "receive") {
+    let qr = "";
+    try { if (typeof qrcode !== "undefined") { const q = qrcode(0, "M"); q.addData(recv); q.make(); qr = `<div class="ww-qr">${q.createImgTag(4, 0)}</div>`; } } catch (e) {}
+    page = `${qr}<div class="ww-addr" id="wwAddrBox">${esc(recv)}</div><button class="ww-btn" id="wwCopyAddr">Copy</button>`;
+  } else {
+    const kuDefault = Math.max(Number(ku.keyuses) || 0, Number(wwKuSuggest) || 0);
+    const kuPanel = a.isNodeSeed
+      ? `<p class="ww-fine">This is <b>your node's own wallet</b>: the balance is the whole wallet's, across every address. Sends go through the node, which chooses the coins and manages its signing keys itself.</p>`
+      : (ku.ack
+      ? `<label class="ww-label">Secret key uses</label><div class="ww-kuline"><span>The next send signs at use <b>${esc(String(ku.keyuses))}</b>. The app counts every send and never counts down.</span><button class="ww-link" id="wwKuEdit">Raise it</button></div>`
+      : `<div class="ww-safe ww-safe--warn"><b>Confirm the secret key uses before sending.</b> How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; <b>a figure that is too low can reuse a signing key and lose your funds</b>.${wwKuSuggest > 0 ? ` <b>The chain shows at least ${esc(String(wwKuSuggest))}.</b>` : ""}
+           <label class="ww-label" for="wwKuIn">Secret key uses</label><input class="ww-in" id="wwKuIn" type="number" min="0" step="1" placeholder="Amount of times" value="${esc(String(kuDefault))}" />
+           <div class="ww-two"><button class="ww-btn ww-btn--dark" id="wwKuCheck">Check on-chain</button><button class="ww-btn" id="wwKuConfirm">Confirm</button></div></div>`);
+    const ambig = wwAmbiguous ? `<div class="ww-safe ww-safe--warn"><b>⚠ The last send's status is UNKNOWN.</b> The node did not confirm it, and the payment may have gone through. Check <b>History</b> and your balance before sending again, or you could pay twice.
+        <button class="ww-btn ww-btn--dark" id="wwAmbigClear">I've checked: let me send again</button></div>` : "";
+    const off = ((a.isNodeSeed || ku.ack) && !wwAmbiguous) ? "" : "disabled";
+    const toks = wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }];
+    page = `<label class="ww-label" for="wwTok">Token</label><select class="ww-in" id="wwTok" ${off}>${toks.map(b => `<option value="${esc(b.tokenid)}"${b.tokenid === wwForm.tok ? " selected" : ""}>${esc(wwName(b))}${b.confirmed != null ? "  (" + esc(b.confirmed) + ")" : ""}</option>`).join("")}</select>
+      <label class="ww-label" for="wwAmt">Amount</label><input class="ww-in" id="wwAmt" placeholder="Enter amount" value="${esc(wwForm.amt)}" inputmode="decimal" autocomplete="off" ${off} />
+      <label class="ww-label" for="wwTo">Recipient address</label><input class="ww-in" id="wwTo" placeholder="Enter recipient address (Mx or 0x)" value="${esc(wwForm.to)}" autocomplete="off" spellcheck="false" ${off} />
+      ${kuPanel}${ambig}<button class="ww-btn" id="wwSendBtn" ${off}>Send</button>`;
+  }
+  body.innerHTML = wwCard(`<div class="ww-top"><h1 class="ww-h1">Minima Web Wallet</h1><button class="ww-link" id="wwLockBtn">Logout</button></div>
+    <div class="ww-tabs" role="tablist">${tab("balance", "Balance")}${tab("send", "Send")}${tab("receive", "Receive")}</div>${page}`);
 
-  // Match the original webWallet EXACTLY: display `confirmed`, and append "/<unconfirmed>" only when there is a
-  // pending amount. It never shows `sendable` — a foreign megammr seed reports sendable:0 (the node holds none of its
-  // keys) even though the coins are real and spendable via sendfrom, so showing sendable made a 655k wallet read "0".
-  const balRows = (wwBal.length ? wwBal : []).map(b =>
-    `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
-       <span>${esc(b.name)}</span>
-       <span style="font-family:var(--mono,monospace)">${esc(b.confirmed)}${
-         (b.unconfirmed && String(b.unconfirmed) !== "0") ? `<small style="opacity:.6"> / ${esc(b.unconfirmed)}</small>` : ""}</span>
-     </div>`).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
-
-  const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
-    .map(b => `<option value="${esc(b.tokenid)}">${esc(b.name)}</option>`).join("");
-
-  const kuDefault = Math.max(Number(ku.keyuses) || 0, Number(wwKuSuggest) || 0);
-  const kuPanel = a.isNodeSeed
-    ? `<div class="view__desc">This is <b>your node's own wallet</b> — showing your full balance across every address. Sends go through the node, which selects coins and manages your signing keys automatically.</div>`
-    : (ku.ack
-    ? `<div class="view__desc">Key-uses confirmed: next signing index <b>${esc(String(ku.keyuses))}</b>. <a href="#" id="wwKuEdit">change</a></div>`
-    : `<div class="card" style="border-color:var(--accent)">
-         <div class="view__desc"><b>Confirm key-uses before sending.</b> How many payments has this wallet ALREADY made
-           anywhere (0 for a brand-new seed)? Over-estimating is safe; <b>under-estimating can reuse a signing key and
-           lose your funds</b>.${wwKuSuggest > 0 ? ` <b>On-chain check suggests at least ${esc(String(wwKuSuggest))}.</b>` : ""}</div>
-         <div class="field"><div class="field__label">Payments already made by this seed</div>
-           <input class="field__input" id="wwKuIn" type="number" min="0" step="1" value="${esc(String(kuDefault))}" /></div>
-         <div style="display:flex;gap:8px">
-           <button class="btn btn--outline" id="wwKuCheck">Check on-chain</button>
-           <button class="btn btn--outline" id="wwKuConfirm">Confirm</button>
-         </div>
-       </div>`);
-
-  const ambigBanner = wwAmbiguous
-    ? `<div class="card" style="border-color:var(--accent)">
-         <div class="view__desc"><b>⚠ Last send status is UNKNOWN.</b> The node didn't confirm — the payment may have
-           gone through. Check <b>History</b> / your balance before sending again, or you could pay twice.</div>
-         <button class="btn btn--outline" id="wwAmbigClear">I've checked — re-enable Send</button>
-       </div>`
-    : "";
-  const sendDisabled = ((a.isNodeSeed || ku.ack) && !wwAmbiguous) ? "" : "disabled";
-  body.innerHTML = `
-    <div class="view__title" style="display:flex;justify-content:space-between;align-items:center">
-      <span>Web Wallet</span>
-      <span><button class="btn btn--ghost" id="wwRefresh">Refresh</button> <button class="btn btn--ghost" id="wwLockBtn">Lock</button></span>
-    </div>
-    <div class="card">
-      <div class="view__desc">Receive address</div>
-      ${qrHtml}
-      <div class="addrbox" id="wwAddrBox" title="Click to copy">${esc(recv)}</div>
-    </div>
-    <div class="view__desc" style="margin:10px 2px 4px">Balances</div>
-    ${balRows}
-    <div class="view__desc" style="margin:12px 2px 4px">Send</div>
-    ${kuPanel}
-    ${ambigBanner}
-    <div class="card">
-      <div class="field"><div class="field__label">To (address)</div>
-        <input class="field__input" id="wwTo" placeholder="Mx… or 0x…" autocomplete="off" spellcheck="false" ${sendDisabled}></div>
-      <div class="field"><div class="field__label">Token</div>
-        <select class="field__input" id="wwTok" ${sendDisabled}>${tokOpts}</select></div>
-      <div class="field"><div class="field__label">Amount</div>
-        <input class="field__input" id="wwAmt" placeholder="0.0" autocomplete="off" ${sendDisabled}></div>
-      <button class="btn btn--outline btn--full" id="wwSendBtn" ${sendDisabled}>Send</button>
-    </div>`;
-
-  el("wwAddrBox").addEventListener("click", () => copy(recv));
-  el("wwRefresh").addEventListener("click", async () => { wwBal = await api.wwRead(a.address, a.isNodeSeed).catch(() => wwBal); renderWebWallet(); });
-  el("wwLockBtn").addEventListener("click", () => { wwLock(); renderWebWallet(); toast("Wallet locked", "ok"); });
+  body.querySelectorAll("[data-wwtab]").forEach(b => { b.onclick = () => { wwTab = b.dataset.wwtab; wwArmed = false; renderWebWallet(); }; });
+  el("wwLockBtn").addEventListener("click", wwLogout);
+  const refresh = async () => { wwBal = await api.wwRead(a.address, a.isNodeSeed).catch(() => wwBal); renderWebWallet(); };
+  if (wwTab === "balance") {
+    wwPaintTokens();
+    el("wwSearch").oninput = () => { wwSearch = el("wwSearch").value; wwPaintTokens(); };
+    el("wwRefresh").addEventListener("click", refresh);
+    return;
+  }
+  if (wwTab === "receive") { el("wwAddrBox").onclick = el("wwCopyAddr").onclick = () => copy(recv); return; }
+  for (const [id, k] of [["wwTo", "to"], ["wwAmt", "amt"], ["wwTok", "tok"]]) el(id).oninput = el(id).onchange = () => { wwForm[k] = el(id).value; };
   const ambigBtn = el("wwAmbigClear"); if (ambigBtn) ambigBtn.addEventListener("click", () => { wwAmbiguous = false; renderWebWallet(); });
-
   if (a.isNodeSeed) {
     el("wwSendBtn").addEventListener("click", () => wwDoSend());   // node wallet: no key-uses gate, node manages keys
   } else if (!ku.ack) {
     el("wwKuConfirm").addEventListener("click", async () => {
       const n = Math.max(0, Math.floor(Number(el("wwKuIn").value) || 0));
-      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed ✓", "ok"); }
-      catch (e) { toast("Could not save key-uses", "err"); }
+      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Secret key uses confirmed", "ok"); }
+      catch (e) { toast("Could not save the secret key uses", "err"); }
     });
     el("wwKuCheck").addEventListener("click", async () => {
       const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = "Checking…";
@@ -1201,43 +1191,44 @@ function renderWwWallet(body) {
       btn.disabled = false; btn.textContent = "Check on-chain";
     });
   } else {
-    const ed = el("wwKuEdit"); if (ed) ed.addEventListener("click", (ev) => { ev.preventDefault(); wwKu.ack = false; renderWebWallet(); });
+    const ed = el("wwKuEdit"); if (ed) ed.addEventListener("click", () => { wwKu.ack = false; renderWebWallet(); });
     el("wwSendBtn").addEventListener("click", () => wwDoSend());
   }
 }
+// The original's logout dialog, without showing the secret key back (it is not put on screen again once typed).
+async function wwLogout() {
+  const ku = wwKu || { keyuses: 0 }, node = wwAddr && wwAddr.isNodeSeed;
+  const ok = await showConfirm("Log out of this session", "If you haven't stored your secret key then this is your last chance! It is not kept by this app: after Logout it is gone from memory.\n\n"
+    + (node ? "" : "Secret key uses: " + ku.keyuses + "\nWe recommend taking a note of your secret key uses. This should be increased each time you send a transaction."), "Logout", false);
+  if (!ok) return;
+  wwLock(); renderWebWallet(); toast("Logged out", "ok");
+}
 
 async function wwDoSend() {
-  const to = String(el("wwTo").value || "").trim();
-  const amount = String(el("wwAmt").value || "").trim();
-  const tokenid = el("wwTok").value;
-  if (!to) { toast("Enter a recipient address", "err"); return; }
-  if (!(Number(amount) > 0)) { toast("Enter a valid amount", "err"); return; }
-  const btn = el("wwSendBtn");
-  if (!wwArmed) {   // two-tap confirm — sends are irreversible
-    wwArmed = true; btn.textContent = "Tap again to confirm — irreversible";
-    setTimeout(() => { if (wwArmed) { wwArmed = false; btn.textContent = "Send"; } }, 4000);
+  const btn = el("wwSendBtn"), f = { seed: wwSeed, to: el("wwTo").value, amount: el("wwAmt").value, tokenid: el("wwTok").value };
+  const bad = AppsAct.ww.problem(f); if (bad) { toast(bad, "err"); return; }
+  if (!wwArmed) {   // two-click confirm — sends are irreversible
+    wwArmed = true; btn.textContent = "Click again to confirm: this cannot be undone";
+    setTimeout(() => { if (wwArmed) { wwArmed = false; if (btn.isConnected) btn.textContent = "Send"; } }, 4000);
     return;
   }
-  wwArmed = false; btn.disabled = true; btn.textContent = "Sending…";
-  let r;
-  try { r = await api.wwSend({ seed: wwSeed, to, amount, tokenid }); }
-  catch (e) { toast((e && e.message) || "Send failed", "err"); btn.disabled = false; btn.textContent = "Send"; return; }
-
+  wwArmed = false; btn.disabled = true; btn.textContent = "Sending...";
+  const r = await AppsAct.ww.send(api, f);
   if (r && r.ok) {
-    toast("Sent ✓" + (r.txnid ? " " + short(r.txnid, 12) : ""), "ok", r.txnid || null);
-    el("wwTo").value = ""; el("wwAmt").value = "";
+    toast("Your transaction has been successfully sent!" + (r.txnid ? " " + r.txnid : ""), "ok", r.txnid || null);
+    wwForm.to = ""; wwForm.amt = "";
     wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
     wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else if (r && r.ambiguous) {
-    // M1: don't offer a one-tap retry — surface the unknown state, refresh balances, and gate re-send behind
+    // M1: don't offer a one-click retry — surface the unknown state, refresh balances, and gate re-send behind
     // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while wwAmbiguous).
     wwAmbiguous = true;
-    toast(r.message || "Send status unknown — verify before retrying", "err");
+    toast(r.message || "Send status unknown: check before trying again", "err");
     wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else {
-    toast((r && r.message) || "Send failed", "err");
+    toast((r && (r.message || r.err)) || "Send failed", "err");
     btn.disabled = false; btn.textContent = "Send";
   }
 }

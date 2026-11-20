@@ -258,3 +258,31 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   const sha = (f) => require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", f))).digest("hex");
   for (const [f, want] of [["main/shop.js","5af686b2e1086975f6120307abc00c0236ac473f26071e77246294304588abcd"],["main/shop-store.js","75b6697ef20a1f340638900bed90421e612b8c0f733a7d3719344b58d3cb50d0"],["main/shopcrypto.js","a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec"]]) assert.equal(sha(f), want, f + " is the file of 0.19.107");
 });
+
+// ---- Web Wallet ----
+const OLD_WW = {   // renderer/app.js 0.19.107: wwDoSend (its two checks, then the one call; the two-click arming is the screen's)
+  send: async (api, seed, toField, amtField, tokenid) => {
+    const to = String(toField || "").trim(), amount = String(amtField || "").trim();
+    if (!to) return; if (!(Number(amount) > 0)) return;
+    await api.wwSend({ seed, to, amount, tokenid }).catch(() => {});
+  }
+};
+test("Web Wallet send: the same call with the same arguments as the old screen; nothing is sent for an empty address or amount", async () => {
+  for (const [to, amt, tok] of [[" MxG0ABC ", " 12.5 ", "0x00"], ["0xAB", "0.00000001", MXUSD], ["", "1", "0x00"], ["MxG0ABC", "0", "0x00"], ["MxG0ABC", "abc", "0x00"]]) {
+    await both({ wwSend: { ok: true, txnid: "0xT" } }, (api) => OLD_WW.send(api, "my Phrase - Exactly", to, amt, tok),
+      async (api) => { const f = { seed: "my Phrase - Exactly", to, amount: amt, tokenid: tok }; if (!Act.ww.problem(f)) await Act.ww.send(api, f); });
+  }
+  const r = recorder({ wwSend: { ok: true } }); await Act.ww.send(r.api, { seed: " Keep  My Spaces ", to: "MxA", amount: "1", tokenid: "0x00" });
+  assert.equal(r.log[0][1][0].seed, " Keep  My Spaces ", "the phrase goes to the main process exactly as it is held");
+  assert.deepEqual(await Act.ww.send(recorder({ wwSend: () => Promise.reject(new Error("Confirm this wallet's key-uses count before sending")) }).api, { seed: "s", to: "MxA", amount: "1", tokenid: "0x00" }), { message: "Confirm this wallet's key-uses count before sending" });
+});
+test("Web Wallet screen: the original's look with every desktop safeguard, and nothing that keeps a seed", () => {
+  const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {"));
+  for (const must of ["Never type your secret key into a website Web Wallet", "A -megammr node is required to use this Wallet.", "Confirm the secret key uses before sending.", "Check on-chain", "wwArmed = true", "The last send's status is UNKNOWN", "I've checked",
+    "Search tokens", "No results found", "Log out of this session", "Enter recipient address (Mx or 0x)", ">Balance<" , "Secret key uses"]) assert.ok(ww.includes(must) || ww.includes(must.replace(/[<>]/g, "")), "kept or added: " + must);
+  assert.ok(!/Remember me|rememberme|Generate secret key/i.test(ww.replace(/\/\/[^\n]*/g, "")), "no Remember me, no key generation");
+  assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
+  assert.ok(/function wwLock\(\) \{ wwSeed = null;/.test(ww), "Logout clears the seed");
+  assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
+  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "e8957bd3b8cdbd8f7d0c7653e4addb45f8ed1da0a04cb32acda873c0d0023252", "main/webwallet.js is the file of 0.19.107");
+});

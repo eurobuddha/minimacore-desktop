@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.113] — Web Wallet in the look of the official Web Wallet 2.5.2, with every desktop safeguard kept (Phase 5a)
+
+- **The screens are the official Minima Web Wallet's** (reference `mds/webWallet`, its dark theme: page `#090A0C`, card `#282B2E`, fields `#17191C`, the orange `#FF8630` button, Manrope): the centred card "Minima Web Wallet", the login with a hidden secret-key field and Show / Hide, the tabs **Balance | Send | Receive**; Balance with "Tokens", the **Search tokens** pill (by name or token id, "No results found") and the round refresh; a token opens its **detail** (balance, the whole token id, decimals); Send with Token, "Enter amount", "Enter recipient address (Mx or 0x)" and **Secret key uses**; Receive with the QR on white, the address and Copy; **Logout** with the original's "this is your last chance" warning and the key uses to note down.
+- **Every desktop safeguard is still there:** the "never type your secret key into a website" notice on the login, the MegaMMR gate (in the original's words: "A -megammr node is required to use this Wallet."), the one-time key-uses confirmation with the on-chain check and its suggested minimum, the two-click Send, and the UNKNOWN-status lock that blocks a second send until the user has checked.
+- **Not reproduced, on purpose:** "Remember me" (the original keeps the seed in the browser's storage in plain text), "Generate secret key", the Settings page (theme, delete account: nothing is stored to delete), and showing the secret key back in the Logout dialog. The seed is held in memory only and cleared by Logout.
+- **Secret key uses** is shown, not typed per send: `main/webwallet.js` keeps a durable counter per address that is reserved before each signature and never goes down, which is what protects a one-time key. "Raise it" reopens the confirmation; lowering is not possible. The original's field, which lets a user type a lower figure, is the unsafe part of it.
+- A token is named from its id where the id is known (Minima, the one MxUSD); an unnamed token shows its whole id (the old list showed its first 12 characters).
+- **Money unchanged:** the send is the old screen's call with the same arguments, the phrase passed exactly as held (`scripts/apps-money.test.cjs`); `main/webwallet.js` is untouched (sha256 pinned).
+
 ## [0.19.112] — The Mail palette test passes again (0.19.110 and 0.19.111 were committed with it failing)
 
 - 0.19.111 changed the test and said it passed; it did not. The new assertion also reads `renderer/app.js`, where an old comment above the Mail panel still named the removed rule. The comment is corrected and the whole check list is green. From this version on a commit on this branch is made by a script that runs every suite first and refuses when one fails. No behaviour changes in 0.19.111 or here.

@@ -199,7 +199,7 @@
   const chatThread = (pk, name, body, unread, mins) => ({ pubkey: pk, name, unread, last: { ts: now - mins * 60000, body, out: false, state: "delivered" } });
   const status = {
     state: "running", rpcPort: 9005, contribute: false, portmap: {}, parlons: { ready: false, error: "" },
-    health: { version: "1.0.45.14", block: 2428089, time: BLOCK_TIME, connections: 8, incoming: 6, locked: false, megammr: false, acceptingInLinks: null, p2pAddress: "" }
+    health: { version: "1.0.45.14", block: 2428089, time: BLOCK_TIME, connections: 8, incoming: 6, locked: false, megammr: !!Q.get("ww"), acceptingInLinks: null, p2pAddress: "" }
   };
   const fixtures = {
     cmd: async (c) => {
@@ -316,6 +316,12 @@
     ewSend: async () => ({ tx: FAKE_TX }), ewExportKey: async () => "0x" + "FA4E".repeat(16), ewSetRpc: async () => ({ ok: true }), ewAddToken: async () => ({ token: { symbol: "FAKE" } }), ewRemoveToken: async () => true,
     clipSecret: async () => true,
     ewTokens: async () => EW_TOKENS,
+    // Web Wallet: ?ww=1 (a MegaMMR node) | ack (key uses already confirmed) | node (the node's own seed); without it the MegaMMR gate shows
+    wwDerive: async () => ({ address: "0x" + "FA4E".repeat(16), miniaddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE2", publickey: FAKE_PK("C3"), isNodeSeed: Q.get("ww") === "node" }),
+    wwRead: async () => [{ tokenid: "0x00", name: "MINIMA", confirmed: "1250.75", unconfirmed: "0", sendable: "0", decimals: 0 }, { tokenid: MXUSD, name: "whatever", confirmed: "300.50000001", unconfirmed: "12", sendable: "0", decimals: 8 },
+      { tokenid: "0x" + "5A1E".repeat(16), name: "0x5A1E5A1E5A", confirmed: "7", unconfirmed: "0", sendable: "0", decimals: 0 }],
+    wwKeyuses: async () => ({ keyuses: 3, ack: Q.get("ww") === "ack" }), wwAckKeyuses: async (a, n) => ({ keyuses: n, ack: true }),
+    wwSend: async () => (Q.get("wws") === "unknown" ? { ok: false, ambiguous: true, message: "Send status UNKNOWN (preview)" } : { ok: true, txnid: FAKE_PK("7E") }), wwEnableMegammr: async () => true,
     // miniMall: ?shop=empty
     shopInit: async () => ({ publicId: FAKE_PK("5A"), vendorAddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1" }), shopVendorCard: async () => FAKE_PK("5A") + "|MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1",
     shopNewCount: async () => (Q.get("shop") === "empty" ? 0 : 1), shopMyShops: async () => (Q.get("shop") === "empty" ? [] : [MY_SHOP]),
