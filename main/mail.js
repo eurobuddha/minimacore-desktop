@@ -10,7 +10,7 @@ const EventEmitter = require("events");
 const crypto = require("crypto");
 const config = require("./config");
 const node = require("./node-manager");
-const { rpcCall } = require("./rpc");
+const { rpcCall, oneCommand } = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
 const mc = require("./mailcrypto");
 const store = require("./mail-store");
@@ -72,7 +72,7 @@ let lastScanMs = 0;
 // swappable node-command runner (overridable in tests via _setRunner)
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
-async function nodeCmd(cmd) { return runner(cmd); }
+async function nodeCmd(cmd) { return runner(oneCommand(cmd)); }   // ONE command each (main/rpc.js, 0.18.177)
 
 // ---- identity (derive once, cache in Keychain) ----
 async function init() {

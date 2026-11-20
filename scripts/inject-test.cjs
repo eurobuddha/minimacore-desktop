@@ -1,0 +1,63 @@
+/*
+ * inject-test.cjs — a command the app builds is ONE command (0.18.177). The node splits a text on every ";", even inside
+ * quotes and JSON, so a ";" carried in by a pasted seed, a peer's media ref or a coin's state on the chain started a
+ * second command. Stand-in runners record what would have been sent; nothing reaches a node.
+ * Run: node --test scripts/inject-test.cjs
+ */
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("fs"), os = require("os"), path = require("path"), Module = require("module");
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "inject-"));
+const realLoad = Module._load;
+Module._load = function (request, parent) {
+  if (request === "electron") return { app: { getPath: () => DIR, getVersion: () => "t" } };
+  const from = parent && parent.filename || "";
+  if (/[\\/]main[\\/](chat|mail|shop)\.js$/.test(from) && request === "./config") return { rpcSecret: () => "", load: () => ({}), getSecret: () => null, setSecret: () => {}, deleteSecret: () => {} };
+  if (/[\\/]main[\\/](chat|mail|shop)\.js$/.test(from) && request === "./node-manager") return { rpcPort: () => 0, log: () => {}, on: () => {} };
+  return realLoad.apply(this, arguments);
+};
+process.on("exit", () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {} });
+const rd = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+
+test("rpc.oneCommand refuses a ';' anywhere", () => {
+  const { oneCommand } = require("../main/rpc");
+  assert.equal(oneCommand("balance"), "balance");
+  for (const c of ["a;b", 'keys action:genkey phrase:"a b;vault action:passwordlock password:x"', 'runscript prevstate:{"1":"x;send amount:1 address:Mx"}']) assert.throws(() => oneCommand(c), /second command\. Nothing was sent/);
+});
+
+test("Web Wallet: a pasted 'seed' holding ';' never reaches the node", async () => {
+  const ww = require("../main/webwallet"), sent = [];
+  ww._setRunner(async (c) => { sent.push(c); return { status: true, response: { megammr: true } }; });
+  assert.equal(ww._validators.isPhrase("apple banana;vault action:passwordlock password:x"), false);
+  assert.equal(ww._validators.isPhrase("apple banana cherry"), true, "any other phrase (anyphrase) still passes");
+  await assert.rejects(ww.derive("apple banana;vault action:passwordlock password:x"), /seed phrase/);
+  assert.ok(!sent.some(c => c.includes(";")), JSON.stringify(sent));
+});
+
+test("Vestr: a contract coin whose state holds ';' (anyone can make one naming this wallet) never puts a second command on the wire", async () => {
+  const vestr = require("../main/vestr"), sent = [];
+  vestr._setRunner(async (c) => {
+    sent.push(c);
+    if (c.startsWith("newscript")) return { status: true, response: { address: vestr.CONTRACT } };
+    if (c.startsWith("block")) return { status: true, response: { block: 100 } };
+    if (c.startsWith("coins")) return { status: true, response: [{ coinid: "0x01", tokenid: "0x00", amount: "5", created: 1,
+      state: [{ port: 199, data: "0x01" }, { port: 1, data: "10;send amount:5 address:MxATTACKER" }, { port: 2, data: "1" }, { port: 3, data: "200" }] }] };
+    return { status: true, response: { variables: {} } };
+  });
+  await vestr.list();
+  assert.ok(sent.some(c => c.startsWith("coins")), "the list was read");
+  assert.ok(!sent.some(c => c.includes(";")), "no command with ';' was sent: " + JSON.stringify(sent.filter(c => c.includes(";"))));
+});
+
+test("Chat: a peer's media ref with ';', ':' or quotes is refused; every chat command is one command", async () => {
+  const chat = require("../main/chat"), sent = [];
+  chat._setRunner(async (c) => { sent.push(c); return { status: true, response: {} }; });
+  for (const ref of ["keets://ab;vault action:wipekeys", 'keets://ab"x', "keets://ab cd", "keets://ab:9", "http://x"]) await assert.rejects(chat.fetchMedia(ref), /bad media ref/, ref);
+  await assert.rejects(chat.requestPayAddr("0x" + "AB".repeat(32) + ";vault"), /second command/);
+  assert.deepEqual(sent, []);
+});
+
+test("Mail and miniMall send every command through oneCommand", () => {
+  for (const f of ["main/mail.js", "main/shop.js"]) assert.ok(/async function nodeCmd\(cmd\) \{ return runner\(oneCommand\(cmd\)\); \}/.test(rd(f)), f);
+  assert.ok(/const r = await runner\(oneCommand\(cmd\)\);/.test(rd("main/chat.js")));
+});

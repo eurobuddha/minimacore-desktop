@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.177] — a command the app builds is one command
+
+- The node splits a command text on every ";", even inside quotes and JSON. A Web Wallet "seed" pasted with a ";" put a second command after `keys action:genkey phrase:"…"`; a Vestr contract coin (anyone can make one that names this wallet) whose state held a ";" did the same through `runscript … prevstate:` and `txnstate`; a peer's chat media ref (`keets://\\S+`) through `keets action:fetch`; a Vestr password through `send password:"…"`. `main/rpc.js` `oneCommand` now refuses any ";" and every command Mail, miniMall, Chat, Vestr and the Web Wallet build goes through it (nothing is sent); the Web Wallet phrase check also refuses ";" and DEL (any other phrase still passes: anyphrase); a media ref is `keets://` + path characters only. The Terminal's own chains (mcd:cmd) and the AtomiX, PandaPools and casino engines (their own `txnbasics;txnpost`) are not changed. Test: `scripts/inject-test.cjs` (`npm run test:inject`, in CI).
+
 ## [0.18.176] — one system check for every secret gate
 
 - The seed, ETH-key and Terminal gates each asked Touch ID where it could prompt and otherwise went on with the typed phrase alone, so a Mac whose Touch ID was locked after failed tries fell back to the phrase. `main/syscheck.js` is now the one system check of all three (after the typed phrase): Touch ID where it can prompt, with a reason that names what is shown (a Terminal command by its text, cut to 80); once Touch ID has worked on this install a marker file in the data folder says so, and while it is there a Mac that cannot prompt now is REFUSED with a plain message; where Touch ID was never available a main-process dialog shows exactly what will be shown (the command) and must be confirmed. The ETH key, Settings seed, first-run seed and Terminal answer dialogs say "No Touch ID check took place" when Touch ID did not take place. Tests: `scripts/ethkey-test.cjs`, `scripts/cmdgate-test.cjs`.

@@ -70,4 +70,16 @@ function rpcCall(port, secret, command) {
   });
 }
 
-module.exports = { rpcCall, _timeoutFor: timeoutFor };
+/**
+ * oneCommand(text) (0.18.177): a command the APP builds is one command. The node splits a text on EVERY ";", even inside
+ * quotes and JSON, so a ";" carried in by a pasted seed, a peer's media ref, a password or a coin's state on the chain
+ * started a second command of the sender's choosing. Every builder outside the Terminal and the vendored engines (Mail,
+ * miniMall, Chat, Vestr, Web Wallet) sends through this; it throws, and nothing is sent. The Terminal's own chains go
+ * through mcd:cmd; the AtomiX, PandaPools and casino engines chain txnbasics;txnpost of their own making.
+ */
+function oneCommand(command) {
+  if (String(command).includes(";")) throw new Error("This command holds \";\", which would start a second command. Nothing was sent.");
+  return command;
+}
+
+module.exports = { rpcCall, oneCommand, _timeoutFor: timeoutFor };
