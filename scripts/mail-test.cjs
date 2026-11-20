@@ -414,3 +414,22 @@ test("the funds sheet compares amounts exactly and takes only a real receiving a
   assert.ok(/mailPay\(peer, pick\.addr, pick\.amount, pick\.token\.tokenid, pick\.token\.name, pick\.memo, subject \|\| ""\)/.test(src), "the reviewed values are the ones paid");
   assert.ok(!/sendCurrency/.test(src), "one way to pay");
 });
+
+// ---------------------------------------------------------------- 0.19.169: what a sender writes is stored as capped primitives
+test("an incoming message is stored as capped strings and numbers: a field nested 12,000 arrays deep cannot stop mail.json from saving", () => {
+  const deep = JSON.parse("[".repeat(12000) + "]".repeat(12000));
+  const from = "0x" + "12".repeat(64), to = "0x" + "34".repeat(64);
+  const m = { from, to, subject: deep, message: deep, fromname: deep, randomid: deep, date: deep, type: deep, amount: deep, tokenid: deep, tokenname: deep, txpowid: deep, image: deep, payaddr: deep };
+  assert.throws(() => JSON.stringify(m), RangeError, "the raw message is what used to be stored");
+  const local = mail._localOf(m);
+  assert.doesNotThrow(() => JSON.stringify(local));
+  for (const [k, v] of Object.entries(local)) assert.ok(v === undefined || v === null || typeof v !== "object", k + " is a primitive");
+  assert.deepEqual([local.subject, local.message, local.fromname, local.randomid, local.type, local.payaddr, local.amount], ["", "", "", "", "text", "", ""]);
+  assert.equal(local.hashref, mail.threadKey(from, to, ""), "the thread of an unreadable subject is the empty subject's");
+  const honest = mail._localOf({ from, to, subject: "Hi", message: "x".repeat(300000), randomid: "r1", date: "1700000000000", type: "payment", amount: "1.5", tokenid: "0x00", txpowid: "0xAB", fromname: "Ann" });
+  assert.deepEqual([honest.subject, honest.message.length, honest.randomid, honest.date, honest.type, honest.amount, honest.tokenid, honest.tokenname, honest.image, honest.fromname],
+    ["Hi", 200000, "r1", 1700000000000, "payment", "1.5", "0x00", undefined, undefined, "Ann"], "an honest message is kept as it was; a field left out stays out");
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "mail.js"), "utf8");
+  assert.ok(/try \{   \/\/ one coin at a time[\s\S]{0,4000}const local = localOf\(m\);\s*if \(store\.addMessage\(local\)\)[^\n]*\n\s*\} catch \(e\) \{ try \{ node\.log\("\[mail\] a coin could not be read/.test(src), "each coin is read in its own try, and a failure is logged");
+  assert.ok(/require\("\.\/mail-store"\)\.setLog\(\(m\) => node\.log\(m\)\);/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8")), "a failed save of mail.json is said in the Logs view");
+});

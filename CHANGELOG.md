@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.169] — Mail: what a sender writes is stored as capped primitives
+
+- **The same pattern as the miniMall finding (0.19.168), checked in Mail and Chat:** Mail stored an incoming message's fields as the sender wrote them (subject, message, name, ids, payment fields, picture, pay address), so a sender could make every save of `mail.json` throw with one field nested 12,000 arrays deep, or end a whole scan page with a value whose `String()` throws. Chat is not affected: `main/chatschema.js` `chatDecode` already keeps only strings and numbers.
+- **Now:** `localOf` builds the stored row from capped strings and finite numbers only (subject 1,000, message 200,000, name 64, ids 128 / 80, amount 64, token name 200, picture 400,000, pay address 90; an optional payment field the sender left out stays absent; a date must be a plain number). A message whose `from` is not a string is skipped. Each coin is read in its own `try`: one that cannot be read is said in the log and the rest of the page goes on. A failed save of `mail.json` is said in the Logs view (`mail-store` `setLog`, once until the reason changes).
+- Test (`scripts/mail-test.cjs`): a message whose every field is nested 12,000 deep becomes a row that serialises, every field a primitive, in the empty subject's thread; an honest message is kept as it was; each coin in its own `try` with the log line; `main.js` sends Mail's save failures to the Logs view. It fails on 0.19.168.
+
 ## [0.19.168] — miniMall vendor: what a buyer sends is stored as capped primitives
 
 - **Found by the release review of the released desktop (H2), present here too:** an order's items were stored as the buyer sent them. Items nested about 12,000 arrays deep made `JSON.stringify` throw on every save of `shop.json`; the error was swallowed, so from then on NOTHING was saved (new orders, payments, statuses) and it was lost at the next quit. `String()` or `Number()` of such a value throws as well, which aborted the rest of the scan batch.

@@ -14,6 +14,9 @@ const body = () => JSON.stringify({ version: 1, rev: REV, messages: mem.messages
 
 let mem = null;   // { messages:{ "hashref|randomid":msg }, contacts:{ publicId:{publicId,username} }, meta:{} }
 let writeTimer = null;
+// A save that fails is said (0.19.169; it was swallowed): once until the reason changes. main.js points it at the Logs view.
+let logTo = (m) => { try { console.error(m); } catch (e) {} }, lastSaveError = "";
+function setLog(fn) { if (typeof fn === "function") logTo = fn; }
 
 function filePath() { return path.join(app.getPath("userData"), "mail.json"); }
 function ensureLoaded() {
@@ -43,7 +46,11 @@ function persistSoon() {
       const tmp = path.join(dir, "mail.json.tmp");
       fs.writeFileSync(tmp, body());
       fs.renameSync(tmp, filePath());
-    } catch (e) { /* retried next write */ }
+      lastSaveError = "";
+    } catch (e) {   // retried next write
+      const m = "[mail] mail.json could not be saved: " + ((e && e.message) || e);
+      if (m !== lastSaveError) { lastSaveError = m; try { logTo(m); } catch (e2) {} }
+    }
   }, WRITE_DEBOUNCE_MS);
 }
 const keyOf = (m) => m.hashref + "|" + m.randomid;
@@ -138,6 +145,6 @@ function setAside() {
 }
 function exportAll() { ensureLoaded(); return { messages: mem.messages, contacts: mem.contacts, meta: mem.meta }; }
 
-module.exports = { addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
+module.exports = { setLog, addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
   getMessage, markThreadRead, unreadCount, markConfirmed, setStatus,
   contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, setAside, exportAll };

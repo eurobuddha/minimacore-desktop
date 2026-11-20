@@ -320,6 +320,20 @@ async function queryCoinsDegrading(depth) {
   }
   return { coins: null, depth: 0 };
 }
+// What a sender writes is kept only as capped primitives (0.19.169, the miniMall finding of the release review, 0.19.168):
+// a field that is not a string or a finite number becomes "" (an optional one stays absent), so no structure of theirs
+// reaches mail.json, where one nested 12,000 arrays deep would make every save throw. Caps are generous: a coin bounds
+// the whole message anyway.
+const txt = (v, n) => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : "").slice(0, n);
+const opt = (v, n) => (v == null ? undefined : txt(v, n));
+/** The stored row of one opened message (m: the sender's JSON, from and to already checked as strings). */
+function localOf(m) {
+  const subject = txt(m.subject, 1000), date = parseInt(txt(m.date, 15), 10);
+  return { hashref: threadKey(m.from, m.to, subject), fromname: txt(m.fromname, 64), frompublickey: m.from,
+    topublickey: m.to, subject, message: txt(m.message, 200000), randomid: txt(m.randomid, 128), incoming: true, read: false,
+    date: date > 0 ? date : Date.now(), status: "received", sentblock: 0, type: txt(m.type, 32) || "text",
+    amount: opt(m.amount, 64), tokenid: opt(m.tokenid, 80), tokenname: opt(m.tokenname, 200), txpowid: opt(m.txpowid, 80), image: opt(m.image, 400000), payaddr: txt(m.payaddr, 90) };
+}
 /** Trial-decrypt a page of coins into the store. `historical` suppresses the payaddr auto-reply: a backfill
  *  walks over months of old requests and must not answer any of them with a real coin. Returns {fresh,lastFresh,paLearned}. */
 async function processCoins(coins, historical) {
@@ -332,38 +346,39 @@ async function processCoins(coins, historical) {
     if (seenCoins.has(seenKey)) continue;                          // already trial-decrypted this session
     if (seenCoins.size > 40000) seenCoins.clear();
     seenCoins.add(seenKey);
-    let o; try { o = await mc.open(identity, blob); } catch (e) { o = null; }
-    if (!o || !o.valid) continue;
-    let m; try { m = JSON.parse(Buffer.from(o.plaintext).toString("utf8")); } catch (e) { continue; }
-    if (o.fromPublicId !== m.from) continue;             // signed-from must equal claimed sender
-    if (m.to !== identity.publicId) continue;            // addressed to me
-    // Learn the peer's pay address (piggybacked on EVERY message/control coin) — once per pass, newest coin first.
-    if (m.payaddr && !paSeen.has(m.from)) {
-      paSeen.add(m.from);
-      if (store.metaGet("pa:" + m.from) !== m.payaddr) { store.metaSet("pa:" + m.from, m.payaddr); paLearned = true; }
-    }
-    if (m.type === "payaddr-req" || m.type === "payaddr-reply") {
-      // For a REQUEST on a LIVE pass, auto-answer with our own address — the handshake. Suppressed while walking
-      // history (no reply coin per historical request) AND hard rate-limited (per-peer cooldown + global hourly
-      // cap) so a flood of forged requests can't drain coins / WOTS key-uses.
-      if (m.type === "payaddr-req" && !historical && !repliedReq.has(m.randomid)) {
-        if (repliedReq.size > 2000) repliedReq.clear();
-        repliedReq.add(m.randomid);
-        const now = Date.now();
-        autoReplyTimes = autoReplyTimes.filter(t => now - t < 3600000);
-        const last = paReplyCooldown.get(m.from) || 0;
-        if (autoReplyTimes.length < AUTO_REPLY_MAX_PER_HOUR && (now - last) > AUTO_REPLY_PEER_COOLDOWN_MS) {
-          autoReplyTimes.push(now); paReplyCooldown.set(m.from, now);
-          try { await sendControl(m.from, "payaddr-reply"); } catch (e) { /* best effort */ }
-        }
+    try {   // one coin at a time: whatever one message holds, the rest of the page is still read (0.19.169)
+      let o; try { o = await mc.open(identity, blob); } catch (e) { o = null; }
+      if (!o || !o.valid) continue;
+      let m; try { m = JSON.parse(Buffer.from(o.plaintext).toString("utf8")); } catch (e) { continue; }
+      if (!m || typeof m !== "object" || typeof m.from !== "string") continue;
+      if (o.fromPublicId !== m.from) continue;             // signed-from must equal claimed sender
+      if (m.to !== identity.publicId) continue;            // addressed to me
+      // Learn the peer's pay address (piggybacked on EVERY message/control coin) — once per pass, newest coin first.
+      const payaddr = txt(m.payaddr, 90);
+      if (payaddr && !paSeen.has(m.from)) {
+        paSeen.add(m.from);
+        if (store.metaGet("pa:" + m.from) !== payaddr) { store.metaSet("pa:" + m.from, payaddr); paLearned = true; }
       }
-      continue;
-    }
-    const local = { hashref: threadKey(m.from, m.to, m.subject || ""), fromname: m.fromname || "", frompublickey: m.from,
-      topublickey: m.to, subject: m.subject || "", message: m.message || "", randomid: m.randomid, incoming: true, read: false,
-      date: parseInt(m.date, 10) || Date.now(), status: "received", sentblock: 0, type: m.type || "text",
-      amount: m.amount, tokenid: m.tokenid, tokenname: m.tokenname, txpowid: m.txpowid, image: m.image, payaddr: m.payaddr || "" };
-    if (store.addMessage(local)) { fresh++; lastFresh = local; }
+      if (m.type === "payaddr-req" || m.type === "payaddr-reply") {
+        // For a REQUEST on a LIVE pass, auto-answer with our own address — the handshake. Suppressed while walking
+        // history (no reply coin per historical request) AND hard rate-limited (per-peer cooldown + global hourly
+        // cap) so a flood of forged requests can't drain coins / WOTS key-uses.
+        if (m.type === "payaddr-req" && !historical && !repliedReq.has(txt(m.randomid, 128))) {
+          if (repliedReq.size > 2000) repliedReq.clear();
+          repliedReq.add(txt(m.randomid, 128));
+          const now = Date.now();
+          autoReplyTimes = autoReplyTimes.filter(t => now - t < 3600000);
+          const last = paReplyCooldown.get(m.from) || 0;
+          if (autoReplyTimes.length < AUTO_REPLY_MAX_PER_HOUR && (now - last) > AUTO_REPLY_PEER_COOLDOWN_MS) {
+            autoReplyTimes.push(now); paReplyCooldown.set(m.from, now);
+            try { await sendControl(m.from, "payaddr-reply"); } catch (e) { /* best effort */ }
+          }
+        }
+        continue;
+      }
+      const local = localOf(m);
+      if (store.addMessage(local)) { fresh++; lastFresh = local; }
+    } catch (e) { try { node.log("[mail] a coin could not be read (" + String(seenKey).slice(0, 80) + "): " + ((e && e.message) || e)); } catch (e2) {} }
   }
   return { fresh, paLearned, lastFresh };
 }
@@ -786,5 +801,5 @@ module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
   _setRunner, _renewAddresses: renewAddresses, CHAINMAIL, threadKey,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)
-  _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget,
+  _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget, _localOf: localOf,
   _limits: { POLL_DEPTH, WINDOW_DEPTH, MIN_DEPTH, BACKFILL_CHUNK, GAP_MARGIN } };
