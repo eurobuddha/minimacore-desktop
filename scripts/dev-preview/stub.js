@@ -224,6 +224,8 @@
     mailContacts: async () => MAILS === "empty" ? [] : MAIL_CONTACTS,
     mailThread: async () => MAIL_CONV, mailThreadWith: async () => MAIL_CONV,
     mailCheckOwnBeacon: async () => ({ block: 2427841 }),
+    mailResolveDetail: async (v) => { if (/zebra/.test(v)) throw new Error("No published address found on this node. Ask the recipient to publish their address or share their contact link."); return { key: MK("11"), via: "contact", confirm: false }; },
+    mailConfirmRecipient: async () => true, mailPublishNotice: async () => false, payCheck: async () => "unverified",
     mailResolveAddress: async (v) => { if (/zebra/.test(v)) throw new Error("No published address found on this node. Ask the recipient to publish their address or share their contact link."); return MK("11"); },
     mailResolvePayaddr: async () => ADDR, mailRequestPayaddr: async () => true,
     mailPayOptions: async () => [{ tokenid: "0x00", name: "Minima", balance: "1250.75" }, { tokenid: MXUSD, name: "MxUSD", balance: "88.123456" }],

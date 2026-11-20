@@ -327,6 +327,10 @@ ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myId
 ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailAddressWords", () => require("./mailaddress").words);
 ipcMain.handle("mcd:mailResolveAddress", (_e, value) => mail.resolveRecipient(value));
+ipcMain.handle("mcd:mailResolveDetail", (_e, value) => mail.resolveDetail(value));          // 0.19.9: the key AND how it is known
+ipcMain.handle("mcd:mailConfirmRecipient", (_e, key) => mail.confirmRecipient(key));
+ipcMain.handle("mcd:mailPublishNotice", () => mail.publishNoticeDue());
+ipcMain.handle("mcd:mailPublishAnswer", (_e, publish) => mail.answerPublishNotice(publish === true));
 ipcMain.handle("mcd:mailCheckOwnBeacon", () => mail.checkOwnBeacon());
 ipcMain.handle("mcd:mailPublishAddress", (_e, key, enabled) => mail.setPublication(key, enabled === true));
 ipcMain.handle("mcd:mailSetTheme", (_e, theme) => mail.setTheme(theme));

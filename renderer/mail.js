@@ -403,6 +403,59 @@
     if (VIEW === "thread") return renderThread(host);
     if (VIEW === "compose") return renderCompose(host);
     renderFolder(host);
+    publishNotice();
+  }
+
+  /**
+   * The one-time notice before this install first publishes its address (0.19.9). The phone publishes by default and
+   * says nothing; it has no wording to take. Publishing stays the default (the first button); "Don't publish" turns it
+   * off (it can be turned on later under Your key). Nothing is posted until one of the two is chosen.
+   */
+  var NOTICE_TEXT = "Mail can publish your six-word address so that people can write to you from the words alone.\n\n"
+    + "What is published: your six words, your Mail key and a signature, in a coin on the Minima chain (it costs 0.000000001 MINIMA, and is renewed when needed).\n\n"
+    + "It is public and permanent: anyone can read it, and it cannot be removed from the chain. "
+    + "The coin is paid from one of your wallet's addresses, so it links your Mail address to that wallet address for anyone who looks.\n\n"
+    + "If you choose \"Don't publish\", people need your contact link or Mail key to write to you. You can change this later under Your key.";
+  var noticeAsked = false;
+  async function publishNotice() {
+    if (noticeAsked || MODAL || !ID) return;
+    noticeAsked = true;
+    try {
+      if (!await D.api.mailPublishNotice()) { noticeAsked = false; return; }   // answered, already public, or not known yet (asked again at the next draw)
+      var publish = await mmDialog({ title: "Publish your Mail address?", message: NOTICE_TEXT, ok: "Publish my address", cancel: "Don't publish", wide: true });
+      ID = await D.api.mailPublishAnswer(publish === true);
+      noticeAsked = false;   // answered: main says no from here on (and another wallet's Mail is asked for itself)
+      render();
+    } catch (e) { noticeAsked = false; }
+  }
+  /**
+   * Six words are 66 bits: someone can find another key with the same words. Before the FIRST send to a key this
+   * install knows only from a beacon (or only from mail that key sent), the whole key and the beacon's age are shown.
+   * d = main's resolveDetail. true = go on.
+   */
+  function ageWords(blocks) {
+    if (!(blocks >= 0)) return "";
+    var mins = Math.floor(blocks * 50 / 60);   // a Minima block is about 50 seconds
+    return mins < 60 ? "about " + mins + " minutes" : mins < 2880 ? "about " + Math.floor(mins / 60) + " hours" : "about " + Math.floor(mins / 1440) + " days";
+  }
+  function confirmText(d) {
+    var how = d.via === "beacon"
+      ? "This key was found on chain from the six words. It is not one of your contacts and you have not written to it before.\n\n"
+        + (d.first && d.tip >= d.first ? "Its address beacon was first seen by this node at block " + d.first + " (" + ageWords(d.tip - d.first) + " ago, " + (d.tip - d.first) + " blocks)"
+            + (d.block > d.first ? ", last renewed at block " + d.block : "") + ". "
+          : "This node could not tell how old its address beacon is. ")
+        + "A beacon published very recently deserves more care."
+      : "This key is known only from mail it sent you. It is not one of your contacts and you have not written to it before.";
+    return how + "\n\nSix words can be imitated by another key. Check the whole Mail key with the person, by another way, before you send:\n\n" + d.key;
+  }
+  async function confirmRecipient(d) {
+    if (!d || !d.confirm) return true;
+    var ok = await mmDialog({ title: "Is this the right person?", message: confirmText(d), ok: "Yes, send to this key", cancel: "Cancel", neutral: "Copy key", wide: true,
+      onNeutral: function () { D.copy(d.key); } });
+    if (ok !== true) return false;
+    await D.api.mailConfirmRecipient(d.key);
+    d.confirm = false;
+    return true;
   }
 
   /** Mail's own Paper / Dark (Settings, Appearance): it does not follow the shell's theme, as on the phone. */
@@ -687,7 +740,7 @@
     const status = D.el("mmLookup"), retry = D.el("mmRetryLookup");
     const compact = D.el("mmCompactTo"), chips = toggle.parentElement;
     const actions = ["mmDoSend", "mmPhoto", "mmFunds"].map(id => D.el(id));
-    let revision = 0, resolved = "", sending = false;
+    let revision = 0, resolved = "", sending = false, detail = null;
     const { boxes } = addressBoxes(grid, dictionary, wordsChanged, useRaw);
     (c.words || []).forEach((word, i) => { boxes[i].value = word; });
     function mode(asRaw, folded = false) {
@@ -713,15 +766,15 @@
     }
     async function check() {
       const request = ++revision, text = raw.value.trim();
-      resolved = ""; actions.forEach(button => { button.disabled = true; });
+      resolved = ""; detail = null; actions.forEach(button => { button.disabled = true; });
       status.textContent = ""; retry.hidden = true;
       if (!/^(?:0x)?[0-9a-f]{128}(?:\||$)/i.test(text) && !text.includes("minimamail:") &&
           !(text.split(/[\s-]+/).length === 6 && text.toLowerCase().split(/[\s-]+/).every(word => dictionary.includes(word)))) return;
       status.textContent = "Looking up address…";
       try {
-        const key = await D.api.mailResolveAddress(text);
+        const found = await D.api.mailResolveDetail(text);
         if (request !== revision || !raw.isConnected) return;
-        resolved = key; status.textContent = "Recipient ready";
+        detail = found; resolved = found.key; status.textContent = found.confirm ? "Recipient found: you will be asked to check the key before sending" : "Recipient ready";
         actions.forEach(button => { button.disabled = sending; });
       } catch (error) {
         if (request !== revision || !raw.isConnected) return;
@@ -753,14 +806,15 @@
       if (v) { useRaw(String(v).trim()); }
     };
     D.el("mmPhoto").onclick = function () { D.el("mmFile").click(); };
-    D.el("mmFile").onchange = function (e) { if (resolved && e.target.files[0]) composeImage(e.target.files[0], resolved); };
+    D.el("mmFile").onchange = async function (e) { const file = e.target.files[0], to = resolved, d = detail; if (to && file && await confirmRecipient(d)) composeImage(file, to); };
     D.el("mmFunds").onclick = async function () {
-      if (resolved) await sendFunds(resolved, D.el("mmSubj").value.trim());
+      const to = resolved, d = detail;
+      if (to && await confirmRecipient(d)) await sendFunds(to, D.el("mmSubj").value.trim());
     };
     D.el("mmDoSend").onclick = async () => {
       if (!resolved || sending) return;
       sending = true;
-      try { await doSend(resolved); }
+      try { const to = resolved; if (await confirmRecipient(detail)) await doSend(to); }
       finally { sending = false; actions[0].disabled = !resolved; }
     };
   }
@@ -1051,5 +1105,5 @@
   g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge, backup: doBackup, restore: doRestore,
     _open: function (what, a, b) { if (what === "thread") openThread(a, b || "", "", "inbox"); else if (what === "compose") openCompose(a); else if (what === "funds") sendFunds(a, b || ""); else { VIEW = what; PEER = null; render(); } },   // the dev preview drives screens through this
     _pure: { decCmp: decCmp, looksLikeMinimaAddress: looksLikeMinimaAddress },
-    _test: function (deps) { D = deps; return { bubble: bubble, previewText: previewText, verifyShown: verifyShown }; } };   // backup and restore are also opened from Backup & Recovery
+    _test: function (deps) { D = deps; return { bubble: bubble, previewText: previewText, verifyShown: verifyShown, confirmText: confirmText, NOTICE_TEXT: NOTICE_TEXT }; } };   // backup and restore are also opened from Backup & Recovery
 })(window);

@@ -46,12 +46,14 @@ function verify(sodium, key, sig, address) {
   return isKey(key) && typeof sig === "string" && /^[0-9a-f]{128}$/i.test(sig) && phrase(key) === address
     && sodium.crypto_sign_verify_detached(Buffer.from(sig, "hex"), tagged("minima-mail-card-v1", key), Buffer.from(key.slice(66), "hex"));
 }
-async function find(run, sodium, address, depth) {
+/** The signed card for six words, or null. info (optional) receives { first }: the oldest beacon's block, 0 = not known.
+ *  It is not part of the card, which is stored and compared as it is. */
+async function find(run, sodium, address, depth, info) {
   if (!address || normalize(address) !== address || ![1000, 1500].includes(depth)) throw new Error("Invalid Mail address");
   const t = tag(address);
   const reply = await run("coins address:" + ADDRESS + " tokenid:0x00 state:" + t + " simplestate:true order:desc depth:" + depth);
   if (reply?.status !== true || !Array.isArray(reply.response)) throw new Error("Could not read Mail address beacons.");
-  let found = null;
+  let found = null, oldest = 0;
   for (const coin of reply.response) {
     const state = coin?.state;
     if (String(coin?.address).toUpperCase() !== ADDRESS.toUpperCase() || String(coin.tokenid).toLowerCase() !== "0x00" ||
@@ -59,10 +61,13 @@ async function find(run, sodium, address, depth) {
     const sig = state[2].slice(2), key = state[1];
     if (!verify(sodium, key, sig, address)) continue;
     if (found && found.key !== key.toLowerCase()) throw new Error("Multiple keys match. Ask for a contact link.");
-    const block = Math.max(found?.block || 0, Number(coin.created) || 0);
+    const made = Number(coin.created) || 0, block = Math.max(found?.block || 0, made);
+    const first = made > 0 ? Math.min(oldest || made, made) : oldest;   // the oldest beacon in the window: how long this key has held the words
     found = { key: key.toLowerCase(), sig: sig.toLowerCase(), phrase: address };
     if (Number.isSafeInteger(block) && block > 0) found.block = block;
+    oldest = first;
   }
+  if (info) info.first = found && Number.isSafeInteger(oldest) ? oldest : 0;
   return found;
 }
 module.exports = { words, phrase, display, normalize, link, direct, tag, card, verify, find, isKey, ADDRESS };

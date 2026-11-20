@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.9] — Mail: a one-time notice before your address is first published; a wallet reset can no longer overwrite the old inbox; a recipient found only by six words is confirmed by its whole key
+
+- **Found in review (medium, privacy)**: Mail publishes the owner's six-word address by default (released in 0.18.67, as on the phone) and said nothing. The post is a coin on chain carrying the six words, the Mail key and a signature, paid from one of the wallet's addresses: public, permanent, and it ties the Mail address to that wallet address.
+- **Now**: publishing stays the default, but this install's own card is not posted until the owner has answered a one-time notice, shown when Mail opens: what is published, that it is public and permanent and cannot be removed, that it links the Mail address to a wallet address, with "Publish my address" (the first button) and "Don't publish" (which turns it off; Escape is the same). It can be changed later under Your key. An install whose card is already on chain is not asked: there is nothing left to choose. The phone has no such notice, so there was no wording to take: this one is new. Until the answer, Your key shows the address as not published.
+- **Low, data loss**: on a wallet reset, if the old mail could not be moved aside, the store was emptied instead, and its next write replaced the old wallet's `mail.json`, the only copy of that inbox. The fallback is removed: the failure is reported in the reset's "NOT reset" list and the file stays as it is.
+- **Low, six words are 66 bits**: before the first send (mail, photo or funds) to a key this install knows only from a beacon, or only from mail that key itself sent, a dialog shows the whole Mail key, when its beacon was first seen and last renewed (block and rough age), and asks. Saved contacts, keys written to before, contact links and whole keys are not asked about. The main process refuses the send and the payment until the confirmation (`needConfirmed`), so it does not rest on the screen alone.
+- **Tests** (`npm run test:mail` 43): nothing is posted before the answer although the renewal loop runs with a coin; each answer; an already-published install; a beacon-only recipient refused for mail and for payment until confirmed, then "sent" and not asked again; a key known only from its own mail; the dialogs' words with the whole key; a reset whose move fails leaves every message in `mail.json` and in the store.
+
 ## [0.19.8] — Log isolation brought to the same code as the side-by-side branch (its 0.19.104), so the two merge cleanly
 
 - **Why**: 0.19.4 here and 0.19.104 on the `pandamonium-sxs` branch fixed the same finding in two shapes. This version replaces 0.19.4's shape in `main/node-manager.js` with that branch's (commit ca9e922), ported by hand because this branch also has the Parlons notifier in the same function.
