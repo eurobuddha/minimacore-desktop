@@ -61,7 +61,7 @@ test("the page frame: wanted whenever the engine is ready, remade for another en
   assert.equal(C.pageStep("running", ready, silent, 1001 + C.PAGE_LOAD_MS), "retry");
   assert.deepEqual(C.strip("running", { started: true, ready: true, restingReady: true }, true), { text: "PAIRED · trading page did not load", tone: "dim" });
   assert.deepEqual(C.strip("running", { started: true, ready: false, problem: "The old wallet's Dexicon store could not be moved aside" }), { text: "DEXICON IS NOT RUNNING", tone: "dim" });
-  assert.match(C.PAGE_FAILED, /did not load, so a trade cannot be sent from here right now\. The app is trying again/);
+  assert.match(String(C.PAGE_FAILED), /did not load, so a trade cannot be sent from here right now\. The app is trying again/);   // a text fixed at load is a String that translates when shown
 });
 
 test("the screens' code makes the frame without any visit to Dexicon, keeps it across tabs, remakes it after an engine restart, and says so when it cannot load", async () => {
@@ -74,6 +74,7 @@ test("the screens' code makes the frame without any visit to Dexicon, keeps it a
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null },
     addEventListener: (t, f) => { listeners[t] = f; } };
   win.window = win; win.mcd = { dxStatus: async () => { asked++; if (!status) throw new Error("no answer"); return status; }, onDexicon: (f) => { service = f; }, clip: async () => true, dxCommand: async () => ({}) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
   const shell = win.document.getElementById("shell"); shell.dataset.mode = "tabs";   // the Wallet tab is on screen; Dexicon was never opened
   const frames = () => shell.children.filter(c => c.tag === "iframe"), tick = async () => { for (const t of timers) t(); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); };
@@ -280,7 +281,7 @@ function bridge() {
   win.document.createElement = () => ({}); win.document.head = { appendChild: (el_) => { win.pageStyle = el_.textContent; } };
   win.window = win; win.parent.window = win.parent;
   // the engine's own decimal and take rule (the page loads the same two files), and a FAST book the test sets
-  vm.createContext(win);
+  Object.assign(win, require("./i18n-plain.cjs").globals()); vm.createContext(win);
   for (const f of ["vendor/decimal.js", "lib/fill.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "../main/dexicon", f), "utf8"), win);
   win.fastOrders = [];   // { side, price, amount }: other makers' backed orders, as ui/app.js crossing() sees them
   win.DexiconFast.crossing = (isBuy, price) => win.fastOrders.filter(o => (isBuy ? o.side === "sell" && Number(o.price) <= Number(price) : o.side === "buy" && Number(o.price) >= Number(price)))
@@ -518,6 +519,7 @@ test("H2: the Trade button takes one click at a time, sends what was reviewed, a
   win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async () => ({ status: true, rows: [] }),
     dxBook: async () => ({ fast: [{ side: "sell", price: "0.0032", minima: "999", ours: false }], book: [], poolAsks: [], poolBids: [], pools: [] }),   // the SERVICE's book: not what the page will act on
     cmd: async () => ({ status: true, response: [{ tokenid: "0x00", sendable: "1000" }, { tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", sendable: "10" }] }) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
   const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r)); };
   const shell = win.document.getElementById("shell"); shell.dataset.mode = "dex";

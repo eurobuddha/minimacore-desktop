@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.142] — Dexicon in the four languages: its chrome and rooms ①, ② and ③
+
+- **Translated:** the status strip, the room pills and the bottom tabs; room ① (Swap, Market, OTC, the halt card, the wallet actions), room ② (Swap, Pools, My LP, Wallet, Activity, Create in four steps, Back up / restore, the recovery texts), room ③ (Trade, Orders, History, Activity, Assets, Settings), the pool calculator, and every review, refusal and confirmation these screens show. The phone's own Dexicon words are used wherever the phone has the same English text (`apks/base` `dexicon-l10n`).
+- **Not touched:** the vendored engines and the hosted Exchange page (byte for byte, their own English stays where it reaches the screen: an order line such as "BUY 1250.5 @ 0.0029", engine refusals); the AtomiX CSV (`CSV_COLS` and `csv()` are as they were, checked by hand after the extraction wrapped them and before anything was committed), the Exchange CSV header, the pool statement file; every call, argument and stored value.
+- **Texts fixed while a script loads** (the long help texts of the rooms, the create-pool acknowledgements, the recovery guidance) are `L_("…")`: a String that reads as its translation whenever it is shown. Room, tab, step and action names are translated where drawn (`N_`).
+- **Counts:** "3 minutes ago" comes from `Intl.RelativeTimeFormat`. The sentences built around an English noun + "s" keep their English exactly (`I18N.s`); in the other languages the noun comes first and the number after it ("пулов: 3"), which needs no ending. The words joined to a number ("parts", "blocks") have one form per language: correct grammar for every count is owed.
+- **Renderer modules loaded by a test or the main process** ask for the helper themselves (`require("./i18n.js")` when `I18N` is not there).
+- Tests: the Dexicon suites unchanged in what they assert (they read the screens' source through `scripts/i18n-plain.cjs`, and the vm sandboxes get the helpers through its `globals()`); `scripts/i18n-test.cjs` holds 1,685 keys to its rules.
+
 ## [0.19.141] — The shell and the core screens in 简体中文, Русский and Українська
 
 - **What is translated:** the toolbar, tabs, tray, overflow menu, footer and the stopped-node strip; first run (launcher, new wallet, the seed typed back, Restore & resync, the key-mode question); Wallet, the coins dialog and coin detail, Split, Consolidate, Token details; Send; Receive; History (list, filter, detail, import and export messages); Node (dashboard, contribute, the port-forwarding help); Startup Params with the whole parameter list; Backup & Recovery; Settings (updates, node kind, signing keys, coin guard, open at login); Apps (Hide, Freeze and their reasons); Terminal and Logs chrome; the Faucet screen; the shared dialogs. The chooser now lists the four languages.

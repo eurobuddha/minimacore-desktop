@@ -33,7 +33,7 @@ const DexUI = (() => {
 
   function init(o) {
     opts = o;
-    $("dxRail").innerHTML = C.ROOMS.map((r, i) => `<button class="dx-room" data-room="${i}" aria-pressed="false">${r.n} ${r.label}</button>`).join("");
+    $("dxRail").innerHTML = C.ROOMS.map((r, i) => `<button class="dx-room" data-room="${i}" aria-pressed="false">${r.n} ${th(r.label)}</button>`).join("");
     $("dxRail").onclick = (e) => { const b = e.target.closest("[data-room]"); if (b) opts.go(C.ROOMS[Number(b.dataset.room)].view); };
     $("dxNav").onclick = (e) => { const b = e.target.closest("[data-dxtab]"); if (b) { C.pickTab(mem, b.dataset.dxtab); write(); paintNav(); render(); } };
     $("dxNav").addEventListener("keydown", (e) => {   // one tab stop, the arrow keys move along the bar
@@ -71,12 +71,12 @@ const DexUI = (() => {
     $("shell").dataset.dx = mem.theme;
     const dark = mem.theme === "ONYX";
     $("dxTheme").textContent = dark ? "☀" : "☾";
-    $("dxTheme").setAttribute("aria-label", dark ? "Switch Dexicon to its light theme" : "Switch Dexicon to its dark theme");
+    $("dxTheme").setAttribute("aria-label", dark ? I18N.t("Switch Dexicon to its light theme") : I18N.t("Switch Dexicon to its dark theme"));
   }
   function paintNav() {
     const tabs = C.ROOMS[mem.room].tabs, on = C.tabOf(mem);
     $("dxNav").hidden = !tabs.length;
-    $("dxNav").innerHTML = tabs.map(t => `<button class="dx-tab" role="tab" data-dxtab="${t}" aria-selected="${t === on}" tabindex="${t === on ? 0 : -1}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[t]}"/></svg><span>${C.TAB_LABEL[t]}</span></button>`).join("");
+    $("dxNav").innerHTML = tabs.map(t => `<button class="dx-tab" role="tab" data-dxtab="${t}" aria-selected="${t === on}" tabindex="${t === on ? 0 : -1}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[t]}"/></svg><span>${I18N.th(C.TAB_LABEL[t])}</span></button>`).join("");
   }
   function paintStrip() {
     const s = C.strip(node.state, st, Page.failed), p = $("dxPair");
@@ -114,12 +114,12 @@ const DexUI = (() => {
     if (step === "retry") Page.failed = true;   // said in the status strip and on the screens until the page speaks
     if (step === "drop" || step === "remake" || step === "retry") {
       Page.frame.remove(); Page.frame = null; Page.state = {};
-      for (const k of Object.keys(Page.waiting)) { Page.waiting[k]({ error: "Dexicon stopped before it answered. Look at Activity before trying again." }); delete Page.waiting[k]; }
+      for (const k of Object.keys(Page.waiting)) { Page.waiting[k]({ error: I18N.t("Dexicon stopped before it answered. Look at Activity before trying again.") }); delete Page.waiting[k]; }
       if (step !== "retry") Page.failed = false;
     }
     if (step === "make" || step === "remake" || step === "retry") {
       const f = document.createElement("iframe");
-      f.setAttribute("sandbox", "allow-scripts"); f.hidden = true; f.title = "Dexicon engine"; f.src = "dxroom://exchange/index.html";
+      f.setAttribute("sandbox", "allow-scripts"); f.hidden = true; f.title = I18N.t("Dexicon engine"); f.src = "dxroom://exchange/index.html";
       $("shell").appendChild(f); Page.frame = f; Page.epoch = st ? st.epoch : null; Page.madeAt = Date.now(); Page.heard = false;
     }
     if (step !== "keep" && step !== "none") paintStrip();
@@ -144,7 +144,7 @@ const DexUI = (() => {
    *  own review text when it wants one confirmed. */
   function drive(act, args) {
     if (Page.stub) return Page.stub(act, args);
-    if (!Page.frame || !Page.state.ready) return Promise.resolve({ error: "Dexicon is still starting. Nothing was sent." });
+    if (!Page.frame || !Page.state.ready) return Promise.resolve({ error: I18N.t("Dexicon is still starting. Nothing was sent.") });
     const id = ++Page.seq;
     return new Promise(resolve => { Page.waiting[id] = resolve; Page.frame.contentWindow.postMessage(C.driveCall(id, act, args), "*"); });
   }
@@ -169,7 +169,7 @@ const DexUI = (() => {
     X.fills = ((val(3, {}).rows) || []).map(r => { try { return JSON.parse(r.V || r.v); } catch (e) { return null; } }).filter(Boolean).sort((a, b) => (b.ts || 0) - (a.ts || 0));
     const bal = val(4, null);
     if (bal && bal.status && Array.isArray(bal.response)) { const of = (id) => (bal.response.find(r => r.tokenid === id) || {}).sendable || "0"; X.bal = { minima: of("0x00"), mxusd: of(MXUSD) }; X.balErr = ""; }
-    else { X.bal = null; X.balErr = C.refusal((bal && bal.error) || (got[4].reason && got[4].reason.message) || "The balance could not be read."); }
+    else { X.bal = null; X.balErr = C.refusal((bal && bal.error) || (got[4].reason && got[4].reason.message) || I18N.t("The balance could not be read.")); }
     X.loaded = true;
   }
   function onService(message) {   // the service's packets, in its own words (main/dexicon.js "comms")
@@ -194,14 +194,14 @@ const DexUI = (() => {
 
   /** What stops trading right now, in plain words (empty: nothing does). */
   function blocker() {
-    if (node.state !== "running") return "The node is stopped, so nothing here can trade. Start it and Dexicon comes back by itself.";
+    if (node.state !== "running") return I18N.t("The node is stopped, so nothing here can trade. Start it and Dexicon comes back by itself.");
     if (st && st.problem) return st.problem;   // the engine host's own plain sentence (a store that could not be moved aside)
-    if (!st || !st.started || !st.ready) return "Dexicon is still starting: it is reading this wallet's trading identity from the node. Nothing can be sent yet.";
+    if (!st || !st.started || !st.ready) return I18N.t("Dexicon is still starting: it is reading this wallet's trading identity from the node. Nothing can be sent yet.");
     if (Page.failed) return C.PAGE_FAILED;
-    if (Page.state.idError) return "The trading identity could not be read: " + Page.state.idError;
-    if (!Page.state.ready && !Page.stub) return "Dexicon is still starting. Nothing can be sent yet.";
-    if (!(st.relays || []).length) return "No relay is set, so there is no FAST book and a FAST order cannot be published. Add a relay in Settings.";
-    if (relayDown()) return "No relay answers right now, so the FAST book may be out of date and a FAST order may not be heard. On-chain orders and pools still work.";
+    if (Page.state.idError) return I18N.t("The trading identity could not be read: {idError}", { idError: Page.state.idError });
+    if (!Page.state.ready && !Page.stub) return I18N.t("Dexicon is still starting. Nothing can be sent yet.");
+    if (!(st.relays || []).length) return I18N.t("No relay is set, so there is no FAST book and a FAST order cannot be published. Add a relay in Settings.");
+    if (relayDown()) return I18N.t("No relay answers right now, so the FAST book may be out of date and a FAST order may not be heard. On-chain orders and pools still work.");
     return "";
   }
   const relayDown = () => { const r = (Page.state.relays || []).filter(x => !x.found); return r.length > 0 && !r.some(x => x.state === "ok") && r.some(x => x.state === "bad"); };
@@ -209,7 +209,7 @@ const DexUI = (() => {
   function dialog(title, text, okLabel, input) {
     return new Promise(resolve => {
       const d = document.createElement("dialog"); d.className = "dx-dlg";
-      d.innerHTML = `<h2>${esc(title)}</h2><pre>${esc(text)}</pre>${input ? `<input class="dx-in" inputmode="decimal" aria-label="${esc(input.label)}" value="${esc(input.value || "")}">` : ""}<div class="dx-dlg__b"><button class="dx-btn" data-x="0">Close</button>${okLabel ? `<button class="dx-btn dx-btn--go" data-x="1">${esc(okLabel)}</button>` : ""}</div>`;
+      d.innerHTML = `<h2>${esc(title)}</h2><pre>${esc(text)}</pre>${input ? `<input class="dx-in" inputmode="decimal" aria-label="${esc(input.label)}" value="${esc(input.value || "")}">` : ""}<div class="dx-dlg__b"><button class="dx-btn" data-x="0">${th("Close")}</button>${okLabel ? `<button class="dx-btn dx-btn--go" data-x="1">${esc(okLabel)}</button>` : ""}</div>`;
       d.onclick = (e) => { const b = e.target.closest("[data-x]"); if (!b) return; const v = b.dataset.x === "1" ? (input ? d.querySelector("input").value.trim() : true) : null; d.close(); d.remove(); resolve(v); };
       d.addEventListener("cancel", () => { d.remove(); resolve(null); });
       $("shell").appendChild(d); d.showModal();
@@ -247,30 +247,30 @@ const DexUI = (() => {
     return `<div class="dx-state" id="dxState" role="status" hidden></div>
     <div class="dx-trade">
       <div class="dx-col">
-        <div class="dx-card"><div class="dx-row"><b class="dx-t13">MINIMA / MxUSD</b><span class="dx-sync" id="dxSync"></span></div>
+        <div class="dx-card"><div class="dx-row"><b class="dx-t13">${th("MINIMA / MxUSD")}</b><span class="dx-sync" id="dxSync"></span></div>
           <div class="dx-midrow"><span class="dx-mid" id="dxMid">…</span><span class="dx-spread" id="dxSpread"></span></div>
           <div class="dx-kind" id="dxKind"></div>
-          <div class="dx-stats"><div><label>Bids</label><span id="dxBidsN">…</span></div><div><label>Asks</label><span id="dxAsksN">…</span></div></div>
+          <div class="dx-stats"><div><label>${th("Bids")}</label><span id="dxBidsN">…</span></div><div><label>${th("Asks")}</label><span id="dxAsksN">…</span></div></div>
           <div class="dx-kind" id="dxMexc"></div></div>
-        <div class="dx-card"><div class="dx-row"><span class="dx-h">ORDER BOOK</span><span class="dx-groups" id="dxGroups" role="group" aria-label="Price grouping">${C.GROUP_LABELS.map((g, i) => `<button data-g="${i}">${g}</button>`).join("")}</span></div>
-          <div class="dx-legend"><span>Price (MxUSD)</span><span>Amount (MINIMA)</span><span>Total</span></div>
+        <div class="dx-card"><div class="dx-row"><span class="dx-h">${th("ORDER BOOK")}</span><span class="dx-groups" id="dxGroups" role="group" aria-label="${th("Price grouping")}">${C.GROUP_LABELS.map((g, i) => `<button data-g="${i}">${g}</button>`).join("")}</span></div>
+          <div class="dx-legend"><span>${th("Price (MxUSD)")}</span><span>${th("Amount (MINIMA)")}</span><span>${th("Total")}</span></div>
           <div id="dxAsks"></div><div class="dx-center" id="dxCenter">…</div><div id="dxBids"></div></div>
       </div>
       <div class="dx-col">
-        <button class="dx-card dx-funds" id="dxFunds" aria-label="Your funds: show more or less"></button>
+        <button class="dx-card dx-funds" id="dxFunds" aria-label="${th("Your funds: show more or less")}"></button>
         <div class="dx-card">
-          <div class="dx-side" role="group" aria-label="Side"><button id="dxBuy" aria-pressed="true">BUY</button><button id="dxSell" aria-pressed="false">SELL</button></div>
-          <input class="dx-in" id="dxPrice" inputmode="decimal" autocomplete="off" maxlength="44" placeholder="Price (MxUSD per MINIMA)" aria-label="Price, MxUSD per MINIMA">
-          <input class="dx-in" id="dxAmount" inputmode="decimal" autocomplete="off" maxlength="44" placeholder="Amount (MINIMA)" aria-label="Amount, MINIMA">
+          <div class="dx-side" role="group" aria-label="${th("Side")}"><button id="dxBuy" aria-pressed="true">${th("BUY")}</button><button id="dxSell" aria-pressed="false">${th("SELL")}</button></div>
+          <input class="dx-in" id="dxPrice" inputmode="decimal" autocomplete="off" maxlength="44" placeholder="${th("Price (MxUSD per MINIMA)")}" aria-label="${th("Price, MxUSD per MINIMA")}">
+          <input class="dx-in" id="dxAmount" inputmode="decimal" autocomplete="off" maxlength="44" placeholder="${th("Amount (MINIMA)")}" aria-label="${th("Amount, MINIMA")}">
           <button class="dx-avail" id="dxAvail"></button>
           <div class="dx-pct" id="dxPct">${[25, 50, 75, 100].map(n => `<button data-pct="${n}">${n}%</button>`).join("")}</div>
-          <div class="dx-total" id="dxTotal">Total: …</div>
+          <div class="dx-total" id="dxTotal">${th("Total: …")}</div>
           <div class="dx-warn" id="dxWarn" role="alert"></div>
           <div class="dx-review" id="dxReview"></div>
           <div class="dx-ctas"><button class="dx-cta" id="dxCta"></button><button class="dx-cta" id="dxCta2" hidden></button></div>
           <div class="dx-log" id="dxLog" role="log" hidden></div>
         </div>
-        <div class="dx-card"><div class="dx-h">MY OPEN ORDERS</div><div id="dxMyOrders"></div></div>
+        <div class="dx-card"><div class="dx-h">${th("MY OPEN ORDERS")}</div><div id="dxMyOrders"></div></div>
       </div>
     </div>`;
   }
@@ -285,9 +285,9 @@ const DexUI = (() => {
     $("dxGroups").onclick = (e) => { const b = e.target.closest("[data-g]"); if (!b) return; X.group = Number(b.dataset.g); pref("dexicon_group", String(X.group)); paintTrade(); };
     $("dxFunds").onclick = () => { X.fundsBig = !X.fundsBig; pref("dexicon_funds_big", X.fundsBig ? "1" : "0"); paintFunds(); };
     const pct = (n) => {
-      if (!num(price.value)) return say("Enter a price first, or click a row in the book.", "note");
+      if (!num(price.value)) return say(I18N.t("Enter a price first, or click a row in the book."), "note");
       const a = C.percent(book(), X.buy, price.value, n, fundsNow());
-      if (!a) return say(X.balErr || "The balance has not been read yet.", "note");
+      if (!a) return say(X.balErr || I18N.t("The balance has not been read yet."), "note");
       amount.value = a.v > 0n ? C.fmt(a) : ""; X.said = null; paintTicket();
     };
     $("dxPct").onclick = (e) => { const b = e.target.closest("[data-pct]"); if (b) pct(Number(b.dataset.pct)); };
@@ -303,23 +303,23 @@ const DexUI = (() => {
     const why = blocker(), L = lad(), relays = (Page.state.relays || []).filter(r => !r.found), anyOk = relays.some(r => r.state === "ok") || (Page.stub && !relayDown());
     $("dxState").hidden = !why; $("dxState").textContent = why;
     const sync = $("dxSync"), nRelays = ((st && st.relays) || []).length;
-    sync.textContent = !nRelays ? "● no relays" : relayDown() ? "● no relay answers" : anyOk ? "● live" : "● connecting"; sync.dataset.ok = anyOk && !relayDown() ? "1" : "0";
+    sync.textContent = !nRelays ? I18N.t("● no relays") : relayDown() ? I18N.t("● no relay answers") : anyOk ? I18N.t("● live") : I18N.t("● connecting"); sync.dataset.ok = anyOk && !relayDown() ? "1" : "0";
     $("dxMid").textContent = L.mid ? C.fmtPrice(L.mid) : "…";
-    $("dxSpread").textContent = L.spread ? "spread " + C.fmt(L.spread) : "";
-    $("dxKind").textContent = (!L.mid ? "no live orders" : L.bestBid && L.bestAsk ? "mid of best bid / best ask" : L.bestBid ? "best bid only" : "best ask only") + " · FAST + BOOK + POOL";
-    $("dxBidsN").textContent = L.count.fast + " fast · " + L.count.book + " book order" + (L.count.book === 1 ? "" : "s");
-    $("dxAsksN").textContent = L.count.pools + " pool" + (L.count.pools === 1 ? "" : "s");
+    $("dxSpread").textContent = L.spread ? I18N.t("spread {spread}", { spread: C.fmt(L.spread) }) : "";
+    $("dxKind").textContent = I18N.t("{bestBid} · FAST + BOOK + POOL", { bestBid: (!L.mid ? "no live orders" : L.bestBid && L.bestAsk ? I18N.t("mid of best bid / best ask") : L.bestBid ? "best bid only" : "best ask only") });
+    $("dxBidsN").textContent = I18N.t("{fast} fast · {book} book order{book2}", { fast: L.count.fast, book: L.count.book, book2: I18N.s(L.count.book) });
+    $("dxAsksN").textContent = I18N.t("{pools} pool{pools2}", { pools: L.count.pools, pools2: I18N.s(L.count.pools) });
     // the only outside price shown is MEXC's, with the label the engine's read model gives it
     const px = st && st.price; $("dxMexc").textContent = px && px.mid > 0 ? C.priceName(px.source) + " " + px.mid + (px.label ? " · " + px.label : "") : "";
     document.querySelectorAll("#dxGroups button").forEach(b => b.setAttribute("aria-pressed", Number(b.dataset.g) === X.group ? "true" : "false"));
     const row = (r, ask) => {
       const lv = r.lv, parts = C.amountText(lv.fast, lv.book, lv.pool), shown_ = C.fmtPrice(lv.exact), at = C.GROUPS[X.group] ? C.fmt(lv.price) : C.fmt(lv.exact);
-      return `<button class="dx-lrow" data-side="${ask ? "ask" : "bid"}" data-price="${at}" data-cum="${C.fmt(r.cum)}" style="--f:${Math.min(100, r.frac * 100).toFixed(2)}%" aria-label="${ask ? "Ask" : "Bid"} ${shown_}, ${esc(parts.join(", "))} MINIMA${lv.mine ? ", includes your own order" : ""}">`
+      return `<button class="dx-lrow" data-side="${ask ? "ask" : "bid"}" data-price="${at}" data-cum="${C.fmt(r.cum)}" style="--f:${Math.min(100, r.frac * 100).toFixed(2)}%" aria-label="${tr("{ask} {shown}, {parts} MINIMA{mine}", { ask: ask ? th("Ask") : th("Bid"), shown: shown_, parts: esc(parts.join(", ")), mine: lv.mine ? th(", includes your own order") : "" })}">`
         + `<span class="dx-lp">${lv.mine ? "• " : ""}${shown_}</span><span class="dx-la${parts.length > 1 || /[A-Z]/.test(parts[0]) ? " dx-la--tag" : ""}">${parts.map(esc).join("<br>")}</span><span class="dx-lt">${C.fmt(C.levelTotal(lv))}</span></button>`;
     };
     $("dxAsks").innerHTML = C.rows(L.asks).reverse().map(r => row(r, true)).join("");   // best ask just above the centre
     $("dxBids").innerHTML = C.rows(L.bids).map(r => row(r, false)).join("");
-    if (!L.asks.length && !L.bids.length) $("dxAsks").innerHTML = `<div class="dx-empty">${esc(!X.loaded ? "…" : nRelays ? "No live orders yet." : "Add a relay in Settings.")}</div>`;
+    if (!L.asks.length && !L.bids.length) $("dxAsks").innerHTML = `<div class="dx-empty">${esc(!X.loaded ? "…" : nRelays ? I18N.t("No live orders yet.") : I18N.t("Add a relay in Settings."))}</div>`;
     $("dxCenter").textContent = L.mid ? C.fmtPrice(L.mid) : "…";
     X.lastMid = L.mid;
     paintFunds(); paintTicket(); paintMyOrders();
@@ -328,34 +328,34 @@ const DexUI = (() => {
     const f = fundsNow(), b = $("dxFunds"); if (!b) return;
     const value = f.known && X.lastMid ? "≈ " + C.fmt(C.down(C.add(C.add(f.mxusd, f.mxusdSettling), C.mul(C.add(f.minima, f.minimaSettling), X.lastMid)), 4)) + " MxUSD @ mid " + C.fmtPrice(X.lastMid) : "";
     const block = (name, a, o, s2) => `<div><b>${name}</b><br>${C.fmtBal(a)}  available<br>${C.fmtBal(o)}  in your orders<br>+${C.fmtBal(s2)}  settling<br>${C.fmtBal(C.add(a, s2))}  total</div>`;
-    b.innerHTML = `<div class="dx-row"><span class="dx-h">YOUR FUNDS  ${X.fundsBig ? "▾" : "▸"}</span><span class="dx-fval">${esc(value)}</span></div>`
+    b.innerHTML = `<div class="dx-row"><span class="dx-h">${tr("YOUR FUNDS  {fundsBig}", { fundsBig: X.fundsBig ? "▾" : "▸" })}</span><span class="dx-fval">${esc(value)}</span></div>`
       + (!f.known ? `<div class="dx-fsmall">${esc(X.balErr || (node.state === "running" ? "reading…" : "node stopped"))}</div>`
         : X.fundsBig ? `<div class="dx-fcols">${block("MINIMA", f.minima, f.minimaOrders, f.minimaSettling)}${block("MxUSD", f.mxusd, f.mxusdOrders, f.mxusdSettling)}</div>`
-        : `<div class="dx-fsmall">${C.fmtBal(f.minima)} MINIMA  ·  ${C.fmtBal(f.mxusd)} MxUSD  available</div>`);
+        : `<div class="dx-fsmall">${tr("{minima} MINIMA  ·  {mxusd} MxUSD  available", { minima: C.fmtBal(f.minima), mxusd: C.fmtBal(f.mxusd) })}</div>`);
   }
   function paintTicket() {
     if (!$("dxPrice")) return;
     const buy = X.buy, f = fundsNow(), pl = C.plan(book(), buy, $("dxPrice").value, $("dxAmount").value, f), why = blocker(), side = buy ? "BUY " : "SELL ";
     $("dxBuy").setAttribute("aria-pressed", buy ? "true" : "false"); $("dxSell").setAttribute("aria-pressed", buy ? "false" : "true");
-    $("dxAvail").textContent = !f.known ? "Available: … (" + (X.balErr || "not read yet") + ")" : "Available: " + C.fmtBal(C.freeFor(f, buy)) + (buy ? " MxUSD" : " MINIMA") + "  ·  tap for max\n(" + C.fmtBal(f.minima) + " MINIMA · " + C.fmtBal(f.mxusd) + " MxUSD in wallet)";
-    let total = "Total: …";
+    $("dxAvail").textContent = !f.known ? I18N.t("Available: … ({balErr})", { balErr: (X.balErr || "not read yet") }) : I18N.t("Available: {buy}{buy2}  ·  tap for max\n({minima} MINIMA · {mxusd} MxUSD in wallet)", { buy: C.fmtBal(C.freeFor(f, buy)), buy2: (buy ? " MxUSD" : " MINIMA"), minima: C.fmtBal(f.minima), mxusd: C.fmtBal(f.mxusd) });
+    let total = I18N.t("Total: …");
     if (pl.ok) {
       const all = C.mul(pl.amount, pl.price);
-      total = (buy ? "You pay up to " + C.fmt(C.up(all, 8)) + " MxUSD\nYou receive " + C.fmt(pl.amount) + " MINIMA" : "You pay " + C.fmt(pl.amount) + " MINIMA\nYou receive at least " + C.fmt(C.down(all, 8)) + " MxUSD")
-        + (pl.stuck ? "\nNothing can be taken in this amount" : pl.fast ? "\nFills now ≈ " + C.fmt(pl.take) + " MINIMA @ avg " + C.fmtPrice(pl.avg) : "\nNothing crosses on the FAST book: all of it rests as your FAST order @ " + C.fmtPrice(pl.price));
+      total = (buy ? I18N.t("You pay up to {all} MxUSD\nYou receive {amount} MINIMA", { all: C.fmt(C.up(all, 8)), amount: C.fmt(pl.amount) }) : I18N.t("You pay {amount} MINIMA\nYou receive at least {all} MxUSD", { amount: C.fmt(pl.amount), all: C.fmt(C.down(all, 8)) }))
+        + (pl.stuck ? ("\n" + I18N.t("Nothing can be taken in this amount")) : pl.fast ? ("\n" + I18N.t("Fills now ≈ {take} MINIMA @ avg {avg}", { take: C.fmt(pl.take), avg: C.fmtPrice(pl.avg) })) : ("\n" + I18N.t("Nothing crosses on the FAST book: all of it rests as your FAST order @ {price}", { price: C.fmtPrice(pl.price) })));
     }
     $("dxTotal").textContent = total;
     const short = pl.ok && pl.short.v > 0n;
     const typo = C.entryProblem($("dxPrice").value) || C.entryProblem($("dxAmount").value);
-    $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? "Exceeds your free " + (buy ? "MxUSD" : "MINIMA") + " by " + C.fmt(pl.short) + " (free " + C.fmtBal(pl.free) + ")" : "";
+    $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? I18N.t("Exceeds your free {buy} by {short} (free {free})", { buy: (buy ? "MxUSD" : "MINIMA"), short: C.fmt(pl.short), free: C.fmtBal(pl.free) }) : "";
     $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).map(l => `<p>${esc(l)}</p>`).join("")
-      || `<p>Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.</p>`;
+      || `<p>${th("Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.")}</p>`;
     const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !/No relay answers/.test(why);
     for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
-    cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(side + C.fmt(pl.take) + " NOW · FAST") + "<small>instant · " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? "BUY MINIMA" : "SELL MINIMA";
+    cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(I18N.t("{take} NOW · FAST", { take: side + C.fmt(pl.take) })) + "<small>" + th("instant ·") + " " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? th("BUY MINIMA") : th("SELL MINIMA");
     cta.disabled = trading || dead || short || !f.known || !!typo || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
     cta2.hidden = !(pl.ok && pl.chain) || trading;
-    cta2.innerHTML = esc(side.trim() + " · BOOK / POOL") + "<small>on-chain, about 3 minutes · review first</small>";
+    cta2.innerHTML = esc(I18N.t("{side} · BOOK / POOL", { side: side.trim() })) + "<small>" + th("on-chain, about 3 minutes · review first") + "</small>";
     cta2.disabled = dead || !f.known || trading || !!typo;
     // the engine's own words: the take's progress, then what the page or the service last said
     const says = C.pageSays(Page.state, X.svc), lines = says.lines;
@@ -367,22 +367,22 @@ const DexUI = (() => {
   async function submit(layer) {
     const price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim();
     const typo = C.entryProblem(price) || C.entryProblem(amount); if (typo) return say(typo, "note");
-    if (!num(price) || !num(amount)) return say("Enter a price and an amount.", "note");
+    if (!num(price) || !num(amount)) return say(I18N.t("Enter a price and an amount."), "note");
     X.said = null;
     const args = { buy: X.buy, price, amount, layer };
     if (layer === "fast") {
       // H1: the click carries what the review on screen said; the page signs only if its own book still says so
       const pl = C.plan(book(), X.buy, price, amount, fundsNow());
-      if (!pl.ok || pl.stuck) return say(pl.why || "Nothing can be taken in this amount. Nothing was signed.", "note");
+      if (!pl.ok || pl.stuck) return say(pl.why || I18N.t("Nothing can be taken in this amount. Nothing was signed."), "note");
       Object.assign(args, C.expectOf(pl));
       // M4 (0.18.120): the main process signs a take from the page only inside what was reviewed here (main/dexicon-signgate.js)
-      try { await api.dxCommand({ op: "reviewed", buy: X.buy, price, amount }); } catch (e) { return say("The review could not be recorded, so nothing was signed: " + C.refusal(e && e.message)); }
+      try { await api.dxCommand({ op: "reviewed", buy: X.buy, price, amount }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
       X.sent = amount; X.sentRan = false;
     }
     let r = await drive("place", args);
     while (!r.error && r.asked && r.asked !== args.reviewed) {   // on-chain: the page's own review, word for word, before anything is signed
-      const ok = await dialog(args.reviewed ? "The book moved. Review again" : "Review this on-chain trade", r.asked + "\n\nYour node signs this transaction and posts it. It is final only when a block confirms it (about 3 minutes); until then Activity shows it as waiting.", "Sign and send");
-      if (!ok) return say("Nothing was signed or sent.", "note");
+      const ok = await dialog(args.reviewed ? I18N.t("The book moved. Review again") : I18N.t("Review this on-chain trade"), I18N.t("{asked}\n\nYour node signs this transaction and posts it. It is final only when a block confirms it (about 3 minutes); until then Activity shows it as waiting.", { asked: r.asked }), I18N.t("Sign and send"));
+      if (!ok) return say(I18N.t("Nothing was signed or sent."), "note");
       args.reviewed = r.asked;
       r = await drive("place", args);
     }
@@ -393,7 +393,7 @@ const DexUI = (() => {
   }
   function paintMyOrders() {
     const box = $("dxMyOrders"); if (!box) return;
-    box.innerHTML = orderRows() || `<div class="dx-empty">No open orders</div>`;
+    box.innerHTML = orderRows() || `<div class="dx-empty">${th("No open orders")}</div>`;
   }
   /** My open orders: FAST (signed, on the relays) and on-chain (coins in the order contract). */
   function orderRows() {
@@ -401,34 +401,34 @@ const DexUI = (() => {
     for (const o of X.orders) {
       if (o.status !== "live") continue;
       const sell = o.side === "sell", rem = C.dec(o.remaining), price = C.dec(o.price); if (!rem || !price) continue;
-      out.push(orderRow(sell, (sell ? "SELL " : "BUY ") + C.fmt(rem) + " @ " + C.fmtPrice(price) + ((o.coins || []).length ? "" : "  UNBACKED"), "FAST · order " + o.orderId, "fast", o.orderId, C.fmt(price)));
+      out.push(orderRow(sell, (sell ? "SELL " : "BUY ") + C.fmt(rem) + " @ " + C.fmtPrice(price) + ((o.coins || []).length ? "" : "  UNBACKED"), I18N.t("FAST · order {orderId}", { orderId: o.orderId }), "fast", o.orderId, C.fmt(price)));
     }
     for (const o of (X.mine.orders || [])) {
       const m = C.dec(o.minima), price = C.dec(o.price); if (!m || !price) continue;
-      out.push(orderRow(o.sell, (o.sell ? "SELL " : "BUY ") + C.fmt(m) + " @ " + C.fmtPrice(price) + (o.pending ? "  " + String(o.pending).toUpperCase() + " WAITING FOR A BLOCK" : ""), "ON-CHAIN · coin " + o.coinid, "chain", o.coinid, C.fmt(price), !!o.pending));
+      out.push(orderRow(o.sell, (o.sell ? "SELL " : "BUY ") + C.fmt(m) + " @ " + C.fmtPrice(price) + (o.pending ? ("  " + I18N.t("{pending} WAITING FOR A BLOCK", { pending: String(o.pending).toUpperCase() })) : ""), I18N.t("ON-CHAIN · coin {coinid}", { coinid: o.coinid }), "chain", o.coinid, C.fmt(price), !!o.pending));
     }
     for (const o of (X.mine.pending || [])) {
       const m = C.dec(o.minima), price = C.dec(o.price); if (!m || !price) continue;
-      out.push(`<div class="dx-orow"><div><span class="dx-o${o.sell ? "sell" : "buy"}">${o.sell ? "SELL " : "BUY "}${C.fmt(m)} @ ${C.fmtPrice(price)}</span><small>ON-CHAIN · posted, waiting for a block: not on the book yet</small></div></div>`);
+      out.push(`<div class="dx-orow"><div><span class="dx-o${o.sell ? "sell" : "buy"}">${o.sell ? (th("SELL") + " ") : (th("BUY") + " ")}${C.fmt(m)} @ ${C.fmtPrice(price)}</span><small>${th("ON-CHAIN · posted, waiting for a block: not on the book yet")}</small></div></div>`);
     }
     return out.join("");
   }
-  const orderRow = (sell, text, sub, kind, id, price, busy) => `<div class="dx-orow"><div><span class="dx-o${sell ? "sell" : "buy"}">${esc(text)}</span><small data-copy="${esc(id)}" title="Click to copy">${esc(sub)}</small></div>`
-    + (busy ? "" : `<button data-oact="edit" data-kind="${kind}" data-id="${esc(id)}" data-price="${esc(price)}" aria-label="Change the price of this order">✎</button><button class="dx-ox" data-oact="cancel" data-kind="${kind}" data-id="${esc(id)}" aria-label="Cancel this order">✕</button>`) + `</div>`;
+  const orderRow = (sell, text, sub, kind, id, price, busy) => `<div class="dx-orow"><div><span class="dx-o${sell ? "sell" : "buy"}">${esc(text)}</span><small data-copy="${esc(id)}" title="${th("Click to copy")}">${esc(sub)}</small></div>`
+    + (busy ? "" : `<button data-oact="edit" data-kind="${kind}" data-id="${esc(id)}" data-price="${esc(price)}" aria-label="${th("Change the price of this order")}">✎</button><button class="dx-ox" data-oact="cancel" data-kind="${kind}" data-id="${esc(id)}" aria-label="${th("Cancel this order")}">✕</button>`) + `</div>`;
   async function orderAction(act, kind, id, price) {
     const fast = kind === "fast";
     if (act === "cancel") {
-      const ok = await dialog("Cancel this order?", fast ? "FAST order " + id + "\n\nYour node signs a cancel and sends it to every relay. Nothing moves on the chain: the coins never left your wallet. A take that a maker already co-signed still settles."
-        : "On-chain order, coin " + id + "\n\nYour node signs a transaction that returns the order's locked funds to your wallet. The order can still be filled until a block confirms the cancel.", "Cancel the order");
+      const ok = await dialog(I18N.t("Cancel this order?"), fast ? I18N.t("FAST order {id}\n\nYour node signs a cancel and sends it to every relay. Nothing moves on the chain: the coins never left your wallet. A take that a maker already co-signed still settles.", { id: id })
+        : I18N.t("On-chain order, coin {id}\n\nYour node signs a transaction that returns the order's locked funds to your wallet. The order can still be filled until a block confirms the cancel.", { id: id }), I18N.t("Cancel the order"));
       if (!ok) return;
       const r = await drive(fast ? "cancelFast" : "cancelChain", fast ? { orderId: id } : { coinid: id });
       if (r.error) return say(r.error);
     } else {
-      const next = await dialog("New price", (fast ? "FAST order " + id + "\n\nYour node signs the order again at the new price and sends it to every relay. Nothing moves on the chain."
-        : "On-chain order, coin " + id + "\n\nYour node signs a transaction that moves the order to the new price. The old price can still be filled until a block confirms it.") + "\n\nMxUSD per MINIMA:", "Sign the new price", { label: "New price, MxUSD per MINIMA", value: price });
+      const next = await dialog(I18N.t("New price"), I18N.t("{id}\n\nMxUSD per MINIMA:", { id: (fast ? I18N.t("FAST order {id}\n\nYour node signs the order again at the new price and sends it to every relay. Nothing moves on the chain.", { id: id })
+        : I18N.t("On-chain order, coin {id}\n\nYour node signs a transaction that moves the order to the new price. The old price can still be filled until a block confirms it.", { id: id })) }), I18N.t("Sign the new price"), { label: I18N.t("New price, MxUSD per MINIMA"), value: price });
       if (next == null) return;
       if (C.entryProblem(next)) return say(C.entryProblem(next), "note");
-      if (!num(next)) return say("Enter a valid new price. Nothing was changed.", "note");
+      if (!num(next)) return say(I18N.t("Enter a valid new price. Nothing was changed."), "note");
       const r = await drive(fast ? "editFast" : "editChain", fast ? { orderId: id, price: next } : { coinid: id, price: next });
       if (r.error) return say(r.error);
     }
@@ -436,73 +436,73 @@ const DexUI = (() => {
   }
 
   // ---- Orders (OrdersTab.java) and History (HistoryTab.java) ----
-  const idLine = (label, value) => (value ? `<div class="dx-id" data-copy="${esc(value)}" title="Click to copy">${esc(label)} ${esc(value)}</div>` : "");
+  const idLine = (label, value) => (value ? `<div class="dx-id" data-copy="${esc(value)}" title="${th("Click to copy")}">${esc(label)} ${esc(value)}</div>` : "");
   const stamp = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, "0"); return p(d.getDate()) + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()] + " " + p(d.getHours()) + ":" + p(d.getMinutes()); };
   const seg = (names, on, attr) => `<div class="dx-seg" role="group">${names.map((n, i) => `<button ${attr}="${i}" aria-pressed="${i === on}">${n}</button>`).join("")}</div>`;
   function makerCard() {
-    const c = X.mm || {}, mode = !c.enabled ? "OFF" : c.peg ? "PEGGED · MEXC" : "MANUAL", status = X.kv.mm_status || "", pool = X.kv.mm_pool || "";
+    const c = X.mm || {}, mode = !c.enabled ? "OFF" : c.peg ? I18N.t("PEGGED · MEXC") : "MANUAL", status = X.kv.mm_status || "", pool = X.kv.mm_pool || "";
     let feed = ""; try { feed = (JSON.parse(X.kv.mm_feed || "{}") || {}).line || ""; } catch (e) {}
-    return `<div class="dx-card dx-mm"><div class="dx-row"><span class="dx-h">MARKET MAKER</span><span class="dx-pill${c.enabled ? " dx-pill--on" : ""}">${mode}</span></div>`
+    return `<div class="dx-card dx-mm"><div class="dx-row"><span class="dx-h">${th("MARKET MAKER")}</span><span class="dx-pill${c.enabled ? " dx-pill--on" : ""}">${mode}</span></div>`
       + (c.enabled && c.peg && feed ? `<div class="dx-sub">${esc(feed)}</div>` : "")
-      + `<div class="dx-mm__s">${esc(status || (c.enabled ? "starting: the service picks it up within seconds" : "A ladder of FAST asks and bids, pegged to MEXC or set by hand. Your node keeps it live and co-signs every fill."))}</div>`
-      + (c.enabled && pool ? `<div class="dx-sub">PandaPools: ${esc(pool)}</div>` : "")
-      + `<div class="dx-mm__b"><button class="dx-btn dx-btn--go" data-mm="makerOpen">${c.enabled ? "EDIT LADDER ▸" : "SET UP ▸"}</button>${c.enabled ? `<button class="dx-btn dx-btn--stop" data-mm="makerStop">STOP</button>` : ""}${X.kv.mm_review === "1" ? `<button class="dx-btn" data-mm="makerReview">REVIEW</button>` : ""}</div></div>`;
+      + `<div class="dx-mm__s">${esc(status || (c.enabled ? I18N.t("starting: the service picks it up within seconds") : I18N.t("A ladder of FAST asks and bids, pegged to MEXC or set by hand. Your node keeps it live and co-signs every fill.")))}</div>`
+      + (c.enabled && pool ? `<div class="dx-sub">${th("PandaPools:")} ${esc(pool)}</div>` : "")
+      + `<div class="dx-mm__b"><button class="dx-btn dx-btn--go" data-mm="makerOpen">${c.enabled ? th("EDIT LADDER ▸") : th("SET UP ▸")}</button>${c.enabled ? `<button class="dx-btn dx-btn--stop" data-mm="makerStop">${th("STOP")}</button>` : ""}${X.kv.mm_review === "1" ? `<button class="dx-btn" data-mm="makerReview">${th("REVIEW")}</button>` : ""}</div></div>`;
   }
   function ordersHtml() {
-    const out = [seg(["OPEN", "MY FILLS"], X.sub, "data-sub")];
+    const out = [seg(["OPEN", I18N.t("MY FILLS")], X.sub, "data-sub")];
     if (X.sub === 0) {
       out.push(makerCard());
       let any = false;
       for (const k of Object.keys(X.takes || {})) {
         const t = X.takes[k] || {}, o = t.order || {}, pl = t.plan || {}; if (t.taken) continue;
         any = true;
-        out.push(`<div class="dx-card dx-ocard dx-ocard--wait"><div class="dx-oline dx-oline--take">${o.side === "sell" ? "BUY " : "SELL "}${esc(pl.filled || "")} MINIMA @ ${esc(o.price || "")}  ·  TAKE SENT</div>`
-          + `<div class="dx-sub">signed and sent; waiting for the maker to co-sign${t.sent ? " · sent " + C.ago(Date.now() - Number(t.sent)) : ""}. Not traded yet: it is voided by itself if the maker never answers.</div>${idLine("order", o.orderId || k)}</div>`);
+        out.push(`<div class="dx-card dx-ocard dx-ocard--wait"><div class="dx-oline dx-oline--take">${tr("{side}{filled} MINIMA @ {price}  ·  TAKE SENT", { side: o.side === "sell" ? (th("BUY") + " ") : (th("SELL") + " "), filled: esc(pl.filled || ""), price: esc(o.price || "") })}</div>`
+          + `<div class="dx-sub">${tr("signed and sent; waiting for the maker to co-sign{sent}. Not traded yet: it is voided by itself if the maker never answers.", { sent: t.sent ? (" " + tr("· sent {sent}", { sent: C.ago(Date.now() - Number(t.sent)) })) : "" })}</div>${idLine("order", o.orderId || k)}</div>`);
       }
       for (const o of X.orders) {
         if (o.status !== "live") continue;
         const sell = o.side === "sell", rem = C.dec(o.remaining), price = C.dec(o.price), n = (o.coins || []).length; if (!rem || !price) continue;
         any = true;
         const left = Math.max(0, Math.floor(((Number(o.expiry) || 0) - Date.now() / 1000) / 3600));
-        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${sell ? "sell" : "buy"}">${sell ? "SELL " : "BUY "}${C.fmt(rem)} MINIMA @ ${C.fmtPrice(price)}</span><span class="dx-oacts"><button data-oact="edit" data-kind="fast" data-id="${esc(o.orderId)}" data-price="${C.fmt(price)}" aria-label="Change the price of this order">✎</button><button class="dx-ox" data-oact="cancel" data-kind="fast" data-id="${esc(o.orderId)}" aria-label="Cancel this order">✕</button></span></div>`
-          + `<div class="dx-sub">FAST · of ${esc(C.fmt(C.dec(o.amount) || rem))}  ·  ${n} backing coin${n === 1 ? "" : "s"}${n ? "" : " (UNBACKED: takers skip it until your node backs it again)"}${o.expiry ? "  ·  expires in " + left + "h" : ""}  ·  seq ${esc(o.seq)}</div>${idLine("order", o.orderId)}${idLine("pay-to", o.address)}</div>`);
+        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${sell ? "sell" : "buy"}">${tr("{sell}{rem} MINIMA @ {price}", { sell: sell ? (th("SELL") + " ") : (th("BUY") + " "), rem: C.fmt(rem), price: C.fmtPrice(price) })}</span><span class="dx-oacts"><button data-oact="edit" data-kind="fast" data-id="${esc(o.orderId)}" data-price="${C.fmt(price)}" aria-label="${th("Change the price of this order")}">✎</button><button class="dx-ox" data-oact="cancel" data-kind="fast" data-id="${esc(o.orderId)}" aria-label="${th("Cancel this order")}">✕</button></span></div>`
+          + `<div class="dx-sub">${tr("FAST · of {rem}  ·  {n} backing coin{n2}{n3}{left}  ·  seq {seq}", { rem: esc(C.fmt(C.dec(o.amount) || rem)), n: n, n2: I18N.s(n), n3: n ? "" : (" " + th("(UNBACKED: takers skip it until your node backs it again)")), left: o.expiry ? ("  " + tr("·  expires in {left}h", { left: left })) : "", seq: esc(o.seq) })}</div>${idLine("order", o.orderId)}${idLine("pay-to", o.address)}</div>`);
       }
       for (const o of (X.mine.orders || [])) {
         const m = C.dec(o.minima), price = C.dec(o.price); if (!m || !price) continue;
         any = true;
-        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${o.sell ? "sell" : "buy"}">${o.sell ? "SELL " : "BUY "}${C.fmt(m)} MINIMA @ ${C.fmtPrice(price)}</span>${o.pending ? "" : `<span class="dx-oacts"><button data-oact="edit" data-kind="chain" data-id="${esc(o.coinid)}" data-price="${C.fmt(price)}" aria-label="Change the price of this order">✎</button><button class="dx-ox" data-oact="cancel" data-kind="chain" data-id="${esc(o.coinid)}" aria-label="Cancel this order">✕</button></span>`}</div>`
-          + `<div class="dx-sub">ON-CHAIN · the funds are locked in the order's coin until it is filled or cancelled${o.pending ? "  ·  " + esc(o.pending) + " posted, waiting for a block" : ""}</div>${idLine("coin", o.coinid)}${idLine("order", o.orderId)}</div>`);
+        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${o.sell ? "sell" : "buy"}">${tr("{sell}{m} MINIMA @ {price}", { sell: o.sell ? (th("SELL") + " ") : (th("BUY") + " "), m: C.fmt(m), price: C.fmtPrice(price) })}</span>${o.pending ? "" : `<span class="dx-oacts"><button data-oact="edit" data-kind="chain" data-id="${esc(o.coinid)}" data-price="${C.fmt(price)}" aria-label="${th("Change the price of this order")}">✎</button><button class="dx-ox" data-oact="cancel" data-kind="chain" data-id="${esc(o.coinid)}" aria-label="${th("Cancel this order")}">✕</button></span>`}</div>`
+          + `<div class="dx-sub">${tr("ON-CHAIN · the funds are locked in the order's coin until it is filled or cancelled{pending}", { pending: o.pending ? ("  " + tr("·  {pending} posted, waiting for a block", { pending: esc(o.pending) })) : "" })}</div>${idLine("coin", o.coinid)}${idLine("order", o.orderId)}</div>`);
       }
       for (const o of (X.mine.pending || [])) {
         any = true;
-        out.push(`<div class="dx-card dx-ocard dx-ocard--wait"><div class="dx-oline dx-o${o.sell ? "sell" : "buy"}">${o.sell ? "SELL " : "BUY "}${esc(o.minima)} MINIMA @ ${esc(o.price)}</div><div class="dx-sub">ON-CHAIN · posted, waiting for a block: not on the book yet</div>${idLine("order", o.orderId)}</div>`);
+        out.push(`<div class="dx-card dx-ocard dx-ocard--wait"><div class="dx-oline dx-o${o.sell ? "sell" : "buy"}">${tr("{sell}{minima} MINIMA @ {price}", { sell: o.sell ? (th("SELL") + " ") : (th("BUY") + " "), minima: esc(o.minima), price: esc(o.price) })}</div><div class="dx-sub">${th("ON-CHAIN · posted, waiting for a block: not on the book yet")}</div>${idLine("order", o.orderId)}</div>`);
       }
-      if (!any) out.push(`<div class="dx-empty dx-empty--mono">${X.loaded ? "No open orders" : "…"}</div>`);
+      if (!any) out.push(`<div class="dx-empty dx-empty--mono">${X.loaded ? th("No open orders") : "…"}</div>`);
     } else {
       const chain = (X.svc && Array.isArray(X.svc.myTrades) ? X.svc.myTrades : []).filter(t => !t.fast);
-      if (!X.fills.length && !chain.length) out.push(`<div class="dx-empty dx-empty--mono">${X.loaded ? "No fills yet" : "…"}</div>`);
+      if (!X.fills.length && !chain.length) out.push(`<div class="dx-empty dx-empty--mono">${X.loaded ? th("No fills yet") : "…"}</div>`);
       for (const f of X.fills) {
         const buy = f.side === "buy", fs = C.fillState(f);
-        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${buy ? "buy" : "sell"}">${buy ? "BUY " : "SELL "}${esc(f.filled)} MINIMA @ ${esc(f.price)}</span><span class="dx-chip" data-tone="${fs.tone}">${fs.chip}</span></div>`
+        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${buy ? "buy" : "sell"}">${tr("{buy}{filled} MINIMA @ {price}", { buy: buy ? (th("BUY") + " ") : (th("SELL") + " "), filled: esc(f.filled), price: esc(f.price) })}</span><span class="dx-chip" data-tone="${fs.tone}">${fs.chip}</span></div>`
           + `<div class="dx-sub">${stamp((Number(f.ts) || 0) * 1000)}   FAST ${esc(String(f.role || "").toUpperCase())}   ${esc(fs.text)}</div>${idLine("txpow", f.txpowid)}${idLine("order", f.orderId)}${idLine("counterparty", f.maker || f.taker || f.counterparty)}</div>`);
       }
-      for (const t of chain) out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${t.buy ? "buy" : "sell"}">${t.buy ? "BUY " : "SELL "}${esc(t.size)} MINIMA @ ${esc(t.price)}</span></div>`
-        + `<div class="dx-sub">${stamp(Number(t.timems) || 0)}   ON-CHAIN ${t.maker ? "MAKER" : "TAKER"}   ${esc(t.verification_status || t.source_kind || "")}</div>${idLine("txpow", t.txpowid)}${idLine("order", t.orderid)}</div>`);
+      for (const t of chain) out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${t.buy ? "buy" : "sell"}">${tr("{buy}{size} MINIMA @ {price}", { buy: t.buy ? (th("BUY") + " ") : (th("SELL") + " "), size: esc(t.size), price: esc(t.price) })}</span></div>`
+        + `<div class="dx-sub">${tr("{timems}   ON-CHAIN {maker}   {sourcekind}", { timems: stamp(Number(t.timems) || 0), maker: t.maker ? th("MAKER") : th("TAKER"), sourcekind: esc(t.verification_status || t.source_kind || "") })}</div>${idLine("txpow", t.txpowid)}${idLine("order", t.orderid)}</div>`);
     }
     return out.join("");
   }
-  const HIST_INFO = "Every trade this node made on the Exchange, newest first, then every finished AtomiX swap of the market the ⇄ pill is on. One line each: click a line for the amounts, the block and the full on-chain identifiers. Net counts settled trades only. A trade that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Export CSV saves every fill for your accounts; AtomiX swaps have their own file in Activity.";
+  const HIST_INFO = L_("Every trade this node made on the Exchange, newest first, then every finished AtomiX swap of the market the ⇄ pill is on. One line each: click a line for the amounts, the block and the full on-chain identifiers. Net counts settled trades only. A trade that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Export CSV saves every fill for your accounts; AtomiX swaps have their own file in Activity.");
   function historyHtml() {
     const net = C.netSettled(X.fills), now = Date.now(), tone = (n) => (n.sign > 0 ? "in" : n.sign < 0 ? "out" : "");
-    const out = [`<div class="dx-title"><h2>History</h2><button class="dx-info" data-info="hist" aria-label="About History">i</button></div>`,
-      `<div class="dx-card"><div class="dx-row"><div><div class="dx-label">NET · SETTLED TRADES</div><div class="dx-net" data-tone="${tone(net.minima)}">${net.minima.text} MINIMA</div><div class="dx-net" data-tone="${tone(net.mxusd)}">${net.mxusd.text} MxUSD</div>`
-      + `<div class="dx-counts">${net.count ? net.count + (net.count === 1 ? " fill · " : " fills · ") + net.done + " settled" : X.loaded ? "No fills yet." : "…"}</div></div><button class="dx-btn dx-btn--side" data-csv="1"${net.count ? "" : " disabled"}>Export CSV</button></div></div>`];
+    const out = [`<div class="dx-title"><h2>${th("History")}</h2><button class="dx-info" data-info="hist" aria-label="${th("About History")}">i</button></div>`,
+      `<div class="dx-card"><div class="dx-row"><div><div class="dx-label">${th("NET · SETTLED TRADES")}</div><div class="dx-net" data-tone="${tone(net.minima)}">${net.minima.text} MINIMA</div><div class="dx-net" data-tone="${tone(net.mxusd)}">${net.mxusd.text} MxUSD</div>`
+      + `<div class="dx-counts">${net.count ? tr("{done} settled", { done: net.count + (net.count === 1 ? (" " + th("fill ·") + " ") : (" " + th("fills ·") + " ")) + net.done }) : X.loaded ? th("No fills yet.") : "…"}</div></div><button class="dx-btn dx-btn--side" data-csv="1"${net.count ? "" : " disabled"}>${th("Export CSV")}</button></div></div>`];
     let day = "";
     X.fills.forEach((f, i) => {
       const ms = (Number(f.ts) || 0) * 1000, d = C.dayLabel(ms, now), buy = f.side === "buy", fs = C.fillState(f), t = new Date(ms);
       if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
-      out.push(`<button class="dx-card dx-led" data-fill="${i}"><span class="dx-led__ic" data-tone="${fs.tone}">⇄</span><span class="dx-led__m"><b>${f.status === "done" ? (buy ? "Bought" : "Sold") : (buy ? "Buy" : "Sell")}</b>`
-        + `<span class="dx-led__a">${buy ? esc(C.fmt(C.fillUsd(f))) + " MxUSD → " + esc(f.filled) + " MINIMA" : esc(f.filled) + " MINIMA → " + esc(C.fmt(C.fillUsd(f))) + " MxUSD"}</span>`
+      out.push(`<button class="dx-card dx-led" data-fill="${i}"><span class="dx-led__ic" data-tone="${fs.tone}">⇄</span><span class="dx-led__m"><b>${f.status === "done" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))}</b>`
+        + `<span class="dx-led__a">${buy ? tr("{f} MxUSD → {filled} MINIMA", { f: esc(C.fmt(C.fillUsd(f))), filled: esc(f.filled) }) : tr("{filled} MINIMA → {f} MxUSD", { filled: esc(f.filled), f: esc(C.fmt(C.fillUsd(f))) })}</span>`
         + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? "you were the maker" : "fast book"} · ${esc(fs.text)}</span></span>`
         + `<span class="dx-led__r">${f.status === "done" ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${fs.chip}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>`);
     });
@@ -510,8 +510,8 @@ const DexUI = (() => {
   }
   function fillFacts(f) {
     const buy = f.side === "buy", fs = C.fillState(f);
-    return [(buy ? "Bought " : "Sold ") + f.filled + " MINIMA at " + C.fmtPrice(C.dec(f.price)) + " MxUSD per MINIMA", (buy ? "Paid " : "Received ") + C.fmt(C.fillUsd(f)) + " MxUSD", "State: " + fs.chip + ", " + fs.text,
-      "When: " + new Date((Number(f.ts) || 0) * 1000).toString(), "Your side: " + (f.role === "maker" ? "maker (your FAST order was taken)" : "taker (you took a FAST order)"), "",
+    return [I18N.t("{filled} MINIMA at {price} MxUSD per MINIMA", { filled: (buy ? (I18N.t("Bought") + " ") : (I18N.t("Sold") + " ")) + f.filled, price: C.fmtPrice(C.dec(f.price)) }), (buy ? "Paid " : "Received ") + C.fmt(C.fillUsd(f)) + " MxUSD", I18N.t("State: {chip}, {fs}", { chip: fs.chip, fs: fs.text }),
+      I18N.t("When: {ts}", { ts: new Date((Number(f.ts) || 0) * 1000).toString() }), I18N.t("Your side: {role}", { role: (f.role === "maker" ? I18N.t("maker (your FAST order was taken)") : I18N.t("taker (you took a FAST order)")) }), "",
       "txpow id (before mining)\n" + (f.txpowid || ""), "order\n" + (f.orderId || ""), "counterparty\n" + (f.maker || f.taker || f.counterparty || ""), "output coins\n" + ((f.coins || []).join("\n") || "not recorded")].join("\n");
   }
   async function onTabClick(e) {
@@ -522,7 +522,7 @@ const DexUI = (() => {
     if (ds.oact) return money(() => orderAction(ds.oact, ds.kind, ds.id, ds.price));
     if (ds.info) return void dialog("History", HIST_INFO, "");
     if (ds.fill != null) return void dialog("Trade", fillFacts(X.fills[Number(ds.fill)]), "");
-    if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say("Saved " + X.fills.length + " fills.", "note"); } catch (err) { say(err && err.message); } return; }
+    if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say(I18N.t("Saved {fills} fills.", { fills: X.fills.length }), "note"); } catch (err) { say(err && err.message); } return; }
     if (ds.asub != null) { X.asub = Number(ds.asub); return draw(); }
     if (ds.act != null) return void dialog("Activity", actFacts(X.acts[Number(ds.act)]), "");
     if (ds.ainfo) return void dialog("Activity", ACT_INFO, "");
@@ -538,69 +538,69 @@ const DexUI = (() => {
       X.said = null; if (document.activeElement) document.activeElement.blur(); return draw();
     }
     if (ds.mm) return money(async () => {
-      if (ds.mm === "makerStop" && !(await dialog("Stop the market maker?", "Your node signs a cancel for every ladder order and sends it to the relays within seconds. Your settings are kept. A take a maker already co-signed still settles.", "Stop"))) return;
+      if (ds.mm === "makerStop" && !(await dialog(I18N.t("Stop the market maker?"), I18N.t("Your node signs a cancel for every ladder order and sends it to the relays within seconds. Your settings are kept. A take a maker already co-signed still settles."), "Stop"))) return;
       const r = await drive(ds.mm, { light: mem.theme === "DAYLIGHT" });
       if (r.error) say(r.error); else { X.said = null; load().then(draw, draw); }
     });
   }
 
   // ---- Activity (ActivityTab.java), Assets (AssetsTab.java), Settings (RelaysTab.java): shared by the rooms ----
-  const ACT_INFO = "Every BUY and SELL you make and every fill your node co-signs, newest first, with its live progress. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. AtomiX swaps are listed first, each with its steps, Check now and, when one is due, Refund now; a swap is never cancelled by hand: one that stalls is refunded by itself at its deadline. Pool operations (swaps against pools, creating, adding, migrating and closing a pool) follow, each with its transaction id whole; room ② Activity has the same list and every pool's transactions.";
+  const ACT_INFO = L_("Every BUY and SELL you make and every fill your node co-signs, newest first, with its live progress. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. AtomiX swaps are listed first, each with its steps, Check now and, when one is due, Refund now; a swap is never cancelled by hand: one that stalls is refunded by itself at its deadline. Pool operations (swaps against pools, creating, adding, migrating and closing a pool) follow, each with its transaction id whole; room ② Activity has the same list and every pool's transactions.");
   const A = () => (window.AX && window.AX.activity) || null;   // the engine's own stage machine and wording (dexicon/lib/activity.js, verbatim)
   function activityHtml() {
-    const out = [`<div class="dx-title"><h2>Activity</h2><button class="dx-info" data-ainfo="1" aria-label="About Activity">i</button></div>`,
-      `<div class="dx-chips"><button data-asub="0" aria-pressed="${X.asub === 0}">My activity</button><button data-asub="1" aria-pressed="${X.asub === 1}">Market history</button><button data-csv="1"${X.fills.length ? "" : " disabled"}>↓ Export CSV</button><button data-axcsv="1">↓ AtomiX swaps CSV</button></div>`];
+    const out = [`<div class="dx-title"><h2>${th("Activity")}</h2><button class="dx-info" data-ainfo="1" aria-label="${th("About Activity")}">i</button></div>`,
+      `<div class="dx-chips"><button data-asub="0" aria-pressed="${X.asub === 0}">${th("My activity")}</button><button data-asub="1" aria-pressed="${X.asub === 1}">${th("Market history")}</button><button data-csv="1"${X.fills.length ? "" : " disabled"}>${th("↓ Export CSV")}</button><button data-axcsv="1">${th("↓ AtomiX swaps CSV")}</button></div>`];
     const ax = DexAx.part("activity", X.asub) + (X.asub === 0 ? DexPools.part("activity") : ""); out.push(ax);
     const now = Date.now(), tip = (st && st.block) || 0, hm = (ms) => { const t = new Date(ms); return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0"); };
     let day = "";
     if (X.asub === 0) {
-      if (!X.acts.length && !ax) out.push(`<div class="dx-card dx-none"><b>${X.loaded || axRoom() ? "Nothing yet" : "…"}</b><span>Every BUY and SELL you make, every fill your node co-signs, every AtomiX swap and every pool operation shows its live progress here.</span></div>`);
+      if (!X.acts.length && !ax) out.push(`<div class="dx-card dx-none"><b>${X.loaded || axRoom() ? th("Nothing yet") : "…"}</b><span>${th("Every BUY and SELL you make, every fill your node co-signs, every AtomiX swap and every pool operation shows its live progress here.")}</span></div>`);
       X.acts.forEach((a, i) => {
         const ms = Number(a.ts) || 0, d = C.dayLabel(ms, now), buy = a.side === "buy" || a.buy === true, m = A();
         const chip = m ? m.chip(a, tip) : String(a.stage || ""), status = m ? m.status(a, tip, now) : String(a.stage || ""), tone = /DONE|CONFIRMED/.test(chip) ? "ok" : /FAILED|REFUSED|DROPPED|LOST/.test(chip) ? "bad" : "live";
         if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
-        out.push(`<button class="dx-card dx-led" data-act="${i}"><span class="dx-led__ic" data-tone="${tone}">${tone === "ok" ? "✓" : tone === "bad" ? "!" : "…"}</span><span class="dx-led__m"><b>${tone === "ok" ? (buy ? "Bought" : "Sold") : (buy ? "Buy" : "Sell")} MINIMA</b>`
-          + `<span class="dx-led__a">${esc(a.amount || a.minima || "")} MINIMA @ ${esc(a.price || "")}</span><span class="dx-led__s">${stamp(ms)} · ${a.route === "FAST" ? "fast book" : "on-chain"} · ${esc(status)}</span></span>`
+        out.push(`<button class="dx-card dx-led" data-act="${i}"><span class="dx-led__ic" data-tone="${tone}">${tone === "ok" ? "✓" : tone === "bad" ? "!" : "…"}</span><span class="dx-led__m"><b>${tone === "ok" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))} MINIMA</b>`
+          + `<span class="dx-led__a">${tr("{minima} MINIMA @ {price}", { minima: esc(a.amount || a.minima || ""), price: esc(a.price || "") })}</span><span class="dx-led__s">${stamp(ms)} · ${a.route === "FAST" ? "fast book" : "on-chain"} · ${esc(status)}</span></span>`
           + `<span class="dx-led__r"><span class="dx-chip" data-tone="${tone}">${esc(chip)}</span><span class="dx-led__t">▸</span></span></button>`);
       });
     } else {
       const tape = X.svc && Array.isArray(X.svc.tape) ? X.svc.tape : [];
-      if (!tape.length && !ax) out.push(`<div class="dx-card dx-none"><b>No trades seen yet</b><span>Fills this node sees on the on-chain book are listed here. There is no server and no back-fill.</span></div>`);
+      if (!tape.length && !ax) out.push(`<div class="dx-card dx-none"><b>${th("No trades seen yet")}</b><span>${th("Fills this node sees on the on-chain book are listed here. There is no server and no back-fill.")}</span></div>`);
       for (const t of tape) {
         const ms = Number(t.timems) || 0, d = C.dayLabel(ms, now);
         if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
-        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${t.buy ? "buy" : "sell"}">${t.buy ? "BUY " : "SELL "}${esc(t.size)} MINIMA @ ${esc(t.price)}</span><span class="dx-led__t">${hm(ms)}</span></div>${idLine("txpow", t.txpowid)}</div>`);
+        out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${t.buy ? "buy" : "sell"}">${tr("{buy}{size} MINIMA @ {price}", { buy: t.buy ? (th("BUY") + " ") : (th("SELL") + " "), size: esc(t.size), price: esc(t.price) })}</span><span class="dx-led__t">${hm(ms)}</span></div>${idLine("txpow", t.txpowid)}</div>`);
       }
     }
     return out.join("");
   }
   function actFacts(a) {
-    const m = A(), tip = (st && st.block) || 0, L = [(a.side === "buy" || a.buy === true ? "BUY " : "SELL ") + (a.amount || a.minima || "") + " MINIMA at " + (a.price || "") + " MxUSD per MINIMA",
-      "Route: " + (a.route === "FAST" ? "FAST book" : "on-chain book and pools") + (a.role ? ", you were the " + a.role : ""), "State: " + (m ? m.chip(a, tip) + ". " + m.status(a, tip, Date.now()) : a.stage), "Started: " + new Date(Number(a.ts) || 0).toString(), ""];
+    const m = A(), tip = (st && st.block) || 0, L = [I18N.t("{minima} MINIMA at {price} MxUSD per MINIMA", { minima: (a.side === "buy" || a.buy === true ? (I18N.t("BUY") + " ") : (I18N.t("SELL") + " ")) + (a.amount || a.minima || ""), price: (a.price || "") }),
+      I18N.t("Route: {route}{role}", { route: (a.route === "FAST" ? I18N.t("FAST book") : "on-chain book and pools"), role: (a.role ? I18N.t(", you were the {role}", { role: a.role }) : "") }), I18N.t("State: {stage}", { stage: (m ? m.chip(a, tip) + ". " + m.status(a, tip, Date.now()) : a.stage) }), I18N.t("Started: {ts}", { ts: new Date(Number(a.ts) || 0).toString() }), ""];
     for (const [k, label] of [["txpowid", "txpow id (before mining)"], ["orderId", "order"], ["counterparty", "counterparty"], ["id", "activity id"]]) if (a[k]) L.push(label + "\n" + a[k]);
     for (const [k, label] of [["outs", "output coins"], ["ins", "input coins"]]) if (Array.isArray(a[k]) && a[k].length) L.push(label + "\n" + a[k].join("\n"));
     return L.join("\n");
   }
   function assetsHtml() {
     const f = fundsNow(), ident = (X.svc && X.svc.identity) || {}, addr = ident.miniaddress || ident.address || "", id = (st && st.publicId) || "";
-    const asset = (key, name, avail, inOrders, settling) => `<button class="dx-card dx-asset" data-asset="${key}" aria-expanded="${!!X.open[key]}"><span class="dx-row"><span><b>${name}</b><span class="dx-asset__n">${f.known ? esc(C.fmt(avail)) : "…"}</span></span><span class="dx-asset__h">available to trade ${X.open[key] ? "▾" : "▸"}</span></span>`
-      + (X.open[key] && f.known ? `<span class="dx-asset__more">${esc(C.fmt(inOrders))}  promised by your live FAST orders (still in your wallet)\n${esc(C.fmt(C.sub(avail, inOrders)))}  free for a new order\n+${esc(C.fmt(settling))}  settling: traded, waiting for a block</span>` : "") + `</button>`;
-    return (!f.known ? `<div class="dx-state dx-state--note">${esc(X.balErr || "The balance has not been read yet.")}</div>` : "")
+    const asset = (key, name, avail, inOrders, settling) => `<button class="dx-card dx-asset" data-asset="${key}" aria-expanded="${!!X.open[key]}"><span class="dx-row"><span><b>${name}</b><span class="dx-asset__n">${f.known ? esc(C.fmt(avail)) : "…"}</span></span><span class="dx-asset__h">${tr("available to trade {key}", { key: X.open[key] ? "▾" : "▸" })}</span></span>`
+      + (X.open[key] && f.known ? `<span class="dx-asset__more">${tr("{inOrders}  promised by your live FAST orders (still in your wallet)\n{inOrders2}  free for a new order\n+{settling}  settling: traded, waiting for a block", { inOrders: esc(C.fmt(inOrders)), inOrders2: esc(C.fmt(C.sub(avail, inOrders))), settling: esc(C.fmt(settling)) })}</span>` : "") + `</button>`;
+    return (!f.known ? `<div class="dx-state dx-state--note">${esc(X.balErr || I18N.t("The balance has not been read yet."))}</div>` : "")
       + asset("minima", "MINIMA", f.minima, f.minimaOrders, f.minimaSettling) + asset("mxusd", "MxUSD", f.mxusd, f.mxusdOrders, f.mxusdSettling) + DexAx.part("assets")   // the phone's order: the two coins, Ethereum, then the rest
-      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">RECEIVE MINIMA OR MxUSD</span>${addr ? `<button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">Copy</button>` : ""}</div><div class="dx-addr" ${addr ? `data-copy="${esc(addr)}" title="Click to copy"` : ""}>${esc(addr || "The address appears when Dexicon has read the chain.")}</div></div>`
-      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">YOUR TRADING ID</span>${id ? `<button class="dx-btn dx-btn--side" data-copy="${esc(id)}">Copy</button>` : ""}</div><div class="dx-addr" ${id ? `data-copy="${esc(id)}" title="Click to copy"` : ""}>${esc(id || "Not read yet.")}</div>`
-      + `<div class="dx-sub dx-sub--sans">Other traders see this ID when you trade on the fast book. It is made from your node's seed, so it stays the same if you reinstall. It is not an address: never send coins to it.</div></div>`;
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">${th("RECEIVE MINIMA OR MxUSD")}</span>${addr ? `<button class="dx-btn dx-btn--side" data-copy="${esc(addr)}">${th("Copy")}</button>` : ""}</div><div class="dx-addr" ${addr ? `data-copy="${esc(addr)}" title="Click to copy"` : ""}>${esc(addr || I18N.t("The address appears when Dexicon has read the chain."))}</div></div>`
+      + `<div class="dx-card"><div class="dx-row"><span class="dx-label">${th("YOUR TRADING ID")}</span>${id ? `<button class="dx-btn dx-btn--side" data-copy="${esc(id)}">${th("Copy")}</button>` : ""}</div><div class="dx-addr" ${id ? `data-copy="${esc(id)}" title="Click to copy"` : ""}>${esc(id || I18N.t("Not read yet."))}</div>`
+      + `<div class="dx-sub dx-sub--sans">${th("Other traders see this ID when you trade on the fast book. It is made from your node's seed, so it stays the same if you reinstall. It is not an address: never send coins to it.")}</div></div>`;
   }
   function settingsHtml() {
     const relays = Page.state.relays || [], px = st && st.price;
-    const health = (r) => (r.found ? "found through " + r.meta.replace(/^via\s*/, "") : r.state === "ok" ? "OK · " + r.meta : r.state === "bad" ? "ERROR · " + r.meta : "not polled yet");
-    return DexAx.part("settings") + `<div class="dx-card"><div class="dx-h">WALLET</div><div class="dx-sub dx-sub--sans">Dexicon trades with this node's own wallet: the node signs every trade with its own keys. Your node's seed phrase backs up everything here.</div></div>`
-      + `<div class="dx-card"><div class="dx-h">ADD RELAY</div><div class="dx-sub dx-sub--sans">A Dexicon relay is the dexrelay cape of parlons-node.jar / maxima-server.jar. Orders are published to EVERY relay here; the book is the union. On the desktop a relay must be an https address.</div>`
-      + `<input class="dx-in dx-in--s" id="dxRelayIn" placeholder="https://relay.example/dex-relay" aria-label="Relay address" autocomplete="off" spellcheck="false"><div class="dx-mm__b"><button class="dx-btn dx-btn--acc" data-relay="add">ADD</button><button class="dx-btn dx-btn--acc" data-relay="discover">DISCOVER</button></div></div>`
-      + (relays.length ? relays.map(r => `<div class="dx-card dx-relay"><div><div class="dx-relay__u" data-copy="${esc(r.url)}" title="Click to copy">${esc(r.url)}</div><div class="dx-relay__s" data-state="${r.found ? "" : esc(r.state)}">${esc(health(r))}</div></div>`
-          + (r.found ? `<button class="dx-btn dx-btn--side" data-relay="found" data-url="${esc(r.url)}">ADD</button>` : `<button class="dx-relay__x" data-relay="remove" data-url="${esc(r.url)}" aria-label="Remove this relay">✕</button>`) + `</div>`).join("")
-        : `<div class="dx-card dx-none"><b>${Page.state.ready || Page.stub ? "No relays yet" : "…"}</b><span>Add the address of any Dexicon relay, then DISCOVER to find the others.</span></div>`)
-      + `<div class="dx-card"><div class="dx-h">ENGINE</div><div class="dx-sub dx-sub--sans">Dexicon engine ${esc((st && st.version) || "…")} · block ${esc((st && st.block) || "…")} · ${px && px.mid > 0 ? esc(C.priceName(px.source) + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : "no MEXC price yet"}</div></div>`;
+    const health = (r) => (r.found ? "found through " + r.meta.replace(/^via\s*/, "") : r.state === "ok" ? (I18N.t("OK ·") + " ") + r.meta : r.state === "bad" ? I18N.t("ERROR · {meta}", { meta: r.meta }) : "not polled yet");
+    return DexAx.part("settings") + `<div class="dx-card"><div class="dx-h">${th("WALLET")}</div><div class="dx-sub dx-sub--sans">${th("Dexicon trades with this node's own wallet: the node signs every trade with its own keys. Your node's seed phrase backs up everything here.")}</div></div>`
+      + `<div class="dx-card"><div class="dx-h">${th("ADD RELAY")}</div><div class="dx-sub dx-sub--sans">${th("A Dexicon relay is the dexrelay cape of parlons-node.jar / maxima-server.jar. Orders are published to EVERY relay here; the book is the union. On the desktop a relay must be an https address.")}</div>`
+      + `<input class="dx-in dx-in--s" id="dxRelayIn" placeholder="${th("https://relay.example/dex-relay")}" aria-label="${th("Relay address")}" autocomplete="off" spellcheck="false"><div class="dx-mm__b"><button class="dx-btn dx-btn--acc" data-relay="add">${th("ADD")}</button><button class="dx-btn dx-btn--acc" data-relay="discover">${th("DISCOVER")}</button></div></div>`
+      + (relays.length ? relays.map(r => `<div class="dx-card dx-relay"><div><div class="dx-relay__u" data-copy="${esc(r.url)}" title="${th("Click to copy")}">${esc(r.url)}</div><div class="dx-relay__s" data-state="${r.found ? "" : esc(r.state)}">${esc(health(r))}</div></div>`
+          + (r.found ? `<button class="dx-btn dx-btn--side" data-relay="found" data-url="${esc(r.url)}">${th("ADD")}</button>` : `<button class="dx-relay__x" data-relay="remove" data-url="${esc(r.url)}" aria-label="${th("Remove this relay")}">✕</button>`) + `</div>`).join("")
+        : `<div class="dx-card dx-none"><b>${Page.state.ready || Page.stub ? th("No relays yet") : "…"}</b><span>${th("Add the address of any Dexicon relay, then DISCOVER to find the others.")}</span></div>`)
+      + `<div class="dx-card"><div class="dx-h">${th("ENGINE")}</div><div class="dx-sub dx-sub--sans">${tr("Dexicon engine {version} · block {block} · {label}", { version: esc((st && st.version) || "…"), block: esc((st && st.block) || "…"), label: px && px.mid > 0 ? esc(C.priceName(px.source) + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : th("no MEXC price yet") })}</div></div>`;
   }
 
   return { init, paint, render, node: node_, dialog, paintStrip, say, redraw: () => draw(), money, where: () => ({ shown: shown(), shared: ours(), room: C.ROOMS[mem.room].id, tab: C.tabOf(mem) }), pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };

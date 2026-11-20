@@ -102,7 +102,7 @@ test("the Mail panel and its icon set load, and every icon it asks for is define
     setTimeout, clearTimeout, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console
   };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
-  const ctx = vm.createContext(sandbox);
+  Object.assign(sandbox, require("./i18n-plain.cjs").globals()); const ctx = vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(dir, "mailicons.js"), "utf8"), ctx, { filename: "mailicons.js" });
   vm.runInContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(dir, "mail.js"), "utf8")), ctx, { filename: "mail.js" });
 
@@ -156,7 +156,7 @@ function panel() {
   const sandbox = { setTimeout, clearTimeout, Math, Date, JSON, String, Number, Boolean, Array, Object, RegExp, Promise, console,
     document: { getElementById: () => null, createElement: () => ({}) } };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
-  const ctx = vm.createContext(sandbox);
+  Object.assign(sandbox, require("./i18n-plain.cjs").globals()); const ctx = vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(dir, "mailicons.js"), "utf8"), ctx, { filename: "mailicons.js" });
   vm.runInContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(dir, "mail.js"), "utf8")), ctx, { filename: "mail.js" });
   return sandbox;

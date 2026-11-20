@@ -36,6 +36,6 @@ const seen=PP.feedItem({kind:'WITHDRAW',minimaAmt:'175157.93892489164',tokenAmt:
 assert(seen.title.startsWith('Liquidity withdrawal'));assert.equal(seen.chip,'853 confirmations · on-chain');assert(!seen.title.includes('Sold 175157'));
 const obs=PP.feedItem({kind:'WITHDRAW',minimaAmt:'175157',tokenAmt:'784',tokenLabel:'USDT',observed:true},1788936600000);
 assert(obs.title.includes('observation (unverified)'));assert(obs.lines.join(' ').includes('Transaction time unknown'));
-const src=fs.readFileSync(path.join(root,'renderer/dexicon-pp.js'),'utf8');
+const src=require('./i18n-plain.cjs').plain(fs.readFileSync(path.join(root,'renderer/dexicon-pp.js'),'utf8'));
 assert(src.includes('<b class="pp-ct">${esc(it.title)}</b>')&&src.includes('${esc(it.chip)}')&&src.includes('${esc(it.summary)}')&&src.includes('${esc(l)}'),'every part of a row is escaped where it is drawn');
 console.log('PASS Desktop receipts, actual counts, UTC times, public withdrawal classification, observation provenance and escaping');

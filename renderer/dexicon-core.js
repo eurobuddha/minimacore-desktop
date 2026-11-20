@@ -5,6 +5,7 @@
  * The reference is the Android client (apks/dexicon MainActivity.java): three rooms, a bottom tab bar per room,
  * each room remembering its last tab, Dexicon's own light / dark theme (Design.java ONYX / DAYLIGHT).
  */
+if (typeof I18N === "undefined" && typeof require === "function") require("./i18n.js");   // loaded by a test or the main process: the same t(), th(), tr() the window has
 (function (root, factory) { const m = factory(); if (typeof module === "object" && module.exports) module.exports = m; else root.DexCore = m; })(this, function () {
   "use strict";
 
@@ -12,13 +13,13 @@
   // engine (renderer/dexicon-pp.js), with PandaPools' five tabs (pandapools MainActivity: Swap, Pools, My LP, Wallet, Activity).
   const ROOMS = [
     { id: "mxusd", n: "①", label: "MxUSD", view: "atomix", tabs: ["swap", "market", "otc", "activity", "assets", "settings"] },
-    { id: "pools", n: "②", label: "Pools", view: "pandapools", tabs: ["swap", "pools", "mylp", "wallet", "activity"] },
-    { id: "exchange", n: "③", label: "Exchange", view: "dexicon", tabs: ["trade", "orders", "history", "activity", "assets", "settings"] }
+    { id: "pools", n: "②", label: N_("Pools"), view: "pandapools", tabs: ["swap", "pools", "mylp", "wallet", "activity"] },
+    { id: "exchange", n: "③", label: N_("Exchange"), view: "dexicon", tabs: ["trade", "orders", "history", "activity", "assets", "settings"] }
   ];
   /** Activity, Assets and Settings are ONE screen each, shown in rooms 1 and 3 (ActivityTab, AssetsTab, RelaysTab).
    *  Room 2's Activity is PandaPools' own screen, not this one. */
   const SHARED = ["activity", "assets", "settings"];
-  const TAB_LABEL = { swap: "Swap", pools: "Pools", mylp: "My LP", wallet: "Wallet", market: "Market", otc: "OTC", trade: "Trade", orders: "Orders", history: "History", activity: "Activity", assets: "Assets", settings: "Settings" };
+  const TAB_LABEL = { swap: N_("Swap"), pools: N_("Pools"), mylp: N_("My LP"), wallet: N_("Wallet"), market: N_("Market"), otc: "OTC", trade: N_("Trade"), orders: N_("Orders"), history: N_("History"), activity: N_("Activity"), assets: N_("Assets"), settings: N_("Settings") };   // translated where drawn (dexicon-ui.js)
   const roomOfView = (view) => ROOMS.findIndex(r => r.view === view);
 
   /** The saved choices: the last tab of each room and the theme. The room itself is not saved: Dexicon opens on ①. */
@@ -45,10 +46,10 @@
    * An engine that cannot start because its store file could not be opened (0.18.137; status().error). Before this the
    * room said "starting" for ever. In plain words: what happened, what it means, what to do. after = what follows a set-aside.
    */
-  const storeError = (name, what, error, after) => name + " cannot start: its " + what + " could not be opened (" + String(error).replace(/[.\s]+$/, "") + "). Nothing on the chain is changed by this, but nothing can be read or sent here until it starts. What to do: quit the app and open it again. If this message is still here after that, the file is damaged: set it aside (it is kept under a dated name, never deleted) and " + name + " starts with an empty store. " + after;
+  const storeError = (name, what, error, after) => I18N.t("{name} cannot start: its {what} could not be opened ({v}). Nothing on the chain is changed by this, but nothing can be read or sent here until it starts. What to do: quit the app and open it again. If this message is still here after that, the file is damaged: set it aside (it is kept under a dated name, never deleted) and {name2} starts with an empty store. {after}", { name: name, what: what, v: String(error).replace(/[.\s]+$/, ""), name2: name, after: after });
   /** How to undo a set-aside, with the whole path: before the move (file = the store) and after it (kept = where it went). */
-  const PUT_BACK = (file, kept) => "To put it back: quit the app, then rename " + (kept || (file ? file + "-legacy-keys-(the date)" : "the dated file")) + " back to " + (file || "its old name") + " (move the new, empty file out of the way first).";
-  const SET_ASIDE = (name, after, file) => "The store file of " + name + (file ? " (" + file + ")" : "") + " could not be opened. It will be moved aside under a dated name in the same folder. Nothing is deleted.\n\n" + name + " then starts with an empty store. " + after + "\n\n" + PUT_BACK(file) + "\n\nDo this only if the message stayed after the app was restarted.";
+  const PUT_BACK = (file, kept) => I18N.t("To put it back: quit the app, then rename {file} back to {file2} (move the new, empty file out of the way first).", { file: (kept || (file ? I18N.t("{file}-legacy-keys-(the date)", { file: file }) : "the dated file")), file2: (file || "its old name") });
+  const SET_ASIDE = (name, after, file) => I18N.t("The store file of {name}{file} could not be opened. It will be moved aside under a dated name in the same folder. Nothing is deleted.\n\n{name2} then starts with an empty store. {after}\n\n{file2}\n\nDo this only if the message stayed after the app was restarted.", { name: name, file: (file ? " (" + file + ")" : ""), name2: name, after: after, file2: PUT_BACK(file) });
   async function money(fn, redraw) {
     if (gate.on) return undefined;
     gate.on = true; if (redraw) redraw();
@@ -57,12 +58,12 @@
 
   /** The status strip (MainActivity pairPill): the node, then the engine. tone: "ok" | "dim". */
   function strip(nodeState, st, pageFailed) {
-    if (nodeState !== "running") return { text: nodeState === "stopped" ? "NODE STOPPED" : "NODE STARTING…", tone: "dim" };
-    if (st && st.problem) return { text: "DEXICON IS NOT RUNNING", tone: "dim" };
-    if (pageFailed) return { text: "PAIRED · trading page did not load", tone: "dim" };
-    if (!st || !st.started || !st.ready) return { text: "PAIRED · starting Dexicon", tone: "dim" };
-    if (!st.restingReady) return { text: "PAIRED · reading the chain", tone: "ok" };
-    return { text: "PAIRED", tone: "ok" };
+    if (nodeState !== "running") return { text: nodeState === "stopped" ? I18N.t("NODE STOPPED") : I18N.t("NODE STARTING…"), tone: "dim" };
+    if (st && st.problem) return { text: I18N.t("DEXICON IS NOT RUNNING"), tone: "dim" };
+    if (pageFailed) return { text: I18N.t("PAIRED · trading page did not load"), tone: "dim" };
+    if (!st || !st.started || !st.ready) return { text: I18N.t("PAIRED · starting Dexicon"), tone: "dim" };
+    if (!st.restingReady) return { text: I18N.t("PAIRED · reading the chain"), tone: "ok" };
+    return { text: I18N.t("PAIRED"), tone: "ok" };
   }
 
   // ---- exact decimals: strings in, BigInt inside, never a float; shortening is always a cut, never a rounding ----
@@ -151,8 +152,8 @@
    *  become 1.2345 (the comma turned into a point, the second point dropped). */
   function entryProblem(text) {
     const t = String(text == null ? "" : text);
-    if (t.includes(",")) return "Type the number without a comma: digits and one decimal point, for example 1234.5. Nothing was changed.";
-    if ((t.match(/\./g) || []).length > 1) return "A number has one decimal point, for example 1234.5. Nothing was changed.";
+    if (t.includes(",")) return I18N.t("Type the number without a comma: digits and one decimal point, for example 1234.5. Nothing was changed.");
+    if ((t.match(/\./g) || []).length > 1) return I18N.t("A number has one decimal point, for example 1234.5. Nothing was changed.");
     return "";
   }
   /** What the hidden page and the service last said, in their own words, for a screen to show: the take's progress,
@@ -175,7 +176,7 @@
     const parts = [], hasPool = pool && pool.v > 0n;
     if (fast && fast.v > 0n) parts.push("FAST " + str(fast));
     if (bookAmt && bookAmt.v > 0n) parts.push((parts.length || hasPool ? "BOOK " : "") + str(bookAmt));
-    if (hasPool) parts.push("POOL " + fmtDown(pool, 2));
+    if (hasPool) parts.push(I18N.t("POOL {pool}", { pool: fmtDown(pool, 2) }));
     return parts.length ? parts : [fmtDown(zero, 2)];
   }
 
@@ -221,7 +222,7 @@
   function plan(book, buy, priceText, amountText_, f) {
     const price = dec(priceText), amount = dec(amountText_);
     if (!price || !amount || price.v === 0n || amount.v === 0n) return { ok: false, why: "" };
-    if (price.s > 8 || amount.s > 8) return { ok: false, why: "At most 8 decimals." };
+    if (price.s > 8 || amount.s > 8) return { ok: false, why: I18N.t("At most 8 decimals.") };
     const x = crossing(book, buy, price), chain = chainCrosses(book, buy, price);
     let left = amount, take = zero, cost = zero, pay = zero, get = zero, n = 0, worst = null;
     for (const h of x.hits) {
@@ -261,19 +262,19 @@
     if (!pl.ok) return [];
     const side = pl.buy ? "BUY" : "SELL", L = [];
     if (pl.stuck) {
-      L.push("FAST orders cross this price, but none can be taken in this amount: a partial take must leave at least 1 MINIMA on the maker's order. Nothing would be traded and no order would be placed. Change the amount.");
+      L.push(I18N.t("FAST orders cross this price, but none can be taken in this amount: a partial take must leave at least 1 MINIMA on the maker's order. Nothing would be traded and no order would be placed. Change the amount."));
     } else if (pl.fast) {
-      L.push("One click signs and sends: " + side + " " + fmt(pl.take) + " MINIMA from " + pl.takes + " FAST " + (pl.buy ? "ask" : "bid") + (pl.takes === 1 ? "" : "s") + ", best price first, " + (pl.buy ? "never above " : "never below ") + fmtPrice(pl.price) + " MxUSD per MINIMA.");
-      L.push(pl.buy ? "You pay at most " + fmt(pl.pay) + " MxUSD and receive " + fmt(pl.take) + " MINIMA (average " + fmtPrice(pl.avg) + ")."
-                    : "You pay " + fmt(pl.take) + " MINIMA and receive at least " + fmt(pl.get) + " MxUSD (average " + fmtPrice(pl.avg) + ").");
-      L.push("Your node signs one transaction per order taken; each maker's node co-signs and posts it. A partial take leaves at least 1 MINIMA on the maker's order or takes it whole.");
-      if (pl.rest.v > 0n) L.push("The other " + fmt(pl.rest) + " MINIMA is not traded and no order is placed for it.");
+      L.push(I18N.t("One click signs and sends: {side} {take} MINIMA from {takes} FAST {buy}{takes2}, best price first, {buy2}{price} MxUSD per MINIMA.", { side: side, take: fmt(pl.take), takes: pl.takes, buy: (pl.buy ? "ask" : "bid"), takes2: I18N.s(pl.takes), buy2: (pl.buy ? "never above " : "never below "), price: fmtPrice(pl.price) }));
+      L.push(pl.buy ? I18N.t("You pay at most {pay} MxUSD and receive {take} MINIMA (average {avg}).", { pay: fmt(pl.pay), take: fmt(pl.take), avg: fmtPrice(pl.avg) })
+                    : I18N.t("You pay {take} MINIMA and receive at least {get} MxUSD (average {avg}).", { take: fmt(pl.take), get: fmt(pl.get), avg: fmtPrice(pl.avg) }));
+      L.push(I18N.t("Your node signs one transaction per order taken; each maker's node co-signs and posts it. A partial take leaves at least 1 MINIMA on the maker's order or takes it whole."));
+      if (pl.rest.v > 0n) L.push(I18N.t("The other {rest} MINIMA is not traded and no order is placed for it.", { rest: fmt(pl.rest) }));
     } else {
-      if (pl.ownOnly) L.push("Only your own orders are at this price. Nothing would trade.");
-      L.push("One click signs and publishes a FAST order: " + side + " " + fmt(pl.amount) + " MINIMA at " + fmtPrice(pl.price) + " MxUSD per MINIMA (" + (pl.buy ? "up to " + fmt(up(mul(pl.amount, pl.price), 8)) : "at least " + fmt(down(mul(pl.amount, pl.price), 8))) + " MxUSD in all) on " + relays + " relay" + (relays === 1 ? "" : "s") + ".");
-      L.push("Nothing is traded now and no coin is locked: the coins stay in your wallet and your node co-signs each fill while it is running. You can change or cancel the order at any time.");
+      if (pl.ownOnly) L.push(I18N.t("Only your own orders are at this price. Nothing would trade."));
+      L.push(I18N.t("One click signs and publishes a FAST order: {side} {amount} MINIMA at {price} MxUSD per MINIMA ({price2} MxUSD in all) on {relays} relay{relays2}.", { side: side, amount: fmt(pl.amount), price: fmtPrice(pl.price), price2: (pl.buy ? "up to " + fmt(up(mul(pl.amount, pl.price), 8)) : I18N.t("at least {price}", { price: fmt(down(mul(pl.amount, pl.price), 8)) })), relays: relays, relays2: I18N.s(relays) }));
+      L.push(I18N.t("Nothing is traded now and no coin is locked: the coins stay in your wallet and your node co-signs each fill while it is running. You can change or cancel the order at any time."));
     }
-    if (pl.chain) L.push("On-chain orders or pools also reach this price. The second button shows that trade for review before anything is signed.");
+    if (pl.chain) L.push(I18N.t("On-chain orders or pools also reach this price. The second button shows that trade for review before anything is signed."));
     return L;
   }
   /** A refusal or an error, from the engine, the page or the bridge: its own words, with the plain prefix a reader
@@ -284,7 +285,7 @@
   // so a take left unanswered by the last session waited for that visit), and it must belong to the engine that is
   // running now (st.epoch: a node restart or a replaced wallet makes a new engine).
   const PAGE_LOAD_MS = 20000;
-  const PAGE_FAILED = "The trading part of Dexicon did not load, so a trade cannot be sent from here right now. The app is trying again. If this message stays, restart the app.";
+  const PAGE_FAILED = L_("The trading part of Dexicon did not load, so a trade cannot be sent from here right now. The app is trying again. If this message stays, restart the app.");
   /** What to do with the frame now. have = { epoch, madeAt, heard } of the one that exists, or null.
    *  "make" | "remake" (another engine) | "retry" (it never spoke) | "drop" | "keep" | "none". */
   function pageStep(nodeState, st, have, now) {
@@ -300,10 +301,10 @@
    *  ordinary plan feedback, not a failure: "note", everything else that reaches say() unlabelled is an "error". */
   const feedbackKind = (text) => (/^Only your own orders are at this price/.test(String(text == null ? "" : text).trim()) ? "note" : "error");
   /** The one outside price's name, from the engine's own field (status().price.source: "MEXC" | "MEXC via CoinGecko"). */
-  const priceName = (source) => "MEXC price" + (/^MEXC via CoinGecko$/.test(String(source || "")) ? " via CoinGecko" : "");
+  const priceName = (source) => I18N.t("MEXC price{source}", { source: (/^MEXC via CoinGecko$/.test(String(source || "")) ? (" " + I18N.t("via CoinGecko")) : "") });
   function refusal(text) {
     const t = String(text == null ? "" : text).replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "").trim();
-    return t || "It did not go through, and no reason was given. Look at Activity before trying again.";
+    return t || I18N.t("It did not go through, and no reason was given. Look at Activity before trying again.");
   }
 
   // ---- fills (Orders › My fills, History, the CSV) ----
@@ -315,11 +316,11 @@
   }
   /** A fill's state in plain words. "settling" is posted and waiting for a block: it is not done. */
   function fillState(f) {
-    return f.status === "done" ? { chip: "DONE", tone: "ok", text: "in block " + (f.block || "?") }
-      : f.status === "lost" ? { chip: "LOST", tone: "bad", text: f.reason ? "never posted (" + f.reason + "): the coins were not spent" : "not in a block after 2 hours: the coins were not spent" }
+    return f.status === "done" ? { chip: "DONE", tone: "ok", text: I18N.t("in block {block}", { block: (f.block || "?") }) }
+      : f.status === "lost" ? { chip: "LOST", tone: "bad", text: f.reason ? I18N.t("never posted ({reason}): the coins were not spent", { reason: f.reason }) : I18N.t("not in a block after 2 hours: the coins were not spent") }
       // 0.18.117: the node stopped before it answered txnpost (main/dexicon/service.desktop.js POST UNANSWERED)
-      : f.status === "unknown" ? { chip: "UNKNOWN", tone: "live", text: "the node stopped before it answered: not known yet whether this trade was posted. Your order was reduced as if it was; the chain decides" }
-      : { chip: "WAITING", tone: "live", text: "co-signed and posted, waiting for a block: not final yet" };
+      : f.status === "unknown" ? { chip: "UNKNOWN", tone: "live", text: I18N.t("the node stopped before it answered: not known yet whether this trade was posted. Your order was reduced as if it was; the chain decides") }
+      : { chip: "WAITING", tone: "live", text: I18N.t("co-signed and posted, waiting for a block: not final yet") };
   }
   /** Net of SETTLED fills only: signed MINIMA and MxUSD, and the counts (HistoryTab.render). */
   function netSettled(fills) {
@@ -348,17 +349,21 @@
   /** Why a relay address cannot be used on the desktop ("" = it can). The host reaches relays over https only, and
    *  never an address of this machine or the local network (main/netfetch.js). */
   function relayProblem(url) {
-    let u; try { u = new URL(String(url)); } catch (e) { return "Enter a relay address like https://relay.example/dex-relay."; }
-    if (u.protocol !== "https:") return "On the desktop a relay must be an https address. Nothing was added.";
-    if (u.username || u.password || u.search || u.hash) return "A relay address has no user name, query or fragment. Nothing was added.";
-    if (/^(localhost|127\.|10\.|192\.168\.|\[?::1\]?$)/i.test(u.hostname)) return "A relay on this machine or the local network cannot be used from the desktop. Nothing was added.";
+    let u; try { u = new URL(String(url)); } catch (e) { return I18N.t("Enter a relay address like https://relay.example/dex-relay."); }
+    if (u.protocol !== "https:") return I18N.t("On the desktop a relay must be an https address. Nothing was added.");
+    if (u.username || u.password || u.search || u.hash) return I18N.t("A relay address has no user name, query or fragment. Nothing was added.");
+    if (/^(localhost|127\.|10\.|192\.168\.|\[?::1\]?$)/i.test(u.hostname)) return I18N.t("A relay on this machine or the local network cannot be used from the desktop. Nothing was added.");
     return "";
   }
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   /** "TODAY · 19 NOV" / "18 NOV" (local time), for the day headers of History and Activity */
-  function dayLabel(ms, nowMs) { const d = new Date(ms), n = new Date(nowMs), t = d.getDate() + " " + MONTHS[d.getMonth()]; return (d.toDateString() === n.toDateString() ? "TODAY · " : "") + t + (d.getFullYear() === n.getFullYear() ? "" : " " + d.getFullYear()); }
+  function dayLabel(ms, nowMs) { const d = new Date(ms), n = new Date(nowMs), t = d.getDate() + " " + MONTHS[d.getMonth()]; return (d.toDateString() === n.toDateString() ? (I18N.t("TODAY ·") + " ") : "") + t + (d.getFullYear() === n.getFullYear() ? "" : " " + d.getFullYear()); }
   /** How long ago, in whole units cut down (Util.ago) */
-  function ago(ms) { const s = Math.floor(Math.max(0, ms) / 1000); if (s < 60) return s + "s ago"; const m = Math.floor(s / 60); if (m < 60) return m + (m === 1 ? " minute ago" : " minutes ago"); const h = Math.floor(m / 60); if (h < 24) return h + (h === 1 ? " hour ago" : " hours ago"); const d = Math.floor(h / 24); return d + (d === 1 ? " day ago" : " days ago"); }
+  function ago(ms) { const s = Math.floor(Math.max(0, ms) / 1000); if (s < 60) return I18N.t("{s}s ago", { s: s }); const m = Math.floor(s / 60); const rel = (v, unit) => new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "always" }).format(-v, unit);   // "1 minute ago", "3 hours ago", worded in the language on show
+    if (m < 60) return rel(m, "minute"); const h = Math.floor(m / 60); if (h < 24) return rel(h, "hour"); return rel(Math.floor(h / 24), "day"); }
+  // words chosen by a count in rooms ① and ② (I18N.t(n === 1 ? "part" : "parts")): named here so every catalog must hold them
+  const COUNT_WORDS = [N_("are"), N_("block"), N_("blocks"), N_("coin"), N_("coins"), N_("is"), N_("its"), N_("maker"), N_("makers"), N_("need"), N_("needs"), N_("part"), N_("parts"), N_("swap is"), N_("swaps are"), N_("their"), N_("time."), N_("times."),
+    N_("pool"), N_("saved pool"), N_("visible pool"), N_("owner key"), N_("transaction")];
 
   // ---- what the screens may ask for: the page's twelve actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
   const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"];

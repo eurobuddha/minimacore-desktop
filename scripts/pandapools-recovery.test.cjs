@@ -248,7 +248,7 @@ test('one card per pool, carrying BOTH identifiers and the retire action',async(
  // The Desktop half moved out of renderer/app.js into the PandaPools panel module in 0.17.18 (APK parity).
  // Same card, same assertions — loaded through the panel's own template export.
  // the Desktop card is room 2 of Dexicon (renderer/dexicon-pp.js; the old panel was removed in 0.18.141)
- const PP=require(path.join(desktop,'renderer/dexicon-pp.js')),pp=fs.readFileSync(path.join(desktop,'renderer/dexicon-pp.js'),'utf8');
+ const PP=require(path.join(desktop,'renderer/dexicon-pp.js')),pp=require('./i18n-plain.cjs').plain(fs.readFileSync(path.join(desktop,'renderer/dexicon-pp.js'),'utf8'));
  const ids=PP.poolIds({address:addr,opk});
  assert(ids.includes(addr));assert(ids.includes(opk),'Desktop must name the owner key too');
  assert(ids.includes('Pool:')&&ids.includes('Owner key:'),'labelled on Desktop as well');

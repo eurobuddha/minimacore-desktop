@@ -12,6 +12,7 @@
  *   pool value with fees = fee-free value + fees kept   ⇔   √K' = √K + fees / (2 √P).
  * Volume that traded at other prices lands slightly differently; the dialog says so.
  */
+if (typeof I18N === "undefined" && typeof require === "function") require("./i18n.js");   // loaded by a test or the main process: the same t(), th(), tr() the window has
 var PoolCalc = (function () {
 
     /**
@@ -103,8 +104,8 @@ var PoolCalc = (function () {
             ctx.textAlign = "center"; ctx.fillText(fmt(xmax * i / 4), gx, T + ph + 14);
             ctx.textAlign = "right"; ctx.fillText(fmt(ymax * i / 4), L - 6, gy + 4);
         }
-        ctx.textAlign = "right"; ctx.fillText("MINIMA in pool →", L + pw, T + ph + 26);
-        ctx.textAlign = "left"; ctx.fillText(tok + " in pool ↑", L + 4, T - 4);
+        ctx.textAlign = "right"; ctx.fillText(I18N.t("MINIMA in pool →"), L + pw, T + ph + 26);
+        ctx.textAlign = "left"; ctx.fillText(I18N.t("{tok} in pool ↑", { tok: tok }), L + 4, T - 4);
         function curve(k) {
             var xs = k / ymax, n = 120; ctx.beginPath();
             for (var j = 0; j <= n; j++) { var xx = xs + (xmax - xs) * j / n; var px = sx(xx), py = sy(k / xx); if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
@@ -160,17 +161,17 @@ var PoolCalc = (function () {
             row.appendChild(k); row.appendChild(v); root.appendChild(row); return v;
         }
 
-        note("A PandaPool sits on MINIMA × token = K at every price, so the reserves, their ratio and the pool's value follow from the price alone. Enter a starting pool, then move the price. Nothing here touches your funds.", "modal__desc");
-        sub("Starting pool");
-        var inX = field("MINIMA you add", "x0", opts.x0 || "100000");
-        var inY = field(tok + " you add", "y0", opts.y0 || "500");
-        var inTok = field("Token symbol", "tok", tok, true);
+        note(I18N.t("A PandaPool sits on MINIMA × token = K at every price, so the reserves, their ratio and the pool's value follow from the price alone. Enter a starting pool, then move the price. Nothing here touches your funds."), "modal__desc");
+        sub(I18N.t("Starting pool"));
+        var inX = field(I18N.t("MINIMA you add"), "x0", opts.x0 || "100000");
+        var inY = field(I18N.t("{tok} you add", { tok: tok }), "y0", opts.y0 || "500");
+        var inTok = field(I18N.t("Token symbol"), "tok", tok, true);
         var derived = note("");
-        sub("Price now");
+        sub(I18N.t("Price now"));
         var p0seed = Number(inY.value) / Number(inX.value);
-        var inP = field("MINIMA price in " + tok, "p", fmtPrice(p0seed));
+        var inP = field(I18N.t("MINIMA price in {tok}", { tok: tok }), "p", fmtPrice(p0seed));
         inP.style.fontSize = "20px";
-        var slider = h('<input type="range" class="pc-range" min="-4" max="4" step="0.01" value="0" aria-label="Price as a multiple of entry, logarithmic">');
+        var slider = h('<input type="range" class="pc-range" min="-4" max="4" step="0.01" value="0" aria-label="' + th("Price as a multiple of entry, logarithmic") + '">');
         root.appendChild(slider);
         root.appendChild(h('<div class="pc-range__lbl"><span>÷10,000</span><span>÷100</span><span>entry</span><span>×100</span><span>×10,000</span></div>'));
         var chips = document.createElement("div"); chips.className = "chip-row pc-chips"; root.appendChild(chips);
@@ -181,18 +182,18 @@ var PoolCalc = (function () {
             b.onclick = function () { setPriceFromMultiple(m); };
             chips.appendChild(b); chipEls.push({ m: m, el: b });
         });
-        sub("Fees earned");
-        var inFee = field("Swap fee rate (%)", "fee", "0.5");
-        var inVol = field("Volume traded through the pool, in " + tok + " value", "vol", "0");
-        note("PandaPools keeps 0.5 % of every swap's input inside the pool. Both directions count as volume. Fees are valued at the current price, so pool value with fees is exactly the fee-free value plus the fees kept.");
-        sub("The pool at this price");
-        var oMin = kv("MINIMA in pool", "minima"), oTok = kv(tok + " in pool", "token"), oRatio = kv("Ratio MINIMA : " + tok, "ratio"),
-            oVal = kv("Pool value, fees included", "value"), oHold = kv("Versus holding both amounts", "hold"), oMove = kv("Price move from entry", "move"),
-            oFees = kv("Fees kept by the pool", "fees"), oK = kv("K with fees", "k"), oBE = kv("Volume to break even with holding", "be");
-        sub("Where the pool sits on its curve");
+        sub(I18N.t("Fees earned"));
+        var inFee = field(I18N.t("Swap fee rate (%)"), "fee", "0.5");
+        var inVol = field(I18N.t("Volume traded through the pool, in {tok} value", { tok: tok }), "vol", "0");
+        note(I18N.t("PandaPools keeps 0.5 % of every swap's input inside the pool. Both directions count as volume. Fees are valued at the current price, so pool value with fees is exactly the fee-free value plus the fees kept."));
+        sub(I18N.t("The pool at this price"));
+        var oMin = kv(I18N.t("MINIMA in pool"), "minima"), oTok = kv(I18N.t("{tok} in pool", { tok: tok }), "token"), oRatio = kv(I18N.t("Ratio MINIMA : {tok}", { tok: tok }), "ratio"),
+            oVal = kv(I18N.t("Pool value, fees included"), "value"), oHold = kv(I18N.t("Versus holding both amounts"), "hold"), oMove = kv(I18N.t("Price move from entry"), "move"),
+            oFees = kv(I18N.t("Fees kept by the pool"), "fees"), oK = kv(I18N.t("K with fees"), "k"), oBE = kv(I18N.t("Volume to break even with holding"), "be");
+        sub(I18N.t("Where the pool sits on its curve"));
         var canvas = h('<canvas class="pc-canvas"></canvas>'); root.appendChild(canvas);
-        note("Small dot = entry · large accent dot = now · dashed = K at entry (the KMIN floor) once fees lift the curve. The slope of the curve at the pool's point is the price.");
-        note("MINIMA in pool = √(K ÷ price); token in pool = √(K × price). Each 4× move in price moves each reserve 2×. The pool is 50 % MINIMA and 50 % token by value at every price — only the counts change. Neither side ever reaches zero: 90 % of one side is gone at ×100 or ÷100, 99 % at ×10,000 or ÷10,000.");
+        note(I18N.t("Small dot = entry · large accent dot = now · dashed = K at entry (the KMIN floor) once fees lift the curve. The slope of the curve at the pool's point is the price."));
+        note(I18N.t("MINIMA in pool = √(K ÷ price); token in pool = √(K × price). Each 4× move in price moves each reserve 2×. The pool is 50 % MINIMA and 50 % token by value at every price — only the counts change. Neither side ever reaches zero: 90 % of one side is gone at ×100 or ÷100, 99 % at ×10,000 or ÷10,000."));
 
         var syncing = false;
         function num(inp) { var v = parseFloat(String(inp.value).replace(/[,\s]/g, "")); return isFinite(v) ? v : NaN; }
@@ -200,9 +201,9 @@ var PoolCalc = (function () {
         function setPriceFromMultiple(m) { var p0 = entryPrice(); if (isNaN(p0)) return; syncing = true; inP.value = fmtPrice(p0 * m); syncing = false; render(); }
         function setTok(t) { tok = t; root.querySelectorAll("[data-pc-label]").forEach(function (e) {
             var k = e.getAttribute("data-pc-label");
-            if (k === "y0") e.innerText = t + " you add"; else if (k === "p") e.innerText = "MINIMA price in " + t;
-            else if (k === "vol") e.innerText = "Volume traded through the pool, in " + t + " value";
-            else if (k === "token") e.innerText = t + " in pool"; else if (k === "ratio") e.innerText = "Ratio MINIMA : " + t; }); }
+            if (k === "y0") e.innerText = I18N.t("{v} you add", { v: t }); else if (k === "p") e.innerText = I18N.t("MINIMA price in {v}", { v: t });
+            else if (k === "vol") e.innerText = I18N.t("Volume traded through the pool, in {v} value", { v: t });
+            else if (k === "token") e.innerText = I18N.t("{v} in pool", { v: t }); else if (k === "ratio") e.innerText = I18N.t("Ratio MINIMA : {v}", { v: t }); }); }
 
         function render() {
             var x0 = num(inX), y0 = num(inY), p = num(inP), fee = num(inFee), vol = num(inVol);
@@ -210,21 +211,21 @@ var PoolCalc = (function () {
             var r = compute(x0, y0, p, fee, vol);
             var outs = [oMin, oTok, oRatio, oVal, oHold, oMove, oFees, oK, oBE];
             if (!r) {
-                derived.innerText = "Enter a MINIMA amount, a " + tok + " amount and a price above zero.";
+                derived.innerText = I18N.t("Enter a MINIMA amount, a {tok} amount and a price above zero.", { tok: tok });
                 outs.forEach(function (o) { o.innerText = "—"; }); oHold.style.color = "";
                 draw(canvas, null, 0, 0, 0, tok, opts.colors); return;
             }
-            derived.innerText = "Entry price " + fmtPrice(r.entryPrice) + " " + tok + " per MINIMA  ·  K " + fmt(r.k) + "  ·  " + fmt(x0 / y0) + " : 1 MINIMA per " + tok + "  ·  entry value " + fmt(2 * y0) + " " + tok;
-            oMin.innerText = fmt(r.minima) + "  (" + fmt(r.minima / x0 * 100) + " % of what you added)";
-            oTok.innerText = fmt(r.token) + "  (" + fmt(r.token / y0 * 100) + " % of what you added)";
-            oRatio.innerText = fmt(r.ratio) + " : 1  (always 1 ÷ price)";
-            oVal.innerText = fmt(r.value) + " " + tok + "  =  " + fmt(r.token) + " in MINIMA + " + fmt(r.token) + " in " + tok;
-            oHold.innerText = (r.vsHoldPct > 0.005 ? "+" : "") + fmt(r.vsHoldPct) + " %  (holding would be worth " + fmt(r.hold) + " " + tok + ")";
+            derived.innerText = I18N.t("Entry price {entryPrice} {tok} per MINIMA  ·  K {k}  ·  {y0} : 1 MINIMA per {tok2}  ·  entry value {y02} {tok3}", { entryPrice: fmtPrice(r.entryPrice), tok: tok, k: fmt(r.k), y0: fmt(x0 / y0), tok2: tok, y02: fmt(2 * y0), tok3: tok });
+            oMin.innerText = I18N.t("{minima}  ({x0} % of what you added)", { minima: fmt(r.minima), x0: fmt(r.minima / x0 * 100) });
+            oTok.innerText = I18N.t("{token}  ({y0} % of what you added)", { token: fmt(r.token), y0: fmt(r.token / y0 * 100) });
+            oRatio.innerText = I18N.t("{ratio} : 1  (always 1 ÷ price)", { ratio: fmt(r.ratio) });
+            oVal.innerText = I18N.t("{r} {tok}  =  {token} in MINIMA + {token2} in {tok2}", { r: fmt(r.value), tok: tok, token: fmt(r.token), token2: fmt(r.token), tok2: tok });
+            oHold.innerText = I18N.t("{vsHoldPct} %  (holding would be worth {hold} {tok})", { vsHoldPct: (r.vsHoldPct > 0.005 ? "+" : "") + fmt(r.vsHoldPct), hold: fmt(r.hold), tok: tok });
             oHold.style.color = r.vsHoldPct < -0.005 ? "var(--red)" : r.vsHoldPct > 0.005 ? "var(--green)" : "";
             oMove.innerText = fmtMove(r.move) + "  (" + fmtPrice(r.entryPrice) + " → " + fmtPrice(p) + ")";
             oFees.innerText = fmt(r.feesKept) + " " + tok;
             oK.innerText = fmt(r.kWithFees) + "  (+" + fmt(r.kGrowthPct) + " %)";
-            oBE.innerText = isNaN(r.breakEvenVolume) ? "— (fee is 0)" : fmt(r.breakEvenVolume) + " " + tok;
+            oBE.innerText = isNaN(r.breakEvenVolume) ? I18N.t("— (fee is 0)") : fmt(r.breakEvenVolume) + " " + tok;
             var lm = Math.max(-4, Math.min(4, Math.log(r.move) / Math.LN10));
             if (Math.abs(parseFloat(slider.value) - lm) > 0.005) slider.value = lm;
             chipEls.forEach(function (c) { c.el.className = "chip" + (Math.abs(Math.log(c.m) / Math.LN10 - lm) < 0.005 ? " chip--active" : ""); });

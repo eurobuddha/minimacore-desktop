@@ -21,13 +21,13 @@ function usedKeys() {
   files.push(path.join(R, "i18n", "start.js"));
   for (const f of fs.readdirSync(path.join(ROOT, "main"))) if (f.endsWith(".js")) files.push(path.join(ROOT, "main", f));
   for (const file of files) {
-    const src = fs.readFileSync(file, "utf8"); if (!/\b(t|th|tr|N_)\(/.test(src)) continue;
+    const src = fs.readFileSync(file, "utf8"); if (!/\b(t|th|tr|N_|L_)\(/.test(src)) continue;
     const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS);
     const walk = (n) => {
       if (ts.isCallExpression(n) && n.arguments.length) {
         const c = n.expression, name = ts.isIdentifier(c) ? c.text : ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && /^(I18N|lang|L)$/.test(c.expression.text) ? c.name.text : "";
         const a = n.arguments[0];
-        if (/^(t|th|tr|N_)$/.test(name) && (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a))) out.push([a.text, path.relative(ROOT, file) + ":" + (sf.getLineAndCharacterOfPosition(a.pos).line + 1)]);
+        if (/^(t|th|tr|N_|L_)$/.test(name) && (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a))) out.push([a.text, path.relative(ROOT, file) + ":" + (sf.getLineAndCharacterOfPosition(a.pos).line + 1)]);
       }
       ts.forEachChild(n, walk);
     };
@@ -109,7 +109,7 @@ test("no helper is hidden by a local name: where a function has its own t, th or
     const names = (fn) => { const out = new Set(), bind = (n) => { if (!n) return; if (ts.isIdentifier(n)) out.add(n.text); else if (n.elements) n.elements.forEach(e => bind(e.name)); };
       const w = (n) => { if (ts.isParameter(n) || ts.isVariableDeclaration(n) || ts.isBindingElement(n)) bind(n.name); if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n)) && n.name) out.add(n.name.text); ts.forEachChild(n, w); }; w(fn); return out; };
     const cache = new Map(), walk = (n) => {
-      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && /^(t|th|tr|N_)$/.test(n.expression.text) && n.arguments.length && ts.isStringLiteral(n.arguments[0]))
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && /^(t|th|tr|N_|L_)$/.test(n.expression.text) && n.arguments.length && ts.isStringLiteral(n.arguments[0]))
         for (let p = n.parent; p; p = p.parent) if (ts.isFunctionLike(p)) { if (!cache.has(p)) cache.set(p, names(p)); if (cache.get(p).has(n.expression.text)) { bad.push(f + ":" + (sf.getLineAndCharacterOfPosition(n.pos).line + 1)); break; } }
       ts.forEachChild(n, walk);
     };

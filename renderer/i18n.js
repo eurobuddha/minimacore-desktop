@@ -10,6 +10,8 @@
  *   tr(key, html)     the translated text escaped, the params inserted AS GIVEN: only for values the caller has
  *                     already escaped or built as markup (what the template inserted before it was translated)
  *   N_(key)           marks a key held in a table and translated where it is shown: returns the key unchanged
+ *   L_(key)           a text fixed while a script loads (a constant, a table of help texts): a String that reads as its
+ *                     translation whenever it is shown (in a template, a +, textContent, esc()), in the language of that moment
  *
  * Placeholders are named: "{n} coins". A catalog value may be an object of plural forms ({ one, few, many, other }),
  * chosen by Intl.PluralRules from params.n. NUMBERS ARE NEVER FORMATTED HERE: an amount is inserted as the string the
@@ -50,6 +52,13 @@
   const th = (key, p) => fill(esc(text(key, p)), p, esc);
   const tr = (key, p) => fill(esc(text(key, p)), p, str);
   const N_ = (key) => key;
+  /** The English plural "s" for a count, and nothing in any other language: for the few sentences still built around
+   *  an English noun + "s" (their translations are worded so that the count needs no ending: "orders: 3"). */
+  const s = (n) => (lang === "en" && Number(n) !== 1 ? "s" : "");
+  /** A String object over the English text whose toString / valueOf give the text in the language on show at that moment. It is an
+   *  object: never compare one with === (the code that holds them only shows them). */
+  class Later extends String { toString() { return t(String.prototype.toString.call(this)); } valueOf() { return this.toString(); } }
+  const L_ = (key) => new Later(key);
 
   /** A catalog, or more of one. meta.review: keys translated for the desktop (no phone text existed), for a native speaker to check.
    *  meta.same: keys whose text is rightly the same as the English (a name, a unit). */
@@ -77,12 +86,12 @@
     for (const [sel, attr, key] of PAGE) for (const n of scope.querySelectorAll(sel)) { if (attr) n.setAttribute(attr, t(key)); else n.textContent = t(key); }
   }
 
-  const I18N = { CODES, NAMES, TAGS, PAGE, pick, supported, add, set, apply, t, th, tr, N_,
+  const I18N = { CODES, NAMES, TAGS, PAGE, pick, supported, add, set, apply, t, th, tr, N_, L_, s,
     lang: () => lang, tag: () => TAGS[lang],
     languages: () => CODES.filter(c => CAT[c]),                 // the languages that have a catalog, in the phone's order
     onChange: (fn) => { listeners.push(fn); },
     catalog: (code) => CAT[code] || null, review: (code) => (REVIEW[code] || []).slice(), same: (code) => (SAME[code] || []).slice() };
 
-  root.I18N = I18N; root.t = t; root.th = th; root.tr = tr; root.N_ = N_;
+  root.I18N = I18N; root.t = t; root.th = th; root.tr = tr; root.N_ = N_; root.L_ = L_;
   if (typeof module !== "undefined" && module.exports) module.exports = I18N;
 })(typeof window !== "undefined" ? window : globalThis);

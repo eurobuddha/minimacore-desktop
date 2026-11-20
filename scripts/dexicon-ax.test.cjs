@@ -613,7 +613,7 @@ test("wide layout: the phone's own words and order on Market and OTC (its long d
   assert.deepEqual(order, order.slice().sort((a, b) => a - b), "Market in the phone's order"); assert.ok(order.every((i) => i > 0));
   const otc = ["OTC — A PRIVATE DEAL", "MY AVAILABILITY", "I SELL up to", "I BUY up to", "○ Off", "Go live", "LIQUIDITY PROVIDERS", "MY DEALS"].map((t) => src.indexOf(t, src.indexOf("function otcHtml")));
   assert.deepEqual(otc, otc.slice().sort((a, b) => a - b), "OTC in the phone's order"); assert.ok(otc.every((i) => i > 0));
-  assert.match(src, /placeholder="max \$\{esc\(c\)\} \(blank = off\)"/);
+  assert.match(src, /placeholder="\$\{tr\("max \{c\} \(blank = off\)", \{ c: esc\(c\) \}\)\}"/);
   assert.match(css, /\.ax-half--bid \.ax-tag \{ align-self: flex-start; text-align: left; \} \.ax-half:not\(\.ax-half--bid\) \.ax-tag \{ align-self: flex-end; text-align: right; \}/);
   assert.match(css, /\.ax-in--line \{[^}]*border-width: 0 0 1px;/);
 });
@@ -675,7 +675,7 @@ test("set aside: an init in flight is disowned first (no second engine), and the
     await late;
     assert.equal("swaps" in (await atomix.activeWork()), false, "the disowned init did not become the engine: no store is open");
   } finally { atomix._setCtx(null); atomix._setStore(null); fs.rmSync(dir, { recursive: true, force: true }); }
-  const g = {}; require("vm").runInNewContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-core.js"), "utf8")) + "\n;this.C = typeof DexCore !== 'undefined' ? DexCore : null;", Object.assign(g, { window: g, document: { addEventListener() {} }, localStorage: { getItem() { return null; }, setItem() {} }, console }));
+  const g = {}; require("vm").runInNewContext(require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-core.js"), "utf8")) + "\n;this.C = typeof DexCore !== 'undefined' ? DexCore : null;", Object.assign(g, require("./i18n-plain.cjs").globals(), { window: g, document: { addEventListener() {} }, localStorage: { getItem() { return null; }, setItem() {} }, console }));
   const C = g.C || g.DexCore; assert.ok(C && C.SET_ASIDE, "DexCore loaded");
   const F = "/Users/x/Library/Application Support/minimaCore/atomix.sqlite", text = C.SET_ASIDE("AtomiX", "after.", F);
   assert.ok(text.includes("To put it back: quit the app, then rename " + F + "-legacy-keys-(the date) back to " + F), text);
