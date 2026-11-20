@@ -341,7 +341,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // Confirm / Ship / Deliver only when paid or checked by hand); main/shop-store.js in 0.19.164 (an unreadable, zero or negative total is never
   // paid: BAD_TOTAL) and 0.19.166 (paid by what the listing says is due; UNCHECKED; handCheck); both in 0.19.167 (each payment coin id counted once,
   // kept on the order; a wrong coin never pays or blocks)
-  for (const [f, want, ver] of [["main/shop.js", "6c1c237a26b07ed0317d1255b0bdf2fdfa07973a9d26f1d99866df93f79e6b44", "0.19.167"], ["main/shop-store.js", "c895d957b8aa7117229cae0bef483cb252405b35af39a939e4ecac038bb48c6d", "0.19.167"],
+  // both again in 0.19.168 (what a buyer sends is stored as capped primitives; one coin at a time; a failed save is logged)
+  for (const [f, want, ver] of [["main/shop.js", "080dc2e728fd88118254f555980e3ad495d2bb10b64cadc7ae452bc9e77bbff9", "0.19.168"], ["main/shop-store.js", "7092e4ab35ed3e523d0eb3857441cc53db826e720a72d6656f6e2a4b034e4109", "0.19.168"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

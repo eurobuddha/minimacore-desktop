@@ -141,11 +141,11 @@ standIn("main/shopcrypto.js", { ready: async () => {}, loadIdentity: () => ({ pu
   open: async (_id, blob) => ({ valid: true, fromPublicId: BUYER, plaintext: Buffer.from(String(blob).slice(2), "hex") }) });
 let shop = require("../main/shop");
 const hex = (s) => "0x" + Buffer.from(s, "utf8").toString("hex");
-/** One scan in which the MINIMERCH channel carries `orders` (wire objects from BUYER) and my address the `pays` coins ({ coinid, ref, amount, tokenid }). */
+/** One scan in which the MINIMERCH channel carries `orders` (wire objects from BUYER, or a raw JSON text) and my address the `pays` coins ({ coinid, ref, amount, tokenid }). */
 async function scan(orders, pays) {
   shop._setRunner(async (c) => {
     if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
-    if (c.startsWith("coins address:" + shop.MINIMERCH)) return { status: true, response: orders.map((w, i) => ({ coinid: "0xM" + (++n) + "_" + i, state: { "99": hex(JSON.stringify(Object.assign({ from: BUYER, date: 1 }, w))) } })) };
+    if (c.startsWith("coins address:" + shop.MINIMERCH)) return { status: true, response: orders.map((w, i) => ({ coinid: "0xM" + (++n) + "_" + i, state: { "99": hex(typeof w === "string" ? w : JSON.stringify(Object.assign({ from: BUYER, date: 1 }, w))) } })) };
     if (c.startsWith("coins address:" + VENDOR)) return { status: true, response: pays.map(p => ({ coinid: p.coinid, tokenid: p.tokenid, amount: p.amount, tokenamount: p.amount, state: { "1": hex(p.ref) } })) };
     return { status: true, response: [] };
   });
@@ -187,4 +187,37 @@ test("vendor: after a restart the same payment coin is seen again and is not cou
   await scan([], half);
   const o = store.order("ORD-AGAIN");
   assert.equal(o.paidAmount, "1.6", "the same 1.6 coin did not count again"); assert.equal(o.paid, false); assert.equal(o.status, "UNDERPAID");
+});
+
+// ---- 0.19.168: what a buyer sends reaches the store only as capped primitives; one bad coin never stops the batch ----
+test("vendor: an order nested 12,000 arrays deep is stored as plain lines, the next order in the batch is read, and shop.json is still saved", async () => {
+  const deep = "[".repeat(12000) + "]".repeat(12000);
+  const evil = JSON.stringify({ type: "ORDER", ref: "ORD-DEEP", from: BUYER, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: "@Q", unitPrice: "1.5", x: "@X" }, "@L"],
+    amount: "@A", currency: "Minima", shipping: "Domestic", fromname: "@N", delivery: "x".repeat(5000), message: "@M" }).replace(/"@[QXLANM]"/g, deep);
+  const later = { type: "ORDER", ref: "ORD-AFTER", shopId: "tea", items: [{ product: "Tea", quantity: 2, unitPrice: "1.5" }], amount: "3.2", currency: "Minima", shipping: "Domestic" };
+  const said = []; store.setLog((m) => said.push(m));
+  try { await scan([evil, later], []); } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+  const o = store.order("ORD-DEEP");
+  assert.ok(o, "the order is stored"); assert.deepEqual(o.items, [{ product: "Tea", quantity: "", unitPrice: "1.5", lineTotal: "" }, null], "each line rebuilt from its own fields; a nested one is empty");
+  assert.equal(o.amount, "0"); assert.equal(o.buyerName, ""); assert.equal(o.note, ""); assert.equal(o.delivery.length, 500); assert.equal(o.status, "UNCHECKED");
+  assert.ok(store.order("ORD-AFTER"), "the next order in the same batch is read");
+  const disk = JSON.parse(fs.readFileSync(path.join(DIR, "shop.json"), "utf8"));
+  assert.ok(disk.orders["ORD-DEEP"] && disk.orders["ORD-AFTER"], "and both are on disk"); assert.deepEqual(said, [], "nothing failed");
+  const flat = (v, d) => v === null || typeof v !== "object" || (d < 3 && Object.values(v).every(x => flat(x, d + 1)));
+  for (const k of Object.keys(disk.orders)) for (const it of disk.orders[k].items || []) assert.ok(flat(it, 0) && Object.values(it || {}).every(x => x === null || typeof x !== "object"), k + ": a stored line holds primitives only");
+});
+test("a coin whose message cannot be read is said in the log and the rest of the batch goes on; a store that cannot be saved says so once", async () => {
+  const said = []; store.setLog((m) => said.push(m));
+  try {
+    const realOpen = require("../main/shopcrypto.js").open, sc = require("../main/shopcrypto.js");
+    sc.open = async (id, blob) => { if (String(blob).includes(hex("BOOM").slice(2))) throw new Error("bad box"); return realOpen(id, blob); };
+    try { await scan(["BOOM", { type: "ORDER", ref: "ORD-NEXT-ONE", shopId: "tea", items: [], amount: "1", currency: "Minima", shipping: "Domestic" }], []); } finally { sc.open = realOpen; }
+    assert.ok(store.order("ORD-NEXT-ONE"), JSON.stringify(said)); assert.equal(said.length, 1); assert.match(said[0], /^miniMall: an order channel coin could not be read \(0xM\d+_0\): bad box$/);
+    const o = store.order("ORD-NEXT-ONE"); o.self = o;   // a store that cannot be written
+    store.flush(); store.flush();
+    assert.equal(said.length, 2, "said once while the reason stays the same"); assert.match(said[1], /^miniMall: shop\.json could not be saved: /);
+    delete o.self; store.flush(); store.flush(); o.self = o; store.flush(); delete o.self; store.flush();
+    assert.equal(said.length, 3, "said again after a good save"); 
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+  assert.ok(/require\("\.\/shop-store"\)\.setLog\(\(m\) => node\.log\("\[app\] " \+ m\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")), "main.js says it in the Logs view");
 });

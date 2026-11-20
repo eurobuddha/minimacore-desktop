@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.168] — miniMall vendor: what a buyer sends is stored as capped primitives
+
+- **Found by the release review of the released desktop (H2), present here too:** an order's items were stored as the buyer sent them. Items nested about 12,000 arrays deep made `JSON.stringify` throw on every save of `shop.json`; the error was swallowed, so from then on NOTHING was saved (new orders, payments, statuses) and it was lost at the next quit. `String()` or `Number()` of such a value throws as well, which aborted the rest of the scan batch.
+- **Now:** `routeIncoming` rebuilds every stored order line from its own fields, each a capped string or a finite number (product 200, prices 64, quantity 20, size 60, NFT token id 80; anything else is "" and a line that is not an object is `null`), and caps every other field a buyer or vendor sends (name, shop name, amount, currency, delivery method and address, note, status, reply id and text; a date must be a plain number). A reply with no usable id is not stored. Each coin of the order channel and each payment coin is read in its own `try`: one that cannot be read is said in the log and the rest of the batch goes on.
+- **A save that fails is said:** `shop-store` reports it ("miniMall: shop.json could not be saved: …") once until the reason changes; `main.js` sends it, and a coin that could not be read, to the Logs view.
+- **Pins:** `main/shop.js` and `main/shop-store.js` are sha256-pinned in `scripts/apps-money.test.cjs`; both pins are updated on purpose to these files.
+- Tests (`scripts/shop-store-test.cjs`): the reviewer's 12,000-deep order (nested in a line's extra field, its quantity, a whole line, the amount, the name and the note) is stored as plain lines, the next order in the same batch is read, and both are on disk; a coin whose box cannot be opened is logged and the next one is read; a store that cannot be written says so once, and again after a good save. They fail on 0.19.167.
+
 ## [0.19.167] — miniMall vendor: each payment coin counts once, also after a restart
 
 - **Checked against the phone (read only):** the Inbox 0.5.15 (`apks/merchinbox-fix-2026-11-20`, `e2900eb9b3f8f74763c180fe602d41dd97c516c7`): coins of the order currency's token add up, each coin id counted once, and a wrong coin never pays or blocks. The desktop's `recordPayment` summed coins but knew no coin id: the only guard was the scan's in-memory "seen" set, which is empty after every restart (and cleared at 40,000 coins), and the first scan after a start reads the vendor's address again at its deepest (`depth:256`). An order paid in part was counted again at each restart, so a buyer who paid half saw it PAID after one restart of the vendor's app.

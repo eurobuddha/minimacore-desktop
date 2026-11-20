@@ -12,6 +12,13 @@ const WRITE_DEBOUNCE_MS = 300;
 
 let mem = null;   // { shops:{shopId:cfg}, orders:{ref:order}, chat:{randomid:msg}, meta:{} }
 let writeTimer = null;
+// Where a failure to save is said (0.19.168: it was swallowed, so a store that could no longer be written said nothing).
+// main.js points it at the Logs view; the same reason is said once until it changes.
+let logTo = (m) => { try { console.error(m); } catch (e) {} }, lastSaveError = "";
+function setLog(fn) { if (typeof fn === "function") logTo = fn; }
+function log(m) { try { logTo(String(m)); } catch (e) {} }
+function saveFailed(e) { const m = "miniMall: shop.json could not be saved: " + ((e && e.message) || e); if (m !== lastSaveError) { lastSaveError = m; log(m); } }
+function saved() { lastSaveError = ""; }
 
 function filePath() { return path.join(app.getPath("userData"), "shop.json"); }
 function ensureLoaded() {
@@ -35,8 +42,8 @@ function persistSoon() {
       const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
       const tmp = path.join(dir, "shop.json.tmp");
       fs.writeFileSync(tmp, JSON.stringify({ version: 1, shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta }));
-      fs.renameSync(tmp, filePath());
-    } catch (e) {}
+      fs.renameSync(tmp, filePath()); saved();
+    } catch (e) { saveFailed(e); }
   }, WRITE_DEBOUNCE_MS);
 }
 function flush() {   // synchronous — for fund-relevant writes (a recorded order/payment must survive a crash)
@@ -45,8 +52,8 @@ function flush() {   // synchronous — for fund-relevant writes (a recorded ord
     const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
     const tmp = path.join(dir, "shop.json.tmp");
     fs.writeFileSync(tmp, JSON.stringify({ version: 1, shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta }));
-    fs.renameSync(tmp, filePath());
-  } catch (e) {}
+    fs.renameSync(tmp, filePath()); saved();
+  } catch (e) { saveFailed(e); }
 }
 
 // ---- shops (my authored catalogs) ----
@@ -168,6 +175,6 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 module.exports = {
   saveShop, shops, shop, deleteShop,
   upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, mayAdvance, ensureChecked,
-  addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
+  addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, setLog, log,
   _money: { decCmp, decGte, decAdd, payableTotal }
 };

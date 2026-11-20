@@ -205,10 +205,27 @@ async function reply(ref, text) {
 }
 
 // ---- routing an opened inbound message ----
+// What another party sends is kept only as capped primitives (0.19.168): a value that is not a string or a finite number
+// becomes "" (or is left out), so no structure of theirs ever reaches the store. Items nested 12,000 arrays deep made
+// every save of shop.json throw (and nothing was saved again); String() or Number() of one throws as well.
+const txt = (v, n) => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : "").slice(0, n);
+const num = (v, n) => (typeof v === "number" && Number.isFinite(v) ? v : txt(v, n));
+const when = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : /^\d{1,15}$/.test(txt(v, 15)) ? Number(v) : Date.now());
+/** One order line as stored: the fields a line has, each a capped primitive; anything that is not an object is null. */
+function itemLine(it) {
+  if (!it || typeof it !== "object" || Array.isArray(it)) return null;
+  const line = { product: txt(it.product, 200), quantity: num(it.quantity, 20), unitPrice: txt(it.unitPrice, 64), lineTotal: txt(it.lineTotal, 64) };
+  if (it.size != null) line.size = txt(it.size, 60);
+  if (it.nftTokenId != null) line.nftTokenId = txt(it.nftTokenId, 80);
+  if (it.nftStateIdx != null) line.nftStateIdx = num(it.nftStateIdx, 12);
+  if (it.nftBundle != null) line.nftBundle = num(it.nftBundle, 12);
+  return line;
+}
 function routeIncoming(w, fromPublicId) {
   if (!w || w.from !== fromPublicId || !w.ref) return;   // envelope `from` must match the sealed sender (anti-spoof)
   if (typeof w.ref !== "string" || w.ref.length > 64) return;
   if (w.type === T.ORDER || w.type === T.INQUIRY) {
+    if (typeof w.shopId !== "string") return;
     const own = store.shop(w.shopId);
     if (!own) return;   // only accept orders/enquiries for a shop I actually authored — else any coin to my identity could inject bogus orders + flush-amplify
     // The token this order must be paid in is MY shop's, never the currency the buyer wrote (0.19.165, released 0.18.151):
@@ -216,19 +233,20 @@ function routeIncoming(w, fromPublicId) {
     const tokenid = tokenFor(own.currency);
     // What it is due is worked out from MY listing, never the buyer's total (0.19.166, released 0.18.159). items: an
     // array (this desktop) or a JSON array string (the phone's wire shape); either is kept as an array.
-    const items = (listing.itemsOf(w.items) || []).slice(0, 40), chk = listing.check(own, { items, shipping: w.shipping, currency: w.currency });
-    const isNew = store.upsertOrder({ ref: w.ref, role: "sell", counterparty: fromPublicId, buyerName: String(w.fromname || "").slice(0, 64),
-      shopId: w.shopId, shopName: own.shopName || String(w.shopName || ""), items, amount: String(w.amount || "0"), buyerCurrency: String(w.currency || "").slice(0, 20),
+    const items = (listing.itemsOf(w.items) || []).slice(0, 40).map(itemLine), shipping = txt(w.shipping, 200), buyerCurrency = txt(w.currency, 20);
+    const chk = listing.check(own, { items, shipping, currency: buyerCurrency });
+    const isNew = store.upsertOrder({ ref: w.ref, role: "sell", counterparty: fromPublicId, buyerName: txt(w.fromname, 64),
+      shopId: w.shopId, shopName: own.shopName || txt(w.shopName, 200), items, amount: txt(w.amount, 64) || "0", buyerCurrency,
       due: chk.problems.length ? "" : chk.due, problems: chk.problems.slice(0, 20).map(p => String(p).slice(0, 300)), currency: tokenid === MXUSD_TOKEN ? "USDT" : "Minima",
-      tokenid, shipping: String(w.shipping || "").slice(0, 200), delivery: String(w.delivery || "").slice(0, 500), buyerPayaddr: String(w.buyerPayaddr || "").slice(0, 90),
-      status: w.type === T.INQUIRY ? "INQUIRY" : chk.problems.length ? "UNCHECKED" : "PENDING", paid: false, date: Number(w.date) || Date.now(), unread: true, note: String(w.message || "").slice(0, 1000) });
+      tokenid, shipping, delivery: txt(w.delivery, 500), buyerPayaddr: txt(w.buyerPayaddr, 90),
+      status: w.type === T.INQUIRY ? "INQUIRY" : chk.problems.length ? "UNCHECKED" : "PENDING", paid: false, date: when(w.date), unread: true, note: txt(w.message, 1000) });
     if (isNew) emitter.emit("incoming", { ref: w.ref, shopName: own.shopName, amount: chk.problems.length ? "" : chk.due, currency: tokenid === MXUSD_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {
     const o = store.order(w.ref);
-    if (o && o.role === "buy" && o.counterparty === fromPublicId) store.setStatus(w.ref, w.status);   // only the vendor I bought from can advance MY buy order
+    if (o && o.role === "buy" && o.counterparty === fromPublicId) store.setStatus(w.ref, txt(w.status, 20));   // only the vendor I bought from can advance MY buy order
   } else if (w.type === T.REPLY || w.type === T.BUYER_REPLY) {
-    const o = store.order(w.ref);
-    if (o && o.counterparty === fromPublicId) store.addChat({ ref: w.ref, randomid: w.randomid, from: fromPublicId, to: identity.publicId, incoming: true, message: String(w.message || "").slice(0, 4000), date: Number(w.date) || Date.now() });
+    const o = store.order(w.ref), randomid = txt(w.randomid, 64);
+    if (o && randomid && o.counterparty === fromPublicId) store.addChat({ ref: w.ref, randomid, from: fromPublicId, to: identity.publicId, incoming: true, message: txt(w.message, 4000), date: when(w.date) });
   }
 }
 
@@ -250,10 +268,12 @@ async function scanOrders(depth) {
   let changed = false;
   for (const c of coins) {
     const id = c.coinid; if (!id || seenMsgCoins.has(id)) continue; seenMsgCoins.add(id);
-    const blobHex = statePort(c, 99); if (!blobHex) continue;
-    const opened = await sc.open(identity, blobHex); if (!opened || !opened.valid) continue;   // not for me / bad sig
-    routeIncoming(parseWire(opened.plaintext), opened.fromPublicId);
-    changed = true;
+    try {   // one coin at a time: whatever one message holds, the others in the batch are still read (0.19.168)
+      const blobHex = statePort(c, 99); if (!blobHex) continue;
+      const opened = await sc.open(identity, blobHex); if (!opened || !opened.valid) continue;   // not for me / bad sig
+      routeIncoming(parseWire(opened.plaintext), opened.fromPublicId);
+      changed = true;
+    } catch (e) { store.log("miniMall: an order channel coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); }
   }
   return changed;
 }
@@ -264,11 +284,13 @@ async function scanPayments(depth) {
   let changed = false;
   for (const c of coins) {
     const id = c.coinid; if (!id || seenPayCoins.has(id)) continue; seenPayCoins.add(id);
-    const refHex = statePort(c, 1); if (!refHex) continue;
-    const ref = hexToText(refHex); if (!ref) continue;
-    const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;
-    const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
-    if (outcome && outcome !== "ALREADY") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
+    try {   // one coin at a time (0.19.168)
+      const refHex = statePort(c, 1); if (!refHex) continue;
+      const ref = hexToText(refHex); if (!ref) continue;
+      const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;
+      const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
+      if (outcome && outcome !== "ALREADY") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
+    } catch (e) { store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); }
   }
   return changed;
 }

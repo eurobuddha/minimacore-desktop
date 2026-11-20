@@ -34,6 +34,7 @@ const dexiconRoom = require("./dexicon-room");
 dexiconRoom.register(require("electron"));   // dxroom://exchange/: the Dexicon page for its hidden, sandboxed frame
 const ethwallet = require("./ethwallet");
 const shop = require("./shop");
+require("./shop-store").setLog((m) => node.log("[app] " + m));   // a miniMall store that cannot be saved, or a coin that cannot be read, is said in the Logs view
 const casino = require("./casino");
 const vestr = require("./vestr");
 const webwallet = require("./webwallet");
