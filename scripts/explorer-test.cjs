@@ -70,17 +70,17 @@ function screen(o) {
     if (kind === "tip") return { status: true, response: { block: String(o.tip) } };
     if (kind === "status") return { status: true, response: { chain: { speed: "0.02" } } };
     if (kind === "info") return { status: true, response: { txpowdb: { size: 4093 } } };
-    if (kind === "block") { const h = Number(arg); return h > o.floor && h <= o.tip ? { status: true, response: block(h) } : { status: false, error: "TxPoW not found @ height " + arg }; }
+    if (kind === "block") { const h = Number(arg); if (o.failBlocks && o.failBlocks.has(h)) return { status: false, error: "busy" }; if (o.wrongBlock === h) return { status: true, response: block(h - 1) }; return h > o.floor && h <= o.tip ? { status: true, response: block(h) } : { status: false, error: "TxPoW not found @ height " + arg }; }
     if (kind === "txpow") return o.txpow ? o.txpow(arg) : { status: false, error: "TxPoW not found" };
     if (kind === "address") return o.address ? o.address(arg) : { status: true, response: [] };
     if (kind === "onchain") return { status: true, response: { found: true, block: "90", confirmations: "10" } };
     throw new Error("unknown read " + kind); } };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const env = { api, el: node, esc, toast: (m, k, c) => toasts.push([m, c]), running: true, AppsAct: { explorer: X }, store: () => null, histWhen: () => "now", nameWithId: (tid, n) => (n ? n + " (token " + tid + ")" : tid),
+  const env = { api, el: node, esc, toast: (m, k, c) => toasts.push([m, c]), running: o.running !== false, AppsAct: { explorer: X }, store: () => null, histWhen: () => "now", nameWithId: (tid, n) => (n ? n + " (token " + tid + ")" : tid),
     document: { activeElement: null }, setTimeout: (f) => setImmediate(f), clearTimeout() {} };
-  const names = ["explorerReset", "explorerRefresh", "explorerOlder", "explorerSearch", "explorerBlockAt", "explorerFind", "explorerTxn", "explorerAddress", "explorerPush", "explorerPaint", "explorerAct", "explorerTip", "exTokenLabel"];
+  const names = ["explorerReset", "explorerRefresh", "explorerReload", "explorerChrome", "explorerOlder", "explorerSearch", "explorerBlockAt", "explorerFind", "explorerTxn", "explorerAddress", "explorerPush", "explorerPaint", "explorerAct", "explorerTip", "exTokenLabel"];
   const fns = new Function(...Object.keys(env), src.replace(/^"use strict";$/mg, "") + "\nreturn { " + names.join(", ") + ", state: () => EX };")(...Object.values(env));
-  node("exContent"); node("main"); node("exSearch"); node("explorerBody");
+  node("exContent"); node("main"); node("exSearch"); node("explorerBody"); node("exTip");
   const settle = async () => { for (let i = 0; i < 400; i++) await new Promise(r => setImmediate(r)); };
   return Object.assign(fns, { asked, els, toasts, settle, most: () => most, block, env, opts: o });
 }
@@ -118,6 +118,71 @@ test("a new block: a small gap is read above the list in the right order; a larg
   o.tip = 200; await s.explorerRefresh(); await s.settle();
   assert.deepEqual(s.state().blocks.map(b => b.header.block), Array.from({ length: 16 }, (_, i) => String(200 - i)));
   const n = s.asked.length; await s.explorerRefresh(); await s.settle(); assert.deepEqual(s.asked.slice(n).filter(a => a.startsWith("block:")), [], "the same tip reads no block");
+});
+
+// 0.19.136 (review): the list could lose blocks (a new block during a page load was skipped for good, a failed read
+// left a hole), and a list started again while a walker was out got that walker's blocks as well.
+const whole = (E, top, n) => {   // strictly descending by one from `top`: no duplicate, no hole
+  const hs = E.blocks.map(b => Number(b.header.block));
+  assert.deepEqual(hs, Array.from({ length: n == null ? hs.length : n }, (_, i) => top - i), "the list is " + top + " downwards, each height once: " + hs.join(","));
+};
+const ticks = async (n) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
+
+test("a block that arrives during Load older is not lost: it is read above the list when the page has loaded", async () => {
+  const s = screen({ tip: 100 }), o = s.opts; await s.explorerRefresh(); await s.settle();
+  s.explorerOlder(); await ticks(5); assert.equal(s.state().loading, true, "the page is still loading");
+  o.tip = 102; s.explorerTip({ health: { block: "102" } }); await ticks(6);
+  assert.equal(s.state().seen, "102"); assert.equal(s.state().tip, "100", "the list's tip does not move past blocks that are not in the list yet");
+  await s.settle();
+  const E = s.state(); whole(E, 102, 34); assert.equal(E.tip, "102"); assert.equal(E.loading, false);
+  assert.equal(s.most(), 1 + 2, "and still never two block reads at once");
+  const blocks = s.asked.filter(a => a.startsWith("block:")); assert.equal(new Set(blocks).size, blocks.length, "no block was read twice");
+  // the same while the FIRST page is loading (the list is still empty when the new tip is seen)
+  const f = screen({ tip: 50 }), p = f.explorerRefresh(); await ticks(2); f.opts.tip = 51; f.explorerTip({ health: { block: "51" } }); await p; await f.settle();
+  whole(f.state(), 51); assert.equal(f.state().tip, "51"); assert.ok(f.state().blocks.length >= 17);
+});
+
+test("a read that fails among the new blocks leaves no hole: nothing is added, the tip stays, and the next node status tries again", async () => {
+  const s = screen({ tip: 100 }), o = s.opts; await s.explorerRefresh(); await s.settle();
+  o.tip = 103; o.failBlocks = new Set([102]);
+  await s.explorerRefresh(); await s.settle();
+  let E = s.state(); whole(E, 100, 16); assert.equal(E.tip, "100", "103 was read, 102 was not: neither is listed, and the tip shown is still the list's"); assert.equal(E.seen, "103"); assert.equal(E.loading, false);
+  assert.ok(s.els.exContent.innerHTML.includes("#100") && !s.els.exContent.innerHTML.includes("#103"));
+  let n = s.asked.length; s.explorerTip({ health: { block: "103" } }); await s.settle();
+  whole(s.state(), 100, 16); assert.ok(s.asked.length > n, "the same block number again is a reason to try again while the list is behind");
+  o.failBlocks = null; n = s.asked.length; s.explorerTip({ health: { block: "103" } }); await s.settle();
+  E = s.state(); whole(E, 103, 19); assert.equal(E.tip, "103");
+  assert.deepEqual(s.asked.slice(n).filter(a => a.startsWith("block:")), ["block:102", "block:101"], "103 was kept from the first try");
+  n = s.asked.length; s.explorerTip({ health: { block: "103" } }); await s.settle(); assert.equal(s.asked.length, n, "up to date: the same block number starts nothing");
+  // a node that answers with another block than the one asked for is a failed read too
+  o.tip = 104; o.wrongBlock = 104; await s.explorerRefresh(); await s.settle(); whole(s.state(), 103, 19);
+  o.wrongBlock = 0; s.explorerTip({ health: { block: "104" } }); await s.settle(); whole(s.state(), 104, 20);
+});
+
+test("a list started again while a walker is out gets none of that walker's blocks", async () => {
+  const s = screen({ tip: 100 }), p = s.explorerRefresh(); await ticks(8);
+  assert.ok(s.state().blocks.length > 0 && s.state().loading, "the first page is on its way");
+  s.explorerReload(); await p; await s.settle();
+  whole(s.state(), 100, 16); assert.equal(s.state().walk, 2, "each restart of the list is a new walk number");
+  // a large gap seen during Load older: the page ends, then the list starts again at the new tip, once
+  const g = screen({ tip: 100 }); await g.explorerRefresh(); await g.settle(); g.explorerOlder(); await ticks(5);
+  g.opts.tip = 300; g.explorerTip({ health: { block: "300" } }); await g.settle();
+  whole(g.state(), 300, 16); assert.equal(g.state().tip, "300"); assert.equal(g.state().lowest, 285);
+  // the chain went back (a resync): the list starts again rather than keeping blocks above the tip
+  const b = screen({ tip: 100 }); await b.explorerRefresh(); await b.settle(); b.opts.tip = 90; await b.explorerRefresh(); await b.settle(); whole(b.state(), 90, 16);
+  assert.ok(/function explorerReload\(\) \{ EX\.walk\+\+;/.test(src) && (src.match(/if \(exStale\(gen, walk\)\) return;/g) || []).length === 4, "both walkers check the state's number and the list's after every await");
+});
+
+test("the tip chip is neutral when the node is stopped, and Load older is not offered at block 1", async () => {
+  const off = screen({ running: false }); off.explorerChrome(); assert.equal(off.els.exTip.textContent, "○ node stopped");
+  const on = screen({ tip: 20 }); on.explorerChrome(); assert.equal(on.els.exTip.textContent, "● no block yet");
+  await on.explorerRefresh(); await on.settle(); assert.equal(on.els.exTip.textContent, "● 20");
+  assert.ok(/c\.classList\.toggle\("ex-tip--off", !running\);/.test(src) && /\.ex-tip--off \{ color: var\(--x-dim\); \}/.test(R("renderer/apps.css")), "and not in the green of a live tip");
+  whole(on.state(), 20, 16); assert.ok(on.els.exContent.innerHTML.includes("Load older blocks"));
+  on.explorerOlder(); await on.settle();
+  const E = on.state(); whole(E, 20, 20); assert.equal(E.lowest, 1); assert.equal(E.end, false);
+  assert.ok(on.els.exContent.innerHTML.includes("· block 1: the first block ·") && !on.els.exContent.innerHTML.includes("Load older blocks"), "the reason is said in place of the button");
+  const n = on.asked.length; on.explorerOlder(); await on.settle(); assert.equal(on.asked.length, n, "and nothing is read below block 1");
 });
 
 test("a node that goes away: the walk is abandoned, nothing of the old chain is drawn into the new state", async () => {

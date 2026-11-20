@@ -403,6 +403,7 @@ img.mm-prod__im { cursor: zoom-in; }
 .ex-head { display: flex; align-items: center; padding: 14px 14px 12px 18px; background: var(--x-card); }
 .ex-title { flex: 1; font-size: 18px; font-weight: 700; letter-spacing: .02em; color: var(--x-accent); }
 .ex-tip { padding: 6px; font-family: var(--app-mono); font-size: 13px; color: var(--x-green); }
+.ex-tip--off { color: var(--x-dim); }
 .ex .ex-theme { padding: 2px 4px 2px 10px; font-size: 17px; color: var(--x-dim); }
 .ex-search { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px; background: var(--x-card); }
 .ex-in { flex: 1; min-width: 0; height: 42px; box-sizing: border-box; padding: 0 14px; border: 0; border-radius: 12px; background: var(--x-card2); color: var(--x-text); font-family: var(--app-mono); font-size: 13px; }

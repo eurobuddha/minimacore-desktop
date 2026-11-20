@@ -64,7 +64,7 @@ function renderKeyUses() {
 // Different from the phone on purpose: every id and address is shown whole (the phone cuts them to 10…8) and can be copied.
 const EX_MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 let EX = null;
-function explorerReset() { const gen = EX ? EX.gen + 1 : 1; EX = { gen, tip: "", blocks: [], lowest: 0, loading: false, end: false, status: "", speed: "", db: "", pages: [], blockCache: new Map(), txCache: new Map(), timer: null }; }
+function explorerReset() { const gen = EX ? EX.gen + 1 : 1; EX = { gen, walk: 0, tip: "", seen: "", blocks: [], lowest: 0, loading: false, end: false, status: "", speed: "", db: "", pages: [], blockCache: new Map(), txCache: new Map(), timer: null }; }
 explorerReset();
 const exKeep = (map, key, value, cap) => { map.delete(key); map.set(key, value); if (map.size > cap) map.delete(map.keys().next().value); };
 const exWait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -80,9 +80,22 @@ function exTokenLabel(c) {
 }
 
 // ---- the chain list ----
-function explorerTip(s) {   // from every node status: a block the list has not seen starts one refresh (coalesced, as the phone's 400 ms)
+// EX.seen is the tip the node last gave; EX.tip is the tip THE LIST HAS REACHED (the tile and the chip show that one): it
+// moves only when the blocks up to it are in the list, so a new block that could not be read yet is tried again and
+// never skipped. One walker at a time (never two reads at the node at once): one that ends brings the list up to
+// EX.seen if it fell behind meanwhile. Every walker carries the state's number AND the list's (EX.walk, bumped by
+// explorerReload) and checks both after every await: a walker of a list that was started again writes nothing.
+const exTop = () => (EX.blocks.length ? Number(AppsAct.explorer.height(EX.blocks[0])) : 0);
+const exStale = (gen, walk) => gen !== EX.gen || walk !== EX.walk;
+/** One block read by height. → the txpow, or null when the node refused, had nothing, or answered with another block. Writes nothing. */
+async function exRead(height) {
+  const j = await exAsk("block", String(height)), t = j && typeof j.response === "object" && !Array.isArray(j.response) ? j.response : null;
+  return t && Number(AppsAct.explorer.height(t)) === height ? t : null;
+}
+function explorerTip(s) {   // from every node status: a block the list has not reached starts one refresh (coalesced, as the phone's 400 ms)
   const b = s && s.health && s.health.block != null ? String(s.health.block) : "";
-  if (!running || !b || b === EX.tip) return;
+  const behind = EX.blocks.length > 0 && !EX.loading && exTop() < Number(b);   // seen before, but not yet in the list (a read failed): tried again
+  if (!running || !b || (b === EX.seen && !behind)) return;
   clearTimeout(EX.timer); EX.timer = setTimeout(explorerRefresh, 400);
 }
 async function explorerRefresh() {
@@ -91,38 +104,67 @@ async function explorerRefresh() {
   if (gen !== EX.gen) return;
   const tip = j ? AppsAct.explorer.height({ header: j.response }) : "";
   if (!tip || tip === "0") { if (!EX.blocks.length) { EX.status = "node unreachable"; explorerPaint(); } return; }
-  const first = !EX.tip, gap = first ? 0 : Number(tip) - Number(EX.tip);
-  EX.tip = tip; explorerChrome();
-  if (first || !EX.blocks.length) explorerReload();
-  else if (gap > 0) { if (gap <= AppsAct.explorer.MAX_LIVE_GAP) { if (!EX.loading) { EX.loading = true; explorerLoad(Number(tip), gap, true); } } else explorerReload(); }
+  EX.seen = tip;
+  if (!EX.blocks.length && !EX.loading) explorerReload(); else explorerCatchUp();
   exAsk("status").then(r => { const c = r && r.response.chain; const t = c ? AppsAct.explorer.blockTime(c.speed) : ""; if (t && gen === EX.gen) { EX.speed = t; explorerPaint(true); } });
   exAsk("info").then(r => { const d = r && r.response.txpowdb; const n = d ? AppsAct.explorer.groupNum(d.size) : ""; if (n && gen === EX.gen) { EX.db = n + " txns"; explorerPaint(true); } });
 }
-function explorerReload() { EX.blocks = []; EX.blockCache.clear(); EX.end = false; EX.loading = false; EX.lowest = Number(EX.tip) + 1; explorerOlder(); }
-function explorerOlder() {
-  if (EX.loading || EX.end || !EX.tip) return;
-  EX.loading = true; EX.status = "loading…"; explorerPaint(true);
-  explorerLoad(EX.lowest - 1, AppsAct.explorer.PAGE, false);
+/** Bring the list up to EX.seen. While a walker runs this does nothing: that walker calls it when it ends. */
+function explorerCatchUp() {
+  if (!running || EX.loading || !EX.blocks.length || !EX.seen) return;
+  const top = exTop(), seen = Number(EX.seen);
+  if (seen - top > AppsAct.explorer.MAX_LIVE_GAP || seen < top) return explorerReload();   // too far behind to walk, or the chain went back
+  if (seen > top) { EX.loading = true; explorerPrepend(seen, top); }
 }
-/** The sequential walker (MainActivity.loadChain): down from `height` for `count` blocks, one read at a time. prepend: the few new blocks above the list. */
-async function explorerLoad(height, count, prepend) {
-  const gen = EX.gen, X = AppsAct.explorer, top = prepend && EX.blocks.length ? Number(X.height(EX.blocks[0])) : 0;
-  let at = 0;
-  for (; count > 0 && height > 0 && !(prepend && height <= top); count--, height--) {
+/** The list is started again from the tip last read. The number of the list changes, so a walker still out writes nothing. */
+function explorerReload() { EX.walk++; EX.blocks = []; EX.blockCache.clear(); EX.end = false; EX.loading = false; EX.tip = EX.seen; EX.lowest = Number(EX.tip) + 1; explorerChrome(); explorerOlder(); }
+function explorerOlder() {
+  if (EX.loading || EX.end || !EX.tip || EX.lowest <= 1) return;
+  EX.loading = true; EX.status = "loading…"; explorerPaint(true);
+  explorerPage(EX.lowest - 1, AppsAct.explorer.PAGE);
+}
+/** One page (MainActivity.loadChain): down from `height` for `count` blocks, one read at a time, each added below the list as it arrives. */
+async function explorerPage(height, count) {
+  const gen = EX.gen, walk = EX.walk;
+  for (; count > 0 && height > 0; count--, height--) {
     let txpow = EX.blockCache.get(height);
     if (!txpow) {
-      const j = await exAsk("block", String(height));
-      if (gen !== EX.gen) return;
-      txpow = j && typeof j.response === "object" && !Array.isArray(j.response) ? j.response : null;
-      if (!txpow) { if (!prepend) EX.end = true; break; }   // "TxPoW not found @ height N": below what the node keeps
+      txpow = await exRead(height);
+      if (exStale(gen, walk)) return;
+      if (!txpow) { EX.end = true; break; }   // "TxPoW not found @ height N": below what the node keeps
       exKeep(EX.blockCache, height, txpow, 200);
     }
-    if (prepend) EX.blocks.splice(at++, 0, txpow); else { EX.blocks.push(txpow); EX.lowest = height; }
+    EX.blocks.push(txpow); EX.lowest = height;
     explorerPaint(true);
-    await exWait(X.FETCH_GAP_MS);   // never hammer the node
-    if (gen !== EX.gen) return;
+    await exWait(AppsAct.explorer.FETCH_GAP_MS);   // never hammer the node
+    if (exStale(gen, walk)) return;
   }
   EX.loading = false; EX.status = EX.end ? "end of retained chain" : ""; explorerPaint(true);
+  explorerCatchUp();   // a block that arrived while this page was loading
+}
+/**
+ * The new blocks above the list: walked from the tip DOWN TO THE LIST'S OWN TOP BLOCK (not by a count worked out from
+ * a remembered tip), held aside, and put on the list only when every one of them was read. A read that fails leaves
+ * the list and EX.tip as they were: no hole, and the next node status tries again (explorerTip).
+ */
+async function explorerPrepend(seen, top) {
+  const gen = EX.gen, walk = EX.walk, fresh = [];
+  for (let h = seen; h > top; h--) {
+    let txpow = EX.blockCache.get(h);
+    if (!txpow) {
+      txpow = await exRead(h);
+      if (exStale(gen, walk)) return;
+      if (!txpow) { fresh.length = 0; break; }
+      exKeep(EX.blockCache, h, txpow, 200);
+      await exWait(AppsAct.explorer.FETCH_GAP_MS);
+      if (exStale(gen, walk)) return;
+    }
+    fresh.push(txpow);
+  }
+  EX.loading = false;
+  if (!fresh.length || exTop() !== top) return;   // not read whole, or not the list this walk started on
+  EX.blocks.unshift(...fresh); EX.tip = String(seen); explorerChrome(); explorerPaint(true);
+  explorerCatchUp();   // a still newer tip was seen while these were read
 }
 
 // ---- search and pages ----
@@ -233,9 +275,13 @@ function exHome() {
       return `<div class="ex-block" role="button" tabindex="0" data-ex="block" data-i="${i}"><span class="ex-block__l"><span class="ex-block__n">#${esc(X.groupNum(X.height(t)))}</span>
         <span class="ex-block__s"><span class="ex-id" data-copy="${esc(t.txpowid || "")}" title="Click to copy">${esc(t.txpowid || "")}</span>${ms > 0 ? "  ·  " + esc(histWhen(ms)) : ""}</span></span>
         <span class="ex-pill${n ? " ex-pill--tx" : ""}">${n ? "Transactions: " + n : "EMPTY"}</span><span class="ex-chev">›</span></div>`; }).join("")}
-      ${EX.end ? `<div class="ex-more ex-more--end">· end of retained chain ·</div>` : EX.loading ? `<div class="ex-more">loading…</div>` : EX.tip ? `<button class="ex-more ex-more--btn" data-ex="older">Load older blocks  ▾</button>` : ""}</div>`;
+      ${EX.end ? `<div class="ex-more ex-more--end">· end of retained chain ·</div>` : EX.blocks.length && EX.lowest <= 1 ? `<div class="ex-more ex-more--end">· block 1: the first block ·</div>` : EX.loading ? `<div class="ex-more">loading…</div>` : EX.tip ? `<button class="ex-more ex-more--btn" data-ex="older">Load older blocks  ▾</button>` : ""}</div>`;
 }
-function explorerChrome() { const c = el("exTip"); if (c) c.textContent = "● " + (AppsAct.explorer.groupNum(EX.tip) || "no block yet"); }
+function explorerChrome() {   // green with the tip while the node runs; neutral "node stopped" when it does not (never a green dot for a node that is not there)
+  const c = el("exTip"); if (!c) return;
+  c.textContent = running ? "● " + (AppsAct.explorer.groupNum(EX.tip) || "no block yet") : "○ node stopped";
+  c.classList.toggle("ex-tip--off", !running);
+}
 /** Draw the page on top of the stack, or the home list. keep: a repaint for new data; the reader's place and focus are kept. */
 function explorerPaint(keep) {
   const host = el("exContent"); if (!host) return;

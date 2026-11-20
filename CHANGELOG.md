@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.136] — Minima Explorer: the latest-blocks list loses no block
+
+- **A new block during a page load was lost for good.** The new blocks were read "by gap" from a remembered tip, the read was skipped while "Load older" (or the first page) was running, and the tip was moved on regardless, so those blocks were never asked for again. Now the tip the node gave (`EX.seen`) and the tip the list has reached (`EX.tip`, the one shown) are two values: the new blocks are walked from the tip down to the list's own top block, and a walker that ends brings the list up to date if it fell behind meanwhile.
+- **A failed read left a hole.** The new blocks are held aside and put on the list only when every one of them was read. Otherwise nothing is added, the tip shown stays the list's, and the next node status tries again (the blocks already read are kept). A node that answers with another block than the one asked for counts as a failed read.
+- **A list started again got an old walker's blocks too.** Every walker carries the list's number, raised each time the list starts again, and checks it after every await: a walker of an abandoned list writes nothing. A chain that went back (a resync) starts the list again.
+- **The tip chip** reads "○ node stopped" in a neutral colour when the node is not running (it was a green dot with "no block yet").
+- **"Load older blocks" is not offered at block 1**: the list ends with "block 1: the first block" (the button was there and did nothing).
+- Tests: `scripts/explorer-test.cjs` (14), the walkers run against a stand-in node: a block arriving during Load older and during the first page, a failed read among the new blocks, a restart during a walk, a large gap, the chain going back; in each the list is strictly descending with no duplicate and no hole, and no two block reads overlap.
+
 ## [0.19.135] — Web Wallet: the public key leaves only on a click
 
 - **Logging in to the Web Wallet no longer sends anything to the audit service.** Until now the wallet's public key went to `eurobuddha.com/keyaudit` by itself at every login, to pre-fill the "secret key uses" field. It is now sent only when the user clicks **Check on-chain** or **Confirm** in the send form, and the form says so before either button: only this wallet's public key is sent to eurobuddha.com, this reveals that key to that server, the secret key stays on this computer.
