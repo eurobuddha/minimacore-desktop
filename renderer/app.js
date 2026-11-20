@@ -434,9 +434,12 @@ function postBootNewSeed() {
     <label class="opt" id="seedAck" style="display:none"><input type="checkbox"/> <span style="margin:0;color:var(--text)">I've written down my 24 words and stored them safely.</span></label>
     <button class="btn btn--primary btn--full" id="newGo" style="display:none">Open my wallet</button>`;
   el("revealSeed").onclick = async () => {
-    const v = await tryCmd("vault");
-    const phrase = seedFrom(v);
-    if (!phrase) { toast("Couldn't read the seed yet — give the node a moment.", "err"); return; }
+    // 0.18.173: the seed comes only through the main process's gate (the typed phrase, the system's prompt where there is one)
+    const typed = await showPrompt("Reveal my 24-word seed", "", "SHOW SEED", { ok: "Show the seed", message: "Anyone who sees these words controls every coin of this wallet. Only continue if you are alone. Type SHOW SEED to continue." });
+    if (typed == null) return;
+    let phrase = "";
+    try { const r = await api.seedReveal(typed); phrase = (r && r.phrase) || ""; } catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /SHOW SEED/.test(m) ? "Type SHOW SEED exactly to continue." : "Couldn't read the seed yet. Give the node a moment.", "err"); return; }
+    if (!phrase) { toast("Couldn't read the seed yet. Give the node a moment.", "err"); return; }
     el("seedBox").style.display = ""; el("seedBox").textContent = phrase;
     el("seedAck").style.display = ""; el("newGo").style.display = "";
   };
@@ -1858,6 +1861,29 @@ function appendTerm(s) {
   if (TERM_OUT.length > 20000) TERM_OUT = TERM_OUT.slice(TERM_OUT.length - 20000);
   const out = el("termOut"); if (out) { out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight; }
 }
+/** Run ONE command that shows a seed or a private key: the typed phrase (SHOW SEED / SHOW KEY) and the system's prompt are
+ *  checked in the main process for this exact command, which then runs once. Its answer is text in one node that hides
+ *  itself after 60 s and when the window is left; nothing of it reaches the Terminal's output, history or Copy. */
+async function termSecret(c, kind) {
+  const phrase = kind === "seed" ? "SHOW SEED" : "SHOW KEY";
+  const typed = await showPrompt(kind === "seed" ? "This command shows the seed phrase" : "This command shows a private key", "", phrase, { ok: "Run it once",
+    message: "Anyone who sees the answer can take every coin it controls. It is shown apart from the Terminal, for a minute, and is not kept in the history or the output. Type " + phrase + " to run it." });
+  if (typed == null) return;
+  let r;
+  try { await api.cmdGate(c, typed); r = await api.cmd(c); }
+  catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /exactly/.test(m) ? "Type " + phrase + " exactly to continue." : m.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "err"); return; }
+  appendTerm("> (a command that shows a secret was run; its answer is not kept here)");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="termSecOv"><div class="modal"><div class="modal__title">Answer</div>
+    <div class="view__desc" style="color:var(--red)">⚠ Keep this secret. This closes by itself after 60 seconds, and when you leave this window.</div>
+    <pre class="mono" id="termSecText" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:50vh;overflow:auto"></pre>
+    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="termSecClose">Close</button></div></div></div>`);
+  const ov = el("termSecOv"); el("termSecText").textContent = JSON.stringify(r, null, 2); r = null;
+  const hidden = () => { if (document.hidden) close(); };
+  const close = () => { clearTimeout(timer); window.removeEventListener("blur", close); document.removeEventListener("visibilitychange", hidden); if (ov) ov.remove(); };
+  const timer = setTimeout(close, 60000);
+  window.addEventListener("blur", close); document.addEventListener("visibilitychange", hidden);
+  el("termSecClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "termSecOv") close(); };
+}
 function renderTerminal() {
   const out = el("termOut"), inp = el("termIn");
   out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight;
@@ -1867,10 +1893,15 @@ function renderTerminal() {
     if (e.key === "Enter") {                          // Enter ALWAYS submits, dropdown open or not
       const c = inp.value.trim(); if (!c) return;
       inp.value = ""; termSugClose();
+      let r, err = null;
+      try { r = await api.cmd(c); } catch (x) { err = x; }
+      // A command that shows a seed or a private key (0.18.173): the main process refused it until its gate is passed. It is
+      // never kept in the history or the output (Copy), and its answer is shown apart, for a minute at most.
+      const gated = err && /GATED:(seed|key):/.exec(String(err.message || ""));
+      if (gated) { termSecret(c, gated[1]); return; }
       TERM_HIST.push(c); termIdx = TERM_HIST.length;
       appendTerm("> " + c);
-      try { const r = await api.cmd(c); appendTerm(JSON.stringify(r, null, 2)); }
-      catch (err) { appendTerm("error: " + (err && err.message || err)); }
+      appendTerm(err ? "error: " + (err && err.message || err) : JSON.stringify(r, null, 2));
     } else if (e.key === "Escape") {                  // the escape hatch to reach ↑ history while suggestions are up
       if (SUG_ITEMS.length) { e.preventDefault(); termSugClose(); }
     } else if (e.key === "Tab") {

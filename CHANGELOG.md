@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.173] — the Terminal gates the commands that show a seed or a private key
+
+- Owner decision. On the general command channel (`mcd:cmd`: the Terminal and anything else in the window), `vault` (every action), `seedrandom` (every modifier) and `keys action:genkey` (prints a new private key) are refused, in any letter case and in any place of a `;` chain, unless a gate was just passed in the main process for that exact command (`main/cmdgate.js`, `mcd:cmdGate`): the typed phrase (SHOW SEED for vault, SHOW KEY for the others) and the Touch ID prompt where the Mac offers it, good for one run within 60 seconds and never again. A chain holding one of them is refused; it must be run on its own. The Terminal asks for the phrase when such a command is typed, runs it once, and shows the answer apart, as text, for 60 seconds at most and until the window is left; the command and its answer are not kept in the Terminal history, output or Copy. The first-run "Reveal my 24-word seed" now uses the Settings gate (0.18.165). Every other command is unchanged; the app's own main-process uses of these commands (Mail, miniMall, Web Wallet, AtomiX) do not use this channel. Test: `scripts/cmdgate-test.cjs` (`npm run test:cmdgate`, in CI).
+
 ## [0.18.172] — Chat: a peer's strings are cut to length
 
 - A chat message's decoded strings had no length limit. Each is now cut, before anything uses or stores it, to a length that keeps any real message whole: the body 256 KB (one keets message carries at most that), name 200, media ref 2048, address 90, amount 80, token id 66, token name 200, transaction id 130, state 20 (`main/chat.js` `capDecoded`; `chatschema.js` stays identical to the canonical mds/keetchat copy). Test: `scripts/chat-peer-test.cjs` (in `npm run test:chat`).

@@ -151,8 +151,14 @@ function requireRunning() {
   if (node.state !== "running") throw new Error("node not running");
 }
 
+// Commands that print a seed or a private key (vault, seedrandom, keys action:genkey) run on this channel only after a fresh
+// gate for that exact command (main/cmdgate.js, 0.18.173): the typed phrase and the system's prompt, good for one run in 60 s.
+const cmdGate = require("./cmdgate").create({ can: () => { const { systemPreferences } = require("electron"); return process.platform === "darwin" && systemPreferences.canPromptTouchID(); },
+  prompt: (why) => require("electron").systemPreferences.promptTouchID(why) });
+ipcMain.handle("mcd:cmdGate", (_e, command, typed) => cmdGate.arm(command, typed));
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
+  const gated = require("./cmdgate").refusal(command, cmdGate.take); if (gated) throw new Error(gated);
   requireRunning();
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust

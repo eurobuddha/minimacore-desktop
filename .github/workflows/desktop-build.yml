@@ -105,6 +105,10 @@ jobs:
       - name: Verify no script reaches a node by itself
         run: npm run test:test-node
 
+      # Commands that print a seed or a private key run only after a fresh, one-use, main-process gate.
+      - name: Verify the secret-command gate
+        run: npm run test:cmdgate
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
