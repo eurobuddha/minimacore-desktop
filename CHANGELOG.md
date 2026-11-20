@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.144] — The main process speaks the app's language: the Quit and Shutdown warning, the tray menu, dialogs, notices
+
+- **The warning before a Quit or a Shutdown** (`main/inflight.js`: unfinished AtomiX swaps, a market or OTC offer on the book, unconfirmed pool transactions, Exchange trades waiting, what could not be checked) is said in the app's language, title, text and both buttons ("Quit anyway" / "Stay open"). It is still ONE builder: each sentence is a catalog key, counts are plural keys ("1 AtomiX swap is…", "2 AtomiX swaps are…"; one / few / many in Russian and Ukrainian), and a translator is passed in. The English it produces is word for word what it was (the nine tests of `scripts/inflight-test.cjs` are unchanged). **The log line on disk stays English**: `decideQuit` builds the same facts a second time with the English translator (`I18N.tIn("en")`).
+- **Also translated:** the tray menu (Show, Restart node, Update to…, Quit, and the node's state, which loses its em dash: "Minima Core: running"), the titles and file-type names of the save and open dialogs, the mail, chat, miniMall and Parlons notifications' fixed words (a sender's name and message are as sent).
+- **Not done, and it matters:** the refusals and reasons the main process returns as errors are still English: Freeze, the restore gate, the coin guard, key mode, ETH Wallet, miniMall, Explorer, KeyUses, updates (about 200 sentences; listed in the plan). A translated screen can therefore show an English refusal. Engine texts of the vendored AtomiX, PandaPools and Dexicon files are English and are not edited.
+- Tests: `scripts/inflight-test.cjs` (10): the same number of warnings in zh, ru and uk as in English, the counts said, the names kept, no placeholder left, the question in Russian while the log line is English. `scripts/i18n-test.cjs` holds 2,598 keys to its rules.
+
 ## [0.19.143] — Mail, Chat and the tray apps in the four languages
 
 - **Translated:** MinimaMail (folders, lists, threads, compose, payments, contacts, the six-word address notice, settings, backup), Chat (list, thread, attachments, voice, the failure and restore dialogs with the RESTORE warning), ETH Wallet (send, review, tokens, RPC, the key export gate), Minima Vestr, miniMall (Shop, Studio, Inbox), Web Wallet (with its four safety notices), KeyUses (the verdicts and what was not checked), Minima Explorer, Entropy (every warning and note) and the Parlons screen. Mail and Chat take most of their words from the phone.

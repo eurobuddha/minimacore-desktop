@@ -164,21 +164,22 @@ function setupPermissions() {
 
 function pushStatus() { if (win && !win.isDestroyed()) win.webContents.send("mcd:status", node.snapshot()); }
 
+const { N_ } = lang.I18N, NODE_STATES = [N_("running"), N_("starting"), N_("stopping"), N_("stopped"), N_("error")];   // every catalog must hold them
 let refreshTrayMenu = () => {};   // set by setupTray: the menu is rebuilt when the node's state or the language changes
 function setupTray() {
   // the official Minima logo mark (bare, transparent) for the menu-bar tray, sized for the menu bar
   const MINIMA_MARK = "data:image/png;base64,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";
   const img = nativeImage.createFromDataURL(MINIMA_MARK).resize({ width: 18, height: 18 });
   try {
-    tray = new Tray(img);
+    tray = new Tray(img); currentLang();
     const menu = () => Menu.buildFromTemplate([
-      { label: flavor.productName + " — " + node.state, enabled: false },
+      { label: flavor.productName + ": " + lang.t(node.state), enabled: false },   // the node's state, said in the app's language (the five words are named below)
       { type: "separator" },
-      { label: "Show", click: () => { if (win) win.show(); else createWindow(); } },
-      { label: "Restart node", click: () => node.restart() },
-      ...(updater.current().available ? [{ type: "separator" }, { label: "Update to minimaCore " + updater.current().version + "…", click: () => { if (win) { win.show(); win.webContents.send("mcd:openUpdate"); } } }] : []),
+      { label: lang.t("Show"), click: () => { if (win) win.show(); else createWindow(); } },
+      { label: lang.t("Restart node"), click: () => node.restart() },
+      ...(updater.current().available ? [{ type: "separator" }, { label: lang.t("Update to minimaCore {version}…", { version: updater.current().version }), click: () => { if (win) { win.show(); win.webContents.send("mcd:openUpdate"); } } }] : []),
       { type: "separator" },
-      { label: "Quit", click: () => app.quit() }
+      { label: lang.t("Quit"), click: () => app.quit() }
     ]);
     tray.setToolTip(flavor.test ? flavor.productName + " (TEST PROFILE)" : flavor.productName);
     tray.setContextMenu(menu());
@@ -326,13 +327,13 @@ for (const [eng, name] of [[atomix, "AtomiX"], [pandapools, "PandaPools"], [dexi
 node.on("status", (s) => { freeze.settle(); if (s.state !== "running") freeze.nodeStopped(); });   // a start that failed (a locked node) is tried again with the next node, not on every status
 ipcMain.handle("mcd:freezeList", () => freeze.list());
 ipcMain.handle("mcd:freezeSet", (_e, id, on) => freeze.set(id, on));
-ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now()); return { title: w.title, message: w.message, any: w.any }; });
+ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now(), (currentLang(), lang.t)); return { title: w.title, message: w.message, any: w.any }; });
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 // Logs, "Save to file" (the phone's Share): the text the screen shows, redacted again here, to a file the user chooses.
 ipcMain.handle("mcd:logsSave", async (_e, text) => {
   const d = new Date(), two = (n) => String(n).padStart(2, "0");
-  const r = await dialog.showSaveDialog(win, { title: "Save node log", defaultPath: "minima-node-log-" + d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) + "-" + two(d.getHours()) + two(d.getMinutes()) + ".txt", filters: [{ name: "Text", extensions: ["txt"] }] });
+  const r = await dialog.showSaveDialog(win, { title: lang.t("Save node log"), defaultPath: "minima-node-log-" + d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) + "-" + two(d.getHours()) + two(d.getMinutes()) + ".txt", filters: [{ name: "Text", extensions: ["txt"] }] });
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, require("./nodelog").forFile(text, config.rpcSecret()), { encoding: "utf8", mode: 0o600 });
   return r.filePath;
@@ -439,7 +440,7 @@ ipcMain.handle("mcd:chatSendVoice", (_e, to, bytes, mime, secs, wave) => chat.se
 // Files (0.19.2). The renderer never names a path: sending goes through an open dialog, saving through a save dialog
 // whose default name is the peer's file name made safe. A saved file is never opened by the app.
 ipcMain.handle("mcd:chatFileSend", async (_e, to) => {
-  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], title: "File (up to 100 MB)" });
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], title: lang.t("File (up to 100 MB)") });
   if (r.canceled || !r.filePaths.length) return null;
   return chat.fileSend(to, r.filePaths[0]);
 });
@@ -460,7 +461,7 @@ ipcMain.handle("mcd:chatFileSave", async (_e, id) => {
   return { canceled: false, path: r.filePath };
 });
 ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
-  const r = await dialog.showOpenDialog(win, { title: "Send a photo",
+  const r = await dialog.showOpenDialog(win, { title: lang.t("Send a photo"),
     filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }], properties: ["openFile"] });
   if (r.canceled || !r.filePaths.length) return null;
   return chat.sendImageFile(to, r.filePaths[0]);
@@ -510,14 +511,14 @@ ipcMain.handle("mcd:chatExportBackup", async (_e, pass) => {
   const file = chatbackup.exportBackup(pass, { keypair, keetsPubkey: chat.myIdentity().pubkey, chatName: all.meta.myname || "",
     contacts: all.contacts, messages: all.messages, payaddr });
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-  const r = await dialog.showSaveDialog(win, { defaultPath: "keets-chat-backup-" + stamp + ".kbak", filters: [{ name: "Chat backup", extensions: ["kbak"] }] });
+  const r = await dialog.showSaveDialog(win, { defaultPath: "keets-chat-backup-" + stamp + ".kbak", filters: [{ name: lang.t("Chat backup"), extensions: ["kbak"] }] });
   if (r.canceled || !r.filePath) return { canceled: true };
   fs.writeFileSync(r.filePath, file);
   return { canceled: false, path: r.filePath, contacts: all.contacts.length, messages: all.messages.length };
 });
 ipcMain.handle("mcd:chatOpenBackup", async (_e, pass) => {
   if (typeof pass !== "string" || !pass) throw new Error("Enter the backup's password.");
-  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "Chat backup", extensions: ["kbak"] }, { name: "All files", extensions: ["*"] }] });
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: lang.t("Chat backup"), extensions: ["kbak"] }, { name: lang.t("All files"), extensions: ["*"] }] });
   if (r.canceled || !r.filePaths.length) return { canceled: true };
   if (fs.statSync(r.filePaths[0]).size > chatbackup.MAX_FILE) throw new Error("That file is too large to be a chat backup.");
   let opened;
@@ -552,14 +553,14 @@ ipcMain.handle("mcd:chatApplyBackup", async () => {
 ipcMain.handle("mcd:mailExportBackup", async (_e, passphrase) => {
   if (typeof passphrase !== "string" || passphrase.length < 8) throw new Error("Use a passphrase of at least 8 characters.");
   const enc = await mail.exportBackup(passphrase);   // throws before any dialog if the identity isn't ready
-  const r = await dialog.showSaveDialog(win, { defaultPath: "minimamail-backup.json", filters: [{ name: "minimaMail backup", extensions: ["json"] }] });
+  const r = await dialog.showSaveDialog(win, { defaultPath: "minimamail-backup.json", filters: [{ name: lang.t("minimaMail backup"), extensions: ["json"] }] });
   if (r.canceled || !r.filePath) return { canceled: true };
   fs.writeFileSync(r.filePath, enc, "utf8");
   return { canceled: false, path: r.filePath };
 });
 ipcMain.handle("mcd:mailImportBackup", async (_e, passphrase) => {
   if (typeof passphrase !== "string" || passphrase.length < 1) throw new Error("Enter the backup passphrase.");
-  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "minimaMail backup", extensions: ["json"] }] });
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: lang.t("minimaMail backup"), extensions: ["json"] }] });
   if (r.canceled || !r.filePaths.length) return { canceled: true };
   const json = fs.readFileSync(r.filePaths[0], "utf8");
   const id = await mail.importBackup(passphrase, json);   // throws on wrong passphrase / bad file
@@ -583,8 +584,8 @@ node.on("status", (s) => {
 mail.emitter.on("incoming", (info) => {
   try {
     if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
-    const who = info.name || "New mail";
-    const body = info.count > 1 ? info.count + " new messages" : (info.preview || "New message");
+    const who = info.name || lang.t("New mail");
+    const body = info.count > 1 ? lang.t("{n} new messages", { n: info.count }) : (info.preview || lang.t("New message"));
     const n = new Notification({ title: info.count > 1 ? "minimaMail" : who, body, silent: false });
     n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
     n.show();
@@ -596,7 +597,7 @@ chat.emitter.on("incoming", (info) => {
   try {
     if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
     const title = info.count > 1 ? "KeetChat" : (info.name || "KeetChat");
-    const body = info.count > 1 ? info.count + " new messages" : (info.preview || "New message");
+    const body = info.count > 1 ? lang.t("{n} new messages", { n: info.count }) : (info.preview || lang.t("New message"));
     const n = new Notification({ title, body, silent: false });
     n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:chat-focus"); } });
     n.show();
@@ -608,7 +609,7 @@ shop.emitter.on("incoming", (info) => {
   try {
     if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
     if (info.paid) return;   // payment-matched events don't pop a toast; only new orders do
-    const n = new Notification({ title: "miniMall — new order", body: (info.shopName ? info.shopName + " · " : "") + (info.amount ? info.amount + " " + (info.currency || "") : "New order"), silent: false });
+    const n = new Notification({ title: lang.t("miniMall: new order"), body: (info.shopName ? info.shopName + " · " : "") + (info.amount ? info.amount + " " + (info.currency || "") : lang.t("New order")), silent: false });
     n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
     n.show();
   } catch (e) {}
@@ -874,7 +875,7 @@ ipcMain.handle("mcd:exportCsv", async (_e, text, name) => {
 // History "Import history (restore / merge)": the user picks a JSON export; its TEXT goes back to the renderer,
 // which checks every record before anything is stored. Nothing is read without the dialog. 64 MB at most.
 ipcMain.handle("mcd:importJson", async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "History export", extensions: ["json"] }, { name: "All files", extensions: ["*"] }] });
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: lang.t("History export"), extensions: ["json"] }, { name: lang.t("All files"), extensions: ["*"] }] });
   if (r.canceled || !r.filePaths.length) return null;
   if (fs.statSync(r.filePaths[0]).size > 64 * 1024 * 1024) throw new Error("That file is larger than 64 MB.");
   return fs.readFileSync(r.filePaths[0], "utf8");
@@ -882,13 +883,13 @@ ipcMain.handle("mcd:importJson", async () => {
 
 // miniMall: export a .shop bundle (save dialog) / import one (open dialog → parsed JSON)
 ipcMain.handle("mcd:shopExport", async (_e, json, name) => {
-  const r = await dialog.showSaveDialog(win, { defaultPath: (name || "shop") + ".shop", filters: [{ name: "miniMall shop", extensions: ["shop"] }] });
+  const r = await dialog.showSaveDialog(win, { defaultPath: (name || "shop") + ".shop", filters: [{ name: lang.t("miniMall shop"), extensions: ["shop"] }] });
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, String(json == null ? "" : json), "utf8");
   return r.filePath;
 });
 ipcMain.handle("mcd:shopImport", async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "miniMall shop", extensions: ["shop", "json"] }] });
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: lang.t("miniMall shop"), extensions: ["shop", "json"] }] });
   if (r.canceled || !r.filePaths || !r.filePaths[0]) return null;
   let cfg; try { cfg = JSON.parse(fs.readFileSync(r.filePaths[0], "utf8")); } catch (e) { throw new Error("Not a valid .shop file."); }
   return shop.checkImported(cfg);   // the vendor's file: currency and token must agree, prices plain, pictures inline or none
@@ -947,10 +948,10 @@ app.on("before-quit", (e) => {
   if (quitAsking) { if (win && !win.isDestroyed()) { win.show(); win.focus(); } return; }   // a second Quit while the question is open: show it
   quitAsking = true;
   (async () => {
-    const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
+    const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l), t: (currentLang(), lang.t),   // the question in the app's language; the log line stays English
       ask: async (w) => {
         if (win && !win.isDestroyed()) { win.show(); win.focus(); }
-        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle, message: w.title, detail: w.message });
+        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("Quit anyway"), lang.t("Stay open")], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle, message: w.title, detail: w.message });
         return r.response === 0 || systemQuit.on();   // the system asked while the question was open: it is not held
       } }).catch(() => true);
     quitAsking = false;

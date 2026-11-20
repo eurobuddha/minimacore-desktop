@@ -80,7 +80,7 @@ test("wiring: one gather for Shutdown and Quit; the quit is asked before the nod
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "held, asked, and only then the node is stopped and the app quits: " + order);
   assert.match(main, /powerMonitor\.on\("shutdown", \(\) => \{ systemQuit\.mark\(\); \}\)/); assert.match(main, /w\.on\("session-end", \(\) => \{ systemQuit\.mark\(\); \}\)/);
   assert.match(main, /const systemQuit = inflight\.recently\(\);/); assert.ok(!/systemQuit = true|os: systemQuit,|\|\| systemQuit;/.test(main), "no flag that stays set for the session");
-  assert.match(main, /buttons: \["Quit anyway", "Stay open"\], defaultId: 1, cancelId: 1/, "Enter and Esc both stay open");
+  assert.match(main, /buttons: \[lang\.t\("Quit anyway"\), lang\.t\("Stay open"\)\], defaultId: 1, cancelId: 1/, "Enter and Esc both stay open");
   assert.match(main, /win\.on\("close", e => \{ if \(quitting\) return; e\.preventDefault\(\); if \(process\.platform === "darwin"\) win\.hide\(\); else app\.quit\(\); \}\);/, "off the Mac, closing the window asks through the same quit");
   assert.match(main, /node\.onStopping = \(\) => Promise\.all\(\[dexicon\.stop\(\), atomix\.quiet\(10000\), pandapools\.quiet\(10000\)\]\);/, "the bounded drain every quit goes through (0.18.117)");
 });
@@ -112,4 +112,24 @@ test("a cancelled system shutdown does not silence the Quit question for the ses
   sys.mark(); assert.deepEqual(await quit(), { go: true, asked: 0 }, "the system is shutting down: not held");
   clock.t += 61000; assert.deepEqual(await quit(), { go: false, asked: 1 }, "later, Cmd-Q with a swap in flight is asked again");
   sys.mark(); clock.t += 30000; sys.mark(); clock.t += 45000; assert.equal(sys.on(), true, "a second word from the system starts the minute again");
+});
+
+test("languages: the same facts in the app's language for the question, and in English for the log", async () => {
+  const I18N = require("../renderer/i18n.js"); for (const c of ["en", "zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const work = { atomix: { ready: true, swaps: [{}, {}], nearestMs: 0 }, pools: [], dexicon: { ready: true, takes: 1, unknown: 0, pending: 5 } };
+  const en = inFlight(work, "quit", 1000);
+  assert.match(en.message, /^2 AtomiX swaps are not finished\. A swap in progress cannot settle while the app is closed and can time out\. Open the app again well before then/);
+  assert.match(en.message, /1 Exchange trade is sent and not yet answered\. While the app is closed it cannot be voided/); assert.match(en.message, /5 Exchange orders are still waiting for a block\./);
+  for (const code of ["zh", "ru", "uk"]) {
+    const w = inFlight(work, "quit", 1000, I18N.tIn(code));
+    assert.equal(w.busy.length, en.busy.length, code + ": the same number of warnings"); assert.equal(w.any, true);
+    assert.notEqual(w.title, en.title); for (const line of w.busy) { assert.ok(!/ (is|are) (not|sent|still)/.test(line), code + ": no English sentence left: " + line); assert.ok(/[125]/.test(line), code + ": the count is said"); }
+    assert.ok(w.message.includes("AtomiX") && w.message.includes("Dexicon"), code + ": the names stay");
+    assert.ok(!/\{[a-z]+\}/.test(w.message), code + ": no placeholder left unfilled: " + w.message);
+  }
+  // the question in Russian, the log line in English
+  const logs = []; I18N.set("ru");
+  try { await decideQuit({ os: false, stopped: false, gather: async () => work, log: (l) => logs.push(l), t: I18N.t, ask: async (w) => { assert.ok(/[а-я]/i.test(w.title + w.message), "asked in Russian"); return false; } }); }
+  finally { I18N.set("en"); }
+  assert.match(logs[0], /^\[app\] quit asked with work in flight \(2 AtomiX swaps are not finished\./, "the log on disk stays English");
 });

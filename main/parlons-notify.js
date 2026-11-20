@@ -14,6 +14,7 @@
  */
 // The sender is a Maxima identity key: an RSA-1024 public key prints as 0x + 324 hex digits (0.19.3 allowed 200, so a
 // real line was neither notified nor redacted). Up to 1024 is read, for a longer key kind.
+const L = require("../renderer/i18n.js");   // the notices in the app's language (the same catalog as the window)
 const MESSAGE = /^\[parlons-node\] message from (0x[0-9A-Fa-f]{1,1024}): ([\s\S]*)$/;
 const MESSAGE_START = "[parlons-node] message from ";
 const CALL = /^\[parlons-node\] node: call offer from ([\s\S]*) → pushing to devices$/;
@@ -72,7 +73,7 @@ function install({ events, electron, window: getWindow, open }) {
       if (now - lastMessage < MESSAGE_GAP_MS) { waiting++; return; }
       const more = waiting; lastMessage = now; waiting = 0;
       if (!supported()) return;
-      const n = new Notification({ title: "Parlons: new message", body: (ev.preview || "Open Parlons to read it.") + (more ? " (and " + more + " more)" : "") });
+      const n = new Notification({ title: L.t("Parlons: new message"), body: (ev.preview || L.t("Open Parlons to read it.")) + (more ? " " + L.t("(and {n} more)", { n: more }) : "") });
       n.on("click", () => open());
       n.show();
     } else if (ev.type === "call") {
@@ -80,7 +81,7 @@ function install({ events, electron, window: getWindow, open }) {
       const w = getWindow(); if (w && !w.isDestroyed()) w.flashFrame(true);
       if (app.dock) { try { bounce = app.dock.bounce("critical"); } catch (e) {} }
       if (supported()) {
-        callNote = new Notification({ title: "Incoming Parlons call", body: (ev.name ? "From " + ev.name + ". " : "") + "Answer in the Parlons tab in your browser." });
+        callNote = new Notification({ title: L.t("Incoming Parlons call"), body: (ev.name ? L.t("From {name}.", { name: ev.name }) + " " : "") + L.t("Answer in the Parlons tab in your browser.") });
         callNote.on("click", () => { clearCall(); open(); });
         callNote.show();
       }

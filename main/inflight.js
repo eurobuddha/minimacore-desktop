@@ -18,62 +18,67 @@ function clock(ms, nowMs) {
   return d.toDateString() === n.toDateString() ? t : t + " on " + d.getDate() + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
 }
 
+// The words come from the shared catalog (renderer/i18n.js). EN says them in English whatever the app's language: for
+// the log on disk, and when no translator is passed. The counts are plural keys (renderer/i18n/en.js holds "1 … is").
+const I18N = require("../renderer/i18n.js"); require("../renderer/i18n/en.js");
+const EN = I18N.tIn("en");
+
 /** how: "quit" (the app closes, and the node with it) or "shutdown" (the node stops, the app stays open). */
-function inFlight(work, how, nowMs) {
-  work = work || {}; nowMs = nowMs || Date.now();
-  const quit = how === "quit", off = quit ? "while the app is closed" : "while the node is stopped", back = quit ? "Open the app again" : "Start the node again";
-  const busy = [], unread = [], n = (k, one, many) => (k === 1 ? "1 " + one : k + " " + (many || one + "s"));
+function inFlight(work, how, nowMs, t) {
+  work = work || {}; nowMs = nowMs || Date.now(); t = t || EN;   // t: the translator of the language to say it in (English when none is given: the log, the tests)
+  const quit = how === "quit", off = quit ? t("while the app is closed") : t("while the node is stopped"), back = quit ? t("Open the app again") : t("Start the node again");
+  const busy = [], unread = [];
 
   // ---- AtomiX (room 1): swaps, the maker order, OTC ----
   const ax = work.atomix;
-  if (!ax) unread.push("AtomiX swaps, market and OTC (AtomiX could not be asked)");
-  else if (!ax.ready) { if (ax.hasStore) unread.push("AtomiX swaps, market and OTC (AtomiX has not started" + (ax.error ? ": " + ax.error : "") + ")"); }
+  if (!ax) unread.push(t("AtomiX swaps, market and OTC (AtomiX could not be asked)"));
+  else if (!ax.ready) { if (ax.hasStore) unread.push(t("AtomiX swaps, market and OTC (AtomiX has not started{why})", { why: ax.error ? ": " + ax.error : "" })); }
   else {
     const k = (ax.swaps || []).length;
     if (k) {
       const at = Number(ax.nearestMs) || 0;
-      const when = !at ? "can time out"
-        : at <= nowMs ? "can time out: the time limit of " + (k === 1 ? "its lock" : "the first lock") + " has already passed and its refund is waiting to be made"
-        : "can time out " + (ax.nearestApprox ? "at about " : "at ") + clock(at, nowMs) + (k === 1 ? "" : " (the first of them)");
-      busy.push((k === 1 ? "1 AtomiX swap is" : k + " AtomiX swaps are") + " not finished. A swap in progress cannot settle " + off + " and " + when + ". " + back + " well before then: if the other side completes its part in the meantime, this app must be running to claim yours.");
+      const when = !at ? t("can time out")
+        : at <= nowMs ? (k === 1 ? t("can time out: the time limit of its lock has already passed and its refund is waiting to be made") : t("can time out: the time limit of the first lock has already passed and its refund is waiting to be made"))
+        : (ax.nearestApprox ? t("can time out at about {time}", { time: clock(at, nowMs) }) : t("can time out at {time}", { time: clock(at, nowMs) })) + (k === 1 ? "" : " " + t("(the first of them)"));
+      busy.push(t("{n} AtomiX swaps are not finished. A swap in progress cannot settle {off} and {when}. {back} well before then: if the other side completes its part in the meantime, this app must be running to claim yours.", { n: k, off, when, back }));
     }
-    if (ax.maker) busy.push("Your AtomiX market is on the book. Its orders stay there, but a swap someone starts against them is not answered " + off + ".");
-    if (ax.otcOffer) busy.push("Your AtomiX OTC availability is live. A proposal sent to you is not answered " + off + ".");
-    if (ax.otcDeals) busy.push(n(ax.otcDeals, "AtomiX OTC deal") + (ax.otcDeals === 1 ? " is" : " are") + " open and cannot go on " + off + ".");
+    if (ax.maker) busy.push(t("Your AtomiX market is on the book. Its orders stay there, but a swap someone starts against them is not answered {off}.", { off }));
+    if (ax.otcOffer) busy.push(t("Your AtomiX OTC availability is live. A proposal sent to you is not answered {off}.", { off }));
+    if (ax.otcDeals) busy.push(t("{n} AtomiX OTC deals are open and cannot go on {off}.", { n: ax.otcDeals, off }));
   }
 
   // ---- PandaPools (room 2): transactions sent and not confirmed ----
   const pool = work.pools;
-  if (!Array.isArray(pool)) unread.push("pool operations (PandaPools has not started)");
+  if (!Array.isArray(pool)) unread.push(t("pool operations (PandaPools has not started)"));
   else {
     // ponytail: "recent and not confirmed" stands for pending; an old transaction this node never found stays unconfirmed for good
     const k = pool.filter(r => r && r.type !== "STATUS" && !r.failed && !r.confirmed && nowMs - Number(r.ts || 0) < HOUR).length;
-    if (k) busy.push(n(k, "pool transaction") + " sent in the last hour " + (k === 1 ? "is" : "are") + " not confirmed yet. The app cannot check or finish " + (k === 1 ? "it" : "them") + " " + off + ".");
+    if (k) busy.push(t("{n} pool transactions sent in the last hour are not confirmed yet. The app cannot check or finish them {off}.", { n: k, off }));
   }
 
   // ---- Dexicon Exchange (room 3): takes awaiting an answer, fills whose outcome is not known, placements waiting ----
   const dx = work.dexicon;
-  if (dx == null) unread.push("Exchange trades waiting for an answer (Dexicon could not be asked)");
+  if (dx == null) unread.push(t("Exchange trades waiting for an answer (Dexicon could not be asked)"));
   else {
-    if (!dx.ready && dx.hasStore && typeof dx.takes !== "number") unread.push("Exchange trades waiting for an answer (Dexicon has not started)");
-    if (dx.takes > 0) busy.push((dx.takes === 1 ? "1 Exchange trade is" : dx.takes + " Exchange trades are") + " sent and not yet answered. " + (quit ? "While the app is closed" : "While the node is stopped") + " " + (dx.takes === 1 ? "it" : "they")
-      + " cannot be voided, so the other side could still complete " + (dx.takes === 1 ? "it" : "them") + " later at the price you signed. Wait a few minutes until Dexicon, Orders shows no trade waiting.");
-    if (dx.unknown > 0) busy.push(n(dx.unknown, "fill") + " of your Exchange orders " + (dx.unknown === 1 ? "has" : "have") + " an outcome that is not known yet (the node did not answer when " + (dx.unknown === 1 ? "it was" : "they were")
-      + " posted). The chain decides; the app can only read the answer while it runs.");
-    if (dx.pending > 0) busy.push(n(dx.pending, "Exchange order") + (dx.pending === 1 ? " is" : " are") + " still waiting for a block.");
+    if (!dx.ready && dx.hasStore && typeof dx.takes !== "number") unread.push(t("Exchange trades waiting for an answer (Dexicon has not started)"));
+    if (dx.takes > 0) busy.push(quit
+      ? t("{n} Exchange trades are sent and not yet answered. While the app is closed they cannot be voided, so the other side could still complete them later at the price you signed. Wait a few minutes until Dexicon, Orders shows no trade waiting.", { n: dx.takes })
+      : t("{n} Exchange trades are sent and not yet answered. While the node is stopped they cannot be voided, so the other side could still complete them later at the price you signed. Wait a few minutes until Dexicon, Orders shows no trade waiting.", { n: dx.takes }));
+    if (dx.unknown > 0) busy.push(t("{n} fills of your Exchange orders have an outcome that is not known yet (the node did not answer when they were posted). The chain decides; the app can only read the answer while it runs.", { n: dx.unknown }));
+    if (dx.pending > 0) busy.push(t("{n} Exchange orders are still waiting for a block.", { n: dx.pending }));
   }
 
   // ---- P2P Chance (removed in 0.18.68; bets already on the chain are still settled by this app) ----
   const c = work.casino;
-  if (c && (c.offers || c.bets)) busy.push("P2P Chance: " + n(c.bets || 0, "bet") + " and " + n(c.offers || 0, "offer") + " still open. They are revealed and paid out only while the app and its node run; a bet that is not settled before its deadline can be claimed by the other side.");
-  else if (!c && work.casinoOn) unread.push("P2P Chance bets (not read yet)");
+  if (c && (c.offers || c.bets)) busy.push(t("P2P Chance: {bets} and {offers} still open. They are revealed and paid out only while the app and its node run; a bet that is not settled before its deadline can be claimed by the other side.", { bets: t("{n} bets", { n: c.bets || 0 }), offers: t("{n} offers", { n: c.offers || 0 }) }));
+  else if (!c && work.casinoOn) unread.push(t("P2P Chance bets (not read yet)"));
 
   const lines = busy.slice();
-  if (unread.length) lines.push("Could not be checked: " + unread.join("; ") + ". " + (quit ? "If you are not sure nothing is in flight, stay open and look at the Dexicon tab first." : "Look at the Dexicon tab before you shut down."));
-  const base = quit ? "The app closes and its node stops. Swaps, pools, orders, mail and chat stop being served until you open it again."
-    : "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again.";
+  if (unread.length) lines.push(t("Could not be checked: {what}. {advice}", { what: unread.join("; "), advice: quit ? t("If you are not sure nothing is in flight, stay open and look at the Dexicon tab first.") : t("Look at the Dexicon tab before you shut down.") }));
+  const base = quit ? t("The app closes and its node stops. Swaps, pools, orders, mail and chat stop being served until you open it again.")
+    : t("The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again.");
   return { busy, unread, any: lines.length > 0,
-    title: busy.length ? (quit ? "Quit with work in flight?" : "Shut down with trades in flight?") : unread.length ? (quit ? "Quit without the check?" : "Shut down the node?") : (quit ? "Quit?" : "Shut down the node?"),
+    title: busy.length ? (quit ? t("Quit with work in flight?") : t("Shut down with trades in flight?")) : unread.length ? (quit ? t("Quit without the check?") : t("Shut down the node?")) : (quit ? t("Quit?") : t("Shut down the node?")),
     message: lines.concat(base).join("\n\n") };
 }
 
@@ -89,7 +94,8 @@ function inFlight(work, how, nowMs) {
 async function decideQuit(d) {
   let work = null;
   try { work = await Promise.race([d.gather(), new Promise(r => setTimeout(() => r(null), d.waitMs || 5000))]); } catch (e) { work = null; }
-  const w = inFlight(work || {}, "quit", d.now ? d.now() : Date.now()), said = w.busy.concat(w.unread.length ? ["could not be checked: " + w.unread.join("; ")] : []);
+  const at = d.now ? d.now() : Date.now(), w = inFlight(work || {}, "quit", at, d.t), en = d.t ? inFlight(work || {}, "quit", at) : w;   // w: what is asked, in the user's language; en: the same facts in English, for the log
+  const said = en.busy.concat(en.unread.length ? ["could not be checked: " + en.unread.join("; ")] : []);
   if (d.stopped) { d.log("[app] quit with the node already stopped: no question was shown. " + (said.length ? "Not finished: " + said.join(" | ") : "Nothing was in flight.")); return true; }
   if (d.os) { d.log("[app] quit asked by the system: no question was shown. " + (said.length ? "In flight: " + said.join(" | ") : "Nothing was in flight.")); return true; }
   if (!w.any) return true;
