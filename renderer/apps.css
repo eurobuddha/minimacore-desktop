@@ -217,6 +217,7 @@ img.mm-prod__im { cursor: zoom-in; }
 .mm-photo { position: relative; display: flex; align-items: flex-end; justify-content: center; height: 200px; margin-top: 8px; border-radius: 12px; background: #1F1F2B; overflow: hidden; cursor: pointer; }
 .mm-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .mm-photo span { position: relative; padding: 6px 10px; margin-bottom: 10px; border-radius: 14px; background: rgba(0,0,0,.6); font-size: 12px; color: #FFFFFF; }
+.mm-payq { white-space: pre-line; overflow-wrap: anywhere; user-select: text; }   /* the "Pay …?" question: the amount, the token id and the vendor's address, each whole on its own line */
 .mm-zoom { display: block; max-width: 100%; max-height: 50vh; margin: 0 auto 12px; border-radius: 12px; }
 .mm :focus-visible { outline: 2px solid #F7931A; outline-offset: 2px; }
 

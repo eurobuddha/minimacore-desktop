@@ -3709,10 +3709,10 @@ async function renderShopApp() {
      ${mine.length ? `<div class="mm-sec">Your own shops (as a buyer sees them)</div>${mine.map((s, i) => row(s, "mine", i)).join("")}` : ""}`,
     `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopAdd">＋  Add a shop</button></div>`);
   el("mmOrders").onclick = () => shopGo("shop", { screen: "orders" });
-  const open = (s) => { shopLoaded = s; shopCart = {}; shopShipId = null; shopGo("shop", { screen: "store" }); };
+  const open = (s) => { const why = SHOP.problem(s); if (why) { toast(why, "warn"); return; } shopLoaded = s; shopCart = {}; shopShipId = null; shopGo("shop", { screen: "store" }); };   // a shop whose token does not match its currency is never opened
   el("shopAdd").onclick = async () => {
     try { const cfg = await api.shopImport(); if (!cfg) return;
-      if (!cfg.shopName || !Array.isArray(cfg.products)) { toast("That doesn't look like a valid .shop file.", "warn"); return; }
+      const why = SHOP.problem(cfg); if (why) { toast(why, "warn"); return; }
       shopAdded = shopAdded.filter(s => s.shopId !== cfg.shopId).concat(cfg); toast("Added " + cfg.shopName, "ok"); open(cfg);
     } catch (e) { toast("Couldn't read that file.", "warn"); }
   };
@@ -3724,32 +3724,32 @@ function renderShopStore() {
   shopFrame(s.shopName, () => shopGo("shop"), [],
     `<div class="mm-dim mm-pays">Pays in ${esc(cur)}</div>
      ${(s.products || []).map(p => { const q = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99; return `<div class="mm-prod">
-        ${p.image ? `<img class="mm-prod__im" src="${esc(p.image)}" alt="" data-zoom="${esc(p.id)}" />` : `<div class="mm-prod__im"></div>`}
+        ${SHOP.image(p.image) ? `<img class="mm-prod__im" src="${esc(SHOP.image(p.image))}" alt="" data-zoom="${esc(p.id)}" />` : `<div class="mm-prod__im"></div>`}
         <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name)}</div><div class="mm-prod__d">${esc(p.description || "")}</div><div class="mm-prod__p">${esc(p.price)} ${esc(cur)}</div></div>
         <div class="mm-step"><button class="mm-step__b" data-dec="${esc(p.id)}" aria-label="One fewer ${esc(p.name)}"${q <= 0 ? " disabled" : ""}>–</button><span class="mm-step__q">${q}</span><button class="mm-step__b" data-inc="${esc(p.id)}" aria-label="One more ${esc(p.name)}"${q >= cap ? " disabled" : ""}>+</button></div></div>`; }).join("")}`,
-    `<div class="mm-foot mm-foot--cart"><span>${count ? count + " items  ·  " + SHOP.cartTotal(s, shopCart, null).toFixed(6) + " " + esc(cur) : "Cart empty"}</span><button class="mm-btn mm-btn--on" id="shopCheckout">Checkout</button></div>`);
+    `<div class="mm-foot mm-foot--cart"><span>${count ? count + " items  ·  " + esc(SHOP.cartTotal(s, shopCart, null)) + " " + esc(cur) : "Cart empty"}</span><button class="mm-btn mm-btn--on" id="shopCheckout">Checkout</button></div>`);
   const cap = (id) => { const p = (s.products || []).find(x => x.id === id); return p ? (Number(p.maxUnits) || 99) : 99; };
   el("shopSub").querySelectorAll("[data-inc]").forEach(b => { b.onclick = () => { const id = b.dataset.inc; shopCart[id] = Math.min(cap(id), (shopCart[id] || 0) + 1); renderShopStore(); }; });
   el("shopSub").querySelectorAll("[data-dec]").forEach(b => { b.onclick = () => { const id = b.dataset.dec; shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; renderShopStore(); }; });
-  el("shopSub").querySelectorAll("[data-zoom]").forEach(im => { im.onclick = () => { const p = s.products.find(x => x.id === im.dataset.zoom); appDlg({ title: p.name, body: `<img class="mm-zoom" src="${esc(p.image)}" alt="" /><p>${esc(p.description || "")}</p>` }); }; });
+  el("shopSub").querySelectorAll("[data-zoom]").forEach(im => { im.onclick = () => { const p = s.products.find(x => x.id === im.dataset.zoom); appDlg({ title: p.name, body: `<img class="mm-zoom" src="${esc(SHOP.image(p.image))}" alt="" /><p>${esc(p.description || "")}</p>` }); }; });
   el("shopCheckout").onclick = () => { if (!count) { toast("Add an item first (use + above).", "warn"); return; } shopGo("shop", { screen: "checkout" }); };
 }
 function renderShopCheckout() {
   const s = shopLoaded, cur = SHOP.cur(s.currency), ship = SHOP.shipOf(s, shopShipId), items = SHOP.orderItems(s, shopCart);
-  const total = SHOP.cartTotal(s, shopCart, shopShipId).toFixed(6);
+  const sums = SHOP.totals(s, shopCart, shopShipId), total = sums.total || "0.000000";
   shopFrame("Checkout", () => shopGo("shop", { screen: "store" }), [],
     `<div class="mm-card">${items.map(i => `<div class="mm-kv"><span class="mm-kv__v">${esc(i.product)} × ${i.quantity}</span><span>${esc(i.lineTotal)}</span></div>`).join("")}</div>
      ${(s.shipping || []).length ? `<div class="mm-sec">Delivery method</div><div class="mm-opts">${s.shipping.map(sh => `<button class="mm-btn${ship && ship.id === sh.id ? " mm-btn--on" : ""}" data-ship="${esc(sh.id)}" aria-pressed="${!!(ship && ship.id === sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? "  +" + esc(String(sh.fee)) : "  · free"}</button>`).join("")}</div>` : ""}
      <div class="mm-sec">Delivery address / email</div><textarea class="mm-in-f" id="shopDelivery" rows="2" placeholder="Where should this go? (or email for digital)" aria-label="Delivery address or email"></textarea>
      <div class="mm-sec">Message to seller (optional)</div><input class="mm-in-f" id="shopNote" placeholder="Anything the vendor should know" aria-label="Message to seller" autocomplete="off" />
-     <div class="mm-totals">${shopKv("Items", SHOP.cartTotal(s, shopCart, "none").toFixed(6))}${shopKv("Shipping", ship ? String(Number(ship.fee) || 0) : "0")}${shopKv("Total", total + " " + cur)}</div>
+     <div class="mm-totals">${shopKv("Items", sums.itemsTotal || "0.000000")}${shopKv("Shipping", sums.fee || "0.000000")}${shopKv("Total", total + " " + cur)}</div>
      <div class="mm-hint">Your address and message are encrypted: only the vendor can read them.</div>`,
     `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="shopPay">Pay ${esc(total)} ${esc(cur)}</button></div>`);
   const keep = () => ({ d: el("shopDelivery").value, n: el("shopNote").value });
   el("shopSub").querySelectorAll("[data-ship]").forEach(b => { b.onclick = () => { const k = keep(); shopShipId = b.dataset.ship; renderShopCheckout(); el("shopDelivery").value = k.d; el("shopNote").value = k.n; }; });
   el("shopPay").onclick = async () => {
     const btn = el("shopPay"); if (btn.disabled) return; btn.disabled = true;
-    const r = await SHOP.place(api, { confirm: (title, text) => appDlg({ title, body: `<p>${esc(text)}</p>`, buttons: [{ label: "Back", v: false }, { label: "Pay", v: true }] }).done, busy: () => toast("Sending your order and payment…") },
+    const r = await SHOP.place(api, { confirm: (title, text) => appDlg({ title, body: `<p class="mm-payq">${esc(text)}</p>`, buttons: [{ label: "Back", v: false }, { label: "Pay", v: true }] }).done, busy: () => toast("Sending your order and payment…") },
       s, shopCart, shopShipId, el("shopDelivery").value, el("shopNote").value);
     if (r.cancelled) { btn.disabled = false; return; }
     if (r.err) { toast(r.refused ? r.err : "Order failed: " + r.err, "warn"); btn.disabled = false; return; }
@@ -3802,7 +3802,7 @@ function renderShopProducts(d) {
   const cur = SHOP.cur(d.currency), listed = d.products.filter(p => p.name && Number(p.price) > 0).length;
   shopFrame(d.shopId ? d.shopName || "Your shop" : "miniMall Studio", () => { shopDraft = null; shopGo("studio"); }, [],
     `<div class="mm-seg"><span class="mm-btn mm-btn--on">Products · ${d.products.length}</span></div>
-     ${d.products.map((p, i) => `<div class="mm-prod" role="button" tabindex="0" data-prod="${i}">${p.image ? `<img class="mm-prod__im mm-prod__im--s" src="${esc(p.image)}" alt="" />` : `<div class="mm-prod__im mm-prod__im--s"></div>`}
+     ${d.products.map((p, i) => `<div class="mm-prod" role="button" tabindex="0" data-prod="${i}">${SHOP.image(p.image) ? `<img class="mm-prod__im mm-prod__im--s" src="${esc(SHOP.image(p.image))}" alt="" />` : `<div class="mm-prod__im mm-prod__im--s"></div>`}
         <div class="mm-prod__main"><div class="mm-prod__n">${esc(p.name || "Unnamed product")}</div><div class="mm-prod__d${Number(p.price) > 0 ? "" : " mm-red"}">${Number(p.price) > 0 ? esc(String(p.price)) + " " + esc(cur) + " · ×" + esc(String(p.maxUnits || 10)) : "no price"}</div></div></div>`).join("")
        || `<div class="mm-empty">Regular goods: you write the name and price, attach a photo, and ship them yourself.\n\nClick ＋ to add your first product.</div>`}
      <button class="mm-btn mm-btn--cta mm-gap" id="sdAddProd">＋  Add product</button>`,
@@ -3814,7 +3814,7 @@ function renderShopProducts(d) {
 function renderShopProduct(d, i) {
   const p = d.products[i];
   shopFrame("Your product", () => { read(); shopGo("studio"); }, [],
-    `<div class="mm-photo" id="sdPhoto" role="button" tabindex="0">${p.image ? `<img src="${esc(p.image)}" alt="" />` : ""}<span>${p.image ? "Click to change the photo" : "Click to add a photo"}</span></div>
+    `<div class="mm-photo" id="sdPhoto" role="button" tabindex="0">${SHOP.image(p.image) ? `<img src="${esc(SHOP.image(p.image))}" alt="" />` : ""}<span>${SHOP.image(p.image) ? "Click to change the photo" : "Click to add a photo"}</span></div>
      <div class="mm-sec">Name</div><input class="mm-in-f" id="sdPName" placeholder="Product name" value="${esc(p.name || "")}" autocomplete="off" />
      <div class="mm-sec">About</div><input class="mm-in-f" id="sdPDesc" placeholder="Description (optional)" value="${esc(p.description || "")}" autocomplete="off" />
      <div class="mm-sec">Price (${esc(SHOP.cur(d.currency))})</div><input class="mm-in-f" id="sdPPrice" inputmode="decimal" placeholder="0" value="${esc(p.price || "")}" autocomplete="off" />

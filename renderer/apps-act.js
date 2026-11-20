@@ -64,7 +64,12 @@
 
   // ---- miniMall (main/shop.js) ----
   // The figures an order carries are built exactly as the screens before built them (six decimals, as the phone apps send).
-  var MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  var MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", MINIMA = "0x00";
+  // A price, a fee: digits, at most one point with digits after it, at most 44 decimals (Minima's own limit). No sign, no exponent, no hex.
+  var plain = function (v) { return (typeof v === "string" || typeof v === "number") && /^\d{1,30}(\.\d{1,44})?$/.test(String(v)); };
+  var decimals = function (v) { var i = v.indexOf("."); return i < 0 ? 0 : v.length - i - 1; };
+  var units = function (v, dp) { var i = v.indexOf("."), whole = i < 0 ? v : v.slice(0, i), frac = i < 0 ? "" : v.slice(i + 1); return BigInt(whole + frac.padEnd(dp, "0")); };
+  var figure = function (n, dp) { var t = n.toString().padStart(dp + 1, "0"); return t.slice(0, -dp) + "." + t.slice(-dp); };
   var shop = {
     /** The label of a shop's currency: the wire value "USDT" is MxUSD on Minima. */
     cur: function (c) { return /^(usdt|mxusdt)$/i.test(String(c)) ? "MxUSD" : String(c == null ? "" : c); },
@@ -72,25 +77,64 @@
     standardShipping: function () { return [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0" }, { id: "international", label: "International", fee: "0" }]; },
     normalizeShipping: function (list) { var by = {}; (list || []).forEach(function (s) { if (s && s.id) by[s.id] = s; }); return shop.standardShipping().map(function (std) { return { id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") }; }); },
     shipOf: function (s, shipId) { if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(function (x) { return x.id === shipId; }) || s.shipping[0]; },
-    /** shipId "none": the items alone. */
-    cartTotal: function (s, cart, shipId) {
-      if (!s) return 0; var t = 0;
-      (s.products || []).forEach(function (p) { var q = cart[p.id] || 0; if (q) t += q * Number(p.price); });
-      var ship = shipId === "none" ? null : shop.shipOf(s, shipId); if (ship) t += Number(ship.fee) || 0;
-      return t;
+    /** The token a shop is paid in, from its CURRENCY alone (0.19.118). A .shop file is the vendor's: one that says "Minima" and
+     *  carries another token's id would have a buyer pay that token under the Minima label. → { tokenid, name } | { err }. */
+    token: function (s) {
+      var c = String(s && s.currency == null ? "" : s && s.currency), t = /^minima$/i.test(c) ? MINIMA : /^(usdt|mxusdt)$/i.test(c) ? MXUSD : "";
+      if (!t) return { err: "This shop asks to be paid in \"" + c.slice(0, 40) + "\". This app pays shops in Minima or MxUSD only." };
+      var given = s.tokenid == null || s.tokenid === "" ? "" : String(s.tokenid);
+      if (given && given.toLowerCase() !== t.toLowerCase()) return { err: "This shop says it is paid in " + shop.cur(c) + " but names another token (" + given.slice(0, 80) + "). Nothing was sent. Ask the vendor for a corrected .shop file." };
+      return { tokenid: t, name: t === MINIMA ? "Minima" : "MxUSD" };
     },
-    orderItems: function (s, cart) { return (s.products || []).filter(function (p) { return cart[p.id]; }).map(function (p) { return { product: p.name, quantity: cart[p.id], unitPrice: String(p.price), lineTotal: (cart[p.id] * Number(p.price)).toFixed(6) }; }); },
-    /** Checkout. ui.confirm(title, text) -> bool (the original's "Pay …?" question). → { ref, payError } | { cancelled } | { err[, refused] }. */
+    /** A product picture from a .shop: an inline picture or nothing. Any other URL (file://host/… opens an SMB connection on Windows) is no picture. */
+    image: function (src) { return typeof src === "string" && /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+\/]+=*$/.test(src) ? src : ""; },
+    /** What is wrong with a shop, before it is opened, saved or ordered from; "" = nothing. */
+    problem: function (s) {
+      if (!s || typeof s !== "object" || !s.shopName || !Array.isArray(s.products)) return "That doesn't look like a valid .shop file.";
+      var t = shop.token(s); if (t.err) return t.err;
+      for (var i = 0; i < s.products.length; i++) {
+        var p = s.products[i] || {};
+        if (!plain(p.price)) return "The price of \"" + String(p.name).slice(0, 60) + "\" is not a plain number (" + String(p.price).slice(0, 40) + ").";
+        if (p.maxUnits != null && p.maxUnits !== "" && !/^[1-9]\d{0,8}$/.test(String(p.maxUnits))) return "The stock of \"" + String(p.name).slice(0, 60) + "\" is not a whole number above zero.";
+      }
+      var sh = s.shipping || [];
+      if (!Array.isArray(sh)) return "This shop's delivery methods cannot be read.";
+      for (var j = 0; j < sh.length; j++) if (!sh[j] || !plain(sh[j].fee == null || sh[j].fee === "" ? "0" : sh[j].fee)) return "The fee of the delivery method \"" + String(sh[j] && sh[j].label).slice(0, 60) + "\" is not a plain number.";
+      return "";
+    },
+    /** The lines and totals of a cart, in whole units of the smallest decimal in play (BigInt; never a floating-point number).
+     *  Six decimals at least, as this app has always sent; more only when a price has more (the exact figure, as the phone
+     *  sends it: nothing is rounded and nothing needs cutting). shipId "none": the items alone. → { items, itemsTotal, fee, total } | { err }. */
+    totals: function (s, cart, shipId) {
+      var why = shop.problem(s); if (why) return { err: why };
+      var ship = shipId === "none" ? null : shop.shipOf(s, shipId), fee = ship ? String(ship.fee == null || ship.fee === "" ? "0" : ship.fee) : "0";
+      var lines = [], dp = Math.max(6, decimals(fee));
+      for (var i = 0; i < s.products.length; i++) {
+        var p = s.products[i], q = cart[p.id];
+        if (!q) continue;
+        if (!Number.isSafeInteger(q) || q < 1) return { err: "The quantity of \"" + String(p.name).slice(0, 60) + "\" is not a whole number above zero." };
+        lines.push([p, q]); dp = Math.max(dp, decimals(String(p.price)));
+      }
+      var sum = 0n, items = lines.map(function (l) { var line = units(String(l[0].price), dp) * BigInt(l[1]); sum += line; return { product: l[0].name, quantity: l[1], unitPrice: String(l[0].price), lineTotal: figure(line, dp) }; });
+      return { items: items, itemsTotal: figure(sum, dp), fee: figure(units(fee, dp), dp), total: figure(sum + units(fee, dp), dp), zero: sum + units(fee, dp) === 0n };
+    },
+    cartTotal: function (s, cart, shipId) { return shop.totals(s, cart, shipId).total || "0.000000"; },
+    orderItems: function (s, cart) { return shop.totals(s, cart, "none").items || []; },
+    /** Checkout. ui.confirm(title, text) -> bool (the original's "Pay …?" question, then what is sent, to whom and in which token, each whole
+     *  on its own line). The amount shown is the string that is sent. → { ref, payError } | { cancelled } | { err[, refused] }. */
     place: function (api, ui, s, cart, shipId, delivery, note) {
-      var items = shop.orderItems(s, cart);
-      if (!items.length) return Promise.resolve({ err: "Cart is empty.", refused: true });
+      var t = shop.totals(s || {}, cart, shipId);
+      if (t.err) return Promise.resolve({ err: t.err, refused: true });
+      if (!t.items.length) return Promise.resolve({ err: "Cart is empty.", refused: true });
       delivery = text(delivery); note = text(note);
       if (!delivery) return Promise.resolve({ err: "Add a delivery address.", refused: true });
-      var ship = shop.shipOf(s, shipId), total = shop.cartTotal(s, cart, shipId).toFixed(6), cur = shop.cur(s.currency);
-      return Promise.resolve(ui.confirm("Pay " + total + " " + cur + "?", "This sends your encrypted order to " + s.shopName + " and pays " + total + " " + cur + ". Payment is final.")).then(function (yes) {
+      if (t.zero) return Promise.resolve({ err: "The total is zero. Nothing was sent.", refused: true });
+      var ship = shop.shipOf(s, shipId), total = t.total, tok = shop.token(s), cur = tok.name;
+      return Promise.resolve(ui.confirm("Pay " + total + " " + cur + "?", "This sends your encrypted order to " + s.shopName + " and pays " + total + " " + cur + ". Payment is final."
+        + "\n\nAmount sent\n" + total + "\n\nToken: " + cur + "\n" + tok.tokenid + "\n\nVendor's payment address\n" + String(s.vendorAddress))).then(function (yes) {
         if (!yes) return { cancelled: true };
         if (ui.busy) ui.busy();
-        return api.shopPlaceOrder(s, items, total, ship ? ship.label : "", delivery, note).catch(errOf);
+        return api.shopPlaceOrder(s, t.items, total, ship ? ship.label : "", delivery, note).catch(errOf);
       });
     },
     retryPay: function (api, ref) { return api.shopRetryPay(ref).then(function () { return { ok: true }; }, errOf); },
@@ -113,7 +157,8 @@
     save: function (api, d) {
       if (!d.shopName) return Promise.resolve({ err: "Give the shop a name" });
       if (!d.products.length) return Promise.resolve({ err: "Add at least one product" });
-      var cfg = shop.cfgOf(d), wasNew = !d.shopId;
+      var cfg = shop.cfgOf(d), wasNew = !d.shopId, why = shop.problem(cfg);
+      if (why) return Promise.resolve({ err: why });
       return api.shopSave(cfg).then(function () {
         if (!wasNew) return { ok: true };
         return api.shopExport(JSON.stringify(cfg, null, 2), cfg.shopId).then(function (p) { return { ok: true, exported: p || "" }; });

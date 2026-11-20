@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.118] — miniMall pays the token its currency names, and nothing else (review fix, the most serious)
+
+- **Found in review (high):** a `.shop` file is written by the vendor and carries both a `currency` and a `tokenid`. The labels came from the currency and the payment from the token id, so a file saying "Minima" with the MxUSD token id (`0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90`) made the buyer pay MxUSD under a Minima label.
+- **Now:** the app pays shops in Minima or MxUSD only (the currencies "Minima", and "USDT" / "mxUSDT" on the wire, which mean MxUSD). The token paid is always the one the currency names. A file whose `tokenid` is present and differs (compared as hex, any case) is refused with the reason: when the file is added, when the shop is opened, before the "Pay …?" question, in the main process before the order message is sent, and on Retry payment for an order saved earlier. One rule (`AppsAct.shop.token`), used by the screens and required by `main/shop.js`.
+- **The "Pay …?" question** now also shows, each whole on its own line: the amount sent, the token (its name and its id) and the vendor's payment address.
+- **Product pictures** from a `.shop` are shown and kept only when they are inline (`data:image/png|jpeg|gif|webp;base64,…`). Anything else is no picture: a `file://host/…` address would open a network connection on Windows. Pictures from the phone's Studio are bare base64 and were never shown here; they still are not (owed).
+- **Prices, fees, quantities:** a price or a fee is a plain decimal (digits, at most one point; no sign, no exponent, no hex), a quantity a whole number above zero. Line totals and the total are worked out in whole units (BigInt), never through a floating-point number. The figure in the question is the string that is sent. A zero total is refused before the order message goes.
+- **What vendors receive:** unchanged for prices of six decimals or fewer (six decimals, as before). For a price with more than six decimals the old screens rounded the total to six (7 x 0.0000004 was sent as 0.000003); the exact figure is now sent (0.0000028), as the phone app sends it. Nothing is rounded and nothing is cut. The vendor's side compares amounts as numbers, so both forms verify.
+- `main/shop.js` is changed on purpose; its sha256 pin in `scripts/apps-money.test.cjs` is the new file's. New `scripts/shop-test.cjs` runs the main process's order path on a stand-in node.
+- Not changed: the phone apps have the same mismatch (see the plan's owed items).
+
 ## [0.19.117] — The Apps tab's Freeze switch (owed since Phase 1)
 
 - **Each app on the Apps tab has Hide and Freeze**, as Pandamonium's Internal list. Freeze stops the app's background work, puts its drawer row away and adds "· Deep frozen" to its line; nothing the app holds is touched, and unfreezing resumes it. The list is kept in the app's config (`frozenApps`) and honoured at startup: a frozen app's loop is never started.

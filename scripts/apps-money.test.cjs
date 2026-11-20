@@ -190,7 +190,7 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
 // ---- miniMall ----
 const SHOPCFG = { shopName: "Zebra", shopId: "zebra", vendorPublicId: "0x" + "5A".repeat(32), vendorAddress: "MxG0VENDOR", currency: "USDT", tokenid: MXUSD,
   shipping: [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "2.5" }, { id: "international", label: "International", fee: "6" }],
-  products: [{ id: "p1", name: "Mug", price: "12.5", maxUnits: "5" }, { id: "p2", name: "Print", price: "0.1", maxUnits: "9" }, { id: "p3", name: "Pin", price: "0.0000004", maxUnits: "9" }] };
+  products: [{ id: "p1", name: "Mug", price: "12.5", maxUnits: "5" }, { id: "p2", name: "Print", price: "0.1", maxUnits: "9" }, { id: "p3", name: "Pin", price: "0.0000004", maxUnits: "9" }, { id: "p4", name: "Card", price: "0.000004", maxUnits: "9" }] };
 const OLD_SHOP = {   // renderer/app.js 0.19.107: shopCartTotal, shopSelectedShipping, shopDoPay, the order screen's three handlers, the Studio's save
   ship: (s, shipId) => { if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(x => x.id === shipId) || s.shipping[0]; },
   total: (s, cart, shipId) => { let t = 0; for (const p of (s.products || [])) { const q = cart[p.id] || 0; if (q) t += q * Number(p.price); } const ship = OLD_SHOP.ship(s, shipId); if (ship) t += Number(ship.fee) || 0; return t; },
@@ -213,7 +213,7 @@ const OLD_SHOP = {   // renderer/app.js 0.19.107: shopCartTotal, shopSelectedShi
     if (!d.shopId) await api.shopExport(JSON.stringify(cfg, null, 2), cfg.shopId);
   }
 };
-for (const [name, cart, shipId] of [["one item, the first delivery method", { p1: 1 }, null], ["three lines, international", { p1: 2, p2: 3, p3: 7 }, "international"], ["a method the shop does not have", { p2: 1 }, "moon"], ["an empty cart", {}, null]]) {
+for (const [name, cart, shipId] of [["one item, the first delivery method", { p1: 1 }, null], ["three lines, international", { p1: 2, p2: 3, p4: 7 }, "international"], ["a method the shop does not have", { p2: 1 }, "moon"], ["an empty cart", {}, null]]) {
   test(`miniMall checkout, ${name}: the order, its lines and its total are the old screen's, to the last digit`, async () => {
     const log = await both({ shopPlaceOrder: { ref: "ORD-1", payError: null } }, (api) => OLD_SHOP.pay(api, SHOPCFG, cart, shipId, " 1 Street ", " hello "),
       async (api) => { await Act.shop.place(api, { confirm: async () => true }, SHOPCFG, cart, shipId, " 1 Street ", " hello "); });
@@ -224,7 +224,8 @@ for (const [name, cart, shipId] of [["one item, the first delivery method", { p1
 test("miniMall checkout: the original's question comes first and names MxUSD; Back sends nothing; no delivery address, no order", async () => {
   let asked = null; const r = recorder({ shopPlaceOrder: { ref: "ORD-1" } });
   assert.deepEqual(await Act.shop.place(r.api, { confirm: async (t, m) => { asked = [t, m]; return false; } }, SHOPCFG, { p1: 2 }, "domestic", "1 Street", ""), { cancelled: true });
-  assert.deepEqual(asked, ["Pay 27.500000 MxUSD?", "This sends your encrypted order to Zebra and pays 27.500000 MxUSD. Payment is final."]);
+  assert.deepEqual(asked, ["Pay 27.500000 MxUSD?", "This sends your encrypted order to Zebra and pays 27.500000 MxUSD. Payment is final."
+    + "\n\nAmount sent\n27.500000\n\nToken: MxUSD\n0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90\n\nVendor's payment address\nMxG0VENDOR"]);   // 0.19.118: what is sent, in which token and to whom, each whole on its own line
   assert.deepEqual(r.log, []);
   const none = await Act.shop.place(r.api, { confirm: async () => { throw new Error("never asked"); } }, SHOPCFG, { p1: 2 }, null, "  ", "");
   assert.deepEqual(none, { err: "Add a delivery address.", refused: true });   // the original refuses this; the old desktop screen sent it
@@ -256,7 +257,58 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   assert.ok(!/vendorPublicId \|\| ""\)\.slice/.test(mall), "the vendor card is whole (it was cut to 18 characters)");
   assert.match(mall, /idHtml\(shopIdentity\.publicId\)/);
   const sha = (f) => require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", f))).digest("hex");
-  for (const [f, want] of [["main/shop.js","5af686b2e1086975f6120307abc00c0236ac473f26071e77246294304588abcd"],["main/shop-store.js","75b6697ef20a1f340638900bed90421e612b8c0f733a7d3719344b58d3cb50d0"],["main/shopcrypto.js","a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec"]]) assert.equal(sha(f), want, f + " is the file of 0.19.107");
+  // main/shop.js was CHANGED ON PURPOSE in 0.19.118 (the token paid follows the currency; a mismatching tokenid is refused; plain amounts): the pin is the new file's
+  for (const [f, want] of [["main/shop.js","d90041499905001e1565c0bd60ed86b5042770cfadf5fc5eff7b2f81d832123c"],["main/shop-store.js","75b6697ef20a1f340638900bed90421e612b8c0f733a7d3719344b58d3cb50d0"],["main/shopcrypto.js","a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec"]]) assert.equal(sha(f), want, f + (f === "main/shop.js" ? " is the file of 0.19.118" : " is the file of 0.19.107"));
+});
+
+// 0.19.118: the token paid, the pictures and the figures of a vendor's .shop
+const shopOf = (patch) => Object.assign(JSON.parse(JSON.stringify(SHOPCFG)), patch);
+test("miniMall: a shop labelled Minima that carries the MxUSD token id is refused before the question, and never reaches the main process", async () => {
+  for (const [patch, why] of [[{ currency: "Minima" }, /says it is paid in Minima but names another token \(0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90\)/],
+    [{ currency: "USDT", tokenid: "0x00" }, /says it is paid in MxUSD but names another token \(0x00\)/], [{ currency: "MxUSD" }, /pays shops in Minima or MxUSD only/], [{ currency: "DOGE", tokenid: "0x00" }, /Minima or MxUSD only/], [{ currency: undefined }, /Minima or MxUSD only/]]) {
+    const r = recorder({ shopPlaceOrder: { ref: "ORD-1" } });
+    const out = await Act.shop.place(r.api, { confirm: async () => { throw new Error("the question must not be asked"); } }, shopOf(patch), { p1: 1 }, null, "1 Street", "");
+    assert.match(out.err, why); assert.equal(out.refused, true); assert.deepEqual(r.log, []);
+    assert.match(Act.shop.problem(shopOf(patch)), why, "and the same reason when the file is added or the shop opened");
+  }
+  // the id is compared as hex, whatever its case; no tokenid at all is the currency's token
+  assert.deepEqual(Act.shop.token(shopOf({ tokenid: MXUSD.toLowerCase() })), { tokenid: MXUSD, name: "MxUSD" });
+  assert.deepEqual(Act.shop.token(shopOf({ currency: "mxUSDT", tokenid: "" })), { tokenid: MXUSD, name: "MxUSD" });
+  assert.deepEqual(Act.shop.token({ currency: "Minima" }), { tokenid: "0x00", name: "Minima" });
+  let asked = null; await Act.shop.place(recorder({}).api, { confirm: async (t, m) => { asked = m; return false; } }, shopOf({ currency: "Minima", tokenid: "0x00", vendorAddress: "MxG0" + "A".repeat(56) }), { p1: 1 }, null, "x", "");
+  assert.ok(asked.endsWith("\n\nAmount sent\n12.500000\n\nToken: Minima\n0x00\n\nVendor's payment address\nMxG0" + "A".repeat(56)), "the address whole, on its own line");
+});
+test("miniMall: prices, fees and quantities are plain figures; totals are exact (BigInt), six decimals as before and never rounded", async () => {
+  for (const bad of ["-1", "1e3", "0x10", "1,5", " 1", "1.", ".5", "", null, 1e21, "1." + "0".repeat(45)]) assert.match(Act.shop.problem(shopOf({ products: [{ id: "p1", name: "Mug", price: bad }] })), /not a plain number/, String(bad));
+  assert.match(Act.shop.problem(shopOf({ shipping: [{ id: "d", label: "Post", fee: "-2" }] })), /fee of the delivery method "Post" is not a plain number/);
+  assert.match(Act.shop.problem(shopOf({ products: [{ id: "p1", name: "Mug", price: "1", maxUnits: "2.5" }] })), /stock/);
+  for (const q of [-1, 1.5, "2", 2 ** 60]) assert.match(Act.shop.totals(SHOPCFG, { p1: q }, null).err || "", /quantity of "Mug" is not a whole number above zero/, String(q));
+  // the old screen rounded through a floating-point number: 7 x 0.0000004 = 0.0000028 was sent as 0.000003
+  let sent = null; const r = recorder({ shopPlaceOrder: (...a) => { sent = a; return { ref: "ORD-1" }; } }); let asked = null;
+  await Act.shop.place(r.api, { confirm: async (t) => { asked = t; return true; } }, SHOPCFG, { p1: 2, p3: 7 }, "international", "x", "");
+  assert.equal(sent[2], "31.0000028"); assert.equal(asked, "Pay 31.0000028 MxUSD?", "the figure in the question is the figure sent");
+  assert.deepEqual(sent[1].map(i => i.lineTotal), ["25.0000000", "0.0000028"]);
+  // exact where a double is not: 3 x 0.1, and a figure past 2^53
+  assert.equal(Act.shop.totals(SHOPCFG, { p2: 3 }, null).total, "0.300000");
+  assert.equal(Act.shop.totals(shopOf({ shipping: [], products: [{ id: "a", name: "A", price: "9007199254740993.000001" }] }), { a: 3 }, null).total, "27021597764222979.000003");
+  assert.equal(Act.shop.totals(shopOf({ shipping: [], products: [{ id: "a", name: "A", price: "0" }] }), { a: 1 }, null).zero, true);
+  assert.deepEqual(await Act.shop.place(recorder({}).api, { confirm: async () => true }, shopOf({ shipping: [], products: [{ id: "a", name: "A", price: "0" }] }), { a: 1 }, null, "x", ""), { err: "The total is zero. Nothing was sent.", refused: true });
+  // Studio refuses to write what a buyer's side would refuse
+  const d = { shopName: "S", currency: "USDT", vendorPublicId: "0x5A", vendorAddress: "MxV", shipping: [{ id: "domestic", label: "Domestic", fee: "abc" }], products: [{ id: "p1", name: "Mug", price: "1" }] }, st = recorder({ shopSave: (c) => c });
+  assert.match((await Act.shop.save(st.api, d)).err, /fee of the delivery method/); assert.deepEqual(st.log, []);
+  assert.match((await Act.shop.save(st.api, Object.assign({}, d, { shipping: [], products: [{ id: "p1", name: "Mug", price: "1e3" }] }))).err, /not a plain number/); assert.deepEqual(st.log, []);
+});
+test("miniMall: a product picture is an inline picture or nothing, in the file and on every screen", () => {
+  const ok = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+  assert.equal(Act.shop.image(ok), ok); assert.equal(Act.shop.image("data:image/webp;base64,UklGRg"), "data:image/webp;base64,UklGRg");
+  for (const bad of ["file://evil.example/share/x.png", "\\\\evil\\share\\x.png", "https://example.com/x.png", "data:image/svg+xml;base64,PHN2Zz4=", "data:text/html;base64,PGI+", "data:image/png;base64,AAAA\" onerror=\"x", "data:image/png,AAAA", "/9j/4AAQ", "", null, 5, {}])
+    assert.equal(Act.shop.image(bad), "", String(bad));
+  const mall = app.slice(app.indexOf("// ============================ miniMall"), app.indexOf("function shopResizeImage"));
+  assert.ok(!/src="\$\{esc\(p\.image\)\}"/.test(mall), "no screen puts a file's picture URL into the page as it came");
+  assert.equal((mall.match(/src="\$\{esc\(SHOP\.image\(p\.image\)\)\}"/g) || []).length, 4);
+  assert.match(mall, /const why = SHOP\.problem\(cfg\); if \(why\)/, "an added file is checked");
+  assert.match(mall, /const open = \(s\) => \{ const why = SHOP\.problem\(s\); if \(why\)/, "and so is every shop that is opened");
+  assert.match(mall, /class="mm-payq"/); assert.match(fs.readFileSync(path.join(__dirname, "..", "renderer", "apps.css"), "utf8"), /\.mm-payq \{ white-space: pre-line; overflow-wrap: anywhere;/);
 });
 
 // ---- Web Wallet ----
