@@ -310,7 +310,7 @@ ipcMain.handle("mcd:logsSave", async (_e, text) => {
   const d = new Date(), two = (n) => String(n).padStart(2, "0");
   const r = await dialog.showSaveDialog(win, { title: "Save node log", defaultPath: "minima-node-log-" + d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) + "-" + two(d.getHours()) + two(d.getMinutes()) + ".txt", filters: [{ name: "Text", extensions: ["txt"] }] });
   if (r.canceled || !r.filePath) return null;
-  fs.writeFileSync(r.filePath, require("./nodelog").forFile(text), { encoding: "utf8", mode: 0o600 });
+  fs.writeFileSync(r.filePath, require("./nodelog").forFile(text, config.rpcSecret()), { encoding: "utf8", mode: 0o600 });
   return r.filePath;
 });
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());

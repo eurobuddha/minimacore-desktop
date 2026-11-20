@@ -17,7 +17,7 @@ const config = require("./config");
 const portmap = require("./portmap");
 const parlonsNotify = require("./parlons-notify");
 const { rpcCall } = require("./rpc");
-const { createNodeLog } = require("./nodelog");
+const { createNodeLog, scrub } = require("./nodelog");
 const keymode = require("./keymode");
 const PARAMS = require("../renderer/params.js");
 const flavor = require("./flavor");
@@ -150,6 +150,7 @@ class NodeManager extends EventEmitter {
     this.polled = false;          // this node start has answered a health poll: its boot is over (the boot line is believed only before)
     this.carry = { out: "", err: "" };   // the unfinished last line of each of the node's streams
     this.cont = { out: null, err: null };   // per stream: what follows is the CONTINUATION of a cut line, read by nothing (nodeLine)
+    this.secret = "";             // the RPC secret of this node start, for log() to take out of every line
     this.replacingWallet = false; // a wallet-replacing megammrsync is running (runResync): it holds the trading engines
     this.walletCheck = null;      // owed after a wallet-replacing megammrsync: { before, held, final, tries } (runResync, walletSettle)
     this.keyModeAlert = "";       // the running node was found in the OTHER mode and stopped: no start until the app is reopened
@@ -471,7 +472,8 @@ class NodeManager extends EventEmitter {
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
-    this.log("[app] starting node: java " + redactArgs(args, config.rpcSecret()));
+    this.secret = config.rpcSecret();   // kept for log(): the node prints its own start parameters, and no line may carry this
+    this.log("[app] starting node: java " + redactArgs(args, this.secret));
     let p;
     try {
       p = this.spawnFn(this.javaPath(), args, { stdio: ["ignore", "pipe", "pipe"], env: keymode.childEnv(process.env) });
@@ -765,7 +767,7 @@ class NodeManager extends EventEmitter {
   }
   /** One physical line of the node's output: control characters out, then what it may tell the app, then the log. */
   nodeLine(raw, stream = "out") {
-    const l = String(raw).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "");
+    const l = String(raw).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202A-\u202E\u2066-\u2069\u200E\u200F]/g, "");   // control characters and the bidirectional controls
     // A CONTINUATION is never a fresh line (0.19.4's guard, back in 0.19.106): the rest of a line cut at LINE_MAX, and
     // what follows a call-signal or greeting line that a peer's own line end cut short, up to the line carrying the
     // node's ending (parlonsNotify.unfinished). It is logged, marked, and read by nothing: no flag, no boot line, no
@@ -827,8 +829,9 @@ class NodeManager extends EventEmitter {
       // function also takes the app's own lines and, through them, text that came from elsewhere.
       // Redact a seed phrase / private key if the node ever echoes one into an error line (the Web Wallet derives
       // & signs over loopback via `keys genkey phrase:"…"` / `sendfrom … privatekey:0x…`), so they can NEVER end
-      // up in the Logs view.
-      l = l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
+      // up in the Logs view; and the RPC secret, which the node prints with its start parameters; and the
+      // bidirectional controls (main/nodelog.js scrub). Before the 400-character cut, so no part of one is left.
+      l = scrub(l, this.secret);
       this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
       // The same redacted line, on disk and untruncated (main/nodelog.js): the RAM ring holds ~800 lines,
       // and the one line that explained a lost swap had rolled out of it long before anyone looked.

@@ -105,7 +105,7 @@ test("Logs, Save to file: every line is redacted again in the main process; a Pa
   assert.equal(out[3], out[1], "an already redacted line is unchanged");
   assert.ok(!/usual place|secret words/.test(out.join("\n")));
   assert.ok(forFile("x".repeat(SAVE_MAX + 10)).length <= SAVE_MAX + 1);
-  assert.ok(/ipcMain\.handle\("mcd:logsSave"[\s\S]{0,700}dialog\.showSaveDialog\([\s\S]{0,500}require\("\.\/nodelog"\)\.forFile\(text\)/.test(mainJs), "the file is written by the main process, after a dialog, from forFile()");
+  assert.ok(/ipcMain\.handle\("mcd:logsSave"[\s\S]{0,700}dialog\.showSaveDialog\([\s\S]{0,500}require\("\.\/nodelog"\)\.forFile\(text, config\.rpcSecret\(\)\)/.test(mainJs), "the file is written by the main process, after a dialog, from forFile()");
   assert.ok(/parlonsNotify\.redact\(l\)/.test(R("main/node-manager.js")), "lines are redacted before they reach the view (node-manager, unchanged)");
 });
 

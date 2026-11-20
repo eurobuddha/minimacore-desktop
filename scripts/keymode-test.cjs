@@ -886,3 +886,28 @@ test("0.19.106: what continues a cut line is not a fresh line: the rest of a lin
   assert.equal(calls.killed, "SIGKILL", "the node's own boot line (control characters removed) is believed again");
   m.off("parlons-event", onEv); calls.restore();
 });
+
+// ---- 0.19.121: the one place every log line passes ----
+test("0.19.121: log() takes the RPC secret, seed phrases and bidirectional controls out of every line, before the 400-character cut", () => {
+  freshInstall(); const m = manager(true), SECRET = "Zk3_rpc-secret-0123456789abcdefXY", was = m.secret;
+  const last = (line) => { m.log(line); return m.logs[m.logs.length - 1]; };
+  try {
+    m.secret = SECRET;
+    assert.equal(last(SECRET + " at the start"), "••• at the start");
+    assert.equal(last("Minima @ 1 : -rpcpassword " + SECRET + " -daemon"), "Minima @ 1 : -rpcpassword ••• -daemon");
+    assert.equal(last("at the end " + SECRET), "at the end •••");
+    for (const at of [380, 395, 399, 400]) {   // the secret across the cut: nothing of it is left on either side
+      const shown = last("x".repeat(at) + SECRET + " tail");
+      assert.ok(shown.length <= 401 && !shown.includes(SECRET.slice(0, 4)) && !shown.includes(SECRET.slice(-4)), at + ": " + shown.slice(370));
+    }
+    assert.equal(last("megammrsync phrase:ONE TWO THREE host:a.example:9001"), "megammrsync phrase:••• host:a.example:9001");
+    assert.equal(last("a\u202Eb\u2066c\u200F"), "abc");
+    const onDisk = fs.readFileSync(m.diskLog().file, "utf8").split("\n").slice(-20).join("\n");   // this test's lines
+    assert.ok(!onDisk.includes(SECRET) && !onDisk.includes("ONE TWO THREE") && !/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/.test(onDisk), "the file on disk has the same lines");
+    m.secret = "short"; assert.equal(last("a short value is not looked for"), "a short value is not looked for");
+    m.secret = ""; assert.equal(last("nor an empty one"), "nor an empty one");
+    m.secret = SECRET; m.nodeLine("Minima @ 2 : peer says \u202Ehello\u2069 " + SECRET);
+    assert.equal(m.logs[m.logs.length - 1], "Minima @ 2 : peer says hello •••", "the node's own lines pass the same way");
+  } finally { m.secret = was; }
+  assert.ok(/this\.secret = config\.rpcSecret\(\);[^\n]*\n\s*this\.log\("\[app\] starting node: java "/.test(fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8")), "held from the moment the node is given it");
+});

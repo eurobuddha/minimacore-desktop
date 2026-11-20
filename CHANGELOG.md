@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.121] — Logs: the RPC secret, bare seed words and text-direction controls never reach a log line (review fix)
+
+- **Found in review:** the node prints its own start parameters, and with them `-rpcpassword` and its value. The app's own "starting node" line hid it; the node's line did not, so the RPC password could be read in the Logs view, in `node.log` and in a saved log file.
+- **Now**, in the one function every log line passes (`node-manager.log()`, through `nodelog.scrub`): every occurrence of this node start's RPC secret becomes `•••`, wherever it stands in the line and before the 400-character cut of the on-screen ring, so no part of it is left on either side of the cut. Only a secret of 8 characters or more is looked for, so a short or empty value cannot blank the log.
+- **Seed phrases:** besides `phrase:"…"`, a phrase given as bare words (`phrase:ONE TWO THREE host:…`, up to 24 words; the next parameter and the rest of the line stay) and as a reply's JSON (`"phrase":"…"`) are redacted.
+- **Bidirectional controls** (U+202A to U+202E, U+2066 to U+2069, U+200E, U+200F) are stripped from every line: text a remote party wrote can no longer reorder what the Logs view shows beside it.
+- **Save to file** applies the same to every line again in the main process, with the secret handed to it there.
+- Not covered: a secret that the node splits across two physical lines (a line over 64K characters is cut) would be logged in two halves. The node's start line is far shorter.
+
 ## [0.19.120] — One gated way to the ETH private key (review fix)
 
 - **Found in review (high):** ETH Wallet shows its key only after a typed phrase checked in the main process and, on a Mac with Touch ID, the system's prompt (0.19.108). Dexicon room ① MxUSD still had the old export: a warning, then `mcd:axExportKey`, which answered any call from the window with the key, and a "Copy key" button that carried the key in a `data-copy` attribute and used the ordinary clipboard.

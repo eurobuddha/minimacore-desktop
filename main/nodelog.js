@@ -38,14 +38,34 @@ function createNodeLog(dir, opts) {
 }
 
 /**
+ * scrub(line, secret): what no log line may carry, taken out at the one place every line passes (node-manager log())
+ * and again on the way into a saved file (0.19.121):
+ *  - the RPC secret, wherever it stands (the node prints its own start parameters, -rpcpassword among them). Only a
+ *    secret of 8 characters or more is looked for, so a short or empty value can never blank the log;
+ *  - a seed phrase: phrase:"…", "phrase":"…" as a reply's JSON has it, and phrase: followed by bare words (up to 24;
+ *    a word that is the next parameter's name, as in "host:", ends it, so the rest of the line stays);
+ *  - a private key after privatekey:;
+ *  - the bidirectional controls (U+202A to U+202E, U+2066 to U+2069, U+200E, U+200F): a line a remote party wrote
+ *    must not be able to reorder what is shown beside it.
+ */
+const BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g;
+function scrub(line, secret) {
+  let l = String(line).replace(BIDI, "");
+  if (typeof secret === "string" && secret.length >= 8) l = l.split(secret).join("•••");
+  return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/"phrase"\s*:\s*"[^"]*"/g, '"phrase":"•••"')
+    .replace(/phrase:[A-Za-z]+\b(?!:)(?: [A-Za-z]+\b(?!:)){0,23}/g, "phrase:•••")
+    .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
+}
+
+/**
  * The text the Logs screen hands over for "Save to file" (0.19.116), as it goes to disk: every line passes the Parlons
  * redaction again (a message line keeps who and that, never the message's words), whatever the screen sent, and the
  * whole is bounded. The screen only ever holds redacted lines; this does not rely on it.
  */
 const SAVE_MAX = 2 * 1024 * 1024;
-function forFile(text) {
+function forFile(text, secret) {
   const { redact } = require("./parlons-notify");
-  return String(text == null ? "" : text).slice(-SAVE_MAX).split(/\r?\n/).map(l => redact(l)).join("\n") + "\n";
+  return String(text == null ? "" : text).slice(-SAVE_MAX).split(/\r?\n/).map(l => scrub(redact(l), secret)).join("\n") + "\n";
 }
 
-module.exports = { createNodeLog, DEFAULT_MAX_BYTES, forFile, SAVE_MAX };
+module.exports = { createNodeLog, DEFAULT_MAX_BYTES, forFile, SAVE_MAX, scrub };
