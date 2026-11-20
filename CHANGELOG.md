@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.6] — Parlons: a real sender key is read (notifications fire, message text stays out of the log); voice notes are allowed to play
+
+- **Found in review (medium)**: the notifier read a sender key of at most 200 hex digits. A Maxima identity key is an RSA-1024 public key and prints as 324. So for a real message the line was neither parsed (no "Parlons: new message") nor redacted: the message's first 80 characters went to the Logs view and to `node.log`, which 0.19.3 said they did not. 0.19.3's fixtures used a 64-digit key. Not seen on a live node (none may be run here): the fixture is now a key of the real size and shape, and a real line is on the checklist.
+- **Fixed**: a key of up to 1024 hex digits is read. And the redaction no longer depends on the key at all: any line that starts as a message line is logged without what follows its first `": "`, and a sender that is not a plain key is not shown either.
+- **Voice notes can play** (low): the page's content security policy had no `media-src`, so `default-src 'none'` applied to the `data:` URL the Chat player is given. `media-src data:` is added, and nothing wider (the recorder never plays a `blob:`). Playing a note in the built app is on the checklist: this was not run here.
+- **Tests**: `parlons-notify-test.cjs` 9 (the 324-digit fixture, six shapes of message line none of which keeps its text), the 0.19.4 node-manager test now sends its real message under the 324-digit key and finds it notified and redacted; `chatfiles-test.cjs` 34 (the URL `chat.fetchMedia` returns is checked against the policy parsed from `renderer/index.html`).
+
 ## [0.19.5] — Chat files: the first download of a received file works; a temp folder with a space in its path; saved files carry the system's downloaded mark
 
 - **Found in review (high, functional)**: every first download of a received file failed with "Transfer not found". Run on the transfer sheet (`main/chat.js` `fileRun`) looked the transfer up by its id to see whether it was one of ours, and that lookup throws for an offer that has never been downloaded, which is every received file the first time. The lookup is now guarded: no transfer on disk means a download from the offer. 0.19.2's tests called the engine's `download` directly and never went through `fileRun`.

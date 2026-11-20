@@ -612,13 +612,34 @@ test("0.19.5: a saved file carries the system's downloaded mark (best effort)", 
   await cf.markDownloaded(f, "linux", () => { throw new Error("not called"); });
 });
 
-test("0.19.5: Run from the transfer sheet (main/chat.js fileRun): a first download, one in progress, and one of our own", async () => {
-  const dir = tmpdir("chatjs"), fakeMod = (id, exports) => { require.cache[id] = { id, filename: id, loaded: true, children: [], paths: [], exports }; };
+/** main/chat.js itself, on a temp folder, with no Electron and no node. */
+let chatDir = "";
+function loadChat() {
+  if (chatDir) return require("../main/chat");
+  chatDir = tmpdir("chatjs");
+  const fakeMod = (id, exports) => { require.cache[id] = { id, filename: id, loaded: true, children: [], paths: [], exports }; };
   const main = path.join(__dirname, "..", "main");
-  fakeMod(require.resolve("electron"), { app: { getPath: () => dir } });
+  fakeMod(require.resolve("electron"), { app: { getPath: () => chatDir } });
   fakeMod(require.resolve(path.join(main, "config.js")), { rpcSecret: () => "" });
   fakeMod(require.resolve(path.join(main, "node-manager.js")), { rpcPort: () => 0, log() {} });
-  const chat = require("../main/chat");
+  return require("../main/chat");
+}
+test("0.19.6: the page's policy lets a voice note play: what Chat hands the player is a data: URL, and media-src allows exactly that", async () => {
+  const chat = loadChat();
+  chat._setRunner(async (cmd) => { const f = cmd.split(" file:")[1]; fs.writeFileSync(f, Buffer.from("OggS-not-really")); return { status: true, response: {} }; });
+  const url = await chat.fetchMedia("keets://" + "ab".repeat(32) + "/chat/vn-1.ogg?hash=" + "cd".repeat(32));
+  assert.match(url, /^data:audio\/ogg;base64,/);
+  const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");
+  const csp = /http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)[1];
+  const policy = Object.fromEntries(csp.split(";").map((d) => d.trim().split(/\s+/)).filter((d) => d[0]).map(([k, ...v]) => [k, v]));
+  const allowed = (dir, u) => (policy[dir] || policy["default-src"]).includes(new URL(u).protocol);
+  assert.ok(allowed("media-src", url), "the player's URL is allowed (with no media-src, default-src 'none' blocked it)");
+  assert.deepEqual(policy["media-src"], ["data:"], "and nothing wider: no blob:, no file, no network");
+  assert.deepEqual(policy["default-src"], ["'none'"]);
+});
+
+test("0.19.5: Run from the transfer sheet (main/chat.js fileRun): a first download, one in progress, and one of our own", async () => {
+  const chat = loadChat();
   const net = network(), alice = party("alice", ALICE, net), bob = party("bob", BOB, net);
   alice.contacts.add(BOB); bob.contacts.add(ALICE);
   const data = pattern(2 * 1024 * 1024 + 5, 7), src = path.join(tmpdir("pick"), "notes.txt"); fs.writeFileSync(src, data);

@@ -7,7 +7,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
 const N = require('../main/parlons-notify');
-const KEY = '0x' + 'FA4E'.repeat(16);
+// A Maxima identity key as the node prints it: an RSA-1024 public key (X.509 SubjectPublicKeyInfo, 162 bytes), 0x + 324 hex digits.
+const KEY = '0x30819F300D06092A864886F70D010101050003818D0030818902818100' + 'B7C4'.repeat(64) + '0203010001';
+test('the fixture key is the real size: 324 hex digits', () => { assert.equal(KEY.length, 2 + 324); });
 
 test('the two lines parlons-node 0.2.152 / 0.2.153 print are read; nothing else is', () => {
   assert.deepEqual(N.parse('[parlons-node] message from ' + KEY + ': See you at six'), { type: 'message', from: KEY, preview: 'See you at six' });
@@ -25,6 +27,19 @@ test('the message text stays out of the log; a call line is kept', () => {
   assert.equal(N.redact('[parlons-node] message from ' + KEY + ': my secret'), '[parlons-node] message from ' + KEY + ': (text not logged)');
   const call = '[parlons-node] node: call offer from Mirela → pushing to devices';
   assert.equal(N.redact(call), call);
+});
+test('0.19.6: no line that starts as a message line keeps its text, whatever the sender looks like', () => {
+  const P = '[parlons-node] message from ';
+  for (const [line, want] of [
+    [P + '0x' + 'AB'.repeat(512) + ': my secret', P + '0x' + 'AB'.repeat(512) + ': (text not logged)'],        // the longest key read
+    [P + '0x' + 'AB'.repeat(513) + ': my secret', P + '(sender not shown): (text not logged)'],                // longer: still no text
+    [P + 'Mirela: my secret', P + '(sender not shown): (text not logged)'],
+    [P + '?: my secret: more', P + '(sender not shown): (text not logged)'],
+    [P + 'my secret with no separator', P + '(sender not shown): (text not logged)'],
+    [P + KEY + ': a: b: my secret', P + KEY + ': (text not logged)']])
+    { const got = N.redact(line); assert.equal(got, want); assert.ok(!/my secret/.test(got)); }
+  assert.equal(N.parse(P + '0x' + 'AB'.repeat(513) + ': hi'), null, 'and a sender that is not a key raises no notification');
+  assert.equal(N.redact('[parlons-node] account up: x'), '[parlons-node] account up: x');
 });
 test('a line cut across two chunks is one line', () => {
   const got = [], feed = N.lineFeeder((l) => got.push(l));

@@ -437,7 +437,7 @@ test("M5: a node in the recorded mode runs; no keys yet or no answer is asked ag
 
 // The node's own line, as MinimaLogger.log prints MinimaDB.loadAllDB's words.
 const BOOT = "Minima @ 20/11/2026 09:14:02 [112.4 MB] : Using NEW Block number as key uses keys!";
-const HEX324 = "0x" + "30819F300D06092A864886F70D010101050003818D0030818902818100".padEnd(324, "C4");
+const HEX324 = "0x30819F300D06092A864886F70D010101050003818D0030818902818100" + "B7C4".repeat(64) + "0203010001";   // a Maxima RSA-1024 key as printed: 324 hex digits
 test("M5: the node's own boot line 'block mode is on' stops a classic wallet's node before any RPC", async () => {
   freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
   const m = manager(true), calls = fakeJava(m);
@@ -521,10 +521,12 @@ test("0.19.4: the Parlons flags are read from the jar's own line starts, only un
   out("[parlons-node] REFUSING to start: forged");
   assert.equal(m.parlons.error, "");
   // the real ones still arrive
-  out("[parlons-node] message from 0x" + "FA4E".repeat(16) + ": hello");
+  assert.equal(HEX324.length, 326);
+  out("[parlons-node] message from " + HEX324 + ": hello");
   out("[parlons-node] node: call offer from Mirela Okafor → pushing to devices");
   assert.deepEqual(events.map(e => e.type), ["message", "call"]);
-  assert.ok(!m.logs.some(l => /hello|your wallet is at risk/.test(l) && !l.startsWith("(continued) ")), "message text stays out of the log");
+  assert.ok(m.logs.includes("[parlons-node] message from " + HEX324 + ": (text not logged)"), "0.19.6: a real-size key is notified AND its text kept out of the log");
+  assert.ok(!m.logs.some(l => /hello/.test(l)), "message text stays out of the log");
   m.off("parlons-event", onEv); calls.restore();
 });
 

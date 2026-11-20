@@ -12,7 +12,10 @@
  * Both lines carry text a REMOTE party chose (any peer can send a message). They are parsed here, anchored, and by
  * nothing else: main/node-manager.js keeps them away from every other check it runs on the log (isChatter).
  */
-const MESSAGE = /^\[parlons-node\] message from (0x[0-9A-Fa-f]{1,200}): ([\s\S]*)$/;
+// The sender is a Maxima identity key: an RSA-1024 public key prints as 0x + 324 hex digits (0.19.3 allowed 200, so a
+// real line was neither notified nor redacted). Up to 1024 is read, for a longer key kind.
+const MESSAGE = /^\[parlons-node\] message from (0x[0-9A-Fa-f]{1,1024}): ([\s\S]*)$/;
+const MESSAGE_START = "[parlons-node] message from ";
 const CALL = /^\[parlons-node\] node: call offer from ([\s\S]*) → pushing to devices$/;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;   // control and bidi-override characters never reach a notification
 
@@ -38,10 +41,14 @@ function parse(line) {
   if (m) return { type: "call", name: clean(m[1], 80) };
   return null;
 }
-/** What goes to the log and the disk for such a line: who and that, never the message's own words. */
+/** What goes to the log and the disk for such a line: who and that, never the message's own words. Fail closed: ANY
+ *  line that starts as a message line loses everything after its first ": ", whatever the sender looks like, and a
+ *  sender that is not a plain key is not shown either (it could be the text). */
 function redact(line) {
-  const m = MESSAGE.exec(String(line).replace(/\r$/, ""));
-  return m ? "[parlons-node] message from " + m[1] + ": (text not logged)" : line;
+  const l = String(line).replace(/\r$/, "");
+  if (!l.startsWith(MESSAGE_START)) return line;
+  const i = l.indexOf(": ", MESSAGE_START.length), who = i < 0 ? "" : l.slice(MESSAGE_START.length, i);
+  return MESSAGE_START + (/^0x[0-9A-Fa-f]{1,1024}$/.test(who) ? who : "(sender not shown)") + ": (text not logged)";
 }
 /** Chunks of a stream → whole lines (a line cut across two chunks used to be read as two). */
 function lineFeeder(onLine, max = 64 * 1024) {
