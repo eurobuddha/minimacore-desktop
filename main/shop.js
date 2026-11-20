@@ -296,18 +296,27 @@ async function scanOrders(depth) {
 }
 async function scanPayments(depth) {
   if (!vendorAddress) return false;
-  const coins = await coinsAt(vendorAddress, depth, " relevant:true"); if (!coins) return false;
+  const listed = await coinsAt(vendorAddress, depth, " relevant:true"); if (!listed) return false;
   capSeen();
+  // Oldest first (0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one
+  // block the larger coin first, so the remainder comes last.
+  const coins = listed.map((c, i) => ({ c, i })).sort((a, b) => (Number(a.c.created) || 0) - (Number(b.c.created) || 0)
+    || (b.c.amount != null && a.c.amount != null ? (Number(coinAmount(b.c)) - Number(coinAmount(a.c))) : 0) || (b.i - a.i)).map(x => x.c);
   let changed = false;
-  for (const c of coins) {
-    const id = c.coinid; if (!id || seenPayCoins.has(id)) continue;
-    const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); continue; }
-    const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); continue; }
-    const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) continue;   // not marked seen: a payment that arrives before its order is matched once the order is in
+  const judge = (c) => {
+    const id = c.coinid; if (!id || seenPayCoins.has(id)) return "";
+    const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); return ""; }
+    const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
+    const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     seenPayCoins.add(id);
     const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
+    if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
-  }
+    return outcome || "";
+  };
+  // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
+  const dust = coins.filter(c => judge(c) === "DUST");
+  if (changed && dust.length) for (const c of dust) judge(c);
   return changed;
 }
 async function scanOnce() {

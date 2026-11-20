@@ -152,8 +152,10 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   if (has(mem.counted, cid) || (o.coins || []).includes(cid)) return "ALREADY";
   ensureChecked(o);
   // Dust (0.18.181) never fills the order's 1000-coin list, so a flood of tiny coins cannot block a later real payment.
-  // It is remembered (never looked at again) and not counted.
-  if (isDust(o, paidAmount)) { mem.counted[cid] = ref; flush(); return "DUST"; }
+  // It is NOT remembered (0.18.185): what is dust depends on what is still due, so the same coin is judged again later
+  // (it was written to the counted list for good, and a 0.05 top-up seen before its 9.95 stayed dust for ever); and
+  // nothing is saved for it, so a flood of dust costs no disk writes.
+  if (isDust(o, paidAmount)) return "DUST";
   if ((o.coins || []).length >= ORDER_COINS_MAX) return null;
   o.coins = (o.coins || []).concat(cid);
   mem.counted[cid] = ref;

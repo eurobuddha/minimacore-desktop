@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.185] — miniMall vendor: dust is judged again; payments read oldest first
+
+- A dust coin (0.18.181) was written to the counted list for good, and payment coins were read newest first, so a 9.95 payment and a 0.05 top-up seen together left a 10 order UNDERPAID for ever (the 0.05 was dust against 10 still due). A dust coin is now not remembered and nothing is saved for it: it is judged again later against what is then still due (once more in the same scan after another coin counted, and on every later scan). Payment coins are read oldest first (the larger first within one block). 5000 dust coins write nothing. Test: `scripts/shop-test.cjs` (the reviewer's proof, both orders, one scan and two).
+
 ## [0.18.184] — the secret-command check shows the whole command
 
 - The Touch ID prompt showed the first 80 characters of a gated command (the confirmation window 600) and approved the whole text, and the node keeps the LAST of a repeated parameter: `keys action:list` + 70 spaces + `action:genkey` read as harmless and ran genkey. The check now shows the whole command (control and bidirectional characters as spaces, white space collapsed) after the words "show a seed phrase / a private key by running:"; a gated command longer than 80 characters is refused, and so is one that names any parameter twice (`main/cmdverb.js` `repeated`). The pass stays bound to the exact original text. Test: `scripts/cmdgate-test.cjs` (the reviewer's proof).

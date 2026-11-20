@@ -353,3 +353,39 @@ test("'__proto__' as a shop id, an order ref or a chat id finds nothing and writ
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes("const items = (o.items || []).filter(Boolean).map(i =>"), "a stored null line is not drawn");
 });
+
+// ---- 0.18.185: dust is judged again later; payments are read oldest first ----
+test("a 9.95 payment and a 0.05 top-up pay a 10 order, in either order and in one scan or two; 5000 dust coins write nothing", async () => {
+  const m = freshModules(); const VADDR = "MxG0" + "F".repeat(56);
+  m.store.saveShop({ shopId: "topup", shopName: "T", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  let pay = [], msg = [];
+  m.shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
+    : c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: msg } : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] });
+  await m.shop.init();
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("topup buyer");
+  const order = async (ref) => { msg = [{ coinid: "0xE0" + Buffer.from(ref).toString("hex"), state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref, randomid: ref, from: buyer.publicId, to: me.publicId, date: Date.now(), shopId: "topup", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" }))) } }]; await m.shop.scanOnce(); };
+  const st = (ref) => ({ "1": "0x" + Buffer.from(ref).toString("hex") });
+  const cases = [["ORD-TU1", [[0x11, "0.05", 101], [0x12, "9.95", 100]], "newest first, different blocks"],
+    ["ORD-TU2", [[0x22, "9.95", 100], [0x21, "0.05", 101]], "oldest first"],
+    ["ORD-TU3", [[0x31, "0.05", 100], [0x32, "9.95", 100]], "the same block, the top-up listed first"]];
+  for (const [ref, cs, what] of cases) {
+    await order(ref);
+    pay = cs.map(([id, amount, created]) => ({ coinid: "0x" + id.toString(16), tokenid: "0x00", amount, created, state: st(ref) }));
+    await m.shop.scanOnce();
+    assert.equal(m.store.order(ref).paid, true, what); assert.equal(m.store.order(ref).paidAmount, "10.00");
+  }
+  await order("ORD-TU4");   // two scans: the top-up is seen first, alone (dust then), and is judged again once the 9.95 is in
+  pay = [{ coinid: "0x41", tokenid: "0x00", amount: "0.05", created: 105, state: st("ORD-TU4") }];
+  await m.shop.scanOnce(); assert.equal(m.store.order("ORD-TU4").paid, false);
+  pay = [pay[0], { coinid: "0x42", tokenid: "0x00", amount: "9.95", created: 106, state: st("ORD-TU4") }];
+  await m.shop.scanOnce(); assert.equal(m.store.order("ORD-TU4").paid, true, "two scans");
+  m.store.flush();
+  const file = path.join(DIR, "shop.json"), before = fs.readFileSync(file, "utf8");
+  await order("ORD-TU5"); m.store.flush(); const withOrder = fs.readFileSync(file, "utf8");
+  let writes = 0; const real = fs.writeFileSync; fs.writeFileSync = function () { writes++; return real.apply(this, arguments); };
+  try { for (let i = 0; i < 5000; i++) assert.equal(m.store.recordPayment("ORD-TU5", "0.0000001", "0x00", "0x" + (0x100000 + i).toString(16)), "DUST"); }
+  finally { fs.writeFileSync = real; }
+  assert.equal(writes, 0, "no save for a dust coin"); m.store.flush();
+  assert.equal(fs.readFileSync(file, "utf8").length, withOrder.length, "the store is the same size after 5000 dust coins");
+  assert.ok(before.length > 0);
+});
