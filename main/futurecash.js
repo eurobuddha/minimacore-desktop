@@ -739,6 +739,7 @@ function create(o) {
       claimed.add(lc(found.coinid));
       store.insertSweep(String(found.coinid), String(found.address || row.payout), String(found.tokenid || "0x00"), outAmount(found));
       store.setCollectStatus(row.coinid, S.SWEEP_QUEUED);
+      syncHolds();
       activity("info", "Queued " + outAmount(found) + " for sweep to safe | coin:" + found.coinid + " | on:" + (found.address || ""));
     }
   }
@@ -750,6 +751,7 @@ function create(o) {
         if (claimed.has(lc(c.coinid))) continue;
         claimed.add(lc(c.coinid));
         store.insertSweep(String(c.coinid), addr, String(c.tokenid || "0x00"), outAmount(c));
+        syncHolds();
         activity("info", "Stranded " + outAmount(c) + " | coin:" + c.coinid + " | on retired:" + addr + " — queued to sweep to safe");
       }
     }
@@ -936,7 +938,22 @@ function create(o) {
   }
   /** Store.resetHistory and the log: completed records only; in-flight work and the destination stay. */
   function resetHistory() { return exclusive(async () => { store.resetHistory(); kv().set(K.LOG, "[]"); return { ok: true }; }); }
-  function syncHolds() {}
+  // ---- the coin guard (main/reserve.js hold source "futurecash") ----
+  /**
+   * The coins this app is about to move and the wallet must not spend first: the coins collected onto an at-risk payout
+   * and waiting for their sweep (fc_sweep PENDING and SWEEP_POSTED: plain wallet coins, which Send, Consolidate and the
+   * other engines could otherwise take), and the stakes being collected (contract coins: the guard never refuses those,
+   * listed for the record). null while the store is closed: the guard then keeps what it holds (its own file).
+   */
+  function coinHolds() {
+    if (!store) return null;
+    const out = [];
+    for (const r of store.sweeps(S.PENDING, S.SWEEP_POSTED)) out.push({ coinid: r.coinid, why: "", tokenid: r.tokenid });
+    for (const r of store.collects(S.COLLECT_POSTED, S.COLLECT_POSTED_SAFE)) out.push({ coinid: r.coinid, why: "", tokenid: r.tokenid });
+    return out;
+  }
+  /** Tell the guard at once (not at its next minute): a coin queued for a sweep is held before anything else is sent. */
+  function syncHolds() { try { const l = coinHolds(); if (l && o.reserve) o.reserve.setHolds("futurecash", l); } catch (e) {} }
 
   // ---- the pass ----
   /**
@@ -1026,7 +1043,7 @@ function create(o) {
   function activityLog() { try { const a = JSON.parse(kv().get(K.LOG, "[]")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
   return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll, setSafeSameNode, setSafeExternal, stopRescue, setGuardian, setFlag, harden, retire, sweepAddress, recoverRetired, resetHistory,
-    rescueReady: () => { try { return rescueReady(); } catch (e) { return false; } },
+    rescueReady: () => { try { return rescueReady(); } catch (e) { return false; } }, coinHolds,
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }
 

@@ -180,6 +180,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["WHY_DEXICON_ORDER", I18N.N_("a live Dexicon order"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_DEXICON_TAKE", I18N.N_("a Dexicon take that has not been answered yet"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_DEXICON_VOID", I18N.N_("a Dexicon take that is being voided"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_FUTURECASH_TXN", I18N.N_("a Future Cash Next transaction"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_FUTURECASH", I18N.N_("Future Cash Next"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
 
     // ---- ETH Wallet (main/ethwallet.js) ----
     ["EW_FROZEN", I18N.N_("Dexicon is frozen, and this wallet sends through its Ethereum engine. Unfreeze Dexicon on the Apps tab, then send again. Nothing was sent.")],

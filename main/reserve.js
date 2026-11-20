@@ -34,8 +34,9 @@ const MISSES = 2;                  // a coin is "gone" only when the node did no
 const PIN_COINAGE = 3;             // a pin never names a coin younger than this: the node will not spend it yet (main/sendpin.js minCoinage)
 const SWEEP_READS = 25;            // coins asked of the node per sweep, round robin: a fragmented wallet is never listed
 const SETTLES = new Set(["atomix", "casino"]);   // owners whose transactions settle against a deadline
-const TXN_WHY = { atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet" };
+const TXN_WHY = { atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet", futurecash: "a Future Cash Next transaction" };
 const HOLD_WHY = { dexicon: "Dexicon" };
+HOLD_WHY.futurecash = "Future Cash Next";   // the coins Future Cash Next is about to sweep (main/futurecash.js coinHolds)
 const WATCH = /(?:^|;)\s*(?:txncreate|txninput|txnpost|txndelete|send|consolidate|coins)\b/i;
 const MXUSD = "0x7d39745fbd29049be29850b55a18bf550e4d442f930f86266e34193d89042a90";
 const tokenName = (t) => (lc(t) === "0x00" ? "MINIMA" : lc(t) === MXUSD ? "MxUSD" : "of token " + t);

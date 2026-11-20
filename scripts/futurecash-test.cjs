@@ -471,3 +471,26 @@ test("the grant: asked natively in main, written only by config.setFcGrant, neve
   const ops = main.slice(main.indexOf("const FC_OPS"), main.indexOf(" * THE ONE NATIVE GRANT"));
   assert.ok(!/setFcGrant|fcGrant:/.test(ops.replace(/fcGuardian|fcRevoke/g, "")), "no screen op writes the grant directly");
 });
+
+test("the coin guard: a collected coin waiting for its sweep is held for Future Cash Next until it is swept; other owners cannot take it first", async () => {
+  const reg = require("../main/reserve.js").createRegistry({ now: () => Date.now(), log() {} });
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const x = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } }, { granted: () => true, reserve: reg, get: async () => ({ status: true, results: [{ address: SAFE_HEX, reused: false, reuse_count: 0 }] }) });
+  const { e, node } = x, kv = e._store().kv;
+  await e.setSafeExternal(SAFE_MX); kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY1])); await e.setGuardian(true);
+  node.n.answer.txnsign = async () => ({ status: false, error: "vault busy" });   // the sweep fails this time: the coin stays queued
+  await e.pass(150);
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  await e.pass(152);
+  const held = reg.list().find(r => r.coinid === ID(50));
+  assert.ok(held && held.owner === "futurecash" && held.why === "Future Cash Next", JSON.stringify(reg.list()));
+  assert.ok(reg.foreign("pandapools", ID(50)) && reg.foreign("wallet", ID(50)) && !reg.foreign("futurecash", ID(50)), "held from every other owner, not from itself");
+  assert.deepEqual(e.coinHolds().map(h => h.coinid).sort(), [ID(50)], "the claimed collect is done; the sweep is still owed");
+  delete node.n.answer.txnsign; node.n.tip = 161; await e.pass(161);   // tried again, swept
+  node.n.wallet[0].spent = true; await e.pass(162);
+  assert.ok(!reg.list().some(r => r.coinid === ID(50) && r.state === "held"), "released once swept");
+  await e.stop(); assert.equal(e.coinHolds(), null, "a closed store says nothing: the guard keeps what it holds");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(src.includes('reserve.setHoldSource("futurecash", () => futurecash.coinHolds());'));
+});

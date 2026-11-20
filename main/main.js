@@ -420,8 +420,9 @@ ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audi
 // "futurecash" (the signing queue and the coin guard see it); the key audit through the KeyUses host. It runs while the
 // node runs: its store is this wallet's own file, and one pass is made on each new block.
 const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c, { owner: "futurecash" }), dir: () => app.getPath("userData"),
-  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk),
+  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk), reserve,
   notify: (title, body) => { try { const n = new Notification({ title: String(title), body: String(body), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ } } });
+reserve.setHoldSource("futurecash", () => futurecash.coinHolds());   // what it is about to sweep: no other part of the app may spend it first
 const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
 let fcBlock = 0;
 node.on("status", (s) => {
