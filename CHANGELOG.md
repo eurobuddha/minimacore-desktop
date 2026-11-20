@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.173] — Logs: the node's last line is written out when its output has ended
+
+- **From the release review:** the unfinished last line of each of the node's streams (kept back since 0.19.103 until its line end comes) was written out on the process's `exit` event. Node fires `exit` before the pipes are drained, so output arriving after it waited for a line end that never came and was lost, often the last words of a node that died.
+- **Now:** it is written out on `close`, which comes once both streams have ended, so the last line is whole. Output still arriving from a process that a new start has replaced is no longer mixed into the new process's lines, and its `close` leaves the new process's buffers alone.
+- Test (`scripts/keymode-test.cjs`, on the stand-in java of the key-mode tests): a half line before `exit` and its rest after it are logged as one line on `close`, after "node exited", with the error stream's unfinished line; a replaced process's late output and its close do not touch the new process's lines. It fails on 0.19.172.
+
 ## [0.19.172] — Logs: a reply's "seed" is taken out too
 
 - **From the release review:** the log scrub (`main/nodelog.js` `scrub`, run on every line and again on a saved file) took out the RPC secret, a seed phrase (`phrase:` and `"phrase":`) and `privatekey:0x…`, but not the `"seed"` field of a reply's JSON: `vault` answers with the wallet's seed there, and the test even pinned it as kept.

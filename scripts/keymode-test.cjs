@@ -911,3 +911,30 @@ test("0.19.121: log() takes the RPC secret, seed phrases and bidirectional contr
   } finally { m.secret = was; }
   assert.ok(/this\.secret = config\.rpcSecret\(\);[^\n]*\n\s*this\.log\("\[app\] starting node: java "/.test(fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8")), "held from the moment the node is given it");
 });
+
+// 0.19.173 (release review): the node's last unfinished line is written out on "close", after the pipes have ended. On
+// "exit" they may still hold output: what came after it waited for a line end that never came, and was lost.
+test("the node's last line with no line end is logged on close, with what arrived after exit; a replaced process's output is not mixed into the new one", async () => {
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m);
+  await m.start();
+  const p = calls.proc;
+  p.stdout.emit("data", "[app-test] whole line\n[app-test] half a ");
+  p.stderr.emit("data", "[app-test] err without end");
+  m.state = "stopping"; p.emit("exit", 0, null);
+  assert.ok(!m.logs.some(l => l.includes("half a")), "not yet: the pipes may still hold the rest");
+  p.stdout.emit("data", "line, after exit");
+  p.emit("close", 0, null);
+  assert.ok(m.logs.includes("[app-test] half a line, after exit"), "the whole last line, with what came after exit");
+  assert.ok(m.logs.includes("[app-test] err without end"));
+  assert.ok(m.logs.indexOf("[app-test] half a line, after exit") > m.logs.findIndex(l => l.startsWith("[app] node exited")));
+  calls.restore();
+  // a process replaced by a new start: its late output and its close leave the new process's lines alone
+  classicParlons();
+  const c2 = fakeJava(m); await m.start(); const q = c2.proc;
+  q.stdout.emit("data", "[app-test] new node, unfinished ");
+  p.stdout.emit("data", "OLD OUTPUT\n"); p.emit("close", 0, null);
+  q.stdout.emit("data", "line\n");
+  assert.ok(m.logs.includes("[app-test] new node, unfinished line") && !m.logs.some(l => l.includes("OLD OUTPUT")));
+  c2.restore();
+});

@@ -491,11 +491,17 @@ class NodeManager extends EventEmitter {
         dataDir: cfg.dataFolder || config.defaultDataFolder(), startedAt: this.startedTs }));
     } catch (e) {}
     if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
-    p.stdout.on("data", d => this.nodeSaid("out", d));
-    p.stderr.on("data", d => this.nodeSaid("err", d));
+    // Output still arriving from a process a NEW start has replaced is not mixed into the new one's lines (0.19.173).
+    p.stdout.on("data", d => { if (!this.proc || this.proc === p) this.nodeSaid("out", d); });
+    p.stderr.on("data", d => { if (!this.proc || this.proc === p) this.nodeSaid("err", d); });
+    // The unfinished last line of each stream is written out on "close", once both streams have ended (0.19.173). On
+    // "exit" the pipes may still hold output: what came after it was kept back for a line end that never comes.
+    p.on("close", () => {
+      if (this.proc && this.proc !== p) return;   // a new start has its own buffers now
+      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.nodeLine(rest, k); }   // a last line with no line end
+    });
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     p.on("exit", (code, sig) => {
-      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.nodeLine(rest, k); }   // a last line with no line end
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
