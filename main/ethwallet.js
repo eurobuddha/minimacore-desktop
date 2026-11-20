@@ -30,7 +30,10 @@ const addToken    = (addr) => atomix.ethAddToken(addr);
 const removeToken = (addr) => atomix.ethRemoveToken(addr);
 const sendMax     = (asset) => atomix.ethSendMax(asset);
 const sendReview  = (asset, to, amt) => atomix.ethSendReview(asset, to, amt);
-const sendExecute = (asset, to, amt, tier) => atomix.ethSendExecute(asset, to, amt, tier);
+// A frozen Dexicon (Apps tab, main/freeze.js) holds the engine this wallet signs with: a send says so in its own words.
+let dexiconFrozen = () => false;
+const sendExecute = (asset, to, amt, tier) => (dexiconFrozen() ? Promise.reject(new Error("Dexicon is frozen, and this wallet sends through its Ethereum engine. Unfreeze Dexicon on the Apps tab, then send again. Nothing was sent."))
+  : atomix.ethSendExecute(asset, to, amt, tier));
 const exportKey   = () => atomix.exportKey();
 
 /**
@@ -61,5 +64,5 @@ const setRpc      = (url) => atomix.ethSetRpc(url);
 
 module.exports = {
   emitter, status, balances, tokens, addToken, removeToken,
-  sendMax, sendReview, sendExecute, exportKey, exportKeyGated, swapsInFlight, EXPORT_PHRASE, setRpc
+  sendMax, sendReview, sendExecute, setFrozen: (fn) => { dexiconFrozen = fn; }, exportKey, exportKeyGated, swapsInFlight, EXPORT_PHRASE, setRpc
 };

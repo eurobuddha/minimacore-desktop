@@ -80,6 +80,7 @@ if (process.argv.includes("--shots")) {
     ["terminal", "view=terminal&tray=0"], ["terminal-run", "view=terminal&tray=0&fill=%23termIn%3Dbalance&do=%23termRun"], ["terminal-run-1440x900", "view=terminal&tray=0&fill=%23termIn%3Dbalance&do=%23termRun", 1440, 900, 1],
     ["terminal-send", "view=terminal&tray=0&fill=%23termIn%3Dsend%20amount%3A1%20address%3A0xFA4E&do=%23termRun"],
     ["logs", "view=logs&tray=0"], ["logs-1440x900", "view=logs&tray=0", 1440, 900, 1], ["logs-filter", "view=logs&tray=0&fill=%23logsFilter%3Dblock"], ["logs-paused", "view=logs&tray=0&do=%23logsPause%7C%5Bdata-logchip%3Dmining%5D"],
+    ["apps-frozen", "view=apps&tray=0&frozen=mail,vestr"], ["apps-frozen-tray", "view=apps&tray=1&frozen=mail,vestr"], ["apps-freeze-refused", "view=apps&tray=0&scroll=300&do=%5Bdata-freeze%3Ddexicon%5D"], ["apps-1440x900", "view=apps&tray=1&frozen=mail", 1440, 900, 1],
     ["ethwallet-export", "view=ethwallet&tray=0&do=%23ewSettings%7C.adlg__item"], ["ethwallet-menu", "view=ethwallet&tray=0&do=.ew-more"],
 ["parlons", "view=parlons&tray=1&pl=ready"], ["parlons-starting", "view=parlons&tray=0"], ["parlons-error", "view=parlons&tray=0&pl=error"], ["parlons-1440x900", "view=parlons&tray=1&pl=ready", 1440, 900, 1],
     ["chat", "view=chat&tray=0"], ["chat-thread", "view=chat&tray=0&chat=thread"], ["chat-attach", "view=chat&tray=0&chat=attach"], ["chat-file", "view=chat&tray=0&chat=file"], ["chat-failure", "view=chat&tray=0&chat=failure"],

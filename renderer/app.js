@@ -872,6 +872,7 @@ function initShell() {
   });
   initTrayOrder(list);
   applyHiddenApps();
+  api.freezeList().then(l => { FROZEN = l || []; applyHiddenApps(); if (activeView === "apps") renderApps(); }).catch(() => {});
   el("trayBtn").onclick = () => setTray(el("tray").hidden);
   el("trayScrim").onclick = () => setTray(false);
   setTray(!NARROW.matches && store("shellTray") === "1", true);
@@ -1233,6 +1234,7 @@ async function wwDoSend() {
 }
 
 function renderActive() {
+  if (FROZEN.length && thawOnOpen()) return;   // a frozen app that is opened is unfrozen first, then drawn
   if (!running && activeView !== "node") { /* wallet views need the node */ }
   if (activeView === "balances") renderBalances();
   else if (activeView === "receive") renderReceive();
@@ -2743,30 +2745,55 @@ function renderTerminal() {
 }
 
 // ---- Settings --------------------------------------------------------------
-// ---- Apps tab: the phone's "Internal" list, one row per tray app, each with a Hide switch ----
-// Hide takes an app out of the tray until it is switched back; the app itself keeps running (the phone's
-// second switch, Freeze, comes with the engines in a later phase). Minima Core cannot be hidden.
+// ---- Apps tab: the phone's "Internal" list, one row per app, each with a Hide and a Freeze switch ----
+// Hide takes an app out of the tray until it is switched back; the app itself keeps running. Freeze (0.19.117, main/freeze.js)
+// stops the app's background work and puts its tray row away; its data is kept, and unfreezing resumes it. The main process
+// decides whether an app may be frozen and says why not (Dexicon: never while money is in flight). Minima Core is neither.
+// Dexicon and Chat are tabs: they have no drawer row to hide, and opening the tab unfreezes them, as on the phone.
+const APPS_TABS = [{ id: "dexicon", name: "Dexicon", tab: true, icon: "minima-tile.svg" }, { id: "chat", name: "Chat", tab: true, icon: "minima-tile.svg" }];
+const NO_FREEZE = { core: "Minima Core is the node and the wallet", parlons: "Parlons is part of the node itself" };
+let FROZEN = [];   // ids, as the main process holds them (config frozenApps)
 function hiddenApps() { return String(store("shellHidden") || "").split(",").filter(id => id && id !== "core" && TRAY_APPS.some(a => a.id === id)); }
 function applyHiddenApps() {
   const hidden = hiddenApps();
-  document.querySelectorAll(".tray__row").forEach(r => { r.hidden = hidden.includes(r.dataset.app); });
+  document.querySelectorAll(".tray__row").forEach(r => { r.hidden = hidden.includes(r.dataset.app) || FROZEN.includes(r.dataset.app); });
   paintTrayDot();
+}
+/** The line under an app's name (IntegratedAppsAdapter): where it is, and " · Deep frozen" when it is. */
+function appsState(a, hidden, frozen) { return (a.id === "core" ? "Always on" : a.tab ? "A tab" : hidden ? "Hidden from drawer" : "In app drawer") + (frozen ? " · Deep frozen" : ""); }
+async function setFrozen(id, on) {
+  try { FROZEN = await api.freezeSet(id, on); }
+  catch (e) { openDlg("freezeNo", "Not frozen", `<div class="apps-why">${esc(ipcError(e))}</div>`, ""); }
+  applyHiddenApps();
+}
+// Opening a frozen app wakes it for good (PandamoniumHooks: "opening a frozen app unfreezes it").
+function thawOnOpen() {
+  const id = activeView === "chat" ? "chat" : TAB_OF[activeView] === "dexicon" ? "dexicon" : activeView;
+  if (!FROZEN.includes(id)) return false;
+  api.freezeSet(id, false).then(l => { FROZEN = l; applyHiddenApps(); toast((TRAY_APPS.concat(APPS_TABS).find(a => a.id === id) || { name: id }).name + " was frozen. It is running again."); renderActive(); }).catch(() => {});
+  return true;
 }
 function renderApps() {
   const hidden = hiddenApps();
-  el("appsList").innerHTML = TRAY_APPS.map(a => {
-    const core = a.id === "core", off = hidden.includes(a.id);
+  el("appsList").innerHTML = TRAY_APPS.concat(APPS_TABS).map(a => {
+    const core = a.id === "core", off = hidden.includes(a.id), ice = FROZEN.includes(a.id), noIce = NO_FREEZE[a.id];
     return `<div class="apps-row">
     ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
-    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${core ? "Always on" : off ? "Hidden from drawer" : "In app drawer"}</div></div>
-    <label class="apps-row__hide"><span>Hide</span><button class="switch" role="switch" aria-checked="${off}" aria-label="Hide ${esc(a.name)}" data-hide="${a.id}"${core ? " disabled" : ""}></button></label>
+    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${appsState(a, off, ice)}</div></div>
+    <div class="apps-row__sw"><label class="apps-row__hide"><span>Hide</span><button class="switch" role="switch" aria-checked="${off}" aria-label="Hide ${esc(a.name)}" data-hide="${a.id}"${core || a.tab ? " disabled" : ""}></button></label>
+      <label class="apps-row__hide"${noIce ? ` title="${esc(noIce)}"` : ""}><span>Freeze</span><button class="switch" role="switch" aria-checked="${ice}" aria-label="Freeze ${esc(a.name)}" data-freeze="${a.id}"${noIce ? " disabled" : ""}></button></label></div>
   </div>`; }).join("");
   paintAppsCounts();
-  el("appsList").querySelectorAll(".switch:not([disabled])").forEach(sw => sw.onclick = () => {
+  el("appsList").querySelectorAll(".switch[data-hide]:not([disabled])").forEach(sw => sw.onclick = () => {
     const id = sw.dataset.hide, now = hiddenApps();
     store("shellHidden", (now.includes(id) ? now.filter(x => x !== id) : now.concat(id)).join(","));
     applyHiddenApps(); renderApps();
     const again = el("appsList").querySelector(`.switch[data-hide="${id}"]`); if (again) again.focus();
+  });
+  el("appsList").querySelectorAll(".switch[data-freeze]:not([disabled])").forEach(sw => sw.onclick = async () => {
+    const id = sw.dataset.freeze; sw.disabled = true;
+    await setFrozen(id, !FROZEN.includes(id));
+    if (activeView === "apps") { renderApps(); const again = el("appsList").querySelector(`.switch[data-freeze="${id}"]`); if (again && !document.querySelector(".overlay--dlg")) again.focus(); }
   });
 }
 // ---- Minima Faucet: the one screen of Pandamonium's Faucet (apks/base integrated/faucet, pm_faucet_activity_main.xml) ----

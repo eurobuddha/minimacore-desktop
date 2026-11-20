@@ -258,6 +258,7 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.19.114 | 5a | `renderFaucet` (the original's strings, `faucetBanner` when the node is stopped), `.fc-*` in `renderer/apps.css`; `main/faucet.js` unchanged (sha256 pinned); captures `*-faucet*.png` | `apps-money.test.cjs` (30) |
 | 0.19.115 | 5a | `#view-terminal` (`termBanner`, `termOut`, `termIn`, `termRun`), `TERM_BANNER`, `TERM_ITEMS`, `termJsonParts`, `termNode`, `appendTerm(text, kind)`, `termRun`, `termSendNote`; `.term-*` and `--t-*` in `renderer/apps.css`; completion unchanged; new `scripts/apps-screens.test.cjs`; captures `*-terminal*.png` | `apps-screens.test.cjs` (4) |
 | 0.19.116 | 5a | `#view-logs` (`logsPause`, `logsClear`, `logsSave`, `logsFilter`, `logsChips`, `logsBox`), `LOGS_CHIPS`, `logsRender`, `logsAppend`, `logsSync`, `paintLogChips`, `renderLogs`, `appendLog` (textContent only); main `nodelog.forFile` (redacted again, 2 MB bound), IPC `mcd:logsSave`; `.logs-*` in `renderer/apps.css`; captures `*-logs*.png` | `apps-screens.test.cjs` (7) |
+| 0.19.117 | 5a | `main/freeze.js` (`create`: `start`, `set`, `list`, `isFrozen`, `applyAtStartup`; `dexiconBlockers`, `clean`, `FREEZABLE`, `NEVER`), config `frozenApps`, IPC `mcd:freezeList` / `mcd:freezeSet`; `main.js` start sites through `freeze.start`, `onEnginesRelease` skips a frozen Dexicon, `dexiconWork` over `inFlightWork`, `ethwallet.setFrozen`; renderer `FROZEN`, `APPS_TABS`, `appsState`, `setFrozen`, `thawOnOpen`, `renderApps` (two switches); owed list after Phase 5a in the plan; captures `*-apps-frozen*.png`, `*-apps-freeze-refused.png` | `apps-screens.test.cjs` (11), `shell-test.cjs` (14) |
 
 Version line (19 Nov 2026): the released main line owns 0.18.65 to 0.18.69 (its Mail work). This branch reused those numbers, up to 0.18.148, for unpushed commits; they are not renumbered. `v0.18.69` was merged at 0.19.0 and every later change on this branch is 0.19.x.
 
@@ -287,6 +288,15 @@ Owed items (recorded 19 Nov 2026 with the room ② review; none of these is buil
   (`-legacy-keys-YYYYMMDD`); a name of its own is owed.
 - Look-alike token names outside Cyrillic and Greek get the "(not MxUSD)" mark and the token id, but not the extra
   warning line (0.18.135).
+
+Owed after Phase 5a (recorded 20 Nov 2026, 0.19.108 to 0.19.117; none of these is built):
+- ETH Wallet: "Import key" (a second key store and signer beside the node-derived key; on the phone swaps keep the node's key, here one engine serves both). Token logos (the phone fetches them from a CDN).
+- Vestr: nothing owed against the native app. Nicknames and search exist only in the blue MiniDapp.
+- miniMall: Studio's NFTs tab and StateNFT collections, the Inbox's NFT delivery and CSV export, enquiries from a storefront, the NFT storefront grid and timeline, the buyer's product page, the buyer's list of added shops kept across restarts. Each needs `main/shop.js` work first. The order total is still worked out through a floating-point number and written with six decimals, as before and as the wire format has it: exact for prices of up to six decimals, not looked at beyond that.
+- Web Wallet: nothing owed; "Remember me", "Generate secret key" and a typed per-send key-uses figure are left out on purpose.
+- Logs: the node manager cuts a line of over 400 characters in the on-screen ring (the file on disk has it whole): a long identifier in such a line is cut on screen. Not changed here.
+- Freeze: Dexicon's three engines freeze together (one switch); a frozen Dexicon makes ETH Wallet's Send refuse with the reason. P2P Chance has no row. Chat and Dexicon rows have no Hide (they are tabs).
+- Terminal: a MINIMA `send` typed with no `fromaddress:` may be given one by the app (the beacon-dust pin of 0.16.x); the Terminal says so. Whether the Terminal should bypass that pin is the owner's call.
 
 ## 9. Checks that need a real node (owner, on the dev node; nothing here is proven yet)
 
@@ -422,6 +432,7 @@ Phases 0 to 2 were verified by tests and a browser preview only. The app has not
 - [ ] Faucet (0.19.114, owner's choice whether to make a real request): Get My Address fills this wallet's address whole; Request Minima shows the faucet's own answer in green or red.
 - [ ] Terminal (0.19.115, dev node): the banner shows the node's version; `status` prints coloured JSON; Tab completes; `send amount:0.0001 address:<own address>` shows the note, goes through, and the reply's `params` show whether `fromaddress` was added; the same with `fromaddress:` typed is sent as typed. With a Dexicon order holding coins and the coin guard on Observe, a typed send is not refused and Logs has one `[coins] observe:` line.
 - [ ] Logs (0.19.116, dev node): the chips show what `logs` answers on this node (confirm the answer carries `scripts`, `mining`, `blocks`, `networking`, `ibd`, `maxima` as true / false: read from the phone's source, not seen from a node); Mining on: mining lines appear, off: they stop; Filter narrows; Pause holds the text and Resume catches up; Save to file writes the text shown, and a Parlons message line in it reads "(text not logged)".
+- [ ] Freeze (0.19.117, dev node): freeze MinimaMail: its drawer row goes, Logs says "mail frozen", a mail sent to this node from a phone does not appear; unfreeze: it appears within a scan (if it is older than the scan depth, run Mail's backfill). Restart the app with Mail frozen: it stays frozen and nothing scans. Freeze Dexicon with a swap in flight, then with a market published, then with a pool open: each is refused with its reason. With nothing in flight it freezes; rooms ①, ② and ③ do nothing in the background (no AtomiX, PandaPools or Dexicon lines in Logs); ETH Wallet's Send says Dexicon is frozen; opening the Dexicon tab unfreezes it and the engines come back by themselves. NOT proven without a node: that the three engines resume cleanly from a hold that lasted hours, and that a restore run while Dexicon is frozen leaves it held.
 
 ## 10. Proposed addition to the Parlons node (for the owner to approve; nothing in the maxima repo was changed)
 

@@ -218,6 +218,7 @@ ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, t
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
+  if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
   const c = config.save(patch || {});
   reserveMode(c);
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
@@ -258,7 +259,7 @@ node.onEnginesHold = async () => { await Promise.all([dexicon.hold(), atomix.hol
 // Before the node is told to quit (node-manager stop(), 0.18.117): what the engines have at the node ends first, so a
 // posted action is recorded by the engine that posted it. Each wait is bounded (Dexicon: main/dexicon.js STOP DRAINS).
 node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandapools.quiet(10000)]);
-node.onEnginesRelease = () => { atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };
+node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
   running: node.state === "running", run: (c) => node.runResync(c), work: walletWork }));
@@ -277,6 +278,22 @@ ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snap
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
   dexicon: await dexicon.activeWork().catch(() => null), casino: config.load().casinoEnabled ? casino.open() : null, casinoOn: !!config.load().casinoEnabled });
+// The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
+const whenRunning = (fn) => () => { if (node.state === "running") fn(); };
+const freeze = require("./freeze").create({
+  load: () => config.load().frozenApps, save: (ids) => { config.save({ frozenApps: ids }); }, log: (l) => node.log(l),
+  engines: {
+    mail: { start: whenRunning(() => mail.startLoop()), stop: () => mail.stopLoop() },
+    minimall: { start: whenRunning(() => { shop.startLoop().catch(() => {}); }), stop: () => shop.stopLoop() },
+    vestr: { start: whenRunning(() => vestr.startLoop()), stop: () => vestr.stopLoop() },
+    chat: { start: whenRunning(() => chat.startLoop()), stop: () => chat.stopLoop() },
+    dexicon: { start: () => node.onEnginesRelease(), stop: () => node.onEnginesHold() }   // the hold a wallet replacement uses; by the time start runs it is no longer in the frozen list
+  },
+  dexiconWork: async () => Object.assign(await inFlightWork(), { ownPools: await pandapools.ownPools().catch(() => null), holds: (() => { try { return dexicon.coinHolds(); } catch (e) { return null; } })() })
+});
+ethwallet.setFrozen(() => freeze.isFrozen("dexicon"));
+ipcMain.handle("mcd:freezeList", () => freeze.list());
+ipcMain.handle("mcd:freezeSet", (_e, id, on) => freeze.set(id, on));
 ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now()); return { title: w.title, message: w.message, any: w.any }; });
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
@@ -562,8 +579,9 @@ shop.emitter.on("incoming", (info) => {
   } catch (e) {}
 });
 let mailStarted = false;
-node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); shop.startLoop().catch(() => {}); } });
-node.on("status", (s) => { if (s.state === "running") chat.startLoop(); });
+// Asked at every "running" (each start is a no-op while its loop runs): an app unfrozen with the node stopped starts with the node.
+node.on("status", (s) => { if (s.state === "running") { mailStarted = true; freeze.start("mail"); freeze.start("minimall"); } });   // not when frozen (Apps tab)
+node.on("status", (s) => { if (s.state === "running") freeze.start("chat"); });
 
 // PandaPools (AMM) — read model + actions; the AMM logic is the reused MDS core (main/pandapools/*).
 ipcMain.handle("mcd:ppPools", () => pandapools.pools());
@@ -784,7 +802,7 @@ ipcMain.handle("mcd:vestrCollect", (_e, coinid, burn) => vestr.collect(coinid, b
 ipcMain.handle("mcd:vestrCalculate", (_e, amount, startMs, endMs, graceHours) => vestr.calculate(amount, startMs, endMs, graceHours));
 vestr.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:vestr"); });
 let vestrStarted = false;
-node.on("status", (s) => { if (s.state === "running" && !vestrStarted) { vestrStarted = true; vestr.startLoop(); } });
+node.on("status", (s) => { if (s.state === "running") { vestrStarted = true; freeze.start("vestr"); } });
 
 // Web Wallet (local, megammr-gated). All node I/O + fund logic lives in webwallet.js; the seed reaches only
 // the local node over loopback. `wwEnableMegammr` sets the -megammr param and restarts (the tab's warning CTA).
@@ -854,6 +872,7 @@ app.whenReady().then(() => {
   // calls nodeStart when the user finishes — otherwise the node would silently start before any choice.
   const c = config.load();
   if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
+  freeze.applyAtStartup();   // a frozen Dexicon's engines are held before the node is up; the other frozen apps are simply never started
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
   updater.start();   // does nothing for a flavour that does not update itself, and for a TEST copy (main/updater.js OFF)

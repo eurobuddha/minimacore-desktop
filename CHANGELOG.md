@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.117] — The Apps tab's Freeze switch (owed since Phase 1)
+
+- **Each app on the Apps tab has Hide and Freeze**, as Pandamonium's Internal list. Freeze stops the app's background work, puts its drawer row away and adds "· Deep frozen" to its line; nothing the app holds is touched, and unfreezing resumes it. The list is kept in the app's config (`frozenApps`) and honoured at startup: a frozen app's loop is never started.
+- **What Freeze stops** (`main/freeze.js`): MinimaMail, the scan for new mail and the address renewals; miniMall, the scan for orders, payments and messages; Minima Vestr, its block poll; Chat, the message drain and the file transfers; Dexicon, the three trading engines (AtomiX, PandaPools, the Exchange) through the same hold a wallet replacement uses. ETH Wallet, Minima Faucet and Web Wallet do no work while closed, so Freeze only puts them away.
+- **Dexicon is refused while money is in flight**, with the reasons listed: an unfinished AtomiX swap, a market on the book or OTC availability live, an open OTC deal, an unconfirmed pool transaction, an open pool of this wallet, an Exchange trade unanswered or unsettled, coins behind live Exchange orders; and equally when any of that cannot be read. "Dexicon is still watching funds in flight. It can be frozen once they settle." Unfreezing is never refused.
+- **Never frozen:** Minima Core, and Parlons (its account runs inside the node). P2P Chance, removed in 0.18.68, has no row: its settle-only loop runs only while a bet is open.
+- Dexicon and Chat are tabs: their rows have Freeze and no Hide, and opening the tab unfreezes them, as opening a frozen app does on the phone.
+- While Dexicon is frozen, ETH Wallet (which signs through Dexicon's Ethereum engine) refuses a send and says to unfreeze Dexicon first. A wallet command that holds and releases the engines leaves a frozen Dexicon held.
+- The window cannot write the list itself: `mcd:saveConfig` drops `frozenApps`; only `mcd:freezeSet` changes it, after the check.
+- The owed items after Phase 5a are listed in the plan.
+
 ## [0.19.116] — Logs as Pandamonium's: Pause, the filter, the verbosity chips, Save to file (Phase 5a)
 
 - **The screen is Pandamonium's Logs** (apks/base `view_logs.xml`, `LogsView`): three equal buttons **Pause** (Resume) | **Clear** | **Save to file** (the phone's Share), the **Filter** field (any case, anywhere in the line), the row of chips **Scripts, Mining, Blocks, Networking, Initial block download (IBD), Maxima**, and the log in monospace beneath, in the shell's colours, light and dark.

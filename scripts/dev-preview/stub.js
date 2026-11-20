@@ -46,6 +46,7 @@
     items: [{ product: "Fake mug", quantity: 2, unitPrice: "12.5", lineTotal: "25.000000" }], shipping: "Domestic", delivery: "1 Preview Street, Nowhere", note: "Preview note", counterparty: "0x" + "B0FA4E".repeat(11).slice(0, 64) });
   const SHOP_ORDERS = [SHOP_ORDER("ORD-FAKE0001", "sell", "PENDING", false, 240000), SHOP_ORDER("ORD-FAKE0002", "sell", "PAID", true, 7200000), SHOP_ORDER("ORD-FAKE0003", "buy", "PENDING", false, 90000000)];
   const LOGS_ON = { scripts: false, mining: false, blocks: true, networking: false, ibd: false, maxima: false };
+  let FROZEN_IDS = (Q.get("frozen") || "").split(",").filter(Boolean);
   const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
   const AX_BOOK = { scanned: 3, makers: 2, bestBid: 0.99, bestAsk: 1.01, bidCap: 100, askCap: 100, currency: "mxusdt", label: "mxUSDT", pricingParity: true,
     bids: [{ signer: FAKE_PK("D1"), p: 0.99, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 0.985, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 0.98, cap: 10000, mine: false }],
@@ -324,6 +325,10 @@
       { tokenid: "0x" + "5A1E".repeat(16), name: "0x5A1E5A1E5A", confirmed: "7", unconfirmed: "0", sendable: "0", decimals: 0 }],
     wwKeyuses: async () => ({ keyuses: 3, ack: Q.get("ww") === "ack" }), wwAckKeyuses: async (a, n) => ({ keyuses: n, ack: true }),
     wwSend: async () => (Q.get("wws") === "unknown" ? { ok: false, ambiguous: true, message: "Send status UNKNOWN (preview)" } : { ok: true, txnid: FAKE_PK("7E") }), wwEnableMegammr: async () => true,
+    // Apps tab: ?frozen=mail,vestr starts with those frozen; freezing Dexicon is refused with the main process's wording
+    freezeList: async () => FROZEN_IDS.slice(),
+    freezeSet: async (id, on) => { if (on && id === "dexicon") throw new Error("Dexicon is still watching funds in flight. It can be frozen once they settle.\n\n• 1 AtomiX swap not finished.\n• Your AtomiX market is on the book (withdraw it first).");
+      FROZEN_IDS = on ? FROZEN_IDS.concat(id) : FROZEN_IDS.filter(x => x !== id); return FROZEN_IDS.slice(); },
     logsSave: async () => "/Users/preview/Documents/minima-node-log-preview.txt",
     faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
     // miniMall: ?shop=empty

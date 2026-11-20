@@ -72,7 +72,7 @@ test("Quit: asked when a user quits with work in flight; never asked for a syste
 test("wiring: one gather for Shutdown and Quit; the quit is asked before the node is stopped, and never for a system quit", () => {
   const main = read("main/main.js"), pre = read("main/preload.js"), app = read("renderer/app.js");
   assert.match(main, /const inFlightWork = async \(\) => \(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\),\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\), casino: /);
-  assert.equal((main.match(/inFlightWork/g) || []).length, 3, "defined once, used by mcd:inFlight (Shutdown) and by before-quit (Quit)");
+  assert.equal((main.match(/inFlightWork/g) || []).length, 4, "defined once, used by mcd:inFlight (Shutdown), by before-quit (Quit) and, since 0.19.117, by the Freeze check of Dexicon (main/freeze.js)");
   assert.match(pre, /inFlight: \(how\) => ipcRenderer\.invoke\("mcd:inFlight", how\)/); assert.match(app, /api\.inFlight\("shutdown"\)/);
   assert.ok(!/mcd:ppWork|mcd:dxWork/.test(main + pre), "the two reads the old Shutdown warning used are gone with it");
   const q = main.slice(main.indexOf('app.on("before-quit"'), main.indexOf("// ---- ", main.indexOf('app.on("before-quit"')) > 0 ? undefined : undefined);

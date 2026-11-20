@@ -78,6 +78,7 @@ const DEFAULTS = {
                              // gets that wallet's existing bets and offers paid out. Do not delete this key.
   coinGuard: true,           // the shared coin reservation (main/reserve.js). false = the whole guard is a passthrough
   coinGuardSends: "observe", // what it does to `send` and `consolidate`: "off" | "observe" (log only, the default) | "enforce"
+  frozenApps: [],            // the Apps tab's Freeze: ids of the apps whose background work is stopped (main/freeze.js)
   openAtLogin: false         // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
                              // Every key the renderer saves MUST be declared here — save() drops any key DEFAULTS
                              // does not name (the 0.16.97 casinoDollar regression). scripts/config-keys-test.cjs
@@ -138,6 +139,7 @@ function sanitisePatch(cfg) {
       if (k === "heapMb" && (n < 0 || n > 262144)) continue;
       out[k] = n; continue;
     }
+    if (k === "frozenApps") { out[k] = require("./freeze").clean(v); continue; }
     if (k === "coinGuardSends") { if (v === "off" || v === "observe" || v === "enforce") out[k] = v; continue; }
     if (want === "string") { if (typeof v === "string") out[k] = v; continue; }
     out[k] = v;

@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeStatus: () => ipcRenderer.invoke("mcd:nodeStatus"),
   nodeStart: () => ipcRenderer.invoke("mcd:nodeStart"),
   nodeStop: () => ipcRenderer.invoke("mcd:nodeStop"),
+  freezeList: () => ipcRenderer.invoke("mcd:freezeList"),   // the frozen apps' ids (Apps tab)
+  freezeSet: (id, on) => ipcRenderer.invoke("mcd:freezeSet", id, on),   // rejects with the reason when the app may not be frozen
   inFlight: (how) => ipcRenderer.invoke("mcd:inFlight", how),   // what a Shutdown ("shutdown") or a Quit ("quit") would interrupt: { title, message, any }
   nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
   nodeReclaim: () => ipcRenderer.invoke("mcd:nodeReclaim"),
