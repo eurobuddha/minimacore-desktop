@@ -57,7 +57,7 @@ let toastTimer = null;
  *
  * `copyText` is the RULE-1 escape hatch. An identifier exists to be pasted into an explorer or a support
  * ticket, and a toast is the worst place to lose one: it shows briefly, then it is gone with no second
- * surface holding the value. Txid toasts used to print `short(txid, 12)` and nothing anywhere kept the rest.
+ * surface holding the value. Txid toasts used to print the first 12 characters and nothing anywhere kept the rest.
  * When copyText is given the toast becomes clickable and puts the COMPLETE string on the clipboard, and it
  * stays up longer so there is time to click it.
  */
@@ -81,7 +81,6 @@ async function copy(text) {
   toast(ok ? "Copied ✓" : "Copy failed — select the text and press ⌘C", ok ? "ok" : "err");
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function short(s) { return String(s || ""); }   // RULE 1: every caller passes an identifier (tx/coin id, address, key, state) - shown WHOLE
 /**
  * idHtml(value, shown) — an identifier shown and COPYABLE IN FULL (RULE 1).
  *
@@ -1959,7 +1958,7 @@ function showPayResult(ok, message, txid, ambiguous) {
   const title = ambiguous ? "⚠ Payment status unknown" : (ok ? "✓ Payment sent" : "Payment failed");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="prOv"><div class="modal">
     <div class="modal__title">${title}</div>
-    <div class="view__desc" style="white-space:pre-wrap">${esc(message)}${ok && txid ? "\n\nTx: " + esc(short(txid, 20)) : ""}</div>
+    <div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message)}${ok && txid ? "\n\nTx: " + idHtml(txid) : ""}</div>
     ${ok && txid ? `<button class="btn btn--outline btn--full" id="prCopy" style="margin-top:8px">Copy tx id</button>` : ""}
     <button class="btn btn--primary btn--full" id="prOk" style="margin-top:8px">OK</button></div></div>`);
   const ov = el("prOv"); const close = () => { if (ov) ov.remove(); };
@@ -2179,7 +2178,7 @@ function histRowHtml(r) {
     const sign = r.direction === "in" ? "+" : r.direction === "out" ? "−" : "";
     l1 = sign + TOK.tidyAmount(r.amount) + "  " + r.tokenName;
   }
-  const who = labelFor(r.counterparty) || short(r.counterparty, 20), tag = histOwnership(r.counterparty);
+  const who = labelFor(r.counterparty) || r.counterparty, tag = histOwnership(r.counterparty);
   const l2 = [who, tag, histWhen(r.time)].filter(Boolean).join("  ·  ");
   return `<div class="hrow ${cls}" data-txid="${esc(r.txpowid)}" tabindex="0" role="button">
     <div class="hrow__g">${glyph}</div>
@@ -2221,13 +2220,13 @@ function tradeCounter(r) {
 function showHistoryDetail(r) {
   const timeStr = r.time ? new Date(r.time).toLocaleString() : "unknown";
   const lbl = labelFor(r.counterparty);
-  const who = r.counterparty ? (lbl ? `${lbl} (${short(r.counterparty, 16)})` : r.counterparty) : "unknown";
+  const who = r.counterparty ? (lbl ? `${lbl} (${r.counterparty})` : r.counterparty) : "unknown";
   const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "none";
   // Each coin: amount + token → address, with the coinid and any state variables when present.
   const bd = (list) => (list && list.length ? list.map(c => {
-    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${idHtml(c.address, short(c.address, 16))}`;
-    if (c.coinid) line += ` <span class="hist-dim">${idHtml(c.coinid, short(c.coinid, 12))}</span>`;
-    if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(short(String(s.data), 40))}</span>`).join("");
+    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${idHtml(c.address)}`;
+    if (c.coinid) line += ` <span class="hist-dim">${idHtml(c.coinid)}</span>`;
+    if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(String(s.data))}</span>`).join("");
     return line;
   }).join("<br>") : "none");
   const isTrade = r.kind === "buy" || r.kind === "sell";
@@ -2238,7 +2237,7 @@ function showHistoryDetail(r) {
   const burnStr = (r.burn != null && r.burn !== "" && !/^0*\.?0*$/.test(String(r.burn))) ? esc(TOK.tidyAmount(r.burn)) + " MINIMA" : "0";
   const feeRow = r.burn != null ? `<div class="kv"><span class="kv__k">Fee (burn)</span><span class="kv__v">${burnStr}</span></div>` : "";
   const sizeRow = r.size ? `<div class="kv"><span class="kv__k">Size</span><span class="kv__v">${esc(r.size)} bytes</span></div>` : "";
-  const txState = (r.state && r.state.length) ? `<div class="view__sub">Transaction state</div><div class="kv__v" style="text-align:left">${r.state.map(s => `[${esc(String(s.port))}] ${esc(short(String(s.data), 60))}`).join("<br>")}</div>` : "";
+  const txState = (r.state && r.state.length) ? `<div class="view__sub">Transaction state</div><div class="kv__v" style="text-align:left">${r.state.map(s => `[${esc(String(s.port))}] ${esc(String(s.data))}`).join("<br>")}</div>` : "";
   // Optional block-explorer link — off unless the user sets CFG.explorerBase; the local DB is the source of truth.
   const explorer = (CFG && CFG.explorerBase && r.txpowid) ? safeLinkRow("Explorer", String(CFG.explorerBase) + encodeURIComponent(r.txpowid)) : "";
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
@@ -2250,7 +2249,7 @@ function showHistoryDetail(r) {
     <div class="kv"><span class="kv__k">On chain</span><span class="kv__v" id="histChain">Checking chain inclusion…</span></div>
     <div class="kv"><span class="kv__k">Time</span><span class="kv__v">${esc(timeStr)}</span></div>
     ${sizeRow}
-    <div class="kv"><span class="kv__k">Txpow id</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(short(r.txpowid, 22))}</span></div>
+    <div class="kv"><span class="kv__k">Txpow id</span><span class="kv__v" id="histTxid" style="cursor:pointer" title="copy">${esc(r.txpowid)}</span></div>
     <div class="kv"><span class="kv__k">${r.direction === "in" ? "From" : "To"}</span><span class="kv__v">${esc(who)}</span></div>
     ${explorer}
     <div class="view__sub">Per-token effect</div><div class="kv__v" style="text-align:left">${deltas}</div>
@@ -3124,7 +3123,7 @@ function sendForm() {
           el("sGo").disabled = false; el("sGo").textContent = "Send Funds"; return;
         }
         const r = await cmd(`send address:${to} amount:${amt}` + (tok && tok !== MINIMA ? ` tokenid:${tok}` : ""));
-        toast("Sent ✓ " + short((r && r.txpowid) || "", 12), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
+        toast("Sent ✓ " + ((r && r.txpowid) || ""), "ok", (r && r.txpowid) || null); el("sTo").value = el("sAmt").value = ""; refreshAvail();
       } catch (e) { toast(e.message, "err"); }
       el("sGo").disabled = false; el("sGo").textContent = "Send Funds";
     };

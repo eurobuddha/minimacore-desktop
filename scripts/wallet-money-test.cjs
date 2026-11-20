@@ -21,7 +21,7 @@ function source(name) {
   const code = m[1].replace(/\s+\/\/.*$/, "");   // a trailing comment is not part of the question "does this line open a block"
   return /\{$/.test(code) ? app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2) : m[1];
 }
-const CORE = ["validAddr", "validAmt", "validTok", "cmd", "tryCmd", "esc", "short", "absCmp", "consolidateToken"];
+const CORE = ["validAddr", "validAmt", "validTok", "cmd", "tryCmd", "esc", "absCmp", "consolidateToken"];
 // The names of the screen functions, in one place: they move when a screen is rebuilt, the checks below do not.
 const SCREEN = ["sendForm", "splitDialog", "renderReceive", "getRecvAddress", "setRecv", "renderRecvLabel", "drawQR", "labelFor", "summaryAmount"];
 

@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.125] — The send result's transaction id is one click from the clipboard; the helper that once shortened identifiers is gone
+
+- **The wallet send's result dialog** printed its transaction id through `short(txid, 20)`. That helper has returned the whole string since identifiers stopped being shortened, so the id was already whole, but it was plain text in a box that did not wrap a 66-character word. The id is now the app's usual copyable identifier (click it, or "Copy tx id" as before) and wraps inside the dialog.
+- **`short()` is removed.** Its seven other call sites (History rows and the History detail: counterparty, coin addresses and ids, state values, the txpow id; the Send screen's "Sent" toast) passed a length it ignored. They now name the value itself. Nothing on those screens changes: each already showed the whole value.
+
 ## [0.19.124] — Small things from the review: no lone dashes, own-property lookups, a token's whole id beside an unknown name
 
 - **A token that is not known by its id shows its whole id** beside its name, in Vestr (the contract cards, the token list and the "Create vesting contract?" question) and in the Web Wallet's token list. Characters that cannot be seen (control, format and zero-width characters) are taken out of the name first, so "MxUSD" followed by a zero-width character now reads as what it is: a name that imitates a known token is not shown at all, only the id. Before, such a name passed the check and stood alone.
