@@ -577,7 +577,7 @@ function initTabScroll() {
 // Access a wallet straight from a seed phrase, backed by the LOCAL -megammr node. The seed is passed to main
 // only for loopback signing (keys genkey → sendfrom on 127.0.0.1) and is never persisted. Held here in memory
 // while unlocked; cleared on Lock. See main/webwallet.js for the fund-critical send + keyuses handling.
-let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = 0, wwMode = null;
+let wwLastStatus = null, wwSeed = null, wwAddr = null, wwBal = [], wwKu = null, wwArmed = false, wwKuSuggest = null, wwMode = null;   // wwKuSuggest: the chain's figure for this key once the user asked for it; null = not read
 // The wallets (by address) whose last send's status is UNKNOWN. NOT cleared by Lock or by leaving the screen (0.18.155:
 // locking and unlocking again offered Send at once, with the possible first payment unchecked): only "I've checked"
 // clears one. In memory, as everything on this screen: a restart of the app starts clean.
@@ -594,7 +594,24 @@ function wwUnknown(address, set) {
 function currentWwMode() { if (!running) return "waiting"; if (!wwMegammrOn()) return "gate"; if (!wwSeed || !wwAddr) return "unlock"; return "wallet"; }
 function wwLiveRender() { if (activeView === "webwallet" && currentWwMode() !== wwMode) renderWebWallet(); }
 function onWebWalletUpdate() { wwLiveRender(); }
-function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; }
+function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = null; }
+/** One key's on-chain uses from the audit service's answer: the larger of its spend blocks and spent coins, for a row of
+ *  THIS key with whole-number counts. → a whole number, or null when it was not read (never 0 for "unknown"). */
+function wwOnchainUses(resp, publicKey) {
+  const rows = resp && Array.isArray(resp.keys) ? resp.keys : [], pk = String(publicKey || "").toUpperCase();
+  const row = rows.find(u => u && String(u.publickey || "").toUpperCase() === pk);
+  const whole = (v) => (typeof v === "number" ? (Number.isSafeInteger(v) && v >= 0 ? v : null) : typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : null);
+  if (!pk || !row) return null;
+  const a = whole(row.spend_blocks), b = whole(row.spent_coins);
+  return a == null || b == null ? null : Math.max(a, b);
+}
+/** The figure recorded when the user confirms the key uses: what they typed, never below the chain's. null (REFUSE) while
+ *  the chain's figure is unread: a count that is too low signs with a one-time key a second time. */
+function wwConfirmUses(typed, onchain) {
+  if (typeof onchain !== "number" || !Number.isSafeInteger(onchain) || onchain < 0) return null;
+  const n = Math.floor(Number(typed));
+  return Math.max(Number.isSafeInteger(n) && n > 0 ? n : 0, onchain);
+}
 function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
 
 async function renderWebWallet() {
@@ -648,10 +665,10 @@ function renderWwUnlock(body) {
       wwAddr = await api.wwDerive(seed);
       wwSeed = seed;
       wwKu = await api.wwKeyuses(wwAddr.address).catch(() => ({ keyuses: 0, ack: false }));
-      // M2: auto-check on-chain key-uses so the confirm field never defaults to a bare 0 for a seed that has
-      // already spent elsewhere (under-counting reuses a WOTS leaf = fund loss). Best-effort; floored below.
-      wwKuSuggest = 0;
-      if (!wwAddr.isNodeSeed) { try { const ka = await api.keyAudit([wwAddr.publickey]); const k = ka && ka.keys && ka.keys[0]; if (k) wwKuSuggest = Math.max(Number(k.spend_blocks) || 0, Number(k.spent_coins) || 0); } catch (e) {} }
+      // Nothing leaves this computer at unlock (0.18.156: the public key used to be sent to the audit service here, by
+      // itself). The on-chain key uses are read when the user clicks Check on-chain or Confirm, and Confirm refuses
+      // while they are unread, so the figure is never a bare 0 for a key that has already signed elsewhere.
+      wwKuSuggest = null;
       wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => []);
       el("wwSeedIn").value = "";
       renderWebWallet();
@@ -681,7 +698,7 @@ function renderWwWallet(body) {
   const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
     .map(b => `<option value="${esc(b.tokenid)}">${esc(b.name)}</option>`).join("");
 
-  const kuDefault = Math.max(Number(ku.keyuses) || 0, Number(wwKuSuggest) || 0);
+  const kuDefault = Math.max(Number(ku.keyuses) || 0, wwKuSuggest == null ? 0 : wwKuSuggest);
   const kuPanel = a.isNodeSeed
     ? `<div class="view__desc">This is <b>your node's own wallet</b> — showing your full balance across every address. Sends go through the node, which selects coins and manages your signing keys automatically.</div>`
     : (ku.ack
@@ -689,7 +706,8 @@ function renderWwWallet(body) {
     : `<div class="card" style="border-color:var(--accent)">
          <div class="view__desc"><b>Confirm key-uses before sending.</b> How many payments has this wallet ALREADY made
            anywhere (0 for a brand-new seed)? Over-estimating is safe; <b>under-estimating can reuse a signing key and
-           lose your funds</b>.${wwKuSuggest > 0 ? ` <b>On-chain check suggests at least ${esc(String(wwKuSuggest))}.</b>` : ""}</div>
+           lose your funds</b>.${wwKuSuggest != null ? ` <b>The chain shows ${esc(String(wwKuSuggest))} so far.</b>` : ""}</div>
+         <div class="view__desc">Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com, which reveals that key to that server. The seed stays on this computer. Confirm does not go on while that figure is unread.</div>
          <div class="field"><div class="field__label">Payments already made by this seed</div>
            <input class="field__input" id="wwKuIn" type="number" min="0" step="1" value="${esc(String(kuDefault))}" /></div>
          <div style="display:flex;gap:8px">
@@ -739,21 +757,26 @@ function renderWwWallet(body) {
   if (a.isNodeSeed) {
     el("wwSendBtn").addEventListener("click", () => wwDoSend());   // node wallet: no key-uses gate, node manages keys
   } else if (!ku.ack) {
+    // The chain's figure for this key, read on the user's click only (0.18.156). → a whole number, or null: not read.
+    const readOnchain = async () => { let r = null; try { r = await api.keyAudit([a.publickey]); } catch (e) { r = null; } const n = wwOnchainUses(r, a.publickey); if (wwAddr === a) wwKuSuggest = n; return n; };
     el("wwKuConfirm").addEventListener("click", async () => {
-      const n = Math.max(0, Math.floor(Number(el("wwKuIn").value) || 0));
-      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed ✓", "ok"); }
-      catch (e) { toast("Could not save key-uses", "err"); }
+      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value; btn.disabled = true; btn.textContent = "Checking the chain…";
+      const n = wwConfirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
+      if (wwAddr !== a) return;                                   // locked while the chain was being read
+      if (n == null) {
+        toast("Not confirmed: this key's on-chain uses could not be read, and a figure that is too low can lose funds. Check your connection and try again.", "err");
+        if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; }
+        return;
+      }
+      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed: " + n, "ok"); }
+      catch (e) { toast("Could not save key-uses", "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; } }
     });
     el("wwKuCheck").addEventListener("click", async () => {
       const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = "Checking…";
-      try {
-        const r = await api.keyAudit([a.publickey]);
-        const k = r && r.keys && r.keys[0];
-        const onchain = k ? Math.max(Number(k.spend_blocks) || 0, Number(k.spent_coins) || 0) : 0;
-        const cur = Number(el("wwKuIn").value) || 0;
-        el("wwKuIn").value = String(Math.max(cur, onchain));
-        toast("On-chain uses: " + onchain + " (set as minimum)", "ok");
-      } catch (e) { toast("On-chain check unavailable", "err"); }
+      const onchain = await readOnchain();
+      if (wwAddr !== a || !btn.isConnected) return;
+      if (onchain == null) toast("The on-chain uses could not be read. Nothing was changed.", "err");
+      else { el("wwKuIn").value = String(wwConfirmUses(el("wwKuIn").value, onchain)); toast("On-chain uses: " + onchain + " (set as minimum)", "ok"); }
       btn.disabled = false; btn.textContent = "Check on-chain";
     });
   } else {

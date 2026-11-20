@@ -203,3 +203,29 @@ test('a failed connect releases its pool slot, so later fetches still run', asyn
     });
   } finally { restore(); }
 });
+
+// ---- 0.18.156: the key audit follows no redirect (its host is pinned; the keys ride in the query) ----
+test('fetchJson with noRedirect never follows a redirect; without it, it does (re-guarded)', async () => {
+  stubDns([[{ address: '93.184.216.34', family: 4 }]]);
+  const asked = [];
+  const fake = (u, _o, cb) => {
+    asked.push(String(u));
+    const req = new EventEmitter(); req.end = () => {}; req.setTimeout = () => {}; req.destroy = () => {};
+    setImmediate(() => {
+      const res = new EventEmitter(); res.resume = () => {};
+      if (String(u).includes('first.example')) { res.statusCode = 302; res.headers = { location: 'https://elsewhere.example/keyaudit?keys=0xAB' }; cb(res); return; }
+      res.statusCode = 200; res.headers = { 'content-type': 'application/json' }; cb(res); res.emit('data', Buffer.from('{"ok":true}')); res.emit('end');
+    });
+    return req;
+  };
+  http.request = fake; https.request = fake;
+  try {
+    assert.equal(await netfetch.fetchJson('https://first.example/keyaudit?keys=0xAB', { noRedirect: true }), null);
+    assert.deepEqual(asked.map(u => new URL(u).hostname), ['first.example'], 'the redirect target is never asked');
+    asked.length = 0;
+    assert.deepEqual(await netfetch.fetchJson('https://first.example/keyaudit?keys=0xAB'), { ok: true }, 'other callers still follow');
+    assert.deepEqual(asked.map(u => new URL(u).hostname), ['first.example', 'elsewhere.example']);
+  } finally { restore(); }
+  const mainJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  assert.equal((mainJs.match(/netfetch\.fetchJson\(KEYUSES_BASE \+ [^\n]*, \{ noRedirect: true \}\)/g) || []).length, 2, 'both key audit handlers ask with noRedirect');
+});

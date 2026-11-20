@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.156] — Web Wallet: the public key leaves only on a click
+
+- Unlocking a foreign seed in the Web Wallet sent its public key to the key audit service (eurobuddha.com) by itself. Now nothing leaves at unlock: the on-chain key uses are read only when the user clicks Check on-chain or Confirm, the screen says before those buttons what is sent and to whom, and Confirm refuses while the figure is unread (it used to take an unreadable answer as 0, and a count that is too low reuses a one-time signature). The key audit requests follow no redirect (`netfetch.fetchJson` `noRedirect`). Port of 0.19.135. Tests: `scripts/webwallet-ui-test.cjs`, `scripts/netfetch-test.cjs`.
+
 ## [0.18.155] — Web Wallet: the UNKNOWN lock is kept per wallet address
 
 - After a send the node did not confirm, the Web Wallet disabled Send until "I've checked", but Lock (or leaving the screen) reset that flag, so unlocking again offered Send at once with the possible first payment unchecked. The lock is now kept per wallet address across Lock and leaving the screen, only "I've checked" clears it, and the send itself refuses while it stands. Port of 0.19.123. Test: `scripts/webwallet-ui-test.cjs` (`npm run test:webwallet-ui`, in CI).
