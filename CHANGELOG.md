@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.103] — Quit: a cancelled system shutdown no longer silences the question; live test scripts refuse a node that holds funds
+
+- **Quit**: "the system asked us to quit" was a flag that stayed set for the rest of the session. A shutdown or logout the user cancelled left it set, and every later Quit went through with no question, whatever was in flight. It is now true for one minute after the system said so (`main/inflight.js` `recently`), then it is the user's quit again and is asked.
+- **Live test-node scripts** (`scripts/test-node.cjs`, used by `atomix-unit.js`, the two AtomiX gates): before the first command the node is sent `balance`. A node with any non-zero balance is refused, unless `AX_TEST_NODE_ADDRESS` carries one of that node's own addresses and the node confirms it with `checkaddress`. A wrong container name can therefore never pass. An answer that cannot be read is a refusal, never "empty". `docs/DEV_RUN.md` says how.
+- **Tests**: 1 new in `scripts/inflight-test.cjs`, 1 new in `scripts/hermetic-test.cjs` (stand-in transport and a stand-in docker; nothing real is reached). Not run against a node.
+
 ## [0.19.102] — Token label: the "(not MxUSD)" mark goes first; names capped and cleaned; right-to-left names isolated
 
 - **Why**: the mark stood AFTER the token's own name, so a long name pushed it out of sight, and the closed pair picker (which shows only the start of its text) could read "MINIMA / MxUSD" for a token that merely calls itself MxUSD.

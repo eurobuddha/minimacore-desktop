@@ -8,7 +8,7 @@
 const test = require("node:test"), assert = require("node:assert");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), { spawnSync } = require("node:child_process");
 const ROOT = path.resolve(__dirname, "..");
-const NODE_VARS = ["AX_TEST_NODE_RPC", "AX_TEST_NODE_CONTAINER", "AX_TEST_NODE_I_OWN_THIS", "AX_TEST_NODE_EXPECT_ETH", "AX_TEST_CDP_PORT"];
+const NODE_VARS = ["AX_TEST_NODE_RPC", "AX_TEST_NODE_CONTAINER", "AX_TEST_NODE_I_OWN_THIS", "AX_TEST_NODE_ADDRESS", "AX_TEST_NODE_EXPECT_ETH", "AX_TEST_CDP_PORT"];
 
 /** Runs a script with only the stand-in programs on PATH. → { status, out, marks: the programs that were started } */
 function run(script, env = {}, args = []) {
@@ -63,8 +63,10 @@ test("a named and owned node in a container is reached through docker exec of TH
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "hermetic-bin-")), mark = path.join(bin, "STARTED");
     fs.writeFileSync(path.join(bin, "docker"), "#!/bin/sh\necho \"docker $*\" >> \"" + mark + "\"\nexit 1\n", { mode: 0o755 });
     const r = spawnSync(process.execPath, [probe], { env: { PATH: bin, AX_TEST_NODE_RPC: "http://127.0.0.1:19005", AX_TEST_NODE_CONTAINER: "some-test-node", AX_TEST_NODE_I_OWN_THIS: "yes" }, encoding: "utf8", timeout: 30000 });
-    assert.equal(fs.readFileSync(mark, "utf8").trim(), "docker exec some-test-node curl -s -m 60 http://127.0.0.1:19005/status", r.stdout + r.stderr);
-    assert.match(r.stdout, /About to use the node at http:\/\/127\.0\.0\.1:19005 inside the docker container some-test-node\. It will be sent:\n  - status \(a read\)/);
+    // 0.19.103: the FIRST thing sent is `balance`; the stand-in docker answers nothing, so the script stops there and `status` is never sent
+    assert.equal(fs.readFileSync(mark, "utf8").trim(), "docker exec some-test-node curl -s -m 60 http://127.0.0.1:19005/balance", r.stdout + r.stderr);
+    assert.equal(r.status, 2); assert.match(r.stderr, /REFUSED: the node did not answer `balance`.*Nothing else was sent\./s);
+    assert.match(r.stdout, /About to use the node at http:\/\/127\.0\.0\.1:19005 inside the docker container some-test-node\. It will be sent:\n  - balance \(a read, sent FIRST[^\n]*\n  - checkaddress [^\n]*\n  - status \(a read\)/);
     fs.rmSync(bin, { recursive: true, force: true });
   } finally { fs.rmSync(probe, { force: true }); }
 });
@@ -83,6 +85,41 @@ test("no script, package script or workflow names a node: no container name, no 
   }
   const tn = fs.readFileSync(path.join(ROOT, "scripts/test-node.cjs"), "utf8");
   assert.ok(!/\|\|\s*["']\w/.test(code(tn).replace(/\|\| ""/g, "")), "test-node.cjs has no default node");
+});
+
+// ---- 0.19.103: a node that holds funds is refused unless the caller names one of ITS OWN addresses ----
+test("live scripts: `balance` is sent first; any non-zero balance refuses unless AX_TEST_NODE_ADDRESS is an address that node itself owns", async () => {
+  const { balanceProblem } = require("./test-node.cjs"), MINE = "0x" + "AB".repeat(32), THEIRS = "0x" + "CD".repeat(32);
+  const node = (rows, own) => { const sent = []; return { sent, send: async (c) => { sent.push(c); if (c === "balance") return { status: true, response: rows }; if (/^checkaddress address:/.test(c)) return { status: true, response: c.endsWith(own || "-") ? { simple: true, relevant: true } : {} }; throw new Error("sent before the check: " + c); } }; };
+  const zero = [{ tokenid: "0x00", confirmed: "0", unconfirmed: "0", sendable: "0", coins: "0", total: "1000000000" }];
+  const e = node(zero); assert.equal(await balanceProblem(e.send, ""), ""); assert.deepEqual(e.sent, ["balance"], "an empty node: one read, no address needed");
+  for (const rows of [[{ tokenid: "0x00", confirmed: "0.000000001", unconfirmed: "0", sendable: "0" }], [{ tokenid: "0x00", confirmed: "0", unconfirmed: "5", sendable: "0" }], zero.concat([{ tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", confirmed: "12.5", unconfirmed: "0", sendable: "12.5" }])]) {
+    const n = node(rows, MINE);
+    assert.match(await balanceProblem(n.send, ""), /^this node HOLDS FUNDS: .*AX_TEST_NODE_ADDRESS.*Nothing else was sent\.$/); assert.deepEqual(n.sent, ["balance"]);
+    assert.match(await balanceProblem(n.send, THEIRS), /is NOT one of its own\. This is not the node you named the address of\. Nothing else was sent\.$/, "the address of ANOTHER node: a wrong container name cannot pass");
+    assert.equal(await balanceProblem(n.send, MINE), "", "its own address: allowed");
+    assert.match(await balanceProblem(n.send, "0x1234"), /is not a Minima address/);
+  }
+  const custody = (await balanceProblem(node([{ tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", confirmed: "1", unconfirmed: "0", sendable: "1" }]).send, ""));
+  assert.ok(custody.includes("token 0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90"), "a token id is printed whole");
+  // unreadable is never "empty"
+  assert.match(await balanceProblem(async () => { throw new Error("ECONNREFUSED"); }, MINE), /did not answer `balance`/);
+  assert.match(await balanceProblem(async () => ({ status: false, error: "x" }), MINE), /could not be read/);
+  assert.match(await balanceProblem(async (c) => (c === "balance" ? { status: true, response: [{ tokenid: "0x00", confirmed: "1", unconfirmed: "0", sendable: "1" }] } : { status: false }), MINE), /is NOT one of its own/);
+  // through testNode: the caller's first command waits for the check, and a refusal ends the script before it is sent
+  const probe = path.join(os.tmpdir(), "hermetic-bal-" + process.pid + ".cjs");
+  fs.writeFileSync(probe, `const sent = []; const t = require(${JSON.stringify(path.join(ROOT, "scripts/test-node.cjs"))});
+    const rows = JSON.parse(process.env.ROWS);
+    const n = t.testNode(["vault action:seed"], process.env, async (c) => { sent.push(c); process.stdout.write("SENT " + c + "\\n"); if (c === "balance") return { status: true, response: rows }; if (/^checkaddress/.test(c)) return { status: true, response: c.endsWith(process.env.OWN) ? { simple: true } : {} }; return { status: true, response: {} }; });
+    Promise.all([n.run("vault action:seed"), n.run("keys")]).then(() => { process.stdout.write("DONE " + sent.join(" | ") + "\\n"); });`);
+  try {
+    const go = (env) => spawnSync(process.execPath, [probe], { env: Object.assign({ PATH: "/nonexistent", AX_TEST_NODE_RPC: "http://127.0.0.1:1", AX_TEST_NODE_I_OWN_THIS: "yes", OWN: MINE }, env), encoding: "utf8", timeout: 30000 });
+    const funded = JSON.stringify([{ tokenid: "0x00", confirmed: "7", unconfirmed: "0", sendable: "7" }]);
+    let r = go({ ROWS: JSON.stringify(zero) }); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /DONE balance \| vault action:seed \| keys\n$/, "one balance read, then the commands");
+    r = go({ ROWS: funded }); assert.equal(r.status, 2); assert.ok(!/SENT vault|SENT keys/.test(r.stdout), "the seed read never left"); assert.match(r.stderr, /REFUSED: this node HOLDS FUNDS: MINIMA \(confirmed 7, unconfirmed 0\)/);
+    r = go({ ROWS: funded, AX_TEST_NODE_ADDRESS: THEIRS }); assert.equal(r.status, 2); assert.ok(!/SENT vault/.test(r.stdout)); assert.match(r.stderr, /is NOT one of its own/);
+    r = go({ ROWS: funded, AX_TEST_NODE_ADDRESS: MINE }); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /DONE balance \| checkaddress address:0xAB[AB]{62} \| vault action:seed \| keys\n$/);
+  } finally { fs.rmSync(probe, { force: true }); }
 });
 
 // ---- the TEST copy of the app (scripts/dev-run.sh, main/testprofile.js) ----

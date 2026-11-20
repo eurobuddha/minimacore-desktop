@@ -76,6 +76,18 @@ AX_TEST_NODE_CONTAINER=minimaarchive AX_TEST_NODE_RPC=http://127.0.0.1:9005 AX_T
 AX_TEST_NODE_CONTAINER=minimaarchive AX_TEST_NODE_RPC=http://127.0.0.1:9005 AX_TEST_NODE_I_OWN_THIS=yes npm run gate:atomix
 ```
 
+The balance check (0.19.103): before its first command a live script sends `balance`. A node with nothing on it
+passes. A node with ANY non-zero balance is refused, unless a second variable, `AX_TEST_NODE_ADDRESS`, carries one of
+THAT node's own addresses and the node confirms it (`checkaddress`, `simple: true`). So a wrong container name or port
+can never pass: the wrong node is either empty or does not own the address. For a funded test node:
+
+```bash
+AX_TEST_NODE_CONTAINER=minimaarchive AX_TEST_NODE_RPC=http://127.0.0.1:9005 AX_TEST_NODE_I_OWN_THIS=yes \
+  AX_TEST_NODE_ADDRESS=<an address of that node, whole: `getaddress` on it> npm run gate:atomix
+```
+
+A refusal ends the script with exit code 2 and "Nothing else was sent": only `balance` (and `checkaddress`) left.
+
 WARNING: these checks read that node's seed phrase and its Ethereum key into the test process (`vault action:seed`,
 `seedrandom modifier:ethbridge`) and register the AtomiX swap scripts on it (`newscript`). The script prints this
 before it sends anything. Run them only against a node whose funds you can afford to lose. Never name the custody

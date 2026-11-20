@@ -828,9 +828,10 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 //    in the Downloads folder, and the user installs it.)
 //  - Either way the node is then stopped through node.stop(): every engine first finishes what it has at the node,
 //    each within its own bound and 30 s in all (0.18.117), so a transaction posted in the last second is recorded.
-let quitting = false, quitAsking = false, systemQuit = false;
-app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit = true; }); } catch (e) { /* Windows: session-end below */ } });
-app.on("browser-window-created", (_e, w) => { w.on("session-end", () => { systemQuit = true; }); w.on("query-session-end", () => { systemQuit = true; }); });
+let quitting = false, quitAsking = false;
+const systemQuit = inflight.recently();   // true for about a minute after the system asked: a cancelled shutdown does not silence the question for the session
+app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit.mark(); }); } catch (e) { /* Windows: session-end below */ } });
+app.on("browser-window-created", (_e, w) => { w.on("session-end", () => { systemQuit.mark(); }); w.on("query-session-end", () => { systemQuit.mark(); }); });
 app.on("before-quit", (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
@@ -842,11 +843,11 @@ app.on("before-quit", (e) => {
   if (quitAsking) { if (win && !win.isDestroyed()) { win.show(); win.focus(); } return; }   // a second Quit while the question is open: show it
   quitAsking = true;
   (async () => {
-    const go = await inflight.decideQuit({ os: systemQuit, stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
+    const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l),
       ask: async (w) => {
         if (win && !win.isDestroyed()) { win.show(); win.focus(); }
         const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Quit anyway", "Stay open"], defaultId: 1, cancelId: 1, noLink: true, title: "Minima Core", message: w.title, detail: w.message });
-        return r.response === 0 || systemQuit;   // the system asked while the question was open: it is not held
+        return r.response === 0 || systemQuit.on();   // the system asked while the question was open: it is not held
       } }).catch(() => true);
     quitAsking = false;
     if (!go) return;
