@@ -22,6 +22,9 @@ const node = require("./node-manager");
 const { rpcCall } = require("./rpc");
 const store = require("./chat-store");
 const schema = require("./chatschema");
+const chatfiles = require("./chatfiles");
+const voice = require("./chatvoice");
+const os = require("os");
 const fs = require("fs");
 const path = require("path");
 const { app } = require("electron");
@@ -107,6 +110,37 @@ async function nodeCmd(cmd) {
 
 function hexOf(s) { return "0x" + Buffer.from(s, "utf8").toString("hex"); }
 
+// ---- files (0.19.2) ---------------------------------------------------------
+// The phone's file transfer (ChatFiles / ChatFileDelivery over maxima-core's FileCrypto, KeetsFiles and
+// FileDelivery), ported in main/chatfiles.js. One engine per running node; its state is under
+// userData/chat-files/<id>/. Nothing is downloaded until the user asks, and nothing is ever opened.
+let files = null;
+function fileEngine() {
+  if (!files) files = chatfiles.create({
+    root: path.join(app.getPath("userData"), "chat-files"), nodeCmd,
+    hasContact: (pk) => !!store.getContact(pk),
+    myName: () => store.metaGet("myname") || "",
+    addMessage: (m) => store.addMessage(m), setStatus: (id, patch) => store.setStatus(id, patch),
+    onUpdate: () => emitter.emit("update")
+  });
+  return files;
+}
+function needPeer(pk) { const to = ("" + pk).trim().toLowerCase(); if (!/^0x[0-9a-f]{64}$/.test(to)) throw new Error("recipient must be a keets pubkey: 0x + 64 hex"); return to; }
+function needId(id) { if (!/^[a-f0-9]{32}$/.test("" + id)) throw new Error("Invalid file transfer"); return "" + id; }
+/** Encrypt, publish and offer a local file to a contact (the phone's "File (up to 100 MB)"). */
+function fileSend(to, filePath) { return fileEngine().prepare(needPeer(to), filePath, { name: path.basename(filePath) }); }
+/** What an offer says, and the state of its transfer if there is one. Reads nothing from the network. */
+function fileOffer(peer, ref) { return fileEngine().offer(needPeer(peer), "" + ref); }
+function fileRun(peer, ref, id) { const e = fileEngine(); return id && e.status(needId(id)) && e.status(id).mine ? e.resume(id) : e.download(needPeer(peer), "" + ref); }
+function filePause(id) { return fileEngine().pause(needId(id)); }
+function fileStatus(id) { return fileEngine().status(needId(id)); }
+function fileTransfers(peer) { return fileEngine().transfers(needPeer(peer)); }
+function fileRemove(id) { return fileEngine().remove(needId(id)); }
+function fileKeep(id, on) { return fileEngine().keep(needId(id), on === true); }
+function fileShareAgain(id) { return fileEngine().shareAgain(needId(id)); }
+/** Copy a verified file to the path the user chose in a save dialog. Never opened, never run. */
+function fileSave(id, dest) { return fileEngine().save(needId(id), dest); }
+
 // ---- identity -------------------------------------------------------------
 async function init() {
   if (myinfo) return myinfo;
@@ -179,9 +213,24 @@ async function pollOnce() {
         continue;
       }
 
+      if (m.state === "file-control") {
+        // delivery receipts of a file transfer (FileDelivery): consumed, never stored or notified;
+        // a malformed body from a contact is swallowed, so it cannot be re-delivered forever
+        try { await fileEngine().inboundControl(msg.from, m.body); } catch (e) { /* not ours, or not valid */ }
+        fanout(msg, m);
+        await nodeCmd("keets action:ack id:" + msg.id);
+        continue;
+      }
+      if (m.state === "file") {
+        // an offer: the row is the file's name; an offer that does not parse is consumed. Nothing downloads.
+        const offer = chatfiles.inboundOffer(m.ref);
+        if (!offer) { await nodeCmd("keets action:ack id:" + msg.id); continue; }
+        m.body = offer.name;
+      }
+
       // unknown states: a future control type must never become a garbage
       // chat row (the keetchat 0.2.1 lesson) - ack + consume
-      if (!m.legacy && !["", "image", "audio", "payment"].includes(m.state)) {
+      if (!m.legacy && !["", "image", "audio", "payment", "file"].includes(m.state)) {
         await nodeCmd("keets action:ack id:" + msg.id);
         continue;
       }
@@ -208,6 +257,7 @@ async function pollOnce() {
         lastPreview = m.state === "image" ? "📷 Photo"
                     : m.state === "audio" ? "🎤 Voice note"
                     : m.state === "payment" ? "💸 " + m.amt + " " + (m.tokname || "Minima")
+                    : m.state === "file" ? "File: " + m.body
                     : m.body;
       }
       if (isNew) fanout(msg, m);
@@ -229,10 +279,12 @@ async function pollOnce() {
 function startLoop() {
   if (pollTimer) return;
   pollTimer = setInterval(() => { pollOnce().catch(() => {}); }, POLL_MS);
+  try { fileEngine().startLoop(); } catch (e) { /* no data folder yet: files start with the first use */ }
   pollOnce().catch(() => {});
 }
 function stopLoop() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (files) { try { files.close(); } catch (e) { /* transfers pause; their state is on disk */ } files = null; }
   myinfo = null;
   // a restarted node may run a different version = different data dir
   statusDataDir = null;
@@ -275,11 +327,12 @@ async function fetchMedia(ref) {
   if (!/^keets:\/\/\S+$/.test(ref)) throw new Error("bad media ref");
   const key = crypto.createHash("sha256").update(ref).digest("hex").slice(0, 40);
   const clean = ref.split("?")[0].toLowerCase();
-  const m2 = clean.match(/\.(ogg|m4a|wav|png|jpe?g)$/);
+  const m2 = clean.match(/\.(ogg|m4a|webm|wav|png|jpe?g)$/);
   const ext = m2 ? m2[0] : ".jpg";
   const mime = ext === ".png" ? "image/png"
              : ext === ".ogg" ? "audio/ogg"
              : ext === ".m4a" ? "audio/mp4"
+             : ext === ".webm" ? "audio/webm"
              : ext === ".wav" ? "audio/wav"
              : "image/jpeg";
   const f = path.join(mediaDir(), key + ext);
@@ -298,6 +351,33 @@ async function sendImageFile(to, filePath) {
   const pub = await nodeCmd("keets action:publish path:" + name + " file:" + filePath);
   const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "", { state: "image", ref: pub.url });
   return sendTyped(to, payload, { state: "image", ref: pub.url, body: "" });
+}
+
+/**
+ * Send a recorded voice note, as ChatThreadActivity.sendAudio: the bytes are published to our keets drive
+ * (/chat/vn-<ms><ext>, handed over as a file) and a state:"audio" message carries the keets:// url with the
+ * body "M:SS|waveformhex". bytes: the recording (at most 60 s; the size is bounded here as well).
+ */
+const VOICE_MAX_BYTES = 2 * 1024 * 1024;   // 60 s at the phone's 16 kbps is about 120 KB; a browser encoder may ignore the bitrate
+async function sendVoice(to, bytes, mime, secs, waveHex) {
+  to = needPeer(to);
+  const data = Buffer.from(bytes || []);
+  secs = voice.clampSecs(Number(secs) || 0);
+  if (!voice.sendable(data.length, secs)) throw new Error("Too short — hold on a moment longer");
+  if (data.length > VOICE_MAX_BYTES) throw new Error("Recording failed");
+  if (!/^audio\/(mp4|webm|ogg)\b/i.test("" + mime)) throw new Error("Recording failed");
+  const wave = voice.decode("" + (waveHex || "")) ? "" + waveHex : "";
+  const now = Date.now(), ext = voice.extFor(mime);
+  const tmp = path.join(os.tmpdir(), "chat-vn-" + now + "-" + crypto.randomBytes(6).toString("hex") + ext);
+  if (/\s/.test(tmp)) throw new Error("The temporary folder's path has a space in it; the node cannot be handed the recording.");
+  let pub;
+  try {
+    fs.writeFileSync(tmp, data, { mode: 0o600 });
+    pub = await nodeCmd("keets action:publish path:" + voice.publishPath(mime, now) + " file:" + tmp);
+  } finally { try { fs.unlinkSync(tmp); } catch (e) { /* already gone */ } }
+  const body = voice.buildBody(secs, wave);
+  const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", body, { state: "audio", ref: pub.url });
+  return sendTyped(to, payload, { state: "audio", ref: pub.url, body });
 }
 
 // ---- payments ---------------------------------------------------------------
@@ -379,9 +459,17 @@ function addContact(pubkey, name) {
 }
 function renameContact(pubkey, name) { return store.addContact(pubkey, name); }
 function removeContact(pubkey) { store.removeContact(pubkey); store.deleteThread(pubkey); }
+/** "Delete chat" on the phone (ChatDb.clearMessages): the conversation goes, the contact stays. */
+function clearThread(pubkey) { store.deleteThread(pubkey); emitter.emit("update"); return true; }
+/** "Delete (this device)": one message, here only. */
+function deleteMessage(msgid) { const ok = store.deleteMessage("" + msgid); if (ok) emitter.emit("update"); return ok; }
+/** Saved contacts, for "New chat": every contact, with or without a conversation. */
+function contacts() { return store.contacts().map(c => ({ pubkey: c.pubkey, name: c.name || c.pubkey })).sort((a, b) => a.name.localeCompare(b.name)); }
 function unreadCount() { return store.unreadCount(); }
 function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubkey : "", lastError: lastErr, unread: store.unreadCount() }; }
 
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
   threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner,
-  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity };
+  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity,
+  sendVoice, clearThread, deleteMessage, contacts,
+  fileSend, fileOffer, fileRun, filePause, fileStatus, fileTransfers, fileRemove, fileKeep, fileShareAgain, fileSave };

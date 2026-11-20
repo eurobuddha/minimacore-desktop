@@ -144,19 +144,30 @@ function createWindow() {
   win.on("closed", () => { win = null; });
 }
 
-// Camera permission for the QR scanner: allow ONLY the `media` permission and ONLY for our own bundled
-// file:// renderer (there is no other origin — the CSP blocks remote content). Everything else is denied.
+// Camera (the QR scanner) and microphone (a Chat voice note, asked for only when the user chooses "Voice note"):
+// ONLY the `media` permission, ONLY for this app's own window (its top frame, the bundled file:// page; the CSP
+// blocks remote content), and on macOS only after the system's own question for that device. Everything else,
+// and every other web contents, is denied.
+function ownPage(wc) {
+  return !!wc && !!win && !win.isDestroyed() && wc === win.webContents && String((wc.getURL && wc.getURL()) || "").startsWith("file://");
+}
 function setupPermissions() {
   const ses = session.defaultSession;
-  ses.setPermissionRequestHandler((wc, permission, cb) => {
-    const url = (wc && wc.getURL && wc.getURL()) || "";
-    cb(permission === "media" && url.startsWith("file://"));
+  ses.setPermissionRequestHandler(async (wc, permission, cb, details) => {
+    if (permission !== "media" || !ownPage(wc) || (details && details.isMainFrame === false)) { cb(false); return; }
+    try {
+      if (process.platform === "darwin") {
+        const { systemPreferences } = require("electron");
+        for (const type of (details && details.mediaTypes) || []) {
+          if (type === "audio" && !await systemPreferences.askForMediaAccess("microphone")) { cb(false); return; }
+          if (type === "video" && !await systemPreferences.askForMediaAccess("camera")) { cb(false); return; }
+        }
+      }
+      cb(ownPage(wc));
+    } catch (e) { cb(false); }
   });
   // Mirror the request handler exactly (derive from the webContents, don't trust a null origin).
-  ses.setPermissionCheckHandler((wc, permission) => {
-    const url = (wc && wc.getURL && wc.getURL()) || "";
-    return permission === "media" && url.startsWith("file://");
-  });
+  ses.setPermissionCheckHandler((wc, permission) => permission === "media" && ownPage(wc));
 }
 
 function pushStatus() { if (win && !win.isDestroyed()) win.webContents.send("mcd:status", node.snapshot()); }
@@ -367,6 +378,33 @@ ipcMain.handle("mcd:chatMedia", (_e, ref) => chat.fetchMedia(ref));
 ipcMain.handle("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
 ipcMain.handle("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
 ipcMain.handle("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
+ipcMain.handle("mcd:chatContacts", () => chat.contacts());
+ipcMain.handle("mcd:chatClearThread", (_e, pk) => chat.clearThread(pk));
+ipcMain.handle("mcd:chatDeleteMessage", (_e, id) => chat.deleteMessage(id));
+ipcMain.handle("mcd:chatSendVoice", (_e, to, bytes, mime, secs, wave) => chat.sendVoice(to, bytes, mime, secs, wave));
+// Files (0.19.2). The renderer never names a path: sending goes through an open dialog, saving through a save dialog
+// whose default name is the peer's file name made safe. A saved file is never opened by the app.
+ipcMain.handle("mcd:chatFileSend", async (_e, to) => {
+  const r = await dialog.showOpenDialog(win, { properties: ["openFile"], title: "File (up to 100 MB)" });
+  if (r.canceled || !r.filePaths.length) return null;
+  return chat.fileSend(to, r.filePaths[0]);
+});
+ipcMain.handle("mcd:chatFileOffer", (_e, peer, ref) => chat.fileOffer(peer, ref));
+ipcMain.handle("mcd:chatFileRun", (_e, peer, ref, id) => chat.fileRun(peer, ref, id));
+ipcMain.handle("mcd:chatFilePause", (_e, id) => chat.filePause(id));
+ipcMain.handle("mcd:chatFileStatus", (_e, id) => chat.fileStatus(id));
+ipcMain.handle("mcd:chatFileTransfers", (_e, peer) => chat.fileTransfers(peer));
+ipcMain.handle("mcd:chatFileRemove", (_e, id) => chat.fileRemove(id));
+ipcMain.handle("mcd:chatFileKeep", (_e, id, on) => chat.fileKeep(id, on));
+ipcMain.handle("mcd:chatFileShareAgain", (_e, id) => chat.fileShareAgain(id));
+ipcMain.handle("mcd:chatFileSave", async (_e, id) => {
+  const st = chat.fileStatus(id);
+  if (!st || !st.canSave) throw new Error("The file is not verified yet.");
+  const r = await dialog.showSaveDialog(win, { defaultPath: require("./chatfiles").safeName(st.name) });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  await chat.fileSave(id, r.filePath);
+  return { canceled: false, path: r.filePath };
+});
 ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
   const r = await dialog.showOpenDialog(win, { title: "Send a photo",
     filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }], properties: ["openFile"] });

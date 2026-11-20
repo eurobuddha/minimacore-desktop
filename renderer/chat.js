@@ -84,6 +84,7 @@
     if (m.state === "image") return you + "📷 " + (m.body || "Photo");
     if (m.state === "audio") return you + "🎤 Voice note · " + (m.body || "").split("|")[0];
     if (m.state === "payment") return you + "💸 " + (m.amt || "") + " " + (m.tokname || "Minima");
+    if (m.state === "file") return you + "File: " + (m.body || "");
     return you + (m.body || "");
   }
 
@@ -97,6 +98,7 @@
   }
 
   // ---- dialogs: Android AlertDialog shapes on the app's overlay --------------------
+  const KEEP = {};                  // an action that returns this leaves the dialog open (Copy details)
   function dialog(opts) {
     // opts: { title, body (html), actions: [{label, value, danger}], onOpen(ov) }
     return new Promise((resolve) => {
@@ -110,7 +112,7 @@
       const done = (v) => { ov.remove(); resolve(v); };
       ov.querySelectorAll(".chat-dialog__btn").forEach((b) => {
         const a = opts.actions[parseInt(b.dataset.i, 10)];
-        b.onclick = () => done(typeof a.value === "function" ? a.value(ov) : a.value);
+        b.onclick = () => { const v = typeof a.value === "function" ? a.value(ov) : a.value; if (v !== KEEP) done(v); };
       });
       ov.onclick = (e) => { if (e.target === ov) done(null); };
       const esc = (e) => { if (e.key === "Escape") { document.removeEventListener("keydown", esc); done(null); } };
@@ -141,8 +143,18 @@
   async function newChatModal() {    // dialog_chat_new: paste an address (the phone also scans a QR)
     const body = `<div class="chat-dialog__msg">Paste your friend's keets address (0x + 64 hex), as shown under their “My address &amp; QR”.</div>
       <input id="chatNewAddr" placeholder="Their address — 0x…" spellcheck="false" style="font-family:ui-monospace,monospace;font-size:13px" />
-      <input id="chatNewName" placeholder="Name (optional)" />`;
-    const v = await dialog({ title: "New chat", body, actions: [
+      <input id="chatNewName" placeholder="Name (optional)" />
+      <div id="chatNewSaved"></div>`;
+    let saved = [];
+    try { saved = await D.api.chatContacts() || []; } catch (e) { /* node down: paste only */ }
+    const v = await dialog({ title: "New chat", body, onOpen: (ov) => {
+      // saved contacts (the phone's chat_contact_row list): one click starts or reopens the chat
+      const box = ov.querySelector("#chatNewSaved");
+      if (!saved.length) return;
+      box.innerHTML = `<div class="chat-dialog__sub">Saved contacts</div>` + saved.map((c, i) =>
+        `<button class="chat-dialog__item chat-dialog__contact" data-c="${i}">${avatarHtml(c.name.indexOf("0x") === 0 ? "New contact" : c.name, c.pubkey, "chat-avatar--sm")}<span><b>${h(c.name.indexOf("0x") === 0 ? "New contact" : c.name)}</b><small>${h(c.pubkey)}</small></span></button>`).join("");
+      box.querySelectorAll("[data-c]").forEach((b) => { b.onclick = async () => { const c = saved[parseInt(b.dataset.c, 10)]; ov.remove(); await refreshThreads(); select(c.pubkey); }; });
+    }, actions: [
       { label: "Cancel", value: null },
       { label: "Start chat", value: (ov) => ({ addr: ov.querySelector("#chatNewAddr").value.trim().toLowerCase(), name: ov.querySelector("#chatNewName").value.trim() }) }] });
     if (!v) return;
@@ -344,6 +356,9 @@
         slot.replaceWith(img);
       }).catch(() => { slot.textContent = "Photo — not available yet (click to retry)"; slot.onclick = load; });
       load();
+    } else if (m.state === "file" && m.ref) {
+      b.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div><button type="button" class="chat-bubble__attach chat-bubble__attach--btn">Open file transfer</button>${metaHtml(m)}`;
+      b.querySelector(".chat-bubble__attach").onclick = () => fileSheet(m.pubkey, m.ref);
     } else if (m.state === "payment") {
       const tok = m.tokname || "Minima";
       b.innerHTML = `<div class="chat-bubble__body">💸 ${m.incoming ? "Payment received" : "Payment sent"}\n${h(m.amt || "")} ${h(tok)}</div>
@@ -357,6 +372,17 @@
       b.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div>${m.ref ? `<div class="chat-bubble__attach">Attachment — tap to copy link</div>` : ""}${metaHtml(m)}`;
       if (m.ref) b.querySelector(".chat-bubble__attach").onclick = async () => { await D.copy(m.ref); D.toast("Link copied", "ok"); };
     }
+    // long-press on the phone, right-click here: Copy text / Delete (this device)
+    b.oncontextmenu = async (e) => {
+      e.preventDefault();
+      const v = await dialog({ title: "", body: `<button class="chat-dialog__item" data-v="copy">Copy text</button><button class="chat-dialog__item" data-v="del">Delete (this device)</button>`,
+        actions: [{ label: "Cancel", value: null }], onOpen: (ov) => ov.querySelectorAll("[data-v]").forEach((x) => { x.onclick = async () => {
+          ov.remove();
+          if (x.dataset.v === "copy") { await D.copy(m.body || ""); D.toast("Copied", "ok"); }
+          else { await D.api.chatDeleteMessage(m.msgid); await refreshThreads(); renderContacts(); renderMsgs(false); }
+        }; }) });
+      void v;
+    };
     return row;
   }
 
@@ -409,9 +435,81 @@
     if (!text || !sel) return;
     inp.value = ""; autosize(inp);
     try { await D.api.chatSend(sel, text); }
-    catch (e) { D.toast("Not sent — " + (e.message || e), "err"); }
+    catch (e) { showFailure("Send failed: " + errText(e)); }
     await refreshThreads(); renderContacts(); await renderMsgs(true);
     inp.focus();
+  }
+
+  function errText(e) { return ("" + ((e && e.message) || e || "")).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+  /** ChatFailureDialog: the whole error, selectable, with Copy details; it stays open after copying. */
+  function showFailure(message) {
+    return dialog({ title: "Error", body: `<div class="chat-dialog__msg chat-dialog__msg--sel" id="chatFailText">${h(message)}</div>`,
+      actions: [{ label: "Copy details", value: (ov) => { D.copy(ov.querySelector("#chatFailText").textContent); D.toast("Copied", "ok"); return KEEP; } }, { label: "Close", value: null }] });
+  }
+
+  // ---- files: the phone's ChatFiles sheet (explicit download, only a verified file can be saved) ----
+  const mb = (n) => (Number(n || 0) / 1048576).toFixed(1);
+  const DELIVERY = { "Downloaded and verified · sharing stopped": 1, "Downloaded and verified · sharing": 1, "Waiting for verified download": 1 };
+  async function fileSheet(peer, ref, known) {
+    let st = known;
+    try { if (!st) st = await D.api.chatFileOffer(peer, ref); } catch (e) { showFailure(errText(e) || "File transfer failed. Tap Resume to retry."); return; }
+    if (!st) return;
+    let timer = null;
+    await dialog({ title: st.name, body: `<div class="chat-dialog__msg" id="cfInfo"></div>
+        <progress id="cfBar" max="100" value="0"></progress>
+        <button class="chat-dialog__item" id="cfRun"></button>
+        <button class="chat-dialog__item" id="cfSave">Save verified file</button>
+        <label class="chat-dialog__check" id="cfKeepRow" hidden><input type="checkbox" id="cfKeep" /> Keep sharing</label>
+        <button class="chat-dialog__item" id="cfAgain" hidden>Share again</button>
+        <button class="chat-dialog__item" id="cfRemove">Remove local copy</button>`,
+      actions: [{ label: "Close", value: null }],
+      onOpen: (ov) => {
+        const q = (id) => ov.querySelector("#" + id), fail = (e) => showFailure(errText(e) || "File transfer failed. Tap Resume to retry.");
+        const paint = () => {
+          const d = st.delivery || {};
+          let info = (st.error || (st.ready ? "Verified and ready to save" : st.running ? "Transferring encrypted file…" : "Download or resume. Keep both nodes online. File data travels peer to peer."))
+            + "\n" + mb(st.done) + " / " + mb(st.size) + " MB";
+          if (st.mine && d.delivery) info += "\n" + (DELIVERY[d.delivery] ? d.delivery : "Download confirmation unavailable") + (d.deliveryError ? "\n" + d.deliveryError : "");
+          q("cfInfo").textContent = info;
+          q("cfBar").value = Math.floor(100 * Number(st.done || 0) / Math.max(1, Number(st.size || 0)));
+          q("cfRun").textContent = st.running ? "Pause" : st.mine ? "Send / resume" : "Download / resume";
+          q("cfRun").disabled = !st.running && !st.canRun;
+          q("cfSave").disabled = !st.canSave; q("cfRemove").disabled = !st.canRemove;
+          q("cfKeepRow").hidden = q("cfAgain").hidden = !st.mine;
+          if (document.activeElement !== q("cfKeep")) q("cfKeep").checked = d.keepSharing === "true";
+          q("cfAgain").disabled = d.sharingStopped !== "true";
+        };
+        const tick = async () => {
+          if (!ov.isConnected) { clearInterval(timer); return; }
+          try { const now = await D.api.chatFileStatus(st.id); if (now) st = now; } catch (e) { /* not stored yet: the offer's own figures stay */ }
+          if (ov.isConnected) paint();
+        };
+        q("cfRun").onclick = () => { (st.running ? D.api.chatFilePause(st.id) : D.api.chatFileRun(peer, st.ref, st.id)).catch(fail); setTimeout(tick, 150); };
+        q("cfSave").onclick = async () => { try { const r = await D.api.chatFileSave(st.id); if (r && !r.canceled) D.toast("File saved", "ok"); } catch (e) { fail(e); } };
+        q("cfKeep").onchange = () => { D.api.chatFileKeep(st.id, q("cfKeep").checked).catch(fail); };
+        q("cfAgain").onclick = () => { D.api.chatFileShareAgain(st.id).then(tick).catch(fail); };
+        q("cfRemove").onclick = async () => { if (st.running) return; try { await D.api.chatFileRemove(st.id); } catch (e) { fail(e); return; } clearInterval(timer); ov.remove(); };
+        paint(); tick(); timer = setInterval(tick, 400);
+      } });
+    clearInterval(timer);
+  }
+  async function fileTransfers() {
+    let list = [];
+    try { list = await D.api.chatFileTransfers(sel) || []; } catch (e) { showFailure(errText(e)); return; }
+    if (!list.length) { D.toast("No stored file transfers in this chat", ""); return; }
+    const peer = sel;
+    await dialog({ title: "File transfers", body: list.map((t, i) => `<button class="chat-dialog__item" data-t="${i}">${h(t.name)}</button>`).join(""),
+      actions: [{ label: "Close", value: null }],
+      onOpen: (ov) => ov.querySelectorAll("[data-t]").forEach((b) => { b.onclick = () => { const t = list[parseInt(b.dataset.t, 10)]; ov.remove(); fileSheet(peer, t.ref, t); }; }) });
+  }
+  async function doFile() {
+    const peer = sel;
+    D.api.chatFileSend(peer).then(async (st) => {
+      if (!st) return;
+      if (st.error) showFailure(st.error); else D.toast("File offered: " + st.name, "ok");
+      await refreshThreads(); renderContacts(); if (sel === peer) renderMsgs(true);
+    }).catch((e) => showFailure(errText(e) || "File transfer failed. Tap Resume to retry."));
+    D.toast("Encrypting and publishing the file. It appears in the chat when it is offered; \"File transfers\" shows its progress.", "");
   }
 
   function closeMenu() { const m = D.el("chatMenu"); if (m) m.remove(); }
@@ -421,8 +519,9 @@
     main.style.position = "relative";
     main.insertAdjacentHTML("beforeend", `<div class="chat-menu" id="chatMenu">
       <button id="chatAddrBtn">Contact address &amp; QR</button>
-      <button id="chatRenameBtn">Rename</button>
-      <button id="chatRemoveBtn">Delete chat</button></div>`);
+      <button id="chatRenameBtn">Rename contact</button>
+      <button id="chatClearBtn">Delete chat</button>
+      <button id="chatRemoveBtn">Delete contact</button></div>`);
     const off = (e) => { if (!e.target.closest("#chatMenu")) { closeMenu(); document.removeEventListener("mousedown", off); } };
     setTimeout(() => document.addEventListener("mousedown", off), 0);
     D.el("chatAddrBtn").onclick = () => { closeMenu(); contactAddressModal(); };
@@ -441,10 +540,20 @@
     D.el("chatRemoveBtn").onclick = async () => {
       closeMenu();
       if (!sel) return;
-      const ok = await dialog({ title: "Delete chat", body: `<div class="chat-dialog__msg">Delete this chat and its history? This cannot be undone.</div>`,
-        actions: [{ label: "Cancel", value: null }, { label: "Delete", value: true, danger: true }] });
+      const ok = await dialog({ title: "Delete contact", body: `<div class="chat-dialog__msg">Permanently remove this contact and the conversation? You'll need their address again to reconnect. This cannot be undone.</div>`,
+        actions: [{ label: "Cancel", value: null }, { label: "Delete contact", value: true, danger: true }] });
       if (!ok) return;
       await D.api.chatRemoveContact(sel);
+      sel = null;
+      render();
+    };
+    D.el("chatClearBtn").onclick = async () => {
+      closeMenu();
+      if (!sel) return;
+      const ok = await dialog({ title: "Delete chat", body: `<div class="chat-dialog__msg">Clear this conversation? The contact stays in your list — you can start a new chat anytime.</div>`,
+        actions: [{ label: "Cancel", value: null }, { label: "Delete chat", value: true, danger: true }] });
+      if (!ok) return;
+      await D.api.chatClearThread(sel);
       sel = null;
       render();
     };
@@ -454,20 +563,108 @@
     if (!sel) return;
     const v = await dialog({ title: "Attach", body: `
       <button class="chat-dialog__item" id="chatAttPhoto">📷 Photo</button>
+      <button class="chat-dialog__item" id="chatAttVoice">🎤 Voice note</button>
       <button class="chat-dialog__item" id="chatAttPay">💸 Send payment</button>
-      <button class="chat-dialog__item" id="chatAttAddr">🏷 Request their pay address</button>`,
+      <button class="chat-dialog__item" id="chatAttAddr">🏷 Request their pay address</button>
+      <button class="chat-dialog__item" id="chatAttFile">File (up to 100 MB)</button>
+      <button class="chat-dialog__item" id="chatAttFiles">File transfers</button>`,
       actions: [{ label: "Cancel", value: null }],
       onOpen: (ov) => {
         ov.querySelector("#chatAttPhoto").onclick = () => { ov.remove(); doPhoto(); };
         ov.querySelector("#chatAttPay").onclick = () => { ov.remove(); doPay(); };
+        ov.querySelector("#chatAttVoice").onclick = () => { ov.remove(); doVoice(); };
+        ov.querySelector("#chatAttFile").onclick = () => { ov.remove(); doFile(); };
+        ov.querySelector("#chatAttFiles").onclick = () => { ov.remove(); fileTransfers(); };
         ov.querySelector("#chatAttAddr").onclick = async () => { ov.remove(); await D.api.chatRequestPayAddr(sel).catch(() => {}); D.toast("Address requested — arrives automatically", "ok"); };
       } });
     void v;
   }
   async function doPhoto() {
     try { const r = await D.api.chatSendImage(sel); if (r) D.toast(r.via === "direct" ? "Photo delivered" : "Photo stored at a mailbox", "ok"); }
-    catch (e) { D.toast("Photo failed: " + (e.message || e), "err"); }
+    catch (e) { showFailure("Photo failed: " + errText(e)); }
     await refreshThreads(); renderContacts(); await renderMsgs(true);
+  }
+  /**
+   * VoiceRecordDialog: the microphone is asked for only now, when the user chose "Voice note". A live waveform from
+   * the mic level (one sample per 100 ms), a blinking dot, the m:ss timer, 60 s at most; Send or Cancel.
+   * The phone records Opus in OGG (AAC in MP4 on old Android). Chromium cannot write OGG, so this records AAC in
+   * MP4 where the platform can, else Opus in WebM, mono, 16 kbps asked for; the phone's player reads the content.
+   */
+  const VOICE = { MAX: 60, BARS: 32 };
+  function voiceMime() {
+    const R = window.MediaRecorder;
+    if (!R) return "";
+    return ["audio/mp4;codecs=mp4a.40.2", "audio/webm;codecs=opus"].find((t) => R.isTypeSupported(t)) || "";
+  }
+  /** WaveformView.summarise + encode: 32 bars, 1..15 each, one hex digit per bar. */
+  function waveHex(samples) {
+    if (!samples.length) return "4".repeat(VOICE.BARS);
+    let peak = 1, out = "";
+    for (const v of samples) peak = Math.max(peak, Math.trunc(v));
+    for (let i = 0; i < VOICE.BARS; i++) {
+      const a = Math.trunc(i * samples.length / VOICE.BARS), z = Math.max(a + 1, Math.trunc((i + 1) * samples.length / VOICE.BARS));
+      let m = 0;
+      for (let j = a; j < z && j < samples.length; j++) m = Math.max(m, Math.trunc(samples[j]));
+      out += (1 + Math.min(14, Math.trunc(Math.sqrt(m / peak) * 14))).toString(16);
+    }
+    return out;
+  }
+  const fmtSecs = (n) => Math.trunc(n / 60) + ":" + String(Math.trunc(n) % 60).padStart(2, "0");
+  async function doVoice() {
+    const peer = sel, mime = voiceMime();
+    if (!peer) return;
+    if (!mime || !navigator.mediaDevices) { D.toast("Microphone unavailable", "err"); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }, video: false }); }
+    catch (e) { D.toast("Microphone unavailable", "err"); return; }
+    const stop = () => stream.getTracks().forEach((t) => t.stop());
+    let rec, ctx;
+    const chunks = [], samples = [];
+    try {
+      rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
+      ctx = new AudioContext();
+    } catch (e) { stop(); D.toast("Microphone unavailable", "err"); return; }
+    const an = ctx.createAnalyser(); an.fftSize = 1024; ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    const started = Date.now(); let stoppedAt = 0, timers = [];
+    const elapsed = () => Math.trunc(((stoppedAt || Date.now()) - started) / 1000);
+    const halt = () => new Promise((res) => {
+      timers.forEach(clearInterval); timers = [];
+      if (!stoppedAt) stoppedAt = Date.now();
+      if (rec.state === "inactive") { stop(); ctx.close().catch(() => {}); return res(); }
+      rec.onstop = () => { stop(); ctx.close().catch(() => {}); res(); };
+      try { rec.stop(); } catch (e) { stop(); res(); }
+    });
+    rec.start();
+    const v = await dialog({ title: "Voice note",
+      body: `<canvas class="chat-audio__wave chat-rec__wave" id="chatRecWave"></canvas><div class="chat-rec"><span class="chat-rec__dot" id="chatRecDot">●</span><span class="chat-rec__time" id="chatRecTime">0:00</span></div>`,
+      actions: [{ label: "Cancel", value: null }, { label: "Send", value: "send" }],
+      onOpen: (ov) => {
+        const cv = ov.querySelector("#chatRecWave"), time = ov.querySelector("#chatRecTime"), dot = ov.querySelector("#chatRecDot");
+        timers.push(setInterval(() => {                 // the mic level, 0..32767 as MediaRecorder.getMaxAmplitude
+          if (!ov.isConnected) { halt(); return; }
+          an.getByteTimeDomainData(buf);
+          let peak = 0; for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
+          samples.push(Math.min(32767, Math.round(peak / 128 * 32767)));
+          drawWave(cv, samples.slice(-40).map((a) => 1 + Math.min(14, Math.trunc(Math.sqrt(a / 32767) * 14))), 1);
+        }, 100));
+        timers.push(setInterval(() => {
+          dot.style.opacity = dot.style.opacity === "0.25" ? "1" : "0.25";
+          if (elapsed() >= VOICE.MAX) { time.textContent = fmtSecs(VOICE.MAX) + "  max"; halt(); }
+          else time.textContent = fmtSecs(elapsed());
+        }, 500));
+      } });
+    await halt();
+    if (v !== "send") return;
+    const secs = Math.min(VOICE.MAX, Math.max(0, elapsed()));
+    let bytes;
+    try { bytes = new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer()); } catch (e) { D.toast("Recording failed", "err"); return; }
+    if (!bytes.length || secs < 1) { D.toast("Too short — hold on a moment longer", "err"); return; }
+    D.toast("Sending voice note…", "");
+    try { await D.api.chatSendVoice(peer, bytes, mime.split(";")[0], secs, waveHex(samples)); }
+    catch (e) { showFailure("Send failed: " + errText(e)); }
+    await refreshThreads(); renderContacts(); if (sel === peer) await renderMsgs(true);
   }
   async function doPay() {
     const addr = await D.api.chatPayAddr(sel);
@@ -483,7 +680,7 @@
     const amt = await D.showPrompt("Send " + label + " to " + addr, "", "amount", { message: "This sends real " + label + " from this node's wallet." });
     if (!amt) return;
     try { await D.api.chatSendPayment(sel, amt.trim(), token); D.toast(label + " payment sent", "ok"); }
-    catch (e) { D.toast("Payment failed: " + (e.message || e), "err"); }
+    catch (e) { showFailure("Payment failed: " + errText(e)); }
     await refreshThreads(); renderContacts(); await renderMsgs(true);
   }
 

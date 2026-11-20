@@ -230,7 +230,18 @@
     mailStatus: async () => ({ scannedTip: 2428089, lastScanMs: now - 20000, backfill: { done: true } }),
     chatInit: async () => ({ pubkey: PK("77"), name: "Preview" }),
     chatThreads: async () => [chatThread(PK("31"), "Mirela Okafor", "See you at the harbour at six.", 2, 5), chatThread(PK("32"), "Jonas Petrov", "Thanks, got it.", 0, 300)],
-    chatThread: async () => [], chatStatus: async () => ({ ready: true }),
+    // Chat fixtures (invented): ?chat=thread|attach|file|failure|voice|new|menu
+    chatThread: async () => { const t = (mins, incoming, body, extra) => Object.assign({ msgid: "kc-" + mins, pubkey: PK("31"), incoming, body, name: "", ref: "", state: "", ts: now - mins * 60000, read: true, status: "delivered", via: "direct" }, extra || {}); return [
+      t(120, true, "Are you still coming by boat?"), t(118, false, "Yes, the six o'clock one.", { peerread: true }),
+      t(60, true, "0:07|48c9e6a47b3d5f8e9c6a4b7d8f6e4c3a", { state: "audio", ref: "keets://" + "fa4e".repeat(16) + "/chat/vn-1760000000000.m4a?hash=" + "fa4e".repeat(16) }),
+      t(40, false, "harbour-timetable.pdf", { state: "file", ref: "pf1:FAKE", msgid: "kf-" + "fa4e".repeat(8) }),
+      t(30, false, "", { state: "payment", amt: "2.5", tokname: "MxUSD", txid: "0x" + "FA4E".repeat(16) }),
+      t(5, true, "See you at the harbour at six.")]; },
+    chatContacts: async () => [{ pubkey: PK("31"), name: "Mirela Okafor" }, { pubkey: PK("32"), name: "Jonas Petrov" }, { pubkey: PK("33"), name: "Ines Halloran" }],
+    chatFileOffer: async () => ({ id: "fa4e".repeat(8), name: "harbour-timetable.pdf", mime: "application/pdf", size: 3460300, ref: "pf1:FAKE", peer: PK("31"), mine: true, sent: true, running: false, done: 3460300, error: "", ready: true, canSave: true, canRemove: true, canRun: false,
+      delivery: { delivery: "Waiting for verified download", keepSharing: "true", sharingStopped: "false" } }),
+    chatFileStatus: async () => fixtures.chatFileOffer(), chatFileTransfers: async () => [await fixtures.chatFileOffer()],
+    chatMedia: async () => { throw new Error("preview"); }, chatStatus: async () => ({ ready: true }),
     // AtomiX, room 1 of Dexicon (main/atomix.js read models). ?axs=empty|noquote|minima|idle|halt|notready|manycoins
     axStatus: async () => ({ ready: AXS !== "notready" && AXS !== "broken", error: AXS === "broken" ? "Pool database integrity check failed." : "", eth: FAKE_ETH, minimaPk: FAKE_PK("A1"), currency: AX_MINIMA ? "minima" : "mxusdt", block: 2428089, log: [],
       halt: AXS === "halt" ? { summary: "Your ETH wallet no longer matches what this node derives.", minimaMismatch: false, ethMismatch: true, orphanedPk: "", staleEth: FAKE_ETH, nodeEth: FAKE_ETH2 } : null }),
@@ -382,6 +393,17 @@
         else P._open(m);
         document.activeElement && document.activeElement.blur();
       }, 700);
+      if (view === "chat" && Q.get("chat")) setTimeout(() => {
+        const c = Q.get("chat"), row = document.querySelector(".chat-thread"); if (row) row.click();
+        setTimeout(() => {
+          if (c === "attach") el("chatAttachBtn").click();
+          if (c === "menu") el("chatMoreBtn").click();
+          if (c === "new") el("chatNewBtn").click();
+          if (c === "file") document.querySelector(".chat-bubble__attach--btn").click();
+          if (c === "failure") { el("chatText").value = "Are you there?"; fixtures.chatSend = async () => { throw new Error("keets: peer 0x31C4E8A1F09B37D25E6A8C0F1B3D5E7A9C2E4F6081A3B5C7D9E0F2A4B6C8D0E2 is unreachable and no mailbox accepted the message"); }; el("chatSendBtn").click(); }
+          document.activeElement && document.activeElement.blur();
+        }, 600);
+      }, 500);
       if (Q.get("expand") === "1") el("walHead").click();
       // History: ?hmenu=1 opens its options, ?hdetail=<n> the n-th row's detail (&chain=checking: no answer yet), ?hfilter=1 the filter, ?hforeign=1 hides foreign rows
       if (view === "history") setTimeout(() => {

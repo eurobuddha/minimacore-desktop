@@ -11,6 +11,7 @@ const path = require("path");
 
 const WRITE_DEBOUNCE_MS = 300;
 const MAX_MESSAGES = 50000;
+const REV = 2;   // 1 (no field) = the store up to 0.19.1; 2 = the same shape, file rows allowed
 
 let mem = null;   // { messages:{ msgid:msg }, contacts:{ pubkey:{pubkey,name,maximapk} }, meta:{} }
 let writeTimer = null;
@@ -25,6 +26,9 @@ function ensureLoaded() {
   try {
     const j = JSON.parse(raw);
     if (j) { mem.messages = j.messages || {}; mem.contacts = j.contacts || {}; mem.meta = j.meta || {}; }
+    // 0.19.2 adds message rows of a new kind (state "file") and nothing else. The file as the older version left it is
+    // copied aside once, before this version writes anything: the node deletes inbox messages once they are stored here.
+    if (j && j.rev !== REV) { try { fs.copyFileSync(filePath(), filePath() + ".before-0.19.2", fs.constants.COPYFILE_EXCL); } catch (e2) { /* already kept, or unreadable */ } }
   } catch (e) {
     // existing-but-unparseable: preserve aside, never clobber (mail-store rule)
     try { fs.renameSync(filePath(), filePath() + ".corrupt-" + Date.now()); } catch (e2) { /* best effort */ }
@@ -37,7 +41,7 @@ function persistSoon() {
     try {
       const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
       const tmp = path.join(dir, "chat.json.tmp");
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, rev: REV, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
       fs.renameSync(tmp, filePath());
     } catch (e) { /* retried next write */ }
   }, WRITE_DEBOUNCE_MS);
@@ -78,6 +82,7 @@ function deleteThread(pubkey) {
   for (const k of Object.keys(mem.messages)) if (mem.messages[k].pubkey === pubkey) { delete mem.messages[k]; ch = true; }
   if (ch) persistSoon();
 }
+function deleteMessage(msgid) { ensureLoaded(); if (!mem.messages[msgid]) return false; delete mem.messages[msgid]; persistSoon(); return true; }
 function markThreadRead(pubkey) {
   ensureLoaded(); let ch = false;
   for (const m of Object.values(mem.messages)) if (m.pubkey === pubkey && m.incoming && !m.read) { m.read = true; ch = true; }
@@ -138,10 +143,10 @@ function mergeBackup(contacts, messages, payaddr, myname) {
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   const dir = app.getPath("userData"); fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, "chat.json.tmp");
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, rev: REV, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
   fs.renameSync(tmp, filePath());
 }
 function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
 
-module.exports = { addMessage, threadRows, thread, deleteThread, markThreadRead, unreadCount, setStatus, markPeerRead,
+module.exports = { addMessage, threadRows, thread, deleteThread, deleteMessage, markThreadRead, unreadCount, setStatus, markPeerRead,
   contacts, addContact, getContact, removeContact, metaGet, metaSet, clear, all, mergeBackup };

@@ -66,3 +66,67 @@ test("desktop chatschema has not drifted from the canonical mds/keetchat copy", 
     assert.equal(grab(here, fn), grab(canon, fn), fn + " identical in both copies");
   }
 });
+
+// ---------------------------------------------------------------- 0.19.2: what the phone's chat has and the desktop lacked
+const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+
+test("an inbound file offer becomes a row named after the file; receipts and broken offers are consumed; nothing downloads", () => {
+  const src = read("main/chat.js");
+  const ctl = src.indexOf('m.state === "file-control"'), offer = src.indexOf('m.state === "file")'), unknown = src.indexOf("unknown states:");
+  assert.ok(ctl > 0 && offer > ctl && unknown > offer, "file-control and file are handled before the unknown-state guard");
+  assert.ok(/"", "image", "audio", "payment", "file"\]/.test(src), "file is a stored state");
+  assert.ok(/inboundOffer\(m\.ref\);\s*if \(!offer\) \{ await nodeCmd\("keets action:ack id:" \+ msg\.id\); continue; \}/.test(src), "an offer that does not parse is acked and dropped");
+  assert.ok(!/\.download\(/.test(src.slice(ctl, unknown)), "the drainer never downloads");
+  const files = require("../main/chatfiles");
+  assert.equal(files.inboundOffer("pf1:not-an-offer"), null);
+});
+
+test("a peer's file name cannot leave the folder the user chose", () => {
+  const { safeName } = require("../main/chatfiles");
+  for (const bad of ["../../etc/passwd", "..\\..\\boot.ini", "/abs/olute", ".hidden", "a\u0000b", "con\nsole", "", "   ", "....", "x".repeat(600)]) {
+    const n = safeName(bad);
+    assert.ok(n.length > 0 && n.length <= 255, "never empty, never too long: " + JSON.stringify(n).slice(0, 40));
+    assert.ok(!/[\\/\u0000-\u001f]/.test(n) && n[0] !== ".", "no separators, control characters or leading dot: " + JSON.stringify(n).slice(0, 40));
+  }
+  const main = read("main/main.js");
+  assert.ok(/mcd:chatFileSave[\s\S]{0,400}showSaveDialog\(win, \{ defaultPath: require\("\.\/chatfiles"\)\.safeName\(st\.name\) \}\)/.test(main), "saving goes through a save dialog with the safe name");
+  assert.ok(!/shell\.openPath|shell\.showItemInFolder/.test(main.slice(main.indexOf("mcd:chatFileSend"), main.indexOf("mcd:chatSendImage"))), "a received file is never opened");
+});
+
+test("a voice note is the phone's message: published under /chat/vn-<ms><ext>, state audio, body M:SS|waveform", () => {
+  const voice = require("../main/chatvoice");
+  assert.equal(voice.MAX_SECONDS, 60);
+  assert.equal(voice.buildBody(72, "4f8a"), "1:12|4f8a");
+  assert.equal(voice.publishPath("audio/mp4", 1760000000000), "/chat/vn-1760000000000.m4a");
+  assert.equal(voice.publishPath("audio/webm", 1760000000000), "/chat/vn-1760000000000.webm");
+  assert.equal(voice.publishPath("audio/ogg", 1760000000000), "/chat/vn-1760000000000.ogg");
+  assert.equal(voice.sendable(1000, 0), false, "under a second is not sent");
+  const src = read("main/chat.js");
+  assert.ok(/keets action:publish path:" \+ voice\.publishPath\(mime, now\) \+ " file:" \+ tmp/.test(src));
+  assert.ok(/chatEncodeTyped\(store\.metaGet\("myname"\) \|\| "", body, \{ state: "audio", ref: pub\.url \}\)/.test(src));
+  assert.ok(src.includes("(ogg|m4a|webm|wav|png|jpe?g)") && src.includes('ext === ".webm" ? "audio/webm"'), "a .webm note is fetched as audio, not as a picture");
+  // the screen's own waveform is the phone's summarise + encode
+  const ui = read("renderer/chat.js"), vm = require("vm");
+  const fn = /function waveHex\(samples\) \{[\s\S]*?\n  \}/.exec(ui)[0];
+  const waveHex = vm.runInNewContext("const VOICE = { BARS: 32 }; " + fn + "; waveHex");
+  const samples = Array.from({ length: 100 }, (_, i) => (i * 331) % 32768);
+  assert.equal(waveHex(samples), voice.encode(voice.summarise(samples)));
+  assert.equal(waveHex([]), voice.encode(voice.summarise([])));
+});
+
+test("the microphone is asked for only by this window, and only on Voice note", () => {
+  const main = read("main/main.js"), ui = read("renderer/chat.js");
+  assert.ok(/wc === win\.webContents/.test(main) && /permission !== "media" \|\| !ownPage\(wc\)/.test(main), "media permission is this window's alone");
+  assert.ok(/askForMediaAccess\("microphone"\)/.test(main));
+  assert.equal((ui.match(/getUserMedia\(/g) || []).length, 1, "one place asks for the microphone");
+  assert.ok(ui.indexOf("getUserMedia(") > ui.indexOf("async function doVoice()"), "and it is the Voice note action");
+});
+
+test("Delete chat keeps the contact, Delete contact removes both, and a failure is a dialog that can be copied", () => {
+  const src = read("main/chat.js"), ui = read("renderer/chat.js");
+  assert.ok(/function clearThread\(pubkey\) \{ store\.deleteThread\(pubkey\);/.test(src) && !/function clearThread[^\n]*removeContact/.test(src));
+  assert.ok(/chatClearBtn[\s\S]{0,500}Clear this conversation\? The contact stays in your list/.test(ui));
+  assert.ok(/Permanently remove this contact and the conversation\?/.test(ui));
+  assert.ok(/function showFailure\(message\)[\s\S]{0,400}Copy details[\s\S]{0,200}return KEEP/.test(ui), "Copy details leaves the dialog open");
+  for (const item of ["Photo", "Voice note", "Send payment", "Request their pay address", "File (up to 100 MB)", "File transfers"]) assert.ok(ui.includes(item), "attach: " + item);
+});
