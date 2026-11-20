@@ -1055,7 +1055,14 @@ function onWebWalletUpdate() { wwLiveRender(); }
 function wwLock() { wwSeed = null; wwAddr = null; wwBal = []; wwKu = null; wwArmed = false; wwKuSuggest = 0; wwTab = "balance"; wwSearch = ""; wwForm = { to: "", amt: "", tok: "0x00" }; }
 function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
 // A token is named from its id where the id is known; an unnamed token (main hands back the start of its id) shows its whole id.
-function wwName(b) { const k = PayLabel.token(b.tokenid); if (k.known) return k.name === "MINIMA" ? "Minima" : k.name; const n = String(b.name || ""); return !n || String(b.tokenid).startsWith(n) || /^(minima|mxusdt?)$/i.test(n.trim()) ? String(b.tokenid) : n; }
+function wwName(b) { const k = PayLabel.token(b.tokenid); return k.known ? (k.name === "MINIMA" ? "Minima" : k.name) : nameWithId(b.tokenid, b.name); }
+/** A token NOT known by its id (0.19.124): its own name, with what cannot be seen taken out (control, format and zero-width
+ *  characters), AND its whole token id beside it, so that a name made to read as another token's is told apart by the id.
+ *  A name that reads as Minima or MxUSD, or is only the start of the id, is not shown: the id alone is. */
+function nameWithId(tid, name) {
+  const n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/\s+/g, " ").trim();
+  return n && !String(tid).startsWith(n) && !/^(minima|mxusdt?)$/i.test(n) ? n + " (token " + tid + ")" : String(tid);
+}
 const WW_SAFE = `<div class="ww-safe"><b>Runs entirely on this computer.</b> Your secret key is sent only to your own local node (127.0.0.1) to derive keys and sign. It never leaves this machine and is never saved.
   <br><b>Never type your secret key into a website Web Wallet.</b> A hosted site can steal it (that has drained wallets).</div>`;
 const wwCard = (inner) => `<div class="ww"><div class="ww-card">${inner}</div></div>`;
@@ -3399,7 +3406,7 @@ function resetEwState() { ewStatusCache = { ready: false }; ewAt = 0; }
 function ewCut(s) { s = String(s == null ? "" : s); const i = s.indexOf("."); return TOK.tidyAmount(i < 0 ? s : s.slice(0, i + 7)) || "0"; }
 function ewEthIcon() { return `<span class="ew-ic ew-ic--eth" aria-hidden="true"><svg viewBox="0 0 32 32" width="20" height="20"><path d="M16 3 8.5 16 16 20.4 23.5 16z" fill="#343434"/><path d="M16 3v17.4L23.5 16z" fill="#8C8C8C"/><path d="M8.5 17.6 16 29l7.5-11.4L16 22z" fill="#3C3C3B"/><path d="M16 22v7l7.5-11.4z" fill="#8C8C8C"/></svg></span>`; }
 // The phone loads each token's logo from a CDN and shows this disc until it arrives; the desktop makes no such request.
-function ewTokIcon(sym) { return sym === "WETH" ? ewEthIcon() : `<span class="ew-ic" aria-hidden="true" style="background:${EW_DISC[sym] || "#1F1F2B"}">${esc(String(sym || "?").slice(0, 2))}</span>`; }
+function ewTokIcon(sym) { return sym === "WETH" ? ewEthIcon() : `<span class="ew-ic" aria-hidden="true" style="background:${Object.hasOwn(EW_DISC, sym) ? EW_DISC[sym] : "#1F1F2B"}">${esc(String(sym || "?").slice(0, 2))}</span>`; }
 function ewOpen(url) { if (url.startsWith(EW_ETHERSCAN)) window.open(url, "_blank", "noreferrer"); }   // the main process opens nothing but etherscan.io
 /** An address in full, monospace, its first 8 and last 6 characters in the accent (the phone's confirm blocks). */
 function ewBlock(a) { a = String(a || ""); return a.length < 16 ? `<div class="ew-block">${esc(a)}</div>` : `<div class="ew-block"><b>${esc(a.slice(0, 8))}</b>${esc(a.slice(8, -6))}<b>${esc(a.slice(-6))}</b></div>`; }
@@ -3420,9 +3427,9 @@ async function renderEthWallet() {
   }
   const read = await api.ewBalances().catch(() => null);
   if (read) ewAt = Date.now();
-  // no answer from the Ethereum RPC: the screen is still drawn, with "—" where a balance would be, as the phone does
+  // no answer from the Ethereum RPC: the screen is still drawn, with "Not read yet" where a balance would be (the phone draws a dash there)
   const b = read || { address: st.address || "", eth: null, tokens: (await api.ewTokens().catch(() => [])).map(t => Object.assign({ balance: null }, t)) };
-  const val = (v, sym) => (v == null ? "—" : ewCut(v)) + " " + sym;
+  const val = (v, sym) => (v == null ? "Not read yet" : ewCut(v) + " " + sym);
   const asset = (key, icon, title, value, menu) => `<div class="ew-card ew-asset" role="button" tabindex="0" data-ewasset="${esc(key)}">${icon}
       <div class="ew-asset__main"><div class="ew-asset__t">${esc(title)}</div><div class="ew-asset__v">${esc(value)}</div></div>
       ${menu ? `<button class="ew-more" data-ewmenu="${esc(key)}" aria-label="Options for ${esc(menu)}" title="Token options">⋮</button>` : ""}</div>`;
@@ -3653,7 +3660,7 @@ async function refreshShopBadge() {
   try { const n = await api.shopNewCount(); const b = el("shopBadge"); if (!b) return; if (n > 0) { b.textContent = n; b.hidden = false; } else b.hidden = true; paintTrayDot(); } catch (e) {}
 }
 function shopGo(view, nav) { shopView = view; shopNav = nav || {}; renderMiniMall(); }
-function shopPill(status) { const s = status === "INQUIRY" ? "ENQUIRY" : String(status || ""); return `<span class="mm-pill" style="background:${SHOP_PILL[status] || "#9A9AA8"}">${esc(s)}</span>`; }
+function shopPill(status) { const s = status === "INQUIRY" ? "ENQUIRY" : String(status || ""); return `<span class="mm-pill" style="background:${Object.hasOwn(SHOP_PILL, status) ? SHOP_PILL[status] : "#9A9AA8"}">${esc(s)}</span>`; }
 function shopAgo(ms) { const d = Date.now() - (Number(ms) || 0); return d < 60000 ? "just now" : d < 3600000 ? Math.floor(d / 60000) + "m ago" : d < 86400000 ? Math.floor(d / 3600000) + "h ago" : Math.floor(d / 86400000) + "d ago"; }
 /** A screen of one of the three apps: its bar (back, title, icons on the right), then the page. */
 function shopFrame(title, back, icons, body, foot) {
@@ -3713,7 +3720,7 @@ async function renderShopSellOrder(ref) {
     `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? "  paid " + esc(o.paidAmount || o.amount) + " " + esc(cur) : "  awaiting payment"}</span></div>
      <div class="mm-sec">Items</div><div class="mm-card">${shopItems(o)}</div>
      ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Shop", o.shopName || "")}
-     <div class="mm-sec">Delivery</div>${shopKv("Method", o.shipping || "—")}${shopKv("Address", o.delivery || "—", !!o.delivery)}
+     <div class="mm-sec">Delivery</div>${shopKv("Method", o.shipping || "Not given")}${o.delivery ? shopKv("Address", o.delivery, true) : ""}
      ${o.note ? `<div class="mm-sec">Buyer note</div><div class="mm-card">${esc(o.note)}</div>` : ""}
      ${shopKv("Buyer key", o.counterparty || "", true)}
      ${enquiry ? "" : `<div class="mm-sec">Update status</div><div class="mm-grid">${["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${s}</button>`).join("")}</div>
@@ -3807,7 +3814,7 @@ async function renderShopBuyOrder(ref) {
   shopFrame(o.shopName || o.ref, () => shopGo("shop", { screen: "orders" }), [],
     `<div class="mm-line">${shopPill(o.status)}</div>
      <div class="mm-sec">Order</div><div class="mm-card">${shopItems(o)}</div>
-     ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Delivery", o.shipping || "—")}${shopKv("To", o.delivery || "—")}
+     ${shopKv("Total", o.amount + " " + cur)}${shopKv("Reference", o.ref, true)}${shopKv("Delivery", o.shipping || "Not given")}${o.delivery ? shopKv("To", o.delivery) : ""}
      ${d.ambiguous ? `<div class="mm-warn">⚠ The payment timed out: it may already have gone through. Check your Wallet and History before sending again, so that you do not pay twice.</div>` : ""}
      ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">Retry payment</button>` : ""}
      <div class="mm-sec">Messages with the vendor</div><div class="mm-thread">${shopThread(d.chat, "Vendor") || `<div class="mm-dim">No messages yet. Say hello below.</div>`}</div>`,
@@ -3923,12 +3930,11 @@ const VESTR_GRACE = [["None", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 72
 const VESTR_TABS = [["creator", "✎", "Creator"], ["collector", "❖", "Collector"], ["about", "ⓘ", "About"]];
 
 function vAmt(v) { return TOK.tidyAmount(String(v == null ? "0" : v)) || "0"; }   // the node's own figure: never rounded
-// A token is named from its id where the id is known (Minima, the one MxUSD); another token's own name is shown unless it
-// takes one of those two names, and then its whole id is shown instead.
+// A token is named from its id where the id is known (Minima, the one MxUSD); another token's own name is shown WITH its whole
+// id (nameWithId), and when it takes one of those two names the id alone is shown.
 function vTok(tid) {
   const k = PayLabel.token(tid); if (k.known) return k.name === "MINIMA" ? "Minima" : k.name;
-  const n = String((vestrTokMap && vestrTokMap[tid]) || "").trim();
-  return n && !/^(minima|mxusdt?)$/i.test(n) ? n : String(tid);
+  return nameWithId(tid, vestrTokMap && vestrTokMap[tid]);   // a name not known by id is shown with the whole id (the create review too)
 }
 function vRel(ms) {
   if (!(ms > 0)) return "";
@@ -3956,7 +3962,7 @@ async function renderVestr() {
   const title = vestrSub === "create" ? "Create a contract" : vestrSub === "calc" ? "Calculate a contract" : vestrSub ? "Contract" : "";
   host.innerHTML = `<div class="vs">${vestrSub
       ? `<div class="vs-head vs-head--sub"><button class="vs-back" id="vsBack" aria-label="Back">‹</button><span class="vs-head__sub">${title}</span></div>`
-      : `<div class="vs-head"><span class="vs-head__t">vestr</span><span class="vs-head__b">#${st && st.block ? esc(String(st.block)) : "—"}</span></div>`}
+      : `<div class="vs-head"><span class="vs-head__t">vestr</span><span class="vs-head__b">${st && st.block ? "#" + esc(String(st.block)) : ""}</span></div>`}
     <div class="vs-page" id="vestrSub"></div>
     ${vestrSub ? "" : `<div class="vs-nav" role="tablist">${VESTR_TABS.map(([id, g, l]) => `<button class="vs-tab${vestrTab === id ? " vs-tab--on" : ""}" role="tab" aria-selected="${vestrTab === id}" data-vtab="${id}"><span class="vs-tab__g" aria-hidden="true">${g}</span><span class="vs-tab__l">${l}</span></button>`).join("")}</div>`}</div>`;
   host.querySelectorAll("[data-vtab]").forEach(b => { b.onclick = () => vestrGo(b.dataset.vtab); });

@@ -414,6 +414,39 @@ test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and 
   assert.ok(/if \(wwUnknown\(wwAddr && wwAddr\.address\)\) \{ toast\("The last send's status is UNKNOWN\./.test(ww) && /const off = \(\(a\.isNodeSeed \|\| ku\.ack\) && !unknown\) \? "" : "disabled";/.test(ww), "Send is off, and refuses, while it stands");
 });
 
+// ---- 0.19.124: small things from the review ----
+test("a token that is not known by its id is shown with its whole id; a look-alike name never stands alone", () => {
+  const one = (name) => app.match(new RegExp("\\n(function " + name + "\\([^\\n]*)"))[1], block = (name) => { const i = app.indexOf("\nfunction " + name + "("); return app.slice(i + 1, app.indexOf("\n}", i) + 2); };
+  const TID = "0x" + "C0FFEE".repeat(10) + "ABCD", MAP = {};
+  const T = new Function("PayLabel", "vestrTokMap", block("nameWithId") + "\n" + block("vTok") + "\n" + one("wwName") + "\nreturn { nameWithId, vTok, wwName };")(require("../renderer/paylabel.js"), MAP);
+  assert.equal(T.vTok("0x00"), "Minima"); assert.equal(T.vTok(MXUSD), "MxUSD", "known by id: its name");
+  MAP[TID] = "Zebra Coin"; assert.equal(T.vTok(TID), "Zebra Coin (token " + TID + ")", "its own name and the whole id");
+  for (const fake of ["MxUSD", "MxUSD\u200B", "Mx\u200DUSD", "\u2060MxUSD\uFEFF", " minima ", "MINIMA\u00AD", "mxUSDT", "Mx\u0000USD"]) { MAP[TID] = fake; assert.equal(T.vTok(TID), TID, JSON.stringify(fake) + " reads as a known token: the id alone"); }
+  MAP[TID] = "MxUSD Gold\u202E"; assert.equal(T.vTok(TID), "MxUSD Gold (token " + TID + ")", "a longer name keeps its text, without the hidden character, and carries the id");
+  MAP[TID] = ""; assert.equal(T.vTok(TID), TID); delete MAP[TID]; assert.equal(T.vTok(TID), TID);
+  assert.equal(T.wwName({ tokenid: TID, name: "MxUSD\u200B" }), TID); assert.equal(T.wwName({ tokenid: TID, name: "Zebra" }), "Zebra (token " + TID + ")");
+  assert.equal(T.wwName({ tokenid: TID, name: TID.slice(0, 12) }), TID, "a name that is only the start of the id: the whole id"); assert.equal(T.wwName({ tokenid: "0x00", name: "anything" }), "Minima");
+  // the Vestr create review prints that label
+  assert.ok(/AppsAct\.vestr\.create\(api, \{ confirm: showConfirm \}, f, vTok\(f\.tokenid\),/.test(app));
+  let asked = null; return Act.vestr.create(recorder({}).api, { confirm: async (t, m) => { asked = m; return false; } }, { tokenid: TID, amount: "5", beneficiary: "MxB", startMs: 2, endMs: 3 }, "Zebra Coin (token " + TID + ")", "None")
+    .then(() => assert.ok(asked.startsWith("Lock 5 Zebra Coin (token " + TID + ")\n"), "the whole token id is in the question"));
+});
+test("a status or a symbol that is not in the table gets the default colour, never something inherited", () => {
+  const line = (re) => app.match(re)[0], esc = (s) => String(s);
+  const F = new Function("esc", "ewEthIcon", line(/const EW_DISC = [^\n]*/) + "\n" + line(/function ewTokIcon\(sym\)[^\n]*/) + "\n" + line(/const SHOP_PILL = [^\n]*/) + "\n" + line(/function shopPill\(status\)[^\n]*/) + "\nreturn { ewTokIcon, shopPill };")(esc, () => "ETH");
+  assert.match(F.shopPill("PAID"), /background:#F7931A"/); assert.match(F.ewTokIcon("USDT"), /background:#26A17B"/);
+  for (const odd of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf", "", undefined, null]) {
+    assert.match(F.shopPill(odd), /style="background:#9A9AA8"/, "status " + String(odd)); assert.match(F.ewTokIcon(odd), /style="background:#1F1F2B"/, "symbol " + String(odd));
+  }
+});
+test("no lone dash stands in for a missing value on the apps' screens", () => {
+  const apps = app.slice(app.indexOf("// ============================ ETH Wallet"), app.indexOf("// ============================ Minima Vestr") + 6000);
+  assert.ok(!/"—"/.test(apps.replace(/\/\/[^\n]*/g, "")), "no \"—\" placeholder left in ETH Wallet, miniMall or Vestr");
+  assert.ok(app.includes('const val = (v, sym) => (v == null ? "Not read yet" : ewCut(v) + " " + sym);'), "ETH Wallet: a balance that could not be read says so");
+  assert.ok(app.includes('${shopKv("Method", o.shipping || "Not given")}${o.delivery ? shopKv("Address", o.delivery, true) : ""}') && app.includes('${shopKv("Delivery", o.shipping || "Not given")}${o.delivery ? shopKv("To", o.delivery) : ""}'), "miniMall: an address row only when there is one, as the phone");
+  assert.ok(app.includes('<span class="vs-head__b">${st && st.block ? "#" + esc(String(st.block)) : ""}</span>'), "Vestr: the block badge is empty until the block is known, as the phone");
+});
+
 // ---- Minima Faucet ----
 test("Faucet screen: the original's one screen; the request is still main/faucet.js's, to its one pinned host, with a checked address", () => {
   const fc = app.slice(app.indexOf("// ---- Minima Faucet"), app.indexOf("// Settings: what is the desktop's own"));

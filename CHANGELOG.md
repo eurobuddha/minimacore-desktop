@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.124] — Small things from the review: no lone dashes, own-property lookups, a token's whole id beside an unknown name
+
+- **A token that is not known by its id shows its whole id** beside its name, in Vestr (the contract cards, the token list and the "Create vesting contract?" question) and in the Web Wallet's token list. Characters that cannot be seen (control, format and zero-width characters) are taken out of the name first, so "MxUSD" followed by a zero-width character now reads as what it is: a name that imitates a known token is not shown at all, only the id. Before, such a name passed the check and stood alone.
+- **No lone "—"** where a value is missing: ETH Wallet says "Not read yet" for a balance the Ethereum RPC did not answer; a miniMall order shows "Not given" for a missing delivery method and leaves the address row out when there is none (as the phone does); Vestr's block badge is empty until the block is known (as the phone).
+- **Lookups by a name from outside** (an order's status, a token's symbol) use the table's own entries only (`Object.hasOwn`): a status called "constructor" gets the default colour instead of a function's text in the page.
+
 ## [0.19.123] — Web Wallet: the UNKNOWN lock survives Logout (review fix)
 
 - **Found in review:** after a send whose status the node did not confirm, Send is blocked until the user says "I've checked". The block was a flag of the open session: Logout, or leaving the screen (which logs out), reset it, so logging in again offered Send at once and the same payment could be made twice.
