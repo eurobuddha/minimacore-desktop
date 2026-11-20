@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.163] — Entropy: the node never sees the device bytes
+
+- **Brought over from the phone (read only):** Entropy 0.1.16 (`apks/entropy-fix-2026-11-20`, `2c3f010cd87686dcbbe186cf81d17182f1f7376f`). 0.19.132 checked the node's `hash` answer, but `hash data:A||B` still sent the device bytes B to the node, so whoever answers the node learned every die and could veto throws it disliked by answering with an error.
+- **Now:** the node is asked for `random` and nothing else (still 0x + 64 hex, never one it gave before). The face comes from SHA3-256(A ++ B), worked out in the main process (`main/entropy.js`, Node's own `sha3-256`; the window has none of its own), and B is never sent to the node. `mcd:entropy` has two kinds: `random` (the node) and `sha3` (this computer only); the `hash` kind is gone.
+- **A node that fails:** any node error or bad or repeated random during a throw or the last-word pick discards it, says which ("The node did not answer; this roll was not used." / "The node's random value was malformed or repeated; this roll was not used."), marks the node not OK and checks it again before another roll may use it.
+- **Audit:** each digital roll keeps A, B and the local hash H (`#n A:… B:… H:… n:… face:…`), so it can be checked with the same `runscript`.
+- **Wording:** "node random + device randomness, SHA3 on this computer" in the source line and the summary; the mode note and the audit hint say what happens; in the four languages (new texts in the catalogs' review lists; the summary's source labels are now translated too).
+- Tests (`scripts/entropy-test.cjs`): the node receives `random` and nothing else and never B; a refused ask sends nothing; the face and H equal SHA3-256 (FIPS 202 vectors and Node's digest of A ++ B); empty, malformed, repeated random and a node error each discard the roll; a failed pick marks the node not OK and checks it again. They fail on 0.19.162.
+
 ## [0.19.162] — Terminal: the completion's descriptions in the phone's own words
 
 - **Brought over from the phone (read only):** Pandamonium's Terminal shows its command help translated (`integrated/terminalide` `HelpText.java`, with the `l10n_terminal_help_*` strings of `apks/base/localization`). Where the desktop's completion dropdown shows the same English (a command's one-line summary, a parameter's first line), it now shows the phone's Chinese, Russian or Ukrainian: 330 of the 373 descriptions the desktop can show. They are in a generated file, `renderer/i18n/terminal.js`, loaded after the three catalogs; a text the screens' own catalogs already hold is left out of it, so nothing of the screens is overridden.

@@ -107,7 +107,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   }
 
   // ---- a die face (RollEngine) ----
-  /** The node's hash of (node random ++ device random) → { n, face }, { reject: true } (thrown again: no modulo bias), or { error }. */
+  /** The SHA3-256 of (node random ++ device random), worked out in the main process → { n, face }, { reject: true } (thrown again: no modulo bias), or { error }. */
   function faceFromHash(hash) {
     if (typeof hash !== "string" || hash.indexOf("0x") !== 0 || hash.length < 10) return { error: t("Node hash failed") };
     var h = hash.substring(2, 10);
@@ -118,7 +118,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   }
   /** One byte from the device's CSPRNG → a face 1..6, or 0 for "take another byte" (252 and above: byte rejection). */
   function faceFromByte(v) { return v >= 252 ? 0 : (v % 6) + 1; }
-  /** What `hash data:` is given: the node's secret with the device's secret appended (CONCAT(a b)). */
+  /** What is hashed (in the main process, never by the node): the node's random with the device's appended (CONCAT(a b)). */
   function hashInput(a, b) { return a + b.substring(2); }
   var isHex = function (s) { return typeof s === "string" && /^0x[0-9a-fA-F]+$/.test(s); };
 
@@ -132,13 +132,13 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     }
     return taken;
   }
-  var SOURCE_LABEL = {}; SOURCE_LABEL[SRC.NODE_DEVICE] = "node SHA3 + device"; SOURCE_LABEL[SRC.DEVICE_ONLY] = "device only"; SOURCE_LABEL[SRC.PHYSICAL] = "physical";
+  var SOURCE_LABEL = {}; SOURCE_LABEL[SRC.NODE_DEVICE] = N_("node random + device randomness, SHA3 on this computer"); SOURCE_LABEL[SRC.DEVICE_ONLY] = N_("device only"); SOURCE_LABEL[SRC.PHYSICAL] = N_("physical");
   /** The lines under a finished phrase (DiceView.finish): the count line, the sources, and the two warnings when they apply. */
   function summary(faces, audits, allBits, entBits, words) {
     var count = {}, order = [], i;
     for (i = 0; i < audits.length; i++) { if (!(audits[i].src in count)) { count[audits[i].src] = 0; order.push(audits[i].src); } count[audits[i].src]++; }
     var lines = [t("{faces} rolls → {allBits} unbiased bits → {entBits} entropy bits + {entBits2}-bit SHA-256 checksum = {words} words", { faces: faces.length, allBits: allBits, entBits: entBits, entBits2: (entBits / 32), words: words }),
-      "sources: " + order.map(function (s) { return count[s] + " × " + (SOURCE_LABEL[s] || s); }).join(", ")];
+      t("sources: {list}", { list: order.map(function (s) { return count[s] + " × " + (SOURCE_LABEL[s] ? t(SOURCE_LABEL[s]) : s); }).join(", ") })];
     if (SRC.DEVICE_ONLY in count) lines.push(t("⚠ some rolls used a single entropy source (node unavailable)"));
     if (SRC.PHYSICAL in count) {
       var fc = {}, kinds = 0, max = 0;
@@ -152,7 +152,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     return audits.map(function (a, i) {
       if (a.src === SRC.PHYSICAL) return "#" + (i + 1) + " face:" + a.face + " (physical)";
       if (a.src === SRC.DEVICE_ONLY) return "#" + (i + 1) + " face:" + a.face + (" " + t("(device CSPRNG only)"));
-      return "#" + (i + 1) + " A:" + a.a + " B:" + a.b + " n:" + a.n + " face:" + a.face;
+      return "#" + (i + 1) + " A:" + a.a + " B:" + a.b + " H:" + (a.h || "") + " n:" + a.n + " face:" + a.face;   // H = SHA3-256(A ++ B) as worked out on this computer
     }).join("\n");
   }
   /** Up to nine list words that start with what is typed (LastWordView.suggestionsFor). */

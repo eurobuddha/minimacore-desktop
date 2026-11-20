@@ -372,7 +372,7 @@ ipcMain.handle("mcd:applyJarUpdate", async () => { throw new Error("The in-app n
 ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
 ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
 
-// Entropy (main/entropy.js): `random`, or `hash data:` of plain hex, through rpcCall; the hex value back. Seed material: never logged.
+// Entropy (main/entropy.js): the node's `random` through rpcCall, or the SHA3-256 of one roll worked out here (never sent to the node); the hex value back. Seed material: never logged.
 ipcMain.handle("mcd:entropy", (_e, kind, arg) => { requireRunning(); return entropy.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 // While a seed phrase can be on screen (Entropy), the system is asked to keep the window out of screenshots and screen
 // sharing (main/securescreen.js). On or off, nothing else: no path, no setting. The answer is what was set and on which

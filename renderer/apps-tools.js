@@ -327,10 +327,12 @@ function renderExplorer() {
 //
 // WHAT IS ON THIS SCREEN IS A WALLET SEED. The phrase itself lives in this page's memory only: it is never stored,
 // logged, put on the clipboard (the original has no copy button either) or sent to the main process. The VALUES IT IS
-// MADE FROM are another matter in digital mode: each roll's node value (A), device value (B) and their hash pass through
-// the main process (main/entropy.js) and the node on 127.0.0.1, and whoever holds every A and B can recompute the phrase.
-// The screen says so beside the mode choice and recommends real dice for a wallet that will hold value. The device's
-// own random values come from WebCrypto, where the original uses SecureRandom.
+// MADE FROM are another matter in digital mode: each roll's node value (A) comes from the node on 127.0.0.1, which is
+// asked for `random` and nothing else (0.19.163, as the phone's Entropy 0.1.16); the device value (B) and the SHA3 of
+// A ++ B pass through the main process only (main/entropy.js works the digest out and never sends B to the node), and
+// whoever holds every A and B can recompute the phrase. The screen says so beside the mode choice and recommends real
+// dice for a wallet that will hold value. The device's own random values come from WebCrypto, where the original uses
+// SecureRandom; the window has no SHA3 of its own (WebCrypto has none), so the digest is the main process's.
 // LIFETIME (0.19.133, as the phone's note promises): a phrase is concealed until Reveal, and with it the roll string and
 // the audit log. Leaving the screen by any route ERASES the phrase, the rolls, the audit values, their text in the page
 // and every typed last-word box: another screen (asked first when a finished phrase is there), the window hidden or
@@ -349,18 +351,21 @@ const enDice = () => [...document.querySelectorAll("#enDice .en-die")];
 /** 32 random bytes of this device as 0x hex (RollEngine.deviceSecretHex): WebCrypto, never Math.random. */
 function enDeviceSecret() { const b = new Uint8Array(32); crypto.getRandomValues(b); let s = "0x"; for (const x of b) s += x.toString(16).padStart(2, "0"); return s; }
 function enDeviceFace() { const u = new Uint8Array(1); for (;;) { crypto.getRandomValues(u); const f = EntropyCore.faceFromByte(u[0]); if (f) return f; } }
-const EN_NODE_BAD = N_("The node's answer did not match; this roll was not used.");   // an Error's message and compared as written: translated only where shown
+const EN_NODE_BAD = N_("The node's random value was malformed or repeated; this roll was not used.");   // an Error's message and compared as written: translated only where shown
+const EN_NODE_DOWN = N_("The node did not answer; this roll was not used.");
 /**
- * One node value with one device value, believed only when checked (0.19.132): the node's random is 32 bytes of hex and
- * not one it gave before, and the hash is the one the main process worked out itself from (node ++ device), so the node
- * cannot choose it and the face depends on all 32 device bytes. → { a, b, h }; throws EN_NODE_BAD.
+ * One node value with one device value (0.19.163, the phone's 0.1.16): the node is asked for `random` only, and it must
+ * be 32 bytes of hex and not one it gave before; the SHA3-256 of (node ++ device) is worked out in the main process,
+ * never by the node, and B is never sent to it. → { a, b, h }; throws EN_NODE_BAD (a bad or repeated random) or
+ * EN_NODE_DOWN (the node did not answer).
  */
 async function enNodeHash() {
-  const b = enDeviceSecret(), a = await api.entropy("random"), key = String(a).toLowerCase();
+  const b = enDeviceSecret(); let a;
+  try { a = await api.entropy("random"); } catch (e) { throw new Error(EN_NODE_DOWN); }
+  const key = String(a).toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(key) || EN.seen.has(key)) throw new Error(EN_NODE_BAD);
   EN.seen.add(key);
-  const h = await api.entropy("hash", EntropyCore.hashInput(a, b));
-  if (!h) throw new Error(EN_NODE_BAD);
+  const h = await api.entropy("sha3", EntropyCore.hashInput(a, b));
   return { a, b, h };
 }
 /** One die (RollEngine.rollOne): node random and device random, hashed; device only when the node is not there (and labelled so). → { face, audit }; throws on a source that misbehaves: there is no quiet fall back to one source. */
@@ -370,26 +375,26 @@ async function enRollOne() {
   for (let attempt = 0; attempt <= C.REJECT_LIMIT; attempt++) {
     const { a, b, h } = await enNodeHash(), r = C.faceFromHash(h);
     if (r.error) throw new Error(r.error);
-    if (!r.reject) return { face: r.face, audit: { src: C.SRC.NODE_DEVICE, a, b, n: r.n, face: r.face } };
+    if (!r.reject) return { face: r.face, audit: { src: C.SRC.NODE_DEVICE, a, b, h, n: r.n, face: r.face } };
   }
   throw new Error("Entropy source misbehaving (rejection limit)");
 }
-/** One uniform 32-bit number for the last-word picker (RollEngine.randomN): node + device, or the device alone when the node is known to be away, and which it was. A node that answers wrongly gives { error }: nothing is picked. */
+/** One uniform 32-bit number for the last-word picker (RollEngine.randomN): node + device, or the device alone when the node is known to be away, and which it was. A node that fails or answers badly gives { error }: nothing is picked, and the node is checked again. */
 async function enRandomN() {
   const C = EntropyCore;
   if (!EN.nodeOk) { const u = new Uint32Array(1); crypto.getRandomValues(u); return { n: u[0], src: C.SRC.DEVICE_ONLY }; }
   try { const { h } = await enNodeHash(); return { n: parseInt(h.substring(2, 10), 16), src: C.SRC.NODE_DEVICE }; }
-  catch (e) { entropyNode(); return { error: t("The node's answer did not match; no word was picked. Try again.") }; }
+  catch (e) { entropyNode(); return { error: e && e.message === EN_NODE_BAD ? t("The node's random value was malformed or repeated; no word was picked. Checking the node again.") : t("The node did not answer; no word was picked. Checking the node again.") }; }
 }
-/** Prove the node before any roll uses it (MainActivity.verifyNode), by the very check every roll passes: "verified" means one full node + device hash was confirmed in the main process. */
+/** Prove the node before any roll uses it (MainActivity.verifyNode), by the very path every roll takes: "verified" means the node gave a well-formed, fresh random; the SHA3 is always worked out on this computer. */
 async function enVerify() {
   const mine = ++EN.verified, set = (ok, text) => { if (mine !== EN.verified) return; EN.nodeOk = ok; EN.ready = true; if (!EN.selfErr) enSay("enSource", text, "en-source" + (ok ? " en-ok" : " en-amber")); };
   if (!running) return set(false, "node unavailable: device CSPRNG only (single source)");
   setTimeout(() => { if (mine === EN.verified && !EN.ready) set(false, "node unavailable: device CSPRNG only (single source)"); }, 5000);   // never leave rolls gated for ever
-  try { await enNodeHash(); set(true, t("BIP39 self-test ✓ node SHA3 + device CSPRNG verified")); }
-  catch (e) { set(false, t("{ennodebad}: device CSPRNG only (single source)", { ennodebad: (e && e.message === EN_NODE_BAD ? t("the node's answers did not match") : t("node commands failed")) })); }
+  try { await enNodeHash(); set(true, t("BIP39 self-test ✓ node random + device randomness, SHA3 on this computer")); }
+  catch (e) { set(false, t("{ennodebad}: device CSPRNG only (single source)", { ennodebad: (e && e.message === EN_NODE_BAD ? t("the node's random value was malformed or repeated") : t("node commands failed")) })); }
 }
-function entropyNode() { if (EN && el("enRoot")) { EN.ready = false; enVerify(); } }   // the node went away or came back: what the rolls use is checked again
+function entropyNode() { if (EN && el("enRoot")) { EN.ready = false; EN.nodeOk = false; enVerify(); } }   // the node went away, came back or failed a roll: not trusted, and nothing uses it, until it is checked again
 
 // ---- DICE ROLL ----
 function enChips() {
@@ -424,9 +429,8 @@ async function enThrow() {
   if (run !== EN.run) return;                                    // wiped while the node was answering: nothing of this throw is kept
   if (!got) {
     enStopDice(1); EN.busy = false; EN.auto = false; enChips();
-    if (why !== EN_NODE_BAD) return enStatus(t("Entropy source error: nothing recorded. Try again."), true);
-    entropyNode();                                               // the node is proved again before another roll may use it; the source line says what it found
-    return enStatus(t("{ennodebad} Nothing was recorded.", { ennodebad: t(EN_NODE_BAD) }), true);
+    entropyNode();                                               // any failure: the node is proved again before another roll may use it; the source line says what it found
+    return enStatus(t("{ennodebad} Nothing was recorded. Checking the node again.", { ennodebad: t(why === EN_NODE_BAD ? EN_NODE_BAD : EN_NODE_DOWN) }), true);
   }
   await Promise.all(enDice().map((d, i) => new Promise(done => setTimeout(() => {   // each die tumbles on, then settles on its face
     if (run !== EN.run) return done();
@@ -598,7 +602,7 @@ function renderEntropy() {
     <div class="en-page" id="enDiceTab" role="tabpanel">
       <div class="en-card"><div class="en-label">${th("PHRASE LENGTH")}</div><div class="en-row">${lens("data-len")}</div>
         <div class="en-label en-gap">${th("DICE MODE")}</div><div class="en-row"><button class="en-btn" id="enDigital">${th("Digital (node + device)")}</button><button class="en-btn" id="enPhysical">${th("Physical dice")}</button></div>
-        <div class="en-hint" id="enModeNote">${th("Digital: each roll's two random values and their hash pass through this app's main process and the node on 127.0.0.1. Whoever could read them there could rebuild the phrase. For a wallet that will hold real value, use Physical dice: real dice never leave this screen.")}</div>
+        <div class="en-hint" id="enModeNote">${th("Digital: each roll takes a random value from the node on 127.0.0.1 and 32 bytes of this computer's own randomness. The SHA3 of the two is worked out on this computer, and the device bytes are never sent to the node. Both values pass through this app's main process: whoever could read them there could rebuild the phrase. For a wallet that will hold real value, use Physical dice: real dice never leave this screen.")}</div>
         <div class="en-source" id="enSource" role="status">${th("checking entropy sources…")}</div>
         <div class="en-warn">${th("⚠ SECURITY: you are generating a real wallet seed. Go offline, make sure nobody can see the screen, and write the words on paper only. Nothing is stored. Leaving this screen, hiding or closing the window, stopping the node, 5 minutes without input, or Wipe & start over erases the phrase for ever.")}</div>
         <div class="en-banner" id="enIdle" role="status" hidden></div></div>
@@ -614,7 +618,7 @@ function renderEntropy() {
         <div class="en-label en-gap">${th("VERIFY FAIRNESS")}</div><div class="en-hint">${th("Maths is bit-identical to iancoleman/bip39 v0.4.3 (locked by fixed vectors produced from the genuine code; see the Entropy repo tests). Roll history below: paste into bip39-standalone.html (Raw entropy mode) to reproduce the phrase.")}</div>
         <div class="en-ticker en-sel" id="enRolls"></div><button class="en-btn en-btn--full" id="enAuditBtn" aria-expanded="false">${th("Show per-roll audit log")}</button>
         <div id="enAuditWrap" hidden><div class="en-gold en-small">${th("⚠ This log reveals every roll's secrets (A + B): anyone who sees it can recompute the entire seed phrase. Treat it exactly like the seed words.")}</div>
-          <div class="en-hint en-small">${th("Each digital face = SHA3(node_secret ++ device_secret) → first 4 bytes mod 6 (values ≥ 4294967292 rerolled: zero modulo bias). Verify any roll in the Terminal: runscript script:\"LET h=SHA3(CONCAT(<A> <B>)) LET n=NUMBER(SUBSET(0 4 h)) LET r=n%6 RETURN TRUE\"")}</div>
+          <div class="en-hint en-small">${th("Each digital face = SHA3(node random A ++ device random B), worked out on this computer (B is never sent to the node) → first 4 bytes mod 6 (values ≥ 4294967292 rerolled: zero modulo bias). H is that hash. Verify any roll in the Terminal: runscript script:\"LET h=SHA3(CONCAT(<A> <B>)) LET n=NUMBER(SUBSET(0 4 h)) LET r=n%6 RETURN TRUE\"")}</div>
           <pre class="en-audit en-sel" id="enAudit" tabindex="0"></pre></div>
         <button class="en-btn en-btn--pink en-btn--full" id="enWipe">${th("Wipe & start over")}</button></div></div>
     <div class="en-page" id="lwTab" role="tabpanel" hidden>
@@ -646,7 +650,7 @@ function renderEntropy() {
     else if (b.id === "lwCalc") lwCalc();
     else if (b.dataset.sugg) { const box = lwBoxes()[+b.dataset.i]; if (box) lwCommit(box, b.dataset.sugg); }
     else if (b.dataset.cand) lwPick(b.dataset.cand, "chosen manually");
-    else if (b.id === "lwRandom") { const c = EN.lw.candidates; if (c && c.length) { const r = await enRandomN(); if (r.error) lwStatus(r.error, true); else if (EN.lw.candidates === c) lwPick(c[r.n % c.length], r.src === EntropyCore.SRC.NODE_DEVICE ? "picked by SHA3(node ++ device) entropy" : "picked by device entropy"); } }   // the count is a power of two, so the remainder is exactly uniform
+    else if (b.id === "lwRandom") { const c = EN.lw.candidates; if (c && c.length) { const r = await enRandomN(); if (r.error) lwStatus(r.error, true); else if (EN.lw.candidates === c) lwPick(c[r.n % c.length], r.src === EntropyCore.SRC.NODE_DEVICE ? t("picked by SHA3(node random ++ device), worked out on this computer") : t("picked by device entropy")); } }   // the count is a power of two, so the remainder is exactly uniform
   });
   for (const type of ["pointerdown", "keydown", "input"]) root.addEventListener(type, () => { EN.idleAt = Date.now(); const n = el("enIdle"); if (n) n.hidden = true; }, true);
   clearInterval(EN_TICK); EN_TICK = setInterval(() => enIdleTick(Date.now()), 1000);
