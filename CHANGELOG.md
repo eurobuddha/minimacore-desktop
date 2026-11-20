@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.181] — miniMall vendor: dust cannot fill an order's coin list
+
+- An order counts at most 1000 payment coins (0.18.163), so a buyer could fill that list with 1000 coins of almost nothing and block every later real payment. A coin below the larger of 1% of what is due and 0.000001 of the token is now dust: it is remembered (never looked at again), not counted and not put in the order's list; a coin of at least what is still due is never dust, however small. With nothing due by the listing, only the 0.000001 floor applies. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.180] — Web Wallet: payments logged with whole identifiers
 
 - The Web Wallet's log line for a sent payment cut the token id and the sending address to 10 characters and did not name the recipient. It now names the token id, the sending address and the recipient whole. Test: `scripts/inject-test.cjs`.

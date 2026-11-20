@@ -78,6 +78,24 @@ function decCmp(a, b) {
 }
 /** a >= b, both readable figures. */
 function decGte(a, b) { const c = decCmp(a, b); return c === 0 || c === 1; }
+/**
+ * Is a coin dust for this order (0.18.181)? Below the larger of 1% of what is due and 0.000001 of the token (no real
+ * price is smaller: miniMall prices are written to six decimals), unless it is at least what is still due: a top-up of
+ * the remainder is never dust, however small. A real payment is one coin, or a few; 100 coins of 1% still pay an order.
+ * With nothing due by the listing (an unchecked order), only the 0.000001 floor.
+ */
+const MIN_COIN = "0.000001";
+function isDust(o, amount) {
+  const a = decParse(amount); if (!a) return true;
+  const d = decParse(o.due);
+  if (!d || d[0] <= 0n) return decCmp(amount, MIN_COIN) === -1;   // nothing due by the listing: only the absolute floor
+  const p = decParse(o.paidAmount || "0") || [0n, 0], m = decParse(MIN_COIN);
+  const dp = Math.max(a[1], d[1] + 2, p[1], m[1]), at = (x) => x[0] * 10n ** BigInt(dp - x[1]);
+  let floor = d[0] * 10n ** BigInt(dp - d[1] - 2);                  // 1% of what is due
+  if (floor < at(m)) floor = at(m);                                 // never below 0.000001
+  const remaining = at(d) - at(p); if (remaining < floor) floor = remaining;   // what is still due is never dust
+  return floor > 0n && at(a) < floor;
+}
 /** An order total that can ever be paid: a readable figure above zero. */
 function payableTotal(v) { return decCmp(v, "0") === 1; }
 function decAdd(a, b) {
@@ -129,6 +147,10 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   const cid = typeof coinid === "string" ? coinid.toLowerCase() : "";
   if (!/^0x[0-9a-f]{1,128}$/.test(cid)) return null;
   if (mem.counted[cid] || (o.coins || []).includes(cid)) return "ALREADY";
+  ensureChecked(o);
+  // Dust (0.18.181) never fills the order's 1000-coin list, so a flood of tiny coins cannot block a later real payment.
+  // It is remembered (never looked at again) and not counted.
+  if (isDust(o, paidAmount)) { mem.counted[cid] = ref; flush(); return "DUST"; }
   if ((o.coins || []).length >= ORDER_COINS_MAX) return null;
   o.coins = (o.coins || []).concat(cid);
   mem.counted[cid] = ref;

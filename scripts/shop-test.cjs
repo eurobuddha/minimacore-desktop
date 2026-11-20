@@ -51,8 +51,9 @@ test("decCmp: exact decimal compare; an unreadable figure is null, never 0", () 
 test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.000000001), the listing decides what is due", () => {
   for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
-    assert.equal(store.recordPayment(ref, "0.000000001", "0x00", coin()), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
-    assert.equal(store.recordPayment(ref, "3.199999999", "0x00", coin()), "PAID", "3.2 received = 3.2 due");
+    assert.equal(store.recordPayment(ref, "0.000000001", "0x00", coin()), "DUST", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2 (CHANGED on purpose, 0.18.181: it is dust, not counted)");
+    assert.equal(store.recordPayment(ref, "3.199999999", "0x00", coin()), "UNDERPAID");
+    assert.equal(store.recordPayment(ref, "0.000000001", "0x00", coin()), "PAID", "3.2 received = 3.2 due (the remainder is never dust)");
     assert.equal(store.order(ref).due, "3.2");
   }
   const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
@@ -230,8 +231,8 @@ test("vendor: a phone-placed order to my shop is checked against my listing and 
   await shop.scanOnce();
   let o = store.order("ORD-PHONE1");
   assert.equal(o.items.length, 1, "the JSON string is read as items"); assert.equal(o.due, "3.2"); assert.deepEqual(o.problems, []);
-  assert.equal(o.paid, false, "the buyer's 0.000000001 total paid with 1 nano is not paid"); assert.equal(o.status, "UNDERPAID");
-  paid = "3.199999999"; await shop.scanOnce();
+  assert.equal(o.paid, false, "the buyer's 0.000000001 total paid with 1 nano is not paid"); assert.equal(o.status, "PENDING", "1 nano is dust (0.18.181)");
+  paid = "3.2"; await shop.scanOnce();
   o = store.order("ORD-PHONE1"); assert.equal(o.paid, true); assert.equal(o.status, "PAID");
 });
 
@@ -312,4 +313,21 @@ test("L1: advanceStatus accepts only CONFIRMED, SHIPPED, DELIVERED", async () =>
 test("L3: currencies in a listing problem read MxUSD, never USDT", () => {
   const p = L.check({ currency: "mxUSDT", products: [], shipping: [] }, { items: [], shipping: "", currency: "Minima" }).problems.join(" ");
   assert.match(p, /not your shop's \(MxUSD\)/); assert.ok(!/USDT/i.test(p), p);
+});
+
+// ---- 0.18.181: dust cannot fill an order's coin list ----
+test("dust (below 0.000001, or below the smaller of 1% of what is due and what is still due) is not counted and never blocks a real payment", () => {
+  const m = freshModules(); let k = 0; const id = () => "0xD057" + (++k).toString(16);
+  const ref = "ORD-DUST";
+  m.store.saveShop({ shopId: "dust", shopName: "D", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [{ id: "domestic", label: "Domestic", fee: "0.2" }] });
+  m.store.upsertOrder({ ref, role: "sell", shopId: "dust", amount: "3.2", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 2, unitPrice: "1.5" }], shipping: "Domestic" });
+  for (let i = 0; i < 1100; i++) assert.equal(m.store.recordPayment(ref, i % 2 ? "0.0000001" : "0.0001", "0x00", id()), "DUST");
+  const o = m.store.order(ref); assert.equal((o.coins || []).length, 0, "no dust in the order's list"); assert.equal(o.paidAmount || "0", "0", "and none counted");
+  assert.equal(m.store.recordPayment(ref, "0.032", "0x00", id()), "UNDERPAID", "1% of 3.2 is not dust");
+  assert.equal(m.store.recordPayment(ref, "3.15", "0x00", id()), "UNDERPAID");
+  assert.equal(m.store.recordPayment(ref, "0.018", "0x00", id()), "PAID", "a top-up of what is still due is never dust, however small");
+  assert.equal(m.store.order(ref).coins.length, 3);
+  const u = "ORD-DUST2"; m.store.upsertOrder({ ref: u, role: "sell", shopId: "nope", amount: "1", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [], shipping: "" });
+  assert.equal(m.store.recordPayment(u, "0.0000009", "0x00", id()), "DUST", "an order with nothing due by the listing: the 0.000001 floor");
+  assert.equal(m.store.recordPayment(u, "0.000001", "0x00", id()), "UNCHECKED");
 });
