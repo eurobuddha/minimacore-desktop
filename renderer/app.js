@@ -2708,7 +2708,7 @@ function termSugRender() {
     `<div class="termsug__row${i === SUG_SEL ? " termsug__row--sel" : ""}" data-i="${i}">` +
     `<span class="termsug__l">${esc(it.label)}</span>` +
     (it.required ? `<span class="termsug__req">${th("required")}</span>` : "") +
-    (it.desc ? `<span class="termsug__d">${esc(it.desc)}</span>` : "") + `</div>`).join("");
+    (it.desc ? `<span class="termsug__d">${esc(I18N.t(it.desc))}</span>` : "") + `</div>`).join("");   // the node's help line, in the phone's words where it has them (renderer/i18n/terminal.js)
   box.style.display = "";
   // mousedown (not click): fires before the input's blur, and preventDefault keeps focus in the input
   for (const row of box.children) row.onmousedown = (e) => { e.preventDefault(); termSugAccept(SUG_ITEMS[+row.dataset.i]); };

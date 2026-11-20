@@ -284,3 +284,31 @@ test("months, chips and order states are said in each language where drawn; the 
   assert.ok(/var MON = I18N\.MONTHS;/.test(src("mail.js")) && src("mail.js").includes('I18N.t("{day} {month} {year}"') && src("dexicon-ui.js").includes('month: I18N.t(I18N.MONTHS[d.getMonth()])'));
   const AX = require("../renderer/dexicon-ax.js"); assert.equal(AX.dealStatus({ status: "COMPLETE" }), "Complete");
 });
+
+// 0.19.162: the Terminal's completion descriptions, from the phone's own translated help (renderer/i18n/terminal.js)
+test("Terminal help: the phone's words for the completion descriptions; names, parameters and values kept; the screens' catalogs untouched", () => {
+  const src = fs.readFileSync(path.join(R, "i18n", "terminal.js"), "utf8"), rows = {};
+  const J = require("../renderer/i18n.js"); for (const c of OTHERS) require("../renderer/i18n/" + c + ".js");
+  const before = {}; for (const c of OTHERS) before[c] = Object.assign({}, J.catalog(c));
+  const box = { I18N: { add: (code, e) => { rows[code] = e; } } }; new Function("I18N", src)(box.I18N);
+  for (const c of OTHERS) assert.deepEqual(Object.keys(rows[c]).sort(), Object.keys(rows.zh).sort(), c + ": the same texts in each language");
+  assert.ok(Object.keys(rows.zh).length >= 300, "the phone's help is brought over (" + Object.keys(rows.zh).length + ")");
+  globalThis.TERM_HELP = require("../renderer/termhelp.js"); const TC = require("../renderer/termcomplete.js");
+  const shown = new Set(); for (const c of Object.keys(TERM_HELP)) { shown.add(TC.commandBrief(c)); for (const it of TC.suggest(c + " ", c.length + 1).items) shown.add(it.desc); }
+  const tok = (s) => s.match(/[A-Za-z0-9_]+:|0x[0-9A-Fa-f.]+|Mx[0-9A-Za-z.]*|\b\d[\d.,]*\b/g) || [];
+  for (const [en, zh] of Object.entries(rows.zh)) {
+    assert.ok(shown.has(en), "a text the completion actually shows: " + en.slice(0, 80));
+    for (const c of OTHERS) {
+      const v = rows[c][en]; assert.ok(typeof v === "string" && v.trim() && !/[<>]/.test(v), c + ": " + en);
+      for (const x of tok(en)) assert.ok(v.includes(x), c + ": " + JSON.stringify(x) + " kept in " + JSON.stringify(v).slice(0, 120));
+      assert.ok(!Object.hasOwn(before[c], en) || before[c][en] === v, c + ": a text of the screens is not overridden: " + en);
+      assert.ok(!/MxUSDT/i.test(v), "MxUSD");
+    }
+    void zh;
+  }
+  require("../renderer/i18n/terminal.js");
+  J.set("ru"); assert.equal(J.t("Search for coins"), rows.ru["Search for coins"]); assert.notEqual(J.t("Search for coins"), "Search for coins"); J.set("en");
+  const app = fs.readFileSync(path.join(R, "app.js"), "utf8");
+  assert.ok(app.includes('<span class="termsug__d">${esc(I18N.t(it.desc))}</span>'), "the description is drawn through the catalog");
+  assert.ok(html.indexOf('<script src="i18n/terminal.js">') > html.indexOf('<script src="i18n/uk.js">') && html.indexOf('<script src="i18n/terminal.js">') < html.indexOf('<script src="i18n/start.js">'));
+});

@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.162] — Terminal: the completion's descriptions in the phone's own words
+
+- **Brought over from the phone (read only):** Pandamonium's Terminal shows its command help translated (`integrated/terminalide` `HelpText.java`, with the `l10n_terminal_help_*` strings of `apks/base/localization`). Where the desktop's completion dropdown shows the same English (a command's one-line summary, a parameter's first line), it now shows the phone's Chinese, Russian or Ukrainian: 330 of the 373 descriptions the desktop can show. They are in a generated file, `renderer/i18n/terminal.js`, loaded after the three catalogs; a text the screens' own catalogs already hold is left out of it, so nothing of the screens is overridden.
+- **Never translated:** command names, parameter names (`amount:`), values, addresses, and the command line itself. A description the phone does not have (43, for help lines the desktop's node words differently), or one whose translation drops a parameter name, an id or a number (4), stays English.
+- The node's own `help` output (the JSON the node answers) is the node's and is shown as it comes, as before.
+- Test: `scripts/i18n-test.cjs` reads `renderer/i18n/terminal.js`: the same texts in each language, every one a description the completion actually shows, every parameter name, id and number of the English kept, no text of the screens overridden, drawn through the catalog, and loaded before the language is chosen.
+
 ## [0.19.161] — Month names, Dexicon's chips and miniMall's order states in the app's language
 
 - **Month names:** the short months the app writes (Mail's list dates "16 Jul" and day headers "16 Jul 2026", Dexicon's Orders stamps, the node's block time in the footer and the Node tab "Jul 16, 2026, 14:54:04 BST", and the Quit / Shutdown warning's "at 14:05 on 21 Nov") are catalog keys (`I18N.MONTHS`), and the date is put together by a key per language ("{day} {month}", "{month}{day}日"…). English is word for word as before.
