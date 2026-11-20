@@ -70,3 +70,64 @@
 .ew-tier { flex: 1 1 0; color: #9A9AA8; }
 .ew-tier--on { background: #F7931A; color: #000000; }
 .ew-fee { margin-top: 8px; font-size: 13px; color: #FFFFFF; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
+
+/* ---- Minima Vestr (apks/base integrated/vestr: VestrDesign.java, MainActivity, ContractUi) ---- */
+#view-vestr.view--active { display: flex; flex-direction: column; height: 100%; padding: 0; background: #0A0A0F; }
+#vestrBody { flex: 1 1 auto; min-height: 0; display: flex; }
+.vs { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-family: var(--app-font); color: #FFFFFF; background: #0A0A0F; }
+.vs-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; background: #15151F; }
+.vs-head__t { font-size: 18px; font-weight: 700; letter-spacing: .04em; color: #F7931A; }
+.vs-head__b { font-size: 12px; color: #9A9AA8; }
+.vs-head--sub { justify-content: flex-start; gap: 10px; padding: 8px 12px; }
+.vs-back { width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: #F7931A; font-size: 26px; line-height: 1; cursor: pointer; }
+.vs-head__sub { font-size: 17px; font-weight: 700; }
+.vs-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 20px; }
+.vs-nav { flex: 0 0 auto; display: flex; padding: 8px 0; background: #0A0A0F; }
+.vs-tab { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px; border: 0; background: none; color: #9A9AA8; font: inherit; cursor: pointer; }
+.vs-tab__g { font-size: 20px; line-height: 24px; }
+.vs-tab__l { font-size: 11px; letter-spacing: .05em; }
+.vs-tab--on { color: #F7931A; }
+.vs-tab:focus-visible, .vs-cta:focus-visible, .vs-card:focus-visible, .vs-back:focus-visible, .vs-copy:focus-visible { outline: 2px solid #F7931A; outline-offset: 2px; }
+.vs-cta { display: block; width: 100%; margin: 0 0 10px; padding: 14px 0; border: 0; border-radius: 8px; background: #F7931A; color: #0A0A0F; font: inherit; font-size: 15px; font-weight: 700; white-space: pre; cursor: pointer; }
+.vs-cta--2 { background: #0A0A0F; color: #FFFFFF; }
+.vs-cta--dark { background: #000000; color: #FFFFFF; margin-bottom: 12px; }
+.vs-cta--form { margin-top: 24px; padding: 15px 0; font-size: 16px; }
+.vs-cta:disabled { opacity: .4; cursor: default; }
+.vs-h { margin: 0; padding: 20px 0 12px; font-size: 16px; font-weight: 700; color: #FFFFFF; }
+.vs-h1 { margin: 0; font-size: 22px; font-weight: 700; color: #FFFFFF; }
+.vs-blurb { padding: 6px 0 16px; font-size: 14px; color: #9A9AA8; }
+.vs-empty { padding-top: 24px; font-size: 14px; color: #9A9AA8; text-align: center; }
+.vs-card { margin-bottom: 12px; border-radius: 8px; background: #15151F; overflow: hidden; cursor: pointer; }
+.vs-card__hd { display: flex; align-items: center; gap: 12px; padding: 14px; background: #1F1F2B; }
+.vs-card__ic { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; background: #F7931A; color: #0A0A0F; font-size: 18px; font-weight: 700; }
+.vs-card__tt { min-width: 0; }
+.vs-card__id { font-size: 12px; color: #9A9AA8; overflow-wrap: anywhere; }
+.vs-card__amt { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.vs-card__bd { display: flex; justify-content: space-between; gap: 16px; padding: 14px; }
+.vs-card__l { font-size: 13px; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
+.vs-card__r { flex: 0 0 auto; font-size: 12px; color: #9A9AA8; line-height: 1.6; text-align: right; }
+.vs-banner { padding: 16px; background: #15151F; }
+.vs-banner__t { font-size: 15px; font-weight: 700; color: #F7931A; }
+.vs-banner__d { margin-top: 4px; font-size: 13px; color: #9A9AA8; }
+.vs-about__t { margin: 0; font-size: 28px; font-weight: 700; }
+.vs-about__d { padding: 10px 0 28px; font-size: 15px; line-height: 1.3; color: #9A9AA8; }
+.vs-about__f { padding-top: 28px; font-size: 11px; color: #9A9AA8; text-align: center; }
+.vs-label { display: block; padding: 16px 0 6px; font-size: 13px; font-weight: 700; color: #F7931A; }
+.vs-in { display: block; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid #2A2A38; border-radius: 6px; background: #15151F; color: #FFFFFF; font: inherit; font-size: 15px; color-scheme: dark; }
+.vs-in::placeholder { color: #9A9AA8; }
+.vs-in:focus-visible { outline: none; border-color: #F7931A; }
+.vs-in--mono { font-family: var(--app-mono); font-size: 13px; }
+.vs-status { padding-top: 14px; font-size: 13px; text-align: center; }
+.vs-status--ok { color: #2ECC71; }
+.vs-status--err { color: #FF5B5B; }
+.vs-hero { padding: 18px; border-radius: 10px; background: #15151F; margin-bottom: 8px; }
+.vs-hero--on { background: rgba(46,204,113,.2); }
+.vs-hero__l { font-size: 13px; color: #9A9AA8; }
+.vs-hero__v { font-size: 26px; font-weight: 700; overflow-wrap: anywhere; }
+.vs-hero--on .vs-hero__v { color: #2ECC71; }
+.vs-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; font-size: 14px; }
+.vs-row span { color: #9A9AA8; }
+.vs-row b { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.vs-copy { display: block; width: 100%; padding: 8px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: copy; }
+.vs-copy span { display: block; font-size: 12px; color: #9A9AA8; }
+.vs-copy code { display: block; font-family: var(--app-mono); font-size: 12px; color: #FFFFFF; overflow-wrap: anywhere; }

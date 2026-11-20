@@ -36,6 +36,9 @@
   const EW_ADDR = "0xFA4E00000000000000000000000000000000FA4E";   // obviously fake
   const EW_TOKENS = [{ symbol: "USDT", address: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 }, { symbol: "USDC", address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6 },
     { symbol: "DAI", address: "0x6b175474e89094c44da98b954eedeac495271d0f", decimals: 18 }, { symbol: "WETH", address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", decimals: 18 }];
+  const VEST = (n, tokenid, total, amount, can, o) => Object.assign({ coinid: "0x" + (n + "FA4E".repeat(16)).slice(0, 64), tokenid, uid: "0x" + (n + "00FA4E".repeat(11)).slice(0, 64), beneficiary: "0x" + ("FA4E".repeat(16)), total, amount, collected: "0",
+    startBlock: 2400000, endBlock: 2555520, graceHours: 24, graceLabel: "Daily", startMs: Date.now() - 16 * 86400000, endMs: Date.now() + 74 * 86400000, createdMs: Date.now() - 17 * 86400000, cancollect: can, change: "0", mustwaitblocks: "0", cliffed: false, expired: false, mustwait: false, canCollectNow: Number(can) > 0, pctVested: 18 }, o);
+  const VESTS = [VEST("A1", "0x00", "1000", "875.5", "12.5"), VEST("B2", "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "250", "250", "0", { graceLabel: "Weekly", graceHours: 168, startMs: Date.now() + 3 * 86400000, cliffed: true })];
   const FAKE_PK = (n) => "0x" + (n + "FA4E".repeat(16)).slice(0, 64);
   const AX_BOOK = { scanned: 3, makers: 2, bestBid: 0.99, bestAsk: 1.01, bidCap: 100, askCap: 100, currency: "mxusdt", label: "mxUSDT", pricingParity: true,
     bids: [{ signer: FAKE_PK("D1"), p: 0.99, cap: 100, mine: false }, { signer: FAKE_PK("A9"), p: 0.985, cap: 100, mine: true }, { signer: FAKE_PK("D2"), p: 0.98, cap: 10000, mine: false }],
@@ -308,7 +311,11 @@
     clipSecret: async () => true,
     ewTokens: async () => EW_TOKENS,
     shopNewCount: async () => 0, shopMyShops: async () => [], shopOrders: async () => [], shopInit: async () => ({}),
-    vestrStatus: async () => ({ ready: true }), vestrList: async () => [], vestrTokens: async () => [],
+    // Vestr: ?vs=empty (no contract)
+    vestrStatus: async () => ({ ready: true, block: 2428094 }), vestrList: async () => (Q.get("vs") === "empty" ? [] : VESTS),
+    vestrTokens: async () => [{ tokenid: "0x00", name: "MINIMA", sendable: "1250.75" }, { tokenid: MXUSD, name: "MxUSD", sendable: "300.50000001" }],
+    vestrMyAddress: async () => "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1", vestrCreate: async () => ({ ok: true, uid: FAKE_PK("AB") }), vestrCollect: async () => ({ ok: true, collected: "12.5", tokenid: "0x00" }),
+    vestrCalculate: async (a, s, e, h) => ({ durBlocks: 155520, perBlock: Number(a) / 155520, perPeriod: Number(a) / 155520 * (h ? h * 72 : 1), perPeriodBlocks: h * 72, weeks: 12.8 }),
     casinoOpen: async () => ({ offers: 0, bets: 0 }),
     // Dexicon (main/dexicon.js read model). ?dxs=notready|norelay|relaydown|empty|taking|failed
     dxWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0 }),

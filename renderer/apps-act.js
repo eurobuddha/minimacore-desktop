@@ -33,5 +33,34 @@
     }
   };
 
-  return { eth: eth };
+  // ---- Minima Vestr (main/vestr.js) ----
+  // No fee is sent as "" (0.19.109). The screens before sent "0", which main/vestr.js has refused since 0.16.97 ("Invalid
+  // burn amount": its amount check wants a figure above zero), so a collect or a create with the fee left alone failed.
+  var fee = function (v) { v = text(v); return /^0*(\.0*)?$/.test(v) ? "" : v; };
+  var vestr = {
+    /** What stops a create before anything is asked of the node, in the original's words and order; "" = nothing. */
+    createProblem: function (f, now) {
+      if (!text(f.beneficiary)) return "Enter a valid withdrawal address.";
+      if (!/^\d+(\.\d+)?$/.test(text(f.amount))) return "Enter a valid amount.";
+      if (!(Number(text(f.amount)) > 0)) return "Amount must be greater than zero.";
+      if (!isFinite(f.startMs)) return "Pick a start date.";
+      if (!isFinite(f.endMs)) return "Pick an end date.";
+      if (!(f.startMs > now)) return "Start must be in the future.";
+      if (!(f.endMs > f.startMs)) return "End must be after the start.";
+      return "";
+    },
+    /** The review (the beneficiary whole: this covenant has no cancel), then the one call. → { ok } | { cancelled } | { err }. */
+    create: function (api, ui, f, tokenName, graceName) {
+      var opts = { tokenid: f.tokenid, amount: text(f.amount), beneficiary: text(f.beneficiary), startMs: f.startMs, endMs: f.endMs,
+        graceHours: Number(f.graceHours) || 0, burn: fee(f.burn), password: f.password || "" };
+      return ui.confirm("Create vesting contract?", "Lock " + opts.amount + " " + tokenName + "\n\nWithdrawal address\n" + opts.beneficiary + "\n\n"
+        + "Collection: " + graceName + ", from start to end.\nCheck the address above character by character. This cannot be cancelled.", "Lock funds", false).then(function (yes) {
+        if (!yes) return { cancelled: true };
+        return api.vestrCreate(opts).then(function () { return { ok: true }; }, errOf);
+      });
+    },
+    collect: function (api, coinid, typed) { return api.vestrCollect(coinid, fee(typed)).then(function (r) { return r || { ok: true }; }, errOf); }
+  };
+
+  return { eth: eth, vestr: vestr };
 });

@@ -3768,161 +3768,179 @@ async function chanceLeftCard() {
       <div class="view__desc">P2P Chance is no longer part of this app, and no new games can be started. You still have <b>${esc(parts.join(" and "))}</b>. There is nothing you need to do: open offers are withdrawn and their stake returned to your wallet, and bets in play are settled automatically. Keep the app open with your node running until this card disappears.</div></div>`;
 }
 
-// ============================ Vestr (token vesting — shared covenant 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE) ============================
-// Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,
-// collectable per grace cadence. Node computes the exact collectable (main/vestr.js runscript). Merged layout.
-let vestrView = "list";          // list | create | calc
+// ============================ Minima Vestr ============================
+// The screens of the Android Vestr as Pandamonium shows it (apks/base integrated/vestr: MainActivity, CreatorView, ContractUi,
+// CreateContractActivity, CalculatorActivity, ContractDetailActivity; VestrDesign: orange on near black), over main/vestr.js.
+// The covenant, the collect transaction and every command are the main process's and were not touched; the two calls that
+// move funds are in renderer/apps-act.js (AppsAct.vestr), pinned by scripts/apps-money.test.cjs.
+// The shared covenant: 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE.
+// The native app has no nicknames and no search (those are the blue MiniDapp's); neither is here.
+let vestrTab = "creator";        // creator | collector | about
+let vestrSub = null;             // null | "create" | "calc" | { coinid } (a contract's detail)
 let vestrUpdateTimer = null;
 let vestrTokMap = null;          // tokenid → name
-let vestrBusy = {};
-const VESTR_GRACE = [["None (continuous)", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
+let vestrBusy = false;           // a create or a collect is with the node
+const VESTR_GRACE = [["None", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
+const VESTR_TABS = [["creator", "✎", "Creator"], ["collector", "❖", "Collector"], ["about", "ⓘ", "About"]];
 
-function vFmt(v) { const n = Number(v); return isNaN(n) ? "0" : n.toLocaleString(undefined, { maximumFractionDigits: 8 }); }
-function vTok(tid) { if (tid === "0x00") return "MINIMA"; return (vestrTokMap && vestrTokMap[tid]) || String(tid); }   // RULE 1: an unnamed token shows its whole id
+function vAmt(v) { return TOK.tidyAmount(String(v == null ? "0" : v)) || "0"; }   // the node's own figure: never rounded
+// A token is named from its id where the id is known (Minima, the one MxUSD); another token's own name is shown unless it
+// takes one of those two names, and then its whole id is shown instead.
+function vTok(tid) {
+  const k = PayLabel.token(tid); if (k.known) return k.name === "MINIMA" ? "Minima" : k.name;
+  const n = String((vestrTokMap && vestrTokMap[tid]) || "").trim();
+  return n && !/^(minima|mxusdt?)$/i.test(n) ? n : String(tid);
+}
+function vRel(ms) {
+  if (!(ms > 0)) return "";
+  const d = ms - Date.now(), a = Math.abs(d), u = a >= 86400000 ? Math.floor(a / 86400000) + " day(s)" : a >= 3600000 ? Math.floor(a / 3600000) + " hour(s)" : Math.floor(a / 60000) + " min(s)";
+  return d > 0 ? "in " + u : u + " ago";
+}
+function vStatus(text, ok) { const s = el("vsStatus"); if (!s) return; s.textContent = text; s.hidden = !text; s.className = "vs-status " + (ok ? "vs-status--ok" : "vs-status--err"); }
+function vestrGo(tab, sub) { vestrTab = tab || vestrTab; vestrSub = sub || null; renderVestr(); }
 
 function onVestrUpdate() {
   if (vestrUpdateTimer) clearTimeout(vestrUpdateTimer);
   vestrUpdateTimer = setTimeout(() => {
-    if (activeView !== "vestr") return;
-    if (el("vestrBody") && el("vestrBody").querySelector("input:focus, select:focus")) return;   // never stomp a form
-    if (vestrView === "list") renderVestrSub();
+    if (activeView !== "vestr" || vestrBusy) return;
+    if (vestrSub === "create" || vestrSub === "calc") return;   // never redraw a form under the user
+    if (el("vestrBody") && el("vestrBody").querySelector("input:focus")) return;
+    renderVestr();
   }, 350);
 }
 
 async function renderVestr() {
   const host = el("vestrBody"); if (!host) return;
-  if (!vestrTokMap) { try { const t = await api.vestrTokens(); vestrTokMap = {}; (t || []).forEach(x => vestrTokMap[x.tokenid] = x.name); } catch (e) {} }
-  const tab = (v, label) => `<button class="btn btn--sm ${vestrView === v ? "btn--primary" : "btn--outline"}" data-vv="${v}">${label}</button>`;
-  host.innerHTML = `<div class="view__title" style="display:flex;align-items:center;gap:10px">Vestr <span style="font:600 11px/1 var(--mono);color:var(--dim)">TOKEN VESTING · shared covenant</span></div>`
-    + `<div class="seg" style="margin:8px 0 12px">${tab("list", "My Contracts")}${tab("create", "Create")}${tab("calc", "Calculate")}</div>`
-    + `<div id="vestrSub"></div>`;
-  host.querySelectorAll("[data-vv]").forEach(b => b.addEventListener("click", () => { vestrView = b.dataset.vv; renderVestr(); }));
-  renderVestrSub();
-}
-function renderVestrSub() {
-  if (vestrView === "list") return renderVestrList();
-  if (vestrView === "create") return renderVestrCreate();
-  if (vestrView === "calc") return renderVestrCalc();
-}
-
-// ---- My Contracts ----
-async function renderVestrList() {
-  const host = el("vestrSub"); if (!host) return;
-  let vs = []; try { vs = await api.vestrList(); } catch (e) {}
-  if (el("vestrSub") !== host) return;
-  if (!vs.length) { host.innerHTML = `<div class="card"><div class="view__desc" style="margin:0">You have no vesting contracts yet. <b>Create</b> one, or ask someone to vest to your address — contracts from the native app & web dapp appear here too.</div></div>`; return; }
-  host.innerHTML = vs.map(v => {
-    const badge = v.expired ? `<span class="v-badge done">fully vested</span>` : v.cliffed ? `<span class="v-badge cliff">not started</span>` : `<span class="v-badge">${v.pctVested}% vested</span>`;
-    const availCol = v.canCollectNow ? "var(--green)" : "var(--dim)";
-    let action;
-    if (v.canCollectNow) action = `<div class="v-collect"><div class="v-fee"><span class="v-flabel">Fee (burn)</span><input class="field__input" id="vburn_${v.coinid}" value="0"></div><button class="btn btn--primary v-cbtn" data-coin="${v.coinid}" ${vestrBusy[v.coinid] ? "disabled" : ""}>${vestrBusy[v.coinid] ? "Collecting…" : "Collect " + vFmt(v.cancollect) + " " + vTok(v.tokenid)}</button></div>`;
-    else if (v.cliffed) action = `<div class="v-note">Vesting hasn't started — nothing collectable until block ${v.startBlock.toLocaleString()}.</div>`;
-    else if (v.mustwait) action = `<div class="v-note">Grace period — collect again in ~${Number(v.mustwaitblocks).toLocaleString()} blocks.</div>`;
-    else action = `<div class="v-note">Nothing available to collect right now.</div>`;
-    return `<div class="card v-card">
-      <div class="v-top"><span class="v-amt">${vFmt(v.amount)} <small>${esc(vTok(v.tokenid))}</small> <span style="color:var(--dim);font-weight:400">locked</span></span>${badge}</div>
-      <div class="v-to mono">→ ${idHtml(v.beneficiary)}</div>
-      <div class="v-bar"><i style="width:${v.pctVested}%;${v.expired ? "background:var(--green)" : ""}"></i></div>
-      <div class="v-sub mono"><span>start · block ${v.startBlock.toLocaleString()}</span><span>end · block ${v.endBlock.toLocaleString()}</span></div>
-      <div class="v-avail"><span class="k">Available to collect now</span><span class="val" style="color:${availCol}">${vFmt(v.cancollect)}</span></div>
-      <div class="v-stats">
-        <div><span>Collected</span><b>${vFmt(v.collected)}</b></div><div><span>Total locked</span><b>${vFmt(v.total)}</b></div>
-        <div><span>Remaining</span><b>${vFmt(v.amount)}</b></div><div><span>Collect every</span><b>${esc(v.graceLabel)}</b></div>
-      </div>
-      ${action}
-    </div>`;
-  }).join("");
-  host.querySelectorAll(".v-cbtn").forEach(btn => btn.addEventListener("click", () => {
-    const coin = btn.dataset.coin, fee = (el("vburn_" + coin) || {}).value || "0";
-    vestrDoCollect(coin, fee);
-  }));
-}
-async function vestrDoCollect(coinid, burn) {
-  if (vestrBusy[coinid]) return;
-  vestrBusy[coinid] = true; renderVestrList();
-  try { const r = await api.vestrCollect(coinid, burn); delete vestrBusy[coinid]; toast("Collected " + vFmt(r && r.collected) + " " + vTok(r && r.tokenid) + " ✓", "ok"); renderVestrList(); }
-  catch (e) { delete vestrBusy[coinid]; toast("Collect failed: " + (e && e.message ? e.message : e), "err"); renderVestrList(); }
+  if (!vestrTokMap && running) { try { const t = await api.vestrTokens(); vestrTokMap = {}; (t || []).forEach(x => { vestrTokMap[x.tokenid] = x.name; }); } catch (e) {} }
+  const st = await api.vestrStatus().catch(() => ({}));
+  const keep = el("vdBurn") ? el("vdBurn").value : null;   // the fee typed on a contract's screen outlives a redraw on a new block
+  const title = vestrSub === "create" ? "Create a contract" : vestrSub === "calc" ? "Calculate a contract" : vestrSub ? "Contract" : "";
+  host.innerHTML = `<div class="vs">${vestrSub
+      ? `<div class="vs-head vs-head--sub"><button class="vs-back" id="vsBack" aria-label="Back">‹</button><span class="vs-head__sub">${title}</span></div>`
+      : `<div class="vs-head"><span class="vs-head__t">vestr</span><span class="vs-head__b">#${st && st.block ? esc(String(st.block)) : "—"}</span></div>`}
+    <div class="vs-page" id="vestrSub"></div>
+    ${vestrSub ? "" : `<div class="vs-nav" role="tablist">${VESTR_TABS.map(([id, g, l]) => `<button class="vs-tab${vestrTab === id ? " vs-tab--on" : ""}" role="tab" aria-selected="${vestrTab === id}" data-vtab="${id}"><span class="vs-tab__g" aria-hidden="true">${g}</span><span class="vs-tab__l">${l}</span></button>`).join("")}</div>`}</div>`;
+  host.querySelectorAll("[data-vtab]").forEach(b => { b.onclick = () => vestrGo(b.dataset.vtab); });
+  if (el("vsBack")) el("vsBack").onclick = () => vestrGo();
+  const page = el("vestrSub");
+  if (!running) { page.innerHTML = `<div class="vs-banner"><div class="vs-banner__t">vestr is not enabled yet</div><div class="vs-banner__d">The node is not running. Start it on the Node tab, then come back.</div></div>`; return; }
+  if (vestrSub === "create") return renderVestrCreate(page);
+  if (vestrSub === "calc") return renderVestrCalc(page);
+  if (vestrSub) return renderVestrDetail(page, vestrSub.coinid, keep);
+  if (vestrTab === "about") return renderVestrAbout(page);
+  return renderVestrList(page);
 }
 
-// ---- Create ----
-async function renderVestrCreate() {
-  const host = el("vestrSub"); if (!host) return;
+// One contract, as ContractUi.card. The contract id is shown whole (the phone's Pandamonium copy cuts it; the standalone app does not).
+function vestrCard(v) {
+  const tok = vTok(v.tokenid), when = (ms, a, b) => { const r = vRel(ms); return r ? (r.startsWith("in ") ? a + " " + r : b + " " + r) : ""; };
+  return `<div class="vs-card" role="button" tabindex="0" data-vcoin="${esc(v.coinid)}">
+    <div class="vs-card__hd"><span class="vs-card__ic" aria-hidden="true">${esc(tok.slice(0, 1).toUpperCase())}</span>
+      <div class="vs-card__tt"><div class="vs-card__id">Contract ${esc(v.uid)}</div><div class="vs-card__amt">${esc(vAmt(v.amount))} ${esc(tok)}</div></div></div>
+    <div class="vs-card__bd"><div class="vs-card__l"><div>Total vested: ${esc(vAmt(v.total))}</div><div>Collected: ${esc(decSub(String(v.total), String(v.amount)))}</div></div>
+      <div class="vs-card__r"><div>Collection: ${esc(v.graceLabel)}</div><div>${esc(when(v.startMs, "starts", "started"))}</div><div>${esc(when(v.endMs, "ends", "ended"))}</div></div></div></div>`;
+}
+async function renderVestrList(page) {
+  let vs = null; try { vs = await api.vestrList(); } catch (e) {}
+  if (el("vestrSub") !== page) return;
+  const cards = !vs ? `<div class="vs-empty">The contracts could not be read from the node. This screen tries again on the next block.</div>`
+    : vs.length ? vs.map(vestrCard).join("") : `<div class="vs-empty">${vestrTab === "creator" ? "You have no vesting contracts yet." : "Nothing to collect yet."}</div>`;
+  page.innerHTML = vestrTab === "creator"
+    ? `<button class="vs-cta" id="vsCreate">＋  Create a contract</button><button class="vs-cta vs-cta--2" id="vsCalc">≈  Calculate a contract</button><h2 class="vs-h">My contracts</h2>${cards}`
+    : `<h1 class="vs-h1">Collect</h1><div class="vs-blurb">Open a contract to withdraw the tokens that have vested.</div>${cards}`;
+  cardKeys(page);
+  if (el("vsCreate")) { el("vsCreate").onclick = () => vestrGo(null, "create"); el("vsCalc").onclick = () => vestrGo(null, "calc"); }
+  page.querySelectorAll("[data-vcoin]").forEach(c => { c.onclick = () => vestrGo(null, { coinid: c.dataset.vcoin }); });
+}
+function renderVestrAbout(page) {
+  page.innerHTML = `<h1 class="vs-about__t">vestr</h1>
+    <div class="vs-about__d">Lock tokens in a vesting contract that releases gradually over time. Create a contract, track it, and withdraw what has vested.</div>
+    <button class="vs-cta" id="vsAbCreate">Create a contract</button><button class="vs-cta vs-cta--dark" id="vsAbCollect">Collect from a contract</button>
+    <div class="vs-about__f">Contracts are an on-chain Minima smart contract, fully interoperable with the vestr MiniDapp.</div>`;
+  el("vsAbCreate").onclick = () => vestrGo("creator"); el("vsAbCollect").onclick = () => vestrGo("collector");
+}
+
+// ---- a contract's detail (ContractDetailActivity): the node works out what can be collected; one button, no confirm, as the original ----
+async function renderVestrDetail(page, coinid, keepFee) {
+  let vs = null; try { vs = await api.vestrList(); } catch (e) {}
+  if (el("vestrSub") !== page) return;
+  const v = (vs || []).find(x => x.coinid === coinid);
+  if (!v) { page.innerHTML = `<div class="vs-empty">${vs ? "This contract is no longer in the list. If you have just collected its last tokens, it is finished." : "The contract could not be read from the node."}</div>`; return; }
+  const tok = vTok(v.tokenid), can = !!v.canCollectNow;
+  const row = (k, val) => `<div class="vs-row"><span>${k}</span><b>${esc(val)}</b></div>`;
+  const copyRow = (k, val) => `<button class="vs-copy" data-copy="${esc(val)}"><span>${k}</span><code>${esc(val)}</code></button>`;
+  page.innerHTML = `<div class="vs-hero${can ? " vs-hero--on" : ""}"><div class="vs-hero__l">Available to collect</div><div class="vs-hero__v">${esc(vAmt(v.cancollect))} ${esc(tok)}</div></div>
+    ${row("Collected", decSub(String(v.total), String(v.amount)))}${row("Total vested", vAmt(v.total))}${row("Remaining in contract", vAmt(v.amount))}${row("Collect every", v.graceLabel)}
+    ${row("Grace remaining", v.mustwait && Number(v.mustwaitblocks) > 0 ? vAmt(v.mustwaitblocks) + " blocks" : "ready")}${row("Starts", vRel(v.startMs))}${row("Ends", vRel(v.endMs))}
+    ${row("Start block", String(v.startBlock))}${row("End block", String(v.endBlock))}
+    ${copyRow("Token id", v.tokenid)}${copyRow("Coin id", v.coinid)}${copyRow("Withdrawal address", v.beneficiary)}${copyRow("Contract id", v.uid)}
+    <label class="vs-label" for="vdBurn">Network fee (burn, optional)</label><input class="vs-in" id="vdBurn" inputmode="decimal" placeholder="0" autocomplete="off" />
+    <button class="vs-cta vs-cta--form" id="vdCollect"${can ? "" : " disabled"}>${can ? "Collect " + esc(vAmt(v.cancollect)) + " " + esc(tok) : "Nothing to collect yet"}</button>
+    <div class="vs-status" id="vsStatus" hidden></div>`;
+  if (keepFee) el("vdBurn").value = keepFee;
+  page.querySelectorAll("[data-copy]").forEach(b => { b.onclick = () => copy(b.dataset.copy); });
+  el("vdCollect").onclick = async () => {
+    if (vestrBusy) return; vestrBusy = true;
+    const btn = el("vdCollect"); btn.disabled = true; vStatus("Collecting…", true);
+    const r = await AppsAct.vestr.collect(api, coinid, el("vdBurn").value);
+    vestrBusy = false;
+    if (!el("vsStatus")) return;
+    if (r.err) { vStatus("Failed: " + r.err, false); btn.disabled = false; return; }
+    vStatus("✓ Collected. The tokens will arrive shortly.", true);
+    setTimeout(() => { if (vestrSub && vestrSub.coinid === coinid) vestrGo("collector"); }, 1400);
+  };
+}
+
+// ---- Create a contract (CreateContractActivity) ----
+function vestrForm(extra) {
+  return `<label class="vs-label" for="vcAmt">Token amount</label><input class="vs-in" id="vcAmt" inputmode="decimal" placeholder="0.0" autocomplete="off" />
+    <label class="vs-label" for="vcStart">Contract start</label><input class="vs-in" id="vcStart" type="datetime-local" aria-label="Select start date & time" />
+    <label class="vs-label" for="vcEnd">Contract end</label><input class="vs-in" id="vcEnd" type="datetime-local" aria-label="Select end date & time" />
+    <label class="vs-label" for="vcGrace">${extra ? "Grace period (time between collections)" : "Grace period"}</label>
+    <select class="vs-in" id="vcGrace">${VESTR_GRACE.map(([l, h]) => `<option value="${h}"${l === "Daily" ? " selected" : ""}>${l}</option>`).join("")}</select>`;
+}
+const vestrWhen = (id) => { const v = el(id).value; return v ? new Date(v).getTime() : NaN; };
+async function renderVestrCreate(page) {
   let toks = []; try { toks = await api.vestrTokens(); } catch (e) {}
-  let myAddr = ""; try { myAddr = await api.vestrMyAddress(); } catch (e) {}
-  if (el("vestrSub") !== host) return;
-  const now = new Date(), toLocal = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  const startDef = toLocal(now), endDef = toLocal(new Date(now.getTime() + 90 * 24 * 3600 * 1000));
-  host.innerHTML = `<div class="card">
-    <label class="v-flabel">Token</label>
-    <select class="field__input" id="vcTok">${toks.map(t => `<option value="${t.tokenid}">${esc(t.name)} — ${vFmt(t.sendable)} available</option>`).join("") || '<option value="0x00">MINIMA</option>'}</select>
-    <label class="v-flabel">Amount to lock</label>
-    <input class="field__input" id="vcAmt" inputmode="decimal" placeholder="e.g. 1000">
-    <label class="v-flabel">Beneficiary (withdrawal) address</label>
-    <div class="v-row"><input class="field__input" id="vcAddr" placeholder="0x… / Mx…" style="flex:1"><button class="btn btn--outline" id="vcMine" style="flex:0 0 auto">My address</button></div>
-    <div class="v-row">
-      <div style="flex:1"><label class="v-flabel">Start</label><input class="field__input" id="vcStart" type="datetime-local" value="${startDef}"></div>
-      <div style="flex:1"><label class="v-flabel">End</label><input class="field__input" id="vcEnd" type="datetime-local" value="${endDef}"></div>
-    </div>
-    <label class="v-flabel">Release cadence (grace)</label>
-    <select class="field__input" id="vcGrace">${VESTR_GRACE.map(([l, h], i) => `<option value="${h}" ${l === "Weekly" ? "selected" : ""}>${l}</option>`).join("")}</select>
-    <div class="v-row">
-      <div style="flex:1"><label class="v-flabel">Network fee (burn) · optional</label><input class="field__input" id="vcBurn" value="0"></div>
-      <div style="flex:1"><label class="v-flabel">Vault password · optional</label><input class="field__input" id="vcPw" type="password" placeholder="if node locked"></div>
-    </div>
-    <button class="btn btn--primary btn--full" id="vcCreate">Review &amp; create</button>
-    <div class="v-note" style="margin-top:9px">Funds lock into the shared vesting covenant and release linearly from Start to End; the beneficiary collects the vested-so-far amount, no more often than the grace cadence. <b>There is no cancel</b> — locked funds only ever flow to the beneficiary (which can be your own address).</div>
-  </div>`;
-  el("vcMine").addEventListener("click", () => { el("vcAddr").value = myAddr; });
-  el("vcCreate").addEventListener("click", vestrDoCreate);
-}
-async function vestrDoCreate() {
-  const btn = el("vcCreate"); if (!btn || btn.disabled) return;
-  const opts = {
-    tokenid: el("vcTok").value, amount: (el("vcAmt").value || "").trim(), beneficiary: (el("vcAddr").value || "").trim(),
-    startMs: new Date(el("vcStart").value).getTime(), endMs: new Date(el("vcEnd").value).getTime(),
-    graceHours: Number(el("vcGrace").value) || 0, burn: (el("vcBurn").value || "0").trim(), password: (el("vcPw").value || "")
+  let mine = ""; try { mine = await api.vestrMyAddress(); } catch (e) {}
+  if (el("vestrSub") !== page) return;
+  page.innerHTML = `<label class="vs-label" for="vcTok">Token</label>
+    <select class="vs-in" id="vcTok">${(toks || []).map(t => `<option value="${esc(t.tokenid)}">${esc(vTok(t.tokenid))}  (${esc(vAmt(t.sendable))})</option>`).join("") || '<option value="0x00">Minima</option>'}</select>
+    <label class="vs-label" for="vcAddr">Withdrawal address</label><input class="vs-in vs-in--mono" id="vcAddr" placeholder="Mx… or 0x…" value="${esc(mine)}" autocomplete="off" spellcheck="false" />
+    ${vestrForm(true)}
+    <label class="vs-label" for="vcBurn">Burn (optional, MINIMA)</label><input class="vs-in" id="vcBurn" inputmode="decimal" placeholder="0" autocomplete="off" />
+    <label class="vs-label" for="vcPw">Vault password (only if your node is locked)</label><input class="vs-in" id="vcPw" type="password" placeholder="Vault password" autocomplete="off" />
+    <button class="vs-cta vs-cta--form" id="vcCreate">Review &amp; create</button><div class="vs-status" id="vsStatus" hidden></div>`;
+  el("vcCreate").onclick = async () => {
+    if (vestrBusy) return;
+    const f = { tokenid: el("vcTok").value, amount: el("vcAmt").value, beneficiary: el("vcAddr").value, startMs: vestrWhen("vcStart"), endMs: vestrWhen("vcEnd"), graceHours: el("vcGrace").value, burn: el("vcBurn").value, password: el("vcPw").value };
+    const bad = AppsAct.vestr.createProblem(f, Date.now()); if (bad) { vStatus(bad, false); return; }
+    vestrBusy = true; el("vcCreate").disabled = true; vStatus("Creating contract…", true);
+    // The review the button's name promises (the phone sends at once). The address is whole, on its own line: there is no cancel in this covenant.
+    const r = await AppsAct.vestr.create(api, { confirm: showConfirm }, f, vTok(f.tokenid), (VESTR_GRACE.find(g => g[1] === Number(f.graceHours)) || [""])[0]);
+    vestrBusy = false;
+    if (!el("vcCreate")) return;
+    if (r.cancelled) { el("vcCreate").disabled = false; vStatus("", true); return; }
+    if (r.err) { el("vcCreate").disabled = false; vStatus(r.err, false); return; }
+    vStatus("✓ Contract created. It will appear in your contracts shortly.", true);
+    setTimeout(() => { if (vestrSub === "create") vestrGo("creator"); }, 1400);
   };
-  if (!(Number(opts.amount) > 0)) { toast("Enter a valid amount", "warn"); return; }
-  if (!opts.beneficiary) { toast("Enter a beneficiary address", "warn"); return; }
-  // The beneficiary is shown IN FULL, on its own line. This dialog is the last thing between the user and a
-  // contract with no cancel path, so it is the one place a truncated address is least excusable: 8 visible
-  // characters plus 4 is exactly what an address-substitution swap is designed to survive.
-  const ok = await showConfirm("Create vesting contract?",
-    `Lock ${vFmt(opts.amount)} ${vTok(opts.tokenid)}\n\nBeneficiary\n${opts.beneficiary}\n\n` +
-    `Released ${VESTR_GRACE.find(g => g[1] === opts.graceHours)?.[0] || ""} from start to end.\n` +
-    `Check the address above character by character — this cannot be cancelled.`, "Lock funds", false);
-  if (!ok) return;
-  btn.disabled = true; btn.textContent = "Locking…";
-  try { const r = await api.vestrCreate(opts); toast("Vesting contract created ✓", "ok"); vestrView = "list"; renderVestr(); }
-  catch (e) { btn.disabled = false; btn.textContent = "Review & create"; toast("Create failed: " + (e && e.message ? e.message : e), "err"); }
 }
 
-// ---- Calculate (offline preview) ----
-async function renderVestrCalc() {
-  const host = el("vestrSub"); if (!host) return;
-  host.innerHTML = `<div class="card">
-    <div class="v-note" style="margin-top:0">Preview a schedule without locking anything.</div>
-    <div class="v-row" style="margin-top:10px">
-      <div style="flex:1"><label class="v-flabel">Amount</label><input class="field__input" id="vkAmt" value="1000"></div>
-      <div style="flex:1"><label class="v-flabel">Grace</label><select class="field__input" id="vkGrace">${VESTR_GRACE.map(([l, h]) => `<option value="${h}" ${l === "Weekly" ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    </div>
-    <div class="v-row">
-      <div style="flex:1"><label class="v-flabel">Start</label><input class="field__input" id="vkStart" type="date"></div>
-      <div style="flex:1"><label class="v-flabel">End</label><input class="field__input" id="vkEnd" type="date"></div>
-    </div>
-    <div id="vkOut"></div>
-  </div>`;
-  const rerun = async () => {
-    const s = el("vkStart").value ? new Date(el("vkStart").value).getTime() : Date.now();
-    const e = el("vkEnd").value ? new Date(el("vkEnd").value).getTime() : Date.now() + 90 * 24 * 3600 * 1000;
-    const r = await api.vestrCalculate(el("vkAmt").value || "0", s, e, Number(el("vkGrace").value) || 0).catch(() => null);
-    const out = el("vkOut"); if (!out || !r) return;
-    const label = VESTR_GRACE.find(g => g[1] === (Number(el("vkGrace").value) || 0))?.[0] || "period";
-    out.innerHTML = `<div class="v-avail" style="border-top:0;margin-top:14px"><span class="k">Released per ${esc(label.toLowerCase())}</span><span class="val" style="color:var(--accent)">≈ ${vFmt(r.perPeriod.toFixed(6))}</span></div>
-      <div class="v-stats"><div><span>Duration</span><b>${r.durBlocks.toLocaleString()} blocks · ~${r.weeks.toFixed(1)} wks</b></div><div><span>Per-block</span><b>${vFmt(r.perBlock.toFixed(8))}</b></div></div>`;
+// ---- Calculate a contract (CalculatorActivity): one figure, nothing sent ----
+function renderVestrCalc(page) {
+  page.innerHTML = `${vestrForm(false)}<button class="vs-cta vs-cta--form" id="vkGo">Calculate</button><div class="vs-status" id="vsStatus" hidden></div>`;
+  el("vkGo").onclick = async () => {
+    const amt = el("vcAmt").value.trim(), s = vestrWhen("vcStart"), e = vestrWhen("vcEnd"), hours = Number(el("vcGrace").value) || 0;
+    if (!/^\d+(\.\d+)?$/.test(amt) || !(Number(amt) > 0)) return vStatus("Enter a valid amount.", false);
+    if (!isFinite(s) || !isFinite(e)) return vStatus("Pick start and end dates.", false);
+    if (!(e > s)) return vStatus("End must be after the start.", false);
+    const r = await api.vestrCalculate(amt, s, e, hours).catch(() => null);
+    if (!r) return vStatus("The figure could not be worked out.", false);
+    // an estimate, cut and never rounded up, never more than the whole amount (the phone's paymentPerGrace)
+    const cut = (x, dp) => { const m = Math.pow(10, dp); return String(Math.min(Number(amt), Math.floor(x * m) / m)); };
+    vStatus(hours > 0 ? "Released per period (" + (VESTR_GRACE.find(g => g[1] === hours) || [""])[0] + "): " + cut(r.perPeriod, 2) : "Released per block: " + cut(r.perBlock, 8), true);
   };
-  ["vkAmt", "vkGrace", "vkStart", "vkEnd"].forEach(id => el(id).addEventListener("input", rerun));
-  rerun();
 }
 
 

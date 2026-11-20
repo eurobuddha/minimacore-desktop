@@ -107,3 +107,82 @@ test("ETH Wallet screen: the original's settings, in its order; the swap warning
   assert.match(warn({ known: true, swaps: ["0xA", "0xB"] }), /^⚠ 2 swaps of Dexicon ① MxUSD are in flight\. They sign/);
   assert.match(warn(null), /^⚠ Could not check/); assert.match(warn({ known: false, swaps: [] }), /^⚠ Could not check/);
 });
+
+// ---- Minima Vestr ----
+const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", COIN = "0x" + "A1".repeat(32), BEN = "0x" + "FA4E".repeat(16);
+const OLD_VESTR = {   // renderer/app.js 0.19.107: vestrDoCreate and vestrDoCollect (their two checks, the confirm, the call)
+  create: async (api, confirm, fld) => {
+    const opts = { tokenid: fld.tokenid, amount: (fld.amount || "").trim(), beneficiary: (fld.beneficiary || "").trim(), startMs: fld.startMs, endMs: fld.endMs,
+      graceHours: Number(fld.graceHours) || 0, burn: (fld.burn || "0").trim(), password: (fld.password || "") };
+    if (!(Number(opts.amount) > 0)) return; if (!opts.beneficiary) return;
+    if (!confirm) return;
+    await api.vestrCreate(opts).catch(() => {});
+  },
+  collect: (api, coinid, feeField) => api.vestrCollect(coinid, feeField || "0").catch(() => {})
+};
+// The one argument changed on purpose (0.19.109): no fee is "" where the old screen sent "0", which the main process refuses.
+const noFee = (log) => log.map(([n, a]) => (n === "vestrCreate" ? [n, [Object.assign({}, a[0], { burn: a[0].burn === "0" ? "" : a[0].burn })]] : n === "vestrCollect" ? [n, [a[0], a[1] === "0" ? "" : a[1]]] : [n, a]));
+const bothV = async (answers, was, now) => { const a = recorder(answers), b = recorder(answers); await was(a.api); await now(b.api); assert.deepEqual(b.log, noFee(a.log)); return b.log; };
+const T0 = 1800000000000, FORM = { tokenid: MXUSD, amount: " 250.5 ", beneficiary: " " + BEN + " ", startMs: T0 + 86400000, endMs: T0 + 90 * 86400000, graceHours: "168", burn: "", password: "" };
+for (const [name, patch] of [["a token, weekly", {}], ["MINIMA with a burn and the vault password", { tokenid: "0x00", burn: "0.01", password: "pw" }], ["no grace", { graceHours: "0" }], ["an amount of 44 decimals, as typed", { amount: "0.00000000000000000000000000000000000000000001" }]]) {
+  for (const confirm of [true, false]) test(`Vestr create, ${name}, review ${confirm ? "accepted" : "closed"}: the same call with the same arguments as the old screen`, async () => {
+    const f = Object.assign({}, FORM, patch);
+    assert.equal(Act.vestr.createProblem(f, T0), "");
+    const log = await bothV({ vestrCreate: { ok: true, uid: "0xU" } }, (api) => OLD_VESTR.create(api, confirm, f),
+      async (api) => { const r = await Act.vestr.create(api, { confirm: async () => confirm }, f, "MxUSD", "Weekly"); assert.deepEqual(r, confirm ? { ok: true } : { cancelled: true }); });
+    assert.equal(log.length, confirm ? 1 : 0);
+    if (confirm) assert.equal(typeof log[0][1][0].amount, "string", "the amount is the text typed");
+  });
+}
+test("Vestr create: the review shows the withdrawal address whole; what the original refuses is refused before the node is asked", async () => {
+  let said = null; const r = recorder({});
+  await Act.vestr.create(r.api, { confirm: async (t, m) => { said = m; return false; } }, FORM, "MxUSD", "Weekly");
+  assert.ok(said.includes("\n" + BEN + "\n") && said.includes("Lock 250.5 MxUSD") && /cannot be cancelled/.test(said));
+  const p = (patch) => Act.vestr.createProblem(Object.assign({}, FORM, patch), T0);
+  assert.equal(p({ beneficiary: " " }), "Enter a valid withdrawal address.");
+  assert.equal(p({ amount: "1,5" }), "Enter a valid amount."); assert.equal(p({ amount: "1e3" }), "Enter a valid amount."); assert.equal(p({ amount: "" }), "Enter a valid amount.");
+  assert.equal(p({ amount: "0.000" }), "Amount must be greater than zero.");
+  assert.equal(p({ startMs: NaN }), "Pick a start date."); assert.equal(p({ endMs: NaN }), "Pick an end date.");
+  assert.equal(p({ startMs: T0 - 1 }), "Start must be in the future."); assert.equal(p({ endMs: FORM.startMs }), "End must be after the start.");
+  const down = recorder({});
+  assert.match((await Act.vestr.create(down.api, { confirm: async () => true }, FORM, "MxUSD", "Weekly")).err, /unexpected call/);
+});
+test("Vestr collect: the same call as the old screen, with and without a fee", async () => {
+  for (const fee of ["", "0", "0.01", "abc"]) await bothV({ vestrCollect: { ok: true, collected: "12.5", tokenid: "0x00" } }, (api) => OLD_VESTR.collect(api, COIN, fee), (api) => Act.vestr.collect(api, COIN, fee));
+  assert.match((await Act.vestr.collect(recorder({}).api, COIN, "")).err, /unexpected call/);
+});
+test("Vestr, main process (untouched): the collect commands, in order; which of them wait in the signing queue; all pass the coin guard as they are", async () => {
+  const vestr = require("../main/vestr"), { SIGNING } = require("../main/noderun"), { createRegistry } = require("../main/reserve");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "vestr.js"), "utf8");
+  assert.equal(require("crypto").createHash("sha256").update(vestr.CLEAN_SCRIPT).digest("hex"), "ec2dfe508c24ea1c46431a3629ac391ffdeb03f8bcb7c107d52e004b48f6fb11", "the covenant text");
+  assert.equal(vestr.CONTRACT, "0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE");
+  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "97dd6d2f377ffe6af20f6dc04189087a452c1ddfca30848c4121283e94422b92", "main/vestr.js is the file of 0.19.107: this phase changed screens only");
+  const state = [[0, BEN], [1, "1000"], [2, "2400000"], [3, "2555520"], [4, "1728"], [5, "1"], [6, "2"], [7, "24"], [8, "3"], [199, "0xUID"]].map(([port, data]) => ({ port, data }));
+  const reg = createRegistry({ now: () => 1e12, log: () => {}, sends: "enforce" });
+  // another owner holds an unrelated wallet coin: the guard is awake, and still passes every Vestr command unchanged
+  await reg.guard("atomix", "txncreate id:ax1", async () => ({ status: true })); await reg.guard("atomix", "txninput id:ax1 coinid:0x" + "77".repeat(32), async () => ({ status: true, response: {} }));
+  const run = async (burn) => {
+    const sent = [];
+    vestr._setRunner((cmd) => reg.guard("", cmd, async (c) => {
+      sent.push(c);
+      if (c.startsWith("newscript")) return { status: true, response: { address: vestr.CONTRACT } };
+      if (c.startsWith("coins coinid:")) return { status: true, response: [{ coinid: COIN, tokenid: "0x00", amount: "875.5", created: "2400100", address: vestr.CONTRACT, state }] };
+      if (c === "block") return { status: true, response: { block: "2428094" } };
+      if (c.startsWith("runscript")) return { status: true, response: { variables: { cancollect: "12.5", change: "863" } } };
+      return { status: true, response: {} };
+    }));
+    const r = await vestr.collect(COIN, burn);
+    assert.deepEqual(r, { ok: true, collected: "12.5", tokenid: "0x00" });
+    return sent.filter(c => /^txn/.test(c));
+  };
+  const plain = await run(""), id = /^txncreate id:(vc\d+)$/.exec(plain[0])[1];
+  await assert.rejects(vestr.collect(COIN, "0"), /Invalid burn amount/, "what the old screen sent when the fee was left alone: refused, so nothing was collected");
+  assert.deepEqual(plain, ["txncreate id:" + id, "txninput id:" + id + " coinid:" + COIN + " scriptmmr:true",
+    "txnoutput id:" + id + " address:" + BEN + " amount:12.5 tokenid:0x00 storestate:false", "txnoutput id:" + id + " address:" + vestr.CONTRACT + " amount:863 tokenid:0x00 storestate:true",
+    ...state.map(s => "txnstate id:" + id + " port:" + s.port + " value:" + s.data), "txnpost id:" + id, "txndelete id:" + id]);
+  assert.deepEqual(plain.filter(c => SIGNING.test(c)), [], "a collect with no fee signs nothing (the covenant needs no signature): nothing waits in the signing queue");
+  const burned = await run("0.01");
+  assert.deepEqual(burned.filter(c => SIGNING.test(c)).map(c => c.replace(/vc\d+/, "ID")), ["txnpost id:ID burn:0.01"], "a fee is a signed burn: that post is queued behind every other signer");
+  assert.ok(burned[burned.length - 1].startsWith("txndelete id:"), "txndelete runs after the post, as on every path");
+  vestr._setRunner(() => { throw new Error("no node in a test"); });
+});
