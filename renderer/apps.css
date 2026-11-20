@@ -271,3 +271,25 @@ img.mm-prod__im { cursor: zoom-in; }
 .ww-drow { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; font-size: 13px; }
 .ww-drow b { text-align: right; overflow-wrap: anywhere; min-width: 0; font-weight: 600; }
 .ww-id { font-family: var(--app-mono); font-size: 12px; user-select: all; }
+
+/* ---- Minima Faucet (apks/base integrated/faucet: pm_faucet_activity_main.xml; Material 3 defaults for the outlined button) ---- */
+#view-faucet { padding: 0; min-height: 100%; background: #0A0A0F; }
+.fc { max-width: 640px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; align-items: center; font-family: var(--app-font); color: #FFFFFF; text-align: center; }
+.fc-brand { min-height: 48px; display: flex; align-items: center; font-size: 12px; letter-spacing: .15em; color: #F7931A; }
+.fc-banner { align-self: stretch; margin-bottom: 20px; padding: 16px; background: rgba(247,147,26,.2); text-align: left; }
+.fc-banner b { display: block; font-size: 15px; color: #F7931A; }
+.fc-banner span { font-size: 13px; color: #9A9AA8; }
+.fc-h1 { margin: 8px 0 0; font-size: 28px; font-weight: 700; color: #FFFFFF; }
+.fc-sub { margin: 8px 0 28px; font-size: 14px; color: #9A9AA8; }
+.fc-label { align-self: flex-start; margin-bottom: 6px; font-size: 13px; color: #9A9AA8; }
+.fc-in { align-self: stretch; min-height: 48px; box-sizing: border-box; padding: 14px; border: 0; background: #1F1F2B; color: #FFFFFF; font: inherit; font-size: 16px; resize: none; overflow-wrap: anywhere; }
+.fc-in::placeholder { color: #9A9AA8; }
+.fc-btn { align-self: stretch; min-height: 48px; margin-top: 10px; border: 0; border-radius: 24px; background: #F7931A; color: #000000; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.fc-btn--line { margin-top: 12px; border: 1px solid #938F99; background: none; color: #7F67BE; }
+.fc-btn:disabled { opacity: .6; cursor: default; }
+.fc :focus-visible { outline: 2px solid #F7931A; outline-offset: 2px; }
+.fc-status { margin-top: 18px; padding: 14px; font-size: 14px; overflow-wrap: anywhere; }
+.fc-status--ok { color: #2ECC71; }
+.fc-status--err { color: #E74C3C; }
+.fc-help { margin-top: 28px; font-size: 12px; color: #9A9AA8; }
+.fc-foot { margin-top: 24px; font-size: 11px; color: #9A9AA8; }

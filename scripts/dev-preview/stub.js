@@ -322,6 +322,7 @@
       { tokenid: "0x" + "5A1E".repeat(16), name: "0x5A1E5A1E5A", confirmed: "7", unconfirmed: "0", sendable: "0", decimals: 0 }],
     wwKeyuses: async () => ({ keyuses: 3, ack: Q.get("ww") === "ack" }), wwAckKeyuses: async (a, n) => ({ keyuses: n, ack: true }),
     wwSend: async () => (Q.get("wws") === "unknown" ? { ok: false, ambiguous: true, message: "Send status UNKNOWN (preview)" } : { ok: true, txnid: FAKE_PK("7E") }), wwEnableMegammr: async () => true,
+    faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
     // miniMall: ?shop=empty
     shopInit: async () => ({ publicId: FAKE_PK("5A"), vendorAddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1" }), shopVendorCard: async () => FAKE_PK("5A") + "|MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1",
     shopNewCount: async () => (Q.get("shop") === "empty" ? 0 : 1), shopMyShops: async () => (Q.get("shop") === "empty" ? [] : [MY_SHOP]),

@@ -286,3 +286,13 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
   assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "e8957bd3b8cdbd8f7d0c7653e4addb45f8ed1da0a04cb32acda873c0d0023252", "main/webwallet.js is the file of 0.19.107");
 });
+
+// ---- Minima Faucet ----
+test("Faucet screen: the original's one screen; the request is still main/faucet.js's, to its one pinned host, with a checked address", () => {
+  const fc = app.slice(app.indexOf("// ---- Minima Faucet"), app.indexOf("// Settings: what is the desktop's own"));
+  for (const must of ["MINIMA FAUCET", "Get Free Minima", "Receive 0.0001 Minima to try out the blockchain.", "Minima Address", "Paste or fetch an address…", "Get My Address", "Request Minima",
+    "The faucet sends a tiny amount of Minima to your node so you can try creating custom tokens and testing transactions.", "eurobuddha · Minima Ecosystem", "Please enter a Minima address."]) assert.ok(fc.includes(must), must);
+  assert.ok(fc.indexOf("validAddr(addr)") < fc.indexOf("api.faucet(addr)") && fc.indexOf("validAddr(addr)") > 0, "the address is checked before the request");
+  assert.equal((fc.match(/api\.faucet\(/g) || []).length, 1);
+  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "faucet.js"))).digest("hex"), "5b5e03a513e99a5743c0efa159dccb0a7763af8cfea989c3105fae061f9549ce", "main/faucet.js is the file of 0.19.107");
+});

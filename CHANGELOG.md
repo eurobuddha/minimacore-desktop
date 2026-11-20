@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.114] — Minima Faucet as its one screen in Pandamonium (Phase 5a)
+
+- **The screen is Pandamonium's Faucet** (apks/base `integrated/faucet`): "MINIMA FAUCET" in orange, "Get Free Minima", "Receive 0.0001 Minima to try out the blockchain.", the "Minima Address" field ("Paste or fetch an address…"), the outlined "Get My Address", the orange "Request Minima", the answer in green or red beneath, the help line and the footer, on `#0A0A0F`, centred. The address field is two lines so that a whole Mx address is in view.
+- As on the phone, the address is not filled in until "Get My Address" is pressed (the old card filled it by itself), and the answer is said as "Faucet: …".
+- The request is unchanged: `main/faucet.js`, one GET to its one host, after the address check (sha256 pinned).
+- A sentence in the Web Wallet's checklist entry (0.19.113) is corrected.
+
 ## [0.19.113] — Web Wallet in the look of the official Web Wallet 2.5.2, with every desktop safeguard kept (Phase 5a)
 
 - **The screens are the official Minima Web Wallet's** (reference `mds/webWallet`, its dark theme: page `#090A0C`, card `#282B2E`, fields `#17191C`, the orange `#FF8630` button, Manrope): the centred card "Minima Web Wallet", the login with a hidden secret-key field and Show / Hide, the tabs **Balance | Send | Receive**; Balance with "Tokens", the **Search tokens** pill (by name or token id, "No results found") and the round refresh; a token opens its **detail** (balance, the whole token id, decimals); Send with Token, "Enter amount", "Enter recipient address (Mx or 0x)" and **Secret key uses**; Receive with the QR on white, the address and Copy; **Logout** with the original's "this is your last chance" warning and the key uses to note down.

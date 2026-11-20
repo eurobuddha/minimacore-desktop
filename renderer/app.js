@@ -2723,30 +2723,35 @@ function renderApps() {
     const again = el("appsList").querySelector(`.switch[data-hide="${id}"]`); if (again) again.focus();
   });
 }
-// ---- Minima Faucet (a tray app; the card used to sit in Settings) ----
+// ---- Minima Faucet: the one screen of Pandamonium's Faucet (apks/base integrated/faucet, pm_faucet_activity_main.xml) ----
+// The request itself is main/faucet.js (one GET to the pinned host, nothing else); this is its screen.
 async function renderFaucet() {
   const host = el("faucetBody");
-  if (!running) { host.innerHTML = waitHtml(); return; }
-  if (el("faucetGo")) return;                           // already drawn: keep what the user typed and the last answer
-  const addr = await tryCmd("getaddress");
-  const fullAddr = (addr && (addr.miniaddress || addr.address)) || "";
-  host.innerHTML = `
-    <div class="card"><div class="card__title">Minima Faucet</div>
-      <div class="view__desc">Request a tiny amount of Minima to your address. It is enough to get started and to send MinimaMail.</div>
-      <div class="field"><div class="field__label">Your address</div>
-        <div class="seg"><input class="field__input" id="faucetAddr" placeholder="Mx… or 0x…" value="${esc(fullAddr)}" />
-          <button class="btn btn--outline btn--sm" id="faucetMine">My address</button></div></div>
-      <button class="btn btn--primary btn--full" id="faucetGo">Request Minima</button>
-      <div class="status" id="faucetStatus"></div>
-    </div>`;
-  el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
+  if (el("faucetGo")) { el("faucetBanner").hidden = running; return; }   // already drawn: keep what the user typed and the last answer
+  host.innerHTML = `<div class="fc"><div class="fc-brand">MINIMA FAUCET</div>
+    <div class="fc-banner" id="faucetBanner"${running ? " hidden" : ""}><b>The node is not ready</b><span>Start the node on the Node tab, then come back.</span></div>
+    <h1 class="fc-h1">Get Free Minima</h1><div class="fc-sub">Receive 0.0001 Minima to try out the blockchain.</div>
+    <label class="fc-label" for="faucetAddr">Minima Address</label>
+    <textarea class="fc-in" id="faucetAddr" rows="2" placeholder="Paste or fetch an address…" autocomplete="off" spellcheck="false"></textarea>
+    <button class="fc-btn fc-btn--line" id="faucetMine">Get My Address</button>
+    <button class="fc-btn" id="faucetGo">Request Minima</button>
+    <div class="fc-status" id="faucetStatus" role="status" hidden></div>
+    <div class="fc-help">The faucet sends a tiny amount of Minima to your node so you can try creating custom tokens and testing transactions.</div>
+    <div class="fc-foot">eurobuddha · Minima Ecosystem</div></div>`;
+  const say = (text, ok) => { const st = el("faucetStatus"); st.hidden = false; st.textContent = text; st.className = "fc-status " + (ok ? "fc-status--ok" : "fc-status--err"); };
+  el("faucetMine").onclick = async () => {
+    const b = el("faucetMine"); b.disabled = true; b.textContent = "Fetching…";
+    const a = running ? await tryCmd("getaddress") : null, addr = a && (a.miniaddress || a.address);
+    if (addr) el("faucetAddr").value = addr; else say(a ? "Could not read address from response." : "The node did not respond. Check its status on the Node tab.", false);
+    b.disabled = false; b.textContent = "Get My Address";
+  };
   el("faucetGo").onclick = async () => {
     const addr = el("faucetAddr").value.trim();
-    if (!validAddr(addr)) { toast("Enter a valid Mx… / 0x… address.", "err"); return; }
-    const btn = el("faucetGo"), st = el("faucetStatus");
-    btn.disabled = true; btn.textContent = "Requesting…"; st.textContent = "Contacting the faucet…"; st.className = "status status--dim";
-    try { const r = await api.faucet(addr); st.textContent = r.message; st.className = "status " + (r.status ? "status--ok" : "status--err"); toast(r.message, r.status ? "ok" : "err"); }
-    catch (e) { st.textContent = "Faucet error."; st.className = "status status--err"; }
+    if (!addr) { say("Please enter a Minima address.", false); return; }
+    if (!validAddr(addr)) { say("That is not a Minima address (Mx… or 0x…).", false); return; }
+    const btn = el("faucetGo"); btn.disabled = true; btn.textContent = "Requesting…";
+    try { const r = await api.faucet(addr); say("Faucet: " + (r && r.message ? r.message : "Unexpected response from faucet."), !!(r && r.status)); }
+    catch (e) { say("Failed to reach the faucet. Try again later.", false); }
     btn.disabled = false; btn.textContent = "Request Minima";
   };
 }
