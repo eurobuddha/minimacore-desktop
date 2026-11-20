@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld("mcd", {
   restoreBackup: (o) => ipcRenderer.invoke("mcd:restoreBackup", o),
   copyRpcPassword: () => ipcRenderer.invoke("mcd:copyRpcPassword"),
 
+  // language: the saved (or the system's) language as a plain string, known before the first screen is drawn; langSet saves a pick
+  lang: (() => { try { const c = ipcRenderer.sendSync("mcd:langGet"); return typeof c === "string" ? c : "en"; } catch (e) { return "en"; } })(),
+  langSet: (code) => ipcRenderer.invoke("mcd:langSet", code),
+
   // config
   getConfig: () => ipcRenderer.invoke("mcd:getConfig"),
   saveConfig: (patch) => ipcRenderer.invoke("mcd:saveConfig", patch),

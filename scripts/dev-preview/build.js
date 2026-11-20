@@ -180,13 +180,14 @@ if (process.argv.includes("--shots")) {
     ["wide-1440x900", "view=balances&tray=1", 1440, 900, 1], ["narrow-680", "view=balances&tray=1", 680, 704, 2]
   ];
   const only = (process.argv.find(a => a.startsWith("--only=")) || "").slice(7);   // --only=wallet captures the names that start with it
+  const lang = (process.argv.find(a => a.startsWith("--lang=")) || "").slice(7);   // --lang=ru captures in that language, into shots/lang-ru-…
   for (const dark of [true, false]) for (const [name, query, w = 932, h = 704, scale = 2.625] of set) {
-    if (only && !name.startsWith(only)) continue;
-    const file = path.join(here, "shots", (dark ? "dark-" : "light-") + name + ".png");
+    if (only && !only.split(",").some(o => name === o || (o.endsWith("*") && name.startsWith(o.slice(0, -1))) || (!lang && name.startsWith(o)))) continue;
+    const file = path.join(here, "shots", (lang ? "lang-" + lang + "-" : "") + (dark ? "dark-" : "light-") + name + ".png");
     execFileSync(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--screenshot=" + file, `--window-size=${w},${h}`,
       "--force-device-scale-factor=" + scale, "--virtual-time-budget=5000", "--allow-file-access-from-files",
       ...(dark ? ["--force-dark-mode"] : []),
-      pathToFileURL(out) + "?" + query], { stdio: "ignore" });
+      pathToFileURL(out) + "?" + query + (lang ? "&lang=" + lang : "")], { stdio: "ignore" });
     console.log("shot " + path.relative(process.cwd(), file));
   }
 }

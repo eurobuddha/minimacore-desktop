@@ -20,6 +20,8 @@
       <div class="tray__title">Minima Core</div>
       <div class="tray__sub">Pandamonium</div>
       <div class="tray__list" id="trayList"></div>
+      <!-- "Language" pinned under the rows, as the phone's drawer (PandamoniumHooks: a text button in the accent colour). -->
+      <button class="tray__lang" id="trayLang" data-i18n="Language">Language</button>
       <div class="tray__mode" id="trayMode">Classic mode</div>
     </aside>
     <div class="tray-scrim" id="trayScrim" hidden></div>
@@ -32,7 +34,7 @@
         <h1 class="bar__page" id="barPage"></h1>
         <button class="bar__btn bar__more" id="moreBtn" aria-label="More" aria-haspopup="menu" aria-controls="moreMenu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
         <!-- The phone's overflow menu, in the phone's order, minus its phone-only items and what has no
-             desktop function yet (Reset Minima, Language). Settings is the desktop's own addition. -->
+             desktop function yet (Reset Minima). Settings is the desktop's own addition. -->
         <div class="menu" id="moreMenu" role="menu" aria-label="More" hidden>
           <button class="menu__item menu__item--update" role="menuitem" id="hdrUpdate" hidden></button>
           <button class="menu__item" role="menuitem" data-act="logs">Logs</button>
@@ -40,6 +42,7 @@
           <button class="menu__item" role="menuitem" data-act="backup">Backup &amp; Recovery</button>
           <button class="menu__item" role="menuitem" data-act="params">Startup Params</button>
           <button class="menu__item" role="menuitem" data-act="shutdown">Shutdown</button>
+          <button class="menu__item" role="menuitem" data-act="language" data-i18n="Language">Language</button>
           <button class="menu__item" role="menuitem" data-act="settings">Settings</button>
         </div>
       </header>
@@ -265,6 +268,9 @@
   <!-- generic status toast -->
   <div class="toast" id="toast" style="display:none"></div>
 
+  <script src="i18n.js"></script>         <!-- the four languages: t(), th(), tr(); the key is the English text -->
+  <script src="i18n/en.js"></script>      <!-- one catalog per language; English holds only its plural forms -->
+  <script src="i18n/start.js"></script>   <!-- picks the saved language (or the system's) before any screen is drawn -->
   <script src="qrcode.js"></script>
   <script src="params.js"></script>
   <script src="wordentry.js"></script>

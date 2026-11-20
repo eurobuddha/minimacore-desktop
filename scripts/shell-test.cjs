@@ -34,7 +34,7 @@ test("every existing view still has its screen, and each is reachable from its n
 
 test("the overflow menu is the phone's desktop subset, in the phone's order", () => {
   const acts = [...html.matchAll(/role="menuitem" data-act="([a-z]+)"/g)].map(m => m[1]);
-  assert.deepEqual(acts, ["logs", "terminal", "backup", "params", "shutdown", "settings"]);
+  assert.deepEqual(acts, ["logs", "terminal", "backup", "params", "shutdown", "language", "settings"], "Language after Shutdown, as the phone's; Settings is the desktop's own, last");
   for (const a of acts) assert.ok(app.includes(`"${a}"`), a + " has a handler");
   assert.ok(!/App Lock|Allow Screenshots|Battery/.test(html), "phone-only items are left out");
 });
@@ -185,6 +185,7 @@ function rendererLoads(page, read = readRenderer) {
   const any = () => new Proxy(function () {}, { get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? () => any() : any()), apply: () => any(), construct: () => any() });   // a then() that never answers: boot() stops at its first await
   const order = [...page.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]), box = {};
   for (const f of fs.readdirSync(R)) if (f.endsWith(".js") && !order.includes(f)) throw new Error(f + ": no script tag loads it");
+  for (const f of fs.readdirSync(path.join(R, "i18n"))) if (f.endsWith(".js") && !order.includes("i18n/" + f)) throw new Error("i18n/" + f + ": no script tag loads it");   // a catalog defines no name: the folder rule is what catches a dropped one
   for (const k of ["document", "localStorage", "navigator", "location", "mcd", "crypto", "matchMedia", "addEventListener", "requestAnimationFrame", "setTimeout", "setInterval", "clearTimeout", "clearInterval"]) box[k] = any();   // the browser's, and the preload's bridge
   box.window = box;
   const ctx = vm.createContext(box);

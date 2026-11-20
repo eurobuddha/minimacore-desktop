@@ -174,6 +174,7 @@ function showKeyModeBlock(msg) {
 }
 function onStatus(s) {
   if (s.keyModeAlert) showKeyModeBlock(s.keyModeAlert);
+  LAST_STATUS = s;   // kept for a language change: the footer is painted again from it
   paintKeyMode(s.keyMode);
   paintFooter(s);
   nodeState = s.state;
@@ -221,6 +222,7 @@ function frScreen(title, back, bodyClass) {
 }
 function showSetup() {
   frScreen("", null, "fr-launch").innerHTML = `
+    <div class="fr-top"><button class="fr-lang" id="frLang">${th("Language")}</button></div>
     <div class="fr-hero">${CORE_MARK.replace("tray__ic", "fr-logo")}
       <div class="fr-name">MINIMA CORE</div>
       <p class="fr-intro">Your own node, on your computer.\nChoose how to begin.</p></div>
@@ -229,6 +231,7 @@ function showSetup() {
       <button class="btn btn--outline ps-btn ps-btn--main" id="frRestore">Restore Wallet</button>
       <button class="btn btn--outline ps-btn ps-btn--main" id="frParams">Startup Params</button>
     </div>`;
+  el("frLang").onclick = chooseLanguage;
   el("frNew").onclick = () => frStart(null);
   el("frRestore").onclick = () => frRestore();
   el("frParams").onclick = () => renderParams(frScreen("Startup Params", showSetup), true, showSetup);
@@ -869,6 +872,7 @@ function initShell() {
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
   el("stopStart").onclick = () => { toast("Starting the node…"); api.nodeStart(); };
+  el("trayLang").onclick = () => { if (NARROW.matches) setTray(false); chooseLanguage(); };
 
   // tray
   const list = el("trayList");
@@ -989,6 +993,7 @@ function openSettingsAt(cardId) {
 }
 async function menuAction(act) {
   if (act === "logs" || act === "terminal" || act === "settings") selectTab(act);
+  else if (act === "language") chooseLanguage();
   else if (act === "backup") { BK_PAGE = ""; selectTab("backup"); }
   else if (act === "params") selectTab("params");
   else if (act === "shutdown") {
@@ -1001,6 +1006,36 @@ async function menuAction(act) {
     try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
   }
 }
+
+// ---- Language: the phone's chooser (Language.choose): the four languages, each named in itself, the current one marked.
+// The choice is saved by the main process (its own dialogs, menu and notifications follow it) and applied at once:
+// the page's fixed text, the shell, and the screen on show. A screen that holds typed text is not redrawn under the
+// user; it changes the next time it opens.
+function chooseLanguage() {
+  const d = openDlg("langDlg", "Language · 语言 · Язык · Мова", `<div class="lang-list" role="radiogroup" aria-label="${th("Language")}">` + I18N.languages().map(c =>
+    `<button class="lang-opt" role="radio" aria-checked="${c === I18N.lang()}" lang="${I18N.TAGS[c]}" data-lang="${c}">${esc(I18N.NAMES[c])}</button>`).join("") + `</div>`, "");
+  if (!d) return;
+  d.root.querySelector("[data-close]").textContent = t("Close");
+  const cur = d.root.querySelector('[aria-checked="true"]'); if (cur) cur.focus();
+  d.root.querySelectorAll("[data-lang]").forEach(b => b.onclick = async () => {
+    const code = b.dataset.lang;
+    d.close();
+    if (code === I18N.lang()) return;
+    try { await api.langSet(code); } catch (e) { toast(ipcError(e), "err"); return; }   // not saved: not switched (the main process and the window never disagree)
+    I18N.set(code);
+  });
+}
+let LAST_STATUS = null;
+function relang() {
+  I18N.apply(document);
+  el("barPage").textContent = SUB_TITLE[activeView] || "";
+  if (LAST_STATUS) { paintKeyMode(); paintFooter(LAST_STATUS); } else paintKeyMode();
+  if (el("setup").style.display !== "none") { if (el("frLang")) showSetup(); return; }   // first run: only the launcher is redrawn (the seed screens hold typed words)
+  const v = el("view-" + activeView);
+  const typed = v && [...v.querySelectorAll("input:not([type=checkbox]):not([type=radio]):not([type=range]):not([readonly]), textarea:not([readonly])")].some(i => i.value);
+  if (typed) toast(t("This screen changes language the next time it opens.")); else renderActive();
+}
+I18N.onChange(relang);
 
 // Footer, as the phone's: a dot and the key line on the left, "block @ time" on the right. This node uses
 // classic keys, so the left reads "Key uses: N" (the phone's own text when block-as-key-uses is off).

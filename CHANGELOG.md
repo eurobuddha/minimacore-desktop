@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.140] — Languages: the helper, the chooser and where the choice is kept (English only so far)
+
+- **"Language"** is pinned at the bottom of the app tray, is in the overflow menu after Shutdown, and is at the top right of the first-run launcher, as on the phone. It opens the phone's chooser ("Language · 语言 · Язык · Мова", each language named in itself, the current one marked). It lists the languages that have a catalog: in this version English alone; 简体中文, Русский and Українська arrive with the screens' text in the next versions.
+- **The choice is kept by the main process** (config `language`; empty = the system's language when it is one of the four, else English). The window learns it before its first paint (`window.mcd.lang`, read once by the preload), and a pick is saved first (`mcd:langSet`, which refuses any code but the four) and applied after. It is applied without a restart: the page's fixed text, the shell, and the screen on show. A screen that holds typed text is not redrawn under the user; it changes the next time it opens.
+- **`renderer/i18n.js`**: `t(key, params)`, `th` (escaped whole, for markup), `tr` (escaped text, the caller's own markup inserted as given), `N_` (a key kept in a table). The key is the English text, so a text no catalog holds shows its English, never a blank or a key name. Named placeholders; plural forms through `Intl.PluralRules`. An amount is inserted as the string given: no grouping, no rounding. Catalogs are `renderer/i18n/<code>.js`; the main process loads the same files (`main/lang.js`).
+- Dev preview: `&lang=` in the address, `--lang=ru` on `build.js --shots` (files `shots/lang-ru-…`).
+- Tests: `scripts/i18n-test.cjs` (7: the helper, the plural forms, the system-language rule, the chooser's three places and its save-first order, and the rule every later version is held to: each translated key present in zh, ru and uk with the same placeholders, not empty, not left in English, no markup). `scripts/shell-test.cjs` (16): the menu's order; a catalog script dropped from the page is caught by the folder rule. `npm run test:i18n`.
+
 ## [0.19.139] — Two old em dashes out of what is shown
 
 - The toast when a copy fails reads "Copy failed: select the text and press ⌘C". The TEST copy's window title and tray tooltip read "… (TEST PROFILE)". `docs/DEV_RUN.md` follows.

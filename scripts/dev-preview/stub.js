@@ -404,6 +404,7 @@
   };
   // Anything not listed: an "on…" subscription is a no-op that returns its unsubscribe; any other call
   // resolves to null, and the view shows whatever it shows for "nothing came back".
+  fixtures.lang = Q.get("lang") || "en"; fixtures.langSet = async (code) => code;   // &lang=zh|ru|uk: the language the preload would hand over
   window.mcd = new Proxy(fixtures, { get: (t, k) => t[k] || (String(k).startsWith("on") ? () => () => {} : async () => null) });
 
   // Drive the shell to the requested state once app.js has booted.

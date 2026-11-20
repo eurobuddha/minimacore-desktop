@@ -142,6 +142,19 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
 .tray__row--sel, .tray__row--sel:hover { background: var(--tray-accent); color: var(--tray-bg); }
 .tray__row[draggable="true"] { -webkit-user-drag: element; }
 .tray__row--drag { opacity: .45; }
+/* "Language", pinned under the rows: the phone's text button in the accent colour, 48 high, left aligned */
+.tray__lang { flex: 0 0 auto; min-height: 48px; margin-top: 4px; padding: 0 16px; border: 0; border-radius: 10px; background: transparent; color: var(--tray-accent);
+  cursor: pointer; text-align: left; font: 600 14px/1.2 var(--sans); }
+.tray__lang:hover { background: #212A2F; }
+.tray__lang:focus-visible { outline: 2px solid var(--tray-accent); outline-offset: -2px; }
+/* the language chooser: one row per language, each written in itself */
+.lang-list { display: flex; flex-direction: column; gap: 4px; }
+.lang-opt { min-height: 48px; padding: 0 16px 0 44px; position: relative; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text);
+  cursor: pointer; text-align: left; font: 600 16px/1.2 var(--sans); }
+.lang-opt::before { content: ""; position: absolute; left: 16px; top: 50%; width: 14px; height: 14px; margin-top: -8px; border: 2px solid var(--dim); border-radius: 50%; }
+.lang-opt[aria-checked="true"]::before { border-color: var(--orange); background: radial-gradient(var(--orange) 0 45%, transparent 50%); }
+.lang-opt:hover { background: var(--surface2); }
+.lang-opt:focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
 .tray__mode { font-size: 11px; font-weight: 500; line-height: 15px; color: var(--tray-muted); padding-top: 12px; }
 .tray-scrim { display: none; }
 /* narrow windows: the tray overlays the screen under a scrim, as on the phone */
@@ -433,6 +446,10 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .fr-body { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 .fr-body.pscreen { padding: 24px 24px 40px; }
 .fr-launch { display: flex; flex-direction: column; }
+.fr-top { flex: 0 0 auto; display: flex; justify-content: flex-end; padding: 4px 12px 0; }   /* the phone's launcher: "Language" at the top right */
+.fr-lang { min-height: 48px; padding: 0 12px; border: 0; border-radius: var(--radius); background: transparent; color: var(--orange); cursor: pointer; font: 600 14px/1.2 var(--sans); }
+.fr-lang:hover { background: var(--surface2); }
+.fr-lang:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .fr-hero { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 32px 24px; }
 .fr-logo { width: 112px; height: 112px; fill: #08090B; }
 .fr-name { margin-top: 26px; font: 800 16px/22px var(--sans); letter-spacing: .34em; margin-right: -.34em; color: var(--text); }

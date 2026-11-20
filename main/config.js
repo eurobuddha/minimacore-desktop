@@ -79,6 +79,7 @@ const DEFAULTS = {
   coinGuard: true,           // the shared coin reservation (main/reserve.js). false = the whole guard is a passthrough
   coinGuardSends: "observe", // what it does to `send` and `consolidate`: "off" | "observe" (log only, the default) | "enforce"
   frozenApps: [],            // the Apps tab's Freeze: ids of the apps whose background work is stopped (main/freeze.js)
+  language: "",              // "en" | "zh" | "ru" | "uk": the language picked in "Language" ("" = the system's when it is one of the four, else English; main/lang.js)
   openAtLogin: false         // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
                              // Every key the renderer saves MUST be declared here — save() drops any key DEFAULTS
                              // does not name (the 0.16.97 casinoDollar regression). scripts/config-keys-test.cjs
