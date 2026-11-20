@@ -166,3 +166,17 @@ test("the screen: Pandamonium's KeyUses, every identifier whole and copyable, no
   assert.deepEqual(Act.sections({ rows: [{ family: "block" }, { family: "classic" }, { family: "classic" }] }).map(s => [s.title, s.rows.length]), [["Classic keys · 1–2", 2], ["Blocks-as-keyuses keys · 1–1", 1]]);
   assert.ok(require("../main/freeze.js").FREEZABLE.includes("keyuses"));
 });
+
+test("Settings and the footer (0.19.128): the most-used key is the node's own figure for either mode, and an unread counter shows nothing", () => {
+  const app = R("renderer/app.js"), i = app.indexOf("\nfunction keysInfo(keys) {"), j = app.indexOf("\nfunction maxKeyUses(k) {");
+  const { keysInfo, maxKeyUses } = new Function(app.slice(i, app.indexOf("\n}", i) + 2) + app.slice(j, app.indexOf("\n}", j) + 2) + "\nreturn { keysInfo, maxKeyUses };")();
+  assert.deepEqual(keysInfo({ keys: [classic(0, 12), classic(1, 40), classic(2, 0)] }), { used: 40, cap: 262144, count: 3 });
+  assert.deepEqual(keysInfo({ keys: [block(0, 2428101), block(1, 2428090)] }), { used: 2428101, cap: 268435456, count: 2 }, "a block key is measured against its own capacity, not 262144");
+  assert.deepEqual(keysInfo({ keys: [classic(0, 200000), block(1, 2428101)] }), { used: 200000, cap: 262144, count: 2 }, "of two kinds, the one nearest its own capacity");
+  for (const bad of [null, undefined, {}, { keys: [] }, { keys: "x" }, { keys: [classic(0, undefined)] }, { keys: [classic(0, "many")] }, { keys: [classic(0, 5), classic(1, null)] }, { keys: [classic(0, 5, { maxuses: undefined })] }, { keys: [classic(0, -1)] }, { keys: [classic(0, 1.5)] }])
+    assert.equal(keysInfo(bad), null, JSON.stringify(bad));
+  assert.equal(maxKeyUses({ keys: [classic(0, undefined)] }), null, "the footer keeps 'Awaiting blocks…' rather than print 0");
+  assert.equal(maxKeyUses(null), null); assert.equal(maxKeyUses({ keys: [classic(0, 7)], maxuses: 8 }), 8, "the node's own maxuses line is shown as the node gave it");
+  assert.ok(/The node's key uses could not be read\. Nothing is shown rather than a figure that was not read\./.test(app));
+  assert.ok(!/parseInt\(k\.uses, 10\) \|\| 0|cap \|\| 262144/.test(app), "no counter defaults to 0 and no capacity to the classic one");
+});

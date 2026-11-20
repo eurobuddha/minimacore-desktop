@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.128] — Settings and the footer never show a key-use figure that was not read
+
+- **Settings, "Signing keys":** the most-used key was worked out with `parseInt(uses) || 0` and a capacity that fell back to 262144. A counter the node did not give read as 0, and a block-key wallet could be measured against the classic capacity; the highest use and the highest capacity could also come from two different keys. The card now shows the key nearest its own capacity, in the node's own whole numbers, or says "The node's key uses could not be read" and shows no figure. The percentage is cut, not rounded.
+- **The footer** ("Key uses: N") used the same helper when the node's reply had no `maxuses` line: an unread counter there now leaves "Awaiting blocks…" instead of 0.
+- Test: `scripts/keyuses-test.cjs` (12).
+
 ## [0.19.127] — KeyUses, as Pandamonium shows it
 
 - **A new tray app, KeyUses** (after Minima Vestr, where Pandamonium has it), with its row on the Apps tab (Hide and Freeze). It is Pandamonium's native KeyUses 0.1.4 (`apks/base` `integrated/keyreuses`, `1c60c2593325f70cba5089e2ba430925d6ccca3c`), reproduced: the badge, the title, Run audit, the privacy line, the verdict card with its blocks, the table in sections (classic keys, block keys) with a status chip per key, the coverage note, the explainer. Its own dark palette (`Design.java`), in both system themes, as the original. The plan proposed hosting the MiniDapp page; Pandamonium shows the native screen, so that is what was copied.
