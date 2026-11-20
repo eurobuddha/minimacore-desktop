@@ -3,9 +3,9 @@
  *
  * The account serves its own web panel on 127.0.0.1:<basePort+586> (ParlonsLocal in the maxima repo). A
  * browser gets in with a ONE-TIME ticket the account keeps in <data>/panel-ticket.txt (owner-only file; it
- * writes the next one as soon as one is used). This module reads that file for the in-app Parlons tab and
- * for "Open in browser", and reads account.txt / invite.txt for the native strip above the panel. Nothing
- * here talks to the account over the network; the renderer's <webview> does, same-origin, cookie-bound.
+ * writes the next one as soon as one is used). This module reads that file to open the panel in the SYSTEM
+ * BROWSER (0.19.3: the panel is no longer embedded in the app), and reads account.txt / invite.txt for the
+ * Parlons screen. Nothing here talks to the account over the network; the browser does, cookie-bound.
  */
 const { shell } = require("electron");
 const fs = require("fs");

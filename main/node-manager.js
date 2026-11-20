@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const config = require("./config");
 const portmap = require("./portmap");
+const parlonsNotify = require("./parlons-notify");
 const { rpcCall } = require("./rpc");
 const { createNodeLog } = require("./nodelog");
 const keymode = require("./keymode");
@@ -443,8 +444,9 @@ class NodeManager extends EventEmitter {
         dataDir: cfg.dataFolder || config.defaultDataFolder(), startedAt: this.startedTs }));
     } catch (e) {}
     if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
-    p.stdout.on("data", d => this.log(String(d)));
-    p.stderr.on("data", d => this.log(String(d)));
+    // whole lines only: a line cut across two chunks was read as two (and a parser looking for its start missed it)
+    p.stdout.on("data", parlonsNotify.lineFeeder(l => this.log(l)));
+    p.stderr.on("data", parlonsNotify.lineFeeder(l => this.log(l)));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     p.on("exit", (code, sig) => {
       this.log("[app] node exited code=" + code + " sig=" + sig);
@@ -710,6 +712,16 @@ class NodeManager extends EventEmitter {
   log(line) {
     for (let l of String(line).split("\n")) {
       if (!l.trim()) continue;
+      // A Parlons message or call line carries text a REMOTE party chose. It is read by the notifier's anchored parser
+      // and by nothing below: before 0.19.3 a message containing "Using NEW Block number as key uses" stopped a
+      // classic wallet's node, and one containing "account layer FAILED" put the sender's text up as the account's error.
+      if (parlonsNotify.isChatter(l)) {
+        try { const ev = parlonsNotify.parse(l); if (ev && this.proc) this.emit("parlons-event", ev); } catch (e) {}
+        l = parlonsNotify.redact(l);   // the message's own words stay out of the Logs view and node.log
+        this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
+        this.diskLog().append(l);
+        continue;
+      }
       try { this.watchParlonsLine(l); } catch (e) {}
       // The node says so itself, as it opens its databases and before it loads the wallet: block mode is ON.
       // For a classic wallet that is the forbidden start, caught earlier than any RPC could answer.

@@ -137,7 +137,6 @@ async function boot() {
   refreshUpdatePill(); setTimeout(refreshUpdatePill, 15_000); setInterval(refreshUpdatePill, 60_000);   // the first feed check runs ~8 s after launch
 
   api.onStatus(onStatus);
-  api.onParlonsIncoming(() => selectTab("parlons"));
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
   api.onChat(onChatUpdate);
@@ -868,6 +867,8 @@ function initShell() {
   list.innerHTML = TRAY_APPS.map(a => `<button class="tray__row" data-app="${a.id}">${a.icon ? `<img class="tray__ic" src="${a.icon}" alt="">` : CORE_MARK}<span class="tray__name">${esc(a.name)}</span>${a.badge ? `<span class="tab-badge" id="${a.badge}" hidden></span>` : ""}</button>`).join("");
   list.querySelectorAll(".tray__row").forEach(r => r.onclick = () => {
     selectTab(r.dataset.app === "core" ? lastTabView : r.dataset.app);
+    // The Parlons row opens Parlons: in the browser, when the account is up (its screen here says so, and what is wrong when it is not).
+    if (r.dataset.app === "parlons") api.parlonsStatus().then(st => { if (st && st.kind === "parlons" && st.ready && !st.error) openParlons(); }).catch(() => {});
     if (NARROW.matches) setTray(false);
   });
   initTrayOrder(list);
@@ -3884,28 +3885,28 @@ async function renderVestrCalc() {
 
 
 // ---- Parlons: the account this node hosts (Parlons Node kind) ------------------------------------------
-// The account serves its own web panel on loopback; the tab embeds it in ONE hardened <webview> and shows a
-// native strip above it (address, pairing, open-in-browser). The panel signs in with a one-time link the
-// account keeps beside its data; a fresh link is fetched whenever the account (re)starts.
-let parlonsLoadedFor = "";     // exact node start we last loaded the panel for
+// The account serves its own web panel on loopback. Since 0.19.3 the app does not embed it: the Parlons row opens it in
+// the system browser with the node's one-time link, and this screen says where it is and what state the account is in.
 let parlonsLastSig = "";       // readiness/error signature that last drove a re-render
-let parlonsStatusCache = null;
-let parlonsRenderSeq = 0, parlonsRetry = null;
-async function renderParlons(attempt = 0) {
-  const seq = ++parlonsRenderSeq; clearTimeout(parlonsRetry);
+let parlonsRenderSeq = 0;
+/** Open the panel in the system browser with a fresh one-time link (only ever the node's loopback panel; main/parlons.js). */
+async function openParlons() {
+  const ok = await api.parlonsOpenExternal().catch(() => false);
+  if (!ok) toast("The account has no sign-in link yet. Try again in a moment.", "err");
+  return ok;
+}
+async function renderParlons() {
+  const seq = ++parlonsRenderSeq;
   const strip = el("parlonsStrip"), body = el("parlonsBody");
   function retry(message) {
-    parlonsLoadedFor = "";
     strip.innerHTML = `<div class="parlons-strip"><span>${esc(message)}</span><button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>`;
     body.innerHTML = `<div class="spin" role="status">${esc(message)}</div>`;
     el("parlonsReload").onclick = () => renderParlons();
   }
   const st = await api.parlonsStatus().catch(() => null);
   if (seq !== parlonsRenderSeq) return;
-  parlonsStatusCache = st;
   if (!st) { retry("Could not check the account. Reload to try again."); return; }
   if (st.kind !== "parlons") {
-    parlonsLoadedFor = "";
     strip.innerHTML = "";
     body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
       <div class="view__desc">Your node can host your Parlons account: private chat, calls and payments under this node's own seed, with your phones and computers paired to it. This install still runs the plain Minima node.</div>
@@ -3921,36 +3922,21 @@ async function renderParlons(attempt = 0) {
     };
     return;
   }
-  // The panel IS the Parlons app: no native chrome above it. The strip only speaks when the account
-  // is not up (starting / error).
-  if (st.ready && !st.error) strip.innerHTML = "";
-  else {
+  if (!st.ready || st.error) {
     strip.innerHTML = `<div class="parlons-strip"><span>${st.error ? "Account error" : "Starting the account…"}${st.version ? " · Parlons Node " + esc(st.version) : ""}</span>
         <button class="btn btn--sm btn--outline" id="parlonsReload">Reload</button></div>${st.error ? `<div class="status status--warn">${esc(st.error)}</div>` : ""}`;
-    el("parlonsReload").onclick = () => { parlonsLoadedFor = ""; renderParlons(); };
-  }
-  if (!st.ready || st.error) {
-    parlonsLoadedFor = "";
-    body.innerHTML = `<div class="spin">${st.error ? "The account did not start — see the Logs tab." : "Waiting for the account to attach to the network…"}</div>`;
+    el("parlonsReload").onclick = () => renderParlons();
+    body.innerHTML = `<div class="spin">${st.error ? "The account did not start. See Logs in the menu." : "Waiting for the account to attach to the network…"}</div>`;
     return;
   }
-  const ns = await api.nodeStatus().catch(() => null);
-  if (seq !== parlonsRenderSeq) return;
-  if (!ns || !ns.startedTs) { retry("Could not identify the running node. Reload to try again."); return; }
-  const key = String(st.panelPort) + ":" + ns.startedTs;   // minimaDesk's exact one-key-per-start model
-  if (body.querySelector("webview") && parlonsLoadedFor === key) return;   // already showing this start's session
-  const url = await api.parlonsPanelUrl().catch(() => "");
-  if (seq !== parlonsRenderSeq) return;
-  if (!url) {
-    retry(attempt >= 20 ? "Could not get a sign-in link. Reload to try again." : "Getting a sign-in link from the account…");
-    if (attempt < 20) parlonsRetry = setTimeout(() => { if (seq === parlonsRenderSeq) renderParlons(attempt + 1); }, 1500);
-    return;
-  }
-  parlonsLoadedFor = key;
-  body.innerHTML = "";
-  const wv = document.createElement("webview");
-  wv.setAttribute("partition", "persist:parlons");
-  wv.setAttribute("allowpopups", "false");
-  wv.setAttribute("src", url);
-  body.appendChild(wv);
+  // Parlons is its own app and opens in your browser (owner decision, 19 Nov 2026): nothing of it is embedded here.
+  strip.innerHTML = "";
+  body.innerHTML = `<div class="card"><div class="card__title">Parlons</div>
+    <div class="view__desc">Parlons opens in your browser, signed in to the account on this node. Each time, the app asks the node for a new one-time link, and only for this computer.</div>
+    <button class="btn btn--primary btn--full" id="parlonsOpen">Open Parlons in the browser</button>
+    ${st.address ? `<div class="view__desc" style="margin-top:14px">Your Parlons address</div><div class="addrbox__addr" id="parlonsAddr" title="Copy" style="cursor:copy;overflow-wrap:anywhere">${esc(st.address)}</div>` : ""}
+    <div class="view__desc" style="margin-top:14px">While the node runs, this app tells you when a Parlons message arrives. It tells you of an incoming call only while Parlons is open in a browser tab or a paired phone is in reach: with neither, the node declines the call at once and tells nothing. Calls are answered in the Parlons tab.</div>
+    ${st.version ? `<div class="view__desc" style="margin-top:8px">Parlons Node ${esc(st.version)}</div>` : ""}</div>`;
+  el("parlonsOpen").onclick = openParlons;
+  const addr = el("parlonsAddr"); if (addr) addr.onclick = () => { copy(st.address); toast("Copied.", "ok"); };
 }

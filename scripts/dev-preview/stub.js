@@ -321,7 +321,10 @@
       if (/fill_/.test(a.query)) return { status: true, rows: (DXS === "empty" ? [] : DX_FILLS).map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) };
       return { status: true, rows: [] };
     },
-    parlonsStatus: async () => ({ ready: false }), portmapStatus: async () => ({})
+    // ?pl=ready|error : the Parlons screen (the panel itself is in the browser; the address is invented)
+    parlonsStatus: async () => Q.get("pl") === "ready" ? { kind: "parlons", ready: true, error: "", version: "0.2.152", address: "MAX#0xFA4E0000FA4E0000FA4E0000FA4E0000FA4E0000FA4E0000FA4E0000FA4E0001#FA4E0000FA4E@198.51.100.7:9001", hasTicket: true }
+      : Q.get("pl") === "error" ? { kind: "parlons", ready: false, error: "account layer FAILED: the relay did not answer (preview)", version: "0.2.152" } : { kind: "parlons", ready: false, error: "", version: "0.2.152" },
+    parlonsOpenExternal: async () => true, portmapStatus: async () => ({})
   };
   // Anything not listed: an "on…" subscription is a no-op that returns its unsubscribe; any other call
   // resolves to null, and the view shows whatever it shows for "nothing came back".

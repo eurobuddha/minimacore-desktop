@@ -36,9 +36,7 @@ contextBridge.exposeInMainWorld("mcd", {
   portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
 
   // Parlons account (the Parlons Node hosts it under this node's seed)
-  onParlonsIncoming: (fn) => { const h = () => fn(); ipcRenderer.on("parlons:incoming", h); return () => ipcRenderer.removeListener("parlons:incoming", h); },
   parlonsStatus: () => ipcRenderer.invoke("mcd:parlonsStatus"),
-  parlonsPanelUrl: () => ipcRenderer.invoke("mcd:parlonsPanelUrl"),
   parlonsOpenExternal: () => ipcRenderer.invoke("mcd:parlonsOpenExternal"),
   setNodeKind: (kind) => ipcRenderer.invoke("mcd:setNodeKind", kind),
 

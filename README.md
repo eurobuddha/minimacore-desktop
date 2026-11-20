@@ -99,9 +99,10 @@ reveals it. Nothing installs by itself. Publish with `scripts/publish-desktop.sh
 `npm run dist:mac:signed`. `updateFeed` in the app config points a self-hoster at their own feed.
 
 ## The Parlons tab (0.16.26)
-The tab is the account's own web panel (parlons-node 0.2.48): a full chat window - chats, conversations
-with photos, contacts, devices (pairing QR), node, settings - live over server-sent events. The app only
-embeds it (one hardened `<webview>` on the loopback panel) and adds the strip above it.
+Parlons is the account's own web panel (parlons-node 0.2.48): a full chat window - chats, conversations
+with photos, contacts, devices (pairing QR), node, settings - live over server-sent events. Since 0.19.3 the
+app does not embed it: the tray's Parlons row opens it in the system browser with the node's one-time link,
+and the app raises a desktop notification for a new message or an incoming call (main/parlons-notify.js).
 
 ## Node lifecycle (0.16.25)
 The node must never outlive the app, and the app must never fight a node it left behind. `node-manager`

@@ -82,11 +82,9 @@ process.on("unhandledRejection", (reason) => logFatal("UNHANDLED REJECTION", rea
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 
-require("./parlons-calls").install({
-  port: () => node.panelPort(),
-  window: () => win,
-  focusPanel: () => { if (win && !win.isDestroyed()) win.webContents.send("parlons:incoming"); }
-});
+// Parlons lives in the system browser (0.19.3). The app still says when a message or a call arrives, from the
+// node's own log lines (main/parlons-notify.js); a click opens the panel with a fresh one-time link.
+require("./parlons-notify").install({ events: node, electron: require("electron"), window: () => win, open: () => parlons.openExternal() });
 
 function createWindow() {
   win = new BrowserWindow({
@@ -100,8 +98,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
-      webviewTag: true          // ONE hardened <webview>: the Parlons account's own web panel (loopback)
+      sandbox: true
     }
   });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
@@ -110,23 +107,8 @@ function createWindow() {
     win.webContents.on("did-finish-load", () => win.webContents.insertCSS('body::after{content:"TEST PROFILE";position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;background:#B00020;color:#fff;font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.08em;padding:4px 10px;border-radius:0 0 6px 6px;pointer-events:none}').catch(() => {}));
     try { if (app.dock) app.dock.setBadge("TEST"); } catch (e) {}
   }
-  // The Parlons tab's <webview> may only ever show the account's loopback panel: strip any preload,
-  // force isolation, and refuse any other src. External web links open in the OS browser; no guest child windows.
-  win.webContents.on("will-attach-webview", (ev, prefs, params) => {
-    delete prefs.preload; delete prefs.preloadURL;
-    prefs.nodeIntegration = false; prefs.contextIsolation = true; prefs.webSecurity = true; prefs.sandbox = true;
-    const src = String((params && params.src) || "");
-    if (!src.startsWith("http://127.0.0.1:" + node.panelPort() + "/")) ev.preventDefault();
-  });
-  win.webContents.on("did-attach-webview", (_ev, contents) => {
-    contents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
-      return { action: "deny" };
-    });
-    contents.on("will-navigate", (e, url) => {
-      if (!String(url).startsWith("http://127.0.0.1:" + node.panelPort() + "/")) e.preventDefault();
-    });
-  });
+  // No embedded web view anywhere (0.19.3: Parlons opens in the system browser). Should one ever be attached, refuse it.
+  win.webContents.on("will-attach-webview", (ev) => ev.preventDefault());
   // Deny ALL child windows (no camera/etc inheritance). BUT for the ETH Wallet's Etherscan links, open them in the
   // user's real browser via shell.openExternal — allowed ONLY for the exact https://etherscan.io/ prefix so no
   // attacker-influenced or non-https scheme can ever be launched. rel=noreferrer on the anchors covers tabnabbing.
@@ -291,10 +273,9 @@ ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return nod
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());
 
-// Parlons account (Parlons Node kind): status for the tab's strip, the one-time panel link for the
-// <webview>, "open in browser", and the kind switch (restarts the node).
+// Parlons account (Parlons Node kind): status for its screen, "open in the browser" (the one-time link is read and
+// handed to the system browser here; the renderer never holds it), and the kind switch (restarts the node).
 ipcMain.handle("mcd:parlonsStatus", () => parlons.status());
-ipcMain.handle("mcd:parlonsPanelUrl", () => parlons.ticketUrl());
 ipcMain.handle("mcd:parlonsOpenExternal", () => parlons.openExternal());
 ipcMain.handle("mcd:setNodeKind", async (_e, kind) => {
   const k = kind === "minima" ? "minima" : "parlons";
