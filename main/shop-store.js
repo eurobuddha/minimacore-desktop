@@ -143,6 +143,43 @@ function ensureChecked(o) {
  *  what is compared (0.18.159): PAID iff the token matches AND the order matches the vendor's listing AND the CUMULATIVE
  *  paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED and is never paid (the
  *  vendor checks it by hand: handCheck); one due 0 or less is BAD_TOTAL. Never clobbers a vendor-progressed status (CONFIRMED+). */
+// Dust coins of an order not counted yet (0.18.190), in memory only: { ref → Map(coinid → amount) }. Together they count
+// once their sum covers what is still due (9.9 + 0.05 + 0.05 pays 10). A flood that never sums to it writes nothing; the
+// map keeps an order's 1000 largest. After a restart the scanner sees them again and they gather again.
+const PENDING_DUST = new Map(), PENDING_MAX = 1000;
+function remainingOf(o) {
+  const d = decParse(o.due), p = decParse(o.paidAmount || "0") || [0n, 0];
+  if (!d || d[0] <= 0n || o.problems.length) return null;
+  const dp = Math.max(d[1], p[1]); return [d[0] * 10n ** BigInt(dp - d[1]) - p[0] * 10n ** BigInt(dp - p[1]), dp];
+}
+function covers(amounts, rem) {
+  let dp = rem[1]; for (const a of amounts) { const x = decParse(a); if (x) dp = Math.max(dp, x[1]); }
+  let sum = 0n; for (const a of amounts) { const x = decParse(a); if (x) sum += x[0] * 10n ** BigInt(dp - x[1]); }
+  return sum >= rem[0] * 10n ** BigInt(dp - rem[1]);
+}
+/** Count coins on an order: in its list and the global list, their amounts added; the outcome. */
+function countCoins(o, ref, coins, paidTokenid) {
+  for (const [cid, amount] of coins) {
+    o.coins = (o.coins || []).concat(cid); mem.counted[cid] = ref;
+    o.paidAmount = decAdd(o.paidAmount || "0", amount);
+  }
+  const ids = Object.keys(mem.counted); if (ids.length > COUNTED_MAX) for (const k of ids.slice(0, ids.length - COUNTED_MAX)) delete mem.counted[k];   // the oldest go first; the order's own list still holds them
+  o.paidTokenid = paidTokenid; o.paidAt = Date.now();
+  const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
+  if (outcome === "PAID") { o.paid = true; PENDING_DUST.delete(ref); }
+  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
+  return outcome;
+}
+/** The order's gathered dust, counted together when it covers what is still due → the outcome, or "". */
+function settleDust(o, ref) {
+  const pend = PENDING_DUST.get(ref), rem = remainingOf(o);
+  if (!pend || !pend.size || !rem || rem[0] <= 0n) return "";
+  const list = [...pend.entries()].filter(([cid]) => !has(mem.counted, cid) && !(o.coins || []).includes(cid));
+  if (!list.length || !covers(list.map(x => x[1]), rem)) return "";
+  if ((o.coins || []).length + list.length > ORDER_COINS_MAX) return "";
+  PENDING_DUST.delete(ref);
+  return countCoins(o, ref, list, o.tokenid);
+}
 function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   ensureLoaded(); const o = order(ref); if (!o) return null;
   if (o.paid) return "ALREADY";
@@ -151,25 +188,27 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   if (!/^0x[0-9a-f]{1,128}$/.test(cid)) return null;
   if (has(mem.counted, cid) || (o.coins || []).includes(cid)) return "ALREADY";
   ensureChecked(o);
+  const rightToken = String(paidTokenid).toLowerCase() === String(o.tokenid).toLowerCase();
   // Dust (0.18.181) never fills the order's 1000-coin list, so a flood of tiny coins cannot block a later real payment.
-  // It is NOT remembered (0.18.185): what is dust depends on what is still due, so the same coin is judged again later
-  // (it was written to the counted list for good, and a 0.05 top-up seen before its 9.95 stayed dust for ever); and
-  // nothing is saved for it, so a flood of dust costs no disk writes.
-  if (isDust(o, paidAmount)) return "DUST";
+  // It is NOT remembered on disk (0.18.185): what is dust depends on what is still due, so the same coin is judged again
+  // later; it is gathered in memory and counted with the order's other dust once together they cover what is still due
+  // (0.18.190). Nothing is saved for it until then.
+  if (isDust(o, paidAmount)) {
+    if (!rightToken || !decParse(paidAmount)) return "DUST";
+    const pend = PENDING_DUST.get(ref) || new Map(); pend.set(cid, String(paidAmount)); PENDING_DUST.set(ref, pend);
+    if (pend.size > PENDING_MAX) { const smallest = [...pend.entries()].sort((x, y) => decCmp(x[1], y[1]))[0][0]; pend.delete(smallest); }
+    const out = settleDust(o, ref); if (out) { flush(); return out; }
+    return "DUST";
+  }
   if ((o.coins || []).length >= ORDER_COINS_MAX) return null;
-  o.coins = (o.coins || []).concat(cid);
-  mem.counted[cid] = ref;
-  const ids = Object.keys(mem.counted); if (ids.length > COUNTED_MAX) for (const k of ids.slice(0, ids.length - COUNTED_MAX)) delete mem.counted[k];   // the oldest go first; the order's own list still holds them
-  ensureChecked(o);
-  if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {
+  if (!rightToken) {
+    o.coins = (o.coins || []).concat(cid); mem.counted[cid] = ref;
     o.paidTokenid = paidTokenid;
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
-  o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
-  const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
-  if (outcome === "PAID") o.paid = true;
-  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
+  let outcome = countCoins(o, ref, [[cid, String(paidAmount)]], paidTokenid);
+  if (outcome === "UNDERPAID") outcome = settleDust(o, ref) || outcome;   // the gathered dust may now cover what is left
   flush(); return outcome;
 }
 /** The vendor's explicit "I checked this order by hand" for an order that does not match the listing: only then can it

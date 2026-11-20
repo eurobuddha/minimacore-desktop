@@ -52,8 +52,7 @@ test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.00000
   for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
     assert.equal(store.recordPayment(ref, "0.000000001", "0x00", coin()), "DUST", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2 (CHANGED on purpose, 0.18.181: it is dust, not counted)");
-    assert.equal(store.recordPayment(ref, "3.199999999", "0x00", coin()), "UNDERPAID");
-    assert.equal(store.recordPayment(ref, "0.000000001", "0x00", coin()), "PAID", "3.2 received = 3.2 due (the remainder is never dust)");
+    assert.equal(store.recordPayment(ref, "3.199999999", "0x00", coin()), "PAID", "3.199999999 + the gathered 1 nano = 3.2 due (CHANGED on purpose, 0.18.190: dust counts once it covers what is left)");
     assert.equal(store.order(ref).due, "3.2");
   }
   const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
@@ -388,4 +387,39 @@ test("a 9.95 payment and a 0.05 top-up pay a 10 order, in either order and in on
   assert.equal(writes, 0, "no save for a dust coin"); m.store.flush();
   assert.equal(fs.readFileSync(file, "utf8").length, withOrder.length, "the store is the same size after 5000 dust coins");
   assert.ok(before.length > 0);
+});
+
+// ---- 0.18.190: an order's dust counts together once it covers what is still due ----
+test("9.9 + 0.05 + 0.05 pays a 10 order in any order and across a restart; a flood of dust that never covers the remainder writes nothing", async () => {
+  const VADDR = "MxG0" + "9".repeat(56);
+  let m = freshModules(), pay = [], msg = [];
+  const runner = () => async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
+    : c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: msg } : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] };
+  m.store.saveShop({ shopId: "dust3", shopName: "D", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  m.shop._setRunner(runner()); await m.shop.init();
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("dust3 buyer");
+  const order = async (ref) => { msg = [{ coinid: "0xE1" + Buffer.from(ref).toString("hex"), state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref, randomid: ref, from: buyer.publicId, to: me.publicId, date: Date.now(), shopId: "dust3", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" }))) } }]; await m.shop.scanOnce(); };
+  const coin = (ref, id, amount, created) => ({ coinid: id, tokenid: "0x00", amount, created, state: { "1": "0x" + Buffer.from(ref).toString("hex") } });
+  const orders = [["ORD-DS1", [["0x91", "9.9", 1], ["0x92", "0.05", 2], ["0x93", "0.05", 3]]], ["ORD-DS2", [["0x94", "0.05", 1], ["0x95", "0.05", 2], ["0x96", "9.9", 3]]],
+    ["ORD-DS3", [["0x97", "0.05", 1], ["0x98", "9.9", 2], ["0x99", "0.05", 3]]], ["ORD-DS4", [["0x9a", "0.05", 5], ["0x9b", "9.9", 5], ["0x9c", "0.05", 5]]]];
+  for (const [ref, cs] of orders) {
+    await order(ref); pay = cs.map(([id, a, cr]) => coin(ref, id, a, cr)); await m.shop.scanOnce();
+    assert.equal(m.store.order(ref).paid, true, ref); assert.equal(m.store.order(ref).paidAmount.replace(/0+$/, ""), "10.");
+  }
+  for (const [id, a] of [["0x9d", "9.9"], ["0x9e", "0.05"], ["0x9f", "0.05"]]) {   // directly, newest first
+    if (id === "0x9d") m.store.upsertOrder({ ref: "ORD-DS5", role: "sell", shopId: "dust3", amount: "10", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], shipping: "" });
+  }
+  assert.equal(m.store.recordPayment("ORD-DS5", "0.05", "0x00", "0x9e"), "DUST"); assert.equal(m.store.recordPayment("ORD-DS5", "0.05", "0x00", "0x9f"), "DUST");
+  assert.equal(m.store.recordPayment("ORD-DS5", "9.9", "0x00", "0x9d"), "PAID", "the gathered dust covers what the 9.9 leaves");
+  // across a restart: the 9.9 and one 0.05 were seen before; the memory of the dust is gone; the next scan gathers it again
+  await order("ORD-DS6"); pay = [coin("ORD-DS6", "0xa1", "9.9", 1), coin("ORD-DS6", "0xa2", "0.05", 2)]; await m.shop.scanOnce();
+  assert.equal(m.store.order("ORD-DS6").paid, false); m.store.flush();
+  m = freshModules(); m.shop._setRunner(runner()); await m.shop.init();
+  pay = [coin("ORD-DS6", "0xa1", "9.9", 1), coin("ORD-DS6", "0xa2", "0.05", 2), coin("ORD-DS6", "0xa3", "0.05", 3)]; await m.shop.scanOnce();
+  assert.equal(m.store.order("ORD-DS6").paid, true, "after a restart"); m.store.flush();
+  const file = path.join(DIR, "shop.json"), size = fs.readFileSync(file, "utf8").length;
+  await order("ORD-DS7"); m.store.flush(); const withOrder = fs.readFileSync(file, "utf8").length; assert.ok(withOrder >= size);
+  let writes = 0; const real = fs.writeFileSync; fs.writeFileSync = function () { writes++; return real.apply(this, arguments); };
+  try { for (let i = 0; i < 5000; i++) assert.equal(m.store.recordPayment("ORD-DS7", "0.0000001", "0x00", "0x" + (0x200000 + i).toString(16)), "DUST"); } finally { fs.writeFileSync = real; }
+  assert.equal(writes, 0, "5000 dust coins that do not cover 10 write nothing"); m.store.flush(); assert.equal(fs.readFileSync(file, "utf8").length, withOrder);
 });

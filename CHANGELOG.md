@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.190] — miniMall vendor: an order's dust counts together
+
+- Coins below the dust line (0.18.181) were never counted, so a 9.9 payment and two top-ups of 0.05 left a 10 order unpaid. An order's dust coins are now gathered in memory and counted together once their sum covers what is still due (in any order, and again after a restart, when the scanner sees them anew); a flood of dust that never covers the remainder still writes nothing (an order keeps its 1000 largest in memory). Test: `scripts/shop-test.cjs`.
+
 ## [0.18.189] — a parameter name glued after a quote counts
 
 - Parameter names were read with quotes dropped, so a name glued after a closing quote (`keys action:"list"action:genkey`, `send … tokenid:"0xFF"tokenid:0x00`) ran together with the value before it and was not seen as a repeat. Names are now read with quotes as spaces and with whatever stands inside {…} or […] blanked (a key in a state's JSON is not a parameter); the send pin reads its values the same way. Tests: `scripts/cmdgate-test.cjs`, `scripts/sendpin-test.cjs`.
