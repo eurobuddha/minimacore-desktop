@@ -2764,11 +2764,33 @@
   "parlons-node.jar is not bundled in this build.": "此版本未附带 parlons-node.jar。",
   "The trading engines could not be stopped ({error}), so the wallet was not replaced. Nothing was changed.": "无法停止交易引擎（{error}），因此钱包未被替换。未做任何更改。",
   "{error}. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.": "{error}。节点没有答复，可能仍在重新同步：请查看“日志”，并在它提示已完成时重启节点。",
-  "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.": "节点在答复前停止了，因此结果未知。它已重新启动：请先检查钱包和链再继续。"
+  "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.": "节点在答复前停止了，因此结果未知。它已重新启动：请先检查钱包和链再继续。",
+  "The parameter {param}: is given twice. Nothing was signed.": "参数 {param}: 出现了两次。未签署任何内容。",
+  "The parameter id: is given twice. Nothing was posted.": "参数 id: 出现了两次。未发布任何内容。",
+  "Coin {coin} is held for {why}. Nothing was signed.": "币 {coin} 已被{why}占用。未签署任何内容。",
+  "Not sent: the parameter {param}: is given twice. Nothing was signed.": "未发送：参数 {param}: 出现了两次。未签署任何内容。",
+  "Not sent: the address this send takes its coins from holds coin {coin}, held for {why}. Nothing was signed.": "未发送：此次发送取币的地址中有币 {coin}，它已被{why}占用。未签署任何内容。",
+  "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}. Nothing was signed.": "可用资金不足：{held} {token} 已被{why}占用（一次发送只从一个地址取币，因此与被占用的币同在一个地址上的币也算被占用）。可用：{free} {token}。未签署任何内容。",
+  "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}, and no single address holds the {need} this send needs. Nothing was signed.": "可用资金不足：{held} {token} 已被{why}占用（一次发送只从一个地址取币，因此与被占用的币同在一个地址上的币也算被占用）。可用：{free} {token}，且没有任何单个地址持有此次发送所需的 {need}。未签署任何内容。",
+  "of token {tokenid}": "代币 {tokenid}",
+  "Nothing consolidated: the parameter {param}: is given twice. Nothing was signed.": "未合并任何内容：参数 {param}: 出现了两次。未签署任何内容。",
+  "Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed.": { other: "未合并任何内容：有 {n} 个币已被{why}占用，而合并会自行选币，可能会取用它们。请等它们释放后再试。未签署任何内容。" },
+  "The parameter {param}: is given twice in a chained `txninput`. Nothing was signed.": "参数 {param}: 在链式 `txninput` 中出现了两次。未签署任何内容。",
+  "Not sent: coins are held for {why}, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.": "未发送：有币已被{why}占用，而命令链中的发送或合并无法避开它们。请作为单独一条命令运行。未签署任何内容。",
+  "{list} and {last}": "{list}和{last}",
+  "an AtomiX swap": "AtomiX 兑换",
+  "a PandaPools transaction": "PandaPools 交易",
+  "a Dexicon trade": "Dexicon 交易",
+  "a P2P Chance transaction": "P2P Chance 交易",
+  "a transaction of the wallet": "钱包的一笔交易",
+  "a live Dexicon order": "有效的 Dexicon 订单",
+  "a Dexicon take that has not been answered yet": "尚未得到答复的 Dexicon 吃单",
+  "a Dexicon take that is being voided": "正在作废的 Dexicon 吃单",
+  "Dexicon": "Dexicon"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
-  same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
-  // translated for the desktop (the phone has no such text): 1755 keys for native review
+  same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
+  // translated for the desktop (the phone has no such text): 1776 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4524,6 +4546,27 @@
     "parlons-node.jar is not bundled in this build.",
     "The trading engines could not be stopped ({error}), so the wallet was not replaced. Nothing was changed.",
     "{error}. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.",
-    "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on."
+    "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.",
+    "The parameter {param}: is given twice. Nothing was signed.",
+    "The parameter id: is given twice. Nothing was posted.",
+    "Coin {coin} is held for {why}. Nothing was signed.",
+    "Not sent: the parameter {param}: is given twice. Nothing was signed.",
+    "Not sent: the address this send takes its coins from holds coin {coin}, held for {why}. Nothing was signed.",
+    "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}. Nothing was signed.",
+    "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}, and no single address holds the {need} this send needs. Nothing was signed.",
+    "of token {tokenid}",
+    "Nothing consolidated: the parameter {param}: is given twice. Nothing was signed.",
+    "Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed.",
+    "The parameter {param}: is given twice in a chained `txninput`. Nothing was signed.",
+    "Not sent: coins are held for {why}, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.",
+    "{list} and {last}",
+    "an AtomiX swap",
+    "a PandaPools transaction",
+    "a Dexicon trade",
+    "a P2P Chance transaction",
+    "a transaction of the wallet",
+    "a live Dexicon order",
+    "a Dexicon take that has not been answered yet",
+    "a Dexicon take that is being voided"
   ]
 });

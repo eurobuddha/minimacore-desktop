@@ -12,7 +12,7 @@
  * Code that must DECIDE something from a main message asks for its code (has()), never for its words on screen.
  * The English never travels translated, so a code read from it does not depend on the language on show.
  *
- *   say(text)          the message in the language on show (English when it is not listed)
+ *   say(text[, group]) the message in the language on show (English when it is not listed)
  *   read(text)         { code, key, params, parts } of the whole message, or null
  *   has(text, code)    the message, or any sentence inside it, is that code
  *
@@ -153,7 +153,33 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["PARLONS_NO_JAR", I18N.N_("parlons-node.jar is not bundled in this build.")],
     ["WR_ENGINES", I18N.N_("The trading engines could not be stopped ({error}), so the wallet was not replaced. Nothing was changed.")],
     ["WR_NO_ANSWER", I18N.N_("{error}. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.")],
-    ["WR_STOPPED", I18N.N_("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.")]
+    ["WR_STOPPED", I18N.N_("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.")],
+
+    // ---- The coin guard (main/reserve.js): its refusals, in the node's failure shape, and what a coin is held for ----
+    ["CG_TXN_DUP", I18N.N_("The parameter {param}: is given twice. Nothing was signed.")],
+    ["CG_POST_DUP", I18N.N_("The parameter id: is given twice. Nothing was posted.")],
+    ["CG_COIN_HELD", I18N.N_("Coin {coin} is held for {why}. Nothing was signed."), { nest: { why: { sub: "HOLD_WHY" } } }],
+    ["CG_SEND_DUP", I18N.N_("Not sent: the parameter {param}: is given twice. Nothing was signed.")],
+    ["CG_SEND_FROM", I18N.N_("Not sent: the address this send takes its coins from holds coin {coin}, held for {why}. Nothing was signed."), { nest: { why: { sub: "HOLD_WHY" } } }],
+    ["CG_SEND_SHORT", I18N.N_("Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}. Nothing was signed."), { nest: { why: { sub: "HOLD_WHY" }, token: { sub: ["CG_TOKEN"], value: true } } }],
+    ["CG_SEND_SHORT_ADDRESS", I18N.N_("Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}, and no single address holds the {need} this send needs. Nothing was signed."), { nest: { why: { sub: "HOLD_WHY" }, token: { sub: ["CG_TOKEN"], value: true } } }],
+    ["CG_TOKEN", I18N.N_("of token {tokenid}"), { top: false }],
+    ["CG_CONSOLIDATE_DUP", I18N.N_("Nothing consolidated: the parameter {param}: is given twice. Nothing was signed.")],
+    ["CG_CONSOLIDATE_HELD", I18N.N_("Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed."), { nest: { why: { sub: "HOLD_WHY" } } }],
+    ["CG_CHAIN_DUP", I18N.N_("The parameter {param}: is given twice in a chained `txninput`. Nothing was signed.")],
+    ["CG_CHAIN_HELD", I18N.N_("Not sent: coins are held for {why}, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed."), { nest: { why: { sub: "HOLD_WHY" } } }],
+    // what holds a coin: one of these, or several joined ("a, b and c"); read with say(text, "HOLD_WHY") where a screen shows it
+    ["WHY_SEVERAL", I18N.N_("{list} and {last}"), { top: false, group: "HOLD_WHY", nest: { list: { split: ", ", sub: "HOLD_WHY_ONE" }, last: { sub: "HOLD_WHY_ONE" } } }],
+    ["WHY_ATOMIX", I18N.N_("an AtomiX swap"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_PANDAPOOLS", I18N.N_("a PandaPools transaction"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_DEXICON_TRADE", I18N.N_("a Dexicon trade"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_CASINO", I18N.N_("a P2P Chance transaction"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_WALLET", I18N.N_("a transaction of the wallet"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_DEXICON", I18N.N_("Dexicon"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_OTHER", I18N.N_("another part of the app"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_DEXICON_ORDER", I18N.N_("a live Dexicon order"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_DEXICON_TAKE", I18N.N_("a Dexicon take that has not been answered yet"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+    ["WHY_DEXICON_VOID", I18N.N_("a Dexicon take that is being voided"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }]
   ];
 
   var BY = {}, GROUP = {}, TOP = [];
@@ -161,7 +187,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     var names = [], src = "^";
     String(form).split(/(\{\w+\})/).forEach(function (part) {
       var m = /^\{(\w+)\}$/.exec(part);
-      if (m) { names.push(m[1]); src += m[1] === "n" ? "(\\d+)" : "([\\s\\S]*?)"; }
+      if (m && names.indexOf(m[1]) >= 0) src += "\\" + (names.indexOf(m[1]) + 1);   // the same value again: the same text again
+      else if (m) { names.push(m[1]); src += m[1] === "n" ? "(\\d+)" : "([\\s\\S]*?)"; }
       else src += part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     });
     return { re: new RegExp(src + "$"), names: names };
@@ -173,7 +200,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       if (!e.forms.some(function (x) { return x.text === f; })) { var r = rx(f); r.text = f; e.forms.push(r); }
     });
     BY[e.code] = e; if (e.top) TOP.push(e);
-    if (o.group) (GROUP[o.group] = GROUP[o.group] || []).push(e);
+    [].concat(o.group || []).forEach(function (g) { (GROUP[g] = GROUP[g] || []).push(e); });
   });
   var listOf = function (sub) { return sub == null ? TOP : typeof sub === "string" ? (GROUP[sub] || []) : sub.map(function (c) { return BY[c]; }); };
 
@@ -205,8 +232,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     });
     return I18N.t(r.key, p);
   }
-  /** The message in the language on show; as it came when it is not listed here. */
-  function say(text) { var r = read(text); return r ? render(r) : String(text == null ? "" : text); }
+  /** The message in the language on show; as it came when it is not listed here. group: read it as one of that group's sentences only (a value a screen shows, such as what holds a coin). */
+  function say(text, group) { var r = read(text, group); return r ? render(r) : String(text == null ? "" : text); }
   /** Is this message, or a sentence inside it, the given code? */
   function has(text, code) {
     var walk = function (r) { return !!r && (r.code === code || Object.keys(r.parts).some(function (p) { return r.parts[p].some(function (b) { return walk(b.said); }); })); };

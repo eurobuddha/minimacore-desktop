@@ -4,6 +4,7 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
 require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
+globalThis.MainSaid = require("../renderer/mainsaid.js");   // the window's reader of main's English (a held coin's reason is said through it)
 const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"));
 
 function source(name) {

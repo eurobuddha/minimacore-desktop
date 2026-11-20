@@ -64,7 +64,7 @@ let toastTimer = null;
 function toast(msg, kind, copyText) {
   const t = el("toast");
   t.className = "toast" + (kind ? " " + kind : "") + (copyText ? " toast--copy" : "");
-  t.textContent = msg + (copyText ? "  ⧉" : "");
+  t.textContent = MainSaid.say(msg) + (copyText ? "  ⧉" : "");   // a sentence of the main process or the coin guard (in English): said in the app's language
   t.style.display = "";
   t.onclick = copyText ? (() => copy(copyText)) : null;
   t.title = copyText ? I18N.t("Click to copy the full id") : "";
@@ -1381,7 +1381,7 @@ let HELD = { coins: {}, funds: {} };
 async function loadHeld() {
   try {
     const r = await api.reserved(), coins = {}, funds = {};
-    for (const c of (r && r.coins) || []) coins[String(c.coinid).toLowerCase()] = String(c.why || t("another part of the app"));
+    for (const c of (r && r.coins) || []) coins[String(c.coinid).toLowerCase()] = String(c.why || "another part of the app");   // main's English: said in the app's language where shown (heldWhy, heldLine)
     for (const f of (r && r.funds) || []) funds[String(f.tokenid).toLowerCase()] = f;
     HELD = { coins, funds };
   } catch (e) {}
@@ -1389,7 +1389,7 @@ async function loadHeld() {
 const heldOf = (tid) => HELD.funds[String(tid || MINIMA).toLowerCase()] || null;
 /** What the wallet itself can send of this balance row: the node's sendable less what is held (never below 0). */
 const freeOf = (b) => { const h = heldOf(b.tokenid || MINIMA); return h ? decSub(b.sendable || "0", h.held) : (b.sendable || "0"); };
-const heldLine = (tid) => { const h = heldOf(tid); return h ? t("held {amount} for {why}", { amount: TOK.tidyAmount(h.held), why: h.why }) : ""; };
+const heldLine = (tid) => { const h = heldOf(tid); return h ? t("held {amount} for {why}", { amount: TOK.tidyAmount(h.held), why: MainSaid.say(h.why, "HOLD_WHY") }) : ""; };
 let BAL_BY_TID = {};       // tokenid → last balance row, so a row click can open its dialog without refetching
 let BAL_AT = 0;            // when the last `balance` reply landed: the breakdown's "updated ..."
 let WAL_MINIMA = null;     // the MINIMA balance row behind "Total balance" (null: not read)
@@ -1627,7 +1627,7 @@ async function showTokenDetail(b) {
       ${desc ? `<div class="tokd-desc">${esc(desc)}</div>` : ""}
     </div>
     <div class="kv"><span class="kv__k">${th("Spendable")}</span><span class="kv__v kv__v--green">${esc(TOK.tidyAmount(freeOf(b)))}${tick ? " " + esc(tick) : ""}</span></div>
-    ${heldOf(tid) ? `<div class="kv"><span class="kv__k">${th("Held")}</span><span class="kv__v">${tr("{held} for {why}", { held: esc(TOK.tidyAmount(heldOf(tid).held)), why: esc(heldOf(tid).why) })}</span></div>` : ""}
+    ${heldOf(tid) ? `<div class="kv"><span class="kv__k">${th("Held")}</span><span class="kv__v">${tr("{held} for {why}", { held: esc(TOK.tidyAmount(heldOf(tid).held)), why: esc(MainSaid.say(heldOf(tid).why, "HOLD_WHY")) })}</span></div>` : ""}
     ${locked !== "0" ? `<div class="kv"><span class="kv__k">${th("🔒 Locked")}</span><span class="kv__v">${esc(TOK.tidyAmount(locked))}</span></div>` : ""}
     ${b.unconfirmed && b.unconfirmed !== "0" ? `<div class="kv"><span class="kv__k">${th("Pending")}</span><span class="kv__v kv__v--amber">${esc(TOK.tidyAmount(b.unconfirmed))}</span></div>` : ""}
     <div class="kv"><span class="kv__k">${th("Coins")}</span><span class="kv__v">${coins}</span></div>
@@ -1758,7 +1758,7 @@ async function showCoins(b) {
   if (!all.length) { status(t("No coins for this token.")); return; }
   const amountOf = (c) => String(isNative ? (c.amount || "0") : (c.tokenamount || c.amount || "0"));
   const isSendable = (c) => (sendableIds ? sendableIds.has(c.coinid) : null);   // null: not known, and never shown as "sendable"
-  const heldWhy = (c) => HELD.coins[String(c.coinid || "").toLowerCase()] || "";
+  const heldWhy = (c) => MainSaid.say(HELD.coins[String(c.coinid || "").toLowerCase()] || "", "HOLD_WHY");
   const tagOf = (c) => {
     const ad = String(c.address || "").toLowerCase(), mx = String(c.miniaddress || "").toLowerCase();
     if ((ad && poolAddrs.has(ad)) || (mx && poolAddrs.has(mx))) return `<span class="coin-chip">${th("POOL")}</span>`;

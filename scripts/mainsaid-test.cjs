@@ -149,3 +149,38 @@ test("node start, node kind, wallet replacement, config: each listed sentence is
   // the program on the port is a value: kept as it came
   I18N.set("ru"); assert.ok(MS.say("Port 9001 (the node's RPC) is in use by /usr/bin/java -jar x.jar (pid 77). minimaCore did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.").includes("/usr/bin/java -jar x.jar")); I18N.set("en");
 });
+
+test("the coin guard: every refusal, run through main/reserve.js in front of the model node, and what a coin is held for", async () => {
+  const { createRegistry } = require("../main/reserve"), { makeNode, build, coinId, ADDR } = require("./reserve-model.cjs");
+  const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", OTHER = "0x" + "AB".repeat(32);
+  const rig = (coins) => { const node = makeNode(coins), reg = createRegistry({ now: () => 1e12, log: () => {}, sends: "enforce" }); return { node, reg, as: (o) => (c) => reg.guard(o, c, node.run) }; };
+  const wallet3 = () => [{ coinid: coinId(1), amount: "100", address: ADDR(1) }, { coinid: coinId(2), amount: "50", address: ADDR(2) }, { coinid: coinId(3), amount: "10", address: ADDR(3) }];
+  const said = [];
+  let { node, reg, as } = rig(wallet3().concat([{ coinid: coinId(11), amount: "30", address: ADDR(1), tokenid: MXUSD }, { coinid: coinId(12), amount: "7.5", address: ADDR(2), tokenid: MXUSD }, { coinid: coinId(21), amount: "5", address: ADDR(1), tokenid: OTHER }]));
+  reg.setHolds("dexicon", [{ coinid: coinId(1), why: "a live Dexicon order" }, { coinid: coinId(11), why: "a Dexicon take that has not been answered yet" }, { coinid: coinId(21), why: "a Dexicon take that is being voided" }]);
+  said.push((await build(as("pandapools"), "pp1", [coinId(1)])).error);
+  said.push((await as("wallet")("send amount:60 address:" + ADDR(9))).error, (await as("wallet")("send amount:500 address:" + ADDR(9))).error);
+  said.push((await as("wallet")("send amount:7.50000001 address:" + ADDR(9) + " tokenid:" + MXUSD)).error, (await as("wallet")("send amount:9 address:" + ADDR(9) + " tokenid:" + OTHER)).error);
+  said.push((await as("wallet")("send amount:5 address:" + ADDR(9) + " fromaddress:" + ADDR(1))).error);
+  said.push((await as("wallet")("consolidate tokenid:0x00")).error);
+  said.push((await as("wallet")("send amount:1 address:" + ADDR(7) + " amount:60")).error, (await as("wallet")("consolidate tokenid:0x00 tokenid:0x00")).error);
+  said.push((await as("wallet")("txninput id:t coinid:" + coinId(3) + " coinid:" + coinId(3))).error, (await as("wallet")("txnpost id:a id:b")).error);
+  said.push((await as("wallet")("txncreate id:u;txninput id:u coinid:" + coinId(2) + " coinid:" + coinId(2))).error);
+  ({ node, reg, as } = rig(wallet3()));
+  await build(as("atomix"), "lock", [coinId(2)], { noPost: true });
+  reg.setHolds("dexicon", [{ coinid: coinId(1), why: "a live Dexicon order" }, { coinid: coinId(3), why: "a live Dexicon order" }]);
+  said.push((await as("wallet")("consolidate tokenid:0x00")).error, (await as("wallet")("txncreate id:u;send amount:1 address:" + ADDR(9))).error);
+  for (const m of said) check(m);
+  for (const c of MS.codes().filter(c => /^CG_/.test(c))) assert.ok(seen.has(c), "never said by main/reserve.js here: " + c);
+  // what holds a coin, as the Wallet shows it (main/reserve.js describe / whys): one, or several joined
+  for (const why of ["an AtomiX swap", "a PandaPools transaction", "a Dexicon trade", "a P2P Chance transaction", "a transaction of the wallet", "Dexicon", "another part of the app", "a live Dexicon order", "an AtomiX swap and a live Dexicon order", "an AtomiX swap, a PandaPools transaction and a live Dexicon order"]) {
+    I18N.set("en"); assert.equal(MS.say(why, "HOLD_WHY"), why);
+    for (const code of LANGS) { I18N.set(code); const s = MS.say(why, "HOLD_WHY"); if (why !== "Dexicon") assert.notEqual(s, why, code + ": " + why); assert.ok(!/ and |AtomiX swap|PandaPools transaction/.test(s), code + ": " + s); }
+  }
+  I18N.set("en");
+  assert.equal(MS.say("Dexicon"), "Dexicon", "a word of the group is never read as a whole message");
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "reserve.js"), "utf8");
+  for (const w of ['atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet"', 'HOLD_WHY = { dexicon: "Dexicon" }', '|| "another part of the app"', 'said.slice(0, -1).join(", ") + " and " + said[said.length - 1]']) assert.ok(src.includes(w), "main/reserve.js still says: " + w);
+  const app = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes('t.textContent = MainSaid.say(msg) + (copyText ? "  ⧉" : "");') && app.split(', "HOLD_WHY")').length - 1 >= 3, "toasts and the held lines go through MainSaid");
+});

@@ -2764,11 +2764,33 @@
   "parlons-node.jar is not bundled in this build.": "parlons-node.jar не входить до цієї збірки.",
   "The trading engines could not be stopped ({error}), so the wallet was not replaced. Nothing was changed.": "Торгові рушії не вдалося зупинити ({error}), тому гаманець не замінено. Нічого не змінено.",
   "{error}. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.": "{error}. Вузол не відповів і, можливо, ще пересинхронізується: стежте за «Журналами» й перезапустіть вузол, коли він повідомить про завершення.",
-  "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.": "Вузол зупинився, не відповівши, тому результат невідомий. Його запущено знову: перевірте гаманець і ланцюг, перш ніж продовжувати."
+  "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.": "Вузол зупинився, не відповівши, тому результат невідомий. Його запущено знову: перевірте гаманець і ланцюг, перш ніж продовжувати.",
+  "The parameter {param}: is given twice. Nothing was signed.": "Параметр {param}: вказано двічі. Нічого не підписано.",
+  "The parameter id: is given twice. Nothing was posted.": "Параметр id: вказано двічі. Нічого не надіслано.",
+  "Coin {coin} is held for {why}. Nothing was signed.": "Монета {coin} утримується для {why}. Нічого не підписано.",
+  "Not sent: the parameter {param}: is given twice. Nothing was signed.": "Не надіслано: параметр {param}: вказано двічі. Нічого не підписано.",
+  "Not sent: the address this send takes its coins from holds coin {coin}, held for {why}. Nothing was signed.": "Не надіслано: на адресі, з якої це надсилання бере монети, є монета {coin}, що утримується для {why}. Нічого не підписано.",
+  "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}. Nothing was signed.": "Недостатньо вільних коштів: {held} {token} утримується для {why} (надсилання бере монети з однієї адреси, тому монети на адресі, де є утримувана монета, теж вважаються утримуваними). Вільно: {free} {token}. Нічого не підписано.",
+  "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}, and no single address holds the {need} this send needs. Nothing was signed.": "Недостатньо вільних коштів: {held} {token} утримується для {why} (надсилання бере монети з однієї адреси, тому монети на адресі, де є утримувана монета, теж вважаються утримуваними). Вільно: {free} {token}, і на жодній адресі немає {need}, потрібних цьому надсиланню. Нічого не підписано.",
+  "of token {tokenid}": "токена {tokenid}",
+  "Nothing consolidated: the parameter {param}: is given twice. Nothing was signed.": "Нічого не об’єднано: параметр {param}: вказано двічі. Нічого не підписано.",
+  "Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed.": { one: "Нічого не об’єднано: утримуваних монет: {n}, для {why}, а об’єднання саме вибирає монети й могло б узяти утримувану. Спробуйте ще раз, коли вони звільняться. Нічого не підписано.", few: "Нічого не об’єднано: утримуваних монет: {n}, для {why}, а об’єднання саме вибирає монети й могло б узяти утримувану. Спробуйте ще раз, коли вони звільняться. Нічого не підписано.", many: "Нічого не об’єднано: утримуваних монет: {n}, для {why}, а об’єднання саме вибирає монети й могло б узяти утримувану. Спробуйте ще раз, коли вони звільняться. Нічого не підписано.", other: "Нічого не об’єднано: утримуваних монет: {n}, для {why}, а об’єднання саме вибирає монети й могло б узяти утримувану. Спробуйте ще раз, коли вони звільняться. Нічого не підписано." },
+  "The parameter {param}: is given twice in a chained `txninput`. Nothing was signed.": "Параметр {param}: вказано двічі в ланцюжку `txninput`. Нічого не підписано.",
+  "Not sent: coins are held for {why}, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.": "Не надіслано: монети утримуються для {why}, а надсилання чи об’єднання всередині ланцюжка команд не можна втримати від них. Виконайте це однією командою. Нічого не підписано.",
+  "{list} and {last}": "{list} і {last}",
+  "an AtomiX swap": "свопу AtomiX",
+  "a PandaPools transaction": "транзакції PandaPools",
+  "a Dexicon trade": "угоди Dexicon",
+  "a P2P Chance transaction": "транзакції P2P Chance",
+  "a transaction of the wallet": "транзакції гаманця",
+  "a live Dexicon order": "активної заявки Dexicon",
+  "a Dexicon take that has not been answered yet": "взяття Dexicon, на яке ще немає відповіді",
+  "a Dexicon take that is being voided": "взяття Dexicon, яке анулюється",
+  "Dexicon": "Dexicon"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
-  same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "OK ·", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)", "• {item}."],
-  // translated for the desktop (the phone has no such text): 1755 keys for native review
+  same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "OK ·", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)", "• {item}.", "Dexicon"],
+  // translated for the desktop (the phone has no such text): 1776 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4524,6 +4546,27 @@
     "parlons-node.jar is not bundled in this build.",
     "The trading engines could not be stopped ({error}), so the wallet was not replaced. Nothing was changed.",
     "{error}. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.",
-    "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on."
+    "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.",
+    "The parameter {param}: is given twice. Nothing was signed.",
+    "The parameter id: is given twice. Nothing was posted.",
+    "Coin {coin} is held for {why}. Nothing was signed.",
+    "Not sent: the parameter {param}: is given twice. Nothing was signed.",
+    "Not sent: the address this send takes its coins from holds coin {coin}, held for {why}. Nothing was signed.",
+    "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}. Nothing was signed.",
+    "Not enough free funds: {held} {token} is held for {why} (a send takes its coins from one address, so coins at an address with a held coin count as held). Free: {free} {token}, and no single address holds the {need} this send needs. Nothing was signed.",
+    "of token {tokenid}",
+    "Nothing consolidated: the parameter {param}: is given twice. Nothing was signed.",
+    "Nothing consolidated: {n} coins are held for {why}, and consolidating chooses its own coins and could take one of them. Try again when they are free. Nothing was signed.",
+    "The parameter {param}: is given twice in a chained `txninput`. Nothing was signed.",
+    "Not sent: coins are held for {why}, and a send or a consolidation inside a chain of commands cannot be kept away from them. Run it as one command. Nothing was signed.",
+    "{list} and {last}",
+    "an AtomiX swap",
+    "a PandaPools transaction",
+    "a Dexicon trade",
+    "a P2P Chance transaction",
+    "a transaction of the wallet",
+    "a live Dexicon order",
+    "a Dexicon take that has not been answered yet",
+    "a Dexicon take that is being voided"
   ]
 });
