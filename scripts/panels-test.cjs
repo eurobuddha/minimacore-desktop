@@ -556,12 +556,13 @@ test("nothing that moves value changed in the AtomiX rewrite", () => {
   const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
   for (const call of ["api.axQuote(axSell, axAmt, axSlip)", "api.axSwap(q.quoteId)", "api.axMakerSave(cfg, collect())",
                       "api.axMakerWithdraw()", "api.axOtcPropose(", "api.axOtcDeal(", "api.axSendReview(asset, to, amt)",
-                      "api.axSend(asset, to, amt)", "api.axSwitchCurrency(key)", "api.axExportKey()"]) {
+                      "api.axSend(asset, to, amt)", "api.axSwitchCurrency(key)"]) {
     assert.ok(src.includes(call), call + " is still here");
   }
   assert.ok(/const q = await api\.axQuote\([\s\S]{0,2200}await showConfirm\(title, msg[\s\S]{0,300}api\.axSwap\(q\.quoteId\)/.test(src),
     "quote → confirm → post that same quoteId");
-  assert.ok(/showConfirm\("Export ETH private key"/.test(src), "the key-export warning is intact");
+  // CHANGED on purpose (0.18.152): the panel's own ungated api.axExportKey() is gone; Export key opens ETH Wallet's gated dialog
+  assert.ok(/function axExportKey\(\) \{ exportKey\(\); \}/.test(src) && !src.includes("api.axExportKey"), "the key export is ETH Wallet's gated one");
   assert.ok(/showConfirm\("Review — Send "[\s\S]{0,200}This cannot be undone/.test(src), "the irreversible-send confirm is intact");
   assert.ok(/showConfirm\("Withdraw your market\?"/.test(src), "…and the withdraw confirm");
 });

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.152] — one gated way to the ETH private key
+
+- Both `mcd:axExportKey` (AtomiX panel) and `mcd:ewExportKey` (ETH Wallet) handed the key to any caller in the window with no check. `mcd:axExportKey` and its bridge are removed; `mcd:ewExportKey` now needs the typed phrase SHOW KEY and, where the system offers it, the Touch ID prompt, both checked in the main process (`main/ethwallet.js` `exportKeyGated`). The AtomiX panel's Export key opens the same dialog and holds no key. The key is shown as text in one node, says when no system check took place, and closes after 60 seconds and when the window is left. A copied key goes to the clipboard through the main process and is cleared after 60 seconds and at quit, only if the clipboard still holds it (`main/clipsecret.js`). Port of 0.19.108 / 0.19.120. Test: `scripts/ethkey-test.cjs` (`npm run test:ethkey`, in CI); `scripts/panels-test.cjs` updated for the intended change.
+
 ## [0.18.151] — miniMall vendor: an order is paid in the shop's own token
 
 - An incoming order took its token from the currency the BUYER wrote (`routeIncoming`, `tokenFor(w.currency)`): an order to an MxUSD shop that said "Minima" was marked PAID by a payment in Minima. The token, the currency and the new-order notification now come from the vendor's own stored shop. Orders and totals show the currency as MxUSD. Test: `scripts/shop-test.cjs`.

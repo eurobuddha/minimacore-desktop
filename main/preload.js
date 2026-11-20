@@ -189,7 +189,6 @@ contextBridge.exposeInMainWorld("mcd", {
   axInspect: (hash) => ipcRenderer.invoke("mcd:axInspect", hash),
   axMarketHistory: () => ipcRenderer.invoke("mcd:axMarketHistory"),
   axWallet: () => ipcRenderer.invoke("mcd:axWallet"),
-  axExportKey: () => ipcRenderer.invoke("mcd:axExportKey"),
   axCoins: () => ipcRenderer.invoke("mcd:axCoins"),
   axSendMax: (asset) => ipcRenderer.invoke("mcd:axSendMax", asset),
   axSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:axSendReview", asset, to, amt),
@@ -217,7 +216,8 @@ contextBridge.exposeInMainWorld("mcd", {
   ewSendMax: (asset) => ipcRenderer.invoke("mcd:ewSendMax", asset),
   ewSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:ewSendReview", asset, to, amt),
   ewSend: (asset, to, amt, tier) => ipcRenderer.invoke("mcd:ewSend", asset, to, amt, tier),
-  ewExportKey: () => ipcRenderer.invoke("mcd:ewExportKey"),
+  ewExportKey: (typed) => ipcRenderer.invoke("mcd:ewExportKey", typed),   // the typed phrase; the main process checks it and asks the system where it can → { key, system }
+  clipSecret: (text) => ipcRenderer.invoke("mcd:clipSecret", text),   // cleared from the clipboard after a minute and at quit
   ewSetRpc: (url) => ipcRenderer.invoke("mcd:ewSetRpc", url),
   onEthWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:ethwallet", h); return () => ipcRenderer.removeListener("mcd:ethwallet", h); },
 

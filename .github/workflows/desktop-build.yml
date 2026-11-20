@@ -89,6 +89,10 @@ jobs:
       - name: Verify miniMall money rules
         run: npm run test:shop
 
+      # The ETH private key: one gated way to it (typed phrase, the system's prompt), a clipboard that clears itself.
+      - name: Verify ETH key export gate
+        run: npm run test:ethkey
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a

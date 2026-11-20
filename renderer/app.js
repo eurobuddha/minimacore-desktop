@@ -2421,7 +2421,8 @@ AtomixPanel.init({
   api, esc, el, toast, copy, TOK,
   showConfirm, showPrompt, relTime, idHtml,
   running: () => running,
-  activeView: () => activeView
+  activeView: () => activeView,
+  exportKey: () => ewExportKey()   // the one gated way to the ETH key (0.18.152)
 });
 api.appVersion().then(v => AtomixPanel.setVersion(v)).catch(() => {});
 function renderAtomix() { AtomixPanel.render(); }
@@ -2614,16 +2615,33 @@ function ewSettingsDialog(b) {
   el("ewSetTok").onclick = () => { close(); ewAddTokenDialog(); };
 }
 
+// 0.18.152: the typed phrase, then the system's prompt where Electron offers one (Touch ID on a Mac that has it), both
+// checked in the main process. The ETH Wallet and the AtomiX panel both come here; no other way to the key exists.
 async function ewExportKey() {
-  if (!await showConfirm("Export ETH private key", "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.", "Reveal key", true)) return;
-  const pk = await api.ewExportKey().catch(() => null);
-  if (!pk) { toast("Wallet not ready", "warn"); return; }
+  const typed = await showPrompt("Export ETH private key", "", "SHOW KEY", { ok: "Show the key",
+    message: "This key controls your ETH funds, and it is the key AtomiX swaps sign with. Anyone who sees it can take them, permanently. It is derived from your Minima node seed. Never share it or type it into a website. Type SHOW KEY to continue." });
+  if (typed == null) return;
+  let r; try { r = await api.ewExportKey(typed); } catch (e) { const m = String((e && e.message) || ""); toast(/cancel/i.test(m) ? "Cancelled" : /SHOW KEY/.test(m) ? "Type SHOW KEY exactly to continue." : "Wallet not ready", "warn"); return; }
+  if (!r || !r.key) { toast("Wallet not ready", "warn"); return; }
+  ewRevealKey(r.key, r.system === true); r.key = null;
+}
+/** The key on the screen: for a minute at most, and only while the window is in front. It is set as text in one node that
+ *  closing removes; Copy goes through the main process, which clears the clipboard again (main/clipsecret.js). */
+function ewRevealKey(key, system) {
+  let k = String(key || ""); key = null;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="ewPkOv"><div class="modal">
-    <div class="modal__title">ETH private key</div><div class="view__desc" style="color:var(--red)">⚠ Keep this secret.</div>
-    <div class="mono" style="user-select:all;word-break:break-all;font-size:12px">${esc(pk)}</div>
+    <div class="modal__title">ETH private key</div><div class="view__desc" style="color:var(--red)">⚠ Keep this secret. Anyone with this key controls these funds.</div>
+    ${system ? "" : `<div class="view__desc" style="color:var(--red)">No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.</div>`}
+    <div class="mono" id="ewPkText" style="user-select:all;word-break:break-all;font-size:12px"></div>
+    <div class="view__desc">This closes by itself after 60 seconds, and when you leave this window.</div>
     <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="ewPkClose">Close</button><button class="btn btn--primary btn--full" id="ewPkCopy">Copy key</button></div></div></div>`);
-  const ov = el("ewPkOv"); const close = () => ov && ov.remove();
-  el("ewPkClose").onclick = close; el("ewPkCopy").onclick = () => copy(pk);
+  const ov = el("ewPkOv"); el("ewPkText").textContent = k;
+  const hidden = () => { if (document.hidden) close(); };
+  const close = () => { k = ""; clearTimeout(timer); window.removeEventListener("blur", close); document.removeEventListener("visibilitychange", hidden); if (ov) ov.remove(); };
+  const timer = setTimeout(close, 60000);
+  window.addEventListener("blur", close); document.addEventListener("visibilitychange", hidden);
+  el("ewPkClose").onclick = close;
+  el("ewPkCopy").onclick = () => { if (!k) return; api.clipSecret(k); toast("Key copied. The clipboard is cleared in 60 seconds and when the app quits", "ok"); };
   ov.onclick = e => { if (e.target.id === "ewPkOv") close(); };
 }
 

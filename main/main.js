@@ -165,6 +165,9 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
 // to the renderer navigator.clipboard's focus/permission failures (which silently left stale data on the clipboard
 // while the UI still said "Copied"). Coerce nullish to "" so it never writes the string "null"/"undefined".
 ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? "" : String(text)); return true; });
+// A secret on the clipboard (the ETH key): cleared after a minute and when the app quits, unless something else was copied since (main/clipsecret.js).
+const clipSecret = require("./clipsecret").create(clipboard);
+ipcMain.handle("mcd:clipSecret", (_e, text) => clipSecret.copy(text));
 
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
@@ -502,7 +505,6 @@ ipcMain.handle("mcd:axExportSwaps", () => atomix.exportSwaps());
 ipcMain.handle("mcd:axInspect", (_e, hash) => atomix.inspect(hash));
 ipcMain.handle("mcd:axMarketHistory", () => atomix.marketHistory());
 ipcMain.handle("mcd:axWallet", () => atomix.wallet());
-ipcMain.handle("mcd:axExportKey", () => atomix.exportKey());
 ipcMain.handle("mcd:axCoins", () => atomix.coins());
 ipcMain.handle("mcd:axSendMax", (_e, asset) => atomix.sendMax(asset));
 ipcMain.handle("mcd:axSendReview", (_e, asset, to, amt) => atomix.sendReview(asset, to, amt));
@@ -540,7 +542,9 @@ ipcMain.handle("mcd:ewRemoveToken", (_e, addr) => ethwallet.removeToken(addr));
 ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
 ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
 ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
-ipcMain.handle("mcd:ewExportKey", () => ethwallet.exportKey());
+// The ETH key: the typed phrase and, where the system offers one, its own prompt, both here (main/ethwallet.js exportKeyGated).
+ipcMain.handle("mcd:ewExportKey", (_e, typed) => { const { systemPreferences } = require("electron"); return ethwallet.exportKeyGated(typed, {
+  can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }); });
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
@@ -668,7 +672,7 @@ app.whenReady().then(() => {
 // The node must never outlive the app: a normal quit goes through before-quit → node.stop() (graceful);
 // these two are the last resort for every other way out (uncaught exception, will-quit after a failed
 // stop). A SIGKILL of the app itself is what reclaimStaleNode() on the next start is for.
-app.on("will-quit", () => { try { node.killNow(); } catch (e) {} });
+app.on("will-quit", () => { try { clipSecret.clearNow(); } catch (e) {} try { node.killNow(); } catch (e) {} });   // a key still on the clipboard does not outlive the app
 process.on("exit", () => { try { node.killNow(); } catch (e) {} });
 
 app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhere */ if (process.platform !== "darwin") app.quit(); });

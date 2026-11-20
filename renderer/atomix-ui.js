@@ -26,6 +26,7 @@
   // ---- injected dependencies (renderer/app.js owns these) ----
   var api, esc, el, toast, copy, TOK, showConfirm, showPrompt, relTime, idHtml;
   var running = function () { return false; };
+  var exportKey = function () {};   // ETH Wallet's gated export dialog (renderer/app.js ewExportKey)
   var activeView = function () { return ""; };
 
   let axView = "swap";                    // swap | market | activity | otc | wallet
@@ -815,18 +816,9 @@
     el("axRxClose").onclick = close; el("axRxCopy").onclick = () => { copy(addr); };
     ov.onclick = e => { if (e.target.id === "axRxOv") close(); };
   }
-  async function axExportKey() {
-    if (!await showConfirm("Export ETH private key", "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.", "Reveal key", true)) return;
-    const pk = await api.axExportKey().catch(() => null);
-    if (!pk) { toast("Wallet not ready", "warn"); return; }
-    document.body.insertAdjacentHTML("beforeend", `<div class="overlay axapp" id="axPkOv"><div class="ax-modal">
-      <div class="ax-modt">ETH private key</div><div class="ax-desc" style="color:var(--ax-red)">⚠ Keep this secret.</div>
-      <div class="mono" style="user-select:all;word-break:break-all;font-size:12px">${esc(pk)}</div>
-      <div class="ax-seg" style="margin-top:12px"><button class="ax-btn" id="axPkClose">Close</button><button class="ax-btn ax-btn--cta" id="axPkCopy">Copy key</button></div></div></div>`); axApplyLook();
-    const ov = el("axPkOv"); const close = () => ov && ov.remove();
-    el("axPkClose").onclick = close; el("axPkCopy").onclick = () => copy(pk);
-    ov.onclick = e => { if (e.target.id === "axPkOv") close(); };
-  }
+  // 0.18.152: one gated way to the key. The panel opens ETH Wallet's export (typed phrase and the system's prompt, checked
+  // in the main process; the key shown for a minute at most, copied to a clipboard that clears itself) and holds no key.
+  function axExportKey() { exportKey(); }
   async function axCoinDump() {
     const rows = await api.axCoins().catch(() => []);
     const body = rows.length ? rows.map(c => `<div class="ax-row mono" style="font-size:12px"><span>${esc(c.amount)}</span><span style="color:var(--ax-dim)">${idHtml(c.coinid, TOK.shortId(c.coinid))}</span></div>`).join("") : '<div class="ax-empty">No sendable coins right now.</div>';
@@ -909,7 +901,7 @@
     init: function (d) {
       api = d.api; esc = d.esc; el = d.el; toast = d.toast; copy = d.copy; TOK = d.TOK;
       showConfirm = d.showConfirm; showPrompt = d.showPrompt; relTime = d.relTime; idHtml = d.idHtml;
-      running = d.running; activeView = d.activeView;
+      running = d.running; activeView = d.activeView; exportKey = d.exportKey;
     },
     render: renderAtomix,
     onUpdate: onAtomixUpdate,

@@ -32,9 +32,24 @@ const sendMax     = (asset) => atomix.ethSendMax(asset);
 const sendReview  = (asset, to, amt) => atomix.ethSendReview(asset, to, amt);
 const sendExecute = (asset, to, amt, tier) => atomix.ethSendExecute(asset, to, amt, tier);
 const exportKey   = () => atomix.exportKey();
+
+/**
+ * The key for the screen (0.18.152, from 0.19.108 / 0.19.120). Never handed over on a bare call: the caller must pass
+ * the phrase the user typed, and where the system can ask "is it you" (os.can(): Touch ID on a Mac that has it) it is
+ * asked here, in the main process, and a refusal ends it. This is the ONLY way a key reaches a window: the AtomiX
+ * panel's "Export key" uses it too (its own ungated mcd:axExportKey is gone). → { key, system }.
+ * os = { can() -> bool, prompt(reason) -> Promise } (main.js passes Electron's systemPreferences).
+ */
+const EXPORT_PHRASE = "SHOW KEY";
+async function exportKeyGated(typed, os) {
+  if (String(typed == null ? "" : typed).trim() !== EXPORT_PHRASE) throw new Error("Type " + EXPORT_PHRASE + " exactly to continue.");
+  let ask = false; try { ask = !!(os && os.can()); } catch (e) { ask = false; }
+  if (ask) { try { await os.prompt("show the ETH private key"); } catch (e) { throw new Error("Cancelled"); } }
+  return { key: atomix.exportKey(), system: ask };   // system: the system's own check took place; false is said on the screen
+}
 const setRpc      = (url) => atomix.ethSetRpc(url);
 
 module.exports = {
   emitter, status, balances, tokens, addToken, removeToken,
-  sendMax, sendReview, sendExecute, exportKey, setRpc
+  sendMax, sendReview, sendExecute, exportKey, exportKeyGated, EXPORT_PHRASE, setRpc
 };
