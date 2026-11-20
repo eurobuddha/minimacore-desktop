@@ -503,8 +503,9 @@ function create(o) {
           }
         }
         const r = await call(c);
-        if (r == null) return { ok: false, error: "Minima Core didn't respond (at " + verb + ")" };
-        if (typeof r.status !== "boolean") return { ok: false, error: "Couldn't read Minima Core's reply to " + verb + ": it may have succeeded. Check the Activity log before retrying." };
+        // a post with no readable answer may have been broadcast: `unknown`, so the caller keeps it as posted (the chain decides)
+        if (r == null) return { ok: false, error: "Minima Core didn't respond (at " + verb + ")", unknown: verb === "txnpost" };
+        if (typeof r.status !== "boolean") return { ok: false, error: "Couldn't read Minima Core's reply to " + verb + ": it may have succeeded. Check the Activity log before retrying.", unknown: verb === "txnpost" };
         if (r.pending === true) return { ok: false, error: "The embedded node did not authorize the request. Check its status before retrying.", notPaired: true };
         if (r.status !== true) return { ok: false, error: (r.error ? String(r.error) : "failed") + " (at " + verb + ")" };
       }
@@ -552,7 +553,7 @@ function create(o) {
     if (!store.collectExists(id)) store.insertCollect(id, payout, tokenid, amount, num(state(coin, ST_FUTUREBLOCK)), false);
     if (!store.claimForPost(id, S.COLLECT_POSTED_SAFE, t)) return err("This stake is already being collected.");
     const res = await collectTx(id, payout, amount, tokenid, sets);
-    if (!res.ok) { store.setCollectStatus(id, S.DETECTED); return Object.assign(err(res.error), { stop: !!res.notPaired }); }
+    if (!res.ok) { if (!res.unknown) store.setCollectStatus(id, S.DETECTED); return Object.assign(err(res.error), { stop: !!res.notPaired }); }   // unknown: kept as posted, followed by the pass
     activity("info", "Manual collect posted: " + amount + " | stake:" + id + " | to:" + payout);
     return { ok: true, amount };
   }
@@ -912,7 +913,7 @@ function create(o) {
       const r = await sweepTx(id, from, dest.value, amount, tok, key, sets);
       if (r.ok) { rep.swept++; activity("info", "Swept " + amount + " | coin:" + id + " | from:" + from + " | to safe:" + dest.value); }
       else {
-        store.deleteSweep(id); syncHolds();
+        if (!r.unknown) { store.deleteSweep(id); syncHolds(); }   // unknown: kept as posted, followed by the pass
         if (r.notPaired) { rep.error = r.error; return rep; }
         rep.failed++; rep.error = r.error; activity("warn", "Couldn't sweep | coin:" + id + " | on:" + from + ": " + r.error);
       }

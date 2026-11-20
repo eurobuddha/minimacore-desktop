@@ -298,6 +298,8 @@ test("txndelete follows a failure at every step, and a missing or unreadable rep
       assert.equal(r.ok, false, at);
       assert.match(r.error, reply === null ? new RegExp("didn't respond \\(at " + at + "\\)") : reply.status === false ? new RegExp("boom \\(at " + at + "\\)") : /it may have succeeded/, at);
       assert.ok(/^txndelete id:FCCOL/.test(node.sent[node.sent.length - 1]), at + ": deleted");
+      const kept = at === "txnpost" && (reply === null || reply.status === "yes");
+      assert.equal(e._store().collect(ID(1)).status, kept ? "COLLECT_POSTED_SAFE" : "DETECTED", at + ": a post that may have gone out stays posted; anything else is free again");
     }
   }
 });
