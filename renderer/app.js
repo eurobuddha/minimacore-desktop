@@ -2986,7 +2986,7 @@ async function renderShopStudio() {
       <div class="field"><div class="field__label">Shop name</div><input class="field__input" id="sdName" value="${esc(d.shopName)}" placeholder="My Shop" autocomplete="off"/></div>
       <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">MxUSD</button></div></div>
       <div class="view__desc">Vendor card (auto-derived from your node — this is how buyers' orders reach you):</div>
-      <div class="mono shop-card">${esc((d.vendorPublicId || "").slice(0, 18))}… | ${esc(d.vendorAddress || "")}</div>
+      <div class="mono shop-card" style="overflow-wrap:anywhere">${idHtml(d.vendorPublicId || "")} | ${idHtml(d.vendorAddress || "")}</div>
     </div>
     <div class="card"><div class="card__title">Shipping</div><div class="view__desc">Digital delivery is free. Set your Domestic &amp; International fees.</div>${ship}</div>
     <div class="card"><div class="card__title">Products (max 40)</div>${prods || '<div class="empty">Add your first product.</div>'}<button class="btn btn--outline btn--full" id="sdAddProd" style="margin-top:8px">+ Add product</button></div>
@@ -3064,7 +3064,18 @@ let vestrTokMap = null;          // tokenid → name
 let vestrBusy = {};
 const VESTR_GRACE = [["None (continuous)", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
 
-function vFmt(v) { const n = Number(v); return isNaN(n) ? "0" : n.toLocaleString(undefined, { maximumFractionDigits: 8 }); }
+// An amount as the node wrote it (0.18.170): never rounded (it was toLocaleString with 8 decimals, which rounds). A figure in
+// exponent form is written out exactly; dp, when given, CUTS the decimals (the calculator's estimates), it never rounds.
+function vFmt(v, dp) {
+  let t = typeof v === "number" ? (Number.isFinite(v) ? String(v) : "") : String(v == null ? "" : v).trim();
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([-+]?\d+))?$/.exec(t); if (!m) return "0";
+  let digits = m[2] + (m[3] || ""), point = m[2].length + Number(m[4] || 0);
+  if (point <= 0) { digits = "0".repeat(1 - point) + digits; point = 1; } else if (point > digits.length) digits = digits.padEnd(point, "0");
+  let whole = digits.slice(0, point).replace(/^0+(?=\d)/, ""), frac = digits.slice(point);
+  if (dp != null) frac = frac.slice(0, dp);
+  frac = frac.replace(/0+$/, "");
+  return m[1] + whole + (frac ? "." + frac : "");
+}
 function vTok(tid) { return tokLabel(tid, vestrTokMap && vestrTokMap[tid]); }   // RULE 1: a token not known by its id shows its whole id (0.18.158)
 
 function onVestrUpdate() {
@@ -3205,8 +3216,8 @@ async function renderVestrCalc() {
     const r = await api.vestrCalculate(el("vkAmt").value || "0", s, e, Number(el("vkGrace").value) || 0).catch(() => null);
     const out = el("vkOut"); if (!out || !r) return;
     const label = VESTR_GRACE.find(g => g[1] === (Number(el("vkGrace").value) || 0))?.[0] || "period";
-    out.innerHTML = `<div class="v-avail" style="border-top:0;margin-top:14px"><span class="k">Released per ${esc(label.toLowerCase())}</span><span class="val" style="color:var(--accent)">≈ ${vFmt(r.perPeriod.toFixed(6))}</span></div>
-      <div class="v-stats"><div><span>Duration</span><b>${r.durBlocks.toLocaleString()} blocks · ~${r.weeks.toFixed(1)} wks</b></div><div><span>Per-block</span><b>${vFmt(r.perBlock.toFixed(8))}</b></div></div>`;
+    out.innerHTML = `<div class="v-avail" style="border-top:0;margin-top:14px"><span class="k">Released per ${esc(label.toLowerCase())}</span><span class="val" style="color:var(--accent)">≈ ${vFmt(r.perPeriod, 6)}</span></div>
+      <div class="v-stats"><div><span>Duration</span><b>${r.durBlocks.toLocaleString()} blocks · ~${r.weeks.toFixed(1)} wks</b></div><div><span>Per-block</span><b>${vFmt(r.perBlock, 8)}</b></div></div>`;
   };
   ["vkAmt", "vkGrace", "vkStart", "vkEnd"].forEach(id => el(id).addEventListener("input", rerun));
   rerun();

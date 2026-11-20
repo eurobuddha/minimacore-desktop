@@ -70,3 +70,17 @@ test("a token not known by its id is shown with its whole id; a name imitating M
   assert.ok(/function vTok\(tid\) \{ return tokLabel\(tid, vestrTokMap && vestrTokMap\[tid\]\); \}/.test(app) && /esc\(tokLabel\(t\.tokenid, t\.name\)\)/.test(app), "Vestr's cards and token list");
   assert.ok(/"Collect " \+ vFmt\(v\.cancollect\) \+ " " \+ esc\(vTok\(v\.tokenid\)\)/.test(app), "a token's name is escaped in the Collect button");
 });
+
+// ---- 0.18.170: Vestr amounts are never rounded; miniMall's vendor id is whole ----
+test("Vestr vFmt shows the node's figure, never rounded; dp cuts, never rounds", () => {
+  const vFmt = new Function(fnSrc("vFmt") + "\nreturn vFmt;")();
+  assert.equal(vFmt("1234567.123456789123"), "1234567.123456789123", "every decimal the node wrote, no grouping");
+  assert.equal(vFmt("0.999999999"), "0.999999999", "not 1"); assert.equal(vFmt("10.50000"), "10.5"); assert.equal(vFmt("7"), "7");
+  assert.equal(vFmt(1e-9), "0.000000001"); assert.equal(vFmt("2.5E+3"), "2500"); assert.equal(vFmt(0.1 + 0.2, 6), "0.3", "dp cuts 0.30000000000000004");
+  assert.equal(vFmt(0.6666666666, 6), "0.666666", "cut, not rounded to 0.666667"); assert.equal(vFmt("abc"), "0"); assert.equal(vFmt(null), "0"); assert.equal(vFmt(NaN), "0");
+  assert.ok(!/toFixed\(/.test(app.slice(app.indexOf("const rerun = async () =>"), app.indexOf("const rerun = async () =>") + 1500).replace(/r\.weeks\.toFixed\(1\)/, "")), "the calculator's amounts are not rounded with toFixed");
+});
+test("miniMall Studio shows the vendor id and address whole and copyable", () => {
+  assert.ok(app.includes('<div class="mono shop-card" style="overflow-wrap:anywhere">${idHtml(d.vendorPublicId || "")} | ${idHtml(d.vendorAddress || "")}</div>'));
+  assert.ok(!/vendorPublicId \|\| ""\)\.slice\(/.test(app));
+});
