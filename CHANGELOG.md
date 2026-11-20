@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.161] — no script reaches a node or a docker container by itself
+
+- `scripts/atomix-unit.js` (run in CI), `atomix-boot-gate.js` and `atomix-s2-gate.js` ran `docker exec` into a fixed container name whenever docker answered; on the owner's machine that container is a custody wallet, and the scripts booted the AtomiX engine on it and read its seed. They now reach only a node the caller names (`scripts/test-node.cjs` from the dev branch 0.18.140 / 0.19.103: `AX_TEST_NODE_RPC`, optionally `AX_TEST_NODE_CONTAINER`, `AX_TEST_NODE_I_OWN_THIS=yes`, and for a node that holds funds `AX_TEST_NODE_ADDRESS` confirmed by that node; `balance` is sent first). With none named the gates refuse and atomix-unit skips its one live check, and atomix-unit fails if it starts any child process. No container name, address or port of any node is written in the scripts; the boot gate's expected Ethereum address is `AX_TEST_NODE_EXPECT_ETH`. `cdp-eval.js` names no app port (`AX_TEST_CDP_PORT`). Test: `scripts/test-node-test.cjs` (`npm run test:test-node`, in CI).
+
 ## [0.18.160] — Logs: whole lines only, so a split secret is still scrubbed
 
 - The node's stdout and stderr arrive in chunks, and each chunk was logged as if it were whole lines: a line split across two chunks became two lines, so a secret split there passed the 0.18.153 scrub in two halves. `nodeSaid` (from the dev branch) keeps the unfinished last line of each stream for the next chunk and logs only whole lines (a line over 64K is cut there); what is left is logged when the node exits. Test: `scripts/node-log-test.cjs`.

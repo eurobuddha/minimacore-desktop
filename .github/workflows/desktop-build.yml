@@ -101,6 +101,10 @@ jobs:
       - name: Verify Web Wallet screen rules
         run: npm run test:webwallet-ui
 
+      # No script reaches a node or a docker container unless the caller names a test node of their own.
+      - name: Verify no script reaches a node by itself
+        run: npm run test:test-node
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
@@ -116,9 +120,10 @@ jobs:
       - name: Verify ETH wallet guards
         run: npm run test:ethwallet
 
-      # NOT gate:atomix — the S1/S2 gates boot the engine against a live mainnet node in the minimega docker
-      # container and compare the derived ETH identity with that peer's. There is no such node here, so they
-      # stay a local pre-release step. atomix-unit skips its one container-dependent check and says so.
+      # NOT gate:atomix — the S1/S2 gates boot the engine against a live node the caller must name
+      # (scripts/test-node.cjs: AX_TEST_NODE_RPC + AX_TEST_NODE_I_OWN_THIS=yes; no name, address or port of any
+      # node is written in this repo). There is no such node here, so they stay a local step. atomix-unit skips its
+      # one node-dependent check with no node named, and fails if it starts any child process.
       - name: Verify AtomiX glue
         run: node scripts/atomix-unit.js
 

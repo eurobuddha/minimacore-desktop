@@ -9,6 +9,13 @@ const assert = require("assert");
 const os = require("os"), path = require("path"), fs = require("fs");
 
 let pass = 0, fail = 0, skipped = 0;
+// 0.18.161: with no test node named (scripts/test-node.cjs), nothing this suite runs may start a child process (docker,
+// curl, …): every child_process entry point throws and is recorded, and a recorded one fails the suite.
+const LEAKS = [];
+if (!process.env.AX_TEST_NODE_RPC && !process.env.AX_TEST_NODE_CONTAINER) {
+  const cp = require("child_process");
+  for (const f of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) cp[f] = (...a) => { LEAKS.push(f + " " + String(a[0]).slice(0, 80)); throw new Error("TEST LEAK: child_process." + f + " " + String(a[0]).slice(0, 80)); };
+}
 function ok(name, fn) { try { fn(); pass++; console.log("  ✓", name); } catch (e) { fail++; console.error("  ✗", name, "—", e.message); } }
 async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", name); } catch (e) { fail++; console.error("  ✗", name, "—", e.message); } }
 
@@ -58,27 +65,23 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
   });
 
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
-  // This one is NOT hermetic: it reuses the live minimega docker container for the crypto-bearing commands
-  // (vault/seedrandom/newscript/getaddress), because the identity and covenant must derive for real. CI has
-  // no such container, so probe for it and SKIP rather than fail — a skip that says so is honest; counting it
-  // as a failure would train people to ignore a red suite, and counting it as a pass would be a lie.
-  const haveMinimega = await new Promise((res) => {
-    require("child_process").execFile("docker", ["exec", "minimega", "true"], { timeout: 8000 }, (e) => res(!e));
-  });
-  if (!haveMinimega) {
+  // Not hermetic: the crypto-bearing commands (vault/seedrandom/newscript/getaddress) go to a REAL node so the identity
+  // and covenant derive for real. Until 0.18.161 that node was whatever docker container carried a fixed name; on the
+  // owner's machine that is a wallet with real funds, and this booted the engine on it and read its seed. Now ONLY a
+  // node the caller names (scripts/test-node.cjs: AX_TEST_NODE_RPC + AX_TEST_NODE_I_OWN_THIS=yes); with none named
+  // the check is SKIPPED and says so, and nothing outside this process is touched (CI has no node).
+  const { testNode, ENGINE_BOOT_SENDS } = require("./test-node.cjs");
+  const NODE = testNode(ENGINE_BOOT_SENDS.concat("A quote is frozen and replayed with startLeg stubbed: nothing is locked or sent."));
+  if (!NODE) {
     skipped++;
-    console.log("  ⊘ frozen quote replay — SKIPPED (no minimega docker container; run it locally for this check)");
+    console.log("  ⊘ frozen quote replay — SKIPPED (no test node named: AX_TEST_NODE_RPC + AX_TEST_NODE_I_OWN_THIS=yes)");
   } else
   await okA("frozen quote issues a replayable quoteId; replay consumes it", async () => {
     const atomix = require("../main/atomix");
     atomix._setDataDir(fs.mkdtempSync(path.join(os.tmpdir(), "axq-")));
-    // a mock node: real vault/seedrandom/newscript/getaddress (so identity+covenant derive) but a FUNDED book +
-    // balance. We reuse the live minimega for the crypto-bearing commands and inject a funded balance + a live
-    // book (the book is already live on minimega); only 'balance' is overridden to report USDT so a BUY quote
-    // passes the affordability gate and FREEZES.
-    const { execFile } = require("child_process");
-    const real = (cmd) => new Promise((res, rej) => execFile("docker", ["exec", "minimega", "curl", "-s", "-m", "60",
-      "http://127.0.0.1:9005/" + encodeURIComponent(cmd)], { maxBuffer: 64 * 1024 * 1024 }, (e, o) => e ? rej(e) : res(JSON.parse(o))));
+    // the named test node for the crypto-bearing commands; only 'balance' is overridden to report a funded MxUSD
+    // balance so a SELL quote passes the affordability gate and FREEZES.
+    const real = NODE.run;
     atomix._setRunner(async (cmd) => {
       if (/^balance tokenid:0x7D39/i.test(cmd)) return { status: true, response: [{ confirmed: "100", unconfirmed: "0", sendable: "100", coins: 3 }] };
       return real(cmd);
@@ -274,7 +277,7 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       // The engine kept the old currency for up to a minute; the renderer's stale cache then made the next
       // click a server-side no-op. reloadShared is the donor's own function and a vm global (same access
       // class as the ctx.RPC.setUrl the glue already uses), so call it directly. Structural, because the
-      // engine-driving path needs the minimega container.
+      // engine-driving path needs a live node.
       const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "atomix.js"), "utf8");
       const fn = src.slice(src.indexOf("async function switchCurrency"), src.indexOf("\n}", src.indexOf("async function switchCurrency")));
       assert.ok(/ctx\.reloadShared\s*\(/.test(fn), "switchCurrency must call ctx.reloadShared directly");
@@ -428,7 +431,8 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     });
   }
 
-  const skipNote = skipped ? " (" + skipped + " skipped — needs the minimega container)" : "";
+  if (LEAKS.length) { fail++; console.error("  ✗ a child process was started with no test node named:", LEAKS.join("; ")); }
+  const skipNote = skipped ? " (" + skipped + " skipped — needs a named test node)" : "";
   console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" + skipNote : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed" + skipNote);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("UNIT ERROR:", e); process.exit(1); });

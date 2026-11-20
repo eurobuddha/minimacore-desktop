@@ -7,8 +7,13 @@ const net = require("net");
 const crypto = require("crypto");
 const http = require("http");
 
-const PORT = 9333;
+// The expression runs INSIDE a running copy of the app, with everything its window can do (send, swap, node commands).
+// Since 0.18.161 no port is written here: the caller names the debugging port of a TEST copy and says it is one.
+const PORT = Number(process.env.AX_TEST_CDP_PORT);
 const EXPR = process.argv[2] || "1+1";
+if (!(PORT > 0)) { console.error("NOT RUN: no app was named. Set AX_TEST_CDP_PORT to the --remote-debugging-port of a TEST copy of the app, and AX_TEST_NODE_I_OWN_THIS=yes. Nothing was sent."); process.exit(1); }
+console.log("About to run this inside the app listening on 127.0.0.1:" + PORT + " (it can do anything that app's window can, on that app's node):\n  " + EXPR);
+if (process.env.AX_TEST_NODE_I_OWN_THIS !== "yes") { console.error("REFUSED: AX_TEST_NODE_I_OWN_THIS=yes is not set. Nothing was sent."); process.exit(2); }
 
 function targets() {
   return new Promise((resolve, reject) => {
