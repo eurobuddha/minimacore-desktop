@@ -33,6 +33,9 @@ function builderConfig(pkg, id, opts = {}) {
   cfg.npmRebuild = false;
   cfg.publish = null;
   cfg.mac = Object.assign({}, cfg.mac, { notarize: false, artifactName: F.artifact + "-${version}-${arch}.${ext}" });
+  // the questions macOS asks for the camera and the microphone name the app that asks, not the released one
+  const released = require(path.join(ROOT, "main", "flavor.js")).RELEASED.windowTitle;
+  for (const [k, v] of Object.entries(cfg.mac.extendInfo || {})) if (typeof v === "string") cfg.mac.extendInfo[k] = v.split(released).join(F.productName);
   if (opts.adhoc) cfg.mac.identity = "-";
   cfg.win = Object.assign({}, cfg.win, { artifactName: F.artifact + "-${version}-x64.${ext}" });
   cfg.linux = Object.assign({}, cfg.linux, { artifactName: F.artifact + "-${version}-x64.${ext}" });

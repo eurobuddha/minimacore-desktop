@@ -247,6 +247,9 @@ test("the build of a flavour: its name, id and artifact names, the flavour writt
   assert.deepEqual(cfg.extraResources.slice(2), PKG.build.extraResources.slice(2), "the JRE and the keets sidecar are the released app's");
   assert.deepEqual(cfg.files, PKG.build.files); assert.ok(!cfg.files.some(f => /^scripts|test|dev-preview/.test(f)), "no script, test or preview is packaged");
   assert.equal(builderConfig(PKG, "pandamonium", { adhoc: true }).cfg.mac.identity, "-");
+  // 0.19.107: the system's camera and microphone questions name this app; the released build's own wording is not edited
+  assert.deepEqual(cfg.mac.extendInfo, { NSCameraUsageDescription: "Pandamonium Desktop uses your camera to scan QR codes.", NSMicrophoneUsageDescription: "Pandamonium Desktop uses your microphone to record a Chat voice note when you choose Voice note." });
+  assert.match(PKG.build.mac.extendInfo.NSMicrophoneUsageDescription, /^Minima Core uses your microphone/);
   assert.throws(() => builderConfig(PKG, ""), /name a flavour/); assert.equal(F.basePort, 17001);
   assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.153", "c2b8cb33b07b78197cc4ed0b5c82cf3f14b6407095f20963971d6b932b25e6af", "1.1.2.31-euro5", "93111abb83f2239970257e692026b6033f3b1caeaf31db52604b9f531a0617ea"]);
   // the jar check, on stand-in files

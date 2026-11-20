@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.107] — Pandamonium Desktop: the system's camera and microphone questions name Pandamonium Desktop
+
+- **Found while checking the merge**: the text macOS shows when the app first asks for the microphone (a Chat voice note, 0.19.2) or the camera (the QR scanner) is written into the app when it is built, and a flavour's build took the released app's wording: "Minima Core uses your microphone…" inside Pandamonium Desktop.
+- **Now** `scripts/build-flavor.cjs` writes the flavour's own name into those two sentences. The released build's wording and `package.json` are not changed.
+- **Tests**: `scripts/flavor-test.cjs` 8 (the build test reads both sentences of the flavour's config and the released one's).
+
 ## [0.19.106] — The two branches are one: Phase 4 messaging (0.19.1 to 0.19.9) merged with the side-by-side work (0.19.100 to 0.19.105); the two log guards dropped in 0.19.8 are back
 
 - **Merge** of `pandamonium-sxs` (0.19.100 to 0.19.105: coin guard per the review, restore gate, token label, quit, node output, build flavours) into `pandamonium-desktop` (0.19.1 to 0.19.9: Mail as the phone, Chat files and voice notes, Parlons in the browser with the notifier, payment verification, the Mail publication notice). Both sides' behaviour is kept. The entries below are in two runs for that reason: 0.19.100 to 0.19.105, then 0.19.1 to 0.19.9.
