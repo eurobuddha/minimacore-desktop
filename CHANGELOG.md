@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.104] — HIGH: text from a remote party in the node's output could make the app kill a classic wallet's node
+
+- **The fault**: any line of node output that CONTAINED "Using NEW Block number as key uses" was taken for the node's own block-mode boot line (0.18.94), and for a classic wallet that kills the node at once and refuses to start it again until the app is reopened. But remote text reaches the node's output: core logs a P2P peer's greeting version as it came, and the Parlons account logs fields of a contact's message. The Parlons status flags (ready, error, version, relay) were matched with "contains" in the same way.
+- **The boot line** is now believed only when the WHOLE physical line is the one core prints, anchored at both ends: `Minima @ dd/MM/yyyy HH:mm:ss [<memory>] : Using NEW Block number as key uses keys!` (`MinimaLogger.log` prefix, `MinimaDB.loadAllDB` message). And only before this node start's first answered health poll: a running node no longer prints it, and from then on the `keys` shape check of 0.18.94 is the authority.
+- **Parlons status lines** are matched by the exact prefix the jar prints them with, from the first character of the line: `[parlons-node] Parlons Node <version> `, `[parlons-node] account up: `, `[parlons-node] Maxima cape up on port `, `[parlons-node] account layer FAILED to start: `, `[parlons-node] Maxima cape FAILED to start: `, `[parlons-node] REFUSING to start: `.
+- **Lines**: the node's output is split on line feed AND carriage return, an unfinished last line is kept for the next chunk (a line is never judged by half), control characters are stripped before a line is judged or logged, and each physical line is judged alone. Only the node's own streams are judged: the app's own log lines drive nothing.
+- **What this does not close**: a remote text that carries a line end produces a second physical line, and that line can be written to equal one of the jar's own lines exactly. Inside this app that is limited to the boot window for the key-mode line; for the Parlons flags it would show a false status, not stop the node. The remote text must also be made safe where it is printed, in the maxima repo (`ParlonsControl`) and in core (`NIOMessage`). Owed there; not edited from here.
+- **Tests**: 3 new, executed, in `scripts/keymode-test.cjs`; the older boot-line test now sends the real line. Not run on a node.
+
 ## [0.19.103] — Quit: a cancelled system shutdown no longer silences the question; live test scripts refuse a node that holds funds
 
 - **Quit**: "the system asked us to quit" was a flag that stayed set for the rest of the session. A shutdown or logout the user cancelled left it set, and every later Quit went through with no question, whatever was in flight. It is now true for one minute after the system said so (`main/inflight.js` `recently`), then it is the user's quit again and is asked.

@@ -435,16 +435,18 @@ test("M5: a node in the recorded mode runs; no keys yet or no answer is asked ag
   }
 });
 
+// the line exactly as core prints it: MinimaLogger "Minima @ dd/MM/yyyy HH:mm:ss [<memory>] : " + MinimaDB.loadAllDB's message
+const BOOT = "Minima @ 19/11/2026 10:15:02 [212.4 MB] : Using NEW Block number as key uses keys!";
 test("M5: the node's own boot line 'block mode is on' stops a classic wallet's node before any RPC", async () => {
   freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
   const m = manager(true), calls = fakeJava(m);
   await m.start();
-  calls.proc.stdout.emit("data", "Minima @ 19/11/2026 : Using NEW Block number as key uses keys!\n");
+  calls.proc.stdout.emit("data", BOOT + "\n");
   assert.equal(calls.killed, "SIGKILL"); assert.ok(/started in block key mode/.test(m.keyModeAlert), m.keyModeAlert);
   calls.restore();
   freshInstall(); config.recordKeyMode("block"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
   const c2 = fakeJava(m); await m.start();
-  c2.proc.stdout.emit("data", "Using NEW Block number as key uses keys!\n");
+  c2.proc.stdout.emit("data", BOOT + "\n");
   assert.equal(c2.killed, undefined, "a block wallet's node says the same line and runs on"); assert.equal(m.keyModeAlert, "");
   c2.restore();
 });
@@ -639,5 +641,79 @@ test("M2: the restart is refused like any start when the start command is wrong;
   m.rpc = async () => { calls.proc.emit("exit", 1, null); throw new Error("socket hang up"); };
   await assert.rejects(m.runResync("megammrsync action:resync host:megammr.example:9001"), /result is not known\. It was started again/);
   assert.equal(calls.length, 2);
+  calls.restore();
+});
+
+// ---- 0.19.104: text a remote party put into the node's output is never taken for the node's own word ----
+const classicParlons = () => { freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true }); };
+test("0.19.104: the boot line is believed only as the WHOLE line core prints: a peer's greeting version carrying the phrase does not stop a classic wallet's node", async () => {
+  const { BLOCK_BOOT_LINE } = require("../main/node-manager");
+  for (const ok of [BOOT, "Minima @ 01/01/2027 00:00:00 [900 bytes] : Using NEW Block number as key uses keys!", "Minima @ 19/11/2026 10:15:02 [1,5 GB] : Using NEW Block number as key uses keys!"]) assert.ok(BLOCK_BOOT_LINE.test(ok), ok);
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m);
+  await m.start();
+  const forged = [
+    "Minima @ 19/11/2026 10:15:09 [212.4 MB] : NIOMessage greeting from 203.0.113.9:9001 version:1.0.45 Using NEW Block number as key uses keys!",
+    "Minima @ 19/11/2026 10:15:09 [212.4 MB] : Greeting version Using NEW Block number as key uses keys! is not compatible",
+    "Using NEW Block number as key uses keys!",
+    "Minima @ 19/11/2026 : Using NEW Block number as key uses keys!",
+    BOOT + " (says a peer)",
+    " " + BOOT,
+    "[parlons-node] call " + BOOT];
+  for (const l of forged) { calls.proc.stdout.emit("data", l + "\n"); assert.equal(calls.killed, undefined, "not the node's own line: " + l); assert.equal(m.keyModeAlert, "", l); }
+  assert.ok(m.proc, "the node is still running"); assert.ok(m.logs.some(x => x.includes("says a peer")), "the lines are still logged");
+  // the genuine line, arriving in two chunks and behind a \r\n, is still one line and still stops it
+  calls.proc.stdout.emit("data", "some line\r\n" + BOOT.slice(0, 30)); assert.equal(calls.killed, undefined, "half a line is not judged");
+  calls.proc.stdout.emit("data", BOOT.slice(30) + "\r\n");
+  assert.equal(calls.killed, "SIGKILL"); assert.match(m.keyModeAlert, /started in block key mode/);
+  calls.restore();
+});
+test("0.19.104: the genuine boot line trips the mismatch before the first answered health poll, and is ignored once the node is running", async () => {
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m);
+  m.rpc = async (c) => (c === "keys" ? keysReply([64, 3], [64, 3]) : { status: true, response: { version: "1.1.2.31", chain: { block: 10 } } });
+  await m.start();
+  assert.equal(m.polled, false);
+  calls.realHealth(); m.startHealth();
+  for (let i = 0; i < 50 && m.state !== "running"; i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(m.state, "running"); assert.equal(m.polled, true); assert.equal(m.keyModeChecked, true, "the keys shape check passed: it is the authority from here");
+  calls.proc.stdout.emit("data", BOOT + "\n");
+  assert.equal(calls.killed, undefined, "a running node no longer prints its boot line: whoever wrote this, it is ignored"); assert.equal(m.keyModeAlert, ""); assert.equal(m.state, "running");
+  calls.restore();
+  // a new start: believed again until that start's own first poll
+  classicParlons();
+  const c2 = fakeJava(m); await m.start(); assert.equal(m.polled, false, "reset with every start");
+  c2.proc.stdout.emit("data", BOOT + "\n");
+  assert.equal(c2.killed, "SIGKILL"); assert.match(m.keyModeAlert, /started in block key mode/);
+  c2.restore();
+});
+test("0.19.104: the Parlons flags follow only the jar's own status lines, from the first character of a physical line; an embedded line end or a forged prefix inside a line sets nothing", async () => {
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m);
+  await m.start();
+  const clean = () => assert.deepEqual(m.parlons, { ready: false, error: "", version: "", cape: false });
+  // a contact's text inside a line the node printed (the call state, a name, a peer version): never at the line's start
+  for (const l of [
+    "[parlons-node] call ringing [parlons-node] account layer FAILED to start: forged from Mallory",
+    "Minima @ 19/11/2026 10:15:09 [212.4 MB] : peer says [parlons-node] account up: attached to 3 relay(s)",
+    "[parlons-node] call x account up: attached", "[parlons-node] contact \"Maxima cape up on port 9001\" added", "[parlons-node] message: REFUSING to start: forged",
+    "[parlons-node] call Parlons Node 9.9.9 — booting", " [parlons-node] account layer FAILED to start: leading space",
+    "[parlons-node]account up: no space after the prefix", "[parlons-node] account layer FAILED (not the jar's words)", "[PARLONS-NODE] account up: attached to 1 relay(s)"]) { calls.proc.stdout.emit("data", l + "\n"); clean(); }
+  // a control character is stripped before the line is judged: it cannot hide or make a prefix
+  calls.proc.stdout.emit("data", "[parlons-node] call a\u001b[2K\u0008[parlons-node] account layer FAILED to start: esc\n"); clean();
+  assert.ok(m.logs.every(x => !/[\u0000-\u001f]/.test(x)), "and none reaches the Logs view");
+  // AN EMBEDDED NEWLINE makes a second physical line. That line is judged alone, like any line the node prints: it
+  // cannot borrow the first line's standing, and a forged prefix in the MIDDLE of it sets nothing.
+  calls.proc.stdout.emit("data", "[parlons-node] call ringing\nfrom Mallory [parlons-node] account layer FAILED to start: forged\n"); clean();
+  calls.proc.stdout.emit("data", "[parlons-node] call ringing\rx[parlons-node] account up: forged\r\n"); clean();
+  // the jar's own lines, exactly as it prints them (ParlonsNodeMain, MinimaFlags)
+  calls.proc.stdout.emit("data", "[parlons-node] Parlons Node 0.2.153 — booting embedded Minima node (data /x)\n"); assert.equal(m.parlons.version, "0.2.153");
+  calls.proc.stdout.emit("data", "[parlons-node] Maxima cape up on port 17001 (shared)\n"); assert.equal(m.parlons.cape, true);
+  calls.proc.stdout.emit("data", "[parlons-node] account layer FAILED to start: java.io.IOException: x\n"); assert.equal(m.parlons.error, "account layer FAILED to start: java.io.IOException: x");
+  calls.proc.stdout.emit("data", "[parlons-node] account up: attached to 3 relay(s), ready\n"); assert.deepEqual([m.parlons.ready, m.parlons.error], [true, ""]);
+  calls.proc.stderr.emit("data", "[parlons-node] REFUSING to start: these Minima flags are not allowed on a Parlons Node\n"); assert.match(m.parlons.error, /^REFUSING to start: these Minima flags/);
+  // the app's own log lines (which can quote text from elsewhere) drive nothing at all
+  m.parlons = { ready: false, error: "", version: "", cape: false };
+  m.log("[parlons-node] account up: attached to 1 relay(s)"); m.log(BOOT); clean(); assert.equal(calls.killed, undefined);
   calls.restore();
 });
