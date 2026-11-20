@@ -203,6 +203,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SHOP_NO_VENDOR", I18N.N_("Missing vendor address for retry.")],
     ["SHOP_NOT_DUE", I18N.N_("This order is not paid by what your shop says is due. Check it by hand first.")],
     ["SHOP_HAND_ONLY", I18N.N_("Only an order that does not match your shop is checked by hand.")],
+    ["SHOP_NOT_NEXT", I18N.N_("That is not this order's next step.")],
 
     // ---- miniMall: how an incoming order departs from the vendor's own listing (main/shop-listing.js, 0.19.166) ----
     ["SL_DELIVERY", I18N.N_("the delivery method \"{ship}\" is not in your listing")],   // before SL_UNLISTED, whose {what} would take it whole

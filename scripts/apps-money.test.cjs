@@ -343,7 +343,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // kept on the order; a wrong coin never pays or blocks)
   // both again in 0.19.168 (what a buyer sends is stored as capped primitives; one coin at a time; a failed save is logged)
   // main/shop-store.js again in 0.19.170 (counted coins bounded per order; wrong coins never kept)
-  for (const [f, want, ver] of [["main/shop.js", "080dc2e728fd88118254f555980e3ad495d2bb10b64cadc7ae452bc9e77bbff9", "0.19.170"], ["main/shop-store.js", "5a910736b1e8379d4fee3a97632893fddd0a7115205872e3f66182002b99c37b", "0.19.170"],
+  // main/shop.js again in 0.19.171 (advanceStatus takes only the order's next step, by SHOP.nextStatus)
+  for (const [f, want, ver] of [["main/shop.js", "0448cfb05dac31c1cc8b4f79d045ff79fdede29e7b054afc914bbd4edbaa05e8", "0.19.171"], ["main/shop-store.js", "5a910736b1e8379d4fee3a97632893fddd0a7115205872e3f66182002b99c37b", "0.19.171"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

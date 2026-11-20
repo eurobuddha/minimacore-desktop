@@ -184,8 +184,15 @@ async function retryPayment(ref) {
 // ---- VENDOR: advance an order's status (sends a sealed STATUS_UPDATE back to the buyer) ----
 async function advanceStatus(ref, status) {
   const o = store.order(ref); if (!o || o.role !== "sell") throw new Error("Order not found.");
-  // Confirm, ship, deliver: only an order paid by what my listing says is due, or one I checked by hand (0.19.166).
-  if (/^(CONFIRMED|SHIPPED|DELIVERED)$/.test(String(status)) && !store.mayAdvance(o)) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
+  store.ensureChecked(o);
+  // Only the order's one legitimate next step, by the rule the screen draws its buttons from (SHOP.nextStatus, 0.19.171):
+  // CONFIRMED, then SHIPPED, then DELIVERED, and only for an order paid by what my listing says is due or one I checked
+  // by hand (0.19.166). Before, any state was accepted here and sent to the buyer: PAID on an unpaid order, a jump, a word.
+  const next = SHOP.nextStatus(o);
+  if (!next || status !== next) {
+    if (!store.mayAdvance(o) && o.problems.length) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
+    throw new Error("That is not this order's next step.");
+  }
   await init();
   store.setStatus(ref, status);
   const msg = { type: T.STATUS_UPDATE, ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), status };

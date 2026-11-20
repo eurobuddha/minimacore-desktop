@@ -2822,6 +2822,7 @@
   "Missing vendor address for retry.": "Для повтора не хватает адреса продавца.",
   "This order is not paid by what your shop says is due. Check it by hand first.": "Этот заказ не оплачен на сумму, которую указывает ваш магазин. Сначала проверьте его вручную.",
   "Only an order that does not match your shop is checked by hand.": "Вручную проверяется только заказ, который не совпадает с вашим магазином.",
+  "That is not this order's next step.": "Это не следующий шаг для этого заказа.",
   "the delivery method \"{ship}\" is not in your listing": "способа доставки «{ship}» нет в вашем каталоге",
   "the shop this order names is not one of your shops on this computer": "магазин, указанный в этом заказе, не является одним из ваших магазинов на этом компьютере",
   "the order's currency ({ordercur}) is not your shop's ({shopcur})": "валюта заказа ({ordercur}) не совпадает с валютой вашего магазина ({shopcur})",
@@ -2932,7 +2933,7 @@
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)", "• {item}.", "Dexicon", "{day} {month}", "{day} {month} {year}"],
-  // translated for the desktop (the phone has no such text): 1905 keys for native review
+  // translated for the desktop (the phone has no such text): 1906 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4745,6 +4746,7 @@
     "Missing vendor address for retry.",
     "This order is not paid by what your shop says is due. Check it by hand first.",
     "Only an order that does not match your shop is checked by hand.",
+    "That is not this order's next step.",
     "the delivery method \"{ship}\" is not in your listing",
     "the shop this order names is not one of your shops on this computer",
     "the order's currency ({ordercur}) is not your shop's ({shopcur})",

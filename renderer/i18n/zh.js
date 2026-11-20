@@ -2822,6 +2822,7 @@
   "Missing vendor address for retry.": "重试缺少商家地址。",
   "This order is not paid by what your shop says is due. Check it by hand first.": "此订单未按您店铺所列的应付金额付款。请先人工核对。",
   "Only an order that does not match your shop is checked by hand.": "只有与您的店铺不符的订单才需要人工核对。",
+  "That is not this order's next step.": "这不是此订单的下一步。",
   "the delivery method \"{ship}\" is not in your listing": "配送方式“{ship}”不在您的商品列表中",
   "the shop this order names is not one of your shops on this computer": "此订单所指的店铺不是您在这台电脑上的店铺",
   "the order's currency ({ordercur}) is not your shop's ({shopcur})": "订单的币种（{ordercur}）不是您店铺的币种（{shopcur}）",
@@ -2932,7 +2933,7 @@
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
-  // translated for the desktop (the phone has no such text): 1907 keys for native review
+  // translated for the desktop (the phone has no such text): 1908 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4745,6 +4746,7 @@
     "Missing vendor address for retry.",
     "This order is not paid by what your shop says is due. Check it by hand first.",
     "Only an order that does not match your shop is checked by hand.",
+    "That is not this order's next step.",
     "the delivery method \"{ship}\" is not in your listing",
     "the shop this order names is not one of your shops on this computer",
     "the order's currency ({ordercur}) is not your shop's ({shopcur})",

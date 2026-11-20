@@ -238,3 +238,21 @@ test("recordPayment: at most MAX_PAY_COINS counted coins per order; more makes i
   const I18N = require("../renderer/i18n.js"), MS = require("../renderer/mainsaid.js");
   try { for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); I18N.set(c); const s = MS.say(o.problems[0]); assert.ok(s.includes("500") && !/payment coins/.test(s), c + ": " + s); } } finally { I18N.set("en"); }
 });
+
+// ---- 0.19.171: the vendor may set only the order's one legitimate next step ----
+test("advanceStatus: only CONFIRMED, then SHIPPED, then DELIVERED, each in turn, and only for a paid (or hand-checked) order", async () => {
+  const sent = []; shop._setRunner(async (c) => { if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } }; if (c.startsWith("send ")) sent.push(c); return { status: true, response: { txpowid: "0xT" } }; });
+  await shop.init();
+  const unpaid = sellOrder("3.2", "0x00", { counterparty: BUYER });
+  for (const s of ["PAID", "CONFIRMED", "SHIPPED", "DELIVERED", "UNDERPAID", "WRONG_TOKEN", "PENDING", "anything", "", null, ["CONFIRMED"]])
+    await assert.rejects(shop.advanceStatus(unpaid, s), /That is not this order's next step\./, "unpaid: " + JSON.stringify(s));
+  assert.equal(store.order(unpaid).status, "PENDING", "PAID was never set by hand"); assert.deepEqual(sent, [], "and nothing was sent to the buyer");
+  const paid = sellOrder("3.2", "0x00", { counterparty: BUYER }); assert.equal(store.recordPayment(paid, "0xP1", "3.2", "0x00"), "PAID");
+  for (const s of ["SHIPPED", "DELIVERED", "PAID", "PENDING"]) await assert.rejects(shop.advanceStatus(paid, s), /next step/, "paid, not yet confirmed: " + s);
+  for (const s of ["CONFIRMED", "SHIPPED", "DELIVERED"]) { assert.deepEqual(await shop.advanceStatus(paid, s), { ok: true }); assert.equal(store.order(paid).status, s); }
+  for (const s of ["DELIVERED", "CONFIRMED", "SHIPPED"]) await assert.rejects(shop.advanceStatus(paid, s), /next step/, "delivered: " + s);
+  assert.equal(sent.length, 3, "one STATUS_UPDATE per step");
+  const enquiry = sellOrder("0", "0x00", { counterparty: BUYER, status: "INQUIRY" });
+  await assert.rejects(shop.advanceStatus(enquiry, "CONFIRMED"), /next step/);
+  const I18N = require("../renderer/i18n.js"), MS = require("../renderer/mainsaid.js"); assert.ok(MS.has("That is not this order's next step.", "SHOP_NOT_NEXT"));
+});

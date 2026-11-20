@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.171] — miniMall vendor: only the order's next step can be set
+
+- **From the release review:** `advanceStatus` accepted any state the window asked for and sent it to the buyer: `PAID` on an order nothing had paid (it was then shown as paid on both sides), a jump from PAID straight to DELIVERED, a word that is no state at all. Only CONFIRMED, SHIPPED and DELIVERED were held back for an unpaid order (0.19.166).
+- **Now:** the main process takes exactly the one next step the screen draws its buttons from (`AppsAct.shop.nextStatus`, the same function): CONFIRMED, then SHIPPED, then DELIVERED, for an order paid by what the vendor's listing says is due or checked by hand, and nothing for an enquiry. Anything else is refused before anything is sent: "That is not this order's next step." (in the four languages, `SHOP_NOT_NEXT`), or the hand-check refusal of 0.19.166 for an unchecked order. The two allow-list entries of 0.19.166 for the old pattern in `main/shop.js` are gone with it.
+- **Pin:** `main/shop.js` is sha256-pinned in `scripts/apps-money.test.cjs`; the pin is updated on purpose to this file.
+- Test (`scripts/shop-store-test.cjs`): an unpaid order refuses every state (PAID among them) and sends nothing; a paid one takes CONFIRMED, SHIPPED and DELIVERED only in turn and refuses a jump, a step back and anything after DELIVERED; an enquiry takes nothing. It fails on 0.19.170.
+
 ## [0.19.170] — miniMall vendor: the counted payment coins of an order are bounded
 
 - **From the release review (H1):** counted payment coin ids lived only in memory in the released desktop; here they are kept on the order since 0.19.167 (the reviewer's restart probe leaves a half-paid order UNDERPAID on this branch). What was left: the list had no bound, and wrong-token coins were kept in it too, so anyone could grow an order's record (and `shop.json`) one tiny coin at a time.
