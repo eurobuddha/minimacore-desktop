@@ -106,7 +106,7 @@ async function sendMerchMessage(toPublicId, msg) {
   const blob = await sc.seal(identity, toPublicId, toWire(msg));
   if (blob.length > 90000) throw new Error("Message too large for one coin (shrink any image).");
   const cmd = `send amount:${MSG_AMOUNT} address:${MINIMERCH} tokenid:0x00 state:${JSON.stringify({ "99": "0x" + blob })}`;
-  const r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd));
+  const r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd, { minCoinage: 3 }));
   if (!r || (r.status !== true && r.pending !== true)) throw new Error((r && r.error) || "message send failed");
   return r;
 }
@@ -123,7 +123,7 @@ async function sendPayment(vendorAddr, amount, tokenid, ref) {
   const state = ref ? ` state:${JSON.stringify({ "1": "0x" + Buffer.from(ref, "utf8").toString("hex") })}` : "";
   const cmd = `send amount:${amount} address:${vendorAddr} tokenid:${tokenid}${state}`;
   let r;
-  try { r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd)); }
+  try { r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd, { minCoinage: 3 })); }
   catch (e) { const amb = new Error("Payment may have been submitted — check your balance/history before retrying."); amb.ambiguous = true; throw amb; }
   if (!r || (r.status !== true && r.pending !== true)) throw new Error((r && r.error) || "payment failed");
   return r;

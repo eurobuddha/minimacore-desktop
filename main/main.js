@@ -40,6 +40,10 @@ const reserve = require("./reserve");   // the shared coin reservation (docs/COI
 // opened before an engine sends its first command (guard waits for the open). Opened per wallet when the node runs,
 // swept once a minute against the node's real coins, closed when the node stops (the builds died with it).
 reserve.onLog = (line) => node.log("[coins] " + line);
+// The setting (Settings, "Coin guard"): the master switch, and what sends and consolidate do (off / observe / enforce;
+// observe by default: logged, never changed). Read at start and passed again with every save of the config.
+const reserveMode = (c) => reserve.setMode({ on: c.coinGuard !== false, sends: c.coinGuardSends });
+reserveMode(config.load());
 reserve.setHoldSource("dexicon", () => dexicon.coinHolds());   // the coins of live FAST orders and unanswered takes (main/dexicon.js COIN HOLDS)
 let reserveSweep = null, reserveSweeping = false;
 const reserveRead = (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c);
@@ -201,7 +205,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
-  const pinned = /^send\s/.test(command) ? await pinMinimaSend(run, command) : command;
+  const pinned = /^send\s/i.test(command) ? await pinMinimaSend(run, command, { minCoinage: 3 }) : command;   // the node lower-cases the verb: SEND is a send; never a coin too young to spend
   return run(pinned);
 });
 
@@ -218,6 +222,7 @@ ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   const c = config.save(patch || {});
+  reserveMode(c);
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
 });
@@ -524,7 +529,20 @@ ipcMain.handle("mcd:ppConsolidationCheck", () => pandapools.consolidationCheck()
 // held coin with what holds it (ids whole), and per token what the wallet itself can and cannot send. Read only.
 ipcMain.handle("mcd:reserved", async () => {
   if (node.state !== "running") return { coins: [], funds: [] };
-  return { coins: reserve.list().filter(r => r.owner !== "wallet"), funds: await reserve.funds("wallet", reserveRead) };
+  const m = reserve.mode();
+  if (!m.on) return { coins: [], funds: [], mode: m };
+  // The Wallet lowers its sendable figures (and Send refuses above them) only while sends are ENFORCED; observed, the
+  // node's own figures stand and the held coins are only marked.
+  return { coins: reserve.list().filter(r => r.owner !== "wallet"), funds: m.sends === "enforce" ? await reserve.funds("wallet", reserveRead) : [], mode: m };
+});
+// Settings, "Release all holds": every reservation is dropped and the file moved aside under a dated name (never
+// deleted), then a new one is opened. Safe: the node's own mempool check still refuses a double spend. A hold whose
+// order is still live is listed again by its engine within a minute.
+ipcMain.handle("mcd:reserveReleaseAll", async () => {
+  const n = reserve.list().length, kept = reserve.invalidate();
+  node.log("[coins] the user released all " + n + " hold" + (n === 1 ? "" : "s") + (kept ? "; the file is kept as " + kept : ""));
+  if (node.state === "running") await reserve.open(app.getPath("userData"), reserveRead).catch(() => {});
+  return { released: n, kept };
 });
 ipcMain.handle("mcd:ppFeed", () => pandapools.feed());
 ipcMain.handle("mcd:ppScan", () => pandapools.scanNow());

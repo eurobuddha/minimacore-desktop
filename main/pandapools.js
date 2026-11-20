@@ -150,8 +150,11 @@ function onNodeRestarted() {
   if (ready && serviceHandler) serviceHandler({ event: "inited" });
 }
 /** Wallet identity changes invalidate live work, never the saved recipes or usage floors. */
+/** The shared coin reservation (main/reserve.js) drops this engine's unfinished builds. Never throws: a stop must stop. */
+function releaseBuilds() { try { require("./reserve").releaseOwner("pandapools"); } catch (e) {} }
 async function invalidate() {
   quarantineRequired=true;stopLoop();contextEpoch++;poolAbort.aborted=true;poolAbort={aborted:false};
+  releaseBuilds();
   const old=ctx,storage=sqlShim;
   if(old&&old.ActivityChain)old.ActivityChain.stop();
   ready=false;ctx=null;serviceHandler=null;initPromise=null;
@@ -171,6 +174,7 @@ async function invalidate() {
 async function hold(maxMs) {
   if (!held) { held = true; heldLoop = !!scanTimer; stopLoop(); }
   await quiet(maxMs || 15000);
+  releaseBuilds();   // the engine is stopped: its unfinished builds died with it (posted coins stay held)
 }
 /** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
  *  Also awaited before the node is told to quit (main.js onStopping). */

@@ -9,6 +9,26 @@ registry that does.
 Engines are not edited. The only differences an engine can observe are a refusal before signing, and which coins it
 is shown or pinned to.
 
+## Setting (0.19.100): what is enforced
+
+The security review's verdict on 0.18.143 to 0.18.147 was "do not ship fully enabled". Since 0.19.100:
+
+| Part | Default | Setting |
+|---|---|---|
+| `txninput` refusal, and the bookkeeping of `txncreate` / `txnpost` / `txndelete` | ENFORCED | master switch only |
+| an engine's `coins relevant:true … tokenid:` read left without held coins | ENFORCED | master switch only |
+| `send` pinning / refusal, `consolidate` refusal, a chain holding either | OBSERVED: the command goes out byte for byte; the log (`[coins] observe: … WOULD HAVE BEEN PINNED / REFUSED: why`) says what would have happened | `coinGuardSends`: `off` (not looked at, no extra read) / `observe` / `enforce` |
+| everything | on | `coinGuard: false` = the whole guard is a passthrough: nothing read, recorded or refused |
+
+Both are in Settings, "Coin guard" (`config.json` keys `coinGuard`, `coinGuardSends`; `main.js` passes them to
+`reserve.setMode` at start and at every save). While sends are not enforced, the callers' own pin (`main/sendpin.js`)
+avoids no held coin (`reserve.sendHeld`), and the Wallet shows the node's own sendable figures (held coins are still
+marked in the coins dialog).
+
+"Release all holds" (Settings, with a confirm; `mcd:reserveReleaseAll`): `invalidate()` in the main process, the file
+moved aside under a dated name, a new one opened. Safe: the node's own mempool check still refuses a double spend. A
+hold whose Dexicon order is still live is listed again by its engine within a minute.
+
 ## Where it lives
 
 `main/reserve.js` holds the registry. `main/rpc.js` `rpcCall` is the one function every node command of every caller
@@ -32,8 +52,10 @@ Two maps, both keyed by coin id (lower case):
   takes sent and not yet answered or still being voided (`pending_takes`, `void_takes`, field `mine`). The desktop
   glue (`main/dexicon.js`) reads these from the engine's store whenever the engine writes them, and at every sweep.
 
-`tokenid`, `amount` and `address` are filled in by the sweeper's read of the coin; until then they are unknown and
-every rule treats "unknown" as "could be this token".
+`tokenid`, `amount` and `address` are read from the node when a hold is set (M5, 0.19.100), by `consolidate` itself
+for any record still unknown, and by the sweeper. Only a coin the node did not answer for is "unknown", and every
+rule treats that as "could be this token". A record with no time, or a time in the future, has its clock started at
+the next sweep, so it lapses like any other (L4).
 
 ## What is intercepted (every command shape)
 
@@ -51,6 +73,27 @@ every rule treats "unknown" as "could be this token".
 
 Everything else passes untouched. `txnimport` is not read (see limits).
 
+How a command is read (0.19.100), as the node reads it (`CommandRunner`):
+- The verb in any case (`SEND` is `send`: the node lower-cases it). `main/sendpin.js` and `main.js` test it the same way.
+- Parameters are split on white space with a `{…}`, `[…]` or `"…"` value kept whole, so `amount:` inside a state JSON is
+  not a parameter; a value's own quotes are dropped (`coinid:"0x…"` is that coin).
+- A parameter NAME given twice is refused (`txninput`, `txnpost id:`, and `send` / `consolidate` when enforced): the
+  node keeps the last value, a reader of the text finds the first.
+- A `;` ends a command for the node WHEREVER it stands, inside a JSON value too (`runMultiCommand` is a tokenizer on
+  `;`). The guard splits exactly there. The review asked for a `;` inside a state JSON not to count as a chain (L5):
+  NOT done, on purpose. The node would still run what follows the `;` as a command of its own, so a `txninput`
+  written inside a JSON value would be executed and never checked.
+
+Shapes still NOT guarded (each needs its own design; none is used by the app's engines for a wallet coin today):
+- `txnimport` of a whole transaction, then `txnpost`: the inputs are not read.
+- `send` / `txnpost` with `burn:`, `sendpoll`, `multisig`, `tokencreate`, `sendfrom`, `sendnosign` / `sendview` /
+  `sendpost`: the node picks coins itself (or the key is not this wallet's).
+- `txnaddamount` (the node adds inputs of its choice to a transaction), `txnauto`, `txnmine`, `txnminepost`.
+- `consolidate` and `send` while the setting is `observe` or `off`.
+- A node parameter name in another letter case than the guard expects is read here but is a different (unknown)
+  parameter to the node, which rejects the command: refused twice rather than passed.
+- Anything sent to the node from outside this app (a phone, a MiniDapp, the node's own terminal).
+
 Why a refused `txninput` ends cleanly: each builder runs its steps one node command at a time and deletes the
 transaction on the first `status:false`: AtomiX `runSeq` then `deleteTxn` (`main/atomix/lib/htlc.js`, lock, claim,
 refund), PandaPools `runChain` (`poolmgr.js:153`) and `runCmds` then `giveUp` (`service.js`), Dexicon RESTING
@@ -61,16 +104,20 @@ follows releases the transaction's other coins here.
 ## Release, always
 
 1. `txndelete` of a transaction that was never posted; a `status:false` answer to its `txninput`.
-2. A definite `txnpost` rejection: `status:false` and not `pending`.
+2. A definite rejection of a transaction's FIRST `txnpost`: `status:false` and not `pending`. A retried post that is
+   rejected releases nothing (L2): the first may be in the mempool, and "already there" is such a rejection.
 3. Spent: the sweeper asks the node for each reserved coin (`coins coinid:C`, one coin per read, at most 25 reads a
-   sweep, round robin, so a fragmented wallet is never listed). A coin the node no longer shows is spent: released.
+   sweep, round robin, so a fragmented wallet is never listed). A coin the node does not show in TWO sweeps running,
+   with a chain tip each time, is spent: released (M4; one miss, or a miss with no tip, decides nothing). A coin
+   called gone that its source still lists is asked for again each sweep and, shown again, is held again.
    This is also how a coin spent by a phone or a MiniDapp on the same node leaves the registry.
 4. Known dead. `txnpost` answering ok is asynchronous mining, not confirmation, so a posted coin stays reserved. It
    is released as dead only when ALL hold: at least 12 blocks and 10 minutes since the post, the coin is still
    unspent, and `coins coinid:C checkmempool:true` shows it (nothing in the mempool spends it). 12 blocks is past
    any normal mining delay; a transaction absent from the mempool that long is not coming back by itself.
 5. An abandoned build: `building` for 15 minutes with no post and no delete.
-6. Engine stop: that owner's `building` coins (the builds died with the engine). Its posted coins and its holds stay:
+6. Engine stop: that owner's `building` coins (the builds died with the engine; wired for Dexicon, and since
+   0.19.100 for AtomiX and PandaPools when they are held or their wallet is replaced). Its posted coins and its holds stay:
    they still back something on the chain or on the relays.
 7. Wallet replaced or reset: everything; the store is moved aside under a dated name, never deleted.
 8. A hold ends when its source no longer lists the coin (order cancelled, filled; take answered or voided), at the
@@ -88,7 +135,9 @@ A reservation must never stop a time-critical settlement.
   (`coins coinid:C sendable:true`): a coin that is not at one of this wallet's simple addresses (an HTLC coin, a pool
   reserve, a bet) is never refused, whoever named it first. So a counterparty that names my HTLC coin as an order's
   backing cannot make my own Dexicon take block my claim.
-- For `atomix` and `casino`, if that read fails the input is let through (today's behaviour) rather than refused.
+- If that read fails (no answer, or the node does not say), EVERY engine's input is let through and the log says so
+  (0.19.100, M1: a pool operation or a Dexicon settlement must not fail on an unanswered read). Only `wallet`, whose
+  commands a person can repeat, is refused.
 - If a settlement transaction (one of `atomix` or `casino` that already carries a contract coin) names a plain coin
   that is only a hold, the hold is dropped and the input goes through: the collateral's owner finds the coin gone by
   its normal path (Dexicon's refresh re-backs or withdraws the order; a take arriving meanwhile is refused at its
@@ -97,11 +146,15 @@ A reservation must never stop a time-critical settlement.
 
 ## Persistence
 
-`userData/coin-reservations-<wallet id>.json`, written (temp file, fsync, rename) before the reserving command is
-forwarded. The wallet id is the SHA-256 of `seedrandom modifier:coin-reservation-v1`: one-way, public, and another
-wallet opens another file. The file is opened when the node is running and closed when it stops. If the id cannot be
-read the registry works in memory, says so once in the log and tries again every minute; it never blocks a command
-for that. A coin its owner has already posted keeps that record when the same owner names it for a second transaction.
+`userData/coin-reservations-pk-<wallet id>.json` (mode 0600), written (temp file, fsync, rename) before the reserving
+command is forwarded. The wallet id is the SHA-256 of the wallet's FIRST public key, the key with modifier `0x00`
+(`keys modifier:0x00`, else the row of `keys`): public data, the same for a wallet in a key mode however often it is
+restored, and readable on a locked node. Nothing is derived from the seed for it (up to 0.19.0 it was
+`seedrandom modifier:coin-reservation-v1`; that command is no longer sent). One-time rename: a folder with no file of
+the new name and exactly ONE `coin-reservations-0x….json` has it renamed; with several, none is taken (the old name
+cannot be recomputed without the seed read). The file is opened when the node is running and closed when it stops.
+If the id cannot be read the registry works in memory, says so once in the log and tries again every minute. A watched
+command waits at most 3 s for an open in progress (M2), then goes on with what memory holds; the late open merges. A coin its owner has already posted keeps that record when the same owner names it for a second transaction.
 
 ## Visibility
 
@@ -127,3 +180,39 @@ with the reason instead of the figure being lower. Doing better needs a held lin
 - A transaction that arrives whole by `txnimport` is not read; its coins are covered only if they are already held.
 - `sendfrom` (the Web Wallet's own key) and coins of other wallets are outside the registry.
 - A coin older than the node's proof window that is not this wallet's cannot be asked about and is released as spent.
+
+## H1, the proper fix: DESIGN ONLY (not built)
+
+The finding: `send` can only be pinned to an ADDRESS. When every address that could fund a send also holds a held
+coin, the pin fails and an enforced send is refused although free coins exist ("coins at an address with a held coin
+count as held"). A wallet whose coins sit at few addresses (the usual case after a consolidate) is then unable to
+send while one order is live. That is why sends are only observed today.
+
+The fix is to stop using `send` for that case and build the transaction from explicit free coins:
+
+1. In `sendVerdict`, when the address pin fails and `freeUnits >= need`: choose inputs among the FREE coins of the
+   token (`coins relevant:true sendable:true checkmempool:true tokenid:T coinage:3`, less every coin `foreign()`
+   names): the smallest single coin that covers, else largest first, at most 10 inputs (above that: refuse and say
+   "consolidate first").
+2. Build it as the engines do, one command at a time, deleting on the first failure:
+   `txncreate id:W` · `txninput id:W coinid:C` per input (through the guard, so each is recorded `building` for
+   `wallet` and no engine can take it meanwhile) · `txnoutput id:W amount:A address:TO tokenid:T storestate:…` ·
+   change: `txnoutput` to a fresh `getaddress` of this wallet (the node's `send` does the same) · `txnstate` for each
+   state port of the original `send state:{…}` · `txnsign id:W publickey:auto` · `txnpost id:W auto:true
+   txndelete:true` (with `mine:true` when the send had it).
+3. Tokens: outputs are in token units and the node scales them; the input coin must be passed as the node holds it.
+   The family rule applies only to OFF-node builders (byte-exact `coinexport`); this is built ON the node by
+   `txninput coinid:`, which takes the node's own coin proof.
+4. `burn:` is refused in this path (the node picks its own MINIMA for a burn). `multi:[…]` becomes one `txnoutput`
+   per pair. `split:` and `debug:` are refused. Anything not recognised: refuse, never guess.
+5. Every error path runs `txndelete`; `txnpost` answering `pending` is asynchronous mining, not failure.
+6. The reply is reshaped to what `send` answers (`response.txpowid`, `status`, `pending`), because callers read it
+   (Mail's receipt, the Wallet's toast, AtomiX's publish retry).
+7. Signing passes the one signing queue as a unit: the queue must hold from `txnsign` to `txnpost` so no other
+   signer runs in between (today each command is queued alone; a second key use between sign and post is harmless,
+   but the queue's "lost signer" handling must see the pair as one).
+8. Tests before it is enabled: the model node gains `txnoutput` accounting (inputs = outputs + change), then the
+   same test list as `send`: MINIMA, MxUSD, `multi:`, a state send, an insufficient wallet, a node failure at every
+   step (each ends in `txndelete` and a released reservation), and byte-identical behaviour when nothing is held.
+
+Until that exists `enforce` keeps the address pin and its refusal, and the default stays `observe`.

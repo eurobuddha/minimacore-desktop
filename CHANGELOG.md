@@ -7,6 +7,25 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.100] — Coin reservation: sends and consolidate are observed, not enforced; the review's findings
+
+- **Why**: the security review of 0.18.143 to 0.18.147 said "do not ship fully enabled". An enforced `send` can only be pinned to an address, so a wallet with a live order could be refused a send it has the coins for.
+- **What is enforced now**: the `txninput` refusal and the engines' own coin reads (held coins left out). **What is only observed**: `send` pinning and refusal, and `consolidate` refusal. Observed means the command goes out byte for byte and the Logs say what would have been pinned or refused, and why.
+- **Settings, "Coin guard"**: a master switch (off = the whole guard passes every command untouched), "Sends and Consolidate" with three states (Off / Observe / Enforce; Observe by default), and "Release all holds" with a confirm. Releasing cannot spend a coin twice: the node refuses that itself.
+- **Wallet id**: the reservation file is named after the wallet's first PUBLIC key (modifier 0x00). `seedrandom modifier:coin-reservation-v1` is no longer sent. It works on a locked node. An existing file is renamed once (only when the folder holds exactly one).
+- **M1**: when the node does not say what a coin is, every engine's input is let through and logged; only the wallet's own command is refused.
+- **M2**: a watched command waits at most 3 s for the reservation file to open, then goes on.
+- **M3**: every pin is given a coin age of 3 blocks (Wallet Send, Web Wallet, Vestr, miniMall, the reservation's own pin; Mail and AtomiX already had theirs).
+- **M4**: a coin is released as spent only when the node did not show it in two sweeps running, with a chain tip; a coin shown again is held again.
+- **M5**: a hold's token is read when the hold is set; `consolidate` is held up only by coins of its own token.
+- **L1**: the verb is read in any letter case (`SEND` is a send) in `main/sendpin.js`, `main/main.js` and the reservation; a parameter given twice is refused; a quoted coin id is read as the node reads it. The shapes still not guarded are listed in `docs/COIN_RESERVATION.md`.
+- **L2**: a retried `txnpost` the node rejects no longer releases the coins the first post put in the mempool.
+- **L3**: AtomiX and PandaPools release their unfinished builds when they are stopped.
+- **L4**: the file is mode 0600; a record with no post time, or a time in the future, still lapses.
+- **L5, not done on purpose**: the node ends a command at every `;`, inside a JSON value too. Reading it any other way here would let an input written after such a `;` reach the node unchecked. The guard splits exactly where the node does, and a test pins it.
+- **H1**: the proper fix (build the send from explicit free coins when the address pin fails) is written as a design in `docs/COIN_RESERVATION.md`. Not built.
+- **Tests**: 13 new in `scripts/reserve-test.cjs`; the model node answers `keys`. Not run on a node.
+
 ## [0.19.0] — Merge of the released Mail (v0.18.69) into the overhaul branch; the branch's version line becomes 0.19.x
 
 - **What this is**: a merge of the released tag `v0.18.69` (the main line's Mail work, built in another session while this branch was open) into the overhaul branch, and a new version line. The main line owns 0.18.65 to 0.18.69; this branch had used those numbers (and up to 0.18.148) for its own unpushed commits. From here the branch is 0.19.x. No old commit is renumbered.

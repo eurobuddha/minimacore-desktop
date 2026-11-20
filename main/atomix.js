@@ -258,6 +258,7 @@ function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
 async function hold(maxMs = 15000) {
   if (!held) { held = true; heldLoop = !!pollTimer; stopLoop(); log("held: a command that may replace the wallet is about to run"); }
   await quiet(maxMs);
+  require("./reserve").releaseOwner("atomix");   // the engine is stopped: its unfinished builds died with it (posted coins stay held)
 }
 /** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
  *  Also awaited before the node is told to quit (main.js onStopping): the engine outlives the node here, so the
@@ -341,6 +342,7 @@ function invalidate() {
   generation++;              // disown any in-flight init (old seed) BEFORE we tear down
   engineAbort.abort(); engineAbort = new AbortController();   // and whatever the old engine still has queued to sign
   stopLoop();
+  require("./reserve").releaseOwner("atomix");
   flush();
   try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); }
   catch (e) { log("wallet replaced: the old swap database could not be moved aside (" + e.message + ")"); }

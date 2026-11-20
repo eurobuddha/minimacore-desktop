@@ -72,6 +72,8 @@ const DEFAULTS = {
   casinoEnabled: false,      // P2P Chance was removed in 0.18.68 and nothing sets this any more. An install that
                              // had it on keeps it: it is the gate for the settle-only loop (main/casino.js) that
                              // gets that wallet's existing bets and offers paid out. Do not delete this key.
+  coinGuard: true,           // the shared coin reservation (main/reserve.js). false = the whole guard is a passthrough
+  coinGuardSends: "observe", // what it does to `send` and `consolidate`: "off" | "observe" (log only, the default) | "enforce"
   openAtLogin: false         // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
                              // Every key the renderer saves MUST be declared here — save() drops any key DEFAULTS
                              // does not name (the 0.16.97 casinoDollar regression). scripts/config-keys-test.cjs
@@ -132,6 +134,7 @@ function sanitisePatch(cfg) {
       if (k === "heapMb" && (n < 0 || n > 262144)) continue;
       out[k] = n; continue;
     }
+    if (k === "coinGuardSends") { if (v === "off" || v === "observe" || v === "enforce") out[k] = v; continue; }
     if (want === "string") { if (typeof v === "string") out[k] = v; continue; }
     out[k] = v;
   }

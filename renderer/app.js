@@ -2800,6 +2800,16 @@ async function renderSettings() {
       : `<p class="set-text">No labels yet. Name an address on the Receive screen.</p>`) +
     sec("History", `<p class="set-text">Your transaction history is stored on this computer (the node prunes old data). Clear it if you switch wallets.</p>
       <div class="home-actions set-actions"><button class="btn btn--outline" id="setClearHist">Clear local history</button></div>`) +
+    sec("Coin guard", `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setGuardL">Keep the trading engines off each other's coins</span><button class="switch switch--m2" role="switch" id="setGuard" aria-checked="${CFG.coinGuard !== false ? "true" : "false"}" aria-labelledby="setGuardL"></button></div>
+      <p class="ps-note">AtomiX, PandaPools, Dexicon and the wallet spend from one wallet. With this on, a coin one of them has put into a transaction, or that backs a live Dexicon order, is refused to the others before anything is signed. Off: nothing is checked and every command passes untouched.</p>
+      <div class="eyebrow ps-label">Sends and Consolidate</div>
+      <select class="field__input ps-field" id="setGuardSends" aria-label="Sends and Consolidate">
+        <option value="off"${CFG.coinGuardSends === "off" ? " selected" : ""}>Off: not looked at</option>
+        <option value="observe"${CFG.coinGuardSends !== "off" && CFG.coinGuardSends !== "enforce" ? " selected" : ""}>Observe: sent unchanged; the Logs say what would have been pinned or refused</option>
+        <option value="enforce"${CFG.coinGuardSends === "enforce" ? " selected" : ""}>Enforce: kept off held coins, or refused with the reason</option>
+      </select>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="setGuardRelease">Release all holds</button></div>
+      <div class="status" id="setGuardStatus"></div>`) +
     `<div id="chanceLeft"></div>`;
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
@@ -2835,6 +2845,13 @@ async function renderSettings() {
     CFG = await api.saveConfig({ labels: nl }); toast("Label removed", "ok"); renderSettings();
   });
   el("setClearHist").onclick = async () => { await api.histClear(); toast("Local history cleared ✓", "ok"); };
+  el("setGuard").onclick = async () => { CFG = await api.saveConfig({ coinGuard: CFG.coinGuard === false }); toast(CFG.coinGuard !== false ? "Coin guard on" : "Coin guard off: nothing is checked", CFG.coinGuard !== false ? "ok" : "warn"); renderSettings(); };
+  el("setGuardSends").onchange = async () => { CFG = await api.saveConfig({ coinGuardSends: el("setGuardSends").value }); toast("Sends and Consolidate: " + CFG.coinGuardSends, "ok"); };
+  el("setGuardRelease").onclick = async () => {
+    if (!await showConfirm("Release all holds?", "Every coin the app is holding for a swap, a pool transaction or an order is released at once. The record of them is kept beside the new one under a dated name; nothing is deleted.\n\nThis cannot spend a coin twice: the node itself refuses a second spend. A transaction still being built may then fail and can be tried again. The coins of an order that is still live are held again within a minute; cancel the order to free them.", "Release all", true)) return;
+    try { const r = await api.reserveReleaseAll(); el("setGuardStatus").textContent = r.released + (r.released === 1 ? " hold" : " holds") + " released."; toast("Holds released", "ok"); }
+    catch (e) { el("setGuardStatus").textContent = e.message || String(e); }
+  };
   el("setAutostart").onclick = async () => {
     const on = !CFG.openAtLogin;
     CFG = await api.saveConfig({ openAtLogin: on });

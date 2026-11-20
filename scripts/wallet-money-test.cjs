@@ -123,7 +123,7 @@ test("Send: every check still stops the send, before anything reaches the node",
 });
 
 test("Send: the main process still pins a MINIMA send to a signable coin, and only a send", () => {
-  assert.ok(mainJs.includes('const pinned = /^send\\s/.test(command) ? await pinMinimaSend(run, command) : command;'));
+  assert.ok(mainJs.includes('const pinned = /^send\\s/i.test(command) ? await pinMinimaSend(run, command, { minCoinage: 3 }) : command;'));
   assert.ok(mainJs.includes("return run(pinned);"));
 });
 

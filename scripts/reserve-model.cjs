@@ -13,6 +13,7 @@ const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A9
 function makeNode(list) {
   const coins = new Map(), mempool = new Map(), txns = new Map(), seen = [];
   let block = 1000, next = 900000, down = false;
+  const wallet = { pk: "0x" + "AB".repeat(32), locked: false };   // the wallet's first key (modifier 0x00): public, shown by a locked node too
   const add = (c) => { const x = Object.assign({ tokenid: "0x00", simple: true, state: [], created: String(block - 10), spent: false }, c); coins.set(lc(x.coinid), x); return x; };
   (list || []).forEach(add);
   const row = (x) => { const r = { coinid: x.coinid, amount: x.amount, address: x.address, tokenid: x.tokenid, state: x.state, created: x.created, spent: false }; if (x.tokenid !== "0x00") r.tokenamount = x.amount; return r; };
@@ -32,7 +33,8 @@ function makeNode(list) {
     const ok = (response) => ({ command: v, status: true, pending: false, response });
     const no = (error) => ({ command: v, status: false, pending: false, error });
     if (v === "block") return ok({ block: String(block) });
-    if (v === "seedrandom") return ok({ seedrandom: "0x" + "AB".repeat(32) });
+    if (v === "seedrandom") return wallet.locked ? no("KeysDB LOCKED") : ok({ seedrandom: "0x" + "AB".repeat(32) });
+    if (v === "keys") return ok({ keys: [{ size: 64, depth: 3, uses: 1, maxuses: 262144, modifier: "0x00", publickey: wallet.pk }, { size: 64, depth: 3, uses: 0, maxuses: 262144, modifier: "0x01", publickey: "0x" + "EF".repeat(32) }].filter(k => !P(c, "modifier") || k.modifier === P(c, "modifier")), total: 2 });
     if (v === "coins") {
       let r = [...coins.values()];
       if (P(c, "coinid")) r = r.filter(x => lc(x.coinid) === lc(P(c, "coinid")));
@@ -70,7 +72,7 @@ function makeNode(list) {
     return ok({});
   }
   return {
-    run, seen, coins, mempool, add,
+    run, seen, coins, mempool, add, wallet,
     /** A block: everything in the mempool is spent. */
     mine(n) { for (const k of mempool.keys()) coins.delete(k); mempool.clear(); block += n || 1; },
     /** The mempool forgets a transaction that never mined (its inputs are unspent again). */

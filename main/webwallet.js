@@ -212,7 +212,7 @@ async function send(opts) {
   if (await isNodeOwnSeed(pubkey, seed)) {
     privatekey = null;   // not needed — the node signs with its own keys
     let cmd = "send amount:" + amount + " address:" + to + " tokenid:" + tok;
-    try { cmd = await pinMinimaSend(runner, cmd); } catch (e) {}   // dodge shared-node beacon-dust NPE
+    try { cmd = await pinMinimaSend(runner, cmd, { minCoinage: 3 }); } catch (e) {}   // dodge shared-node beacon-dust NPE
     let nr;
     try { nr = await runner(cmd); }
     catch (e) { return { ok: false, ambiguous: true, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying." }; }
