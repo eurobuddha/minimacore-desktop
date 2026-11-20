@@ -660,20 +660,18 @@ function renderBackup() {
   // Private keys: the seed phrase, and the rebuild of this wallet from a phrase.
   host.innerHTML = head(t("Private keys"), t("Anyone who reads these words owns your funds. Write them down somewhere only you can reach: never in a photo, a note app or a message.")) +
     `<div class="eyebrow ps-label">${th("Seed")}</div>
-    <div class="seedcard" id="bkSeed" hidden></div>
     <button class="btn btn--outline ps-btn" id="bkShow">${th("Show seed phrase")}</button>
     <div class="eyebrow ps-label bk-gap">${th("Rebuild wallet from seed phrase")}</div>
     <p class="ps-note ps-note--body">${th("Replace this node's wallet with the one for a seed phrase, then resync from a MegaMMR node. Destructive.")}</p>
     <div class="eyebrow ps-label">${th("Seed phrase")}</div><div id="bkWords"></div>` + modeQuestionHtml() +
     field("bkUses", t("Key uses"), `inputmode="numeric" placeholder="${th("higher than any previous rebuild of this seed")}"`) + hostField +
     `<button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Rebuild")}">${th("Rebuild")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
-  $("bkShow").onclick = async () => {
-    const box = $("bkSeed");
-    if (!box.hidden) { box.hidden = true; box.textContent = ""; $("bkShow").textContent = t("Show seed phrase"); return; }
-    const p = seedFrom(await tryCmd("vault"));
-    if (!p) { toast(t("The node did not return a seed phrase."), "err"); return; }
-    box.textContent = p; box.hidden = false; $("bkShow").textContent = t("Hide seed phrase");
-  };
+  // The phrase typed, then the system's prompt where there is one, both checked in the main process before the node is
+  // asked (main/seedgate.js, 0.19.176); the seed is then shown for a minute at most, and only while the window is in front.
+  $("bkShow").onclick = () => secretAsk("seed", t("Show seed phrase"), async (typed) => {
+    const r = await api.revealSeed(typed);
+    secretReveal(t("Seed phrase"), r.phrase, r.system); r.phrase = "";
+  });
   const words = WordEntry.create($("bkWords"), { anyPhrase: true, clearClipboard: () => api.clip("") });
   wireModeQuestion(host);
   $("bkGo").onclick = async () => { const km = restoreMode(host); if (km.error) { toast(km.error, "err"); return; }
@@ -723,7 +721,7 @@ async function postBootNewSeed() {
     <button class="btn btn--primary ps-btn ps-btn--main fr-proceed" id="frSaved" disabled>${th("I've saved it. Proceed")}</button>`;
   let phrase = "";
   for (let i = 0; i < 20 && !phrase && el("frSeed"); i++) {   // the vault answers a moment after the node does
-    phrase = String(seedFrom(await tryCmd("vault")) || "").trim();
+    phrase = String(await api.firstRunSeed().catch(() => "") || "").trim();   // answered only in this step (main.js mcd:firstRunSeed)
     if (!phrase) await new Promise(r => setTimeout(r, 1500));
   }
   if (!el("frSeed")) return;
@@ -2774,9 +2772,24 @@ function appendTerm(text, kind) {
 // passes a wallet command through unchanged unless it is switched to Enforce (Settings, Coin guard).
 // The same rule as the main process (main/sendpin.js pinSend): MINIMA is no tokenid at all or exactly tokenid:0x00, and a chain (;) is never pinned.
 function termSendNote(c) { const t = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c); return /^send\s/i.test(c) && !c.includes(";") && !/\bfromaddress:/i.test(c) && (!t || t[1].toLowerCase() === "0x00") ? "note: a MINIMA send with no fromaddress: may be given one of this wallet's own addresses, so that the node does not choose a coin it cannot sign. The reply's params show what was sent. Type fromaddress: yourself to choose." : ""; }
+// `vault` and `seedrandom` (any action, any case, anywhere in a `;` chain) show what controls the funds (0.19.176, owner
+// decision): the main process runs one only after the phrase typed for that exact command and the system's prompt
+// (main/seedgate.js secretKind, the same rule). The command is not kept in the history; its reply is shown in its own
+// window for a minute at most and is never in the Terminal's output or its Copy output.
+function termSecretKind(c) { let k = null; for (const p of String(c).split(";")) { const v = (p.trim().split(/\s+/)[0] || "").toLowerCase(); if (v === "vault") return "seed"; if (v === "seedrandom") k = "key"; } return k; }
 async function termRun() {
   const inp = el("termIn"), c = inp.value.trim(); if (!c) return;   // an empty Run does nothing
   inp.value = ""; termSugClose();
+  const secret = termSecretKind(c);
+  if (secret) {
+    appendTerm(c.split(/\s+/)[0], "cmd");
+    secretAsk(secret, c, async (typed) => {
+      const g = await api.secretGate(c, typed);
+      const r = await api.cmd(c);
+      secretReveal(c, JSON.stringify(r, null, 2), !!(g && g.system)); appendTerm(t("The reply is shown in its own window for 60 seconds and is not kept here."), "note");
+    });
+    return;
+  }
   TERM_HIST.push(c); termIdx = TERM_HIST.length;
   appendTerm(c, "cmd");
   const note = termSendNote(c); if (note) appendTerm(note, "note");
@@ -3527,6 +3540,34 @@ async function ewSettingsDialog(b) {
       <p>${th("Importing another key is not offered here. One Ethereum key serves this wallet and the swaps, and replacing it while a swap is in flight would leave that swap unable to claim or refund. (Nothing here moves funds.)")}</p>` });
 }
 
+/** The question before a secret is shown (0.19.176): what it is, then the phrase to type (SHOW SEED for the seed, SHOW KEY for a
+ *  key), checked in the main process by go(typed); a refusal is said and the question stays. */
+function secretAsk(kind, title, go) {
+  const phrase = kind === "seed" ? "SHOW SEED" : "SHOW KEY"; let busy = false;
+  appDlg({ title, body: `<p>${th("This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.")}</p>
+      <label class="adlg__lbl" for="secretIn">${tr("Type {exportphrase} to confirm it's you", { exportphrase: esc(phrase) })}</label>
+      <input class="adlg__in" id="secretIn" autocomplete="off" spellcheck="false" />`,
+    buttons: [{ label: t("Cancel"), v: null }, { label: t("I understand, show it"), on: async (_root, close) => {
+      if (busy) return; busy = true;
+      try { await go(el("secretIn").value); close(); }
+      catch (e) { const raw = ipcRaw(e); toast(MainSaid.has(raw, "EW_CANCELLED") ? t("Cancelled") : ipcError(e), "warn"); }
+      busy = false;
+    } }] });
+}
+/** A secret on the screen: for a minute at most, and only while the window is in front; never copied, never kept. */
+function secretReveal(title, text, system) {
+  let s = String(text || ""); text = null;
+  const d = appDlg({ title, body: `<div class="ew-warn">${th("Anyone who sees this can take your funds. Never share it.")}</div>
+      ${system ? "" : `<div class="ew-warn">${th("No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.")}</div>`}
+      <div class="ew-mono" id="secretText" style="white-space:pre-wrap;overflow-wrap:anywhere"></div><div class="ew-fine">${th("This closes by itself after 60 seconds, and when you leave this window.")}</div>`,
+    buttons: [{ label: t("Close"), v: null }] });
+  d.root.querySelector("#secretText").textContent = s; s = "";   // as text, in this one node, which close() removes
+  const end = () => d.close(null), hidden = () => { if (document.hidden) end(); };
+  const timer = setTimeout(end, 60000);
+  window.addEventListener("blur", end); document.addEventListener("visibilitychange", hidden);
+  d.done.then(() => { clearTimeout(timer); window.removeEventListener("blur", end); document.removeEventListener("visibilitychange", hidden); });
+  return d;
+}
 // Export: the phone asks "I understand", then the device's own lock screen ("Confirm it's you"), then shows the key. Here: the
 // typed phrase, then the system's prompt where Electron offers one (Touch ID on a Mac that has it), both checked in the main process.
 function ewExportKey() {

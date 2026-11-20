@@ -195,9 +195,29 @@ function requireRunning() {
   if (node.state !== "running") throw new Error("node not running");
 }
 
+// The commands that show what controls the funds (main/seedgate.js, 0.19.176): `vault` and `seedrandom` run from a window
+// only once the phrase typed for that exact command, and the system's prompt where there is one, were checked here.
+const seedgate = require("./seedgate");
+const systemCheck = { can: () => { const { systemPreferences } = require("electron"); return process.platform === "darwin" && systemPreferences.canPromptTouchID(); },
+  prompt: (why) => { const { systemPreferences } = require("electron"); return systemPreferences.promptTouchID(why); } };
+const secretGate = seedgate.create(systemCheck);
+ipcMain.handle("mcd:secretGate", (_e, command, typed) => { requireRunning(); return secretGate.open(command, typed); });
+ipcMain.handle("mcd:revealSeed", (_e, typed) => { requireRunning(); return seedgate.revealSeed(typed, systemCheck, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
+// First run: the seed of the wallet the node has just made is shown once, before the wallet opens. Only in that step: a
+// launch that began with the wallet already made never answers it (a window that set walletDone back does not reopen it).
+let firstRunOpen = null;
+ipcMain.handle("mcd:firstRunSeed", async () => {
+  requireRunning();
+  const c = config.load(); if (firstRunOpen === null) firstRunOpen = !c.walletDone;
+  if (!firstRunOpen || c.walletDone || c.walletMode !== "new") throw new Error("The seed is shown here only while a new wallet is being made.");
+  const v = ((await rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "vault")) || {}).response || {};
+  return String(v.phrase || v.seedphrase || v.seed || v.mnemonic || "");
+});
+
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   requireRunning();
+  if (seedgate.secretKind(command) && !secretGate.take(command)) throw new Error("vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.");
   // A backup file brings its own keys, in its own key mode: only Backup & Recovery restores one, after the mode check.
   if (restore.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
   // Replacing the wallet from a seed phrase resets every identity made from the old one: refused while work that needs the old keys is open.
@@ -247,8 +267,10 @@ ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
+  if (firstRunOpen === null) firstRunOpen = !config.load().walletDone;   // as the launch found it, before this save
   const c = config.save(patch || {});
   reserveMode(c);
+  if (c.walletDone) firstRunOpen = false;   // the wallet step is over for this launch
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
 });

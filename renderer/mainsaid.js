@@ -286,7 +286,12 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["MAIN_BACKUP_PASSPHRASE", I18N.N_("Enter the backup passphrase.")],
     ["MAIN_NO_ENGINE", I18N.N_("No such engine.")],
     ["MAIN_TOO_LARGE_64", I18N.N_("That file is larger than 64 MB.")],
-    ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")]
+    ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")],
+    // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
+    ["MAIN_SECRET_CMD", I18N.N_("vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.")],
+    ["MAIN_FIRSTRUN_SEED", I18N.N_("The seed is shown here only while a new wallet is being made.")],
+    ["SG_NO_CHECK", I18N.N_("This command needs no check.")],
+    ["SG_NO_SEED", I18N.N_("Couldn't read the seed.")]
   ];
 
   var BY = {}, GROUP = {}, TOP = [];

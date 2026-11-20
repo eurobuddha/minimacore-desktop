@@ -189,7 +189,7 @@ test("the coin guard: every refusal, run through main/reserve.js in front of the
 // never edited: their exact English is listed), and read back in each language with sample values.
 test("ETH Wallet, miniMall, Vestr, Web Wallet, Faucet, Explorer, KeyUses, updates, main.js: each listed sentence is in its file, and is said in each language", async () => {
   const fs = require("fs"), path = require("path"), read = (f) => fs.readFileSync(path.join(__dirname, "..", "main", f), "utf8");
-  const SRC = { EW_: "ethwallet.js", SHOP_: "shop.js", VESTR_: "vestr.js", WW_: "webwallet.js", FAUCET_: "faucet.js", EXPLORER_: "explorer.js", KU_: "keyuses.js", UPD_: "updater.js", MAIN_: "main.js", SL_: "shop-listing.js", SS_: "shop-store.js" };
+  const SRC = { EW_: "ethwallet.js", SHOP_: "shop.js", VESTR_: "vestr.js", WW_: "webwallet.js", FAUCET_: "faucet.js", EXPLORER_: "explorer.js", KU_: "keyuses.js", UPD_: "updater.js", MAIN_: "main.js", SL_: "shop-listing.js", SS_: "shop-store.js", SG_: "seedgate.js" };
   const unq = (s) => s.replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, "\\");
   let n = 0;
   for (const code of MS.codes()) {

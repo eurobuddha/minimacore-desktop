@@ -132,7 +132,7 @@ test("every megammrsync screen confirms first, and a replaced wallet drops the o
 
 test("the seed phrase is read only on request, shown only on its screen, and never stored or logged", () => {
   const body = source("renderBackup");
-  assert.ok(/\$\("bkShow"\)\.onclick = async[\s\S]*?seedFrom\(await tryCmd\("vault"\)\)/.test(body), "vault runs when Show seed phrase is pressed");
+  assert.ok(/\$\("bkShow"\)\.onclick = \(\) => secretAsk\("seed", [\s\S]*?await api\.revealSeed\(typed\)/.test(body), "the seed is read when Show seed phrase is pressed, through the gate (0.19.176)");
   assert.ok(app.includes('if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";'), "leaving the screen removes the words from the page");
   assert.ok(!/console\.\w+\([^)]*(phrase|seed|pw\b|password)/i.test(app), "nothing logs a phrase or a password");
   assert.ok(!/saveConfig\(\{[^}]*(phrase|seed|password)/i.test(app), "nothing saves one");
@@ -257,7 +257,7 @@ test("first run is the phone's launcher; the seed screens keep the words out of 
     assert.ok(!/saveConfig\(\{[^}]*(seed|phrase|keyuses)/i.test(src), fn + " saves no seed");
   }
   assert.ok(source("hideSetup").includes('el("setupBody").innerHTML = ""'), "closing the layer removes the words from the page");
-  assert.ok(/postBootNewSeed[\s\S]*?tryCmd\("vault"\)/.test(app) && source("confirmNewSeed").includes("seedMismatch(phrase, typed)"));
+  assert.ok(/postBootNewSeed[\s\S]*?api\.firstRunSeed\(\)/.test(app) && source("confirmNewSeed").includes("seedMismatch(phrase, typed)"));
   assert.ok(html.includes('<script src="wordentry.js"></script>') && !html.includes("Set up your node"));
   const stub = fs.readFileSync(path.join(ROOT, "scripts", "dev-preview", "stub.js"), "utf8");
   assert.ok(stub.includes('const FAKE_SEED = "TEST ONLY VOID ABANDON ".repeat(6).trim();'), "the preview's seed is four words repeated: plainly not a wallet");

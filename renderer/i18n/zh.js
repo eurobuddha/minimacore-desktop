@@ -21,6 +21,13 @@
   "Restore & resync": "恢复并重新同步",
   "Enter your seed phrase, key uses and the address of a Minima MegaMMR node.\n\nEnter key uses above the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds: if unsure, set it higher.": "请输入您的助记词、密钥使用次数和 Minima MegaMMR 节点的地址。\n\n输入的密钥使用次数必须高于此种子在任何节点上做过的签名总数。数值过低会重复使用一次性密钥，可能导致资金损失：如不确定，请设得更高。",
   "Seed phrase": "助记词",
+  "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.": "这会显示控制您资金的内容。任何看到它的人都能永久且不可逆转地拿走这些资金。只有在您独自一人并且清楚知道为什么需要它时才继续。",
+  "Anyone who sees this can take your funds. Never share it.": "任何看到它的人都能拿走您的资金。切勿分享。",
+  "The reply is shown in its own window for 60 seconds and is not kept here.": "回复会在单独的窗口中显示 60 秒，不会保留在这里。",
+  "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.": "vault 和 seedrandom 会显示控制您资金的内容：请在终端中输入该命令，终端会先要求您输入确认短语。",
+  "The seed is shown here only while a new wallet is being made.": "只有在创建新钱包时才会在这里显示助记词。",
+  "This command needs no check.": "此命令无需核对。",
+  "Couldn't read the seed.": "无法读取助记词。",
   "Key uses": "密钥使用次数",
   "0 only if this seed has never signed": "仅当此种子从未签名时才填 0",
   "MegaMMR node": "MegaMMR 节点",
@@ -2933,7 +2940,7 @@
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
-  // translated for the desktop (the phone has no such text): 1908 keys for native review
+  // translated for the desktop (the phone has no such text): 1915 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4842,6 +4849,13 @@
     "DROPPED",
     "on-chain",
     "BAD_TOTAL",
-    "UNCHECKED"
+    "UNCHECKED",
+    "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.",
+    "Anyone who sees this can take your funds. Never share it.",
+    "The reply is shown in its own window for 60 seconds and is not kept here.",
+    "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.",
+    "The seed is shown here only while a new wallet is being made.",
+    "This command needs no check.",
+    "Couldn't read the seed."
   ]
 });

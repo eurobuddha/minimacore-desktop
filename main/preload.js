@@ -10,6 +10,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("mcd", {
   // node command over RPC → { status, response } (same shape the Android NodeApi consumes)
   cmd: (command) => ipcRenderer.invoke("mcd:cmd", command),
+  secretGate: (command, typed) => ipcRenderer.invoke("mcd:secretGate", command, typed),   // vault / seedrandom: the typed phrase and the system's prompt, for that one command (main/seedgate.js)
+  revealSeed: (typed) => ipcRenderer.invoke("mcd:revealSeed", typed),
+  firstRunSeed: () => ipcRenderer.invoke("mcd:firstRunSeed"),
 
   // reliable clipboard write via the MAIN process (the renderer's navigator.clipboard silently rejects when the
   // window isn't focused, leaving stale data on the clipboard while the UI still says "Copied"). Returns true on ok.

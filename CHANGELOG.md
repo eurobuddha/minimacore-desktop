@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.176] — The Terminal gates vault and seedrandom; Show seed phrase asks first
+
+- **Owner decision (20 Nov 2026):** the commands that show what controls the funds no longer run on a bare call. `vault` (any action, any letter case, anywhere in a `;` chain) answers with the wallet's seed phrase or handles its keys; `seedrandom` (any modifier) answers with a key made from the seed. Before, the Terminal ran both like any other command, kept them in its history and its Copy output, and Backup & Recovery's "Show seed phrase" put the seed on screen with one click.
+- **Main process:** `mcd:cmd` refuses either unless a gate was just passed for that exact command (`main/seedgate.js`, as `ethwallet.exportKeyGated` and the released desktop's `main/seedgate.js`, `e3946acad8e5029e85d4bd65e558dc58c54e7aa0`): the typed phrase (SHOW SEED for `vault`, SHOW KEY for `seedrandom`), then Touch ID where the Mac offers it; the pass is for that one command, used once, within 60 seconds. `mcd:revealSeed` does the same for Show seed phrase. The first-run "Your recovery seed" reads the new wallet's seed through `mcd:firstRunSeed`, which answers only while a new wallet is being made in this launch. Every other command is unchanged. The engines' own uses (AtomiX's and Dexicon's seed-derived keys) are in the main process and are not affected.
+- **Terminal:** such a command asks for the phrase in a dialog, runs once on success, and shows its reply in its own window that closes after 60 seconds and when the window is left, says when no system check took place, offers no copy, and is never kept in the output, Copy output or the ↑ history (the output shows only the verb and a note).
+- **Show seed phrase:** the same question, then the seed in that window (no longer left in the page).
+- New text in the four languages (review lists); main's refusals listed in `renderer/mainsaid.js` (`MAIN_SECRET_CMD`, `MAIN_FIRSTRUN_SEED`, `SG_NO_CHECK`, `SG_NO_SEED`; the phrase and Cancelled refusals reuse the ETH key export's).
+- Tests: `scripts/seedgate-test.cjs` (new, in `npm run test:wallet`): which commands are gated (chains, case, look-alikes not) and the window agreeing with main; wrong phrase, wrong kind, a refused Touch ID and an ungated command leave no pass; the pass is for the exact command, once, within 60 seconds; Show seed phrase asks the node only after both checks; `mcd:cmd` checks first; no window code asks the node for `vault` or `seedrandom` itself; the Terminal keeps neither the command nor the reply. `scripts/core-screens-test.cjs` follows the two seed screens to their gated calls. They fail on 0.19.175.
+
 ## [0.19.175] — Logs: "seedphrase" and "mnemonic" are redacted too
 
 - **Parity with the released desktop (its 0.18.169, `1c668ae`):** a reply's JSON `"seedphrase"` or `"mnemonic"` field is taken out of every log line and saved log, as `"seed"` and `"privatekey"` are since 0.19.172.

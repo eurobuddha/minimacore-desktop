@@ -21,6 +21,13 @@
   "Restore & resync": "Восстановление и синхронизация",
   "Enter your seed phrase, key uses and the address of a Minima MegaMMR node.\n\nEnter key uses above the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds: if unsure, set it higher.": "Введите сид-фразу, число использований ключей и адрес узла Minima MegaMMR.\n\nУкажите число использований ключей больше числа подписей, когда-либо сделанных этой сид-фразой на любом узле. Слишком низкое значение приводит к повторному использованию одноразовых ключей и может привести к потере средств: если не уверены, укажите больше.",
   "Seed phrase": "Сид-фраза",
+  "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.": "Здесь будет показано то, что управляет вашими средствами. Любой, кто это увидит, сможет забрать их навсегда и безвозвратно. Продолжайте, только если вы одни и точно знаете, зачем вам это нужно.",
+  "Anyone who sees this can take your funds. Never share it.": "Любой, кто это увидит, сможет забрать ваши средства. Никогда никому это не показывайте.",
+  "The reply is shown in its own window for 60 seconds and is not kept here.": "Ответ показывается в отдельном окне в течение 60 секунд и здесь не сохраняется.",
+  "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.": "vault и seedrandom показывают то, что управляет вашими средствами: введите команду в Терминале, он сначала попросит фразу подтверждения.",
+  "The seed is shown here only while a new wallet is being made.": "Сид-фраза показывается здесь только во время создания нового кошелька.",
+  "This command needs no check.": "Этой команде проверка не нужна.",
+  "Couldn't read the seed.": "Не удалось прочитать сид-фразу.",
   "Key uses": "Число использований ключей",
   "0 only if this seed has never signed": "0, только если эта сид-фраза никогда не подписывала",
   "MegaMMR node": "Узел MegaMMR",
@@ -2933,7 +2940,7 @@
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)", "• {item}.", "Dexicon", "{day} {month}", "{day} {month} {year}"],
-  // translated for the desktop (the phone has no such text): 1906 keys for native review
+  // translated for the desktop (the phone has no such text): 1913 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -4840,6 +4847,13 @@
     "DROPPED",
     "on-chain",
     "BAD_TOTAL",
-    "UNCHECKED"
+    "UNCHECKED",
+    "This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.",
+    "Anyone who sees this can take your funds. Never share it.",
+    "The reply is shown in its own window for 60 seconds and is not kept here.",
+    "vault and seedrandom show what controls your funds: type the command in the Terminal, which asks for the phrase first.",
+    "The seed is shown here only while a new wallet is being made.",
+    "This command needs no check.",
+    "Couldn't read the seed."
   ]
 });
