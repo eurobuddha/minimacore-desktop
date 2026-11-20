@@ -25,7 +25,7 @@ function ensureLoaded() {
   try {
     const j = JSON.parse(raw);
     if (j) { mem.messages = j.messages || {}; mem.contacts = j.contacts || {}; mem.meta = j.meta || {}; }
-    // 0.18.148 adds keys to meta (theme, saved cards, the publication opt-out) and nothing else. The file as the older
+    // 0.18.148 and the merged Mail of 0.18.65 to 0.18.69 add keys to meta (theme, the publication opt-out) and nothing else. The file as the older
     // version left it is copied aside once, before this version writes anything: this store is the only complete inbox.
     if (j && j.rev !== REV) { try { fs.copyFileSync(filePath(), filePath() + ".before-0.18.148", fs.constants.COPYFILE_EXCL); } catch (e2) { /* already kept, or unreadable */ } }
   } catch (e) {
@@ -91,12 +91,15 @@ function deleteThread(hashref) {
 // archive state lives in meta under `arch:<hashref>`
 function archivedSet() { ensureLoaded(); const s = new Set(); for (const k in mem.meta) if (k.indexOf("arch:") === 0 && mem.meta[k]) s.add(k.slice(5)); return s; }
 function setArchived(hashref, on) { ensureLoaded(); if (on) mem.meta["arch:" + hashref] = true; else delete mem.meta["arch:" + hashref]; persistSoon(); }
+function getMessage(hashref, randomid) {
+  ensureLoaded();
+  return mem.messages[hashref + "|" + randomid];
+}
 /** Patch one message in place, found by its thread + dedup id. The send lifecycle needs this: a message is
  *  written as `posting` BEFORE the coin is broadcast (so the Outbox shows it and a crash can't lose it), then
  *  promoted to `sent` or demoted to `failed` by the same call site. */
 function setStatus(hashref, randomid, patch) {
-  ensureLoaded();
-  const m = mem.messages[hashref + "|" + randomid];
+  const m = getMessage(hashref, randomid);
   if (!m) return false;
   Object.assign(m, patch);
   persistSoon();
@@ -136,5 +139,5 @@ function setAside() {
 function exportAll() { ensureLoaded(); return { messages: mem.messages, contacts: mem.contacts, meta: mem.meta }; }
 
 module.exports = { addMessage, all, threads, archivedThreads, thread, deleteThread, setArchived, archivedSet,
-  markThreadRead, unreadCount, markConfirmed, setStatus,
+  getMessage, markThreadRead, unreadCount, markConfirmed, setStatus,
   contacts, addContact, renameContact, getContact, removeContact, metaGet, metaSet, clear, setAside, exportAll };

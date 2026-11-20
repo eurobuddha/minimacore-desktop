@@ -77,7 +77,7 @@ async function nodeCmd(cmd) { return runner(cmd); }
 // ---- identity (derive once, cache in Keychain) ----
 async function init() {
   if (identity) return identity;
-  await mc.ready();
+  const sodium = await mc.ready();
   const cached = config.getSecret(MAIL_KEY_ACCOUNT);
   if (cached) { try { identity = mc.loadIdentity(cached); } catch (e) { identity = null; } }
   if (!identity) {
@@ -88,8 +88,8 @@ async function init() {
     identity = await mc.deriveIdentity(resp.seed);
     config.setSecret(mc.serializeIdentity(identity), MAIL_KEY_ACCOUNT);
   }
+  ensureOwnPublication(sodium);
   try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; mypayaddr = gr.miniaddress || gr.address || ""; if (mypayaddr) store.metaSet("mypayaddr", mypayaddr); } catch (e) {}
-  ensureOwn(await mc.ready());
   if (!store.metaGet("coinnotify")) { try { await nodeCmd("coinnotify action:add address:" + CHAINMAIL); store.metaSet("coinnotify", true); } catch (e) {} }
   return identity;
 }
@@ -191,7 +191,7 @@ async function retrySend(hashref, randomid) {
   emitter.emit("update");
   return true;
 }
-/** Mail pays in MINIMA and MxUSD only (PaymentCurrency.java). The names are the phone's, the ids are fixed here. */
+/** Mail pays in MINIMA and MxUSD only (the phone's PaymentCurrency.java, 0.5.27). The names are the phone's, the ids are fixed here. */
 const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 const PAY_NAMES = { "0x00": "Minima", [MXUSD.toLowerCase()]: "MxUSD" };
 /** PaymentCurrency.options: always both rows; the balance is the node's sendable (else confirmed) when above zero, else "0". */
@@ -210,11 +210,11 @@ async function payOptions() {
   const r = await nodeCmd("balance");
   return r && r.status === true && Array.isArray(r.response) ? payOptionsFrom(r.response) : [];
 }
-async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo, subject) {
+async function pay(toPublicId, payaddr, amount, tokenid, tokenname, memo, subject = "") {
   await init();
   const payName = PAY_NAMES[String(tokenid).toLowerCase()];
   if (!payName) throw new Error("Mail sends Minima and MxUSD only.");
-  tokenid = payName === "MxUSD" ? MXUSD : "0x00"; tokenname = payName;
+  tokenid = payName === "MxUSD" ? MXUSD : "0x00"; tokenname = payName;   // the phone's names on the wire, whatever the screen called them
   subject = String(subject || "").slice(0, 200);
   if (!looksLikeMinimaAddress(payaddr)) throw new Error("Invalid pay address.");   // rejects a Mail key too
   if (!/^[0-9]*\.?[0-9]+$/.test(String(amount)) || parseFloat(amount) <= 0) throw new Error("Invalid amount.");
@@ -490,54 +490,45 @@ function myIdentity() {
     published: !!publications()[id], name: store.metaGet("myname") || "", payaddr: store.metaGet("mypayaddr") || mypayaddr || "",
     theme: store.metaGet("theme") === "dark" ? "dark" : "light" };
 }
-/** Mail's own Paper / Dark choice (Design.java; meta "theme", Paper unless set). It does not follow the shell. */
+/** Mail's own Paper / Dark choice (the phone's Design.java; meta "theme", Paper unless set). It does not follow the shell. */
 function setTheme(theme) { store.metaSet("theme", theme === "dark" ? "dark" : "light"); return myIdentity(); }
-/** The six words of each key asked for (MailAddress.display), so no screen has to show a 130-character key as a name. */
-function phrases(keys) {
-  const out = {};
-  for (const k of Array.isArray(keys) ? keys.slice(0, 5000) : []) { const c = address.canonicalKey(k); if (c) out[k] = address.phrase(c); }
-  return out;
-}
-/** Every key this store knows: contacts and both parties of every message (CommsDb.knownMailKeys), and our own. */
-function knownKeys() {
-  const keys = new Set();
-  for (const c of store.contacts()) keys.add(c.publicId);
-  for (const m of store.all()) { keys.add(m.frompublickey); keys.add(m.topublickey); }
-  if (identity) keys.add(identity.publicId);
-  const out = new Set();
-  for (const k of keys) { const c = address.canonicalKey(k); if (c) out.add(c); }
-  return out;
-}
-/** MainActivity.resolveRecipient: a key or key|address, a contact link, or six words (known keys first, then the live beacon). */
 async function resolveRecipient(input) {
   const text = String(input || "").trim();
-  if (text.includes("minimamail:")) {
-    const linked = address.direct(text);
-    if (!linked) throw new Error("Enter six address words, a contact link or a Mail key.");
-    return linked.toLowerCase();
-  }
-  const bar = text.indexOf("|");
-  const raw = address.canonicalKey(bar > 0 ? text.slice(0, bar).trim() : text);
-  if (raw) {
-    const pa = bar > 0 ? text.slice(bar + 1).trim() : "";
-    if (pa && mc.isValidPublicId(raw) && looksLikeMinimaAddress(pa)) store.metaSet("pa:" + raw, pa);   // acceptKeyShare
-    return raw;
-  }
+  const linked = address.direct(text);
+  if (linked) return linked;
+  const raw = text.split("|")[0].trim();
+  if (mc.isValidPublicId(raw)) return "0x" + raw.replace(/^0x/i, "").toLowerCase();
   const words = address.normalize(text);
   if (!words) throw new Error("Enter six address words, a contact link or a Mail key.");
-  const owner = identity;
-  const matches = [...knownKeys()].filter(k => address.phrase(k) === words);
-  if (matches.length > 1) throw new Error("Ambiguous address. Ask for a contact link.");
-  if (matches.length) return matches[0];
-  const found = await address.find(nodeCmd, await mc.ready(), words, address.DISCOVERY);
-  if (identity !== owner) throw new Error("The Mail identity changed. Try again.");
+  const known = new Set([identity?.publicId, ...contacts().map(c => c.publicId)]);
+  for (const message of store.all()) {
+    known.add(message.frompublickey);
+    known.add(message.topublickey);
+  }
+  const matches = new Set([...known].filter(k => typeof k === "string" && /^(?:0x)?[a-f0-9]{128}$/i.test(k))
+    .map(k => "0x" + k.replace(/^0x/i, "").toLowerCase()).filter(k => address.phrase(k) === words));
+  if (matches.size > 1) throw new Error("Multiple contacts match. Ask for a contact link.");
+  if (matches.size) return [...matches][0];
+  const found = await address.find(nodeCmd, await mc.ready(), words, 1500);
   if (!found) throw new Error("No published address found on this node. Ask the recipient to publish their address or share their contact link.");
-  store.metaSet("card:" + found.key, found);
   return found.key;
 }
 
-// Only signed public cards are retained. The owner's own card is published unless the owner stopped it (AddressRenewal
-// .ensureOwn / stopOwn); a contact's card is relayed only when the user asks. The node loop checks each at most every four hours.
+// Only user-enabled, signed public cards are retained. The regular node loop checks them at most every four hours.
+function ensureOwnPublication(sodium) {
+  const key = identity.publicId;
+  if (!store.metaGet("mail-address-off:" + key) && !publications()[key]) {
+    updatePublication(key, { card: address.card(sodium, identity), next: 0, pending: false });
+  }
+}
+async function checkOwnBeacon() {
+  const owner = identity;
+  if (!owner) throw new Error("Mail identity unavailable");
+  const proof = await address.find(nodeCmd, await mc.ready(), address.phrase(owner.publicId), 1500);
+  if (!proof) return null;
+  if (proof.key !== owner.publicId) throw new Error("Address conflict");
+  return { block: proof.block || 0 };
+}
 function publications() { return store.metaGet("mail-address-publications") || {}; }
 function updatePublication(key, entry) {
   const entries = { ...publications() };
@@ -545,38 +536,24 @@ function updatePublication(key, entry) {
   else delete entries[key];
   store.metaSet("mail-address-publications", entries);
 }
-function ownOff(key) { return store.metaGet("mail-address-off:" + key) === true; }
-/** The owner's address is discoverable by default; a recorded "stop" is respected for good (0.5.22). */
-function ensureOwn(sodium) {
-  const key = identity && identity.publicId.toLowerCase();
-  if (!key || ownOff(key) || publications()[key]) return;
-  updatePublication(key, { card: address.card(sodium, identity), next: 0, pending: false });
-}
 async function setPublication(key, enable) {
   if (!address.isKey(key)) throw new Error("Invalid Mail key");
   key = key.toLowerCase();
-  const own = identity?.publicId.toLowerCase() === key;
   if (!enable) {
-    if (own) store.metaSet("mail-address-off:" + key, true);
+    if (key === identity?.publicId) store.metaSet("mail-address-off:" + key, true);
     updatePublication(key, null);
     return myIdentity();
   }
   const owner = identity;
   const sodium = await mc.ready();
-  const saved = store.metaGet("card:" + key);
-  const card = own ? address.card(sodium, owner)
-    : saved && address.verify(sodium, key, saved.sig, saved.phrase) ? saved
-    : contacts().some(c => String(c.publicId).toLowerCase() === key) && await address.find(nodeCmd, sodium, address.phrase(key), address.DISCOVERY);
-  if (!owner || identity !== owner) throw new Error("The Mail identity changed. Try again.");
-  if (!card || card.key !== key) throw new Error("Ask this contact to publish their address first.");
-  if (!own) store.metaSet("card:" + key, card);
-  if (own) store.metaSet("mail-address-off:" + key, false);
+  const card = owner?.publicId === key ? address.card(sodium, owner)
+    : contacts().some(c => c.publicId === key) && await address.find(nodeCmd, sodium, address.phrase(key), 1500);
+  if (!owner || identity !== owner || !card || card.key !== key) throw new Error("A verified contact card is required for publication.");
+  if (key === owner.publicId) store.metaSet("mail-address-off:" + key, false);
   if (!publications()[key]) updatePublication(key, { card, next: 0, pending: false });
   await renewAddresses();
   return myIdentity();
 }
-// MailBeacon.renew's outcomes, in its words ("Core" is the node).
-const FRESH_STATUS = "Address visible on-chain", PENDING_STATUS = "Awaiting Core approval";
 let renewing = false;
 async function renewAddresses() {
   if (renewing || !identity) return;
@@ -588,46 +565,24 @@ async function renewAddresses() {
       const card = job.card;
       if (!card || key !== card.key || !address.verify(sodium, key, card.sig, card.phrase)) continue;
       const current = () => publications()[key] === job;
-      const say = (status) => { if (current()) { job.status = status; updatePublication(key, job); } };
       if (!current()) continue;
       job.next = Date.now() + 4 * 60 * 60 * 1000;
       updatePublication(key, job);
-      let found;
-      try { found = await address.find(nodeCmd, sodium, card.phrase, address.FRESH); }
-      catch (e) { say(String((e && e.message) || e)); continue; }
+      const found = await address.find(nodeCmd, sodium, card.phrase, 1000);
       if (!current()) continue;
-      if (found) { if (found.key === key) { job.pending = false; say(FRESH_STATUS); } else say("Address conflict"); continue; }
-      if (job.pending) { say(PENDING_STATUS); continue; }
+      if (found) { if (found.key === key) { job.pending = false; updatePublication(key, job); } continue; }
+      if (job.pending) continue;
       const state = { 0: address.tag(card.phrase), 1: key, 2: "0x" + card.sig };
       const command = "send amount:" + MSG_AMOUNT + " address:" + address.ADDRESS + " tokenid:0x00 state:" + JSON.stringify(state);
       const pinned = await pinMinimaSend(nodeCmd, command, { minCoinage: MAIL_MIN_COINAGE });
-      if (!current()) continue;
-      if (!pinned.includes(" fromaddress:")) { say("No suitable signing coin"); continue; }
+      if (!current() || !pinned.includes(" fromaddress:")) continue;
       job.pending = true; updatePublication(key, job); // An unknown send outcome must survive a restart.
-      let reply;
-      try { reply = await nodeCmd(pinned); } catch (e) { say(PENDING_STATUS); continue; }   // outcome unknown: never post twice
+      const reply = await nodeCmd(pinned);
       if (current() && reply?.pending !== true && typeof reply?.status === "boolean") {
-        job.pending = false; say(reply.status ? "Beacon submitted to Core" : "Core rejected the beacon");
-      } else say(PENDING_STATUS);
+        job.pending = false; updatePublication(key, job);
+      }
     }
   } finally { renewing = false; }
-}
-/** The live check under "Your key" (MainActivity.showBeaconStatus): what this node sees for the address right now. */
-async function beaconStatus(key) {
-  if (!address.isKey(key)) throw new Error("Invalid Mail key");
-  key = key.toLowerCase();
-  const job = publications()[key];
-  let seen;
-  try { seen = await address.inspect(nodeCmd, await mc.ready(), address.phrase(key), address.DISCOVERY); }
-  catch (e) { return { state: "error", text: "Could not verify beacon: " + String((e && e.message) || e) }; }
-  if (seen.card && seen.card.key === key) return { state: "live", block: seen.block, text: seen.block > 0 ? "Beacon live · block " + seen.block : "Beacon live on this node" };
-  if (seen.card) return { state: "conflict", text: "Address conflict" };
-  if (job) {
-    let progress = job.status || "Publication scheduled";
-    if (progress === FRESH_STATUS) progress = "Waiting for renewal";
-    return { state: "waiting", text: "Beacon not yet visible · " + progress };
-  }
-  return { state: "off", text: "Publication off · no visible beacon" };
 }
 function resolvePayaddr(peer) { return store.metaGet("pa:" + peer) || ""; }         // a peer's known receiving address (or "")
 function myReceivingAddress() { return store.metaGet("mypayaddr") || mypayaddr || ""; }
@@ -637,7 +592,22 @@ function setName(name) { store.metaSet("myname", String(name || "")); emitter.em
 // message's from/to is definitive). This hides threads orphaned by an identity change — e.g. a seed restore gives a
 // new mail identity, and the old conversation, keyed with the previous publicId, would otherwise linger as a duplicate.
 function mineThread(t) { const me = identity && identity.publicId; return !!(me && t.last && (t.last.frompublickey === me || t.last.topublickey === me)); }
-function threads() { return store.threads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last), subject: (t.last && t.last.subject) || "" })); }
+function threadSummary(t) {
+  const other = otherOf(t.last);
+  return { hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other,
+    words: address.display(other), subject: t.last.subject || "" };
+}
+function threads() { return store.threads().filter(mineThread).map(threadSummary); }
+function readMessage(hashref, randomid) {
+  const m = store.getMessage(hashref, randomid);
+  if (!m || !mineThread({ last: m })) return null;
+  if (m.incoming && !m.read) {
+    store.setStatus(hashref, randomid, { read: true });
+    emitter.emit("update");
+  }
+  const peer = otherOf(m);
+  return { message: m, peer, words: address.display(peer) };
+}
 /** Outgoing mail that has not reached the chain yet (Outbox) and outgoing mail that has (Sent) — the APK's two
  *  folders, off the same store. `status` is the on-chain lifecycle: posting → sent → confirmed, or failed. */
 function outgoing(match) {
@@ -650,9 +620,14 @@ function sent() { return outgoing(st => st === "sent" || st === "confirmed"); }
 function otherOf(m) { if (!m || !identity) return ""; return m.incoming ? m.frompublickey : m.topublickey; }
 // NOTE: emit ONLY when marking-read actually changed something. The renderer's live-update handler calls these
 // to refresh an open thread; emitting unconditionally would re-trigger that handler forever (a self-feeding loop).
-function thread(hashref) { if (store.markThreadRead(hashref)) emitter.emit("update"); return store.thread(hashref); }
+function thread(hashref) {
+  const rows = store.thread(hashref);
+  if (!rows.length || !rows.every(m => mineThread({ last: m }))) return [];
+  if (store.markThreadRead(hashref)) emitter.emit("update");
+  return rows;
+}
 function threadWith(peer, subject) { if (!identity) return []; const h = threadKey(identity.publicId, peer, subject || ""); if (store.markThreadRead(h)) emitter.emit("update"); return store.thread(h); }
-function contacts() { const jobs = publications(); return store.contacts().map(c => ({ ...c, published: !!jobs[String(c.publicId).toLowerCase()] })); }
+function contacts() { const jobs = publications(); return store.contacts().map(c => ({ ...c, words: address.display(c.publicId), published: !!jobs[c.publicId] })); }
 async function addContact(share, name) {
   const parts = String(share || "").split("|");
   const id = await resolveRecipient(share);
@@ -669,13 +644,9 @@ function renameContact(peer, name) {
   emitter.emit("update");
   return { publicId: peer };
 }
-function removeContact(peer) {
-  const key = String(peer).toLowerCase();
-  if (key !== identity?.publicId.toLowerCase()) { if (publications()[key]) updatePublication(key, null); if (store.metaGet("card:" + key)) store.metaSet("card:" + key, ""); }
-  store.removeContact(peer); emitter.emit("update"); return true;
-}
+function removeContact(peer) { if (peer !== identity?.publicId && publications()[peer]) updatePublication(peer, null); store.removeContact(peer); emitter.emit("update"); return true; }
 function deleteThread(hashref) { store.deleteThread(hashref); emitter.emit("update"); return true; }
-function archivedThreads() { return store.archivedThreads().filter(mineThread).map(t => ({ hashref: t.hashref, unread: t.unread, count: t.count, last: t.last, other: otherOf(t.last) })); }
+function archivedThreads() { return store.archivedThreads().filter(mineThread).map(threadSummary); }
 function setArchived(hashref, on) { store.setArchived(hashref, !!on); emitter.emit("update"); return true; }
 
 // ---- passphrase-encrypted backup (identity + name + contacts + messages), byte-compatible with the native app ----
@@ -700,7 +671,7 @@ async function exportBackup(passphrase) {
 }
 async function importBackup(passphrase, json) {
   if (/[^\x20-\x7E]/.test(String(passphrase))) throw new Error("Use an ASCII passphrase — a non-ASCII one won't match a backup made on another device.");
-  await mc.ready();
+  const sodium = await mc.ready();
   const plain = backup.decrypt(passphrase, json);          // throws on a wrong passphrase / tampered file
   const root = JSON.parse(plain.toString("utf8"));
   const kd = root.identity || {};
@@ -714,7 +685,12 @@ async function importBackup(passphrase, json) {
   identity = restored;
   config.setSecret(mc.serializeIdentity(identity), MAIL_KEY_ACCOUNT);
   seenCoins.clear(); repliedReq.clear(); paReplyCooldown.clear(); autoReplyTimes = []; backfilled = false; lastTip = 0;
+  const ownOff = store.metaGet("mail-address-off:" + restored.publicId);
+  const existingJob = publications()[restored.publicId];
   store.clear();   // drop the PREVIOUS identity's decrypted mail/contacts (confidentiality on a shared/repurposed node)
+  if (ownOff) store.metaSet("mail-address-off:" + restored.publicId, true);
+  else if (existingJob) updatePublication(restored.publicId, existingJob);
+  ensureOwnPublication(sodium);
   if (root.name != null) store.metaSet("myname", String(root.name));
   for (const c of (root.contacts || [])) {
     if (!c || !c.key || !mc.isValidPublicId(String(c.key))) continue;   // don't import garbage contact keys
@@ -738,7 +714,7 @@ async function importBackup(passphrase, json) {
 module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   startBackfill, backfillStatus, status, outbox, sent, retrySend,
   sendMessage, pay, requestPayaddr, resolvePayaddr, myReceivingAddress, looksLikeMinimaAddress,
-  myIdentity, shareString, resolveRecipient, setPublication, beaconStatus, phrases, setTheme, payOptions, _payOptionsFrom: payOptionsFrom, MXUSD, setName, threads, thread, threadWith, contacts, addContact,
+  myIdentity, shareString, resolveRecipient, setPublication, checkOwnBeacon, setTheme, payOptions, _payOptionsFrom: payOptionsFrom, MXUSD, setName, threads, thread, readMessage, threadWith, contacts, addContact,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
   _setRunner, _renewAddresses: renewAddresses, CHAINMAIL, threadKey,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)

@@ -21,6 +21,8 @@
   var STATUS = null;            // main's scan/backfill status
   var VIEW = "inbox";           // inbox | outbox | sent | archive | contacts | key | settings | thread | compose
   var PEER = null, SUBJ = "", HASH = "";
+  let threadOrigin = "inbox";
+  const peerWords = new Map();
   var COMPOSE = null;           // { to, subject, body } kept across a re-render so typing is never lost
   var booted = false;
 
@@ -41,7 +43,7 @@
     if (/may have been submitted/i.test(m)) return "The node didn't answer in time — check before sending again.";
     return m;
   }
-  function reset() { ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
+  function reset() { threadOrigin = "inbox"; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
 
   // ---------------------------------------------------------------- identity, names, avatars
   /** A peer's key for display: the WHOLE key (RULE 1). It was 0x + 8…6; .mm-key wraps it. */
@@ -50,7 +52,7 @@
     return s;   // RULE 1: the whole key (it used to be 0x + 8…6); the name was kept so call sites stay put
   }
   /**
-   * Who wrote this. Contact name first, then the sender's own declared name off the message, then the short key
+   * Who wrote this. Prefer a saved name, then the sender’s declared name, then the six-word address
    * — the same chain main/mail.js already uses for OS notifications. The old panel resolved from an id alone,
    * so it could never see `fromname` and every unsaved peer showed as hex.
    */
@@ -58,15 +60,15 @@
     if (!id) return "(unknown)";
     if (ID && id === ID.publicId) return "You";
     for (var i = 0; i < CONTACTS.length; i++) if (CONTACTS[i].publicId === id) {
-      if (CONTACTS[i].username) return CONTACTS[i].username;
+      if (typeof CONTACTS[i].username === "string" && CONTACTS[i].username.trim() && CONTACTS[i].username.toLowerCase() !== id.toLowerCase()) return CONTACTS[i].username;
       break;
     }
     if (msg) {
       // fromname travels on every message, but only the SENDER's own messages declare their name.
       var theirs = msg.incoming ? msg.fromname : null;
-      if (theirs) return theirs;
+      if (typeof theirs === "string" && theirs.trim() && theirs.toLowerCase() !== id.toLowerCase()) return theirs;
     }
-    return shortKey(id);
+    return peerWords.get(id) || shortKey(id);
   }
   /** The APK's avatar: hash → HSV(S .55, V .72). In CSS that is exactly hsl(H, 38%, 52%). */
   function discHue(key) { var h = 0, s = String(key || ""); for (var i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; return ((h % 360) + 360) % 360; }
@@ -162,15 +164,14 @@
     var unread = !!t.unread;
     var subject = (m.subject || "").trim();
     var nm = nameFor(peer, m);
-    var isHex = nm.indexOf("0x") === 0;
     return '<button class="mm-row' + (unread ? " mm-unread" : "") + '" type="button" data-peer="' + D.esc(peer)
-      + '" data-subject="' + D.esc(subject) + '" data-hashref="' + D.esc(t.hashref || "") + '">'
+      + '" data-subject="' + D.esc(m.subject || "") + '" data-hashref="' + D.esc(t.hashref || "") + '" data-message="' + D.esc(m.randomid || "") + '">'
       + avatar(peer, nm, 44)
-      + '<span class="mm-mid"><span class="mm-l1">'
-      + '<span class="mm-nm' + (isHex ? " mm-key" : "") + '">' + D.esc(nm) + "</span>"
-      + '<span class="mm-time">' + D.esc(rel(m.date)) + "</span></span>"
-      + '<span class="mm-subj' + (subject ? "" : " mm-none") + '">' + D.esc(subject || "(no subject)") + "</span>"
-      + '<span class="mm-snip">' + D.esc((m.incoming ? "" : "You: ") + previewText(m)) + "</span></span>"
+      + '<span class="mm-mid mm-inbox-preview">'
+      + (subject ? '<span class="mm-subj">' + D.esc(subject) + '</span>' : '')
+      + '<span class="mm-snip">' + D.esc((m.incoming ? "" : "You: ") + previewText(m)) + '</span>'
+      + '<span class="mm-l1"><span class="mm-nm">' + D.esc(nm) + '</span>'
+      + '<span class="mm-time">' + D.esc(rel(m.date)) + '</span></span></span>'
       + (unread ? '<span class="mm-udot"></span>' : "") + "</button>";
   }
   /** The four chain states, said plainly. The old panel showed ✓ / ✓✓ — ticks it had invented, since this
@@ -189,7 +190,7 @@
   }
   function statusRow(m, withRetry) {
     var subject = (m.subject || "").trim();
-    return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-subject="' + D.esc(subject) + '">'
+    return '<div class="mm-srow" data-peer="' + D.esc(m.topublickey) + '" data-message="' + D.esc(m.randomid) + '" data-message-thread="' + D.esc(m.hashref) + '" data-subject="' + D.esc(m.subject || "") + '">'
       + '<div class="mm-sto"><b>To ' + D.esc(nameFor(m.topublickey, m)) + " — " + D.esc(subject || "(no subject)") + "</b>"
       + "<span>" + D.esc(rel(m.date)) + "</span></div>"
       + '<div class="mm-ssnip">' + D.esc(previewText(m)) + "</div>"
@@ -211,6 +212,8 @@
     ]);
     THREADS = r[0] || []; ARCHIVED = r[1] || []; OUT = r[2] || []; SENTL = r[3] || [];
     CONTACTS = r[4] || []; STATUS = r[5];
+    peerWords.clear();
+    for (const t of THREADS.concat(ARCHIVED)) if (t.words) peerWords.set(t.other, t.words);
   }
 
   // ---------------------------------------------------------------- screens
@@ -235,11 +238,11 @@
       var add = '<button class="mm-tbtn" id="mmAddContact" type="button">Add contact</button>';
       if (!CONTACTS.length) return add + '<div class="mm-empty">No contacts yet.</div>';
       return add + '<div class="mm-list">'  + CONTACTS.map(function (c) {
-        var nm = c.username || shortKey(c.publicId);
+        var nm = c.username || c.words || shortKey(c.publicId);
         return '<button class="mm-row" type="button" data-contact="' + D.esc(c.publicId) + '" style="border-bottom:0">'
           + avatar(c.publicId, nm, 44)
           + '<span class="mm-mid"><span class="mm-nm" style="color:var(--mm-text);font-weight:700;font-size:15px">' + D.esc(nm) + "</span>"
-          + '<span class="mm-snip mm-key" style="font-size:12px">' + D.esc(shortKey(c.publicId)) + "</span></span></button>";
+          + '<span class="mm-contact-address mm-key" title="Copy address words">' + D.esc(c.words || c.publicId) + "</span></span></button>";
       }).join("") + "</div>";
     }
     if (f === "key") return identityBody();
@@ -250,9 +253,10 @@
     var pid = (ID && ID.publicId) || "";
     return '<div class="mm-id">' + avatar(pid, ID && ID.name, 72)
       + (ID && ID.words ? '<div class="mm-idkey">' + D.esc(ID.words) + '</div>'
+        + '<button class="mm-abtn" id="mmPublish" type="button">' + (ID.published ? "Stop publishing address" : "Publish my address") + '</button>'
+        + '<div class="mm-idcap" role="status" id="mmBeaconStatus">Checking beacon…</div>'
         + '<button class="mm-tbtn" id="mmWords" type="button">Copy address words</button>'
-        + '<button class="mm-tbtn" id="mmLink" type="button">Copy contact link</button>'
-        + '<button class="mm-tbtn" id="mmPublish" type="button">' + (ID.published ? "Stop publishing address" : "Publish my address") + '</button>' : '')
+        + '<button class="mm-tbtn" id="mmLink" type="button">Copy contact link</button>' : '')
       + '<div class="mm-qr" id="mmQr"></div>'
       + '<div class="mm-idcap">Have someone scan this, or share your key:</div>'
       + '<div class="mm-idkey" id="mmShare" title="Click to copy">' + D.esc(pid || "(connecting to your node…)") + "</div>"
@@ -367,9 +371,9 @@
     };
     if (f === "settings") wireSettings(host);
     host.querySelectorAll("[data-peer]").forEach(function (r) {
-      r.onclick = function (e) {
+      r.onclick = async function (e) {
         if (e.target.closest("[data-retry]")) return;
-        openThread(r.dataset.peer, r.dataset.subject || "", r.dataset.hashref || "");
+        return openThread(r.dataset.peer, r.dataset.subject || "", r.dataset.messageThread || r.dataset.hashref || "", f);
       };
       if (r.dataset.hashref) r.oncontextmenu = function (e) { e.preventDefault(); rowMenu(r.dataset.hashref, f === "archive"); };
     });
@@ -383,26 +387,20 @@
       };
     });
     host.querySelectorAll("[data-contact]").forEach(function (b) {
-      b.onclick = function () { openCompose({ to: b.dataset.contact }); };
+      b.onclick = function (event) {
+        const address = event.target.closest(".mm-contact-address");
+        if (address) { D.copy(address.textContent); D.toast("Address copied.", "ok"); return; }
+        openCompose({ to: b.dataset.contact });
+      };
       b.oncontextmenu = function (e) { e.preventDefault(); contactMenu(b.dataset.contact); };
     });
     var fab = D.el("mmFab"); if (fab) fab.onclick = function () { openCompose(null); };
   }
 
   // Desktop counterpart of Android AddressWordEntry. Exact words win over unique prefixes.
-  async function enterAddress() {
-    const dictionary = await D.api.mailAddressWords();
-    const overlay = document.createElement("div");
-    overlay.className = "overlay mail-address-entry";
-    overlay.innerHTML = '<form class="modal"><div class="modal__title">Mail address</div>'
-      + '<textarea class="field__input" rows="2" aria-label="Contact link or Mail key" placeholder="Paste a contact link or Mail key"></textarea>'
-      + '<fieldset><legend>Or enter six address words</legend><div class="mm-word-grid"></div></fieldset>'
-      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">Cancel</button>'
-      + '<button type="submit" class="btn btn--primary">Use address</button></div></form>';
-    const form = overlay.querySelector("form"), raw = form.querySelector("textarea");
-    const grid = form.querySelector(".mm-word-grid"), status = form.querySelector('[role="status"]');
+  function addressBoxes(grid, dictionary, changed, useRaw) {
     const boxes = [], choices = document.createElement("datalist");
-    choices.id = "mmAddressOptions"; grid.append(choices);
+    choices.id = grid.id ? grid.id + "Options" : "mmAddressOptions"; grid.append(choices);
     for (const word of dictionary) { const option = document.createElement("option"); option.value = word; choices.append(option); }
     function complete(value) {
       const word = value.trim().toLowerCase();
@@ -414,18 +412,54 @@
       const box = document.createElement("input");
       box.className = "field__input"; box.setAttribute("list", choices.id); box.autocomplete = "off";
       box.setAttribute("aria-label", "Address word " + (i + 1)); box.placeholder = String(i + 1);
-      box.oninput = () => { raw.value = ""; status.textContent = ""; };
-      box.onblur = () => { const word = complete(box.value); if (word) box.value = word; };
+      box.spellcheck = false;
+      function advance() { if (boxes[i + 1]) boxes[i + 1].focus(); }
+      box.oninput = event => {
+        const prefix = box.value.toLowerCase();
+        if (!event.isComposing && !String(event.inputType).startsWith("delete") && prefix &&
+            (prefix.length >= 4 || dictionary.includes(prefix))) {
+          const matches = dictionary.filter(w => w.startsWith(prefix));
+          if (matches.length === 1) { box.value = matches[0]; advance(); changed(true); return; }
+        }
+        changed();
+      };
+      box.onkeydown = event => {
+        if ((event.key === " " || event.key === "Enter") && dictionary.includes(box.value.toLowerCase())) {
+          event.preventDefault(); advance(); changed(true);
+        }
+      };
       box.onpaste = event => {
-        const parts = event.clipboardData.getData("text").trim().split(/[\s-]+/);
+        const text = event.clipboardData.getData("text").trim();
+        if (text.includes("://") || text.includes("|") || /^(?:0x)?[0-9a-f]{128}$/i.test(text)) {
+          event.preventDefault(); useRaw(text); return;
+        }
+        const parts = text.split(/[\s-]+/);
         if (parts.length < 2) return;
         event.preventDefault();
         const start = parts.length === 6 ? 0 : i;
-        if (start + parts.length > 6) { status.textContent = "Enter six address words."; return; }
-        raw.value = ""; parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
+        if (start + parts.length > 6) { box.value = ""; changed(); box.setCustomValidity("Enter six address words."); box.reportValidity(); box.setCustomValidity(""); return; }
+        parts.forEach((w, n) => { boxes[start + n].value = complete(w) || w; });
+        boxes[Math.min(5, start + parts.length)].focus(); changed(true);
       };
       grid.append(box); boxes.push(box);
     }
+    return { boxes, complete };
+  }
+
+  async function enterAddress() {
+    const dictionary = await D.api.mailAddressWords();
+    const overlay = document.createElement("div");
+    overlay.className = "overlay mail-address-entry";
+    overlay.innerHTML = '<form class="modal"><div class="modal__title">Mail address</div>'
+      + '<textarea class="field__input" rows="2" aria-label="Contact link or Mail key" placeholder="Paste a contact link or Mail key"></textarea>'
+      + '<fieldset><legend>Or enter six address words</legend><div class="mm-word-grid"></div></fieldset>'
+      + '<div role="status"></div><div class="seg"><button type="button" class="btn btn--outline">Cancel</button>'
+      + '<button type="submit" class="btn btn--primary">Use address</button></div></form>';
+    const form = overlay.querySelector("form"), raw = form.querySelector("textarea");
+    const grid = form.querySelector(".mm-word-grid"), status = form.querySelector('[role="status"]');
+    const { boxes, complete } = addressBoxes(grid, dictionary,
+      () => { raw.value = ""; status.textContent = ""; },
+      text => { raw.value = text; boxes.forEach(box => { box.value = ""; }); raw.focus(); });
     raw.oninput = () => { if (raw.value) boxes.forEach(box => { box.value = ""; }); };
     const previous = document.activeElement;
     D.el("view-mail").append(overlay); raw.focus();
@@ -483,6 +517,17 @@
     if (ID && ID.words) {
       D.el("mmWords").onclick = () => D.copy(ID.words);
       D.el("mmLink").onclick = () => D.copy(ID.link);
+      const indicator = D.el("mmBeaconStatus");
+      async function check() {
+        if (!indicator?.isConnected || VIEW !== "key") return;
+        try {
+          const proof = await D.api.mailCheckOwnBeacon();
+          indicator.textContent = proof ? (proof.block ? "Beacon live · block " + proof.block : "Beacon live on this node")
+            : (ID.published ? "Beacon not yet visible on this node" : "Publication off · no visible beacon");
+        } catch (e) { indicator.textContent = "Could not verify beacon: " + errText(e); }
+        if (indicator.isConnected && VIEW === "key") setTimeout(check, 15000);
+      }
+      check();
       D.el("mmPublish").onclick = () => toggleAddress(ID.publicId, !ID.published);
     }
     try {
@@ -502,14 +547,21 @@
   }
 
   // ---------------------------------------------------------------- thread screen
-  function openThread(peer, subject, hashref) {
-    PEER = peer; SUBJ = subject || ""; HASH = hashref || ""; VIEW = "thread"; render();
+  function openThread(peer, subject, hashref, origin) {
+    PEER = peer; SUBJ = subject || ""; HASH = hashref || ""; threadOrigin = origin || "inbox"; VIEW = "thread";
+    return render();
   }
   async function renderThread(host) {
-    var msgs = await D.api.mailThreadWith(PEER, SUBJ).catch(function () { return []; });
+    const peer = PEER, hash = HASH, subject = SUBJ;
+    var msgs = await (hash ? D.api.mailThread(hash) : D.api.mailThreadWith(peer, subject)).catch(function () { return []; });
+    if (VIEW !== "thread" || PEER !== peer || HASH !== hash || SUBJ !== subject) return;
+    const current = D.el("mmReply");
+    const draft = current && current.dataset && current.dataset.peer === peer && current.dataset.subject === subject ? current.value : "";
     var nm = nameFor(PEER, msgs.length ? msgs[msgs.length - 1] : null);
     var title = SUBJ || nm;
-    var sub = SUBJ ? nm + " · " + shortKey(PEER) : shortKey(PEER);
+    const address = peerWords.get(PEER) || PEER;
+    var sub = SUBJ && nm !== address ? nm + " · " + address : address;
+    if (!SUBJ && nm === address) title = "Conversation";
     host.innerHTML = '<div class="mailapp">'
       + '<div class="mm-cbar"><button class="mm-ibtn" type="button" id="mmBack" aria-label="Back">' + g.micon("back") + "</button>"
       + avatar(PEER, nm, 34)
@@ -521,12 +573,13 @@
       + '<button class="mm-send" type="button" id="mmSend" aria-label="Send">' + g.micon("up") + "</button></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
     var conv = D.el("mmConv"); if (conv) conv.scrollTop = conv.scrollHeight;
-    D.el("mmBack").onclick = function () { VIEW = "inbox"; PEER = null; render(); };
+    D.el("mmBack").onclick = function () { VIEW = threadOrigin; PEER = null; render(); };
     D.el("mmThreadMenu").onclick = function () { threadMenu(); };
     D.el("mmPlus").onclick = function () { plusMenu(); };
     var inp = D.el("mmReply");
     D.el("mmSend").onclick = function () { sendReply(); };
     inp.onkeydown = function (e) { if (e.key === "Enter") sendReply(); };
+    inp.dataset.peer = peer; inp.dataset.subject = subject; inp.value = draft;
     inp.focus();
     D.el("mmFile").onchange = function (e) { if (e.target.files[0]) sendImage(e.target.files[0]); };
   }
@@ -541,16 +594,23 @@
 
   // ---------------------------------------------------------------- compose
   function openCompose(pre) { COMPOSE = { to: (pre && pre.to) || "", subject: (pre && pre.subject) || "", body: "" }; VIEW = "compose"; render(); }
-  function renderCompose(host) {
+  async function renderCompose(host) {
     var c = COMPOSE || { to: "", subject: "", body: "" };
+    let dictionary;
+    try { dictionary = await D.api.mailAddressWords(); }
+    catch (error) { dictionary = []; D.toast(errText(error), "err"); }
+    if (VIEW !== "compose" || COMPOSE !== c) return;
     host.innerHTML = '<div class="mailapp">'
       + '<div class="mm-chead"><button class="mm-ibtn" type="button" id="mmCancel" aria-label="Close">' + g.micon("close") + "</button>"
       + '<span class="mm-t">New message</span>'
       + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "Send</button></div>"
       + '<div class="mm-f"><span class="mm-lab">To</span>'
+      + '<button id="mmCompactTo" type="button" hidden></button>'
+      + '<div class="mm-word-grid" id="mmToWords"></div>'
       + '<textarea rows="1" class="mm-monoin" id="mmTo" placeholder="Six words, contact link or Mail key" autocomplete="off" spellcheck="false">' + D.esc(c.to) + '</textarea>'
       + '<span class="mm-chips"><button class="mm-outchip" type="button" id="mmEnterWords">Enter words</button><button class="mm-outchip" type="button" id="mmScan">' + g.micon("scan") + "Scan</button>"
       + '<button class="mm-outchip" type="button" id="mmPick" aria-label="Pick a contact">' + g.micon("contacts") + "</button></span></div>"
+      + '<div class="mm-recipient-state"><span id="mmLookup" role="status"></span> <button hidden id="mmRetryLookup" type="button">Retry lookup</button></div>'
       + '<div class="mm-f"><span class="mm-lab">Subject</span>'
       + '<input id="mmSubj" placeholder="(optional — subjects make their own thread)" autocomplete="off" value="' + D.esc(c.subject) + '" /></div>'
       + '<textarea class="mm-cbody" id="mmBodyIn" placeholder="Write your message…">' + D.esc(c.body) + "</textarea>"
@@ -559,39 +619,93 @@
       + '<div class="mm-hint">' + g.micon("chain")
       + "<span>Delivered with the next block — usually 1–3 minutes. Your message waits in the Outbox until it's on-chain.</span></div>"
       + '<input type="file" id="mmFile" accept="image/*" hidden /></div>';
-    var keep = function () { COMPOSE = { to: D.el("mmTo").value, subject: D.el("mmSubj").value, body: D.el("mmBodyIn").value }; };
-    ["mmTo", "mmSubj", "mmBodyIn"].forEach(function (id) { D.el(id).oninput = keep; });
+    const raw = D.el("mmTo"), grid = D.el("mmToWords"), toggle = D.el("mmEnterWords");
+    const status = D.el("mmLookup"), retry = D.el("mmRetryLookup");
+    const compact = D.el("mmCompactTo"), chips = toggle.parentElement;
+    const actions = ["mmDoSend", "mmPhoto", "mmFunds"].map(id => D.el(id));
+    let revision = 0, resolved = "", sending = false;
+    const { boxes } = addressBoxes(grid, dictionary, wordsChanged, useRaw);
+    (c.words || []).forEach((word, i) => { boxes[i].value = word; });
+    function mode(asRaw, folded = false) {
+      compact.hidden = !folded; chips.hidden = folded;
+      compact.textContent = folded ? raw.value : "";
+      raw.hidden = !asRaw || folded; grid.hidden = asRaw || folded;
+      toggle.textContent = asRaw ? "Enter words" : "Link or Mail key";
+      toggle.disabled = !dictionary.length;
+    }
+    function useRaw(text) { mode(true); raw.value = text; raw.focus(); keep(); check(); }
+    function wordsChanged(accepted) {
+      const parts = boxes.map(box => box.value.toLowerCase());
+      raw.value = accepted && parts.every(word => dictionary.includes(word)) ? parts.join("-") : "";
+      if (raw.value) {
+        mode(false, true);
+        compact.focus();
+      }
+      keep(); check();
+    }
+    function keep() {
+      Object.assign(c, { to: raw.value, words: boxes.map(box => box.value), raw: !raw.hidden, collapsed: !compact.hidden,
+        subject: D.el("mmSubj").value, body: D.el("mmBodyIn").value });
+    }
+    async function check() {
+      const request = ++revision, text = raw.value.trim();
+      resolved = ""; actions.forEach(button => { button.disabled = true; });
+      status.textContent = ""; retry.hidden = true;
+      if (!/^(?:0x)?[0-9a-f]{128}(?:\||$)/i.test(text) && !text.includes("minimamail:") &&
+          !(text.split(/[\s-]+/).length === 6 && text.toLowerCase().split(/[\s-]+/).every(word => dictionary.includes(word)))) return;
+      status.textContent = "Looking up address…";
+      try {
+        const key = await D.api.mailResolveAddress(text);
+        if (request !== revision || !raw.isConnected) return;
+        resolved = key; status.textContent = "Recipient ready";
+        actions.forEach(button => { button.disabled = sending; });
+      } catch (error) {
+        if (request !== revision || !raw.isConnected) return;
+        status.textContent = errText(error); retry.hidden = false;
+      }
+    }
+    raw.oninput = () => { keep(); check(); };
+    D.el("mmSubj").oninput = D.el("mmBodyIn").oninput = keep;
+    mode(!dictionary.length || (c.raw ?? Boolean(c.to)), !!c.collapsed);
+    compact.onclick = () => {
+      mode(false); wordsChanged(false);
+      boxes[0].focus(); boxes[0].select();
+    };
+    retry.onclick = check;
+    check();
     D.el("mmCancel").onclick = function () { COMPOSE = null; VIEW = "inbox"; render(); };
     D.el("mmPick").onclick = function () {
       if (!CONTACTS.length) { D.toast("No contacts yet — paste a Mail key instead.", ""); return; }
       D.showActionSheet("Send to", CONTACTS.map(function (ct) {
-        return { label: ct.username || shortKey(ct.publicId), onclick: function () { D.el("mmTo").value = ct.publicId; keep(); } };
+        return { label: ct.username || shortKey(ct.publicId), onclick: function () { useRaw(ct.publicId); } };
       }));
     };
-    D.el("mmEnterWords").onclick = async function () {
-      const value = await enterAddress(); if (value) { D.el("mmTo").value = value; keep(); }
+    toggle.onclick = () => {
+      if (raw.hidden) { useRaw(raw.value); raw.select(); }
+      else { mode(false); wordsChanged(); boxes[Math.max(0, boxes.findIndex(box => !dictionary.includes(box.value)))].focus(); }
     };
     D.el("mmScan").onclick = async function () {
       var v = await D.scanQR("Scan a Mail key").catch(function () { return null; });
-      if (v) { D.el("mmTo").value = String(v).split("|")[0].trim(); keep(); }
+      if (v) { useRaw(String(v).trim()); }
     };
     D.el("mmPhoto").onclick = function () { D.el("mmFile").click(); };
-    D.el("mmFile").onchange = function (e) { if (e.target.files[0]) composeImage(e.target.files[0]); };
+    D.el("mmFile").onchange = function (e) { if (resolved && e.target.files[0]) composeImage(e.target.files[0], resolved); };
     D.el("mmFunds").onclick = async function () {
-      var to = D.el("mmTo").value.trim();
-      if (!to) { D.toast("Add a recipient first.", "err"); return; }
-      try { await sendFunds(await D.api.mailResolveAddress(to)); } catch (e) { D.toast(errText(e), "err"); }
+      if (resolved) await sendFunds(resolved);
     };
-    D.el("mmDoSend").onclick = doSend;
+    D.el("mmDoSend").onclick = async () => {
+      if (!resolved || sending) return;
+      sending = true;
+      try { await doSend(resolved); }
+      finally { sending = false; actions[0].disabled = !resolved; }
+    };
   }
-  async function doSend() {
-    var to = D.el("mmTo").value.trim();
+  async function doSend(to) {
     var subject = D.el("mmSubj").value.trim();
     var body = D.el("mmBodyIn").value.trim();
     if (!body) { D.toast("Write a message first.", "err"); return; }
     var btn = D.el("mmDoSend"); btn.disabled = true;
     try {
-      to = await D.api.mailResolveAddress(to);
       await D.api.mailSend(to, { message: body, subject: subject });
       COMPOSE = null;
       openThread(to, subject, "");
@@ -627,11 +741,9 @@
     } catch (e) { D.toast(errText(e), "err"); }
     render();
   }
-  async function composeImage(file) {
-    var to = D.el("mmTo").value.trim();
+  async function composeImage(file, to) {
     var subject = D.el("mmSubj").value.trim();
     try {
-      to = await D.api.mailResolveAddress(to);
       var b64 = await compressImage(file);
       await D.api.mailSend(to, { message: "", subject: subject, type: "image", image: b64 });
       COMPOSE = null; openThread(to, subject, "");
@@ -645,21 +757,28 @@
   }
   /** The payment sheet. The address is the peer's own, learned from their signed messages (never typed by us
    *  unless they've never written), and main re-validates it with `checkaddress` before any coin moves. */
-  async function sendFunds(peer) {
+  function sendFunds(peer) {
+    D.showActionSheet("Send funds", [
+      { label: "Minima", onclick: () => sendCurrency(peer, "0x00", "MINIMA") },
+      { label: "MxUSD", onclick: () => sendCurrency(peer, "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "MxUSD") }
+    ]);
+  }
+  async function sendCurrency(peer, tokenId, tokenName) {
+    const subject = VIEW === "thread" ? SUBJ : ((D.el("mmSubj") || {}).value || "");
     var addr = await D.api.mailResolvePayaddr(peer).catch(function () { return ""; });
     if (!addr) { try { await D.api.mailRequestPayaddr(peer); } catch (e) {} }
-    var amount = await D.showPrompt("Send funds", "", "0.0",
+    var amount = await D.showPrompt("Send " + tokenName, "", "0.0",
       { message: "To " + nameFor(peer, null) + (addr ? "\n" + addr : "\nNo address known yet — asking them for it now.") });
     if (amount == null) return;
     if (!addr) { D.toast("No receiving address for them yet — try again once they reply.", "err"); return; }
     if (!/^[0-9]*\.?[0-9]+$/.test(amount) || parseFloat(amount) <= 0) { D.toast("Enter a valid amount.", "err"); return; }
     var memo = await D.showPrompt("Note (optional)", "", "What's it for?");
     if (memo == null) memo = "";
-    var ok = await D.showConfirm("Send " + amount + " MINIMA?",
+    var ok = await D.showConfirm("Send " + amount + " " + tokenName + "?",
       "To " + nameFor(peer, null) + "\n" + addr + "\n\nThis sends real funds and cannot be undone.", "Send", true);
     if (!ok) return;
     try {
-      await D.api.mailPay(peer, addr, amount, "0x00", "MINIMA", memo);
+      await D.api.mailPay(peer, addr, amount, tokenId, tokenName, memo, subject);
       D.toast("Payment sent ✓", "ok");
     } catch (e) {
       // An RPC timeout is AMBIGUOUS — the coin may well have gone out. Never invite a retry that double-spends.
@@ -707,6 +826,7 @@
         await D.api.mailRenameContact(peer, String(n).trim()); render();
       } },
       { label: published ? "Stop relaying address" : "Relay signed address", onclick: () => toggleAddress(peer, !published) },
+      { label: "Copy address words", onclick: () => D.copy(CONTACTS.find(c => c.publicId === peer).words || peer) },
       { label: "Copy Mail key", onclick: function () { D.copy(peer); D.toast("Copied ✓", "ok"); } },
       { label: "Remove", danger: true, onclick: async function () {
         if (!await D.showConfirm("Remove this contact?", "Their messages stay; only the saved name goes.", "Remove", true)) return;

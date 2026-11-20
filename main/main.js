@@ -335,13 +335,13 @@ ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myId
 ipcMain.handle("mcd:mailSetName", (_e, n) => { mail.setName(n); return mail.myIdentity(); });
 ipcMain.handle("mcd:mailAddressWords", () => require("./mailaddress").words);
 ipcMain.handle("mcd:mailResolveAddress", (_e, value) => mail.resolveRecipient(value));
+ipcMain.handle("mcd:mailCheckOwnBeacon", () => mail.checkOwnBeacon());
 ipcMain.handle("mcd:mailPublishAddress", (_e, key, enabled) => mail.setPublication(key, enabled === true));
-ipcMain.handle("mcd:mailBeaconStatus", (_e, key) => mail.beaconStatus(key));
-ipcMain.handle("mcd:mailPhrases", (_e, keys) => mail.phrases(keys));
 ipcMain.handle("mcd:mailSetTheme", (_e, theme) => mail.setTheme(theme));
 ipcMain.handle("mcd:mailPayOptions", () => mail.payOptions());
 ipcMain.handle("mcd:mailShare", () => mail.shareString());
 ipcMain.handle("mcd:mailThreads", () => mail.threads());
+ipcMain.handle("mcd:mailReadMessage", (_e, hash, id) => mail.readMessage(hash, id));
 ipcMain.handle("mcd:mailThread", (_e, h) => mail.thread(h));
 ipcMain.handle("mcd:mailThreadWith", (_e, peer, subject) => mail.threadWith(peer, subject));
 ipcMain.handle("mcd:mailSend", (_e, to, base) => mail.sendMessage(to, base || {}));

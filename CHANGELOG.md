@@ -7,6 +7,20 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.0] — Merge of the released Mail (v0.18.69) into the overhaul branch; the branch's version line becomes 0.19.x
+
+- **What this is**: a merge of the released tag `v0.18.69` (the main line's Mail work, built in another session while this branch was open) into the overhaul branch, and a new version line. The main line owns 0.18.65 to 0.18.69; this branch had used those numbers (and up to 0.18.148) for its own unpushed commits. From here the branch is 0.19.x. No old commit is renumbered.
+- **Brought in from the main line** (five released commits, no changelog entries of their own): 0.18.65 complete Mail recipients and resolve conversation keys before sending; 0.18.66 open the selected Mail message with a compact sender address; 0.18.67 publish Mail addresses by default and verify live beacons; 0.18.68 collapse completed Mail addresses before lookup; 0.18.69 open Mail threads directly, show contact words and add MxUSD payments. Files: `main/mail.js`, `main/mailaddress.js`, `main/mail-store.js`, `main/main.js`, `main/preload.js`, `renderer/mail.js`, `renderer/mail.css`, `scripts/mail-test.cjs`.
+- **The released Mail code is the Mail code.** This branch's own 0.18.148 had built some of the same features a second time in the main process. In the three files where the two met (`main/mail.js`, `main/mailaddress.js`, `main/mail-store.js`) the released version was taken and 0.18.148's duplicate parts were dropped: its `beaconStatus` / `inspect` (the released `checkOwnBeacon` and `find` with a block are used), its `resolveRecipient`, `ensureOwn`, `phrases`, the kept `card:<key>` and the recorded renewal status. The opt-out key `mail-address-off:<key>` is the same in both, so nothing stored differs.
+- **Kept from this branch** in those files: everything older than 0.18.148 (the store set aside on a wallet restore, the reservation-aware send pin, the reset chains), and from 0.18.148 only what the released code does not have: the one-time copy `mail.json.before-0.18.148` and the `rev: 2` marker, Mail's own Paper / Dark choice (`setTheme`), and payments limited to Minima and MxUSD by token id with the node's sendable balance (`payOptions`; the phone's 0.5.27). The released `pay` already carries the thread's subject.
+- **IPC**: `mcd:mailBeaconStatus` and `mcd:mailPhrases` (0.18.148) are removed again; `mcd:mailCheckOwnBeacon` and `mcd:mailReadMessage` come from the main line; `mcd:mailSetTheme` and `mcd:mailPayOptions` stay.
+- **Tests**: every suite run after the merge. `scripts/mail-test.cjs` is the released file (20 tests). `scripts/mail-address-test.cjs` is rewritten against the merged code (10 tests: the phone's identity and card vectors, default publication and the remembered stop, a renewal posts once, the beacon's block, six-word resolution, the currency picker vector, a payment's command and receipt).
+- Nothing here was run on a node.
+
+## The unreleased overhaul branch: local versions 0.18.65 to 0.18.148
+
+The entries from here down to 0.18.65 belong to the Pandamonium overhaul branch and were never released. The released main line used the numbers 0.18.65 to 0.18.69 for other changes (its Mail work, merged in 0.19.0 above). Entries 0.18.64 and older are the released history both lines share.
+
 ## [0.18.148] — Mail, the main process up to the phone's 0.5.28: your address published by default, the live beacon check, six words resolved the phone's way, payments in Minima and MxUSD only
 
 - **Why**: the desktop Mail was at parity with the phone's Minima Mail 0.5.8. The phone is at 0.5.28 (and in Pandamonium 2.2.53). This is the main-process half of catching up; the screens follow.

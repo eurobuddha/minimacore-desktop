@@ -1,5 +1,5 @@
 /*
- * mail-address-test.cjs — Mail 0.5.28 parity in the main process, run on a store in a temp folder with a recorded
+ * mail-address-test.cjs — the Mail merged from 0.18.65 to 0.18.69, and what 0.19.x adds, in the main process, run on a store in a temp folder with a recorded
  * node (no Electron, no node, no socket: scripts/no-reach.cjs).
  *
  * Vectors: apks/mail app/src/androidTest/java/com/eurobuddha/mail/PublicAddressTest.java (identity from the vault
@@ -87,7 +87,7 @@ test("a renewal posts only after a successful, empty lookup with a signable coin
     sends = []; asked = []; lookup = () => reply; fund = coin === undefined ? FUND : coin;
     const jobs = {}; if (enabled) jobs[ME] = { card: mine, next: 0, pending };
     store.metaSet("mail-address-publications", jobs);
-    await mail._renewAddresses();
+    await mail._renewAddresses().catch(() => {});   // a failed read throws to the loop, which ignores it
     return sends.length;
   };
   const empty = { status: true, response: [] }, fresh = { status: true, response: [beacon(mine.phrase, mine.key, mine.sig, "2427841")] };
@@ -107,26 +107,22 @@ test("the live beacon check gives the creation block (0.5.23)", async () => {
   const sodium = await require("../main/mailcrypto").ready();
   const id = await require("../main/mailcrypto").deriveIdentity(SEED), mine = codec.card(sodium, id);
   lookup = () => ({ status: true, response: [beacon(mine.phrase, mine.key, mine.sig, "2427841"), beacon(mine.phrase, mine.key, mine.sig, "2427000")] });
-  assert.deepEqual(await mail.beaconStatus(ME), { state: "live", block: 2427841, text: "Beacon live · block 2427841" });
+  assert.deepEqual(await mail.checkOwnBeacon(), { block: 2427841 });
   lookup = () => ({ status: true, response: [beacon(mine.phrase, mine.key, mine.sig)] });
-  assert.equal((await mail.beaconStatus(ME)).text, "Beacon live on this node");
+  assert.deepEqual(await mail.checkOwnBeacon(), { block: 0 });
   lookup = () => ({ status: true, response: [] });
-  assert.match((await mail.beaconStatus(ME)).text, /^Beacon not yet visible · /);
-  await mail.setPublication(ME, false);
-  assert.equal((await mail.beaconStatus(ME)).text, "Publication off · no visible beacon");
+  assert.equal(await mail.checkOwnBeacon(), null);
   lookup = () => ({ status: false });
-  assert.match((await mail.beaconStatus(ME)).text, /^Could not verify beacon: /);
+  await assert.rejects(mail.checkOwnBeacon(), /Could not read Mail address beacons/);
 });
 
 test("six words resolve before sending: known keys first, then the signed beacon; a forged card is nothing", async () => {
   sends = [];
   lookup = () => ({ status: true, response: [beacon(WORDS, KEY, SIG, "2427841")] });
   assert.equal(await mail.resolveRecipient("  Reunion sting lazy tornado LIBERTY bubble "), KEY);
-  assert.deepEqual(store.metaGet("card:" + KEY), { key: KEY, sig: SIG, phrase: WORDS }, "the verified card is kept for relaying");
   lookup = () => ({ status: true, response: [beacon("assist-purpose-unveil-talk-tomato-subject", ME, "00".repeat(64), "1")] });
   assert.equal(await mail.resolveRecipient("assist purpose unveil talk tomato subject"), ME, "our own words need no beacon");
   lookup = () => ({ status: true, response: [beacon(WORDS, KEY, "00" + SIG.slice(2), "1")] });
-  store.metaSet("card:" + KEY, "");
   await assert.rejects(mail.resolveRecipient("lemon sting lazy tornado liberty bubble"), /No published address found on this node/);
   await assert.rejects(mail.resolveRecipient("five words are not enough"), /Enter six address words, a contact link or a Mail key\./);
   assert.equal(await mail.resolveRecipient(KEY.slice(2).toUpperCase()), KEY, "a key without 0x");
@@ -141,10 +137,6 @@ test("address rules of MailAddress.java (PublicAddressTest)", () => {
   assert.equal(codec.direct(codec.link(KEY)), KEY);
   assert.equal(codec.direct(WORDS.replace("reunion", "lemon") + "\n" + codec.link(KEY)), null);
   assert.equal(codec.direct(codec.link(KEY) + "|address"), null);
-  assert.equal(codec.lookupReady("reunion sting"), false);
-  assert.equal(codec.lookupReady(WORDS), true);
-  assert.equal(codec.lookupReady(KEY + "|MxG0"), true);
-  assert.deepEqual(mail.phrases([KEY, "nonsense"]), { [KEY]: WORDS });
 });
 
 test("Send funds offers Minima and MxUSD only, by token id, with the sendable balance (PaymentCurrency)", async () => {
