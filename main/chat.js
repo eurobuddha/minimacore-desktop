@@ -131,7 +131,16 @@ function needId(id) { if (!/^[a-f0-9]{32}$/.test("" + id)) throw new Error("Inva
 function fileSend(to, filePath) { return fileEngine().prepare(needPeer(to), filePath, { name: path.basename(filePath) }); }
 /** What an offer says, and the state of its transfer if there is one. Reads nothing from the network. */
 function fileOffer(peer, ref) { return fileEngine().offer(needPeer(peer), "" + ref); }
-function fileRun(peer, ref, id) { const e = fileEngine(); return id && e.status(needId(id)) && e.status(id).mine ? e.resume(id) : e.download(needPeer(peer), "" + ref); }
+/** Run from the transfer sheet. One of ours is sent or resumed by its id; anything else is downloaded from its offer.
+ *  An offer never downloaded before has no transfer on disk yet, and status() throws for it: that is the first
+ *  download, not an error (0.19.2 failed every first download here with "Transfer not found"). */
+function fileRun(peer, ref, id) {
+  const e = fileEngine();
+  let mine = false;
+  if (id) { needId(id); try { mine = e.status(id).mine === true; } catch (x) { /* not on disk yet */ } }
+  return mine ? e.resume(id) : e.download(needPeer(peer), "" + ref);
+}
+function _setFileEngine(e) { files = e; }   // tests
 function filePause(id) { return fileEngine().pause(needId(id)); }
 function fileStatus(id) { return fileEngine().status(needId(id)); }
 function fileTransfers(peer) { return fileEngine().transfers(needPeer(peer)); }
@@ -368,8 +377,7 @@ async function sendVoice(to, bytes, mime, secs, waveHex) {
   if (!/^audio\/(mp4|webm|ogg)\b/i.test("" + mime)) throw new Error("Recording failed");
   const wave = voice.decode("" + (waveHex || "")) ? "" + waveHex : "";
   const now = Date.now(), ext = voice.extFor(mime);
-  const tmp = path.join(os.tmpdir(), "chat-vn-" + now + "-" + crypto.randomBytes(6).toString("hex") + ext);
-  if (/\s/.test(tmp)) throw new Error("The temporary folder's path has a space in it; the node cannot be handed the recording.");
+  const tmp = path.join(chatfiles.spaceFreeDir(os.tmpdir()), "chat-vn-" + now + "-" + crypto.randomBytes(6).toString("hex") + ext);
   let pub;
   try {
     fs.writeFileSync(tmp, data, { mode: 0o600 });
@@ -469,7 +477,7 @@ function unreadCount() { return store.unreadCount(); }
 function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubkey : "", lastError: lastErr, unread: store.unreadCount() }; }
 
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
-  threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner,
+  threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner, _setFileEngine,
   fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity,
   sendVoice, clearThread, deleteMessage, contacts,
   fileSend, fileOffer, fileRun, filePause, fileStatus, fileTransfers, fileRemove, fileKeep, fileShareAgain, fileSave };

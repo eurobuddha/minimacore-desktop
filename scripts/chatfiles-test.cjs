@@ -413,7 +413,8 @@ function party(name, pubkey, net, over = {}) {
     return { status: 404, body: Buffer.alloc(0) };
   };
   p.files = cf.create(Object.assign({ root, nodeCmd: p.nodeCmd, hasContact: (k) => p.contacts.has(k), myName: () => name,
-    addMessage: (m) => p.messages.push(m), setStatus: (id, s) => p.statuses.push([id, s]), http: httpFn, tmpDir: pub }, over));
+    addMessage: (m) => p.messages.push(m), setStatus: (id, s) => p.statuses.push([id, s]), http: httpFn, tmpDir: pub, markDownloaded: async (d) => { p.marked.push(d); } }, over));
+  p.marked = [];
   return p;
 }
 const network = () => ({ files: new Map(), stopped: new Set(), forgotten: [] });
@@ -464,6 +465,7 @@ test("end to end: prepare, publish, offer, explicit download, verify, save, rece
   assert.throws(() => bob.files.offer("0x" + "9".repeat(64), m.ref), /Conflicting file offer/, "the same offer from another peer is refused");
   const out = path.join(tmpdir("save"), cf.safeName(got.name));
   assert.equal(await bob.files.save(f.id, out), out); assert.deepEqual(fs.readFileSync(out), data);
+  assert.deepEqual(bob.marked, [out], "the saved copy gets the system's downloaded mark");
   await rejects(bob.files.save(f.id, path.join(bob.root, f.id, "x.bin")), /different place/);
   await rejects(bob.files.save(f.id, "relative.bin"), /different place/);
   assert.equal(bob.files.transfers(ALICE).length, 1); assert.equal(bob.files.transfers(BOB).length, 0);
@@ -579,7 +581,72 @@ test("transport: path regex, contact shape, datahex, and the temp file is remove
   assert.equal(await t.send(PEER, "hé"), "mailbox");
   assert.equal(cmds[1], "keets action:send to:" + PEER + " datahex:0x68C3A9");
   const spaced = cf.createTransport({ nodeCmd: async () => ({ url: "u" }), tmpDir: path.join(dir, "has space") });
-  await rejects(spaced.publish("/private/" + ID + "/0", Buffer.from("x")), /contains a space/);
+  if (process.platform !== "win32") await rejects(spaced.publish("/private/" + ID + "/0", Buffer.from("x")), /contains a space.*has space/);
+});
+
+test("0.19.5: a temp folder with a space in its path (a Windows user name): the node is handed the same folder under a space-free name", async () => {
+  const base = tmpdir("sp"), spacedDir = path.join(base, "John Smith", "Temp"), alias = path.join(base, "JOHNSM~1");
+  fs.mkdirSync(spacedDir, { recursive: true }); fs.symlinkSync(path.join(base, "John Smith"), alias);   // what the 8.3 name is on Windows
+  const shortOf = (d) => d.replace("John Smith", "JOHNSM~1"), cmds = [];
+  let seen = null;
+  const t = cf.createTransport({ tmpDir: spacedDir, shortOf, nodeCmd: async (c) => { cmds.push(c); const f = c.split(" file:")[1]; seen = fs.readFileSync(f, "utf8"); return { url: "u" }; } });
+  assert.equal(await t.publish("/private/" + ID + "/0", Buffer.from("block")), "u");
+  assert.equal(cmds[0].split(" ").length, 4, "one token per parameter: " + cmds[0]); assert.ok(!/\s/.test(cmds[0].split(" file:")[1]));
+  assert.equal(seen, "block", "and the node reads the block there"); assert.deepEqual(fs.readdirSync(spacedDir), [], "removed after");
+  assert.equal(cf.spaceFreeDir(spacedDir, shortOf), path.join(alias, "Temp")); assert.equal(cf.spaceFreeDir(base), base);
+  // no usable short name: refused with the whole path, never a rewritten command
+  for (const bad of [(d) => d, () => "", () => path.join(base, "no-such-dir"), () => { throw new Error("8.3 names are off"); }])
+    assert.throws(() => cf.spaceFreeDir(spacedDir, bad), /contains a space.*John Smith/);
+});
+
+test("0.19.5: a saved file carries the system's downloaded mark (best effort)", async () => {
+  const dir = tmpdir("mark"), f = path.join(dir, "saved.bin"); fs.writeFileSync(f, "x");
+  await cf.markDownloaded(f, "win32");
+  assert.equal(fs.readFileSync(f + ":Zone.Identifier", "utf8"), "[ZoneTransfer]\r\nZoneId=3\r\n");
+  await cf.markDownloaded(path.join(dir, "missing", "x.bin"), "win32");   // never throws
+  const ran = [];
+  await cf.markDownloaded(f, "darwin", (cmd, args, o, cb) => { ran.push([cmd, ...args]); cb(new Error("no such attribute support")); });   // a failure is swallowed
+  assert.equal(ran.length, 1); assert.deepEqual(ran[0].slice(0, 3), ["/usr/bin/xattr", "-w", "com.apple.quarantine"]);
+  assert.match(ran[0][3], /^0081;[0-9a-f]+;minimaCore;$/); assert.equal(ran[0][4], f);
+  await cf.markDownloaded(f, "darwin", () => { throw new Error("cannot start"); });
+  await cf.markDownloaded(f, "linux", () => { throw new Error("not called"); });
+});
+
+test("0.19.5: Run from the transfer sheet (main/chat.js fileRun): a first download, one in progress, and one of our own", async () => {
+  const dir = tmpdir("chatjs"), fakeMod = (id, exports) => { require.cache[id] = { id, filename: id, loaded: true, children: [], paths: [], exports }; };
+  const main = path.join(__dirname, "..", "main");
+  fakeMod(require.resolve("electron"), { app: { getPath: () => dir } });
+  fakeMod(require.resolve(path.join(main, "config.js")), { rpcSecret: () => "" });
+  fakeMod(require.resolve(path.join(main, "node-manager.js")), { rpcPort: () => 0, log() {} });
+  const chat = require("../main/chat");
+  const net = network(), alice = party("alice", ALICE, net), bob = party("bob", BOB, net);
+  alice.contacts.add(BOB); bob.contacts.add(ALICE);
+  const data = pattern(2 * 1024 * 1024 + 5, 7), src = path.join(tmpdir("pick"), "notes.txt"); fs.writeFileSync(src, data);
+  const mine = await alice.files.prepare(BOB, src, {});
+  const [m] = await deliver(alice, bob);
+
+  // bob: an offer never seen on this disk. The sheet shows it (offer) and Run passes the id it showed.
+  chat._setFileEngine(bob.files);
+  const shown = bob.files.offer(ALICE, m.ref);
+  assert.throws(() => bob.files.status(shown.id), /Transfer not found/, "nothing on disk yet: the lookup 0.19.2 died on");
+  const got = await chat.fileRun(ALICE, m.ref, shown.id);
+  assert.equal(got.error, ""); assert.ok(got.ready && !got.mine);
+  assert.deepEqual(fs.readFileSync(path.join(bob.root, shown.id, "verified.bin")), data);
+  // ...and one in progress: paused part-way, Run resumes the same transfer
+  const carol = party("carol", "0x" + "c2".repeat(32), net); carol.contacts.add(ALICE);
+  const first = chat._setFileEngine(carol.files) || carol.files.download(ALICE, m.ref);
+  carol.files.pause(shown.id);
+  const part = await first;
+  const again = await chat.fileRun(ALICE, m.ref, shown.id);
+  assert.equal(again.error, ""); assert.ok(again.ready, "resumed to the end (was at " + part.done + " of " + data.length + ")");
+  assert.deepEqual(fs.readFileSync(path.join(carol.root, shown.id, "verified.bin")), data);
+  // alice: her own transfer is resumed by its id, never downloaded
+  chat._setFileEngine(alice.files);
+  const before = alice.http.length, own = await chat.fileRun(BOB, mine.ref, mine.id);
+  assert.ok(own.mine && own.sent && own.ready); assert.equal(alice.http.filter((h, i) => i >= before && /^GET/.test(h)).length, 0, "no download of our own file");
+  await rejects((async () => chat.fileRun(ALICE, m.ref, "../x"))(), /Invalid file transfer/);
+  chat._setFileEngine(null);
+  for (const p of [alice, bob, carol]) await p.files.close();
 });
 
 test("safeName: a peer-supplied name as a save dialog default", () => {

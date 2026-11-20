@@ -439,7 +439,33 @@ function toDataHex(payload) { return "0x" + Buffer.from(payload, "utf8").toStrin
  * nodeCmd(command) -> Promise<response>; it must THROW when the node answers status:false (main/chat.js nodeCmd).
  * tmpDir holds one ciphertext block at a time for the `keets action:publish ... file:` hand-off.
  */
-function createTransport({ nodeCmd, http, tmpDir }) {
+/**
+ * A folder the node can be handed a path in. The node's command reader splits on whitespace (CommandRunner), and its
+ * quoting is not the same on every path it takes (a Windows path goes through another splitter), so the path must
+ * have no space. A Windows user name with a space puts one in the temp folder: its short (8.3) name is the same
+ * private folder without it. Where that cannot be had, the old refusal stands, with the path whole.
+ */
+function shortPathWin(dir) {
+  return ("" + require("child_process").execFileSync("cmd.exe", ["/d", "/s", "/c", 'for %I in ("' + dir + '") do @echo %~sI'],
+    { windowsVerbatimArguments: true, windowsHide: true, timeout: 5000 })).trim();
+}
+function spaceFreeDir(dir, shortOf) {
+  if (!/\s/.test(dir)) return dir;
+  let alt = "";
+  try { if (shortOf || process.platform === "win32") alt = "" + (shortOf || shortPathWin)(dir); } catch (e) { /* refused below */ }
+  if (alt && !/\s/.test(alt) && path.isAbsolute(alt) && fs.existsSync(alt) && fs.statSync(alt).isDirectory()) return alt;
+  throw new Error("The temporary folder path contains a space, and the node cannot be handed a file there: " + dir);
+}
+/** The mark the system puts on a downloaded file, on a file saved from a chat: macOS asks before opening it, Windows
+ *  shows its "came from another computer" warning. Best effort: a file system without the mark still has the file. */
+async function markDownloaded(dest, platform = process.platform, execFile = require("child_process").execFile) {
+  try {
+    if (platform === "darwin") await new Promise((res) => execFile("/usr/bin/xattr",
+      ["-w", "com.apple.quarantine", "0081;" + Math.floor(Date.now() / 1000).toString(16) + ";minimaCore;", dest], { timeout: 5000 }, () => res()));
+    else if (platform === "win32") await fsp.writeFile(dest + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
+  } catch (e) { /* never fails the save */ }
+}
+function createTransport({ nodeCmd, http, tmpDir, shortOf }) {
   let media = null;
   const t = { via: "" };
   async function client() {
@@ -460,9 +486,8 @@ function createTransport({ nodeCmd, http, tmpDir }) {
   };
   t.publish = async (p, bytes) => {
     if (!PATH_RE.test(p)) throw new Error("Invalid file path");
-    const tmp = path.join(tmpDir || os.tmpdir(), "chat-file-" + randomHex(8) + ".bin");
     // the node command tokenizer splits on whitespace: a spaced path would rewrite the command
-    if (/\s/.test(tmp)) throw new Error("The temporary folder path contains a space: " + tmp);
+    const tmp = path.join(spaceFreeDir(tmpDir || os.tmpdir(), shortOf), "chat-file-" + randomHex(8) + ".bin");
     try {
       await fsp.writeFile(tmp, bytes, { flag: "wx", mode: 0o600 });
       return "" + (await nodeCmd("keets action:publish path:" + p + " file:" + tmp)).url;
@@ -604,7 +629,7 @@ function safeName(name) {
  *   addMessage, setStatus,    chat-store's addMessage(m) / setStatus(msgid, patch) for the outgoing message row
  *   onUpdate,                 (id) -> void, a transfer changed (refresh the UI)
  *   sendPayload,              (peer, payload) -> Promise<via>; default = keets action:send through nodeCmd
- *   http, tmpDir, freeSpace   test seams: loopback http function, publish temp dir, (root) -> free bytes
+ *   http, tmpDir, freeSpace, markDownloaded   test seams: loopback http function, publish temp dir, (root) -> free bytes, the downloaded mark
  * })
  */
 function create(opts) {
@@ -818,6 +843,7 @@ function create(opts) {
       if (!path.isAbsolute("" + destPath) || (dest + path.sep).startsWith(path.resolve(root) + path.sep)) throw new Error("Choose a different place to save the file");
       try { await fsp.copyFile(path.join(t.dir, "verified.bin"), dest); }
       catch (e) { await fsp.rm(dest, { force: true }).catch(() => {}); throw e; }
+      await (opts.markDownloaded || markDownloaded)(dest);
       return dest;
     },
     /** Inbox drainer hook for state:"file-control". Contacts only; never throws (a malformed control must not wedge the drain). */
@@ -845,7 +871,7 @@ module.exports = {
   // protocol pieces (pure; used by the tests and by anything that only needs to look at an offer)
   chatFile, parseRef, validate, isKeets, cipherSize, encrypt, decrypt, sealRecord, openRecord, publish, download, manifestBytes,
   fileMessage, fileControl, controlBody, createDelivery, createTransport, mediaClient, mediaClientLocal, loopbackHttp,
-  jsonWrite, jsonParse, urlEncode, validRef, toDataHex, randomHex,
+  jsonWrite, jsonParse, urlEncode, validRef, toDataHex, randomHex, spaceFreeDir, markDownloaded,
   PREFIX, MAX_BYTES, TRANSFER_MAX_BYTES, MAX_REF_CHARS, PIECE, PLAIN_PIECE, BLOCK, MANIFEST_LIMIT, FETCH_MAX, MAX_TRANSFERS,
   MAX_STORE_BYTES, FREE_MARGIN, CONTROL_MAX, PATH_RE, TEXT
 };
