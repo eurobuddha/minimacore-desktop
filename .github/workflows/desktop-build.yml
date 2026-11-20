@@ -125,6 +125,8 @@ jobs:
         run: npm run test:shell
       - name: Wallet money paths and History (send, split, consolidate, receive commands pinned)
         run: npm run test:wallet
+      - name: Tray apps (money calls of ETH Wallet, Vestr, miniMall and Web Wallet pinned; Terminal, Logs, Freeze; KeyUses, Explorer, Entropy)
+        run: npm run test:apps
 
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar

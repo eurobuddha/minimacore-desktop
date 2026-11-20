@@ -22,6 +22,7 @@
     "test:mail": "node --test scripts/mail-test.cjs scripts/mail-address-test.cjs scripts/payverify-test.cjs",
     "test:shell": "node --test scripts/shell-test.cjs",
     "test:wallet": "node --test scripts/wallet-money-test.cjs scripts/wallet-review-test.cjs scripts/history-screen-test.cjs scripts/core-screens-test.cjs scripts/keymode-test.cjs",
+    "test:apps": "node --test scripts/apps-money.test.cjs scripts/apps-screens.test.cjs scripts/shop-test.cjs scripts/keyuses-test.cjs scripts/explorer-test.cjs scripts/entropy-test.cjs",
     "test:panels": "node --test scripts/panels-test.cjs",
     "test:keets": "node --test scripts/keets-test.cjs",
     "test:atomix": "bash scripts/atomix-parity-check.sh && node scripts/atomix-unit.js",
