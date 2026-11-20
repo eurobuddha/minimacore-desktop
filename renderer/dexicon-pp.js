@@ -16,16 +16,26 @@
   // ======================================================================== Core: no DOM
   const MINIMA = "0x00", MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
   const isMxusd = (tok) => String(tok || "").toLowerCase() === MXUSD.toLowerCase();
-  /** A token's own name as it may be shown: without control and format characters (zero-width, direction marks), which can hide a difference or reorder the words that follow. */
-  const clean = (name) => String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+  /**
+   * A token's own name as it may be shown (0.19.102). Removed: control and format characters (zero-width, direction
+   * marks and overrides), every code point that draws nothing (Unicode's default-ignorables: the Hangul fillers U+3164,
+   * U+115F, U+1160, U+FFA0, variation selectors, the grapheme joiner) and the blank Braille cell U+2800. Any run of
+   * space characters becomes one space. A name of only such characters is no name.
+   */
+  const clean = (name) => String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/[\p{Z}\s]+/gu, " ").trim();
+  const NAME_MAX = 32;   // code points of a token's name on a screen; the token id beside it is always whole
+  /** The cleaned name, capped, inside a direction ISOLATE (U+2068 … U+2069): right-to-left letters in a name cannot reorder the mark before it or the token id after it. */
+  const shown = (name) => { const a = Array.from(name); return "\u2068" + (a.length > NAME_MAX ? a.slice(0, NAME_MAX).join("") + "…" : name) + "\u2069"; };
   /**
    * A token's identity is its ID, never its name (0.18.135). The one MxUSD is MXUSD above and is the only token written
    * "MxUSD". EVERY other token is written by its own name marked "(not MxUSD)", and wherever a pair is named or a trade is
    * reviewed its whole token id stands beside it (pairName). A name can be anything its maker typed: "MxUSD " with a
    * space, a zero-width character, Cyrillic letters.
    */
-  const tokLabel = (tok, name) => { if (isMxusd(tok)) return "MxUSD"; const n = clean(name); return (n && n.toLowerCase() !== String(tok || "").toLowerCase() ? n : "unnamed token") + " (not MxUSD)"; };
-  /** "MINIMA / MxUSD", or for any other token "MINIMA / <name> (not MxUSD)  ·  token <its whole id>". t = { tok, name: tokLabel }. */
+  // THE MARK GOES FIRST (0.19.102): a label cut short by a narrow column or a closed picker then reads "(not MxUSD) …",
+  // never a bare name. A long name can no longer push the mark out of sight.
+  const tokLabel = (tok, name) => { if (isMxusd(tok)) return "MxUSD"; const n = clean(name); return "(not MxUSD) " + shown(n && n.toLowerCase() !== String(tok || "").toLowerCase() ? n : "unnamed token"); };
+  /** "MINIMA / MxUSD", or for any other token "MINIMA / (not MxUSD) <name>  ·  token <its whole id>". t = { tok, name: tokLabel }. */
   const pairName = (t) => "MINIMA / " + t.name + (isMxusd(t.tok) ? "" : "  ·  token " + t.tok);
   // Letters of other alphabets (and two signs) that read as the Latin letters of "MxUSD" and "USDT", after lower-casing.
   // ponytail: Cyrillic and Greek only; a look-alike from another script still gets "(not MxUSD)" and its id, only not the extra warning line.

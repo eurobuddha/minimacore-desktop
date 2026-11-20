@@ -365,8 +365,12 @@ function myPools() {
  */
 function labelById(tok, name) {
   if (isMarketFed(tok)) return "MxUSD";
-  var n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
-  return (n && n.toLowerCase() !== String(tok || "").toLowerCase() ? n : "unnamed token") + " (not MxUSD, token " + tok + ")";
+  // 0.19.102, as renderer/dexicon-pp.js tokLabel: the mark and the whole id FIRST; the name without invisible and
+  // filler characters, capped at 32 code points, inside a direction isolate (U+2068 … U+2069).
+  var n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/[\p{Z}\s]+/gu, " ").trim();
+  if (!n || n.toLowerCase() === String(tok || "").toLowerCase()) n = "unnamed token";
+  var a = Array.from(n); if (a.length > 32) n = a.slice(0, 32).join("") + "…";
+  return "(not MxUSD, token " + tok + ") \u2068" + n + "\u2069";
 }
 function activityLabels() { var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "MxUSD"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = labelById(p.tok, p.tokName); }); return labels; }
 /** A swap recorded before 0.18.135 ends in the token's NAME as the engine read it ("… for 10 USDT"). Where the node's own
@@ -374,7 +378,7 @@ function activityLabels() { var labels = {}; labels[USDT_TOKENID.toLowerCase()] 
  *  exactly as recorded (never guessed, never reworded). */
 function relabelSwap(model, row) {
   var m = /^((?:Sold|Bought) \S+ MINIMA for \S+) (.+)$/.exec((model && model.summary) || ""), h = row && row.history;
-  if (!m || model.type !== "SWAP" || !h || /\(not MxUSD, token 0x[0-9A-Fa-f]+\)$/.test(m[2])) return model;
+  if (!m || model.type !== "SWAP" || !h || /^\(not MxUSD, token 0x[0-9A-Fa-f]+\) |\(not MxUSD, token 0x[0-9A-Fa-f]+\)$/.test(m[2])) return model;   // labelled already (the mark first since 0.19.102; last before)
   var ids = []; try { ids = Object.keys(JSON.parse(h.deltas || "{}")).filter(function (t) { return t !== "0x00"; }); } catch (e) {}
   if (ids.length === 1) model.summary = m[1] + " " + labelById(ids[0], m[2]);
   return model;

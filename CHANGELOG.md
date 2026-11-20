@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.102] — Token label: the "(not MxUSD)" mark goes first; names capped and cleaned; right-to-left names isolated
+
+- **Why**: the mark stood AFTER the token's own name, so a long name pushed it out of sight, and the closed pair picker (which shows only the start of its text) could read "MINIMA / MxUSD" for a token that merely calls itself MxUSD.
+- **Now**: every token but the real MxUSD (by token id) reads `(not MxUSD) <name>`, and a pair reads `MINIMA / (not MxUSD) <name>  ·  token <whole id>`. In records the glue writes `(not MxUSD, token <whole id>) <name>`.
+- **Names** are capped at 32 code points (the token id beside them is always whole). Removed from a name: control and format characters (zero-width, direction marks and overrides), every code point that draws nothing (the Hangul fillers U+3164, U+115F, U+1160, U+FFA0, variation selectors, the grapheme joiner, the soft hyphen) and the blank Braille cell U+2800. Runs of space characters become one space. A name of only such characters is "unnamed token".
+- **Right-to-left**: the name is wrapped in a direction isolate (U+2068 … U+2069), so Hebrew or Arabic letters in a name cannot reorder the mark before it or the token id after it.
+- **Records** labelled the old way (the mark last, written by this branch's earlier versions) are recognised and not labelled twice.
+- **Tests**: 1 new in `scripts/dexicon-pp.test.cjs` (25 invisible code points, the cap, the isolate, every cut of the picker's text); the older label assertions moved to the new order. Not looked at in a running app.
+
 ## [0.19.101] — Restore gate: unfinished AtomiX swaps are read from the open store; a store set aside disowns an init in flight
 
 - **The gap**: when AtomiX's store was open but its service had not become ready (it waits for the node's identity reads, which a locked or slow node never answers), a wallet replacement could be confirmed past "cannot be checked" after two minutes, with a swap in flight in that very store.
