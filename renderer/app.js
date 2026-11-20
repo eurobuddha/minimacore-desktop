@@ -2757,26 +2757,26 @@ async function renderShopBrowse() {
     host.innerHTML = `<div class="card"><div class="card__title">Open a shop</div>
       <div class="view__desc">Load a <span class="mono">.shop</span> a vendor shared with you, or preview one of yours.</div>
       <button class="btn btn--primary btn--full" id="shopOpenFile" style="margin-top:8px">Open a .shop file…</button></div>
-      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card shop-order" data-openmine="${esc(s.shopId)}"><div class="row" style="justify-content:space-between"><span>${esc(s.shopName)}</span><span class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</span></div></div>`).join("") : ""}`;
+      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card shop-order" data-openmine="${esc(s.shopId)}"><div class="row" style="justify-content:space-between"><span>${esc(s.shopName)}</span><span class="view__desc">${(s.products || []).length} item(s) · ${esc(ShopRules.cur(s.currency))}</span></div></div>`).join("") : ""}`;
     el("shopOpenFile").onclick = async () => { try { const cfg = await api.shopImport(); if (cfg) { shopLoaded = cfg; shopCart = {}; renderShopBrowse(); } } catch (e) { toast(e.message || "not a valid .shop", "warn"); } };
-    host.querySelectorAll("[data-openmine]").forEach(c => c.onclick = async () => { const mine2 = await api.shopMyShops(); shopLoaded = mine2.find(s => s.shopId === c.dataset.openmine); shopCart = {}; renderShopBrowse(); });
+    host.querySelectorAll("[data-openmine]").forEach(c => c.onclick = async () => { const mine2 = await api.shopMyShops(); const s = mine2.find(x => x.shopId === c.dataset.openmine); const why = ShopRules.problem(s); if (why) { toast(why, "warn"); return; } shopLoaded = s; shopCart = {}; renderShopBrowse(); });
     return;
   }
-  const s = shopLoaded;
+  const s = shopLoaded, cur = ShopRules.token(s).name || ShopRules.cur(s.currency);   // the token it is paid in, by its currency (0.18.150)
   const cartCount = Object.values(shopCart).reduce((a, b) => a + b, 0);
   const grid = (s.products || []).map(p => {
     const qty = shopCart[p.id] || 0, cap = Number(p.maxUnits) || 99;
     return `<div class="card shop-prod">
-      <div class="shop-prod-imgwrap" data-open="${esc(p.id)}" title="View details">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-prod-img shop-prod-noimg">🛍</div>`}<span class="shop-zoom">⤢</span></div>
+      <div class="shop-prod-imgwrap" data-open="${esc(p.id)}" title="View details">${ShopRules.image(p.image) ? `<img class="shop-prod-img" src="${esc(ShopRules.image(p.image))}" alt=""/>` : `<div class="shop-prod-img shop-prod-noimg">🛍</div>`}<span class="shop-zoom">⤢</span></div>
       <div class="shop-prod-name" data-open="${esc(p.id)}">${esc(p.name)}</div>
       <div class="view__desc shop-prod-desc">${esc(p.description || "")}</div>
-      <div class="shop-prod-price mono">${esc(p.price)} ${esc(s.currency)}</div>
+      <div class="shop-prod-price mono">${esc(p.price)} ${esc(cur)}</div>
       ${shopStepper(p.id, qty, cap)}
     </div>`;
   }).join("");
-  host.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><div><div class="card__title" style="margin:0">${esc(s.shopName)}</div><div class="view__desc">pays in ${esc(s.currency)}</div></div><button class="btn btn--sm btn--outline" id="shopClose">Close</button></div>
+  host.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><div><div class="card__title" style="margin:0">${esc(s.shopName)}</div><div class="view__desc">pays in ${esc(cur)}</div></div><button class="btn btn--sm btn--outline" id="shopClose">Close</button></div>
     <div class="shop-grid">${grid}</div>
-    ${cartCount ? `<div class="shop-cartbar"><span>${cartCount} item(s) · <span class="mono">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></span><button class="btn btn--primary btn--sm" id="shopCheckout">Checkout</button></div>` : ""}`;
+    ${cartCount ? `<div class="shop-cartbar"><span>${cartCount} item(s) · <span class="mono">${esc(shopCartTotal())} ${esc(cur)}</span></span><button class="btn btn--primary btn--sm" id="shopCheckout">Checkout</button></div>` : ""}`;
   el("shopClose").onclick = () => { shopLoaded = null; shopCart = {}; renderShopBrowse(); };
   host.querySelectorAll("[data-open]").forEach(e => e.onclick = () => shopProductModal(e.dataset.open));
   host.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { const id = b.dataset.inc, cap = shopCapOf(id); shopCart[id] = Math.min(cap, (shopCart[id] || 0) + 1); renderShopBrowse(); });
@@ -2795,10 +2795,10 @@ function shopProductModal(id) {
   if (!ov) { ov = document.createElement("div"); ov.id = "shopModalOv"; ov.className = "shop-modal-ov"; document.body.appendChild(ov); }
   ov.innerHTML = `<div class="shop-modal">
     <button class="shop-modal-x" id="shopModalX" aria-label="Close">✕</button>
-    ${p.image ? `<img class="shop-modal-img" src="${esc(p.image)}" alt=""/>` : `<div class="shop-modal-img shop-prod-noimg" style="height:200px;font-size:56px">🛍</div>`}
+    ${ShopRules.image(p.image) ? `<img class="shop-modal-img" src="${esc(ShopRules.image(p.image))}" alt=""/>` : `<div class="shop-modal-img shop-prod-noimg" style="height:200px;font-size:56px">🛍</div>`}
     <div class="shop-modal-body">
       <div class="shop-modal-name">${esc(p.name)}</div>
-      <div class="shop-modal-price mono">${esc(p.price)} ${esc(s.currency)}</div>
+      <div class="shop-modal-price mono">${esc(p.price)} ${esc(ShopRules.cur(s.currency))}</div>
       <div class="shop-modal-desc">${esc(p.description || "No description.")}</div>
       <div class="view__desc">Up to ${cap} per order · from ${esc(s.shopName)}</div>
       <div class="shop-modal-buy">${shopStepper(id, qty, cap)}<button class="btn btn--primary" id="mAdd">${qty > 0 ? "In cart ✓" : "Add to cart"}</button></div>
@@ -2812,44 +2812,49 @@ function shopProductModal(id) {
   ov.querySelector("[data-dec]").onclick = () => { shopCart[id] = Math.max(0, (shopCart[id] || 0) - 1); if (!shopCart[id]) delete shopCart[id]; shopProductModal(id); };
   el("mAdd").onclick = () => { if (!shopCart[id]) shopCart[id] = 1; shopProductModal(id); };
 }
-function shopCartTotal() {
-  const s = shopLoaded; if (!s) return 0; let t = 0;
-  for (const p of (s.products || [])) { const q = shopCart[p.id] || 0; if (q) t += q * Number(p.price); }
-  const ship = shopSelectedShipping(); if (ship) t += Number(ship.fee) || 0;
-  return t;
-}
+// The cart's total as the exact decimal that is sent (ShopRules.totals: BigInt, never a floating-point number).
+function shopCartTotal() { const s = shopLoaded; if (!s) return "0.000000"; return ShopRules.totals(s, shopCart, shopShipId).total || "0.000000"; }
 let shopShipId = null;
 function shopSelectedShipping() { const s = shopLoaded; if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(x => x.id === shopShipId) || s.shipping[0]; }
 async function shopOpenCheckout() {
-  const s = shopLoaded;
-  const shipOpts = (s.shipping || []).map(sh => `<option value="${esc(sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? " (+" + esc(String(sh.fee)) + " " + esc(s.currency) + ")" : " (free)"}</option>`).join("");
+  const s = shopLoaded, cur = ShopRules.cur(s.currency);
+  const shipOpts = (s.shipping || []).map(sh => `<option value="${esc(sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? " (+" + esc(String(sh.fee)) + " " + esc(cur) + ")" : " (free)"}</option>`).join("");
   const host = el("shopSub");
   host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopBackStore">← Store</button>
     <div class="card" style="margin-top:8px"><div class="card__title">Checkout · ${esc(s.shopName)}</div>
-      ${(s.products || []).filter(p => shopCart[p.id]).map(p => `<div class="row" style="justify-content:space-between"><span>${esc(p.name)} × ${shopCart[p.id]}</span><span class="mono">${(shopCart[p.id] * Number(p.price)).toFixed(6)}</span></div>`).join("")}
+      ${(ShopRules.totals(s, shopCart, "none").items || []).map(i => `<div class="row" style="justify-content:space-between"><span>${esc(i.product)} × ${esc(String(i.quantity))}</span><span class="mono">${esc(i.lineTotal)}</span></div>`).join("")}
       ${shipOpts ? `<div class="field" style="margin-top:8px"><div class="field__label">Shipping</div><select class="field__input" id="shopShip">${shipOpts}</select></div>` : ""}
       <div class="field"><div class="field__label">Delivery (address / email — encrypted, only the vendor sees it)</div><textarea class="field__input" id="shopDelivery" rows="2" placeholder="Where should this go?"></textarea></div>
       <div class="field"><div class="field__label">Note (optional)</div><input class="field__input" id="shopNote" placeholder="Anything for the vendor?" autocomplete="off"/></div>
-      <div class="row" style="justify-content:space-between;margin-top:8px;font-weight:700"><span>Total</span><span class="mono" id="shopCkTotal">${shopCartTotal().toFixed(6)} ${esc(s.currency)}</span></div>
+      <div class="row" style="justify-content:space-between;margin-top:8px;font-weight:700"><span>Total</span><span class="mono" id="shopCkTotal">${esc(shopCartTotal())} ${esc(cur)}</span></div>
       <button class="btn btn--primary btn--full" id="shopPay" style="margin-top:10px">Pay & place order</button>
-      <div class="view__desc" style="margin-top:6px">Sends an encrypted order to the vendor + the ${esc(s.currency)} payment in one go.</div>
+      <div class="view__desc" style="margin-top:6px">Sends an encrypted order to the vendor + the ${esc(cur)} payment in one go.</div>
     </div>`;
   el("shopBackStore").onclick = () => renderShopBrowse();
-  if (el("shopShip")) el("shopShip").onchange = () => { shopShipId = el("shopShip").value; el("shopCkTotal").textContent = shopCartTotal().toFixed(6) + " " + s.currency; };
+  if (el("shopShip")) el("shopShip").onchange = () => { shopShipId = el("shopShip").value; el("shopCkTotal").textContent = shopCartTotal() + " " + cur; };
   el("shopPay").onclick = shopDoPay;
 }
 async function shopDoPay() {
   const s = shopLoaded; const btn = el("shopPay"); btn.disabled = true; btn.textContent = "Placing order…";
-  const items = (s.products || []).filter(p => shopCart[p.id]).map(p => ({ product: p.name, quantity: shopCart[p.id], unitPrice: String(p.price), lineTotal: (shopCart[p.id] * Number(p.price)).toFixed(6) }));
-  if (!items.length) { toast("Cart is empty", "warn"); btn.disabled = false; btn.textContent = "Pay & place order"; return; }
-  const ship = shopSelectedShipping(), total = shopCartTotal().toFixed(6);
+  const again = () => { btn.disabled = false; btn.textContent = "Pay & place order"; };
+  // 0.18.150: the token from the shop's currency (a mismatched .shop is refused), exact totals, and the question first:
+  // the amount sent, the token id and the vendor's address, each whole on its own line.
+  const t = ShopRules.totals(s, shopCart, shopShipId), tok = ShopRules.token(s);
+  if (t.err || tok.err) { toast(t.err || tok.err, "warn"); again(); return; }
+  const items = t.items;
+  if (!items.length) { toast("Cart is empty", "warn"); again(); return; }
+  if (t.zero) { toast("The total is zero. Nothing was sent.", "warn"); again(); return; }
+  const ship = shopSelectedShipping(), total = t.total;
   const delivery = (el("shopDelivery") && el("shopDelivery").value.trim()) || "", note = (el("shopNote") && el("shopNote").value.trim()) || "";
+  const yes = await showConfirm("Pay " + total + " " + tok.name + "?", "This sends your encrypted order to " + s.shopName + " and pays " + total + " " + tok.name + ". Payment is final."
+    + "\n\nAmount sent\n" + total + "\n\nToken: " + tok.name + "\n" + tok.tokenid + "\n\nVendor's payment address\n" + String(s.vendorAddress), "Pay");
+  if (!yes) { again(); return; }
   try {
     const r = await api.shopPlaceOrder(s, items, total, ship ? ship.label : "", delivery, note);
     if (r.payError) toast("Order sent, but payment failed: " + r.payError + " — retry from Orders.", "warn");
     else toast("Order placed ✓ " + r.ref, "ok");
     shopCart = {}; shopLoaded = null; shopView = "orders"; shopOrderRef = null; renderMiniMall();
-  } catch (e) { toast(e.message || "order failed", "warn"); btn.disabled = false; btn.textContent = "Pay & place order"; }
+  } catch (e) { toast(e.message || "order failed", "warn"); if (btn.isConnected) again(); }
 }
 
 // ---- Studio: author a .shop (auto vendor card from the node identity) ----
@@ -2862,7 +2867,7 @@ async function renderShopStudio() {
   if (!shopDraft) {
     const mine = await api.shopMyShops().catch(() => []);
     host.innerHTML = `<button class="btn btn--primary btn--full" id="shopNew">+ New shop</button>
-      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(s.shopName)}</b><div class="view__desc">${(s.products || []).length} item(s) · ${esc(s.currency)}</div></div><div class="seg"><button class="btn btn--sm btn--outline" data-editshop="${esc(s.shopId)}">Edit</button><button class="btn btn--sm btn--outline" data-exportshop="${esc(s.shopId)}">Export</button></div></div></div>`).join("") : `<div class="card"><div class="empty">No shops yet. Create one — customers load the exported <span class="mono">.shop</span> file to buy.</div></div>`}`;
+      ${mine.length ? `<div class="ax-seclabel">MY SHOPS</div>` + mine.map(s => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(s.shopName)}</b><div class="view__desc">${(s.products || []).length} item(s) · ${esc(ShopRules.cur(s.currency))}</div></div><div class="seg"><button class="btn btn--sm btn--outline" data-editshop="${esc(s.shopId)}">Edit</button><button class="btn btn--sm btn--outline" data-exportshop="${esc(s.shopId)}">Export</button></div></div></div>`).join("") : `<div class="card"><div class="empty">No shops yet. Create one — customers load the exported <span class="mono">.shop</span> file to buy.</div></div>`}`;
     el("shopNew").onclick = () => { shopDraft = { shopName: "", currency: "Minima", vendorPublicId: shopIdentity ? shopIdentity.publicId : "", vendorAddress: shopIdentity ? shopIdentity.vendorAddress : "", shipping: shopStandardShipping(), products: [] }; renderShopStudio(); };
     host.querySelectorAll("[data-editshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); shopDraft = JSON.parse(JSON.stringify(m.find(s => s.shopId === b.dataset.editshop))); shopDraft.shipping = shopNormalizeShipping(shopDraft.shipping); renderShopStudio(); });
     host.querySelectorAll("[data-exportshop]").forEach(b => b.onclick = async () => { const m = await api.shopMyShops(); const s = m.find(x => x.shopId === b.dataset.exportshop); const p = await api.shopExport(JSON.stringify(s, null, 2), s.shopId); if (p) toast("Exported → " + p, "ok"); });
@@ -2871,7 +2876,7 @@ async function renderShopStudio() {
   const d = shopDraft;
   const prods = d.products.map((p, i) => `<div class="card shop-prod-edit">
       <div class="row" style="justify-content:space-between"><b>Item ${i + 1}</b><button class="btn btn--sm btn--outline" data-delprod="${i}">Remove</button></div>
-      <div class="shop-imgdrop" data-imgi="${i}">${p.image ? `<img class="shop-prod-img" src="${esc(p.image)}"/>` : "drop / click to add a photo"}</div>
+      <div class="shop-imgdrop" data-imgi="${i}">${ShopRules.image(p.image) ? `<img class="shop-prod-img" src="${esc(ShopRules.image(p.image))}"/>` : "drop / click to add a photo"}</div>
       <input class="field__input" data-pf="name" data-pi="${i}" placeholder="Name" value="${esc(p.name || "")}" autocomplete="off"/>
       <input class="field__input" data-pf="description" data-pi="${i}" placeholder="Description" value="${esc(p.description || "")}" autocomplete="off"/>
       <div class="row" style="gap:6px"><input class="field__input" data-pf="price" data-pi="${i}" inputmode="decimal" placeholder="Price" value="${esc(p.price || "")}" style="flex:1" autocomplete="off"/><input class="field__input" data-pf="maxUnits" data-pi="${i}" inputmode="numeric" placeholder="Max qty" value="${esc(p.maxUnits || "")}" style="flex:1" autocomplete="off"/></div>
@@ -2882,7 +2887,7 @@ async function renderShopStudio() {
   host.innerHTML = `<button class="btn btn--sm btn--outline" id="shopStudioBack">← My shops</button>
     <div class="card" style="margin-top:8px"><div class="card__title">${d.shopId ? "Edit shop" : "New shop"}</div>
       <div class="field"><div class="field__label">Shop name</div><input class="field__input" id="sdName" value="${esc(d.shopName)}" placeholder="My Shop" autocomplete="off"/></div>
-      <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">mxUSDT</button></div></div>
+      <div class="field"><div class="field__label">Currency</div><div class="seg"><button class="btn btn--sm ${d.currency === "Minima" ? "btn--primary" : "btn--outline"}" data-cur="Minima">MINIMA</button><button class="btn btn--sm ${d.currency !== "Minima" ? "btn--primary" : "btn--outline"}" data-cur="USDT">MxUSD</button></div></div>
       <div class="view__desc">Vendor card (auto-derived from your node — this is how buyers' orders reach you):</div>
       <div class="mono shop-card">${esc((d.vendorPublicId || "").slice(0, 18))}… | ${esc(d.vendorAddress || "")}</div>
     </div>
@@ -2913,7 +2918,8 @@ async function renderShopStudio() {
     const cfg = { shopName: d.shopName, shopId: d.shopId || shopSlug(d.shopName), vendorPublicId: d.vendorPublicId, vendorAddress: d.vendorAddress,
       currency: d.currency, tokenid: d.currency === "Minima" ? "0x00" : "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90",
       shipping: shopNormalizeShipping(d.shipping),
-      products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price), maxUnits: String(Number(p.maxUnits) || 10), image: p.image || "" })) };
+      products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price).trim(), maxUnits: String(Number(p.maxUnits) || 10), image: ShopRules.image(p.image) })) };
+    const why = ShopRules.problem(cfg); if (why) return toast(why, "warn");   // plain prices and fees only (0.18.150)
     await api.shopSave(cfg);
     const wasNew = !d.shopId;
     shopDraft = null;

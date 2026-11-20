@@ -643,7 +643,8 @@ ipcMain.handle("mcd:shopExport", async (_e, json, name) => {
 ipcMain.handle("mcd:shopImport", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "miniMall shop", extensions: ["shop", "json"] }] });
   if (r.canceled || !r.filePaths || !r.filePaths[0]) return null;
-  try { return JSON.parse(fs.readFileSync(r.filePaths[0], "utf8")); } catch (e) { throw new Error("Not a valid .shop file."); }
+  let cfg; try { cfg = JSON.parse(fs.readFileSync(r.filePaths[0], "utf8")); } catch (e) { throw new Error("Not a valid .shop file."); }
+  return shop.checkImported(cfg);   // the vendor's file: currency and token must agree, prices plain, pictures inline or none
 });
 
 // forward node events to the window + tray

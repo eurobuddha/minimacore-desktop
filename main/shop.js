@@ -15,6 +15,7 @@ const { rpcCall } = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
 const sc = require("./shopcrypto");
 const store = require("./shop-store");
+const SHOP = require("../renderer/shop-rules.js");   // which token a shop is paid in, what a price is (shared with the screen)
 
 const MINIMERCH = "0x4D494E494D45524348";   // ASCII "MINIMERCH" — the shared order channel (matches native)
 const MSG_AMOUNT = "0.000000001";
@@ -117,7 +118,7 @@ async function sendMerchMessage(toPublicId, msg) {
 async function sendPayment(vendorAddr, amount, tokenid, ref) {
   if (!looksLikeMinimaAddress(vendorAddr)) throw new Error("Invalid vendor address.");
   if (!(String(tokenid) === MINIMA_TOKEN || /^0x[0-9A-Fa-f]{64}$/.test(String(tokenid)))) throw new Error("Invalid token.");
-  if (!/^[0-9]*\.?[0-9]+$/.test(String(amount)) || !(parseFloat(amount) > 0)) throw new Error("Invalid amount.");
+  if (!SHOP.payable(amount)) throw new Error("Invalid amount.");   // a plain decimal above zero: no sign, no exponent
   let chk; try { chk = await nodeCmd(`checkaddress address:${vendorAddr}`); } catch (e) { chk = null; }
   if (!chk || chk.status === false) throw new Error("Couldn't validate the vendor address — not sending.");
   const state = ref ? ` state:${JSON.stringify({ "1": "0x" + Buffer.from(ref, "utf8").toString("hex") })}` : "";
@@ -131,11 +132,15 @@ async function sendPayment(vendorAddr, amount, tokenid, ref) {
 
 // ---- BUYER: place an order (seal ORDER → MINIMERCH, then the ref-stamped payment) ----
 async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
+  // The token paid is the one the shop's CURRENCY names, never the file's own tokenid: a .shop that says "Minima" and
+  // carries another token's id is refused here, whatever screen (or stored shop) it came from (0.18.150).
+  const tok = SHOP.token(shopCfg || {}); if (tok.err) throw new Error(tok.err);
+  const tokenid = tok.tokenid;
+  if (!SHOP.payable(total)) throw new Error("Invalid amount.");   // before the order message is sent
   await init();
   if (!sc.isValidPublicId(shopCfg.vendorPublicId)) throw new Error("This shop's vendor id is invalid.");
   if (!looksLikeMinimaAddress(shopCfg.vendorAddress)) throw new Error("This shop's payout address is invalid.");
   const ref = "ORD-" + randomId().slice(0, 8).toUpperCase();
-  const tokenid = shopCfg.tokenid || tokenFor(shopCfg.currency);
   const msg = { type: T.ORDER, ref, randomid: randomId(), from: identity.publicId, to: shopCfg.vendorPublicId,
     date: Date.now(), shopId: shopCfg.shopId, shopName: shopCfg.shopName, items, amount: String(total),
     currency: shopCfg.currency, tokenid, shipping: shipping || "", delivery: delivery || "", buyerPayaddr: vendorAddress, message: note || "" };
@@ -165,6 +170,7 @@ async function retryPayment(ref) {
   const o = store.order(ref); if (!o || o.role !== "buy") throw new Error("Order not found.");
   if (store.getMeta("ambiguous:" + ref)) throw new Error("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.");
   if (o.paid) throw new Error("This order is already paid.");
+  const tok = SHOP.token(o); if (tok.err) throw new Error(tok.err);   // an order placed before 0.18.150 with a shop whose token did not match its currency
   const vendorAddr = o.vendorAddress || (store.shop(o.shopId) || {}).vendorAddress;
   if (!vendorAddr) throw new Error("Missing vendor address for retry.");
   let r;
@@ -277,6 +283,14 @@ async function startLoop() {
 }
 function stopLoop() { if (scanTimer) { clearInterval(scanTimer); scanTimer = null; } }
 
+/** A .shop file is the vendor's: checked before the screen sees it (currency and token, plain prices and fees), and a
+ *  product picture is an inline picture or nothing. Throws the plain reason. */
+function checkImported(cfg) {
+  const why = SHOP.problem(cfg); if (why) throw new Error(why);
+  for (const p of cfg.products) if (p && typeof p === "object") p.image = SHOP.image(p.image);
+  return cfg;
+}
+
 // ---- read-model for the renderer ----
 function myShops() { return store.shops(); }
 function saveShop(cfg) { store.saveShop(cfg); emitter.emit("update"); return cfg; }
@@ -295,6 +309,6 @@ function newOrderCount() { return store.orders().filter(o => o.role === "sell" &
 module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
   myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount,
-  placeOrder, retryPayment, advanceStatus, reply,
+  placeOrder, retryPayment, advanceStatus, reply, checkImported,
   _setRunner, MINIMERCH, USDT_TOKEN, tokenFor
 };

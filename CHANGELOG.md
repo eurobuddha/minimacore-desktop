@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.150] — miniMall pays the token its currency names
+
+- A `.shop` that says Minima and carries the MxUSD token id (or any token id that is not its currency's) is refused on import, on opening a stored shop, before Pay and in the main process before the order message (`placeOrder`) and on Retry payment; the token paid is the one the currency names. Pay now asks first and shows the amount sent, the token id and the vendor's address whole, each on its own line. Prices and fees are plain decimals; totals are exact in BigInt (six decimals as before, the exact figure when a price has more). Product pictures are inline `data:image` pictures or nothing. The Studio currency button reads MxUSD. Rules shared by screen and main process in `renderer/shop-rules.js`. Port of 0.19.118. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.149] — miniMall: a malformed order total is never paid
 
 - `main/shop-store.js` `decCmp` returned 0 ("equal") when it could not read a figure, so an incoming order whose buyer-written total was malformed ("abc", "1e3") counted as PAID by any payment in the right token; a zero or negative total was accepted the same way. Figures are now plain decimals only, compared exactly in BigInt; a total that is not a figure above zero is `BAD_TOTAL` (shown as "invalid total") and is never paid. Test: `scripts/shop-test.cjs` (`npm run test:shop`, in CI).
