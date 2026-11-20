@@ -52,7 +52,7 @@ Before starting it prints the profile folder, the ports, the Java it will use an
 | Update feed | read every start | never read: not at start, not from Settings; nothing is downloaded (`main/updater.js` `OFF`) |
 | Ports | base 12001 by default | base 23001 by default, written to the profile's `config.json` on the first run only |
 | Protocol | `dxroom://` is handled inside the process; nothing is registered with the OS | the same: nothing to separate |
-| Window | "Minima Core" | title "Minima Core — TEST PROFILE", a red TEST PROFILE tag on every screen, a TEST badge on the Dock icon |
+| Window | "Minima Core" | title "Minima Core (TEST PROFILE)", a red TEST PROFILE tag on every screen, a TEST badge on the Dock icon |
 
 Not separate, by nature: the network. A TEST copy's node is a real node on the chosen network with its own new
 wallet. "Contribute to the network" would ask the router for a port mapping for the TEST port. A wallet restored

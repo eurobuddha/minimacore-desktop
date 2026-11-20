@@ -162,6 +162,12 @@ test("the overflow menu is reachable from sub screens and tray apps; an overlayi
   assert.ok(/el\("stage"\)\.inert = open && NARROW\.matches/.test(app) && /id="stage"/.test(html), "the screen under an overlaying tray is inert");
 });
 
+test("0.19.139: the copy-failed toast and the TEST window title and tray tooltip carry no em dash", () => {
+  const mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(app.includes('"Copy failed: select the text and press ⌘C"') && !/toast\([^\n]*Copy failed[^\n]*—/.test(app));
+  assert.equal((mainJs.match(/ \+ " \(TEST PROFILE\)"/g) || []).length, 2); assert.ok(!/— TEST PROFILE/.test(mainJs));
+});
+
 // 0.19.126: 0.19.125 removed a helper and left its name in MailPanel.init's list, at the top level of app.js: a
 // ReferenceError there stops the script, and with it every screen. No test read the renderer as a program.
 // 0.19.131: this one does, the whole of it. The script list is index.html's own <script src> tags; nothing here names

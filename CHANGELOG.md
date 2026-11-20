@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.139] — Two old em dashes out of what is shown
+
+- The toast when a copy fails reads "Copy failed: select the text and press ⌘C". The TEST copy's window title and tray tooltip read "… (TEST PROFILE)". `docs/DEV_RUN.md` follows.
+- Seen and not changed (outside this change's two lines): other em dashes in text the app shows, in `renderer/app.js` (the stored-secret placeholder, the QR scan hint, the update download lines, the reachability and port-mapping lines, the node-kind switch question) and `main/main.js` (the tray's state line, the miniMall order notification, an `[app]` log line).
+- Test: `scripts/shell-test.cjs` (16).
+
 ## [0.19.138] — Settings: "Signing keys" per key family
 
 - The card showed one "most-used key" for the whole wallet, as "N / cap sigs", choosing between a classic key and a block-based key by share of capacity, and warned at 80% whatever the key was. A classic key's counter is a count of signatures; a block-based key's is its key block position, which follows the chain's block number. The two are not the same kind of figure.

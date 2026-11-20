@@ -100,7 +100,7 @@ function createWindow() {
     // title bar is kept (no hiddenInset): the shell's own toolbar has the tray button where the Mac's
     // traffic lights would sit. The background is Pandamonium's core_bg for the system theme.
     width: 932, height: 732, minWidth: 440, minHeight: 640,
-    title: flavor.test ? flavor.windowTitle + " — TEST PROFILE" : flavor.windowTitle,
+    title: flavor.test ? flavor.windowTitle + " (TEST PROFILE)" : flavor.windowTitle,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0F1114" : "#F4F5F7",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -178,7 +178,7 @@ function setupTray() {
       { type: "separator" },
       { label: "Quit", click: () => app.quit() }
     ]);
-    tray.setToolTip(flavor.test ? flavor.productName + " — TEST PROFILE" : flavor.productName);
+    tray.setToolTip(flavor.test ? flavor.productName + " (TEST PROFILE)" : flavor.productName);
     tray.setContextMenu(menu());
     node.on("status", () => tray && tray.setContextMenu(menu()));
   } catch (e) { /* tray optional */ }

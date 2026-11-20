@@ -78,7 +78,7 @@ async function copy(text) {
   let ok = false;
   try { ok = !!(await api.clip(s)); } catch (e) { ok = false; }
   if (!ok) { try { await navigator.clipboard.writeText(s); ok = true; } catch (e) { ok = false; } }
-  toast(ok ? "Copied ✓" : "Copy failed — select the text and press ⌘C", ok ? "ok" : "err");
+  toast(ok ? "Copied ✓" : "Copy failed: select the text and press ⌘C", ok ? "ok" : "err");
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 /**
