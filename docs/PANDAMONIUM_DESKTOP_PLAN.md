@@ -266,6 +266,13 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.19.122 | 5a review | Terminal: `sendpin.pinSend` returns a chain (`;`) unpinned; `termSendNote` uses the pin's rule (no token id or exactly `0x00`, no chain); `appendTerm` keeps `full` and says the output is cut, `termText` copies `full` | `apps-screens.test.cjs` (20) |
 | 0.19.123 | 5a review | Web Wallet: `WW_UNKNOWN` / `wwUnknown(address[, set])` replace `wwAmbiguous`; `wwLock` does not clear it; `wwDoSend` refuses while it stands and records it for the address the send left | `apps-money.test.cjs` (37) |
 | 0.19.124 | 5a review | `nameWithId(tid, name)` behind `vTok` and `wwName`; "Not read yet", "Not given", no address row without an address, empty Vestr block badge; `Object.hasOwn` for `SHOP_PILL` and `EW_DISC` | `apps-money.test.cjs` (40) |
+| 0.19.125 | 5b | `showPayResult` shows the transaction id through `idHtml` (wraps, click to copy); `short()` and its seven no-op call sites removed. **This version did not load** (see 0.19.126) | `wallet-money-test.cjs` |
+| 0.19.126 | 5b fix | `short` taken out of `MailPanel.init`'s list (a ReferenceError at the top level of `renderer/app.js`); `rendererTopLevel` in `scripts/shell-test.cjs` runs the renderer's top level against stand-ins | `shell-test.cjs` (15) |
+| 0.19.127 | 5b | KeyUses: `main/keyuses.js` (`audit`, `select`, `join`, `lookup`, `parseUsage`, `parseReuse`, `addressOf`, `selfTest`; host `https://eurobuddha.com` pinned, no redirect), IPC `mcd:keyUsesAudit`; `renderer/apps-tools.js` (new: `renderKeyUses`, `keyUsesRun`, `keyUsesResults`, `keyUsesReset`), `AppsAct.keyuses` (`chip`, `verdict`, `sections`, `num`); Settings' audit card replaced by `kuOpen`, `mcd:keyReuse` removed; `trayOrder` slots a new row after its default neighbour; `renderer/icons/keyuses.svg`; captures `*-keyuses*.png`, `*-apps-5b.png` | `keyuses-test.cjs` (11), `shell-test.cjs` |
+| 0.19.128 | 5b | `keysInfo` returns null for an unreadable counter or capacity and picks the key nearest its own capacity; `maxKeyUses` and Settings' "Signing keys" card follow | `keyuses-test.cjs` (12) |
+| 0.19.129 | 5b | Minima Explorer: `main/explorer.js` (`command`, `ask`; seven reads, `ADDRESS_MAX` 200), IPC `mcd:explorer`; `AppsAct.explorer` (`classify`, `groupNum`, `tidyAmount`, `coinAmount`, `blockTime`, `onchain`, …); `renderExplorer`, `explorerRefresh`, `explorerLoad`, `explorerSearch`, `explorerPush`, `explorerPaint`, `explorerTip` (from `onStatus`); `renderer/icons/explorer.svg`; captures `*-explorer*.png` | `explorer-test.cjs` (10) |
+| 0.19.130 | 5b | Entropy: `renderer/entropy-core.js` (BIP39 from dice, the die face, `selfTest` with the original's vectors), `main/entropy.js` (`random`, `hash data:` of plain hex), IPC `mcd:entropy`, `mcd:secureScreen` (`setContentProtection`); `renderEntropy`, `enThrow`, `enRollOne`, `enFinish`, `enWipe`, `lwCalc`, `entropyLeave`, `entropyNode`; `renderer/icons/entropy.svg`; captures `*-entropy*.png` | `entropy-test.cjs` (12) |
+| (no version) | 5b | `npm run test:apps` and a CI step: `apps-money`, `apps-screens`, `shop-test`, `keyuses-test`, `explorer-test`, `entropy-test` | 98 tests |
 
 Version line (19 Nov 2026): the released main line owns 0.18.65 to 0.18.69 (its Mail work). This branch reused those numbers, up to 0.18.148, for unpushed commits; they are not renumbered. `v0.18.69` was merged at 0.19.0 and every later change on this branch is 0.19.x.
 
@@ -319,6 +326,65 @@ Owed after the review of Phase 5a (recorded 20 Nov 2026, 0.19.118 to 0.19.124; n
 - Web Wallet: the UNKNOWN lock is in memory; an app restart clears it.
 - Token names with the whole id (0.19.124) cover Vestr and the Web Wallet. The Wallet's own token list, Mail and Chat payment labels were not changed here.
 - Seen and not changed: the result dialog of a wallet send shows a shortened transaction id (`renderer/app.js`, `short(txid, 20)` in the "Tx:" line).
+
+Phase 5b (20 Nov 2026, 0.19.125 to 0.19.130): KeyUses, Minima Explorer and Entropy are built; **Future Cash Next is NOT built** (decision and reasons below). The plan (section 3) proposed hosting KeyUses' MiniDapp page; Pandamonium shows the NATIVE KeyUses, Explorer and Entropy, so each was reproduced from its Java source instead. Section 3's "Host" for KeyUses and "nothing stored" for Entropy are superseded by this paragraph.
+
+Owed after Phase 5b (none of these is built):
+- **KeyUses:** the 64 classic and 32 block keys DERIVED FROM THE SEED (the phone checks them as well as the node's own keys, so reuse of the other key family of the same seed is seen), and minimaWallet's keys. Needs the seed phrase in the main process (from `vault`), `mds/keyuses/phrase/derive.js` vendored with its vectors, and a worker (about 70 million SHA3 rounds). Until then a wallet whose seed was also used in the other key mode is not warned about that other family here.
+- **Minima Explorer:** the tip chip is green while the node is stopped ("no block yet"). A list of more than 200 records for one address is cut to 200 (the total is said); paging through the rest is not offered.
+- **Entropy:** the sounds; demo mode. The phrase is kept (concealed) when the screen is left, where the security note on the phone says closing destroys it: owner's call whether leaving the screen should wipe.
+- **Settings:** the "Signing keys" card and the footer take their figure from `keys action:list` as before; the footer shows the node's own `maxuses` line (highest uses + 1), which is the node's figure, not a count this app made.
+- **Future Cash Next** (see below).
+
+### Future Cash Next: read, and not built (20 Nov 2026)
+
+Read: `mds/futurecash-next` 3.2.1 (`e48c523420940bfbb703626d60a2971230bcb8b3`): `guardian.js` (the engine, loaded by the page AND, with `svc-main.js`, as `service.js`), `ui.js`, `index.html`; and Pandamonium's native copy (`apks/base` `integrated/futurecash-next`). The MiniDapp page has the phone's four tabs (Guardian, Stakes, Activity, Help), so hosting it would look right. It was not hosted, because it cannot be made safe in one pass:
+
+1. **It must run with WRITE permission, and then it signs by itself.** The engine treats the node's "pending" answer as a failure ("Future Cash doesn't work in READ mode, switch it to WRITE in MiniHub"). With WRITE, a background service acts on every new block with nobody at the screen: it collects matured stakes (`txncreate` / `txninput` / `txnoutput` / `txnbasics;txnpost`, no signature: the contract pins the payout), and it SWEEPS coins from an at-risk address to a "safe address" with `txnsign publickey:<key>`. The safe address comes from the app's own key-value store (typed in the page, or a `newaddress`); the at-risk set comes from a remote audit service. The desktop's rule (a native confirmation before anything is signed, no weaker than the node's Pending list) and an engine built to sign unattended need a designed answer: a one-time native grant, plus a sign gate in the main process that checks each transaction with `txnlist` (a collect pays only the stake's own state-port-2 address; a sweep pays only the destination the user confirmed natively) as `main/dexicon-signgate.js` does for the Exchange page. That gate needs the node's real `txnlist` shapes, which cannot be seen here.
+2. **It rewrites the wallet's script table.** `newscript trackall:true script:"RETURN SIGNEDBY(…)"` RETIRES a reused default address (the node then never gives change to it), and `newaddress` mints a key. Both change the one wallet that AtomiX, PandaPools, Dexicon and Send share (their change addresses, and a new key on a block-key wallet). Nothing in the desktop reviews that today.
+3. **Unbounded reads on every block.** `coins relevant:true` (three places) and `scripts` are sent with no bound; the page and service must stay byte-identical, so the bound would have to be invented in the shim, and the node has no paged form of that read.
+4. **Coin guard.** `main/reserve.js` would record the service's `txninput` coins under a new owner, and lets every contract coin through. But a collected coin waiting to be swept is an ordinary wallet coin on the payout address: the wallet's Send, Consolidate or another engine can spend it first (the sweep then fails and retries; with an at-risk key that is the race the app exists to win). A hold source for `fc_collect` / `fc_sweep` rows is needed, and an answer to chains (`txnbasics id:X;txnpost id:X` is one command to the guard).
+5. **Store and service.** Two H2 tables (`fc_collect`, `fc_sweep`; upper-case column names, `CAST(… AS DOUBLE)`), 28 key-value keys shared by page and service, `MDS.notify`, NEWBLOCK / NEWBALANCE events with the block header. The H2-to-SQLite shim used by the three engines has never run these statements.
+6. **Gates.** Freeze, the Quit warning and the restore gate must each read `COLLECT_POSTED`, `SWEEP_POSTED` and `PENDING` rows and fail closed; a wallet replacement must move the store aside (the keys in `clean_addr` and the sweep keys die with the old wallet).
+7. **None of it can be run here.** A money engine that signs unattended, shipped on tests against stand-ins alone, is the unreviewed hole the brief forbids.
+
+What the page and the service ask of the host (every `MDS.*` call, from the source):
+
+| Call | Shape | Who | Kind |
+|---|---|---|---|
+| `MDS.cmd` | `block` | page, service | read |
+| | `status` | both | read (is the vault locked) |
+| | `keys action:list` | both | read |
+| | `scripts` | both | read, unbounded |
+| | `scripts address:<0x hex or Mx>` | both | read |
+| | `coins relevant:true` | both | read, UNBOUNDED |
+| | `coins relevant:true sendable:true address:<addr>` | service | read |
+| | `coins address:<addr>` | both | read |
+| | `coins address:<addr> tokenid:<0x hex>` | service | read |
+| | `coins coinid:<0x hex>` | both | read |
+| | `checkaddress address:<0x hex or Mx>` | page | read |
+| | `newscript trackall:false clean:true script:"RETURN (@BLOCK GTE PREVSTATE(1) OR @COINAGE GTE PREVSTATE(4)) AND VERIFYOUT(@INPUT PREVSTATE(2) @AMOUNT @TOKENID FALSE)"` | both | WRITE: registers the contract (exact text only) |
+| | `newscript trackall:true script:"<a default address's own RETURN SIGNEDBY(0x…) script>"` | page (Retire) | WRITE: takes an address out of the change pool |
+| | `newaddress` | page | WRITE: a new key |
+| | `send amount:<decimal> address:<the contract address> [tokenid:<0x hex>] state:{"0":"0xFF","1":"<block>","2":"<0x payout>","3":"<ms>","4":"<blocks>"}` | page (Lock it) | MONEY: locks funds until block "1", payable to "2" |
+| | `txncreate id:<FC…>` | both | build |
+| | `txninput id:<FC…> coinid:<0x hex>` | both | build (coin guard) |
+| | `txnoutput id:<FC…> address:<addr> amount:<decimal> tokenid:<0x hex> storestate:false` | both | build |
+| | `txnsign id:<FC…> publickey:<0x hex>` | both (sweep, rescue) | SIGNS |
+| | `txnbasics id:<FC…>;txnpost id:<FC…>` | both | POSTS (a two-command chain) |
+| | `txndelete id:<FC…>` | both | cleanup, after every build |
+| `MDS.sql` | `CREATE TABLE IF NOT EXISTS` for `fc_collect` and `fc_sweep`; `SELECT` / `INSERT` / `UPDATE` / `DELETE` on those two tables only | both | own store |
+| `MDS.keypair.get` / `.set` | `safe_address`, `safe_mode`, `safe_reused`, `safe_reuse_checked`, `safe_reuse_at`, `clean_addr`, `script_address`, `enabled`, `auto_collect_safe`, `notify`, `atrisk_addrs`, `audit_ok`, `audit_at`, `audit_uses`, `audit_view`, `audit_last_err`, `audit_last_try`, `audit_logged_n`, `audit_archive_tip`, `fc_log`, `fc_status`, `last_action`, `last_tip`, `write_confirmed`, `reset_request`, `reset_done`, `purge_foreign_done`, `kp_selftest` | both | own store |
+| `MDS.net.GET` | `https://eurobuddha.com/keyaudit?keys=…`, `https://eurobuddha.com/reuse?addrs=…` | page | outbound, one host |
+| `MDS.notify` | text | service | system notification |
+| `MDS.log` | text | both | log |
+| `MDS.util.getStateVariable` | (coin, port) | both | pure |
+| `MDS.init` events | `inited`, `NEWBLOCK` (`data.txpow.header.block`), `NEWBALANCE` | both | from the host |
+| links | `https://eurobuddha.com/pandadapps.json`, `https://minidapps.minima.global/futurecash/guide.html` | page | open in the browser |
+
+No `MDS.file`, `MDS.comms`, `MDS.form` or `MDS.dapplink` call exists in the page or the service.
+
+For the owner to decide before it is built: (a) may the desktop run an engine that signs with nobody at the screen, after one native grant, as the node's WRITE mode does; (b) may it retire default addresses of the shared wallet; (c) host the MiniDapp (the service runs as the node's own does) or reproduce Pandamonium's native Java app (`Guardian.java`, `Wallet.java`, `Store.java`, about 7,600 lines) over a desktop engine.
 
 Open questions for the owner (after the review of Phase 5a, 20 Nov 2026):
 1. **A second factor for key export where Touch ID is absent.** On a Mac without Touch ID, and on Windows and Linux, the typed phrase "SHOW KEY" is the only check before the ETH private key is shown. The dialog now says so. Whether to add another check there (the vault password, a system password prompt, a waiting time), and which, is not decided.
@@ -474,6 +540,23 @@ Phases 0 to 2 were verified by tests and a browser preview only. The app has not
 - [ ] Terminal (0.19.122, dev node): `send amount:0.0001 address:<own address>; status` runs both, and the reply's `params` of the send carry no `fromaddress`, nor does `status`; no note is shown. `send … tokenid:0x000` shows no note. `coins` on a wallet with many coins: the screen starts with "[This output is cut: …]" and Copy output pastes the whole reply (its first line is `{`).
 - [ ] Web Wallet (0.19.123, hard to provoke: needs a send the node does not answer): after "status UNKNOWN", Logout and log in to the same wallet: the warning is there and Send is off until "I've checked".
 - [ ] Token names (0.19.124, dev node): create a token named "MxUSD" plus a zero-width character and lock some in Vestr: the card, the token list and the create question show its whole token id and never the name alone.
+
+- [ ] **First (0.19.126): the app loads.** 0.19.125 could not (a name left at the top of the renderer). Open the app: the shell, the tabs and every tray app draw.
+- [ ] Send result (0.19.125): after a wallet send the dialog's "Tx:" line shows the whole id, wrapped; a click on it, and "Copy tx id", put the whole id on the clipboard.
+- [ ] Tray order (0.19.127): on an install whose tray order was changed before this version, Minima Explorer sits after ETH Wallet, Entropy after Minima Vestr and KeyUses after Entropy (or after wherever those were dragged), not at the end.
+- [ ] KeyUses on a classic wallet (0.19.127, dev node): Run audit: "Checked scope: 64 classic · 0 block-based keys" (or the node's own count), every row with its Mx address, Local uses equal to `keys action:list`, a verdict, and the coverage block. Compare three addresses and their figures with the phone's KeyUses on the same seed. The node log shows `keys action:list` twice and no other command.
+- [ ] KeyUses on a block-key wallet (0.19.127): rows read "#n · 128/4" under "Blocks-as-keyuses keys", no AT RISK chip appears from spend counts, and no "keyuses:" estimate is offered. Confirm what `keys action:list` gives for `uses` and `maxuses` on that node (expected 268435456): if a key row has another shape the audit refuses with "could not be read", and that row's values belong in this checklist.
+- [ ] KeyUses offline (0.19.127): with the network off, Run audit ends with "Could not reach the audit service" and shows no rows. With a signature made while the audit runs (a send from another window), it ends with "changed during the audit".
+- [ ] KeyUses host (0.19.127): the only outbound requests are to `https://eurobuddha.com/keyaudit` and `/reuse`; a reply with a redirect is not followed (`netfetch.fetchJson` with `noRedirect`, never run against the live service from this app).
+- [ ] Settings (0.19.128): "Signing keys" shows the most-used key against its own capacity on a classic and on a block-key wallet; "Open KeyUses" opens the app.
+- [ ] Minima Explorer (0.19.129, dev node): the tip and the three tiles fill; sixteen blocks load one by one; a new block appears at the top within a few seconds; Load older blocks adds sixteen; the list ends with "end of retained chain" where the node's records end. Search a block number, a TxPoW id of a transaction, a block's id, an address in both forms, and nonsense. Confirm on a real reply: `txpow action:info` carries `txpowdb.size`, `status` carries `chain.speed`, a coin carries `miniaddress`, and `txpow address:` answers with a list. The node log shows no command other than `block`, `status` and `txpow …`.
+- [ ] Explorer, a busy address (0.19.129): an address with more than 200 records says "(the first 200 are listed)" and the window stays responsive. Note how long the node takes to answer and the size of its reply.
+- [ ] Entropy (0.19.130, dev node, NOT for a real wallet until this is done): the source line turns green "node SHA3 + device CSPRNG verified"; Throw 5 dice tumbles and settles; Auto-roll runs to the phrase; Reveal shows it; the roll history pasted into iancoleman's bip39-standalone.html (Raw entropy, base 6 dice) gives the SAME phrase; one line of the audit log verifies with the `runscript` given there. With the node stopped the line is amber "single source" and the summary carries the single-source warning.
+- [ ] Entropy, node replies (0.19.130): `random` answers `response.random` as 0x hex and `hash data:<hex>` answers `response.hash` as 0x hex of SHA3 (read from the phone's source, never seen from a node here). If either has another shape the app falls back to device only and says so.
+- [ ] Entropy, screen capture (0.19.130, NEVER RUN): with Entropy open, a screenshot and a screen share show the window blank (macOS, Windows); leaving Entropy makes it capturable again; on Linux the notice "cannot keep the window out of screenshots" is shown. `setContentProtection` was not exercised in Electron here.
+- [ ] Entropy, memory (0.19.130): leave the screen with a phrase revealed and come back: it is concealed and still there; Wipe & start over removes it; after quitting the app nothing of it is in the data folder (search the folder for one of the words' positions is not possible; check instead that no file's modification time changed while rolling).
+- [ ] Entropy last word (0.19.130): type eleven words (completion after four letters), Calculate: 128 words; pick one and check the twelve in the phone's Entropy or in iancoleman's tool.
+- [ ] Freeze (0.19.127 to 0.19.130): KeyUses, Minima Explorer and Entropy each have Hide and Freeze on the Apps tab; freezing puts the row away and opening the app from the Apps state unfreezes it. They have no background work.
 
 ## 10. Proposed addition to the Parlons node (for the owner to approve; nothing in the maxima repo was changed)
 
