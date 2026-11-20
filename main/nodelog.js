@@ -45,8 +45,8 @@ function createNodeLog(dir, opts) {
  *  - a seed phrase: phrase:"…", "phrase":"…" as a reply's JSON has it, and phrase: followed by bare words (up to 24;
  *    a word that is the next parameter's name, as in "host:", ends it, so the rest of the line stays);
  *  - a private key after privatekey:;
- *  - the "seed" and "privatekey" fields of a reply's JSON (0.19.172: `vault` answers with the wallet's seed as "seed",
- *    which the phrase rule did not cover);
+ *  - the "seed", "seedphrase", "mnemonic" and "privatekey" fields of a reply's JSON (0.19.172: `vault` answers with the
+ *    wallet's seed as "seed", which the phrase rule did not cover; 0.19.175: the other two names, as the released 0.18.169);
  *  - the bidirectional controls (U+202A to U+202E, U+2066 to U+2069, U+200E, U+200F): a line a remote party wrote
  *    must not be able to reorder what is shown beside it.
  */
@@ -57,7 +57,7 @@ function scrub(line, secret) {
   return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/"phrase"\s*:\s*"[^"]*"/g, '"phrase":"•••"')
     .replace(/phrase:[A-Za-z]+\b(?!:)(?: [A-Za-z]+\b(?!:)){0,23}/g, "phrase:•••")
     .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••")
-    .replace(/"(seed|privatekey)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');
+    .replace(/"(seed|seedphrase|mnemonic|privatekey)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');
 }
 
 /**

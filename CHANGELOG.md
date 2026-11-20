@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.175] — Logs: "seedphrase" and "mnemonic" are redacted too
+
+- **Parity with the released desktop (its 0.18.169, `1c668ae`):** a reply's JSON `"seedphrase"` or `"mnemonic"` field is taken out of every log line and saved log, as `"seed"` and `"privatekey"` are since 0.19.172.
+- Test (`scripts/node-log-test.cjs`): both names redacted, a longer name kept. It fails on 0.19.174.
+
 ## [0.19.174] — miniMall vendor: a payment mined before its order is counted when the order comes
 
 - **Found while comparing with the released desktop (its 0.18.163, `b349fde`):** `scanPayments` marked every payment coin as seen before it looked for its order, so a payment mined in an earlier block than its order message (the buyer's app sends the message first, but the two need not land in the same block) was skipped for the rest of the session and the order stayed unpaid until the app was restarted.
