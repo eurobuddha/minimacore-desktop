@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.158] — Web Wallet and Vestr: a token is shown with its whole id
+
+- Both screens showed a token by the name in its own metadata, so a token named "MINIMA" or "MxUSD" read as the real one, and the Web Wallet showed an unnamed token by the first 12 characters of its id. A token not known by its id is now its name (invisible, control and bidi characters taken out) with its whole token id beside it; a name that reads as Minima, MxUSD or USDT, or is only the start of the id, is not shown, the id alone is (`tokLabel`). Vestr's Collect button now escapes the token name it carries. Port of 0.19.124 (the dashes and table lookups of that commit have no counterpart here). Test: `scripts/webwallet-ui-test.cjs`.
+
 ## [0.18.157] — Settings: the deep key audit runs only on its button
 
 - Opening Settings sent every public key of this node (and then their addresses) to the KeyUses service by itself, every minute it was reopened. The deep reuse audit now runs only when "Deep reuse audit" is pressed, and the card says what is sent and to whom. The privacy part of 0.19.127 (the released app keeps its card; the KeyUses app is not ported). Test: `scripts/webwallet-ui-test.cjs`.

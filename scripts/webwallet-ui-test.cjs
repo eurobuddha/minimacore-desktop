@@ -54,3 +54,19 @@ test("Settings: the node's public keys go to the audit service only when the but
   assert.ok(/el\("kuAudit"\)\.onclick = \(\) => runKeyAudit\(true\);/.test(app));
   assert.ok(/It runs only when you press the button\./.test(app) && !/automatically when you open this panel/.test(app), "the screen says so");
 });
+
+// ---- 0.18.158: token names in the Web Wallet and Vestr ----
+test("a token not known by its id is shown with its whole id; a name imitating Minima or MxUSD (also with unseen characters) is not shown", () => {
+  const i = app.indexOf("\nconst MXUSD_TOKENID");
+  const F = new Function(app.slice(i, app.indexOf("\n}\n", app.indexOf("function tokLabel(", i)) + 3) + "\nreturn tokLabel;")();
+  const T = "0x" + "C0FFEE".repeat(10) + "ABCD", MX = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  assert.equal(F("0x00", "anything"), "MINIMA"); assert.equal(F(MX.toLowerCase(), "x"), "MxUSD");
+  assert.equal(F(T, "Gold"), "Gold (token " + T + ")", "its own name and the whole id");
+  for (const fake of ["MINIMA", "Minima ", "MxUSD", "mxUSDT", "USDT", "Mi​nima", "Mx⁦USD⁩", "M­xUSD", "‮MINIMA"]) assert.equal(F(T, fake), T, JSON.stringify(fake) + " shows the id alone");
+  assert.equal(F(T, T.slice(0, 12)), T, "a name that is only the start of the id (main cuts it to 12) shows the whole id");
+  assert.equal(F(T, ""), T); assert.equal(F(T, null), T);
+  const ww = app.slice(app.indexOf("function renderWwWallet("), app.indexOf("async function wwDoSend("));
+  assert.ok(!/esc\(b\.name\)/.test(ww) && (ww.match(/tokLabel\(b\.tokenid, b\.name\)/g) || []).length === 2, "the Web Wallet's balances and token list");
+  assert.ok(/function vTok\(tid\) \{ return tokLabel\(tid, vestrTokMap && vestrTokMap\[tid\]\); \}/.test(app) && /esc\(tokLabel\(t\.tokenid, t\.name\)\)/.test(app), "Vestr's cards and token list");
+  assert.ok(/"Collect " \+ vFmt\(v\.cancollect\) \+ " " \+ esc\(vTok\(v\.tokenid\)\)/.test(app), "a token's name is escaped in the Collect button");
+});

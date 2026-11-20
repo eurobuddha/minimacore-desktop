@@ -612,6 +612,18 @@ function wwConfirmUses(typed, onchain) {
   const n = Math.floor(Number(typed));
   return Math.max(Number.isSafeInteger(n) && n > 0 ? n : 0, onchain);
 }
+/** A token's label (0.18.158): Minima and the one MxUSD by their ids; any other token by its own name, with what cannot be
+ *  seen taken out (control, format and zero-width characters), AND its whole token id beside it, so that a name made to
+ *  read as another token's is told apart by the id. A name that reads as Minima or MxUSD, or is only the start of the id,
+ *  is not shown: the id alone is. */
+const MXUSD_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+function tokLabel(tid, name) {
+  const t = String(tid == null ? "" : tid);
+  if (t === "0x00") return "MINIMA";
+  if (t.toUpperCase() === MXUSD_TOKENID.toUpperCase()) return "MxUSD";
+  const n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/\s+/g, " ").trim();
+  return n && !t.startsWith(n) && !/^(minima|mxusdt?|usdt)$/i.test(n) ? n + " (token " + t + ")" : t;
+}
 function wwMegammrOn() { return !!(wwLastStatus && wwLastStatus.health && wwLastStatus.health.megammr); }
 
 async function renderWebWallet() {
@@ -690,13 +702,13 @@ function renderWwWallet(body) {
   // keys) even though the coins are real and spendable via sendfrom, so showing sendable made a 655k wallet read "0".
   const balRows = (wwBal.length ? wwBal : []).map(b =>
     `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
-       <span>${esc(b.name)}</span>
+       <span>${esc(tokLabel(b.tokenid, b.name))}</span>
        <span style="font-family:var(--mono,monospace)">${esc(b.confirmed)}${
          (b.unconfirmed && String(b.unconfirmed) !== "0") ? `<small style="opacity:.6"> / ${esc(b.unconfirmed)}</small>` : ""}</span>
      </div>`).join("") || `<div class="view__desc">No balance yet for this wallet.</div>`;
 
   const tokOpts = (wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }])
-    .map(b => `<option value="${esc(b.tokenid)}">${esc(b.name)}</option>`).join("");
+    .map(b => `<option value="${esc(b.tokenid)}">${esc(tokLabel(b.tokenid, b.name))}</option>`).join("");
 
   const kuDefault = Math.max(Number(ku.keyuses) || 0, wwKuSuggest == null ? 0 : wwKuSuggest);
   const kuPanel = a.isNodeSeed
@@ -3020,7 +3032,7 @@ let vestrBusy = {};
 const VESTR_GRACE = [["None (continuous)", 0], ["Daily", 24], ["Weekly", 168], ["Monthly", 720], ["Every 3 Months", 2190], ["Every 6 Months", 4320], ["Yearly", 8640]];
 
 function vFmt(v) { const n = Number(v); return isNaN(n) ? "0" : n.toLocaleString(undefined, { maximumFractionDigits: 8 }); }
-function vTok(tid) { if (tid === "0x00") return "MINIMA"; return (vestrTokMap && vestrTokMap[tid]) || String(tid); }   // RULE 1: an unnamed token shows its whole id
+function vTok(tid) { return tokLabel(tid, vestrTokMap && vestrTokMap[tid]); }   // RULE 1: a token not known by its id shows its whole id (0.18.158)
 
 function onVestrUpdate() {
   if (vestrUpdateTimer) clearTimeout(vestrUpdateTimer);
@@ -3057,7 +3069,7 @@ async function renderVestrList() {
     const badge = v.expired ? `<span class="v-badge done">fully vested</span>` : v.cliffed ? `<span class="v-badge cliff">not started</span>` : `<span class="v-badge">${v.pctVested}% vested</span>`;
     const availCol = v.canCollectNow ? "var(--green)" : "var(--dim)";
     let action;
-    if (v.canCollectNow) action = `<div class="v-collect"><div class="v-fee"><span class="v-flabel">Fee (burn)</span><input class="field__input" id="vburn_${v.coinid}" value="0"></div><button class="btn btn--primary v-cbtn" data-coin="${v.coinid}" ${vestrBusy[v.coinid] ? "disabled" : ""}>${vestrBusy[v.coinid] ? "Collecting…" : "Collect " + vFmt(v.cancollect) + " " + vTok(v.tokenid)}</button></div>`;
+    if (v.canCollectNow) action = `<div class="v-collect"><div class="v-fee"><span class="v-flabel">Fee (burn)</span><input class="field__input" id="vburn_${v.coinid}" value="0"></div><button class="btn btn--primary v-cbtn" data-coin="${v.coinid}" ${vestrBusy[v.coinid] ? "disabled" : ""}>${vestrBusy[v.coinid] ? "Collecting…" : "Collect " + vFmt(v.cancollect) + " " + esc(vTok(v.tokenid))}</button></div>`;
     else if (v.cliffed) action = `<div class="v-note">Vesting hasn't started — nothing collectable until block ${v.startBlock.toLocaleString()}.</div>`;
     else if (v.mustwait) action = `<div class="v-note">Grace period — collect again in ~${Number(v.mustwaitblocks).toLocaleString()} blocks.</div>`;
     else action = `<div class="v-note">Nothing available to collect right now.</div>`;
@@ -3096,7 +3108,7 @@ async function renderVestrCreate() {
   const startDef = toLocal(now), endDef = toLocal(new Date(now.getTime() + 90 * 24 * 3600 * 1000));
   host.innerHTML = `<div class="card">
     <label class="v-flabel">Token</label>
-    <select class="field__input" id="vcTok">${toks.map(t => `<option value="${t.tokenid}">${esc(t.name)} — ${vFmt(t.sendable)} available</option>`).join("") || '<option value="0x00">MINIMA</option>'}</select>
+    <select class="field__input" id="vcTok">${toks.map(t => `<option value="${t.tokenid}">${esc(tokLabel(t.tokenid, t.name))} — ${vFmt(t.sendable)} available</option>`).join("") || '<option value="0x00">MINIMA</option>'}</select>
     <label class="v-flabel">Amount to lock</label>
     <input class="field__input" id="vcAmt" inputmode="decimal" placeholder="e.g. 1000">
     <label class="v-flabel">Beneficiary (withdrawal) address</label>
