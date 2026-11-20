@@ -173,5 +173,53 @@
     send: function (api, f) { return api.wwSend({ seed: f.seed, to: text(f.to), amount: text(f.amount), tokenid: f.tokenid }).catch(function (e) { return { message: String((e && e.message) || "Send failed") }; }); }
   };
 
-  return { eth: eth, vestr: vestr, shop: shop, ww: ww };
+  // ---- KeyUses (main/keyuses.js): what the audit's answer is SHOWN as. Pandamonium's KeyUses 0.1.4, MainActivity. ----
+  // Wording: apks/base localization bear_strings.xml (l10n_keyuses_*), with the phone-only parts taken out.
+  var KU = {
+    reuseTitle: "One-time key reuse detected", riskTitle: "Classic counter is behind recorded usage",
+    riskBody: "The archive shows more spend blocks than the stored classic counter. Review these keys before signing again. Block-based leaf positions are not compared with spend counts.",
+    causes: "Common causes", causesBody: "Independent signers using the same seed, restoring an old counter, or restoring an older wallet snapshot can reuse a one-time key. This audit never changes counters or signs transactions.",
+    okTitle: "No known key reuse was found in the checked keys.", partial: "Audit needs review",
+    incomplete: "Some public audit results are missing or inconsistent. Those rows remain unknown. Confirmed reuse findings still apply.",
+    explain: "Each one-time signing leaf must sign only once. Classic keys use counters; block-based keys use block-derived positions. The audit combines archive spend counts with witnessed reuse reports for both families. USED/UNUSED describes the archive history; it does not verify a local signing counter.",
+    blockLabel: "Node seed · block-based", blockNote: "Block-based keys use a block-derived leaf position. A classic keyuses recovery estimate does not apply to these keys.",
+    reco: "Classic recovery estimate: review before use", keyAudit: "Key audit",
+    mismatch: "The server’s address differs from the locally derived address. Treat the audit as incomplete.",
+    exhaustion: "A key is near its signature capacity. Review it before signing again."
+  };
+  var keyuses = {
+    COPY: KU, UNAVAILABLE: "The node’s keys could not be read. Check that the node is running, then run the audit again.",
+    /** A count the node or the server gave, grouped as the phone groups it; null (nothing was read) is said in words, never as 0. */
+    num: function (v) { return typeof v === "number" && isFinite(v) ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "Not read"; },
+    /** The status chip of one row (MainActivity.row): → { label, tone: "ok" | "warn" | "risk" }. */
+    chip: function (r) {
+      if (r.reused) return { label: "REUSED" + (r.reuseCount > 0 ? " ×" + r.reuseCount : ""), tone: r.reuseCount > 3 ? "risk" : "warn" };
+      if (r.risk) return { label: "AT RISK", tone: "risk" };
+      if (!r.checked) return { label: "Unknown", tone: "warn" };
+      return { label: r.sigs > 0 ? "USED " + keyuses.num(r.sigs) : "UNUSED", tone: "ok" };
+    },
+    /** The verdict card (MainActivity.verdictCard, addRecoBlocks): → { tone, title, body, blocks: [{ label, body } | { label, cmd }] }. */
+    verdict: function (r) {
+      var out, reco = function (b) {
+        if (r.complete && r.classicKeys > 0 && r.recommendedKeyUses < 262144) b.push({ label: KU.reco, cmd: "keyuses:" + r.recommendedKeyUses });
+        if (r.blockKeys > 0) b.push({ label: KU.blockLabel, body: KU.blockNote });
+        return b;
+      };
+      if (r.verdict === "REUSE_RISK" || r.verdict === "REUSE_WARN")
+        out = { tone: r.verdict === "REUSE_RISK" ? "risk" : "warn", title: KU.reuseTitle, body: "The witness index reports repeated use of a one-time key; maximum reported depth: " + keyuses.num(r.worstReuse) + ". Review the affected addresses before further use.",
+          blocks: [{ label: KU.causes, body: KU.causesBody }] };   // the advice there is to move, so no keyuses estimate is shown (as the original)
+      else if (r.verdict === "RISK_HEURISTIC") out = { tone: "risk", title: KU.riskTitle, body: KU.riskBody, blocks: reco([{ label: KU.causes, body: KU.causesBody }, { label: KU.keyAudit, body: KU.riskBody }]) };
+      else out = { tone: r.complete ? "ok" : "warn", title: r.complete ? KU.okTitle : KU.partial, body: r.complete ? KU.explain : KU.incomplete, blocks: reco([]) };
+      return out;
+    },
+    /** The table's sections (renderKeySections): classic keys, then block keys; empty ones left out; rows numbered inside each. */
+    sections: function (r) {
+      return [["classic", "Classic keys"], ["block", "Blocks-as-keyuses keys"]].map(function (g) {
+        var rows = r.rows.filter(function (x) { return x.family === g[0]; });
+        return { family: g[0], title: g[1] + " · 1–" + rows.length, rows: rows };
+      }).filter(function (s) { return s.rows.length; });
+    }
+  };
+
+  return { eth: eth, vestr: vestr, shop: shop, ww: ww, keyuses: keyuses };
 });

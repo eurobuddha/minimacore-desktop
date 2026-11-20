@@ -21,6 +21,7 @@ const loginitem = require("./loginitem");   // "Open at login" — OS login item
 const netfetch = require("./netfetch");
 const histDb = require("./history-db");
 const faucet = require("./faucet");
+const keyuses = require("./keyuses");
 const mail = require("./mail");
 const chat = require("./chat");
 const pandapools = require("./pandapools");
@@ -352,17 +353,14 @@ ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
 // netfetch.fetchJson is capped + never throws, so an unreachable service just returns null (graceful degrade).
 const KEYUSES_BASE = "https://eurobuddha.com";
 const HEX_KEY = /^0x[0-9a-fA-F]{64}$/;         // 32-byte WOTS public key
-const HEX_ADDR = /^0x[0-9a-fA-F]{2,80}$/;      // Minima address — 0x + hex, generously bounded (hex-only, no metachars)
 ipcMain.handle("mcd:keyAudit", (_e, pubkeys) => {
   const list = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(k => HEX_KEY.test(k));
   if (!list.length) return null;
   return netfetch.fetchJson(KEYUSES_BASE + "/keyaudit?keys=" + encodeURIComponent(list.join(",")));
 });
-ipcMain.handle("mcd:keyReuse", (_e, addrs) => {
-  const list = (Array.isArray(addrs) ? addrs : []).map(String).filter(a => HEX_ADDR.test(a));
-  if (!list.length) return null;
-  return netfetch.fetchJson(KEYUSES_BASE + "/reuse?addrs=" + encodeURIComponent(list.join(",")));
-});
+// The KeyUses app (main/keyuses.js): the node's keys are read here through rpcCall, the two lookups go to the one pinned
+// host with no redirect followed, and the renderer is handed the joined result. It names no host and no key itself.
+ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audit({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), get: (url) => netfetch.fetchJson(url, { noRedirect: true }) }); });
 
 // minimaMail (on-chain encrypted messaging; crypto/keys live here, never in the renderer)
 ipcMain.handle("mcd:mailInit", async () => { await mail.init(); return mail.myIdentity(); });

@@ -321,7 +321,7 @@ test("Settings holds the desktop's own items in the shell's style, and no second
   assert.ok(!/vault|megammrsync|backup password/.test(body), "seed, resync and backup live in Backup & Recovery");
   assert.ok(/class="switch switch--m2" role="switch" id="setAutostart"/.test(body) && body.includes("home-eyebrow") && body.includes("home-card"), "the phone's switch, eyebrow and card");
   assert.ok(!/if \(!running\) \{ host\.innerHTML = waitHtml\(\); return; \}/.test(body), "updates and open at login do not wait for the node");
-  for (const id of ["updCard", "updCheck", "updGet", "setKindApply", "setHeap", "kuAudit", "setClearHist", "chanceLeft"]) assert.ok(body.includes(id), id + " kept");
+  for (const id of ["updCard", "updCheck", "updGet", "setKindApply", "setHeap", "kuOpen", "setClearHist", "chanceLeft"]) assert.ok(body.includes(id), id + " kept");
   assert.ok(!/—/.test(body.slice(0, body.indexOf("const drawUpdate"))), "no em dash in the Settings text");
 });
 

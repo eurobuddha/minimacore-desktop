@@ -59,7 +59,7 @@ contextBridge.exposeInMainWorld("mcd", {
 
   // KeyUses reuse audit (host-pinned eurobuddha.com main-process fetch; null if unreachable)
   keyAudit: (pubkeys) => ipcRenderer.invoke("mcd:keyAudit", pubkeys),
-  keyReuse: (addrs) => ipcRenderer.invoke("mcd:keyReuse", addrs),
+  keyUsesAudit: () => ipcRenderer.invoke("mcd:keyUsesAudit"),   // the KeyUses app: the whole audit runs in the main process (main/keyuses.js)
 
   // local transaction-history DB (SQLite; our own source of truth — survives node pruning + restarts)
   histGet: (limit) => ipcRenderer.invoke("mcd:histGet", limit),

@@ -27,7 +27,7 @@ test("every existing view still has its screen, and each is reachable from its n
   const sub = app.match(/const SUB_TITLE = \{([^}]+)\}/)[1];
   for (const v of ["receive", "send", "logs", "terminal", "settings"]) assert.ok(sub.includes(v + ":"), v + " is a titled sub screen");
   const tray = [...app.match(/const TRAY_APPS = \[([\s\S]+?)\n\];/)[1].matchAll(/id: "([a-z]+)", name: "([^"]+)"/g)].map(m => m[1] + "=" + m[2]);
-  assert.deepEqual(tray, ["core=Minima Core", "mail=MinimaMail", "ethwallet=ETH Wallet", "vestr=Minima Vestr", "faucet=Minima Faucet",
+  assert.deepEqual(tray, ["core=Minima Core", "mail=MinimaMail", "ethwallet=ETH Wallet", "vestr=Minima Vestr", "keyuses=KeyUses", "faucet=Minima Faucet",
     "minimall=miniMall", "webwallet=Web Wallet", "parlons=Parlons"], "the tray's default order; no row for an app the desktop does not have");
   assert.ok(/id="walSend"/.test(html) && /id="walReceive"/.test(html), "Send and Receive open from the Wallet's buttons");
 });
@@ -66,12 +66,19 @@ test("shell text: sentence case and no em dash", () => {
   assert.ok(!chrome.includes("—"), "no em dash in the shell markup");
 });
 
-test("tray order: Minima Core pinned, saved ids kept once, unknown ids dropped, new apps appended", () => {
+test("tray order: Minima Core pinned, saved ids kept once, unknown ids dropped, a new app takes its default place", () => {
   const trayOrder = new Function(app.match(/function trayOrder\(saved, ids\) \{[\s\S]+?\n\}/)[0] + "; return trayOrder;")();
   const ids = ["core", "mail", "ethwallet", "vestr", "parlons"];
   assert.deepEqual(trayOrder(null, ids), ids, "nothing saved: the default order");
   assert.deepEqual(trayOrder("parlons,mail", ids), ["core", "parlons", "mail", "ethwallet", "vestr"]);
-  assert.deepEqual(trayOrder("vestr,core,vestr,casino,mail", ids), ["core", "vestr", "mail", "ethwallet", "parlons"], "core cannot be moved; duplicates and removed apps are ignored");
+  assert.deepEqual(trayOrder("vestr,core,vestr,casino,mail", ids), ["core", "vestr", "parlons", "mail", "ethwallet"], "core cannot be moved; duplicates and removed apps are ignored; an app never saved goes after its default neighbour");
+  // an existing user's saved order (0.19.124's seven apps, two of them moved) when a new version adds rows: each new row sits after the app before it by default
+  const now = ["core", "mail", "ethwallet", "vestr", "keyuses", "faucet", "minimall", "webwallet", "parlons"];
+  assert.deepEqual(trayOrder("mail,ethwallet,vestr,faucet,minimall,webwallet,parlons", now), now, "an untouched order: the new row is at its default place, not at the end");
+  assert.deepEqual(trayOrder("parlons,mail,ethwallet,faucet,minimall,webwallet,vestr", now), ["core", "parlons", "mail", "ethwallet", "faucet", "minimall", "webwallet", "vestr", "keyuses"], "it follows the app it comes after by default, wherever that was moved to");
+  const real = [...app.match(/const TRAY_APPS = \[([\s\S]+?)\n\];/)[1].matchAll(/id: "([a-z]+)"/g)].map(m => m[1]);
+  const old = real.filter(id => !["keyuses", "explorer", "entropy", "futurecash"].includes(id));
+  assert.deepEqual(trayOrder(old.slice(1).join(","), real), real, "the shipped list: a 0.19.124 order replayed gives today's default order");
   assert.ok(/shellOrder/.test(app) && /dragstart/.test(app) && /altKey/.test(app), "saved, draggable, and movable by keyboard");
 });
 
@@ -155,21 +162,20 @@ test("the overflow menu is reachable from sub screens and tray apps; an overlayi
   assert.ok(/el\("stage"\)\.inert = open && NARROW\.matches/.test(app) && /id="stage"/.test(html), "the screen under an overlaying tray is inert");
 });
 
-
 // 0.19.126: 0.19.125 removed a helper and left its name in MailPanel.init's list, at the top level of app.js: a
 // ReferenceError there stops the script, and with it every screen. No test read the file as a program. This one runs
-// the top level of the renderer's own script against stand-ins: a name that nothing defines throws here.
+// the top level of the renderer's two own scripts against stand-ins: a name that nothing defines throws here.
 function rendererTopLevel(appSource) {
   const any = () => new Proxy(function () {}, { get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? () => any() : any()), apply: () => any(), construct: () => any() });   // a then() that never answers: boot() stops at its first await
   const known = new Set(["window", "document", "localStorage", "navigator", "location", "requestAnimationFrame",   // the browser's
     "MailPanel", "ChatPanel", "TOK", "DexPools", "DexUI", "DexAx", "PoolCalc", "AppsAct"]);                         // the other renderer scripts' (index.html loads them first)
   const scope = new Proxy({}, { has: (_t, k) => known.has(k), get: (_t, k) => (k === Symbol.unscopables ? undefined : any()) });
-  const src = appSource.replace(/^"use strict";$/mg, "");
+  const src = (fs.readFileSync(path.join(__dirname, "..", "renderer", "apps-tools.js"), "utf8") + "\n" + appSource).replace(/^"use strict";$/mg, "");
   new Function("__scope", "with (__scope) { (function () { 'use strict';\n" + src + "\n})(); }")(scope);
 }
 test("the renderer's top level runs: no name is used there that nothing defines", () => {
   rendererTopLevel(app);
   assert.throws(() => rendererTopLevel(app.replace("api, esc, el, toast, copy, relTime,", "api, esc, el, toast, copy, short, relTime,")), /ReferenceError: short is not defined/, "the 0.19.125 slip is caught");
   const order = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
-  assert.equal(order[order.length - 1], "app.js", "app.js is loaded last, after every script whose names it uses");
+  assert.ok(order.indexOf("apps-tools.js") >= 0 && order.indexOf("apps-tools.js") < order.indexOf("app.js") && order[order.length - 1] === "app.js", "app.js is loaded last, after every script whose names it uses");
 });

@@ -194,7 +194,7 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running) { resetWalletFigures(); if (activeView === "balances" || activeView === "faucet") renderActive(); }
+  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
@@ -788,12 +788,13 @@ async function postBootRestore() {
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", dexicon: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
 const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params", backup: "Backup & Recovery" };
 // The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
-// (Future Cash Next, Minima Explorer, Entropy, KeyUses) get a row when their phase builds them: no dead rows.
+// (Future Cash Next, Minima Explorer, Entropy) get a row when their phase builds them: no dead rows.
 const TRAY_APPS = [
   { id: "core", name: "Minima Core" },
   { id: "mail", name: "MinimaMail", icon: "icons/mail.png", badge: "mailBadge" },
   { id: "ethwallet", name: "ETH Wallet", icon: "icons/ethwallet.png" },
   { id: "vestr", name: "Minima Vestr", icon: "icons/vestr.png" },
+  { id: "keyuses", name: "KeyUses", icon: "icons/keyuses.svg" },
   { id: "faucet", name: "Minima Faucet", icon: "icons/faucet.svg" },
   { id: "minimall", name: "miniMall", icon: "icons/minimall.png", badge: "shopBadge" },
   { id: "webwallet", name: "Web Wallet", icon: "minima-mark.svg" },
@@ -809,12 +810,14 @@ function store(key, value) {    // shell preferences only (tray open, order, hid
   try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) {}
   return null;
 }
-// The saved tray order, as PandamoniumOrder.decode: Minima Core is pinned first, then the saved ids that
-// still exist (each once), then any app the saved order has never seen, in the default order.
+// The saved tray order: Minima Core is pinned first, then the saved ids that still exist (each once). An app the
+// saved order has never seen (a new app in this version) takes its default place: straight after the app that
+// comes before it in the default order, wherever the user has put that one. (PandamoniumOrder.decode appends new
+// apps at the end; here a new row must not land under Parlons for everyone who ever moved a row.)
 function trayOrder(saved, ids) {
   const order = [ids[0]];
   for (const id of String(saved || "").split(",")) if (ids.indexOf(id) > 0 && !order.includes(id)) order.push(id);
-  for (const id of ids) if (!order.includes(id)) order.push(id);
+  ids.forEach((id, i) => { if (!order.includes(id)) order.splice(order.indexOf(ids[i - 1]) + 1, 0, id); });
   return order;
 }
 function viewOfTab(tab) { return tab === "wallet" ? "balances" : tab === "dexicon" ? dexView : tab; }
@@ -825,6 +828,7 @@ function selectTab(view) {
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
+  if (activeView === "keyuses" && view !== "keyuses") keyUsesReset();                 // an audit's result is not kept after the screen is left (as the phone's)
   activeView = view;
   const { tab, mode } = shellMode(view);
   if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; else lastShellView = view; }
@@ -1272,6 +1276,7 @@ function renderActive() {
   else if (activeView === "backup") renderBackup();
   else if (activeView === "apps") renderApps();
   else if (activeView === "faucet") renderFaucet();
+  else if (activeView === "keyuses") renderKeyUses();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
 function startRefresh() {
@@ -2861,9 +2866,8 @@ async function renderFaucet() {
 // eyebrow-and-card of the Node tab. Node commands are typed in the Terminal; there is no second command box here.
 async function renderSettings() {
   const host = el("settingsBody");
-  const [keys, scripts] = running ? await Promise.all([tryCmd("keys action:list"), tryCmd("scripts")]) : [null, null];
+  const keys = running ? await tryCmd("keys action:list") : null;
   const ku = keysInfo(keys);
-  const kuRows = keyUsesRows(keys, scripts);
   const pct = ku.cap ? Math.min(100, Math.round(ku.used / ku.cap * 100)) : 0;
   const warn = pct >= 80;
   const labels = CFG.labels || {}, labelKeys = Object.keys(labels);
@@ -2890,11 +2894,8 @@ async function renderSettings() {
       <div class="health"><div class="health__row"><span>Most-used key</span><span>${esc(ku.used)} / ${esc(ku.cap)} sigs${ku.count ? " · " + ku.count + " keys" : ""}</span></div>
         <div class="health__track"><div class="health__fill${warn ? " health__fill--warn" : ""}" style="width:${pct}%"></div></div></div>
       ${warn ? `<div class="status status--warn">⚠ A signing key is ${pct}% used. Generate fresh keys or restore with the correct key uses before it exhausts.</div>` : ""}`) +
-    sec("Address key uses", `<p class="set-text">This lists each key's address and how many signatures it has used; a one-time key that signs the same leaf twice is unsafe. "Deep reuse audit" cross-checks the chain through your KeyUses service, because the node's own counter can under-report.</p>
-      <div id="kuList" class="ku-list">${kuRows.length ? kuRows.map(kuRowHtml).join("") : `<p class="set-text">No keys reported.</p>`}</div>
-      <div class="home-actions set-actions"><button class="btn btn--outline" id="kuAudit">Deep reuse audit</button></div>
-      <div class="status" id="kuAuditStatus"></div>
-      <p class="ps-note">The deep audit sends your public keys to your KeyUses service (eurobuddha.com) to check the chain for real reuse: when you open this screen, and when you press the button. Nothing else leaves your node.</p>`)
+    sec("Address key uses", `<p class="set-text">KeyUses, in the app tray, lists every key of this node with its address and checks each against the chain for one-time signature reuse. It runs only when you press Run audit there.</p>
+      <div class="home-actions set-actions"><button class="btn btn--outline" id="kuOpen">Open KeyUses</button></div>`)
       : sec("Signing keys", `<p class="set-text">${nodeState === "stopped" ? "The node is stopped." : "Waiting for the node…"}</p>`)) +
     sec("Address labels", labelKeys.length ? labelKeys.map(a => `<div class="set-label"><div class="set-label__t"><b>${esc(labels[a])}</b><span>${esc(a)}</span></div><button class="btn btn--sm btn--outline lbl-del" data-addr="${esc(a)}">Delete</button></div>`).join("")
       : `<p class="set-text">No labels yet. Name an address on the Receive screen.</p>`) +
@@ -2961,10 +2962,7 @@ async function renderSettings() {
     renderSettings();
   };
   chanceLeftCard();
-  // key-uses panel: copy an address on click, run the deep audit on demand, and auto-run it once on open (rate-limited).
-  if (el("kuList")) el("kuList").onclick = (e) => { const row = e.target.closest(".ku-row"); if (row && e.target.classList.contains("ku-addr") && row.dataset.addr) copy(row.dataset.addr); };
-  if (el("kuAudit")) el("kuAudit").onclick = () => runKeyAudit(true);
-  runKeyAudit(false);
+  if (el("kuOpen")) el("kuOpen").onclick = () => selectTab("keyuses");
 }
 function keysInfo(keys) {
   try {
@@ -2974,90 +2972,6 @@ function keysInfo(keys) {
     return { used, cap: cap || 262144, count: arr.length };
   } catch (e) { return { used: 0, cap: 262144, count: 0 }; }
 }
-// keys action:list has no address, so join each key to its default single-sig address via `scripts`
-// (the `simple && default` row whose script is `RETURN SIGNEDBY(<pk>)`). Keyed on uppercased public key.
-function keyAddrMap(scripts) {
-  const arr = Array.isArray(scripts) ? scripts : (scripts && scripts.scripts) || [];
-  const m = {};
-  for (const s of arr) { if (s && s.publickey && s.simple && s.default) { const pk = String(s.publickey).toUpperCase(); if (!m[pk]) m[pk] = { address: s.address, miniaddress: s.miniaddress }; } }
-  for (const s of arr) { if (s && s.publickey) { const pk = String(s.publickey).toUpperCase(); if (!m[pk]) m[pk] = { address: s.address, miniaddress: s.miniaddress }; } } // fallback: any script row
-  return m;
-}
-function keyUsesRows(keys, scripts) {
-  const arr = Array.isArray(keys) ? keys : (keys && keys.keys) || [];
-  const map = keyAddrMap(scripts);
-  return arr.map((k, i) => {
-    const a = map[String(k.publickey || "").toUpperCase()] || {};
-    return { i, publickey: k.publickey || "", address: a.address || "", miniaddress: a.miniaddress || "",
-      uses: parseInt(k.uses, 10) || 0, cap: parseInt(k.maxuses, 10) || 262144 };
-  }).sort((x, y) => y.uses - x.uses);   // most-used (riskiest) first
-}
-function kuRowHtml(r) {
-  const pct = r.cap ? Math.min(100, Math.round(r.uses / r.cap * 100)) : 0;
-  const near = pct >= 95 ? " ku-uses--red" : pct >= 80 ? " ku-uses--warn" : "";
-  const who = r.miniaddress || r.address || ("key #" + (r.i + 1));   // full address; CSS ellipsizes only if too narrow
-  return `<div class="row ku-row" data-pk="${esc(r.publickey)}" data-uses="${esc(r.uses)}" data-addr="${esc(r.miniaddress || r.address || "")}">
-    <div class="row__mid"><div class="row__l1 ku-addr" title="Click to copy">${esc(who)}</div><div class="row__l2"><span class="ku-verdict"></span></div></div>
-    <div class="row__r"><span class="ku-uses${near}">${esc(r.uses)}</span><span class="ku-cap"> / ${esc(r.cap)}</span></div></div>`;
-}
-// Deep reuse audit: send the node's public keys to the KeyUses service, join spend_blocks + reuse DB, classify
-// each key (risk = reused OR on-chain sigs > local uses — the node counter can under-report). Patches rows in
-// place (never rebuilds the panel). Graceful: an unreachable service leaves the local counts and says so.
-let KU_AUDIT_AT = 0, KU_AUDITING = false;
-const KU_AUDIT_GAP = 60000;
-async function runKeyAudit(force) {
-  const status = el("kuAuditStatus"); if (!status || KU_AUDITING) return;   // one audit at a time (button can't stack fetches)
-  if (!force && KU_AUDIT_AT && (Date.now() - KU_AUDIT_AT) < KU_AUDIT_GAP) return;
-  // Source public keys + local use-counts from the already-rendered rows (no redundant, race-prone re-fetch).
-  const rows = Array.from(document.querySelectorAll("#kuList .ku-row"));
-  const pubs = rows.map(r => r.dataset.pk).filter(Boolean);
-  if (!pubs.length) return;
-  KU_AUDIT_AT = Date.now(); KU_AUDITING = true;
-  const btn = el("kuAudit"); if (btn) btn.disabled = true;
-  const usesByPk = {}; rows.forEach(r => { if (r.dataset.pk) usesByPk[String(r.dataset.pk).toUpperCase()] = parseInt(r.dataset.uses, 10) || 0; });
-  status.className = "status status--dim"; status.textContent = "Auditing your keys against the chain…";
-  try {
-  const audit = await api.keyAudit(pubs).catch(() => null);
-  if (!audit || !audit.keys) {
-    KU_AUDIT_AT = 0;   // transient failure → let the next panel-open retry instead of blocking for the whole window
-    status.className = "status status--warn";
-    status.textContent = "⚠ Reuse audit unavailable (KeyUses service unreachable). Showing local key-use counts only. Try again later.";
-    return;
-  }
-  const byPk = {}; audit.keys.forEach(u => { if (u && u.publickey) byPk[String(u.publickey).toUpperCase()] = u; });
-  const addrs = audit.keys.map(u => u && u.address).filter(Boolean);
-  const reuse = await api.keyReuse(addrs).catch(() => null);
-  const full = !!(reuse && reuse.results);
-  const reuseByAddr = {}; if (full) reuse.results.forEach(r => { if (r && r.address) reuseByAddr[String(r.address).toUpperCase()] = r; });
-  let anyRisk = false, maxReuse = 0, recommended = 0;
-  document.querySelectorAll("#kuList .ku-row").forEach(node => {
-    const pk = String(node.dataset.pk || "").toUpperCase();
-    const u = byPk[pk] || {};
-    const local = usesByPk[pk] || 0;
-    const sigs = Number(u.spend_blocks || 0);
-    const rinfo = u.address ? reuseByAddr[String(u.address).toUpperCase()] : null;
-    const reused = !!(rinfo && rinfo.reused);
-    const reuseCount = rinfo ? (Number(rinfo.reuse_count) || 0) : 0;
-    const countRisk = sigs > local;
-    if (reused || countRisk) anyRisk = true;
-    if (reuseCount > maxReuse) maxReuse = reuseCount;
-    recommended = Math.max(recommended, Math.max(sigs, local));
-    const v = node.querySelector(".ku-verdict"); if (!v) return;
-    if (reused) { v.className = "ku-verdict ku-v--" + (reuseCount > 3 ? "risk" : "warn"); v.textContent = "RE-USED ×" + reuseCount; }
-    else if (countRisk) { v.className = "ku-verdict ku-v--risk"; v.textContent = "AT RISK · chain " + sigs + " > node " + local; }
-    else { v.className = "ku-verdict ku-v--ok"; v.textContent = "OK · " + sigs + " on-chain"; }
-  });
-  const reco = recommended + 256;
-  const cls = anyRisk ? (maxReuse > 3 ? "status--err" : "status--warn") : "status--ok";
-  status.className = "status " + cls;
-  status.textContent = (anyRisk
-      ? (maxReuse > 3 ? "⚠ Key reuse detected — move funds off the flagged addresses to fresh ones. " : "⚠ Some keys are at risk (chain shows more signatures than the node counter). ")
-      : "✓ No reuse detected. ")
-    + (full ? "" : "(reuse DB partial — treat as unverified.) ")
-    + "Recommended key-uses for your next resync: " + reco + ".";
-  } finally { KU_AUDITING = false; const b = el("kuAudit"); if (b) b.disabled = false; }
-}
-
 // ---- Send ------------------------------------------------------------------
 async function renderSend() {
   const card = el("sendCard");

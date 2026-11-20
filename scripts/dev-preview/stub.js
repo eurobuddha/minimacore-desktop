@@ -331,6 +331,16 @@
       FROZEN_IDS = on ? FROZEN_IDS.concat(id) : FROZEN_IDS.filter(x => x !== id); return FROZEN_IDS.slice(); },
     logsSave: async () => "/Users/preview/Documents/minima-node-log-preview.txt",
     faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
+    // KeyUses: ?ku=ok|block|reuse|risk|partial|fail  (every key and address invented; the Mx strings are not real addresses)
+    keyUsesAudit: async () => {
+      const ku = Q.get("ku") || "ok"; if (ku === "fail") return { ok: false, error: "Could not reach the audit service. Check your connection and try again." };
+      const row = (i, family, local, sigs, coins, o) => Object.assign({ index: i, publickey: FAKE_PK("K" + i), address: "MxG08" + ("FAKE0" + i).repeat(12).slice(0, 58), hex: FAKE_PK("AD" + i), family, local, maxuses: family === "block" ? 268435456 : 262144, sigs, coins, risk: false, reused: false, reuseCount: 0, checked: true }, o || {});
+      const classic = [row(1, "classic", 1204, 1198, 3021), row(2, "classic", 37, ku === "risk" ? 52 : 36, 80, ku === "risk" ? { risk: true } : {}), row(3, "classic", 0, 0, 0), row(4, "classic", 5, ku === "partial" ? null : 5, ku === "partial" ? null : 9, ku === "partial" ? { checked: false } : {})];
+      if (ku === "reuse") Object.assign(classic[0], { reused: true, reuseCount: 5 });
+      const rows = ku === "block" ? [row(1, "block", 2428101, 14, 22), row(2, "block", 2428090, 0, 0)] : classic.concat([row(5, "block", 2428101, 3, 3)]);
+      return { ok: true, tip: 2428000, rows, verdict: ku === "reuse" ? "REUSE_RISK" : ku === "risk" ? "RISK_HEURISTIC" : "OK", worstReuse: ku === "reuse" ? 5 : 0, recommendedKeyUses: ku === "block" ? 0 : 1460,
+        mismatch: false, exhaustion: false, complete: ku !== "partial", classicKeys: rows.filter(r => r.family === "classic").length, blockKeys: rows.filter(r => r.family === "block").length };
+    },
     // miniMall: ?shop=empty
     shopInit: async () => ({ publicId: FAKE_PK("5A"), vendorAddress: "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1" }), shopVendorCard: async () => FAKE_PK("5A") + "|MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1",
     shopNewCount: async () => (Q.get("shop") === "empty" ? 0 : 1), shopMyShops: async () => (Q.get("shop") === "empty" ? [] : [MY_SHOP]),
