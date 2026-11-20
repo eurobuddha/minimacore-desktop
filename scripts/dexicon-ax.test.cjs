@@ -315,12 +315,10 @@ test("wallet send: the review shows both addresses whole, and a send that fails 
   const u = ui(true); await AX.Act.sendGo({ axSend: async () => { throw new Error("nonce too low"); } }, u, "eth", ETH, TO, "1", "0.0004");
   assert.match(u.said[u.said.length - 1][0], /^The send of 1 ETH was not confirmed as sent: nonce too low\. Look at this address on an Ethereum explorer before sending again/);
 });
-for (const confirm of [true, false]) test(`Export key, warning ${confirm ? "accepted" : "closed"}: the old warning first, axExportKey only after it`, async () => {
-  const was = old(`exportKey|${confirm}`);
-  const rn = recorder({ axExportKey: "0xKEY" }), u = ui(confirm), pk = await AX.Act.exportKey(rn.api, u);
-  assert.deepEqual(rn.money(), was); assert.deepEqual(rn.money(), confirm ? [["axExportKey", []]] : []);
-  assert.equal(pk, confirm ? "0xKEY" : null);
-  assert.equal(u.said[0][1], "Export ETH private key"); assert.equal(AX.KEY_WARN, "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.");
+// Export key (0.19.120, CHANGED on purpose): the room no longer asks for the key itself. It opens ETH Wallet's gated dialog
+// (scripts/apps-money.test.cjs "key export"); the old panel's warning-then-axExportKey call is gone with mcd:axExportKey.
+test("Export key: the room has no key call of its own", () => {
+  assert.equal(AX.Act.exportKey, undefined); assert.equal(AX.KEY_WARN, undefined);
 });
 test("the CSV is the old panel's file, byte for byte: the same column names in the same order (another tool parses them)", async () => {
   const rows = [

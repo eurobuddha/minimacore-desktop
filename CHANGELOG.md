@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.120] — One gated way to the ETH private key (review fix)
+
+- **Found in review (high):** ETH Wallet shows its key only after a typed phrase checked in the main process and, on a Mac with Touch ID, the system's prompt (0.19.108). Dexicon room ① MxUSD still had the old export: a warning, then `mcd:axExportKey`, which answered any call from the window with the key, and a "Copy key" button that carried the key in a `data-copy` attribute and used the ordinary clipboard.
+- **Now:** `mcd:axExportKey` and the preload's `axExportKey` are removed. Room ①'s "Export key" (and the halt card's "Export the stale ETH key") opens ETH Wallet's dialog; the room's page never holds the key. One IPC handler can answer with a key, `mcd:ewExportKey`, and it is the gated one.
+- **No system check is said.** Where the computer offers no Touch ID prompt, the key dialog says so: "No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check." No second factor was invented for that case (an open question for the owner).
+- **The clipboard forgets** (`main/clipsecret.js`): a copied key is cleared after 60 seconds and when the app quits, each time only if the clipboard still holds exactly that key.
+- **The dialog closes itself** after 60 seconds and when the window loses focus or is hidden; the key is set as text in one node, which closing removes, and the dialog's own copy is dropped with it.
+- Not changed, for the owner to decide: the Terminal still runs `vault` and `seedrandom`, and the application menu is Electron's default one (see the plan's open questions).
+
 ## [0.19.119] — Freeze, after its review: a wallet replacement's hold is never released by an unfreeze, and nine smaller faults
 
 - **Found in review (high):** Freeze stops Dexicon's engines with the hold a wallet replacement uses. Unfreezing Dexicon while the node was replacing the wallet (Restore from seed or file) released the engines in the middle of it. Now a replacement's hold is its own: while one runs, unfreezing saves the choice and leaves the engines stopped, and the replacement's own settle starts them (on the same stores, or on new ones after the old were set aside); freezing Dexicon during a replacement is refused with the reason. The node manager says when a replacement holds the engines (`replacingWallet`, from before its hold until the command has ended, and again while stores are being set aside). Not as asked: the condition is that flag and not `resyncing`, because a plain resync (no wallet replaced) holds nothing and releases nothing, so an unfreeze during it would have left Dexicon stopped for good.

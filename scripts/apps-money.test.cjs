@@ -61,8 +61,11 @@ test("ETH Wallet: Max, add token, remove token and the RPC endpoint make the old
 });
 test("ETH Wallet: the key is asked for only with the typed phrase (CHANGED on purpose: the old screen asked with a click)", async () => {
   for (const typed of ["", "show key", "SHOW KEYS", "yes"]) { const r = recorder({ ewExportKey: "0xKEY" }); assert.ok((await Act.eth.exportKey(r.api, typed)).err); assert.deepEqual(r.log, [], JSON.stringify(typed) + " never reaches the main process"); }
-  const r = recorder({ ewExportKey: "0xKEY" });
-  assert.deepEqual(await Act.eth.exportKey(r.api, " SHOW KEY "), { key: "0xKEY" });
+  const r = recorder({ ewExportKey: { key: "0xKEY", system: true } });
+  assert.deepEqual(await Act.eth.exportKey(r.api, " SHOW KEY "), { key: "0xKEY", system: true });
+  assert.deepEqual(await Act.eth.exportKey(recorder({ ewExportKey: { key: "0xKEY", system: false } }).api, "SHOW KEY"), { key: "0xKEY", system: false });
+  assert.deepEqual(await Act.eth.exportKey(recorder({ ewExportKey: { key: "0xKEY" } }).api, "SHOW KEY"), { key: "0xKEY", system: false }, "not said to have been checked unless the main process says so");
+  assert.deepEqual(await Act.eth.exportKey(recorder({ ewExportKey: null }).api, "SHOW KEY"), { err: "No key yet" });
   assert.deepEqual(r.log, [["ewExportKey", ["SHOW KEY"]]]);
   const no = recorder({ ewExportKey: () => Promise.reject(new Error("Cancelled")) });
   assert.deepEqual(await Act.eth.exportKey(no.api, "SHOW KEY"), { err: "Cancelled" });
@@ -75,11 +78,12 @@ test("ETH Wallet, main process: no key without the phrase; the system's prompt i
     await assert.rejects(ethwallet.exportKeyGated(undefined, null), /Type SHOW KEY/);
     await assert.rejects(ethwallet.exportKeyGated("show key", { can: () => true, prompt: async () => { asked++; } }), /Type SHOW KEY/);
     assert.equal(asked, 0, "the phrase is checked before anything is prompted");
-    assert.equal(await ethwallet.exportKeyGated("SHOW KEY", { can: () => true, prompt: async () => { asked++; } }), "0xKEY");
+    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => true, prompt: async () => { asked++; } }), { key: "0xKEY", system: true });
     assert.equal(asked, 1);
     await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", { can: () => true, prompt: async () => { throw new Error("user cancelled"); } }), /^Error: Cancelled$/);
-    assert.equal(await ethwallet.exportKeyGated("SHOW KEY", { can: () => false, prompt: async () => { throw new Error("never"); } }), "0xKEY", "no system prompt on this machine: the typed phrase alone");
-    assert.equal(await ethwallet.exportKeyGated("SHOW KEY", { can: () => { throw new Error("x"); }, prompt: async () => { throw new Error("never"); } }), "0xKEY");
+    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => false, prompt: async () => { throw new Error("never"); } }), { key: "0xKEY", system: false }, "no system prompt on this machine: the typed phrase alone, and the answer says so");
+    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => { throw new Error("x"); }, prompt: async () => { throw new Error("never"); } }), { key: "0xKEY", system: false });
+    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", null), { key: "0xKEY", system: false });
     // swaps in flight on the same address, for the send review
     atomix.activeWork = async () => ({ ready: true, swaps: ["0xA", "0xB"] });
     assert.deepEqual(await ethwallet.swapsInFlight(), { known: true, swaps: ["0xA", "0xB"] });
@@ -94,6 +98,58 @@ test("ETH Wallet, main process: no key without the phrase; the system's prompt i
   } finally { atomix.exportKey = real; atomix.activeWork = realWork; }
   const mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
   assert.ok(!/mcd:ewExportKey", \(\) => ethwallet\.exportKey\(\)/.test(mainJs) && /mcd:ewExportKey", \(_e, typed\) =>[^\n]*exportKeyGated\(typed/.test(mainJs), "the IPC handler is the gated one");
+});
+// 0.19.120: one gated way to a key, a clipboard that forgets, a dialog that closes itself
+test("key export: no ungated path is left; Dexicon room 1 uses ETH Wallet's dialog and never holds the key in its page", () => {
+  const mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), preload = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), ax = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ax.js"), "utf8");
+  assert.ok(!/axExportKey/.test(mainJs) && !/axExportKey/.test(preload) && !/axExportKey/.test(ax) && !/axExportKey/.test(app), "mcd:axExportKey and its bridge are gone");
+  const handlers = [...mainJs.matchAll(/ipcMain\.handle\("(mcd:[A-Za-z]+)"[^\n]*(?:exportKey|privKey)[^\n]*/g)].map(m => m[1]);
+  assert.deepEqual(handlers, ["mcd:ewExportKey"], "one IPC handler can answer with a key, and it is the gated one");
+  const AX = require("../renderer/dexicon-ax.js"); assert.equal(AX.Act.exportKey, undefined); assert.equal(AX.KEY_WARN, undefined);
+  assert.ok(ax.includes('if (what === "key") return void D.exportKey();'), "the room opens ETH Wallet's dialog");
+  assert.ok(!/data-copy="\$\{esc\(pk\)\}"/.test(ax) && !/\bpk\b/.test(ax.replace(/\/\/[^\n]*/g, "").replace(/mpk|\.pk|opk/g, "")), "no key in a data-copy attribute, or anywhere in the room's code");
+  assert.ok(/DexAx\.init\(\{ api, copy, relTime, exportKey: ewExportKey,/.test(app));
+  assert.ok(/app\.on\("will-quit", \(\) => \{ try \{ clipSecret\.clearNow\(\); \}/.test(mainJs) && /ipcMain\.handle\("mcd:clipSecret", \(_e, text\) => clipSecret\.copy\(text\)\);/.test(mainJs), "the secret clipboard is cleared at quit too");
+});
+test("a key on the clipboard is cleared after 60 seconds and at quit, and only if the clipboard still holds it", () => {
+  const { create, CLEAR_MS } = require("../main/clipsecret"); assert.equal(CLEAR_MS, 60000);
+  const rig = () => { const clip = { text: "", cleared: 0, writeText(t) { this.text = t; }, readText() { return this.text; }, clear() { this.text = ""; this.cleared++; } }, due = [];
+    const timers = { setTimeout: (fn, ms) => { const t = { fn, ms, on: true }; due.push(t); return t; }, clearTimeout: (t) => { t.on = false; } };
+    return { clip, due, s: create(clip, timers), fire: () => due.filter(t => t.on).forEach(t => { t.on = false; t.fn(); }) }; };
+  let r = rig(); r.s.copy("0xKEY"); assert.equal(r.clip.text, "0xKEY"); assert.equal(r.due[0].ms, 60000);
+  r.fire(); assert.equal(r.clip.text, "", "cleared after the minute"); assert.equal(r.clip.cleared, 1);
+  r = rig(); r.s.copy("0xKEY"); r.clip.text = "something the user copied since"; r.fire();
+  assert.equal(r.clip.text, "something the user copied since", "never clears what is not the key"); assert.equal(r.clip.cleared, 0);
+  r = rig(); r.s.copy("0xKEY"); assert.equal(r.s.clearNow(), true, "at quit, before the minute is up"); assert.equal(r.clip.text, ""); r.fire(); assert.equal(r.clip.cleared, 1, "and the timer has nothing left to do");
+  r = rig(); r.s.copy("0xKEY"); r.clip.text = "other"; assert.equal(r.s.clearNow(), false); assert.equal(r.clip.text, "other");
+  r = rig(); assert.equal(r.s.clearNow(), false, "nothing copied: nothing cleared"); assert.equal(r.clip.cleared, 0);
+  r = rig(); r.s.copy("0xOLD"); r.s.copy("0xNEW"); assert.equal(r.due[0].on, false, "a second copy replaces the first one's timer"); r.fire(); assert.equal(r.clip.text, "");
+  r = rig(); r.clip.readText = () => { throw new Error("clipboard unavailable"); }; r.s.copy("0xKEY"); assert.equal(r.s.clearNow(), false, "never throws at quit");
+});
+test("the key dialog: says when no system check took place, closes after 60 s and when the window is left, and then holds no key", async () => {
+  const src = (name) => { const m = app.match(new RegExp("\\nfunction " + name + "\\b")); return app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2); };
+  const make = () => {
+    const E = { timers: [], win: {}, doc: {}, copied: [], toasts: [], node: { textContent: "" }, closed: 0, hidden: false };
+    const listen = (bag) => ({ addEventListener: (n, f) => { bag[n] = f; }, removeEventListener: (n, f) => { if (bag[n] === f) delete bag[n]; } });
+    let res; const done = new Promise(r => { res = r; });
+    const appDlg = (o) => { E.dlg = o; return { root: { querySelector: (q) => (q === "#ewKeyText" ? E.node : null) }, done, close: (v) => { if (E.closed++) return; E.node = null; res(v); } }; };
+    const L = listen(E.doc), document = { get hidden() { return E.hidden; }, addEventListener: L.addEventListener, removeEventListener: L.removeEventListener };
+    const fn = new Function("appDlg", "api", "toast", "window", "document", "setTimeout", "clearTimeout", src("ewRevealKey") + "\nreturn ewRevealKey;")(appDlg, { clipSecret: (k) => E.copied.push(k) }, (t) => E.toasts.push(t), listen(E.win), document,
+      (f, ms) => { E.timers.push({ f, ms, on: true }); return E.timers.length - 1; }, (i) => { E.timers[i].on = false; });
+    return { E, fn, done };
+  };
+  let t = make(); t.fn("0xKEY", false);
+  assert.match(t.E.dlg.body, /No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check\./);
+  assert.ok(!t.E.dlg.body.includes("0xKEY"), "the key is not in the markup: it is set as text in one node"); assert.equal(t.E.node.textContent, "0xKEY");
+  assert.equal(t.E.timers[0].ms, 60000);
+  t.E.dlg.buttons[1].on(); assert.deepEqual(t.E.copied, ["0xKEY"], "Copy goes through the main process's secret clipboard");
+  t.E.timers[0].f(); await t.done; await null;
+  assert.equal(t.E.closed, 1, "closed by itself after the minute"); assert.deepEqual(Object.keys(t.E.win), []); assert.deepEqual(Object.keys(t.E.doc), [], "its listeners are gone");
+  t.E.dlg.buttons[1].on(); assert.deepEqual(t.E.copied, ["0xKEY"], "after closing, Copy has no key left to copy");
+  t = make(); t.fn("0xKEY", true); assert.ok(!/No system check/.test(t.E.dlg.body), "not said when the system did ask");
+  t.E.win.blur(); await t.done; await null; assert.equal(t.E.closed, 1, "the window lost focus"); assert.equal(t.E.timers[0].on, false);
+  t = make(); t.fn("0xKEY", true); t.E.doc.visibilitychange(); assert.equal(t.E.closed, 0, "still visible"); t.E.hidden = true; t.E.doc.visibilitychange(); assert.equal(t.E.closed, 1, "the window was hidden");
+  assert.ok(/ewRevealKey\(r\.key, r\.system\); r\.key = null;/.test(app), "the export dialog hands the key over and lets go of it");
 });
 test("ETH Wallet screen: the original's settings, in its order; the swap warning; no import of another key; whole addresses", () => {
   const eth = app.slice(app.indexOf("// ============================ ETH Wallet"), app.indexOf("// ============================ miniMall"));

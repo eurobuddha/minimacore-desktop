@@ -206,8 +206,9 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
 // to the renderer navigator.clipboard's focus/permission failures (which silently left stale data on the clipboard
 // while the UI still said "Copied"). Coerce nullish to "" so it never writes the string "null"/"undefined".
 ipcMain.handle("mcd:clip", (_e, text) => { clipboard.writeText(text == null ? "" : String(text)); return true; });
-// A secret on the clipboard (the ETH key): cleared after a minute, unless something else was copied since.
-ipcMain.handle("mcd:clipSecret", (_e, text) => { const t = String(text == null ? "" : text); clipboard.writeText(t); setTimeout(() => { try { if (t && clipboard.readText() === t) clipboard.clear(); } catch (e) {} }, 60000); return true; });
+// A secret on the clipboard (the ETH key): cleared after a minute and when the app quits, unless something else was copied since (main/clipsecret.js).
+const clipSecret = require("./clipsecret").create(clipboard);
+ipcMain.handle("mcd:clipSecret", (_e, text) => clipSecret.copy(text));
 
 // Startup Params "Copy RPC password": main process to clipboard. The password is never returned to the renderer.
 ipcMain.handle("mcd:copyRpcPassword", () => { clipboard.writeText(config.rpcSecret()); return true; });
@@ -696,7 +697,6 @@ ipcMain.handle("mcd:axExportSwaps", () => atomix.exportSwaps());
 ipcMain.handle("mcd:axInspect", (_e, hash) => atomix.inspect(hash));
 ipcMain.handle("mcd:axMarketHistory", () => atomix.marketHistory());
 ipcMain.handle("mcd:axWallet", () => atomix.wallet());
-ipcMain.handle("mcd:axExportKey", () => atomix.exportKey());
 ipcMain.handle("mcd:axCoins", () => atomix.coins());
 ipcMain.handle("mcd:axSendMax", (_e, asset) => atomix.sendMax(asset));
 ipcMain.handle("mcd:axSendReview", (_e, asset, to, amt) => atomix.sendReview(asset, to, amt));
@@ -891,7 +891,7 @@ app.whenReady().then(() => {
 // The node must never outlive the app: a normal quit goes through before-quit → node.stop() (graceful);
 // these two are the last resort for every other way out (uncaught exception, will-quit after a failed
 // stop). A SIGKILL of the app itself is what reclaimStaleNode() on the next start is for.
-app.on("will-quit", () => { try { node.killNow(); } catch (e) {} });
+app.on("will-quit", () => { try { clipSecret.clearNow(); } catch (e) {} try { node.killNow(); } catch (e) {} });   // a key still on the clipboard does not outlive the app
 process.on("exit", () => { try { node.killNow(); } catch (e) {} });
 
 app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhere */ if (process.platform !== "darwin") app.quit(); });

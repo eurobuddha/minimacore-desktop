@@ -285,7 +285,7 @@
     axOtcGoLive: async () => ({ ok: true }), axOtcWithdraw: async () => ({ ok: true }), axOtcPropose: async () => ({ ok: true }), axOtcDeal: async () => ({ ok: true }),
     axCoins: async () => [{ amount: "0.8", coinid: FAKE_PK("E1") }, { amount: "0.40135743", coinid: FAKE_PK("E2") }],
     axExportSwaps: async () => AX_SWAPS.map(s => ({ hash: s.hash, role: s.role, direction: s.direction, sellToken: s.selltoken, sellAmount: s.sellamount, buyToken: s.buytoken, buyAmount: s.buyamount, counterparty: s.counterparty, status: s.status, contractId: s.contractId, created: s.created, minimaTx: "", ethTx: FAKE_TX })),
-    axSendMax: async (a) => (a === "eth" ? "0.0419" : "217.912562"), axSendReview: async () => ({ fee: "0.000412" }), axSend: async () => ({ tx: FAKE_TX }), axExportKey: async () => "0x" + "FA4E".repeat(16),
+    axSendMax: async (a) => (a === "eth" ? "0.0419" : "217.912562"), axSendReview: async () => ({ fee: "0.000412" }), axSend: async () => ({ tx: FAKE_TX }),
     // PandaPools, room 2 of Dexicon (main/pandapools.js read models and actions)
     ppStatus: async () => ({ ready: PPS !== "notready" && PPS !== "broken", block: 2428089, pools: PP_POOLS.length, error: PPS === "broken" ? "Pool database integrity check failed." : "" }),
     engineSetAside: async (which) => "/Users/you/Library/Application Support/minimaCore/" + which + ".sqlite-legacy-keys-20261119",
@@ -316,7 +316,7 @@
     ewSendMax: async (a) => (a === "eth" ? "0.04188" : "125.5"),
     ewSendReview: async (a, to, amt) => (/^0x[0-9a-fA-F]{40}$/.test(to) ? { ok: true, sym: a === "eth" ? "ETH" : "USDT", decimals: 18, capped: Q.get("ew") === "capped",
       fees: { low: { fee: "0.000063", gwei: "3" }, med: { fee: "0.0000819", gwei: "3.9" }, high: { fee: "0.0001071", gwei: "5.1" } } } : { err: "Enter a valid Ethereum address (0x + 40 hex characters)." }),
-    ewSend: async () => ({ tx: FAKE_TX }), ewExportKey: async () => "0x" + "FA4E".repeat(16), ewSetRpc: async () => ({ ok: true }), ewAddToken: async () => ({ token: { symbol: "FAKE" } }), ewRemoveToken: async () => true,
+    ewSend: async () => ({ tx: FAKE_TX }), ewExportKey: async () => ({ key: "0x" + "FA4E".repeat(16), system: false }), ewSetRpc: async () => ({ ok: true }), ewAddToken: async () => ({ token: { symbol: "FAKE" } }), ewRemoveToken: async () => true,
     clipSecret: async () => true,
     ewTokens: async () => EW_TOKENS,
     // Web Wallet: ?ww=1 (a MegaMMR node) | ack (key uses already confirmed) | node (the node's own seed); without it the MegaMMR gate shows

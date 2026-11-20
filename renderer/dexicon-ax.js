@@ -250,7 +250,6 @@
   const tokRaw = (t) => { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = t.toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "MxUSD"; } return t; };
   /** The review of a wallet send (WalletActions.review): from, amount, to and the fee, every address whole. */
   const sendReview = (asset, from, to, amt, fee) => { const sym = asset === "eth" ? "ETH" : "USDT"; return { title: "Review: Send " + sym, ok: "Send now", text: "From  " + from + "\n\nSend  " + amt + " " + sym + "\nTo  " + to + "\n\nNetwork fee  ≈ " + fee + " ETH\nThis cannot be undone." }; };
-  const KEY_WARN = "This key controls your ETH funds. Anyone who sees it can take them. It is derived from your Minima node seed. Never share it or type it into a website.";
 
   // The engine reads at most this many coins of a token before it refuses (main/atomix/lib/htlc.js guardedCoins): a maker
   // over it declines every buy until the coins are merged (AtomixConsolidate.warning).
@@ -375,8 +374,6 @@
       else ui.say("Sent " + amt + " " + sym + ". It is final once Ethereum confirms it. Transaction " + (r && r.tx), "note");
       return r;
     },
-    /** the warning first, then the key (axExportKey) */
-    async exportKey(api, ui) { if (!await ui.confirm("Export ETH private key", KEY_WARN, "Reveal key")) return null; return api.axExportKey().catch(() => null); },
     /** every swap, maker and taker, to one file: axExportSwaps → exportCsv(text, "atomix-trades.csv") */
     async exportCsv(api, ui) {
       const rows = await api.axExportSwaps().catch(() => []);
@@ -392,14 +389,14 @@
   /** One at a time (0.18.118): while fn runs, a second call does nothing. For the money actions that had no
    *  in-flight state of their own: a double click on Refund now or on a wallet action started it twice. */
   function oneAtATime() { let on = false; return async (fn) => { if (on) return; on = true; try { return await fn(); } finally { on = false; } }; }
-  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, rungSize, lpPick, makerForm, ladderSummary, midLine, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, KEY_WARN, haltCard, offline };
+  const core = { oneAtATime, MXUSD, ccyName, ccyOf, mx, tok, fmtPx, abbrev, cut, ax6, cleanNum, coinAmount, slipOf, roleLabel, terminal, bestLine, review, takeResult, prelock, stages, swapItem, HIDE_ASK, launch, makerLive, historyList, unfinished, stoppedNote, RUNGS, clampLevels, ladderPrices, rungSize, lpPick, makerForm, ladderSummary, midLine, offerState, COIN_CAP, coinWarn, dealStatus, dealCanAct, termsProblem, CSV_COLS, csv, sendReview, haltCard, offline };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; };
-  let D = null;   // deps from app.js: api, copy, dialog, running(), consolidateToken, go(tab), repaintStrip()
+  let D = null;   // deps from app.js: api, copy, dialog, running(), consolidateToken, exportKey() (ETH Wallet's gated key dialog), go(tab), repaintStrip()
   const S = { st: { ready: false }, book: null, swaps: null, bals: null, mc: null, mh: null, otc: null, sell: false, typed: null, said: null, answers: {}, at: 0, tab: "", busy: false,
     slip: slipOf(pref("dexicon_ax_slip")) || 4.2, hidden: new Set((pref("dexicon_ax_hidden") || "").split(",").filter(Boolean)) };
   const api = () => D.api;
@@ -861,11 +858,7 @@
     }
     if (what === "send") return sendDialog("");
     if (what === "sweep") return sendDialog((S.st.halt && S.st.halt.nodeEth) || "");   // the rescue: the recipient is this node's own current Ethereum address
-    if (what === "key") {
-      const pk = await Act.exportKey(api(), ui); if (pk === null) return;
-      if (!pk) return say("The Ethereum wallet is not ready yet. No key was shown.", "note");
-      return void form("ETH private key", `<div class="ax-bad">⚠ Keep this secret.</div><div class="dx-addr">${esc(pk)}</div><button class="dx-btn ax-copy" data-copy="${esc(pk)}">Copy key</button>`, "");
-    }
+    if (what === "key") return void D.exportKey();   // ETH Wallet's own gated flow (0.19.120: the typed phrase checked in the main process, the system's prompt where there is one, the clipboard that clears); the key is never in this room's page
     if (what === "coins") {
       const rows = await api().axCoins().catch(() => []);
       return void D.dialog("Your " + c + " coins", rows.length ? rows.map((r) => r.amount + " " + c + "\ncoin " + r.coinid).join("\n\n") : "No sendable coins right now.", "");

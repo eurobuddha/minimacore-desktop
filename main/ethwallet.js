@@ -41,13 +41,15 @@ const exportKey   = () => atomix.exportKey();
  * and where the system can ask "is it you" (os.can(): Touch ID on a Mac that has it) it is asked here, in the main
  * process, and a refusal ends it. The phone's ETH Wallet does the same with the device's lock screen before it shows
  * the key. os = { can() -> bool, prompt(reason) -> Promise } (main.js passes Electron's systemPreferences).
+ * This is the ONLY way a key reaches a window: Dexicon room 1's "Export key" uses it too (0.19.120; its own ungated
+ * mcd:axExportKey is gone). → { key, system }.
  */
 const EXPORT_PHRASE = "SHOW KEY";
 async function exportKeyGated(typed, os) {
   if (String(typed == null ? "" : typed).trim() !== EXPORT_PHRASE) throw new Error("Type " + EXPORT_PHRASE + " exactly to continue.");
   let ask = false; try { ask = !!(os && os.can()); } catch (e) { ask = false; }
   if (ask) { try { await os.prompt("show the ETH private key"); } catch (e) { throw new Error("Cancelled"); } }
-  return atomix.exportKey();
+  return { key: atomix.exportKey(), system: ask };   // system: the system's own check took place. false is SAID on the screen (0.19.120): the typed phrase was then the only check
 }
 
 /**

@@ -3335,7 +3335,7 @@ initLogs();
 // ---- AtomiX: room ① of Dexicon (renderer/dexicon-ax.js) over the window.mcd ax* calls. The panel it replaced
 // (renderer/atomix-ui.js) was removed in 0.18.141 after the parity audit (docs/DEXICON_PARITY_AUDIT.md).
 DexPools.init({ api, copy, tryCmd, TOK, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
-DexAx.init({ api, copy, relTime, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
+DexAx.init({ api, copy, relTime, exportKey: ewExportKey, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast("Starting the node…"); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
 function resetAxState() { DexAx.reset(); }
 
@@ -3561,9 +3561,23 @@ function ewExportKey() {
       busy = false;
       if (r.err) { toast(/cancel/i.test(r.err) ? "Cancelled" : r.err, "warn"); return; }
       close();
-      appDlg({ title: "Private key", body: `<div class="ew-warn">Anyone with this key controls these funds. Never share it.</div><div class="ew-mono ew-sel">${esc(r.key)}</div>`,
-        buttons: [{ label: "Close", v: null }, { label: "Copy", on: () => { api.clipSecret(r.key); toast("Key copied. The clipboard clears in 60 s", "ok"); } }] });
+      ewRevealKey(r.key, r.system); r.key = null;
     } }] });
+}
+/** The key on the screen: for a minute at most, and only while the window is in front. Closing takes it out of the page
+ *  and out of this function. Copy goes through the main process, which clears the clipboard again (main/clipsecret.js). */
+function ewRevealKey(key, system) {
+  let k = String(key || ""); key = null;
+  const d = appDlg({ title: "Private key", body: `<div class="ew-warn">Anyone with this key controls these funds. Never share it.</div>
+      ${system ? "" : `<div class="ew-warn">No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.</div>`}
+      <div class="ew-mono ew-sel" id="ewKeyText"></div><div class="ew-fine">This closes by itself after 60 seconds, and when you leave this window.</div>`,
+    buttons: [{ label: "Close", v: null }, { label: "Copy", on: () => { if (!k) return; api.clipSecret(k); toast("Key copied. The clipboard is cleared in 60 seconds and when the app quits", "ok"); } }] });
+  d.root.querySelector("#ewKeyText").textContent = k;   // as text, in this one node, which close() removes
+  const end = () => d.close(null), hidden = () => { if (document.hidden) end(); };
+  const timer = setTimeout(end, 60000);
+  window.addEventListener("blur", end); document.addEventListener("visibilitychange", hidden);
+  d.done.then(() => { k = ""; clearTimeout(timer); window.removeEventListener("blur", end); document.removeEventListener("visibilitychange", hidden); });
+  return d;
 }
 
 async function ewRpcDialog() {

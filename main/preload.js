@@ -227,7 +227,6 @@ contextBridge.exposeInMainWorld("mcd", {
   axInspect: (hash) => ipcRenderer.invoke("mcd:axInspect", hash),
   axMarketHistory: () => ipcRenderer.invoke("mcd:axMarketHistory"),
   axWallet: () => ipcRenderer.invoke("mcd:axWallet"),
-  axExportKey: () => ipcRenderer.invoke("mcd:axExportKey"),
   axCoins: () => ipcRenderer.invoke("mcd:axCoins"),
   axSendMax: (asset) => ipcRenderer.invoke("mcd:axSendMax", asset),
   axSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:axSendReview", asset, to, amt),

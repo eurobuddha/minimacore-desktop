@@ -29,7 +29,7 @@
     /** The key leaves the main process only after the typed phrase (checked again there) and, where the system offers one, its own prompt. */
     exportKey: function (api, typed) {
       if (text(typed) !== EXPORT_PHRASE) return Promise.resolve({ err: "Type " + EXPORT_PHRASE + " exactly to continue." });
-      return api.ewExportKey(text(typed)).then(function (k) { return k ? { key: k } : { err: "No key yet" }; }, errOf);
+      return api.ewExportKey(text(typed)).then(function (r) { return r && r.key ? { key: r.key, system: r.system === true } : { err: "No key yet" }; }, errOf);
     }
   };
 
