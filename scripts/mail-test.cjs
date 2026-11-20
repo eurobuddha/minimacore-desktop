@@ -367,3 +367,47 @@ test("the owner's card starts enabled, survives restart, and respects Stop", asy
   instance = await open();
   assert.equal(instance.myIdentity().published, false);
 });
+
+// ---------------------------------------------------------------- 0.19.1: the phone's navigation, Mail's own theme, the funds sheet
+test("folders are in a side menu under a folder header, not a strip of tabs", async () => {
+  const P = panel(), dom = fakeDom();
+  P.MailPanel.init(deps(dom, baseApi({ mailOutbox: async () => [{ hashref: "h", randomid: "r", topublickey: PEER, incoming: false, subject: "", message: "x", date: Date.now(), status: "posting", type: "text" }] })));
+  await P.MailPanel.render();
+  const html = dom.nodes.mailBody.innerHTML;
+  assert.ok(!html.includes("mm-tabs") && !html.includes('role="tab"'), "no tab strip");
+  assert.ok(html.includes('id="mmMenu"') && html.includes('<h2 class="mm-title">Inbox</h2>'), "menu button and folder name");
+  assert.ok(html.includes('id="mmDrawer"') && html.includes(" hidden>"), "the side menu is there, closed");
+  const order = [...html.matchAll(/class="mm-nav[^"]*" data-f="([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ["inbox", "outbox", "sent", "archive", "contacts", "key", "settings"], "the phone's order");
+  assert.ok(/data-f="outbox"[^>]*>.*?<span class="mm-cnt">1<\/span>/.test(html), "the Outbox counts what is waiting");
+  assert.ok(html.includes("MINIMA <i>MAIL</i>"), "the menu's heading");
+});
+
+test("Mail keeps its own Paper or Dark and never reads the shell's theme", async () => {
+  const fs = require("fs"), path = require("path");
+  const css = fs.readFileSync(path.join(__dirname, "..", "renderer", "mail.css"), "utf8");
+  assert.ok(!/:root\[data-theme/.test(css), "no rule hangs off the shell's data-theme");
+  assert.ok(css.includes('.mailapp[data-mm-theme="dark"]'));
+  assert.ok(/--mm-bg: #FAF9F6/.test(css) && /--mm-accent: #F7931A/.test(css) && /--mm-on-accent: #1A1000/.test(css), "Design.java's paper, orange and ink-on-orange");
+  const P = panel(), dom = fakeDom();
+  P.MailPanel.init(deps(dom, baseApi({ mailInit: async () => ({ publicId: ME, name: "", payaddr: "MxTEST", theme: "dark" }) })));
+  await P.MailPanel.render();
+  assert.ok(dom.nodes.mailBody.innerHTML.startsWith('<div class="mailapp" data-mm-theme="dark">'));
+  const P2 = panel(), dom2 = fakeDom();
+  P2.MailPanel.init(deps(dom2, baseApi()));
+  await P2.MailPanel.render();
+  assert.ok(dom2.nodes.mailBody.innerHTML.startsWith('<div class="mailapp">'), "Paper unless chosen");
+});
+
+test("the funds sheet compares amounts exactly and takes only a real receiving address", () => {
+  const { decCmp, looksLikeMinimaAddress } = panel().MailPanel._pure;
+  assert.equal(decCmp("88.123456", "88.123456"), 0);
+  assert.equal(decCmp("88.1234560000000000000000000000000000000000001", "88.123456"), 1, "one unit in the 43rd decimal is more");
+  assert.equal(decCmp("9", "10"), -1); assert.equal(decCmp("010.50", "10.5"), 0); assert.equal(decCmp(".5", "0.49999999999999999999"), 1);
+  assert.equal(looksLikeMinimaAddress("0x" + "ab".repeat(65)), false, "a Mail key is never a pay address");
+  assert.equal(looksLikeMinimaAddress("MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1 address:0x00"), false);
+  assert.equal(looksLikeMinimaAddress("MxG085QK2T7MN4CWP9RZD3HVJ6YBA1SE0FU8G5TKX2NC7MWQ4PRD9ZH3VJ6YBA1"), true);
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "mail.js"), "utf8");
+  assert.ok(/mailPay\(peer, pick\.addr, pick\.amount, pick\.token\.tokenid, pick\.token\.name, pick\.memo, subject \|\| ""\)/.test(src), "the reviewed values are the ones paid");
+  assert.ok(!/sendCurrency/.test(src), "one way to pay");
+});

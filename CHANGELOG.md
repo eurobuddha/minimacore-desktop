@@ -7,6 +7,19 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.1] — Mail as the phone: folders in a side menu, Mail's own Paper / Dark, the Send funds sheet with the currency picker, selectable text
+
+- **Why**: after the merge of the released Mail (0.19.0) the desktop had the phone's features up to 0.5.26 but not its navigation, its own theme, or the phone's Send funds sheet. An audit against `apks/mail` 0.5.28 and Pandamonium's integrated copy (2.2.53) left these.
+- **Folders are in a side menu, as on the phone.** The strip of tabs and the "MINIMA MAIL" bar are gone. Each folder has the phone's header (menu button, folder name) under the shell's host bar; the menu button opens the side menu: "MINIMA MAIL", "you · your six words", Inbox, Outbox, Sent, Archive, a rule, Contacts, Your key, Settings, and the version on the last line, with the unread and waiting counts. Escape or a click outside closes it. The freshness line and the compose button belong to the Inbox only.
+- **Mail's theme is its own.** Paper unless you choose Dark in Settings, Appearance (the phone's "Paper by day, dark by night — your call"), kept in Mail's store. It no longer follows the shell's light or dark, and the theme button in Mail's bar (which changed the whole app) is gone. Ink on orange is the phone's `#1A1000` in both themes.
+- **Send funds is the phone's sheet**: "Send funds to NAME", the currency picker (Minima and MxUSD, each with the node's sendable balance), the amount, their receiving address (filled from their signed messages, also while the sheet is open), "You'll receive at", a note, then Review. The amount is compared with the balance exactly (no floating point) before the review: "Insufficient balance." The question, the progress notice and the result ("Payment sent", the transaction id whole, Copy tx id) follow the phone. An unanswered send still says the payment may have gone out. The payment itself is unchanged.
+- **Text in a conversation can be selected and copied** (phone 0.5.25).
+- **Wording**: "33 minutes ago" / clock time / "3 days ago" / "7 Mar" on rows, and "Checked block 2428089 · now" (the block printed plainly), as the phone.
+- **Fixed on the way**: two-line labels (a conversation's title and address, a setting's title and hint, a payment's amount and note) were inline and ran together.
+- **Dev preview**: Mail fixtures (invented people, keys that are plainly not real, list words) and `?mail=menu|outbox|sent|archive|contacts|key|settings|thread|compose|compose-ready|funds`, `&mm=dark`; captures `scripts/dev-preview/shots/*-mail-*.png` at 932 x 704 and 1440 x 900, with the system in light and in dark.
+- **Still behind the phone**: the recipient boxes have no suggestion row and no "N of six words" line; Contacts has "Add contact" as a line, not a + in the header; a photo is sent as JPEG (an animated GIF is not kept); "Share" copies to the clipboard. The sender's own declared name is still shown for an unsaved sender (the released desktop behaviour; the phone shows the six words).
+- **Tests**: `scripts/mail-test.cjs` 23 (3 new: the side menu and its order, the theme, the exact amount comparison).
+
 ## [0.19.0] — Merge of the released Mail (v0.18.69) into the overhaul branch; the branch's version line becomes 0.19.x
 
 - **What this is**: a merge of the released tag `v0.18.69` (the main line's Mail work, built in another session while this branch was open) into the overhaul branch, and a new version line. The main line owns 0.18.65 to 0.18.69; this branch had used those numbers (and up to 0.18.148) for its own unpushed commits. From here the branch is 0.19.x. No old commit is renumbered.

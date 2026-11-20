@@ -3,8 +3,9 @@
  *
  * EVERY rule is scoped under .mailapp and every colour comes from a --mm-* token declared on that wrapper, so
  * the APK's paper ground and Minima orange cannot leak into Balances, AtomiX, Pools or anything else in the
- * shell. Values are the APK's own Design.java tokens and dp geometry (1dp = 1px here); the panel follows the
- * app's existing data-theme attribute, so the shell's theme button drives Paper ⇄ dark with no new setting.
+ * shell. Values are the APK's own Design.java tokens and dp geometry (1dp = 1px here); the panel has its OWN
+ * Paper / Dark choice (Settings, Appearance; data-mm-theme on the wrapper), as on the phone: it does not follow the
+ * shell's light or dark (0.19.1).
  *
  * Class prefix is mm-, NOT mail- : #view-minimall owns .mail-thread (app.css), and the old panel's classes
  * collided with it.
@@ -20,7 +21,8 @@
   --mm-dim: #6E6A63;
   --mm-dim2: #9B968D;
   --mm-accent: #F7931A;      /* Minima orange, both themes */
-  --mm-on-accent: #FFFFFF;
+  --mm-on-accent: #1A1000;   /* Design.ON_ACCENT, both themes */
+  --mm-accent-text: #9B4A00; /* Design.ACCENT_TEXT: orange words on paper */
   --mm-green: #1F9D5B;
   --mm-red: #D9483B;
   --mm-sans: var(--sans);
@@ -38,7 +40,7 @@
   line-height: 1.35;
   overflow: hidden;
 }
-:root[data-theme="dark"] .mailapp {
+.mailapp[data-mm-theme="dark"] {
   /* family dark — Design.java DARK */
   --mm-bg: #0A0A0F;
   --mm-surface: #15151F;
@@ -47,7 +49,7 @@
   --mm-text: #FFFFFF;
   --mm-dim: #9A9AA8;
   --mm-dim2: #6A6A78;
-  --mm-on-accent: #1A1000;
+  --mm-accent-text: #F7931A;
   --mm-green: #2ECC71;
   --mm-red: #E74C3C;
 }
@@ -59,29 +61,37 @@
 .mailapp button { font-family: inherit; }
 .mailapp .mm-ic { width: 22px; height: 22px; display: block; flex: 0 0 auto; }
 
-/* ---- title bar + tab strip (Parlons' strip, the APK's branding) ---- */
-.mailapp .mm-bar { display: flex; align-items: center; gap: 2px; background: var(--mm-surface); padding: 12px 8px 12px 16px; flex: 0 0 auto; }
-.mailapp .mm-brand { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
-.mailapp .mm-brand i { font-style: normal; color: var(--mm-accent); }
+/* ---- folder header and the side menu (MainActivity.header / rebuildNav; dp = px) ---- */
+.mailapp .mm-head { display: flex; align-items: center; background: var(--mm-surface); padding: 12px 8px; flex: 0 0 auto; }
+.mailapp .mm-title { flex: 1; min-width: 0; margin: 0; padding-left: 8px; font-size: 19px; line-height: 26px; font-weight: 700; color: var(--mm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mailapp .mm-ibtn { width: 38px; height: 38px; padding: 8px; border: 0; background: none; color: var(--mm-dim); border-radius: 50%; display: grid; place-items: center; cursor: pointer; flex: 0 0 auto; }
 .mailapp .mm-ibtn:hover { background: var(--mm-surface2); }
 .mailapp .mm-ibtn:disabled { opacity: .5; cursor: default; }
-
-.mailapp .mm-tabs { display: flex; background: var(--mm-surface); padding: 0 4px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
-.mailapp .mm-tabs::-webkit-scrollbar { display: none; }
-.mailapp .mm-tabs button { position: relative; flex: 0 0 auto; font-size: 13.5px; font-weight: 500; color: var(--mm-dim); background: none; border: 0; padding: 12px 11px 11px; white-space: nowrap; cursor: pointer; }
-.mailapp .mm-tabs button[aria-selected="true"] { color: var(--mm-text); font-weight: 700; }
-/* a short centred dash, 34px — not a full-width Material indicator */
-.mailapp .mm-tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 34px; height: 2px; background: var(--mm-accent); transform: translateX(-50%); }
-.mailapp .mm-tabs .mm-cnt { display: inline-block; margin-left: 5px; background: var(--mm-accent); color: var(--mm-on-accent); border-radius: 9px; font-size: 10.5px; font-weight: 700; padding: 0 6px; vertical-align: 1px; }
+.mailapp .mm-grow { flex: 1 1 auto; min-width: 0; }
+.mailapp .mm-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.6); z-index: 20; }
+.mailapp .mm-drawer { position: absolute; left: 0; top: 0; bottom: 0; width: min(280px, 82%); z-index: 21; display: flex; flex-direction: column; background: var(--mm-surface); overflow-y: auto; box-shadow: 4px 0 18px -6px rgba(0,0,0,.45); }
+.mailapp .mm-scrim[hidden], .mailapp .mm-drawer[hidden] { display: none; }
+.mailapp .mm-dhead { padding: 20px 18px 14px; border-bottom: 1px solid var(--mm-hairline); }
+.mailapp .mm-brand { font-size: 16px; font-weight: 700; color: var(--mm-text); }
+.mailapp .mm-brand i { font-style: normal; color: var(--mm-accent); }
+.mailapp .mm-self { padding-top: 3px; font-size: 14px; color: var(--mm-text); overflow-wrap: anywhere; }
+.mailapp .mm-nav { display: flex; align-items: center; gap: 14px; width: 100%; padding: 11px 14px 11px 18px; border: 0; background: none; color: var(--mm-text); font-size: 14.5px; text-align: left; cursor: pointer; flex: 0 0 auto; }
+.mailapp .mm-nav .mm-ic { width: 20px; height: 20px; color: var(--mm-dim); }
+.mailapp .mm-nav:hover { background: var(--mm-surface2); }
+.mailapp .mm-nav.mm-sel { width: calc(100% - 12px); background: rgba(247,147,26,.133); border-radius: 0 22px 22px 0; color: var(--mm-accent-text); font-weight: 700; }
+.mailapp .mm-nav.mm-sel .mm-ic { color: var(--mm-accent); }
+.mailapp .mm-cnt { background: var(--mm-accent); color: var(--mm-on-accent); border-radius: 10px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; }
+.mailapp .mm-navsep { height: 1px; margin: 8px 18px; background: var(--mm-hairline); flex: 0 0 auto; }
+.mailapp .mm-dver { padding: 6px 18px 10px; font-size: 10.5px; color: var(--mm-dim); }
 
 /* ---- freshness line: what we have actually covered ---- */
-.mailapp .mm-fresh { display: flex; align-items: center; gap: 6px; background: var(--mm-surface); padding: 3px 14px 7px; font-size: 10.5px; color: var(--mm-dim); border-bottom: 1px solid var(--mm-hairline); flex: 0 0 auto; }
+.mailapp .mm-fresh { display: flex; align-items: center; gap: 6px; background: var(--mm-surface); padding: 3px 14px 7px; font-size: 10.5px; color: var(--mm-dim); flex: 0 0 auto; }
 .mailapp .mm-fresh .mm-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mm-green); flex: 0 0 6px; }
 .mailapp .mm-fresh.mm-cold .mm-dot { background: var(--mm-dim2); }
 .mailapp .mm-fresh.mm-busy .mm-dot { background: var(--mm-accent); }
 .mailapp .mm-fresh .mm-grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mailapp .mm-fresh .mm-act { display: inline-flex; align-items: center; gap: 4px; color: var(--mm-accent); font-weight: 700; background: none; border: 0; font-size: 10.5px; cursor: pointer; padding: 2px 0; white-space: nowrap; }
+.mailapp .mm-fresh .mm-act { display: inline-flex; align-items: center; gap: 4px; color: var(--mm-accent-text); font-weight: 700; background: none; border: 0; font-size: 10.5px; cursor: pointer; padding: 2px 0; white-space: nowrap; }
+.mailapp .mm-fresh .mm-act .mm-ic { color: var(--mm-accent); }
 .mailapp .mm-fresh .mm-act .mm-ic { width: 11px; height: 11px; }
 
 .mailapp .mm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; background: var(--mm-bg); }
@@ -135,7 +145,7 @@
 .mailapp .mm-bub { max-width: 75%; padding: 9px 14px; border-radius: 18px; background: var(--mm-surface2); color: var(--mm-text); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* the incoming hairline exists in Paper only — in dark the surface2 fill carries it (Design.java:1641) */
 .mailapp .mm-mrow.mm-in .mm-bub { border: 1px solid var(--mm-hairline); }
-:root[data-theme="dark"] .mailapp .mm-mrow.mm-in .mm-bub { border: 0; }
+.mailapp[data-mm-theme="dark"] .mm-mrow.mm-in .mm-bub { border: 0; }
 .mailapp .mm-mrow.mm-out .mm-bub { background: var(--mm-accent); color: var(--mm-on-accent); }
 .mailapp .mm-sname { display: block; font-size: 12px; font-weight: 700; color: var(--mm-accent); margin-bottom: 2px; }
 .mailapp .mm-foot { display: flex; align-items: center; gap: 3px; padding: 2px 18px 8px; font-size: 10px; color: var(--mm-dim2); font-variant-numeric: tabular-nums; }
@@ -205,7 +215,6 @@
 
 .mailapp :focus-visible { outline: 2px solid var(--mm-accent); outline-offset: -2px; }
 
-.mailapp .mm-self { flex: 1; font-size: 13px; overflow-wrap: anywhere; }
 #view-mail .mail-address-entry fieldset { border: 0; margin: 1em 0; padding: 0; }
 #view-mail .mm-word-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .5em; }
 
@@ -228,3 +237,40 @@
 #view-mail #mmCompactTo[hidden], #view-mail .mm-chips[hidden] { display: none; }
 
 .mailapp .mm-contact-address { display: block; white-space: normal; overflow-wrap: anywhere; color: var(--mm-dim); text-align: left; }
+
+/* ---- conversations: the text can be selected and copied (phone 0.5.25) ---- */
+.mailapp .mm-bub, .mailapp .mm-reader-text, .mailapp .mm-pmemo { user-select: text; -webkit-user-select: text; cursor: text; }
+
+/* ---- Mail's own dialogs (the phone's AlertDialogs, in Mail's palette) ---- */
+.mailapp .mm-ov { position: absolute; inset: 0; z-index: 30; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; }
+.mailapp .mm-dlg { width: min(420px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--mm-surface); color: var(--mm-text); border-radius: 14px; box-shadow: 0 18px 40px -12px rgba(0,0,0,.6); }
+.mailapp .mm-dlg--wide { width: min(720px, 100%); }
+.mailapp .mm-dtitle { padding: 18px 20px 6px; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+.mailapp .mm-dbody { padding: 8px 20px 4px; overflow-y: auto; min-height: 0; }
+.mailapp .mm-dmsg { font-size: 14px; color: var(--mm-text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.mailapp .mm-dstatus { padding: 0 20px; font-size: 12.5px; color: var(--mm-red); min-height: 0; }
+.mailapp .mm-dstatus:empty { display: none; }
+.mailapp .mm-dbtns { display: flex; align-items: center; gap: 6px; padding: 10px 12px 12px; }
+.mailapp .mm-dbtn { border: 0; background: none; color: var(--mm-accent-text); font-size: 14px; font-weight: 700; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.mailapp .mm-dbtn:hover { background: var(--mm-surface2); }
+.mailapp .mm-dbtn:disabled { opacity: .5; cursor: default; }
+.mailapp .mm-dbtn.mm-danger { color: var(--mm-red); }
+.mailapp .mm-flab { display: block; font-size: 12px; color: var(--mm-dim); padding: 12px 0 4px; }
+.mailapp .mm-inp { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--mm-dim); background: none; color: var(--mm-text); font: inherit; font-size: 15px; padding: 6px 0; outline: none; }
+.mailapp .mm-inp:focus { border-bottom: 2px solid var(--mm-accent); padding-bottom: 5px; }
+.mailapp .mm-inp::placeholder { color: var(--mm-dim2); }
+.mailapp .mm-inp--mono { font-family: var(--mm-mono); font-size: 12.5px; }
+.mailapp .mm-fhint { font-size: 11px; color: var(--mm-dim); padding-top: 4px; }
+.mailapp .mm-fhint--addr { font-size: 10px; padding-top: 8px; overflow-wrap: anywhere; }
+.mailapp .mm-radio { display: flex; flex-direction: column; }
+.mailapp .mm-radio label { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 14px; color: var(--mm-text); cursor: pointer; overflow-wrap: anywhere; }
+.mailapp .mm-radio input { accent-color: var(--mm-accent); width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
+.mailapp .mm-full { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; }
+
+/* two-line labels are two lines (they were inline spans and ran together) */
+.mailapp .mm-ct, .mailapp .mm-cs, .mailapp .mm-tt, .mailapp .mm-dd, .mailapp .mm-pay, .mailapp .mm-pamt, .mailapp .mm-pmemo { display: block; }
+
+/* the six recipient boxes as the phone draws them (AddressWordEntry.box: 14sp mono, 8/6 padding, 6dp corners, a faint fill) */
+#view-mail #mmToWords { gap: 3px; padding: 4px 0; }
+#view-mail #mmToWords input { padding: 6px 8px; border: 1px solid rgba(136,136,136,.33); border-radius: 6px; background: rgba(0,0,0,.13); font-family: var(--mm-mono); font-size: 14px; color: var(--mm-text); }
+#view-mail #mmToWords input::placeholder { color: #888888; }

@@ -22,12 +22,15 @@
   var VIEW = "inbox";           // inbox | outbox | sent | archive | contacts | key | settings | thread | compose
   var PEER = null, SUBJ = "", HASH = "";
   let threadOrigin = "inbox";
+  var VERSION = "";             // the app's version, for the side menu's last line
+  var MODAL = 0;                // open Mail dialogs: nothing is redrawn under them (the phone's modalOpen)
+  var PAYFILL = null;           // an open Send funds sheet waiting for the peer's address
   const peerWords = new Map();
   var COMPOSE = null;           // { to, subject, body } kept across a re-render so typing is never lost
   var booted = false;
 
-  var FOLDERS = [["inbox", "Inbox"], ["outbox", "Outbox"], ["sent", "Sent"], ["archive", "Archive"],
-    ["contacts", "Contacts"], ["key", "Your key"], ["settings", "Settings"]];
+  var FOLDERS = [["inbox", "Inbox", "inbox"], ["outbox", "Outbox", "outbox"], ["sent", "Sent", "send"], ["archive", "Archive", "archive"],
+    ["contacts", "Contacts", "contacts"], ["key", "Your key", "key"], ["settings", "Settings", "settings"]];
 
   function init(deps) { D = deps; }
   /**
@@ -43,7 +46,7 @@
     if (/may have been submitted/i.test(m)) return "The node didn't answer in time — check before sending again.";
     return m;
   }
-  function reset() { threadOrigin = "inbox"; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
+  function reset() { MODAL = 0; PAYFILL = null; threadOrigin = "inbox"; peerWords.clear(); ID = null; CONTACTS = []; STATUS = null; VIEW = "inbox"; PEER = null; SUBJ = ""; HASH = ""; COMPOSE = null; booted = false; }
 
   // ---------------------------------------------------------------- identity, names, avatars
   /** A peer's key for display: the WHOLE key (RULE 1). It was 0x + 8…6; .mm-key wraps it. */
@@ -91,14 +94,22 @@
   function pad2(n) { return n < 10 ? "0" + n : String(n); }
   function clock(ms) { var d = new Date(Number(ms)); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  /** now · 42m · HH:mm · 3d · "7 Mar" — MainActivity.rel() */
-  function rel(ms) {
-    var t = Number(ms) || 0; if (!t) return "";
-    var diff = Date.now() - t, d = new Date(t);
+  function ago(n, unit) { return n + " " + unit + (n === 1 ? "" : "s") + " ago"; }
+  /** The phone's Language.since: now · 33 minutes ago · 5 hours ago · 3 days ago */
+  function since(ms) {
+    var diff = Date.now() - Number(ms);
     if (diff < 60000) return "now";
-    if (diff < 3600000) return Math.floor(diff / 60000) + "m";
-    if (diff < 86400000) return clock(t);
-    if (diff < 7 * 86400000) return Math.floor(diff / 86400000) + "d";
+    if (diff < 3600000) return ago(Math.floor(diff / 60000), "minute");
+    if (diff < 86400000) return ago(Math.floor(diff / 3600000), "hour");
+    return ago(Math.floor(diff / 86400000), "day");
+  }
+  /** MainActivity.rel(): under an hour "33 minutes ago", then today's clock time, "3 days ago" for a week, then "7 Mar". */
+  function rel(ms) {
+    var t = Number(ms) || 0; if (t <= 0) return "";
+    var age = Date.now() - t, d = new Date(t);
+    if (age < 3600000) return since(t);
+    if (age < 86400000) return clock(t);
+    if (age < 7 * 86400000) return since(t);
     return d.getDate() + " " + MON[d.getMonth()];
   }
   function dayStart(ms) { var d = new Date(Number(ms)); d.setHours(0, 0, 0, 0); return d.getTime(); }
@@ -127,29 +138,45 @@
   }
 
   // ---------------------------------------------------------------- shell
+  /** Folder header, as the phone: the menu button and the folder's name. The folders are in the side menu, not a strip of tabs. */
   function header() {
-    return '<div class="mm-bar"><span class="mm-brand">MINIMA <i>MAIL</i></span>'
-      + (ID && ID.words ? '<span class="mm-self">you · ' + D.esc(ID.words) + '</span>' : '')
-      + '<button class="mm-ibtn" type="button" id="mmTheme" aria-label="Theme" title="Light / dark">' + g.micon("theme") + "</button>"
-      + '<button class="mm-ibtn" type="button" id="mmMore" aria-label="About Minima Mail" title="About">' + g.micon("dots") + "</button></div>"
-      + '<div class="mm-tabs" role="tablist" id="mmTabs">' + FOLDERS.map(function (f) {
-        var n = f[0] === "inbox" ? unreadCount() : f[0] === "outbox" ? OUT.length : 0;
-        return '<button type="button" role="tab" data-f="' + f[0] + '" aria-selected="' + (VIEW === f[0]) + '">' + D.esc(f[1])
-          + (n ? '<span class="mm-cnt">' + n + "</span>" : "") + "</button>";
-      }).join("") + "</div>";
+    var title = "";
+    FOLDERS.forEach(function (f) { if (f[0] === VIEW) title = f[1]; });
+    return '<div class="mm-head"><button class="mm-ibtn" type="button" id="mmMenu" aria-label="Open menu" aria-haspopup="true" aria-expanded="false">' + g.micon("menu") + "</button>"
+      + '<h2 class="mm-title">' + D.esc(title) + "</h2></div>";
+  }
+  function drawer() {
+    var items = FOLDERS.map(function (f, i) {
+      var n = f[0] === "inbox" ? unreadCount() : f[0] === "outbox" ? OUT.length : 0, sel = VIEW === f[0];
+      return (i === 4 ? '<div class="mm-navsep"></div>' : "")
+        + '<button type="button" class="mm-nav' + (sel ? " mm-sel" : "") + '" data-f="' + f[0] + '"' + (sel ? ' aria-current="page"' : "") + ">"
+        + g.micon(f[2]) + '<span class="mm-grow">' + D.esc(f[1]) + "</span>" + (n ? '<span class="mm-cnt">' + n + "</span>" : "") + "</button>";
+    }).join("");
+    return '<div class="mm-scrim" id="mmScrim" hidden></div>'
+      + '<nav class="mm-drawer" id="mmDrawer" aria-label="Mail folders" hidden>'
+      + '<div class="mm-dhead"><div class="mm-brand">MINIMA <i>MAIL</i></div>'
+      + '<div class="mm-self">' + D.esc(ID && ID.words ? "you · " + ID.words : "Connecting to your node…") + "</div></div>"
+      + items + '<div class="mm-grow"></div><div class="mm-dver">Minima Mail' + (VERSION ? " v" + D.esc(VERSION) : "") + "</div></nav>";
+  }
+  function setDrawer(open) {
+    var d = D.el("mmDrawer"), s = D.el("mmScrim"), b = D.el("mmMenu");
+    if (!d || !s) return;
+    d.hidden = s.hidden = !open;
+    if (b && b.setAttribute) b.setAttribute("aria-expanded", String(open));
+    if (open) { var first = d.querySelector && (d.querySelector(".mm-sel") || d.querySelector(".mm-nav")); if (first) first.focus(); }
+    else if (b && b.focus && document.activeElement && d.contains && d.contains(document.activeElement)) b.focus();
   }
   /** The freshness line — the panel's one honest statement about how much of the chain it has actually read. */
   function freshness() {
     var st = STATUS || {};
     var bf = st.backfill || {};
     var cls = "mm-fresh", text, act = "Check now";
-    if (!st.scannedTip) { cls += " mm-cold"; text = "Waiting for your node…"; }
+    if (!st.scannedTip) { cls += " mm-cold"; text = "Connecting to your node…"; }
     else if (bf.active) {
       cls += " mm-busy";
       text = "Catching up — block " + groupInt(bf.floor || 0) + " of " + groupInt(st.scannedTip);
     } else {
-      var mins = st.lastScanMs ? Math.floor((Date.now() - st.lastScanMs) / 60000) : 0;
-      text = "Checked block " + groupInt(st.scannedTip) + " · " + (mins < 1 ? "just now" : mins + " min ago");
+      text = "Checked block " + st.scannedTip + " · " + (st.lastScanMs ? since(st.lastScanMs) : "now");   // the phone prints the block plainly
       if (bf.done) act = "Check now";
     }
     return '<div class="' + cls + '" id="mmFresh"><span class="mm-dot"></span>'
@@ -273,7 +300,12 @@
     var sweep = bf.active ? "Sweeping — block " + groupInt(bf.floor || 0)
       : bf.done ? "Complete — the node serves no further back"
       : "Ready";
-    return '<div class="mm-grp">Identity</div>'
+    var dark = ID && ID.theme === "dark";
+    return '<div class="mm-grp">Appearance</div>'
+      + '<div class="mm-set"><span class="mm-m"><span class="mm-tt">Theme</span><span class="mm-dd">Paper by day, dark by night — your call</span></span>'
+      + '<span class="mm-seg" role="group" aria-label="Theme"><button type="button" data-theme="light" aria-pressed="' + !dark + '">Paper</button>'
+      + '<button type="button" data-theme="dark" aria-pressed="' + !!dark + '">Dark</button></span></div>'
+      + '<div class="mm-grp">Identity</div>'
       + '<button class="mm-set mm-tap" type="button" id="mmSetName"><span class="mm-m"><span class="mm-tt">Display name</span>'
       + '<span class="mm-dd">Sent with every message, so people see who you are</span></span>'
       + '<span class="mm-vv">' + D.esc((ID && ID.name) || "(not set)") + "</span>" + g.micon("chev") + "</button>"
@@ -339,12 +371,13 @@
     var host = D.el("mailBody");
     if (!host) return;
     if (!booted) {
-      host.innerHTML = '<div class="mailapp"><div class="mm-empty">Starting Minima Mail…</div></div>';
+      host.innerHTML = shellOpen() + '<div class="mm-empty">Connecting to your node…</div></div>';
       try { ID = await D.api.mailInit(); } catch (e) {
-        host.innerHTML = '<div class="mailapp"><div class="mm-empty">' + D.esc(e.message || String(e)) + "</div></div>";
+        host.innerHTML = shellOpen() + '<div class="mm-empty">' + D.esc(errText(e)) + "</div></div>";
         return;
       }
       booted = true;
+      D.api.appVersion().then(function (v) { VERSION = v || ""; }).catch(function () {});
     }
     await loadLists();
     if (VIEW === "thread") return renderThread(host);
@@ -352,13 +385,15 @@
     renderFolder(host);
   }
 
+  /** Mail's own Paper / Dark (Settings, Appearance): it does not follow the shell's theme, as on the phone. */
+  function shellOpen() { return '<div class="mailapp"' + (ID && ID.theme === "dark" ? ' data-mm-theme="dark"' : "") + ">"; }
   function renderFolder(host) {
     var f = VIEW;
-    var showFresh = (f === "inbox" || f === "archive");
-    host.innerHTML = '<div class="mailapp">' + header() + (showFresh ? freshness() : "")
+    var showFresh = f === "inbox";   // the phone: the freshness line and the compose button are the Inbox's
+    host.innerHTML = shellOpen() + header() + (showFresh ? freshness() : "")
       + '<div class="mm-body" id="mmBody">' + folderBody(f) + "</div>"
-      + (showFresh ? '<button class="mm-fab" type="button" id="mmFab" aria-label="Compose">' + g.micon("pen") + "</button>" : "")
-      + "</div>";
+      + (showFresh ? '<button class="mm-fab" type="button" id="mmFab" aria-label="New message">' + g.micon("pen") + "</button>" : "")
+      + drawer() + "</div>";
     wireShell(host);
     if (f === "key") drawQr();
     var add = D.el("mmAddContact");
@@ -477,11 +512,12 @@
     });
   }
   function wireShell(host) {
-    host.querySelectorAll("#mmTabs button").forEach(function (b) {
+    var menu = D.el("mmMenu"); if (menu) menu.onclick = function () { setDrawer(true); };
+    var scrim = D.el("mmScrim"); if (scrim) scrim.onclick = function () { setDrawer(false); };
+    var dr = D.el("mmDrawer"); if (dr) dr.onkeydown = function (e) { if (e.key === "Escape") { e.stopPropagation(); setDrawer(false); } };
+    host.querySelectorAll(".mm-nav").forEach(function (b) {
       b.onclick = function () { VIEW = b.dataset.f; PEER = null; render(); };
     });
-    var t = D.el("mmTheme"); if (t) t.onclick = function () { if (D.cycleTheme) D.cycleTheme(); };
-    var mo = D.el("mmMore"); if (mo) mo.onclick = showAbout;
     var ck = D.el("mmCheck");
     if (ck) ck.onclick = async function () {
       ck.disabled = true;
@@ -491,6 +527,13 @@
   }
 
   function wireSettings(host) {
+    host.querySelectorAll("[data-theme]").forEach(function (b) {
+      b.onclick = async function () {
+        if ((ID.theme === "dark") === (b.dataset.theme === "dark")) return;
+        try { ID = await D.api.mailSetTheme(b.dataset.theme); } catch (e) { D.toast(errText(e), "err"); }
+        render();
+      };
+    });
     D.el("mmSetName").onclick = async function () {
       var n = await D.showPrompt("Display name", (ID && ID.name) || "", "Your name",
         { message: "Sent with every message so your contacts see a name instead of a key." });
@@ -562,7 +605,7 @@
     const address = peerWords.get(PEER) || PEER;
     var sub = SUBJ && nm !== address ? nm + " · " + address : address;
     if (!SUBJ && nm === address) title = "Conversation";
-    host.innerHTML = '<div class="mailapp">'
+    host.innerHTML = shellOpen()
       + '<div class="mm-cbar"><button class="mm-ibtn" type="button" id="mmBack" aria-label="Back">' + g.micon("back") + "</button>"
       + avatar(PEER, nm, 34)
       + '<span class="mm-ctitles"><span class="mm-ct">' + D.esc(title) + '</span><span class="mm-cs">' + D.esc(sub) + "</span></span>"
@@ -600,7 +643,7 @@
     try { dictionary = await D.api.mailAddressWords(); }
     catch (error) { dictionary = []; D.toast(errText(error), "err"); }
     if (VIEW !== "compose" || COMPOSE !== c) return;
-    host.innerHTML = '<div class="mailapp">'
+    host.innerHTML = shellOpen()
       + '<div class="mm-chead"><button class="mm-ibtn" type="button" id="mmCancel" aria-label="Close">' + g.micon("close") + "</button>"
       + '<span class="mm-t">New message</span>'
       + '<button class="mm-sendbtn" type="button" id="mmDoSend">' + g.micon("send") + "Send</button></div>"
@@ -691,7 +734,7 @@
     D.el("mmPhoto").onclick = function () { D.el("mmFile").click(); };
     D.el("mmFile").onchange = function (e) { if (resolved && e.target.files[0]) composeImage(e.target.files[0], resolved); };
     D.el("mmFunds").onclick = async function () {
-      if (resolved) await sendFunds(resolved);
+      if (resolved) await sendFunds(resolved, D.el("mmSubj").value.trim());
     };
     D.el("mmDoSend").onclick = async () => {
       if (!resolved || sending) return;
@@ -752,39 +795,146 @@
   function plusMenu() {
     D.showActionSheet("Attach", [
       { label: "Photo", onclick: function () { D.el("mmFile").click(); } },
-      { label: "Send funds", onclick: function () { sendFunds(PEER); } }
+      { label: "Send funds", onclick: function () { sendFunds(PEER, SUBJ); } }
     ]);
   }
-  /** The payment sheet. The address is the peer's own, learned from their signed messages (never typed by us
-   *  unless they've never written), and main re-validates it with `checkaddress` before any coin moves. */
-  function sendFunds(peer) {
-    D.showActionSheet("Send funds", [
-      { label: "Minima", onclick: () => sendCurrency(peer, "0x00", "MINIMA") },
-      { label: "MxUSD", onclick: () => sendCurrency(peer, "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", "MxUSD") }
-    ]);
+  // ---------------------------------------------------------------- dialogs and menus, in Mail's own look
+  function root() { return document.querySelector ? document.querySelector("#mailBody .mailapp") : null; }
+  /**
+   * One Mail dialog: { title, html | message, ok, cancel (false = none), neutral, danger, wide,
+   *   onOpen(box, close), onOk(box) → false keeps it open, onNeutral(box) }. Resolves what onOk returned (true when
+   * there is none), or null when cancelled. Escape cancels; focus goes back to what opened it.
+   */
+  function mmDialog(o) {
+    return new Promise(function (resolve) {
+      var host = root(); if (!host) return resolve(null);
+      var opener = document.activeElement, ov = document.createElement("div");
+      ov.className = "mm-ov";
+      ov.innerHTML = '<div class="mm-dlg' + (o.wide ? " mm-dlg--wide" : "") + '" role="dialog" aria-modal="true" aria-label="' + D.esc(o.title || "Mail") + '">'
+        + (o.title ? '<div class="mm-dtitle">' + D.esc(o.title) + "</div>" : "")
+        + '<div class="mm-dbody">' + (o.html != null ? o.html : '<div class="mm-dmsg">' + D.esc(o.message || "") + "</div>") + "</div>"
+        + '<div class="mm-dstatus" role="alert"></div>'
+        + '<div class="mm-dbtns">' + (o.neutral ? '<button type="button" class="mm-dbtn mm-dneutral">' + D.esc(o.neutral) + "</button>" : "") + '<span class="mm-grow"></span>'
+        + (o.cancel === false ? "" : '<button type="button" class="mm-dbtn mm-dcancel">' + D.esc(o.cancel || "Cancel") + "</button>")
+        + (o.ok === false ? "" : '<button type="button" class="mm-dbtn mm-dok' + (o.danger ? " mm-danger" : "") + '">' + D.esc(o.ok || "OK") + "</button>") + "</div></div>";
+      MODAL++;
+      host.appendChild(ov);
+      var box = ov.querySelector(".mm-dlg"), status = ov.querySelector(".mm-dstatus"), okB = ov.querySelector(".mm-dok"), open = true;
+      box.say = function (text) { status.textContent = text || ""; };
+      var close = function (v) {
+        if (!open) return; open = false; MODAL--; ov.remove();
+        if (opener && opener.isConnected && opener.focus) opener.focus();
+        resolve(v);
+      };
+      var cancelB = ov.querySelector(".mm-dcancel"), neutralB = ov.querySelector(".mm-dneutral");
+      if (cancelB) cancelB.onclick = function () { close(null); };
+      if (neutralB) neutralB.onclick = function () { if (o.onNeutral) o.onNeutral(box); };
+      if (okB) okB.onclick = async function () {
+        okB.disabled = true;
+        var v; try { v = o.onOk ? await o.onOk(box) : true; } catch (e) { box.say(errText(e)); v = false; }
+        okB.disabled = false;
+        if (v !== false) close(v == null ? true : v);
+      };
+      ov.onkeydown = function (e) {
+        if (e.key === "Escape" && o.cancel !== false) { e.stopPropagation(); close(null); }
+        else if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.target.closest(".we") && okB) { e.preventDefault(); okB.click(); }
+        else if (e.key === "Tab") {   // stay inside
+          var f = box.querySelectorAll("button:not([disabled]):not([hidden]), input:not([hidden]), textarea"), a = f[0], z = f[f.length - 1];
+          if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
+          else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+        }
+      };
+      if (o.onOpen) o.onOpen(box, close);
+      var first = box.querySelector("input:not([hidden]), textarea") || okB || cancelB;
+      if (first && !box.contains(document.activeElement)) first.focus();
+    });
   }
-  async function sendCurrency(peer, tokenId, tokenName) {
-    const subject = VIEW === "thread" ? SUBJ : ((D.el("mmSubj") || {}).value || "");
-    var addr = await D.api.mailResolvePayaddr(peer).catch(function () { return ""; });
-    if (!addr) { try { await D.api.mailRequestPayaddr(peer); } catch (e) {} }
-    var amount = await D.showPrompt("Send " + tokenName, "", "0.0",
-      { message: "To " + nameFor(peer, null) + (addr ? "\n" + addr : "\nNo address known yet — asking them for it now.") });
-    if (amount == null) return;
-    if (!addr) { D.toast("No receiving address for them yet — try again once they reply.", "err"); return; }
-    if (!/^[0-9]*\.?[0-9]+$/.test(amount) || parseFloat(amount) <= 0) { D.toast("Enter a valid amount.", "err"); return; }
-    var memo = await D.showPrompt("Note (optional)", "", "What's it for?");
-    if (memo == null) memo = "";
-    var ok = await D.showConfirm("Send " + amount + " " + tokenName + "?",
-      "To " + nameFor(peer, null) + "\n" + addr + "\n\nThis sends real funds and cannot be undone.", "Send", true);
-    if (!ok) return;
-    try {
-      await D.api.mailPay(peer, addr, amount, tokenId, tokenName, memo, subject);
-      D.toast("Payment sent ✓", "ok");
-    } catch (e) {
+  function mmConfirm(title, message, ok, danger) { return mmDialog({ title: title, message: message, ok: ok, danger: danger }).then(function (v) { return v === true; }); }
+  function copied(text, said) { D.copy(text); D.toast(said, "ok"); }
+
+  /** Exact comparison of two plain decimals (no floats: an amount is never rounded to decide whether it can be sent). */
+  function decParts(v) { var p = String(v).split("."); return [(p[0] || "0").replace(/^0+(?=\d)/, ""), (p[1] || "").replace(/0+$/, "")]; }
+  function decCmp(a, b) {
+    var x = decParts(a), y = decParts(b);
+    if (x[0].length !== y[0].length) return x[0].length < y[0].length ? -1 : 1;
+    if (x[0] !== y[0]) return x[0] < y[0] ? -1 : 1;
+    var n = Math.max(x[1].length, y[1].length), f = x[1].padEnd(n, "0"), h = y[1].padEnd(n, "0");
+    return f === h ? 0 : f < h ? -1 : 1;
+  }
+  function looksLikeMinimaAddress(a) {
+    a = String(a || "").trim();
+    if (/^Mx[0-9A-Za-z]+$/.test(a)) return a.length >= 40 && a.length <= 80;
+    return /^0x[0-9A-Fa-f]{64}$/.test(a);
+  }
+  /**
+   * Send funds (MainActivity.showSendFundsSheet): the Parlons-style currency picker (Minima and MxUSD, each with the
+   * node's sendable balance), amount, their receiving address (learned from their signed messages; asked for when
+   * unknown), a note; then Review, and only then the payment. Main checks the address with the node before any coin moves.
+   */
+  async function sendFunds(peer, subject) {
+    var known = await D.api.mailResolvePayaddr(peer).catch(function () { return ""; });
+    if (!known) { try { await D.api.mailRequestPayaddr(peer); } catch (e) {} }
+    var tokens = await D.api.mailPayOptions().catch(function () { return []; });
+    if (!tokens || !tokens.length) { D.toast("No funds available to send.", "err"); return; }
+    var mine = (ID && ID.payaddr) || "", who = nameFor(peer, null);
+    var pick = await mmDialog({ title: "Send funds to " + who, ok: "Review",
+      html: '<div class="mm-flab" id="mmTokLab">Token</div><div class="mm-radio" role="radiogroup" aria-labelledby="mmTokLab">'
+        + tokens.map(function (t, i) {
+          return '<label><input type="radio" name="mmTok" value="' + i + '"' + (i === 0 ? " checked" : "") + "><span>" + D.esc(t.name + "  ·  " + t.balance) + "</span></label>";
+        }).join("") + "</div>"
+        + '<label class="mm-flab" for="mmAmt">Amount</label><input class="mm-inp" id="mmAmt" inputmode="decimal" placeholder="0.0" autocomplete="off">'
+        + '<label class="mm-flab" for="mmPayAddr">Their Minima receiving address</label>'
+        + '<input class="mm-inp mm-inp--mono" id="mmPayAddr" placeholder="0x… / Mx… address" autocomplete="off" spellcheck="false" value="' + D.esc(known || "") + '">'
+        + '<div class="mm-fhint" id="mmPayHint">' + (known ? "Auto-filled from their messages." : "Auto-fills when they message you / are online. Or scan their QR, or paste their address.") + "</div>"
+        + '<button type="button" class="mm-tbtn" id="mmPayScan">Scan their QR for their address</button>'
+        + '<div class="mm-fhint mm-fhint--addr">You\'ll receive at: ' + D.esc(mine || "(getting your address…)") + "</div>"
+        + '<label class="mm-flab" for="mmMemo">Note (optional)</label><input class="mm-inp" id="mmMemo" placeholder="What\'s it for?" autocomplete="off">',
+      onOpen: function (box) {
+        var addr = box.querySelector("#mmPayAddr");
+        PAYFILL = function () {                          // the handshake answered while the sheet is open
+          if (!addr.isConnected) { PAYFILL = null; return; }
+          if (addr.value.trim()) return;
+          D.api.mailResolvePayaddr(peer).then(function (a) { if (a && addr.isConnected && !addr.value.trim()) { addr.value = a; box.querySelector("#mmPayHint").textContent = "Auto-filled from their messages."; } }).catch(function () {});
+        };
+        box.querySelector("#mmPayScan").onclick = async function () {
+          var v = await D.scanQR("Scan their Mail-key QR for their address").catch(function () { return null; });
+          if (!v) return;
+          var parts = String(v).split("|"), a = (parts[1] || parts[0]).trim();
+          if (looksLikeMinimaAddress(a)) addr.value = a; else box.say("That QR does not carry a Minima receiving address.");
+        };
+      },
+      onOk: function (box) {
+        var sel = box.querySelector('input[name="mmTok"]:checked'); if (!sel) return false;
+        var t = tokens[parseInt(sel.value, 10)], amount = box.querySelector("#mmAmt").value.trim(), addr = box.querySelector("#mmPayAddr").value.trim();
+        if (!amount) { box.say("Enter an amount."); return false; }
+        if (!/^[0-9]*\.?[0-9]+$/.test(amount)) { box.say("Invalid amount."); return false; }
+        if (!/[1-9]/.test(amount)) { box.say("Enter an amount."); return false; }
+        if (decCmp(amount, t.balance) > 0) { box.say("Insufficient balance."); return false; }
+        if (!looksLikeMinimaAddress(addr)) { box.say("Enter " + who + "'s Minima receiving address (0x… or Mx…)."); return false; }
+        return { token: t, amount: amount, addr: addr, memo: box.querySelector("#mmMemo").value };
+      } });
+    PAYFILL = null;
+    if (!pick) return;
+    if (!await mmConfirm("Send " + pick.amount + " " + pick.token.name + "?",
+        "To " + who + "\n" + pick.addr + "\n\nThis sends real funds and cannot be undone.", "Send")) return;
+    var done = null, wait = mmDialog({ title: "Sending " + pick.amount + " " + pick.token.name, message: "Posting to the chain — this can take a few seconds…",
+      ok: false, cancel: false, onOpen: function (_box, close) { done = close; } });
+    var result, failure = null;
+    try { result = await D.api.mailPay(peer, pick.addr, pick.amount, pick.token.tokenid, pick.token.name, pick.memo, subject || ""); }
+    catch (e) { failure = e; }
+    if (done) done(true); await wait;
+    if (failure) {
       // An RPC timeout is AMBIGUOUS — the coin may well have gone out. Never invite a retry that double-spends.
-      var msg = String((e && e.message) || e || "");
-      if (/may have been submitted/i.test(msg)) D.toast("The node didn't answer in time — check your balance before resending.", "err");
-      else D.toast(errText(e), "err");
+      var msg = String((failure && failure.message) || failure || "");
+      await mmDialog({ title: "Payment failed", cancel: false, ok: "OK",
+        message: /may have been submitted/i.test(msg) ? "The node didn't answer in time. The payment may have been sent: check your balance and History before sending again."
+          : /validate the recipient/i.test(msg) ? "Couldn't validate the recipient address — not sending." : "Payment failed: " + errText(failure) });
+    } else {
+      var txid = (result && result.txpowid) || "";
+      await mmDialog({ title: "Payment sent", cancel: false, ok: "OK", neutral: txid ? "Copy tx id" : null,
+        message: "Sent " + pick.amount + " " + pick.token.name + " to " + who + "." + (txid ? "\n\nTx: " + txid : "")
+          + (result && result.receiptFailed ? "\n\nThe payment went through, but the receipt message to them did not post." : ""),
+        onNeutral: function () { copied(txid, "Copied."); } });
     }
     render();
   }
@@ -866,7 +1016,9 @@
     pending = setTimeout(function () {
       if (!booted) return;
       // Never rebuild the compose form under someone's hands — their draft would go with it.
-      if (VIEW === "compose") { loadLists(); return; }
+      if (PAYFILL) PAYFILL();
+      if (MODAL > 0 || VIEW === "compose") { loadLists(); return; }
+      var d = D.el("mmDrawer"); if (d && d.isConnected && d.hidden === false) { loadLists(); return; }   // the side menu is open
       render();
     }, 350);
   }
@@ -875,5 +1027,7 @@
     catch (e) { return 0; }
   }
 
-  g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge, backup: doBackup, restore: doRestore };   // backup and restore are also opened from Backup & Recovery
+  g.MailPanel = { init: init, render: render, reset: reset, onUpdate: onUpdate, badge: badge, backup: doBackup, restore: doRestore,
+    _open: function (what, a, b) { if (what === "thread") openThread(a, b || "", "", "inbox"); else if (what === "compose") openCompose(a); else if (what === "funds") sendFunds(a, b || ""); else { VIEW = what; PEER = null; render(); } },   // the dev preview drives screens through this
+    _pure: { decCmp: decCmp, looksLikeMinimaAddress: looksLikeMinimaAddress } };   // backup and restore are also opened from Backup & Recovery
 })(window);

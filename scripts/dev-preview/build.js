@@ -17,7 +17,7 @@ const here = __dirname, renderer = path.join(here, "..", "..", "renderer");
 let html = fs.readFileSync(path.join(renderer, "index.html"), "utf8");
 html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>\s*/, "")
   .replace("<head>", `<head>\n  <base href="${pathToFileURL(renderer + path.sep)}" />`)
-  .replace('<script src="qrcode.js">', `<script src="${pathToFileURL(path.join(here, "stub.js"))}"></script>\n  <script src="qrcode.js">`);
+  .replace('<script src="qrcode.js">', `<script>window.__MAIL_WORDS = ${JSON.stringify(fs.readFileSync(path.join(here, "..", "..", "main", "mail-address-words.txt"), "utf8").trim().split(/\r?\n/))};</script>\n  <script src="${pathToFileURL(path.join(here, "stub.js"))}"></script>\n  <script src="qrcode.js">`);
 const out = path.join(here, "preview.html");
 fs.writeFileSync(out, html);
 console.log("wrote " + out);
@@ -57,7 +57,10 @@ if (process.argv.includes("--shots")) {
     ["settings-stopped", "view=settings&tray=0&state=stopped"], ["settings-1440x900", "view=settings&tray=0", 1440, 900, 1],
     ["apps", "view=apps&tray=0"], ["node", "view=node&tray=0"],
     ["tray", "view=node&tray=1"], ["overflow", "view=balances&tray=0&menu=1"], ["ethwallet", "view=ethwallet&tray=0"],
-    ["mail", "view=mail&tray=1"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],
+["mail", "view=mail&tray=0"], ["mail-tray", "view=mail&tray=1"], ["mail-empty", "view=mail&tray=0&mails=empty"], ["mail-1440x900", "view=mail&tray=0", 1440, 900, 1], ["mail-mmdark", "view=mail&tray=0&mm=dark"],
+    ["mail-menu", "view=mail&tray=0&mail=menu"], ["mail-outbox", "view=mail&tray=0&mail=outbox"], ["mail-sent", "view=mail&tray=0&mail=sent"], ["mail-archive", "view=mail&tray=0&mail=archive"], ["mail-contacts", "view=mail&tray=0&mail=contacts"], ["mail-key", "view=mail&tray=0&mail=key"], ["mail-settings", "view=mail&tray=0&mail=settings"], ["mail-thread", "view=mail&tray=0&mail=thread"], ["mail-compose", "view=mail&tray=0&mail=compose"], ["mail-compose-ready", "view=mail&tray=0&mail=compose-ready"], ["mail-funds", "view=mail&tray=0&mail=funds"],
+    ["mail-thread-1440x900", "view=mail&tray=0&mail=thread", 1440, 900, 1], ["mail-compose-1440x900", "view=mail&tray=0&mail=compose", 1440, 900, 1], ["mail-menu-1440x900", "view=mail&tray=0&mail=menu", 1440, 900, 1], ["mail-funds-1440x900", "view=mail&tray=0&mail=funds", 1440, 900, 1],
+    ["mail-thread-mmdark", "view=mail&tray=0&mail=thread&mm=dark"], ["mail-menu-mmdark", "view=mail&tray=0&mail=menu&mm=dark"], ["mail-funds-mmdark", "view=mail&tray=0&mail=funds&mm=dark"], ["mail-settings-mmdark", "view=mail&tray=0&mail=settings&mm=dark"], ["receive", "view=receive&tray=0"], ["receive-1440x900", "view=receive&tray=0", 1440, 900, 1], ["receive-stopped", "view=receive&tray=0&state=stopped"],
     ["stopped", "view=balances&tray=0&state=stopped"], ["shutdown", "view=balances&tray=0&shutdown=1"], ["apps-hidden", "view=apps&tray=0&hidden=mail"],
     // Dexicon. The file prefix is the SYSTEM theme; "-dxlight" is Dexicon's own light theme (it does not follow the system)
     ["ax-swap", "view=atomix"], ["ax-swap-dxlight", "view=atomix&dx=light"], ["ax-swap-1440x900", "view=atomix", 1440, 900, 1], ["ax-swap-dxlight-1440x900", "view=atomix&dx=light", 1440, 900, 1],

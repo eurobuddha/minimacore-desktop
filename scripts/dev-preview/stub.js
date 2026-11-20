@@ -165,9 +165,25 @@
     tx(10, 60 * 24 * 40, "in", "normal", "1000", "0x00", "Minima", EXT, [c(EXT, "1000")], [c(ADDR, "1000")], { "0x00": "1000" }),
     tx(11, 60 * 24 * 41, "in", "normal", "7", "0x00", "Minima", CON, [c(CON, "7")], [c(CON, "7")], { "0x00": "7" })   // touches no wallet address: "foreign"
   ];
-  const mailId = PK("E5");
-  const mailThread = (who, name, subject, message, unread, mins) => ({ other: who, hashref: PK("F" + mins), unread,
-    last: { incoming: true, frompublickey: who, topublickey: mailId, fromname: name, subject, message, type: "text", timemilli: now - mins * 60000, date: now - mins * 60000 } });
+  // Mail fixtures: invented people and text; keys are 0x + 128 hex and plainly not real; the six words are list words, not anyone's address.
+  // ?mail=menu|outbox|sent|archive|contacts|key|settings|thread|compose|compose-ready|funds  &mm=dark (Mail's own Dark)  &mails=empty
+  const MK = (n) => "0x" + (n + "FA4E".repeat(32)).slice(0, 128).toLowerCase();
+  const mailId = MK("e5"), MAILS = Q.get("mails") || "";
+  const MW = { [MK("11")]: "canal-dune-harbor-lemon-maple-olive", [MK("22")]: "river-stone-walnut-zebra-anchor-basket", [MK("33")]: "dolphin-eagle-forest-garden-hazard-island", [mailId]: "jungle-olive-canal-stone-eagle-lemon" };
+  const mailMsg = (who, incoming, subject, message, mins, extra) => Object.assign({ hashref: PK("F" + who.slice(2, 4) + subject.length), randomid: PK("A" + mins), incoming, frompublickey: incoming ? who : mailId, topublickey: incoming ? mailId : who,
+    fromname: "", subject, message, type: "text", status: incoming ? "received" : "confirmed", sentblock: incoming ? 0 : 2428000, read: true, date: now - mins * 60000 }, extra || {});
+  const mailThread = (who, subject, message, unread, mins, incoming) => { const last = mailMsg(who, incoming !== false, subject, message, mins); return { other: who, words: MW[who], hashref: last.hashref, unread, count: 3, subject, last }; };
+  const MAIL_CONV = [
+    mailMsg(MK("11"), true, "Saturday market", "Is table nine still free for Saturday?", 60 * 26),
+    mailMsg(MK("11"), false, "Saturday market", "Yes. I have put your name on it.", 60 * 25),
+    mailMsg(MK("11"), true, "Saturday market", "Thank you. I will bring the awning and the two crates.", 95),
+    mailMsg(MK("11"), false, "Saturday market", "For the deposit", 40, { type: "payment", amount: "12.5", tokenid: MXUSD, tokenname: "MxUSD", status: "sent", sentblock: 2428080 }),
+    mailMsg(MK("11"), true, "Saturday market", "The stall is booked, table nine by the fountain.", 12),
+    mailMsg(MK("11"), false, "Saturday market", "See you there.", 1, { status: "posting", sentblock: 0 })];
+  const MAIL_OUT = [mailMsg(MK("11"), false, "Saturday market", "See you there.", 1, { status: "posting" }), mailMsg(MK("33"), false, "", "Could you send the photos again?", 30, { status: "failed" })];
+  const MAIL_SENT = [mailMsg(MK("22"), false, "Invoice 0042", "Received, thank you.", 200, { status: "confirmed", sentblock: 2427850 }), mailMsg(MK("11"), false, "Saturday market", "For the deposit", 40, { type: "payment", amount: "12.5", tokenname: "MxUSD", status: "sent", sentblock: 2428080 })];
+  const MAIL_CONTACTS = [{ publicId: MK("11"), username: "Odile Varga", words: MW[MK("11")], published: false }, { publicId: MK("22"), username: "Teodor Lind", words: MW[MK("22")], published: true }];
+  let mailTheme = Q.get("mm") === "dark" ? "dark" : "light";
   const chatThread = (pk, name, body, unread, mins) => ({ pubkey: pk, name, unread, last: { ts: now - mins * 60000, body, out: false, state: "delivered" } });
   const status = {
     state: "running", rpcPort: 9005, contribute: false, portmap: {}, parlons: { ready: false, error: "" },
@@ -196,12 +212,22 @@
     histQuery: async (f) => histRows.filter(r => (!f.search || JSON.stringify([r.counterparty, r.tokenName, r.txpowid, r.amount]).toLowerCase().includes(String(f.search).toLowerCase()))
       && (!f.direction || r.direction === f.direction || r.kind === f.direction) && (!f.token || r.tokenid === f.token)),
     histStats: async () => ({ count: histRows.length }), histAdd: async () => histRows.length, histImport: async () => ({ added: 0, refused: false }), exportCsv: async () => null, importJson: async () => null,
-    mailInit: async () => ({ publicId: mailId, name: "Preview", words: "amber canal dune ember fjord grove", published: false, payaddr: ADDR }),
-    mailThreads: async () => [
-      mailThread(PK("11"), "Odile Varga", "Saturday market", "The stall is booked, table nine by the fountain.", 1, 12),
-      mailThread(PK("22"), "Teodor Lind", "Invoice 0042", "Sent the corrected copy, same total as before.", 0, 190)],
-    mailArchivedThreads: async () => [], mailOutbox: async () => [], mailSent: async () => [], mailContacts: async () => [],
-    mailStatus: async () => ({ scannedTip: 2428089, lastScanMs: now - 60000, backfill: { done: true } }),
+    mailInit: async () => ({ publicId: mailId, name: "", words: MW[mailId], link: "minimamail://contact/" + MW[mailId] + "?id=" + mailId, published: true, payaddr: ADDR, theme: mailTheme }),
+    mailSetTheme: async (t) => { mailTheme = t === "dark" ? "dark" : "light"; return fixtures.mailInit(); },
+    mailSetName: async () => fixtures.mailInit(), mailShare: async () => mailId + "|" + ADDR, mailAddressWords: async () => window.__MAIL_WORDS || [],
+    mailThreads: async () => MAILS === "empty" ? [] : [
+      mailThread(MK("11"), "Saturday market", "The stall is booked, table nine by the fountain.", 1, 12),
+      mailThread(MK("22"), "Invoice 0042", "Sent the corrected copy, same total as before.", 0, 190),
+      mailThread(MK("33"), "", "Could you send the photos again?", 0, 60 * 30, false)],
+    mailArchivedThreads: async () => MAILS === "empty" ? [] : [mailThread(MK("22"), "Old lease", "Signed and returned.", 0, 60 * 24 * 12)],
+    mailOutbox: async () => MAILS === "empty" ? [] : MAIL_OUT, mailSent: async () => MAILS === "empty" ? [] : MAIL_SENT,
+    mailContacts: async () => MAILS === "empty" ? [] : MAIL_CONTACTS,
+    mailThread: async () => MAIL_CONV, mailThreadWith: async () => MAIL_CONV,
+    mailCheckOwnBeacon: async () => ({ block: 2427841 }),
+    mailResolveAddress: async (v) => { if (/zebra/.test(v)) throw new Error("No published address found on this node. Ask the recipient to publish their address or share their contact link."); return MK("11"); },
+    mailResolvePayaddr: async () => ADDR, mailRequestPayaddr: async () => true,
+    mailPayOptions: async () => [{ tokenid: "0x00", name: "Minima", balance: "1250.75" }, { tokenid: MXUSD, name: "MxUSD", balance: "88.123456" }],
+    mailStatus: async () => ({ scannedTip: 2428089, lastScanMs: now - 20000, backfill: { done: true } }),
     chatInit: async () => ({ pubkey: PK("77"), name: "Preview" }),
     chatThreads: async () => [chatThread(PK("31"), "Mirela Okafor", "See you at the harbour at six.", 2, 5), chatThread(PK("32"), "Jonas Petrov", "Thanks, got it.", 0, 300)],
     chatThread: async () => [], chatStatus: async () => ({ ready: true }),
@@ -344,6 +370,18 @@
           if (Q.get("dxopen") === "1") document.querySelector('[data-asset="mxusd"]').click();
         }, 500);
       }
+      // Mail: ?mail=<screen>, one step every 500 ms where a screen has to be reached through another
+      if (view === "mail" && Q.get("mail")) setTimeout(() => {
+        const m = Q.get("mail"), P = MailPanel, later = (fn) => setTimeout(fn, 700);
+        if (m === "menu") el("mmMenu").click();
+        else if (m === "thread") P._open("thread", MK("11"), "Saturday market");
+        else if (m === "compose") P._open("compose", null);
+        else if (m === "compose-ready") { P._open("compose", null); later(() => { const b = document.querySelectorAll("#mmToWords input"); "canal dune harbor lemon maple olive".split(" ").forEach((w, i) => { b[i].value = w; b[i].dispatchEvent(new Event("input")); });
+          b[5].dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })); el("mmSubj").value = "Saturday market"; el("mmBodyIn").value = "Is table nine still free for Saturday?"; }); }
+        else if (m === "funds") { P._open("thread", MK("11"), "Saturday market"); later(() => { P._open("funds", MK("11"), "Saturday market"); later(() => { el("mmAmt").value = "12.5"; el("mmMemo").value = "For the deposit"; }); }); }
+        else P._open(m);
+        document.activeElement && document.activeElement.blur();
+      }, 700);
       if (Q.get("expand") === "1") el("walHead").click();
       // History: ?hmenu=1 opens its options, ?hdetail=<n> the n-th row's detail (&chain=checking: no answer yet), ?hfilter=1 the filter, ?hforeign=1 hides foreign rows
       if (view === "history") setTimeout(() => {
