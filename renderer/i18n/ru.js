@@ -749,6 +749,7 @@
   "Buyer key": "Ключ покупателя",
   "Update status": "Обновить статус",
   "Awaiting payment first. PAID is set by the payment itself, when it arrives.": "Сначала ожидается оплата. Статус PAID устанавливает сам платёж, когда он поступает.",
+  "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}": "Сумма покупателя не является числом больше нуля, поэтому этот заказ никогда не будет отмечен как оплаченный. Получено на данный момент: {amount} {cur}",
   "Next: {next}.": "Далее: {next}.",
   "This order is delivered.": "Этот заказ доставлен.",
   "Conversation": "Переписка",
@@ -2899,11 +2900,12 @@
   "DELIVERED": "ДОСТАВЛЕН",
   "UNDERPAID": "НЕДОПЛАТА",
   "WRONG_TOKEN": "НЕВЕРНЫЙ ТОКЕН",
+  "BAD_TOTAL": "НЕВЕРНАЯ СУММА",
   "ALL": "ВСЕ"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)", "• {item}.", "Dexicon", "{day} {month}", "{day} {month} {year}"],
-  // translated for the desktop (the phone has no such text): 1876 keys for native review
+  // translated for the desktop (the phone has no such text): 1878 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -3353,6 +3355,7 @@
     "paid {amount} {cur}",
     "Not given",
     "Awaiting payment first. PAID is set by the payment itself, when it arrives.",
+    "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}",
     "Next: {next}.",
     "This order is delivered.",
     "Buyer",
@@ -4780,6 +4783,7 @@
     "POSTED",
     "REFUSED",
     "DROPPED",
-    "on-chain"
+    "on-chain",
+    "BAD_TOTAL"
   ]
 });

@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.164] — miniMall vendor: a malformed, zero or negative buyer total is never paid
+
+- **Ported from the released desktop (read only):** `desktop/minimacore-desktop-sec` 0.18.149 (`7d73315f6420a515f5b9e04c50983663f20f7830`). `main/shop-store.js` `decCmp` answered 0 ("equal") for a figure it could not read, so an incoming order whose total the buyer wrote as "abc" or "1e3" counted as paid by any coin; a total of 0 or below was accepted too.
+- **Now:** `decParse` reads only a plain decimal (digits, at most one point with digits after it: no sign, exponent, hex or spaces); `decCmp` is an exact BigInt compare and answers `null` for anything else, never "equal"; `payableTotal` is a readable figure above zero. `recordPayment` gives `BAD_TOTAL` for any other total and never marks it paid, whatever arrives (what arrived is still recorded).
+- **Inbox:** a `BAD_TOTAL` order has the red pill and says "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: …", in the four languages (review lists).
+- **Pin:** `main/shop-store.js` is sha256-pinned in `scripts/apps-money.test.cjs`; the pin is updated on purpose to this file (each pin now names the version it belongs to).
+- Test: `scripts/shop-store-test.cjs` (new, the real store with a throw-away folder, in `npm run test:apps`): exact compare past a double's precision, every unreadable figure `null` on either side, malformed / zero / negative totals `BAD_TOTAL` whatever is received, a readable total paid exactly and cumulatively in its token. Two of them fail on 0.19.163.
+
 ## [0.19.163] — Entropy: the node never sees the device bytes
 
 - **Brought over from the phone (read only):** Entropy 0.1.16 (`apks/entropy-fix-2026-11-20`, `2c3f010cd87686dcbbe186cf81d17182f1f7376f`). 0.19.132 checked the node's `hash` answer, but `hash data:A||B` still sent the device bytes B to the node, so whoever answers the node learned every die and could veto throws it disliked by answering with an error.

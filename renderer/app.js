@@ -3602,7 +3602,7 @@ let shopFilter = "ALL";         // the Inbox's status chip
 let shopDraft = null;           // Studio: the shop being built
 let shopUpdateTimer = null;
 const SHOP = AppsAct.shop;
-const SHOP_PILL = { DELIVERED: "#2ECC71", SHIPPED: "#2ECC71", PAID: "#F7931A", CONFIRMED: "#F7931A", UNDERPAID: "#E74C3C", WRONG_TOKEN: "#E74C3C" };
+const SHOP_PILL = { DELIVERED: "#2ECC71", SHIPPED: "#2ECC71", PAID: "#F7931A", CONFIRMED: "#F7931A", UNDERPAID: "#E74C3C", WRONG_TOKEN: "#E74C3C", BAD_TOTAL: "#E74C3C" };
 const SHOP_APPS = [["shop", "miniMall", L_("Browse your shops, place orders and track deliveries.")], ["studio", "miniMall Studio", L_("Build a storefront for your products.")], ["inbox", "miniMall Inbox", L_("Manage customer orders, payments and deliveries.")]];
 
 async function onShopUpdate() {
@@ -3683,7 +3683,7 @@ async function renderShopSellOrder(ref) {
      ${o.note ? `<div class="mm-sec">${th("Buyer note")}</div><div class="mm-card">${esc(o.note)}</div>` : ""}
      ${shopKv(t("Buyer key"), o.counterparty || "", true)}
      ${enquiry ? "" : `<div class="mm-sec">${th("Update status")}</div><div class="mm-grid">${[N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${th(s)}</button>`).join("")}</div>
-       <div class="mm-hint">${!o.paid ? th("Awaiting payment first. PAID is set by the payment itself, when it arrives.") : next ? tr("Next: {next}.", { next: next }) : th("This order is delivered.")}</div>`}
+       <div class="mm-hint">${o.status === "BAD_TOTAL" ? tr("The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}", { amount: esc(o.paidAmount || "0"), cur: esc(cur) }) : !o.paid ? th("Awaiting payment first. PAID is set by the payment itself, when it arrives.") : next ? tr("Next: {next}.", { next: next }) : th("This order is delivered.")}</div>`}
      <div class="mm-sec">${enquiry ? th("Conversation") : th("Message the buyer")}</div><div class="mm-thread">${shopThread(d.chat, t("Buyer"))}</div>
      <div class="mm-send"><input class="mm-in-f" id="shopMsg" placeholder="${th("Reply…")}" aria-label="${th("Reply")}" autocomplete="off" /><button class="mm-btn" id="shopSend">${th("Send")}</button></div>`);
   shopWireOrder(ref, () => renderShopSellOrder(ref));

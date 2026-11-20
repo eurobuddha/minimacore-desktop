@@ -336,8 +336,10 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   assert.ok(!/vendorPublicId \|\| ""\)\.slice/.test(mall), "the vendor card is whole (it was cut to 18 characters)");
   assert.match(mall, /idHtml\(shopIdentity\.publicId\)/);
   const sha = (f) => require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", f))).digest("hex");
-  // main/shop.js was CHANGED ON PURPOSE in 0.19.118 (the token paid follows the currency; a mismatching tokenid is refused; plain amounts): the pin is the new file's
-  for (const [f, want] of [["main/shop.js","d90041499905001e1565c0bd60ed86b5042770cfadf5fc5eff7b2f81d832123c"],["main/shop-store.js","75b6697ef20a1f340638900bed90421e612b8c0f733a7d3719344b58d3cb50d0"],["main/shopcrypto.js","a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec"]]) assert.equal(sha(f), want, f + (f === "main/shop.js" ? " is the file of 0.19.118" : " is the file of 0.19.107"));
+  // Each pin is a file CHANGED ON PURPOSE, never by a screen change: main/shop.js in 0.19.118 (the token paid follows the currency; a
+  // mismatching tokenid is refused; plain amounts); main/shop-store.js in 0.19.164 (an unreadable, zero or negative buyer total is never paid: BAD_TOTAL)
+  for (const [f, want, ver] of [["main/shop.js", "d90041499905001e1565c0bd60ed86b5042770cfadf5fc5eff7b2f81d832123c", "0.19.118"], ["main/shop-store.js", "eac6a80c8b10d7e16ea0876eaae743e62e68a561d795b88b977385b3e2f4a491", "0.19.164"],
+    ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 
 // 0.19.118: the token paid, the pictures and the figures of a vendor's .shop

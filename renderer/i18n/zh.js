@@ -749,6 +749,7 @@
   "Buyer key": "买家密钥",
   "Update status": "更新状态",
   "Awaiting payment first. PAID is set by the payment itself, when it arrives.": "请先等待付款。“已付款”状态由付款本身在到账时设定。",
+  "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}": "买家的总额不是大于零的金额，因此此订单永远不会被标记为已付款。目前已收到：{amount} {cur}",
   "Next: {next}.": "下一步：{next}。",
   "This order is delivered.": "此订单已送达。",
   "Conversation": "对话",
@@ -2899,11 +2900,12 @@
   "DELIVERED": "已送达",
   "UNDERPAID": "付款不足",
   "WRONG_TOKEN": "代币不符",
+  "BAD_TOTAL": "总额无效",
   "ALL": "全部"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
   same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
-  // translated for the desktop (the phone has no such text): 1878 keys for native review
+  // translated for the desktop (the phone has no such text): 1880 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -3353,6 +3355,7 @@
     "paid {amount} {cur}",
     "Not given",
     "Awaiting payment first. PAID is set by the payment itself, when it arrives.",
+    "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}",
     "Next: {next}.",
     "This order is delivered.",
     "Buyer",
@@ -4782,6 +4785,7 @@
     "POSTED",
     "REFUSED",
     "DROPPED",
-    "on-chain"
+    "on-chain",
+    "BAD_TOTAL"
   ]
 });

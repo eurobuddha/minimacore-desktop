@@ -215,6 +215,7 @@ test("no code decides by matching text that is translated (regex, ===, includes,
   for (const c of OTHERS) require("../renderer/i18n/" + c + ".js");
   const ALLOW = {
     "renderer/apps-act.js International": "a delivery label as stored and sent (a wire value), compared before it is translated for the screen",
+    "renderer/app.js BAD_TOTAL": "a miniMall order state as stored (a wire value), compared before it is translated for the screen",
     "renderer/dexicon-ax.js AtomiX is halted": "the AtomiX glue's own refusal (main/atomix.js), which reaches the window in English",
     "renderer/dexicon-core.js Only your own orders are at this price": "the Exchange engine's own English sentence (dexicon/lib/ownskip.js), matched before anything is translated",
     "renderer/dexicon-pp.js timed out": "the PandaPools engine's raw message, before it is put into words",
@@ -275,7 +276,7 @@ test("months, chips and order states are said in each language where drawn; the 
       const said = inflight.clock(JUL, NOW, I18N.t);
       assert.ok(said.includes(I18N.t("Jul")) && said.includes("09:05") && said.includes("16") && !/ on |Jul/.test(said), code + ": " + said);
       const bt = blockTime("Thu Jul 16 14:54:04 BST 2026"); assert.ok(bt.includes(I18N.t("Jul")) && bt.includes("2026") && bt.includes("14:54:04 BST") && !/Jul/.test(bt), code + ": " + bt);
-      for (const w of ["LIVE", "DONE", "FAILED", "REFUNDED", "LOST", "UNKNOWN", "WAITING", "BID", "ASK", "ENQUIRY", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED", "UNDERPAID", "WRONG_TOKEN", "ALL", "SETTLING", "IN BLOCK", "CO-SIGNED"]) assert.notEqual(I18N.t(w), w, code + ": " + w);
+      for (const w of ["LIVE", "DONE", "FAILED", "REFUNDED", "LOST", "UNKNOWN", "WAITING", "BID", "ASK", "ENQUIRY", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED", "UNDERPAID", "WRONG_TOKEN", "BAD_TOTAL", "ALL", "SETTLING", "IN BLOCK", "CO-SIGNED"]) assert.notEqual(I18N.t(w), w, code + ": " + w);
     }
   } finally { I18N.set("en"); }
   // drawn through the catalog; the value under it unchanged
