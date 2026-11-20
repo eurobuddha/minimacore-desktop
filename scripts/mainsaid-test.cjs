@@ -184,3 +184,33 @@ test("the coin guard: every refusal, run through main/reserve.js in front of the
   const app = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes('t.textContent = MainSaid.say(msg) + (copyText ? "  ⧉" : "");') && app.split(', "HOLD_WHY")').length - 1 >= 3, "toasts and the held lines go through MainSaid");
 });
+
+// The tray apps and the rest of main.js: what they say is held to their source (four of them are pinned by sha256 and are
+// never edited: their exact English is listed), and read back in each language with sample values.
+test("ETH Wallet, miniMall, Vestr, Web Wallet, Faucet, Explorer, KeyUses, updates, main.js: each listed sentence is in its file, and is said in each language", async () => {
+  const fs = require("fs"), path = require("path"), read = (f) => fs.readFileSync(path.join(__dirname, "..", "main", f), "utf8");
+  const SRC = { EW_: "ethwallet.js", SHOP_: "shop.js", VESTR_: "vestr.js", WW_: "webwallet.js", FAUCET_: "faucet.js", EXPLORER_: "explorer.js", KU_: "keyuses.js", UPD_: "updater.js", MAIN_: "main.js" };
+  const unq = (s) => s.replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+  let n = 0;
+  for (const code of MS.codes()) {
+    const pre = Object.keys(SRC).find(p => code.startsWith(p)); if (!pre) continue;
+    const src = unq(read(SRC[pre])), tpl = MS.template(code); n++;
+    for (const piece of tpl.split(/\{\w+\}/).map(x => x.trim()).filter(x => x.length >= 8)) assert.ok(src.includes(piece), code + ": not in main/" + SRC[pre] + ": " + piece);
+    if (!/\{\w+\}/.test(tpl)) assert.ok(src.includes('"' + tpl + '"') || src.includes("'" + tpl + "'") || src.includes(tpl + '"') || code === "EW_CANCELLED", code + ": said as a whole in main/" + SRC[pre]);
+    check(tpl.replace(/\{(\w+)\}/g, (m, k) => (k === "exportphrase" ? "SHOW KEY" : k === "product" ? "minimaCore" : "X-" + k)));
+  }
+  assert.ok(n >= 70, "the tray apps' sentences are all checked (" + n + ")");
+  // through the screens' own reader (AppsAct): the IPC wrapper taken off, translated, and main's English kept for a decision
+  const Act = require("../renderer/apps-act.js"), rej = (m) => ({ ewExportKey: () => Promise.reject(new Error("Error invoking remote method 'mcd:ewExportKey': Error: " + m)) });
+  try {
+    for (const code of ["en", ...LANGS]) {
+      I18N.set(code);
+      const r = await Act.eth.exportKey(rej("Cancelled"), "SHOW KEY");
+      assert.deepEqual(r, { err: I18N.t("Cancelled"), raw: "Cancelled" }); assert.ok(MS.has(r.raw, "EW_CANCELLED"));
+      const f = await Act.eth.exportKey(rej("node blew up"), "SHOW KEY"); assert.deepEqual(f, { err: "node blew up", raw: "node blew up" }, "anything else as it came, without the wrapper");
+    }
+  } finally { I18N.set("en"); }
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"), tools = fs.readFileSync(path.join(__dirname, "..", "renderer", "apps-tools.js"), "utf8");
+  assert.ok(app.includes('MainSaid.has(r.raw || "", "EW_CANCELLED") ? t("Cancelled") : r.err') && !/\/cancel\/i\.test/.test(app), "the key export decides by code");
+  assert.ok(app.includes("error: MainSaid.say(u.error)") && tools.includes("esc(MainSaid.say(s.error))"));
+});

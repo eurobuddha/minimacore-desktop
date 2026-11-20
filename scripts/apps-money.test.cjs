@@ -69,7 +69,7 @@ test("ETH Wallet: the key is asked for only with the typed phrase (CHANGED on pu
   assert.deepEqual(await Act.eth.exportKey(recorder({ ewExportKey: null }).api, "SHOW KEY"), { err: "No key yet" });
   assert.deepEqual(r.log, [["ewExportKey", ["SHOW KEY"]]]);
   const no = recorder({ ewExportKey: () => Promise.reject(new Error("Cancelled")) });
-  assert.deepEqual(await Act.eth.exportKey(no.api, "SHOW KEY"), { err: "Cancelled" });
+  assert.deepEqual(await Act.eth.exportKey(no.api, "SHOW KEY"), { err: "Cancelled", raw: "Cancelled" });   // 0.19.160: raw, main's English, for the screen's decision by code
 });
 test("ETH Wallet, main process: no key without the phrase; the system's prompt is asked where there is one and its refusal ends it", async () => {
   const ethwallet = require("../main/ethwallet"), atomix = require("../main/atomix");

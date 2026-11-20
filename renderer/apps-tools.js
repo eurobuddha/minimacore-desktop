@@ -47,7 +47,7 @@ function renderKeyUses() {
     <div class="kx-card">
       <button class="kx-run" id="kuRun"${s.busy || !running ? " disabled" : ""}>${s.busy ? `<i class="kx-spin" aria-hidden="true"></i>${th("Auditing your keys…")}` : th("Run audit")}</button>
       <p class="kx-privacy">${th("Only public keys and addresses are sent to eurobuddha.com for the audit. This reveals the selected addresses to that server. Seeds stay on this computer.")}</p>
-      ${s.error ? `<div class="kx-error" role="alert">${esc(s.error)}</div>` : ""}
+      ${s.error ? `<div class="kx-error" role="alert">${esc(MainSaid.say(s.error))}</div>` : ""}
     </div>
     <div id="kuResults" aria-live="polite">${s.result ? keyUsesResults(s.result) : ""}</div>
     <div class="kx-card"><div class="kx-label">${th("Key audit")}</div><p class="kx-explain">${esc(C.explain)}</p>

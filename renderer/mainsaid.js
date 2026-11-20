@@ -179,7 +179,97 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["WHY_OTHER", I18N.N_("another part of the app"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_DEXICON_ORDER", I18N.N_("a live Dexicon order"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_DEXICON_TAKE", I18N.N_("a Dexicon take that has not been answered yet"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
-    ["WHY_DEXICON_VOID", I18N.N_("a Dexicon take that is being voided"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }]
+    ["WHY_DEXICON_VOID", I18N.N_("a Dexicon take that is being voided"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
+
+    // ---- ETH Wallet (main/ethwallet.js) ----
+    ["EW_FROZEN", I18N.N_("Dexicon is frozen, and this wallet sends through its Ethereum engine. Unfreeze Dexicon on the Apps tab, then send again. Nothing was sent.")],
+    ["EW_TYPE", I18N.N_("Type {exportphrase} exactly to continue.")],
+    ["EW_CANCELLED", I18N.N_("Cancelled")],
+
+    // ---- miniMall (main/shop.js: pinned by sha256, its exact English) ----
+    ["SHOP_SEED", I18N.N_("Couldn't read the node seed (is the wallet unlocked?).")],
+    ["SHOP_RECIPIENT", I18N.N_("Invalid recipient shop id.")],
+    ["SHOP_TOO_LARGE", I18N.N_("Message too large for one coin (shrink any image).")],
+    ["SHOP_VENDOR_ADDRESS_BAD", I18N.N_("Invalid vendor address.")],
+    ["SHOP_TOKEN_BAD", I18N.N_("Invalid token.")],
+    ["SHOP_AMOUNT_BAD", I18N.N_("Invalid amount.")],
+    ["SHOP_VENDOR_CHECK", I18N.N_("Couldn't validate the vendor address — not sending.")],
+    ["SHOP_MAY_SUBMITTED", I18N.N_("Payment may have been submitted — check your balance/history before retrying.")],
+    ["SHOP_VENDOR_ID", I18N.N_("This shop's vendor id is invalid.")],
+    ["SHOP_PAYOUT", I18N.N_("This shop's payout address is invalid.")],
+    ["SHOP_NOT_FOUND", I18N.N_("Order not found.")],
+    ["SHOP_MAY_SENT", I18N.N_("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.")],
+    ["SHOP_PAID", I18N.N_("This order is already paid.")],
+    ["SHOP_NO_VENDOR", I18N.N_("Missing vendor address for retry.")],
+
+    // ---- Minima Vestr (main/vestr.js: pinned, its exact English) ----
+    ["VESTR_AMOUNT", I18N.N_("Enter a valid amount to lock")],
+    ["VESTR_BENEFICIARY", I18N.N_("Enter a beneficiary address")],
+    ["VESTR_TOKEN", I18N.N_("Invalid token id")],
+    ["VESTR_BURN", I18N.N_("Invalid burn amount")],
+    ["VESTR_PASSWORD", I18N.N_("The wallet password can't contain quotes, backslashes or line breaks")],
+    ["VESTR_END", I18N.N_("End must be after start")],
+    ["VESTR_BENEFICIARY_BAD", I18N.N_("Invalid beneficiary address")],
+    ["VESTR_LOCK_FAILED", I18N.N_("Lock failed")],
+    ["VESTR_COIN_ID", I18N.N_("Invalid coin id")],
+    ["VESTR_NO_COIN", I18N.N_("Contract coin not found (already collected?)")],
+    ["VESTR_NOTHING", I18N.N_("Nothing available to collect yet")],
+    ["VESTR_STEP", I18N.N_("collect step failed: {error}")],
+
+    // ---- Web Wallet (main/webwallet.js: pinned, its exact English) ----
+    ["WW_ADDRESS", I18N.N_("bad address")],
+    ["WW_SEED", I18N.N_("Enter your seed phrase (a \" or \\ or line break can't be carried safely)")],
+    ["WW_MEGAMMR", I18N.N_("Web Wallet needs a MegaMMR node")],
+    ["WW_DERIVE", I18N.N_("Could not derive wallet from seed")],
+    ["WW_SEED_BAD", I18N.N_("Invalid seed phrase")],
+    ["WW_RECIPIENT", I18N.N_("Invalid recipient address")],
+    ["WW_AMOUNT", I18N.N_("Invalid amount")],
+    ["WW_RECIPIENT_CHECK", I18N.N_("Recipient address failed validation")],
+    ["WW_SIGNING", I18N.N_("Could not derive signing key")],
+    ["WW_KEY_CHECK", I18N.N_("Derived key material failed validation")],
+    ["WW_ACK", I18N.N_("Confirm this wallet's key-uses count before sending")],
+    ["WW_UNKNOWN", I18N.N_("Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying.")],
+    ["WW_UNKNOWN_TWICE", I18N.N_("Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying (a blind retry could pay twice).")],
+
+    // ---- Minima Faucet (main/faucet.js: pinned, its exact English) ----
+    ["FAUCET_NO_DATA", I18N.N_("Faucet returned no data.")],
+    ["FAUCET_UNREACHABLE", I18N.N_("Couldn't reach the faucet.")],
+    ["FAUCET_ADDRESS", I18N.N_("Enter a valid Mx… / 0x… address.")],
+
+    // ---- Minima Explorer (main/explorer.js) ----
+    ["EXPLORER_QUERY", I18N.N_("Not a block number, a TxPoW ID or an address.")],
+
+    // ---- KeyUses (main/keyuses.js) ----
+    ["KU_UNAVAILABLE", I18N.N_("The node’s keys could not be read. Check that the node is running, then run the audit again.")],
+    ["KU_CHANGED", I18N.N_("The node’s keys changed during the audit. Run it again.")],
+    ["KU_NETWORK", I18N.N_("Could not reach the audit service. Check your connection and try again.")],
+    ["KU_SELFTEST", I18N.N_("Address verification failed. This build cannot run a reliable audit.")],
+
+    // ---- Updates (main/updater.js) ----
+    ["UPD_OFF", I18N.N_("{product} does not update itself. A newer build is installed by hand.")],
+    ["UPD_URL", I18N.N_("refusing a non-https update URL: {url}")],
+    ["UPD_FEED", I18N.N_("the update feed must be https")],
+    ["UPD_NONE", I18N.N_("no update to download")],
+    ["UPD_DOWNLOAD", I18N.N_("refusing a non-https download")],
+    ["UPD_NO_SHA", I18N.N_("the feed carries no sha256 for this platform — refusing to download")],
+    ["UPD_SHA", I18N.N_("sha256 mismatch — the download does not match the feed; not saved")],
+    ["UPD_SIZE", I18N.N_("size mismatch — the download does not match the feed; not saved")],
+
+    // ---- The rest of main/main.js (backups, files, the Terminal) ----
+    ["MAIN_NODE_DOWN", I18N.N_("node not running")],
+    ["MAIN_EMPTY", I18N.N_("empty command")],
+    ["MAIN_LANGUAGE", I18N.N_("Unknown language.")],
+    ["MAIN_JAR_UPDATER", I18N.N_("The in-app node updater is disabled.")],
+    ["MAIN_NOT_VERIFIED", I18N.N_("The file is not verified yet.")],
+    ["MAIN_PASSWORD_8", I18N.N_("Use a password of at least 8 characters.")],
+    ["MAIN_BACKUP_PASSWORD", I18N.N_("Enter the backup's password.")],
+    ["MAIN_CHAT_TOO_LARGE", I18N.N_("That file is too large to be a chat backup.")],
+    ["MAIN_OPEN_AGAIN", I18N.N_("Open the backup again.")],
+    ["MAIN_PASSPHRASE_8", I18N.N_("Use a passphrase of at least 8 characters.")],
+    ["MAIN_BACKUP_PASSPHRASE", I18N.N_("Enter the backup passphrase.")],
+    ["MAIN_NO_ENGINE", I18N.N_("No such engine.")],
+    ["MAIN_TOO_LARGE_64", I18N.N_("That file is larger than 64 MB.")],
+    ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")]
   ];
 
   var BY = {}, GROUP = {}, TOP = [];

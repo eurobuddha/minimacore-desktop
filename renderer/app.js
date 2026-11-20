@@ -2968,17 +2968,17 @@ async function renderSettings() {
     `<div id="chanceLeft"></div>`;
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
-    if (u.error && !u.available) b.textContent = t("Could not read the feed ({error}). Running v{running}.", { error: u.error, running: u.running });
+    if (u.error && !u.available) b.textContent = t("Could not read the feed ({error}). Running v{running}.", { error: MainSaid.say(u.error), running: u.running });
     else if (u.available) b.innerHTML = tr("{b}Minima Core {version}{_b} is available (you run v{running})", { b: "<b>", _b: "</b>", version: esc(u.version), running: esc(u.running) }) + (u.date ? " · " + esc(u.date) : "") + (u.notes ? "<br>" + esc(u.notes) : "") + (u.downloaded ? "<br>" + tr("Downloaded to {path}", { path: esc(u.downloaded) }) : "");
     else b.textContent = t("You run the newest build, v{running}{toLocaleTimeSt}.", { running: u.running, toLocaleTimeSt: (u.checkedAt ? (" " + t("(checked {toLocaleTimeSt})", { toLocaleTimeSt: new Date(u.checkedAt).toLocaleTimeString() })) : "") });
     g.hidden = !u.available;
   };
   if (fl.updates) api.updateStatus().then(drawUpdate).catch(() => {});
-  if (el("updCheck")) el("updCheck").onclick = async () => { el("updStatus").textContent = t("Checking…"); try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = e.message || String(e); } };
+  if (el("updCheck")) el("updCheck").onclick = async () => { el("updStatus").textContent = t("Checking…"); try { const u = await api.updateCheck(); drawUpdate(u); el("updStatus").textContent = ""; } catch (e) { el("updStatus").textContent = ipcError(e); } };
   if (el("updGet")) el("updGet").onclick = async () => {
     el("updGet").disabled = true; el("updStatus").textContent = t("Downloading: the file is verified against the feed before it is saved…");
     try { const r = await api.updateDownload(); el("updStatus").textContent = t("Saved and verified: {path}: install it over this app, then relaunch.", { path: r.path }); drawUpdate(r.status); }
-    catch (e) { el("updStatus").textContent = e.message || String(e); }
+    catch (e) { el("updStatus").textContent = ipcError(e); }
     el("updGet").disabled = false;
   };
   el("setKindApply").onclick = async () => {
@@ -3539,7 +3539,7 @@ function ewExportKey() {
       if (busy) return; busy = true;
       const r = await AppsAct.eth.exportKey(api, el("ewExpIn").value);
       busy = false;
-      if (r.err) { toast(/cancel/i.test(r.err) ? t("Cancelled") : r.err, "warn"); return; }
+      if (r.err) { toast(MainSaid.has(r.raw || "", "EW_CANCELLED") ? t("Cancelled") : r.err, "warn"); return; }   // decided by main's code, not the words on screen
       close();
       ewRevealKey(r.key, r.system); r.key = null;
     } }] });

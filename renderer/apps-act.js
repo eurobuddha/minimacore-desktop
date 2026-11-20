@@ -9,7 +9,10 @@
 if (typeof I18N === "undefined" && typeof require === "function") require("./i18n.js");   // loaded by a test or the main process: the same t(), th(), tr() the window has
 (function (root, make) { if (typeof module === "object" && module.exports) module.exports = make(); else root.AppsAct = make(); })(this, function () {
   "use strict";
-  var errOf = function (e) { return { err: String((e && e.message) || e) }; };
+  // What the main process answered, for the screen: Electron's "Error invoking remote method …" wrapper taken off, then said in the
+  // app's language when it is one of main's listed sentences (renderer/mainsaid.js). raw: the English as main said it, for a decision.
+  var said = typeof MainSaid !== "undefined" ? MainSaid : typeof require === "function" ? require("./mainsaid.js") : null;
+  var errOf = function (e) { var raw = String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); return { err: said ? said.say(raw) : raw, raw: raw }; };
   var text = function (v) { return String(v == null ? "" : v).trim(); };
 
   // ---- ETH Wallet (main/ethwallet.js, the AtomiX engine's Ethereum code) ----

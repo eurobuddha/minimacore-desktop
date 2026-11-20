@@ -219,6 +219,7 @@ test("no code decides by matching text that is translated (regex, ===, includes,
     "renderer/dexicon-core.js Only your own orders are at this price": "the Exchange engine's own English sentence (dexicon/lib/ownskip.js), matched before anything is translated",
     "renderer/dexicon-pp.js timed out": "the PandaPools engine's raw message, before it is put into words",
     "renderer/mail.js validate the recipient": "main/mail.js's own English error",
+    "renderer/mail.js may have been submitted": "main/mail.js's own English error, read from the raw message (never translated)",
     "main/atomix.js timed out": "an Ethereum RPC or network error text",
     "main/node-manager.js  Parlons Node ": "a line of the parlons-node jar's own log",
     "main/pandapools.js  MINIMA for ": "the PandaPools engine's English summary of a swap"
