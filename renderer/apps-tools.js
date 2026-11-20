@@ -280,16 +280,23 @@ function renderExplorer() {
 // Two tabs: DICE ROLL (pick a length, throw five dice or tap in real ones, the bits fill, the phrase is shown concealed)
 // and LAST WORD (type N-1 words, every valid last word is worked out). The maths is renderer/entropy-core.js.
 //
-// WHAT IS ON THIS SCREEN IS A WALLET SEED. It lives in this page's memory only: nothing is stored, logged, sent to the
-// main process, or put on the clipboard (the original has no copy button either). The device's own random values come
-// from WebCrypto, where the original uses SecureRandom; the node's come from its `random` and `hash` commands. A phrase
-// is concealed until Reveal, concealed again when the screen is left, and gone after Wipe or when the app quits.
-// While the screen is open the window is kept out of screen captures (the phone's FLAG_SECURE).
+// WHAT IS ON THIS SCREEN IS A WALLET SEED. The phrase itself lives in this page's memory only: it is never stored,
+// logged, put on the clipboard (the original has no copy button either) or sent to the main process. The VALUES IT IS
+// MADE FROM are another matter in digital mode: each roll's node value (A), device value (B) and their hash pass through
+// the main process (main/entropy.js) and the node on 127.0.0.1, and whoever holds every A and B can recompute the phrase.
+// The screen says so beside the mode choice and recommends real dice for a wallet that will hold value. The device's
+// own random values come from WebCrypto, where the original uses SecureRandom.
+// LIFETIME (0.19.133, as the phone's note promises): a phrase is concealed until Reveal, and with it the roll string and
+// the audit log. Leaving the screen by any route ERASES the phrase, the rolls, the audit values, their text in the page
+// and every typed last-word box: another screen (asked first when a finished phrase is there), the window hidden or
+// closed, the node stopping, a wallet restore, Hide or Freeze of Entropy, and five minutes without input (counted down
+// on screen through the last minute). While the screen is open the window is asked to be kept out of screen captures.
 // Not here: the sounds, and demo mode (the phone's switch that allows screen capture and then refuses to roll).
 const EN_PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
-let EN = null;
+const EN_IDLE_MS = 300000, EN_WARN_MS = 60000;
+let EN = null, EN_ASKING = false, EN_TICK = null;
 function entropyNew() { return { tab: "dice", words: 12, physical: false, faces: [], audits: [], busy: false, auto: false, done: false, revealed: false, phrase: null, audit: false, run: 0,
-  selfErr: "not run", ready: false, nodeOk: false, verified: 0, seen: new Set(), lw: { words: 12, hidden: false, candidates: null, prev: [] } }; }
+  selfErr: "not run", ready: false, nodeOk: false, verified: 0, seen: new Set(), idleAt: Date.now(), lw: { words: 12, hidden: false, candidates: null, prev: [] } }; }
 const enEl = (id) => el(id);
 const enSay = (id, text, cls) => { const n = enEl(id); if (n) { n.textContent = text; n.className = cls; } };
 const enDie = (n, face) => { n.dataset.face = face; n.innerHTML = `<i class="en-die__b">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => `<b${EN_PIPS[face].includes(i) ? ' class="on"' : ""}></b>`).join("")}</i>`; };
@@ -351,6 +358,13 @@ function enProgress() {
   enEl("enBar").style.width = Math.min(100, Math.floor(b * 100 / target)) + "%";
   enEl("enProgL").textContent = Math.min(b, target) + " / " + target + " bits, " + EN.faces.length + " rolls";
   enEl("enTicker").textContent = EN.faces.join("");
+  enEl("enRestart").hidden = !EN.faces.length || EN.done;
+}
+/** The phrase length is chosen BEFORE the first roll and not after: a length picked once rolls are seen would let the same rolls be tried at every length. */
+function enSetLength(n) {
+  if (EN.faces.length > 0) { if (!EN.done && n !== EN.words) enStatus("The phrase length cannot change once a roll is recorded. Start over to choose another length.", true); return false; }
+  if (EN.busy || EN.done) return false;
+  EN.words = n; enChips(); enProgress(); return true;
 }
 const enStatus = (text, err) => enSay("enStatus", text, "en-status" + (err ? " en-red" : ""));
 function enBlocked() { if (!EN.selfErr) return false; enStatus("Blocked: self-test failed: " + EN.selfErr, true); return true; }
@@ -397,18 +411,21 @@ async function enFinish() {
   if (!good) { EN.done = false; return enStatus("INTERNAL MISMATCH: phrase suppressed. Wipe and retry.", true); }   // our own checker must accept our own words, or nothing is shown
   EN.phrase = phrase; EN.revealed = false; enWords();
   enEl("enSummary").textContent = C.summary(EN.faces, EN.audits, all.length, ent.length, phrase.length).join("\n");
-  enEl("enRolls").textContent = EN.faces.join(""); enEl("enAudit").textContent = C.auditLog(EN.audits);
   enEl("enRoll").hidden = true; enEl("enDone").hidden = false;
 }
+/** The phrase, and with it the roll string and the audit log (each of them IS the phrase to whoever reads it): in the page only while revealed. */
 function enWords() {
-  const p = EN.phrase || [];
-  enEl("enWords").innerHTML = p.map((w, i) => `<div class="en-word${i === p.length - 1 ? " en-word--cs" : ""}${EN.revealed ? "" : " en-word--off"}">${i + 1}. ${EN.revealed ? esc(w) : "••••••"}</div>`).join("");
-  enEl("enReveal").textContent = EN.revealed ? "🙈 Click to hide" : "👁 Click to reveal";
+  const p = EN.phrase || [], on = EN.revealed && !!EN.phrase;
+  enEl("enWords").innerHTML = p.map((w, i) => `<div class="en-word${i === p.length - 1 ? " en-word--cs" : ""}${on ? "" : " en-word--off"}">${i + 1}. ${on ? esc(w) : "••••••"}</div>`).join("");
+  enEl("enReveal").textContent = on ? "🙈 Click to hide" : "👁 Click to reveal";
+  enEl("enRolls").textContent = on ? EN.faces.join("") : EN.phrase ? "•••••• (reveal the phrase to see its roll history)" : "";
+  if (!on) EN.audit = false;
+  const b = enEl("enAuditBtn"); b.disabled = !on; b.textContent = !on ? "Per-roll audit log: reveal the phrase first" : EN.audit ? "Hide per-roll audit log" : "Show per-roll audit log"; b.setAttribute("aria-expanded", EN.audit ? "true" : "false");
+  enEl("enAuditWrap").hidden = !EN.audit; enEl("enAudit").textContent = EN.audit ? EntropyCore.auditLog(EN.audits) : "";
 }
 function enWipe() {
   EN.run++; EN.faces = []; EN.audits = []; EN.phrase = null; EN.seen = new Set(); EN.busy = EN.auto = EN.done = EN.revealed = EN.audit = false;
-  enEl("enWords").innerHTML = ""; for (const id of ["enSummary", "enRolls", "enAudit"]) enEl(id).textContent = "";
-  enEl("enAuditWrap").hidden = true; enEl("enAuditBtn").textContent = "Show per-roll audit log";
+  enWords(); enEl("enSummary").textContent = "";
   enStatus("", false); enStopDice(); enEl("enDone").hidden = true; enEl("enRoll").hidden = false; enChips(); enProgress();
 }
 
@@ -470,15 +487,57 @@ function entropyTab(tab) {
   if (!EN.lw.hidden && lwBoxes().some(b => b.value)) lwHidden(true);
   for (const t of ["dice", "lw"]) { const on = t === tab; enEl(t === "dice" ? "enDiceTab" : "lwTab").hidden = !on; const b = enEl("enTab-" + t); b.classList.toggle("en-tab--on", on); b.setAttribute("aria-selected", on ? "true" : "false"); b.tabIndex = on ? 0 : -1; }
 }
-/** Leaving the screen: an auto-roll stops, a shown phrase and typed words are concealed, and the window may be captured again. Nothing is destroyed. */
-function entropyLeave() {
-  if (EN && el("enRoot")) { EN.auto = false; enChips(); entropyTab(EN.tab); }
-  try { api.secureScreen(false); } catch (e) {}
+/** Is there anything on the screen that is, or leads to, a seed phrase? */
+function enHolds() { return !!(EN && (EN.phrase || EN.faces.length || lwBoxes().some(b => b.value))); }
+/**
+ * ERASE: the phrase, the rolls, the audit values, everything the page drew of them (the words, #enRolls, #enAudit,
+ * #enSummary, #enTicker) and every typed last-word box. The screen's whole content is taken out of the page and the
+ * state replaced; a throw or a calculation still waiting for an answer finds another run number and records nothing.
+ */
+function entropyErase() {
+  if (!EN) return;
+  const run = EN.run + 1, verified = EN.verified;
+  clearInterval(EN_TICK); EN_TICK = null; enDice().forEach(d => clearInterval(d._flick));
+  EN.faces.length = 0; EN.audits.length = 0; EN.phrase = null; EN.lw.candidates = null; EN.seen.clear();
+  const body = el("entropyBody"); if (body) body.innerHTML = "";
+  EN = entropyNew(); EN.run = run; EN.verified = verified;
 }
+/** Erased without being asked (the window hidden, the node stopped, a wallet restore, five idle minutes): a screen still open is drawn again, empty, and says why. */
+function entropyErased(why) {
+  if (!EN) return;
+  const had = enHolds(), open = !!el("enRoot");
+  entropyErase();
+  if (open && activeView === "entropy") { renderEntropy(); if (had) enStatus("Everything on this screen was erased: " + why, true); }
+}
+/**
+ * selectTab asks this before another screen is shown. → true: go on (everything is erased and the window may be
+ * captured again). → false: a finished phrase is on the screen, so the user is asked, once; go() runs if they agree.
+ */
+function entropyLeaving(go) {
+  if (EN && EN.phrase) {
+    if (!EN_ASKING) { EN_ASKING = true; showConfirm("Leave Entropy?", "Leaving erases this phrase. Have you written it down?", "Erase and leave", true).then(ok => { EN_ASKING = false; if (ok) { entropyErase(); go(); } }); }
+    return false;
+  }
+  entropyErase();
+  try { api.secureScreen(false); } catch (e) {}
+  return true;
+}
+/** Once a second while the screen is open: five minutes without a click or a key erases what it holds, counted down through the last minute. */
+function enIdleTick(now) {
+  if (!EN || !el("enRoot")) return;
+  const n = el("enIdle"), left = EN.idleAt + EN_IDLE_MS - now;
+  if (!enHolds() || EN.busy || EN.auto) { EN.idleAt = now; if (n) n.hidden = true; return; }   // nothing to erase, or dice in the air
+  if (left <= 0) return entropyErased("5 minutes passed without input.");
+  if (n) { n.hidden = left > EN_WARN_MS; n.textContent = "No input for a while. Everything on this screen is erased in " + Math.ceil(left / 1000) + " s. Click or press a key to keep it."; }
+}
+// The window hidden or closed (on macOS closing hides it), or the page going away: erased at once, nobody is asked.
+document.addEventListener("visibilitychange", () => { if (document.hidden) entropyErased("the window was hidden."); });
+window.addEventListener("pagehide", () => entropyErase());
 function renderEntropy() {
   try { api.secureScreen(true).then(ok => { const n = el("enCapture"); if (n) n.hidden = ok !== false; }, () => {}); } catch (e) {}
   if (el("enRoot")) { enVerify(); return; }
-  EN = entropyNew();
+  const was = EN; EN = entropyNew();
+  if (was) { EN.run = was.run; EN.verified = was.verified; }   // the counters go on: an answer still on its way to an erased screen never matches the new one
   let initErr = null; try { EntropyCore.init(WordEntry.WORDS); } catch (e) { initErr = "init failed: " + ((e && e.message) || e); EntropyCore.init(new Array(2048).fill("")); }   // a broken list blocks everything below, with the reason on screen
   const C = EntropyCore, lens = (attr) => C.LENGTHS.map(n => `<button class="en-btn" ${attr}="${n}">${n}</button>`).join("");
   el("entropyBody").innerHTML = `<div class="en" id="enRoot"><div class="en-head"><div class="en-title">ENTROPY</div><div class="en-sub">PROVABLY FAIR BIP39 SEED DICE</div><div class="en-banner" id="enBanner" hidden></div>
@@ -487,13 +546,16 @@ function renderEntropy() {
     <div class="en-page" id="enDiceTab" role="tabpanel">
       <div class="en-card"><div class="en-label">PHRASE LENGTH</div><div class="en-row">${lens("data-len")}</div>
         <div class="en-label en-gap">DICE MODE</div><div class="en-row"><button class="en-btn" id="enDigital">Digital (node + device)</button><button class="en-btn" id="enPhysical">Physical dice</button></div>
+        <div class="en-hint" id="enModeNote">Digital: each roll's two random values and their hash pass through this app's main process and the node on 127.0.0.1. Whoever could read them there could rebuild the phrase. For a wallet that will hold real value, use Physical dice: real dice never leave this screen.</div>
         <div class="en-source" id="enSource" role="status">checking entropy sources…</div>
-        <div class="en-warn">⚠ SECURITY: you are generating a real wallet seed. Go offline, make sure nobody can see the screen, and write the words on paper only. Nothing is stored: quitting the app, or Wipe &amp; start over, destroys the phrase for ever.</div></div>
+        <div class="en-warn">⚠ SECURITY: you are generating a real wallet seed. Go offline, make sure nobody can see the screen, and write the words on paper only. Nothing is stored. Leaving this screen, hiding or closing the window, stopping the node, 5 minutes without input, or Wipe &amp; start over erases the phrase for ever.</div>
+        <div class="en-banner" id="enIdle" role="status" hidden></div></div>
       <div class="en-card" id="enRoll"><div class="en-label">COLLECT ENTROPY</div><div class="en-track"><div class="en-bar" id="enBar"></div></div><div class="en-mono en-dim" id="enProgL"></div>
         <div class="en-dice" id="enDice" aria-hidden="true">${"<div class=\"en-die\"></div>".repeat(C.DICE)}</div>
         <button class="en-btn en-btn--gold en-btn--full" id="enThrow">Throw 5 dice</button><button class="en-btn en-btn--full" id="enAuto">Auto-roll: off</button>
         <div id="enPad" hidden><div class="en-warn">⚠ Use a REAL, fair die and enter every roll exactly as it lands. Typing numbers "randomly" from your head produces a weak, guessable seed.</div>
           <div class="en-pad">${[1, 2, 3, 4, 5, 6].map(f => `<button class="en-btn en-btn--text" data-face="${f}" aria-label="A real die landed on ${f}">${"⚀⚁⚂⚃⚄⚅"[f - 1]} ${f}</button>`).join("")}</div><button class="en-btn en-btn--full" id="enUndo">↺ Undo last</button></div>
+        <button class="en-btn en-btn--full" id="enRestart" hidden>↺ Start over (erases these rolls)</button>
         <div class="en-ticker" id="enTicker" aria-label="The rolls so far"></div><div class="en-status" id="enStatus" role="status"></div></div>
       <div class="en-card" id="enDone" hidden><div class="en-label">YOUR SEED PHRASE</div><div class="en-words" id="enWords"></div><button class="en-btn en-btn--full" id="enReveal">👁 Click to reveal</button>
         <div class="en-mono en-dim en-summary" id="enSummary"></div>
@@ -515,14 +577,15 @@ function renderEntropy() {
   const root = el("enRoot");
   root.addEventListener("click", async (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.len) { if (!EN.busy && !EN.done) { EN.words = +b.dataset.len; enChips(); enProgress(); } }
+    if (b.dataset.len) enSetLength(+b.dataset.len);
+    else if (b.id === "enRestart") enWipe();   // also with dice in the air: that throw finds another run number and records nothing
     else if (b.id === "enDigital" || b.id === "enPhysical") { if (!EN.busy) { EN.physical = b.id === "enPhysical"; enChips(); } }
     else if (b.id === "enThrow") enThrow();
     else if (b.id === "enAuto") { EN.auto = !EN.auto; enChips(); if (EN.auto && !EN.busy && !EN.done) enThrow(); }
     else if (b.dataset.face) enTap(+b.dataset.face);
     else if (b.id === "enUndo") { if (!EN.done && EN.faces.length) { EN.faces.pop(); EN.audits.pop(); enProgress(); } }
     else if (b.id === "enReveal") { EN.revealed = !EN.revealed; enWords(); }
-    else if (b.id === "enAuditBtn") { EN.audit = !EN.audit; enEl("enAuditWrap").hidden = !EN.audit; b.textContent = EN.audit ? "Hide per-roll audit log" : "Show per-roll audit log"; b.setAttribute("aria-expanded", EN.audit ? "true" : "false"); }
+    else if (b.id === "enAuditBtn") { EN.audit = !EN.audit; enWords(); }
     else if (b.id === "enWipe") enWipe();
     else if (b.id === "enTab-dice" || b.id === "enTab-lw") entropyTab(b.id === "enTab-lw" ? "lw" : "dice");
     else if (b.dataset.lwlen) { EN.lw.words = +b.dataset.lwlen; lwBuild(); lwHidden(EN.lw.hidden); }
@@ -533,6 +596,8 @@ function renderEntropy() {
     else if (b.dataset.cand) lwPick(b.dataset.cand, "chosen manually");
     else if (b.id === "lwRandom") { const c = EN.lw.candidates; if (c && c.length) { const r = await enRandomN(); if (r.error) lwStatus(r.error, true); else if (EN.lw.candidates === c) lwPick(c[r.n % c.length], r.src === EntropyCore.SRC.NODE_DEVICE ? "picked by SHA3(node ++ device) entropy" : "picked by device entropy"); } }   // the count is a power of two, so the remainder is exactly uniform
   });
+  for (const type of ["pointerdown", "keydown", "input"]) root.addEventListener(type, () => { EN.idleAt = Date.now(); const n = el("enIdle"); if (n) n.hidden = true; }, true);
+  clearInterval(EN_TICK); EN_TICK = setInterval(() => enIdleTick(Date.now()), 1000);
   root.addEventListener("input", (e) => { if (e.target.matches("#lwBoxes input")) lwEdit(e.target); });
   root.addEventListener("focusin", (e) => { if (e.target.matches("#lwBoxes input")) lwSuggest(e.target); });
   root.querySelector(".en-tabs").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); const to = EN.tab === "dice" ? "lw" : "dice"; entropyTab(to); enEl("enTab-" + to).focus(); } });

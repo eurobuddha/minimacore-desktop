@@ -20,13 +20,14 @@
   var REJECT_THRESHOLD = 4294967292, REJECT_LIMIT = 25;   // RollEngine: floor(2^32 / 6) * 6; rerolls before the source is called broken
   var SRC = { NODE_DEVICE: "node-sha3+device", DEVICE_ONLY: "device-only", PHYSICAL: "physical" };
   var EVENT_BITS = ["00", "01", "10", "11", "0", "1"];
+  var WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda";
 
   /** SHA-256 of bytes → Promise<Uint8Array>. WebCrypto in the window, and in Node for the tests. */
   var sha256 = function (bytes) { return crypto.subtle.digest("SHA-256", bytes).then(function (b) { return new Uint8Array(b); }); };
 
   function init(words) {
     if (!Array.isArray(words) || words.length !== 2048) throw new Error("BIP39 wordlist must have 2048 words");
-    WORDS = words.slice(); INDEX = new Map();
+    WORDS = Object.freeze(words.slice()); INDEX = new Map();   // its own frozen copy: nothing changes a word after the self-test
     for (var i = 0; i < WORDS.length; i++) INDEX.set(WORDS[i], i);
   }
   function ready() { return WORDS !== null; }
@@ -94,6 +95,11 @@
       if (!(await check(eleven.concat("about")))) return "last-word tool: validator rejects known phrase";
       if (await check(eleven.concat("abandon"))) return "last-word tool: validator accepts invalid phrase";
       for (var c = 0; c < lw.candidates.length; c++) if (!(await check(eleven.concat(lw.candidates[c])))) return "last-word tool: candidate fails checksum";
+      // the WHOLE list, not only the words the vectors happen to use: the SHA-256 of the BIP39 English file (res/raw/pm_entropy_bip39_english.txt)
+      if (!Object.isFrozen(WORDS)) return "wordlist is not frozen";
+      var digest = await sha256(new TextEncoder().encode(WORDS.join("\n") + "\n")), hex = "";
+      for (var d = 0; d < digest.length; d++) hex += (digest[d] < 16 ? "0" : "") + digest[d].toString(16);
+      if (hex !== WORDLIST_SHA256) return "wordlist digest wrong";
       return null;
     };
     return run().catch(function (e) { return "self-test exception: " + ((e && e.message) || e); });

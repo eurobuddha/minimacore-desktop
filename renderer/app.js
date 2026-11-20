@@ -188,13 +188,14 @@ function onStatus(s) {
   running = s.state === "running";
   if (running && (waitingForNode || !wasRunning)) {
     waitingForNode = false;
+    entropyNode();   // the node is back: an open Entropy screen proves it again before a roll may use it
     startRefresh();
     refreshMailBadge();
     if (CFG.walletDone) { hideSetup(); renderActive(); }
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); entropyNode(); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
+  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); entropyErased("the node stopped."); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
@@ -543,7 +544,7 @@ async function offerWithoutDexicon(e) {
 // The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
 // node.onWalletReplaced, 0.18.106): that must not depend on this window being open. Here only the screen is cleared.
 async function walletReplaced() {
-  resetMailState(); resetPpState(); resetAxState();
+  resetMailState(); resetPpState(); resetAxState(); entropyErased("the wallet was replaced.");
   resetWalletFigures(); api.nodeStatus().then(paintFooter);
 }
 // A backup password as the node can carry it (the phone's rule): letters and numbers only. A quote used to
@@ -828,10 +829,11 @@ function viewOfTab(tab) { return tab === "wallet" ? "balances" : tab === "dexico
 function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: tab === "dexicon" ? "dex" : tab ? "tabs" : SUB_TITLE[view] ? "sub" : "app" }; }
 
 function selectTab(view) {
+  // Entropy holds a seed phrase: leaving it erases everything it holds, and a finished phrase is asked about first (then this runs again).
+  if (activeView === "entropy" && view !== "entropy" && !entropyLeaving(() => selectTab(view))) return;
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
-  if (activeView === "entropy" && view !== "entropy") entropyLeave();                 // a shown phrase is concealed again and the window may be captured again
   if (activeView === "keyuses" && view !== "keyuses") keyUsesReset();                 // an audit's result is not kept after the screen is left (as the phone's)
   activeView = view;
   const { tab, mode } = shellMode(view);
@@ -2825,12 +2827,14 @@ function renderApps() {
   paintAppsCounts();
   el("appsList").querySelectorAll(".switch[data-hide]:not([disabled])").forEach(sw => sw.onclick = () => {
     const id = sw.dataset.hide, now = hiddenApps();
+    if (id === "entropy") entropyErased("Entropy was hidden.");
     store("shellHidden", (now.includes(id) ? now.filter(x => x !== id) : now.concat(id)).join(","));
     applyHiddenApps(); renderApps();
     const again = el("appsList").querySelector(`.switch[data-hide="${id}"]`); if (again) again.focus();
   });
   el("appsList").querySelectorAll(".switch[data-freeze]:not([disabled])").forEach(sw => sw.onclick = async () => {
     const id = sw.dataset.freeze; sw.disabled = true;
+    if (id === "entropy") entropyErased("Entropy was frozen.");
     await setFrozen(id, !FROZEN.includes(id));
     if (activeView === "apps") { renderApps(); const again = el("appsList").querySelector(`.switch[data-freeze="${id}"]`); if (again && !document.querySelector(".overlay--dlg")) again.focus(); }
   });

@@ -102,15 +102,21 @@ test("the node cannot decide a die face: its hash is used only when it is the SH
  * hash(k, input, truth) → its hash); o.main: a stand-in for the main process itself. A recording WebCrypto; Math.random throws.
  */
 function engine(o) {
-  const asked = [], drawn = []; let k = 0;
+  const asked = [], drawn = [], secure = [], confirms = [], on = {}, els = new Map(); let k = 0;
   const cryptoStub = { getRandomValues: (arr) => { drawn.push(arr.constructor.name + ":" + arr.length); const next = (o.bytes || (() => nodeCrypto.randomBytes(arr.byteLength)))(arr); if (next) new Uint8Array(arr.buffer).set(next); return arr; } };
   const node = async (c) => { if (o.node === "down") throw new Error("node not running"); if (c === "random") return { status: true, response: { random: o.random ? o.random(k) : A64(k) } };
     const input = c.slice("hash data:".length), truth = M.sha3(input); return { status: true, response: { hash: o.hash ? o.hash(k++, input, truth) : (k++, truth.toUpperCase().replace("0X", "0x")) } }; };
-  const api = { entropy: async (kind, arg) => { asked.push(kind + (arg ? ":" + arg : "")); return o.main ? o.main(kind, arg, kind === "hash" ? k++ : k) : M.ask(kind, arg, node); } };
-  const fns = new Function("api", "crypto", "EntropyCore", "Math", "el", "document", "running", "setTimeout", src.replace(/^"use strict";$/mg, "") + "\nreturn { enRollOne, enRandomN, enVerify, enDeviceSecret, enDeviceFace, entropyNew, EN_NODE_BAD, set: (v) => { EN = v; } };")
-    (api, cryptoStub, C, Object.assign(Object.create(Math), { random: () => { throw new Error("Math.random was used"); } }), () => null, { querySelectorAll: () => [] }, o.running !== false, () => 0);
+  const api = { entropy: async (kind, arg) => { asked.push(kind + (arg ? ":" + arg : "")); return o.main ? o.main(kind, arg, kind === "hash" ? k++ : k) : M.ask(kind, arg, node); }, secureScreen: (v) => { secure.push(v); return Promise.resolve(true); } };
+  // o.dom: every element the screen asks for exists as a plain stand-in; #enRoot (the built screen) only with o.root
+  const stub = () => ({ hidden: false, disabled: false, textContent: "", innerHTML: "", className: "", value: "", dataset: {}, style: {}, classList: { toggle() {} }, setAttribute(k2, v) { this["@" + k2] = v; } });
+  const el = (id) => { if (!o.dom || (id === "enRoot" && !o.root)) return null; if (!els.has(id)) els.set(id, stub()); return els.get(id); };
+  const doc = { hidden: false, querySelectorAll: () => [], addEventListener: (t, f) => { on[t] = f; } }, win = { addEventListener: (t, f) => { on[t] = f; } };
+  const showConfirm = (title, message, ok, danger) => new Promise(answer => confirms.push({ title, message, ok, danger, answer }));
+  const fns = new Function("api", "crypto", "EntropyCore", "Math", "el", "document", "window", "running", "setTimeout", "showConfirm", "activeView", "esc", src.replace(/^"use strict";$/mg, "")
+    + "\nreturn { enRollOne, enRandomN, enVerify, enDeviceSecret, enDeviceFace, entropyNew, entropyErase, entropyErased, entropyLeaving, enIdleTick, enHolds, enWords, enSetLength, EN_NODE_BAD, EN_IDLE_MS, set: (v) => { EN = v; }, now: () => EN };")
+    (api, cryptoStub, C, Object.assign(Object.create(Math), { random: () => { throw new Error("Math.random was used"); } }), el, doc, win, o.running !== false, () => 0, showConfirm, "balances", (t) => String(t).replace(/[&<>"']/g, "?"));
   const EN = fns.entropyNew(); EN.nodeOk = o.node !== "off"; EN.selfErr = null; fns.set(EN);
-  return Object.assign(fns, { asked, drawn, EN });
+  return Object.assign(fns, { asked, drawn, secure, confirms, on, doc, els, el, EN });
 }
 const faceOf = (a, b) => { const n = parseInt(M.sha3(a + b.slice(2)).slice(2, 10), 16); return { n, face: (n % 6) + 1 }; };
 
@@ -195,7 +201,7 @@ test("what is said under a finished phrase: the counts, the sources, and the two
   assert.equal(C.auditLog([nd(4), dev(2), ph(6)]), "#1 A:0xA B:0xB n:3 face:4\n#2 face:2 (device CSPRNG only)\n#3 face:6 (physical)");
 });
 
-test("the phrase stays in the page: no storage, no clipboard, no log, no IPC but the two it needs; concealed until asked, and again on leaving", () => {
+test("the phrase stays in the page: no storage, no clipboard, no log, no IPC but the two it needs; concealed until asked, erased on leaving", () => {
   const code = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.deepEqual([...new Set([...code.matchAll(/\bapi\.([A-Za-z]+)/g)].map(m => m[1]))].sort(), ["entropy", "secureScreen"], "the only calls to the main process");
   assert.ok(!/localStorage|sessionStorage|\bstore\(|indexedDB|document\.cookie/.test(code), "nothing is stored");
@@ -203,17 +209,121 @@ test("the phrase stays in the page: no storage, no clipboard, no log, no IPC but
   assert.ok(!/console\.|toast\(/.test(code), "nothing is logged or toasted");
   assert.ok(!/Math\.random/.test(code) && !/Math\.random/.test(R("renderer/entropy-core.js")), "no Math.random anywhere, not even for the tumbling faces");
   assert.ok(/crypto\.getRandomValues\(b\)/.test(code) && /new Uint8Array\(32\)/.test(code), "the device's values come from WebCrypto, 32 bytes as the original's SecureRandom");
-  assert.ok(/\$\{EN\.revealed \? esc\(w\) : "••••••"\}/.test(code), "a word is in the page only while revealed");
+  assert.ok(/const p = EN\.phrase \|\| \[\], on = EN\.revealed && !!EN\.phrase;/.test(code) && /\$\{on \? esc\(w\) : "••••••"\}/.test(code), "a word is in the page only while revealed");
   assert.ok(/EN\.phrase = phrase; EN\.revealed = false;/.test(code), "a new phrase starts concealed");
   assert.ok(/if \(!good\) \{ EN\.done = false; return enStatus\("INTERNAL MISMATCH: phrase suppressed/.test(code), "a phrase our own checker refuses is never shown");
   assert.ok(/function entropyTab\(tab\) \{\s*EN\.tab = tab;\s*if \(EN\.done && EN\.revealed\) \{ EN\.revealed = false; enWords\(\); \}/.test(code), "a tab switch conceals it");
-  assert.ok(/function entropyLeave\(\) \{\s*if \(EN && el\("enRoot"\)\) \{ EN\.auto = false; enChips\(\); entropyTab\(EN\.tab\); \}\s*try \{ api\.secureScreen\(false\); \}/.test(code), "leaving the screen stops auto-roll, conceals, and lets the window be captured again");
-  assert.ok(/if \(activeView === "entropy" && view !== "entropy"\) entropyLeave\(\);/.test(R("renderer/app.js")));
   assert.ok(/api\.secureScreen\(true\)/.test(code) && /id="enCapture" hidden>This system cannot keep the window out of screenshots/.test(code), "capture protection is asked for on entry, and its absence is said");
   assert.ok(/EN\.run\+\+; EN\.faces = \[\]; EN\.audits = \[\]; EN\.phrase = null;/.test(code), "Wipe drops the rolls, the audit values and the phrase");
   assert.ok(/if \(run !== EN\.run\) return;/.test(code), "a throw that answers after a Wipe is not recorded");
   assert.ok(/if \(EN\.busy \|\| EN\.done \|\| enBlocked\(\)\) return;/.test(code) && /if \(EN\.selfErr\) return lwStatus\("Blocked: startup self-test failed/.test(code), "nothing is generated before the self-test has passed");
   assert.ok(/type="\$\{L\.hidden \? "password" : "text"\}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/.test(code), "typed seed words are kept from autocomplete and spell-check");
+});
+
+// 0.19.133 (review): the phone's note says closing the screen destroys the phrase. 0.19.130 kept it (concealed).
+const PHRASE = "wedding crawl scout then coast emotion bridge spot demise together holiday tray".split(" ");
+function holding(o) {   // a screen with a finished phrase on it, as the page would hold it
+  const e = engine(Object.assign({ dom: true }, o)), EN = e.EN;
+  EN.phrase = PHRASE.slice(); EN.faces.push(2, 5, 2, 6); EN.audits.push({ src: "node-sha3+device", a: "0xA", b: "0xB", n: 1, face: 2 }); EN.done = true; EN.revealed = true; EN.seen.add("0xa");
+  e.el("entropyBody").innerHTML = "<div>wedding crawl 2526 A:0xA B:0xB</div>";
+  return e;
+}
+const erased = (e) => { const now = e.now(); assert.notEqual(now, e.EN, "a new, empty state");
+  assert.equal(e.EN.phrase, null); assert.equal(e.EN.faces.length, 0); assert.equal(e.EN.audits.length, 0); assert.equal(e.EN.seen.size, 0, "the old state holds nothing either (a late answer finds nothing)");
+  assert.equal(now.phrase, null); assert.deepEqual(now.faces, []); assert.deepEqual(now.audits, []); assert.equal(now.done, false); assert.equal(now.run, e.EN.run + 1, "a throw still in the air belongs to another run");
+  assert.ok(/const was = EN; EN = entropyNew\(\);\n  if \(was\) \{ EN\.run = was\.run; EN\.verified = was\.verified; \}/.test(src), "and the screen drawn again keeps counting from there");
+  assert.equal(e.el("entropyBody").innerHTML, "", "the words, the roll string, the audit log, the summary and the typed last-word boxes are out of the page"); };
+
+test("leaving Entropy erases the phrase, the rolls, the audit values and their text; a finished phrase is asked about first, once", async () => {
+  const e = holding(); let went = 0; const go = () => { went++; };
+  assert.equal(e.entropyLeaving(go), false, "not yet: the user is asked"); assert.equal(e.entropyLeaving(go), false); assert.equal(e.confirms.length, 1, "asked once, however many routes fire");
+  assert.deepEqual([e.confirms[0].title, e.confirms[0].message, e.confirms[0].ok, e.confirms[0].danger], ["Leave Entropy?", "Leaving erases this phrase. Have you written it down?", "Erase and leave", true]);
+  e.confirms[0].answer(false); await null; await null;
+  assert.equal(went, 0); assert.deepEqual(e.EN.phrase, PHRASE, "Cancel: nothing is erased and the screen stays"); assert.deepEqual(e.secure, [], "and the window stays protected");
+  assert.equal(e.entropyLeaving(go), false); assert.equal(e.confirms.length, 2, "a later attempt asks again");
+  e.confirms[1].answer(true); await null; await null;
+  assert.equal(went, 1, "then the screen that was asked for is shown"); erased(e);
+  assert.equal(e.entropyLeaving(go), true, "selectTab runs again: nothing is held, so it goes on"); assert.deepEqual(e.secure, [false], "and only now may the window be captured again"); assert.equal(e.confirms.length, 2);
+  // rolls without a finished phrase, or typed last-word boxes: erased without a question
+  const r = engine({ dom: true }); r.EN.faces.push(1, 2, 3); r.EN.audits.push({}, {}, {}); r.el("entropyBody").innerHTML = "123";
+  assert.equal(r.enHolds(), true); assert.equal(r.entropyLeaving(go), true); assert.equal(r.confirms.length, 0); erased(r);
+  const app = R("renderer/app.js");
+  assert.ok(/function selectTab\(view\) \{\n  \/\/[^\n]*\n  if \(activeView === "entropy" && view !== "entropy" && !entropyLeaving\(\(\) => selectTab\(view\)\)\) return;\n/.test(app), "selectTab's first statement: every in-app route (tab, tray row, Back, the overflow menu, a notification) passes it before anything changes");
+  assert.equal((app.match(/\bactiveView = /g) || []).length, 2, "the view is changed in selectTab and nowhere else");
+});
+
+test("the window hidden or closed, the node stopped, a wallet restore, Hide and Freeze erase without asking", async () => {
+  const e = holding(); e.doc.hidden = false; e.on.visibilitychange(); assert.deepEqual(e.EN.phrase, PHRASE, "a visibility event with the window still shown erases nothing");
+  e.doc.hidden = true; e.on.visibilitychange(); erased(e); assert.equal(e.confirms.length, 0, "nobody is asked");
+  const p = holding(); p.on.pagehide(); erased(p);
+  const n = holding(); n.entropyErased("the node stopped."); erased(n); assert.equal(n.confirms.length, 0);
+  const app = R("renderer/app.js");
+  assert.ok(/if \(wasRunning && !running\) \{[^\n]*entropyErased\("the node stopped\."\);/.test(app), "the node went away");
+  assert.ok(/waitingForNode = false;\n    entropyNode\(\);/.test(app), "the node came back: an open screen proves it again (stopped to running, as running to stopped)");
+  assert.ok(/async function walletReplaced\(\) \{\n  resetMailState\(\); resetPpState\(\); resetAxState\(\); entropyErased\("the wallet was replaced\."\);/.test(app));
+  assert.ok(/const id = sw\.dataset\.hide, now = hiddenApps\(\);\n    if \(id === "entropy"\) entropyErased\("Entropy was hidden\."\);/.test(app) && /const id = sw\.dataset\.freeze; sw\.disabled = true;\n    if \(id === "entropy"\) entropyErased\("Entropy was frozen\."\);/.test(app));
+  assert.ok(/if \(open && activeView === "entropy"\) \{ renderEntropy\(\); if \(had\) enStatus\("Everything on this screen was erased: " \+ why, true\); \}/.test(src), "a screen still open is drawn again, empty, and says why");
+});
+
+test("five minutes without input erases, with a countdown through the last minute; a click or a key starts the five minutes again", () => {
+  const e = holding({ root: true }), t0 = 1000000, idle = e.el("enIdle"); e.EN.idleAt = t0; idle.hidden = true;
+  assert.equal(e.EN_IDLE_MS, 300000);
+  e.enIdleTick(t0 + 239000); assert.equal(idle.hidden, true, "four minutes in: nothing is shown yet"); assert.deepEqual(e.EN.phrase, PHRASE);
+  e.enIdleTick(t0 + 240000); assert.equal(idle.hidden, false); assert.equal(idle.textContent, "No input for a while. Everything on this screen is erased in 60 s. Click or press a key to keep it.");
+  e.enIdleTick(t0 + 299001); assert.equal(idle.textContent, "No input for a while. Everything on this screen is erased in 1 s. Click or press a key to keep it."); assert.deepEqual(e.EN.phrase, PHRASE, "not a second early");
+  e.EN.idleAt = t0 + 299500;   // a click (the screen's listener sets this)
+  e.enIdleTick(t0 + 300000); assert.deepEqual(e.EN.phrase, PHRASE, "input starts the five minutes again"); assert.equal(idle.hidden, true);
+  e.enIdleTick(t0 + 299500 + 300000); erased(e); assert.equal(e.confirms.length, 0);
+  // nothing held: nothing to erase, and the clock does not run; dice in the air are not interrupted
+  const empty = engine({ dom: true, root: true }); empty.EN.idleAt = t0; empty.enIdleTick(t0 + 900000); assert.equal(empty.now(), empty.EN); assert.equal(empty.EN.idleAt, t0 + 900000);
+  const auto = holding({ root: true }); auto.EN.idleAt = t0; auto.EN.auto = true; auto.enIdleTick(t0 + 900000); assert.deepEqual(auto.EN.phrase, PHRASE);
+  // rolls alone (no phrase yet) are erased the same way
+  const rolls = engine({ dom: true, root: true }); rolls.EN.faces.push(3, 4); rolls.EN.audits.push({}, {}); rolls.EN.idleAt = t0; rolls.el("entropyBody").innerHTML = "34"; rolls.enIdleTick(t0 + 300000); erased(rolls);
+  assert.ok(/clearInterval\(EN_TICK\); EN_TICK = setInterval\(\(\) => enIdleTick\(Date\.now\(\)\), 1000\);/.test(src), "once a second while the screen is built");
+  assert.ok(/for \(const type of \["pointerdown", "keydown", "input"\]\) root\.addEventListener\(type, \(\) => \{ EN\.idleAt = Date\.now\(\);/.test(src), "any click, key or typed letter on the screen is input");
+  assert.ok(/id="enIdle" role="status" hidden>/.test(src));
+});
+
+test("while the phrase is concealed, so are the roll string and the audit log", () => {
+  const e = holding(); e.EN.revealed = false; e.EN.audit = true; e.enWords();
+  const rolls = e.el("enRolls"), audit = e.el("enAudit"), btn = e.el("enAuditBtn"), words = e.el("enWords");
+  assert.ok(!/[1-6]/.test(rolls.textContent) && rolls.textContent.includes("reveal the phrase"), "no roll in the page: " + rolls.textContent);
+  assert.equal(audit.textContent, ""); assert.equal(e.el("enAuditWrap").hidden, true); assert.equal(e.EN.audit, false, "an open audit log closes when the phrase is concealed");
+  assert.equal(btn.disabled, true); assert.equal(btn.textContent, "Per-roll audit log: reveal the phrase first", "the button says why it is off");
+  assert.ok(!PHRASE.some(w => words.innerHTML.includes(w)) && words.innerHTML.includes("••••••"));
+  e.EN.revealed = true; e.enWords();
+  assert.equal(rolls.textContent, "2526"); assert.equal(btn.disabled, false); assert.equal(btn.textContent, "Show per-roll audit log"); assert.equal(audit.textContent, "", "the audit log only when asked for");
+  assert.ok(PHRASE.every(w => words.innerHTML.includes(w)));
+  e.EN.audit = true; e.enWords(); assert.equal(audit.textContent, "#1 A:0xA B:0xB n:1 face:2"); assert.equal(e.el("enAuditWrap").hidden, false); assert.equal(btn.textContent, "Hide per-roll audit log");
+  assert.ok(/function entropyTab\(tab\) \{\s*EN\.tab = tab;\s*if \(EN\.done && EN\.revealed\) \{ EN\.revealed = false; enWords\(\); \}/.test(src), "a tab switch conceals all three");
+  assert.ok(/else if \(b\.id === "enAuditBtn"\) \{ EN\.audit = !EN\.audit; enWords\(\); \}/.test(src) && !/enEl\("enRolls"\)\.textContent = EN\.faces/.test(src), "nothing else writes the rolls or the log into the page");
+});
+
+test("the phrase length cannot change once a roll exists", () => {
+  const e = engine({ dom: true }); assert.equal(e.EN.words, 12);
+  assert.equal(e.enSetLength(24), true); assert.equal(e.EN.words, 24, "before the first roll: free");
+  e.EN.faces.push(4); e.EN.audits.push({});
+  assert.equal(e.enSetLength(12), false); assert.equal(e.EN.words, 24); assert.equal(e.el("enStatus").textContent, "The phrase length cannot change once a roll is recorded. Start over to choose another length.");
+  e.el("enStatus").textContent = ""; assert.equal(e.enSetLength(24), false); assert.equal(e.el("enStatus").textContent, "", "the same length again: nothing to say");
+  e.EN.faces.length = 0; e.EN.busy = true; assert.equal(e.enSetLength(15), false, "nor while dice are in the air"); assert.equal(e.EN.words, 24);
+  assert.ok(/if \(b\.dataset\.len\) enSetLength\(\+b\.dataset\.len\);/.test(src) && /id="enRestart" hidden>↺ Start over \(erases these rolls\)<\/button>/.test(src) && /else if \(b\.id === "enRestart"\) enWipe\(\);/.test(src) && /enEl\("enRestart"\)\.hidden = !EN\.faces\.length \|\| EN\.done;/.test(src), "and Start over is there whenever a roll is");
+});
+
+test("the self-test also checks the whole word list by its SHA-256, and the list is frozen", async () => {
+  assert.ok(Object.isFrozen(WORDS), "wordentry.js: the list every seed screen uses");
+  assert.throws(() => { "use strict"; WORDS[5] = "x"; }, TypeError);
+  C.init(WORDS); assert.equal(await C.selfTest(), null);
+  const one = WORDS.slice(); one[1000] = one[1000] + "x"; C.init(one); assert.equal(await C.selfTest(), "wordlist digest wrong", "a word no vector uses");
+  const swap = WORDS.slice(); [swap[1500], swap[1501]] = [swap[1501], swap[1500]]; C.init(swap); assert.equal(await C.selfTest(), "wordlist digest wrong");
+  C.init(WORDS); assert.equal(await C.selfTest(), null);
+  assert.ok(/WORDS = Object\.freeze\(words\.slice\(\)\);/.test(R("renderer/entropy-core.js")) && /if \(!Object\.isFrozen\(WORDS\)\) return "wordlist is not frozen";/.test(R("renderer/entropy-core.js")));
+});
+
+test("the screen says where a digital roll's values go, and what erases the phrase", () => {
+  assert.ok(src.includes(`Digital: each roll's two random values and their hash pass through this app's main process and the node on 127.0.0.1. Whoever could read them there could rebuild the phrase. For a wallet that will hold real value, use Physical dice: real dice never leave this screen.`));
+  assert.ok(src.includes("Nothing is stored. Leaving this screen, hiding or closing the window, stopping the node, 5 minutes without input, or Wipe &amp; start over erases the phrase for ever."));
+  assert.ok(!/quitting the app, or Wipe/.test(src) && !/sent to the\n\/\/ main process, or put on the clipboard/.test(src), "the old sentence and the old comment are gone");
+  assert.ok(/pass through\n\/\/ the main process \(main\/entropy\.js\) and the node on 127\.0\.0\.1/.test(src), "the comment says what the code does");
 });
 
 test("the screen: the original's wording and palette (no em dash), its icon unchanged, keyboard reachable", () => {

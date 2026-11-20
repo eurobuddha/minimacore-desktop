@@ -7,6 +7,19 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.133] — Entropy: leaving the screen erases the phrase
+
+- **The phrase no longer outlives the screen** (the phone's own note says closing the screen destroys it; 0.19.130 kept it, concealed). Leaving Entropy erases the phrase, the rolls, each roll's audit values, everything the page drew of them (the words, the roll string, the audit log, the summary, the roll ticker) and every typed last-word box. The routes: another screen (tab, tray row, Back, the overflow menu, a notification), the window hidden or closed, the node stopping, a wallet restore, Hide or Freeze of Entropy, and quitting.
+- **Asked once before an in-app route erases a finished phrase:** "Leaving erases this phrase. Have you written it down?" (Erase and leave / Cancel). Hiding or closing the window, a node stop and a wallet restore erase without asking; rolls with no finished phrase are erased without a question.
+- **Five minutes without a click or a key on the screen erase it too**, with a countdown on the screen through the last minute. A screen still open after such an erase is drawn again, empty, and says why.
+- **While the phrase is concealed, so are the roll string and the audit log** (each of them is the phrase to whoever reads it). The audit button says "reveal the phrase first" while it is off.
+- **The screen now says where a digital roll's values go.** Beside the mode choice: each roll's two random values and their hash pass through this app's main process and the node on 127.0.0.1, and Physical dice are recommended for a wallet that will hold real value. The security note lists what erases the phrase. The code comment that said nothing reaches the main process is corrected.
+- **The phrase length is fixed once a roll exists** (a length chosen after seeing rolls would let the same rolls be tried at every length); "Start over (erases these rolls)" appears with the first roll.
+- **Self-test:** besides the fixed vectors it now checks the SHA-256 of the whole word list (`2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`), so a changed word that no vector uses blocks generation; the list is frozen (`renderer/wordentry.js`, and Entropy's own copy).
+- **The node coming back** (stopped to running) proves it again on an open Entropy screen, as its going away already did.
+- Tests: `scripts/entropy-test.cjs` (23): the erase run on a stand-in page for every route, the question (once, Cancel keeps everything), the idle clock second by second, concealment of the roll string and the log, the length rule, the list digest.
+- Not done: the preview captures (`scripts/dev-preview/shots/*-entropy*.png`) were not retaken. Not proven here: whether macOS reports a fully covered window as hidden (then covering the window erases too); it is in the dev-node checklist.
+
 ## [0.19.132] — Entropy: the node cannot decide a die face
 
 - **Review finding, HIGH.** A digital die face is SHA3(node random ++ device random), and the hash was the node's own answer to `hash data:`, taken on trust (as the phone takes it). A node that answered with a value of its choosing chose the face, and with it the seed phrase, while the screen said "node SHA3 + device CSPRNG verified".
