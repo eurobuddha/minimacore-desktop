@@ -1888,7 +1888,6 @@
   "With {v} MINIMA the pool takes about {est} {name} from your wallet. {name2} is taken at the pool's ratio when the transaction is posted, so this figure can change slightly.": "添加 {v} MINIMA 时，池会从您的钱包收取约 {est} {name}。{name2} 在交易提交时按池的比例收取，因此该数字可能略有变化。",
   "Grow {name} in place (capped at 2× the floor: beyond that, use Migrate). You enter the MINIMA; the pool takes the {name2} that goes with it at its own ratio, so the price does not move.": "原地扩大 {name}（上限为下限的 2×：超出时请使用“迁移”）。您输入 MINIMA；池按自身比例收取与之对应的 {name2}，因此价格不会变动。",
   "Add MINIMA": "添加 MINIMA",
-  "Inter, sans-serif": "Inter, sans-serif",
   "Pool calculator": "流动性池计算器",
   "Closed pools": "已关闭的池",
   "Bring back": "重新显示",
@@ -2647,8 +2646,8 @@
   "This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install.": "本次安装使用的是经典密钥钱包，且无法更改。曾用于区块密钥钱包的单词在这里只会打开一个空钱包。请在全新安装中恢复它们。"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
-  same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "Inter, sans-serif", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
-  // translated for the desktop (the phone has no such text): 1635 keys for native review
+  same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop"],
+  // translated for the desktop (the phone has no such text): 1634 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -3778,7 +3777,6 @@
     "With {v} MINIMA the pool takes about {est} {name} from your wallet. {name2} is taken at the pool's ratio when the transaction is posted, so this figure can change slightly.",
     "Grow {name} in place (capped at 2× the floor: beyond that, use Migrate). You enter the MINIMA; the pool takes the {name2} that goes with it at its own ratio, so the price does not move.",
     "Add MINIMA",
-    "Inter, sans-serif",
     "Which activity",
     "Read the activity again",
     "POOL OPERATIONS · ② POOLS",

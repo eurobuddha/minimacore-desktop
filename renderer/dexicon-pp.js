@@ -664,7 +664,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function calc(address) {
     const seed = address ? pool(address) : null, cs = getComputedStyle($("shell")), cv = (n, fb) => cs.getPropertyValue(n).trim() || fb;
     const f = D.PoolCalc.form({ x0: seed && seed.reserveM ? String(seed.reserveM) : "100000", y0: seed && seed.reserveT ? String(seed.reserveT) : "500", tok: seed ? tokLabel(seed.tok, seed.tokName) : "MxUSD",
-      colors: { accent: cv("--dx-accent", "#F7931A"), ink: cv("--dx-text", "#fff"), dim: cv("--dx-dim", "#8B909C"), grid: cv("--dx-dim2", "#6F7583"), surface: cv("--dx-surface2", "#1B1F28"), font: I18N.t("Inter, sans-serif") } });
+      colors: { accent: cv("--dx-accent", "#F7931A"), ink: cv("--dx-text", "#fff"), dim: cv("--dx-dim", "#8B909C"), grid: cv("--dx-dim2", "#6F7583"), surface: cv("--dx-surface2", "#1B1F28"), font: "Inter, sans-serif" } });
     form(I18N.t("Pool calculator"), `<div class="pp-calc" data-calc></div>`, "", () => true, (d) => { d.classList.add("pp-dlg--wide"); d.querySelector("[data-calc]").appendChild(f.el); setTimeout(() => f.render(), 0); });
   }
   async function closedPools() {

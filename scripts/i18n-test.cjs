@@ -186,3 +186,9 @@ test("the English the review found in translated screens is said in every langua
     ["app.js", 'stat.textContent = "connecting…"'], ["app.js", "this Mac's IP address"], ["app.js", "(this Mac)"], ["app.js", ': "your router"'], ["app.js", "{ mode: KEYMODE.mode, mode2: mode }"]])
     assert.ok(!src(f).includes(bare), f + " still has " + bare);
 });
+
+// 0.19.150: a CSS value is code, not text: the chart's font family went through t() and sat in every catalog as "the same"
+test("no CSS value is a catalog key, and the pool chart's font is a plain value", () => {
+  for (const code of OTHERS) for (const k of Object.keys(I18N.catalog(code))) assert.ok(!/(^|,\s*)(sans-serif|serif|monospace)$|^#[0-9A-Fa-f]{3,8}$|^var\(--/.test(k), code + ": " + k);
+  assert.ok(fs.readFileSync(path.join(R, "dexicon-pp.js"), "utf8").includes('font: "Inter, sans-serif"'));
+});

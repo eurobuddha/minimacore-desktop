@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.150] — Room ②: the pool chart's font is a plain CSS value again
+
+- **Fixed (review of 0.19.140 to 0.19.144):** the extraction wrapped the pool chart's font family (`"Inter, sans-serif"`) in `I18N.t()`, and the three catalogs carried it as a text "rightly the same" and for review. It is a CSS value, not a text: unwrapped in `renderer/dexicon-pp.js` and removed from the catalogs and their lists. Nothing on screen changes.
+- Test: `scripts/i18n-test.cjs` refuses a catalog key that is a CSS font family, colour or variable, and checks the chart's font is passed as written. It fails on the 0.19.149 code.
+
 ## [0.19.149] — English left inside translated screens, from the review of 0.19.140 to 0.19.144
 
 - **Now translated** (each read in the code first: every one is only shown): room ① the OTC deal states Complete / Rejected / Expired (the phone's words), "a few blocks", the Hide and Set buttons of two dialogs, "less than a minute ago", "need 2+ trades to chart", "Asking for the refund…", an LP's "sells up to / buys up to"; room ③ the funds block (available, in your orders, settling, total, reading…, node stopped), "no live orders" / "best bid only" / "best ask only", "not read yet", a fill's "you were the maker" / "fast book" (the phone's words), "Paid / Received … MxUSD", "not recorded", the History, Trade and Activity dialog titles, "on-chain book and pools", "not polled yet" and the two "Click to copy" hints; room ② a pool's "migrate soon" / "healthy" and its Add, Migrate and Close buttons; Mail's "Confirmed · block …", "On-chain" and "Re-posting…"; KeyUses' block-key "position … of …" and its "Checked scope" line; the first-run "connecting…" and "node error"; the port-forward help, which now says "this computer" throughout, as 0.19.144 does elsewhere, and "your router".

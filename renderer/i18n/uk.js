@@ -1888,7 +1888,6 @@
   "With {v} MINIMA the pool takes about {est} {name} from your wallet. {name2} is taken at the pool's ratio when the transaction is posted, so this figure can change slightly.": "Разом із {v} MINIMA пул візьме з вашого гаманця приблизно {est} {name}. {name2} береться за співвідношенням пулу в момент надсилання транзакції, тому ця цифра може трохи змінитися.",
   "Grow {name} in place (capped at 2× the floor: beyond that, use Migrate). You enter the MINIMA; the pool takes the {name2} that goes with it at its own ratio, so the price does not move.": "Збільшити {name} на місці (не більше ніж 2× від нижньої межі: понад це скористайтеся пунктом «Перенести»). Ви вводите MINIMA; пул бере відповідну суму {name2} за власним співвідношенням, тому ціна не змінюється.",
   "Add MINIMA": "Додати MINIMA",
-  "Inter, sans-serif": "Inter, sans-serif",
   "Pool calculator": "Калькулятор пулу",
   "Closed pools": "Закриті пули",
   "Bring back": "Показати знову",
@@ -2647,8 +2646,8 @@
   "This install holds a classic key wallet, and that cannot be changed. Words used in a block key wallet would open an empty wallet here. Restore them on a fresh install.": "Ця інсталяція містить гаманець із класичними ключами, і змінити це неможливо. Слова з гаманця з блоковими ключами відкриють тут порожній гаманець. Відновіть їх у новій інсталяції."
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
-  same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "Inter, sans-serif", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "OK ·", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)"],
-  // translated for the desktop (the phone has no such text): 1635 keys for native review
+  same: ["MINIMA CORE", "MegaMMR (-megammr)", "RPC (-rpcenable)", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "Ethereum", "↗  Etherscan", "ETH · Ethereum", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "· Parlons Node {version}", "Parlons Node {version}", "Minima Explorer", "ENTROPY", "{m} (Minima)", "{e} (Ethereum)", "{side}{amount} {c} @ {price} USDT", "ETHEREUM", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{ask} {shown}, {parts} MINIMA{mine}", "{side} · BOOK / POOL", "PandaPools:", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "OK ·", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Mail", "MySQL DSN (-mysqldb)", "JNLP (-jnlp)"],
+  // translated for the desktop (the phone has no such text): 1634 keys for native review
   review: [
     "Click to copy the full id",
     "Copy failed: select the text and press ⌘C",
@@ -3778,7 +3777,6 @@
     "With {v} MINIMA the pool takes about {est} {name} from your wallet. {name2} is taken at the pool's ratio when the transaction is posted, so this figure can change slightly.",
     "Grow {name} in place (capped at 2× the floor: beyond that, use Migrate). You enter the MINIMA; the pool takes the {name2} that goes with it at its own ratio, so the price does not move.",
     "Add MINIMA",
-    "Inter, sans-serif",
     "Which activity",
     "Read the activity again",
     "POOL OPERATIONS · ② POOLS",
