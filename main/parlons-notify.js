@@ -16,6 +16,16 @@ const MESSAGE = /^\[parlons-node\] message from (0x[0-9A-Fa-f]{1,200}): ([\s\S]*
 const CALL = /^\[parlons-node\] node: call offer from ([\s\S]*) → pushing to devices$/;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;   // control and bidi-override characters never reach a notification
 
+/** Removed from every line before anything is matched on it (line ends are split on before this). */
+const STRIP = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+// Lines the node prints with a peer's text in the middle and its own words at the end. A line that starts as one and
+// does not end as one was cut by a line end inside the peer's text: the run it opens ends at the line with the ending.
+const CUT = [
+  [/^\[parlons-node\] node: call (?!relay |push queue full; signal dropped$)/, / → pushing to devices$/],                       // ParlonsControl.forwardCallSignal
+  [/^Minima @ \d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d \[[^\]]*\] : Greeting with Incompatible Version! /, / incoming:(true|false)$/]   // core NIOMessage
+];
+/** null, or the test that recognises the line ending the run this unfinished line opens. */
+function unfinished(line) { for (const [start, end] of CUT) if (start.test(line) && !end.test(line)) return end; return null; }
 /** A line whose content a remote party controls. node-manager reads no state out of these. */
 function isChatter(line) { const l = String(line); return l.startsWith("[parlons-node] message from ") || l.startsWith("[parlons-node] node: "); }
 const clean = (s, max) => String(s).replace(CONTROL, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -39,7 +49,7 @@ function lineFeeder(onLine, max = 64 * 1024) {
   return (chunk) => {
     rest += String(chunk);
     let i;
-    while ((i = rest.indexOf("\n")) >= 0) { onLine(rest.slice(0, i)); rest = rest.slice(i + 1); }
+    while ((i = rest.search(/[\r\n]/)) >= 0) { onLine(rest.slice(0, i)); rest = rest.slice(i + 1); }
     if (rest.length > max) { onLine(rest); rest = ""; }   // a line with no end: hand it on, never grow without bound
   };
 }
@@ -86,4 +96,4 @@ function install({ events, electron, window: getWindow, open }) {
   events.on("parlons-event", onEvent);
   return { onEvent, clearCall };
 }
-module.exports = { isChatter, parse, redact, lineFeeder, install, MESSAGE_GAP_MS, RING_MS };
+module.exports = { STRIP, unfinished, isChatter, parse, redact, lineFeeder, install, MESSAGE_GAP_MS, RING_MS };

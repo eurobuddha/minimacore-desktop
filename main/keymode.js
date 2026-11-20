@@ -189,4 +189,7 @@ function startProblem(o) {
   return "";
 }
 
-module.exports = { jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, argvProblem, keysMode, nodeTokens, childEnv, readZipEntry, MARKER };
+/** The node's own line for "block mode is ON", whole: MinimaLogger.log's prefix ("Minima @ dd/MM/yyyy HH:mm:ss [memory] : ")
+ *  and MinimaDB.loadAllDB's words, nothing before and nothing after. A line that merely holds the words is a peer's. */
+const BLOCK_BOOT_LINE = /^Minima @ \d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d \[[^\]]*\] : Using NEW Block number as key uses keys!$/;
+module.exports = { BLOCK_BOOT_LINE, jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, argvProblem, keysMode, nodeTokens, childEnv, readZipEntry, MARKER };

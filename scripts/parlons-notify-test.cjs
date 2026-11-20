@@ -5,8 +5,6 @@
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const EventEmitter = require('node:events');
 const N = require('../main/parlons-notify');
 const KEY = '0x' + 'FA4E'.repeat(16);
@@ -33,15 +31,21 @@ test('a line cut across two chunks is one line', () => {
   feed('[parlons-node] message fr'); feed('om ' + KEY + ': hello\n[parlons-node] acc'); feed('ount up: x\n');
   assert.deepEqual(got, ['[parlons-node] message from ' + KEY + ': hello', '[parlons-node] account up: x']);
 });
-test('a remote sender cannot drive the node manager through the log (found in review)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main', 'node-manager.js'), 'utf8');
-  const chatter = src.indexOf('if (parlonsNotify.isChatter(l)) {'), watch = src.indexOf('try { this.watchParlonsLine(l); }'), keymode = src.indexOf('l.includes("Using NEW Block number as key uses")'), hint = src.indexOf('/Database may be already in use');
-  assert.ok(chatter > 0 && chatter < watch && watch < keymode && keymode < hint, 'chatter lines are taken out before every state check');
-  assert.match(src.slice(chatter, watch), /continue;\s*\}\s*$/, 'and never fall through');
-  for (const evil of ['Using NEW Block number as key uses', 'account layer FAILED', 'Maxima cape FAILED', 'account up:', 'REFUSING to start', 'Address already in use'])
+// The node manager's side of this (what a peer's text in the log can and cannot do) is EXECUTED in
+// scripts/keymode-test.cjs ("0.19.4: ..."), on the real log() with a stand-in java process.
+test('remote-controlled lines are named as such; a line end may be \\r; a cut line is recognised', () => {
+  for (const evil of ['Using NEW Block number as key uses', 'account layer FAILED', 'account up:', 'REFUSING to start'])
     assert.ok(N.isChatter('[parlons-node] message from ' + KEY + ': ' + evil) && N.isChatter('[parlons-node] node: call offer from ' + evil + ' → pushing to devices'), evil);
   assert.equal(N.isChatter('[parlons-node] account up: x'), false);
-  assert.match(src, /p\.stdout\.on\("data", parlonsNotify\.lineFeeder\(/);
+  const got = [], feed = N.lineFeeder((l) => got.push(l)); feed('a\rb\r\nc\n');
+  assert.deepEqual(got.filter(Boolean), ['a', 'b', 'c']);
+  assert.equal(N.unfinished('[parlons-node] node: call offer from Mirela → pushing to devices'), null);
+  assert.equal(N.unfinished('[parlons-node] node: call relay offer → Mirela (device→peer)'), null);
+  assert.equal(N.unfinished('[parlons-node] node: call push queue full; signal dropped'), null);
+  assert.equal(N.unfinished('[parlons-node] account up: x'), null);
+  assert.ok(N.unfinished('[parlons-node] node: call x').test(' from Mirela → pushing to devices'));
+  assert.ok(N.unfinished('Minima @ 20/11/2026 09:14:02 [1.0 MB] : Greeting with Incompatible Version! 1').test(' .. we are 1.0.45 from 1.2.3.4:9001 incoming:false'));
+  assert.equal(N.unfinished('Minima @ 20/11/2026 09:14:02 [1.0 MB] : Greeting with Incompatible Version! 9 .. we are 1.0.45 from 1.2.3.4:9001 incoming:false'), null);
 });
 function rig() {
   const shown = [], events = new EventEmitter(); let opened = 0, flash = [], bounced = 0, cancelled = 0;
