@@ -3602,7 +3602,7 @@ let shopFilter = "ALL";         // the Inbox's status chip
 let shopDraft = null;           // Studio: the shop being built
 let shopUpdateTimer = null;
 const SHOP = AppsAct.shop;
-const SHOP_PILL = { DELIVERED: "#2ECC71", SHIPPED: "#2ECC71", PAID: "#F7931A", CONFIRMED: "#F7931A", UNDERPAID: "#E74C3C", WRONG_TOKEN: "#E74C3C", BAD_TOTAL: "#E74C3C" };
+const SHOP_PILL = { DELIVERED: "#2ECC71", SHIPPED: "#2ECC71", PAID: "#F7931A", CONFIRMED: "#F7931A", UNDERPAID: "#E74C3C", WRONG_TOKEN: "#E74C3C", BAD_TOTAL: "#E74C3C", UNCHECKED: "#E74C3C" };
 const SHOP_APPS = [["shop", "miniMall", L_("Browse your shops, place orders and track deliveries.")], ["studio", "miniMall Studio", L_("Build a storefront for your products.")], ["inbox", "miniMall Inbox", L_("Manage customer orders, payments and deliveries.")]];
 
 async function onShopUpdate() {
@@ -3656,7 +3656,7 @@ async function renderShopInbox() {
      <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>
      <div class="mm-chips">${[N_("ALL"), N_("PENDING"), N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${th(s)}</button>`).join("")}</div>
      ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
-        <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.amount)} ${esc(SHOP.cur(o.currency))}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
+        <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.due || o.amount)} ${esc(SHOP.cur(o.currency))}${o.unchecked && o.status !== "INQUIRY" ? " " + th("(buyer's figure)") : ""}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
   el("mmCard").onclick = shopVendorCard;
   el("shopSub").querySelectorAll("[data-chip]").forEach(c => { c.onclick = () => { shopFilter = c.dataset.chip; renderShopInbox(); }; });
   el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("inbox", { screen: "order", ref: r.dataset.oref }); });
@@ -3678,15 +3678,32 @@ async function renderShopSellOrder(ref) {
   shopFrame((o.items && o.items[0] && o.items[0].product) || o.ref, () => shopGo("inbox"), [],
     `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? ("  " + tr("paid {amount} {cur}", { amount: esc(o.paidAmount || o.amount), cur: esc(cur) })) : "  awaiting payment"}</span></div>
      <div class="mm-sec">${th("Items")}</div><div class="mm-card">${shopItems(o)}</div>
-     ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
+     ${shopKv(t("Buyer's total"), o.amount + " " + cur)}${shopCheckBlock(o, cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
      <div class="mm-sec">${th("Delivery")}</div>${shopKv(t("Method"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("Address"), o.delivery, true) : ""}
      ${o.note ? `<div class="mm-sec">${th("Buyer note")}</div><div class="mm-card">${esc(o.note)}</div>` : ""}
      ${shopKv(t("Buyer key"), o.counterparty || "", true)}
      ${enquiry ? "" : `<div class="mm-sec">${th("Update status")}</div><div class="mm-grid">${[N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${th(s)}</button>`).join("")}</div>
-       <div class="mm-hint">${o.status === "BAD_TOTAL" ? tr("The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}", { amount: esc(o.paidAmount || "0"), cur: esc(cur) }) : !o.paid ? th("Awaiting payment first. PAID is set by the payment itself, when it arrives.") : next ? tr("Next: {next}.", { next: next }) : th("This order is delivered.")}</div>`}
+       <div class="mm-hint">${o.status === "BAD_TOTAL" ? tr("Your listing says nothing is due for this order, so it is never marked paid. Received so far: {amount} {cur}", { amount: esc(o.paidAmount || "0"), cur: esc(cur) }) : !o.paid && !o.handChecked ? ((o.problems || []).length ? th("Check this order by hand before you can confirm it.") : th("Awaiting payment first. PAID is set by the payment itself, when it arrives.")) : next ? tr("Next: {next}.", { next: next }) : th("This order is delivered.")}</div>`}
      <div class="mm-sec">${enquiry ? th("Conversation") : th("Message the buyer")}</div><div class="mm-thread">${shopThread(d.chat, t("Buyer"))}</div>
      <div class="mm-send"><input class="mm-in-f" id="shopMsg" placeholder="${th("Reply…")}" aria-label="${th("Reply")}" autocomplete="off" /><button class="mm-btn" id="shopSend">${th("Send")}</button></div>`);
   shopWireOrder(ref, () => renderShopSellOrder(ref));
+  if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {   // an explicit question first: it lets an unpaid order be confirmed, shipped and delivered
+    const yes = await showConfirm(t("Checked by hand?"), t("This order does not match your shop:\n{problems}\n\nThe buyer's total: {amount} {cur} (their own figure)\nReceived so far: {paid} {cur2}\n\nConfirm only if you have checked the items and the payment yourself. It lets you confirm, ship and deliver this order.",
+      { problems: (o.problems || []).map(p => "• " + MainSaid.say(p)).join("\n"), amount: o.amount, cur: cur, paid: o.paidAmount || "0", cur2: cur }), t("I checked it"), true);
+    if (!yes) return;
+    try { await api.shopVendorCheck(ref); toast(t("Marked as checked by hand"), "ok"); } catch (e) { toast(ipcError(e), "warn"); }
+    renderShopSellOrder(ref);
+  };
+}
+/** What the vendor's own listing says about an incoming order (0.19.166): due by the listing, or Unchecked with every reason
+ *  (main's English sentences, said in the app's language) and the vendor's explicit check by hand. */
+function shopCheckBlock(o, cur) {
+  if (o.status === "INQUIRY") return "";
+  const probs = o.problems || [];
+  if (!probs.length) return shopKv(t("Due by your listing"), o.due + " " + cur);
+  return `<div class="mm-warn"><b>${th("Unchecked: the items or total do not match your shop; check by hand.")}</b> ${th("It is never marked paid by the buyer's figure.")}
+      <div style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:6px">${probs.map(p => "• " + esc(MainSaid.say(p))).join("\n")}</div>
+      ${o.handChecked ? `<div style="margin-top:6px">${th("You checked this order by hand.")}</div>` : `<button class="mm-btn" id="shopHandCheck" style="margin-top:8px">${th("I checked this order by hand")}</button>`}</div>`;
 }
 function shopWireOrder(ref, again) {
   el("shopSub").querySelectorAll("[data-copy]").forEach(b => { b.onclick = () => copy(b.dataset.copy); });

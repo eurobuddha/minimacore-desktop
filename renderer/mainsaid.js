@@ -201,6 +201,21 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SHOP_MAY_SENT", I18N.N_("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.")],
     ["SHOP_PAID", I18N.N_("This order is already paid.")],
     ["SHOP_NO_VENDOR", I18N.N_("Missing vendor address for retry.")],
+    ["SHOP_NOT_DUE", I18N.N_("This order is not paid by what your shop says is due. Check it by hand first.")],
+    ["SHOP_HAND_ONLY", I18N.N_("Only an order that does not match your shop is checked by hand.")],
+
+    // ---- miniMall: how an incoming order departs from the vendor's own listing (main/shop-listing.js, 0.19.166) ----
+    ["SL_DELIVERY", I18N.N_("the delivery method \"{ship}\" is not in your listing")],   // before SL_UNLISTED, whose {what} would take it whole
+    ["SL_NOT_MINE", I18N.N_("the shop this order names is not one of your shops on this computer")],
+    ["SL_CURRENCY", I18N.N_("the order's currency ({ordercur}) is not your shop's ({shopcur})")],
+    ["SL_NO_ITEMS", I18N.N_("the order has no items that can be read")],
+    ["SL_ITEM", I18N.N_("an item cannot be read")],
+    ["SL_QTY", I18N.N_("{what}: the quantity {qty} is not a whole number above zero")],
+    ["SL_QTY_MAX", I18N.N_("{what}: the quantity {qty} is more than you list ({cap})")],
+    ["SL_OWN_PRICE", I18N.N_("{what}: your own price {price} is not a plain number")],
+    ["SL_PRICE", I18N.N_("{what}: the order's price {stated} is not your price {price}")],
+    ["SL_TWICE", I18N.N_("{what} is listed more than once")],
+    ["SL_UNLISTED", I18N.N_("{what} is not in your listing")],
 
     // ---- Minima Vestr (main/vestr.js: pinned, its exact English) ----
     ["VESTR_AMOUNT", I18N.N_("Enter a valid amount to lock")],

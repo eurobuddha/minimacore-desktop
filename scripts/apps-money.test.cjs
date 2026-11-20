@@ -337,8 +337,10 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   assert.match(mall, /idHtml\(shopIdentity\.publicId\)/);
   const sha = (f) => require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", f))).digest("hex");
   // Each pin is a file CHANGED ON PURPOSE, never by a screen change: main/shop.js in 0.19.118 (the token paid follows the currency; a
-  // mismatching tokenid is refused; plain amounts) and 0.19.165 (an incoming order is paid in the token of the vendor's own shop); main/shop-store.js in 0.19.164 (an unreadable, zero or negative buyer total is never paid: BAD_TOTAL)
-  for (const [f, want, ver] of [["main/shop.js", "1e3dfc57dab27e5dcb8b5ed2b7ba4ec244f9ad0b16723a8a3cae47d31b36fcda", "0.19.165"], ["main/shop-store.js", "eac6a80c8b10d7e16ea0876eaae743e62e68a561d795b88b977385b3e2f4a491", "0.19.164"],
+  // mismatching tokenid is refused; plain amounts) 0.19.165 (an incoming order is paid in the token of the vendor's own shop) and 0.19.166 (what is due is the vendor's own listing's;
+  // Confirm / Ship / Deliver only when paid or checked by hand); main/shop-store.js in 0.19.164 (an unreadable, zero or negative total is never
+  // paid: BAD_TOTAL) and 0.19.166 (paid by what the listing says is due; UNCHECKED; handCheck)
+  for (const [f, want, ver] of [["main/shop.js", "902c4efe3e19325ed284e3aec6aaedbc4015ba51aa4e527c001cb2327a2bc45f", "0.19.166"], ["main/shop-store.js", "a9b81634bc4c194b3f7acd818a38dae603b9b70e5d57b466e525ec9f0edfed8f", "0.19.166"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

@@ -145,9 +145,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       });
     },
     retryPay: function (api, ref) { return api.shopRetryPay(ref).then(function () { return { ok: true }; }, errOf); },
-    /** The one status a vendor may set next (the screens before allowed exactly this): none before payment, none for an enquiry. */
+    /** The one status a vendor may set next (the screens before allowed exactly this): none before payment (or, for an order that
+     *  does not match the vendor's listing, before the vendor checked it by hand: 0.19.166), none for an enquiry. */
     nextStatus: function (o) {
-      if (!o || o.status === "INQUIRY" || !o.paid) return null;
+      if (!o || o.status === "INQUIRY" || !(o.paid || o.handChecked)) return null;
       var rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 }, cur = rank[o.status] != null ? rank[o.status] : -1;
       return ["CONFIRMED", "SHIPPED", "DELIVERED"][cur + 1] || null;
     },

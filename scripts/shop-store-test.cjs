@@ -10,7 +10,12 @@ const M = store._money;
 process.on("exit", () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {} });
 const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 let n = 0;
-const sellOrder = (amount, tokenid) => { const ref = "ORD-T" + (++n); store.upsertOrder({ ref, role: "sell", amount, tokenid: tokenid || "0x00", status: "PENDING", paid: false }); return ref; };
+// An incoming order to the vendor's own shop "tea" (Tea 1.5 x up to 10, Domestic delivery 0.2). Since 0.19.166 what is
+// due comes from that listing; the buyer's amount is kept only to be shown.
+store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }, { id: "p2", name: "Free sample", price: "0", maxUnits: "1" }],
+  shipping: [{ id: "digital", label: "Digital", fee: "0" }, { id: "domestic", label: "Domestic", fee: "0.2" }] });
+const sellOrder = (amount, tokenid, more) => { const ref = "ORD-T" + (++n); store.upsertOrder(Object.assign({ ref, role: "sell", shopId: "tea", amount, currency: "Minima", tokenid: tokenid || "0x00", status: "PENDING", paid: false,
+  items: [{ product: "Tea", quantity: 2, unitPrice: "1.5", lineTotal: "3.000000" }], shipping: "Domestic" }, more)); return ref; };
 
 // ---- 0.19.164 (released 0.18.149): decCmp never calls an unreadable figure "equal" ----
 test("decCmp: exact decimal compare; an unreadable figure is null, never 0", () => {
@@ -24,31 +29,85 @@ test("decCmp: exact decimal compare; an unreadable figure is null, never 0", () 
   }
 });
 
-test("recordPayment: a malformed, zero or negative buyer total is never paid (BAD_TOTAL), whatever is received", () => {
-  for (const total of ["abc", "1e3", "-5", "0", "0.000", "", "0x10", "1.2.3", " 10"]) {
+// 0.19.164's tests were on the buyer's total; since 0.19.166 the figure compared is the listing's (CHANGED on purpose, as released 0.18.159).
+test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.000000001), the listing decides what is due", () => {
+  for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
-    assert.equal(store.recordPayment(ref, "1000000", "0x00"), "BAD_TOTAL", JSON.stringify(total));
-    const o = store.order(ref); assert.equal(o.paid, false); assert.equal(o.status, "BAD_TOTAL"); assert.equal(o.paidAmount, "1000000", "what arrived is still recorded");
-    assert.equal(store.recordPayment(ref, "5", "0x00"), "BAD_TOTAL", "and a second coin does not change it");
+    assert.equal(store.recordPayment(ref, "0.000000001", "0x00"), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
+    assert.equal(store.recordPayment(ref, "3.199999999", "0x00"), "PAID", "3.2 received = 3.2 due");
+    assert.equal(store.order(ref).due, "3.2");
   }
+  const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
+  assert.equal(store.recordPayment(free, "5", "0x00"), "BAD_TOTAL", "nothing due by the listing: never paid"); assert.equal(store.order(free).paid, false);
+  assert.equal(store.recordPayment(free, "5", "0x00"), "BAD_TOTAL", "and a second coin does not change it"); assert.equal(store.order(free).paidAmount, "10", "what arrived is still recorded");
 });
 
-test("recordPayment: a readable total is paid exactly at its figure, cumulatively, and only in its token", () => {
-  let ref = sellOrder("10.5");
-  assert.equal(store.recordPayment(ref, "10.499999999999999999", "0x00"), "UNDERPAID");
-  assert.equal(store.recordPayment(ref, "0.000000000000000001", "0x00"), "PAID", "10.499999999999999999 + 0.000000000000000001 = 10.5");
+test("recordPayment: exact, cumulative, and only in the order's token", () => {
+  let ref = sellOrder("3.2");
+  assert.equal(store.recordPayment(ref, "3.199999999999999999", "0x00"), "UNDERPAID");
+  assert.equal(store.recordPayment(ref, "0.000000000000000001", "0x00"), "PAID");
   assert.equal(store.recordPayment(ref, "1", "0x00"), "ALREADY");
-  ref = sellOrder("3", MXUSD);
+  ref = sellOrder("3.2", MXUSD);
   assert.equal(store.recordPayment(ref, "100", "0x00"), "WRONG_TOKEN");
-  assert.equal(store.recordPayment(ref, "3", MXUSD.toLowerCase()), "PAID");
-  ref = sellOrder("0.000000001");
-  assert.equal(store.recordPayment(ref, "0.000000001", "0x00"), "PAID", "a tiny but real total is still payable");
 });
 
-test("the Inbox: a BAD_TOTAL order is red and says why it is never paid, in each language", () => {
+// ---- 0.19.166 (released 0.18.159, the phone Inbox 0.5.18 Listing.check): the vendor's own listing ----
+const L = require("../main/shop-listing");
+const TEA = store.shop("tea");
+test("listing.check: due = listed price x quantity + the listed fee; both buyers' wire shapes match", () => {
+  const desktop = { items: [{ product: "Tea", quantity: 3, unitPrice: "1.5", lineTotal: "4.500000" }], shipping: "Domestic", currency: "Minima" };
+  assert.deepEqual(L.check(TEA, desktop), { due: "4.7", problems: [] }, "this desktop: items an array, shipping the LABEL");
+  const phone = { items: JSON.stringify([{ product: "Tea", size: "", quantity: 3, unitPrice: "1.5", lineTotal: "4.5" }]), shipping: "domestic", currency: "Minima" };
+  assert.deepEqual(L.check(TEA, phone), { due: "4.7", problems: [] }, "the phone: items a JSON array STRING, shipping the ID");
+  assert.deepEqual(L.check(TEA, { items: [{ product: "Tea", quantity: 1, unitPrice: "1.50" }], shipping: "digital", currency: "minima" }), { due: "1.5", problems: [] }, "1.50 is the listed 1.5");
+  assert.deepEqual(L.check({ shopId: "x", currency: "USDT", products: [{ name: "Pin", price: "0.00000001", maxUnits: "99" }], shipping: [] }, { items: [{ product: "Pin", quantity: 7, unitPrice: "0.00000001" }], shipping: "", currency: "USDT" }),
+    { due: "0.00000007", problems: [] }, "no delivery methods listed: none chosen costs nothing; 8 decimals exact");
+});
+test("listing.check: every way an order departs from the listing is a problem, each one a sentence the Inbox says in every language", () => {
+  const P = (items, shipping, currency, shopObj) => L.check(shopObj === undefined ? TEA : shopObj, { items, shipping: shipping == null ? "Domestic" : shipping, currency: currency || "Minima" }).problems;
+  const tea = (o) => [Object.assign({ product: "Tea", quantity: 1, unitPrice: "1.5" }, o)], all = [];
+  const got = (p) => { all.push(...p); return p.join(" | "); };
+  for (const [items, why] of [[tea({ product: "Tea " }), /not in your listing/], [tea({ product: "tea" }), /not in your listing/], [tea({ unitPrice: "0.000000001" }), /is not your price 1\.5/], [tea({ unitPrice: "1e0" }), /not your price/],
+    [tea({ quantity: 0 }), /not a whole number above zero/], [tea({ quantity: 1.5 }), /not a whole number/], [tea({ quantity: "2x" }), /not a whole number/], [tea({ quantity: -1 }), /not a whole number/], [tea({ quantity: 11 }), /more than you list \(10\)/],
+    [tea({ nftTokenId: "0x" + "AB".repeat(32) }), /not in your listing/], [tea({ nftStateIdx: 3 }), /not in your listing/], [[], /no items/], ["not json", /no items/], [[null], /cannot be read/]])
+    assert.match(got(P(items)), why, JSON.stringify(items));
+  assert.match(got(P(tea({}), "Express")), /delivery method "Express" is not in your listing/);
+  assert.match(got(P(tea({}), null, "USDT")), /currency \(MxUSD\) is not your shop's \(Minima\)/, "the Minima dollar token is named MxUSD, never USDT");
+  assert.match(got(P(tea({}), null, "MxUSD")), /currency \("MxUSD"\) is not your shop's \(Minima\)/, "a currency the wire does not know is shown as it came, in quotes");
+  assert.match(got(P(tea({}), null, null, null)), /not one of your shops/);
+  assert.match(got(P(tea({}), null, null, Object.assign({}, TEA, { products: TEA.products.concat([{ name: "Tea", price: "9" }]) }))), /listed more than once/);
+  assert.match(got(P(tea({}), null, null, Object.assign({}, TEA, { products: [{ name: "Tea", price: "1,5" }] }))), /your own price 1,5 is not a plain number/);
+  const nft = { shopId: "n", currency: "Minima", shipping: [], products: [{ name: "Art", price: "5", nftTokenId: "0xAA", nftStateIdx: 2 }] };
+  assert.deepEqual(P([{ product: "Art", quantity: 1, unitPrice: "5", nftTokenId: "0xaa", nftStateIdx: 2 }], "digital", null, nft), [], "an edition matches by name, token id and index");
+  assert.match(got(P([{ product: "Art", quantity: 2, unitPrice: "5", nftTokenId: "0xAA", nftStateIdx: 2 }], "digital", null, nft)), /more than you list \(1\)/, "one of an edition");
+  // every problem main gives is a listed sentence (renderer/mainsaid.js SL_*), said whole in each language
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const MS = require("../renderer/mainsaid.js"), codes = new Set();
+  try {
+    for (const p of all) {
+      I18N.set("en"); const r = MS.read(p); assert.ok(r && /^SL_/.test(r.code), "not a listed sentence: " + p); codes.add(r.code); assert.equal(MS.say(p), p);
+      for (const c of ["zh", "ru", "uk"]) { I18N.set(c); const s = MS.say(p); assert.notEqual(s, p, c + ": " + p); assert.ok(!/is not in your listing|is not your price|whole number|more than you list|not one of your shops|can be read|cannot be read|listed more than once|plain number/.test(s), c + ": " + s); }
+    }
+  } finally { I18N.set("en"); }
+  assert.deepEqual([...codes].sort(), MS.codes().filter(c => /^SL_/.test(c)).sort(), "each listed sentence is one main gives");
+});
+test("an order that does not match is UNCHECKED, never paid by any amount, and can be confirmed only after the vendor checks it by hand", async () => {
+  const ref = sellOrder("1000", "0x00", { items: [{ product: "Tea", quantity: 2, unitPrice: "0.000000001" }] });
+  assert.equal(store.recordPayment(ref, "1000000", "0x00"), "UNCHECKED");
+  const o = store.order(ref); assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.match(o.problems[0], /is not your price 1\.5/);
+  assert.equal(store.mayAdvance(o), false);
+  await assert.rejects(shop.advanceStatus(ref, "CONFIRMED"), /Check it by hand first/);
+  for (const s of ["SHIPPED", "DELIVERED"]) await assert.rejects(shop.advanceStatus(ref, s), /Check it by hand first/);
+  assert.equal(store.handCheck(sellOrder("3.2")), false, "a matching order is not 'checked by hand'");
+  assert.throws(() => shop.vendorCheck(sellOrder("3.2")), /Only an order that does not match your shop is checked by hand\./);
+  shop.vendorCheck(ref); assert.equal(store.mayAdvance(store.order(ref)), true); assert.equal(store.order(ref).paid, false, "still not paid");
+  const Act = require("../renderer/apps-act.js");
+  assert.equal(Act.shop.nextStatus({ status: "UNCHECKED", paid: false }), null); assert.equal(Act.shop.nextStatus({ status: "UNCHECKED", paid: false, handChecked: true }), "CONFIRMED");
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
-  assert.ok(app.includes('WRONG_TOKEN: "#E74C3C", BAD_TOTAL: "#E74C3C" };'));
-  assert.ok(app.includes(`o.status === "BAD_TOTAL" ? tr("The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: {amount} {cur}", { amount: esc(o.paidAmount || "0"), cur: esc(cur) })`));
+  assert.ok(app.includes('th("Unchecked: the items or total do not match your shop; check by hand.")') && app.includes("!o.paid && !o.handChecked ? ((o.problems || []).length ? th(\"Check this order by hand before you can confirm it.\")")
+    && /const yes = await showConfirm\(t\("Checked by hand\?"\)[\s\S]{0,700}if \(!yes\) return;\s*try \{ await api\.shopVendorCheck\(ref\);/.test(app), "the screen says so and asks before it");
+  assert.ok(app.includes("${shopKv(t(\"Buyer's total\"), o.amount + \" \" + cur)}${shopCheckBlock(o, cur)}") && app.includes('shopKv(t("Due by your listing"), o.due + " " + cur)'), "the buyer's figure is named as theirs; what is due is the listing's");
+  assert.ok(/ipcMain\.handle\("mcd:shopVendorCheck", \(_e, ref\) => shop\.vendorCheck\(ref\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
 });
 
 // ---- the vendor's side of main/shop.js over the real store: orders are opened by a stand-in shopcrypto ----
@@ -79,5 +138,19 @@ test("vendor: an order to an MxUSD shop that says Minima must still be paid in M
     [{ coinid: "0xC2", ref: "ORD-VEND1", amount: "5", tokenid: "0x00" }]);
   const o = store.order("ORD-VEND1");
   assert.ok(o, "the order was received"); assert.equal(o.tokenid, MXUSD); assert.equal(o.currency, "USDT"); assert.equal(o.shopName, "Mine", "the shop's name is mine, not the buyer's");
-  assert.equal(o.paid, false, "5 Minima does not pay a 5 MxUSD order"); assert.equal(o.status, "WRONG_TOKEN");
+  assert.equal(o.paid, false, "5 Minima does not pay a 5 MxUSD order"); assert.equal(o.paidTokenid, "0x00");
+  assert.match(o.problems.join(), /currency \(Minima\) is not your shop's \(MxUSD\)/, "and since 0.19.166 the order is UNCHECKED against the listing"); assert.equal(o.status, "UNCHECKED");
+});
+
+// ---- 0.19.166: a phone-placed order (wire: items as a JSON string, shipping by id) is checked and paid end to end ----
+test("vendor: a phone-placed order to my shop is checked against my listing and paid by what it says is due", async () => {
+  const order = { type: "ORDER", ref: "ORD-PHONE1", shopId: "tea", shopName: "Tea", items: JSON.stringify([{ product: "Tea", size: "", quantity: 2, unitPrice: "1.5", lineTotal: "3.0" }]), product: "Tea x2",
+    amount: "0.000000001", currency: "Minima", tokenid: "0x00", shipping: "domestic", delivery: "x", message: "", buyerPayaddr: "" };
+  await scan([order], [{ coinid: "0xD201", ref: "ORD-PHONE1", amount: "0.000000001", tokenid: "0x00" }]);
+  let o = store.order("ORD-PHONE1");
+  assert.equal(o.items.length, 1, "the JSON string is read as items"); assert.equal(o.due, "3.2"); assert.deepEqual(o.problems, []);
+  assert.equal(o.paid, false, "the buyer's 0.000000001 total paid with 1 nano is not paid"); assert.equal(o.status, "UNDERPAID");
+  await scan([], [{ coinid: "0xD202", ref: "ORD-PHONE1", amount: "3.199999999", tokenid: "0x00" }]);
+  o = store.order("ORD-PHONE1"); assert.equal(o.paid, true); assert.equal(o.status, "PAID");
+  const listed = shop.ordersList().find(x => x.ref === "ORD-PHONE1"); assert.equal(listed.due, "3.2"); assert.equal(listed.unchecked, false);
 });

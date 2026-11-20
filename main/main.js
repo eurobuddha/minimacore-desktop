@@ -492,6 +492,7 @@ ipcMain.handle("mcd:shopNewCount", () => shop.newOrderCount());
 ipcMain.handle("mcd:shopPlaceOrder", (_e, shopCfg, items, total, shipping, delivery, note) => shop.placeOrder(shopCfg, items, total, shipping, delivery, note));
 ipcMain.handle("mcd:shopRetryPay", (_e, ref) => shop.retryPayment(ref));
 ipcMain.handle("mcd:shopAdvance", (_e, ref, status) => shop.advanceStatus(ref, status));
+ipcMain.handle("mcd:shopVendorCheck", (_e, ref) => shop.vendorCheck(ref));   // the vendor checked an unmatched order by hand (0.19.166)
 ipcMain.handle("mcd:shopReply", (_e, ref, text) => shop.reply(ref, text));
 ipcMain.handle("mcd:shopScan", () => shop.scanOnce());
 ipcMain.handle("mcd:shopInvalidate", () => { shop.invalidateIdentity(); return true; });

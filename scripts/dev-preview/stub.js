@@ -368,7 +368,7 @@
     shopNewCount: async () => (Q.get("shop") === "empty" ? 0 : 1), shopMyShops: async () => (Q.get("shop") === "empty" ? [] : [MY_SHOP]),
     shopOrders: async () => (Q.get("shop") === "empty" ? [] : SHOP_ORDERS.map(o => Object.assign({ unpaid: o.ref === "ORD-FAKE0003", ambiguous: false }, o))),
     shopOrder: async (ref) => { const o = SHOP_ORDERS.find(x => x.ref === ref); return o ? { order: o, chat: [{ incoming: true, message: "Preview message from the other side", date: Date.now() - 3600000 }, { incoming: false, message: "Preview reply", date: Date.now() - 1800000 }], unpaid: ref === "ORD-FAKE0003", ambiguous: false } : null; },
-    shopPlaceOrder: async () => ({ ref: "ORD-FAKE0003", payError: null }), shopRetryPay: async () => ({}), shopAdvance: async () => ({ ok: true }), shopReply: async () => ({ ok: true }), shopSave: async (c) => c, shopExport: async () => "/Users/preview/Documents/preview.shop", shopImport: async () => MY_SHOP,
+    shopPlaceOrder: async () => ({ ref: "ORD-FAKE0003", payError: null }), shopRetryPay: async () => ({}), shopAdvance: async () => ({ ok: true }), shopVendorCheck: async () => ({ ok: true }), shopReply: async () => ({ ok: true }), shopSave: async (c) => c, shopExport: async () => "/Users/preview/Documents/preview.shop", shopImport: async () => MY_SHOP,
     // Vestr: ?vs=empty (no contract)
     vestrStatus: async () => ({ ready: true, block: 2428094 }), vestrList: async () => (Q.get("vs") === "empty" ? [] : VESTS),
     vestrTokens: async () => [{ tokenid: "0x00", name: "MINIMA", sendable: "1250.75" }, { tokenid: MXUSD, name: "MxUSD", sendable: "300.50000001" }],
