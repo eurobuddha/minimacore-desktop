@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.180] — Web Wallet: payments logged with whole identifiers
+
+- The Web Wallet's log line for a sent payment cut the token id and the sending address to 10 characters and did not name the recipient. It now names the token id, the sending address and the recipient whole. Test: `scripts/inject-test.cjs`.
+
 ## [0.18.179] — Logs: a privatekey field is scrubbed
 
 - A reply's `"privatekey":"…"` field (as `keys action:genkey` answers) is now redacted like `"phrase"` and `"seed"`, in any letter case. Test: `scripts/node-log-test.cjs`.

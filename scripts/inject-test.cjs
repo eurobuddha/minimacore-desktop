@@ -61,3 +61,18 @@ test("Mail and miniMall send every command through oneCommand", () => {
   for (const f of ["main/mail.js", "main/shop.js"]) assert.ok(/async function nodeCmd\(cmd\) \{ return runner\(oneCommand\(cmd\)\); \}/.test(rd(f)), f);
   assert.ok(/const r = await runner\(oneCommand\(cmd\)\);/.test(rd("main/chat.js")));
 });
+
+// ---- 0.18.180: the Web Wallet's log line names the token id and the addresses whole ----
+test("Web Wallet: a sent payment is logged with its whole token id and addresses", async () => {
+  const ww = require("../main/webwallet");
+  const FROM = "0x" + "AA".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "BB".repeat(32), MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
+  ww.ackKeyuses(FROM, 0);
+  const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
+  assert.equal(r.ok, true);
+  const line = ww.status().log.slice(-1)[0];
+  assert.ok(line.includes("token " + MXUSD) && line.includes("from " + FROM) && line.includes("to " + TO), line);
+});
