@@ -333,7 +333,7 @@
     faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
     // Entropy: ?en=nonode (the node does not answer: device only). Preview only: the "node" values below are invented and no seed made here is real.
     entropy: async (kind, arg) => { if (Q.get("en") === "nonode") throw new Error("node not running"); const b = new Uint8Array(32); crypto.getRandomValues(b); return "0x" + [...b].map(x => x.toString(16).padStart(2, "0")).join("").toUpperCase(); },
-    secureScreen: async () => Q.get("en") !== "nocapture",
+    secureScreen: async (on) => ({ on: on === true && Q.get("en") !== "nocapture", platform: Q.get("en") === "nocapture" ? "linux" : "darwin" }),
     // Minima Explorer: ?ex=fail (the node does not answer)  &do=<clicks>  &fill=%23exSearch=<text>. Every id and address is invented.
     explorer: async (kind, arg) => {
       if (Q.get("ex") === "fail") throw new Error("node not running");

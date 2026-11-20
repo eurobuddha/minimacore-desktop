@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.134] — Entropy: screen capture protection is reported as it was set, and turned off when the page goes
+
+- `mcd:secureScreen` answered "protected" on every platform but Linux, whatever the call did, and nothing turned the switch off again if the page reloaded or its renderer crashed while Entropy was open.
+- Now `main/securescreen.js` answers what was set and on which platform, `{ on, platform }`: on only when `setContentProtection(true)` was called without an error on macOS or Windows; never on Linux, on a failed call, or without a window. A page load, a reload and a renderer crash turn it off.
+- The screen no longer claims protection. The banner is always shown: "This window may still be captured by screen recording…" until the main process has answered, on Linux, and whenever nothing was set; on macOS and Windows "Asked the system to keep this window out of screen captures. That was not confirmed here…", because the result could not be tested where this was written.
+- Tests: `scripts/entropy-test.cjs` (24), the module run against a stand-in window.
+
 ## [0.19.133] — Entropy: leaving the screen erases the phrase
 
 - **The phrase no longer outlives the screen** (the phone's own note says closing the screen destroys it; 0.19.130 kept it, concealed). Leaving Entropy erases the phrase, the rolls, each roll's audit values, everything the page drew of them (the words, the roll string, the audit log, the summary, the roll ticker) and every typed last-word box. The routes: another screen (tab, tray row, Back, the overflow menu, a notification), the window hidden or closed, the node stopping, a wallet restore, Hide or Freeze of Entropy, and quitting.

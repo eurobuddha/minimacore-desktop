@@ -113,7 +113,7 @@ function engine(o) {
   const doc = { hidden: false, querySelectorAll: () => [], addEventListener: (t, f) => { on[t] = f; } }, win = { addEventListener: (t, f) => { on[t] = f; } };
   const showConfirm = (title, message, ok, danger) => new Promise(answer => confirms.push({ title, message, ok, danger, answer }));
   const fns = new Function("api", "crypto", "EntropyCore", "Math", "el", "document", "window", "running", "setTimeout", "showConfirm", "activeView", "esc", src.replace(/^"use strict";$/mg, "")
-    + "\nreturn { enRollOne, enRandomN, enVerify, enDeviceSecret, enDeviceFace, entropyNew, entropyErase, entropyErased, entropyLeaving, enIdleTick, enHolds, enWords, enSetLength, EN_NODE_BAD, EN_IDLE_MS, set: (v) => { EN = v; }, now: () => EN };")
+    + "\nreturn { enRollOne, enRandomN, enVerify, enDeviceSecret, enDeviceFace, entropyNew, entropyErase, entropyErased, entropyLeaving, enIdleTick, enHolds, enWords, enSetLength, enCaptureNote, EN_NODE_BAD, EN_IDLE_MS, set: (v) => { EN = v; }, now: () => EN };")
     (api, cryptoStub, C, Object.assign(Object.create(Math), { random: () => { throw new Error("Math.random was used"); } }), el, doc, win, o.running !== false, () => 0, showConfirm, "balances", (t) => String(t).replace(/[&<>"']/g, "?"));
   const EN = fns.entropyNew(); EN.nodeOk = o.node !== "off"; EN.selfErr = null; fns.set(EN);
   return Object.assign(fns, { asked, drawn, secure, confirms, on, doc, els, el, EN });
@@ -213,7 +213,6 @@ test("the phrase stays in the page: no storage, no clipboard, no log, no IPC but
   assert.ok(/EN\.phrase = phrase; EN\.revealed = false;/.test(code), "a new phrase starts concealed");
   assert.ok(/if \(!good\) \{ EN\.done = false; return enStatus\("INTERNAL MISMATCH: phrase suppressed/.test(code), "a phrase our own checker refuses is never shown");
   assert.ok(/function entropyTab\(tab\) \{\s*EN\.tab = tab;\s*if \(EN\.done && EN\.revealed\) \{ EN\.revealed = false; enWords\(\); \}/.test(code), "a tab switch conceals it");
-  assert.ok(/api\.secureScreen\(true\)/.test(code) && /id="enCapture" hidden>This system cannot keep the window out of screenshots/.test(code), "capture protection is asked for on entry, and its absence is said");
   assert.ok(/EN\.run\+\+; EN\.faces = \[\]; EN\.audits = \[\]; EN\.phrase = null;/.test(code), "Wipe drops the rolls, the audit values and the phrase");
   assert.ok(/if \(run !== EN\.run\) return;/.test(code), "a throw that answers after a Wipe is not recorded");
   assert.ok(/if \(EN\.busy \|\| EN\.done \|\| enBlocked\(\)\) return;/.test(code) && /if \(EN\.selfErr\) return lwStatus\("Blocked: startup self-test failed/.test(code), "nothing is generated before the self-test has passed");
@@ -324,6 +323,31 @@ test("the screen says where a digital roll's values go, and what erases the phra
   assert.ok(src.includes("Nothing is stored. Leaving this screen, hiding or closing the window, stopping the node, 5 minutes without input, or Wipe &amp; start over erases the phrase for ever."));
   assert.ok(!/quitting the app, or Wipe/.test(src) && !/sent to the\n\/\/ main process, or put on the clipboard/.test(src), "the old sentence and the old comment are gone");
   assert.ok(/pass through\n\/\/ the main process \(main\/entropy\.js\) and the node on 127\.0\.0\.1/.test(src), "the comment says what the code does");
+});
+
+// 0.19.134 (review): the handler answered "protected" for every platform but Linux, whatever happened, and nothing turned it off again.
+test("screen capture: the answer is what was set and where; a load, a reload or a crash turns it off; the screen never claims more", () => {
+  const S = require("../main/securescreen.js");
+  const win = (o) => { const w = { calls: [], on: {}, isDestroyed: () => !!(o && o.destroyed), setContentProtection(v) { if (o && o.throws) throw new Error("no"); w.calls.push(v); }, webContents: { on: (t, f) => { w.on[t] = f; } } }; return w; };
+  let w = win(); assert.deepEqual(S.set(w, true, "darwin"), { on: true, platform: "darwin" }); assert.deepEqual(S.set(w, false, "darwin"), { on: false, platform: "darwin" }); assert.deepEqual(w.calls, [true, false]);
+  w = win(); assert.deepEqual(S.set(w, true, "win32"), { on: true, platform: "win32" });
+  w = win(); for (const v of [1, "true", {}, null, undefined]) assert.equal(S.set(w, v, "darwin").on, false, "only true turns it on"); assert.deepEqual(w.calls, [false, false, false, false, false]);
+  w = win(); assert.deepEqual(S.set(w, true, "linux"), { on: false, platform: "linux" }, "Linux has no such switch: nothing is claimed"); assert.deepEqual(w.calls, []);
+  assert.deepEqual(S.set(win({ throws: true }), true, "darwin"), { on: false, platform: "darwin" }, "a call that failed set nothing");
+  assert.deepEqual(S.set(win({ destroyed: true }), true, "darwin"), { on: false, platform: "darwin" }); assert.deepEqual(S.set(null, true, "darwin"), { on: false, platform: "darwin" });
+  w = win(); S.watch(w, "darwin"); assert.deepEqual(Object.keys(w.on).sort(), ["did-finish-load", "render-process-gone"]);
+  S.set(w, true, "darwin"); w.on["did-finish-load"](); assert.deepEqual(w.calls, [true, false], "a page loaded or reloaded: off");
+  S.set(w, true, "darwin"); w.on["render-process-gone"](); assert.deepEqual(w.calls, [true, false, true, false], "the renderer crashed: off");
+  const mainJs = R("main/main.js");
+  assert.ok(/ipcMain\.handle\("mcd:secureScreen", \(_e, on\) => secureScreen\.set\(win, on\)\);/.test(mainJs) && /secureScreen\.watch\(win\);[^\n]*\n  win\.loadFile\(/.test(mainJs), "main: the switch and nothing else, watched from before the first page loads");
+  assert.ok(!/setContentProtection/.test(mainJs), "one place sets it");
+  const e = engine({}), may = "This window may still be captured by screen recording. Make sure nothing is recording the screen.";
+  assert.equal(e.enCaptureNote({ on: true, platform: "darwin" }), "Asked the system to keep this window out of screen captures. That was not confirmed here: make sure nothing is recording the screen.");
+  assert.equal(e.enCaptureNote({ on: true, platform: "win32" }), e.enCaptureNote({ on: true, platform: "darwin" }));
+  for (const r of [{ on: false, platform: "linux" }, { on: true, platform: "linux" }, { on: false, platform: "darwin" }, null, undefined, true, false, { on: "yes", platform: "darwin" }]) assert.equal(e.enCaptureNote(r), may, JSON.stringify(r));
+  assert.ok(!/protected|is kept out of|cannot be captured/i.test(e.enCaptureNote({ on: true, platform: "darwin" })), "asked, never promised");
+  assert.ok(/<div class="en-banner" id="enCapture" role="status">\$\{esc\(enCaptureNote\(null\)\)\}<\/div>/.test(src), "the banner is always shown, and says 'may still be captured' until the main process has answered");
+  assert.ok(/try \{ api\.secureScreen\(true\)\.then\(capture, \(\) => capture\(null\)\); \} catch \(e\) \{ capture\(null\); \}/.test(src));
 });
 
 test("the screen: the original's wording and palette (no em dash), its icon unchanged, keyboard reachable", () => {

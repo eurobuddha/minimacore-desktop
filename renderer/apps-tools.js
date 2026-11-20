@@ -533,15 +533,22 @@ function enIdleTick(now) {
 // The window hidden or closed (on macOS closing hides it), or the page going away: erased at once, nobody is asked.
 document.addEventListener("visibilitychange", () => { if (document.hidden) entropyErased("the window was hidden."); });
 window.addEventListener("pagehide", () => entropyErase());
+/** What the screen says about screen capture, from what the main process SET ({ on, platform }); nothing was set until it answers. Never "protected": the result was not tested. */
+function enCaptureNote(r) {
+  return r && r.on === true && r.platform !== "linux"
+    ? "Asked the system to keep this window out of screen captures. That was not confirmed here: make sure nothing is recording the screen."
+    : "This window may still be captured by screen recording. Make sure nothing is recording the screen.";
+}
 function renderEntropy() {
-  try { api.secureScreen(true).then(ok => { const n = el("enCapture"); if (n) n.hidden = ok !== false; }, () => {}); } catch (e) {}
+  const capture = (r) => { const n = el("enCapture"); if (n) n.textContent = enCaptureNote(r); };
+  try { api.secureScreen(true).then(capture, () => capture(null)); } catch (e) { capture(null); }
   if (el("enRoot")) { enVerify(); return; }
   const was = EN; EN = entropyNew();
   if (was) { EN.run = was.run; EN.verified = was.verified; }   // the counters go on: an answer still on its way to an erased screen never matches the new one
   let initErr = null; try { EntropyCore.init(WordEntry.WORDS); } catch (e) { initErr = "init failed: " + ((e && e.message) || e); EntropyCore.init(new Array(2048).fill("")); }   // a broken list blocks everything below, with the reason on screen
   const C = EntropyCore, lens = (attr) => C.LENGTHS.map(n => `<button class="en-btn" ${attr}="${n}">${n}</button>`).join("");
   el("entropyBody").innerHTML = `<div class="en" id="enRoot"><div class="en-head"><div class="en-title">ENTROPY</div><div class="en-sub">PROVABLY FAIR BIP39 SEED DICE</div><div class="en-banner" id="enBanner" hidden></div>
-      <div class="en-banner" id="enCapture" hidden>This system cannot keep the window out of screenshots and screen sharing. Make sure nothing is recording the screen.</div></div>
+      <div class="en-banner" id="enCapture" role="status">${esc(enCaptureNote(null))}</div></div>
     <div class="en-tabs" role="tablist"><button class="en-tab en-tab--on" id="enTab-dice" role="tab" aria-selected="true" aria-controls="enDiceTab">🎲 DICE ROLL</button><button class="en-tab" id="enTab-lw" role="tab" aria-selected="false" aria-controls="lwTab" tabindex="-1">✓ LAST WORD</button></div>
     <div class="en-page" id="enDiceTab" role="tabpanel">
       <div class="en-card"><div class="en-label">PHRASE LENGTH</div><div class="en-row">${lens("data-len")}</div>

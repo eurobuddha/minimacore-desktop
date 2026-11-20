@@ -24,6 +24,7 @@ const faucet = require("./faucet");
 const keyuses = require("./keyuses");
 const explorer = require("./explorer");
 const entropy = require("./entropy");
+const secureScreen = require("./securescreen");
 const mail = require("./mail");
 const chat = require("./chat");
 const pandapools = require("./pandapools");
@@ -108,6 +109,7 @@ function createWindow() {
       sandbox: true
     }
   });
+  secureScreen.watch(win);   // capture protection never outlives the page that asked for it
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
   if (flavor.id || flavor.test) win.on("page-title-updated", (e) => e.preventDefault());   // the page's own <title> is the released app's: the window keeps this app's name
   if (flavor.test) {   // a TEST copy says so in the title bar, on every screen and on the Dock icon
@@ -352,9 +354,10 @@ ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
 
 // Entropy (main/entropy.js): `random`, or `hash data:` of plain hex, through rpcCall; the hex value back. Seed material: never logged.
 ipcMain.handle("mcd:entropy", (_e, kind, arg) => { requireRunning(); return entropy.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
-// While a seed phrase can be on screen (Entropy), the window is kept out of screenshots and screen sharing, as the phone's
-// FLAG_SECURE (macOS and Windows; Linux has no such switch). On or off, nothing else: no path, no setting.
-ipcMain.handle("mcd:secureScreen", (_e, on) => { try { if (win && !win.isDestroyed()) win.setContentProtection(on === true); return process.platform !== "linux"; } catch (e) { return false; } });
+// While a seed phrase can be on screen (Entropy), the system is asked to keep the window out of screenshots and screen
+// sharing (main/securescreen.js). On or off, nothing else: no path, no setting. The answer is what was set and on which
+// platform, { on, platform }; a load, a reload or a renderer crash turns it off (secureScreen.watch in createWindow).
+ipcMain.handle("mcd:secureScreen", (_e, on) => secureScreen.set(win, on));
 
 // Minima Explorer (main/explorer.js): a kind and one checked value in, one of seven node READS out, through rpcCall.
 ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return explorer.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
