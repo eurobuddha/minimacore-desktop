@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.154] — a chain of commands is never given the send pin
+
+- `main/sendpin.js` `pinMinimaSend` appended `fromaddress:` to the end of the command text, so for a Terminal chain (`send …; status`) it landed on the LAST command as a stray parameter while the send itself went out unpinned. A chain is now sent as typed. Port of the main-process part of 0.19.122 (the released Terminal has no pin note and keeps its own output handling). Test: `scripts/sendpin-test.cjs` (`npm run test:sendpin`, in CI).
+
 ## [0.18.153] — Logs: the RPC secret, bare seed words and bidi controls scrubbed
 
 - The node prints its own start parameters, `-rpcpassword` among them, so the RPC secret went into the Logs view and `node.log`. `main/nodelog.js` `scrub` now takes it out of every line (only a secret of 8 characters or more is looked for), before the 400-character cut; a seed phrase given as bare words or as a reply's JSON is redacted as the quoted form was, without eating the rest of the line; bidirectional text controls are stripped. Port of 0.19.121 (the released app has no Save to file, so `forFile` is not ported). Test: `scripts/node-log-test.cjs` (`npm run test:node-log`, in CI).

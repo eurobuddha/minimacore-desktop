@@ -17,6 +17,9 @@
 async function pinMinimaSend(runner, command, opts) {
   const c = String(command);
   if (!/^send\s/.test(c) || /\bfromaddress:/.test(c)) return c;
+  // A chain (cmd1; cmd2) is never pinned (0.18.154): the pin is appended to the END of the text, so in a chain it landed
+  // on the LAST command, a stray parameter there, while the send itself went out unpinned. The node splits on every ";".
+  if (c.includes(";")) return c;
   // minCoinage: only consider coins at least N blocks deep. AtomiX's order-book publish needs this — a
   // publish's own CHANGE output is a brand-new coin that immediately becomes the smallest one, and pinning
   // to a coin the node will not spend yet makes the send unfundable, so every publish poisoned the next.
