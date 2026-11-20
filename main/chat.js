@@ -130,7 +130,7 @@ async function pollOnce() {
     const inbox = await nodeCmd("keets action:inbox");
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
-      const m = schema.chatDecode(msg.message);
+      const m = capDecoded(schema.chatDecode(msg.message));   // every peer string cut to its length before anything uses or stores it (0.18.172)
 
       // control messages: consumed, never stored or notified
       if (m.state === "read") {
@@ -382,6 +382,17 @@ function removeContact(pubkey) { store.removeContact(pubkey); store.deleteThread
 function unreadCount() { return store.unreadCount(); }
 function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubkey : "", lastError: lastErr, unread: store.unreadCount() }; }
 
+/* A peer's decoded message, every string cut to a length that keeps any real message whole (0.18.172): the body to
+ * 256 KB (one keets message carries at most that), a name 200, a media ref 2048, an address 90, an amount 80, a token id
+ * 66, a token name 200, a transaction id 130, a state 20. Done here, not in chatschema.js, which must stay identical to
+ * the canonical mds/keetchat copy (scripts/chat-test.cjs). */
+const CHAT_CAP = { body: 262144, name: 200, ref: 2048, addr: 90, amt: 80, tok: 66, tokname: 200, txid: 130, state: 20 };
+function capDecoded(m) {
+  const out = Object.assign({}, m);
+  for (const [k, n] of Object.entries(CHAT_CAP)) out[k] = typeof m[k] === "string" ? m[k].slice(0, n) : "";
+  return out;
+}
+
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
   threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner,
-  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity };
+  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity, _capDecoded: capDecoded, CHAT_CAP };
