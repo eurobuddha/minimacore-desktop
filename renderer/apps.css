@@ -535,3 +535,66 @@ img.mm-prod__im { cursor: zoom-in; }
 .en-sugg { display: flex; flex-wrap: wrap; gap: 6px 0; margin-top: 4px; }
 .en-cands { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 4px; margin-top: 8px; }
 .en .en-cand { padding: 6px; background: rgba(0,0,0,.4); border: 1.5px solid #2A3550; border-radius: 6px; color: #EAEAF2; font-family: var(--app-mono); font-size: 11px; text-align: left; }
+
+/* ---- Future Cash Next (renderer/futurecash.js): the native app's Design.java, Onyx (dark, its default) and Daylight
+   behind its own ☀ / ☾ button; Ui.java's raised cards (18 radius, hairline), pills, ghost / tinted / gradient buttons. ---- */
+.fcn { --g: #0B0D12; --s: #12151C; --s2: #1B1F28; --b: rgba(255,255,255,.07); --t: #EEF0F4; --d: #8B909C; --d2: #6F7583; --a: #F7931A; --as: rgba(247,147,26,.2);
+  --safe: #3FD0A2; --warn: #FFB020; --red: #FF5C5C; --top: #171B24; --bot: #10131A; min-height: 100%; background: var(--g); color: var(--t); font-family: var(--app-font); }
+.fcn[data-theme="light"] { --g: #F3F4F7; --s: #FFFFFF; --s2: #EDEEF2; --b: #E6E8EE; --t: #181B22; --d: #8B909C; --d2: #A6ABB6; --as: rgba(247,147,26,.12);
+  --safe: #12A97E; --warn: #B25E00; --red: #E5484D; --top: #FFFFFF; --bot: #F7F8FB; }
+.fcn-wrap { max-width: 1180px; margin: 0 auto; padding: 14px 16px 32px; }
+.fcn-head { display: flex; align-items: center; gap: 12px; padding: 0 4px 12px; }
+.fcn-grow { flex: 1 1 auto; min-width: 0; }
+.fcn-title { margin: 0; font-size: 21px; font-weight: 700; color: var(--t); }
+.fcn-sub { font-size: 12px; color: var(--d2); }
+.fcn-theme { background: var(--s2); border: 1px solid var(--b); border-radius: 12px; padding: 8px 12px; font-size: 12px; color: var(--d); cursor: pointer; }
+.fcn-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; }
+.fcn-tab { border: 0; border-radius: 12px; padding: 10px 16px; font: inherit; font-size: 13px; background: transparent; color: var(--d); cursor: pointer; white-space: nowrap; }
+.fcn-tab--on { background: var(--as); color: var(--a); font-weight: 700; }
+.fcn-content { columns: 2 520px; column-gap: 14px; }
+.fcn-content > * { break-inside: avoid; }
+.fcn-card { background: linear-gradient(var(--top), var(--bot)); border: 1px solid var(--b); border-radius: 18px; padding: 16px 18px; margin: 0 0 14px; box-shadow: 0 3px 10px rgba(0,0,0,.18); }
+.fcn-card--warn { border-color: var(--warn); } .fcn-card--red { border-color: var(--red); } .fcn-card--safe { border-color: var(--safe); }
+.fcn-hero { display: flex; align-items: center; gap: 10px; }
+.fcn-dot { flex: 0 0 10px; height: 10px; border-radius: 5px; }
+.fcn-hero__t { font-size: 19px; font-weight: 700; }
+.fcn-h { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--t); }
+.fcn-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--d2); }
+.fcn-body, .fcn-dim { margin: 4px 0 0; font-size: 13px; line-height: 1.45; color: var(--d); }
+.fcn-small2 { font-size: 12px; line-height: 1.45; margin: 4px 0 0; }
+.fcn-small { font-size: 11px; color: var(--d2); margin-top: 4px; }
+.fcn-pre { white-space: pre-wrap; }
+.fcn-mono, .fcn-amt, .fcn-field.fcn-mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+.fcn-amt { font-size: 17px; font-weight: 700; color: var(--t); }
+.fcn-unit { font-size: 11px; color: var(--d2); padding: 4px 6px 0 4px; }
+.fcn-div { height: 1px; background: var(--b); margin: 12px 0 4px; }
+.fcn-foot { display: flex; gap: 6px; font-size: 11px; color: var(--d2); }
+.fcn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fcn-row--split { justify-content: space-between; }
+.fcn-col { display: flex; flex-direction: column; align-items: flex-start; }
+.fcn-inset { display: flex; align-items: flex-start; gap: 10px; background: var(--s2); border-radius: 12px; padding: 10px 12px; margin-top: 8px; }
+.fcn-pill { border-radius: 14px; padding: 6px 10px; font-size: 11px; }
+.fcn-pill--safe { background: color-mix(in srgb, var(--safe) 14%, transparent); color: var(--safe); }
+.fcn-pill--warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.fcn-pill--dim { background: color-mix(in srgb, var(--d) 14%, transparent); color: var(--d); }
+.fcn-btn { margin: 12px 8px 0 0; padding: 12px 18px; border-radius: 14px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; border: 1px solid var(--b); background: transparent; color: var(--t); }
+.fcn-btn:disabled { opacity: .45; cursor: default; }
+.fcn-btn--cta { border: 0; color: #fff; background: linear-gradient(#FFB454, #F7931A); }
+.fcn-btn--on { border-color: var(--a); color: var(--a); }
+.fcn-btn--tint { --c: var(--a); color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); border-color: color-mix(in srgb, var(--c) 40%, transparent); }
+.fcn-tint--safe { --c: var(--safe); } .fcn-tint--warn { --c: var(--warn); } .fcn-tint--accent { --c: var(--a); }
+.fcn-presets .fcn-btn { margin-top: 10px; }
+.fcn-field { display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 13px 14px; border-radius: 14px; border: 1px solid var(--b); background: var(--s2); color: var(--t); font: inherit; font-size: 15px; }
+.fcn-field::placeholder { color: var(--d2); }
+.fcn-copy { display: block; max-width: 100%; margin-top: 4px; padding: 0; border: 0; background: none; text-align: left; font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 11px; color: var(--t); overflow-wrap: anywhere; word-break: break-all; cursor: pointer; }
+.fcn-copy--dim { color: var(--d); } .fcn-copy--safe { color: var(--safe); }
+.fcn-keyrow, .fcn-logrow { padding: 8px 0; border-top: 1px solid var(--b); font-size: 12px; }
+.fcn-sel { user-select: text; overflow-wrap: anywhere; }
+.fcn-banner { padding: 14px; margin: 0 0 14px; border-radius: 14px; background: var(--s2); border: 1px solid var(--b); color: var(--warn); font-size: 13px; }
+.fcn-ink--safe { color: var(--safe); } .fcn-ink--warn { color: var(--warn); } .fcn-ink--red { color: var(--red); } .fcn-ink--dim { color: var(--d); } .fcn-ink--text { color: var(--t); }
+.fcn-bg--safe { background: var(--safe); } .fcn-bg--warn { background: var(--warn); } .fcn-bg--red { background: var(--red); } .fcn-bg--dim { background: var(--d); }
+.fcn :focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+.adlg--fcn .fcn-field { background: rgba(255,255,255,.08); color: #fff; border-color: rgba(255,255,255,.2); }
+#view-futurecash.view--active { padding: 0; min-height: 100%; display: flex; flex-direction: column; }
+#futurecashBody { flex: 1 0 auto; display: flex; flex-direction: column; }
+#futurecashBody > .fcn { flex: 1 0 auto; }

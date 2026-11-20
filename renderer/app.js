@@ -145,6 +145,7 @@ async function boot() {
   api.onShop(onShopUpdate);
   api.onCasino(chanceLeftCard);            // P2P Chance is removed; this only refreshes its "still open" Settings card
   api.onVestr(onVestrUpdate);
+  api.onFutureCash(() => { if (activeView === "futurecash") futureCashLoad(false); });   // a pass on a new block changed something
   api.onWebWallet(onWebWalletUpdate);
 
   // KeetChat rides the keets transport, which both node kinds run (0.18.17+).
@@ -196,7 +197,7 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
+  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); futureCashReset(); if (activeView === "futurecash") renderActive(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
@@ -796,12 +797,13 @@ async function postBootRestore() {
 //   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", dexicon: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
 const SUB_TITLE = { receive: N_("Receive"), send: N_("Send"), logs: N_("Logs"), terminal: N_("Terminal"), settings: N_("Settings"), params: N_("Startup Params"), backup: N_("Backup & Recovery") };   // translated where shown
-// The tray, in Pandamonium's default order (PandamoniumDestinations). An app the desktop does not have yet
-// (Future Cash Next) gets a row when it is built: no dead rows.
+// The tray, in Pandamonium's default order (PandamoniumDestinations). Every app of the phone's tray is here since 0.19.184
+// (Future Cash Next, after ETH Wallet); an app the desktop does not have would get a row only when built: no dead rows.
 const TRAY_APPS = [
   { id: "core", name: "Minima Core" },
   { id: "mail", name: "MinimaMail", icon: "icons/mail.png", badge: "mailBadge" },
   { id: "ethwallet", name: "ETH Wallet", icon: "icons/ethwallet.png" },
+  { id: "futurecash", name: "Future Cash Next", icon: "icons/futurecash.svg" },
   { id: "explorer", name: "Minima Explorer", icon: "icons/explorer.svg" },
   { id: "vestr", name: "Minima Vestr", icon: "icons/vestr.png" },
   { id: "entropy", name: "Entropy", icon: "icons/entropy.svg" },
@@ -1329,6 +1331,7 @@ function renderActive() {
   else if (activeView === "keyuses") renderKeyUses();
   else if (activeView === "explorer") renderExplorer();
   else if (activeView === "entropy") renderEntropy();
+  else if (activeView === "futurecash") renderFutureCash();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
 function startRefresh() {

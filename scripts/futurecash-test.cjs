@@ -543,3 +543,22 @@ test("the store is this wallet's, moved aside (never deleted) when the wallet is
   assert.ok(main.includes('if (!freeze.start("futurecash")) return;'), "frozen: no pass");
   assert.ok(/futurecash: \{ start: whenRunning\(\(\) => futurecash\.start\(\)\), stop: \(\) => futurecash\.stop\(\), blockers:/.test(main));
 });
+
+test("the screens: every action that moves coins is asked first, every call is a named main action, ids copy whole, amounts are the node's, no em dash", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "renderer", "futurecash.js"), "utf8"), main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  const ops = main.slice(main.indexOf("const FC_OPS"), main.indexOf(" * THE ONE NATIVE GRANT"));
+  for (const m of src.matchAll(/api\.fc\("(\w+)"/g)) assert.ok(new RegExp("\\b" + m[1] + ": ").test(ops), "a main action: " + m[1]);
+  for (const op of ["lock", "collect", "collectAll", "sweep", "retire", "recover", "revoke"]) {
+    const at = src.indexOf('api.fc("' + op + '"'); assert.ok(at > 0, op);
+    const before = src.slice(Math.max(0, src.lastIndexOf("\n", src.lastIndexOf("\n", at) - 1)), at);
+    assert.ok(/await showConfirm\(/.test(before), op + " is asked first");
+  }
+  assert.ok(!/api\.(cmd|tryCmd)\(|\bcmd\(|tryCmd\(/.test(src), "never the free command channel");
+  for (const m of src.matchAll(/\b(?:t|th|tr|N_)\(\s*"((?:[^"\\]|\\.)*)"/g)) assert.ok(!JSON.parse('"' + m[1] + '"').includes("—"), "no em dash: " + m[1].slice(0, 80));
+  for (const v of ["x.payout", "x.coinid", "x.tokenid", "st.safe", "r.address", "r.mx || r.hex"]) assert.ok(src.includes("fcnCopy(" + v), "whole and copyable: " + v);
+  const fcnAmt = new Function("return " + /const fcnAmt = (\(a\) => \{[\s\S]*?\});/.exec(src)[1])();
+  assert.equal(fcnAmt("1000.000000000000000001"), "1000.000000000000000001"); assert.equal(fcnAmt("250.500"), "250.5"); assert.equal(fcnAmt("12"), "12"); assert.equal(fcnAmt("0.123456789"), "0.123456789");
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(/\{ id: "ethwallet", [^\n]+\n  \{ id: "futurecash", name: "Future Cash Next", icon: "icons\/futurecash\.svg" \}/.test(app), "the tray row after ETH Wallet, with the ported icon");
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "icons", "futurecash.svg"), "utf8").includes('fill="#F7931A"'));
+});

@@ -353,6 +353,24 @@
       if (kind === "address") return arg.includes("FAKE") || arg.startsWith("0xAD") ? Object.assign(ok([txn("a"), block(TIP - 11), txn("b")]), {}) : ok([]);
       throw new Error("unknown read");
     },
+    // Future Cash Next: ?fc=setup|on|risk  &fctheme=light (its own Daylight palette)  &fcfail=1 (the stake list could not be read)
+    fc: async (op, ...args) => {
+      const mode = Q.get("fc") || "setup", TIPF = 2428091, on = mode !== "setup", risk = mode === "risk";
+      const SAFE = "MxG081SDHCPHCMDEM4NU4GW54FSPPY9ASN55JJNKB8JYKYSE8BSPRQ985WP0KH6", PAYA = FAKE_PK("PA1"), PAYB = FAKE_PK("PB2");   // invented: no real wallet's addresses
+      if (op === "status") return { started: true, tip: TIPF, walletKey: FAKE_PK("WK"), watching: 3, collecting: 0, collectedSafe: 1, collected: 0, sweeping: risk ? 1 : 0, swept: 2, taken: 0,
+        readySafe: on ? { n: 1, total: "250.5" } : { n: 0, total: "0" }, readyRisk: risk ? { n: 1, total: "40" } : { n: 0, total: "0" }, pendRisk: risk ? { n: 1, total: "1000.000000000000000001", soonest: TIPF + 1728 } : { n: 0, total: "0", soonest: 0 },
+        atRiskKnown: risk ? 2 : 0, atRiskList: risk ? [PAYB] : [], guardianOn: on, rescueOn: on, autoCollect: false, notify: true, safe: on ? SAFE : "", sameNode: false, safeReused: null,
+        audit: { at: Date.now() - 120000, ok: true, error: "", running: false, verdict: { ok: true, at: Date.now() - 120000, mode: "FRESH" },
+          last: { verdict: risk ? "RISK_HEURISTIC" : "OK", worstReuse: 0, complete: true, classicKeys: 2, blockKeys: 0, rows: [{ index: 1, address: "MxG08" + "FAKE01".repeat(10).slice(0, 58), family: "classic", local: 1204, risk: false, reused: false, reuseCount: 0, checked: true }, { index: 2, address: "MxG08" + "FAKE02".repeat(10).slice(0, 58), family: "classic", local: 37, risk, reused: false, reuseCount: 0, checked: true }] } },
+        lastAction: "", contract: "0xEA8823992AB3CEBBA855D68006F0D05B0C4838FE55885375837D90F98954FA13", granted: on, running: on, vaultLocked: false };
+      if (op === "stakes") { if (Q.get("fcfail")) throw new Error("Could not read the complete stake list. Refresh and retry.");
+        return { tip: TIPF, stakes: [{ coinid: FAKE_PK("C1"), payout: PAYA, amount: "250.5", tokenid: "0x00", matureBlock: TIPF - 3, ready: true, atRisk: false, node: true },
+          { coinid: FAKE_PK("C2"), payout: PAYB, amount: "1000.000000000000000001", tokenid: "0x00", matureBlock: TIPF + 1728, ready: false, atRisk: risk, node: true },
+          { coinid: FAKE_PK("C3"), payout: PAYA, amount: "12", tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", matureBlock: TIPF + 51840, ready: false, atRisk: false, node: true }] }; }
+      if (op === "activity") return [{ ts: Date.now() - 60000, level: "info", msg: "Detected FutureCash (250.5) | stake:" + FAKE_PK("C1") + " | to:" + PAYA }, { ts: Date.now() - 3600000, level: "warn", msg: "Collect retry scheduled | stake:" + FAKE_PK("C9") + " | to:" + PAYA }, { ts: Date.now() - 7200000, level: "error", msg: "Sweep post failed | coin:" + FAKE_PK("C8") + " | from:" + PAYB + " — vault locked" }];
+      if (op === "harden") return { list: risk ? [{ hex: PAYB, mx: "", isDefault: true, coins: 1, balance: "40" }, { hex: FAKE_PK("PB3"), mx: "", isDefault: true, coins: 0, balance: "0" }] : [], stuck: risk ? [{ address: FAKE_PK("RT1"), coins: 2 }] : [], retired: [] };
+      return { ok: true };
+    },
     // KeyUses: ?ku=ok|block|reuse|risk|partial|fail  (every key and address invented; the Mx strings are not real addresses)
     keyUsesAudit: async () => {
       const ku = Q.get("ku") || "ok"; if (ku === "fail") return { ok: false, error: "Could not reach the audit service. Check your connection and try again." };
@@ -405,6 +423,7 @@
   // Anything not listed: an "on…" subscription is a no-op that returns its unsubscribe; any other call
   // resolves to null, and the view shows whatever it shows for "nothing came back".
   fixtures.lang = Q.get("lang") || "en"; fixtures.langSet = async (code) => code;   // &lang=zh|ru|uk: the language the preload would hand over
+  try { if (Q.get("fctheme")) localStorage.setItem("fcnTheme", Q.get("fctheme")); else localStorage.removeItem("fcnTheme"); } catch (e) {}
   window.mcd = new Proxy(fixtures, { get: (t, k) => t[k] || (String(k).startsWith("on") ? () => () => {} : async () => null) });
 
   // Drive the shell to the requested state once app.js has booted.
