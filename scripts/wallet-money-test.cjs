@@ -17,10 +17,10 @@ const TOKENS = () => [
 ];
 
 // a one-line definition, or a block that ends at the first "}" in column 0 (as scripts/shell-test.cjs)
-function source(name) {
-  const m = app.match(new RegExp("\\n((?:async )?(?:const|function) " + name + "\\b[^\\n]*)")); assert.ok(m, name + " found in app.js");
+function source(name, src) {
+  const app_ = src || app, m = app_.match(new RegExp("\\n((?:async )?(?:const|function) " + name + "\\b[^\\n]*)")); assert.ok(m, name + " found in app.js");
   const code = m[1].replace(/\s+\/\/.*$/, "");   // a trailing comment is not part of the question "does this line open a block"
-  return /\{$/.test(code) ? app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2) : m[1];
+  return /\{$/.test(code) ? app_.slice(m.index + 1, app_.indexOf("\n}", m.index) + 2) : m[1];
 }
 const CORE = ["validAddr", "validAmt", "validTok", "cmd", "tryCmd", "esc", "absCmp", "consolidateToken"];
 // The names of the screen functions, in one place: they move when a screen is rebuilt, the checks below do not.
@@ -52,10 +52,10 @@ function harness(opts) {
     document: { body: node(), createElement: node, getElementById: el, activeElement: null, querySelectorAll: () => [] },
     qrcode: undefined
   };
-  const names = CORE.concat(SCREEN.filter(n => new RegExp("\\n(?:async )?function " + n + "\\b").test(app)));
+  const names = CORE.concat(SCREEN.filter(n => new RegExp("\\n(?:async )?function " + n + "\\b").test(opts.src || app)));
   const prelude = 'const MINIMA = "0x00"; let SEND_TOKENS = TOKENS; let SEND_PRESELECT = null; let running = true; let CFG = { labels: {} }; let RECV_ADDR = null; let nodeState = "running";\n' +
     "function tokenOptions() { return ''; }\n";
-  const fns = new Function(...Object.keys(env), prelude + names.map(source).join("\n") + "; return { " + names.join(", ") + " };")(...Object.values(env));
+  const fns = new Function(...Object.keys(env), prelude + names.map(n => source(n, opts.src)).join("\n") + "; return { " + names.join(", ") + " };")(...Object.values(env));
   const h = { log, toasts, els, el, fns, asked: [], cmds: () => log.filter(l => l.startsWith("cmd:")).map(l => l.slice(4)) };
   return h;
 }
@@ -126,6 +126,33 @@ test("Send: every check still stops the send, before anything reaches the node",
 test("Send: the main process still pins a MINIMA send to a signable coin, and only a send", () => {
   assert.ok(mainJs.includes('const pinned = /^send\\s/i.test(command) ? await pinMinimaSend(run, command, { minCoinage: 3 }) : command;'));
   assert.ok(mainJs.includes("return run(pinned);"));
+});
+
+// 0.19.154: the same Send and Split, lifted from the SHIPPED source (not the English view) and run with the app in each
+// other language: the review, the toasts and the dialogs are translated; the bytes sent to the node are the same
+test("Send and Split in Chinese, Russian and Ukrainian: the same command strings and the same refusals as in English", async () => {
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const raw = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  try {
+    for (const code of ["zh", "ru", "uk"]) {
+      I18N.set(code);
+      for (const [input, want] of [[{ to: TO, amt: "1.5", tok: "0x00" }, "send address:" + TO + " amount:1.5"], [{ to: TO, max: true, tok: MXUSD }, "send address:" + TO + " amount:300.50000001 tokenid:" + MXUSD]]) {
+        const h = harness({ src: raw });
+        await driveSend(h, input);
+        assert.deepEqual(h.cmds(), ["checkaddress address:" + TO, want], code + " " + JSON.stringify(input));
+        assert.ok(h.asked[0].includes(TO) && h.asked[0].includes(want.match(/amount:(\S+)/)[1]), code + ": the review shows the whole address and the amount as typed");
+      }
+      for (const input of [{ to: TO, amt: "1,5", tok: "0x00" }, { to: TO + " burn:100", amt: "1", tok: "0x00" }, { to: TO, amt: "301", tok: MXUSD }]) {
+        const h = harness({ src: raw });
+        await driveSend(h, input);
+        assert.deepEqual(h.log, [], code + ": nothing asked, nothing sent: " + JSON.stringify(input)); assert.equal(h.toasts.length, 1, code + ": and the user is told why");
+        assert.ok(!/[A-Za-z]{4,} [a-z]{3,} [a-z]{3,}/.test(h.toasts[0]), code + ": told in " + code + ", not English: " + h.toasts[0]);
+      }
+      const h = harness({ src: raw });
+      await driveSplit(h, { amt: "10", n: "4", tok: "0x00" });
+      assert.deepEqual(h.cmds(), ["getaddress", "send address:" + OWN + " amount:10 split:4"], code + ": split");
+    }
+  } finally { I18N.set("en"); }
 });
 
 test("Split: the command string for a given input is the one 0.18.78 sent", async () => {

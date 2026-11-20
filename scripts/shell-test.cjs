@@ -182,12 +182,13 @@ test("0.19.139: the copy-failed toast and the TEST window title and tray tooltip
 //      `typeof name` first.
 const vm = require("node:vm"), ts = require("typescript");
 const readRenderer = (f) => fs.readFileSync(path.join(R, f), "utf8");
-function rendererLoads(page, read = readRenderer) {
+function rendererLoads(page, read = readRenderer, lang) {   // lang: the saved language the preload hands the page (window.mcd.lang)
   const any = () => new Proxy(function () {}, { get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? () => any() : any()), apply: () => any(), construct: () => any() });   // a then() that never answers: boot() stops at its first await
   const order = [...page.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]), box = {};
   for (const f of fs.readdirSync(R)) if (f.endsWith(".js") && !order.includes(f)) throw new Error(f + ": no script tag loads it");
   for (const f of fs.readdirSync(path.join(R, "i18n"))) if (f.endsWith(".js") && !order.includes("i18n/" + f)) throw new Error("i18n/" + f + ": no script tag loads it");   // a catalog defines no name: the folder rule is what catches a dropped one
   for (const k of ["document", "localStorage", "navigator", "location", "mcd", "crypto", "matchMedia", "addEventListener", "requestAnimationFrame", "setTimeout", "setInterval", "clearTimeout", "clearInterval"]) box[k] = any();   // the browser's, and the preload's bridge
+  if (lang) { const m = any(); box.mcd = new Proxy(m, { get: (_t, k) => (k === "lang" ? lang : m[k]) }); }
   box.window = box;
   const ctx = vm.createContext(box);
   for (const f of order) { try { vm.runInContext(read(f), ctx, { filename: f }); } catch (e) { throw new Error(f + ": " + e.name + ": " + e.message); } }
@@ -199,8 +200,19 @@ function rendererLoads(page, read = readRenderer) {
     if (m && vm.runInContext("typeof " + m[1], ctx) === "undefined" && !new RegExp("typeof (?:window\\.)?" + m[1].replace(/\$/g, "\\$") + "\\b").test(read(f)))
       throw new Error(f + ": ReferenceError: " + m[1] + " is not defined (line " + (prog.getSourceFile(file).getLineAndCharacterOfPosition(d.start).line + 1) + ")");
   }
-  return order;
+  return lang ? { order, ctx } : order;
 }
+// 0.19.154: the whole renderer, started in each language: every script runs its top level (the tables built while a
+// script loads, the page's fixed text) with that language already chosen, and the shell's own decisions are unchanged
+test("the renderer starts in each language: the language is chosen before any screen script, and the shell decides as in English", () => {
+  for (const code of ["zh", "ru", "uk"]) {
+    const { ctx } = rendererLoads(html, readRenderer, code);
+    assert.equal(vm.runInContext("I18N.lang()", ctx), code, code + ": started in the saved language");
+    assert.equal(vm.runInContext('t("Wallet")', ctx), vm.runInContext('I18N.catalog("' + code + '")["Wallet"]', ctx));
+    assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify([shellMode('balances'), shellMode('dexicon'), shellMode('mail'), viewOfTab('wallet'), trayOrder(['mail', 'chat'], ['core', 'chat', 'mail'])])", ctx)),
+      JSON.parse(vm.runInContext("I18N.set('en'); JSON.stringify([shellMode('balances'), shellMode('dexicon'), shellMode('mail'), viewOfTab('wallet'), trayOrder(['mail', 'chat'], ['core', 'chat', 'mail'])])", ctx)), code + ": the shell's decisions do not depend on the language");
+  }
+});
 test("the renderer loads: every script of index.html, in its order, and no name is used that nothing defines", () => {
   const order = rendererLoads(html), tag = (f) => '<script src="' + f + '"></script>';
   assert.equal(order[order.length - 1], "app.js"); assert.ok(order.length >= 20);

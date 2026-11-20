@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.154] — Tests: code that matches translated text is refused; the apostrophe rule; the shell, Send and Split run in every language
+
+- **A scan of the code that decides by text** (`scripts/i18n-test.cjs`): every regex literal, and every string compared with `===`, `!==`, a `case`, `includes`, `startsWith`, `endsWith` or `indexOf`, in the shipped renderer and main files (vendored engines and catalogs excluded), is checked against the translated catalog keys. A phrase of 9 or more characters found inside a translated key, or a whole translated key, fails the test unless it is on a short allow-list with its reason (eight cases: engine and node texts that reach the code in English before anything is translated, and the miniMall delivery label, a wire value). The scan finds the 0.19.144 Trade-button match on a probe; it found the room ② failure-card defect fixed in 0.19.153.
+- **Catalog values may not add an apostrophe (`'`)** that their English does not have, as for the other quote characters.
+- **Run in each language:** the whole renderer is started with Chinese, Russian and Ukrainian saved (every script's top level runs in that language; the shell's decisions are the same as in English) (`scripts/shell-test.cjs`); Send and Split are lifted from the shipped source, not the English view, and run in the three languages: the same command strings, the same refusals, told in that language (`scripts/wallet-money-test.cjs`). Dexicon ③'s Trade buttons already run in the four languages since 0.19.145.
+- No app code changed.
+
 ## [0.19.153] — Room ②: a failed pool action's card ends the same way in every language
 
 - **Fixed (found by the new matcher scan of this phase):** a pool operation the engine marked failed showed its reason and then "Nothing was sent and no funds moved." The card made that ending by cutting the English words "Look at Activity: if no new line is there, …" off a longer sentence. In Chinese, Russian and Ukrainian there was nothing English to cut, so the card pointed at Activity (the screen it is on) instead of saying that nothing was sent. `failText()` now takes a flag and picks the right whole sentence; nothing is cut out of a translated text. The subjects "This" and "That" put in front of a failure, and "no reason was given", are translated too. English reads as before.

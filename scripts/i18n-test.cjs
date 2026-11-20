@@ -2,7 +2,7 @@
 // never be missing; what this file keeps true is that the other three languages are WHOLE and SAFE:
 //   - every key the code translates (a literal first argument of t / th / tr / N_, and every data-i18n in index.html)
 //     is in zh, ru and uk, with the same placeholders, not empty, and not left as its English unless listed as "same";
-//   - a translated value is data: no "<" or ">", and a quote or ampersand only where its English has one;
+//   - a translated value is data: no "<" or ">", and a quote (" ' `) or ampersand only where its English has one;
 //   - a plural (an object in en.js) has every form its language needs.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path"), ts = require("typescript");
@@ -88,7 +88,7 @@ test("every translated key is in zh, ru and uk: same placeholders, not empty, no
         if (typeof v === "object" && [...s.matchAll(/\{(\w+)\}/g)].some(m => !holes(key).split(",").includes(m[1]))) bad.push("unknown placeholder: " + JSON.stringify(s));
         if (s === key && !same.has(key)) bad.push("left in English: " + JSON.stringify(key) + " (" + where + ")");
         if (/[<>]/.test(s) && !/[<>]/.test(key)) bad.push("markup: " + JSON.stringify(s));
-        for (const ch of ['"', "&", "`"]) if (s.includes(ch) && !key.includes(ch)) bad.push("a " + ch + " its English does not have: " + JSON.stringify(s));
+        for (const ch of ['"', "&", "`", "'"]) if (s.includes(ch) && !key.includes(ch)) bad.push("a " + ch + " its English does not have: " + JSON.stringify(s));
         if (s.includes("—") && !key.includes("—") && ours.has(key)) bad.push("an em dash: " + JSON.stringify(s));   // the phone's own wording is taken as it is; what was translated for the desktop has none
         if (/MxUSDT|mxUSDT/.test(s)) bad.push("the Minima dollar token is MxUSD: " + JSON.stringify(s));
       }
@@ -204,4 +204,47 @@ test("main/lang.js: a broken catalog is skipped and the app runs in English", ()
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { broken: ["ru"], saved: "en", sys: "en", set: false, now: "en", zh: true, t: "语言" }, "Russian is not offered; the others load; nothing stops");
   assert.match(r.stderr, /\[lang\] the ru catalog could not be loaded, so it is not offered: Unexpected token/);
+});
+
+// 0.19.154: code that decides by matching TEXT breaks as soon as that text is translated (0.19.142 to 0.19.144 shipped two:
+// the Dexicon Trade buttons and the Market offline card). Every regex literal, and every string compared with ===, !==, a
+// case, includes, startsWith, endsWith or indexOf, in the shipped renderer and main files (vendored engines and catalogs
+// excluded), is checked against the translated catalog keys: a phrase of 9+ characters found inside a translated key, or a
+// whole translated key, fails unless listed below with the reason it is safe.
+test("no code decides by matching text that is translated (regex, ===, includes, startsWith…), except the listed cases", () => {
+  for (const c of OTHERS) require("../renderer/i18n/" + c + ".js");
+  const ALLOW = {
+    "renderer/apps-act.js International": "a delivery label as stored and sent (a wire value), compared before it is translated for the screen",
+    "renderer/dexicon-ax.js AtomiX is halted": "the AtomiX glue's own refusal (main/atomix.js), which reaches the window in English",
+    "renderer/dexicon-core.js Only your own orders are at this price": "the Exchange engine's own English sentence (dexicon/lib/ownskip.js), matched before anything is translated",
+    "renderer/dexicon-pp.js timed out": "the PandaPools engine's raw message, before it is put into words",
+    "renderer/mail.js validate the recipient": "main/mail.js's own English error",
+    "main/atomix.js timed out": "an Ethereum RPC or network error text",
+    "main/node-manager.js  Parlons Node ": "a line of the parlons-node jar's own log",
+    "main/pandapools.js  MINIMA for ": "the PandaPools engine's English summary of a swap"
+  };
+  const keys = new Set(); for (const c of OTHERS) { const cat = I18N.catalog(c); for (const k of Object.keys(cat)) if (cat[k] !== k) keys.add(k); }
+  const K = [...keys], files = [...fs.readdirSync(R).filter(f => f.endsWith(".js") && f !== "qrcode.js").map(f => path.join(R, f)), ...fs.readdirSync(path.join(ROOT, "main")).filter(f => f.endsWith(".js")).map(f => path.join(ROOT, "main", f))];
+  const runs = (pat) => pat.replace(/\\[sSdDwWbB]/g, "\u0000").replace(/\\(.)/g, "$1").split(/[\u0000^$()[\]?*+{}|.]/).filter(x => x.length >= 9);
+  const found = [], used = new Set();
+  const scan = (rel, src, out) => {
+    const sf = ts.createSourceFile(rel, src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS);
+    const hit = (n, lits) => { for (const l of lits) { const k = keys.has(l) ? l : /[A-Za-z] +[A-Za-z]/.test(l) ? K.find(x => x.includes(l)) : null; if (!k) continue;
+      if (Object.hasOwn(ALLOW, rel + " " + l)) { used.add(rel + " " + l); continue; } out.push(rel + ":" + (sf.getLineAndCharacterOfPosition(n.getStart()).line + 1) + " " + JSON.stringify(l) + " is in the key " + JSON.stringify(k).slice(0, 80)); } };
+    const str = (n) => n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text.length >= 9;
+    const walk = (n) => {
+      if (n.kind === ts.SyntaxKind.RegularExpressionLiteral) { const x = n.getText(); hit(n, runs(x.slice(1, x.lastIndexOf("/")))); }
+      if (ts.isBinaryExpression(n) && /^(===|!==|==|!=)$/.test(n.operatorToken.getText())) for (const side of [n.left, n.right]) if (str(side)) hit(side, [side.text]);
+      if (ts.isCaseClause(n) && str(n.expression)) hit(n, [n.expression.text]);
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && /^(includes|startsWith|endsWith|indexOf)$/.test(n.expression.name.text) && str(n.arguments[0])) hit(n, [n.arguments[0].text]);
+      ts.forEachChild(n, walk);
+    };
+    walk(sf);
+  };
+  for (const file of files) scan(path.relative(ROOT, file).split(path.sep).join("/"), fs.readFileSync(file, "utf8"), found);
+  assert.deepEqual(found, [], "code matching translated text");
+  assert.deepEqual(Object.keys(ALLOW).filter(k => !used.has(k)), [], "an allow-list entry that no longer matches anything: remove it");
+  // the scan itself: the 0.19.144 Trade-button test, and the same text compared or searched for, are found
+  const probe = []; scan("renderer/probe.js", 'const dead = !!why && !/No relay answers/.test(why); if (s === "Market offline") x(); if (m.includes("a FAST order may not be heard")) y();', probe);
+  assert.equal(probe.length, 3, probe.join("\n"));
 });
