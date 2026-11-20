@@ -468,3 +468,70 @@ img.mm-prod__im { cursor: zoom-in; }
 .ex-rec__sub { font-size: 11px; color: var(--x-dim2); white-space: pre-wrap; }
 .ex .ex-rawbtn { font-size: 13px; color: var(--x-dim); white-space: pre-wrap; }
 .ex-raw { margin: 0; padding-top: 8px; overflow-x: auto; font-family: var(--app-mono); font-size: 10px; color: var(--x-dim); }
+
+/* ---- Entropy (apks/base integrated/entropy: Theme.java, Ui.java, the two views; the retro arcade palette, dark as the original) ---- */
+#view-entropy { padding: 0; min-height: 100%; }
+.en { min-height: calc(100vh - 52px); background: #0A0E1A; color: #EAEAF2; font-family: var(--app-font); }
+.en button { font: inherit; cursor: pointer; }
+.en :focus-visible { outline: 2px solid #00E5FF; outline-offset: 2px; }
+.en-head { padding: 14px; text-align: center; }
+.en-title { min-height: 48px; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; letter-spacing: .4em; color: #FFD700; }
+.en-sub { font-size: 10px; letter-spacing: .2em; color: #8A93AD; }
+.en-banner { margin-top: 8px; padding: 8px; background: rgba(255,215,0,.2); color: #FFD700; font-size: 12px; text-align: left; }
+.en-tabs { display: flex; padding: 0 4px; }
+.en .en-tab { min-height: 48px; padding: 0 16px; border: 0; border-bottom: 3px solid transparent; background: none; color: #8A93AD; font-size: 14px; font-weight: 500; }
+.en .en-tab--on { color: #FFD700; border-bottom-color: #FFD700; }
+.en-page { padding: 12px 16px 40px; }
+.en-card { margin-bottom: 12px; padding: 14px; background: #121829; border: 1.5px solid #2A3550; border-radius: 8px; }
+.en-label { font-size: 10px; letter-spacing: .1em; color: #8A93AD; }
+.en-gap { margin-top: 8px; }
+.en-row { display: flex; margin-top: 6px; }
+.en-row > * { flex: 1 1 0; min-width: 0; }
+.en .en-btn { min-height: 48px; padding: 12px 16px; border: 0; border-radius: 6px; background: #1A2238; color: #8A93AD; font-family: var(--app-mono); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.en .en-btn--full { display: block; width: 100%; margin-top: 8px; }
+.en .en-btn--on, .en .en-btn--gold:not(#enAuto) { background: #FFD700; color: #0A0E1A; }
+.en #enAuto.en-btn--gold { color: #FFD700; }
+.en .en-btn--pink { background: #FF2D78; color: #0A0E1A; margin-top: 10px; }
+.en .en-btn--cyan, .en .en-btn--sugg { color: #00E5FF; }
+.en .en-btn--text { color: #EAEAF2; }
+.en .en-btn--sugg { margin-right: 6px; text-transform: none; }
+.en .en-btn:disabled { opacity: .4; cursor: default; }
+.en-mono, .en-source, .en-status, .en-ticker, .en-audit { font-family: var(--app-mono); }
+.en-dim { color: #8A93AD; } .en-ok { color: #35E07A; } .en-amber { color: #E6A23C; } .en-red { color: #FF3B5C; } .en-gold { color: #FFD700; } .en-small { font-size: 10px; }
+.en-source { margin-top: 8px; font-size: 11px; color: #8A93AD; }
+.en-source.en-ok { color: #35E07A; } .en-source.en-amber { color: #E6A23C; }
+.en-status { margin-top: 6px; min-height: 14px; font-size: 11px; color: #8A93AD; overflow-wrap: anywhere; }
+.en-status.en-red { color: #FF3B5C; } .en-status.en-ok { color: #35E07A; }
+.en-warn { margin-top: 10px; padding: 10px; background: rgba(255,215,0,.13); border: 1.5px solid rgba(255,215,0,.27); border-radius: 6px; color: #FFD700; font-size: 11px; line-height: 1.35; }
+.en-hint { margin-top: 8px; font-size: 11px; line-height: 1.35; color: #8A93AD; overflow-wrap: anywhere; }
+.en-hint.en-small { font-size: 10px; margin-top: 4px; }
+.en-track { height: 4px; margin: 8px 0 4px; background: rgba(255,215,0,.35); }
+.en-bar { height: 100%; width: 0; background: #FFD700; }
+#enProgL { font-size: 11px; }
+.en-dice { display: flex; margin-top: 8px; }
+.en-die { flex: 1 1 0; height: 70px; display: flex; align-items: center; justify-content: center; }
+.en-die__b { width: 43px; height: 43px; box-sizing: border-box; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 5px; background: #1A2238; border: 1.5px solid #2A3550; border-radius: 7px; }
+.en-die__b b { place-self: center; width: 7px; height: 7px; border-radius: 50%; }
+.en-die__b b.on { background: #EAEAF2; }
+.en-die--tumble .en-die__b { animation: en-spin 1.4s linear infinite; }
+.en-die--roll .en-die__b { animation: en-roll .9s cubic-bezier(.1,.7,.2,1); }
+@keyframes en-spin { to { transform: rotate(360deg); } }
+@keyframes en-roll { from { transform: rotate(0); } to { transform: rotate(540deg); } }
+@media (prefers-reduced-motion: reduce) { .en-die--tumble .en-die__b, .en-die--roll .en-die__b { animation: none; } }
+.en-pad { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 8px; }
+.en-ticker { min-height: 36px; box-sizing: border-box; margin-top: 10px; padding: 8px 10px; background: rgba(0,0,0,.4); border: 1.5px solid #2A3550; border-radius: 6px; color: #00E5FF; font-size: 12px; letter-spacing: .25em; overflow-wrap: anywhere; }
+.en-sel { user-select: text; }
+.en-words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; user-select: none; }
+.en-word { padding: 6px 8px; background: rgba(0,0,0,.4); border: 1.5px solid #2A3550; border-radius: 6px; font-family: var(--app-mono); font-size: 12px; overflow-wrap: anywhere; }
+.en-word--off { font-weight: 700; }
+.en-word--cs { color: #00E5FF; border-color: rgba(0,229,255,.5); }
+.en-summary { margin-top: 10px; font-size: 11px; white-space: pre-wrap; }
+.en-audit { margin: 6px 0 0; font-size: 9px; color: #8A93AD; white-space: pre-wrap; overflow-wrap: anywhere; }
+.en-boxes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.en-box { min-width: 0; padding: 6px 8px; background: rgba(0,0,0,.4); border: 1.5px solid #2A3550; border-radius: 6px; color: #EAEAF2; font-family: var(--app-mono); font-size: 12px; }
+.en-box::placeholder { color: #8A93AD; }
+.en-box--ok { border-color: #35E07A; } .en-box--bad { border-color: #FF3B5C; }
+.en-box--cs { color: #00E5FF; border-color: rgba(0,229,255,.5); opacity: 1; }
+.en-sugg { display: flex; flex-wrap: wrap; gap: 6px 0; margin-top: 4px; }
+.en-cands { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 4px; margin-top: 8px; }
+.en .en-cand { padding: 6px; background: rgba(0,0,0,.4); border: 1.5px solid #2A3550; border-radius: 6px; color: #EAEAF2; font-family: var(--app-mono); font-size: 11px; text-align: left; }

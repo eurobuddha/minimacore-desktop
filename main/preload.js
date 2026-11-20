@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld("mcd", {
 
   // KeyUses reuse audit (host-pinned eurobuddha.com main-process fetch; null if unreachable)
   keyAudit: (pubkeys) => ipcRenderer.invoke("mcd:keyAudit", pubkeys),
+  entropy: (kind, arg) => ipcRenderer.invoke("mcd:entropy", kind, arg),   // Entropy: the node's `random`, or its hash of plain hex (main/entropy.js)
+  secureScreen: (on) => ipcRenderer.invoke("mcd:secureScreen", on === true),   // keep the window out of screen captures while a seed phrase can be on screen
   explorer: (kind, arg) => ipcRenderer.invoke("mcd:explorer", kind, arg),   // Minima Explorer: one of seven node reads, built and checked in the main process (main/explorer.js)
   keyUsesAudit: () => ipcRenderer.invoke("mcd:keyUsesAudit"),   // the KeyUses app: the whole audit runs in the main process (main/keyuses.js)
 

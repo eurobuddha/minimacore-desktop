@@ -225,6 +225,11 @@
         <div id="explorerBody"></div>
       </section>
 
+      <!-- Entropy: Pandamonium's seed dice (renderEntropy in apps-tools.js; the maths is entropy-core.js). -->
+      <section class="view" id="view-entropy">
+        <div id="entropyBody"></div>
+      </section>
+
       <!-- KeyUses: Pandamonium's key audit (renderKeyUses in apps-tools.js, over main/keyuses.js). -->
       <section class="view" id="view-keyuses">
         <div id="keyusesBody"></div>
@@ -277,6 +282,7 @@
   <script src="dexicon-ax.js"></script>
   <script src="dexicon-pp.js"></script>
   <script src="dexicon-ui.js"></script>
+  <script src="entropy-core.js"></script>   <!-- Entropy's maths (BIP39 from dice, the die face), no DOM: window.EntropyCore -->
   <script src="apps-tools.js"></script>   <!-- the Phase 5b tray apps (KeyUses, Minima Explorer, Entropy): only functions, called by app.js -->
   <script src="app.js"></script>
 </body>

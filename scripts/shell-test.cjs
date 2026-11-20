@@ -27,7 +27,7 @@ test("every existing view still has its screen, and each is reachable from its n
   const sub = app.match(/const SUB_TITLE = \{([^}]+)\}/)[1];
   for (const v of ["receive", "send", "logs", "terminal", "settings"]) assert.ok(sub.includes(v + ":"), v + " is a titled sub screen");
   const tray = [...app.match(/const TRAY_APPS = \[([\s\S]+?)\n\];/)[1].matchAll(/id: "([a-z]+)", name: "([^"]+)"/g)].map(m => m[1] + "=" + m[2]);
-  assert.deepEqual(tray, ["core=Minima Core", "mail=MinimaMail", "ethwallet=ETH Wallet", "explorer=Minima Explorer", "vestr=Minima Vestr", "keyuses=KeyUses", "faucet=Minima Faucet",
+  assert.deepEqual(tray, ["core=Minima Core", "mail=MinimaMail", "ethwallet=ETH Wallet", "explorer=Minima Explorer", "vestr=Minima Vestr", "entropy=Entropy", "keyuses=KeyUses", "faucet=Minima Faucet",
     "minimall=miniMall", "webwallet=Web Wallet", "parlons=Parlons"], "the tray's default order; no row for an app the desktop does not have");
   assert.ok(/id="walSend"/.test(html) && /id="walReceive"/.test(html), "Send and Receive open from the Wallet's buttons");
 });
@@ -168,7 +168,7 @@ test("the overflow menu is reachable from sub screens and tray apps; an overlayi
 function rendererTopLevel(appSource) {
   const any = () => new Proxy(function () {}, { get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? () => any() : any()), apply: () => any(), construct: () => any() });   // a then() that never answers: boot() stops at its first await
   const known = new Set(["window", "document", "localStorage", "navigator", "location", "requestAnimationFrame",   // the browser's
-    "MailPanel", "ChatPanel", "TOK", "DexPools", "DexUI", "DexAx", "PoolCalc", "AppsAct"]);                         // the other renderer scripts' (index.html loads them first)
+    "MailPanel", "ChatPanel", "TOK", "DexPools", "DexUI", "DexAx", "PoolCalc", "AppsAct", "EntropyCore", "WordEntry"]);                         // the other renderer scripts' (index.html loads them first)
   const scope = new Proxy({}, { has: (_t, k) => known.has(k), get: (_t, k) => (k === Symbol.unscopables ? undefined : any()) });
   const src = (fs.readFileSync(path.join(__dirname, "..", "renderer", "apps-tools.js"), "utf8") + "\n" + appSource).replace(/^"use strict";$/mg, "");
   new Function("__scope", "with (__scope) { (function () { 'use strict';\n" + src + "\n})(); }")(scope);

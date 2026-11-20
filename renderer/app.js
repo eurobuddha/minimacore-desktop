@@ -194,7 +194,7 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
+  if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); if (activeView === "explorer") renderActive(); entropyNode(); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
@@ -788,14 +788,15 @@ async function postBootRestore() {
 //   a tray APP        the dark host bar "Minima Core / Pandamonium" with the tray button; no tabs, no footer
 const TAB_OF = { balances: "wallet", atomix: "dexicon", pandapools: "dexicon", dexicon: "dexicon", history: "history", apps: "apps", chat: "chat", node: "node" };
 const SUB_TITLE = { receive: "Receive", send: "Send", logs: "Logs", terminal: "Terminal", settings: "Settings", params: "Startup Params", backup: "Backup & Recovery" };
-// The tray, in Pandamonium's default order (PandamoniumDestinations). Apps the desktop does not have yet
-// (Future Cash Next, Entropy) get a row when their phase builds them: no dead rows.
+// The tray, in Pandamonium's default order (PandamoniumDestinations). An app the desktop does not have yet
+// (Future Cash Next) gets a row when it is built: no dead rows.
 const TRAY_APPS = [
   { id: "core", name: "Minima Core" },
   { id: "mail", name: "MinimaMail", icon: "icons/mail.png", badge: "mailBadge" },
   { id: "ethwallet", name: "ETH Wallet", icon: "icons/ethwallet.png" },
   { id: "explorer", name: "Minima Explorer", icon: "icons/explorer.svg" },
   { id: "vestr", name: "Minima Vestr", icon: "icons/vestr.png" },
+  { id: "entropy", name: "Entropy", icon: "icons/entropy.svg" },
   { id: "keyuses", name: "KeyUses", icon: "icons/keyuses.svg" },
   { id: "faucet", name: "Minima Faucet", icon: "icons/faucet.svg" },
   { id: "minimall", name: "miniMall", icon: "icons/minimall.png", badge: "shopBadge" },
@@ -830,6 +831,7 @@ function selectTab(view) {
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
+  if (activeView === "entropy" && view !== "entropy") entropyLeave();                 // a shown phrase is concealed again and the window may be captured again
   if (activeView === "keyuses" && view !== "keyuses") keyUsesReset();                 // an audit's result is not kept after the screen is left (as the phone's)
   activeView = view;
   const { tab, mode } = shellMode(view);
@@ -1280,6 +1282,7 @@ function renderActive() {
   else if (activeView === "faucet") renderFaucet();
   else if (activeView === "keyuses") renderKeyUses();
   else if (activeView === "explorer") renderExplorer();
+  else if (activeView === "entropy") renderEntropy();
   else if (activeView === "node") api.nodeStatus().then(renderNode);
 }
 function startRefresh() {

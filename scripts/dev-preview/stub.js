@@ -331,6 +331,9 @@
       FROZEN_IDS = on ? FROZEN_IDS.concat(id) : FROZEN_IDS.filter(x => x !== id); return FROZEN_IDS.slice(); },
     logsSave: async () => "/Users/preview/Documents/minima-node-log-preview.txt",
     faucet: async () => ({ status: true, message: "0.0001 Minima is on its way (preview, nothing was sent)" }),
+    // Entropy: ?en=nonode (the node does not answer: device only). Preview only: the "node" values below are invented and no seed made here is real.
+    entropy: async (kind, arg) => { if (Q.get("en") === "nonode") throw new Error("node not running"); const b = new Uint8Array(32); crypto.getRandomValues(b); return "0x" + [...b].map(x => x.toString(16).padStart(2, "0")).join("").toUpperCase(); },
+    secureScreen: async () => Q.get("en") !== "nocapture",
     // Minima Explorer: ?ex=fail (the node does not answer)  &do=<clicks>  &fill=%23exSearch=<text>. Every id and address is invented.
     explorer: async (kind, arg) => {
       if (Q.get("ex") === "fail") throw new Error("node not running");
@@ -487,6 +490,8 @@
         if (Q.get("hmenu") === "1") { el("histMenuBtn").click(); document.activeElement.blur(); }
         if (Q.get("hdetail")) document.querySelectorAll(".hrow")[parseInt(Q.get("hdetail"), 10) - 1].click();
       }, 600);
+      // Entropy: ?enfaces=1 taps in a fixed run of "physical" rolls (1 2 3 4 5 6 1 2 …) until the phrase is made: a publicly known pattern, never a wallet
+      if (Q.get("enfaces")) setTimeout(() => { el("enPhysical").click(); for (let i = 0; i < 400 && el("enDone").hidden; i++) document.querySelector('[data-face="' + ((i % 6) + 1) + '"]').click(); }, 300);
       // ?send=filled|review|error fills the Send form, opens its review, or shows what a pasted address with extra parameters gets
       if (Q.get("send")) setTimeout(() => {
         el("sTok").value = MXUSD; el("sTok").onchange(); el("sAmt").value = "25.5";

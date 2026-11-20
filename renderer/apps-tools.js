@@ -275,3 +275,251 @@ function renderExplorer() {
   explorerChrome(); explorerPaint(true);
   if (running) explorerRefresh();
 }
+
+// ---- Entropy: Pandamonium's seed dice (integrated/entropy MainActivity, DiceView, LastWordView, DiceRollView) -------
+// Two tabs: DICE ROLL (pick a length, throw five dice or tap in real ones, the bits fill, the phrase is shown concealed)
+// and LAST WORD (type N-1 words, every valid last word is worked out). The maths is renderer/entropy-core.js.
+//
+// WHAT IS ON THIS SCREEN IS A WALLET SEED. It lives in this page's memory only: nothing is stored, logged, sent to the
+// main process, or put on the clipboard (the original has no copy button either). The device's own random values come
+// from WebCrypto, where the original uses SecureRandom; the node's come from its `random` and `hash` commands. A phrase
+// is concealed until Reveal, concealed again when the screen is left, and gone after Wipe or when the app quits.
+// While the screen is open the window is kept out of screen captures (the phone's FLAG_SECURE).
+// Not here: the sounds, and demo mode (the phone's switch that allows screen capture and then refuses to roll).
+const EN_PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+let EN = null;
+function entropyNew() { return { tab: "dice", words: 12, physical: false, faces: [], audits: [], busy: false, auto: false, done: false, revealed: false, phrase: null, audit: false, run: 0,
+  selfErr: "not run", ready: false, nodeOk: false, verified: 0, lw: { words: 12, hidden: false, candidates: null, prev: [] } }; }
+const enEl = (id) => el(id);
+const enSay = (id, text, cls) => { const n = enEl(id); if (n) { n.textContent = text; n.className = cls; } };
+const enDie = (n, face) => { n.dataset.face = face; n.innerHTML = `<i class="en-die__b">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => `<b${EN_PIPS[face].includes(i) ? ' class="on"' : ""}></b>`).join("")}</i>`; };
+const enDice = () => [...document.querySelectorAll("#enDice .en-die")];
+/** 32 random bytes of this device as 0x hex (RollEngine.deviceSecretHex): WebCrypto, never Math.random. */
+function enDeviceSecret() { const b = new Uint8Array(32); crypto.getRandomValues(b); let s = "0x"; for (const x of b) s += x.toString(16).padStart(2, "0"); return s; }
+function enDeviceFace() { const u = new Uint8Array(1); for (;;) { crypto.getRandomValues(u); const f = EntropyCore.faceFromByte(u[0]); if (f) return f; } }
+/** One die (RollEngine.rollOne): node random and device random hashed by the node; device only when the node is not there. → { face, audit }; throws on a source that misbehaves. */
+async function enRollOne() {
+  const C = EntropyCore;
+  if (!EN.nodeOk) { const face = enDeviceFace(); return { face, audit: { src: C.SRC.DEVICE_ONLY, a: "", b: "", n: face - 1, face } }; }
+  for (let attempt = 0; attempt <= C.REJECT_LIMIT; attempt++) {
+    const b = enDeviceSecret(), a = await api.entropy("random");
+    if (!a) throw new Error("Node random failed");
+    const r = C.faceFromHash(await api.entropy("hash", C.hashInput(a, b)));
+    if (r.error) throw new Error(r.error);
+    if (!r.reject) return { face: r.face, audit: { src: C.SRC.NODE_DEVICE, a, b, n: r.n, face: r.face } };
+  }
+  throw new Error("Entropy source misbehaving (rejection limit)");
+}
+/** One uniform 32-bit number for the last-word picker (RollEngine.randomN): node + device, or the device alone, and which it was. */
+async function enRandomN() {
+  const C = EntropyCore, own = () => { const u = new Uint32Array(1); crypto.getRandomValues(u); return { n: u[0], src: C.SRC.DEVICE_ONLY }; };
+  if (!EN.nodeOk) return own();
+  try { const b = enDeviceSecret(), a = await api.entropy("random"); if (!a) return own(); const h = await api.entropy("hash", C.hashInput(a, b)); return /^0x[0-9a-fA-F]{8}/.test(h) ? { n: parseInt(h.substring(2, 10), 16), src: C.SRC.NODE_DEVICE } : own(); } catch (e) { return own(); }
+}
+/** Prove the node answers `random` and `hash` with well-formed values before any roll uses it (MainActivity.verifyNode). */
+async function enVerify() {
+  const mine = ++EN.verified, set = (ok, text) => { if (mine !== EN.verified) return; EN.nodeOk = ok; EN.ready = true; if (!EN.selfErr) enSay("enSource", text, "en-source" + (ok ? " en-ok" : " en-amber")); };
+  if (!running) return set(false, "node unavailable: device CSPRNG only (single source)");
+  setTimeout(() => { if (mine === EN.verified && !EN.ready) set(false, "node unavailable: device CSPRNG only (single source)"); }, 5000);   // never leave rolls gated for ever
+  try { const a = await api.entropy("random"); if (!a) return set(false, "node commands failed: device CSPRNG only (single source)"); const h = await api.entropy("hash", a); set(h.length >= 10, h.length >= 10 ? "BIP39 self-test ✓ node SHA3 + device CSPRNG verified" : "node hash malformed: device CSPRNG only (single source)"); }
+  catch (e) { set(false, "node commands failed: device CSPRNG only (single source)"); }
+}
+function entropyNode() { if (EN && el("enRoot")) { EN.ready = false; enVerify(); } }   // the node went away or came back: what the rolls use is checked again
+
+// ---- DICE ROLL ----
+function enChips() {
+  document.querySelectorAll("#enDiceTab [data-len]").forEach(b => b.classList.toggle("en-btn--on", +b.dataset.len === EN.words));
+  enEl("enDigital").classList.toggle("en-btn--on", !EN.physical); enEl("enPhysical").classList.toggle("en-btn--on", EN.physical);
+  enEl("enThrow").hidden = enEl("enAuto").hidden = EN.physical; enEl("enPad").hidden = !EN.physical;
+  enEl("enAuto").textContent = EN.auto ? "Auto-roll: on" : "Auto-roll: off"; enEl("enAuto").classList.toggle("en-btn--gold", EN.auto);
+}
+function enProgress() {
+  const target = EntropyCore.entTarget(EN.words), b = EntropyCore.facesToBits(EN.faces).length;
+  enEl("enBar").style.width = Math.min(100, Math.floor(b * 100 / target)) + "%";
+  enEl("enProgL").textContent = Math.min(b, target) + " / " + target + " bits, " + EN.faces.length + " rolls";
+  enEl("enTicker").textContent = EN.faces.join("");
+}
+const enStatus = (text, err) => enSay("enStatus", text, "en-status" + (err ? " en-red" : ""));
+function enBlocked() { if (!EN.selfErr) return false; enStatus("Blocked: self-test failed: " + EN.selfErr, true); return true; }
+function enStopDice(face) { enDice().forEach((d, i) => { clearInterval(d._flick); d.className = "en-die"; enDie(d, face == null ? (i % 6) + 1 : face); }); }
+async function enThrow() {
+  if (EN.busy || EN.done || enBlocked()) return;
+  if (!EN.ready) return enStatus("Verifying entropy sources, one moment…", true);
+  const run = EN.run; EN.busy = true; enStatus("", false);
+  enDice().forEach(d => { d.className = "en-die en-die--tumble"; clearInterval(d._flick); d._flick = setInterval(() => enDie(d, (+d.dataset.face % 6) + 1), 140); });
+  let got = null;
+  try { got = await Promise.race([Promise.all(Array.from({ length: EntropyCore.DICE }, enRollOne)), new Promise((_, no) => setTimeout(() => no(new Error("late")), 20000))]); } catch (e) { got = null; }
+  if (run !== EN.run) return;                                    // wiped while the node was answering: nothing of this throw is kept
+  if (!got) { enStopDice(1); EN.busy = false; EN.auto = false; enChips(); return enStatus("Entropy source error: nothing recorded. Try again.", true); }
+  await Promise.all(enDice().map((d, i) => new Promise(done => setTimeout(() => {   // each die tumbles on, then settles on its face
+    if (run !== EN.run) return done();
+    clearInterval(d._flick); d.className = "en-die en-die--roll"; let ticks = 0;
+    d._flick = setInterval(() => { if (++ticks > 13) { clearInterval(d._flick); enDie(d, got[i].face); } else enDie(d, (+d.dataset.face % 6) + 1); }, 55);
+    setTimeout(() => { clearInterval(d._flick); d.className = "en-die"; enDie(d, got[i].face); done(); }, 900);
+  }, 120 * i))));
+  if (run !== EN.run) return;
+  const target = EntropyCore.entTarget(EN.words);
+  EntropyCore.record(EN.faces, EN.audits, got.map(g => g.face), got.map(g => g.audit), target);
+  enProgress(); EN.busy = false;
+  if (EntropyCore.facesToBits(EN.faces).length >= target) return enFinish();
+  if (EN.auto && !EN.done) setTimeout(() => { if (run === EN.run && EN.auto && activeView === "entropy") enThrow(); }, 500);
+}
+function enTap(face) {
+  if (EN.done || EN.busy || !EN.physical || enBlocked()) return;
+  EN.faces.push(face); EN.audits.push({ src: EntropyCore.SRC.PHYSICAL, a: "", b: "", n: face - 1, face });
+  enDie(enDice()[(EN.faces.length - 1) % EntropyCore.DICE], face);
+  enProgress();
+  if (EntropyCore.facesToBits(EN.faces).length >= EntropyCore.entTarget(EN.words)) enFinish();
+}
+async function enFinish() {
+  const C = EntropyCore, run = EN.run, all = C.facesToBits(EN.faces), ent = C.rawTruncate(all);
+  EN.done = true;
+  const phrase = await C.entropyBitsToWords(ent), good = await C.check(phrase);
+  if (run !== EN.run) return;
+  if (!good) { EN.done = false; return enStatus("INTERNAL MISMATCH: phrase suppressed. Wipe and retry.", true); }   // our own checker must accept our own words, or nothing is shown
+  EN.phrase = phrase; EN.revealed = false; enWords();
+  enEl("enSummary").textContent = C.summary(EN.faces, EN.audits, all.length, ent.length, phrase.length).join("\n");
+  enEl("enRolls").textContent = EN.faces.join(""); enEl("enAudit").textContent = C.auditLog(EN.audits);
+  enEl("enRoll").hidden = true; enEl("enDone").hidden = false;
+}
+function enWords() {
+  const p = EN.phrase || [];
+  enEl("enWords").innerHTML = p.map((w, i) => `<div class="en-word${i === p.length - 1 ? " en-word--cs" : ""}${EN.revealed ? "" : " en-word--off"}">${i + 1}. ${EN.revealed ? esc(w) : "••••••"}</div>`).join("");
+  enEl("enReveal").textContent = EN.revealed ? "🙈 Click to hide" : "👁 Click to reveal";
+}
+function enWipe() {
+  EN.run++; EN.faces = []; EN.audits = []; EN.phrase = null; EN.busy = EN.auto = EN.done = EN.revealed = EN.audit = false;
+  enEl("enWords").innerHTML = ""; for (const id of ["enSummary", "enRolls", "enAudit"]) enEl(id).textContent = "";
+  enEl("enAuditWrap").hidden = true; enEl("enAuditBtn").textContent = "Show per-roll audit log";
+  enStatus("", false); enStopDice(); enEl("enDone").hidden = true; enEl("enRoll").hidden = false; enChips(); enProgress();
+}
+
+// ---- LAST WORD ----
+const lwBoxes = () => [...document.querySelectorAll("#lwBoxes input:not([disabled])")];
+const lwStatus = (text, err) => enSay("lwStatus", text, "en-status " + (err ? "en-red" : "en-ok"));
+function lwBuild() {
+  const L = EN.lw; L.candidates = null; L.prev = [];
+  enEl("lwResults").hidden = true; enEl("lwCands").innerHTML = ""; lwStatus("", false); enEl("lwSugg").innerHTML = "";
+  enEl("lwBoxes").innerHTML = Array.from({ length: L.words }, (_, i) => { const cs = i === L.words - 1;
+    return `<input class="en-box${cs ? " en-box--cs" : ""}" ${cs ? 'id="lwLast" disabled placeholder="?"' : `data-i="${i}" placeholder="${i + 1}…"`} aria-label="${cs ? "The last word, calculated" : "Word " + (i + 1)}" type="${L.hidden ? "password" : "text"}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">`; }).join("");
+  document.querySelectorAll("#lwTab [data-lwlen]").forEach(b => b.classList.toggle("en-btn--on", +b.dataset.lwlen === L.words));
+  lwCalcState();
+}
+function lwStyle(box) { const v = box.value; box.classList.toggle("en-box--ok", !!v && EntropyCore.wordIndex(v) >= 0); box.classList.toggle("en-box--bad", !!v && EntropyCore.wordIndex(v) < 0 && !EntropyCore.suggestions(v).length); }
+function lwTyped() { const out = []; for (const b of lwBoxes()) { if (EntropyCore.wordIndex(b.value) < 0) return null; out.push(b.value); } return out; }
+function lwCalcState() { enEl("lwCalc").disabled = !lwTyped(); }
+function lwInvalidate() { const L = EN.lw; if (L.candidates) { L.candidates = null; enEl("lwResults").hidden = true; enEl("lwCands").innerHTML = ""; } enEl("lwLast").value = ""; }
+function lwSuggest(box) { enEl("lwSugg").innerHTML = EntropyCore.suggestions(box.value).slice(0, 8).map(w => `<button class="en-btn en-btn--sugg" data-sugg="${esc(w)}" data-i="${box.dataset.i}">${esc(w)}</button>`).join(""); }
+function lwCommit(box, w) {
+  const boxes = lwBoxes(), idx = boxes.indexOf(box);
+  box.value = w; EN.lw.prev[idx] = w.length; lwStyle(box); lwInvalidate(); lwCalcState();
+  for (let j = 0; j < boxes.length; j++) { const k = boxes[(idx + 1 + j) % boxes.length]; if (EntropyCore.wordIndex(k.value) < 0) { k.focus(); lwSuggest(k); return; } }
+  enEl("lwSugg").innerHTML = ""; enEl("lwCalc").focus();
+}
+function lwEdit(box) {
+  const idx = lwBoxes().indexOf(box), v = box.value.toLowerCase().replace(/[^a-z]/g, "");
+  if (v !== box.value) box.value = v;
+  lwInvalidate();
+  const grew = v.length > (EN.lw.prev[idx] || 0); EN.lw.prev[idx] = v.length;
+  const m = EntropyCore.suggestions(v);
+  // list words are unique after four letters: commit as soon as what is typed can be only one word, but only while TYPING (never while deleting)
+  if (grew && m.length === 1 && v) return lwCommit(box, m[0]);
+  lwStyle(box); lwSuggest(box); lwCalcState();
+}
+async function lwCalc() {
+  if (EN.selfErr) return lwStatus("Blocked: startup self-test failed: " + EN.selfErr, true);
+  const words = lwTyped(); if (!words) return;
+  const res = await EntropyCore.lastWordCandidates(words);
+  if (res.error) return lwStatus(res.error, true);
+  for (const c of res.candidates) if (!(await EntropyCore.check(words.concat(c)))) return lwStatus("INTERNAL MISMATCH: results suppressed (candidate failed validation).", true);
+  if ((lwTyped() || []).join(" ") !== words.join(" ")) return;   // edited while it was worked out
+  EN.lw.candidates = res.candidates;
+  lwStatus(res.candidates.length + " valid last words (" + res.free + " free bits + " + res.cs + "-bit checksum), all checksum-validated", false);
+  enEl("lwCands").innerHTML = res.candidates.map(w => `<button class="en-cand" data-cand="${esc(w)}">${esc(w)}</button>`).join("");
+  enEl("lwResults").hidden = false; lwHidden(EN.lw.hidden);
+}
+function lwPick(w, how) { enEl("lwLast").value = w; lwStatus("Phrase complete: word " + EN.lw.words + " = \"" + w + "\" (" + how + "). Valid BIP39 ✓", false); }
+function lwHidden(on) {
+  EN.lw.hidden = on; enEl("lwHide").textContent = on ? "👁 Show" : "🙈 Hide";
+  document.querySelectorAll("#lwBoxes input").forEach(b => { b.type = on ? "password" : "text"; });
+  for (const id of ["lwSugg", "lwCands", "lwStatus"]) enEl(id).style.visibility = on ? "hidden" : "";
+}
+
+// ---- the screen ----
+function entropyTab(tab) {
+  EN.tab = tab;
+  if (EN.done && EN.revealed) { EN.revealed = false; enWords(); }   // secret hygiene on a tab switch: whatever was on show is concealed again
+  if (!EN.lw.hidden && lwBoxes().some(b => b.value)) lwHidden(true);
+  for (const t of ["dice", "lw"]) { const on = t === tab; enEl(t === "dice" ? "enDiceTab" : "lwTab").hidden = !on; const b = enEl("enTab-" + t); b.classList.toggle("en-tab--on", on); b.setAttribute("aria-selected", on ? "true" : "false"); b.tabIndex = on ? 0 : -1; }
+}
+/** Leaving the screen: an auto-roll stops, a shown phrase and typed words are concealed, and the window may be captured again. Nothing is destroyed. */
+function entropyLeave() {
+  if (EN && el("enRoot")) { EN.auto = false; enChips(); entropyTab(EN.tab); }
+  try { api.secureScreen(false); } catch (e) {}
+}
+function renderEntropy() {
+  try { api.secureScreen(true).then(ok => { const n = el("enCapture"); if (n) n.hidden = ok !== false; }, () => {}); } catch (e) {}
+  if (el("enRoot")) { enVerify(); return; }
+  EN = entropyNew();
+  let initErr = null; try { EntropyCore.init(WordEntry.WORDS); } catch (e) { initErr = "init failed: " + ((e && e.message) || e); EntropyCore.init(new Array(2048).fill("")); }   // a broken list blocks everything below, with the reason on screen
+  const C = EntropyCore, lens = (attr) => C.LENGTHS.map(n => `<button class="en-btn" ${attr}="${n}">${n}</button>`).join("");
+  el("entropyBody").innerHTML = `<div class="en" id="enRoot"><div class="en-head"><div class="en-title">ENTROPY</div><div class="en-sub">PROVABLY FAIR BIP39 SEED DICE</div><div class="en-banner" id="enBanner" hidden></div>
+      <div class="en-banner" id="enCapture" hidden>This system cannot keep the window out of screenshots and screen sharing. Make sure nothing is recording the screen.</div></div>
+    <div class="en-tabs" role="tablist"><button class="en-tab en-tab--on" id="enTab-dice" role="tab" aria-selected="true" aria-controls="enDiceTab">🎲 DICE ROLL</button><button class="en-tab" id="enTab-lw" role="tab" aria-selected="false" aria-controls="lwTab" tabindex="-1">✓ LAST WORD</button></div>
+    <div class="en-page" id="enDiceTab" role="tabpanel">
+      <div class="en-card"><div class="en-label">PHRASE LENGTH</div><div class="en-row">${lens("data-len")}</div>
+        <div class="en-label en-gap">DICE MODE</div><div class="en-row"><button class="en-btn" id="enDigital">Digital (node + device)</button><button class="en-btn" id="enPhysical">Physical dice</button></div>
+        <div class="en-source" id="enSource" role="status">checking entropy sources…</div>
+        <div class="en-warn">⚠ SECURITY: you are generating a real wallet seed. Go offline, make sure nobody can see the screen, and write the words on paper only. Nothing is stored: quitting the app, or Wipe &amp; start over, destroys the phrase for ever.</div></div>
+      <div class="en-card" id="enRoll"><div class="en-label">COLLECT ENTROPY</div><div class="en-track"><div class="en-bar" id="enBar"></div></div><div class="en-mono en-dim" id="enProgL"></div>
+        <div class="en-dice" id="enDice" aria-hidden="true">${"<div class=\"en-die\"></div>".repeat(C.DICE)}</div>
+        <button class="en-btn en-btn--gold en-btn--full" id="enThrow">Throw 5 dice</button><button class="en-btn en-btn--full" id="enAuto">Auto-roll: off</button>
+        <div id="enPad" hidden><div class="en-warn">⚠ Use a REAL, fair die and enter every roll exactly as it lands. Typing numbers "randomly" from your head produces a weak, guessable seed.</div>
+          <div class="en-pad">${[1, 2, 3, 4, 5, 6].map(f => `<button class="en-btn en-btn--text" data-face="${f}" aria-label="A real die landed on ${f}">${"⚀⚁⚂⚃⚄⚅"[f - 1]} ${f}</button>`).join("")}</div><button class="en-btn en-btn--full" id="enUndo">↺ Undo last</button></div>
+        <div class="en-ticker" id="enTicker" aria-label="The rolls so far"></div><div class="en-status" id="enStatus" role="status"></div></div>
+      <div class="en-card" id="enDone" hidden><div class="en-label">YOUR SEED PHRASE</div><div class="en-words" id="enWords"></div><button class="en-btn en-btn--full" id="enReveal">👁 Click to reveal</button>
+        <div class="en-mono en-dim en-summary" id="enSummary"></div>
+        <div class="en-label en-gap">VERIFY FAIRNESS</div><div class="en-hint">Maths is bit-identical to iancoleman/bip39 v0.4.3 (locked by fixed vectors produced from the genuine code; see the Entropy repo tests). Roll history below: paste into bip39-standalone.html (Raw entropy mode) to reproduce the phrase.</div>
+        <div class="en-ticker en-sel" id="enRolls"></div><button class="en-btn en-btn--full" id="enAuditBtn" aria-expanded="false">Show per-roll audit log</button>
+        <div id="enAuditWrap" hidden><div class="en-gold en-small">⚠ This log reveals every roll's secrets (A + B): anyone who sees it can recompute the entire seed phrase. Treat it exactly like the seed words.</div>
+          <div class="en-hint en-small">Each digital face = SHA3(node_secret ++ device_secret) → first 4 bytes mod 6 (values ≥ 4294967292 rerolled: zero modulo bias). Verify any roll in the Terminal: runscript script:"LET h=SHA3(CONCAT(&lt;A&gt; &lt;B&gt;)) LET n=NUMBER(SUBSET(0 4 h)) LET r=n%6 RETURN TRUE"</div>
+          <pre class="en-audit en-sel" id="enAudit" tabindex="0"></pre></div>
+        <button class="en-btn en-btn--pink en-btn--full" id="enWipe">Wipe &amp; start over</button></div></div>
+    <div class="en-page" id="lwTab" role="tabpanel" hidden>
+      <div class="en-card"><div class="en-label">LAST-WORD (CHECKSUM) CALCULATOR</div><div class="en-row"><button class="en-btn" id="lwHide">🙈 Hide</button><button class="en-btn" id="lwClear">↺ Clear all</button></div>
+        <div class="en-row en-gap">${lens("data-lwlen")}</div>
+        <div class="en-hint">Every BIP39 word is unique after 4 letters, so boxes auto-complete as soon as the word is unambiguous. The final word packs entropy bits plus the SHA-256 checksum, so it is calculated, never typed.</div>
+        <div class="en-boxes" id="lwBoxes"></div><div class="en-sugg" id="lwSugg"></div>
+        <button class="en-btn en-btn--gold en-btn--full" id="lwCalc" disabled>Calculate valid last words</button><div class="en-status" id="lwStatus" role="status"></div></div>
+      <div class="en-card" id="lwResults" hidden><div class="en-label">VALID LAST WORDS</div><div class="en-hint en-small">click a word to use it as your final word, or:</div>
+        <button class="en-btn en-btn--cyan en-btn--full" id="lwRandom">🎲 Pick one at random (node + device entropy)</button><div class="en-cands" id="lwCands"></div></div></div></div>`;
+  enStopDice(); enChips(); enProgress(); lwBuild();
+  const root = el("enRoot");
+  root.addEventListener("click", async (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.len) { if (!EN.busy && !EN.done) { EN.words = +b.dataset.len; enChips(); enProgress(); } }
+    else if (b.id === "enDigital" || b.id === "enPhysical") { if (!EN.busy) { EN.physical = b.id === "enPhysical"; enChips(); } }
+    else if (b.id === "enThrow") enThrow();
+    else if (b.id === "enAuto") { EN.auto = !EN.auto; enChips(); if (EN.auto && !EN.busy && !EN.done) enThrow(); }
+    else if (b.dataset.face) enTap(+b.dataset.face);
+    else if (b.id === "enUndo") { if (!EN.done && EN.faces.length) { EN.faces.pop(); EN.audits.pop(); enProgress(); } }
+    else if (b.id === "enReveal") { EN.revealed = !EN.revealed; enWords(); }
+    else if (b.id === "enAuditBtn") { EN.audit = !EN.audit; enEl("enAuditWrap").hidden = !EN.audit; b.textContent = EN.audit ? "Hide per-roll audit log" : "Show per-roll audit log"; b.setAttribute("aria-expanded", EN.audit ? "true" : "false"); }
+    else if (b.id === "enWipe") enWipe();
+    else if (b.id === "enTab-dice" || b.id === "enTab-lw") entropyTab(b.id === "enTab-lw" ? "lw" : "dice");
+    else if (b.dataset.lwlen) { EN.lw.words = +b.dataset.lwlen; lwBuild(); lwHidden(EN.lw.hidden); }
+    else if (b.id === "lwHide") lwHidden(!EN.lw.hidden);
+    else if (b.id === "lwClear") { lwHidden(false); lwBuild(); }
+    else if (b.id === "lwCalc") lwCalc();
+    else if (b.dataset.sugg) { const box = lwBoxes()[+b.dataset.i]; if (box) lwCommit(box, b.dataset.sugg); }
+    else if (b.dataset.cand) lwPick(b.dataset.cand, "chosen manually");
+    else if (b.id === "lwRandom") { const c = EN.lw.candidates; if (c && c.length) { const r = await enRandomN(); if (EN.lw.candidates === c) lwPick(c[r.n % c.length], r.src === EntropyCore.SRC.NODE_DEVICE ? "picked by SHA3(node ++ device) entropy" : "picked by device entropy"); } }   // the count is a power of two, so the remainder is exactly uniform
+  });
+  root.addEventListener("input", (e) => { if (e.target.matches("#lwBoxes input")) lwEdit(e.target); });
+  root.addEventListener("focusin", (e) => { if (e.target.matches("#lwBoxes input")) lwSuggest(e.target); });
+  root.querySelector(".en-tabs").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); const to = EN.tab === "dice" ? "lw" : "dice"; entropyTab(to); enEl("enTab-" + to).focus(); } });
+  // the fixed vectors first: nothing is generated until the maths has proved itself in this very window
+  (initErr ? Promise.resolve(initErr) : C.selfTest()).then(err => { EN.selfErr = err;
+    if (err) { const n = enEl("enBanner"); n.hidden = false; n.textContent = "SELF-TEST FAILED, generation blocked: " + err; enSay("enSource", "self-test FAILED: blocked", "en-source en-amber"); }
+    else { enSay("enSource", "BIP39 self-test ✓ node: connecting…", "en-source en-ok"); enVerify(); } });
+}

@@ -8,7 +8,7 @@
  *                           chat      the message drain and the file transfers' loop
  *                           dexicon   the three trading engines (AtomiX, PandaPools, the Exchange), by the same hold
  *                                     a wallet replacement uses: nothing is published, answered, scanned or signed
- *                           ethwallet, explorer, keyuses, faucet, webwallet   nothing: they do no work while closed (the switch only
+ *                           ethwallet, explorer, entropy, keyuses, faucet, webwallet   nothing: they do no work while closed (the switch only
  *                                     puts them away)
  *   never frozen            core (the node and the wallet), parlons (the account is part of the node itself)
  *
@@ -36,7 +36,7 @@
  * The list is kept in the app's config (frozenApps) and honoured at startup: a frozen app's loop is never started
  * (every start site in main.js goes through start(id)), and Dexicon's engines are held before the node is up.
  */
-const FREEZABLE = ["mail", "ethwallet", "explorer", "vestr", "keyuses", "faucet", "minimall", "webwallet", "dexicon", "chat"];
+const FREEZABLE = ["mail", "ethwallet", "explorer", "vestr", "entropy", "keyuses", "faucet", "minimall", "webwallet", "dexicon", "chat"];
 const NEVER = { core: "Minima Core is the node and the wallet. It cannot be frozen.", parlons: "Parlons is part of the node itself: its account runs inside it. It cannot be frozen. Hide takes it out of the drawer." };
 const clean = (list) => [...new Set((Array.isArray(list) ? list : []).filter(id => FREEZABLE.includes(id)))];
 

@@ -23,6 +23,7 @@ const histDb = require("./history-db");
 const faucet = require("./faucet");
 const keyuses = require("./keyuses");
 const explorer = require("./explorer");
+const entropy = require("./entropy");
 const mail = require("./mail");
 const chat = require("./chat");
 const pandapools = require("./pandapools");
@@ -348,6 +349,12 @@ ipcMain.handle("mcd:applyJarUpdate", async () => { throw new Error("The in-app n
 // token icons + history store + CSV export (no requireRunning — these render off the local store / cache)
 ipcMain.handle("mcd:tokenIcon", (_e, url) => netfetch.tokenIcon(url));
 ipcMain.handle("mcd:faucet", (_e, address) => faucet.requestFaucet(address));
+
+// Entropy (main/entropy.js): `random`, or `hash data:` of plain hex, through rpcCall; the hex value back. Seed material: never logged.
+ipcMain.handle("mcd:entropy", (_e, kind, arg) => { requireRunning(); return entropy.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
+// While a seed phrase can be on screen (Entropy), the window is kept out of screenshots and screen sharing, as the phone's
+// FLAG_SECURE (macOS and Windows; Linux has no such switch). On or off, nothing else: no path, no setting.
+ipcMain.handle("mcd:secureScreen", (_e, on) => { try { if (win && !win.isDestroyed()) win.setContentProtection(on === true); return process.platform !== "linux"; } catch (e) { return false; } });
 
 // Minima Explorer (main/explorer.js): a kind and one checked value in, one of seven node READS out, through rpcCall.
 ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return explorer.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
