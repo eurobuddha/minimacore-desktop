@@ -113,6 +113,11 @@ jobs:
       - name: Verify no command injection
         run: npm run test:inject
 
+      # Chat: the wire schema round trip and every peer string cut to its length (the drift check against the
+      # canonical mds/keetchat copy skips itself here: that repo is not checked out).
+      - name: Verify chat
+        run: npm run test:chat
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
