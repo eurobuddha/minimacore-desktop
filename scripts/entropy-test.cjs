@@ -68,56 +68,121 @@ test("a die face is exactly uniform: n % 6 + 1 of the hash's first four bytes, t
   assert.equal(C.hashInput("0xAABB", "0xccdd"), "0xAABBccdd", "CONCAT(a b): the device's value appended to the node's");
 });
 
-test("the node is asked for a random value or the hash of plain hex, and nothing else", async () => {
-  assert.equal(M.command("random"), "random"); assert.equal(M.command("random", "x y"), "random"); assert.equal(M.command("hash", "0xAABBccdd"), "hash data:0xAABBccdd");
-  for (const [k, a] of [["hash", "0xAA type:keccak"], ["hash", "0xAA;quit"], ["hash", "AA"], ["hash", "0x"], ["hash", ""], ["hash", null], ["hash", "0x" + "A".repeat(513)], ["vault", ""], ["seedrandom", "modifier:x"], ["send", "0xAA"], ["constructor", ""]]) assert.equal(M.command(k, a), null, k + " " + a);
+const A64 = (k) => "0x" + String(k).padStart(64, "A"), BAD = /The node's answer did not match; this roll was not used\./;
+test("the node is asked for a random value or the hash of the 64 bytes of one roll, and nothing else", async () => {
+  const roll = "0x" + "aB".repeat(64);
+  assert.equal(M.command("random"), "random"); assert.equal(M.command("random", "x y"), "random"); assert.equal(M.command("hash", roll), "hash data:" + roll);
+  for (const [k, a] of [["hash", roll + " type:sha2"], ["hash", roll + ";quit"], ["hash", roll.slice(2)], ["hash", "0x"], ["hash", ""], ["hash", null], ["hash", "0xAABBccdd"], ["hash", roll.slice(0, -2)], ["hash", roll + "00"], ["hash", roll.slice(0, -1)],
+    ["vault", ""], ["seedrandom", "modifier:x"], ["send", "0xAA"], ["constructor", ""]]) assert.equal(M.command(k, a), null, k + " " + a);
   const sent = [], run = (reply) => async (c) => { sent.push(c); return reply; };
-  assert.equal(await M.ask("random", undefined, run({ status: true, response: { random: "0xABCD" } })), "0xABCD"); assert.equal(await M.ask("hash", "0xABCD", run({ status: true, response: { hash: "0x1234" } })), "0x1234");
-  assert.deepEqual(sent, ["random", "hash data:0xABCD"]);
-  for (const reply of [null, { status: false }, { status: true }, { status: true, response: { random: 5 } }, { status: true, response: { random: "0xZZ" } }, { status: true, response: { random: "<b>" } }]) assert.equal(await M.ask("random", undefined, run(reply)), "", "a value of another shape is not passed on");
-  await assert.rejects(M.ask("hash", "0xAA;quit", run({}))); await assert.rejects(M.ask("vault", "", run({})));
+  assert.equal(await M.ask("random", undefined, run({ status: true, response: { random: A64(1) } })), A64(1)); assert.equal(await M.ask("hash", roll, run({ status: true, response: { hash: M.sha3(roll) } })), M.sha3(roll));
+  assert.deepEqual(sent, ["random", "hash data:" + roll]);
+  for (const reply of [null, { status: false }, { status: true }, { status: true, response: { random: 5 } }, { status: true, response: { random: "0xZZ" } }, { status: true, response: { random: "<b>" } },
+    { status: true, response: { random: "" } }, { status: true, response: { random: "0x" } }, { status: true, response: { random: "0xABCD" } }, { status: true, response: { random: A64(1) + "00" } }, { status: true, response: { random: A64(1).slice(2) } }])
+    assert.equal(await M.ask("random", undefined, run(reply)), "", "a random value that is not 32 bytes of hex is not passed on: " + JSON.stringify(reply));
+  await assert.rejects(M.ask("hash", roll + ";quit", run({}))); await assert.rejects(M.ask("vault", "", run({})));
   const mainJs = R("main/main.js"), mod = R("main/entropy.js");
   assert.ok(/ipcMain\.handle\("mcd:entropy", \(_e, kind, arg\) => \{ requireRunning\(\); return entropy\.ask\(kind, arg, \(c\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\)\); \}\);/.test(mainJs));
   assert.ok(!/log\(|console\.|writeFile|appendFile|require\("fs"\)|clipboard/.test(mod), "the main module logs, writes and copies nothing");
-  assert.ok(/ipcMain\.handle\("mcd:secureScreen", \(_e, on\) => \{ try \{ if \(win && !win\.isDestroyed\(\)\) win\.setContentProtection\(on === true\);/.test(mainJs), "the window is kept out of screen captures: a true / false switch and nothing else");
 });
 
-/** The screen's own roll code against a stand-in node and a recording WebCrypto. Math.random throws while it runs. */
+// 0.19.132 (review, HIGH): the original, and 0.19.130, took the node's word for the hash, so the node chose the face.
+test("the node cannot decide a die face: its hash is used only when it is the SHA3-256 the main process worked out itself", async () => {
+  assert.equal(M.sha3("0x"), "0xa7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a", "SHA3-256 of nothing (FIPS 202)");
+  assert.equal(M.sha3("0x616263"), "0x3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532", "SHA3-256 of abc; the same digest main/keyuses.js derives addresses with");
+  const roll = "0x" + "01".repeat(32) + "fe".repeat(32), truth = M.sha3(roll), say = (hash) => async () => ({ status: true, response: { hash } });
+  assert.equal(await M.ask("hash", roll, say(truth)), truth); assert.equal(await M.ask("hash", roll, say(truth.toUpperCase().replace("0X", "0x"))), truth.toUpperCase().replace("0X", "0x"), "Minima answers in upper case: the same digest in any letter case");
+  for (const lie of ["0x00000000" + "00".repeat(28), "0x" + "11".repeat(32), "", "0x", truth.slice(0, -2), truth + "00", truth.slice(2), M.sha3("0x" + "01".repeat(32)), null, 7, { hash: truth }])
+    assert.equal(await M.ask("hash", roll, say(lie)), "", "not the digest, so not passed on: " + JSON.stringify(lie));
+  assert.equal(await M.ask("hash", roll, async () => ({ status: false, response: { hash: truth } })), "", "a refused command's value is not used");
+});
+
+/**
+ * The screen's own roll code. o.node: a stand-in NODE behind the real main/entropy.js (random(k) → its random value,
+ * hash(k, input, truth) → its hash); o.main: a stand-in for the main process itself. A recording WebCrypto; Math.random throws.
+ */
 function engine(o) {
   const asked = [], drawn = []; let k = 0;
   const cryptoStub = { getRandomValues: (arr) => { drawn.push(arr.constructor.name + ":" + arr.length); const next = (o.bytes || (() => nodeCrypto.randomBytes(arr.byteLength)))(arr); if (next) new Uint8Array(arr.buffer).set(next); return arr; } };
-  const api = { entropy: async (kind, arg) => { asked.push(kind + (arg ? ":" + arg : "")); if (o.node === "down") throw new Error("node not running"); return kind === "random" ? (o.random ? o.random(k) : "0x" + String(k).padStart(64, "A")) : o.hash(k++, arg); } };
-  const fns = new Function("api", "crypto", "EntropyCore", "Math", "el", "document", "running", src.replace(/^"use strict";$/mg, "") + "\nreturn { enRollOne, enRandomN, enDeviceSecret, enDeviceFace, entropyNew, set: (v) => { EN = v; } };")
-    (api, cryptoStub, C, Object.assign(Object.create(Math), { random: () => { throw new Error("Math.random was used"); } }), () => null, { querySelectorAll: () => [] }, true);
-  const EN = fns.entropyNew(); EN.nodeOk = o.node !== "off"; fns.set(EN);
+  const node = async (c) => { if (o.node === "down") throw new Error("node not running"); if (c === "random") return { status: true, response: { random: o.random ? o.random(k) : A64(k) } };
+    const input = c.slice("hash data:".length), truth = M.sha3(input); return { status: true, response: { hash: o.hash ? o.hash(k++, input, truth) : (k++, truth.toUpperCase().replace("0X", "0x")) } }; };
+  const api = { entropy: async (kind, arg) => { asked.push(kind + (arg ? ":" + arg : "")); return o.main ? o.main(kind, arg, kind === "hash" ? k++ : k) : M.ask(kind, arg, node); } };
+  const fns = new Function("api", "crypto", "EntropyCore", "Math", "el", "document", "running", "setTimeout", src.replace(/^"use strict";$/mg, "") + "\nreturn { enRollOne, enRandomN, enVerify, enDeviceSecret, enDeviceFace, entropyNew, EN_NODE_BAD, set: (v) => { EN = v; } };")
+    (api, cryptoStub, C, Object.assign(Object.create(Math), { random: () => { throw new Error("Math.random was used"); } }), () => null, { querySelectorAll: () => [] }, o.running !== false, () => 0);
+  const EN = fns.entropyNew(); EN.nodeOk = o.node !== "off"; EN.selfErr = null; fns.set(EN);
   return Object.assign(fns, { asked, drawn, EN });
 }
+const faceOf = (a, b) => { const n = parseInt(M.sha3(a + b.slice(2)).slice(2, 10), 16); return { n, face: (n % 6) + 1 }; };
 
-test("a digital roll: the node's random and 32 WebCrypto bytes, hashed by the node; both inputs kept for the audit; never Math.random", async () => {
-  const e = engine({ hash: () => "0x0000000B" + "CD".repeat(28) }), r = await e.enRollOne();
-  assert.equal(r.face, (11 % 6) + 1); assert.equal(r.audit.src, "node-sha3+device"); assert.equal(r.audit.n, 11); assert.equal(r.audit.face, r.face);
-  assert.match(r.audit.b, /^0x[0-9a-f]{64}$/); assert.equal(r.audit.a, "0x" + "0".padStart(64, "A"));
-  assert.deepEqual(e.drawn, ["Uint8Array:32"]); assert.deepEqual(e.asked, ["random", "hash:" + r.audit.a + r.audit.b.slice(2)], "the node hashes exactly (its value ++ the device's value)");
-  const two = engine({ hash: () => "0x00000001" }), x = await two.enRollOne(), y = await two.enRollOne(); assert.notEqual(x.audit.b, y.audit.b, "a new device value for every roll");
+test("a digital roll: the node's random and 32 WebCrypto bytes; the face is the checked SHA3 of both; both inputs kept for the audit; never Math.random", async () => {
+  let e, r; do { e = engine({}); r = await e.enRollOne(); } while (e.asked.length > 2);   // (a rejected value, once in a thousand million, is thrown again: the next test)
+  assert.equal(r.audit.src, "node-sha3+device"); assert.match(r.audit.b, /^0x[0-9a-f]{64}$/); assert.equal(r.audit.a, A64(0));
+  assert.deepEqual({ n: r.audit.n, face: r.face }, faceOf(r.audit.a, r.audit.b), "the face is n % 6 + 1 of SHA3-256(node 32 bytes ++ device 32 bytes)"); assert.equal(r.audit.face, r.face);
+  assert.deepEqual(e.drawn, ["Uint8Array:32"]); assert.deepEqual(e.asked, ["random", "hash:" + r.audit.a + r.audit.b.slice(2)], "the node is given exactly (its value ++ the device's value)");
+  const two = engine({}), x = await two.enRollOne(), y = await two.enRollOne(); assert.notEqual(x.audit.b, y.audit.b, "a new device value for every roll");
   assert.equal(e.enDeviceSecret().length, 66);
+  // all 32 device bytes count: change the last one and the number changes
+  const fixed = (last) => engine({ bytes: () => Buffer.concat([Buffer.alloc(31, 7), Buffer.from([last])]), random: () => A64(0) });
+  const p = await fixed(1).enRollOne(), q = await fixed(2).enRollOne(); assert.notEqual(p.audit.n, q.audit.n); assert.deepEqual({ n: q.audit.n, face: q.face }, faceOf(A64(0), "0x" + "07".repeat(31) + "02"));
+});
+
+test("a node that answers `hash` with a value of its choosing gets no roll: wrong, constant, empty, and nothing falls back to one source in silence", async () => {
+  const one = "0x00000000" + "00".repeat(28);   // would be face 1 on every die if it were believed
+  for (const [name, hash] of [["a hash that would make every die a 1", () => one], ["a constant", () => "0x" + "5A".repeat(32)], ["an empty string", () => ""], ["the hash of other bytes", (k, input) => M.sha3(input.slice(0, 66))], ["a short value", (k, i, truth) => truth.slice(0, 10)]]) {
+    const e = engine({ hash });
+    await assert.rejects(e.enRollOne(), BAD, name); assert.equal(e.EN.faces.length, 0); assert.equal(e.EN.audits.length, 0);
+    assert.deepEqual(e.drawn, ["Uint8Array:32"], name + ": no device-only face was drawn in its place");
+    assert.deepEqual(await e.enRandomN(), { error: "The node's answer did not match; no word was picked. Try again." }, name + ": the last-word picker picks nothing");
+  }
+  // five dice at once, one lie among five truthful answers: the whole throw is refused
+  const mixed = engine({ hash: (k, i, truth) => (k === 3 ? one : truth) });
+  await assert.rejects(Promise.all(Array.from({ length: 5 }, () => mixed.enRollOne())), BAD);
+  assert.ok(/if \(why !== EN_NODE_BAD\) return enStatus\("Entropy source error: nothing recorded\. Try again\.", true\);\s*entropyNode\(\);[^\n]*\n\s*return enStatus\(EN_NODE_BAD \+ " Nothing was recorded\.", true\);/.test(src), "the screen says so, records nothing, and proves the node again before the next roll");
+  assert.ok(/if \(!got\) \{\s*enStopDice\(1\); EN\.busy = false; EN\.auto = false;/.test(src), "and auto-roll stops");
+});
+
+test("the node's random is 32 bytes of hex and never one it gave before: short, empty or repeated, the roll is not used and the device's 32 bytes are never the lesser part", async () => {
+  for (const [name, random] of [["empty", () => ""], ["0x alone", () => "0x"], ["one byte", () => "0xAB"], ["31 bytes", () => "0x" + "AB".repeat(31)], ["33 bytes", () => "0x" + "AB".repeat(33)], ["not hex", () => "0x" + "ZZ".repeat(32)], ["no prefix", () => "AB".repeat(32)]]) {
+    const e = engine({ random }); await assert.rejects(e.enRollOne(), BAD, name);
+    assert.ok(!e.asked.some(a => a.startsWith("hash:")), name + ": nothing was hashed");
+  }
+  const same = engine({ random: () => A64(9) }), first = await same.enRollOne();
+  assert.deepEqual({ n: first.audit.n, face: first.face }, faceOf(A64(9), first.audit.b), "the first use of a value: the face still rests on the 32 device bytes");
+  await assert.rejects(same.enRollOne(), BAD, "the same value again");
+  const shout = engine({ random: (k) => (k ? A64(9).toLowerCase() : A64(9)) }); await shout.enRollOne(); await assert.rejects(shout.enRollOne(), BAD, "the same value in another letter case");
+  // the main-process stand-in: even a main process that passed a short value on would be refused by the screen
+  await assert.rejects(engine({ main: (kind) => (kind === "random" ? "0xAB" : "0x00000001" + "00".repeat(28)) }).enRollOne(), BAD);
+});
+
+test("\"verified\" rests on the same check: a lying node is never shown as a second source, and its rolls are labelled device only", async () => {
+  const good = engine({}); good.EN.nodeOk = false; await good.enVerify(); assert.equal(good.EN.nodeOk, true); assert.equal(good.EN.ready, true);
+  assert.equal(good.asked.length, 2); assert.match(good.asked[1], /^hash:0x[0-9A-Fa-f]{128}$/, "one whole node + device hash, as a roll");
+  for (const o of [{ hash: () => "0x" + "00".repeat(32) }, { hash: () => "" }, { hash: () => "0x1234567890" }, { random: () => "" }, { random: () => "0xAB" }, { node: "down" }]) {
+    const e = engine(o); e.EN.nodeOk = true; await e.enVerify();
+    assert.equal(e.EN.nodeOk, false, JSON.stringify(Object.keys(o))); assert.equal(e.EN.ready, true);
+    const r = await e.enRollOne(); assert.equal(r.audit.src, "device-only", "what is rolled after that says it had one source");
+    assert.equal((await e.enRandomN()).src, "device-only");
+  }
+  const off = engine({ running: false }); off.EN.nodeOk = true; await off.enVerify(); assert.equal(off.EN.nodeOk, false); assert.deepEqual(off.asked, [], "a stopped node is not asked");
+  assert.ok(/set\(true, "BIP39 self-test ✓ node SHA3 \+ device CSPRNG verified"\)/.test(src) && /"the node's answers did not match" : "node commands failed"\) \+ ": device CSPRNG only \(single source\)"/.test(src));
 });
 
 test("a rejected value is thrown again with new values on both sides; a source that rejects 26 times, or answers badly, records nothing", async () => {
-  const e = engine({ hash: (k) => (k < 2 ? "0xFFFFFFFC" : "0x00000002") }), r = await e.enRollOne();
+  const good = (k) => "0x0000000" + (k < 2 ? "0" : "2") + "00".repeat(28);
+  const e = engine({ main: (kind, arg, k) => (kind === "random" ? A64(k) : k < 2 ? "0xFFFFFFFC" + "00".repeat(28) : good(k)) }), r = await e.enRollOne();
   assert.equal(r.face, 3); assert.equal(e.asked.filter(a => a === "random").length, 3); assert.equal(e.drawn.length, 3);
-  assert.equal(r.audit.a, "0x" + "2".padStart(64, "A"), "the audit holds the values of the throw that counted");
-  await assert.rejects(engine({ hash: () => "0xFFFFFFFF" }).enRollOne(), /Entropy source misbehaving \(rejection limit\)/);
-  await assert.rejects(engine({ hash: () => "" }).enRollOne(), /Node hash failed/); await assert.rejects(engine({ hash: () => "0xZZZZZZZZ00" }).enRollOne(), /Node hash unparseable/);
-  await assert.rejects(engine({ random: () => "", hash: () => "0x00000001" }).enRollOne(), /Node random failed/); await assert.rejects(engine({ node: "down", hash: () => "" }).enRollOne(), /node not running/);
+  assert.equal(r.audit.a, A64(2), "the audit holds the values of the throw that counted");
+  await assert.rejects(engine({ main: (kind, arg, k) => (kind === "random" ? A64(k) : "0xFFFFFFFF" + "00".repeat(28)) }).enRollOne(), /Entropy source misbehaving \(rejection limit\)/);
+  await assert.rejects(engine({ main: (kind, arg, k) => (kind === "random" ? A64(k) : "0xZZZZZZZZ00") }).enRollOne(), /Node hash unparseable/);
+  await assert.rejects(engine({ node: "down" }).enRollOne(), /node not running/);
 });
 
 test("with no node a roll is the device alone, by byte rejection, and is labelled as one source", async () => {
-  const bytes = [255, 252, 251, 7]; const e = engine({ node: "off", hash: () => "", bytes: () => [bytes.shift()] });
+  const bytes = [255, 252, 251, 7]; const e = engine({ node: "off", bytes: () => [bytes.shift()] });
   const r = await e.enRollOne(); assert.deepEqual(r, { face: (251 % 6) + 1, audit: { src: "device-only", a: "", b: "", n: 251 % 6, face: (251 % 6) + 1 } });
   assert.deepEqual(e.asked, [], "the node is not asked"); assert.deepEqual(e.drawn, ["Uint8Array:1", "Uint8Array:1", "Uint8Array:1"], "255 and 252 were thrown away");
-  const pickN = await engine({ node: "off", hash: () => "" }).enRandomN(); assert.equal(pickN.src, "device-only"); assert.ok(Number.isInteger(pickN.n) && pickN.n >= 0 && pickN.n <= 4294967295);
-  assert.deepEqual(await engine({ hash: () => "0x000000FF00" }).enRandomN(), { n: 255, src: "node-sha3+device" });
-  assert.equal((await engine({ hash: () => "nonsense" }).enRandomN()).src, "device-only", "a malformed hash falls back to the device, and says so");
+  const pickN = await engine({ node: "off" }).enRandomN(); assert.equal(pickN.src, "device-only"); assert.ok(Number.isInteger(pickN.n) && pickN.n >= 0 && pickN.n <= 4294967295);
+  const both = engine({ bytes: () => Buffer.alloc(32, 3) }), got = await both.enRandomN(); assert.deepEqual(got, { n: faceOf(A64(0), "0x" + "03".repeat(32)).n, src: "node-sha3+device" });
 });
 
 test("what is said under a finished phrase: the counts, the sources, and the two warnings when they apply", () => {

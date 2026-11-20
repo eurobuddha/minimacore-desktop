@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.132] — Entropy: the node cannot decide a die face
+
+- **Review finding, HIGH.** A digital die face is SHA3(node random ++ device random), and the hash was the node's own answer to `hash data:`, taken on trust (as the phone takes it). A node that answered with a value of its choosing chose the face, and with it the seed phrase, while the screen said "node SHA3 + device CSPRNG verified".
+- **Now the hash is worked out in the main process first** (`main/entropy.js`, `crypto.createHash("sha3-256")` over the raw bytes) and the node's answer is passed on only when it is that same digest, in any letter case. Confirmed from source: Minima's `hash` command defaults to type `sha3`, which is BouncyCastle `SHA3Digest(256)` over the bytes the hex spells (core `commands/base/hash.java`, `utils/Crypto.java` `hashData`); it is the digest `main/keyuses.js` derives addresses with, pinned there by vectors checked against the live service.
+- **The node's random value** is passed on only as 32 bytes of hex (the command's default size), the screen refuses one the node gave before, and the value hashed is exactly 64 bytes, so a short, empty or repeated node value never makes the device's 32 bytes the lesser part.
+- **When the node's answer does not match**, the whole throw is discarded and the screen says "The node's answer did not match; this roll was not used. Nothing was recorded.", auto-roll stops, and the node is proved again before another roll may use it. There is no quiet fall back to the device alone: if the node fails that proof, the source line turns amber ("the node's answers did not match: device CSPRNG only (single source)") and the rolls after it are labelled as one source in the summary. The last-word picker picks nothing and says so.
+- **"Verified" rests on the same check:** the source line turns green only after one whole node + device hash has been confirmed this way.
+- Tests: `scripts/entropy-test.cjs` (16): a stand-in node behind the real `main/entropy.js` that answers with a hash making every die a 1, a constant, an empty string, the hash of other bytes, a cut value; a random value that is empty, short, long, not hex or repeated; one lie among five dice. They fail on 0.19.131.
+- The phone's Entropy has the same finding (`RollEngine.java:84-108`); it is recorded in the plan and nothing was changed there.
+
 ## [0.19.131] — The renderer-load test runs the whole renderer
 
 - Tests only; nothing in the app changes. `scripts/shell-test.cjs` no longer keeps a list of the names the other renderer scripts provide. It reads the `<script src>` tags of `renderer/index.html` and (1) refuses a `renderer/*.js` file that no tag loads, (2) runs every file's top level, in tag order, in one vm context whose only stand-ins are the browser's own objects and the preload bridge, (3) checks that every name a script uses anywhere, also inside its functions, is defined once all have loaded.

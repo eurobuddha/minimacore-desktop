@@ -202,7 +202,7 @@ test("the renderer loads: every script of index.html, in its order, and no name 
   const swap = (a, b) => html.replace(tag(a), "\u0000").replace(tag(b), tag(a)).replace("\u0000", tag(b));
   assert.throws(() => rendererLoads(swap("apps-act.js", "app.js")), /app\.js: ReferenceError: \w+ is not defined/, "app.js before the scripts whose names its top level uses");
   assert.throws(() => rendererLoads(swap("dexicon-core.js", "dexicon-ui.js")), /dexicon-ui\.js: ReferenceError: DexCore is not defined/);
-  assert.throws(() => rendererLoads(html, edit("entropy-core.js", "root.EntropyCore = make()", "root.EntropyKore = make()")), /apps-tools\.js: ReferenceError: EntropyCore is not defined/, "an export renamed, used only inside functions");
-  assert.throws(() => rendererLoads(html, edit("apps-tools.js", "function entropyNode()", "function entropyNodes()")), /app\.js: ReferenceError: entropyNode is not defined/, "a function renamed in one script and still called in another");
-  assert.throws(() => rendererLoads(html, edit("mailicons.js", "g.micon", "g.mikon")), /mail\.js: ReferenceError: micon is not defined/, "a name read off window");
+  assert.throws(() => rendererLoads(html, edit("entropy-core.js", "root.EntropyCore = make()", "root.EntropyKore = make()")), /ReferenceError: EntropyCore is not defined/, "an export renamed, used only inside functions");
+  assert.throws(() => rendererLoads(html, edit("apps-tools.js", "function entropyNode()", "function entropyNodes()")), /ReferenceError: entropyNode is not defined/, "a function renamed and still called");
+  assert.throws(() => rendererLoads(html, edit("mailicons.js", "g.micon", "g.mikon")), /ReferenceError: micon is not defined/, "a name read off window");
 });

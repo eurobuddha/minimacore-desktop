@@ -289,7 +289,7 @@ function renderExplorer() {
 const EN_PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 let EN = null;
 function entropyNew() { return { tab: "dice", words: 12, physical: false, faces: [], audits: [], busy: false, auto: false, done: false, revealed: false, phrase: null, audit: false, run: 0,
-  selfErr: "not run", ready: false, nodeOk: false, verified: 0, lw: { words: 12, hidden: false, candidates: null, prev: [] } }; }
+  selfErr: "not run", ready: false, nodeOk: false, verified: 0, seen: new Set(), lw: { words: 12, hidden: false, candidates: null, prev: [] } }; }
 const enEl = (id) => el(id);
 const enSay = (id, text, cls) => { const n = enEl(id); if (n) { n.textContent = text; n.className = cls; } };
 const enDie = (n, face) => { n.dataset.face = face; n.innerHTML = `<i class="en-die__b">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => `<b${EN_PIPS[face].includes(i) ? ' class="on"' : ""}></b>`).join("")}</i>`; };
@@ -297,32 +297,45 @@ const enDice = () => [...document.querySelectorAll("#enDice .en-die")];
 /** 32 random bytes of this device as 0x hex (RollEngine.deviceSecretHex): WebCrypto, never Math.random. */
 function enDeviceSecret() { const b = new Uint8Array(32); crypto.getRandomValues(b); let s = "0x"; for (const x of b) s += x.toString(16).padStart(2, "0"); return s; }
 function enDeviceFace() { const u = new Uint8Array(1); for (;;) { crypto.getRandomValues(u); const f = EntropyCore.faceFromByte(u[0]); if (f) return f; } }
-/** One die (RollEngine.rollOne): node random and device random hashed by the node; device only when the node is not there. → { face, audit }; throws on a source that misbehaves. */
+const EN_NODE_BAD = "The node's answer did not match; this roll was not used.";
+/**
+ * One node value with one device value, believed only when checked (0.19.132): the node's random is 32 bytes of hex and
+ * not one it gave before, and the hash is the one the main process worked out itself from (node ++ device), so the node
+ * cannot choose it and the face depends on all 32 device bytes. → { a, b, h }; throws EN_NODE_BAD.
+ */
+async function enNodeHash() {
+  const b = enDeviceSecret(), a = await api.entropy("random"), key = String(a).toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(key) || EN.seen.has(key)) throw new Error(EN_NODE_BAD);
+  EN.seen.add(key);
+  const h = await api.entropy("hash", EntropyCore.hashInput(a, b));
+  if (!h) throw new Error(EN_NODE_BAD);
+  return { a, b, h };
+}
+/** One die (RollEngine.rollOne): node random and device random, hashed; device only when the node is not there (and labelled so). → { face, audit }; throws on a source that misbehaves: there is no quiet fall back to one source. */
 async function enRollOne() {
   const C = EntropyCore;
   if (!EN.nodeOk) { const face = enDeviceFace(); return { face, audit: { src: C.SRC.DEVICE_ONLY, a: "", b: "", n: face - 1, face } }; }
   for (let attempt = 0; attempt <= C.REJECT_LIMIT; attempt++) {
-    const b = enDeviceSecret(), a = await api.entropy("random");
-    if (!a) throw new Error("Node random failed");
-    const r = C.faceFromHash(await api.entropy("hash", C.hashInput(a, b)));
+    const { a, b, h } = await enNodeHash(), r = C.faceFromHash(h);
     if (r.error) throw new Error(r.error);
     if (!r.reject) return { face: r.face, audit: { src: C.SRC.NODE_DEVICE, a, b, n: r.n, face: r.face } };
   }
   throw new Error("Entropy source misbehaving (rejection limit)");
 }
-/** One uniform 32-bit number for the last-word picker (RollEngine.randomN): node + device, or the device alone, and which it was. */
+/** One uniform 32-bit number for the last-word picker (RollEngine.randomN): node + device, or the device alone when the node is known to be away, and which it was. A node that answers wrongly gives { error }: nothing is picked. */
 async function enRandomN() {
-  const C = EntropyCore, own = () => { const u = new Uint32Array(1); crypto.getRandomValues(u); return { n: u[0], src: C.SRC.DEVICE_ONLY }; };
-  if (!EN.nodeOk) return own();
-  try { const b = enDeviceSecret(), a = await api.entropy("random"); if (!a) return own(); const h = await api.entropy("hash", C.hashInput(a, b)); return /^0x[0-9a-fA-F]{8}/.test(h) ? { n: parseInt(h.substring(2, 10), 16), src: C.SRC.NODE_DEVICE } : own(); } catch (e) { return own(); }
+  const C = EntropyCore;
+  if (!EN.nodeOk) { const u = new Uint32Array(1); crypto.getRandomValues(u); return { n: u[0], src: C.SRC.DEVICE_ONLY }; }
+  try { const { h } = await enNodeHash(); return { n: parseInt(h.substring(2, 10), 16), src: C.SRC.NODE_DEVICE }; }
+  catch (e) { entropyNode(); return { error: "The node's answer did not match; no word was picked. Try again." }; }
 }
-/** Prove the node answers `random` and `hash` with well-formed values before any roll uses it (MainActivity.verifyNode). */
+/** Prove the node before any roll uses it (MainActivity.verifyNode), by the very check every roll passes: "verified" means one full node + device hash was confirmed in the main process. */
 async function enVerify() {
   const mine = ++EN.verified, set = (ok, text) => { if (mine !== EN.verified) return; EN.nodeOk = ok; EN.ready = true; if (!EN.selfErr) enSay("enSource", text, "en-source" + (ok ? " en-ok" : " en-amber")); };
   if (!running) return set(false, "node unavailable: device CSPRNG only (single source)");
   setTimeout(() => { if (mine === EN.verified && !EN.ready) set(false, "node unavailable: device CSPRNG only (single source)"); }, 5000);   // never leave rolls gated for ever
-  try { const a = await api.entropy("random"); if (!a) return set(false, "node commands failed: device CSPRNG only (single source)"); const h = await api.entropy("hash", a); set(h.length >= 10, h.length >= 10 ? "BIP39 self-test ✓ node SHA3 + device CSPRNG verified" : "node hash malformed: device CSPRNG only (single source)"); }
-  catch (e) { set(false, "node commands failed: device CSPRNG only (single source)"); }
+  try { await enNodeHash(); set(true, "BIP39 self-test ✓ node SHA3 + device CSPRNG verified"); }
+  catch (e) { set(false, (e && e.message === EN_NODE_BAD ? "the node's answers did not match" : "node commands failed") + ": device CSPRNG only (single source)"); }
 }
 function entropyNode() { if (EN && el("enRoot")) { EN.ready = false; enVerify(); } }   // the node went away or came back: what the rolls use is checked again
 
@@ -347,10 +360,15 @@ async function enThrow() {
   if (!EN.ready) return enStatus("Verifying entropy sources, one moment…", true);
   const run = EN.run; EN.busy = true; enStatus("", false);
   enDice().forEach(d => { d.className = "en-die en-die--tumble"; clearInterval(d._flick); d._flick = setInterval(() => enDie(d, (+d.dataset.face % 6) + 1), 140); });
-  let got = null;
-  try { got = await Promise.race([Promise.all(Array.from({ length: EntropyCore.DICE }, enRollOne)), new Promise((_, no) => setTimeout(() => no(new Error("late")), 20000))]); } catch (e) { got = null; }
+  let got = null, why = "";
+  try { got = await Promise.race([Promise.all(Array.from({ length: EntropyCore.DICE }, enRollOne)), new Promise((_, no) => setTimeout(() => no(new Error("late")), 20000))]); } catch (e) { got = null; why = (e && e.message) || ""; }
   if (run !== EN.run) return;                                    // wiped while the node was answering: nothing of this throw is kept
-  if (!got) { enStopDice(1); EN.busy = false; EN.auto = false; enChips(); return enStatus("Entropy source error: nothing recorded. Try again.", true); }
+  if (!got) {
+    enStopDice(1); EN.busy = false; EN.auto = false; enChips();
+    if (why !== EN_NODE_BAD) return enStatus("Entropy source error: nothing recorded. Try again.", true);
+    entropyNode();                                               // the node is proved again before another roll may use it; the source line says what it found
+    return enStatus(EN_NODE_BAD + " Nothing was recorded.", true);
+  }
   await Promise.all(enDice().map((d, i) => new Promise(done => setTimeout(() => {   // each die tumbles on, then settles on its face
     if (run !== EN.run) return done();
     clearInterval(d._flick); d.className = "en-die en-die--roll"; let ticks = 0;
@@ -388,7 +406,7 @@ function enWords() {
   enEl("enReveal").textContent = EN.revealed ? "🙈 Click to hide" : "👁 Click to reveal";
 }
 function enWipe() {
-  EN.run++; EN.faces = []; EN.audits = []; EN.phrase = null; EN.busy = EN.auto = EN.done = EN.revealed = EN.audit = false;
+  EN.run++; EN.faces = []; EN.audits = []; EN.phrase = null; EN.seen = new Set(); EN.busy = EN.auto = EN.done = EN.revealed = EN.audit = false;
   enEl("enWords").innerHTML = ""; for (const id of ["enSummary", "enRolls", "enAudit"]) enEl(id).textContent = "";
   enEl("enAuditWrap").hidden = true; enEl("enAuditBtn").textContent = "Show per-roll audit log";
   enStatus("", false); enStopDice(); enEl("enDone").hidden = true; enEl("enRoll").hidden = false; enChips(); enProgress();
@@ -513,7 +531,7 @@ function renderEntropy() {
     else if (b.id === "lwCalc") lwCalc();
     else if (b.dataset.sugg) { const box = lwBoxes()[+b.dataset.i]; if (box) lwCommit(box, b.dataset.sugg); }
     else if (b.dataset.cand) lwPick(b.dataset.cand, "chosen manually");
-    else if (b.id === "lwRandom") { const c = EN.lw.candidates; if (c && c.length) { const r = await enRandomN(); if (EN.lw.candidates === c) lwPick(c[r.n % c.length], r.src === EntropyCore.SRC.NODE_DEVICE ? "picked by SHA3(node ++ device) entropy" : "picked by device entropy"); } }   // the count is a power of two, so the remainder is exactly uniform
+    else if (b.id === "lwRandom") { const c = EN.lw.candidates; if (c && c.length) { const r = await enRandomN(); if (r.error) lwStatus(r.error, true); else if (EN.lw.candidates === c) lwPick(c[r.n % c.length], r.src === EntropyCore.SRC.NODE_DEVICE ? "picked by SHA3(node ++ device) entropy" : "picked by device entropy"); } }   // the count is a power of two, so the remainder is exactly uniform
   });
   root.addEventListener("input", (e) => { if (e.target.matches("#lwBoxes input")) lwEdit(e.target); });
   root.addEventListener("focusin", (e) => { if (e.target.matches("#lwBoxes input")) lwSuggest(e.target); });
