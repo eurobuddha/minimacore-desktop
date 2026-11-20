@@ -85,6 +85,10 @@ jobs:
       - name: Verify mail invariants
         run: npm run test:mail
 
+      # miniMall money rules: an order total the buyer wrote is paid only when it is a readable figure above zero.
+      - name: Verify miniMall money rules
+        run: npm run test:shop
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a

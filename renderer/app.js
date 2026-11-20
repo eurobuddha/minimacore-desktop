@@ -2694,8 +2694,8 @@ function renderShopSub() {
   else renderShopStudio();
 }
 function shopStatusPill(status, unpaid) {
-  const cls = ({ DELIVERED: "ok", SHIPPED: "ok", PAID: "acc", CONFIRMED: "acc", UNDERPAID: "warn", WRONG_TOKEN: "warn" })[status] || "";
-  const label = unpaid && status === "PENDING" ? "unpaid" : String(status || "").toLowerCase();
+  const cls = ({ DELIVERED: "ok", SHIPPED: "ok", PAID: "acc", CONFIRMED: "acc", UNDERPAID: "warn", WRONG_TOKEN: "warn", BAD_TOTAL: "warn" })[status] || "";
+  const label = unpaid && status === "PENDING" ? "unpaid" : status === "BAD_TOTAL" ? "invalid total" : String(status || "").toLowerCase();
   return `<span class="shop-pill ${cls}">${esc(label)}</span>`;
 }
 
@@ -2727,7 +2727,7 @@ async function renderShopOrderDetail(ref) {
       <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>Total</span><span class="mono">${esc(o.amount)} ${esc(o.currency)}</span></div>
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
-      ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : "Awaiting payment"}</div>` : ""}
+      ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "The buyer's total is not an amount above zero, so this order is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Awaiting payment"}</div>` : ""}
       ${(!isSell && d.ambiguous) ? `<div class="shop-warn" style="margin-top:8px">⚠ The payment timed out — it may already have gone through. Check your Balance/History before sending again, to avoid paying twice.</div>` : ""}
       ${(!isSell && d.unpaid && !d.ambiguous && !o.paid) ? `<button class="btn btn--primary btn--full" id="shopRetry" style="margin-top:8px">Retry payment</button>` : ""}
       ${isSell ? shopAdvanceRow(o) : ""}

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.149] — miniMall: a malformed order total is never paid
+
+- `main/shop-store.js` `decCmp` returned 0 ("equal") when it could not read a figure, so an incoming order whose buyer-written total was malformed ("abc", "1e3") counted as PAID by any payment in the right token; a zero or negative total was accepted the same way. Figures are now plain decimals only, compared exactly in BigInt; a total that is not a figure above zero is `BAD_TOTAL` (shown as "invalid total") and is never paid. Test: `scripts/shop-test.cjs` (`npm run test:shop`, in CI).
+
 ## [0.18.60] — the node starts again after a pid reuse
 
 - `reclaimStaleNode`: the pid in `node.pid` counts as "our node from an earlier launch" only while that pid still runs our jar. Pids are reused — DexiconPro (same code) hit it on 17 Nov 2026: the pidfile's pid had become a macOS XPC service, the start reported "port in use by ThemeWidgetControlViewService" and the node was never launched, with no log line. A refused start is now logged. Source fix; no installer cut yet.

@@ -55,14 +55,24 @@ function shop(shopId) { ensureLoaded(); return mem.shops[shopId] || null; }
 function deleteShop(shopId) { ensureLoaded(); if (mem.shops[shopId]) { delete mem.shops[shopId]; persistSoon(); } }
 
 // ---- decimal-safe money (BigInt; NEVER float — amounts are decimal strings up to 44dp) ----
-function decCmp(a, b) {
-  const [ai = "0", af = ""] = String(a == null ? "0" : a).split(".");
-  const [bi = "0", bf = ""] = String(b == null ? "0" : b).split(".");
-  const dp = Math.max(af.length, bf.length);
-  let A, B; try { A = BigInt((ai || "0") + af.padEnd(dp, "0")); B = BigInt((bi || "0") + bf.padEnd(dp, "0")); } catch (e) { return 0; }
-  return A < B ? -1 : A > B ? 1 : 0;
+// A money figure is a plain decimal: digits, at most one point with digits after it. No sign, no exponent, no hex, no
+// spaces. → [units BigInt, decimals] or null. decCmp → -1 / 0 / 1, or NULL when either side is not such a figure: an
+// unreadable figure is never "equal" (0.18.149: it was, so a malformed buyer total counted as paid by any amount).
+function decParse(v) {
+  const s = typeof v === "number" ? String(v) : v;
+  if (typeof s !== "string" || !/^\d{1,60}(\.\d{1,60})?$/.test(s)) return null;
+  const [i, f = ""] = s.split(".");
+  return [BigInt(i + f), f.length];
 }
-function decGte(a, b) { return decCmp(a, b) >= 0; }
+function decCmp(a, b) {
+  const A = decParse(a), B = decParse(b); if (!A || !B) return null;
+  const dp = Math.max(A[1], B[1]), x = A[0] * 10n ** BigInt(dp - A[1]), y = B[0] * 10n ** BigInt(dp - B[1]);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+/** a >= b, both readable figures. */
+function decGte(a, b) { const c = decCmp(a, b); return c === 0 || c === 1; }
+/** An order total that can ever be paid: a readable figure above zero. */
+function payableTotal(v) { return decCmp(v, "0") === 1; }
 function decAdd(a, b) {
   const [ai = "0", af = ""] = String(a == null ? "0" : a).split(".");
   const [bi = "0", bf = ""] = String(b == null ? "0" : b).split(".");
@@ -73,7 +83,7 @@ function decAdd(a, b) {
 }
 
 // ---- orders (dedup on ref; never regress a progressed status) ----
-const STATUS_RANK = { PENDING: 0, INQUIRY: 0, UNDERPAID: 1, WRONG_TOKEN: 1, PAID: 2, CONFIRMED: 3, SHIPPED: 4, DELIVERED: 5 };
+const STATUS_RANK = { PENDING: 0, INQUIRY: 0, UNDERPAID: 1, WRONG_TOKEN: 1, BAD_TOTAL: 1, PAID: 2, CONFIRMED: 3, SHIPPED: 4, DELIVERED: 5 };
 /** Insert an order if new (dedup on ref). Returns true if newly inserted. Never overwrites an existing order. */
 function upsertOrder(o) {
   ensureLoaded();
@@ -93,7 +103,8 @@ function setStatus(ref, status) {
   o.status = status; flush(); return true;
 }
 /** Record a matched payment against an order. Accumulates across coins (decimal-safe); PAID iff token matches AND
- *  the CUMULATIVE paid amount >= the order amount. Never clobbers a vendor-progressed status (CONFIRMED+). */
+ *  the order's total is a readable figure above zero AND the CUMULATIVE paid amount >= it. A total that is not
+ *  (the buyer wrote it: "abc", "1e3", "-5", "0") is BAD_TOTAL and is never paid. Never clobbers a vendor-progressed status (CONFIRMED+). */
 function recordPayment(ref, paidAmount, paidTokenid) {
   ensureLoaded(); const o = mem.orders[ref]; if (!o) return null;
   if (o.paid) return "ALREADY";
@@ -103,7 +114,7 @@ function recordPayment(ref, paidAmount, paidTokenid) {
     flush(); return "WRONG_TOKEN";
   }
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
-  const outcome = decGte(o.paidAmount, o.amount) ? "PAID" : "UNDERPAID";
+  const outcome = !payableTotal(o.amount) ? "BAD_TOTAL" : decGte(o.paidAmount, o.amount) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") o.paid = true;
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
   flush(); return outcome;
@@ -123,5 +134,6 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 module.exports = {
   saveShop, shops, shop, deleteShop,
   upsertOrder, order, orders, setStatus, recordPayment, markOrderRead,
-  addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush
+  addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
+  _money: { decCmp, decGte, decAdd, payableTotal }
 };
