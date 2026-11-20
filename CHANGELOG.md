@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.186] — the Touch ID marker
+
+- The marker that makes a Mac whose Touch ID cannot prompt refuse (0.18.176) was written before the prompt, even when it then failed, and held no sign of which Mac wrote it. It is now written only after a Touch ID prompt succeeded, holds an identifier of this Mac (a hash of its built-in network card address), and a marker from another Mac (a copied profile) is ignored. The refusal names the file's whole path and says what to do in both cases: Touch ID locked (lock the screen and log in with the password) or no longer on this Mac (quit the app and delete the file; the confirmation window is then used). Test: `scripts/ethkey-test.cjs`.
+
 ## [0.18.185] — miniMall vendor: dust is judged again; payments read oldest first
 
 - A dust coin (0.18.181) was written to the counted list for good, and payment coins were read newest first, so a 9.95 payment and a 0.05 top-up seen together left a 10 order UNDERPAID for ever (the 0.05 was dust against 10 still due). A dust coin is now not remembered and nothing is saved for it: it is judged again later against what is then still due (once more in the same scan after another coin counted, and on every later scan). Payment coins are read oldest first (the larger first within one block). 5000 dust coins write nothing. Test: `scripts/shop-test.cjs` (the reviewer's proof, both orders, one scan and two).
