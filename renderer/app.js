@@ -3673,7 +3673,7 @@ async function renderShopSellOrder(ref) {
     `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? ("  " + tr("paid {amount} {cur}", { amount: esc(o.paidAmount || o.amount), cur: esc(cur) })) : "  awaiting payment"}</span></div>
      <div class="mm-sec">${th("Items")}</div><div class="mm-card">${shopItems(o)}</div>
      ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
-     <div class="mm-sec">${th("Delivery")}</div>${shopKv(t("Method"), o.shipping || t("Not given"))}${o.delivery ? shopKv(t("Address"), o.delivery, true) : ""}
+     <div class="mm-sec">${th("Delivery")}</div>${shopKv(t("Method"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("Address"), o.delivery, true) : ""}
      ${o.note ? `<div class="mm-sec">${th("Buyer note")}</div><div class="mm-card">${esc(o.note)}</div>` : ""}
      ${shopKv(t("Buyer key"), o.counterparty || "", true)}
      ${enquiry ? "" : `<div class="mm-sec">${th("Update status")}</div><div class="mm-grid">${["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"].map(s => `<button class="mm-btn${o.status === s ? " mm-btn--on" : ""}" data-advance="${s}"${s === next ? "" : " disabled"}>${s}</button>`).join("")}</div>
@@ -3735,7 +3735,7 @@ function renderShopCheckout() {
   const sums = SHOP.totals(s, shopCart, shopShipId), total = sums.total || "0.000000";
   shopFrame(t("Checkout"), () => shopGo("shop", { screen: "store" }), [],
     `<div class="mm-card">${items.map(i => `<div class="mm-kv"><span class="mm-kv__v">${esc(i.product)} × ${i.quantity}</span><span>${esc(i.lineTotal)}</span></div>`).join("")}</div>
-     ${(s.shipping || []).length ? `<div class="mm-sec">${th("Delivery method")}</div><div class="mm-opts">${s.shipping.map(sh => `<button class="mm-btn${ship && ship.id === sh.id ? " mm-btn--on" : ""}" data-ship="${esc(sh.id)}" aria-pressed="${!!(ship && ship.id === sh.id)}">${esc(sh.label)}${Number(sh.fee) > 0 ? "  +" + esc(String(sh.fee)) : ("  " + th("· free"))}</button>`).join("")}</div>` : ""}
+     ${(s.shipping || []).length ? `<div class="mm-sec">${th("Delivery method")}</div><div class="mm-opts">${s.shipping.map(sh => `<button class="mm-btn${ship && ship.id === sh.id ? " mm-btn--on" : ""}" data-ship="${esc(sh.id)}" aria-pressed="${!!(ship && ship.id === sh.id)}">${esc(SHOP.shipName(sh.label))}${Number(sh.fee) > 0 ? "  +" + esc(String(sh.fee)) : ("  " + th("· free"))}</button>`).join("")}</div>` : ""}
      <div class="mm-sec">${th("Delivery address / email")}</div><textarea class="mm-in-f" id="shopDelivery" rows="2" placeholder="${th("Where should this go? (or email for digital)")}" aria-label="${th("Delivery address or email")}"></textarea>
      <div class="mm-sec">${th("Message to seller (optional)")}</div><input class="mm-in-f" id="shopNote" placeholder="${th("Anything the vendor should know")}" aria-label="${th("Message to seller")}" autocomplete="off" />
      <div class="mm-totals">${shopKv(t("Items"), sums.itemsTotal || "0.000000")}${shopKv(t("Shipping"), sums.fee || "0.000000")}${shopKv(t("Total"), total + " " + cur)}</div>
@@ -3767,7 +3767,7 @@ async function renderShopBuyOrder(ref) {
   shopFrame(o.shopName || o.ref, () => shopGo("shop", { screen: "orders" }), [],
     `<div class="mm-line">${shopPill(o.status)}</div>
      <div class="mm-sec">${th("Order")}</div><div class="mm-card">${shopItems(o)}</div>
-     ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Delivery"), o.shipping || t("Not given"))}${o.delivery ? shopKv(t("To"), o.delivery) : ""}
+     ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Delivery"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("To"), o.delivery) : ""}
      ${d.ambiguous ? `<div class="mm-warn">${th("⚠ The payment timed out: it may already have gone through. Check your Wallet and History before sending again, so that you do not pay twice.")}</div>` : ""}
      ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">${th("Retry payment")}</button>` : ""}
      <div class="mm-sec">${th("Messages with the vendor")}</div><div class="mm-thread">${shopThread(d.chat, t("Vendor")) || `<div class="mm-dim">${th("No messages yet. Say hello below.")}</div>`}</div>`,
@@ -3827,7 +3827,7 @@ function renderShopDetails(d) {
   shopFrame(t("Your shop"), () => { read(); shopGo("studio"); }, [],
     `<div class="mm-sec">${th("Shop name")}</div><input class="mm-in-f" id="sdName" value="${esc(d.shopName)}" placeholder="${th("e.g. Zebra Gallery")}" autocomplete="off" />
      <div class="mm-sec">${th("Pays in")}</div><div class="mm-seg"><button class="mm-btn${d.currency === "Minima" ? " mm-btn--on" : ""}" data-cur="Minima" aria-pressed="${d.currency === "Minima"}">Minima</button><button class="mm-btn${d.currency !== "Minima" ? " mm-btn--on" : ""}" data-cur="USDT" aria-pressed="${d.currency !== "Minima"}">MxUSD</button></div>
-     <div class="mm-sec">${th("Shipping (label + fee)")}</div>${d.shipping.map((sh, i) => `<div class="mm-kv"><span class="mm-kv__v">${esc(sh.label)}</span>${sh.id === "digital" ? `<span>free</span>` : `<input class="mm-in-f mm-in-f--fee" data-si="${i}" inputmode="decimal" placeholder="0" aria-label="${tr("{label} fee", { label: esc(sh.label) })}" value="${esc(sh.fee || "")}" autocomplete="off" />`}</div>`).join("")}
+     <div class="mm-sec">${th("Shipping (label + fee)")}</div>${d.shipping.map((sh, i) => `<div class="mm-kv"><span class="mm-kv__v">${esc(SHOP.shipName(sh.label))}</span>${sh.id === "digital" ? `<span>${th("free")}</span>` : `<input class="mm-in-f mm-in-f--fee" data-si="${i}" inputmode="decimal" placeholder="0" aria-label="${tr("{label} fee", { label: esc(SHOP.shipName(sh.label)) })}" value="${esc(sh.fee || "")}" autocomplete="off" />`}</div>`).join("")}
      <div class="mm-sec">${th("Vendor card (from this node: how orders reach you)")}</div><div class="mm-card ew-mono">${esc(d.vendorPublicId || "")}|${esc(d.vendorAddress || "")}</div>
      <div class="mm-hint">${tr("{price} products  ·  pays in {currency}", { price: d.products.filter(p => p.name && Number(p.price) > 0).length, currency: esc(SHOP.cur(d.currency)) })}</div>`,
     `<div class="mm-foot"><button class="mm-btn mm-btn--on mm-btn--cta" id="sdSave">${d.shopId ? th("Save") : th("Save & export .shop")}</button></div>`);

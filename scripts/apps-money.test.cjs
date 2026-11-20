@@ -306,6 +306,28 @@ test("miniMall Studio: the .shop saved and exported is the old screen's, byte fo
     await both({ shopSave: (c) => c, shopExport: "/tmp/x.shop" }, (api) => OLD_SHOP.save(api, draft(patch)), (api) => Act.shop.save(api, draft(patch)));
   assert.equal(Act.shop.cfgOf(draft({})).tokenid, MXUSD); assert.equal(Act.shop.cfgOf(draft({})).currency, "USDT");
 });
+// 0.19.146: a delivery method's label is a wire value (saved in the .shop, sent in an order, sent back by buyers). In 0.19.143 to
+// 0.19.144 a new shop took its labels in the app's language, so a Russian vendor's .shop and its buyers' orders carried Russian.
+test("miniMall: delivery labels are saved and sent in English in every language, and shown in the app's language", async () => {
+  const I18N = require("../renderer/i18n.js"); for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const draft = () => ({ shopName: "Zebra Gallery!", currency: "USDT", vendorPublicId: "0x5A", vendorAddress: "MxV", shipping: Act.shop.standardShipping(),
+    products: [{ id: "p1", name: "Mug", description: "", price: "12.5", maxUnits: "", image: "" }] });
+  try {
+    for (const code of ["en", "zh", "ru", "uk"]) {
+      I18N.set(code);
+      assert.deepEqual(Act.shop.standardShipping(), OLD_SHOP.std(), code + ": a new shop's methods are the English wire labels");
+      assert.deepEqual(Act.shop.normalizeShipping([{ id: "domestic", label: "Domestic", fee: "2.5" }]), OLD_SHOP.norm([{ id: "domestic", label: "Domestic", fee: "2.5" }]), code);
+      await both({ shopSave: (c) => c, shopExport: "/tmp/x.shop" }, (api) => OLD_SHOP.save(api, draft()), (api) => Act.shop.save(api, draft()));
+      const log = await both({ shopPlaceOrder: { ref: "ORD-1", payError: null } }, (api) => OLD_SHOP.pay(api, SHOPCFG, { p1: 1 }, "international", " 1 Street ", ""),
+        async (api) => { await Act.shop.place(api, { confirm: async () => true }, SHOPCFG, { p1: 1 }, "international", " 1 Street ", ""); });
+      assert.equal(log[0][1][3], "International", code + ": the order names the method in English");
+      for (const l of ["Digital", "Domestic", "International"]) assert.equal(Act.shop.shipName(l), I18N.t(l), code + ": shown in the app's language");
+      if (code !== "en") assert.notEqual(Act.shop.shipName("Domestic"), "Domestic", code);
+      for (const own of ["Courier", "x", "", "Send"]) assert.equal(Act.shop.shipName(own), own, code + ": a vendor's own label is shown as written");
+    }
+  } finally { I18N.set("en"); }
+  assert.ok(app.includes("SHOP.shipName(sh.label)") && app.includes("SHOP.shipName(o.shipping)"), "the screens draw labels through shipName");
+});
 test("miniMall screens: MxUSD on every label, the vendor's key whole, every money call through AppsAct.shop; the store file is not the screens' to change", () => {
   const mall = app.slice(app.indexOf("// ============================ miniMall"), app.indexOf("function shopResizeImage"));
   assert.ok(!/api\.shop(?:PlaceOrder|RetryPay|Advance|Reply|Save)\(/.test(mall), "no direct money call in the screens");
@@ -475,7 +497,7 @@ test("no lone dash stands in for a missing value on the apps' screens", () => {
   const apps = app.slice(app.indexOf("// ============================ ETH Wallet"), app.indexOf("// ============================ Minima Vestr") + 6000);
   assert.ok(!/"—"/.test(apps.replace(/\/\/[^\n]*/g, "")), "no \"—\" placeholder left in ETH Wallet, miniMall or Vestr");
   assert.ok(app.includes('const val = (v, sym) => (v == null ? "Not read yet" : ewCut(v) + " " + sym);'), "ETH Wallet: a balance that could not be read says so");
-  assert.ok(app.includes('${shopKv("Method", o.shipping || "Not given")}${o.delivery ? shopKv("Address", o.delivery, true) : ""}') && app.includes('${shopKv("Delivery", o.shipping || "Not given")}${o.delivery ? shopKv("To", o.delivery) : ""}'), "miniMall: an address row only when there is one, as the phone");
+  assert.ok(app.includes('${shopKv("Method", o.shipping ? SHOP.shipName(o.shipping) : "Not given")}${o.delivery ? shopKv("Address", o.delivery, true) : ""}') && app.includes('${shopKv("Delivery", o.shipping ? SHOP.shipName(o.shipping) : "Not given")}${o.delivery ? shopKv("To", o.delivery) : ""}'), "miniMall: an address row only when there is one, as the phone");
   assert.ok(app.includes('<span class="vs-head__b">${st && st.block ? "#" + esc(String(st.block)) : ""}</span>'), "Vestr: the block badge is empty until the block is known, as the phone");
 });
 

@@ -74,7 +74,11 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     /** The label of a shop's currency: the wire value "USDT" is MxUSD on Minima. */
     cur: function (c) { return /^(usdt|mxusdt)$/i.test(String(c)) ? "MxUSD" : String(c == null ? "" : c); },
     slug: function (s) { return String(s || "shop").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shop"; },
-    standardShipping: function () { return [{ id: "digital", label: I18N.t("Digital"), fee: "0" }, { id: "domestic", label: I18N.t("Domestic"), fee: "0" }, { id: "international", label: I18N.t("International"), fee: "0" }]; },
+    /** The three delivery methods. Their labels are WIRE values: saved in the .shop, sent in an order and sent back by buyers,
+     *  so they stay English (as every other app writes them) and are translated only where shown (shipName). */
+    standardShipping: function () { return [{ id: "digital", label: I18N.N_("Digital"), fee: "0" }, { id: "domestic", label: I18N.N_("Domestic"), fee: "0" }, { id: "international", label: I18N.N_("International"), fee: "0" }]; },
+    /** A delivery method's label as shown: one of the three standard English labels in the app's language; a vendor's own as written. */
+    shipName: function (label) { label = String(label == null ? "" : label); return label === "Digital" || label === "Domestic" || label === "International" ? I18N.t(label) : label; },
     normalizeShipping: function (list) { var by = {}; (list || []).forEach(function (s) { if (s && s.id) by[s.id] = s; }); return shop.standardShipping().map(function (std) { return { id: std.id, label: std.label, fee: std.id === "digital" ? "0" : String((by[std.id] && by[std.id].fee) || "0") }; }); },
     shipOf: function (s, shipId) { if (!s || !s.shipping || !s.shipping.length) return null; return s.shipping.find(function (x) { return x.id === shipId; }) || s.shipping[0]; },
     /** The token a shop is paid in, from its CURRENCY alone (0.19.118). A .shop file is the vendor's: one that says "Minima" and

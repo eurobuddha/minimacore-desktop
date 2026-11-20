@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.146] — miniMall: delivery labels stay English in the shop file and in orders, and are translated only where shown
+
+- **Fixed (review of 0.19.140 to 0.19.144):** since 0.19.143 a new shop, and an existing one opened in the Studio, took the labels of its three delivery methods (Digital, Domestic, International) in the app's language. Those labels are wire values: they are saved in the `.shop` file, sent in each order, and sent back by buyers, so a Russian vendor's shop file and its buyers' orders carried Russian. `standardShipping()` is English again (`N_`), and `normalizeShipping()` once more gives the English labels it gave before 0.19.143, so a saved or exported shop is byte for byte what 0.19.142 wrote. A shop already saved with translated labels by a 0.19.143 or 0.19.144 development build is left as it is (no migration).
+- **Shown in the app's language:** the Shop's delivery buttons, the Studio's method rows and their fee field names, and the method on an order (Shop and Inbox) go through `AppsAct.shop.shipName`, which translates only the three standard English labels; a vendor's own label is shown as written. The Studio's "free" beside Digital is translated too.
+- Test: `scripts/apps-money.test.cjs` runs the Studio save and a checkout in English, Chinese, Russian and Ukrainian and compares them with the pre-translation screens' calls (the saved shop and the order's method are English in all four), and checks the labels shown. It fails on the 0.19.144 code.
+
 ## [0.19.145] — Dexicon Trade: the buttons stay live in every language when no relay answers
 
 - **Fixed (from the review of 0.19.140 to 0.19.144):** the Exchange Trade ticket decided whether BUY / SELL and the on-chain BOOK / POOL button were live by matching the English words "No relay answers" in the warning it showed. Since that warning was translated, in 简体中文, Русский and Українська both buttons were disabled whenever no relay answered, even though on-chain orders and pools still work. `blocker()` in `renderer/dexicon-ui.js` now returns what stops trading as `{ text, soft }`, and the buttons follow `soft`, never the text. English behaviour is unchanged.
