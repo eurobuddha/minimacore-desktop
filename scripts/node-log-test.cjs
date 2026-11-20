@@ -60,7 +60,8 @@ ok("a short or empty secret blanks nothing", () => {
 });
 ok("a seed phrase is redacted quoted, as JSON, and as bare words, without eating the rest of the line", () => {
   assert.equal(scrub('megammrsync action:resync phrase:"ONE TWO THREE" host:x:9001'), 'megammrsync action:resync phrase:"•••" host:x:9001');
-  assert.equal(scrub('{"command":"vault","response":{"phrase":"ONE TWO THREE","seed":"0x01"}}'), '{"command":"vault","response":{"phrase":"•••","seed":"0x01"}}');
+  assert.equal(scrub('{"command":"vault","response":{"phrase":"ONE TWO THREE","seed":"0x01"}}'), '{"command":"vault","response":{"phrase":"•••","seed":"•••"}}', "0.19.172: the vault's seed too");
+  assert.equal(scrub('{"seed" : "0xABCDEF", "privatekey":"0x0123", "Seed":"x", "seeds":"kept", "block":"1"}'), '{"seed":"•••", "privatekey":"•••", "Seed":"•••", "seeds":"kept", "block":"1"}', "a JSON seed or private key, in any case and spacing");
   assert.equal(scrub('{"phrase" : "ONE TWO"}'), '{"phrase":"•••"}');
   assert.equal(scrub("megammrsync action:resync phrase:ONE TWO THREE host:megammr.example:9001 keyuses:1000"), "megammrsync action:resync phrase:••• host:megammr.example:9001 keyuses:1000");
   assert.equal(scrub("keys genkey phrase:alpha"), "keys genkey phrase:•••");

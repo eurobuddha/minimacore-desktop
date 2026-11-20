@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.172] — Logs: a reply's "seed" is taken out too
+
+- **From the release review:** the log scrub (`main/nodelog.js` `scrub`, run on every line and again on a saved file) took out the RPC secret, a seed phrase (`phrase:` and `"phrase":`) and `privatekey:0x…`, but not the `"seed"` field of a reply's JSON: `vault` answers with the wallet's seed there, and the test even pinned it as kept.
+- **Now:** a JSON `"seed"` or `"privatekey"` field, in any letter case and spacing, becomes `"•••"`; a field merely starting with the word ("seeds") is left alone.
+- Test (`scripts/node-log-test.cjs`): the vault reply loses its phrase and its seed; JSON seed and private key fields in other spellings are redacted, others kept. It fails on 0.19.171.
+
 ## [0.19.171] — miniMall vendor: only the order's next step can be set
 
 - **From the release review:** `advanceStatus` accepted any state the window asked for and sent it to the buyer: `PAID` on an order nothing had paid (it was then shown as paid on both sides), a jump from PAID straight to DELIVERED, a word that is no state at all. Only CONFIRMED, SHIPPED and DELIVERED were held back for an unpaid order (0.19.166).
