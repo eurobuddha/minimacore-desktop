@@ -179,7 +179,10 @@ function makeHost(opts = {}) {
   let busy = 0, posts = 0;  // engine commands at the node, and the txnposts among them (STOP DRAINS)
   let draining = null;     // the promise of a stop() that is waiting for the engine to finish
   let held = false;        // HOLD (0.18.116): a command that may replace the wallet is running in the node; no engine, no bridge, until release()
-  const HELD = "Dexicon is stopped while the wallet is being replaced. It starts again by itself.";
+  const HELD_REPLACING = "Dexicon is stopped while the wallet is being replaced. It starts again by itself.";
+  // The same hold serves the Apps tab's Freeze (0.19.117): the refusal then says so (main.js sets the reason), not "the wallet is being replaced".
+  let heldReason = null;
+  const heldText = () => { let why = ""; try { why = heldReason ? heldReason() : ""; } catch (e) {} return why || HELD_REPLACING; };
   // opts.signal: a SIGNING command still waiting in the process-wide queue (main/noderun.js) when its engine is
   // dropped is rejected there and never reaches the node (0.18.107)
   let runner = opts.runner || ((cmd, o) => {
@@ -301,7 +304,7 @@ function makeHost(opts = {}) {
   function fire(event, extra) { if (serviceHandler && !draining) { try { serviceHandler(toVm(Object.assign({ event }, extra))); } catch (e) { log("handler error: " + e.message); } } }
 
   async function init() {
-    if (held) throw new Error(HELD);
+    if (held) throw new Error(heldText());
     if (ready) return;
     if (initPromise) return initPromise;
     const mine = epoch;
@@ -435,6 +438,9 @@ function makeHost(opts = {}) {
   /** HOLD: stopped, and not started again by a node status, the timer or a screen until release(). The store stays. */
   function hold() { if (!held) { held = true; log("held: a command that may replace the wallet is about to run"); } return stop(); }
   function release() { held = false; }   // main.js starts it again when the node is running
+  /** GATE (0.19.119, the Apps tab's Freeze): nothing NEW from a screen or the page from now on, while the engine and its
+   *  store stay as they are, so that what is in flight can be read before it is decided whether to stop. release() lifts it. */
+  function gate() { if (!held) { held = true; log("held: Dexicon is about to be frozen, if nothing is in flight"); } }
 
   /**
    * The wallet under the app was replaced (main/restore.js): the identity (seedrandom of the OLD seed), the orders it
@@ -598,7 +604,7 @@ function makeHost(opts = {}) {
    *  commands then met the NEXT engine: another wallet's, after a restore. */
   function checkEpoch(a) { if (a && a.epoch != null && a.epoch !== epoch) throw new Error("this page belongs to a Dexicon engine that has stopped. Nothing was done."); }
   async function command(a) {
-    if (held) throw new Error(HELD);   // the page's own txnsign / txnpost included
+    if (held) throw new Error(heldText());   // the page's own txnsign / txnpost included
     checkEpoch(a);
     const op = a && a.op;
     if (op === "cmd") return pageCmd(a.command);
@@ -609,7 +615,7 @@ function makeHost(opts = {}) {
     throw new Error("unknown Dexicon op");
   }
 
-  return { emitter, init, start, stop, hold, release, flush, invalidate, status, activeWork, book, mine, command, storePath, coinHolds,
+  return { emitter, init, start, stop, hold, gate, release, setHeldReason: (fn) => { heldReason = fn; }, flush, invalidate, status, activeWork, book, mine, command, storePath, coinHolds,
     identitySeed, checkEpoch,
     _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),

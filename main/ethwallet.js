@@ -19,7 +19,7 @@ async function status() {
   const s = atomix.status();
   let address = s.eth || null, rpc = null;
   if (s.ready) { try { const w = await atomix.ethWallet(); address = w.address; rpc = w.rpc; } catch (e) {} }
-  return { ready: !!s.ready, address, rpc, block: s.block, halt: !!s.halt };
+  return { ready: !!s.ready, address, rpc, block: s.block, halt: !!s.halt, frozen: !!dexiconFrozen() };   // frozen: Dexicon is (Apps tab), so the engine this wallet uses is held
 }
 
 // The reads/actions below delegate straight to the AtomiX glue. Each throws "AtomiX engine not booted yet" until

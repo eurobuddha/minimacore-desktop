@@ -2751,7 +2751,7 @@ function renderTerminal() {
 // decides whether an app may be frozen and says why not (Dexicon: never while money is in flight). Minima Core is neither.
 // Dexicon and Chat are tabs: they have no drawer row to hide, and opening the tab unfreezes them, as on the phone.
 const APPS_TABS = [{ id: "dexicon", name: "Dexicon", tab: true, icon: "minima-tile.svg" }, { id: "chat", name: "Chat", tab: true, icon: "minima-tile.svg" }];
-const NO_FREEZE = { core: "Minima Core is the node and the wallet", parlons: "Parlons is part of the node itself" };
+const NO_FREEZE = { core: "Cannot be frozen: Minima Core is the node and the wallet.", parlons: "Cannot be frozen: Parlons is part of the node itself." };
 let FROZEN = [];   // ids, as the main process holds them (config frozenApps)
 function hiddenApps() { return String(store("shellHidden") || "").split(",").filter(id => id && id !== "core" && TRAY_APPS.some(a => a.id === id)); }
 function applyHiddenApps() {
@@ -2761,16 +2761,24 @@ function applyHiddenApps() {
 }
 /** The line under an app's name (IntegratedAppsAdapter): where it is, and " · Deep frozen" when it is. */
 function appsState(a, hidden, frozen) { return (a.id === "core" ? "Always on" : a.tab ? "A tab" : hidden ? "Hidden from drawer" : "In app drawer") + (frozen ? " · Deep frozen" : ""); }
+let THAW_FAILED = "";   // the app whose unfreeze-on-open failed: it is drawn frozen, with the reason said, and not asked again until the switch is used
 async function setFrozen(id, on) {
+  THAW_FAILED = "";
   try { FROZEN = await api.freezeSet(id, on); }
-  catch (e) { openDlg("freezeNo", "Not frozen", `<div class="apps-why">${esc(ipcError(e))}</div>`, ""); }
+  catch (e) { openDlg("freezeNo", on ? "Not frozen" : "Still frozen", `<div class="apps-why">${esc(ipcError(e))}</div>`, ""); FROZEN = await api.freezeList().catch(() => FROZEN); }   // the list is read again: the screen shows what the main process holds
   applyHiddenApps();
 }
 // Opening a frozen app wakes it for good (PandamoniumHooks: "opening a frozen app unfreezes it").
 function thawOnOpen() {
   const id = activeView === "chat" ? "chat" : TAB_OF[activeView] === "dexicon" ? "dexicon" : activeView;
-  if (!FROZEN.includes(id)) return false;
-  api.freezeSet(id, false).then(l => { FROZEN = l; applyHiddenApps(); toast((TRAY_APPS.concat(APPS_TABS).find(a => a.id === id) || { name: id }).name + " was frozen. It is running again."); renderActive(); }).catch(() => {});
+  if (!FROZEN.includes(id) || THAW_FAILED === id) return false;
+  const name = (TRAY_APPS.concat(APPS_TABS).find(a => a.id === id) || { name: id }).name;
+  api.freezeSet(id, false).then(l => { FROZEN = l; applyHiddenApps(); toast(name + " was frozen. It is running again."); renderActive(); })
+    .catch(async (e) => {   // never a blank screen: the reason is said, and the app is drawn as it is (still frozen)
+      THAW_FAILED = id; FROZEN = await api.freezeList().catch(() => FROZEN); applyHiddenApps();
+      openDlg("freezeNo", "Still frozen", `<div class="apps-why">${esc(name + " could not be unfrozen: " + ipcError(e) + "\n\nTry the Freeze switch on the Apps tab.")}</div>`, "");
+      renderActive();
+    });
   return true;
 }
 function renderApps() {
@@ -2779,9 +2787,9 @@ function renderApps() {
     const core = a.id === "core", off = hidden.includes(a.id), ice = FROZEN.includes(a.id), noIce = NO_FREEZE[a.id];
     return `<div class="apps-row">
     ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
-    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${appsState(a, off, ice)}</div></div>
+    <div class="apps-row__main"><div class="apps-row__name">${esc(a.name)}${a.badge ? `<span class="tab-badge" data-count="${a.badge}" hidden></span>` : ""}</div><div class="apps-row__state">${appsState(a, off, ice)}</div>${noIce ? `<div class="apps-row__state" id="appsWhy-${a.id}">${esc(noIce)}</div>` : ""}</div>
     <div class="apps-row__sw"><label class="apps-row__hide"><span>Hide</span><button class="switch" role="switch" aria-checked="${off}" aria-label="Hide ${esc(a.name)}" data-hide="${a.id}"${core || a.tab ? " disabled" : ""}></button></label>
-      <label class="apps-row__hide"${noIce ? ` title="${esc(noIce)}"` : ""}><span>Freeze</span><button class="switch" role="switch" aria-checked="${ice}" aria-label="Freeze ${esc(a.name)}" data-freeze="${a.id}"${noIce ? " disabled" : ""}></button></label></div>
+      <label class="apps-row__hide"><span>Freeze</span><button class="switch" role="switch" aria-checked="${ice}" aria-label="Freeze ${esc(a.name)}" data-freeze="${a.id}"${noIce ? ` disabled aria-describedby="appsWhy-${a.id}"` : ""}></button></label></div>
   </div>`; }).join("");
   paintAppsCounts();
   el("appsList").querySelectorAll(".switch[data-hide]:not([disabled])").forEach(sw => sw.onclick = () => {
@@ -3390,10 +3398,10 @@ async function renderEthWallet() {
     <div class="ew-sub">v${esc(APP_VERSION)}  ·  node-derived${upd ? "  ·  updated " + esc(since(ewAt)) : ""}</div>`;
   if (!st.ready) {
     host.innerHTML = `<div class="ew">${running ? "" : `<button class="ew-banner" id="ewRetry">The node is not running. Start it on the Node tab, then come back: this wallet sets itself up.</button>`}
-      ${head(false)}<div class="ew-line">Setting up wallet…</div>
-      ${running ? `<div class="ew-note">The key is derived from this node (the same one Dexicon ① MxUSD swaps with). The node must be running and unlocked.</div>
+      ${head(false)}<div class="ew-line">${st.frozen ? "Dexicon is frozen. Unfreeze it on the Apps tab to use this wallet." : "Setting up wallet…"}</div>
+      ${running && !st.frozen ? `<div class="ew-note">The key is derived from this node (the same one Dexicon ① MxUSD swaps with). The node must be running and unlocked.</div>
       <div class="ew-acts"><button class="ew-pill ew-act" id="ewRetry">↻  Refresh</button></div>` : ""}</div>`;
-    el("ewRetry").onclick = () => { toast("Retrying…"); renderEthWallet(); };
+    if (el("ewRetry")) el("ewRetry").onclick = () => { toast("Retrying…"); renderEthWallet(); };
     return;
   }
   const read = await api.ewBalances().catch(() => null);

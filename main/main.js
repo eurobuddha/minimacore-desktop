@@ -279,19 +279,26 @@ ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snap
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
   dexicon: await dexicon.activeWork().catch(() => null), casino: config.load().casinoEnabled ? casino.open() : null, casinoOn: !!config.load().casinoEnabled });
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
-const whenRunning = (fn) => () => { if (node.state === "running") fn(); };
+const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one
 const freeze = require("./freeze").create({
   load: () => config.load().frozenApps, save: (ids) => { config.save({ frozenApps: ids }); }, log: (l) => node.log(l),
   engines: {
     mail: { start: whenRunning(() => mail.startLoop()), stop: () => mail.stopLoop() },
-    minimall: { start: whenRunning(() => { shop.startLoop().catch(() => {}); }), stop: () => shop.stopLoop() },
+    minimall: { start: whenRunning(() => shop.startLoop()), stop: () => shop.stopLoop() },   // its start awaits the node (identity, first scan): never two at once, never retried on every status after a failure (main/freeze.js)
     vestr: { start: whenRunning(() => vestr.startLoop()), stop: () => vestr.stopLoop() },
     chat: { start: whenRunning(() => chat.startLoop()), stop: () => chat.stopLoop() },
-    dexicon: { start: () => node.onEnginesRelease(), stop: () => node.onEnginesHold() }   // the hold a wallet replacement uses; by the time start runs it is no longer in the frozen list
+    // The hold a wallet replacement uses; by the time start runs it is no longer in the frozen list. gate: before what is
+    // in flight is read, nothing new can start (AtomiX and PandaPools held with their engines up; the Exchange takes no new command).
+    dexicon: { gate: async () => { dexicon.gate(); await Promise.all([atomix.hold(), pandapools.hold()]); }, start: () => node.onEnginesRelease(), stop: () => node.onEnginesHold() }
   },
+  // A wallet-replacing megammrsync holds the same engines (node-manager runResync): from before its hold until its settle has released them.
+  replacing: () => !!node.replacingWallet || !!(node.walletCheck && node.walletCheck.held),
   dexiconWork: async () => Object.assign(await inFlightWork(), { ownPools: await pandapools.ownPools().catch(() => null), holds: (() => { try { return dexicon.coinHolds(); } catch (e) { return null; } })() })
 });
 ethwallet.setFrozen(() => freeze.isFrozen("dexicon"));
+// A held engine says why in its refusals: frozen by the user, not "the wallet is being replaced".
+for (const [eng, name] of [[atomix, "AtomiX"], [pandapools, "PandaPools"], [dexicon, "Dexicon"]]) eng.setHeldReason(() => (freeze.isFrozen("dexicon") ? (name === "Dexicon" ? "Dexicon is frozen" : name + " is stopped because Dexicon is frozen") + ". Unfreeze Dexicon on the Apps tab: it then starts again by itself. Nothing was sent." : ""));
+node.on("status", (s) => { freeze.settle(); if (s.state !== "running") freeze.nodeStopped(); });   // a start that failed (a locked node) is tried again with the next node, not on every status
 ipcMain.handle("mcd:freezeList", () => freeze.list());
 ipcMain.handle("mcd:freezeSet", (_e, id, on) => freeze.set(id, on));
 ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now()); return { title: w.title, message: w.message, any: w.any }; });

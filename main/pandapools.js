@@ -55,7 +55,10 @@ let poolAbort = { aborted: false };
 // engine and its store are kept, but nothing new is done: no scan timer, no init, so no action from a screen (each
 // starts with init()), and no SIGNING command reaches the node. release() lifts it.
 let held = false, heldLoop = false, busy = 0;
-const HELD = "PandaPools is stopped while the wallet is being replaced. It starts again by itself.";
+const HELD_REPLACING = "PandaPools is stopped while the wallet is being replaced. It starts again by itself.";
+// The same hold serves the Apps tab's Freeze (0.19.117): the refusal then says so (main.js sets the reason), not "the wallet is being replaced".
+let heldReason = null;
+const heldText = () => { let why = ""; try { why = heldReason ? heldReason() : ""; } catch (e) {} return why || HELD_REPLACING; };
 function _setRunner(fn) { runner = fn; }
 function _setDataDir(d) { dataDir = d; }
 function nodeCmd(cmd) { return runner(cmd); }
@@ -84,7 +87,7 @@ function storeFile() { return path.join(dataDir || app.getPath("userData"), "pan
  *  failed: a store that opens is never moved. Returns the kept path. The caller starts the engine (startLoop). */
 function setAsideStore() {
   if (ready || !initError) throw new Error("PandaPools' store is open, so nothing was moved.");
-  if (held) throw new Error(HELD);
+  if (held) throw new Error(heldText());
   // 0.19.101: an init may be in flight on this very file (the scan loop tries again): it is disowned first (its epoch
   // check then ends it), so it cannot finish beside the init that starts on the empty store.
   contextEpoch++;
@@ -102,7 +105,7 @@ function buildMds() {
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
     cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}
-      if(held&&require("./noderun").SIGNING.test(String(command))){if(cb)cb({status:false,error:HELD});return;}
+      if(held&&require("./noderun").SIGNING.test(String(command))){if(cb)cb({status:false,error:heldText()});return;}
       busy++;   // hold() waits for what is at the node
       runner(command,{signal:signal}).then(function (r) { busy--; noteFail(command, r); if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function (e) { busy--; noteFail(command, { status: false, error: (e && e.message) || String(e) }); if (cb) cb({ status: false }); }); },
     sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
@@ -122,7 +125,7 @@ function buildMds() {
 }
 
 async function init() {
-  if (held) throw new Error(HELD);
+  if (held) throw new Error(heldText());
   if (ready) return;
   if (initPromise) return initPromise;
   const epoch=contextEpoch;
@@ -887,7 +890,7 @@ async function consolidationCheck() {
 module.exports = {
   consolidationCheck,
   completeBackup, completeBackupRequired, validateCompleteRecipes,
-  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate, hold, release, quiet,
+  emitter, init, startLoop, stopLoop, scanNow, flush, invalidate, hold, release, setHeldReason: (fn) => { heldReason = fn; }, quiet,
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,

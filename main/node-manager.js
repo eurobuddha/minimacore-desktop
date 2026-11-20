@@ -150,6 +150,7 @@ class NodeManager extends EventEmitter {
     this.polled = false;          // this node start has answered a health poll: its boot is over (the boot line is believed only before)
     this.carry = { out: "", err: "" };   // the unfinished last line of each of the node's streams
     this.cont = { out: null, err: null };   // per stream: what follows is the CONTINUATION of a cut line, read by nothing (nodeLine)
+    this.replacingWallet = false; // a wallet-replacing megammrsync is running (runResync): it holds the trading engines
     this.walletCheck = null;      // owed after a wallet-replacing megammrsync: { before, held, final, tries } (runResync, walletSettle)
     this.keyModeAlert = "";       // the running node was found in the OTHER mode and stopped: no start until the app is reopened
     // Parlons Node (nodeKind "parlons"): the account's readiness comes from the jar's own log lines,
@@ -585,6 +586,7 @@ class NodeManager extends EventEmitter {
     try {
       let w = null;
       if (replaces) {
+        this.replacingWallet = true;   // from before the engines are held until this command has ended: the hold is the replacement's (main/freeze.js does not release it)
         try { if (typeof this.onEnginesHold === "function") await this.onEnginesHold(); }
         catch (e) { await this.releaseEngines(); throw new Error("The trading engines could not be stopped (" + ((e && e.message) || e) + "), so the wallet was not replaced. Nothing was changed."); }
         w = this.walletCheck = { before: await this.walletMark(), held: true, final: false, tries: 0 };
@@ -615,7 +617,7 @@ class NodeManager extends EventEmitter {
         else { this.walletCheck = null; await this.releaseEngines(); }
       }
       return j;
-    } finally { this.resyncing = false; this.emit("status", this.snapshot()); }
+    } finally { this.resyncing = false; this.replacingWallet = false; this.emit("status", this.snapshot()); }
   }
   /** A megammrsync that puts another wallet under the app (phrase: or file:) has run, or may have. main.js sets
    *  onWalletReplaced: every identity-bound store is invalidated there, in the main process. Never throws: a store
@@ -661,9 +663,12 @@ class NodeManager extends EventEmitter {
       return true;
     }
     this.log("[app] the node now holds ANOTHER wallet: the old wallet's stores are set aside (never deleted)");
-    if (!w.held && typeof this.onEnginesHold === "function") { try { await this.onEnginesHold(); } catch (e) {} }
-    this.walletCheck = null;
-    await this.walletReplaced(true);
+    const was = this.replacingWallet; this.replacingWallet = true;   // the stores are being set aside: nothing else may release the engines meanwhile (main/freeze.js)
+    try {
+      if (!w.held && typeof this.onEnginesHold === "function") { try { await this.onEnginesHold(); } catch (e) {} }
+      this.walletCheck = null;
+      await this.walletReplaced(true);
+    } finally { this.replacingWallet = was; }
     await this.releaseEngines();
     return true;
   }

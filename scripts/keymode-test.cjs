@@ -538,6 +538,70 @@ test("0.18.116: the same wallet restored again keeps every store; the engines ar
     assert.deepEqual(ev, ["hold", "sent", "release"], "no store set aside"); assert.equal(m.walletCheck, null); assert.equal(m.state, "running");
   });
 });
+// ---- 0.19.119: the Apps tab's Freeze uses the same hold. Wired here as main.js wires it, on the real node manager and the real main/freeze.js ----
+function frozenDexicon(m, ev, saved) {
+  const f = require("../main/freeze").create({ load: () => saved, save() {}, log() {},
+    engines: { dexicon: { gate: async () => { ev.push("gate"); }, start: () => m.onEnginesRelease(), stop: () => m.onEnginesHold() } },
+    replacing: () => !!m.replacingWallet || !!(m.walletCheck && m.walletCheck.held),
+    dexiconWork: async () => ({ atomix: { ready: true, swaps: [] }, pools: [], ownPools: [], dexicon: { ready: true, takes: 0, unknown: 0, pending: 0 }, holds: [] }) });
+  m.onEnginesRelease = () => { if (f.isFrozen("dexicon")) return; ev.push("release"); };   // main.js: a frozen Dexicon stays held
+  const onStatus = () => f.settle(); m.on("status", onStatus);
+  return { f, off: () => m.off("status", onStatus) };
+}
+test("0.19.119: Dexicon frozen, a restore starts, Dexicon is unfrozen while the node is replacing the wallet: the engines stay held until the restore has settled", async () => {
+  for (const [after, want] of [["A", ["release"]], ["B", ["replaced:starting", "release"]]]) {
+    let fz = null, unfrozen = null;
+    await resyncCase(async (w, ev) => {   // the megammrsync is at the node: the user opens the Dexicon tab
+      unfrozen = await fz.f.set("dexicon", false);
+      assert.ok(!ev.includes("release"), "unfreezing released the engines in the middle of the wallet replacement: " + ev.join(","));
+      w.seed = after; return { status: true, response: {} };
+    }, async (m, calls, { ev }) => {
+      fz = frozenDexicon(m, ev, ["dexicon"]);
+      try {
+        await fz.f.applyAtStartup(); assert.deepEqual(ev, ["hold"], "frozen: held");
+        assert.equal((await m.runResync(PHRASE)).status, true);
+        assert.deepEqual(unfrozen, []); assert.deepEqual(ev, ["hold", "hold", "sent"], "still held when the command has ended: the node is not back yet");
+        calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 50));
+        assert.deepEqual(ev.slice(3).filter((e, i, l) => e !== "release" || l.indexOf(e) === i), want, "released by the restore's own settle, after the stores were dealt with");
+        assert.equal(ev.indexOf("release") > ev.lastIndexOf("replaced:starting"), true); assert.equal(m.walletCheck, null); assert.equal(fz.f.isFrozen("dexicon"), false);
+      } finally { fz.off(); }
+    });
+  }
+});
+test("0.19.119: a restore is running: Dexicon cannot be frozen, with the reason; a Dexicon frozen before it stays held after it", async () => {
+  let fz = null, refused = null;
+  await resyncCase(async () => { refused = await fz.f.set("dexicon", true).then(() => null, (e) => e.message); return { status: true, response: {} }; }, async (m, calls, { ev }) => {
+    fz = frozenDexicon(m, ev, []);
+    try {
+      await m.runResync(PHRASE);
+      assert.match(refused, /^The wallet is being replaced, and Dexicon's engines are stopped for it\. Dexicon can be frozen once that has finished\.$/);
+      assert.ok(!ev.includes("gate"), "no hold of its own was taken"); assert.equal(fz.f.isFrozen("dexicon"), false);
+      calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 50));
+      assert.deepEqual(ev, ["hold", "sent", "release"]); assert.equal(m.replacingWallet, false);
+      assert.deepEqual(await fz.f.set("dexicon", true), ["dexicon"], "afterwards it freezes");
+    } finally { fz.off(); }
+  });
+  await resyncCase(() => ({ status: true, response: {} }), async (m, calls, { ev }) => {
+    fz = frozenDexicon(m, ev, ["dexicon"]);
+    try {
+      await fz.f.applyAtStartup(); await m.runResync(PHRASE);
+      calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 50));
+      assert.ok(!ev.includes("release"), "frozen throughout: never released"); assert.equal(m.walletCheck, null);
+      assert.deepEqual(await fz.f.set("dexicon", false), []); assert.equal(ev.filter(e => e === "release").length, 1, "unfrozen later: released then");
+    } finally { fz.off(); }
+  });
+});
+test("0.19.119: a plain resync (no wallet replaced) holds nothing: Dexicon unfrozen during it is released at once", async () => {
+  await resyncCase(() => ({ status: true, response: {} }), async (m, calls, { ev }) => {
+    const fz = frozenDexicon(m, ev, ["dexicon"]);
+    try {
+      await fz.f.applyAtStartup();
+      m.rpc = ((real) => async (c) => { if (/^megammrsync/.test(c)) { await fz.f.set("dexicon", false); } return real(c); })(m.rpc);
+      await m.runResync("megammrsync action:resync host:megammr.example:9001");
+      assert.deepEqual(ev.filter(e => e === "release"), ["release"], "nothing else would ever have released it");
+    } finally { fz.off(); }
+  });
+});
 test("0.18.116: another wallet after a restore: the stores are set aside before the node is called running, with the engines held", async () => {
   await resyncCase((w) => { w.seed = "B"; return { status: true, response: {} }; }, async (m, calls, { ev }) => {
     await m.runResync(PHRASE);

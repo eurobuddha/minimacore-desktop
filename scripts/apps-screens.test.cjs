@@ -176,7 +176,9 @@ test("Freeze, wiring: every start site asks; a frozen Dexicon stays held through
   for (const id of ["mail", "minimall", "chat", "vestr"]) assert.ok(mainJs.includes('freeze.start("' + id + '")'), id + " starts through freeze.start");
   assert.ok(!/\{ mailStarted = true; mail\.startLoop\(\)/.test(mainJs) && !/vestrStarted = true; vestr\.startLoop\(\)/.test(mainJs) && !/if \(s\.state === "running"\) chat\.startLoop\(\)/.test(mainJs), "no start site left that ignores the switch");
   assert.ok(/node\.onEnginesRelease = \(\) => \{ if \(freeze\.isFrozen\("dexicon"\)\) return; atomix\.release\(\); pandapools\.release\(\); dexicon\.release\(\);/.test(mainJs), "a wallet command's release leaves a frozen Dexicon held");
-  assert.ok(/dexicon: \{ start: \(\) => node\.onEnginesRelease\(\), stop: \(\) => node\.onEnginesHold\(\) \}/.test(mainJs), "the hold a wallet replacement uses");
+  assert.ok(/dexicon: \{ gate: async \(\) => \{ dexicon\.gate\(\); await Promise\.all\(\[atomix\.hold\(\), pandapools\.hold\(\)\]\); \}, start: \(\) => node\.onEnginesRelease\(\), stop: \(\) => node\.onEnginesHold\(\) \}/.test(mainJs), "the hold a wallet replacement uses, taken before the read");
+  assert.ok(/replacing: \(\) => !!node\.replacingWallet \|\| !!\(node\.walletCheck && node\.walletCheck\.held\),/.test(mainJs) && /node\.on\("status", \(s\) => \{ freeze\.settle\(\); if \(s\.state !== "running"\) freeze\.nodeStopped\(\); \}\);/.test(mainJs), "the freeze knows a wallet replacement and is told of every status");
+  assert.ok(/minimall: \{ start: whenRunning\(\(\) => shop\.startLoop\(\)\), stop/.test(mainJs) && /const whenRunning = \(fn\) => \(\) => \{ if \(node\.state === "running"\) return fn\(\); \};/.test(mainJs), "miniMall's start hands its promise to the freeze");
   assert.ok(/dexiconWork: async \(\) => Object\.assign\(await inFlightWork\(\), \{ ownPools: await pandapools\.ownPools\(\)/.test(mainJs), "the check reads what the Shutdown and Quit warnings read, and the wallet's own pools and order coins");
   assert.ok(mainJs.indexOf("freeze.applyAtStartup();") < mainJs.indexOf("if (c.setupDone && c.walletDone) node.start();") && mainJs.indexOf("freeze.applyAtStartup();") > 0, "applied before the node starts");
   const ethwallet = require("../main/ethwallet"), atomix = require("../main/atomix"), real = atomix.ethSendExecute; let sent = 0;
@@ -189,4 +191,116 @@ test("Freeze, wiring: every start site asks; a frozen Dexicon stays held through
   assert.equal(appsState({ id: "mail" }, true, true), "Hidden from drawer · Deep frozen"); assert.equal(appsState({ id: "dexicon", tab: true }, false, false), "A tab");
   assert.ok(/r\.hidden = hidden\.includes\(r\.dataset\.app\) \|\| FROZEN\.includes\(r\.dataset\.app\)/.test(app), "a frozen app's tray row is put away");
   assert.ok(/if \(FROZEN\.length && thawOnOpen\(\)\) return;/.test(app), "opening a frozen app unfreezes it first");
+});
+
+// ---- 0.19.119: the review of Freeze ----
+/** As rig(), with the hold taken before the read (gate), a start that may be a promise, and a stop that may fail. */
+function rig2(o) {
+  o = o || {}; const calls = [], store = { ids: (o.saved || []).slice() }, logs = [];
+  const eng = (id) => ({ start: () => { calls.push(id + ".start"); return o.start ? o.start(id) : undefined; }, stop: async () => { calls.push(id + ".stop"); if (o.stopFails) throw new Error("the engine did not stop"); } });
+  const dex = eng("dexicon"); dex.gate = async () => { calls.push("dexicon.gate"); if (o.gateFails) throw new Error("hold failed"); };
+  const f = freezeLib.create({ load: () => store.ids, save: (ids) => { store.ids = ids.slice(); calls.push("save:" + ids.join(",")); }, log: (l) => logs.push(l), readMs: o.readMs,
+    engines: { mail: eng("mail"), minimall: eng("minimall"), dexicon: dex }, replacing: o.replacing, dexiconWork: async () => { calls.push("read"); return o.work ? o.work() : IDLE(); } });
+  return { f, calls, store, logs };
+}
+const tick = (ms) => new Promise(r => setTimeout(r, ms || 0));
+test("Freeze (b): the hold is taken first, then what is in flight is read; anything in flight, or a hold that failed, releases it and refuses", async () => {
+  const ok = rig2();
+  assert.deepEqual(await ok.f.set("dexicon", true), ["dexicon"]);
+  assert.deepEqual(ok.calls, ["dexicon.gate", "read", "save:dexicon", "dexicon.stop"], "held before the read: a swap started a moment before the click is either seen or never starts");
+  const busy = rig2({ work: () => { const w = IDLE(); w.atomix.swaps = ["0xA"]; return w; } });
+  await assert.rejects(busy.f.set("dexicon", true), /1 AtomiX swap not finished/);
+  assert.deepEqual(busy.calls, ["dexicon.gate", "read", "dexicon.start"], "the hold is released; nothing saved"); assert.deepEqual(busy.f.list(), []); assert.deepEqual(busy.store.ids, []);
+  const noHold = rig2({ gateFails: true });
+  await assert.rejects(noHold.f.set("dexicon", true), /What is in flight could not be read\./);
+  assert.deepEqual(noHold.calls, ["dexicon.gate", "dexicon.start"], "a hold that failed half way is released too"); assert.deepEqual(noHold.store.ids, []);
+});
+test("Freeze (c): an engine with a store that has not started is 'could not be read', as the Quit warning has it", () => {
+  const w1 = IDLE(); w1.atomix = { ready: false, hasStore: true, swaps: [] };
+  assert.deepEqual(freezeLib.dexiconBlockers(w1), ["AtomiX has not started, so its market and OTC offers could not be read"]);
+  const w2 = IDLE(); w2.dexicon = { ready: false, hasStore: true, takes: 0, unknown: 0 };
+  assert.deepEqual(freezeLib.dexiconBlockers(w2), ["the Exchange has not started, so its orders could not be read"]);
+  const w3 = IDLE(); w3.atomix = { ready: false, hasStore: true }; w3.dexicon = { ready: false, hasStore: true };
+  assert.deepEqual(freezeLib.dexiconBlockers(w3), ["AtomiX has not started, so its swaps could not be read", "the Exchange has not started, so its trades could not be read"]);
+  const inflight = require("../main/inflight").inFlight({ atomix: w1.atomix, pools: [], dexicon: { ready: true, takes: 0 } }, "quit", 1e12);
+  assert.equal(inflight.unread.length, 1, "main/inflight.js calls the same state unread");
+});
+test("Freeze (d): a read that does not answer within its time is 'could not be read', and the next call is not kept waiting", async () => {
+  const r = rig2({ readMs: 30, work: () => new Promise(() => {}) });
+  const t0 = Date.now();
+  await assert.rejects(r.f.set("dexicon", true), /What is in flight could not be read in time\./);
+  assert.ok(Date.now() - t0 < 1000); assert.deepEqual(r.calls, ["dexicon.gate", "read", "dexicon.start"]); assert.deepEqual(r.store.ids, []);
+  assert.deepEqual(await r.f.set("mail", true), ["mail"], "a later freeze goes through");
+  assert.deepEqual(await r.f.set("mail", false), []);
+  assert.equal(freezeLib.create({ load: () => [], save() {}, engines: {} }).set.length, 2);
+  assert.ok(/READ_MS = 5000/.test(R("main/freeze.js")), "five seconds in the app");
+});
+test("Freeze (e): an engine that fails to stop leaves the app not frozen, not saved and running, and says so", async () => {
+  const r = rig2({ stopFails: true });
+  await assert.rejects(r.f.set("mail", true), /It could not be stopped, so it is not frozen \(the engine did not stop\)\. It is running as before\./);
+  assert.deepEqual(r.calls, ["save:mail", "mail.stop", "save:", "mail.start"]); assert.deepEqual(r.f.list(), []); assert.deepEqual(r.store.ids, []); assert.equal(r.f.isFrozen("mail"), false);
+  const d = rig2({ stopFails: true });
+  await assert.rejects(d.f.set("dexicon", true), /could not be stopped/);
+  assert.deepEqual(d.calls, ["dexicon.gate", "read", "save:dexicon", "dexicon.stop", "save:", "dexicon.start"], "the hold is released"); assert.deepEqual(d.store.ids, []);
+  // the screen: a failed unfreeze-on-open is said, the list is read again, and it is not asked again in a loop
+  assert.ok(/\.catch\(async \(e\) => \{[^\n]*\n\s*THAW_FAILED = id; FROZEN = await api\.freezeList\(\)[^\n]*\n\s*openDlg\("freezeNo", "Still frozen"/.test(app), "thawOnOpen shows the error");
+  assert.ok(/if \(!FROZEN\.includes\(id\) \|\| THAW_FAILED === id\) return false;/.test(app));
+});
+test("Freeze (f): one start at a time; a start that ends after the freeze is stopped; a failed start waits for the next node", async () => {
+  let done; const slow = rig2({ start: () => new Promise(r => { done = r; }) });
+  assert.equal(slow.f.start("minimall"), true); assert.equal(slow.f.start("minimall"), true); assert.equal(slow.f.start("minimall"), true);
+  assert.deepEqual(slow.calls, ["minimall.start"], "asked on every node status, started once");
+  const frozen = slow.f.set("minimall", true); await tick(5);
+  assert.deepEqual(slow.calls, ["minimall.start"], "the freeze waits for the start that is still running");
+  done(); assert.deepEqual(await frozen, ["minimall"]);
+  assert.deepEqual(slow.calls, ["minimall.start", "save:minimall", "minimall.stop"], "its timer is there to be stopped: the freeze is not undone");
+  assert.equal(slow.f.start("minimall"), false);
+  // a locked node: the start fails, and is not tried on every status
+  let fails = 0; const locked = rig2({ start: () => { fails++; return Promise.reject(new Error("Couldn't read the node seed (is the wallet unlocked?).")); } });
+  assert.equal(locked.f.start("minimall"), true); await tick(5);
+  for (let i = 0; i < 5; i++) assert.equal(locked.f.start("minimall"), false);
+  assert.equal(fails, 1, "once, not on every status"); assert.match(locked.logs.join("\n"), /minimall could not start its background work \(Couldn't read the node seed/);
+  locked.f.nodeStopped(); assert.equal(locked.f.start("minimall"), true); await tick(5); assert.equal(fails, 2, "again with the next node");
+  await locked.f.set("minimall", true); await locked.f.set("minimall", false); await tick(5); assert.equal(fails, 3, "and when the user unfreezes it");
+  const sync = rig2({ start: () => { throw new Error("boom"); } }); assert.equal(sync.f.start("mail"), true); await tick(5); assert.equal(sync.f.start("mail"), false, "a start that throws is a failed start, not an uncaught error");
+});
+test("Freeze (a): during a wallet replacement Dexicon is not frozen, and unfreezing does not release the engines the replacement holds", async () => {
+  let replacing = true; const r = rig2({ saved: ["dexicon"], replacing: () => replacing });
+  assert.deepEqual(await r.f.set("dexicon", false), []);
+  assert.deepEqual(r.calls, ["save:"], "unfrozen and saved, the engines left to the replacement"); assert.match(r.logs.join("\n"), /the wallet is being replaced, so its engines start when that has settled/);
+  r.f.settle(); assert.deepEqual(r.calls, ["save:"], "not while it still holds them");
+  await assert.rejects(r.f.set("dexicon", true), /The wallet is being replaced, and Dexicon's engines are stopped for it\. Dexicon can be frozen once that has finished\./);
+  assert.deepEqual(r.calls, ["save:"], "no hold, no read, nothing saved"); assert.deepEqual(r.f.list(), []);
+  replacing = false; r.f.settle(); r.f.settle();
+  assert.deepEqual(r.calls, ["save:", "dexicon.start"], "released once the replacement has let go (a plain resync holds nothing and releases nothing itself)");
+  const broken = rig2({ replacing: () => { throw new Error("x"); } });
+  await assert.rejects(broken.f.set("dexicon", true), /wallet is being replaced/, "what cannot be asked counts as a replacement");
+});
+test("Freeze (g, h, i): ETH Wallet says Dexicon is frozen; a frozen engine's refusal names Freeze; the reason a switch is off is on the screen", async () => {
+  const ethwallet = require("../main/ethwallet"), atomix = require("../main/atomix"), pandapools = require("../main/pandapools");
+  const tmp = fs.mkdtempSync(path.join(require("os").tmpdir(), "freeze-test-")); atomix._setDataDir(tmp); pandapools._setDataDir(tmp);   // an empty folder: no store, no engine
+  try {
+    ethwallet.setFrozen(() => true); assert.equal((await ethwallet.status()).frozen, true);
+    ethwallet.setFrozen(() => false); assert.equal((await ethwallet.status()).frozen, false);
+  } finally { ethwallet.setFrozen(() => false); }
+  assert.ok(app.includes('${st.frozen ? "Dexicon is frozen. Unfreeze it on the Apps tab to use this wallet." : "Setting up wallet…"}'));
+  for (const [eng, name, act] of [[atomix, "AtomiX", () => atomix.swapExecute("q")], [pandapools, "PandaPools", () => pandapools.init()]]) {
+    await eng.hold(1);
+    try {
+      await assert.rejects(act(), new RegExp("^Error: " + name + " is stopped while the wallet is being replaced"));
+      eng.setHeldReason(() => name + " is stopped because Dexicon is frozen. Unfreeze Dexicon on the Apps tab: it then starts again by itself. Nothing was sent.");
+      await assert.rejects(act(), (e) => /is stopped because Dexicon is frozen\. Unfreeze Dexicon on the Apps tab/.test(e.message) && !/wallet is being replaced/.test(e.message));
+      eng.setHeldReason(() => ""); await assert.rejects(act(), /wallet is being replaced/, "no reason given: the replacement's own words");
+    } finally { eng.setHeldReason(null); eng.release(); }
+  }
+  const dx = require("../main/dexicon").makeHost({});
+  dx.gate(); dx.setHeldReason(() => "Dexicon is frozen. Unfreeze Dexicon on the Apps tab: it then starts again by itself. Nothing was sent.");
+  await assert.rejects(dx.command({ op: "cmd", command: "txnpost id:x" }), /^Error: Dexicon is frozen\./);
+  dx.release();
+  assert.ok(/eng\.setHeldReason\(\(\) => \(freeze\.isFrozen\("dexicon"\) \?/.test(mainJs), "main.js gives the three engines the reason");
+  // i: visible text, tied to the switch
+  assert.ok(app.includes('${noIce ? `<div class="apps-row__state" id="appsWhy-${a.id}">${esc(noIce)}</div>` : ""}') && app.includes('${noIce ? ` disabled aria-describedby="appsWhy-${a.id}"` : ""}'), "the reason is text on the row, and described-by for the switch");
+  assert.ok(!/class="apps-row__hide"\$\{noIce \? ` title=/.test(app), "no longer only a title");
+  const NO_FREEZE = new Function("return " + app.match(/const NO_FREEZE = (\{[^\n]*\});/)[1])();
+  assert.deepEqual(NO_FREEZE, { core: "Cannot be frozen: Minima Core is the node and the wallet.", parlons: "Cannot be frozen: Parlons is part of the node itself." });
 });

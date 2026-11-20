@@ -51,7 +51,10 @@ let dataDir = null;
 // command reaches the node (reads and txndelete still do, so a chain in flight ends cleanly). release() lifts it:
 // on the same wallet the engine goes on exactly where it was; on another one invalidate() has run in between.
 let held = false, heldLoop = false, busy = 0;
-const HELD = "AtomiX is stopped while the wallet is being replaced. It starts again by itself.";
+const HELD_REPLACING = "AtomiX is stopped while the wallet is being replaced. It starts again by itself.";
+// The same hold serves the Apps tab's Freeze (0.19.117): the refusal then says so (main.js sets the reason), not "the wallet is being replaced".
+let heldReason = null;
+const heldText = () => { let why = ""; try { why = heldReason ? heldReason() : ""; } catch (e) {} return why || HELD_REPLACING; };
 let runner = (cmd, opts) => {   // opts.signal: see makerStep
   const config = require("./config"), node = require("./node-manager");
   return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, Object.assign({ owner: "atomix" }, opts));   // owner: main/reserve.js
@@ -169,7 +172,7 @@ function buildMds() {
       // 0.18.107: an engine disowned by invalidate() (the wallet was replaced) reaches neither the node nor the new
       // engine's store; what it had already queued behind another signer is dropped by the signal.
       if (gen !== generation) return failed(new Error(GONE));
-      if (held && SIGNING.test(c)) return failed(new Error(HELD));
+      if (held && SIGNING.test(c)) return failed(new Error(heldText()));
       if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c, makerOp ? AbortSignal.any([makerOp.signal, signal]) : signal).then(r => cb(toVm(normReply(r))), failed); return; }
       runner(c, { signal }).then(r => cb(toVm(normReply(r))), failed);
     },
@@ -216,7 +219,7 @@ function toVm(obj) {
 }
 
 async function init() {
-  if (held) throw new Error(HELD);
+  if (held) throw new Error(heldText());
   if (ready) return;
   if (initPromise) return initPromise;
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
@@ -270,7 +273,7 @@ async function quiet(maxMs = 10000) {
 }
 function release() { if (!held) return; held = false; log("released"); if (heldLoop) startLoop(); }
 /** A screen's action that can sign or lock: refused while held. */
-const whileHeld = (fn) => (...a) => (held ? Promise.reject(new Error(HELD)) : fn(...a));
+const whileHeld = (fn) => (...a) => (held ? Promise.reject(new Error(heldText())) : fn(...a));
 // HALT (0.18.130): the identity watch says this node no longer owns the keys AtomiX saved. Whatever is locked under
 // the saved key then cannot be refunded, so nothing that creates a NEW liability may start: a take, a publish, an OTC
 // offer, proposal, accept or counter. The verdict is read from the engine at the moment of the call, never from a
@@ -401,7 +404,7 @@ function haltFrom(watch) {
 let initError = "", firstTry = 0;
 function setAsideStore() {
   if (ready || !initError) throw new Error("AtomiX's store is open, so nothing was moved.");
-  if (held) throw new Error(HELD);
+  if (held) throw new Error(heldText());
   // An init may be in flight on this very file (the loop tries again every few seconds): it is disowned first, as
   // invalidate() does, so it cannot finish beside the init that starts on the empty store (two engines on one wallet).
   generation++;
@@ -1314,7 +1317,7 @@ async function ethSetRpc(url) {
 }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, quiet, status, activeWork, setAsideStore, _activeWorkFrom: activeWorkFrom,
+  emitter, init, startLoop, stopLoop, flush, invalidate, hold, release, setHeldReason: (fn) => { heldReason = fn; }, quiet, status, activeWork, setAsideStore, _activeWorkFrom: activeWorkFrom,
   book, quote, swapPreview, swapExecute: whileHeld(whileHalted(swapExecute)), swaps, refundNow: whileHeld(refundNow), exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute: whileHeld(sendExecute),
   makerCfg, makerPreview, makerSave: whileHeld(whileHalted(makerSave)), makerPublish: whileHeld(whileHalted(makerPublish)), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),

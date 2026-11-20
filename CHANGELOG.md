@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.119] — Freeze, after its review: a wallet replacement's hold is never released by an unfreeze, and nine smaller faults
+
+- **Found in review (high):** Freeze stops Dexicon's engines with the hold a wallet replacement uses. Unfreezing Dexicon while the node was replacing the wallet (Restore from seed or file) released the engines in the middle of it. Now a replacement's hold is its own: while one runs, unfreezing saves the choice and leaves the engines stopped, and the replacement's own settle starts them (on the same stores, or on new ones after the old were set aside); freezing Dexicon during a replacement is refused with the reason. The node manager says when a replacement holds the engines (`replacingWallet`, from before its hold until the command has ended, and again while stores are being set aside). Not as asked: the condition is that flag and not `resyncing`, because a plain resync (no wallet replaced) holds nothing and releases nothing, so an unfreeze during it would have left Dexicon stopped for good.
+- **The hold comes first.** Freezing Dexicon now stops anything new from starting (AtomiX and PandaPools held with their engines up; the Exchange takes no new command), then reads what is in flight. Anything in flight, anything unreadable, or a hold that failed releases it and refuses. A swap started a moment before the click is seen or never starts.
+- **Fail closed.** AtomiX with a store that has not started, and the Exchange with a store that has not started, each refuse the freeze ("has not started, so its … could not be read"), as the Quit warning already treats them.
+- **Five seconds.** The read of what is in flight is given five seconds; later is "could not be read in time" and refuses. A read that never answers no longer blocks every later Freeze switch.
+- **A stop that fails is undone.** If an engine cannot be stopped the app is not frozen, not saved as frozen, its hold is released, and the reason is shown. Opening a frozen app whose unfreeze fails shows the reason ("Still frozen") instead of a blank screen, and does not ask again in a loop.
+- **miniMall's scan could start twice, and a freeze could be undone.** Its start waits for the node before it sets its timer, and since 0.19.117 it was asked at every node status. One start runs at a time (for every app), a freeze waits for a start still running, and a start that failed (a locked node) is not tried again until the node next starts or the app is unfrozen by hand, instead of at every status.
+- **ETH Wallet** with Dexicon frozen from startup says "Dexicon is frozen. Unfreeze it on the Apps tab to use this wallet." instead of "Setting up wallet…".
+- **A frozen engine's refusal says Freeze.** AtomiX, PandaPools and Dexicon answered "stopped while the wallet is being replaced" when the cause was Freeze. They now say that Dexicon is frozen and where to unfreeze it (desktop glue only; the vendored engines are untouched).
+- **Apps tab:** why Minima Core and Parlons have no Freeze is text on their rows, tied to the switch for screen readers, no longer only a hover title.
+
 ## [0.19.118] — miniMall pays the token its currency names, and nothing else (review fix, the most serious)
 
 - **Found in review (high):** a `.shop` file is written by the vendor and carries both a `currency` and a `tokenid`. The labels came from the currency and the payment from the token id, so a file saying "Minima" with the MxUSD token id (`0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90`) made the buyer pay MxUSD under a Minima label.
