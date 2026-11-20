@@ -394,6 +394,37 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
   assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "e8957bd3b8cdbd8f7d0c7653e4addb45f8ed1da0a04cb32acda873c0d0023252", "main/webwallet.js is the file of 0.19.107");
 });
+// 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
+// redirects, and an unread figure counted as 0.
+test("Web Wallet: the public key leaves only on a click, with no redirect; Confirm refuses while the on-chain uses are unread, never taking them as 0", async () => {
+  const K = require("../main/keyuses.js"), PK = "0x3A985DA74FE225B2045C172D6BD390BD855F086E3E9D525B46BFE24511431532", asked = [];
+  const get = (reply) => async (url) => { asked.push(url); if (reply instanceof Error) throw reply; return reply; };
+  const row = (o) => ({ status: true, keys: [Object.assign({ publickey: PK, address: "0x39EE", spend_blocks: 4, spent_coins: 9 }, o)] });
+  assert.equal(await K.onchainUses(PK, get(row())), 9, "the larger of spend blocks and spent coins");
+  assert.deepEqual(asked, ["https://eurobuddha.com/keyaudit?keys=" + PK], "one key, the pinned host, nothing else in the address");
+  assert.equal(await K.onchainUses(PK.toLowerCase().replace("0X", "0x"), get(row({ spend_blocks: 12 }))), 12);
+  assert.equal(await K.onchainUses(PK, get(row({ spend_blocks: 0, spent_coins: 0 }))), 0, "a key the archive knows as unused: a read 0");
+  for (const [why, reply] of [["no answer", null], ["the request failed", new Error("offline")], ["status false", { status: false, keys: row().keys }], ["no rows", { status: true, keys: [] }], ["an error row", row({ error: "x" })],
+    ["another key's row", row({ publickey: "0x" + "00".repeat(32) })], ["a count that is not a number", row({ spend_blocks: "many" })], ["a negative count", row({ spent_coins: -1 })], ["a fraction", row({ spend_blocks: 1.5 })], ["a missing count", { status: true, keys: [{ publickey: PK }] }]])
+    assert.equal(await K.onchainUses(PK, get(reply)), null, why + ": not read, and never 0");
+  const before = asked.length;
+  for (const bad of ["", null, undefined, [PK], "0x12", PK + ",0x" + "11".repeat(32), PK + "&x=1", "https://evil.example/"]) assert.equal(await K.onchainUses(bad, get(row())), null, "not one public key: " + String(bad));
+  assert.equal(asked.length, before, "and nothing was asked for those");
+  // the figure recorded at Confirm
+  const C = Act.ww.confirmUses;
+  assert.equal(C("0", 9), 9, "never below the chain's figure"); assert.equal(C("20", 9), 20, "a higher typed figure stands (too high is safe)"); assert.equal(C("", 0), 0); assert.equal(C("abc", 3), 3); assert.equal(C("-5", 3), 3); assert.equal(C("7.9", 3), 7);
+  for (const unread of [null, undefined, NaN, -1, 1.5, "9", {}]) assert.equal(C("50", unread), null, "unread (" + String(unread) + "): refused, whatever was typed");
+  const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {")), mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.equal((ww.match(/api\.keyAudit\(/g) || []).length, 1, "one place asks");
+  assert.ok(/const readOnchain = async \(\) => \{ let n = null; try \{ n = await api\.keyAudit\(a\.publickey\); \}/.test(ww) && /el\("wwKuConfirm"\)\.addEventListener\("click"/.test(ww) && /el\("wwKuCheck"\)\.addEventListener\("click"/.test(ww));
+  const login = ww.slice(ww.indexOf("function renderWwUnlock"), ww.indexOf("function wwAmount"));
+  assert.ok(login.includes("api.wwDerive(seed)") && !/keyAudit|readOnchain/.test(login), "logging in asks the audit service nothing");
+  assert.ok(/const n = AppsAct\.ww\.confirmUses\(typed, wwKuSuggest != null \? wwKuSuggest : await readOnchain\(\)\);\s*if \(wwAddr !== a\) return;[^\n]*\n\s*if \(n == null\) \{\s*toast\("Not confirmed: this key's on-chain uses could not be read/.test(ww), "Confirm reads the chain itself when it was not read, and stops there when it cannot");
+  assert.ok(ww.indexOf("only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer.") < ww.indexOf('id="wwKuCheck"') && ww.indexOf("only this wallet's public key is sent to eurobuddha.com") > 0, "the privacy line is on the screen before either button");
+  assert.ok(/ipcMain\.handle\("mcd:keyAudit", \(_e, publicKey\) => keyuses\.onchainUses\(publicKey, \(url\) => netfetch\.fetchJson\(url, \{ noRedirect: true \}\)\)\);/.test(mainJs), "main: no redirect is followed");
+  assert.ok(!/KEYUSES_BASE|the ONLY user-initiated external call/.test(mainJs), "the second copy of the host and the stale comment are gone");
+  assert.ok(/if \(!info\.ack\) \{ privatekey = null; throw new Error\("Confirm this wallet's key-uses count before sending"\); \}/.test(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"), "utf8")), "and the main process still refuses a send before that confirmation (main/webwallet.js, unchanged)");
+});
 test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and outlives Logout and leaving the screen; only \"I've checked\" clears it", () => {
   const line = (re) => app.match(re)[0];
   const W = new Function("let wwSeed = 's', wwAddr = { address: 'MxA' }, wwBal = [1], wwKu = {}, wwArmed = true, wwKuSuggest = 3, wwTab = 'send', wwSearch = 'x', wwForm = {};\nconst WW_UNKNOWN = new Set();\n"

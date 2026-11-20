@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.135] — Web Wallet: the public key leaves only on a click
+
+- **Logging in to the Web Wallet no longer sends anything to the audit service.** Until now the wallet's public key went to `eurobuddha.com/keyaudit` by itself at every login, to pre-fill the "secret key uses" field. It is now sent only when the user clicks **Check on-chain** or **Confirm** in the send form, and the form says so before either button: only this wallet's public key is sent to eurobuddha.com, this reveals that key to that server, the secret key stays on this computer.
+- **The safeguard is kept, and closed.** Confirm reads the chain's figure itself when it has not been read, records the typed figure or the chain's, whichever is higher, and **refuses** when the figure could not be read. An unread figure used to count as 0, the one value that can reuse a one-time signing key. Consequence: a wallet that has never been confirmed on this computer cannot be confirmed for sending while the audit service is unreachable. A wallet already confirmed sends as before; the main process still refuses any send before that confirmation (`main/webwallet.js`, unchanged, same sha256).
+- **No redirect is followed** (`netfetch.fetchJson` with `noRedirect`), the request names one key, and the answer is a whole number or "not read" (`main/keyuses.js` `onchainUses`): an error row, another key's row, or a count that is not a whole number is "not read". The second copy of the host in `main/main.js` and its stale comment ("the ONLY user-initiated external call") are gone.
+- Tests: `scripts/apps-money.test.cjs` (41).
+
 ## [0.19.134] — Entropy: screen capture protection is reported as it was set, and turned off when the page goes
 
 - `mcd:secureScreen` answered "protected" on every platform but Linux, whatever the call did, and nothing turned the switch off again if the page reloaded or its renderer crashed while Entropy was open.

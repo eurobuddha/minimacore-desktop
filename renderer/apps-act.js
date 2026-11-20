@@ -169,6 +169,16 @@
   // ---- Web Wallet (main/webwallet.js) ----
   var ww = {
     problem: function (f) { if (!text(f.to)) return "Enter a recipient address"; if (!(Number(text(f.amount)) > 0)) return "Enter a valid amount"; return ""; },
+    /**
+     * The figure to record when the user confirms the secret key uses: what they typed, never below what the chain
+     * shows. → null (REFUSE) when the chain's figure was not read: an unread figure is never taken as 0, because a
+     * count that is too low signs with a one-time key a second time.
+     */
+    confirmUses: function (typed, onchain) {
+      if (typeof onchain !== "number" || !Number.isSafeInteger(onchain) || onchain < 0) return null;
+      var n = Math.floor(Number(typed));
+      return Math.max(Number.isSafeInteger(n) && n > 0 ? n : 0, onchain);
+    },
     /** → the main process's answer ({ ok, txnid } | { ambiguous, message } | { message }), or { err } when it threw. */
     send: function (api, f) { return api.wwSend({ seed: f.seed, to: text(f.to), amount: text(f.amount), tokenid: f.tokenid }).catch(function (e) { return { message: String((e && e.message) || "Send failed") }; }); }
   };

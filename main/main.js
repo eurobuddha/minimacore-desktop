@@ -362,16 +362,11 @@ ipcMain.handle("mcd:secureScreen", (_e, on) => secureScreen.set(win, on));
 // Minima Explorer (main/explorer.js): a kind and one checked value in, one of seven node READS out, through rpcCall.
 ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return explorer.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 
-// KeyUses reuse audit — the ONLY user-initiated external call. Host is HARD-PINNED to eurobuddha.com (no
-// user-controlled host → no SSRF surface); pubkeys/addrs are hex-validated before they reach the query string.
-// netfetch.fetchJson is capped + never throws, so an unreachable service just returns null (graceful degrade).
-const KEYUSES_BASE = "https://eurobuddha.com";
-const HEX_KEY = /^0x[0-9a-fA-F]{64}$/;         // 32-byte WOTS public key
-ipcMain.handle("mcd:keyAudit", (_e, pubkeys) => {
-  const list = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(k => HEX_KEY.test(k));
-  if (!list.length) return null;
-  return netfetch.fetchJson(KEYUSES_BASE + "/keyaudit?keys=" + encodeURIComponent(list.join(",")));
-});
+// The Web Wallet's on-chain check of ONE public key (main/keyuses.js onchainUses): asked only by a click on "Check
+// on-chain" or "Confirm" in the Web Wallet's send form, never by itself. The host is the one pinned in keyuses.js,
+// the key is checked as 0x + 64 hex before it reaches the query string, no redirect is followed, and the answer is a
+// whole number or null (not read), never a default.
+ipcMain.handle("mcd:keyAudit", (_e, publicKey) => keyuses.onchainUses(publicKey, (url) => netfetch.fetchJson(url, { noRedirect: true })));
 // The KeyUses app (main/keyuses.js): the node's keys are read here through rpcCall, the two lookups go to the one pinned
 // host with no redirect followed, and the renderer is handed the joined result. It names no host and no key itself.
 ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audit({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), get: (url) => netfetch.fetchJson(url, { noRedirect: true }) }); });

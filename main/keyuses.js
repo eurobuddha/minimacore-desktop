@@ -148,6 +148,20 @@ async function lookup(keys, get) {
 }
 
 /**
+ * One key's on-chain use figure, for the Web Wallet's "secret key uses" check: the larger of the spend blocks and the
+ * spent coins the archive counted. get(url) → parsed JSON or null (https, no redirect). → a whole number, or NULL when
+ * it was not read: no answer, an error row, a row for another key, a count that is not a whole number. Never 0 for
+ * "unknown": a figure that is too low reuses a one-time signature.
+ */
+async function onchainUses(publicKey, get) {
+  if (typeof publicKey !== "string" || !PK.test(publicKey)) return null;
+  let j; try { j = await get(BASE + "/keyaudit?keys=" + encodeURIComponent(publicKey)); } catch (e) { return null; }
+  if (!j || j.status !== true) return null;
+  const row = parseUsage(j.keys).find(u => u.publickey.toUpperCase() === publicKey.toUpperCase());
+  return row ? Math.max(row.sigs, row.coins) : null;
+}
+
+/**
  * One audit. io = { run(command) → the node's reply (through rpcCall), get(url) → parsed JSON or null (https, no
  * redirect) }. → { ok: true, tip, …join() } or { ok: false, error }. Never throws; never returns a figure it did not read.
  */
@@ -162,4 +176,4 @@ async function audit(io) {
   return Object.assign({ ok: true, tip: found.tip }, join(keys, found.usage, found.reuse));
 }
 
-module.exports = { audit, select, join, lookup, parseUsage, parseReuse, addressOf, selfTest, whole, BASE, SHAPES, MSG };
+module.exports = { audit, onchainUses, select, join, lookup, parseUsage, parseReuse, addressOf, selfTest, whole, BASE, SHAPES, MSG };
