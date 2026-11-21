@@ -142,7 +142,7 @@ function currentBlock() {
 function D(x) { return ctx.PP.dec(x); }
 function s(d) { try { return ctx.PP.plain(d); } catch (e) { return "0"; } }
 /** Reject a fund action that never settles (a dropped PoolMgr callback / a node command that never returns). */
-function withTimeout(p, ms, msg) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(msg)); }, ms); })]); }
+function withTimeout(p, ms, msg) { var t; return Promise.race([p, new Promise(function (_, rej) { t = setTimeout(function () { rej(new Error(msg)); }, ms); })]).finally(function () { clearTimeout(t); }); }   // the timer goes with the action (0.18.229: 800 s timers outlived every settled action)
 
 // ------------------------------------------------------------------ glue-level fund-action queue
 //
@@ -195,6 +195,16 @@ function queuedAction(label, run) {
     .catch(function (e) { gaveUp = true; throw e; });
 }
 
+/** A callback the engine calls LATER (a node reply, a key check, a post's answer), after the slot's own try/catch has returned
+ *  (0.18.229, as Pandamonium Desktop 0.19.271): a throw in it settled nothing, the slot stayed taken and every later add,
+ *  withdraw and migrate waited for good. It rejects the slot instead, saying it may have been posted (a throw can come after
+ *  the post). */
+const QUEUE_THROW = "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.";
+function caught(reject, label, fn) {
+  return function () { try { return fn.apply(this, arguments); } catch (e) { reject(new Error(QUEUE_THROW.replace("{label}", label).replace("{error}", (e && e.message) || String(e)))); } };
+}
+// a decimal the engine's Decimal reads, above zero (the screens send what they typed, ".5", or a worked-out figure)
+const plainAmount = (v) => { const t = String(v); return (typeof v === "string" || typeof v === "number") && t.length <= 80 && /^(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t) && /[1-9]/.test(t.split(/[eE]/)[0]); };
 /** Deadline for the pre-spend guards, stamped when a slot is ENTERED (never at enqueue time). */
 function execDeadline() { return Date.now() + ACTION_EXEC_MS - 10000; }
 
@@ -497,6 +507,7 @@ function createPreview(tokDecimals, x0, y0) {
 
 async function createPool(tokenid, tokDecimals, x0, y0) {
   await init();
+  if (!plainAmount(x0) || !plainAmount(y0)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the engine (0.18.229)
   return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.createPool(tokenid, tokDecimals, x0, y0, {
       created: function (p, txpowid) {
@@ -516,7 +527,7 @@ function actionOnPool(addr, fn, label, summary) {
     if (!p) return Promise.reject(new Error("Pool not found in the current scan — try again in a moment."));
     return queuedAction(label, function (resolve, reject) {
       fn(p, {
-        ok: function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); },
+        ok: caught(reject, label, function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); }),
         fail: function (m) { reject(new Error(m)); },
       });
     });
@@ -548,31 +559,32 @@ function ensureOwnerKey(opk, cb) {
 function closePool(addr) {
   return actionOnPool(addr, function (p, d) {
     var deadline = execDeadline();
-    ensureOwnerKey(p.opk, function (foreign) {
+    ensureOwnerKey(p.opk, caught(function (e) { d.fail(e.message); }, "WITHDRAW", function (foreign) {
       if (foreign) { d.fail(UNAVAILABLE_KEY_MSG); return; }
       if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — nothing was posted. Retry."); return; }
       ctx.PoolMgr.close(p, {
-        ok: function (txpowid) {
+        ok: caught(function (e) { d.fail(e.message); }, "WITHDRAW", function (txpowid) {
           ctx.Store.setRetired(p.address, 1, function () {});
           // Queue the payout address BEFORE any forward, so a crash between the close and the forward still
           // leaves the job recorded. The service pass finishes it and keeps going until the address is empty.
           ctx.Store.collectAdd(p.oadr, function () { ctx.PoolMgr.collectSweep(function () { emitter.emit("update"); }); });
           d.ok(txpowid);
-        },
+        }),
         fail: function (m) { d.fail(m); } });
-    });
+    }));
   }, "WITHDRAW", "Withdrew a pool's reserves");
 }
 async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
+  if (!plainAmount(newX) || !plainAmount(newY)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the queue (0.18.229)
   return queuedAction("Migrate", function (resolve, reject) {
     var deadline = execDeadline();
-    ensureOwnerKey(p.opk, function (foreign) {
+    ensureOwnerKey(p.opk, caught(reject, "Migrate", function (foreign) {
       if (foreign) { reject(new Error(UNAVAILABLE_KEY_MSG)); return; }
       if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — nothing was posted. Retry.")); return; }
-      ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } });
-    });
+      ctx.PoolMgr.migrate(p, newX, newY, { created: caught(reject, "Migrate", function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }), fail: function (m) { reject(new Error(m)); } });
+    }));
   });
 }
 
@@ -737,5 +749,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, activeWork,
-  _setRunner, _setDataDir,
+  _setRunner, _setDataDir, _ctx: () => ctx, _setPools: (ps) => { POOLS = ps; },   // test-only
 };
