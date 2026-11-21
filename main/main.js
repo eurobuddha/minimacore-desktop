@@ -296,7 +296,9 @@ ipcMain.handle("mcd:appVersion", () => app.getVersion());
 // Which app this is, for the screens: its name, and whether it updates itself and may open at login (main/flavor.js).
 ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, title: flavor.windowTitle, updates: !updater.OFF, loginItem: flavor.loginItem && !flavor.test, basePort: flavor.basePort }));
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
-ipcMain.handle("mcd:saveConfig", (_e, patch) => {
+ipcMain.handle("mcd:saveConfig", (_e, patch) => saveConfigPatch(patch));
+/** The window's config patch, saved (also by a restart that carries one: mcd:nodeRestart, 0.19.287). */
+function saveConfigPatch(patch) {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
   const c = config.save(patch || {});
@@ -304,7 +306,7 @@ ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (c.walletDone) firstRunOpen = false;   // the wallet step is over for this launch
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
-});
+}
 // Key mode (main/keymode.js). The renderer may ASK for a mode when a wallet is created or restored; config
 // records it once and refuses any later change. Block is refused outright on a jar that cannot run it.
 ipcMain.handle("mcd:keyMode", () => ({ mode: config.load().keyMode, supported: node.blockKeysSupported() }));
@@ -357,8 +359,8 @@ ipcMain.handle("mcd:pickFolder", async () => {
 ipcMain.handle("mcd:nodeStatus", () => node.snapshot());
 ipcMain.handle("mcd:nodeStart", async () => { await node.start(); return node.snapshot(); });
 // Stop whatever node holds our port/data folder (an earlier launch's), then start. Same reclaim as every start.
-ipcMain.handle("mcd:nodeReclaim", async (_e, ack) => { await mayStop(ack); await node.stop(); await node.start(); return node.snapshot(); });
-ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack); await node.stop(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeReclaim", async (_e, ack) => { await mayStop(ack, "reclaim"); await node.stop(); await node.start(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack, "stop"); await node.stop(); return node.snapshot(); });
 // What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
@@ -372,7 +374,7 @@ const stopGuard = inflight.stopGuard({ running: () => node.state === "running", 
     const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("Stop the node anyway"), lang.t("Keep it running")], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle, message: w.title, detail: w.message });
     return r.response === 0;
   } });
-async function mayStop(ack) { if (!await stopGuard.pass(ack)) throw new Error("The node keeps running: nothing was stopped."); }
+async function mayStop(ack, action) { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); }
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one
 const freeze = require("./freeze").create({
@@ -398,8 +400,9 @@ for (const [eng, name] of [[atomix, "AtomiX"], [pandapools, "PandaPools"], [dexi
 node.on("status", (s) => { freeze.settle(); if (s.state !== "running") freeze.nodeStopped(); });   // a start that failed (a locked node) is tried again with the next node, not on every status
 ipcMain.handle("mcd:freezeList", () => freeze.list());
 ipcMain.handle("mcd:freezeSet", (_e, id, on) => freeze.set(id, on));
-ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now(), (currentLang(), lang.t)); return { title: w.title, message: w.message, any: w.any, ack: w.any && how !== "quit" ? stopGuard.issue() : "" }; });   // ack: the warning was shown (0.19.268)
-ipcMain.handle("mcd:nodeRestart", async (_e, ack) => { await mayStop(ack); await node.restart(); return node.snapshot(); });
+ipcMain.handle("mcd:inFlight", async (_e, how, action) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now(), (currentLang(), lang.t)); return { title: w.title, message: w.message, any: w.any, ack: w.any && how !== "quit" && /^(restart|stop|kind)$/.test(String(action)) ? stopGuard.issue(action) : "" }; });   // ack: for that action's warning only (0.19.268, 0.19.287)
+// a patch is saved only once the guard let the restart go (0.19.287): asked first, saved after; a refusal changes nothing
+ipcMain.handle("mcd:nodeRestart", async (_e, ack, patch) => { await mayStop(ack, "restart"); if (patch) saveConfigPatch(patch); await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 // Logs, "Save to file" (the phone's Share): the text the screen shows, redacted again here, to a file the user chooses.
 ipcMain.handle("mcd:logsSave", async () => {   // the log files on disk through the scrubber (0.19.221), never text the window sends
@@ -422,7 +425,7 @@ ipcMain.handle("mcd:setNodeKind", async (_e, kind, ack) => {
   // A block wallet cannot move to a node jar that does not know block keys: say so before anything is saved.
   if (config.load().keyMode === "block" && !require("./keymode").jarSupportsBlock(path.join(path.dirname(node.jarPath()), k === "parlons" ? "parlons-node.jar" : "minima.jar")))
     throw new Error("This wallet uses block key uses, and that node cannot run it.");
-  await mayStop(ack);
+  await mayStop(ack, "kind");
   config.save({ nodeKind: k });
   chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
   await node.restart();

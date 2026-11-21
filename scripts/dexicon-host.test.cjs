@@ -1052,7 +1052,7 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8"));
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
   assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", async (e, a) => {') && main.includes("  return dexicon.command(a);\n});"));
-  assert.ok(/const inFlightWork = async \(\) => \(\{[^\n]*\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\)/.test(main) && /api\.inFlight\("shutdown"\)/.test(app), "the Shutdown and Quit warnings ask for takes awaiting an answer; a failed read is null (0.18.142: main/inflight.js)");
+  assert.ok(/const inFlightWork = async \(\) => \(\{[^\n]*\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\)/.test(main) && /api\.inFlight\("shutdown", action\)/.test(app), "the Shutdown and Quit warnings ask for takes awaiting an answer; a failed read is null (0.18.142: main/inflight.js)");
   // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
   assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));

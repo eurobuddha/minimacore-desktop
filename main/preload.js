@@ -40,8 +40,8 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeStop: (ack) => ipcRenderer.invoke("mcd:nodeStop", ack),
   freezeList: () => ipcRenderer.invoke("mcd:freezeList"),   // the frozen apps' ids (Apps tab)
   freezeSet: (id, on) => ipcRenderer.invoke("mcd:freezeSet", id, on),   // rejects with the reason when the app may not be frozen
-  inFlight: (how) => ipcRenderer.invoke("mcd:inFlight", how),   // what a Shutdown ("shutdown") or a Quit ("quit") would interrupt: { title, message, any }
-  nodeRestart: (ack) => ipcRenderer.invoke("mcd:nodeRestart", ack),   // ack: from inFlight, the warning was shown (0.19.268)
+  inFlight: (how, action) => ipcRenderer.invoke("mcd:inFlight", how, action),   // what a Shutdown ("shutdown") or a Quit ("quit") would interrupt: { title, message, any }
+  nodeRestart: (ack, patch) => ipcRenderer.invoke("mcd:nodeRestart", ack, patch),   // ack: from inFlight, the warning was shown (0.19.268)
   nodeReclaim: (ack) => ipcRenderer.invoke("mcd:nodeReclaim", ack),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
   logsSave: () => ipcRenderer.invoke("mcd:logsSave"),   // Logs, Save to file: the log files on disk, redacted again in the main process; resolves the path or null

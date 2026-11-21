@@ -73,7 +73,7 @@ test("wiring: one gather for Shutdown and Quit; the quit is asked before the nod
   const main = read("main/main.js"), pre = read("main/preload.js"), app = read("renderer/app.js");
   assert.match(main, /const inFlightWork = async \(\) => \(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\),\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\), casino: /);
   assert.equal((main.match(/inFlightWork/g) || []).length, 5, "defined once, used by mcd:inFlight (Shutdown), by before-quit (Quit), since 0.19.117 by the Freeze check of Dexicon (main/freeze.js) and since 0.19.268 by the guard of every node stop");
-  assert.match(pre, /inFlight: \(how\) => ipcRenderer\.invoke\("mcd:inFlight", how\)/); assert.match(app, /api\.inFlight\("shutdown"\)/);
+  assert.match(pre, /inFlight: \(how, action\) => ipcRenderer\.invoke\("mcd:inFlight", how, action\)/); assert.match(app, /api\.inFlight\("shutdown", action\)/);
   assert.ok(!/mcd:ppWork|mcd:dxWork/.test(main + pre), "the two reads the old Shutdown warning used are gone with it");
   const q = main.slice(main.indexOf('app.on("before-quit"'), main.indexOf("// ---- ", main.indexOf('app.on("before-quit"')) > 0 ? undefined : undefined);
   const order = ["if (quitting) return;", "e.preventDefault();", "inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === \"stopped\", gather: inFlightWork", "if (!go) return;", "quitting = true;", "await node.stop()", "app.quit();"].map((x) => q.indexOf(x));
@@ -141,10 +141,13 @@ test("stopGuard: with work in flight a stop goes on only with main's own one-tim
   let answer = false;
   const g = stopGuard({ running: () => running, gather: async () => work, ask: async (w) => { asked.push(w.title); return answer; }, log: (l) => logs.push(l), now: () => t });
   assert.equal(await g.pass(), false, "in flight, no ack: main asks, and a no keeps the node"); assert.equal(asked.length, 1); assert.match(logs[0], /pool transaction.*keep it running/);
-  answer = true; assert.equal(await g.pass("not one of main's"), true); assert.equal(asked.length, 2, "an ack main never issued is no ack");
-  answer = false; const a = g.issue(); assert.equal(await g.pass(a), true, "the warning the window showed"); assert.equal(asked.length, 2, "no second question");
-  assert.equal(await g.pass(a), false, "an ack works once"); assert.equal(asked.length, 3);
-  const b = g.issue(); t += ACK_MS + 1; assert.equal(await g.pass(b), false, "and only for two minutes");
+  answer = true; assert.equal(await g.pass("not one of main's", "restart"), true); assert.equal(asked.length, 2, "an ack main never issued is no ack");
+  answer = false; const a = g.issue("restart"); assert.equal(await g.pass(a, "restart"), true, "the warning the window showed"); assert.equal(asked.length, 2, "no second question");
+  assert.equal(await g.pass(a, "restart"), false, "an ack works once"); assert.equal(asked.length, 3);
+  // 0.19.287: an ack is for the one action its warning was asked for
+  const k = g.issue("stop"); assert.equal(await g.pass(k, "restart"), false, "a Shutdown ack opens no restart"); assert.equal(await g.pass(k, "stop"), false, "and is spent by that try");
+  asked.length = 3; const u = g.issue(); assert.equal(await g.pass(u, ""), false, "an ack named for no action opens nothing"); asked.length = 3;
+  const b = g.issue("restart"); t += ACK_MS + 1; assert.equal(await g.pass(b, "restart"), false, "and only for two minutes");
   work = IDLE; assert.equal(await g.pass(), true, "nothing in flight: no question"); assert.equal(asked.length, 4);
   const h = stopGuard({ running: () => true, gather: async () => { throw new Error("down"); }, ask: async (w) => { asked.push(w.message); return false; }, log() {}, now: () => t });
   assert.equal(await h.pass(), false, "what could not be checked is asked, never read as idle"); assert.match(asked[4], /Could not be checked/);
@@ -158,8 +161,8 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
   walk(sf);
   const names = ["mcd:nodeRestart", "mcd:nodeStop", "mcd:nodeReclaim", "mcd:setNodeKind", "mcd:wwEnableMegammr", "mcd:chatApplyBackup"];
   for (const allow of [false, true]) for (const name of names) {
-    const did = [], acks = [], h = {};
-    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async (ack) => { acks.push(ack); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
+    const did = [], acks = [], actions = [], h = {};
+    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async (ack, action) => { acks.push(ack); actions.push(action); if (!allow) throw new Error("The node keeps running: nothing was stopped."); }, saveConfigPatch: () => did.push("save"),
       node: { state: "running", stop: async () => did.push("stop"), start: async () => did.push("start"), restart: async () => did.push("restart"), snapshot: () => ({}), parlonsBlocker: () => "", jarPath: () => "/x/minima.jar" },
       config: { load: () => ({ params: {}, keyMode: "classic" }), save: () => did.push("save") }, chat: { stopLoop() {}, forgetIdentity() {}, init: async () => {} },
       pendingChatBackup: { contacts: [], messages: [], manifest: {} }, chatStore: { mergeBackup() {} }, fs: { mkdirSync() {}, writeFileSync() {}, renameSync() {} }, path, keetsKeypairFile: () => "/x/k", require };
@@ -169,10 +172,19 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
     else { await assert.rejects(h[name](...args), /nothing was stopped/, name); assert.deepEqual(did, [], name + ": nothing stopped and nothing saved"); }
     assert.equal(acks.length, 1, name + " asks the guard once");
     if (!/ww|chat/i.test(name)) assert.equal(acks[0], "ACK", name + " hands the window's ack to the guard");
+    assert.equal(actions[0], { "mcd:nodeRestart": "restart", "mcd:nodeStop": "stop", "mcd:nodeReclaim": "reclaim", "mcd:setNodeKind": "kind" }[name], name + ": the action its ack must have been issued for (0.19.287)");
+  }
+  // 0.19.287: a restart that carries the window's config patch saves it only once the guard let it go: asked first, saved after
+  for (const allow of [false, true]) {
+    const did = [], h = {};
+    new Function("env", "with (env) { " + calls["mcd:nodeRestart"] + "; }")({ ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
+      saveConfigPatch: (p) => did.push("save " + JSON.stringify(p)), node: { restart: async () => did.push("restart"), snapshot: () => ({}) } });
+    await h["mcd:nodeRestart"](null, "ACK", { contribute: true }).catch(() => {});
+    assert.deepEqual(did, allow ? ["ask", 'save {"contribute":true}', "restart"] : ["ask"], allow ? "saved after the guard, before the restart" : "refused: nothing saved");
   }
   assert.ok(/label: lang\.t\("Restart node"\), click: \(\) => \{ mayStop\(\)\.then\(\(\) => node\.restart\(\)\)/.test(src), "the tray's Restart node asks the guard first");
   assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command)); }"), "a Terminal resync asks the guard first");
-  assert.ok(/ack: w\.any && how !== "quit" \? stopGuard\.issue\(\) : ""/.test(calls["mcd:inFlight"]), "the ack is issued only with a warning that was shown");
+  assert.ok(calls["mcd:inFlight"].includes('ack: w.any && how !== "quit" && /^(restart|stop|kind)$/.test(String(action)) ? stopGuard.issue(action) : ""'), "the ack is issued only with a warning that was shown, for its one action");
 });
 
 // ---- 0.19.283: the Terminal's commands that stop the node at their end go through the same main-side stop guard ----

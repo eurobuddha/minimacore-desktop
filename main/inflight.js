@@ -117,18 +117,19 @@ async function decideQuit(d) {
  * only, and four paths had none. With the node running and anything in flight or not checkable (inFlight's any), a stop goes
  * on only with a one-time acknowledgement main issued with the warning the window showed (issue(), from mcd:inFlight; used
  * once, for ACK_MS), or after main's own question (d.ask(w), a message box). d = { running(), gather(), ask(w), log(line),
- * t() → the translator of the app's language, now(), waitMs }. pass(ack) → true: go on.
+ * t() → the translator of the app's language, now(), waitMs }. pass(ack, action) → true: go on.
  */
 const ACK_MS = 120000;
 function stopGuard(d) {
   const acks = new Map(), now = d.now || Date.now;
   return {
-    issue() { const a = require("crypto").randomBytes(16).toString("hex"); acks.set(a, now() + ACK_MS); return a; },
-    async pass(ack) {
-      const due = typeof ack === "string" ? acks.get(ack) : undefined; if (due !== undefined) acks.delete(ack);
-      for (const [a, until] of acks) if (until < now()) acks.delete(a);
+    // an ack is for ONE action, named when the warning was asked for (0.19.287: restart, stop, kind): it opens no other stop
+    issue(action) { const a = require("crypto").randomBytes(16).toString("hex"); acks.set(a, { until: now() + ACK_MS, action: String(action || "") }); return a; },
+    async pass(ack, action) {
+      const got = typeof ack === "string" ? acks.get(ack) : undefined; if (got !== undefined) acks.delete(ack);
+      for (const [a, e] of acks) if (e.until < now()) acks.delete(a);
       if (!d.running()) return true;
-      if (due !== undefined && due >= now()) return true;   // the user saw main's warning and chose to go on
+      if (got && got.until >= now() && got.action && got.action === String(action || "")) return true;   // the user saw main's warning for this action and chose to go on
       let work = null;
       try { work = await Promise.race([d.gather(), new Promise(r => setTimeout(() => r(null), d.waitMs || 5000))]); } catch (e) { work = null; }
       const at = now(), w = inFlight(work || {}, "shutdown", at, d.t ? d.t() : undefined);
