@@ -40,6 +40,12 @@ const WINDOW_DEPTH = 1024, GAP_MARGIN = 8, BACKFILL_CHUNK = 512;
 // already spent are lost past the tree. NODE_TREE_DEPTH: what the tree surely holds; NODE_TREE_MOST: what it may hold; ROOT_DEPTH:
 // a walk that reaches the root whatever the tree's length.
 const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
+// How many blocks a payment may be mined before its order and still pay it automatically (0.18.285). The buyer's app sends the order
+// message first and the payment only once the node has taken it (placeOrder here; the phone Shop's placeOrder sends the payment in the
+// order's onSent; a Retry is later still), so a real payment is never created before its order; the two are mined separately, and the
+// order coin (a sealed message of up to 90000 bytes) may land a few blocks after the payment. A payment older than that is held for a
+// check by hand, never refused outright.
+const PAY_BEFORE_ORDER = 3;
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
 
@@ -307,7 +313,7 @@ function cleanItems(raw) {
 // ---- routing an opened inbound message ----
 /** Where a second buyer's order with an already used reference is kept: the reference and that buyer's whole id. */
 function dupKey(ref, fromPublicId) { return ref + "~" + fromPublicId; }
-function routeIncoming(w, fromPublicId) {
+function routeIncoming(w, fromPublicId, coinBlock) {
   if (!w || typeof w !== "object" || w.from !== fromPublicId || !w.ref) return;   // envelope `from` must match the sealed sender (anti-spoof)
   if (typeof w.ref !== "string" || w.ref.length > 64) return;
   const date = typeof w.date === "number" && Number.isFinite(w.date) ? w.date : Date.now();
@@ -326,6 +332,7 @@ function routeIncoming(w, fromPublicId) {
       currency: tokenid === USDT_TOKEN ? "USDT" : "Minima",
       tokenid, shipping, delivery: str(w.delivery, 500), buyerPayaddr: str(w.buyerPayaddr, 90),
       paid: false, date, unread: true, note: str(w.message, 1000) };
+    if (Number.isSafeInteger(coinBlock) && coinBlock > 0) order.orderBlock = coinBlock;   // when the order reached the chain (0.18.285): see PAY_BEFORE_ORDER
     while (order.items.length && Buffer.byteLength(JSON.stringify(order)) > ORDER_MAX_BYTES) order.items.pop();   // the whole order stays bounded
     const chk = listing.check(own, { items: order.items, shipping, currency: buyerCurrency });
     // The same reference from a second buyer (0.18.208): it was dropped, and a payment carrying that reference was counted
@@ -374,7 +381,7 @@ async function scanOrders(depth, floor) {
     // One coin's message never stops the batch (0.18.163): a message that cannot be routed is logged and passed over.
     try {
       const opened = await sc.open(identity, blobHex); if (!opened || !opened.valid) continue;   // not for me / bad sig
-      routeIncoming(parseWire(opened.plaintext), opened.fromPublicId);
+      routeIncoming(parseWire(opened.plaintext), opened.fromPublicId, Number(c.created));   // the block of the coin that carried it (0.18.285)
       changed = true;
     } catch (e) { console.error("[miniMall] a message in coin " + id + " could not be read: " + String((e && e.message) || e).slice(0, 200)); }
   }
@@ -405,6 +412,11 @@ async function scanPayments(depth) {
     const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
     const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     seenPayCoins.add(id);
+    // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
+    // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
+    const pb = Number(c.created);
+    if (o.orderBlock && Number.isSafeInteger(pb) && pb > 0 && pb < o.orderBlock - PAY_BEFORE_ORDER)
+      store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
     const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
     if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }

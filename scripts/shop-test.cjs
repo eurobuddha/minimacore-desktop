@@ -630,6 +630,45 @@ test("past the tree: a cut orders read is retried and then said with the reply c
   assert.ok(Number(m.store.getMeta("bfTarget")) > 0, "a new gap registers, and one capped step does not end it: " + m.store.getMeta("bfStall"));
   assert.equal(Number(m.store.getMeta("bfStall")), 1, "counted from 0 for the new gap");
 });
+// 0.18.285: a payment's reference is plain text on chain; someone who copies it into an order of their own, while the real order is not
+// held here, must not have their order paid by another buyer's coin. A payment older than its order (beyond PAY_BEFORE_ORDER blocks)
+// holds the order for a check by hand; a real buyer always sends the order first
+test("an order whose payment is older than the order is held for a check by hand (a copied reference); a real order then payment still pays", async () => {
+  const sealAs = async (t, who, ref, created) => { const me = t.m.shop.myIdentity(); return { coinid: "0xAA" + Buffer.from(who.publicId.slice(0, 6) + ref).toString("hex"), created,
+    state: { "99": "0x" + await t.m.sc.seal(who, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref, randomid: ref + "a", from: who.publicId, to: me.publicId, date: 1, shopId: t.shopId, items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], amount: "1", currency: "Minima", shipping: "", delivery: "ATTACKER" }))) } }; };
+  const held = (m, payBlock) => { const o = m.store.order("ORD-X"); assert.ok(o && o.delivery === "ATTACKER", "the copier's order is the one held");
+    assert.equal(o.paid, false, "nobody is paid automatically"); assert.equal(o.status, "UNCHECKED");
+    assert.ok(o.problems.some(p => p.startsWith("a payment with this order's reference is older than the order (payment coin 0xFA" + Buffer.from("ORD-X").toString("hex") + " at block " + payBlock + ", the order at block ")), o.problems.join(" | ")); };
+  const run = async (name, fn) => { const t = await javaSetup(name); t.shopId = name; t.atk = await t.m.sc.deriveIdentity("attacker seed"); return fn(t); };
+  // the real order older than the tree at reopen, its payment unspent (root); the copier's order inside the tree
+  await run("atk1", async (t) => {
+    t.st.msg = [await t.seal("ORD-X", 1003), await sealAs(t, t.atk, "ORD-X", 2490)]; t.st.pay = [t.pay("ORD-X", 1005)];
+    const m = await t.reopen(); for (let i = 0; i < 6; i++) { t.st.tip = 2500 + i; await m.shop.scanOnce(); } held(m, 1005); });
+  // the copier's order lands during the backfill; the payment is a late one inside the first window
+  await run("atk2", async (t) => {
+    t.st.msg = [await t.seal("ORD-X", 1003)]; t.st.pay = [t.pay("ORD-X", 2400)];
+    const m = await t.reopen(); let first = true; t.st.hook = (d) => { if (first && d > 512) { first = false; return { status: true, response: { tooBig: true } }; } return null; };
+    t.st.tip = 2500; await m.shop.scanOnce(); t.st.msg.push(await sealAs(t, t.atk, "ORD-X", 2501));
+    for (let i = 1; i < 7; i++) { t.st.tip = 2500 + i; await m.shop.scanOnce(); } held(m, 2400); });
+  // the copier's order lands after the backfill, then the vendor closes again for long (the root read returns the old payment)
+  await run("atk3", async (t) => {
+    t.st.msg = [await t.seal("ORD-X", 1003)]; t.st.pay = [t.pay("ORD-X", 1500)];
+    let m = await t.reopen(); for (let i = 0; i < 6; i++) { t.st.tip = 2500 + i; await m.shop.scanOnce(); }
+    t.st.msg.push(await sealAs(t, t.atk, "ORD-X", t.st.tip)); for (let i = 0; i < 3; i++) { t.st.tip++; await m.shop.scanOnce(); }
+    m = await t.reopen(); for (let i = 0; i < 6; i++) { t.st.tip = 4500 + i; await m.shop.scanOnce(); } held(m, 1500); });
+  // a real order then its payment: same block, 1 to 3 blocks earlier by mining order, or later, pays; 4 blocks earlier is held
+  for (const [k, paid] of [[0, true], [1, true], [2, true], [3, true], [-5, true], [4, false]]) {
+    const t = await javaSetup("real" + (k + 10)); t.st.msg = [await t.seal("ORD-R", 1010)]; t.st.pay = [t.pay("ORD-R", 1010 - k)];
+    t.st.tip = 1020; await t.m.shop.scanOnce(); const o = t.m.store.order("ORD-R");
+    assert.equal(o.orderBlock, 1010, "the order coin's block is kept"); assert.equal(o.paid, paid, "payment " + k + " blocks before the order");
+    if (!paid) assert.equal(o.status, "UNCHECKED");
+  }
+  // an order stored before 0.18.285 has no block: unknown, so no hold (as before)
+  { const t = await javaSetup("legacy"); t.st.msg = [await t.seal("ORD-L", 1010)]; t.st.tip = 1011; await t.m.shop.scanOnce();
+    delete t.m.store.order("ORD-L").orderBlock; t.m.store.setMeta("x", 1); t.st.pay = [t.pay("ORD-L", 1003)]; const m = await t.reopen(); t.st.tip = 1012; await m.shop.scanOnce();
+    assert.equal(m.store.order("ORD-L").orderBlock, undefined);
+    assert.equal(m.store.order("ORD-L").paid, true, "no block: paid as before"); }
+});
 // (5) 0.18.277: the unread notice is shown only with a shop, and can be dismissed (the fact stays in the log)
 test("the unread notice: only for someone with a shop, dismissable, shown again for a newer one", async () => {
   const t = await javaSetup("notice"); const m = t.m;
