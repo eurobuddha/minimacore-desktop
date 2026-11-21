@@ -44,11 +44,17 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     return s || "0";
   };
   /** a book size, cut: "k" from 1000 (the panel's fmtAbbrev) */
-  const abbrev = (v) => { v = Number(v); if (!(v > 0)) return "—"; const trim = (x) => { const f = Math.pow(10, x < 10 ? 2 : 1); return (Math.floor(x * f) / f).toString(); }; return v >= 1000 ? trim(v / 1000) + "k" : trim(v); };
+  // cut from the exact decimal text (0.19.297: Math.floor(0.29 * 100) / 100 is 0.28); thousands by moving the point, not by dividing
+  const abbrev = (v) => {
+    const t = plainNum(v); if (!t || t[0] === "-" || !(Number(t) > 0)) return "—";
+    if (Number(t) < 1000) return cut(t, Number(t) < 10 ? 2 : 1);
+    const [i, f = ""] = t.split("."), k = i.slice(0, -3) + "." + i.slice(-3) + f;
+    return cut(k, Number(k) < 10 ? 2 : 1) + "k";
+  };
   /** an amount for display, CUT to dp decimals from its exact decimal text, never rounded (0.19.256: it was rounded to nine decimals first) */
   const cut = (n, dp) => { const t = plainNum(n); if (!t) return String(Number(n)); const i = t.indexOf("."); return ((i < 0 ? t : t.slice(0, i + 1 + (dp == null ? 6 : dp))).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0").replace(/^-0$/, "0"); };   // never "-0"
   /** the panel's ax6: the live estimate, floored to 6 decimals */
-  const ax6 = (x) => (isFinite(x) && x > 0 ? String(Math.floor(x * 1e6) / 1e6) : "");
+  const ax6 = (x) => (isFinite(x) && x > 0 ? cut(x, 6) : "");   // cut from the exact text (0.19.297: Math.floor(x * 1e6) could cut one below)
   /** A typed amount as a plain number text. A comma or a second point is never read as anything ("" = no amount):
    *  stripping the comma made "1,5" fifteen (0.18.121; the Exchange ticket's rule is DexCore.entryProblem). */
   const cleanNum = (v) => (/,|\..*\./.test(String(v)) ? "" : String(v).replace(/[^0-9.]/g, ""));

@@ -751,3 +751,10 @@ test("AtomiX: the main process's sentences reach the screen through MainSaid, in
     assert.equal(AXm.mx("You locked 100 mxUSDT for USDT"), "You locked 100 MxUSD for USDT", "an engine sentence keeps its token mapping");
   } finally { I18N.set("en"); }
 });
+
+// ---- 0.19.297: sizes and the live estimate are cut from the exact decimal text, never one below by a float floor ----
+test("abbrev and ax6 cut from the exact decimal text: 0.29 stays 0.29; thousands keep their digits", () => {
+  assert.equal(AX.abbrev(0.29), "0.29"); assert.equal(AX.abbrev(9.999), "9.99"); assert.equal(AX.abbrev(12.34), "12.3"); assert.equal(AX.abbrev(2900), "2.9k"); assert.equal(AX.abbrev(1234.5), "1.23k");
+  assert.equal(AX.abbrev(56789), "56.7k"); assert.equal(AX.abbrev(0), "—"); assert.equal(AX.abbrev(-1), "—"); assert.equal(AX.abbrev("x"), "—");
+  assert.equal(AX.ax6(0.29), "0.29"); assert.equal(AX.ax6(1.0000009), "1"); assert.equal(AX.ax6(0.1234567), "0.123456"); assert.equal(AX.ax6(0), ""); assert.equal(AX.ax6(NaN), "");
+});
