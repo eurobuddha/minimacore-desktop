@@ -82,6 +82,25 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     m._resetEthCaches();
   });
 
+  await okA("the database file: 0 bytes opens fresh, content that is not SQLite is refused, no tables writes nothing, saves are synced, a disposed one never writes (0.19.245)", async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "axsql2-")), f = path.join(d, "x.sqlite");
+    fs.writeFileSync(f, ""); const s0 = await makeSqlShim(f);   // what sql.js writes for a database with no tables
+    assert.equal(s0.flush(), true); assert.equal(fs.readFileSync(f).length, 0, "a flush with no tables writes nothing");
+    fs.rmSync(f); const s1 = await makeSqlShim(f); assert.equal(s1.flush(), true); assert.ok(!fs.existsSync(f), "no 0-byte file is created");
+    fs.writeFileSync(f, "x".repeat(4096)); await assert.rejects(makeSqlShim(f), /is damaged \(not an SQLite file\)/); assert.equal(fs.readFileSync(f, "utf8"), "x".repeat(4096), "left as it is");
+    fs.rmSync(f); const s2 = await makeSqlShim(f); s2.sql("CREATE TABLE t (a int)"); s2.sql("INSERT INTO t VALUES (7)"); assert.equal(s2.flush(), true);
+    const s3 = await makeSqlShim(f); assert.equal(s3.sql("SELECT a FROM t").rows[0].A, 7, "a real file reopens");
+    s3.sql("INSERT INTO t VALUES (8)"); s3.dispose(); await new Promise(r => setTimeout(r, 600));
+    assert.equal((await makeSqlShim(f)).sql("SELECT count(*) AS n FROM t").rows[0].N, 1, "a disposed database's pending save is never written");
+    assert.equal(s3.flush(), false, "nor any later one");
+    const s4 = await makeSqlShim(f); s4.sql("INSERT INTO t VALUES (9)"); await new Promise(r => setTimeout(r, 600));
+    assert.equal((await makeSqlShim(f)).sql("SELECT count(*) AS n FROM t").rows[0].N, 2, "the debounced save writes");
+    const src = fs.readFileSync(path.join(__dirname, "..", "main", "pandapools", "sqlshim.js"), "utf8");
+    assert.ok(/writeTimer = null; flushChecked\(\);/.test(src) && /fs\.fsyncSync\(fd\)/.test(src) && /fs\.fsyncSync\(dfd\)/.test(src), "the debounced save is the synced one; file and folder are synced");
+    const ax = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8"), pp = fs.readFileSync(path.join(__dirname, "..", "main", "pandapools.js"), "utf8");
+    assert.ok(!/shim\.flush\(\); \} catch \(e\) \{\} return; \}/.test(ax) && /if \(sqlShim\) sqlShim\.dispose\(\);/.test(ax) && /storage\.dispose\(\);/.test(pp), "a disowned database is disposed, not flushed");
+  });
+
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
   // HERMETIC since 0.18.140. It used to run `docker exec` into a fixed container name for the crypto-bearing
   // commands; on the owner's machine that container is a wallet with real funds, and this "unit" check read its

@@ -230,11 +230,11 @@ async function init() {
   if (!firstTry) firstTry = Date.now();
   initPromise = (async () => {
     const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"));
-    if (gen !== generation) { try { shim.flush(); } catch (e) {} return; }   // invalidated mid-init → drop it
+    if (gen !== generation) { try { shim.dispose(); } catch (e) {} return; }   // invalidated mid-init → drop it, never written (0.19.245)
     sqlShim = shim;
     ctx = createContext(buildMds());
     gateEngine(ctx);
-    if (gen !== generation) { ctx = null; sqlShim = null; return; }           // invalidated during context build
+    if (gen !== generation) { try { shim.dispose(); } catch (e) {} ctx = null; sqlShim = null; return; }   // invalidated during context build
     ready = true; initError = "";
     fire("inited");            // service.js tryBoot: trust preflight → vault/seedrandom → engines → poll.
   })().catch(e => { if (gen === generation) { initError = String((e && e.message) || e || "it did not start"); initPromise = null; ready = false; } log("init failed: " + e.message); throw e; });
@@ -378,6 +378,7 @@ function invalidate() {
   stopLoop();
   require("./reserve").releaseOwner("atomix");
   flush();
+  try { if (sqlShim) sqlShim.dispose(); } catch (e) {}   // the old wallet's database never writes again (0.19.245: a pending save of it would land in the new wallet's file)
   // A store that cannot be moved aside is OWED (0.19.243): the engine does not start (init throws) until it is, else the
   // new wallet's engine would open the old wallet's swap records; and the failure is said to the caller.
   let moveFailed = null;

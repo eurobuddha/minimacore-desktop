@@ -171,6 +171,7 @@ async function invalidate() {
   if(storage){
     const r=storage.sql("UPDATE pp_ownpools SET signing_unverified=1");
     if(!r.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine stopped; resolve storage before restarting.");
+    try{storage.dispose();}catch(e){}   // the old engine's database never writes again (0.19.245): a late save of it would overwrite the next engine's
     quarantineRequired=false;
   }
   // a store that could not be opened belongs to the old wallet too: kept under its dated name, and the engine starts empty (0.18.137)
