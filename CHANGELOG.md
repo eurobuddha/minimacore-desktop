@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.205] — miniMall vendor: the payout address stays and every published one is read
+
+- On every start the vendor side asked the node for an address (`getaddress` gives one of the wallet's default addresses at random) and read payments only at that one, while buyers pay the address written in the published .shop: after a restart their payments went unseen. The vendor address is now kept once chosen, and the payment scan (and coin notification) covers every distinct payout address of the shops made on this computer. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.204] — Web Wallet: a failed read never decides the send path
 
 - Whether an entered seed is the node's own wallet decides how a Web Wallet send is signed. A failed `keys action:list` answered "not the node's key" and a locked vault "no seed phrase", so the node's own seed could go down the foreign path and sign at the wrong key use. Either read failing now refuses: "Could not tell whether this is the node's own wallet … Nothing was sent." Test: `scripts/inject-test.cjs`.

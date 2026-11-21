@@ -73,10 +73,13 @@ async function init() {
     identity = await sc.deriveIdentity(seed);
     config.setSecret(sc.serializeIdentity(identity), SHOP_KEY_ACCOUNT);
   }
-  try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; vendorAddress = gr.miniaddress || gr.address || ""; if (vendorAddress) store.setMeta("vendorAddress", vendorAddress); } catch (e) {}
-  if (!vendorAddress) vendorAddress = store.getMeta("vendorAddress") || "";
+  // The address buyers pay is the one in the published .shop (0.18.205): it is kept once chosen. `getaddress` gives one of
+  // the wallet's default addresses at random, and asking it on every start moved the address the scan read, so payments
+  // to the published one went unseen after a restart.
+  vendorAddress = store.getMeta("vendorAddress") || "";
+  if (!vendorAddress) { try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; vendorAddress = gr.miniaddress || gr.address || ""; if (vendorAddress) store.setMeta("vendorAddress", vendorAddress); } catch (e) {} }
   if (!store.getMeta("cn:merch")) { try { await nodeCmd("coinnotify action:add address:" + MINIMERCH); store.setMeta("cn:merch", true); } catch (e) {} }
-  if (vendorAddress && !store.getMeta("cn:pay:" + vendorAddress)) { try { await nodeCmd("coinnotify action:add address:" + vendorAddress); store.setMeta("cn:pay:" + vendorAddress, true); } catch (e) {} }
+  for (const a of payAddresses()) if (!store.getMeta("cn:pay:" + a)) { try { await nodeCmd("coinnotify action:add address:" + a); store.setMeta("cn:pay:" + a, true); } catch (e) {} }
   return identity;
 }
 /** On seed change (wallet restore) → drop the cached shop identity + local orders (different identity). */
@@ -84,6 +87,11 @@ function invalidateIdentity() {
   config.deleteSecret(SHOP_KEY_ACCOUNT);
   identity = null; vendorAddress = ""; backfilled = false; seenMsgCoins.clear(); seenPayCoins.clear();
   try { store.clear(); } catch (e) {}
+}
+/** Every address a buyer may pay: this app's vendor address and the payout address of each shop I made. */
+function payAddresses() {
+  const all = [vendorAddress].concat(store.shops().map(x => x && x.vendorAddress));
+  return [...new Set(all.filter(a => typeof a === "string" && looksLikeMinimaAddress(a)))];
 }
 function myIdentity() { return identity ? { publicId: identity.publicId, vendorAddress } : null; }
 /** The Vendor Card the customer pastes into a shop-config: "0x<publicId>|<vendorAddress>" (native format). */
@@ -295,8 +303,12 @@ async function scanOrders(depth) {
   return changed;
 }
 async function scanPayments(depth) {
-  if (!vendorAddress) return false;
-  const listed = await coinsAt(vendorAddress, depth, " relevant:true"); if (!listed) return false;
+  const addrs = payAddresses(); if (!addrs.length) return false;
+  const listed = [], have = new Set();
+  for (const a of addrs) {   // every published payout address (0.18.205), one coin once
+    const got = await coinsAt(a, depth, " relevant:true"); if (!got) continue;
+    for (const c of got) if (c && c.coinid && !have.has(c.coinid)) { have.add(c.coinid); listed.push(c); }
+  }
   capSeen();
   // Oldest first (0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one
   // block the larger coin first, so the remainder comes last.

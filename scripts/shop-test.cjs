@@ -239,7 +239,7 @@ test("vendor: a phone-placed order to my shop is checked against my listing and 
 const freshModules = () => { for (const k of Object.keys(require.cache)) if (k.includes(path.join(__dirname, "..", "main"))) delete require.cache[k];
   return { store: require("../main/shop-store"), shop: require("../main/shop"), sc: require("../main/shopcrypto") }; };
 test("H1: after a restart the backfill does not count the same payment coin again (a half-paid order stays half paid)", async () => {
-  let m = freshModules();
+  let m = freshModules(); m.store.setMeta("vendorAddress", "");   // this test names its own vendor address (0.18.205 keeps a stored one)
   m.store.saveShop({ shopId: "half", shopName: "Half", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] }); m.store.flush();
   const VADDR = "MxG0" + "C".repeat(56); let pay = [], msg = [];
   const runner = async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
@@ -356,6 +356,7 @@ test("'__proto__' as a shop id, an order ref or a chat id finds nothing and writ
 // ---- 0.18.185: dust is judged again later; payments are read oldest first ----
 test("a 9.95 payment and a 0.05 top-up pay a 10 order, in either order and in one scan or two; 5000 dust coins write nothing", async () => {
   const m = freshModules(); const VADDR = "MxG0" + "F".repeat(56);
+  m.store.setMeta("vendorAddress", "");   // this test names its own vendor address (0.18.205 keeps a stored one)
   m.store.saveShop({ shopId: "topup", shopName: "T", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
   let pay = [], msg = [];
   m.shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
@@ -392,7 +393,7 @@ test("a 9.95 payment and a 0.05 top-up pay a 10 order, in either order and in on
 // ---- 0.18.190: an order's dust counts together once it covers what is still due ----
 test("9.9 + 0.05 + 0.05 pays a 10 order in any order and across a restart; a flood of dust that never covers the remainder writes nothing", async () => {
   const VADDR = "MxG0" + "9".repeat(56);
-  let m = freshModules(), pay = [], msg = [];
+  let m = freshModules(), pay = [], msg = []; m.store.setMeta("vendorAddress", "");   // this test names its own vendor address (0.18.205 keeps a stored one)
   const runner = () => async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
     : c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: msg } : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] };
   m.store.saveShop({ shopId: "dust3", shopName: "D", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
@@ -443,4 +444,25 @@ test("one currency mapping; a coin is never counted twice by its order even afte
   m.store.clear();
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop-store.js"), "utf8").replace(/\r\n/g, "\n");
   assert.ok(/function clear\(\) \{[^\n]*PENDING_DUST\.clear\(\);/.test(src) && /const COUNTED_MAX = 5000,/.test(src));
+});
+
+// ---- 0.18.205: the vendor address stays; every published payout address is read ----
+test("vendor: the address buyers pay stays the same across restarts, and payments to any shop's published address are seen", async () => {
+  let m = freshModules(); m.store.clear(); m.store.flush();
+  const A0 = "MxG0" + "0".repeat(56), A1 = "MxG0" + "1".repeat(56), A2 = "MxG0" + "2".repeat(56);
+  let next = A1; const asked = [];
+  const runner = () => async (c) => { asked.push(c); return c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed h1" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: next } }
+    : c.startsWith("coins address:" + A0) ? { status: true, response: [{ coinid: "0xAD01", tokenid: "0x00", amount: "10", created: 1, state: { "1": "0x" + Buffer.from("ORD-ADDR").toString("hex") } }] } : { status: true, response: [] }; };
+  m.shop._setRunner(runner()); await m.shop.init();
+  assert.equal(m.shop.myIdentity().vendorAddress, A1);
+  m.store.saveShop({ shopId: "addr", shopName: "A", currency: "Minima", vendorAddress: A0, products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  m.store.upsertOrder({ ref: "ORD-ADDR", role: "sell", shopId: "addr", amount: "10", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], shipping: "" });
+  m.store.flush();
+  m = freshModules(); next = A2; asked.length = 0; m.shop._setRunner(runner()); await m.shop.init();
+  assert.equal(m.shop.myIdentity().vendorAddress, A1, "not moved to a new random default address on restart");
+  assert.ok(!asked.some(c => c.startsWith("getaddress")), "not even asked");
+  assert.ok(asked.includes("coinnotify action:add address:" + A0), "the shop's published address is watched too");
+  await m.shop.scanOnce();
+  assert.ok(asked.some(c => c.startsWith("coins address:" + A0)) && asked.some(c => c.startsWith("coins address:" + A1)), "both read");
+  assert.equal(m.store.order("ORD-ADDR").paid, true, "a payment to the published address is seen");
 });
