@@ -277,3 +277,17 @@ test("a send that repeats amount, tokenid, address or fromaddress is refused bef
     assert.throws(() => run(V, c), /^Error: This send names (amount|address|tokenid) more than once \(the node would use only the last\)\. Write each once\.$/, c);
   for (const c of ["send amount:1 address:0xA", "sendpoll action:list action:remove", "txnoutput id:a amount:1 amount:2"]) assert.doesNotThrow(() => run(V, c), c);
 });
+
+// ---- 0.19.236: the Wallet names a token by its id, never by the name its creator wrote on the chain ----
+test("token names on the Wallet: Minima and MxUSD by their ids; any other token its name and whole id; a name imitating them, the id alone; stored names untouched", () => {
+  const ctx = { window: {} }; require("vm").runInNewContext(fs.readFileSync(path.join(__dirname, "..", "renderer", "tokenicons.js"), "utf8"), ctx);
+  const TOK = ctx.window.TOK, FAKE = "0x" + "FA".repeat(32);
+  assert.equal(TOK.label(null, "0x00"), "Minima"); assert.equal(TOK.label({ name: "Something" }, MXUSD), "MxUSD"); assert.equal(TOK.label(null, MXUSD.toLowerCase()), "MxUSD");
+  assert.equal(TOK.label({ name: "Gold" }, FAKE), "Gold (" + FAKE + ")"); assert.equal(TOK.label({ name: { name: "Gold" } }, FAKE), "Gold (" + FAKE + ")");
+  for (const fake of ["MxUSD", "mxusd", "MxUSDT", "MхUSD", "MINIMA", "Minima", "M1nima", "Mіnima", "USD", "Mx​USD", "ＭxUSD"]) assert.equal(TOK.label({ name: fake }, FAKE), FAKE, JSON.stringify(fake) + " shows the id alone");
+  assert.equal(TOK.label("Gold", FAKE), "Gold (" + FAKE + ")", "a name already stored (History) is labelled the same way");
+  assert.equal(TOK.tokenName({ name: "MxUSD" }, FAKE), "MxUSD", "the stored / exported name is not changed");
+  for (const site of ['<span class="balrow__name">${esc(TOK.label(b.token, tid))}</span>', 'SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.label(b.token, b.tokenid),', 'l1 = sign + TOK.tidyAmount(r.amount) + "  " + TOK.label(r.tokenName, r.tokenid);'])
+    assert.ok(app.includes(site), site);
+  assert.ok(app.includes("return [histDate(r.time), histType(r), r.direction || \"\", TOK.tidyAmount(r.amount), r.tokenName,"), "the CSV keeps the stored name");
+});

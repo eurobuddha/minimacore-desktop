@@ -1509,7 +1509,7 @@ function balCardHtml(b) {
   return `<div class="balrow" data-tokenid="${esc(tid)}" tabindex="0" role="button">
     ${iconCell}
     <div class="balrow__main">
-    <div class="balrow__top"><span class="balrow__name">${esc(TOK.tokenName(b.token, tid))}</span><span class="balrow__amt">${esc(summaryAmount(free))}</span></div>
+    <div class="balrow__top"><span class="balrow__name">${esc(TOK.label(b.token, tid))}</span><span class="balrow__amt">${esc(summaryAmount(free))}</span></div>
     ${parts.length ? `<div class="bal-breakdown">${esc(parts.join("  ·  "))}</div>` : ""}
     </div>
   </div>`;
@@ -1582,7 +1582,7 @@ function safeLinkRow(label, url) {
 async function showTokenDetail(b) {
   const tid = b.tokenid || MINIMA;
   const isNative = tid === MINIMA;
-  const name = TOK.tokenName(b.token, tid);
+  const name = TOK.label(b.token, tid);   // by its id (0.19.236)
   const nft = isNftBal(b);
   const sendable = b.sendable || "0";
   const locked = decSub(b.confirmed || "0", sendable);
@@ -1708,7 +1708,7 @@ document.addEventListener("keydown", modalTab, true);
  * is shortened. A coin opens its full detail. Split and Consolidate, the desktop's own, are two buttons here.
  */
 async function showCoins(b) {
-  const tid = b.tokenid || MINIMA, isNative = tid === MINIMA, name = TOK.tokenName(b.token, tid);
+  const tid = b.tokenid || MINIMA, isNative = tid === MINIMA, name = TOK.label(b.token, tid);
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0", locked = decSub(confirmed, sendable);
   await loadHeld();
   const head = t("sendable {amount}", { amount: TOK.tidyAmount(freeOf(b)) }) + (heldLine(tid) ? `  ·  ${heldLine(tid)}` : "") + (locked !== "0" ? "  ·  " + t("locked {amount}", { amount: TOK.tidyAmount(locked) }) : "") + "  ·  " + t("confirmed {amount}", { amount: TOK.tidyAmount(confirmed) });
@@ -2235,7 +2235,7 @@ function histRowHtml(r) {
     l1 = r.kind === "split" ? t("Split · {n} coins", { n: r.outCount }) : t("Consolidation · {n} coins", { n: r.inCount });
   else {
     const sign = r.direction === "in" ? "+" : r.direction === "out" ? "−" : "";
-    l1 = sign + TOK.tidyAmount(r.amount) + "  " + r.tokenName;
+    l1 = sign + TOK.tidyAmount(r.amount) + "  " + TOK.label(r.tokenName, r.tokenid);
   }
   const who = labelFor(r.counterparty) || r.counterparty, tag = histOwnership(r.counterparty);
   const l2 = [who, tag && t(tag), histWhen(r.time)].filter(Boolean).join("  ·  ");
@@ -2274,7 +2274,7 @@ function tradeCounter(r) {
   const tid = Object.keys(d).find(t => t !== MINIMA && !/^-?0*\.?0*$/.test(String(d[t])));
   if (!tid) return null;
   const coin = (r.inputs || []).concat(r.outputs || []).find(c => c.tokenid === tid);
-  return { amt: String(d[tid]).replace(/^-/, ""), name: TOK.tokenName(coin && coin.token, tid) };
+  return { amt: String(d[tid]).replace(/^-/, ""), name: TOK.label(coin && coin.token, tid) };
 }
 function showHistoryDetail(r) {
   const timeStr = r.time ? new Date(r.time).toLocaleString() : "unknown";
@@ -2283,7 +2283,7 @@ function showHistoryDetail(r) {
   const deltas = Object.keys(r.difference || {}).map(t => `${esc(TOK.shortId(t))}: ${esc(TOK.tidyAmount(r.difference[t]))}`).join("<br>") || "none";
   // Each coin: amount + token → address, with the coinid and any state variables when present.
   const bd = (list) => (list && list.length ? list.map(c => {
-    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.tokenName(c.token, c.tokenid))} → ${idHtml(c.address)}`;
+    let line = `• ${esc(TOK.tidyAmount(c.amount))} ${esc(TOK.label(c.token, c.tokenid))} → ${idHtml(c.address)}`;
     if (c.coinid) line += ` <span class="hist-dim">${idHtml(c.coinid)}</span>`;
     if (c.state && c.state.length) line += c.state.map(s => `<br>&nbsp;&nbsp;<span class="hist-dim">[${esc(String(s.port))}] ${esc(String(s.data))}</span>`).join("");
     return line;
@@ -3053,7 +3053,7 @@ async function renderSend() {
   // token dropdown source — the wallet's held coins/tokens (MINIMA first). No raw token-id typing.
   const bal = await tryCmd("balance") || [];
   await loadHeld();   // sendable here is what the WALLET can send: less what AtomiX, PandaPools and Dexicon hold
-  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.tokenName(b.token, b.tokenid), sendable: freeOf(b), held: heldLine(b.tokenid || MINIMA),
+  SEND_TOKENS = bal.map(b => ({ tokenid: b.tokenid || MINIMA, name: TOK.label(b.token, b.tokenid), sendable: freeOf(b), held: heldLine(b.tokenid || MINIMA),
     ticker: (b.tokenid || MINIMA) === MINIMA ? "MINIMA" : (TOK.ticker(b.token) || "") }));
   if (!SEND_TOKENS.some(t => t.tokenid === MINIMA)) SEND_TOKENS.unshift({ tokenid: MINIMA, name: "Minima", sendable: "0", ticker: "MINIMA" });
   SEND_TOKENS.sort((a, b) => (a.tokenid === MINIMA ? -1 : b.tokenid === MINIMA ? 1 : 0));

@@ -12,7 +12,7 @@ function source(name) {
   return /\{$/.test(m[1].replace(/\s+\/\/.*$/, "")) ? app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2) : m[1];
 }
 const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-const TOK = { tidyAmount: (s) => { s = String(s == null ? "" : s); return s.indexOf(".") < 0 ? s : s.replace(/0+$/, "").replace(/\.$/, ""); }, tokenName: (t, id) => (id === "0x00" ? "Minima" : "MxUSD") };
+const TOK = { tidyAmount: (s) => { s = String(s == null ? "" : s); return s.indexOf(".") < 0 ? s : s.replace(/0+$/, "").replace(/\.$/, ""); }, tokenName: (t, id) => (id === "0x00" ? "Minima" : "MxUSD"), label: (t, id) => (id === "0x00" ? "Minima" : "MxUSD") };   // label: the screens name a token by its id (0.19.236)
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // a stand-in element: remembers what was put in it; a list hands back one row per data-i it was given

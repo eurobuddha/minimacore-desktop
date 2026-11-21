@@ -106,6 +106,27 @@
     return shortId(tokenid);
   }
 
+  /**
+   * What a token is CALLED on the Wallet's screens (0.19.236): by its id, not by the name its creator wrote on the chain.
+   * Minima and MxUSD (their real ids) by those names; any other token: its name and its whole id; a name that imitates
+   * Minima or MxUSD (after folding look-alike letters) is not shown at all, only the id. Stored values, CSV and JSON are
+   * untouched (tokenName). token: the node's token object, or a name already stored.
+   */
+  var MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  var LOOK = { "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y", "\u0445": "x", "\u0456": "i", "\u0458": "j", "\u04bb": "h", "\u0501": "d", "\u043c": "m", "\u0442": "t", "\u043d": "h", "\u0438": "n",
+    "\u03b1": "a", "\u03bf": "o", "\u03c1": "p", "\u03c5": "u", "\u03bd": "v", "\u03b9": "i", "\u03ba": "k", "\u03bc": "m", "\u0131": "i", "0": "o", "1": "i", "$": "s" };
+  function skeleton(n) {
+    return String(n || "").normalize("NFKD").replace(/[\u0300-\u036f\p{Cf}\p{Cc}\u2800]/gu, "").toLowerCase().replace(/./gu, function (ch) { return LOOK[ch] || ch; }).replace(/[^a-z]/g, "");
+  }
+  function label(token, tokenid) {
+    var id = String(tokenid || MINIMA);
+    if (id === MINIMA) return "Minima";
+    if (id.toLowerCase() === MXUSD.toLowerCase()) return "MxUSD";
+    var n = tokenName(token, id), k = skeleton(n);
+    if (!n || n === id || /minima|mxusd|usd/.test(k)) return id;
+    return n + " (" + id + ")";
+  }
+
   function tidyAmount(s) {
     s = String(s == null ? "" : s);
     if (s.indexOf(".") < 0) return s;
@@ -121,6 +142,7 @@
     resolveIcon: resolveIcon,
     identiconDataUri: identiconDataUri,
     tokenName: tokenName,
+    label: label,
     tidyAmount: tidyAmount,
     shortId: shortId
   };
