@@ -234,7 +234,7 @@ class NodeManager extends EventEmitter {
     }
 
     // Additional raw args, appended verbatim (quote-aware split).
-    for (const tok of tokenizeArgs(cfg.extraArgs)) args.push(tok);
+    for (const tok of tokenizeArgs(cfg.extraArgs)) if (!require("../renderer/params.js").mdsArg(tok)) args.push(tok);   // never MDS (0.18.221)
     return args;
   }
 
@@ -259,6 +259,7 @@ class NodeManager extends EventEmitter {
     for (const tok of tokenizeArgs(cfg.extraArgs)) {
       const key = tok.replace(/^-+/, "").toLowerCase();
       if (tok.startsWith("-") && PARLONS_REFUSED.has(key)) continue;
+      if (require("../renderer/params.js").mdsArg(tok)) continue;   // never MDS (0.18.221)
       flags.push(/\s/.test(tok) ? q(tok) : tok);
     }
     // keets transport, same as the minima kind: app-managed sidecar path + runtime.

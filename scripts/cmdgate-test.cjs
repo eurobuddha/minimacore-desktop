@@ -344,3 +344,25 @@ test("a value the node pastes, unquoted, into its own second command is refused 
     assert.equal(G.repasted(c), "", c);
   assert.equal(await G.checkCommand("reset action:chainsync archivefile:C:\\backup\\a.gz", io), "reset action:chainsync archivefile:C:\\backup\\a.gz");
 });
+
+// ---- 0.18.221 (as Pandamonium Desktop 0.19.291): no second command smuggled in through an escape; mds accept and a multisig spend not run ----
+test("an escaped semicolon or control character smuggles no second command; mds accept and a multisig spend are not run from the Terminal; ordinary JSON states still run", async () => {
+  const V = require("../main/cmdverb"), SC = "\\u003b";
+  const sent = [], io = { take: () => true, running: () => true, pin: async (c) => { sent.push(c); return c; } };
+  const refused = [
+    ['sendfrom fromaddress:0x01 address:0x02 amount:0.0001 script:"RETURN TRUE" privatekey:0x00 keyuses:1 state:{"1":"[a' + SC + 'send address:0xATT amount:500 tokenid:0x00' + SC + 'b]"}', /escape code/],
+    ['multisig action:create amount:1 required:1 publickeys:["0x' + SC + 'rpc action:adduser username:a password:b mode:write' + SC + 'xxxx"]', /escape code/],
+    ['send amount:1 address:0xA state:{"0":"a\\u000Aphrase:x"}', /escape code/], ['txnstate id:x port:1 value:{"a":"\\u003B"}', /escape code/],
+    ["mds action:accept uid:0x01", /mds action:accept runs a MiniDapp's waiting command/], ["multisig action:spend id:abc amount:1 address:0x02", /multisig spend copies the coin's state/], ["multisigread action:spend data:0x01", /multisig spend/],
+    ["sendfrom fromaddress:0x01 address:0x02 address:0x03 amount:1 privatekey:0x00 keyuses:1", /names address more than once/], ["sphincs action:transaction amount:1 amount:2", /names amount more than once/],
+    ["sendpoll action:list action:remove", /names action more than once/]];
+  for (const [c, why] of refused) await assert.rejects(G.checkCommand(c, io), why, c);
+  assert.deepEqual(sent, [], "none reached the node");
+  for (const c of ['send amount:1 address:0xA state:{"0":"hello"}', 'txnstate id:x port:1 value:"[hello world]"', 'send amount:1 address:0xA state:{"0":"caf\\u00e9"}', "txnoutput id:a amount:1 amount:2", "mds action:pending"]) { sent.length = 0; await G.checkCommand(c, io); assert.deepEqual(sent, [c], c); }
+  await assert.rejects(G.create(SYS({ confirm: async () => { throw new Error("no question"); } })).arm('vault action:seed password:"a' + SC + 'b"', "SHOW SEED"), /escape code/, "refused before the gate asks");
+  assert.throws(() => require("../main/rpc").oneCommand('send state:{"1":"' + SC + '"}'), /escape code/, "and for a command the app builds");
+  for (const v of ["sphincs", "sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread"]) assert.match(V.unclear(v + ' x:"a"b'), /differently from how it is written/, v + " is a sensitive verb");
+  // no MDS: refused in the extra node arguments, and never passed to either node kind
+  const P = require("../renderer/params.js"); assert.equal(P.mdsArg("-mdsenable"), "-mdsenable"); assert.equal(P.mdsArg('-p2pnodes x "-MDSPASSWORD=y"'), "-mdspassword"); assert.equal(P.mdsArg("-test -nop2p"), "");
+  assert.ok(rd("main/config.js").includes("const mds = PARAMS.mdsArg(cfg.extraArgs);") && (rd("main/node-manager.js").match(/require\("\.\.\/renderer\/params\.js"\)\.mdsArg\(tok\)/g) || []).length === 2, "config refuses it, both node kinds skip it");
+});

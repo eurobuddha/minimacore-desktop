@@ -79,6 +79,7 @@ function rpcCall(port, secret, command) {
  */
 function oneCommand(command) {
   if (String(command).includes(";")) throw new Error("This command holds \";\", which would start a second command. Nothing was sent.");
+  const esc = V.smuggled(command); if (esc) throw new Error(esc);   // an escaped one too (0.18.221): the node decodes \u003b in a JSON value
   return command;
 }
 

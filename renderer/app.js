@@ -391,7 +391,7 @@ function showSetup() {
       customConnect: net === "custom" ? el("customPeer").value.trim() : "",
       megammrHost: host, params: P, extraArgs: el("extraArgs").value.trim()
     };
-    CFG = await api.saveConfig(patch);
+    try { CFG = await api.saveConfig(patch); } catch (e) { toast(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "err"); return; }   // e.g. an -mds… extra argument (0.18.221)
     waitingForNode = true;
     postBootStarted = false;      // let the post-boot wallet step run for this (re)start
     showStarting();

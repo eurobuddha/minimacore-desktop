@@ -130,6 +130,8 @@ function save(patch) {
   // Work on a COPY: the secret-marker rewrite below replaces values in cfg.params, and mutating the caller's
   // object (the live IPC argument) is a side effect no caller asks for.
   const cfg = sanitisePatch(patch);
+  const mds = PARAMS.mdsArg(cfg.extraArgs);
+  if (mds) throw new Error(mds + " cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.");   // 0.18.221
   if (cfg.params) cfg.params = Object.assign({}, cfg.params);
   const cur = load();
   // Route secret params (passwords / DSNs) to the Keychain; store only a boolean "set" marker in config.

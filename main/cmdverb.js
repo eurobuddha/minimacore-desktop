@@ -121,9 +121,19 @@ function paramValue(part, name) {
   for (let i = ps.length - 1; i >= 0; i--) if (fold(ps[i][0]) === want) return ps[i][1];
   return null;
 }
-const SENSITIVE = /^(?:vault|seedrandom|keys|megammrsync|archive|mysql|reset|backup|restore\w*|send\w*|txn\w*|consolidate|tokencreate|multisig|sign\w*)$/;
+const SENSITIVE = /^(?:vault|seedrandom|keys|megammrsync|archive|mysql|reset|backup|restore\w*|send\w*|txn\w*|consolidate\w*|tokencreate|createtokenfrom|multisig\w*|sign\w*|sphincs)$/;   // 0.18.221: sendpoll, sendfrom, signfrom, consolidatefrom, createtokenfrom, multisig, multisigread, sphincs
 const UNCLEAR = "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.";
 /** Why a text whose reading is odd (read().odd) is refused for a command that moves funds or keys ("" = it is not). */
 function unclear(command) { return parts(command).some(p => read(p).odd && verbs(p).some(v => SENSITIVE.test(v))) ? UNCLEAR : ""; }
 
-module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear };
+// A \u escape in a JSON value is decoded by the node's own parser (utils/json/parser/Yylex.java: \uXXXX besides \" \\ \/ \b \f
+// \n \r \t), and some commands paste the decoded text into a command they run themselves, which splits on every ";" and runs each
+// piece with full rights (0.18.221, as Pandamonium Desktop 0.19.291, read from core/minima-core: sendfrom, rawfrom, rawtxnfrom
+// "txnstate … value:" + state; multisig create publickeys; createtokenfrom; sendpoll's stored commands; mysql setlogin's stored
+// login, pasted by the node's autobackup). A raw ";" can never be a value (both sides split on it first), so "\u003b" is the only
+// way to carry one: refused for every verb, and so is an escape that decodes to a control character.
+const SMUGGLED = "This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.";
+/** Why this text is refused for an escaped ";" or control character ("" = it is not). */
+function smuggled(command) { return (String(command).match(/\\u[0-9a-fA-F]{4}/g) || []).some(x => { const c = parseInt(x.slice(2), 16); return c === 0x3b || c < 0x20; }) ? SMUGGLED : ""; }
+
+module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, smuggled };

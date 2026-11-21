@@ -49,7 +49,7 @@ function create(sys, now) {
     const c = String(command == null ? "" : command), { kind, chain } = classify(c);
     if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error("Run this command on its own, not in a chain with ;.");
-    const unclear = V.unclear(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.18.219): refused before any question
+    const unclear = V.unclear(c) || V.smuggled(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.18.219), an escaped ";" (0.18.221): refused before any question
     const twice = V.repeated(c);   // before the phrase: what the phrase is depends on the action, and the node keeps the last one
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");
     if (String(typed == null ? "" : typed).trim() !== PHRASE[kind]) throw new Error("Type " + PHRASE[kind] + " exactly to continue.");
@@ -105,6 +105,7 @@ const WIN_PATH = /^[A-Za-z]:\\[^\s:";{}[\]]*$/;
 const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null),
   mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
 const REPASTED_WHY = "The node pastes this command's values, unquoted, into a second command it runs itself, where white space, a colon, a quote or a semicolon in a value become more parameters of that command (a seed phrase among them). Write each value without them. Nothing was run.";
+const FROM_KEY = ["sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread", "sphincs"];
 /** Why mcd:cmd refuses a command whose pasted values would become parameters of the node's own second command ("" = it does not). */
 function repasted(command) {
   return V.parts(command).some(part => {
@@ -121,7 +122,8 @@ function repasted(command) {
  *   1. a non-empty string;  2. no control character (tab and line end allowed; the node trims and reads the others in
  *   ways no check here can follow);  2b. a command that moves funds or keys whose text the node reads otherwise than it looks
  *   (main/cmdverb.js unclear, 0.18.219);  2c. a value the node would paste into a second command of its own as more parameters
- *   (repasted, 0.18.220);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   (repasted, 0.18.220);  2d. an escaped ";" or control character (cmdverb.smuggled), mds action:accept, a multisig spend, and a
+ *   repeated parameter of a command that moves funds from a key or builds commands of its own (0.18.221);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
  *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
  *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
  */
@@ -130,10 +132,17 @@ async function checkCommand(command, io) {
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
   const unclear = V.unclear(command); if (unclear) throw new Error(unclear);   // refused, not guessed (0.18.219, main/cmdverb.js read)
   const pasted = repasted(command); if (pasted) throw new Error(pasted);
+  const esc = V.smuggled(command); if (esc) throw new Error(esc);
   for (const part of V.parts(command)) {
-    if (!V.is(part, "send")) continue;
-    const twice = V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]);
+    const twice = V.is(part, "send") ? V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
     if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
+    // the commands that move funds from a key or build commands of their own: any parameter named twice (0.18.221)
+    if (FROM_KEY.some(v => V.is(part, v))) { const again = V.repeated(part); if (again.length) throw new Error("This command names " + again.join(", ") + " more than once (the node would use only the last). Write each once. Nothing was run."); }
+    // a MiniDapp's waiting command runs with full rights past every check here; a multisig spend copies a coin's state from the chain
+    // into commands the node runs itself, where a ";" starts a second command, and this app cannot read that state first (0.18.221)
+    const action = V.fold(V.paramValue(part, "action") || "");
+    if (V.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
+    if ((V.is(part, "multisig") || V.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
   }
   const gated = refusal(command, io.take); if (gated) throw new Error(gated);
   io.running();
