@@ -24,27 +24,32 @@ test('an interrupted RPC response rejects instead of leaving the operation pendi
   });
 });
 
-test('the existing LF-header parser and UTF-8 POST length remain compatible', async () => {
-  const command = 'status ' + 'é'.repeat(6000);
+// CHANGED on purpose (0.18.239, as Pandamonium Desktop 0.19.304): the node reads Content-Length CHARACTERS (CMDHandler: char[contentlength]
+// from a UTF-8 reader), so the header counts UTF-16 units, as Java's char does; this stand-in reads the body exactly that way and never more
+test('a non-ASCII POST is read whole by a reader that counts characters, as the node does (an emoji is two chars in both)', async () => {
+  const command = 'status ' + 'é'.repeat(6000) + ' ✓ 😀 ' + 'ж'.repeat(10); let sock = null;
   await withServer(socket => {
-    let received = Buffer.alloc(0);
+    sock = socket; let received = Buffer.alloc(0);
     socket.on('data', chunk => {
       received = Buffer.concat([received, chunk]);
       const end = received.indexOf('\r\n\r\n');
       if (end < 0) return;
       const header = received.subarray(0, end).toString();
       const length = Number(/content-length: (\d+)/i.exec(header)?.[1]);
-      if (received.length - end - 4 < length) return;
-      assert.equal(length, Buffer.byteLength(command));
-      assert.equal(received.subarray(end + 4).toString(), command);
+      const chars = received.subarray(end + 4).toString('utf8');   // what a UTF-8 Reader yields, in UTF-16 units
+      if (chars.length < length) return;                             // the node blocks here, waiting for more characters
+      assert.equal(chars.slice(0, length), command, 'the whole command in the first Content-Length characters');
+      assert.equal(chars.length, length, 'and nothing after it');
       assert.match(header, /^POST \/ HTTP/);
       const body = '{"status":true,"response":{"ok":true}}';
       socket.end('HTTP/1.1 200 OK\nContent-Length: ' + Buffer.byteLength(body) + '\nConnection: close\n\n' + body);
     });
-  }, async port => assert.deepEqual(await rpcCall(port, 'test-only', command), { status: true, response: { ok: true } }));
+  }, async port => {
+    let timer;
+    try { assert.deepEqual(await Promise.race([rpcCall(port, 'test-only', command), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('the node would still be waiting for characters')), 3000); })]), { status: true, response: { ok: true } }); }
+    finally { clearTimeout(timer); if (sock) sock.destroy(); }
+  });
 });
-
-// ---- 0.18.211: a reply that is not JSON is reported without its body ----
 test('a non-JSON reply is refused without any of its text in the error', async () => {
   const SECRET = 'apple banana cherry seed words';
   await withServer(socket => socket.once('data', () => {
