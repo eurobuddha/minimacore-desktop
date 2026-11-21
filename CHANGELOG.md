@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.286] — miniMall: the payments' own cause
+
+- When the orders read past the node's tree was whole but the payments read was cut by the reply cap, the notice names the reply cap for the payments. Test: `scripts/shop-test.cjs`.
+
+## [0.18.285] — miniMall: a payment older than its order is checked by hand
+
+- A payment's reference is plain text on the chain. Someone could copy it into an order of their own while the real order was not known to the app (older than the node's recent blocks, or not read yet), and their order was marked paid by another buyer's coin. The app now keeps the block each order reached the chain at. A payment more than 3 blocks older than its order holds the order for a check by hand, naming the payment coin. A real buyer's app always sends the order before the payment, so real orders are not affected. Orders stored before this version have no block and are judged as before. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.284] — key uses: a loose reading never raises the bound
 
 - The single-signature bound (262143) applies only when every reading of the command's verb is one of the five single-signature verbs; a loosely quoted command is held to 250000. Test: `scripts/cmdgate-test.cjs`.
@@ -17,7 +25,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.282] — miniMall: a payment read before its order is counted
 
-- Backfill and tree reads no longer skip payments above the point already read, so a payment seen while its order was still unknown is counted once the order is read. Counting is idempotent: a coin is counted once, dust totals once, and two buyers' orders with one reference stay unpaid. With this, an unspent payment of any age pays its order. Test: `scripts/shop-test.cjs`.
+- Backfill and tree reads no longer skip payments above the point already read, so a payment seen while its order was still unknown is counted once the order is read. Counting is idempotent: a coin is counted once, dust totals once, and two buyers' orders with one reference stay unpaid. With this, an unspent payment of any age pays its order once the order is read, when the app was closed longer than the node's recent blocks. Known limit: with the app open and no backfill, a payment made more than 64 blocks before its order arrives is not read; under 0.18.285 such a payment could not pay the order automatically anyway, so it is left. Test: `scripts/shop-test.cjs`.
 
 ## [0.18.281] — miniMall: the scan follows the chain down
 
