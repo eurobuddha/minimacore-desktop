@@ -266,3 +266,22 @@ test("vendor: a payment that arrives before its order is counted when the order 
   const o = store.order("ORD-LATE"); assert.equal(o.paid, true); assert.equal(o.status, "PAID"); assert.equal(o.paidAmount, "3.2");
   await scan([], pay); assert.equal(store.order("ORD-LATE").paidAmount, "3.2", "and only once");
 });
+
+// ---- 0.19.199 (released 0.18.183): ids a peer writes read own entries only; a stored null line is not drawn ----
+test("'__proto__' as a shop id, an order ref or a chat id finds nothing and writes nothing into the prototype", async () => {
+  const base = { type: "ORDER", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" };
+  await scan([Object.assign({}, base, { ref: "ORD-PROTO1", shopId: "__proto__" }), Object.assign({}, base, { ref: "__proto__", shopId: "tea" }), Object.assign({}, base, { ref: "ORD-PROTO3", shopId: "constructor" })],
+    [{ coinid: "0xF1F1", ref: "__proto__", amount: "10", tokenid: "0x00" }]);
+  assert.equal(store.shop("__proto__"), null); assert.equal(store.shop("toString"), null); assert.equal(store.shop("constructor"), null);
+  assert.equal(store.order("__proto__"), null); assert.equal(store.order("hasOwnProperty"), null);
+  const p1 = store.order("ORD-PROTO1"), p3 = store.order("ORD-PROTO3");
+  assert.ok(!p1 || p1.problems.length, "an order for a shop named __proto__ is never checked against Object.prototype"); assert.ok(!p3 || p3.problems.length, "nor constructor");
+  assert.equal(store.recordPayment("__proto__", "0xF1F2", "10", "0x00"), null);
+  assert.equal(store.upsertOrder({ ref: "__proto__", role: "sell" }), false); assert.equal(store.upsertOrder({ ref: 7, role: "sell" }), false);
+  assert.equal(store.addChat({ randomid: "__proto__", ref: "x" }), false);
+  assert.throws(() => store.saveShop({ shopId: "__proto__" }), /Invalid shop id/);
+  assert.equal({}.coins, undefined); assert.equal({}.paidAmount, undefined); assert.equal({}.status, undefined, "Object.prototype untouched");
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"), line = app.match(/function shopItems\(o\) \{[^\n]*\}/)[0];
+  const shopItems = new Function("esc", "th", line + "; return shopItems;")((s) => String(s), (s) => s);
+  assert.ok(shopItems({ items: [null, { product: "Tea", quantity: 2, lineTotal: "3" }, undefined] }).includes("Tea"), "a stored null line is not drawn, and does not stop the rest");
+});

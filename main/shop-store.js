@@ -57,10 +57,13 @@ function flush() {   // synchronous — for fund-relevant writes (a recorded ord
 }
 
 // ---- shops (my authored catalogs) ----
-function saveShop(cfg) { ensureLoaded(); mem.shops[cfg.shopId] = cfg; persistSoon(); }
+// Every lookup by an id a peer can write (shopId, ref, randomid) reads OWN entries only (0.19.199, as released 0.18.183):
+// "__proto__" found Object.prototype, so an order "for a shop I made" passed, and an order ref of "__proto__" wrote into it.
+const has = (m, k) => typeof k === "string" && Object.hasOwn(m, k);
+function saveShop(cfg) { ensureLoaded(); if (typeof cfg.shopId !== "string" || cfg.shopId === "__proto__") throw new Error("Invalid shop id."); mem.shops[cfg.shopId] = cfg; persistSoon(); }
 function shops() { ensureLoaded(); return Object.values(mem.shops); }
-function shop(shopId) { ensureLoaded(); return mem.shops[shopId] || null; }
-function deleteShop(shopId) { ensureLoaded(); if (mem.shops[shopId]) { delete mem.shops[shopId]; persistSoon(); } }
+function shop(shopId) { ensureLoaded(); return has(mem.shops, shopId) ? mem.shops[shopId] : null; }
+function deleteShop(shopId) { ensureLoaded(); if (has(mem.shops, shopId)) { delete mem.shops[shopId]; persistSoon(); } }
 
 // ---- decimal-safe money (BigInt; NEVER float — amounts are decimal strings up to 44dp) ----
 // A money figure is a plain decimal: digits, at most one point with digits after it. No sign, no exponent, no hex, no
@@ -96,16 +99,16 @@ const STATUS_RANK = { PENDING: 0, INQUIRY: 0, UNDERPAID: 1, WRONG_TOKEN: 1, BAD_
 /** Insert an order if new (dedup on ref). Returns true if newly inserted. Never overwrites an existing order. */
 function upsertOrder(o) {
   ensureLoaded();
-  if (mem.orders[o.ref]) return false;
+  if (typeof o.ref !== "string" || o.ref === "__proto__" || has(mem.orders, o.ref)) return false;
   mem.orders[o.ref] = o;
   flush();   // fund-relevant: an incoming order must survive a crash
   return true;
 }
-function order(ref) { ensureLoaded(); return mem.orders[ref] || null; }
+function order(ref) { ensureLoaded(); return has(mem.orders, ref) ? mem.orders[ref] : null; }
 function orders() { ensureLoaded(); return Object.values(mem.orders); }
 /** Set status only if it STRICTLY advances (higher rank) — an out-of-order/malicious STATUS_UPDATE can't roll back. */
 function setStatus(ref, status) {
-  ensureLoaded(); const o = mem.orders[ref]; if (!o) return false;
+  ensureLoaded(); const o = order(ref); if (!o) return false;
   const cur = STATUS_RANK[o.status] != null ? STATUS_RANK[o.status] : 0;
   const nxt = STATUS_RANK[status] != null ? STATUS_RANK[status] : 0;
   if (nxt <= cur) return false;
@@ -135,7 +138,7 @@ function ensureChecked(o) {
 const MAX_PAY_COINS = 500;
 const TOO_MANY_COINS = "more than " + MAX_PAY_COINS + " payment coins came for this order; check the payment by hand";
 function recordPayment(ref, coinid, paidAmount, paidTokenid) {
-  ensureLoaded(); const o = mem.orders[ref]; if (!o) return null;
+  ensureLoaded(); const o = order(ref); if (!o) return null;
   if (o.paid) return "ALREADY";
   const id = String(coinid == null ? "" : coinid).toLowerCase();
   if (!id || id.length > 80) return null;
@@ -162,20 +165,20 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
 /** The vendor's explicit "I checked this order by hand" for an order that does not match the listing: only then can it
  *  be confirmed, shipped or delivered without being PAID. Nothing else changes (it is still not paid). */
 function handCheck(ref) {
-  ensureLoaded(); const o = mem.orders[ref];
+  ensureLoaded(); const o = order(ref);
   if (!o || o.role !== "sell") return false;
   ensureChecked(o); if (!o.problems.length) return false;
   o.handChecked = true; flush(); return true;
 }
 /** May the vendor confirm / ship / deliver this order? Paid by the listing's figure, or checked by hand. */
 function mayAdvance(o) { return !!(o && (o.paid || o.handChecked)); }
-function markOrderRead(ref) { ensureLoaded(); const o = mem.orders[ref]; if (o && o.unread) { o.unread = false; persistSoon(); return true; } return false; }
+function markOrderRead(ref) { ensureLoaded(); const o = order(ref); if (o && o.unread) { o.unread = false; persistSoon(); return true; } return false; }
 function setMeta(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 function setMetaSync(k, v) { ensureLoaded(); mem.meta[k] = v; flush(); }   // fund-relevant flags (unpaid/ambiguous) must survive a crash
 function getMeta(k) { ensureLoaded(); return mem.meta[k]; }
 
 // ---- order chat (dedup on randomid) ----
-function addChat(m) { ensureLoaded(); if (mem.chat[m.randomid]) return false; mem.chat[m.randomid] = m; persistSoon(); return true; }
+function addChat(m) { ensureLoaded(); if (typeof m.randomid !== "string" || m.randomid === "__proto__" || has(mem.chat, m.randomid)) return false; mem.chat[m.randomid] = m; persistSoon(); return true; }
 function chat(ref) { ensureLoaded(); return Object.values(mem.chat).filter(m => m.ref === ref).sort((a, b) => (a.date || 0) - (b.date || 0)); }
 
 function clear() { mem = { shops: {}, orders: {}, chat: {}, meta: {} }; flush(); }

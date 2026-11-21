@@ -3713,7 +3713,7 @@ async function shopVendorCard() {
     buttons: [{ label: t("Close"), v: null }, { label: t("Copy"), on: () => { api.clip(card); toast(t("Copied"), "ok"); } }] });
 }
 function shopThread(chat, them) { return (chat || []).map(m => `<div class="mm-msg${m.incoming ? "" : " mm-msg--me"}">${m.incoming ? them : th("You")}: ${esc(m.message)}</div>`).join(""); }
-function shopItems(o) { return (o.items || []).map(i => `<div>• ${esc(i.product)}${i.size ? " (" + esc(i.size) + ")" : ""}  x${esc(String(i.quantity))}  = ${esc(i.lineTotal || "")}</div>`).join("") || "<div>" + th("(no items listed)") + "</div>"; }
+function shopItems(o) { return (o.items || []).filter(Boolean).map(i => `<div>• ${esc(i.product)}${i.size ? " (" + esc(i.size) + ")" : ""}  x${esc(String(i.quantity))}  = ${esc(i.lineTotal || "")}</div>`).join("") || "<div>" + th("(no items listed)") + "</div>"; }
 const shopKv = (k, v, copyable) => `<div class="mm-kv"><span>${k}</span>${copyable ? `<button class="mm-kv__v mm-kv__v--copy" data-copy="${esc(v)}">${esc(v)}</button>` : `<span class="mm-kv__v">${esc(v)}</span>`}</div>`;
 async function renderShopSellOrder(ref) {
   const d = await api.shopOrder(ref).catch(() => null);
