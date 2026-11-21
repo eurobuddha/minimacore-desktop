@@ -155,8 +155,8 @@ test("a stop let go whose operation then fails releases the hold: the retry is a
   const g = S.stopGuard({ running: () => true, gather: async () => ({ atomix: { ready: true, swaps: ["0xAB"] }, pools: [] }), log: () => {}, ask: async () => { asks++; return true; } });
   assert.equal(await g.pass(), true); assert.equal(await g.pass(), "busy", "held after a yes");
   g.release(); assert.equal(await g.pass(), true, "released: asked again"); assert.equal(asks, 2);
-  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn)"), main.indexOf("\n", main.indexOf("async function stopping(fn)")));
-  const released = [], run = (passOk) => new Function("mayStop", "stopGuard", src + "\nreturn stopping;")(async () => { if (!passOk) throw new Error("kept running"); }, { release: () => released.push(1) });
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn)")) + 3);
+  const released = [], node = { state: "running" }, run = (passOk) => new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => { if (!passOk) throw new Error("kept running"); }, { release: () => released.push(1) }, node);
   await assert.rejects(run(true)(async () => { throw new Error("Wrong password"); }), /Wrong password/); assert.equal(released.length, 1, "the operation failed: released");
   await assert.rejects(run(false)(async () => 1), /kept running/); assert.equal(released.length, 1, "a refused or busy guard releases nothing (another request's hold stays)");
   assert.equal(await run(true)(async () => 7), 7); assert.equal(released.length, 1);
@@ -192,4 +192,15 @@ test("inFlightWork: AtomiX, pools and P2P Chance are read side by side; a late o
   w = await make({ atomix: { activeWork: never }, pandapools: { activeWork: () => { throw new Error("sync throw"); } }, casinoOpen: async () => ({ offers: 0, bets: 1 }) })();
   assert.deepEqual([w.atomix, w.pools, w.casino], [null, null, { offers: 0, bets: 1 }]);
   assert.match(S.inFlight(w, Date.now()).message, /P2P Chance: 1 bet[\s\S]*AtomiX could not be asked/);
+});
+
+// ---- 0.18.264 (as Pandamonium Desktop 0.19.319's held()): a status:false reply with the node still running ends the hold too ----
+test("stopping(): a refused restore (status:false) or a throw with the node still running releases the hold; with the node stopped it does not", async () => {
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn)")) + 3);
+  const released = [], node = { state: "running" };
+  const stopping = new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => {}, { release: () => released.push(1) }, node);
+  assert.deepEqual(await stopping(async () => ({ status: false, error: "Wrong password" })), { status: false, error: "Wrong password" }); assert.equal(released.length, 1, "a refused restore, the node running: released");
+  await stopping(async () => ({ status: true })); assert.equal(released.length, 1, "a reply that went through: held until the node stops");
+  node.state = "stopping"; await stopping(async () => ({ status: false })); await assert.rejects(stopping(async () => { throw new Error("socket closed"); }));
+  assert.equal(released.length, 1, "the node is stopping: its status ends the hold, not this");
 });

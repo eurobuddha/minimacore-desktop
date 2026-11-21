@@ -183,9 +183,15 @@ async function mayStop() {
   if (!r) throw new Error("The node keeps running: nothing was stopped.");
 }
 node.on("status", (s) => stopGuard.seen(s && s.state));
-/** The guarded stop, then what it was for (0.18.257): when that fails (a restore with a wrong password, an import that fails fast, a
- *  config save that throws), the hold the yes started is released, so an immediate retry is asked again instead of refused. */
-async function stopping(fn) { await mayStop(); try { return await fn(); } catch (e) { stopGuard.release(); throw e; } }
+/** The guarded stop, then what it was for (0.18.257): when that fails with the node still running (a restore the node refused with
+ *  status:false for a wrong password, an import that fails fast, a config save that throws), the hold the yes started is released, so
+ *  an immediate retry is asked again instead of refused (0.18.264, as Pandamonium Desktop 0.19.319's held(): a status:false reply as
+ *  well as a throw, and only while the node is still running; a node that stopped ends the hold through its status). */
+async function stopping(fn) {
+  await mayStop();
+  try { const r = await fn(); if (r && r.status === false && node.state === "running") stopGuard.release(); return r; }
+  catch (e) { if (node.state === "running") stopGuard.release(); throw e; }
+}
 /** A config patch from the window, with what Settings' save does after it (Casino loop, login item). */
 function saveConfigPatch(patch) {
   const c = config.save(patch || {});
