@@ -59,8 +59,20 @@ const { N_ } = require("./lang").I18N;
 // The secret parameters of the node's commands (core/minima-core commands, every getParam of them: phrase, password, confirm,
 // seed, privatekey; 0.19.282 added privatekey: sendfrom, signfrom, consolidatefrom, createtokenfrom, txnsign, sphincs).
 const SECRET_NAMES = ["phrase", "password", "confirm", "seed", "privatekey"];
+const CTRL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+/** The command as the node reads it, name by name, the value of every secret parameter hidden and everything else shown (0.19.293:
+ *  hiding the words after a value hid the ACTION of `vault phrase: action:restorekeys`, which the node reads as phrase "" and
+ *  action restorekeys). A piece the node would refuse (a word with no ":") is hidden the older way. */
 function masked(c) {
-  const words = String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
+  const show = (v) => (v === "" ? '""' : /\s/.test(v) && !/^[{[]/.test(v) ? '"' + v + '"' : v);
+  return V.parts(String(c).replace(CTRL, " ")).map(p => {
+    const r = V.read(p);
+    if (r.error || !r.verb) return maskedWords(p);
+    return [r.verb].concat(r.params.map(([n, v]) => n + ":" + (SECRET_NAMES.includes(V.fold(n)) && v !== "" ? "•••" : show(v)))).join(" ");
+  }).join(" ; ");
+}
+function maskedWords(c) {
+  const words = String(c).replace(CTRL, " ")
     // hidden through the end of the node's token (0.19.266): a quote inside a value opens a quoted span the node keeps in the same
     // value (`password:my"secret` showed `"secret`; `seed:0xAB"action":"wipekeys"` is ONE seed value to the node, no action)
     .replace(new RegExp("((?:^|\\s|\")(?:" + SECRET_NAMES.join("|") + ")\"?\\s*:\\s*)((?:\"[^\"]*\"?|[^\\s\"])+)", "gi"), "$1•••")
@@ -125,7 +137,9 @@ function create(sys, now) {
     pass = null;
     const c = String(command == null ? "" : command), { kind, chain } = classify(c); if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error(CHAIN);
-    const unclear = V.unclear(c) || V.smuggled(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.19.266), an escaped ";" (0.19.291): refused before any question
+    const unclear = V.unclear(c) || V.smuggled(c); if (unclear) throw new Error(unclear);
+    // a secret parameter the node reads as empty (0.19.293): `vault phrase: action:restorekeys` would run with phrase ""
+    for (const p of V.parts(c)) for (const [n, v] of V.read(p).params) if (SECRET_NAMES.includes(V.fold(n)) && v === "") throw new Error("This command names " + n + ": with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.");   // read otherwise than it looks (0.19.266), an escaped ";" (0.19.291): refused before any question
     // a repeated parameter first (released 0.18.202): what the phrase is depends on the action, and the node keeps the last
     const twice = V.repeated(c);
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");

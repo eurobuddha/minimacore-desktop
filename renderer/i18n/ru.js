@@ -5338,7 +5338,8 @@
   "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} нельзя задать в дополнительных аргументах: это приложение никогда не включает MiniDapps (MDS).",
   "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.": "Эта команда показывает пароли или закрытый ключ (rpc action:listusers, mds, sphincs action:generate). Введите SHOW KEY в терминале, чтобы выполнить её.",
   "show passwords or a private key by running: {command}": "показать пароли или закрытый ключ, выполнив: {command}",
-  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "Будут показаны пароли или закрытый ключ. Эта команда терминала выполнится один раз:\n\n{command}"
+  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "Будут показаны пароли или закрытый ключ. Эта команда терминала выполнится один раз:\n\n{command}",
+  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "В этой команде {name}: указан без значения, и узел прочитает его как пустое. Укажите значение или уберите параметр. Ничего не было запущено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5446,5 +5447,6 @@
   "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.",
   "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.",
   "show passwords or a private key by running: {command}",
-  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}"
+  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}",
+  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run."
 ] });

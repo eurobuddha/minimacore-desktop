@@ -207,7 +207,7 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
   // 0.19.266: the node reads this as ONE seed value (0xABaction:wipekeys) and no action (0.19.252 showed an action the node never reads): hidden whole
   assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
   assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
-  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••".replace("seed:", "seed : "));
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••");
 });
 
 test("syscheck: refused (not phrase only) once Touch ID worked here and cannot be asked; the marker is written only after a prompt succeeded and names this Mac", async () => {
@@ -345,9 +345,9 @@ test("the texts the review ran through the node: every check reads what the node
 // ---- 0.19.282: no secret is shown: privatekey: too, every word of an unquoted phrase, and the node's own echo of the parameters ----
 test("secrets stay hidden: privatekey: is masked, so are the words after a hidden value, and the node's reply params are scrubbed before the window gets them", async () => {
   assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
-  assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:••• •••", "the node drops 'lamp', and it is a word of the phrase");
+  assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:•••", "CHANGED on purpose (0.19.293): shown as the node reads it, which drops 'lamp'");
   assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5");
-  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed : ••• confirm:•••", "a spaced name still ends it");
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••", "a spaced name still ends it");
   const main = SRC("main/main.js"), kh = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async')), handlers = {};
   new Function("ipcMain", "seedgate", "rpc", kh)({ handle: (n, f) => { handlers[n] = f; } }, G, require("../main/rpc.js"));
   const k = handlers["mcd:cmdKind"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5");
@@ -424,4 +424,15 @@ test("the node's reply is scrubbed of the typed command's secrets (its 'command'
   // and the node's log file: password:, confirm:, seed: values
   const NL = require("../main/nodelog.js"), line = NL.scrub('cmd: backup password:hunter22 confirm:"a b" seed:0xABCD file:x');
   assert.ok(!/hunter22|a b|0xABCD/.test(line) && line.includes("file:x"), line);
+});
+
+// ---- 0.19.293: what the gate shows is the node's reading, name by name: an empty secret never hides the action; it is refused ----
+test("masked shows the command name by name as the node reads it, never hiding the action after an empty secret; a gated command with an empty secret is refused", async () => {
+  assert.equal(G.masked("vault phrase: action:restorekeys"), 'vault phrase:"" action:restorekeys');
+  assert.equal(G.masked("vault password: action:passwordlock"), 'vault password:"" action:passwordlock');
+  assert.equal(G.masked('vault action:restorekeys phrase:"spray lamp a b" keyuses:5'), "vault action:restorekeys phrase:••• keyuses:5");
+  assert.equal(G.masked("status;vault password:x action:passwordunlock"), "status ; vault password:••• action:passwordunlock");
+  const g = G.create({ check: async () => { throw new Error("no question"); } });
+  for (const c of ["vault phrase: action:restorekeys", "vault password: action:passwordlock", 'vault action:passwordunlock password:""'])
+    await assert.rejects(g.open(c, "CHANGE KEYS"), /names (phrase|password): with no value/, c);
 });
