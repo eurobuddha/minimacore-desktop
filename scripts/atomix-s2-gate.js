@@ -31,7 +31,7 @@ const ok = (name, cond, extra) => {
   ok("engine booted", atomix.status().ready);
 
   const w = await atomix.wallet();
-  ok("wallet: identity address", /^0x[0-9a-f]{40}$/i.test(w.addr), w.shortAddr);
+  ok("wallet: identity address", /^0x[0-9a-f]{40}$/i.test(w.addr), w.addr);
   ok("wallet: raw balances present", typeof w.bals.ethWei === "string" && typeof w.bals.usdtRaw === "string",
     "eth=" + w.bals.eth + " usdt=" + w.bals.usdt + " " + w.label + "=" + w.bals.minima);
   ok("wallet: breakdown meta always present (zeroed when no coins)", !!w.bals.meta && "coins" in w.bals.meta);

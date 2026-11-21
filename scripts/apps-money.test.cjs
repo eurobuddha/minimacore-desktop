@@ -528,3 +528,10 @@ test("Faucet screen: the original's one screen; the request is still main/faucet
   assert.equal((fc.match(/api\.faucet\(/g) || []).length, 1);
   assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "faucet.js"))).digest("hex"), "5b5e03a513e99a5743c0efa159dccb0a7763af8cfea989c3105fae061f9549ce", "main/faucet.js is the file of 0.19.107");
 });
+
+// 0.19.240: no shortened identifier leaves the main process's AtomiX glue
+test("AtomiX glue: no shortAddr field, and a token with no symbol is named by its whole contract address", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8");
+  assert.ok(!/shortAddr/.test(src), "no shortened address is handed out");
+  assert.ok(src.includes('if (!s) return "0x" + lc(addr).replace(/^0x/, "");') && !/slice\(0, 4\)\.toUpperCase\(\)/.test(src), "the whole address, never four characters");
+});

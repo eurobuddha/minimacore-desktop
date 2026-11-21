@@ -784,7 +784,7 @@ async function marketHistory() {
 async function wallet() {
   const A = AX();
   const b = await balances();
-  return jclone({ addr: vmCtx().eth.address, shortAddr: A.wallet.shortAddr(vmCtx().eth.address), bals: b,
+  return jclone({ addr: vmCtx().eth.address, bals: b,
     currency: A.trading.active().key, label: A.trading.active().coinLabel });
 }
 function exportKey() { AX(); return vmCtx().eth.privKey; }   // renderer shows the 2-step native warning flow
@@ -1029,7 +1029,7 @@ function ethCleanSymbol(sym, addr) {
   // sink, but stripping < > " ' ` & \ here means a single future missed esc can't regress into stored injection —
   // and no legitimate ERC20 symbol contains these).
   let s = String(sym == null ? "" : sym).replace(/[^\x20-\x7e]/g, "").replace(/[<>"'`&\\]/g, "").trim();
-  if (!s) s = "0x" + lc(addr).replace(/^0x/, "").slice(0, 4).toUpperCase();
+  if (!s) return "0x" + lc(addr).replace(/^0x/, "");   // no symbol: the whole contract address, never four characters of it (0.19.240)
   return s.slice(0, 12);
 }
 function hexToAscii(h) { let s = ""; for (let i = 0; i + 1 < h.length; i += 2) { const c = parseInt(h.slice(i, i + 2), 16); if (c) s += String.fromCharCode(c); } return s; }
@@ -1089,7 +1089,7 @@ async function ethBalances() {
   const addr = vmCtx().eth.address;
   await ensureRpcOverride();
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, addr);
-  const out = { address: addr, shortAddr: A.wallet.shortAddr(addr), eth: "0", ethWei: "0", tokens: [], at: Date.now() };
+  const out = { address: addr, eth: "0", ethWei: "0", tokens: [], at: Date.now() };
   await p(cb => ctx.RPC.getBalance(addr, cb)).then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); }).catch(() => {});
   for (const t of ethTokensLoad()) {
     let raw = "0", bal = "0";
@@ -1100,7 +1100,7 @@ async function ethBalances() {
 }
 async function ethWallet() {
   const A = AX();
-  return jclone({ address: vmCtx().eth.address, shortAddr: A.wallet.shortAddr(vmCtx().eth.address),
+  return jclone({ address: vmCtx().eth.address,
     rpc: ctx.RPC.url, tiers: ["low", "med", "high"] });
 }
 
