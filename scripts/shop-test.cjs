@@ -497,3 +497,53 @@ test("an order sent while the app was closed for long is read after the restart 
   try { await m.shop.scanOnce(); } finally { console.error = err; }
   assert.match(errs.join(), /older than block \d+ could not be read: the node serves no deeper history/); assert.equal(Number(m.store.getMeta("bfTarget")), 0);
 });
+
+// ---- 0.18.208: the same reference from two buyers; a retry needs a refused payment and nothing in flight ----
+test("two buyers' orders with the same reference are both kept and neither is paid automatically", async () => {
+  const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
+  const VADDR = "MxG0" + "5".repeat(56); let msg = [], pay = [];
+  m.store.saveShop({ shopId: "dup", shopName: "D", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  m.shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "vendor seed dup" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
+    : c === "block" ? { status: true, response: { block: 50 } }
+    : c.startsWith("coins address:" + m.shop.MINIMERCH) ? { status: true, response: msg } : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] });
+  await m.shop.init();
+  const me = m.shop.myIdentity(), b1 = await m.sc.deriveIdentity("dup buyer one"), b2 = await m.sc.deriveIdentity("dup buyer two");
+  const coin = async (b, id) => ({ coinid: id, created: 49, state: { "99": "0x" + await m.sc.seal(b, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref: "ORD-DUP", randomid: id, from: b.publicId, to: me.publicId, date: 1, shopId: "dup", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" }))) } });
+  msg = [await coin(b1, "0xD1")]; await m.shop.scanOnce();
+  assert.equal(m.store.order("ORD-DUP").status, "PENDING");
+  msg = [await coin(b1, "0xD1"), await coin(b2, "0xD2")]; await m.shop.scanOnce();
+  const first = m.store.order("ORD-DUP"), second = m.store.order("ORD-DUP~" + b2.publicId);
+  assert.ok(second, "the second buyer's order is kept"); assert.equal(second.counterparty, b2.publicId); assert.equal(second.wireRef, "ORD-DUP");
+  for (const o of [first, second]) { assert.equal(o.status, "UNCHECKED"); assert.match(o.problems[0], /another buyer sent an order with the same reference ORD-DUP/); assert.equal(o.due, ""); }
+  pay = [{ coinid: "0xAA10", tokenid: "0x00", amount: "10", created: 49, state: { "1": "0x" + Buffer.from("ORD-DUP").toString("hex") } }];
+  await m.shop.scanOnce();
+  assert.equal(m.store.order("ORD-DUP").paid, false, "a payment with the shared reference pays neither");
+  assert.equal(m.store.handCheck("ORD-DUP~" + b2.publicId), true, "the vendor can check either by hand");
+});
+
+test("buyer: a retry pays only after a refused payment, never while one may be in flight or may have been sent", async () => {
+  const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
+  const vendor = await m.sc.deriveIdentity("retry vendor"); let mode = "refuse"; const paid = [];
+  m.shop._setRunner(async (c) => {
+    if (c.startsWith("vault")) return { status: true, response: { phrase: "retry buyer" } };
+    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: "MxG0" + "B".repeat(56) } };
+    if (c.startsWith("checkaddress")) return { status: true, response: { simple: true } };
+    if (c.startsWith("coins")) return { status: true, response: [] };
+    if (c.startsWith("send ") && c.includes("address:" + ADDR)) { paid.push(c); if (mode === "refuse") return { status: false, error: "Insufficient funds" }; if (mode === "timeout") throw new Error("timed out"); }
+    return { status: true, response: { txpowid: "0x01" } };
+  });
+  const cfg = shopOf({ vendorPublicId: vendor.publicId });
+  const r1 = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", ""); assert.match(r1.payError, /Insufficient/);
+  assert.equal(m.store.getMeta("inflight:" + r1.ref), false, "a refused payment is not in flight");
+  mode = "ok"; await m.shop.retryPayment(r1.ref); assert.equal(paid.length, 2, "retried once after the refusal");
+  await assert.rejects(m.shop.retryPayment(r1.ref), /no refused payment to retry/, "and not again");
+  const r2 = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", ""); assert.equal(r2.payError, null);
+  await assert.rejects(m.shop.retryPayment(r2.ref), /no refused payment to retry/, "a paid order is never paid again by a retry");
+  mode = "timeout"; const r3 = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", "");
+  assert.equal(m.store.getMeta("inflight:" + r3.ref), true); await assert.rejects(m.shop.retryPayment(r3.ref), /may already have been sent/);
+  // a quit during the send: the in-flight mark is still on disk
+  mode = "refuse"; const r4 = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", ""); m.store.setMetaSync("inflight:" + r4.ref, true);
+  const before = paid.length; await assert.rejects(m.shop.retryPayment(r4.ref), /may already have been sent/); assert.equal(paid.length, before, "nothing sent");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(src.indexOf('store.setMetaSync("inflight:" + ref, true);\n  try { const pr = await sendPayment(') > 0, "the mark is on disk before the first payment is sent");
+});

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.208] — miniMall: the same reference from two buyers; a retry pays only after a refusal
+
+- A second buyer's order carrying a reference already used was dropped, and a payment with that reference was counted for whichever order came first. Both orders are now kept (the second under the reference and that buyer's whole id, and replies and status updates still carry the reference the buyer knows), and neither can be paid automatically: both are marked to check by hand (an order already paid or confirmed before the copy arrived is left as it is). On the buyer side, Retry pays only after a payment the node refused, and an "in flight" mark is written to disk before each payment is sent and cleared when the node answers, so a quit or crash during a send blocks the retry as "may already have been sent". Test: `scripts/shop-test.cjs`.
+
 ## [0.18.207] — Chat: receipts and payments
 
 - A peer's "delivered" receipt marked any message whose id it named, including another peer's, and a ref of `__proto__` wrote into `Object.prototype` (every object in the process gained `status: "delivered"`). The chat store's maps now have no prototype, `setStatus` looks up its own keys only, and a receipt moves only my outgoing message to that sender (a ref over 200 characters is ignored). A chat payment is now checked like Mail and miniMall payments: a plain amount above zero, a pay address of a valid form that the node accepts (`checkaddress`), a Minima send pinned clear of unsignable dust, "may have been sent; check before you try again" when the node does not answer, and a receipt that fails after the payment went is reported as a sent payment whose note did not go, not a failed payment. Test: `scripts/chat-peer-test.cjs`.

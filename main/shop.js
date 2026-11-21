@@ -169,8 +169,12 @@ async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
     status: "PENDING", paid: false, date: msg.date, unread: false });
   await sendMerchMessage(shopCfg.vendorPublicId, msg);
   let payTxpow = null, payError = null;
-  try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; }
+  // In flight, on disk, until the node answers (0.18.208): a quit or crash during the send leaves it set, and a retry is then
+  // refused as "may already have been sent" instead of paying a second time.
+  store.setMetaSync("inflight:" + ref, true);
+  try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; store.setMetaSync("inflight:" + ref, false); }
   catch (e) {
+    if (!e.ambiguous) store.setMetaSync("inflight:" + ref, false);
     payError = e.message || "payment failed";
     // AMBIGUOUS (timed-out but maybe accepted) must NOT get a one-click retry — that double-pays. Flag it apart
     // from a clean failure, which is safe to retry. Both flushed so the state survives a crash.
@@ -182,15 +186,18 @@ async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
 async function retryPayment(ref) {
   await init();
   const o = store.order(ref); if (!o || o.role !== "buy") throw new Error("Order not found.");
-  if (store.getMeta("ambiguous:" + ref)) throw new Error("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.");
+  if (store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)) throw new Error("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.");
   if (o.paid) throw new Error("This order is already paid.");
+  // A retry only after a payment the node refused (0.18.208): no "unpaid" mark, no second payment.
+  if (!store.getMeta("unpaid:" + ref)) throw new Error("This order has no refused payment to retry. Check your Balance/History.");
   const tok = SHOP.token(o); if (tok.err) throw new Error(tok.err);   // an order placed before 0.18.150 with a shop whose token did not match its currency
   const vendorAddr = o.vendorAddress || (store.shop(o.shopId) || {}).vendorAddress;
   if (!vendorAddr) throw new Error("Missing vendor address for retry.");
   let r;
+  store.setMetaSync("inflight:" + ref, true);
   try { r = await sendPayment(vendorAddr, String(o.amount), o.tokenid, ref); }
-  catch (e) { if (e.ambiguous) store.setMetaSync("ambiguous:" + ref, true); throw e; }   // a retry that itself times out → now ambiguous, block further retries
-  store.setMetaSync("unpaid:" + ref, false); emitter.emit("update");
+  catch (e) { if (e.ambiguous) store.setMetaSync("ambiguous:" + ref, true); else store.setMetaSync("inflight:" + ref, false); throw e; }   // a retry that itself times out → now ambiguous, block further retries
+  store.setMetaSync("unpaid:" + ref, false); store.setMetaSync("inflight:" + ref, false); emitter.emit("update");
   return r;
 }
 
@@ -203,7 +210,7 @@ async function advanceStatus(ref, status) {
   if (!store.mayAdvance(o)) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
   await init();
   store.setStatus(ref, status);
-  const msg = { type: T.STATUS_UPDATE, ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), status };
+  const msg = { type: T.STATUS_UPDATE, ref: o.wireRef || ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), status };
   await sendMerchMessage(o.counterparty, msg);
   emitter.emit("update");
   return { ok: true };
@@ -212,7 +219,7 @@ async function reply(ref, text) {
   await init();
   const o = store.order(ref); if (!o) throw new Error("Order not found.");
   const type = o.role === "sell" ? T.REPLY : T.BUYER_REPLY;
-  const msg = { type, ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), message: text };
+  const msg = { type, ref: o.wireRef || ref, randomid: randomId(), from: identity.publicId, to: o.counterparty, date: Date.now(), message: text };
   store.addChat({ ref, randomid: msg.randomid, from: identity.publicId, to: o.counterparty, incoming: false, message: text, date: msg.date });
   await sendMerchMessage(o.counterparty, msg);
   emitter.emit("update");
@@ -245,6 +252,8 @@ function cleanItems(raw) {
 }
 
 // ---- routing an opened inbound message ----
+/** Where a second buyer's order with an already used reference is kept: the reference and that buyer's whole id. */
+function dupKey(ref, fromPublicId) { return ref + "~" + fromPublicId; }
 function routeIncoming(w, fromPublicId) {
   if (!w || typeof w !== "object" || w.from !== fromPublicId || !w.ref) return;   // envelope `from` must match the sealed sender (anti-spoof)
   if (typeof w.ref !== "string" || w.ref.length > 64) return;
@@ -266,16 +275,25 @@ function routeIncoming(w, fromPublicId) {
       paid: false, date, unread: true, note: str(w.message, 1000) };
     while (order.items.length && Buffer.byteLength(JSON.stringify(order)) > ORDER_MAX_BYTES) order.items.pop();   // the whole order stays bounded
     const chk = listing.check(own, { items: order.items, shipping, currency: buyerCurrency });
-    Object.assign(order, { due: chk.problems.length ? "" : chk.due, problems: chk.problems.slice(0, 20).map(p => String(p).slice(0, 300)),
-      status: w.type === T.INQUIRY ? "INQUIRY" : chk.problems.length ? "UNCHECKED" : "PENDING" });
+    // The same reference from a second buyer (0.18.208): it was dropped, and a payment carrying that reference was counted
+    // for whichever order came first. Both are kept, and neither can be paid automatically: a payment cannot be told apart.
+    const prior = store.order(w.ref), problems = chk.problems.slice(0, 20).map(p => String(p).slice(0, 300));
+    if (prior && prior.counterparty !== fromPublicId) {
+      if (store.order(dupKey(w.ref, fromPublicId))) return;   // this buyer's copy is already kept
+      const DUP = "another buyer sent an order with the same reference " + w.ref + ": a payment with it cannot be told apart, so check both orders by hand";
+      store.flagDuplicate(w.ref, DUP);
+      problems.unshift(DUP); order.wireRef = w.ref; order.ref = dupKey(w.ref, fromPublicId);
+    }
+    Object.assign(order, { due: problems.length ? "" : chk.due, problems,
+      status: w.type === T.INQUIRY ? "INQUIRY" : problems.length ? "UNCHECKED" : "PENDING" });
     const isNew = store.upsertOrder(order);
-    if (isNew) emitter.emit("incoming", { ref: w.ref, shopName: own.shopName, amount: chk.problems.length ? "" : chk.due, currency: tokenid === USDT_TOKEN ? "MxUSD" : "Minima" });
+    if (isNew) emitter.emit("incoming", { ref: order.ref, shopName: own.shopName, amount: problems.length ? "" : chk.due, currency: tokenid === USDT_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {
     const o = store.order(w.ref);
     if (o && o.role === "buy" && o.counterparty === fromPublicId && typeof w.status === "string") store.setStatus(w.ref, w.status.slice(0, 20));   // only the vendor I bought from can advance MY buy order
   } else if (w.type === T.REPLY || w.type === T.BUYER_REPLY) {
-    const o = store.order(w.ref);
-    if (o && o.counterparty === fromPublicId && str(w.randomid, 64)) store.addChat({ ref: w.ref, randomid: str(w.randomid, 64), from: fromPublicId, to: identity.publicId, incoming: true, message: str(w.message, 4000), date });
+    let o = store.order(w.ref); if (o && o.counterparty !== fromPublicId) o = store.order(dupKey(w.ref, fromPublicId));   // the second buyer's copy
+    if (o && o.counterparty === fromPublicId && str(w.randomid, 64)) store.addChat({ ref: o.ref, randomid: str(w.randomid, 64), from: fromPublicId, to: identity.publicId, incoming: true, message: str(w.message, 4000), date });
   }
 }
 
