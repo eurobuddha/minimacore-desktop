@@ -569,7 +569,8 @@ test("a failed read moves nothing and is said as recent; a failed backfill step 
   t.st.tip = 3000; await m.shop.scanOnce();
   assert.equal(Number(m.store.getMeta("bfTarget")), 1000, "the oldest target is kept"); assert.ok(Number(m.store.getMeta("bfFloor")) < 3000 - 512, "the floor moves under the new window");
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep, floor\)/.test(src) && /scanOrders\(NODE_TREE_MOST, floor\)/.test(src) && /scanPayments\(ROOT_DEPTH, floor\)/.test(src), "a backfill read skips what an earlier pass read");
+  // CHANGED on purpose (0.18.282): orders skip what an earlier pass read; payments never do (a payment seen before its order was not counted)
+  assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep\)/.test(src) && /scanOrders\(NODE_TREE_MOST, floor\)/.test(src) && /scanPayments\(ROOT_DEPTH\)/.test(src) && !/scanPayments\([^)]*floor/.test(src), "orders skip what an earlier pass read, payments do not");
   // CHANGED on purpose (0.18.281): a resync or a lower branch: the cursor follows the chain down, no failure is said, a pending backfill waits
   m.store.setMeta("bfTarget", 1900); m.store.setMeta("bfFloor", 1950); t.st.hook = null; const cur = Number(m.store.getMeta("scanTip")); t.st.tip = 300; t.st.depths.length = 0; await m.shop.scanOnce();
   assert.ok(cur > 300); assert.equal(Number(m.store.getMeta("scanTip")), 300, "the cursor follows the chain down"); assert.equal(m.shop.scanState().readFailed, false, "not a failure"); assert.equal(Number(m.store.getMeta("bfTarget")), 1900, "the backfill waits");
@@ -585,6 +586,26 @@ test("after a reorganisation onto a lower branch and a fast catch-up, the new br
   for (const tip of [1100, 1200, 1300, 1400, 1500, 1501]) { t.st.tip = tip; await m.shop.scanOnce(); assert.equal(m.shop.scanState().readFailed, false, "no failure at " + tip); }
   for (const r of ["ORD-B1", "ORD-B2", "ORD-B3"]) assert.ok(m.store.order(r), r + " on the new branch is read");
   assert.equal(m.store.order("ORD-B1").paid, true, "and its payment counted"); assert.equal(Number(m.store.getMeta("scanTip")), 1501);
+});
+// 0.18.282: an order below a window or step boundary and its payment above it: the payment was seen while the order was unknown (so not
+// counted, not marked seen) and then skipped for ever by the floor; it is counted once the order is read, and only once
+test("a payment read before its order (the order below a window or step boundary, the payment above it) pays the order once", async () => {
+  // the 1024-block window's boundary, the gap then past the tree
+  for (const T of [2500, 2100]) {
+    const t = await javaSetup("straddle" + T); t.st.msg = [await t.seal("ORD-ST", T - 1030)]; t.st.pay = [t.pay("ORD-ST", T - 1020)];
+    const m = await t.reopen(); for (let i = 0; i < 6; i++) { t.st.tip = T + i; await m.shop.scanOnce(); }
+    assert.equal(m.store.order("ORD-ST").paid, true, "window boundary, closed until " + T); assert.equal(Number(m.store.order("ORD-ST").paidAmount), 1);
+  }
+  // a backfill step's boundary: the first window cut to 512 by the reply cap
+  { const T = 2500, t = await javaSetup("straddlestep"); t.st.msg = [await t.seal("ORD-ST", T - 530)]; t.st.pay = [t.pay("ORD-ST", T - 500)];
+    const m = await t.reopen(); let first = true; t.st.hook = (d) => { if (first) { first = false; if (d > 512) return { status: true, response: { tooBig: true } }; } return null; };
+    for (let i = 0; i < 6; i++) { t.st.tip = T + i; await m.shop.scanOnce(); }
+    assert.equal(m.store.order("ORD-ST").paid, true, "step boundary"); assert.equal(Number(m.store.order("ORD-ST").paidAmount), 1); }
+  // gathered dust read again on every pass still totals once: 0.6 + 0.4 pay the 1 due, the later 0.4 is not added
+  { const T = 2500, t = await javaSetup("straddledust"); t.st.msg = [await t.seal("ORD-D", T - 1030)];
+    t.st.pay = [Object.assign(t.pay("ORD-D", T - 1020), { coinid: "0xFA01", amount: "0.6" }), Object.assign(t.pay("ORD-D", T - 1019), { coinid: "0xFA02", amount: "0.4" }), Object.assign(t.pay("ORD-D", T - 5), { coinid: "0xFA03", amount: "0.4" })];
+    const m = await t.reopen(); for (let i = 0; i < 6; i++) { t.st.tip = T + i; await m.shop.scanOnce(); }
+    const o = m.store.order("ORD-D"); assert.equal(o.paid, true); assert.equal(Number(o.paidAmount), 1, "counted once: " + o.paidAmount); assert.equal(o.coins.length, 2); }
 });
 // (5) 0.18.277: the unread notice is shown only with a shop, and can be dismissed (the fact stays in the log)
 test("the unread notice: only for someone with a shop, dismissable, shown again for a newer one", async () => {

@@ -380,7 +380,7 @@ async function scanOrders(depth, floor) {
   }
   return changed;
 }
-async function scanPayments(depth, floor) {
+async function scanPayments(depth) {
   const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   const listed = [], have = new Set();
   for (const a of addrs) {   // every published payout address (0.18.205), one coin once
@@ -391,7 +391,7 @@ async function scanPayments(depth, floor) {
       continue;
     }
     if (!got) continue;
-    for (const c of got) if (c && c.coinid && !have.has(c.coinid) && !above(c, floor)) { have.add(c.coinid); listed.push(c); }
+    for (const c of got) if (c && c.coinid && !have.has(c.coinid)) { have.add(c.coinid); listed.push(c); }
   }
   capSeen();
   // Oldest first (0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one
@@ -444,9 +444,10 @@ async function scanOnce() {
       if (target && floor && tip <= target) { /* the chain has not reached the gap yet: the backfill waits, not a failure (0.18.276) */ }
       else if (target && floor && tip - floor >= NODE_TREE_DEPTH) {
         // the rest of the gap is past what the tree surely holds (0.18.277): orders are read as deep as the tree may still hold, and ONE
-        // payments read reaches the root, where this wallet's unspent payment coins of any age are; both skip what was read before (floor)
+        // payments read reaches the root, where this wallet's unspent payment coins of any age are. Orders skip what was read before (floor);
+        // payments never do (0.18.282): one seen before its order was known was not counted then, and judging a coin again is idempotent
         passServed = NODE_TREE_MOST; const c = await scanOrders(NODE_TREE_MOST, floor).catch(failed);
-        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH, floor).catch(failed);
+        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH).catch(failed);
         changed = changed || c || d;
         if (!readFailed) {   // a failed read moves nothing: the same reads are tried on the next pass
           const root = passServed >= ROOT_DEPTH;   // the reply cap may have cut the payments read short of the root
@@ -457,7 +458,7 @@ async function scanOnce() {
       } else if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, NODE_TREE_DEPTH);   // never past what the tree surely holds (0.18.277)
         passServed = deep;
-        const c = await scanOrders(deep, floor).catch(failed), d = await scanPayments(deep, floor).catch(failed);
+        const c = await scanOrders(deep, floor).catch(failed), d = await scanPayments(deep).catch(failed);   // payments: no floor (0.18.282)
         changed = changed || c || d;
         const reached = tip - passServed;
         if (readFailed) { /* nothing moves: the same step is tried on the next pass */ }
