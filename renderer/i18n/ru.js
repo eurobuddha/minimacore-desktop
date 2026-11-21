@@ -5335,7 +5335,10 @@
   "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.": "Эта команда указывает {names} больше одного раза (узел использует только последнее). Укажите каждый один раз. Ничего не было запущено.",
   "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.": "mds action:accept выполняет ожидающую команду MiniDapp с полными правами, в обход всех проверок этого приложения. Из терминала она не запускается. Ничего не было запущено.",
   "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.": "Мультиподписная трата копирует состояние монеты из сети в команды, которые узел выполняет сам, где оно может запустить вторую команду, а это приложение не может заранее прочитать это состояние. Из терминала она не запускается. Ничего не было запущено.",
-  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} нельзя задать в дополнительных аргументах: это приложение никогда не включает MiniDapps (MDS)."
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} нельзя задать в дополнительных аргументах: это приложение никогда не включает MiniDapps (MDS).",
+  "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.": "Эта команда показывает пароли или закрытый ключ (rpc action:listusers, mds, sphincs action:generate). Введите SHOW KEY в терминале, чтобы выполнить её.",
+  "show passwords or a private key by running: {command}": "показать пароли или закрытый ключ, выполнив: {command}",
+  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "Будут показаны пароли или закрытый ключ. Эта команда терминала выполнится один раз:\n\n{command}"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5440,5 +5443,8 @@
   "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.",
   "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.",
   "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.",
-  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on."
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.",
+  "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.",
+  "show passwords or a private key by running: {command}",
+  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}"
 ] });

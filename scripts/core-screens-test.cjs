@@ -374,5 +374,5 @@ test("M2: after megammrsync the node is restarted by the main process, and every
   assert.ok(h.saved.some(p => p.walletDone === true), "the wallet IS restored, so it is marked done either way");
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
   // CHANGED on purpose (0.19.201): through main.js runResync, which closes the first-run seed step and then calls node.runResync
-  assert.ok(main.includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command)); }") && main.includes("run: (c) => runResync(c)") && main.includes("firstRunOpen = false; return node.runResync(c); };"), "every megammrsync, from any screen or the Terminal, goes through runResync");
+  assert.ok(main.includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command), command); }") && main.includes("run: (c) => runResync(c)") && main.includes("firstRunOpen = false; return node.runResync(c); };"), "every megammrsync, from any screen or the Terminal, goes through runResync");
 });

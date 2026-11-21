@@ -11,7 +11,7 @@
  */
 "use strict";
 const SEED_PHRASE = "SHOW SEED", KEY_PHRASE = "SHOW KEY", CHANGE_PHRASE = "CHANGE KEYS", PASS_MS = 60000;
-const PHRASE = { seed: SEED_PHRASE, key: KEY_PHRASE, change: CHANGE_PHRASE };
+const PHRASE = { seed: SEED_PHRASE, key: KEY_PHRASE, change: CHANGE_PHRASE, secret: KEY_PHRASE };
 // vault actions that change the wallet's keys or their lock rather than show the seed (0.19.227, as released 0.18.196); resetkeys
 // never gets here: the command channel refuses it (main/restore.js replacesKeysElsewhere)
 const CHANGE_ACTIONS = new Set(["wipekeys", "restorekeys", "passwordlock", "passwordunlock", "resetkeys", "testphrase"]);
@@ -24,13 +24,17 @@ function kindOf(part) {
   if (V.beginsAs(part, "vault")) { const a = V.paramValue(part, "action"); return a != null && CHANGE_ACTIONS.has(V.fold(a)) ? "change" : "seed"; }
   if (V.beginsAs(part, "seedrandom")) return "key";
   if (V.beginsAs(part, "keys") && /genkey/.test(V.fold(String(part).replace(/"/g, "")))) return "key";
+  // what the user asks for by name and the reply carries (0.19.292): the RPC users' passwords, the MiniHUB password (mds list,
+  // mds/mds.java), a SPHINCS private key (sphincs action:generate): shown behind SHOW KEY and the system's check, never hidden
+  const a = V.fold(V.paramValue(part, "action") || "");
+  if ((V.is(part, "rpc") && a === "listusers") || (V.is(part, "mds") && (a === "" || a === "list")) || (V.is(part, "sphincs") && a === "generate")) return "secret";
   return "";
 }
 /** → { kind: "seed" | "key" | "", chain }: the strongest kind anywhere in the text (the node splits on every ";"). */
 function classify(command) {
   const parts = V.parts(command);
   let kind = "";
-  const rank = { "": 0, change: 1, key: 2, seed: 3 };
+  const rank = { "": 0, change: 1, key: 2, secret: 2, seed: 3 };
   for (const p of parts) { const k = kindOf(p); if (rank[k] > rank[kind]) kind = k; }
   return { kind, chain: parts.length > 1 };
 }
@@ -46,6 +50,7 @@ function refusal(command, take) {
   if (take(command)) return "";
   return kind === "seed" ? "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it."
     : kind === "change" ? "This vault command changes this wallet's keys or their lock. Type CHANGE KEYS in the Terminal to run it."
+    : kind === "secret" ? "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it."
     : "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.";
 }
 const { N_ } = require("./lang").I18N;
@@ -66,17 +71,40 @@ function masked(c) {
   for (let i = 0; i < words.length; i++) { const w = words[i]; if (/•••"?$/.test(w)) { hiding = true; continue; } if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else words[i] = "•••"; } }   // a name ends it, also one spaced from its ":"
   return words.join(" ");
 }
-/** A reply of the node with the values of secret parameters hidden wherever it carries its "params" (0.19.282): Command.getJSONReply
- *  echoes every parameter, so a megammrsync phrase:, a backup password: or a sendfrom privatekey: came back whole to the window. */
-function scrubReply(r, depth = 0) {
-  if (!r || typeof r !== "object" || depth > 8) return r;
-  if (Array.isArray(r)) return r.map(x => scrubReply(x, depth + 1));
-  const out = {};
-  for (const [k, v] of Object.entries(r)) {
-    if (k === "params" && v && typeof v === "object" && !Array.isArray(v)) { out[k] = {}; for (const [n, x] of Object.entries(v)) out[k][n] = SECRET_NAMES.includes(V.fold(n)) ? "•••" : scrubReply(x, depth + 1); }
-    else out[k] = scrubReply(v, depth + 1);
+/** The secret words a typed command carries (0.19.292): each secret parameter's value as the node reads it and its words, and the
+ *  bare words after one that the node drops or joins (the ones masked() hides), three characters or more. */
+function secretWords(command) {
+  const out = new Set(), add = (w) => { w = String(w).replace(/"/g, ""); if (w.length >= 3) out.add(w); };
+  for (const p of V.parts(command)) for (const [n, v] of V.read(p).params) if (SECRET_NAMES.includes(V.fold(n)) && v) { add(v); v.split(/\s+/).forEach(add); }
+  const words = String(command).split(/[\s\u0000-\u001f]+/), name = new RegExp("^\"?(?:" + SECRET_NAMES.join("|") + ")\"?:", "i");
+  let hiding = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (name.test(w)) { add(w.replace(/^[^:]*:/, "")); hiding = true; continue; }
+    if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else add(w); }
   }
-  return out;
+  return [...out].sort((a, b) => b.length - a.length);
+}
+const wordRe = (w) => new RegExp("(^|[^A-Za-z0-9])" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^A-Za-z0-9])", "g");
+/** A reply of the node with nothing secret of the typed command in it: the values of secret parameters wherever it carries its
+ *  "params" (0.19.282, Command.getJSONReply echoes every parameter), every "command" string masked (0.19.292: for an invalid
+ *  parameter the node answers with the whole typed text, CommandRunner.java), and each secret word of the typed command, as a
+ *  whole word, in every other string (an error like "Invalid parameters for vault @ lamp" names a word of an unquoted phrase). */
+function scrubReply(r, command) {
+  const res = command == null ? [] : secretWords(command).map(wordRe);
+  const str = (s) => res.reduce((t, re) => t.replace(re, "$1•••"), s);
+  const walk = (x, depth, key) => {
+    if (typeof x === "string") return key === "command" ? masked(str(x)) : str(x);
+    if (!x || typeof x !== "object" || depth > 8) return x;
+    if (Array.isArray(x)) return x.map(y => walk(y, depth + 1));
+    const out = {};
+    for (const [k, v] of Object.entries(x)) {
+      if (k === "params" && v && typeof v === "object" && !Array.isArray(v)) { out[k] = {}; for (const [n, y] of Object.entries(v)) out[k][n] = SECRET_NAMES.includes(V.fold(n)) ? "•••" : walk(y, depth + 1); }
+      else out[k] = walk(v, depth + 1, k);
+    }
+    return out;
+  };
+  return walk(r, 0);
 }
 /** The typed phrase, then the system's own check (main/syscheck.js, 0.19.188: Touch ID; refused while a Touch ID that
  *  worked before cannot be asked; a message box naming what is shown where there never was one). what = { reason, detail }
@@ -109,6 +137,7 @@ function create(sys, now) {
     const system = await check(typed, kind, sys, kind === "seed"
       ? { reason: [N_("show a seed phrase by running: {command}"), p], detail: [N_("This shows a seed phrase. This Terminal command will run once:\n\n{command}"), p] }
       : kind === "change" ? { reason: [N_("change this wallet's keys by running: {command}"), p], detail: [N_("This changes this wallet's keys or their lock. This Terminal command will run once:\n\n{command}"), p] }
+      : kind === "secret" ? { reason: [N_("show passwords or a private key by running: {command}"), p], detail: [N_("This shows passwords or a private key. This Terminal command will run once:\n\n{command}"), p] }
       : { reason: [N_("show a private key by running: {command}"), p], detail: [N_("This shows a private key. This Terminal command will run once:\n\n{command}"), p] });
     pass = { command: c, until: clock() + PASS_MS };
     return { system };

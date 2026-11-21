@@ -410,6 +410,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SG_GATED_SEED", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.")],
     ["SG_GATED_KEY", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.")],
     ["SG_GATED_CHANGE", I18N.N_("This vault command changes this wallet's keys or their lock. Type CHANGE KEYS in the Terminal to run it.")],
+    ["SG_GATED_SECRET", I18N.N_("This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.")],
     ["SC_TOO_LONG", I18N.N_("This is longer than the Touch ID prompt can show in full (120 characters, with the secret values hidden). Shorten it, for example by running it without optional parameters. Nothing was shown or run.")],
     ["SG_CHAIN", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.")],
     ["MAIN_FIRSTRUN_SEED", I18N.N_("The seed is shown here only while a new wallet is being made.")],

@@ -5322,7 +5322,10 @@
   "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.": "此命令多次指定了 {names}（节点只会使用最后一个）。每个只写一次。未运行任何命令。",
   "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.": "mds action:accept 会以完全权限运行某个 MiniDapp 等待中的命令，绕过本应用的所有检查。它不能从终端运行。未运行任何命令。",
   "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.": "多签支出会把链上币的状态复制到节点自己运行的命令中，在那里它可能启动第二条命令，而本应用无法事先读取该状态。它不能从终端运行。未运行任何命令。",
-  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} 不能在额外参数中设置：本应用从不开启 MiniDapp（MDS）。"
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} 不能在额外参数中设置：本应用从不开启 MiniDapp（MDS）。",
+  "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.": "此命令会显示密码或私钥（rpc action:listusers、mds、sphincs action:generate）。请在终端中输入 SHOW KEY 来运行它。",
+  "show passwords or a private key by running: {command}": "运行以下命令以显示密码或私钥：{command}",
+  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "这会显示密码或私钥。此终端命令将运行一次：\n\n{command}"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5427,5 +5430,8 @@
   "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.",
   "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.",
   "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.",
-  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on."
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.",
+  "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.",
+  "show passwords or a private key by running: {command}",
+  "This shows passwords or a private key. This Terminal command will run once:\n\n{command}"
 ] });

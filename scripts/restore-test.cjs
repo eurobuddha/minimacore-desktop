@@ -81,7 +81,7 @@ test("M1: a seed restore on the general command channel is recognised, and main.
     assert.equal(restore.replacesWalletFromPhrase(c), true, c);
   for (const c of ["megammrsync action:resync host:h:1", "megammrsync action:mydetails", 'send address:0x00 amount:1 state:{"1":"phrase:x"}', "", null]) assert.equal(restore.replacesWalletFromPhrase(c), false, String(c));
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
-  const order = ["requireRunning()", "restore.loadsBackupFile(command)", "restore.replacesWalletFromPhrase(command)", "restore.activeWorkProblem(await walletWork())", "seedgate.scrubReply(await run(pinned))"].map(x => cmd.indexOf(x));
+  const order = ["requireRunning()", "restore.loadsBackupFile(command)", "restore.replacesWalletFromPhrase(command)", "restore.activeWorkProblem(await walletWork())", "seedgate.scrubReply(await run(pinned), command)"].map(x => cmd.indexOf(x));
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refusals first, the node last: " + order);
   assert.ok(/const walletWork = async \(skipDexicon = Date\.now\(\) < dexSkipUntil\) => restore\.activeWorkList\(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\),/.test(main), "asked of the existing read models; a failed read is null, which refuses");
   assert.ok(/work: walletWork \}\)\);/.test(main), "and the backup-file restore asks the same");
@@ -158,7 +158,7 @@ test("lows: a semicolon in a restore value is refused in plain words; a resync a
   for (const c of ['backup password:"a"b"', 'backup password:"a b"', "backup password:a;b", 'backup password:"pä55"', "backup password:", 'backup password:"abc" confirm:"ab c"', " Backup password:a-b"])
     assert.ok(/letters and numbers only/.test(restore.backupCommandProblem(c)), c);
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
-  assert.ok(cmd.indexOf("restore.backupCommandProblem(command)") > 0 && cmd.indexOf("restore.backupCommandProblem(command)") < cmd.indexOf("seedgate.scrubReply(await run(pinned))"));
+  assert.ok(cmd.indexOf("restore.backupCommandProblem(command)") > 0 && cmd.indexOf("restore.backupCommandProblem(command)") < cmd.indexOf("seedgate.scrubReply(await run(pinned), command)"));
 });
 
 // ---- 0.19.193: the command channel's restore checks read a command as the node does (main/cmdverb.js) ----

@@ -183,7 +183,7 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
     assert.deepEqual(did, allow ? ["ask", 'save {"contribute":true}', "restart"] : ["ask"], allow ? "saved after the guard, before the restart" : "refused: nothing saved");
   }
   assert.ok(/label: lang\.t\("Restart node"\), click: \(\) => \{ mayStop\(\)\.then\(\(\) => node\.restart\(\)\)/.test(src), "the tray's Restart node asks the guard first");
-  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command)); }"), "a Terminal resync asks the guard first");
+  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command), command); }"), "a Terminal resync asks the guard first");
   assert.ok(calls["mcd:inFlight"].includes('ack: w.any && how !== "quit" && /^(restart|stop|kind)$/.test(String(action)) ? stopGuard.issue(action) : ""'), "the ack is issued only with a warning that was shown, for its one action");
 });
 

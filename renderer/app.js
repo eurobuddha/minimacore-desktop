@@ -2867,7 +2867,7 @@ async function termRun() {
   if (k.write) TERM_BUSY.add(c);
   let r, err = null;
   try { r = await api.cmd(c); } catch (x) { err = x; } finally { if (k.write) TERM_BUSY.delete(c); }
-  const raw = err ? ipcRaw(err) : "", secret = MainSaid.has(raw, "SG_GATED_SEED") ? "seed" : MainSaid.has(raw, "SG_GATED_KEY") ? "key" : MainSaid.has(raw, "SG_GATED_CHANGE") ? "change" : null;
+  const raw = err ? ipcRaw(err) : "", secret = MainSaid.has(raw, "SG_GATED_SEED") ? "seed" : MainSaid.has(raw, "SG_GATED_KEY") ? "key" : MainSaid.has(raw, "SG_GATED_CHANGE") ? "change" : MainSaid.has(raw, "SG_GATED_SECRET") ? "secret" : null;
   if (secret) { ask(secret); return; }   // main read it as gated after all: its refusal decides
   if (err) appendTerm("error: " + ipcError(err), "err"); else appendTerm(JSON.stringify(r, null, 2), "json");
   inp.focus();

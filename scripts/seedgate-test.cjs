@@ -163,7 +163,7 @@ test("main: the general command channel refuses vault and seedrandom without a p
   // CHANGED on purpose (0.19.237, as released 0.18.194): main is asked what the text is FIRST (mcd:cmdKind), then mcd:cmd decides
   const app = SRC("renderer/app.js"), run = app.slice(app.indexOf("const TERM_BUSY"), app.indexOf("function renderTerminal()"));
   assert.ok(run.indexOf("k = await api.cmdKind(c)") < run.indexOf("if (k.kind && !k.chain) { ask(k.kind); return; }") && run.indexOf("if (k.kind && !k.chain) { ask(k.kind); return; }") < run.indexOf("TERM_HIST.push(c)"), "a secret command goes to its gate before the history and the output");
-  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : MainSaid\.has\(raw, "SG_GATED_CHANGE"\) \? "change" : null;\s*\n\s*if \(secret\) \{ ask\(secret\); return; \}/.test(run), "main's refusal still decides, by code");
+  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : MainSaid\.has\(raw, "SG_GATED_CHANGE"\) \? "change" : MainSaid\.has\(raw, "SG_GATED_SECRET"\) \? "secret" : null;\s*\n\s*if \(secret\) \{ ask\(secret\); return; \}/.test(run), "main's refusal still decides, by code");
   assert.ok(/if \(!k\.secretValues\) \{ TERM_HIST\.push\(c\);/.test(run) && /appendTerm\(k\.shown, "cmd"\)/.test(run) && /secretReveal\(k\.shown,/.test(run), "the echo, the title and the history never carry a secret value");
   assert.ok(/appendTerm\(c\.split\(\/\\s\+\/\)\[0\], "cmd"\)/.test(run), "only its verb is shown in the output");
   const reveal = app.slice(app.indexOf("function secretReveal("), app.indexOf("// Export: the phone asks"));
@@ -397,4 +397,31 @@ test("an escaped semicolon or control character smuggles no second command; mds 
   // no MDS: refused in the extra node arguments, and never passed to the node
   const P = require("../renderer/params.js"); assert.equal(P.mdsArg("-mdsenable"), "-mdsenable"); assert.equal(P.mdsArg('-p2pnodes x "-MDSPASSWORD=y"'), "-mdspassword"); assert.equal(P.mdsArg("-test -nop2p"), "");
   assert.ok(SRC("main/config.js").includes("const mds = PARAMS.mdsArg(cfg.extraArgs);") && (SRC("main/node-manager.js").match(/PARAMS\.mdsArg\(tok\)/g) || []).length === 2, "config refuses it, both node kinds skip it");
+});
+
+// ---- 0.19.292: a reply never shows a secret of the typed command; passwords and a private key the user asks for are gated, not hidden ----
+test("the node's reply is scrubbed of the typed command's secrets (its 'command' echo, an error naming a phrase word); rpc listusers, mds and sphincs generate need SHOW KEY", async () => {
+  const typed = "vault action:restorekeys phrase:spray lamp keyz:1";
+  const r = G.scrubReply({ command: typed, params: { action: "restorekeys", phrase: "spray", keyz: "1" }, status: false, error: "Invalid parameter : keyz", more: ["Invalid parameters for vault @ lamp", "spraying is a word"] }, typed);
+  const s = JSON.stringify(r);
+  assert.ok(!/\bspray\b|\blamp\b/.test(s), s); assert.equal(r.command, "vault action:restorekeys phrase:••• ••• keyz:1"); assert.equal(r.more[0], "Invalid parameters for vault @ •••"); assert.equal(r.more[1], "spraying is a word", "whole words only");
+  const pk = "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD9 keyuses:5 foo:1";
+  assert.ok(!JSON.stringify(G.scrubReply({ command: pk, status: false, error: "Invalid parameter : foo" }, pk)).includes("0x1234ABCD9"));
+  // through the real mcd:cmd handler
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {};
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => ({ command: c, status: false, error: "Invalid parameter : foo" }) },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  const got = await hs["mcd:cmd"](null, "backup password:hunter22 foo:1");
+  assert.equal(got.command, "backup password:••• foo:1"); assert.ok(!JSON.stringify(got).includes("hunter22"));
+  // what the user asks for by name: gated like SHOW KEY
+  for (const c of ["rpc action:listusers", "mds", "mds action:list", "sphincs action:generate seed:abc"]) assert.equal(G.classify(c).kind, "secret", c);
+  for (const c of ["mds action:pending", "rpc", "sphincs action:sign data:0x01"]) assert.equal(G.classify(c).kind, "", c);
+  assert.match(G.refusal("rpc action:listusers", () => false), /shows passwords or a private key .*Type SHOW KEY/);
+  let why = null; const g = G.create({ check: async (reason) => { why = reason; return { biometric: false }; } });
+  await assert.rejects(g.open("rpc action:listusers", "SHOW SEED"), /Type SHOW KEY exactly/); await g.open("rpc action:listusers", "SHOW KEY");
+  assert.deepEqual(why, ["show passwords or a private key by running: {command}", { command: "rpc action:listusers" }]); assert.equal(g.take("rpc action:listusers"), true);
+  // and the node's log file: password:, confirm:, seed: values
+  const NL = require("../main/nodelog.js"), line = NL.scrub('cmd: backup password:hunter22 confirm:"a b" seed:0xABCD file:x');
+  assert.ok(!/hunter22|a b|0xABCD/.test(line) && line.includes("file:x"), line);
 });

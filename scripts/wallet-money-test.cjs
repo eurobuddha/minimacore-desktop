@@ -125,7 +125,7 @@ test("Send: every check still stops the send, before anything reaches the node",
 
 test("Send: the main process still pins a MINIMA send to a signable coin, and only a send", () => {
   assert.ok(mainJs.includes("const pinned = await pinMinimaSend(run, command, { minCoinage: 3 });"), "CHANGED on purpose (0.19.190): the pin itself reads the verb (main/cmdverb.js) and passes any other command unchanged");
-  assert.ok(mainJs.includes("return seedgate.scrubReply(await run(pinned));"));
+  assert.ok(mainJs.includes("return seedgate.scrubReply(await run(pinned), command);"));
 });
 
 // 0.19.154: the same Send and Split, lifted from the SHIPPED source (not the English view) and run with the app in each
