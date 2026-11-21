@@ -433,3 +433,18 @@ test("an incoming message is stored as capped strings and numbers: a field neste
   assert.ok(/try \{   \/\/ one coin at a time[\s\S]{0,4000}const local = localOf\(m\);\s*if \(store\.addMessage\(local\)\)[^\n]*\n\s*\} catch \(e\) \{ try \{ node\.log\("\[mail\] a coin could not be read/.test(src), "each coin is read in its own try, and a failure is logged");
   assert.ok(/require\("\.\/mail-store"\)\.setLog\(\(m\) => node\.log\(m\)\);/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8")), "a failed save of mail.json is said in the Logs view");
 });
+
+// ---------------------------------------------------------------- 0.19.261: a backfill never learns an older pay address over a newer one
+test("a peer's pay address: a backfill's older coin never replaces the address a newer coin gave", () => {
+  const L = mail._learnPayaddr;
+  assert.equal(L("", 0, 100, true), true, "none known: learned, from any pass");
+  assert.equal(L("MxOLD", 500, 100, true), false, "a backfill reads block 100 after a live pass learned at block 500");
+  assert.equal(L("MxOLD", 500, 100, false), false, "nor a live pass reading an older coin");
+  assert.equal(L("MxOLD", 500, 600, true), true, "a newer coin, from any pass");
+  assert.equal(L("MxOLD", 500, 500, false), true);
+  assert.equal(L("MxOLD", 0, 100, true), false, "an address of unknown age (stored before 0.19.261) is not replaced by a backfill");
+  assert.equal(L("MxOLD", 0, 100, false), true, "but is by a live pass");
+  assert.equal(L("MxOLD", 500, 0, false), false, "a coin with no block does not replace a dated address");
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "mail.js"), "utf8");
+  assert.ok(src.includes('if (cur !== payaddr && learnPayaddr(cur, known, blk, historical)) { store.metaSet("pa:" + m.from, payaddr); store.metaSet("pab:" + m.from, blk);'), "processCoins asks it");
+});

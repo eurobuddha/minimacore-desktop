@@ -334,6 +334,15 @@ function localOf(m) {
     date: date > 0 ? date : Date.now(), status: "received", sentblock: 0, type: txt(m.type, 32) || "text",
     amount: opt(m.amount, 64), tokenid: opt(m.tokenid, 80), tokenname: opt(m.tokenname, 200), txpowid: opt(m.txpowid, 80), image: opt(m.image, 400000), payaddr: txt(m.payaddr, 90) };
 }
+/** Learn a peer's pay address from this coin? Yes when none is known; by blocks when both are known (not older than the
+ *  coin it was learned from); a known address of unknown age is replaced only by a live pass, never by a backfill. */
+function learnPayaddr(cur, knownBlock, coinBlock, historical) {
+  if (!cur) return true;
+  const k = Number(knownBlock) || 0, c = Number(coinBlock) || 0;
+  if (k && c) return c >= k;
+  if (k) return false;
+  return !historical;
+}
 /** Trial-decrypt a page of coins into the store. `historical` suppresses the payaddr auto-reply: a backfill
  *  walks over months of old requests and must not answer any of them with a real coin. Returns {fresh,lastFresh,paLearned}. */
 async function processCoins(coins, historical) {
@@ -357,7 +366,11 @@ async function processCoins(coins, historical) {
       const payaddr = txt(m.payaddr, 90);
       if (payaddr && !paSeen.has(m.from)) {
         paSeen.add(m.from);
-        if (store.metaGet("pa:" + m.from) !== payaddr) { store.metaSet("pa:" + m.from, payaddr); paLearned = true; }
+        // Never an older address over a newer one (0.19.261): a backfill walks history, so the coin it reads is older than
+        // the one a live pass learned from. The block each address came from is kept beside it (pab:).
+        const cur = store.metaGet("pa:" + m.from), blk = Number(coin.created) || 0, known = store.metaGet("pab:" + m.from);
+        if (cur !== payaddr && learnPayaddr(cur, known, blk, historical)) { store.metaSet("pa:" + m.from, payaddr); store.metaSet("pab:" + m.from, blk); paLearned = true; }
+        else if (cur === payaddr && blk > (Number(known) || 0)) store.metaSet("pab:" + m.from, blk);
       }
       if (m.type === "payaddr-req" || m.type === "payaddr-reply") {
         // For a REQUEST on a LIVE pass, auto-answer with our own address — the handshake. Suppressed while walking
@@ -801,5 +814,5 @@ module.exports = { emitter, init, invalidateIdentity, startLoop, stopLoop, scan,
   renameContact, removeContact, deleteThread, archivedThreads, setArchived, exportBackup, importBackup,
   _setRunner, _renewAddresses: renewAddresses, CHAINMAIL, threadKey,
   // test seams: the two numbers that decide how much history we fetch (scripts/mail-test.cjs)
-  _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget, _localOf: localOf,
+  _depthForGap: depthForGap, _nextFloorTarget: nextFloorTarget, _localOf: localOf, _learnPayaddr: learnPayaddr,
   _limits: { POLL_DEPTH, WINDOW_DEPTH, MIN_DEPTH, BACKFILL_CHUNK, GAP_MARGIN } };
