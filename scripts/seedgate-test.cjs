@@ -280,3 +280,16 @@ test("0.19.237: mcd:cmdKind says what a text is with its secret values hidden; t
   assert.equal(k("vault action:passwordunlock password:hunter2").shown, "vault action:passwordunlock password:•••");
   assert.deepEqual([k("vault").kind, k("status;vault").chain], ["seed", true]);
 });
+
+// ---- 0.19.250: an empty quoted value does not hide the next parameter name from the reader ----
+test("an empty quoted value (password:\"\") does not hide the parameter after it: the kind, a repeated name and the value are read", () => {
+  const V = require("../main/cmdverb.js");
+  for (const c of ['vault password:"" action:wipekeys', 'vault password : "" action:wipekeys', 'vault password:""action:wipekeys', 'vault phrase:"" action:restorekeys'])
+    assert.equal(G.classify(c).kind, "change", c);
+  assert.deepEqual(V.paramNames('vault action:seed password:"" action:wipekeys'), ["action", "password", "action"]);
+  assert.deepEqual(V.repeated('vault action:seed password:"" action:wipekeys'), ["action"], "the repeat is seen, so the command is refused");
+  assert.equal(V.paramValue('vault password:"" action:wipekeys', "action"), "wipekeys");
+  assert.equal(V.paramValue('vault password:"x y" action:wipekeys', "action"), "wipekeys", "a value with content as before");
+  assert.equal(V.paramValue('keys action:"list"action:genkey', "action"), "genkey", "a name glued after a closing quote as before");
+  assert.match(V.paramsText('send amount:1 address:"" tokenid:0xAB'), /address:"" +tokenid:0xAB$/);
+});

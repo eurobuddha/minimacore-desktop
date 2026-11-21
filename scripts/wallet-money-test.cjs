@@ -255,6 +255,12 @@ test("the send pin reads the LAST tokenid and amount and a top-level fromaddress
   r = pinRig(); const st = 'send amount:1 address:0xCD state:{"1":"fromaddress:0xEE"}'; assert.equal(await pinMinimaSend(r.run, st), st + " fromaddress:" + PIN_A, "fromaddress: inside a state's JSON is not the parameter");
   r = pinRig(); assert.equal(await pinMinimaSend(r.run, "send amount:1 amount:60 address:0xCD"), "send amount:1 amount:60 address:0xCD", "the amount looked for is the last one (60): no coin of 50 covers it, so nothing is pinned");
 });
+test("the send pin: an empty quoted value does not hide the tokenid after it (0.19.250)", async () => {
+  const { pinMinimaSend } = require("../main/sendpin");
+  for (const c of ['send amount:1 address:"" tokenid:' + MXUSD, 'send amount:1 address : "" tokenid:' + MXUSD, 'send amount:1 address:""tokenid:' + MXUSD]) {
+    const r = pinRig(); assert.equal(await pinMinimaSend(r.run, c), c, "an MxUSD send is not pinned: " + c); assert.deepEqual(r.asked, [], c);
+  }
+});
 test("the RPC write timeout reads the verb as the node does", () => {
   const { _timeoutFor } = require("../main/rpc");
   for (const c of ['"send" amount:1', "\u0002vault", 'v"ault"', "status;send amount:1", "SEEDRANDOM modifier:x", '"txnpost" id:a']) assert.equal(_timeoutFor(c), 180000, JSON.stringify(c));

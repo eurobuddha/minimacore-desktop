@@ -36,7 +36,9 @@ function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(pref
 /** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value).
  *  NOT in the released file (0.19.192 here): a "quoted" first word is ended by its closing quote, so `"txninput"id:a` reads
  *  as `txninput id:a`, as the node's fast path reads it (released: `txninputid:a`, and its id: was not seen). */
-function paramsText(part) { return jtrim(jtrim(String(part)).replace(/^"([^"]*)"/, "$1 ").replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
+// An empty quoted value (`password:""`) is kept as "" (0.19.250): dropped, it left `password:` followed by a space, which the
+// closing-up of " : " then joined to the next name (`password:action:wipekeys`), and that name was no longer read.
+function paramsText(part) { return jtrim(jtrim(String(part)).replace(/^"([^"]*)"/, "$1 ").replace(/""/g, "\u0000").replace(/"/g, "").replace(/\u0000/g, '"" ')).replace(/[ \t]*:[ \t]*/g, ":"); }
 
 /** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb. The node
  *  keeps the LAST of a repeated name. Read from namesText since 0.19.218 (released 0.18.189 / 0.18.197). */
@@ -50,9 +52,10 @@ function paramNames(part) {
  *  " : " is closed up. Values that need quotes are not read here. */
 function namesText(part) {
   const s = jtrim(String(part));
-  let out = "", depth = 0, quoted = false;
+  let out = "", depth = 0, quoted = false, opened = -1;
   for (const ch of s) {
-    if (ch === '"') { quoted = !quoted; out += " "; continue; }
+    // an empty quoted value stays "" (0.19.250): two spaces after a colon were closed up into the next name, which hid it
+    if (ch === '"') { if (!quoted) opened = out.length; else if (depth === 0 && out.length === opened + 1) out += '""'; quoted = !quoted; out += " "; continue; }
     if (quoted) { out += depth > 0 ? " " : ch; continue; }
     if (ch === "{" || ch === "[") { depth++; out += ch; continue; }
     if ((ch === "}" || ch === "]") && depth > 0) { depth--; out += ch; continue; }
