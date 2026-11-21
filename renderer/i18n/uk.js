@@ -5323,7 +5323,7 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} зупинено ({error}). Можливо, транзакцію вже надіслано: перевірте «Активність» і баланс, перш ніж повторювати.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "Адресу для виплат не вдалося перевірити: вузол не відповів. Нічого не збережено; спробуйте знову, коли вузол працюватиме.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Вузол повідомляє, що адреса для виплат {address} не є дійсною адресою Minima. Нічого не збережено; перевірте адресу й збережіть знову.",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "Замовлення, надіслані до блоку {block}, могли бути не прочитані: застосунок був закритий довше, ніж охоплює одне читання. Платежі не губляться: вузол показує кожну невитрачену монету цього гаманця.",
+  "Orders and payments older than block {block} could not be read: the node serves no deeper history.": "Замовлення й платежі, старші за блок {block}, не вдалося прочитати: вузол не віддає ранішої історії.",
   "Need {need} USDT or more for that — you have {have} USDT.": "Для цього потрібно {need} USDT або більше — у вас {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "Не вдалося прочитати використання цього ключа в мережі із сервісу використань ключів (eurobuddha.com). Доки їх не можна прочитати, з цього гаманця нічого не можна надіслати: занизьке число може призвести до втрати коштів. Перевірте з'єднання й знову натисніть «Підтвердити».",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "Не вдалося прочитати використання в мережі із сервісу використань ключів (eurobuddha.com). Нічого не змінено, і з цього гаманця нічого не можна надіслати, доки їх не можна прочитати.",
@@ -5354,7 +5354,8 @@
   "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.": "Збережена кількість використань ключа цього гаманця дорівнює {count}, це не менше за 262144 одноразові використання, які має ключ (від 0 до 262143): надсилання зараз знову підписало б одноразовим ключем, тож цей застосунок не підписуватиме з цієї адреси. Кількість ніколи не зменшується. Нічого не надіслано.",
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "Збережена кількість використань ключа цього гаманця до пошкодження була {count}, це не менше за 262144 одноразові використання, які має ключ: надсилання знову підписало б одноразовим ключем, тож цей застосунок не підписуватиме з цієї адреси. Нічого не збережено.",
   "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.": "Збережена кількість використань ключа цього гаманця до пошкодження була {count}. Підтвердьте не менше цього числа. Нічого не збережено.",
-  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.": "keyuses: означає, скільки разів ключ уже використано: ціле число від 0 до {max} для ключів цього гаманця. Більше число змусить вузол знову підписати одноразовим ключем або відмовитися підписувати. Нічого не виконано."
+  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.": "keyuses: означає, скільки разів ключ уже використано: ціле число від 0 до {max} для ключів цього гаманця. Більше число змусить вузол знову підписати одноразовим ключем або відмовитися підписувати. Нічого не виконано.",
+  "Reading orders and payments from while the app was closed (back to block {block}).": "Читаються замовлення й платежі за час, поки застосунок був закритий (до блоку {block})."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5447,7 +5448,7 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
+  "Orders and payments older than block {block} could not be read: the node serves no deeper history.",
   "Need {need} USDT or more for that — you have {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
@@ -5478,5 +5479,6 @@
   "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.",
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
   "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.",
-  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run."
+  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.",
+  "Reading orders and payments from while the app was closed (back to block {block})."
 ] });

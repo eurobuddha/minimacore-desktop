@@ -5310,7 +5310,7 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} 已停止（{error}）。它可能已经提交：重试前请检查活动记录和余额。",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "无法检查收款地址：节点没有响应。未保存任何内容；请在节点运行时再试。",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "节点表示收款地址 {address} 不是有效的 Minima 地址。未保存任何内容；请检查地址后再保存。",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "区块 {block} 之前发送的订单可能未被读取：应用离开的时间超过了一次读取的范围。付款不会遗漏：节点会列出此钱包的每个未花费币。",
+  "Orders and payments older than block {block} could not be read: the node serves no deeper history.": "区块 {block} 之前的订单和付款无法读取：节点不提供更早的历史。",
   "Need {need} USDT or more for that — you have {have} USDT.": "这需要 {need} USDT 或更多 — 您有 {have} USDT。",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "无法从密钥使用服务（eurobuddha.com）读取此密钥的链上使用次数。在读取之前，此钱包无法发送任何内容：过低的数字可能导致资金损失。请检查网络连接，然后再次点击“确认”。",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "无法从密钥使用服务（eurobuddha.com）读取链上使用次数。未做任何更改，在读取之前此钱包无法发送任何内容。",
@@ -5341,7 +5341,8 @@
   "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.": "此钱包保存的密钥使用次数为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用（0 到 262143）：现在发送会再次使用一次性密钥签名，因此本应用不会从该地址签名。该计数从不降低。未发送任何内容。",
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用：发送将再次使用一次性密钥签名，因此本应用不会从该地址签名。未保存任何内容。",
   "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}。请确认至少这么多。未保存任何内容。",
-  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.": "keyuses: 是一个密钥已经使用过的次数：对此钱包的密钥而言，是 0 到 {max} 之间的整数。更大的数字会使节点再次使用一次性密钥签名，或拒绝签名。未运行任何内容。"
+  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.": "keyuses: 是一个密钥已经使用过的次数：对此钱包的密钥而言，是 0 到 {max} 之间的整数。更大的数字会使节点再次使用一次性密钥签名，或拒绝签名。未运行任何内容。",
+  "Reading orders and payments from while the app was closed (back to block {block}).": "正在读取应用关闭期间的订单和付款（回溯到区块 {block}）。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5434,7 +5435,7 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
+  "Orders and payments older than block {block} could not be read: the node serves no deeper history.",
   "Need {need} USDT or more for that — you have {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
@@ -5465,5 +5466,6 @@
   "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.",
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
   "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.",
-  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run."
+  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.",
+  "Reading orders and payments from while the app was closed (back to block {block})."
 ] });

@@ -292,18 +292,21 @@ function routeIncoming(w, fromPublicId) {
 
 // ---- scanners (adaptive depth: MINIMERCH is a network-wide shared address, so a deep query can exceed the node's
 //      reply cap and return a non-array — shrink 256→…→4 until we get a real list, like mail.js, rather than miss all) ----
+let served = 0;   // the smallest depth the node really served in this pass or step (0.19.328, as released 0.18.213's passServed)
 async function coinsAt(address, depth, extra) {
   let d = depth;
   while (d >= 4) {
     const r = await nodeCmd(`coins address:${address} simplestate:true${extra || ""} order:desc depth:${d}`);
-    if (r && Array.isArray(r.response)) return r.response;
+    if (r && Array.isArray(r.response)) { served = Math.min(served, d); return r.response; }
     d = Math.floor(d / 2);
   }
   return null;   // never got a usable reply → caller keeps its bookmark and retries next tick
 }
+const above = (c, floor) => floor > 0 && Number(c && c.created) > floor;   // already read by an earlier pass: a backfill step skips it (0.19.328)
 function capSeen() { if (seenMsgCoins.size > 40000) seenMsgCoins.clear(); if (seenPayCoins.size > 40000) seenPayCoins.clear(); }
-async function scanOrders(depth) {
-  const coins = await coinsAt(MINIMERCH, depth); if (!coins) return null;   // null: not read (the cursor stays)
+async function scanOrders(depth, floor) {
+  const all = await coinsAt(MINIMERCH, depth); if (!all) return null;   // null: not read (the cursor stays)
+  const coins = all.filter(c => !above(c, floor));
   capSeen();
   let changed = false;
   for (const c of coins) {
@@ -336,13 +339,13 @@ function badAddress(a) {
 // Inbox (scanState). Not read as "not answered", which held the cursor for good and read the widest window on every pass.
 const SKIP_MS = 5 * 60000, skippedPay = new Map();   // address -> skipped until
 const skipping = (a) => (skippedPay.get(a) || 0) > Date.now();
-async function scanPayments(depth) {
+async function scanPayments(depth, floor) {
   const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   let listed = [], any = false;
   let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
   for (const a of addrs) {
     const got = await coinsAt(a, depth, " relevant:true");
-    if (got) { any = true; listed = listed.concat(got); continue; }
+    if (got) { any = true; listed = listed.concat(got.filter(c => !above(c, floor))); continue; }
     if (badAddress(a)) { skippedPay.set(a, Date.now() + SKIP_MS); store.log("miniMall: the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address)."); any = true; continue; }
     missed = true;
   }
@@ -375,8 +378,10 @@ async function scanPayments(depth) {
   return missed ? null : changed;
 }
 /** How many blocks a pass asks for (0.19.232, mail.js's depthForGap): the gap since the last scanned tip (saved, so it
- *  survives a quit) plus a margin, never below the steady window, never past one pass's ceiling. */
-const WINDOW_DEPTH = 4096, GAP_MARGIN = 16;
+ *  survives a quit) plus a margin, never below the steady window, never past one pass's ceiling. What is older is read by the
+ *  stepped backfill (0.19.328, as released 0.18.206 / 0.18.213): one step per pass, each reaching BACKFILL_CHUNK blocks deeper than
+ *  the last (one pass's ceiling), skipping what an earlier pass read, until the gap is read or the node serves no deeper. */
+const WINDOW_DEPTH = 4096, GAP_MARGIN = 16, BACKFILL_CHUNK = WINDOW_DEPTH;
 function depthForGap(tip, prevTip) { if (!prevTip) return BACKFILL_MAX_DEPTH; const gap = Math.max(0, tip - prevTip); return Math.min(WINDOW_DEPTH, Math.max(POLL_DEPTH, gap + GAP_MARGIN)); }
 async function currentBlock() { try { const b = await nodeCmd("block"); return parseInt((b && b.response && (b.response.block != null ? b.response.block : b.response)), 10) || 0; } catch (e) { return 0; } }
 async function scanOnce() {
@@ -385,23 +390,45 @@ async function scanOnce() {
   try {
     const tip = await currentBlock(), prev = Number(store.getMeta("scanned_tip_block") || 0);
     const depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
+    served = depth;
     const a = await scanOrders(depth).catch(() => null);
     const b = await scanPayments(depth).catch(() => null);
     backfilled = true;
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
-    const failed = !tip || a === null || b === null;
+    let failed = !tip || a === null || b === null, changed = !!(a || b);
+    const meta = (k) => Number(store.getMeta(k)) || 0, bf0 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
     if (!failed) {
-      if (prev && tip - prev + GAP_MARGIN > WINDOW_DEPTH) {   // the app was away longer than one pass reads: said, and kept until a later pass
-        const below = tip - WINDOW_DEPTH; store.setMeta("unread_below_block", Math.max(below, Number(store.getMeta("unread_below_block")) || 0));
-        store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass reads the last " + WINDOW_DEPTH + " (orders and payments before block " + below + " were not read)");
+      const covered = tip - served;   // the oldest block this pass read (less than asked when the node served less)
+      // a gap below this pass (the app was away longer than one pass reads, or the node served less): the backfill reaches down to the
+      // oldest unread block and starts just under this pass; a gap that opens while an older one is still being read keeps the oldest
+      // target (0.19.328, as released 0.18.213)
+      if (prev && prev < covered) {
+        const t0 = meta("backfill_target_block"); store.setMeta("backfill_target_block", t0 ? Math.min(t0, prev) : prev); store.setMeta("backfill_floor_block", covered);
+        store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass read back to block " + covered + ", and the older blocks are read in steps, back to block " + (t0 ? Math.min(t0, prev) : prev));
       }
-      // a later pass that read everything since the one before clears it (0.19.273); the log keeps what was not read
-      else if (prev && Number(store.getMeta("unread_below_block"))) store.setMeta("unread_below_block", 0);
+      // a later pass that read everything since the one before, with nothing left to read below, clears the Inbox notice (0.19.273); the log keeps it
+      else if (prev && !meta("backfill_target_block") && meta("unread_below_block")) store.setMeta("unread_below_block", 0);
       store.setMeta("scanned_tip_block", tip);
+      const target = meta("backfill_target_block"), floor = meta("backfill_floor_block");
+      if (target && floor) {   // ONE step per pass: a widening query is heavy on the shared MINIMERCH address
+        const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK);
+        served = deep;
+        const c = await scanOrders(deep, floor).catch(() => null), d = await scanPayments(deep, floor).catch(() => null);
+        changed = changed || !!(c || d);
+        const reached = tip - served;
+        if (c === null || d === null) failed = true;   // nothing moves: the same step is tried on the next pass (0.19.249)
+        else if (reached <= target) { store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); }
+        else if (reached < floor) store.setMeta("backfill_floor_block", reached);
+        else {   // the node served no deeper than the floor: what is older cannot be read, said and kept (0.19.249)
+          store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", reached);
+          store.log("miniMall: orders and payments older than block " + reached + " could not be read: the node serves no deeper history");
+        }
+      }
     }
-    const said = failed !== lastPassFailed; lastPassFailed = failed;
-    if (a || b || said) emitter.emit("update");
+    const bf1 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
+    const said = failed !== lastPassFailed || bf0 !== bf1; lastPassFailed = failed;
+    if (changed || said) emitter.emit("update");
   } finally { scanning = false; }
 }
 async function startLoop() {
@@ -468,7 +495,9 @@ function paymentNotSent(ref) {
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read, for the Inbox's status line (0.19.249): the last pass failed (the node did not answer;
  *  read again on the next block), and the oldest block below which a long absence left orders and payments unread. */
-function scanState() { return { readFailed: lastPassFailed, unreadBelow: Number(store.getMeta("unread_below_block")) || 0, skipped: [...skippedPay.keys()].filter(skipping) }; }
+/** What the order scan could not read yet, for the Inbox: a failed pass, the block a backfill still reads back to (catchingUpTo), the oldest
+ *  block a node that serves no deeper left unread (unreadBelow), payout addresses skipped as not valid (0.19.249, 0.19.284, 0.19.328). */
+function scanState() { return { readFailed: lastPassFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: Number(store.getMeta("unread_below_block")) || 0, skipped: [...skippedPay.keys()].filter(skipping) }; }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {

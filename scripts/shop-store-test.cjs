@@ -425,10 +425,14 @@ test("vendor: a payout address the node does not answer for leaves the scan curs
   assert.equal(shop.scanState().readFailed, true);
   down = false; await shop.scanOnce();
   assert.equal(store.getMeta("scanned_tip_block"), 9000); assert.equal(shop.scanState().readFailed, false);
+  // changed on purpose (0.19.328, the stepped backfill): what is older than one pass is read in steps and said while it is read
   tip = 20000; await shop.scanOnce();
-  assert.equal(shop.scanState().unreadBelow, 20000 - 4096, "away longer than one pass reads: the oldest unread block is kept for the Inbox");
+  assert.equal(shop.scanState().catchingUpTo, 9000, "away longer than one pass reads: the Inbox says how far back the scan still reads");
+  assert.equal(store.getMeta("scanned_tip_block"), 20000);
+  await shop.scanOnce(); assert.equal(shop.scanState().catchingUpTo, 0, "the next step reaches the last block read before the absence"); assert.equal(shop.scanState().unreadBelow, 0);
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
-  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Orders sent before block {block} may not have been read'));
+  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Reading orders and payments from while the app was closed (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })')
+    && app.includes('tr("Orders and payments older than block {block} could not be read: the node serves no deeper history.", { block: esc(String(scan.unreadBelow)) })'));
 });
 
 // ---- 0.19.273 / 0.19.284: a payout address that can never be valid (its checksum) is skipped for a while, said whole on the Inbox;
@@ -494,4 +498,46 @@ test("dust past the bound: an order keeps PENDING_MAX coins, the smallest is rep
   assert.equal(fresh.recordPayment(r2, "0xf2", "0.05", "0x00"), "DUST"); assert.equal(fresh.recordPayment(r2, "0xf1", "0.05", "0x00"), "DUST");
   try { assert.equal(fresh.recordPayment(r2, "0xf3", "9.9", "0x00"), "PAID"); assert.equal(M.decCmp(fresh.order(r2).paidAmount, "10"), 0); }
   finally { fresh.flush(); require.cache[key] = kept; }
+});
+
+// ---- 0.19.328 (the released stepped backfill, 0.18.206 / 0.18.213): a long absence is read to its end in bounded steps ----
+test("vendor: an absence longer than one pass is read back in steps to the last block read; a failed step moves nothing; a node that serves no deeper ends it and says so; a gap during a backfill keeps the oldest target", async () => {
+  for (const id of store.shops().map(s => s.shopId)) if (id !== "tea") store.deleteShop(id);
+  const logs = []; store.setLog((m) => logs.push(m));
+  let tip = 113000, maxServe = Infinity, failDeep = false; const coins = [], asked = [];
+  const order = (ref, created) => coins.push({ coinid: "0xBF" + ref, created, state: { "99": hex(JSON.stringify({ type: "ORDER", ref, from: BUYER, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], amount: "1.5", currency: "Minima", shipping: "" })) } });
+  shop._setRunner(async (c) => {
+    if (c === "block") return { status: true, response: { block: String(tip) } };
+    if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
+    const m = / depth:(\d+)$/.exec(c); if (!m || !c.startsWith("coins ")) return { status: true, response: [] };
+    const d = Number(m[1]); asked.push(d);
+    if (d > maxServe) return { status: true, response: "too large" };   // a reply over the node's cap: not a list
+    if (failDeep && d > 4096) throw new Error("timed out");
+    return { status: true, response: c.startsWith("coins address:" + shop.MINIMERCH) ? coins.filter(x => x.created > tip - d && x.created <= tip) : [] };
+  });
+  store.setMeta("scanned_tip_block", 100000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
+  order("ORD-BF-OLD", 101000); order("ORD-BF-NEW", 112000);
+  await shop.init(); await shop.scanOnce();
+  assert.ok(store.order("ORD-BF-NEW"), "the newest part is read at once"); assert.equal(store.order("ORD-BF-OLD"), null, "not reached yet");
+  assert.equal(store.getMeta("scanned_tip_block"), 113000, "the cursor moves with a pass that read");
+  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.catchingUpTo, st.unreadBelow], [false, 100000, 0]); }
+  assert.equal(Math.max(...asked), 8192, "one step of one pass's ceiling (4096) below the window, no more"); assert.ok(logs.some(l => l.includes("the older blocks are read in steps, back to block 100000")));
+  asked.length = 0; await shop.scanOnce();
+  assert.ok(store.order("ORD-BF-OLD"), "the next step reaches it"); assert.ok(Math.max(...asked) <= 13016);
+  await shop.scanOnce(); assert.equal(shop.scanState().catchingUpTo, 0, "read back to the last block read before the absence");
+  // a failed step moves nothing, and is said; the next pass tries the same step again
+  tip = 125000; failDeep = true; await shop.scanOnce();
+  assert.equal(store.getMeta("scanned_tip_block"), 125000, "the window was read: the cursor moves"); assert.equal(shop.scanState().readFailed, true, "the step was not: said");
+  const floor = Number(store.getMeta("backfill_floor_block")); assert.equal(floor, 125000 - 4096, "the floor stays under the window");
+  // a second gap while this backfill is pending: the target stays the oldest, the floor moves under the new window
+  tip = 140000; failDeep = false; await shop.scanOnce();
+  assert.equal(shop.scanState().catchingUpTo, 113000, "the oldest target is kept"); assert.equal(shop.scanState().readFailed, false);
+  for (let i = 0; i < 10 && shop.scanState().catchingUpTo; i++) await shop.scanOnce();
+  assert.equal(shop.scanState().catchingUpTo, 0, "both gaps read to their end");
+  // a node that serves no deeper ends the backfill and says from which block nothing older was read
+  tip = 160000; maxServe = 5000; await shop.scanOnce();
+  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.catchingUpTo, st.unreadBelow], [false, 0, 160000 - 4096]); }
+  assert.ok(logs.some(l => l.includes("older than block " + (160000 - 4096) + " could not be read: the node serves no deeper history")));
+  tip = 160001; await shop.scanOnce(); assert.equal(shop.scanState().unreadBelow, 0, "a later pass that read everything since the one before clears the notice (0.19.273)");
+  store.setLog((m) => { throw new Error("no log expected: " + m); });
 });
