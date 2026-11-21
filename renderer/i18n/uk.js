@@ -5329,7 +5329,8 @@
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "Не вдалося прочитати використання в мережі із сервісу використань ключів (eurobuddha.com). Нічого не змінено, і з цього гаманця нічого не можна надіслати, доки їх не можна прочитати.",
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Адреса для виплат {address} не є дійсною адресою Minima. Нічого не збережено; перевірте адресу й збережіть знову.",
   "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "Платежі на {address} не читаються: це недійсна адреса Minima. Виправте адресу для виплат магазину в miniMall Studio.",
-  "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.": "P2P Chance не дочитав ставки цього гаманця за {m} хв, тож не можна перевірити, чи якась із них досі відкрита."
+  "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.": "P2P Chance не дочитав ставки цього гаманця за {m} хв, тож не можна перевірити, чи якась із них досі відкрита.",
+  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.": "Оплата miniMall зараз надсилається на вузол. Якщо зупинити зараз, вона може пройти, а може й ні: дочекайтеся відповіді, потім перегляньте замовлення."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5428,5 +5429,6 @@
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
   "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.",
-  "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked."
+  "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.",
+  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order."
 ] });

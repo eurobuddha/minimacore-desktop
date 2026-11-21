@@ -75,6 +75,9 @@ function inFlight(work, how, nowMs, t) {
   else if (fc && !fc.ready) { if (fc.hasStore) unread.push(t("Future Cash Next collects and sweeps (Future Cash Next has not started)")); }
   else if (fc && fc.posted > 0) busy.push(t("{n} Future Cash Next collects or sweeps are under way. {off} the app cannot follow them to their end, and a coin collected onto an at-risk address is not moved to your safe address.", { n: fc.posted, off: quit ? t("While the app is closed") : t("While the node is stopped") }));
 
+  // ---- miniMall: a payment at the node in this process (0.19.288): stopped now, whether it went through is not known ----
+  if (work.shop > 0) busy.push(t("A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order."));
+
   // ---- P2P Chance (removed in 0.18.68; bets already on the chain are still settled by this app) ----
   const c = work.casino;
   if (c && (c.offers || c.bets)) busy.push(t("P2P Chance: {bets} and {offers} still open. They are revealed and paid out only while the app and its node run; a bet that is not settled before its deadline can be claimed by the other side.", { bets: t("{n} bets", { n: c.bets || 0 }), offers: t("{n} offers", { n: c.offers || 0 }) }));

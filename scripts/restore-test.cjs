@@ -207,7 +207,7 @@ test("P2P Chance: bets found by the settle loop of an install that only watches 
   const run = (cas, enabled) => {
     const env = { restore: R, dexSkipUntil: 0, config: { load: () => ({ casinoEnabled: enabled }) }, casino: cas,
       atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] },
-      futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, dexicon: { activeWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }) } };
+      shop: { sendingCount: () => 0 }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, dexicon: { activeWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }) } };
     return new Function("env", "with (env) { " + decl.walletWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
   };
   // bets found by a loop that only watched (casinoEnabled off): the replacement is refused, Quit and Shutdown say them

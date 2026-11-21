@@ -206,3 +206,19 @@ test("main: quit, an archive / mysql / reset resync or import and a megammr impo
     else { await assert.rejects(hs["mcd:cmd"](null, c), /nothing was stopped/, c); assert.deepEqual(sent, [], c + ": nothing reached the node"); }
   }
 });
+
+// ---- 0.19.288: a miniMall payment at the node is said by the Quit and Shutdown warnings ----
+test("a miniMall payment being sent makes Quit and Shutdown ask, from the shop's own count, through main.js's gather", async () => {
+  for (const how of ["quit", "shutdown"]) {
+    const w = inFlight(With({ shop: 1 }), how, NOW); assert.equal(w.any, true, how);
+    assert.ok(w.busy.some(l => /miniMall payment is being sent to the node/.test(l)), how);
+    assert.equal(inFlight(With({ shop: 0 }), how, NOW).busy.length, 0);
+  }
+  const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
+  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === "inFlightWork")) decl = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  const gather = new Function("env", "with (env) { " + decl + "; return inFlightWork; }")({ config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+    atomix: { activeWork: async () => IDLE.atomix }, pandapools: { activeWork: async () => [] }, dexicon: { activeWork: async () => IDLE.dexicon }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) },
+    shop: { sendingCount: () => 1 } });
+  assert.equal(inFlight(await gather(), "quit", NOW).any, true, "main.js asks the shop");
+});

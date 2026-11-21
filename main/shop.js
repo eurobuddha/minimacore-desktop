@@ -475,5 +475,6 @@ module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
   myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState,
   placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
+  sendingCount: () => sending.size,   // payments at the node in this process: said by the Quit and Shutdown warnings (0.19.288)
   _setRunner, MINIMERCH, MXUSD_TOKEN, tokenFor
 };

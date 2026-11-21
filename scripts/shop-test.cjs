@@ -105,11 +105,12 @@ test("buyer: while a payment is at the node, 'not sent' and Retry are refused an
   const placing = shop.placeOrder(cfg({}), [], "1.5", "", "home", "");
   while (!release) await new Promise(r => setImmediate(r));
   const ref = Object.keys(db.orders)[0];
+  assert.equal(shop.sendingCount(), 1, "counted for the Quit and Shutdown warnings (0.19.288)");
   const d = shop.orderDetail(ref); assert.equal(d.sending, true); assert.equal(d.ambiguous, false, "no 'may have gone through' warning and no 'not sent' button while it is sent");
   assert.equal(shop.ordersList()[0].sending, true);
   assert.throws(() => shop.paymentNotSent(ref), /being sent to the node now/); assert.equal(db.meta["inflight:" + ref], true, "the in-flight mark stays");
   db.meta["unpaid:" + ref] = true; await assert.rejects(shop.retryPayment(ref), /being sent to the node now/); assert.equal(paid.length, 1, "no second payment");
-  release({ status: true, response: { txpowid: "0xP" } }); const r = await placing;
+  release({ status: true, response: { txpowid: "0xP" } }); const r = await placing; assert.equal(shop.sendingCount(), 0);
   assert.equal(r.payError, null); assert.equal(db.meta["unpaid:" + ref], false, "a payment that went clears unpaid"); assert.equal(shop.orderDetail(ref).sending, false);
   await assert.rejects(shop.retryPayment(ref), /no refused payment to retry/);
 });
