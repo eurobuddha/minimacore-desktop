@@ -58,7 +58,7 @@ function scrub(line, secret) {
   // "seedrandom" field (the value AtomiX's ETH key is made from) is redacted with the others
   return l.replace(/phrase[ \t]*:[ \t]*"[^"]*"/g, 'phrase:"•••"')
     .replace(/phrase(?::|[ \t]+:[ \t]*)[A-Za-z]+\b(?![ \t]*:)(?: [A-Za-z]+\b(?![ \t]*:)){0,23}/g, "phrase:•••")   // "phrase: none given" (prose) is not one
-    .replace(/privatekey[ \t]*:[ \t]*"?0x[0-9A-Fa-f]+"?/gi, "privatekey:•••")
+    .replace(/privatekey[ \t]*:[ \t]*"?(?:0x[0-9A-Fa-f]+|M[xX][0-9A-Za-z]+)"?/gi, "privatekey:•••")   // an Mx form too (0.19.302: getAddressParam takes it)
     .replace(/\b(password|confirm|seed)[ \t]*:[ \t]*(?:"[^"]*"|[^\s"]+)/gi, "$1:•••")   // a command's password:, confirm:, seed: (0.19.292)
     .replace(/"(phrase|seed|seedphrase|mnemonic|privatekey|seedrandom)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');   // any letter case (0.19.197: "phrase" too, as released 0.18.179)   // any letter case (0.19.197: "phrase" too, as released 0.18.179)
 }

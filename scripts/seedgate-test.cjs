@@ -485,3 +485,12 @@ test("smuggled refuses a real escape only: an even run of backslashes before u00
   assert.match(V.smuggled('send state:{"1":"' + B + 'u000a"}'), /escape code/);
   assert.equal(V.smuggled('send state:{"1":"caf' + B + 'u00e9"}'), "");
 });
+
+// ---- 0.19.302: the node log scrubs a privatekey: in its Mx form too ----
+test("the node log hides privatekey: whether written 0x… or Mx…", () => {
+  const NL = require("../main/nodelog.js");
+  for (const pk of ["0x1234ABCD", "MxG081PTR905VTUGBKY7KHKV76QVHE99BM691QNC09GP2WPCG1P0QZTHD8SWWVQ"]) {
+    const line = NL.scrub("cmd: signfrom id:a data:0x01 privatekey:" + pk + " keyuses:3");
+    assert.ok(!line.includes(pk) && line.includes("privatekey:•••") && line.includes("keyuses:3"), line);
+  }
+});
