@@ -86,7 +86,7 @@ function canon(a) {
   if (/^[0-9a-fA-F]{8,}$/.test(s)) return "h" + s.toLowerCase();
   return "x" + s.toLowerCase();
 }
-const sha3 = (b) => crypto.createHash("sha3-256").update(b).digest();
+const sha3 = (b) => require("./sha3").sha3_256(b);   // never crypto's sha3-256 (0.19.312: Electron's BoringSSL has none: every Mx address read as invalid)
 const B32 = "0123456789abcdefghijklmnopqrstuv";
 /** An Mx address back to its 0x hex (the inverse of main/keyuses.js addressOf's encoding, with its checksum), or null. */
 function mxToHex(mx) {

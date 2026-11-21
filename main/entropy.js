@@ -16,10 +16,10 @@
  * anywhere. rpcCall logs no command and no reply.
  */
 "use strict";
-const crypto = require("crypto");
 const RANDOM = /^0x[0-9a-fA-F]{64}$/, INPUT = /^0x[0-9a-fA-F]{128}$/;
 /** SHA3-256 of the bytes a 0x hex string spells, as 0x lower-case hex (what Minima's `hash data:` gives by default). */
-const sha3 = (hex) => "0x" + crypto.createHash("sha3-256").update(Buffer.from(hex.slice(2), "hex")).digest("hex");
+// main/sha3.js, never crypto's sha3-256 (0.19.312: Electron's BoringSSL has none, so the roll's hash threw in the packaged app)
+const sha3 = (hex) => "0x" + require("./sha3").sha3_256(Buffer.from(hex.slice(2), "hex")).toString("hex");
 /** The node command for one ask: `random`, or null (the only command Entropy ever sends; `sha3` never reaches the node). */
 function command(kind) { return kind === "random" ? "random" : null; }
 /**

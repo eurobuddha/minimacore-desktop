@@ -21,7 +21,6 @@
  * need the seed phrase in this process; this audit covers the keys the node holds.
  */
 "use strict";
-const crypto = require("crypto");
 
 const BASE = "https://eurobuddha.com";            // AuditApi.BASE: the only host this module ever names
 const CHUNK = 64;                                 // AuditApi.CHUNK: entries per request (URL length)
@@ -40,7 +39,7 @@ const MSG = {   // localization/src/main/res/values/bear_strings.xml (English), 
   selfTest: "Address verification failed. This build cannot run a reliable audit."
 };
 
-const sha3 = (bytes) => crypto.createHash("sha3-256").update(bytes).digest();
+const sha3 = (bytes) => require("./sha3").sha3_256(bytes);   // never crypto's sha3-256 (0.19.312: Electron's BoringSSL has none)
 
 /** MinimaAddress.fromPublicKey: a public key's default address → { hex, mx }, or null for a malformed key. */
 function addressOf(publicKey) {

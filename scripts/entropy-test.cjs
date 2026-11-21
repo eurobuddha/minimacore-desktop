@@ -378,3 +378,26 @@ test("the screen: the original's wording and palette (no em dash), its icon unch
   assert.ok(R("renderer/index.html").includes('id="view-entropy"') && require("../main/freeze.js").FREEZABLE.includes("entropy"));
   const order = [...R("renderer/index.html").matchAll(/<script src="([^"]+)"/g)].map(m => m[1]); assert.ok(order.indexOf("wordentry.js") < order.indexOf("entropy-core.js") && order.indexOf("entropy-core.js") < order.indexOf("apps-tools.js"));
 });
+
+// ---- 0.19.312: SHA-3 in plain JS: Electron's BoringSSL has no sha3-256, so createHash("sha3-256") throws in the packaged app ----
+test("SHA3-256 never comes from crypto: the known vectors, an Mx address both ways, and every caller with a crypto whose sha3 throws", () => {
+  const S = require("../main/sha3.js");
+  assert.equal(S.sha3_256("").toString("hex"), "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a");
+  assert.equal(S.sha3_256("abc").toString("hex"), "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532");
+  for (const n of [135, 136, 137, 300]) assert.equal(S.sha3_256(Buffer.alloc(n, 0xa5)).toString("hex"), nodeCrypto.createHash("sha3-256").update(Buffer.alloc(n, 0xa5)).digest("hex"), n + " bytes (block edges)");
+  // the callers, loaded fresh with a crypto that has no SHA-3, as Electron's
+  const Module = require("module"), real = Module._load, path = require("path");
+  const noSha3 = Object.assign({}, nodeCrypto, { createHash: (alg, ...r) => { if (/sha3|keccak/i.test(alg)) throw new Error("Digest method not supported"); return nodeCrypto.createHash(alg, ...r); } });
+  const mods = ["entropy", "keyuses", "futurecash", "sha3"].map(m => require.resolve("../main/" + m + ".js")), saved = mods.map(p => require.cache[p]);
+  Module._load = function (req, ...rest) { return req === "crypto" || req === "node:crypto" ? noSha3 : real.call(this, req, ...rest); };
+  try {
+    for (const p of mods) delete require.cache[p];
+    const FC = require("../main/futurecash.js"), KU = require("../main/keyuses.js"), EN = require("../main/entropy.js");
+    assert.equal(FC.mxToHex("MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G"), "0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A");
+    assert.equal(FC.mxToHex("MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842H"), null, "a wrong checksum is still refused");
+    assert.equal(KU.selfTest(), true, "the key-use audit's address check passes");
+    assert.equal(KU.addressOf("0x3A985DA74FE225B2045C172D6BD390BD855F086E3E9D525B46BFE24511431532").mx, "MxG081PTR905VTUGBKY7KHKV76QVHE99BM691QNC09GP2WPCG1P0QZTHD8SWWVQ");
+    assert.equal(EN.sha3("0x"), "0xa7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a");
+  } finally { Module._load = real; mods.forEach((p, i) => { if (saved[i]) require.cache[p] = saved[i]; else delete require.cache[p]; }); }
+  for (const f of ["entropy.js", "keyuses.js", "futurecash.js"]) assert.ok(!/createHash\(\s*["']sha3/.test(require("fs").readFileSync(path.join(__dirname, "..", "main", f), "utf8")), f + " asks crypto for no SHA-3");
+});
