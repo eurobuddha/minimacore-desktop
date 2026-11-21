@@ -80,3 +80,21 @@ test("main: every stop or restart handler asks the guard before the node is touc
   assert.ok(!/api\.saveConfig\(\{ heapMb \}\)/.test(app) && /api\.setNodeKind\(want, heapMb\)/.test(app), "the heap size goes with the guarded kind switch");
   assert.ok(/await api\.nodeRestart\(patch\);/.test(app), "the setup screen's restart carries its config");
 });
+
+// ---- 0.18.225 (as Pandamonium Desktop 0.19.288): a miniMall payment at the node is part of what the guard sees ----
+test("a miniMall payment being sent is in flight: the guard asks, and says to wait for its answer", async () => {
+  const w = S.inFlight(Object.assign({}, IDLE, { shop: 1 }), Date.now());
+  assert.equal(w.any, true); assert.match(w.busy[0], /^A miniMall payment is being sent to the node\. Stopped now, it may or may not go through: wait for its answer, then look at the order\.$/);
+  assert.ok(/shop: shop\.sendingCount\(\) \}\);/.test(rd("main/main.js")), "main hands the guard the count of payments at the node");
+  // the count is the shop's own: one while a payment is at the node, none after
+  const Module = require("module"), os = require("os"), real = Module._load, DIR = fs.mkdtempSync(path.join(os.tmpdir(), "sg-shop-"));
+  Module._load = function (r, parent) { if (r === "electron") return { app: { getPath: () => DIR, getVersion: () => "t" } }; if (parent && /[\\/]main[\\/]shop\.js$/.test(parent.filename) && r === "./config") return { getSecret: () => null, setSecret: () => {}, deleteSecret: () => {}, rpcSecret: () => "", load: () => ({}) }; if (parent && /[\\/]main[\\/]shop\.js$/.test(parent.filename) && r === "./node-manager") return { rpcPort: () => 0 }; return real.apply(this, arguments); };
+  try {
+    const shop = require("../main/shop"), sc = require("../main/shopcrypto"), vendor = await sc.deriveIdentity("sg vendor"); let release = null;
+    shop._setRunner(async (c) => { if (c.startsWith("vault")) return { status: true, response: { phrase: "sg buyer" } }; if (c.startsWith("coins")) return { status: true, response: [] };
+      if (c.startsWith("send ") && c.includes("address:0x" + "AB".repeat(32))) return new Promise(r => { release = r; }); return { status: true, response: { txpowid: "0x01" } }; });
+    const placing = shop.placeOrder({ shopName: "S", shopId: "s1", currency: "Minima", vendorAddress: "0x" + "AB".repeat(32), vendorPublicId: vendor.publicId, shipping: [], products: [{ id: "p1", name: "Tea", price: "1.5" }] }, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", "");
+    while (!release) await new Promise(r => setImmediate(r));
+    assert.equal(shop.sendingCount(), 1); release({ status: true, response: { txpowid: "0xP" } }); await placing; assert.equal(shop.sendingCount(), 0);
+  } finally { Module._load = real; fs.rmSync(DIR, { recursive: true, force: true }); }
+});

@@ -155,7 +155,7 @@ function requireRunning() {
 // not checkable, main asks first (this desktop shows no warning in the window), and a no refuses the stop with nothing changed.
 const stopguard = require("./stopguard");
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  casinoOn: !!config.load().casinoEnabled });
+  casinoOn: !!config.load().casinoEnabled, shop: shop.sendingCount() });   // shop: miniMall payments at the node (0.18.225)
 const stopGuard = stopguard.stopGuard({ running: () => node.state === "running", gather: inFlightWork, log: (l) => node.log(l),
   ask: async (w) => {
     if (win && !win.isDestroyed()) { win.show(); win.focus(); }
