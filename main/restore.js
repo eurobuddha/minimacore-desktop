@@ -192,9 +192,19 @@ function activeWorkProblem(list) {
  * Parameters and verbs are read the way the node reads them (main/cmdverb.js); over-blocking on purpose: an archive, mysql
  * or reset that names phrase:, file:, password: or archivefile: with a seed or backup action is refused whatever its spelling.
  */
+// Commands whose VALUES the node pastes, unquoted, into a second command it then runs itself (0.19.281, read from
+// core/minima-core commands: backup/reset.java chainsync / seedsync / restore -> "archive action:import file:" + archivefile ...;
+// backup/archive.java import / importold / importraw -> "archive action:resync host:… keys:" + keys + " keyuses:" … " anyphrase:" …;
+// backup/mysql.java reset -> "mysql action:rawimport file:" + file; search/txpow.java -> "mysql action:findtxpow txpowid:" + txpowid).
+// A value holding white space, ":", a quote or ";" there becomes more parameters of that second command (phrase: among them), so
+// such a command is read as one that replaces the keys. The other builders found (send/wallet/*from, multisig, consolidate,
+// sphincs, txnauto, megammrsync's restore file:) build send / txn* / restore commands; megammrsync file: is refused already.
+const REPASTED = { reset: () => true, archive: (a) => /^(import|importold|importraw)$/.test(a), mysql: (a) => a === "reset", txpow: () => true };
+const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => runsAs(part, v) && REPASTED[v](action)) && V.read(part).params.some(([, val]) => /[\s:";]/.test(val));
 function replacesKeysElsewhere(command) {
   return V.parts(command).some(part => {
     const action = (V.paramValue(part, "action") || "").toLowerCase(), named = (n) => V.paramValue(part, n) != null;
+    if (repastedUnsafe(part, action)) return true;
     if (runsAs(part, "archive", "mysql")) return named("phrase");
     if (runsAs(part, "reset")) return action === "seedsync" || action === "restore" || named("phrase") || named("password") || (named("file") && action !== "chainsync");
     if (runsAs(part, "vault")) return action === "resetkeys";

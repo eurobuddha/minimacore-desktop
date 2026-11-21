@@ -186,6 +186,13 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
   for (const c of ["archive action:resync host:h:9001", "archive action:export", "archive action:inspect file:x", "mysql action:info", "reset action:chainsync archivefile:x", "vault", "vault action:seed",
     "megammrsync action:resync phrase:a", "status", 'send amount:1 address:0xA state:{"phrase":"x"}'])
     assert.equal(restore.replacesKeysElsewhere(c), false, JSON.stringify(c));
+  // 0.19.281: a value the node pastes, unquoted, into the archive / mysql command it runs itself becomes its parameters
+  for (const c of ['reset action:chainsync archivefile:"/Users/me/archive.gz phrase:abc anyphrase:true" keys:[1]', 'archive action:import file:/Users/me/archive.gz keys:"64 phrase:abc anyphrase:true" address:{}',
+    'reset action:chainsync archivefile:"C:\\x.gz phrase:abc anyphrase:true"', 'reset action:chainsync archivefile:"x.gz phrase:abc"', 'archive action:importraw file:x keyuses:"5 phrase:a"', 'archive action:importold file:x anyphrase:"true phrase:a"',
+    'mysql action:reset file:"x phrase:a"', 'txpow txpowid:"0x01 action:resync phrase:abc"', 'archive action:import file:"/Users/me/My Archive.gz"'])
+    assert.equal(restore.replacesKeysElsewhere(c), true, JSON.stringify(c));
+  for (const c of ["reset action:chainsync archivefile:/Users/me/archive.gz", "archive action:import file:/Users/me/archive.gz", "txpow txpowid:0x01", "mysql action:reset file:/x/y.dat", "archive action:resync host:h:9001"])
+    assert.equal(restore.replacesKeysElsewhere(c), false, JSON.stringify(c));
   const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
   assert.ok(h.indexOf("restore.replacesKeysElsewhere(command)") > 0 && h.indexOf("restore.replacesKeysElsewhere(command)") < h.indexOf("seedgate.refusal(command"), "refused before the gate asks anything");
 });
