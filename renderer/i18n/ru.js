@@ -5324,7 +5324,9 @@
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "Адрес для выплат не удалось проверить: узел не ответил. Ничего не сохранено; попробуйте снова, когда узел будет работать.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Узел сообщает, что адрес для выплат {address} не является действительным адресом Minima. Ничего не сохранено; проверьте адрес и сохраните снова.",
   "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "Заказы, отправленные до блока {block}, могли быть не прочитаны: приложение было закрыто дольше, чем охватывает одно чтение. Платежи не теряются: узел показывает каждую неизрасходованную монету этого кошелька.",
-  "Need {need} USDT or more for that — you have {have} USDT.": "Для этого нужно {need} USDT или больше — у вас {have} USDT."
+  "Need {need} USDT or more for that — you have {have} USDT.": "Для этого нужно {need} USDT или больше — у вас {have} USDT.",
+  "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "Не удалось прочитать использования этого ключа в сети из сервиса использований ключей (eurobuddha.com). Пока их нельзя прочитать, с этого кошелька ничего нельзя отправить: слишком низкое число может привести к потере средств. Проверьте подключение и снова нажмите «Подтвердить».",
+  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "Не удалось прочитать использования в сети из сервиса использований ключей (eurobuddha.com). Ничего не изменено, и с этого кошелька ничего нельзя отправить, пока их нельзя прочитать."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5418,5 +5420,7 @@
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
   "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
-  "Need {need} USDT or more for that — you have {have} USDT."
+  "Need {need} USDT or more for that — you have {have} USDT.",
+  "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
+  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can."
 ] });
