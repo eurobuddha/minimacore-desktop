@@ -151,7 +151,7 @@ const BUILDERS = /^(?:sendfrom|rawfrom|rawtxnfrom|createtokenfrom|consolidatefro
 // it), data (signfrom / postfrom: checked by txnBlobId), name (createtokenfrom builds its JSON), and for multisig / multisigread id
 // (hashed). file is pasted by multisig / multisigread sign, post and view ("txnimport id:… file:" + file) and is checked there.
 const NOT_PASTED = new Set(["action", "seed", "data", "name"]);
-const fileBad = (v) => /[\s"]/.test(v) || (v.includes(":") && !/^[A-Za-z]:\\[^:]*$/.test(v));   // a drive letter's ":" is fine
+const fileBad = (v) => /[\s"]/.test(v) || (v.includes(":") && !/^[A-Za-z]:[\\/][^:]*$/.test(v));   // a drive letter's ":" is fine, with either slash (0.18.260: C:/dir/x.txn)
 const BUILT = "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.";
 const MSKEY = "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.";
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;

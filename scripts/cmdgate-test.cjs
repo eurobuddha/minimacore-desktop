@@ -578,3 +578,10 @@ test("a \\??\\UNC\\ path in a file parameter is refused, with either slash; a lo
   assert.deepEqual(sent, []);
   for (const c of ["backup file:/Users/me/b.bak", "backup file:C:" + B + "b.bak", "backup file:??/b.bak"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
 });
+
+// ---- 0.18.260: a multisig file with a drive letter and a forward slash (C:/dir/x.txn) runs, as one with a backslash does ----
+test("a multisig file C:/dir/x.txn runs; a second ':' or a space is still refused", async () => {
+  const B = String.fromCharCode(92), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  for (const c of ["multisig action:view file:C:/dir/x.txn", "multisig action:view file:C:" + B + "dir" + B + "x.txn"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
+  for (const c of ["multisig action:view file:C:/dir/x:y.txn", 'multisig action:view file:"C:/my dir/x.txn"']) await assert.rejects(h(null, c), /builds further commands|differently from how it is written/, c);   // a ':' inside quotes is refused as unclear first
+});
