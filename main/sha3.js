@@ -1,5 +1,5 @@
 /*
- * sha3.js: SHA3-256 in plain JS (0.18.247, the same file as Pandamonium Desktop 0.19.312). Electron's crypto is BoringSSL, which has
+ * sha3.js: SHA3-256 in plain JS (0.18.247; the same code as Pandamonium Desktop 0.19.312's main/sha3.js, this comment apart). Electron's crypto is BoringSSL, which has
  * no SHA-3: createHash("sha3-256") throws in the packaged app while it works under plain Node, where the tests run. Every SHA-3 of
  * the desktop's own code goes through here: the Mx address checksum of the miniMall payout-address check (main/shop.js mxToHex,
  * 0.18.227, which read every address as valid in the packaged app). Keccak-f[1600] on BigInt lanes; inputs are small.

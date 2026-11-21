@@ -759,3 +759,9 @@ test("SHA3-256 comes from main/sha3.js: the known vectors, the Mx address both w
     m.shop.saveShop({ shopId: "s3ok", shopName: "Y", vendorAddress: GOOD, products: [] }); assert.ok(m.store.shop("s3ok"));
   } finally { Module._load = prev; freshModules(); }
 });
+
+// ---- 0.18.261: main/sha3.js says what it is: the same code as Pandamonium Desktop's, its comment apart ----
+test("main/sha3.js's header says the same code (not the same file) as Pandamonium Desktop's", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "sha3.js"), "utf8");
+  assert.ok(src.includes("the same code as Pandamonium Desktop 0.19.312's main/sha3.js, this comment apart") && !src.includes("the same file as"));
+});
