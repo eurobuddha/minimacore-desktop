@@ -72,6 +72,7 @@ const DEFAULTS = {
                              // scripts/config-keys-test.cjs now fails the build if a renderer key goes missing.
 };
 
+let rescueDropped = false;   // said once a run
 function load() {
   let j = {};
   try { j = JSON.parse(fs.readFileSync(configPath(), "utf8")); } catch (e) { /* first run */ }
@@ -91,6 +92,13 @@ function load() {
   // so a stale config can never resurrect a flag we no longer expose.
   const defs = PARAMS.defaultParams(), sp = j.params || {}, params = {};
   for (const k of Object.keys(defs)) params[k] = (k in sp) ? sp[k] : defs[k];
+  // A -rescuenode that is not host:port (saved before 0.18.232 refused one) is dropped here, said once in the log, and never passed
+  // to the node (0.18.251): kept, it made every later save that sends the whole params (Contribute, the setup screen, Enable
+  // MegaMMR) throw "The rescue node must be host:port".
+  if (PARAMS.rescueProblem(params.rescuenode)) {
+    if (!rescueDropped) { rescueDropped = true; console.warn("[config] the saved rescue node was not host:port, so it is not used and is cleared at the next save; set it again in Startup Params"); }
+    params.rescuenode = defs.rescuenode;
+  }
   merged.params = params;
   return merged;
 }

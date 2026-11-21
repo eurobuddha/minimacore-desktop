@@ -116,9 +116,24 @@ test("saved settings: an mds* param never reaches the node, and -rescuenode take
     delete require.cache[require.resolve("../main/config.js")]; const config = require("../main/config.js");
     fs.writeFileSync(path.join(DIR, "config.json"), JSON.stringify({ params: { mdsenable: true, mdspassword: "x", rescuenode: "h.example:9001 phrase:a b c" } }));
     const p = config.effectiveParams();
-    assert.equal(Object.keys(p).some(k => /^mds/i.test(k)), false); assert.equal(p.rescuenode, undefined, "an unsafe rescue node is never passed");
+    assert.equal(Object.keys(p).some(k => /^mds/i.test(k)), false); assert.ok(!p.rescuenode, "an unsafe rescue node is never passed (an empty value is not passed to the node; CHANGED on purpose, 0.18.251: load() drops it)");
     for (const bad of ["h.example:9001 phrase:a", "h.example", "h:9001;quit", '"h:1"']) assert.throws(() => config.save({ params: { rescuenode: bad } }), /must be host:port/, bad);
     config.save({ params: { rescuenode: "megammr.example:9001" } }); assert.equal(config.effectiveParams().rescuenode, "megammr.example:9001");
     assert.throws(() => config.save({ extraArgs: '-test "-rescuenode" h:1' }), /-rescuenode is set in Startup Params/);
   } finally { Module._load = real; delete require.cache[require.resolve("../main/config.js")]; fs.rmSync(DIR, { recursive: true, force: true }); }
+});
+
+// ---- 0.18.251: an invalid -rescuenode saved by an older version is dropped at load, so the saves that send the whole params work ----
+test("a saved -rescuenode that is not host:port is dropped at load with one log line, never passed to the node, and the next whole-params save works", () => {
+  const os = require("node:os"), Module = require("node:module"), DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cfg-rescue2-")), real = Module._load;
+  Module._load = function (r, parent) { if (r === "electron" && parent && /[\\/]main[\\/]config\.js$/.test(parent.filename)) return { app: { getPath: () => DIR }, safeStorage: { isEncryptionAvailable: () => false } }; return real.apply(this, arguments); };
+  const warn = console.warn, said = []; console.warn = (l) => said.push(String(l));
+  try {
+    delete require.cache[require.resolve("../main/config.js")]; const config = require("../main/config.js");
+    fs.writeFileSync(path.join(DIR, "config.json"), JSON.stringify({ params: { rescuenode: "h.example:9001 phrase:a b c", server: false } }));
+    const c = config.load(); assert.equal(c.params.rescuenode, "", "dropped"); assert.ok(!config.effectiveParams().rescuenode, "never passed (an empty value is skipped by both node kinds)");
+    config.load(); assert.equal(said.filter(l => /saved rescue node was not host:port/.test(l)).length, 1, "said once");
+    const saved = config.save({ contribute: true, params: Object.assign({}, config.load().params, { server: true }) });   // Contribute sends the whole params
+    assert.equal(saved.params.server, true); assert.equal(JSON.parse(fs.readFileSync(path.join(DIR, "config.json"), "utf8")).params.rescuenode, "", "cleared on disk by the save");
+  } finally { console.warn = warn; Module._load = real; delete require.cache[require.resolve("../main/config.js")]; fs.rmSync(DIR, { recursive: true, force: true }); }
 });
