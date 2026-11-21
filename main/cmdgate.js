@@ -192,14 +192,18 @@ const REPASTED_WHY = "The node pastes this command's values, unquoted, into a se
 // checks no capacity, so after a restore at 262143 every key signs once and then starts again at leaf 0. So 250000 for SET (12,144 more
 // signatures per key before the node's limit) and 10000 for restoresync's ADD; neither is presented as a target.
 const KEYUSES_MAX = 262143, KEYUSES_SET_MAX = 250000, KEYUSES_ADD_MAX = 10000;
-const SET_VERBS = ["megammrsync", "archive", "mysql", "reset", "vault", "keys"];
+// the five single-signature verbs by name (0.18.278); restoresync adds; EVERY other verb that names keyuses gets the setting bound, the lower
+// one (an unknown verb defaulted to 262143)
+const SINGLE_VERBS = ["txnsign", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom"];
 const KEYUSES_WHY = "keyuses: must be a whole number from 0 to " + KEYUSES_MAX + ": a key of this wallet has 262144 one-time uses, numbered 0 to " + KEYUSES_MAX + ", and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds. Nothing was run.";
-const KEYUSES_SET_WHY = "keyuses: sets how many times every key of this wallet has already signed, so it must be above that number; the usual figure is small (the node's own default is 1000). It can be at most " + KEYUSES_SET_MAX + ": a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out and then sign with one-time keys they have already used, which can lose funds. Nothing was run.";
+// uses is the NEXT leaf to sign at, so the number of times a key has already signed is itself a safe figure: "at least", not "above" (0.18.278);
+// the node's defaults are 100 (vault resetkeys) to 1000 (the resyncs), and keys createallkeys has none
+const KEYUSES_SET_WHY = "keyuses: sets how many times every key of this wallet has already signed, so it must be at least that number; a small figure is usual (the node's defaults are 100 to 1000). It can be at most " + KEYUSES_SET_MAX + ": a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out and then sign with one-time keys they have already used, which can lose funds. Nothing was run.";
 const KEYUSES_ADD_WHY = "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). It can be at most " + KEYUSES_ADD_MAX + ": a large figure would bring the wallet's keys near their limit of 262144 one-time uses, after which they sign with one-time keys they have already used, which can lose funds. Nothing was run.";
 /** Why a keyuses: value is refused ("" = it is not, or there is none): plain digits, at most the bound of what the command does with it. */
 function keyusesProblem(command) {
   for (const part of V.parts(command)) {
-    const [max, why] = V.is(part, "restoresync") ? [KEYUSES_ADD_MAX, KEYUSES_ADD_WHY] : SET_VERBS.some(v => V.is(part, v)) ? [KEYUSES_SET_MAX, KEYUSES_SET_WHY] : [KEYUSES_MAX, KEYUSES_WHY];
+    const [max, why] = V.is(part, "restoresync") ? [KEYUSES_ADD_MAX, KEYUSES_ADD_WHY] : SINGLE_VERBS.some(v => V.is(part, v)) ? [KEYUSES_MAX, KEYUSES_WHY] : [KEYUSES_SET_MAX, KEYUSES_SET_WHY];
     if (V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= max))) return why;
   }
   return "";
