@@ -2871,7 +2871,8 @@ async function renderShopOrderDetail(ref) {
   if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; try { await api.shopRetryPay(ref); toast("Payment sent ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {
-    const yes = await showConfirm("Checked by hand?", "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
+    const yes = await showConfirm("Checked by hand?", ((o.problems || []).length ? "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
+      : "An older version of this app recorded " + o.legacyPaid + " " + ShopRules.cur(o.currency) + " received for this order; the coins the node shows now come to " + (o.paidAmount || "0") + ".")
       + "\n\nThe buyer's total: " + o.amount + " " + ShopRules.cur(o.currency) + " (their own figure)\nReceived so far: " + (o.paidAmount || "0") + " " + ShopRules.cur(o.currency)
       + "\n\nConfirm only if you have checked the items and the payment yourself. It lets you confirm, ship and deliver this order.", "I checked it", true);
     if (!yes) return;
@@ -2883,9 +2884,11 @@ async function renderShopOrderDetail(ref) {
 // What the vendor's own listing says about an incoming order (0.18.159): due by the listing, or unchecked with the reasons.
 function shopCheckBlock(o) {
   const cur = esc(ShopRules.cur(o.currency));
-  if (o.status === "INQUIRY") return "";
-  if (!(o.problems || []).length) return `<div class="row" style="justify-content:space-between;font-weight:700"><span>Due by your listing</span><span class="mono">${esc(o.due)} ${cur}</span></div>`;
-  return `<div class="shop-warn" style="margin-top:8px"><b>Unchecked: the items or total do not match your shop; check by hand.</b> It is never marked paid by the buyer's figure.
+  if (o.status === "INQUIRY" || o.legacyVerdict) return "";   // an older version's verdict on a paid or shipped order is kept as it was (0.18.195)
+  const legacy = o.legacyPaid && !o.paid ? `<div class="shop-warn" style="margin-top:8px">An older version of this app recorded ${esc(o.legacyPaid)} ${cur} received for this order. It is counted again from the coins the node still shows; if that is less, check the payment yourself.
+      ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : (o.problems || []).length ? "" : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>` : "";
+  if (!(o.problems || []).length) return `<div class="row" style="justify-content:space-between;font-weight:700"><span>Due by your listing</span><span class="mono">${esc(o.due)} ${cur}</span></div>` + legacy;
+  return legacy + `<div class="shop-warn" style="margin-top:8px"><b>Unchecked: the items or total do not match your shop; check by hand.</b> It is never marked paid by the buyer's figure.
       <div style="white-space:pre-wrap;overflow-wrap:anywhere">${(o.problems || []).map(p => "• " + esc(p)).join("\n")}</div>
       ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>`;
 }

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.195] — miniMall: orders stored by 0.18.69 are read safely
+
+- A shop.json written by 0.18.69 has no coin lists and no listing check. An old half-paid order had its coin counted again on the first scan (a false PAID), phone orders stored with no items became Unchecked though paid, and old paid orders got an Unchecked banner. At load an old order now keeps its verdict when it is paid or confirmed, shipped or delivered (no re-check, no banner); an old order with money counted but no coin list is counted again from the coins the node still shows (the old figure kept for the screen; it errs towards underpaid and a check by hand, never towards paid); an old order without items says "the items were not kept by an older version of this app" and can be checked by hand. Test: `scripts/shop-migrate-test.cjs` (the review's 0.18.69 fixture).
+
 ## [0.18.194] — the Terminal echoes a command at once again
 
 - Since 0.18.173 the Terminal ran a command first and showed it only when the node answered, so a send (up to three minutes) showed nothing and invited a second send. The Terminal now asks the main process what the text is first (`mcd:cmdKind`: the gate's own reading): an ordinary command is echoed and kept in the history at once; a command that shows a secret goes to its gate; a chain holding one is refused. While a signing command runs, the same text typed again only gets a note; typing it once more runs it. The main process refusal stays the gate. Test: `scripts/cmdgate-test.cjs`.
