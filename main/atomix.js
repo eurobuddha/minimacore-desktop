@@ -256,6 +256,36 @@ function invalidate() {
   startLoop();
 }
 
+/**
+ * What a node stop would strand (main/stopguard.js, 0.18.223, as Pandamonium Desktop's activeWork): swaps that are not finished
+ * (or are in ERROR but still inside their timelock, where a refund can still be due), the first of their own locks' time limits
+ * as a clock time (an Ethereum lock's limit is unix seconds; a Minima lock's is a block, estimated from the tip at 50 s a block
+ * and said as "about"), a live maker order, a live OTC offer, open OTC deals. Not booted: { ready:false, hasStore }.
+ */
+function activeWorkFrom(A, tip, now) {
+  return p(cb => A.swapdb.allSwaps(cb)).then(async all => {
+    const st = (s) => s && (s.status || s.STATUS);
+    const open = (all || []).filter(s => !A.trading.isTerminalSwap(s) || (st(s) === "ERROR" && A.trading.withinWindow(s, tip, now))), swaps = open.map(s => String(s.hash || s.HASH));
+    let nearestMs = null, nearestApprox = false;
+    for (const s of open) {
+      const tl = Number(s.myTimelock !== undefined ? s.myTimelock : s.mytimelock) || 0; if (tl <= 0) continue;
+      const blocks = !!(s.myLegIsMinima !== undefined ? s.myLegIsMinima : Number(s.mylegminima)); if (blocks && !(tip > 0)) continue;
+      const at = blocks ? now + (tl - tip) * 50000 : tl * 1000;
+      if (nearestMs === null || at < nearestMs) { nearestMs = at; nearestApprox = blocks; }
+    }
+    let maker = false;
+    try { const o = A.maker.currentOrder(); maker = !!o && Object.keys(o.pairs || {}).some(k => { const pr = o.pairs[k]; return !!(pr && pr.en && ((pr.bids || []).length || (pr.asks || []).length)); }); } catch (e) { maker = true; }   // unreadable: not assumed absent
+    const deals = await p(cb => A.otc.allDeals(cb)).catch(() => []);
+    const offer = A.otc.myOffer();
+    return { ready: true, swaps, nearestMs, nearestApprox, maker, otcOffer: !!(offer && offer.enable),
+      otcDeals: (deals || []).filter(d => d && d.status !== "EXPIRED" && d.status !== "REJECTED" && d.status !== "COMPLETE").length };
+  });
+}
+async function activeWork() {
+  if (!ctx || !ctx.READY) return { ready: false, hasStore: fs.existsSync(path.join(dir(), "atomix.sqlite")) };
+  return activeWorkFrom(ctx.AX, Number(lastTip) || 0, Date.now());
+}
+
 /** Engine status for the renderer header: booted?, identity, block, active currency, recent log lines. */
 function status() {
   const booted = !!(ctx && ctx.READY);
@@ -1147,7 +1177,7 @@ async function ethSetRpc(url) {
 }
 
 module.exports = {
-  emitter, init, startLoop, stopLoop, flush, invalidate, status,
+  emitter, init, startLoop, stopLoop, flush, invalidate, status, activeWork, _activeWorkFrom: activeWorkFrom,
   book, quote, swapPreview, swapExecute, swaps, refundNow, exportSwaps, inspect, marketHistory, wallet, exportKey, coins,
   sendMax, sendReview, sendExecute,
   makerCfg, makerPreview, makerSave, makerPublish, makerWithdraw, switchCurrency,

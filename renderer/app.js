@@ -391,14 +391,23 @@ function showSetup() {
       customConnect: net === "custom" ? el("customPeer").value.trim() : "",
       megammrHost: host, params: P, extraArgs: el("extraArgs").value.trim()
     };
-    try { CFG = await api.saveConfig(patch); } catch (e) { toast(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "err"); return; }   // e.g. an -mds… extra argument (0.18.221)
+    if (running) {   // reconfigure = restart to apply: main saves the patch only once its stop guard let the restart go (0.18.223)
+      const before = CFG; CFG = Object.assign({}, CFG, patch);
+      waitingForNode = true; postBootStarted = false; showStarting();
+      try { await api.nodeRestart(patch); CFG = await api.getConfig(); }
+      catch (e) { CFG = before; waitingForNode = false; hideSetup(); toast(ipcMsg(e), "err"); }
+      return;
+    }
+    try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcMsg(e), "err"); return; }   // e.g. an -mds… extra argument (0.18.221)
     waitingForNode = true;
     postBootStarted = false;      // let the post-boot wallet step run for this (re)start
     showStarting();
-    if (running) await api.nodeRestart(); else await api.nodeStart();   // reconfigure = restart to apply
+    await api.nodeStart();
   };
   el("setup").style.display = "";
 }
+/** The reason an IPC call was refused, without Electron's "Error invoking remote method …" wrapper. */
+function ipcMsg(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
 function hideSetup() { el("setup").style.display = "none"; el("shell").style.filter = ""; }
 
 // ---- starting / progress overlay -------------------------------------------
@@ -651,7 +660,7 @@ function renderWwGate(body) {
   el("wwEnableBtn").addEventListener("click", async () => {
     const b = el("wwEnableBtn"); b.disabled = true; b.textContent = "Restarting node…";
     try { await api.wwEnableMegammr(); toast("MegaMMR enabled — node restarting", "ok"); }
-    catch (e) { toast("Could not enable MegaMMR", "err"); b.disabled = false; b.textContent = "Enable MegaMMR & restart node"; }
+    catch (e) { toast("Could not enable MegaMMR: " + ipcMsg(e), "err"); b.disabled = false; b.textContent = "Enable MegaMMR & restart node"; }
   });
 }
 
@@ -2082,12 +2091,11 @@ async function renderSettings() {
     const stat = el("setKindStatus");
     el("setKindApply").disabled = true; stat.textContent = "Restarting the node…";
     try {
-      CFG = await api.saveConfig({ heapMb });
-      await api.setNodeKind(want);
+      await api.setNodeKind(want, heapMb);   // the heap size is saved with the kind, after the stop guard (0.18.223)
       CFG = await api.getConfig();
       stat.textContent = want === "parlons" ? "Parlons Node starting — see the Parlons tab." : "Plain Minima node starting.";
       toast("Node restarting…", "ok");
-    } catch (e) { stat.textContent = e.message || String(e); toast(e.message || String(e), "err"); }
+    } catch (e) { stat.textContent = ipcMsg(e); toast(ipcMsg(e), "err"); }
     el("setKindApply").disabled = false;
   };
   el("setReveal").onclick = () => settingsRevealSeed();
@@ -2477,12 +2485,12 @@ function renderNode(s) {
     if (!await showConfirm(turnOn ? "Contribute to the network?" : "Stop contributing?",
         msg.slice(msg.indexOf("\n\n") + 2), turnOn ? "Contribute" : "Stop", !turnOn)) return;
     const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
-    CFG = await api.saveConfig({ contribute: turnOn, params });
     toast(turnOn ? "Contributing — restarting node…" : "Back to light wallet — restarting node…");
-    api.nodeRestart();
+    try { await api.nodeRestart({ contribute: turnOn, params }); CFG = await api.getConfig(); }   // saved by main only once its stop guard let the restart go (0.18.223)
+    catch (e) { toast(ipcMsg(e), "err"); }
   };
   el("nReconfig").onclick = () => showSetup();
-  el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart(); };
+  el("nRestart").onclick = () => { toast("Restarting node…"); api.nodeRestart().catch(e => toast(ipcMsg(e), "err")); };   // refused by main's stop guard: said (0.18.223)
   const nReclaim = el("nReclaim");
   if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = "Stopping…"; try { await api.nodeReclaim(); toast("Node restarting…", "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
   // The in-app jar updater is disabled — the node jar ships with the app. See main/updater.js.

@@ -99,6 +99,16 @@ async function init() {
   return initPromise;
 }
 function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) { /* best effort */ } }
+/**
+ * For the node-stop guard (main/stopguard.js, 0.18.223, as Pandamonium Desktop's activeWork): the activity rows while the engine
+ * runs; [] when this data folder never had a pool store, so nothing can be waiting; null when there is a store but the engine has
+ * not started, so whether a pool transaction is waiting COULD NOT BE CHECKED (activity() answers [] then, which read as idle).
+ */
+function activeWork() {
+  if (ctx) return activity();
+  let has = true; try { has = fs.existsSync(path.join(dataDir || app.getPath("userData"), "pandapools.sqlite")); } catch (e) {}
+  return Promise.resolve(has ? null : []);
+}
 /** The node restarted IN-APP (tray "Restart node" / settings / megammr): its in-memory relevance cache was
  *  just rebuilt, so any tracking demotes that were pending a restart are now effective — and unlike MDS,
  *  the desktop service context survives, so `inited` would never re-fire on its own. Re-fire it (idempotent:
@@ -726,6 +736,6 @@ module.exports = {
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
-  onNodeRestarted,
+  onNodeRestarted, activeWork,
   _setRunner, _setDataDir,
 };

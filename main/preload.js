@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld("mcd", {
   nodeStatus: () => ipcRenderer.invoke("mcd:nodeStatus"),
   nodeStart: () => ipcRenderer.invoke("mcd:nodeStart"),
   nodeStop: () => ipcRenderer.invoke("mcd:nodeStop"),
-  nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
+  nodeRestart: (patch) => ipcRenderer.invoke("mcd:nodeRestart", patch),   // patch: config saved by main only once the stop guard let the restart go (0.18.223)
   nodeReclaim: () => ipcRenderer.invoke("mcd:nodeReclaim"),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
   portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld("mcd", {
   parlonsStatus: () => ipcRenderer.invoke("mcd:parlonsStatus"),
   parlonsPanelUrl: () => ipcRenderer.invoke("mcd:parlonsPanelUrl"),
   parlonsOpenExternal: () => ipcRenderer.invoke("mcd:parlonsOpenExternal"),
-  setNodeKind: (kind) => ipcRenderer.invoke("mcd:setNodeKind", kind),
+  setNodeKind: (kind, heapMb) => ipcRenderer.invoke("mcd:setNodeKind", kind, heapMb),   // heapMb saved with the kind, after the stop guard (0.18.223)
 
   // app updates from the minimaCore store feed
   updateStatus: () => ipcRenderer.invoke("mcd:updateStatus"),

@@ -48,7 +48,7 @@ test("no pass: refused; a pass is for one exact command, once, within 60 s; a ch
 test("mcd:cmd refuses before anything is sent; the Terminal keeps no gated command or answer; first run reads the seed through the gate", () => {
   const main = rd("main/main.js"), app = rd("renderer/app.js");
   const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'), main.indexOf("});", main.indexOf('ipcMain.handle("mcd:cmd"')));
-  assert.ok(/const ready = await require\("\.\/cmdgate"\)\.checkCommand\(command, \{ take: cmdGate\.take,[^\n]*\n\s*return require\("\.\/cmdgate"\)\.scrubReply\(await run\(ready\), command\);[^\n]*\n\}\);/.test(main), "the handler runs only what checkCommand returns (0.18.201), and its reply is scrubbed of the typed secrets (CHANGED on purpose, 0.18.222)");
+  assert.ok(/const ready = await require\("\.\/cmdgate"\)\.checkCommand\(command, \{ take: cmdGate\.take,[^\n]*\n(?:[^\n]*\n){0,2}?\s*return require\("\.\/cmdgate"\)\.scrubReply\(await run\(ready\), command\);[^\n]*\n\}\);/.test(main), "the handler runs only what checkCommand returns (0.18.201), and its reply is scrubbed of the typed secrets (CHANGED on purpose, 0.18.222; 0.18.223 asks the stop guard in between)");
   assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => \{ requireRunning\(\); return cmdGate\.arm\(command, typed\); \}\);/.test(main), "CHANGED on purpose (0.18.202): the node is checked first");
   assert.equal((main.match(/ipcMain\.handle\("mcd:[A-Za-z]+", (async )?\(_e, (command|cmd)\b/g) || []).length, 3, "mcd:cmd, mcd:cmdGate and mcd:cmdKind (advice only, 0.18.194) are the only handlers that take a command text");
   const term = app.slice(app.indexOf("async function termSubmit(c) {"), app.indexOf("function renderTerminal() {"));

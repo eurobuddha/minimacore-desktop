@@ -113,6 +113,11 @@ jobs:
       - name: Verify no command injection
         run: npm run test:inject
 
+      # Every node stop or restart (the tray, the Node tab, the node kind, Contribute, the Web Wallet's MegaMMR switch, a Chat
+      # restore, a Terminal resync or quit) asks main's own question first when anything is in flight or could not be checked.
+      - name: Verify the node-stop guard
+        run: npm run test:stopguard
+
       # Chat: the wire schema round trip and every peer string cut to its length (the drift check against the
       # canonical mds/keetchat copy skips itself here: that repo is not checked out).
       - name: Verify chat
