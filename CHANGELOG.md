@@ -7,6 +7,34 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.261] — sha3.js says "the same code"
+
+- main/sha3.js's header now says it is the same code as Pandamonium Desktop's, its comment apart. Test: `scripts/shop-test.cjs`.
+
+## [0.18.260] — multisig file with C:/
+
+- A multisig file written with a drive letter and a forward slash (C:/dir/x.txn) runs, as one with a backslash does. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.259] — the stop question reads everything side by side
+
+- AtomiX, PandaPools and P2P Chance are read in parallel, each with its own time limit, so a slow read no longer loses the others' answers. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.258] — setup screen: the truth after a failed restart
+
+- When a restart fails after it began, the screen reads the saved settings again and no longer says the changes are still on screen when the form is gone. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.257] — a failed stop does not block a retry
+
+- When what a stop was for fails without stopping the node (a wrong password, an import that fails at once), the next try is asked again instead of refused for 30 seconds. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.256] — Terminal: Windows \\??\\UNC paths
+
+- A file parameter written as \\??\\UNC\\host\\share or /??/UNC/host/share is refused as a file on another computer. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.255] — Terminal: decryptbackup output on another computer
+
+- decryptbackup writes the decrypted backup, the wallet in plain text, to output:; an output on another computer is now refused. Test: `scripts/cmdgate-test.cjs`.
+
 ## [0.18.254] — AtomiX: a failing owed move is retried with a pause
 
 - An owed move of the old wallet's swap database that keeps failing is tried again with a growing pause (12 seconds up to 10 minutes) instead of every 12 seconds, is said in the log once per reason, and config.json is rewritten only when the debt changes. Test: `scripts/atomix-unit.js`.
