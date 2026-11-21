@@ -818,3 +818,14 @@ test("L7: an at-risk stake whose payout this node cannot sign for is left in the
   assert.deepEqual(node.sent.filter(c => /^txn/.test(c)), [], "not collected onto an address no sweep can follow from");
   assert.equal(e._store().collect(ID(2)).status, "DETECTED");
 });
+
+test("L8: a token id or payout from the store reaches a command only in its shape", async () => {
+  const { e, node } = await engine();
+  const st = e._store(); st.kv.set(FC.K.SAFE_MODE, "samenode"); st.kv.set(FC.K.SAFE_ADDRESS, SAFE_MX); st.kv.setBool(FC.K.ENABLED, true);
+  st.kv.set(FC.K.CLEAN_ADDR, JSON.stringify({ mx: SAFE_MX, hex: SAFE_HEX }));
+  st.insertSweep(ID(80), PAY1, "0x00 address:0xFF;quit", "1"); st.claimSweepForPost(ID(80), 150);
+  st.insertCollect(ID(81), PAY1, "0x00;quit", "1", 100, true); st.setCollectStatus(ID(81), "COLLECTED");
+  node.n.coins[ID(80)] = { coinid: ID(80), address: PAY1, amount: "1", tokenid: "0x00", spent: true };
+  node.sent.length = 0; await e.pass(160);
+  assert.deepEqual(node.sent.filter(c => /quit|0xFF/.test(c)), [], "nothing malformed was sent");
+});

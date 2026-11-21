@@ -71,6 +71,7 @@ const S = { DETECTED: "DETECTED", COLLECT_POSTED: "COLLECT_POSTED", COLLECT_POST
   SWEEP_QUEUED: "SWEEP_QUEUED", COLLECTED_UNFOUND: "COLLECTED_UNFOUND", PENDING: "PENDING", SWEEP_POSTED: "SWEEP_POSTED", SWEPT: "SWEPT", TAKEN: "TAKEN" };
 
 // ---- shapes: the one gate between data (the chain, the audit service, the screen) and a command string (Node.java) ----
+const TOKEN = /^0x[0-9a-fA-F]{2,64}$/;
 const HEX = /^0x[0-9a-fA-F]{2,}$/, MX = /^M[xX][0-9A-Za-z]{30,100}$/, HEX64 = /^0x[0-9a-fA-F]{64}$/, AMOUNT = /^[0-9]+(\.[0-9]+)?$/;
 const validHexAddr = (s) => typeof s === "string" && HEX.test(s);
 const validMx = (s) => typeof s === "string" && MX.test(s);
@@ -802,6 +803,7 @@ function create(o) {
   async function detectCollectedForSweep(budget, t) {
     const claimed = new Set(store.sweepIds().map(lc));
     for (const row of store.collects(S.COLLECTED)) {
+      if (!validAddr(row.payout) || !TOKEN.test(String(row.tokenid))) continue;   // review L8: never into a command unchecked
       if (budget.sweepReads-- <= 0) return;
       const r = await call("coins address:" + row.payout + " checkmempool:true");
       const found = (ok(r) && Array.isArray(r.response) ? r.response : []).find(c => c && c.spent !== true && HEX64.test(String(c.coinid || "")) && !claimed.has(lc(c.coinid))
@@ -852,6 +854,7 @@ function create(o) {
   }
   /** Did our swept output arrive? {reliable, coinid}. Only a same-node safe can be looked at (an external one is never tracked). */
   async function arrived(safe, row) {
+    if (!TOKEN.test(String(row.tokenid)) || !validAddr(safe)) return { reliable: false, coinid: null };   // a stored value goes into a command only in its shape (review L8)
     const used = new Set(store.sweepNotes().map(lc)), c0 = cleanAddr(), lookup = sameNode() && c0 ? c0.hex : safe;
     const r = await call("coins address:" + lookup + " tokenid:" + row.tokenid);
     if (!ok(r) || !Array.isArray(r.response)) return { reliable: false, coinid: null };
