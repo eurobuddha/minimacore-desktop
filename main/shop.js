@@ -40,6 +40,15 @@ const seenPayCoins = new Set();
 let identity = null;         // {boxPk,boxSk,signPk,signSk,publicId}
 let vendorAddress = "";      // my default receiving address (payments land here)
 let scanTimer = null, lastTip = 0, scanning = false, passServed = 0;
+// Refs whose payment is at the node in THIS process right now (0.18.224, as Pandamonium Desktop 0.19.265): a send can take up to
+// the RPC's write timeout, and while it runs "not sent" and Retry are refused (they cleared the in-flight mark and paid a second
+// time while the first was live).
+const sending = new Set();
+const SENDING = "This payment is being sent to the node now. Wait for its answer.";
+// A buy order the vendor has moved to PAID or on (CONFIRMED, SHIPPED, DELIVERED): the payment arrived. A buy order's own `paid`
+// is never set (only the vendor's store counts coins), so its status is what says it.
+const ACKED = new Set(["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"]);
+const acked = (o) => !!(o && (o.paid || ACKED.has(o.status)));
 // A read the node did not answer (refused at every depth, timed out, threw) in this pass (0.18.213): it was taken as covered,
 // so the newest part of a gap was never read. Any failure now advances nothing; the same blocks are read on the next pass.
 let readFailed = false, lastPassFailed = false;
@@ -174,32 +183,34 @@ async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
   let payTxpow = null, payError = null;
   // In flight, on disk, until the node answers (0.18.208): a quit or crash during the send leaves it set, and a retry is then
   // refused as "may already have been sent" instead of paying a second time.
-  store.setMetaSync("inflight:" + ref, true);
-  try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; store.setMetaSync("inflight:" + ref, false); }
+  store.setMetaSync("inflight:" + ref, true); sending.add(ref);
+  try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; store.setMetaSync("unpaid:" + ref, false); store.setMetaSync("inflight:" + ref, false); }
   catch (e) {
     if (!e.ambiguous) store.setMetaSync("inflight:" + ref, false);
     payError = e.message || "payment failed";
     // AMBIGUOUS (timed-out but maybe accepted) must NOT get a one-click retry — that double-pays. Flag it apart
     // from a clean failure, which is safe to retry. Both flushed so the state survives a crash.
     if (e.ambiguous) store.setMetaSync("ambiguous:" + ref, true); else store.setMetaSync("unpaid:" + ref, true);
-  }
+  } finally { sending.delete(ref); }
   emitter.emit("update");
   return { ref, payError, payTxpow };
 }
 async function retryPayment(ref) {
   await init();
   const o = store.order(ref); if (!o || o.role !== "buy") throw new Error("Order not found.");
+  if (sending.has(ref)) throw new Error(SENDING);
+  if (acked(o)) throw new Error("This order is already paid.");
   if (store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)) throw new Error("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.");
-  if (o.paid) throw new Error("This order is already paid.");
   // A retry only after a payment the node refused (0.18.208): no "unpaid" mark, no second payment.
   if (!store.getMeta("unpaid:" + ref)) throw new Error("This order has no refused payment to retry. Check your Balance/History.");
   const tok = SHOP.token(o); if (tok.err) throw new Error(tok.err);   // an order placed before 0.18.150 with a shop whose token did not match its currency
   const vendorAddr = o.vendorAddress || (store.shop(o.shopId) || {}).vendorAddress;
   if (!vendorAddr) throw new Error("Missing vendor address for retry.");
   let r;
-  store.setMetaSync("inflight:" + ref, true);
+  store.setMetaSync("inflight:" + ref, true); sending.add(ref);
   try { r = await sendPayment(vendorAddr, String(o.amount), o.tokenid, ref); }
   catch (e) { if (e.ambiguous) store.setMetaSync("ambiguous:" + ref, true); else store.setMetaSync("inflight:" + ref, false); throw e; }   // a retry that itself times out → now ambiguous, block further retries
+  finally { sending.delete(ref); }
   store.setMetaSync("unpaid:" + ref, false); store.setMetaSync("inflight:" + ref, false); emitter.emit("update");
   return r;
 }
@@ -421,10 +432,15 @@ function checkImported(cfg) {
 function myShops() { return store.shops(); }
 function saveShop(cfg) { store.saveShop(cfg); emitter.emit("update"); return cfg; }
 function deleteShop(shopId) { store.deleteShop(shopId); emitter.emit("update"); }
+/** What the screens may offer for a buy order's payment (0.18.224): `sending` while its send is at the node in this process (no
+ *  warning, no button), nothing once the vendor acknowledged it; else the unpaid / may-have-gone-through marks. */
+function payState(o) {
+  const ref = o.ref, s = sending.has(ref), done = o.role === "buy" && acked(o);
+  return { sending: s, unpaid: !s && !done && !!store.getMeta("unpaid:" + ref), ambiguous: !s && !done && !!(store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)) };
+}
 function ordersList() {
-  return store.orders().map(o => ({ ref: o.ref, role: o.role, shopId: o.shopId, shopName: o.shopName, status: o.status,
-    amount: o.amount, due: o.due || "", unchecked: !!(o.problems && o.problems.length), currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread,
-    unpaid: !!store.getMeta("unpaid:" + o.ref), ambiguous: !!(store.getMeta("ambiguous:" + o.ref) || store.getMeta("inflight:" + o.ref)) })).sort((a, b) => (b.date || 0) - (a.date || 0));
+  return store.orders().map(o => Object.assign({ ref: o.ref, role: o.role, shopId: o.shopId, shopName: o.shopName, status: o.status,
+    amount: o.amount, due: o.due || "", unchecked: !!(o.problems && o.problems.length), currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread }, payState(o))).sort((a, b) => (b.date || 0) - (a.date || 0));
 }
 function orderDetail(ref) {
   const o = store.order(ref); if (!o) return null; store.markOrderRead(ref); if (o.role === "sell") store.ensureChecked(o);
@@ -432,12 +448,13 @@ function orderDetail(ref) {
   // a second buyer's copy of a reference (0.18.218): payments carrying that reference are counted on the first order
   const first = o.wireRef ? store.order(o.wireRef) : null;
   const sharedRef = first ? { ref: first.ref, received: first.paidAmount || "0" } : null;
-  return { order: o, chat: store.chat(ref), unpaid: !!store.getMeta("unpaid:" + ref), ambiguous: !!(store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)), sharedRef };
+  return Object.assign({ order: o, chat: store.chat(ref), sharedRef }, payState(o));
 }
 /** The buyer checked their History and the uncertain payment was not sent (0.18.217): Retry is offered again. */
 function paymentNotSent(ref) {
   const o = store.order(ref); if (!o || o.role !== "buy") throw new Error("Order not found.");
-  if (o.paid) throw new Error("This order is already paid.");
+  if (sending.has(ref)) throw new Error(SENDING);
+  if (acked(o)) throw new Error("This order is already paid.");
   if (!store.getMeta("ambiguous:" + ref) && !store.getMeta("inflight:" + ref)) throw new Error("This order has no payment that may have gone through.");
   store.setMetaSync("ambiguous:" + ref, false); store.setMetaSync("inflight:" + ref, false); store.setMetaSync("unpaid:" + ref, true);
   emitter.emit("update"); return { ok: true };

@@ -547,8 +547,14 @@ test("buyer: a retry pays only after a refused payment, never while one may be i
   // a quit during the send: the in-flight mark is still on disk
   mode = "refuse"; const r4 = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", ""); m.store.setMetaSync("inflight:" + r4.ref, true);
   const before = paid.length; await assert.rejects(m.shop.retryPayment(r4.ref), /may already have been sent/); assert.equal(paid.length, before, "nothing sent");
-  const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(src.indexOf('store.setMetaSync("inflight:" + ref, true);\n  try { const pr = await sendPayment(') > 0, "the mark is on disk before the first payment is sent");
+  // the mark is on disk before each payment reaches the node (CHANGED on purpose, 0.18.224: checked as the node sees the send, not by the source's text)
+  const marks = []; m.shop._setRunner(async (c) => {
+    if (c.startsWith("coins")) return { status: true, response: [] };
+    if (c.startsWith("send ") && c.includes("address:" + ADDR)) { const o = m.shop.ordersList().find(x => x.role === "buy" && c.includes("0x" + Buffer.from(x.ref, "utf8").toString("hex"))); marks.push(o ? m.store.getMeta("inflight:" + o.ref) : "no order"); return { status: false, error: "Insufficient funds" }; }
+    return { status: true, response: { txpowid: "0x01" } };
+  });
+  const r5 = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", ""); await assert.rejects(m.shop.retryPayment(r5.ref), /Insufficient/);
+  assert.deepEqual(marks, [true, true], "in flight on disk when the node got the order's payment and the retry");
 });
 
 // ---- 0.18.213: a read the node did not answer advances nothing ----
@@ -616,4 +622,44 @@ test("buyer: an in-flight or timed-out payment shows as 'may already have gone t
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes('id="shopNotSent"') && app.includes('"\\n\\nToken id\\n" + o.tokenid + "\\n\\nVendor\'s payment address\\n" + String(o.vendorAddress || "")'), "the confirmation shows the amount, the token id and the vendor address whole");
   assert.ok(/ipcMain\.handle\("mcd:shopNotSent", \(_e, ref\) => shop\.paymentNotSent\(ref\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
+});
+
+// ---- 0.18.224 (as Pandamonium Desktop 0.19.265): no "not sent" and no Retry while the payment is still at the node; none once the vendor acknowledged it ----
+test("buyer: while a payment is at the node, 'not sent' and Retry are refused and the screen is told it is being sent; a payment that went clears unpaid", async () => {
+  const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
+  const vendor = await m.sc.deriveIdentity("sending vendor"); let release = null; const paid = [];
+  m.shop._setRunner(async (c) => {
+    if (c.startsWith("vault")) return { status: true, response: { phrase: "sending buyer" } };
+    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: "MxG0" + "B".repeat(56) } };
+    if (c.startsWith("checkaddress")) return { status: true, response: { simple: true } };
+    if (c.startsWith("coins")) return { status: true, response: [] };
+    if (c.startsWith("send ") && c.includes("address:" + ADDR)) { paid.push(c); return new Promise(r => { release = r; }); }
+    return { status: true, response: { txpowid: "0x01" } };
+  });
+  const placing = m.shop.placeOrder(shopOf({ vendorPublicId: vendor.publicId }), [{ product: "Tea", quantity: 1 }], "1.5", "", "home", "");
+  while (!release) await new Promise(r => setImmediate(r));
+  const ref = m.shop.ordersList().find(o => o.role === "buy").ref;
+  const d = m.shop.orderDetail(ref); assert.equal(d.sending, true); assert.equal(d.ambiguous, false, "no 'may have gone through' warning and no 'not sent' button while it is sent");
+  assert.equal(m.shop.ordersList().find(o => o.ref === ref).sending, true);
+  assert.throws(() => m.shop.paymentNotSent(ref), /being sent to the node now/); assert.equal(m.store.getMeta("inflight:" + ref), true, "the in-flight mark stays");
+  m.store.setMetaSync("unpaid:" + ref, true); await assert.rejects(m.shop.retryPayment(ref), /being sent to the node now/); assert.equal(paid.length, 1, "no second payment");
+  release({ status: true, response: { txpowid: "0xP" } }); const r = await placing;
+  assert.equal(r.payError, null); assert.equal(m.store.getMeta("unpaid:" + ref), false, "a payment that went clears unpaid"); assert.equal(m.shop.orderDetail(ref).sending, false);
+  await assert.rejects(m.shop.retryPayment(ref), /no refused payment to retry/);
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").includes("${(!isSell && d.sending) ?"), "the order screen says it is being sent");
+});
+test("buyer: once the vendor moved the order to PAID or on, the warning, 'not sent' and Retry are gone", async () => {
+  const m = freshModules(); m.store.clear(); const paid = [];
+  m.shop._setRunner(async (c) => { if (c.startsWith("send ")) paid.push(c); return { status: true, response: [] }; });
+  for (const status of ["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"]) {
+    m.store.upsertOrder({ ref: "ORD-A", role: "buy", status, currency: "USDT", tokenid: MXUSD, amount: "5", vendorAddress: ADDR, paid: false });
+    m.store.setMetaSync("ambiguous:ORD-A", true); m.store.setMetaSync("inflight:ORD-A", true); m.store.setMetaSync("unpaid:ORD-A", false);
+    const d = m.shop.orderDetail("ORD-A"); assert.equal(d.ambiguous, false, status); assert.equal(d.unpaid, false); assert.equal(m.shop.ordersList().find(o => o.ref === "ORD-A").ambiguous, false);
+    assert.throws(() => m.shop.paymentNotSent("ORD-A"), /already paid/, status); assert.equal(m.store.getMeta("unpaid:ORD-A"), false);
+    m.store.setMetaSync("ambiguous:ORD-A", false); m.store.setMetaSync("inflight:ORD-A", false); m.store.setMetaSync("unpaid:ORD-A", true);
+    await assert.rejects(m.shop.retryPayment("ORD-A"), /already paid/, status);
+  }
+  assert.deepEqual(paid, []);
+  m.store.upsertOrder({ ref: "ORD-B", role: "buy", status: "PENDING", currency: "USDT", tokenid: MXUSD, amount: "5", vendorAddress: ADDR, paid: false }); m.store.setMetaSync("ambiguous:ORD-B", true);
+  assert.equal(m.shop.orderDetail("ORD-B").ambiguous, true, "a pending order still says it may have gone through");
 });
