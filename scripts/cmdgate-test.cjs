@@ -326,3 +326,21 @@ test("unclear lets txnstate's quoted [..] value through, as the node reads it; a
   assert.equal(V.unclear(c), ""); assert.deepEqual(V.read(c).params, [["id", "x"], ["port", "1"], ["value", "[hello world]"]]);
   for (const bad of ['send amount:1 address:0xA state:"[a b]"', 'vault password:"{" action:wipekeys', 'txnstate id:x port:1 value:"[a" b]']) assert.match(V.unclear(bad), /differently from how it is written/, bad);
 });
+
+// ---- 0.18.220 (as Pandamonium Desktop 0.19.281 / 0.19.291 / 0.19.296): values the node pastes into a command it runs itself ----
+test("a value the node pastes, unquoted, into its own second command is refused when it would add parameters there; plain values and Windows paths run", async () => {
+  const seen = [], io = { take: () => true, running: () => { seen.push("running"); return true; }, pin: async (c) => { seen.push(c); return c; } };
+  for (const c of ['reset action:chainsync archivefile:"/Users/me/archive.gz phrase:abc anyphrase:true" keys:[1]', 'archive action:import file:/Users/me/archive.gz keys:"64 phrase:abc anyphrase:true" address:{}',
+    'reset action:chainsync archivefile:"C:\\x.gz phrase:abc anyphrase:true"', 'reset action:chainsync archivefile:"x.gz phrase:abc"', 'archive action:importraw file:x keyuses:"5 phrase:a"', 'archive action:importold file:x anyphrase:"true phrase:a"',
+    'mysql action:reset file:"x phrase:a"', 'txpow txpowid:"0x01 action:resync phrase:abc"', 'archive action:import file:"/Users/me/My Archive.gz"', "status;reset action:chainsync archivefile:\"a b\"",
+    'mysql action:setlogin host:127.0.0.1:3306 database:db user:u password:"x action:resync phrase:a b"']) {
+    assert.match(G.repasted(c), /second command it runs itself/, c);
+    await assert.rejects(G.checkCommand(c, io), /second command it runs itself|differently from how it is written/, c);   // a ":" inside quotes is refused as unclear first
+  }
+  assert.deepEqual(seen, [], "nothing reached the node");
+  for (const c of ["reset action:chainsync archivefile:/Users/me/archive.gz", "archive action:import file:/Users/me/archive.gz", "txpow txpowid:0x01", "mysql action:reset file:/x/y.dat", "archive action:resync host:h:9001",
+    "reset action:chainsync archivefile:C:\\backup\\a.gz", "archive action:import file:D:\\minima\\archive.gz", "mysql action:setlogin host:127.0.0.1:3306 database:db user:u password:secret1",
+    'archive action:resync host:h:9001 phrase:"a b c"', 'send amount:1 address:0xA state:{"0":"a b"}'])
+    assert.equal(G.repasted(c), "", c);
+  assert.equal(await G.checkCommand("reset action:chainsync archivefile:C:\\backup\\a.gz", io), "reset action:chainsync archivefile:C:\\backup\\a.gz");
+});

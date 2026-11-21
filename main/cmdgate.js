@@ -92,11 +92,36 @@ function refusal(command, take) {
   return "GATED:" + kind + ": " + NAMES + " show a seed or a private key or change the keys; this one " + (kind === "seed" ? "shows the seed phrase" : kind === "key" ? "shows a private key" : "changes this wallet's keys or their lock") + ". Type " + PHRASE[kind] + " to run it.";
 }
 
+// Commands whose VALUES the node pastes, unquoted, into a second command it then runs itself (0.18.220, as Pandamonium Desktop
+// 0.19.281 / 0.19.291 / 0.19.296, read from core/minima-core commands): backup/reset.java chainsync / seedsync / restore ->
+// "archive action:import file:" + archivefile …; backup/archive.java import / importold / importraw -> "archive action:resync
+// host:… keys:" + keys + " keyuses:" … " anyphrase:" …; backup/mysql.java reset -> "mysql action:rawimport file:" + file;
+// search/txpow.java -> "mysql action:findtxpow txpowid:" + txpowid; mysql setlogin stores host, user, password and database,
+// which the node's autobackup pastes into "mysql host:" + host + " … password:" + password + " action:update" (there a ":"
+// stays inside its own token, so only white space, a quote or ";" count). A value holding white space, ":", a quote or ";"
+// there becomes more parameters of that second command (phrase: among them), so it is refused. A Windows path in a file
+// parameter (C:\backup\a.gz: a drive letter, ":\" and no white space, ":", quote, ";" or bracket after it) adds none.
+const WIN_PATH = /^[A-Za-z]:\\[^\s:";{}[\]]*$/;
+const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null),
+  mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
+const REPASTED_WHY = "The node pastes this command's values, unquoted, into a second command it runs itself, where white space, a colon, a quote or a semicolon in a value become more parameters of that command (a seed phrase among them). Write each value without them. Nothing was run.";
+/** Why mcd:cmd refuses a command whose pasted values would become parameters of the node's own second command ("" = it does not). */
+function repasted(command) {
+  return V.parts(command).some(part => {
+    const action = V.fold(V.paramValue(part, "action") || "");
+    return Object.keys(REPASTED).some(v => {
+      const bad = V.is(part, v) && REPASTED[v](action);
+      return !!bad && V.read(part).params.some(([name, val]) => bad.test(val) && !(/^(file|archivefile)$/i.test(name) && WIN_PATH.test(val)));
+    });
+  }) ? REPASTED_WHY : "";
+}
+
 /**
  * checkCommand(command, io) (0.18.201): everything mcd:cmd decides before a text reaches the node, in order:
  *   1. a non-empty string;  2. no control character (tab and line end allowed; the node trims and reads the others in
  *   ways no check here can follow);  2b. a command that moves funds or keys whose text the node reads otherwise than it looks
- *   (main/cmdverb.js unclear, 0.18.219);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   (main/cmdverb.js unclear, 0.18.219);  2c. a value the node would paste into a second command of its own as more parameters
+ *   (repasted, 0.18.220);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
  *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
  *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
  */
@@ -104,6 +129,7 @@ async function checkCommand(command, io) {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
   const unclear = V.unclear(command); if (unclear) throw new Error(unclear);   // refused, not guessed (0.18.219, main/cmdverb.js read)
+  const pasted = repasted(command); if (pasted) throw new Error(pasted);
   for (const part of V.parts(command)) {
     if (!V.is(part, "send")) continue;
     const twice = V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]);
@@ -114,4 +140,4 @@ async function checkCommand(command, io) {
   return io.pin ? await io.pin(command) : command;
 }
 
-module.exports = { classify, create, refusal, masked, checkCommand, PHRASE, PASS_MS };
+module.exports = { classify, create, refusal, masked, repasted, checkCommand, PHRASE, PASS_MS };
