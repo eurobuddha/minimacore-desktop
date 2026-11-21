@@ -3783,8 +3783,8 @@ async function renderShopInbox() {
   const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []), scan = await api.shopScanState().catch(() => null);
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
   const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
-    : scan && scan.catchingUpTo ? tr("Reading orders and payments from while the app was closed (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
-    : scan && scan.unreadBelow ? tr("Orders and payments older than block {block} could not be read: the node serves no deeper history.", { block: esc(String(scan.unreadBelow)) }) : "";
+    : scan && scan.catchingUpTo ? tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
+    : scan && scan.unreadBelow && mine.length ? tr("Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.", { block: esc(String(scan.unreadBelow)) }) : "";
   // a payout address skipped as not valid, whole (0.19.284)
   const skippedPay = (scan && scan.skipped || []).map(a => tr("Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.", { address: esc(a) })).join("<br>");
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],

@@ -376,9 +376,10 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.284 (a payout address is judged by its checksum, never by a node error; a skip runs out after five minutes and is said on the Inbox)
   // main/shop.js again in 0.19.288 (sendingCount: the payments at the node, for the Quit and Shutdown warnings)
   // main/shop-store.js again in 0.19.272 (gathered dust bounded at 256 with a running exact sum; a coin not larger than the smallest kept is not kept)
+  // main/shop.js again in 0.19.330 (every read capped at the node's block tree, status chain.length; a gap below it is "no deeper history")
   // main/shop.js again in 0.19.328 (the stepped backfill: an absence longer than one pass is read back in steps; catchingUpTo; served depth)
   // main/shop.js again in 0.19.265 (no "not sent" or Retry while the payment is at the node; none once the vendor acknowledged it; unpaid cleared on a send that went)
-  for (const [f, want, ver] of [["main/shop.js", "fd212a69a17cc333e27c30142559839aed11b10e6c2f2792db3cb6e7be42645a", "0.19.328"], ["main/shop-store.js", "e78b1c2ea386442f8fbc1927b06d481728e9a587aca4fbe05d3fd9cadb431797", "0.19.272"],
+  for (const [f, want, ver] of [["main/shop.js", "c9017645f837c2b61061cc34db0b605c3f7384bd29f2ad233e192a93146388a4", "0.19.330"], ["main/shop-store.js", "e78b1c2ea386442f8fbc1927b06d481728e9a587aca4fbe05d3fd9cadb431797", "0.19.272"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

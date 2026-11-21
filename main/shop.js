@@ -383,21 +383,39 @@ async function scanPayments(depth, floor) {
  *  the last (one pass's ceiling), skipping what an earlier pass read, until the gap is read or the node serves no deeper. */
 const WINDOW_DEPTH = 4096, GAP_MARGIN = 16, BACKFILL_CHUNK = WINDOW_DEPTH;
 function depthForGap(tip, prevTip) { if (!prevTip) return BACKFILL_MAX_DEPTH; const gap = Math.max(0, tip - prevTip); return Math.min(WINDOW_DEPTH, Math.max(POLL_DEPTH, gap + GAP_MARGIN)); }
+// How deep the node can list coins at all (0.19.330). `coins address:` walks the node's in-memory block tree from the tip to its root
+// (TxPoWSearcher.searchCoins: tip.getParent() until null, the depth counted in tree blocks; core e64600285be) and answers any deeper
+// depth with a LIST of what the tree holds, not a refusal: a deeper read looked complete and the backfill "finished" over blocks it
+// never saw. The tree is cut when it reaches 1124 blocks and shrinks back to 1024 (TxPoWProcessor: MINIMA_CASCADE_START_DEPTH 1024 +
+// MINIMA_CASCADE_FREQUENCY 100), and at each cut the new root receives every RELEVANT unspent coin of what was cut
+// (copyParentRelevantCoins): a read that reaches the root lists this wallet's unspent payments of any age, while ORDERS on the shared
+// channel and payments already spent are gone past the tree. status's chain.length is the branch's length (getHeaviestBranchLength):
+// every read is capped there, a payments read of that depth reaches the root, and a gap whose floor is at least that far below the tip
+// is past the tree. (A node
+// started with -megammr adds every unspent coin of its MegaMMR to `coins … megammr:true` once the tree is walked, whatever their age:
+// this app does not ask for that, and the node runs -megammr only when the Web Wallet switched it on.) 0 = not read.
+async function treeLength() {
+  try { const r = await nodeCmd("status"); const l = Number(r && r.response && r.response.chain && r.response.chain.length); return Number.isSafeInteger(l) && l > 0 ? l : 0; } catch (e) { return 0; }
+}
 async function currentBlock() { try { const b = await nodeCmd("block"); return parseInt((b && b.response && (b.response.block != null ? b.response.block : b.response)), 10) || 0; } catch (e) { return 0; } }
 async function scanOnce() {
   if (scanning || !identity) return;
   scanning = true;
   try {
     const tip = await currentBlock(), prev = Number(store.getMeta("scanned_tip_block") || 0);
-    const depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
+    const meta = (k) => Number(store.getMeta(k)) || 0;
+    let depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
+    // reads deeper than the steady window, and every backfill step, are capped at the node's block tree (0.19.330); unread: nothing moves
+    const len = tip && (depth > POLL_DEPTH || meta("backfill_target_block")) ? await treeLength() : -1;
+    if (len > 0) depth = Math.min(depth, len);
     served = depth;
     const a = await scanOrders(depth).catch(() => null);
     const b = await scanPayments(depth).catch(() => null);
     backfilled = true;
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
-    let failed = !tip || a === null || b === null, changed = !!(a || b);
-    const meta = (k) => Number(store.getMeta(k)) || 0, bf0 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
+    let failed = !tip || len === 0 || a === null || b === null, changed = !!(a || b);   // the tree's length unread: what was read is judged, nothing moves
+    const bf0 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
     if (!failed) {
       const covered = tip - served;   // the oldest block this pass read (less than asked when the node served less)
       // a gap below this pass (the app was away longer than one pass reads, or the node served less): the backfill reaches down to the
@@ -412,7 +430,7 @@ async function scanOnce() {
       store.setMeta("scanned_tip_block", tip);
       const target = meta("backfill_target_block"), floor = meta("backfill_floor_block");
       if (target && floor) {   // ONE step per pass: a widening query is heavy on the shared MINIMERCH address
-        const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK);
+        const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, len > 0 ? len : Infinity);   // never past the tree (0.19.330)
         served = deep;
         const c = await scanOrders(deep, floor).catch(() => null), d = await scanPayments(deep, floor).catch(() => null);
         changed = changed || !!(c || d);
@@ -421,8 +439,9 @@ async function scanOnce() {
         else if (reached <= target) { store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); }
         else if (reached < floor) store.setMeta("backfill_floor_block", reached);
         else {   // the node served no deeper than the floor: what is older cannot be read, said and kept (0.19.249)
-          store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", reached);
-          store.log("miniMall: orders and payments older than block " + reached + " could not be read: the node serves no deeper history");
+          // the floor (0.19.330): what is above it was read; the payments read reached the root, so only orders and spent payments are gone
+          store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", floor);
+          store.log("miniMall: orders sent before block " + floor + ", and payments already spent, could not be read: the node did not list them (its block tree ends there, or its replies were cut short)");
         }
       }
     }
