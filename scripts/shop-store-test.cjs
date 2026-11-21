@@ -34,8 +34,9 @@ test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.00000
   for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
     assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "DUST", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2 (CHANGED on purpose, 0.19.200: it is dust, not counted)");
-    assert.equal(store.recordPayment(ref, "0xC0002", "3.199999999", "0x00"), "UNDERPAID");
-    assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "PAID", "3.2 received = 3.2 due (the same coin, judged again: the remainder is never dust)");
+    // CHANGED on purpose (0.19.248, as released 0.18.190): the dust gathered before is counted with the coin that leaves only it due
+    assert.equal(store.recordPayment(ref, "0xC0002", "3.199999999", "0x00"), "PAID", "3.199999999 + the gathered 0.000000001 = 3.2 due");
+    assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "ALREADY", "and the dust coin is not counted again");
     assert.equal(store.order(ref).due, "3.2");
   }
   const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
@@ -381,4 +382,25 @@ test("two buyers' orders with the same reference are both kept, both Unchecked, 
   await scan([{ type: "ORDER", ref: "ORD-DUP2", shopId: "dup2", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" }], [{ coinid: "0xDB01", ref: "ORD-DUP2", amount: "10", tokenid: "0x00", created: 9 }]);
   assert.equal(store.order("ORD-DUP2").paid, true);
   assert.equal(store.flagDuplicate("ORD-DUP2", "x"), false); assert.equal(store.order("ORD-DUP2").status, "PAID");
+});
+
+// ---- 0.19.248 (as released 0.18.190): an order's dust coins are counted together once their sum covers what is still due ----
+test("dust coins count together once they cover what is still due: 9.9 + 0.05 + 0.05 pays 10, in any order; dust that never covers it writes nothing", () => {
+  store.saveShop({ shopId: "dust10", shopName: "D", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  const ord = (ref) => { store.upsertOrder({ ref, role: "sell", shopId: "dust10", amount: "10", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], shipping: "" }); return ref; };
+  let r = ord("ORD-DU1");
+  assert.equal(store.recordPayment(r, "0xd101", "9.9", "0x00"), "UNDERPAID");
+  assert.equal(store.recordPayment(r, "0xd102", "0.05", "0x00"), "DUST", "0.05 of 0.1 left is below 1% of 10");
+  assert.equal(store.recordPayment(r, "0xd103", "0.05", "0x00"), "PAID", "together they cover the 0.1 left");
+  assert.equal(store.order(r).paidAmount.replace(/0+$/, ""), "10."); assert.deepEqual(store.order(r).coins, ["0xd101", "0xd102", "0xd103"]);
+  r = ord("ORD-DU2");
+  assert.equal(store.recordPayment(r, "0xd201", "0.05", "0x00"), "DUST"); assert.equal(store.recordPayment(r, "0xd202", "0.05", "0x00"), "DUST");
+  assert.equal(store.recordPayment(r, "0xd203", "9.9", "0x00"), "PAID", "the dust first, the payment after");
+  r = ord("ORD-DU3");
+  assert.equal(store.recordPayment(r, "0xd301", "9.9", "0x00"), "UNDERPAID");
+  const real = fs.writeFileSync; let writes = 0; fs.writeFileSync = function () { writes++; return real.apply(this, arguments); };
+  try { for (let i = 0; i < 50; i++) assert.equal(store.recordPayment(r, "0xd3" + (1000 + i), "0.001", "0x00"), "DUST"); } finally { fs.writeFileSync = real; }
+  assert.equal(writes, 0, "dust that does not cover what is due writes nothing"); assert.equal(store.order(r).paid, false);
+  assert.equal(store.recordPayment(r, "0xd3999", "0.05", "0x00"), "PAID", "0.05 + 0.05 of the gathered dust cover the 0.1 left");
+  assert.ok(store.order(r).coins.length >= 3 && store.order(r).coins.length <= 52);
 });

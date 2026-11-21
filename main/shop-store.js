@@ -174,6 +174,39 @@ function ensureChecked(o) {
 // whole record of what was counted; past the cap nothing more is counted and the order waits for a check by hand.
 const MAX_PAY_COINS = 500;
 const TOO_MANY_COINS = "more than " + MAX_PAY_COINS + " payment coins came for this order; check the payment by hand";
+// Dust coins of an order not counted yet (0.19.248, as released 0.18.190), in memory only: { ref → Map(coin id → amount) }.
+// Together they count once their sum covers what is still due (9.9 + 0.05 + 0.05 pays 10). A flood that never sums to it
+// writes nothing; the map keeps an order's PENDING_MAX largest. After a restart the scanner sees them again and they gather again.
+const PENDING_DUST = new Map(), PENDING_MAX = 1000;
+/** What is still due by the listing, as [units, decimals], or null when nothing can be paid by it. */
+function remainingOf(o) {
+  const d = decParse(o.due), p = decParse(o.paidAmount || "0") || [0n, 0];
+  if (!d || d[0] <= 0n || o.problems.length) return null;
+  const dp = Math.max(d[1], p[1]); return [d[0] * 10n ** BigInt(dp - d[1]) - p[0] * 10n ** BigInt(dp - p[1]), dp];
+}
+function covers(amounts, rem) {
+  let dp = rem[1]; for (const a of amounts) { const x = decParse(a); if (x) dp = Math.max(dp, x[1]); }
+  let sum = 0n; for (const a of amounts) { const x = decParse(a); if (x) sum += x[0] * 10n ** BigInt(dp - x[1]); }
+  return sum >= rem[0] * 10n ** BigInt(dp - rem[1]);
+}
+/** The order's verdict after a count: PAID locks it; the status only advances (never back from a vendor's). */
+function judge(o) {
+  const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
+  if (outcome === "PAID") o.paid = true;
+  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+
+  return outcome;
+}
+/** The order's gathered dust, counted together when it covers what is still due → the outcome, or "". */
+function settleDust(o, ref) {
+  const pend = PENDING_DUST.get(ref), rem = remainingOf(o);
+  if (!pend || !pend.size || !rem || rem[0] <= 0n) return "";
+  const list = [...pend.entries()].filter(([cid]) => !o.coins.includes(cid));
+  if (!list.length || !covers(list.map(x => x[1]), rem) || o.coins.length + list.length > MAX_PAY_COINS) return "";
+  PENDING_DUST.delete(ref);
+  for (const [cid, amount] of list) { o.coins.push(cid); o.paidAmount = decAdd(o.paidAmount || "0", amount); }
+  o.paidTokenid = o.tokenid; o.paidAt = Date.now();
+  return judge(o);
+}
 function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   ensureLoaded(); const o = order(ref); if (!o) return null;
   if (o.paid) return "ALREADY";
@@ -190,7 +223,14 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   // Dust (0.19.200, as released 0.18.181 / 0.18.185) is not counted, not kept and not saved: it never fills the order's
   // MAX_PAY_COINS list, so a flood of tiny coins cannot push a later real payment past the cap, and it costs no disk write.
   // It is NOT remembered either: what is dust depends on what is still due, so the same coin is judged again later.
-  if (isDust(o, paidAmount)) return "DUST";
+  // Gathered in memory (0.19.248): counted with the order's other dust once together they cover what is still due.
+  if (isDust(o, paidAmount)) {
+    if (!decParse(paidAmount)) return "DUST";
+    const pend = PENDING_DUST.get(ref) || new Map(); pend.set(id, String(paidAmount)); PENDING_DUST.set(ref, pend);
+    if (pend.size > PENDING_MAX) { const smallest = [...pend.entries()].sort((x, y) => decCmp(x[1], y[1]))[0][0]; pend.delete(smallest); }
+    const out = settleDust(o, ref); if (out) { flush(); return out; }
+    return "DUST";
+  }
   if (o.coins.length >= MAX_PAY_COINS) {
     if (!o.problems.includes(TOO_MANY_COINS)) { o.problems.push(TOO_MANY_COINS); o.due = ""; }
     if ((STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED) o.status = "UNCHECKED";   // from any state before PAID; never back from a vendor's
@@ -198,9 +238,9 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   }
   o.coins.push(id);
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
-  const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
-  if (outcome === "PAID") o.paid = true;
-  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+
+  let outcome = judge(o);
+  if (outcome === "UNDERPAID") outcome = settleDust(o, ref) || outcome;   // the gathered dust may now cover what is left
+  if (o.paid) PENDING_DUST.delete(ref);
   flush(); return outcome;
 }
 /** A second buyer sent an order with this order's reference (0.19.241, as released 0.18.208): it can no longer be paid
