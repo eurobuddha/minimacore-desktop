@@ -782,3 +782,15 @@ test("L4: the runner keeps the caller's options: Lock's send pin reads coins unf
   const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
   assert.ok(main.includes('run: (c, opts) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), Object.assign({}, opts, { owner: "futurecash" }))'), "main passes them on to rpcCall");
 });
+
+test("L5: a long activity line keeps every id whole: the cut falls on a space after them", async () => {
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 140 })] }, answer: { txnpost: async () => ({ status: false, error: "x".repeat(60) + " " + "0x" + "CD".repeat(400) }) } });
+  e._store().kv.setBool(FC.K.AUTO_COLLECT_SAFE, true);
+  await e.collectNow(ID(1));
+  const g = await guardian({ at: { [FC.KNOWN_ADDRESS]: [stake(1, PAY1, { mature: 100 })] }, answer: { txnpost: async () => ({ status: false, error: "y ".repeat(700) }) } }, { atRisk: [PAY1] });
+  await g.e.pass(150);
+  const line = g.e.activity().find(l => l.msg.startsWith("Collect post failed"));
+  assert.ok(line && line.msg.includes("| stake:" + ID(1) + " | to:" + PAY1), "both ids whole: " + (line && line.msg.slice(0, 200)));
+  assert.ok(line.msg.length <= 1002 && line.msg.endsWith(" …"));
+  for (const l of g.e.activity()) for (const m of l.msg.matchAll(/0x[0-9A-Fa-f]+/g)) assert.ok(m[0].length >= 64 || m[0].length < 10, "no cut id: " + m[0]);
+});

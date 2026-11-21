@@ -41,7 +41,7 @@ const SECONDS_PER_BLOCK = 50;
 const RETRY_BLOCKS = 8, MAX_ATTEMPTS = 5, VERIFY_GRACE = 3, VERIFY_MAX = 30;
 const FRESH_MS = 30 * 60000, MAX_MS = 24 * 3600000, AUDIT_EVERY_MS = 20 * 60000;
 const FINGERPRINT_VERSION = "wallet-keys-v1|";
-const LOG_MAX_LINES = 80, LOG_MSG_MAX = 300;
+const LOG_MAX_LINES = 80, LOG_MSG_MAX = 1000;   // ids come first and are never cut: a long line is cut at a space (review L5)
 const MIN_DEFAULTS_KEEP = 8;
 // ---- the desktop's bounds ----
 const CAP_POSTS = 8, CAP_READS = 32, SCRIPTS_EVERY = 10, STAKE_ROWS_MAX = 5000;
@@ -204,7 +204,8 @@ function create(o) {
 
   /** Cfg.log: newest first, capped; ids come first in a message (the cap clips the tail). */
   function activity(level, message) {
-    let msg = String(message == null ? "" : message); if (msg.length > LOG_MSG_MAX) msg = msg.slice(0, LOG_MSG_MAX);
+    let msg = String(message == null ? "" : message);
+    if (msg.length > LOG_MSG_MAX) { const at = msg.lastIndexOf(" ", LOG_MSG_MAX); msg = msg.slice(0, at > 0 ? at : LOG_MSG_MAX) + " …"; }   // an id holds no space: cut at one, it stays whole
     log(level + ": " + msg);
     if (!store) return;
     let arr = []; try { arr = JSON.parse(store.kv.get(K.LOG, "[]")); if (!Array.isArray(arr)) arr = []; } catch (e) { arr = []; }
