@@ -116,7 +116,9 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     assert.equal(validate("https://eth.example.org/v3/KEY").ok, true);
     fs.writeFileSync(path.join(d, "ethrpc.json"), JSON.stringify({ url: "https://u:p@eth.example.org/", host: "eth.example.org" }));
     const lines = [], real = console.log; console.log = (...a) => lines.push(a.join(" "));
-    try { assert.equal(m._ethRpcLoad(), null, "dropped"); } finally { console.log = real; }
+    try { for (let i = 0; i < 5; i++) assert.equal(m._ethRpcLoad(), null, "dropped"); } finally { console.log = real; }   // five balance refreshes
+    assert.equal(lines.filter(l => /saved Ethereum endpoint was not used/.test(l)).length, 1, "said once, not on every refresh (0.18.234)");
+    assert.ok(!lines.some(l => /u:p@|eth\.example\.org/.test(l)), "never its URL");
     assert.ok(lines.some(l => /the saved Ethereum endpoint was not used \(Leave the name and password out/.test(l)), "and said so");
     assert.equal(m._allowedUrl("https://eth.example.org/"), false, "never added to the network list");
   });

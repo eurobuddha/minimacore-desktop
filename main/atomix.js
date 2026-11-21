@@ -1137,11 +1137,15 @@ function ethValidateRpc(url) {
   if (ethPrivateHost(u.hostname)) return { err: "That host isn't allowed (local/private addresses are blocked)." };
   return { ok: true, url: u.toString(), host: u.hostname };
 }
+// The text of a saved endpoint file already refused (0.18.234, as Pandamonium Desktop 0.19.275): it is said once, not again on every
+// balance refresh (each said it, and the log ring filled with it); a file written since is read again.
+let ethRpcRefused = null;
 function ethRpcLoad() {
   if (ethRpcOverride !== null) return ethRpcOverride;
-  try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; }
-    // a saved endpoint that is no longer allowed is dropped with a reason in the log (0.18.216), never used in silence
-    log("the saved Ethereum endpoint was not used (" + v.err + "); the built-in endpoints are used instead"); } catch (e) {}
+  try { const raw = fs.readFileSync(ETH_RPC_FILE(), "utf8"); if (raw === ethRpcRefused) { ethRpcOverride = null; return null; }
+    const o = JSON.parse(raw); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; }
+    // a saved endpoint that is no longer allowed is dropped with a reason in the log (0.18.216), never used in silence; never its URL
+    ethRpcRefused = raw; log("the saved Ethereum endpoint was not used (" + v.err + "); the built-in endpoints are used instead"); } catch (e) {}
   ethRpcOverride = null; return null;
 }
 // NB we deliberately do NOT call AX.ethtx.resetAll() when repointing the RPC. This wallet is MAINNET-ONLY and an
@@ -1197,6 +1201,6 @@ module.exports = {
     ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,
     ethTokensLoad, ethRpcLoad, ETH_FALLBACK_GP, ETH_FEE_MULT, ETH_MAX_GAS_PRICE },
   // test-only: reset the module-level ETH caches so a harness can drive a fresh userData dir per case
-  _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethUserHosts.clear(); },
+  _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethRpcRefused = null; ethUserHosts.clear(); },
   _allowedUrl: allowedUrl, _ethRpcLoad: ethRpcLoad
 };
