@@ -47,20 +47,34 @@ function create(io, t) {
   return { check };
 }
 
-/** An identifier of this Mac: a hash of its built-in network card's hardware address (en0), else of all of them. */
-function machineId() {
-  const os = require("os"), nets = os.networkInterfaces();
-  const macs = (k) => (nets[k] || []).map(n => n.mac).filter(m => m && m !== "00:00:00:00:00:00");
-  const list = macs("en0").length ? macs("en0") : Object.keys(nets).sort().flatMap(macs);
-  return require("crypto").createHash("sha256").update(os.platform() + "|" + [...new Set(list)].sort().join(",")).digest("hex");
+/** An identifier of this Mac (0.19.222, as released 0.18.191): its IOPlatformUUID, read once with /usr/sbin/ioreg (absolute
+ *  path, no shell), then cached. "" when it cannot be read (not a Mac, ioreg missing): a marker is then taken as this Mac's.
+ *  Never the network interfaces (an adapter plugged in changed them). run: for tests only. */
+let cachedId = null;
+function machineId(run) {
+  if (cachedId != null && !run) return cachedId;
+  let id = "";
+  try {
+    const out = (run || ((f, a) => require("child_process").execFileSync(f, a, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] })))("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]);
+    const m = /"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f-]{8,64})"/.exec(String(out)); id = m ? m[1].toUpperCase() : "";
+  } catch (e) { id = ""; }
+  if (!run) cachedId = id;
+  return id;
 }
-/** The real one: Electron's Touch ID, a main-process message box, and a marker file in userData. */
-function forElectron(electron, win) {
+/** Is a marker this Mac's? An id that cannot be read, on either side, counts as the same Mac. */
+function sameMac(markerId, hereId) { return !markerId || !hereId || markerId === hereId; }
+/** The real one: Electron's Touch ID, a main-process message box, and a marker file in userData. opts (tests only):
+ *  { platform, machineId() } in place of process.platform and the ioreg read. Off macOS there is no Touch ID, no marker is
+ *  ever written, and a marker copied from a Mac is IGNORED (0.19.222, as released 0.18.192): a Windows or Linux user always
+ *  gets the confirmation window, never a refusal. */
+function forElectron(electron, win, opts) {
+  const platform = () => (opts && opts.platform) || process.platform, mac = () => platform() === "darwin";
+  const idOf = () => (opts && opts.machineId ? opts.machineId() : machineId());
   const { systemPreferences, dialog, app } = electron;
   const marker = () => path.join(app.getPath("userData"), "touchid-seen");
   const read = () => { try { return JSON.parse(fs.readFileSync(marker(), "utf8")); } catch (e) { return null; } };
   return create({
-    can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(),
+    can: () => mac() && systemPreferences.canPromptTouchID(),
     prompt: (why) => systemPreferences.promptTouchID(why),
     confirm: async (detail) => {
       const w = win && win();
@@ -68,10 +82,10 @@ function forElectron(electron, win) {
         message: lang.t("Show a secret?"), detail: detail + "\n\n" + lang.t("No Touch ID check is available on this computer: this confirmation and the typed phrase are the only checks.") });
       return r.response === 1;
     },
-    seen: () => { const m = read(); return !!(m && m.machine === machineId()); },   // a marker from another Mac is ignored
-    markSeen: () => { const m = read(); if (!(m && m.machine === machineId())) fs.writeFileSync(marker(), JSON.stringify({ machine: machineId(), since: new Date().toISOString() }) + "\n", { mode: 0o600 }); },
+    seen: () => { if (!mac()) return false; const m = read(); return !!(m && sameMac(m.machine, idOf())); },   // a marker from another Mac, or off macOS, is ignored
+    markSeen: () => { if (!mac()) return; const m = read(); if (!(m && sameMac(m.machine, idOf()))) fs.writeFileSync(marker(), JSON.stringify({ machine: idOf(), since: new Date().toISOString() }) + "\n", { mode: 0o600 }); },
     where: () => marker()
   });
 }
 
-module.exports = { create, forElectron, machineId, REASON_MAX };
+module.exports = { create, forElectron, machineId, sameMac, REASON_MAX };

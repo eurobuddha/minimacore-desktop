@@ -201,16 +201,29 @@ test("syscheck: refused (not phrase only) once Touch ID worked here and cannot b
   const osm = require("os"), dir = fs.mkdtempSync(path.join(osm.tmpdir(), "tid-")), file = path.join(dir, "touchid-seen");
   let can = true, boxes = 0;
   const electron = { app: { getPath: () => dir }, systemPreferences: { canPromptTouchID: () => can, promptTouchID: async () => {} }, dialog: { showMessageBox: async (w, o) => { boxes++; assert.ok(o.detail.includes("No Touch ID check is available on this computer")); return { response: 1 }; } } };
-  const realPlatform = Object.getOwnPropertyDescriptor(process, "platform"); Object.defineProperty(process, "platform", { value: "darwin" });
+  // CHANGED on purpose (0.19.222, released 0.18.191 / 0.18.192): the platform and the Mac's id are injected; the id is the IOPlatformUUID
   try {
-    const sys = SC.forElectron(electron, () => null);
+    const sys = SC.forElectron(electron, () => null, { platform: "darwin", machineId: () => "MAC-A" });
     assert.deepEqual(await sys.check("r", "d"), { biometric: true });
-    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).machine, SC.machineId(), "the marker names this Mac");
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).machine, "MAC-A", "the marker names this Mac");
     can = false;
     await assert.rejects(sys.check("r", "d"), (e) => e.message.includes("delete this file: " + file + " ."), "refused, naming the file's whole path");
     fs.writeFileSync(file, JSON.stringify({ machine: "another mac" }));
     assert.deepEqual(await sys.check("r", "d"), { biometric: false }, "a marker from another Mac is ignored: the box is used"); assert.equal(boxes, 1);
-  } finally { Object.defineProperty(process, "platform", realPlatform); fs.rmSync(dir, { recursive: true, force: true }); }
+    // an id that cannot be read counts as the same Mac (refused, never phrase-only)
+    fs.writeFileSync(file, JSON.stringify({ machine: "MAC-A" }));
+    await assert.rejects(SC.forElectron(electron, () => null, { platform: "darwin", machineId: () => "" }).check("r", "d"), /cannot be asked now/);
+    // off macOS the marker is ignored and never written: the box, never a refusal
+    can = true; const win = SC.forElectron(electron, () => null, { platform: "win32", machineId: () => "MAC-A" });
+    assert.deepEqual(await win.check("r", "d"), { biometric: false }, "no Touch ID off macOS, and a copied marker refuses nothing"); assert.equal(boxes, 2);
+    fs.rmSync(file); await win.check("r", "d"); assert.ok(!fs.existsSync(file), "never written off macOS");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const ioreg = '+-o Root  <class IORegistryEntry>\n    "IOPlatformSerialNumber" = "X"\n    "IOPlatformUUID" = "564d4c3a-1111-2222-3333-444455556666"\n';
+  let called = null; assert.equal(SC.machineId((f, a) => { called = [f, a]; return ioreg; }), "564D4C3A-1111-2222-3333-444455556666");
+  assert.deepEqual(called, ["/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]], "absolute path, no shell");
+  assert.equal(SC.machineId(() => { throw new Error("no ioreg"); }), "", "unreadable: empty, the same Mac");
+  assert.ok(SC.sameMac("", "X") && SC.sameMac("X", "") && SC.sameMac("X", "X") && !SC.sameMac("X", "Y"));
+  assert.ok(!/networkInterfaces/.test(SRC("main/syscheck.js")), "never the network cards");
   const main = SRC("main/main.js");
   assert.ok(/const systemCheck = require\("\.\/syscheck"\)\.forElectron\(require\("electron"\), \(\) => win\);/.test(main) && !/canPromptTouchID/.test(main), "one system check for every gate");
   for (const re of [/seedgate\.revealSeed\(typed, systemCheck,/, /secretGate = seedgate\.create\(systemCheck\)/, /exportKeyGated\(typed, systemCheck\)/]) assert.ok(re.test(main), String(re));
