@@ -500,3 +500,15 @@ test("a signfrom or postfrom whose transaction id carries a second command is re
   for (const c of ["postfrom data:" + blob("txn_1.a-b") + " mine:false", "signfrom data:" + blob("abc") + pk]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
   assert.throws(() => require("../main/rpc").oneCommand("postfrom data:" + evil), /whose id is plain/, "a command the app builds is held to it too");
 });
+
+// ---- 0.18.243 (as Pandamonium Desktop 0.19.308): a state value that is an array or object brings its own quotes into the txnstate a builder pastes it into ----
+test("a builder's state value that is an array or object is refused through mcd:cmd; strings, numbers and booleans run; every builder is a sensitive verb", async () => {
+  const V = require("../main/cmdverb"), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  for (const c of ['sendfrom fromaddress:0x01 address:0x02 amount:1 script:"RETURN TRUE" privatekey:0x03 keyuses:1 state:{"1":[["]"],"[] port:9 value:[x"]} mine:false',
+    'rawfrom inputs:[{"coinid":"0x01"}] outputs:[{"address":"0x02","amount":"1"}] state:{"1":["]",["] port:9 value:[x"]]}', 'rawtxnfrom inputs:[{"coinid":"0x01"}] outputs:[] scripts:[] state:{"1":{"a":1}}'])
+    await assert.rejects(h(null, c), /builds further commands|differently from how it is written/, c);
+  assert.deepEqual(sent, []);
+  for (const v of ["rawfrom", "rawtxnfrom", "constructfrom", "createfrom", "postfrom", "txnauto"]) assert.match(V.unclear(v + ' x:"a"b'), /differently from how it is written/, v);
+  const ok = 'sendfrom fromaddress:0x01 address:0x02 amount:1 script:"RETURN TRUE" privatekey:0x03 keyuses:1 state:{"1":"hello","2":5,"3":true} mine:false';
+  sent.length = 0; await h(null, ok); assert.deepEqual(sent, [ok]);
+});
