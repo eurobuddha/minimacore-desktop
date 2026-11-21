@@ -49,9 +49,9 @@ test("mcd:cmd refuses before anything is sent; the Terminal keeps no gated comma
   const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'), main.indexOf("});", main.indexOf('ipcMain.handle("mcd:cmd"')));
   assert.ok(/const gated = require\("\.\/cmdgate"\)\.refusal\(command, cmdGate\.take\); if \(gated\) throw new Error\(gated\);\n\s*requireRunning\(\);/.test(h), "the refusal is the handler's first check");
   assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => cmdGate\.arm\(command, typed\)\);/.test(main));
-  assert.equal((main.match(/ipcMain\.handle\("mcd:[A-Za-z]+", (async )?\(_e, (command|cmd)\b/g) || []).length, 2, "mcd:cmd and mcd:cmdGate are the only handlers that take a command text");
-  const term = app.slice(app.indexOf("function renderTerminal() {"), app.indexOf("inp.oninput = termSugUpdate;"));
-  assert.ok(/if \(gated\) \{ termSecret\(c, gated\[1\]\); return; \}\n\s*TERM_HIST\.push\(c\);/.test(term), "a gated command never reaches the history or the output");
+  assert.equal((main.match(/ipcMain\.handle\("mcd:[A-Za-z]+", (async )?\(_e, (command|cmd)\b/g) || []).length, 3, "mcd:cmd, mcd:cmdGate and mcd:cmdKind (advice only, 0.18.194) are the only handlers that take a command text");
+  const term = app.slice(app.indexOf("async function termSubmit(c) {"), app.indexOf("function renderTerminal() {"));
+  assert.ok(term.indexOf("termSecret(c, k.kind)") > 0 && term.indexOf("termSecret(c, k.kind)") < term.indexOf("TERM_HIST.push(c)"), "a gated command never reaches the history or the output (CHANGED on purpose, 0.18.194: the kind is asked first)");
   assert.ok(!/tryCmd\("vault"\)/.test(app), "no screen reads the seed with a plain command");
 });
 
@@ -195,4 +195,27 @@ test("a parameter name glued after a quoted value counts as a repeat; a key insi
   assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x","1":"tokenid:0x00"}', ["amount", "tokenid", "address", "fromaddress"]), [], "keys inside a state's JSON are not parameters");
   const g = G.create(SYS({}));
   await assert.rejects(g.arm('keys action:"list"action:genkey', "SHOW KEY"), /names action more than once/);
+});
+
+// ---- 0.18.194: the Terminal asks the kind first and echoes an ordinary command at once ----
+test("Terminal: an ordinary command is echoed and kept before it returns; a secret one goes to its gate; a gated chain is refused; a second identical send gets a note", async () => {
+  const app = rd("renderer/app.js"), a = app.indexOf("const TERM_BUSY = new Set();"), b = app.indexOf("function renderTerminal() {");
+  const make = (kinds) => {
+    const E = { out: [], hist: [], secret: [], sent: [], resolve: [] };
+    const api = { cmdKind: async (c) => kinds[c] || { kind: "", chain: false, write: false },
+      cmd: (c) => { E.sent.push(c); return new Promise(r => { E.resolve.push(r); }); } };
+    const fn = new Function("api", "appendTerm", "termSecret", "TERM_HIST", "let termIdx = 0;\n" + app.slice(a, b) + "\nreturn termSubmit;")(api, (s) => E.out.push(s), (c, k) => E.secret.push([c, k]), E.hist);
+    return { E, fn };
+  };
+  const SEND = "send amount:1 address:0xAA";
+  const { E, fn } = make({ [SEND]: { kind: "", chain: false, write: true }, vault: { kind: "seed", chain: false, write: true }, "status;vault": { kind: "seed", chain: true, write: true } });
+  const p1 = fn(SEND); await new Promise(r => setImmediate(r));
+  assert.deepEqual(E.out, ["> " + SEND], "echoed at once, before the node answers"); assert.deepEqual(E.hist, [SEND]);
+  await fn(SEND); assert.match(E.out[1], /^note: the same command is still running .* Type it again to run it a second time anyway\.$/); assert.equal(E.sent.length, 1, "not sent twice");
+  const p2 = fn(SEND); await new Promise(r => setImmediate(r)); assert.equal(E.sent.length, 2, "typed again after the note: it runs");
+  E.resolve.forEach(r => r({ status: true })); await p1; await p2;
+  await fn("vault"); assert.deepEqual(E.secret, [["vault", "seed"]]); assert.ok(!E.hist.includes("vault") && !E.out.some(l => l.includes("> vault")), "never in the history or the output");
+  await fn("status;vault"); assert.match(E.out[E.out.length - 1], /^error: this chain holds vault, seedrandom or keys action:genkey/); assert.ok(!E.hist.includes("status;vault"));
+  const main = rd("main/main.js");
+  assert.ok(/ipcMain\.handle\("mcd:cmdKind", \(_e, command\) => \{[^\n]*require\("\.\/cmdgate"\)\.classify\(c\);[^\n]*write: rpc\.isWrite\(c\)/.test(main));
 });

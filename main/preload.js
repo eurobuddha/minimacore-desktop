@@ -218,6 +218,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ewSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:ewSendReview", asset, to, amt),
   ewSend: (asset, to, amt, tier) => ipcRenderer.invoke("mcd:ewSend", asset, to, amt, tier),
   ewExportKey: (typed) => ipcRenderer.invoke("mcd:ewExportKey", typed),   // the typed phrase; the main process checks it and asks the system where it can → { key, system }
+  cmdKind: (command) => ipcRenderer.invoke("mcd:cmdKind", command),   // { kind: "seed"|"key"|"", chain, write } as the main process reads the text
   cmdGate: (command, typed) => ipcRenderer.invoke("mcd:cmdGate", command, typed),   // a command that shows a seed or a private key: the typed phrase (and the system's prompt) for that one command → { system, kind }
   seedReveal: (typed) => ipcRenderer.invoke("mcd:seedReveal", typed),   // Settings: the typed phrase; the main process checks it, asks the system where it can, then reads the seed → { phrase, system }
   clipSecret: (text) => ipcRenderer.invoke("mcd:clipSecret", text),   // cleared from the clipboard after a minute and at quit

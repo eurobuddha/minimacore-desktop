@@ -1886,6 +1886,33 @@ async function termSecret(c, kind) {
   window.addEventListener("blur", close); document.addEventListener("visibilitychange", hidden);
   el("termSecClose").onclick = close; ov.onclick = (e) => { if (e.target.id === "termSecOv") close(); };
 }
+// One Terminal command (0.18.194). The kind is asked FIRST (main/cmdgate.js through mcd:cmdKind), so an ordinary command is
+// echoed and put in history at once, as before 0.18.173: a send can take three minutes, and showing nothing until it came back
+// invited a second send. A command that shows a secret goes to its own gate and dialog (never into the history or the output);
+// a chain holding one is refused here (and again by the main process, which stays the gate). While a signing command runs, the
+// same text typed again only gets a note; typing it once more after the note runs it.
+const TERM_BUSY = new Set();
+let TERM_WARNED = "";
+async function termSubmit(c) {
+  let k;
+  try { k = await api.cmdKind(c); } catch (e) { k = null; }
+  if (!k) { appendTerm("error: the command could not be checked before running. Nothing was run."); return; }
+  if (k.kind && !k.chain) { termSecret(c, k.kind); return; }
+  if (k.kind && k.chain) { appendTerm("error: this chain holds vault, seedrandom or keys action:genkey, which show a seed or a private key. Run that command on its own. Nothing was run."); return; }
+  if (k.write && TERM_BUSY.has(c) && TERM_WARNED !== c) {
+    TERM_WARNED = c;
+    appendTerm("note: the same command is still running (a send can take up to 3 minutes). Type it again to run it a second time anyway.");
+    return;
+  }
+  TERM_WARNED = "";
+  TERM_HIST.push(c); termIdx = TERM_HIST.length;
+  appendTerm("> " + c);
+  if (k.write) TERM_BUSY.add(c);
+  let r, err = null;
+  try { r = await api.cmd(c); } catch (x) { err = x; }
+  finally { if (k.write) TERM_BUSY.delete(c); }
+  appendTerm(err ? "error: " + (err && err.message || err) : JSON.stringify(r, null, 2));
+}
 function renderTerminal() {
   const out = el("termOut"), inp = el("termIn");
   out.textContent = TERM_OUT; out.scrollTop = out.scrollHeight;
@@ -1895,15 +1922,7 @@ function renderTerminal() {
     if (e.key === "Enter") {                          // Enter ALWAYS submits, dropdown open or not
       const c = inp.value.trim(); if (!c) return;
       inp.value = ""; termSugClose();
-      let r, err = null;
-      try { r = await api.cmd(c); } catch (x) { err = x; }
-      // A command that shows a seed or a private key (0.18.173): the main process refused it until its gate is passed. It is
-      // never kept in the history or the output (Copy), and its answer is shown apart, for a minute at most.
-      const gated = err && /GATED:(seed|key):/.exec(String(err.message || ""));
-      if (gated) { termSecret(c, gated[1]); return; }
-      TERM_HIST.push(c); termIdx = TERM_HIST.length;
-      appendTerm("> " + c);
-      appendTerm(err ? "error: " + (err && err.message || err) : JSON.stringify(r, null, 2));
+      termSubmit(c);
     } else if (e.key === "Escape") {                  // the escape hatch to reach ↑ history while suggestions are up
       if (SUG_ITEMS.length) { e.preventDefault(); termSugClose(); }
     } else if (e.key === "Tab") {

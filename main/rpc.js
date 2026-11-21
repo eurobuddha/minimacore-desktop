@@ -82,4 +82,7 @@ function oneCommand(command) {
   return command;
 }
 
-module.exports = { rpcCall, oneCommand, _timeoutFor: timeoutFor };
+/** Does this text sign or change something (send, txn…, vault…): the commands that wait the long write timeout. */
+function isWrite(command) { return timeoutFor(command) === WRITE_TIMEOUT_MS; }
+
+module.exports = { rpcCall, oneCommand, isWrite, _timeoutFor: timeoutFor };

@@ -158,6 +158,9 @@ function requireRunning() {
 const sysCheck = require("./syscheck").forElectron(require("electron"), () => win);
 const cmdGate = require("./cmdgate").create(sysCheck);
 ipcMain.handle("mcd:cmdGate", (_e, command, typed) => cmdGate.arm(command, typed));
+// What the Terminal must do with a text before it runs it (0.18.194): its secret kind (the same reading as the gate), whether
+// it is a chain, whether it signs or changes something. Advice only: mcd:cmd's own refusal stays the gate.
+ipcMain.handle("mcd:cmdKind", (_e, command) => { const c = String(command == null ? "" : command), k = require("./cmdgate").classify(c); return { kind: k.kind, chain: k.chain, write: rpc.isWrite(c) }; });
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   // A control character in a command is refused (0.18.174): the node trims and reads them in ways the checks here cannot follow.

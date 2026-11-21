@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.194] — the Terminal echoes a command at once again
+
+- Since 0.18.173 the Terminal ran a command first and showed it only when the node answered, so a send (up to three minutes) showed nothing and invited a second send. The Terminal now asks the main process what the text is first (`mcd:cmdKind`: the gate's own reading): an ordinary command is echoed and kept in the history at once; a command that shows a secret goes to its gate; a chain holding one is refused. While a signing command runs, the same text typed again only gets a note; typing it once more runs it. The main process refusal stays the gate. Test: `scripts/cmdgate-test.cjs`.
+
 ## [0.18.193] — source is checked out with LF everywhere
 
 - The Windows CI runner checks files out with CRLF line ends, and the tests that read source text or lift a function out of it (looking for "\\n}\\n") then failed there ("shopDoPay is not defined", and, behind it, failures in the Web Wallet, secret-gate, send-pin and ETH-key suites). `.gitattributes` now checks every .js, .cjs, .mjs, .html, .css and .sh file out with LF on every platform (all are committed with LF, so nothing changed in the repository; the vendored PandaPools engine and `scripts/ethwallet-unit.js` keep their exact bytes). Proof: a clone made with `core.autocrlf=true` failed 8 tests before and passes them all after.
