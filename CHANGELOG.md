@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.193] — source is checked out with LF everywhere
+
+- The Windows CI runner checks files out with CRLF line ends, and the tests that read source text or lift a function out of it (looking for "\\n}\\n") then failed there ("shopDoPay is not defined", and, behind it, failures in the Web Wallet, secret-gate, send-pin and ETH-key suites). `.gitattributes` now checks every .js, .cjs, .mjs, .html, .css and .sh file out with LF on every platform (all are committed with LF, so nothing changed in the repository; the vendored PandaPools engine and `scripts/ethwallet-unit.js` keep their exact bytes). Proof: a clone made with `core.autocrlf=true` failed 8 tests before and passes them all after.
+
 ## [0.18.192] — off macOS the Touch ID marker is ignored
 
 - Windows and Linux have no Touch ID, so no marker is ever written there, and a marker copied from a Mac is now ignored: a Windows or Linux user always gets the confirmation window and is never refused. (The 0.18.191 rule "an id that cannot be read counts as the same Mac" made a copied marker refuse on Linux, where the id is never readable; that is how the Linux CI leg failed.) The test injects the platform and the machine id instead of depending on the host. Test: `scripts/ethkey-test.cjs`.

@@ -1,5 +1,17 @@
 graphify-out/graph.json merge=graphify
 
+# Source, tests, pages and styles are checked out with LF on every platform (0.18.192). The tests read source text and
+# lift functions out of it (they look for "\n}\n"); the Windows CI runner checks out with CRLF, so a lifted function came
+# back empty there ("shopDoPay is not defined"). Every such file is committed with LF already, so nothing is renormalized.
+*.js text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.sh text eol=lf
+# git takes this one for binary (it carries raw bytes in its vectors): keep it exactly as committed
+scripts/ethwallet-unit.js -text
+
 # PandaPools engine files are copied byte-for-byte from the pandapools-mds MiniDapp and their sha256 digests
 # are pinned in scripts/pandapools-parity.manifest.json. Any line-ending translation would change those bytes
 # and fail the parity gate on the Windows/Linux CI legs, so keep them exactly as committed.
