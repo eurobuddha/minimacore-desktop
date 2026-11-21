@@ -19,11 +19,14 @@
   var figure = function (n, dp) { var t = n.toString().padStart(dp + 1, "0"); return t.slice(0, -dp) + "." + t.slice(-dp); };
   var R = {
     MINIMA: MINIMA, MXUSD: MXUSD,
+    /** THE currency to token mapping (0.18.202; main/shop.js and main/shop-listing.js use it): Minima → 0x00, USDT (the
+     *  wire name of MxUSD) or mxUSDT → the MxUSD token id, anything else → "". */
+    tokenOfCurrency: function (c) { return /^minima$/i.test(String(c)) ? MINIMA : /^(usdt|mxusdt)$/i.test(String(c)) ? MXUSD : ""; },
     /** The label of a currency: the wire value "USDT" is MxUSD on Minima. */
     cur: function (c) { return /^(usdt|mxusdt)$/i.test(String(c)) ? "MxUSD" : String(c == null ? "" : c); },
     /** The token a shop (or an order) is paid in, from its CURRENCY alone. → { tokenid, name } | { err }. */
     token: function (s) {
-      var c = String(s && s.currency != null ? s.currency : ""), t = /^minima$/i.test(c) ? MINIMA : /^(usdt|mxusdt)$/i.test(c) ? MXUSD : "";
+      var c = String(s && s.currency != null ? s.currency : ""), t = R.tokenOfCurrency(c);
       if (!t) return { err: "This shop asks to be paid in \"" + c.slice(0, 40) + "\". This app pays shops in Minima or MxUSD only." };
       var given = s.tokenid == null || s.tokenid === "" ? "" : String(s.tokenid);
       if (given && given.toLowerCase() !== t.toLowerCase()) return { err: "This shop says it is paid in " + R.cur(c) + " but names another token (" + given.slice(0, 80) + "). Nothing was sent. Ask the vendor for a corrected .shop file." };

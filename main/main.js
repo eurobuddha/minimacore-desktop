@@ -157,7 +157,7 @@ function requireRunning() {
 // before cannot be asked; a main-process confirmation naming what is shown where Touch ID was never available.
 const sysCheck = require("./syscheck").forElectron(require("electron"), () => win);
 const cmdGate = require("./cmdgate").create(sysCheck);
-ipcMain.handle("mcd:cmdGate", (_e, command, typed) => cmdGate.arm(command, typed));
+ipcMain.handle("mcd:cmdGate", (_e, command, typed) => { requireRunning(); return cmdGate.arm(command, typed); });   // the node first, then Touch ID (0.18.202)
 // What the Terminal must do with a text before it runs it (0.18.194): its secret kind (the same reading as the gate), whether
 // it is a chain, whether it signs or changes something. Advice only: mcd:cmd's own refusal stays the gate.
 ipcMain.handle("mcd:cmdKind", (_e, command) => { const c = String(command == null ? "" : command), k = require("./cmdgate").classify(c); return { kind: k.kind, chain: k.chain, write: rpc.isWrite(c) }; });

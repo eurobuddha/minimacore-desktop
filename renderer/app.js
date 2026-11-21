@@ -422,7 +422,6 @@ function updateSetupProgress(s) {
 }
 
 // ---- post-boot wallet step (runs once the node is running) -----------------
-function seedFrom(v) { return v && (v.phrase || v.seedphrase || v.seed || v.mnemonic) || ""; }
 function runPostBoot() { if (RESTORE) postBootRestore(); else postBootNewSeed(); }
 
 // NEW wallet: reveal the fresh seed for backup, then done — NO resync (a new node just follows the tip).
@@ -2132,7 +2131,7 @@ async function renderSettings() {
     // one typed and reported success — the user only finds out when a restore fails, with funds behind it.
     // The resync handler forty lines up already guards its password this way; this one didn't.
     if (/["\\;]/.test(pw) || /[\n\r\t]/.test(pw)) {
-      toast("Backup password can't contain a \" or \\ or a line break — the node can't carry it safely.", "err"); return;
+      toast("Backup password can't contain a \", a \\, a ; or a line break: the node can't carry it safely.", "err"); return;
     }
     try { await cmd(`backup password:"${pw}"`); toast("Encrypted backup written to the node data folder ✓", "ok"); }
     catch (e) { toast("Backup failed: " + e.message, "err"); }

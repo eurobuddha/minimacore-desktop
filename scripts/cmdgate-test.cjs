@@ -49,7 +49,7 @@ test("mcd:cmd refuses before anything is sent; the Terminal keeps no gated comma
   const main = rd("main/main.js"), app = rd("renderer/app.js");
   const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'), main.indexOf("});", main.indexOf('ipcMain.handle("mcd:cmd"')));
   assert.ok(/const ready = await require\("\.\/cmdgate"\)\.checkCommand\(command, \{ take: cmdGate\.take,[^\n]*\n\s*return run\(ready\);\n\}\);/.test(main), "the handler runs only what checkCommand returns (0.18.201)");
-  assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => cmdGate\.arm\(command, typed\)\);/.test(main));
+  assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => \{ requireRunning\(\); return cmdGate\.arm\(command, typed\); \}\);/.test(main), "CHANGED on purpose (0.18.202): the node is checked first");
   assert.equal((main.match(/ipcMain\.handle\("mcd:[A-Za-z]+", (async )?\(_e, (command|cmd)\b/g) || []).length, 3, "mcd:cmd, mcd:cmdGate and mcd:cmdKind (advice only, 0.18.194) are the only handlers that take a command text");
   const term = app.slice(app.indexOf("async function termSubmit(c) {"), app.indexOf("function renderTerminal() {"));
   assert.ok(term.indexOf("termSecret(c, k.kind)") > 0 && term.indexOf("termSecret(c, k.kind)") < term.indexOf("TERM_HIST.push(c)"), "a gated command never reaches the history or the output (CHANGED on purpose, 0.18.194: the kind is asked first)");

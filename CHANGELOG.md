@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.202] — small cleanups from the review
+
+- The ETH key export checks that the wallet is ready before Touch ID is asked, and the Terminal gate checks the node first; the ungated `ethwallet.exportKey` export and the unused `seedFrom` are gone; the typed phrases live in one module (`main/phrases.js`); the currency to token mapping is one function (`ShopRules.tokenOfCurrency`) used by the shop, the listing check and the vendor side; the order's own coin list is the authority against counting a coin twice and the global list is cut from 100000 to the 5000 most recent ids; `clear()` forgets gathered dust; the backup password message names ";". Tests: `scripts/ethkey-test.cjs`, `scripts/shop-test.cjs`.
+
 ## [0.18.201] — the command channel's policy is one tested function; panels test in CI
 
 - Everything `mcd:cmd` decides before a text reaches the node (empty text, control characters, a send that repeats amount, tokenid, address or fromaddress, the secret-command gate, the node running, the beacon-dust pin) is now one function, `cmdgate.checkCommand`, tested by its behaviour instead of by reading main.js. The red `scripts/panels-test.cjs` check was stale (it counted dialogs inserted with "beforeend" but not 'beforeend', so the backup dialog looked unstyled); it is fixed and `npm run test:panels` is now a CI step. Tests: `scripts/cmdgate-test.cjs`, `scripts/sendpin-test.cjs`, `scripts/panels-test.cjs`.

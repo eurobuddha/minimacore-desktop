@@ -31,7 +31,6 @@ const removeToken = (addr) => atomix.ethRemoveToken(addr);
 const sendMax     = (asset) => atomix.ethSendMax(asset);
 const sendReview  = (asset, to, amt) => atomix.ethSendReview(asset, to, amt);
 const sendExecute = (asset, to, amt, tier) => atomix.ethSendExecute(asset, to, amt, tier);
-const exportKey   = () => atomix.exportKey();
 
 /**
  * The key for the screen (0.18.152, from 0.19.108 / 0.19.120). Never handed over on a bare call: the caller must pass
@@ -40,10 +39,13 @@ const exportKey   = () => atomix.exportKey();
  * panel's "Export key" uses it too (its own ungated mcd:axExportKey is gone). → { key, system }.
  * os = { can() -> bool, prompt(reason) -> Promise } (main.js passes Electron's systemPreferences).
  */
-const EXPORT_PHRASE = "SHOW KEY";
+const EXPORT_PHRASE = require("./phrases").SHOW_KEY;
 async function exportKeyGated(typed, sys) {
   if (String(typed == null ? "" : typed).trim() !== EXPORT_PHRASE) throw new Error("Type " + EXPORT_PHRASE + " exactly to continue.");
   if (!sys || typeof sys.check !== "function") throw new Error("No system check is available. Nothing was shown.");
+  // the wallet must be ready BEFORE Touch ID is asked (0.18.202): a key that cannot be read after the prompt wasted it
+  let ready = false; try { ready = !!(atomix.status && atomix.status().ready); } catch (e) { ready = false; }
+  if (!ready) throw new Error("The ETH wallet is not ready yet (the node must be running and unlocked). Nothing was shown.");
   // the system's own check (main/syscheck.js, 0.18.176): Touch ID; refused while Touch ID that worked before cannot be asked;
   // a confirmation naming what is shown where Touch ID was never available
   const s = await sys.check("show the ETH private key", "The ETH private key of this wallet (the key AtomiX swaps sign with) will be shown.");
@@ -53,5 +55,5 @@ const setRpc      = (url) => atomix.ethSetRpc(url);
 
 module.exports = {
   emitter, status, balances, tokens, addToken, removeToken,
-  sendMax, sendReview, sendExecute, exportKey, exportKeyGated, EXPORT_PHRASE, setRpc
+  sendMax, sendReview, sendExecute, exportKeyGated, EXPORT_PHRASE, setRpc   // no ungated exportKey (0.18.202)
 };

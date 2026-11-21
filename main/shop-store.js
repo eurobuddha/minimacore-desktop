@@ -13,7 +13,9 @@ const WRITE_DEBOUNCE_MS = 300;
 let mem = null;   // { shops:{shopId:cfg}, orders:{ref:order}, chat:{randomid:msg}, meta:{}, counted:{coinid:ref} }
 // counted (0.18.163): every payment coin already added to an order, kept ON DISK. The scanner's own "seen" set is in
 // memory only, so after a restart its backfill counted the same coin again and a half-paid order became PAID.
-const COUNTED_MAX = 100000, ORDER_COINS_MAX = 1000;
+// The order's own coin list is the authority (a coin carries one order's ref in its state, so it is only ever offered to
+// that order); the global list is a short guard of the most recent ids (0.18.202: 100000 → 5000).
+const COUNTED_MAX = 5000, ORDER_COINS_MAX = 1000;
 let writeTimer = null;
 
 function filePath() { return path.join(app.getPath("userData"), "shop.json"); }
@@ -249,7 +251,7 @@ function getMeta(k) { ensureLoaded(); return mem.meta[k]; }
 function addChat(m) { ensureLoaded(); if (typeof m.randomid !== "string" || m.randomid === "__proto__" || has(mem.chat, m.randomid)) return false; mem.chat[m.randomid] = m; persistSoon(); return true; }
 function chat(ref) { ensureLoaded(); return Object.values(mem.chat).filter(m => m.ref === ref).sort((a, b) => (a.date || 0) - (b.date || 0)); }
 
-function clear() { mem = { shops: {}, orders: {}, chat: {}, meta: {}, counted: {} }; flush(); }
+function clear() { mem = { shops: {}, orders: {}, chat: {}, meta: {}, counted: {} }; PENDING_DUST.clear(); flush(); }
 function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.orders, chat: mem.chat, meta: mem.meta }; }
 
 module.exports = {

@@ -31,7 +31,7 @@ function itemsOf(items) {
 }
 // A currency as the user reads it (0.18.168): the wire value "USDT" is MxUSD on Minima.
 const label = (c) => (/^(usdt|mxusdt)$/i.test(String(c)) ? "MxUSD" : typeof c === "string" ? c.slice(0, 20) : "");
-const tokenOf = (c) => (/^(usdt|mxusdt)$/i.test(String(c)) ? "MXUSD" : /^minima$/i.test(String(c)) ? "MINIMA" : "");
+const tokenOf = (c) => require("../renderer/shop-rules.js").tokenOfCurrency(c);   // the one mapping (0.18.202)
 const wholeOf = (v) => (typeof v === "number" ? (Number.isSafeInteger(v) ? v : null) : typeof v === "string" && /^\d{1,9}$/.test(v) ? Number(v) : null);
 
 /**

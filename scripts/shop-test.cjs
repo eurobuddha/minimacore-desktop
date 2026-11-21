@@ -423,3 +423,24 @@ test("9.9 + 0.05 + 0.05 pays a 10 order in any order and across a restart; a flo
   try { for (let i = 0; i < 5000; i++) assert.equal(m.store.recordPayment("ORD-DS7", "0.0000001", "0x00", "0x" + (0x200000 + i).toString(16)), "DUST"); } finally { fs.writeFileSync = real; }
   assert.equal(writes, 0, "5000 dust coins that do not cover 10 write nothing"); m.store.flush(); assert.equal(fs.readFileSync(file, "utf8").length, withOrder);
 });
+
+// ---- 0.18.202: one currency mapping; the order's own coin list is the authority; clear() forgets gathered dust ----
+test("one currency mapping; a coin is never counted twice by its order even after the short global list moved on; clear() empties the dust", () => {
+  const R2 = require("../renderer/shop-rules.js"), MXU = R2.MXUSD;
+  for (const [c, t] of [["Minima", "0x00"], ["MINIMA", "0x00"], ["USDT", MXU], ["mxUSDT", MXU], ["BTC", ""], ["", ""]]) assert.equal(R2.tokenOfCurrency(c), t, c);
+  const m = freshModules();
+  assert.equal(m.shop.tokenFor("USDT"), MXU); assert.equal(m.shop.tokenFor("anything"), "0x00", "the vendor's own shop: unknown is Minima, as before");
+  m.store.saveShop({ shopId: "own1", shopName: "O", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "1000000", maxUnits: "1" }], shipping: [] });
+  m.store.upsertOrder({ ref: "ORD-OWN", role: "sell", shopId: "own1", amount: "1000000", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "1000000" }], shipping: "" });
+  assert.equal(m.store.recordPayment("ORD-OWN", "20000", "0x00", "0xFEED01"), "UNDERPAID");
+  m.store.upsertOrder({ ref: "ORD-FLOOD", role: "sell", shopId: "own1", amount: "1000000", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "1000000" }], shipping: "" });
+  for (let i = 0; i < 999; i++) m.store.recordPayment("ORD-FLOOD", "10000", "0x00", "0x" + (0x500000 + i).toString(16));
+  for (let j = 0; j < 6; j++) { const r = "ORD-FL" + j; m.store.upsertOrder({ ref: r, role: "sell", shopId: "own1", amount: "1000000", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "1000000" }], shipping: "" });
+    for (let i = 0; i < 900; i++) m.store.recordPayment(r, "10000", "0x00", "0x" + (0x600000 + j * 1000 + i).toString(16)); }
+  assert.equal(m.store.recordPayment("ORD-OWN", "20000", "0x00", "0xFEED01"), "ALREADY", "the global list no longer holds it; the order's own list does");
+  m.store.upsertOrder({ ref: "ORD-CLR", role: "sell", shopId: "own1", amount: "1000000", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "1000000" }], shipping: "" });
+  assert.equal(m.store.recordPayment("ORD-CLR", "0.0000001", "0x00", "0xD0D0"), "DUST");
+  m.store.clear();
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop-store.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(/function clear\(\) \{[^\n]*PENDING_DUST\.clear\(\);/.test(src) && /const COUNTED_MAX = 5000,/.test(src));
+});

@@ -11,8 +11,9 @@ const path = require("path");
 const Module = require("module");
 
 const realLoad = Module._load;
+let ENGINE_READY = true;   // the stand-in engine's status().ready (0.18.202)
 Module._load = function (request, parent) {
-  if (request === "./atomix" && parent && /[\\/]main[\\/]ethwallet\.js$/.test(parent.filename)) return { exportKey: () => "0xKEY", emitter: new (require("events"))() };
+  if (request === "./atomix" && parent && /[\\/]main[\\/]ethwallet\.js$/.test(parent.filename)) return { exportKey: () => "0xKEY", status: () => ({ ready: ENGINE_READY }), emitter: new (require("events"))() };
   return realLoad.apply(this, arguments);
 };
 const ethwallet = require("../main/ethwallet");
@@ -173,4 +174,19 @@ test("machine id: IOPlatformUUID from /usr/sbin/ioreg (no shell), never the netw
   assert.equal(sameMac("A", ""), true, "this Mac's id cannot be read: same Mac"); assert.equal(sameMac("", "B"), true, "a marker without an id: same Mac");
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "syscheck.js"), "utf8");
   assert.ok(!/networkInterfaces/.test(src) && /execFileSync\(f, a,/.test(src) && !/execSync\(|shell:\s*true/.test(src));
+});
+
+// ---- 0.18.202: small cleanups from the review ----
+test("the ETH wallet must be ready before Touch ID is asked; one place for the typed phrases; no ungated key export; Touch ID after the node check", async () => {
+  let asked = 0; ENGINE_READY = false;
+  try { await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", SYS({ can: () => true, prompt: async () => { asked++; } })), /not ready yet/); } finally { ENGINE_READY = true; }
+  assert.equal(asked, 0, "no Touch ID prompt for a key that cannot be read");
+  assert.equal(ethwallet.exportKey, undefined, "no ungated export");
+  const P = require("../main/phrases");
+  assert.deepEqual([P.SHOW_SEED, P.SHOW_KEY, P.CHANGE_KEYS], ["SHOW SEED", "SHOW KEY", "CHANGE KEYS"]);
+  assert.equal(ethwallet.EXPORT_PHRASE, P.SHOW_KEY); assert.equal(require("../main/seedgate").PHRASE, P.SHOW_SEED);
+  assert.deepEqual(require("../main/cmdgate").PHRASE, { seed: P.SHOW_SEED, key: P.SHOW_KEY, change: P.CHANGE_KEYS });
+  assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => \{ requireRunning\(\); return cmdGate\.arm\(command, typed\); \}\);/.test(mainJs), "the node is checked before the Terminal gate asks Touch ID");
+  assert.ok(!/function seedFrom\(/.test(app), "the unused seedFrom is gone");
+  assert.ok(app.includes("Backup password can't contain a \\\", a \\\\, a ; or a line break"), "the backup password message names ;");
 });

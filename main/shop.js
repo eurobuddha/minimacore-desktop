@@ -40,7 +40,7 @@ let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
 async function nodeCmd(cmd) { return runner(oneCommand(cmd)); }   // ONE command each (main/rpc.js, 0.18.177)
 
-function tokenFor(currency) { return String(currency).toUpperCase() === "USDT" || String(currency).toLowerCase() === "mxusdt" ? USDT_TOKEN : MINIMA_TOKEN; }
+function tokenFor(currency) { return SHOP.tokenOfCurrency(currency) === USDT_TOKEN ? USDT_TOKEN : MINIMA_TOKEN; }   // the one mapping (renderer/shop-rules.js); an unknown currency is Minima here, as before
 function randomId() { return crypto.randomBytes(16).toString("hex"); }
 function looksLikeMinimaAddress(a) {
   a = String(a || "").trim();

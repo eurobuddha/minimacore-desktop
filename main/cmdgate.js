@@ -14,7 +14,8 @@
  * it must be run on its own. Every other command passes unchanged.
  */
 const PASS_MS = 60000;
-const PHRASE = { seed: "SHOW SEED", key: "SHOW KEY", change: "CHANGE KEYS" };
+const P = require("./phrases");
+const PHRASE = { seed: P.SHOW_SEED, key: P.SHOW_KEY, change: P.CHANGE_KEYS };
 // vault actions that change the wallet's keys or their lock rather than show the seed (the node's vault help, and the
 // Terminal's completion list: wipekeys, restorekeys, passwordlock, passwordunlock, resetkeys, testphrase)
 const CHANGE_ACTIONS = new Set(["wipekeys", "restorekeys", "passwordlock", "passwordunlock", "resetkeys", "testphrase"]);

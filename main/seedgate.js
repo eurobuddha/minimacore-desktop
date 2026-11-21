@@ -5,7 +5,7 @@
  * (main/ethwallet.js exportKeyGated). → { phrase, system } (system: the system's prompt took place).
  * sys = main/syscheck.js (check(reason, detail) → { biometric }); run(command) -> the node's reply.
  */
-const PHRASE = "SHOW SEED";
+const PHRASE = require("./phrases").SHOW_SEED;
 async function revealSeedGated(typed, sys, run) {
   if (String(typed == null ? "" : typed).trim() !== PHRASE) throw new Error("Type " + PHRASE + " exactly to continue.");
   if (!sys || typeof sys.check !== "function") throw new Error("No system check is available. Nothing was shown.");
