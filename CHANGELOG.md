@@ -7,6 +7,26 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.284] — key uses: a loose reading never raises the bound
+
+- The single-signature bound (262143) applies only when every reading of the command's verb is one of the five single-signature verbs; a loosely quoted command is held to 250000. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.283] — miniMall: each read past the tree judged on its own
+
+- Past the node's tree, an orders read cut by the reply cap is tried twice more and then said with that cause; it ended at once with the wrong cause. The retry count starts again for each gap. The notice says older orders "may not have been read", because a tree longer than 1024 blocks reads some of them. Test: `scripts/shop-test.cjs`.
+
+## [0.18.282] — miniMall: a payment read before its order is counted
+
+- Backfill and tree reads no longer skip payments above the point already read, so a payment seen while its order was still unknown is counted once the order is read. Counting is idempotent: a coin is counted once, dust totals once, and two buyers' orders with one reference stay unpaid. With this, an unspent payment of any age pays its order. Test: `scripts/shop-test.cjs`.
+
+## [0.18.281] — miniMall: the scan follows the chain down
+
+- While the chain is below what was read (a resync, or a reorganisation onto a lower branch), the scan position follows it down, so a fast catch-up no longer skips the new branch's orders and payments (a regression of 0.18.276). After a resync from scratch the notice may name blocks the node no longer holds. Test: `scripts/shop-test.cjs`.
+
+## [0.18.280] — two money-safety tests restored
+
+- "Two buyers' orders with the same reference are both kept and neither is paid automatically" and "a retry pays only after a refused payment" were deleted by mistake in 0.18.277 and are restored word for word. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.279] — Web Wallet: the ceiling message first
 
 - Confirming a key-use figure above 262143 is refused with the ceiling message even while the key-use service cannot be read; it said the chain's figure could not be read. Test: `scripts/inject-test.cjs`.
@@ -17,7 +37,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.277] — miniMall: payments made while closed are read again
 
-- The node's in-memory tree holds 1024 to 1123 blocks, and its root keeps every unspent coin of this wallet from older history. When the app was closed longer than the tree, the scan now reads orders as far back as the tree holds and makes one payments read that reaches the root, so an unspent payment of any age pays its order. Only orders older than that, and payments already spent, are said as not read. A backfill step reads at most 1024 blocks, so an order still inside the tree is read. A step the node's reply cap cuts short is tried twice more before the scan stops and says so. The notice shows only when a shop exists and can be dismissed; the log keeps it. Test: `scripts/shop-test.cjs`.
+- The node's in-memory tree holds 1024 to 1123 blocks, and its root keeps every unspent coin of this wallet from older history. When the app was closed longer than the tree, the scan now reads orders as far back as the tree holds and makes one payments read that reaches the root, so an unspent payment older than the tree pays its order when the order was read before (a payment read before its order was still skipped until 0.18.282). A backfill step reads at most 1024 blocks, so an order still inside the tree is read. A step the node's reply cap cuts short is tried twice more before the scan stops and says so. The notice shows only when a shop exists and can be dismissed; the log keeps it. Test: `scripts/shop-test.cjs`.
 
 ## [0.18.276] — miniMall: never claims older orders were read
 
