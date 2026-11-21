@@ -242,3 +242,17 @@ test("main: Restore from file asks the stop guard before its resync, and Apply a
   }
   assert.ok(!/api\.saveConfig\(\{ heapMb \}\)/.test(read("renderer/app.js")), "the screen no longer saves the heap before the switch");
 });
+
+// ---- 0.19.313: the stop guard decides one stop at a time: two requests at once show one question and give one stop ----
+test("stopGuard single-flight: a second stop asked while the first one's question is open is refused; one question, one stop", async () => {
+  const { stopGuard } = require("../main/inflight.js");
+  let answer; const asked = []; const work = With({ pools: [{ type: "ADD", ts: NOW - 60000 }] });
+  const g = stopGuard({ running: () => true, gather: async () => work, ask: (w) => new Promise(r => { asked.push(w.title); answer = r; }), log() {}, now: () => NOW });
+  const first = g.pass(), stops = [];
+  await new Promise(r => setImmediate(r));
+  await assert.rejects(g.pass(), /already being decided/, "the second request while the question is open");
+  assert.equal(asked.length, 1, "one question");
+  answer(true); if (await first) stops.push(1);
+  assert.deepEqual(stops, [1], "one stop");
+  answer = null; const again = g.pass(); await new Promise(r => setImmediate(r)); answer(false); assert.equal(await again, false, "and the next request is asked again afterwards");
+});

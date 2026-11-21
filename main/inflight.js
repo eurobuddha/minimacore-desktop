@@ -123,12 +123,21 @@ async function decideQuit(d) {
  * t() → the translator of the app's language, now(), waitMs }. pass(ack, action) → true: go on.
  */
 const ACK_MS = 120000;
+const STOP_BUSY = "A stop of the node is already being decided. Nothing more was stopped.";
 function stopGuard(d) {
-  const acks = new Map(), now = d.now || Date.now;
-  return {
+  const acks = new Map(), now = d.now || Date.now; let pending = false;
+  const guard = {
     // an ack is for ONE action, named when the warning was asked for (0.19.287: restart, stop, kind): it opens no other stop
     issue(action) { const a = require("crypto").randomBytes(16).toString("hex"); acks.set(a, { until: now() + ACK_MS, action: String(action || "") }); return a; },
+    // one at a time (0.19.313): a second stop asked while one is being decided (its check or its question still open) is refused,
+    // so two requests at once show one question and give one stop
     async pass(ack, action) {
+      if (pending) throw new Error(STOP_BUSY);
+      pending = true;
+      try { return await decide(ack, action); } finally { pending = false; }
+    }
+  };
+  async function decide(ack, action) {
       const got = typeof ack === "string" ? acks.get(ack) : undefined; if (got !== undefined) acks.delete(ack);
       for (const [a, e] of acks) if (e.until < now()) acks.delete(a);
       if (!d.running()) return true;
@@ -140,8 +149,8 @@ function stopGuard(d) {
       const en = inFlight(work || {}, "shutdown", at), go = !!(await d.ask(w));
       d.log("[app] node stop asked with work in flight (" + en.busy.concat(en.unread.length ? ["could not be checked: " + en.unread.join("; ")] : []).join(" | ") + "): the user chose to " + (go ? "stop it" : "keep it running"));
       return go;
-    }
-  };
+  }
+  return guard;
 }
 
 /**

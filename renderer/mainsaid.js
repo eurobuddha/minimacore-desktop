@@ -386,6 +386,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     // ---- The rest of main/main.js (backups, files, the Terminal) ----
     ["MAIN_NODE_DOWN", I18N.N_("node not running")],
     ["MAIN_EMPTY", I18N.N_("empty command")],
+    ["STOP_BUSY", I18N.N_("A stop of the node is already being decided. Nothing more was stopped.")],   // main/inflight.js stopGuard (0.19.313)
     ["MAIN_NOT_STOPPED", I18N.N_("The node keeps running: nothing was stopped.")],
     ["MAIN_LANGUAGE", I18N.N_("Unknown language.")],
     ["MAIN_JAR_UPDATER", I18N.N_("The in-app node updater is disabled.")],
