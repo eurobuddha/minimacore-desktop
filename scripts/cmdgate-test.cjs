@@ -456,3 +456,13 @@ test("a multisig key carrying JSON, a multi-word password, a raw output with a s
   const sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
   await assert.rejects(h(null, ms), /builds further commands/); await assert.rejects(h(null, pw), /builds further commands/); assert.deepEqual(sent, []);
 });
+
+// ---- 0.18.231 (as Pandamonium Desktop 0.19.300): only a real \u escape counts: an escaped backslash before u003b is plain text to the node ----
+test("smuggled refuses a real escape only: an even run of backslashes before u003b is plain text", () => {
+  const V = require("../main/cmdverb"), B = String.fromCharCode(92);
+  assert.equal(V.smuggled('send state:{"1":"[a' + B + B + 'u003b]"}'), "", "escaped backslash, then plain u003b");
+  assert.match(V.smuggled('send state:{"1":"[a' + B + B + B + 'u003b]"}'), /escape code/, "an escaped backslash, then a real escape");
+  assert.match(V.smuggled('send state:{"1":"[a' + B + 'u003B]"}'), /escape code/);
+  assert.match(V.smuggled('send state:{"1":"' + B + 'u000a"}'), /escape code/);
+  assert.equal(V.smuggled('send state:{"1":"caf' + B + 'u00e9"}'), "");
+});
