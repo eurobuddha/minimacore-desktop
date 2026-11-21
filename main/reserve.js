@@ -58,7 +58,7 @@ const verbOf = (c) => { const vs = V.verbs(c); return WATCHED.find(w => vs.inclu
 // name is refused, never guessed.
 let parsedOf = "", parsed = null;   // the last command parsed: every look at one command reads the same parse
 // the node's own reading of names and values (main/cmdverb.js read, 0.19.266): first value of each name, and the first repeat
-function parse(c) { const first = new Map(); let dup = ""; for (const [n, v] of V.read(c).params) { const k = lc(n); if (first.has(k)) { if (!dup) dup = k; } else first.set(k, v); } return { first, dup }; }
+function parse(c) { const first = new Map(); let dup = ""; for (const [n, v] of V.read(c).params) { const k = V.fold(n); if (first.has(k)) { if (!dup) dup = k; } else first.set(k, v); } return { first, dup }; }
 const args = (c) => { if (c !== parsedOf || !parsed) { parsed = parse(c); parsedOf = c; } return parsed; };
 const param = (c, k) => args(c).first.get(k) || "";
 const SEND_MODES = ["off", "observe", "enforce"];

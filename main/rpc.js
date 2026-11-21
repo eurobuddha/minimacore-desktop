@@ -35,7 +35,7 @@ const V = require("./cmdverb");
 const RESYNC_TIMEOUT_MS = 60 * 60 * 1000;
 function timeoutFor(command) {   // the verb read as the node reads it, in every piece of a chain (main/cmdverb.js, 0.19.190, as released 0.18.175)
   const ps = V.parts(command);
-  if (ps.some(part => V.is(part, "megammrsync") && /^resync$/i.test(V.paramValue(part, "action") || ""))) return RESYNC_TIMEOUT_MS;
+  if (ps.some(part => V.is(part, "megammrsync") && V.fold(V.paramValue(part, "action") || "") === "resync")) return RESYNC_TIMEOUT_MS;
   return ps.some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 

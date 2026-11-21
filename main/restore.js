@@ -71,7 +71,7 @@ function backupCommandProblem(command) {
     for (const m of V.jtrim(part).replace(/^"([^"]*)"/, "$1 ").matchAll(/(?:^|\s)"?(password|confirm)"?[ \t]*:[ \t]*(\S*)/gi))
       if (!/^("[A-Za-z0-9]+"|[A-Za-z0-9]+)$/.test(m[2])) return "A backup password can hold letters and numbers only.";
     // and each value as the node reads it (0.19.266): `password:"a b"` above reads `"a`, the node `a b`
-    for (const [n, v] of V.read(part).params) if (/^(password|confirm)$/i.test(n) && !/^[A-Za-z0-9]+$/.test(v)) return "A backup password can hold letters and numbers only.";
+    for (const [n, v] of V.read(part).params) if (/^(password|confirm)$/.test(V.fold(n)) && !/^[A-Za-z0-9]+$/.test(v)) return "A backup password can hold letters and numbers only.";
   }
   return "";
 }
@@ -217,10 +217,10 @@ function activeWorkProblem(list) {
 // a Windows path in a file parameter (0.19.296): "C:\\backup\\a.gz" holds a ":" but no white space, quote, ";" or bracket, so it adds no parameter
 const WIN_PATH = /^[A-Za-z]:\\[^\s:";{}[\]]*$/;
 const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null), mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
-const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => { const bad = runsAs(part, v) && REPASTED[v](action); return !!bad && V.read(part).params.some(([name, val]) => bad.test(val) && !(/^(file|archivefile)$/i.test(name) && WIN_PATH.test(val))); });
+const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => { const bad = runsAs(part, v) && REPASTED[v](action); return !!bad && V.read(part).params.some(([name, val]) => bad.test(val) && !(/^(file|archivefile)$/.test(V.fold(name)) && WIN_PATH.test(val))); });
 function replacesKeysElsewhere(command) {
   return V.parts(command).some(part => {
-    const action = (V.paramValue(part, "action") || "").toLowerCase(), named = (n) => V.paramValue(part, n) != null;
+    const action = V.fold(V.paramValue(part, "action") || ""), named = (n) => V.paramValue(part, n) != null;
     if (repastedUnsafe(part, action)) return true;
     if (runsAs(part, "archive", "mysql")) return named("phrase");
     if (runsAs(part, "reset")) return action === "seedsync" || action === "restore" || named("phrase") || named("password") || (named("file") && action !== "chainsync");

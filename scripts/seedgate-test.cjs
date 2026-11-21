@@ -586,3 +586,23 @@ test("masked says several hidden words as a count also for a text the node would
   assert.equal(G.masked("vault seed : 0xAB extra words action:x"), 'vault seed : "••• (3 words)" action:x', "a name spaced from its ':' too");
   assert.equal(G.masked("vault action:restorekeys phrase:one"), "vault action:restorekeys phrase:•••");
 });
+
+// ---- 0.19.315: every verb, parameter name and action value is compared folded, as the node folds them (İ → i, ſ → s, K → k) ----
+test("a dotted capital İ (or a long ſ) in an action or a parameter name does not slip past any check: compared folded, as the node does", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), B = String.fromCharCode(92), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  const I = "\u0130";
+  for (const c of ["arch" + I + "ve act" + I + "on:" + I + "mport f" + I + 'le:"a b"', "archive action:" + I + "mportraw file:a:b", "archive action:" + I + 'mportold file:"a b"',
+    "reset act" + I + "on:seedsync phrase:x", "reset action:restore f" + I + "le:/a/b.bak", "mysql act" + I + "on:reset f" + I + "le:a:b", "vault act" + I + "on:resetkeys",
+    "txnimport f" + I + "le:" + B + B + "evil" + B + "s" + B + "x.txn", "backup arch" + I + "vef" + I + "le:" + B + B + "evil" + B + "s" + B + "a.raw", "backup f" + I + "le://evil/s/b.bak"])
+    await assert.rejects(hs["mcd:cmd"](null, c), Error, c);
+  assert.deepEqual(sent, [], "nothing reached the node");
+  assert.equal(R.replacesKeysElsewhere("arch" + I + "ve act" + I + "on:" + I + "mport f" + I + 'le:"a b"'), true, "restore.replacesKeysElsewhere folds the action");
+  assert.equal(R.replacesKeysElsewhere("reset act" + I + "on:chainsync f" + I + "le:/a.raw"), false, "chainsync stays allowed, folded too");
+  assert.equal(R.backupCommandProblem("backup password:abc conf" + I + "rm:a-b"), "A backup password can hold letters and numbers only.", "a backup password's name is read folded");
+  const rpcSrc = SRC("main/rpc.js"), resv = SRC("main/reserve.js");
+  assert.ok(!/\/\^resync\$\/i/.test(rpcSrc) && /V\.fold\(V\.paramValue\(part, "action"\) \|\| ""\) === "resync"/.test(rpcSrc), "the resync timeout reads the action folded");
+  assert.ok(/const k = V\.fold\(n\)/.test(resv), "reserve reads parameter names folded");
+});
