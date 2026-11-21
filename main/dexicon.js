@@ -329,7 +329,7 @@ function makeHost(opts = {}) {
       const me = String(c.AX.identity.fromSeed(seed, c.IDENTITY_CONTEXT).publicId()).toLowerCase();
       if (!ID_RE.test(me)) throw new Error("the engine gave no trading identity");
       if (owner !== null) adoptLegacy(owner, me);
-      const shim = await makeSqlShim(storeFor(me));
+      const shim = await makeSqlShim(storeFor(me), log);
       if (mine !== epoch) return;
       box.storage = sqlShim = shim; store = storeFor(me);
       ctx = c; serviceHandler = handler;
