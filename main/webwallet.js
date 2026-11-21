@@ -83,8 +83,7 @@ function loadStore() {
   try { raw = fs.readFileSync(storePath(), "utf8"); } catch (e) { if (e && e.code === "ENOENT") return {}; throw new Error(STORE_BAD); }
   let j; try { j = JSON.parse(raw); } catch (e) { throw new Error(STORE_BAD); }
   if (!j || typeof j !== "object" || Array.isArray(j)) throw new Error(STORE_BAD);
-  for (const k of Object.keys(j)) { const e = j[k]; if (!e || typeof e !== "object" || !Number.isSafeInteger(e.keyuses) || e.keyuses < 0) throw new Error(STORE_BAD); }
-  return j;
+  return j;   // one damaged entry refuses only its own address (0.19.255, as released 0.18.215): entryFor
 }
 function writeStore(obj) {
   const p = storePath(), tmp = p + ".tmp";
@@ -95,23 +94,42 @@ function writeStore(obj) {
   // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
   try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
 }
-function entryFor(store, addr) { return Object.hasOwn(store, addr) ? store[addr] : { keyuses: 0, ack: false }; }
+const entryOk = (v) => !!v && typeof v === "object" && Number.isSafeInteger(v.keyuses) && v.keyuses >= 0;
+/** An address's entry; a damaged one (a counter that is not a whole number of 0 or more) is unknown, so it must be confirmed again. */
+function entryFor(store, addr) {
+  if (!Object.hasOwn(store, addr)) return { keyuses: 0, ack: false };
+  return entryOk(store[addr]) ? store[addr] : { keyuses: 0, ack: false, damaged: true };
+}
+// The chain's figure for a key (main.js: main/keyuses.js onchainUses over the pinned, no-redirect fetch): a whole number, or
+// null when it was not read. The public key of each address this session derived, so main asks for the right key.
+let onchainOf = async () => null;
+const derivedKeys = new Map();
+function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
+const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
 
-/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. */
-function ackKeyuses(address, count) {
+/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. A damaged entry is
+ *  unknown: its new figure must be at least what the chain shows, checked HERE, in main (0.19.255), and it is refused while
+ *  that figure cannot be read. */
+async function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
-  const store = loadStore();
+  if (entryFor(loadStore(), address).damaged) {
+    const pk = derivedKeys.get(String(address).toLowerCase());
+    let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
+    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(DAMAGED_UNREAD);
+    if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
+  }
+  const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
-  e.keyuses = Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss)
-  e.ack = true;
+  e.keyuses = e.damaged ? n : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown
+  delete e.damaged; e.ack = true;
   store[address] = e;
   writeStore(store);
   return { address, keyuses: e.keyuses, ack: true };
 }
 /** Current stored keyuses info for an address (does not mutate). */
-function keyusesInfo(address) { const e = entryFor(loadStore(), address); return { address, keyuses: e.keyuses || 0, ack: !!e.ack }; }
+function keyusesInfo(address) { const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
 // ---------------------------------------------------------------------------
 // node interaction
 // ---------------------------------------------------------------------------
@@ -155,6 +173,7 @@ async function derive(seed) {
   const d = resp(r);
   if (!d || !d.address) throw new Error("Could not derive wallet from seed");
   const isNodeSeed = await isNodeOwnSeed(d.publickey, seed);
+  if (/^0x[0-9A-Fa-f]{1,64}$/.test(String(d.address)) && d.publickey) derivedKeys.set(String(d.address).toLowerCase(), String(d.publickey));   // public material only
   return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script, isNodeSeed };
 }
 
@@ -225,6 +244,7 @@ async function send(opts) {
   // ONE read of the store for the gate and the reservation (0.19.230: two reads could disagree)
   let store; try { store = loadStore(); } catch (e) { privatekey = null; throw e; }
   const e0 = entryFor(store, fromaddress);
+  if (e0.damaged) { privatekey = null; throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent."); }
   if (!e0.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
 
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
@@ -261,7 +281,7 @@ async function send(opts) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = {
+module.exports = { setOnchain,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status,
   _setRunner: (fn) => { runner0 = fn; },

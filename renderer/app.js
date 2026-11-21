@@ -1253,7 +1253,7 @@ function renderWwWallet(body) {
         return;
       }
       try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast(t("Secret key uses confirmed: {n}", { n: n }), "ok"); }
-      catch (e) { toast(t("Could not save the secret key uses"), "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); } }
+      catch (e) { toast(ipcError(e) || t("Could not save the secret key uses"), "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); } }   // main's reason (0.19.255: a damaged count below the chain's figure, or the figure unread)
     });
     el("wwKuCheck").addEventListener("click", async () => {
       const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = t("Checking…");

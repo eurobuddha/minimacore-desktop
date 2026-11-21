@@ -104,7 +104,7 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
     : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
-  ww.ackKeyuses(FROM, 0);
+  await ww.ackKeyuses(FROM, 0);
   const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
   assert.equal(r.ok, true);
   const line = ww.status().log.slice(-1)[0];
@@ -121,14 +121,16 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
     : c.startsWith("keys action:list") ? (keysOk ? { status: true, response: { keys: [] } } : { status: false, error: "busy" })
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} }; });
   const sends = () => sent.filter(c => c.startsWith("send"));
-  for (const bad of ["not json", JSON.stringify({ [FROM]: { keyuses: "7", ack: true } }), JSON.stringify({ [FROM]: { keyuses: -1, ack: true } }), JSON.stringify([1])]) {
+  // CHANGED on purpose (0.19.255, as released 0.18.215): a damaged ENTRY refuses only its own address, with its own reason
+  for (const [bad, why] of [["not json", /key-use record could not be read, so nothing was sent/], [JSON.stringify({ [FROM]: { keyuses: "7", ack: true } }), /saved key-use count is damaged\. Confirm its key uses again/],
+    [JSON.stringify({ [FROM]: { keyuses: -1, ack: true } }), /saved key-use count is damaged/], [JSON.stringify([1]), /key-use record could not be read/]]) {
     fs.writeFileSync(file, bad); sent.length = 0;
-    await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /key-use record could not be read, so nothing was sent/, bad);
+    await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), why, bad);
     assert.deepEqual(sends(), [], "nothing signed: " + bad);
   }
   fs.rmSync(file);
-  for (const c of ["abc", -1, 1.5, "", null]) assert.throws(() => ww.ackKeyuses(FROM, c), /whole number of 0 or more/, String(c));
-  ww.ackKeyuses(FROM, "7");
+  for (const c of ["abc", -1, 1.5, "", null]) await assert.rejects(ww.ackKeyuses(FROM, c), /whole number of 0 or more/, String(c));
+  await ww.ackKeyuses(FROM, "7");
   sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true);
   assert.match(sends()[0], / keyuses:7 mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
   keysOk = false; sent.length = 0;
@@ -165,4 +167,28 @@ test("Vestr: a contract coin with a malformed state signs nothing; an unanswered
   for (const g of ["1e3", "2.5", "-1", "x"]) await assert.rejects(vestr.create({ tokenid: "0x00", amount: "1", beneficiary: BEN, startMs: 1, endMs: 2, graceHours: g }), /grace period must be a whole number of hours/, g);
   await assert.rejects(vestr.create({ tokenid: "0x" + "7D".repeat(32), amount: "1", beneficiary: BEN, startMs: Date.now() + 1000, endMs: Date.now() + 9e6, graceHours: "24" }), (e) => e.ambiguous === true && /lock may have gone/.test(e.message));
   const src = rd("main/vestr.js"); assert.ok(src.includes("const collected = decSub(total, amount);"), "collected in exact units");
+});
+
+// ---- 0.19.255 (released 0.18.215 and the review's open item): one damaged entry is isolated, and confirmed again only at or above the chain's figure, checked in main ----
+test("Web Wallet: a damaged key-use entry refuses only its address; it is confirmed again only at or above the chain's figure, read in main, and refused while unread", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const FROM = "0x" + "A2".repeat(32), OTHER = "0x" + "A3".repeat(32), PK = "0x" + "B2".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C2".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "x", ack: true }, [OTHER]: { keyuses: 5, ack: true } }));
+  assert.deepEqual(ww.keyusesInfo(OTHER), { address: OTHER, keyuses: 5, ack: true }, "another address is untouched");
+  assert.deepEqual(ww.keyusesInfo(FROM), { address: FROM, keyuses: 0, ack: false, damaged: true });
+  await ww.derive("alpha beta");   // the session's key for FROM is known to main
+  let chain = null, asked = []; ww.setOnchain(async (pk) => { asked.push(pk); return chain; });
+  await assert.rejects(ww.ackKeyuses(FROM, 50), /chain's figure for this key could not be read/, "unread: refused, never taken as 0");
+  assert.deepEqual(asked, [PK], "the chain is asked for this address's own key");
+  chain = 12; await assert.rejects(ww.ackKeyuses(FROM, 3), /The chain shows 12 uses of this key\. Confirm at least that many/);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, "x", "nothing saved by a refusal");
+  assert.deepEqual(await ww.ackKeyuses(FROM, 12), { address: FROM, keyuses: 12, ack: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8"))[OTHER], { keyuses: 5, ack: true });
+  asked.length = 0; await ww.ackKeyuses(FROM, 2); assert.equal(ww.keyusesInfo(FROM).keyuses, 12, "a sound entry never goes down"); assert.deepEqual(asked, [], "and needs no chain read");
+  const main = rd("main/main.js");
+  assert.ok(main.includes("webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));"), "main reads the chain with the same pinned fetch");
+  ww.setOnchain(async () => null);
 });

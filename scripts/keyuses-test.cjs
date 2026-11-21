@@ -186,7 +186,7 @@ test("a reply may weigh 512 KB, as the phone's; a full reply for the largest req
   assert.ok(full(auditRow, 64) < 29 * 1024 && full(reuseRow, 64) < 29 * 1024, "64 rows: " + full(auditRow, 64) + " and " + full(reuseRow, 64) + " bytes");
   assert.ok(full(auditRow, 256) < 115 * 1024, "even the server's own limit of 256 rows: " + full(auditRow, 256) + " bytes");
   const mainJs = R("main/main.js");
-  assert.equal((mainJs.match(/netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\)/g) || []).length, 3, "the app's three calls to the audit service (Web Wallet, KeyUses, Future Cash Next): no redirect, 512 KB");
+  assert.equal((mainJs.match(/netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\)/g) || []).length, 4, "the app's four calls to the audit service (Web Wallet, its damaged-count check in main since 0.19.255, KeyUses, Future Cash Next): no redirect, 512 KB");
 });
 
 test("the screen: Pandamonium's KeyUses, every identifier whole and copyable, nothing from outside written as HTML", () => {

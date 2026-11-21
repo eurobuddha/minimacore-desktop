@@ -974,6 +974,8 @@ ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
 ipcMain.handle("mcd:wwRead", (_e, address, nodeSeed) => webwallet.read(address, nodeSeed));
 ipcMain.handle("mcd:wwKeyuses", (_e, address) => webwallet.keyusesInfo(address));
 ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(address, count));
+// a damaged key-use entry is confirmed again only at or above the chain's figure, read here with the same pinned fetch (0.19.255)
+webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
 ipcMain.handle("mcd:wwEnableMegammr", async () => {
   const c = config.load();
