@@ -27,7 +27,7 @@ const SCAN_EVERY_MS = 12000;          // poll cadence; work only runs when the t
 
 // ---- external market price (MEXC MINIMA/USDT) — the create-flow price anchor (parity with the MDS dapp) ----
 // PandaPools only creates MINIMA / USDT pools (the pair with a live market feed), so a pool always opens at the
-// true rate. USDT_TOKENID is the on-chain mxUSDT id; ONLY this token is poolable (no mispriceable pools).
+// true rate. USDT_TOKENID is the on-chain MxUSD id; ONLY this token is poolable (no mispriceable pools).
 const USDT_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 const MKT_DEPTH = "https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20";
 const MKT_BOOK = "https://api.mexc.com/api/v3/ticker/bookTicker?symbol=MINIMAUSDT";
@@ -535,7 +535,14 @@ async function swap(quoteId) {
   var q = lastQuotes[quoteId];
   if (!q || !q.route || !q.route.ok) throw new Error("This quote expired — re-enter the amount to get a fresh quote.");
   var route = q.route, minimaToToken = q.minimaToToken;
-  return withTimeout(new Promise(function (resolve, reject) {
+  // Through the glue's serial queue (0.19.246), as every other fund action: one spend at a time, a slot abandoned while it
+  // waited is dropped before the engine is entered, and the quote is taken when the slot is entered (a second click on
+  // the same quote, queued behind the first, finds it gone and posts nothing).
+  return queuedAction("Swap", function (resolve, reject) {
+    if (lastQuotes[quoteId] !== q) { reject(new Error("This quote expired — re-enter the amount to get a fresh quote.")); return; }
+    delete lastQuotes[quoteId];
+    var deadline = execDeadline();
+    if (!ready || !ctx || Date.now() > deadline) { reject(new Error("Swap: the pool engine is not running — nothing was posted. Retry.")); return; }
     ctx.PoolMgr.swap(route, minimaToToken, {
       ok: function (txpowid) {
         // Always frame from MINIMA's side: paying MINIMA to get the token = SOLD MINIMA; paying the token to get
@@ -543,12 +550,11 @@ async function swap(quoteId) {
         var minimaAmt = minimaToToken ? route.totalIn : route.totalOut;
         var tokenAmt = minimaToToken ? route.totalOut : route.totalIn;
         ctx.Store.actRecord("SWAP", (minimaToToken ? "Sold " : "Bought ") + s(minimaAmt) + " MINIMA for " + s(tokenAmt) + " " + (q.tokenLabel || "token"), txpowid, lastTip, "");
-        delete lastQuotes[quoteId];
         emitter.emit("update"); resolve({ txpowid: txpowid, totalIn: s(route.totalIn), totalOut: s(route.totalOut) });
       },
       fail: function (msg) { reject(new Error(msg)); },
     });
-  }), 200000, "The swap timed out — check Activity and your balance before retrying.");
+  });
 }
 
 // ---- MEXC market price (create-flow anchor) — mirrors the MDS dapp refreshMarket / resolveAnchor ----
@@ -601,7 +607,7 @@ async function createAnchor() {
   if (agg && agg.gt(0)) return { price: s(agg), source: "live pools" };
   return { price: null, source: "" };
 }
-/** The single market-fed token id (mxUSDT) — the renderer gates create to this, mirroring the dapp. */
+/** The single market-fed token id (MxUSD) — the renderer gates create to this, mirroring the dapp; createPool refuses any other. */
 function marketToken() { return { usdt: USDT_TOKENID }; }
 
 /** Opening-price + KMIN preview for the manual-bootstrap create form (tier-3) — pure, no spend. */
@@ -617,10 +623,26 @@ function createPreview(tokDecimals, x0, y0) {
   } catch (e) { return { ok: false, msg: e.message }; }
 }
 
+/** The token's decimals as the node gives them (`tokens tokenid:`), or null when they cannot be read. */
+function nodeDecimals(tokenid) {
+  return nodeCmd("tokens tokenid:" + tokenid).then(function (r) {
+    var t = r && r.status ? r.response : null, d = t && (t.decimals != null ? t.decimals : t.token && t.token.decimals);
+    return /^\d{1,2}$/.test(String(d)) && Number(d) <= 44 ? Number(d) : null;
+  }, function () { return null; });
+}
+/** A new pool (0.19.246): only of the market-fed token (MxUSD), with its decimals read from the node (never the window's
+ *  figure: a different one is refused, since the window's preview was cut to it), through the serial queue with the
+ *  execution deadline stamped when the slot is entered. */
 async function createPool(tokenid, tokDecimals, x0, y0) {
   await init();
-  return withTimeout(new Promise(function (resolve, reject) {
-    ctx.PoolMgr.createPool(tokenid, tokDecimals, x0, y0, {
+  if (!isMarketFed(tokenid)) throw new Error("PandaPools creates MINIMA / MxUSD pools only (the token with a market price). Nothing was sent.");
+  return queuedAction("Creating the pool", function (resolve, reject) {
+    var deadline = execDeadline();
+    nodeDecimals(USDT_TOKENID).then(function (dec) {
+      if (dec == null) { reject(new Error("The token's decimals could not be read from the node. Nothing was sent.")); return; }
+      if (tokDecimals != null && String(tokDecimals) !== "" && Number(tokDecimals) !== dec) { reject(new Error("The node says this token has " + dec + " decimals, not " + tokDecimals + ". Nothing was sent; open Create again.")); return; }
+      if (!ready || !ctx || Date.now() > deadline) { reject(new Error("Creating the pool: timed out before the token was read — nothing was posted. Retry.")); return; }
+      ctx.PoolMgr.createPool(USDT_TOKENID, dec, x0, y0, {
       created: function (p, txpowid) {
         ctx.Store.ownRecord(p);                                         // recovery recipe (Layer 1)
         ctx.Store.lpRecord(p.address, p.reserveM, p.reserveT, lastTip); // LP fee/IL baseline
@@ -628,8 +650,9 @@ async function createPool(tokenid, tokDecimals, x0, y0) {
         emitter.emit("update"); resolve({ txpowid: txpowid, address: p.address });
       },
       fail: function (msg) { reject(new Error(msg)); },
+      });
     });
-  }), 200000, "Creating the pool timed out — check Activity and your balance before retrying.");
+  });
 }
 
 function actionOnPool(addr, fn, label, summary) {
@@ -900,5 +923,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, lastNodeFailure, status, activeWork, ownPools, setAsideStore,
-  _setRunner, _setDataDir, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed, _setWaits, NO_ANSWER,
+  _setRunner, _setDataDir, _stashQuote: function (q) { var id = ++quoteCounter; lastQuotes[id] = q; return id; }, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed, _setWaits, NO_ANSWER,
 };

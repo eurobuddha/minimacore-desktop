@@ -169,4 +169,46 @@ test("AtomiX glue: a store that cannot be moved aside on a wallet replacement is
   } finally { try { fs.chmodSync(dir, 0o700); } catch (e) {} atomix.stopLoop(); atomix.flush(); }
 });
 
+// 0.19.246: PandaPools swap and createPool go through the serial queue; a pool is only of the market-fed token, with the node's decimals
+test("PandaPools glue: createPool only for MxUSD with the node's decimals, swap and createPool one at a time through the queue, a quote posted once", async () => {
+  const dir = tmp("pp-queue-"), contexts = [], stores = [], sent = [];
+  const actualSql = require("../main/pandapools/sqlshim"), loader = require("../main/pandapools/loader");
+  const exports = {};
+  const sandbox = { module: { exports }, exports, console, setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, AbortController, AbortSignal, Promise, require: (n) => {
+    if (n === "electron") return { app: { getPath: () => dir, getVersion: () => "test" } };
+    if (n === "./config") return { rpcSecret: () => "" }; if (n === "./node-manager") return { rpcPort: () => 0 };
+    if (n === "./rpc") return { rpcCall: async () => { throw new Error("TEST LEAK: rpcCall"); } }; if (n === "./netfetch") return { fetchJson: async () => null };
+    if (n === "./noderun") return require("../main/noderun.js");
+    if (n === "./pandapools/loader") return { ...loader, createContext: (mds, ...rest) => { const c = loader.createContext(mds, ...rest); contexts.push(c); return c; } };
+    if (n === "./pandapools/sqlshim") return { makeSqlShim: async (file) => { const sql = await actualSql.makeSqlShim(file); stores.push(sql); return sql; } };
+    return require(n);
+  } };
+  vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
+  const api = sandbox.module.exports; api._setDataDir(dir);
+  const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90"; let decimals = "8";
+  api._setRunner((c) => { sent.push(c); return Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } }
+    : c === "tokens tokenid:" + MXUSD ? (decimals == null ? { status: false, error: "no" } : { status: true, response: { tokenid: MXUSD, decimals } }) : { status: false }); });
+  try {
+    await api.init();
+    const P = contexts[0].PoolMgr, engine = [], held = [];
+    P.createPool = (tok, dec, x, y, cb) => { engine.push(["create", tok, dec, x, y]); held.push(() => cb.created({ address: "0xP" + engine.length, reserveM: "1", reserveT: "1" }, "0xT" + engine.length)); };
+    P.swap = (route, m2t, cb) => { engine.push(["swap", route.id]); held.push(() => cb.ok("0xS" + engine.length)); };
+    contexts[0].Store.ownRecord = () => {}; contexts[0].Store.lpRecord = () => {}; contexts[0].Store.actRecord = () => {};
+    await assert.rejects(api.createPool("0x" + "AB".repeat(32), 8, "100", "1"), /MINIMA \/ MxUSD pools only/); assert.deepEqual(engine, [], "another token: the engine is never entered");
+    decimals = null; await assert.rejects(api.createPool(MXUSD, 8, "100", "1"), /decimals could not be read from the node/); assert.deepEqual(engine, []);
+    decimals = "8"; await assert.rejects(api.createPool(MXUSD, 4, "100", "1"), /node says this token has 8 decimals, not 4/); assert.deepEqual(engine, []);
+    const c1 = api.createPool(MXUSD.toLowerCase(), "8", "100", "1");
+    const q = api._stashQuote({ route: { ok: true, id: "R1", totalIn: 1, totalOut: 2 }, minimaToToken: true, tokenLabel: "MxUSD" });
+    const s1 = api.swap(q), s2 = api.swap(q);
+    await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual(engine, [["create", MXUSD, 8, "100", "1"]], "one action at a time: the node's decimals, the token's own id; the swaps wait");
+    held.shift()(); assert.equal((await c1).txpowid, "0xT1");
+    await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual(engine.map(e => e[0]), ["create", "swap"], "the swap goes after the create");
+    held.shift()(); assert.equal((await s1).txpowid, "0xS2");
+    await assert.rejects(s2, /This quote expired/, "the same quote queued twice is posted once"); assert.equal(engine.length, 2);
+    assert.ok(sent.includes("tokens tokenid:" + MXUSD));
+  } finally { api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
+});
+
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });
