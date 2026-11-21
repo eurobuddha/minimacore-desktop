@@ -18,7 +18,7 @@ test("inFlight says what a stop would interrupt; an engine that could not be ask
   assert.equal(w.busy.length, 4); assert.match(w.busy[0], /^2 AtomiX swaps are not finished\. .* can time out at about 13:00 \(the first of them\)\./);
   assert.equal(w.title, "Stop the node with work in flight?");
   for (const [work, re] of [[{ atomix: null, pools: [] }, /AtomiX could not be asked/], [{ atomix: { ready: false, hasStore: true }, pools: [] }, /AtomiX has not started/],
-    [{ atomix: IDLE.atomix, pools: null }, /PandaPools has not started/], [Object.assign({}, IDLE, { casinoOn: true }), /P2P Chance bets/]]) {
+    [{ atomix: IDLE.atomix, pools: null }, /PandaPools could not be asked/], [Object.assign({}, IDLE, { casinoOn: true }), /P2P Chance bets/]]) {
     const u = S.inFlight(work, now); assert.equal(u.any, true); assert.match(u.message, re); assert.equal(u.title, "Stop the node without the check?");
   }
   const pools = [{ type: "Pool transaction", ts: now - 60000 }, { type: "Pool transaction", ts: now - 60000, confirmed: true }, { type: "Pool transaction", ts: now - 2 * 3600000 }, { type: "STATUS" }];
@@ -217,4 +217,10 @@ test("stopping() releases only its own hold, with its stamp; a refused, busy or 
   // the real guard: another request's hold is never ended by a stale stamp
   const g = S.stopGuard({ running: () => true, gather: async () => ({ atomix: { ready: true, swaps: ["0x1"] }, pools: [] }), log: () => {}, ask: async () => true });
   const a = await g.pass(); g.release(a); const b = await g.pass(); g.release(a); assert.equal(await g.pass(), "busy", "a's stamp does not end b's hold"); g.release(b); assert.ok(Number.isInteger(await g.pass()));
+});
+
+// ---- 0.18.268: a pool read that failed or was late is said as "could not be asked", not "has not started" ----
+test("a pool read that timed out or failed is said as PandaPools could not be asked", () => {
+  const m = S.inFlight({ atomix: IDLE.atomix, pools: null }, Date.now()).message;
+  assert.match(m, /pool operations \(PandaPools could not be asked\)/); assert.ok(!/has not started/.test(m));
 });

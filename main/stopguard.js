@@ -45,7 +45,7 @@ function inFlight(work, nowMs) {
     if (ax.otcDeals) busy.push((ax.otcDeals === 1 ? "1 AtomiX OTC deal is" : ax.otcDeals + " AtomiX OTC deals are") + " open and cannot go on while the node is stopped.");
   }
   const pool = work.pools;
-  if (!Array.isArray(pool)) unread.push("pool operations (PandaPools has not started)");
+  if (!Array.isArray(pool)) unread.push("pool operations (PandaPools could not be asked)");   // not started, failed or late: all the same to the question (0.18.268)
   else {
     // ponytail: "recent and not confirmed" stands for pending; an old transaction this node never found stays unconfirmed for good
     const k = pool.filter(r => r && r.type !== "STATUS" && !r.failed && !r.confirmed && nowMs - Number(r.ts || 0) < HOUR).length;
