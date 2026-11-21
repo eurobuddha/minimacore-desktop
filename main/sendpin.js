@@ -38,8 +38,12 @@ async function pinMinimaSend(runner, command, opts) {
   const exclude = new Set([...((opts && opts.exclude) || [])].map(a => String(a).toLowerCase()));
   const tok = last("tokenid");
   if (tok != null && tok.toLowerCase() !== "0x00") return c;   // an explicit non-MINIMA token (or one that cannot be read) → not beacon-polluted
+  // A send this pin cannot read whole is left as written (0.18.197): an amount that is not a plain number, or a multi: send
+  // (several outputs), would be pinned against the wrong figure.
+  if (last("multi") != null) return c;
   const am = last("amount");
-  const need = am != null && /^[0-9.]+$/.test(am) ? am : "0";
+  if (am == null || !/^\d+(\.\d+)?$/.test(am)) return c;
+  const need = am;
   // Minima amounts carry up to 44 decimals, well past a double's ~15–17 significant digits, so "does this
   // coin cover the amount" is decided on the DECIMAL STRINGS. Comparing as floats made a coin fractionally
   // short read as covering; pinning to it then makes the send unfundable — the very failure this file exists

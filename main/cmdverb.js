@@ -32,7 +32,7 @@ function is(part, verb) { return verbs(part).includes(verb); }
 /** Does this ONE command begin with `prefix`, however it is quoted or trimmed (for gates: over-blocks on purpose)? */
 function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(prefix)) || fold(jtrim(String(part).replace(/"/g, ""))).startsWith(prefix); }
 /** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value). */
-function paramsText(part) { return jtrim(String(part).replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
+function paramsText(part) { return jtrim(jtrim(String(part)).replace(/^"([^"]*)"/, "$1 ").replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }   // a quoted first word ends at its closing quote (0.18.197: "txninput"id:a lost id), as on the development branch
 
 /** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb, read
  *  from paramsText (quotes dropped, " : " closed up). The node keeps the LAST of a repeated name. */
@@ -44,9 +44,13 @@ function paramNames(part) {
  *  `action:"list"action:genkey`, is its own name, as the node reads it), whatever stands inside {…} or […] is blanked
  *  (a key in a state's JSON is not a parameter), and " : " is closed up. Values that need quotes are not read here. */
 function namesText(part) {
-  const s = jtrim(String(part)).replace(/"/g, " ");
-  let out = "", depth = 0;
+  // Quote state is tracked (0.18.197): a { or [ inside a quoted value is part of that value and does not open a block, so
+  // it can no longer hide the parameters after it; the quotes themselves become spaces.
+  const s = jtrim(String(part));
+  let out = "", depth = 0, quoted = false;
   for (const ch of s) {
+    if (ch === '"') { quoted = !quoted; out += " "; continue; }
+    if (quoted) { out += depth > 0 ? " " : ch; continue; }
     if (ch === "{" || ch === "[") { depth++; out += ch; continue; }
     if ((ch === "}" || ch === "]") && depth > 0) { depth--; out += ch; continue; }
     out += depth > 0 ? " " : ch;

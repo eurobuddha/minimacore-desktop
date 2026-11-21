@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.197] — command reading: quotes, brackets and sends the pin cannot read
+
+- A `{` or `[` inside a quoted value (`password:"ab{c"`) opened a block in the parameter reader and hid every parameter after it from the repeat check and the send pin; the quote state is now tracked. A quoted first word now ends at its closing quote (`"txninput"id:a` lost its first parameter; ported from the development branch). The send pin leaves a send as written when its amount is not a plain number or it is a `multi:` send. Test: `scripts/sendpin-test.cjs`.
+
 ## [0.18.196] — the secret-command check hides secret values and allows long commands
 
 - The check of a gated Terminal command printed the user's phrase, password or seed, and its 80-character limit made `vault action:restorekeys phrase:"…"` with a 24-word phrase, `vault action:wipekeys seed:0x…` and long `passwordlock` / `passwordunlock` impossible. The check now shows the command with the values of phrase, password, confirm and seed hidden; the confirmation window shows the whole (hidden-value) command, and only the Touch ID prompt, which cannot show more, refuses a command too long for it. The vault actions that change the keys or their lock (wipekeys, restorekeys, passwordlock, passwordunlock, resetkeys, testphrase) have their own kind and typed phrase, CHANGE KEYS, with wording that says so; their answer still goes to the dialog that closes itself. The pass stays bound to the exact raw text; a repeated parameter is refused before the phrase is asked. Test: `scripts/cmdgate-test.cjs` (the review's commands must be armable; every earlier variant stays gated).
