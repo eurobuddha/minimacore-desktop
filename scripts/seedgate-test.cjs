@@ -550,3 +550,17 @@ test("a builder's state value that is an array or object is refused through mcd:
   const ok = 'sendfrom fromaddress:0x01 address:0x02 amount:1 script:"RETURN TRUE" privatekey:0x03 keyuses:1 state:{"1":"hello","2":5,"3":true} mine:false';
   sent.length = 0; await hs["mcd:cmd"](null, ok); assert.deepEqual(sent, [ok]);
 });
+
+// ---- 0.19.309: a UNC path in a file parameter is refused for every command, and in any mix of slashes ----
+test("a file on another computer is refused for every command that reads one, with any mix of slashes", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), B = String.fromCharCode(92), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  const unc = B + B + "evil" + B + "s" + B + "x.txn";
+  for (const c of ["txnimport file:" + unc, "txnexport id:a file:" + unc, "txnview file:" + unc, "hash file:" + unc, "peers action:publish file:" + unc, "sendview file:" + unc,
+    "backup file:/" + B + "evil" + B + "s" + B + "b.bak", "backup file:" + B + "/evil/s/b.bak", "nodecount file://evil/s/n.csv"])
+    await assert.rejects(hs["mcd:cmd"](null, c), /A file on another computer/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["txnexport id:a file:/Users/me/x.txn", "hash file:C:" + B + "x", "txnimport file:x.txn"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+});
