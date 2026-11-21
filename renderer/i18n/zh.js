@@ -5310,7 +5310,7 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} 已停止（{error}）。它可能已经提交：重试前请检查活动记录和余额。",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "无法检查收款地址：节点没有响应。未保存任何内容；请在节点运行时再试。",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "节点表示收款地址 {address} 不是有效的 Minima 地址。未保存任何内容；请检查地址后再保存。",
-  "Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.": "区块 {block} 之前发送的订单，以及已被花费的付给您的款项，无法读取：节点没有列出它们。",
+  "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node keeps only its recent blocks. Payments not yet spent were read.": "区块 {block} 之前的订单，以及付给您店铺但已被花费的款项，可能未被读取：节点只保留其最近的区块。尚未花费的付款已被读取。",
   "Need {need} USDT or more for that — you have {have} USDT.": "这需要 {need} USDT 或更多 — 您有 {have} USDT。",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "无法从密钥使用服务（eurobuddha.com）读取此密钥的链上使用次数。在读取之前，此钱包无法发送任何内容：过低的数字可能导致资金损失。请检查网络连接，然后再次点击“确认”。",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "无法从密钥使用服务（eurobuddha.com）读取链上使用次数。未做任何更改，在读取之前此钱包无法发送任何内容。",
@@ -5347,7 +5347,10 @@
   "keyuses: on this block key wallet raises the floor under the block number for every key: at most {max}, the chain's tip (block {tip}) plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run.": "keyuses: 在此区块密钥钱包上会抬高每个密钥在区块号之下的下限：最多 {max}，即链顶（区块 {tip}）加 10000。远高于链顶的数字会使每个密钥在一次签名后停止签名：资金仍在，但此钱包无法再签名。未运行任何内容。",
   "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.": "keyuses: 在此区块密钥钱包上必须接近链顶，而链顶现在无法读取，因此最多取 {max}。远高于链顶的数字会使每个密钥在一次签名后停止签名。未运行任何内容。",
   "Older orders could not be read yet: the node did not answer. They are read again on the next block.": "更早的订单暂时无法读取：节点没有应答。下一个区块时会再次读取。",
-  "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.": "Web 钱包暂不支持区块密钥钱包：在这里，同一助记词得到的地址与经典钱包或官方 Web 钱包不同，而且密钥使用次数无法保护它。未执行任何操作。"
+  "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.": "Web 钱包暂不支持区块密钥钱包：在这里，同一助记词得到的地址与经典钱包或官方 Web 钱包不同，而且密钥使用次数无法保护它。未执行任何操作。",
+  "Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large.": "区块 {block} 之前的订单和付款可能未被读取：节点对更早区块的回答过大。",
+  "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.": "区块 {block} 之前的订单，以及付给您店铺但已被花费的款项，可能未被读取：节点对更早区块的回答过大。尚未花费的付款已被读取。",
+  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.": "区块 {block} 之前的订单可能未被读取：节点只保留其最近的区块。区块 {block} 之前付给您店铺的款项可能未被读取：节点对它们的回答过大。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5440,7 +5443,7 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
-  "Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.",
+  "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node keeps only its recent blocks. Payments not yet spent were read.",
   "Need {need} USDT or more for that — you have {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
@@ -5477,5 +5480,8 @@
   "keyuses: on this block key wallet raises the floor under the block number for every key: at most {max}, the chain's tip (block {tip}) plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run.",
   "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.",
   "Older orders could not be read yet: the node did not answer. They are read again on the next block.",
-  "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done."
+  "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.",
+  "Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large.",
+  "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.",
+  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large."
 ] });

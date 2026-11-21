@@ -3778,6 +3778,13 @@ async function renderMiniMall() {
 }
 
 // ---------------- miniMall Inbox (merchinbox): the orders customers placed with my shops ----------------
+// What may not have been read below block N, by its cause: main/shop.js unreadText's sentences, word for word (0.19.338, as released 0.18.283 / 0.18.286)
+const UNREAD_SAID = {
+  cap: N_("Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large."),
+  capRoot: N_("Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read."),
+  treeRoot: N_("Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node keeps only its recent blocks. Payments not yet spent were read."),
+  treePayCap: N_("Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.")
+};
 async function renderShopInbox() {
   if (shopNav.screen === "order") return renderShopSellOrder(shopNav.ref);
   const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []), scan = await api.shopScanState().catch(() => null);
@@ -3785,7 +3792,7 @@ async function renderShopInbox() {
   const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
     : scan && scan.stepFailed ? th("Older orders could not be read yet: the node did not answer. They are read again on the next block.")   // a backfill step, the recent ones read (0.19.332)
     : scan && scan.catchingUpTo ? tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
-    : scan && scan.unreadBelow && mine.length ? tr("Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.", { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331)
+    : scan && scan.unreadBelow && mine.length ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331); the sentence by its cause (0.19.338)
   // a payout address skipped as not valid, whole (0.19.284)
   const skippedPay = (scan && scan.skipped || []).map(a => tr("Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.", { address: esc(a) })).join("<br>");
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],

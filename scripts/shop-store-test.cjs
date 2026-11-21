@@ -354,7 +354,7 @@ test("vendor: the stored address is kept (getaddress only the first time), a sho
   assert.equal(store.order("ORD-TWO1").paid, true, "paid at the shop's own payout address");
   assert.equal(store.getMeta("scanned_tip_block"), 5000, "the cursor is saved");
   tip = 6500; asked.length = 0; await shop.scanOnce();
-  assert.ok(asked.some(c => / depth:1516$/.test(c)), "the gap since the last scan (1500 blocks) and a margin is read: " + asked.filter(c => c.startsWith("coins")).join(" | "));
+  assert.ok(asked.some(c => / depth:1024$/.test(c)), "the gap since the last scan (1500 blocks) is read up to one window, 1024 (0.19.338, changed on purpose: 1516 under the 4096 window): " + asked.filter(c => c.startsWith("coins")).join(" | "));
 });
 
 // ---- 0.19.241 (as released 0.18.208 / 0.18.218): the same reference from two buyers ----
@@ -427,14 +427,13 @@ test("vendor: a payout address the node does not answer for leaves the scan curs
   assert.equal(shop.scanState().readFailed, true);
   down = false; await shop.scanOnce();
   assert.equal(store.getMeta("scanned_tip_block"), 9000); assert.equal(shop.scanState().readFailed, false);
-  // changed on purpose (0.19.328, the stepped backfill): what is older than one pass is read in steps and said while it is read
+  // changed on purpose (0.19.338, the released tree's tree model): an absence longer than the node's tree is said from the floor, with its cause
   tip = 20000; await shop.scanOnce();
-  assert.equal(shop.scanState().catchingUpTo, 9000, "away longer than one pass reads: the Inbox says how far back the scan still reads");
+  { const st = shop.scanState(); assert.deepEqual([st.catchingUpTo, st.unreadBelow, st.unreadWhy], [0, 20000 - 1024, "treeRoot"], "away longer than the tree: said from the floor"); }
   assert.equal(store.getMeta("scanned_tip_block"), 20000);
-  await shop.scanOnce(); assert.equal(shop.scanState().catchingUpTo, 0, "the next step reaches the last block read before the absence"); assert.equal(shop.scanState().unreadBelow, 0);
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })')
-    && app.includes('scan && scan.unreadBelow && mine.length ? tr("Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.", { block: esc(String(scan.unreadBelow)) })'));   // 0.19.330 wording, said only where a shop exists
+    && app.includes('scan && scan.unreadBelow && mine.length ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) })'));   // said only where a shop exists, by its cause
 });
 
 // ---- 0.19.273 / 0.19.284: a payout address that can never be valid (its checksum) is skipped for a while, said whole on the Inbox;
@@ -462,7 +461,7 @@ test("vendor: a payout address with a wrong checksum is skipped for five minutes
     assert.ok(said.some(l => l.includes("payout address " + BAD + " is not a valid Minima address")), said.join(" | "));
     goodFails = false; tip = 30001; asked.length = 0; await shop.scanOnce();
     assert.equal(shop.scanState().readFailed, false); assert.equal(store.getMeta("scanned_tip_block"), 30001); assert.deepEqual(asked, [], "a skipped address is not asked again");
-    tip = 30002; await shop.scanOnce(); assert.equal(shop.scanState().unreadBelow, 0, "a later pass that read everything since the one before clears the Inbox notice");
+    tip = 30002; await shop.scanOnce(); assert.equal(shop.scanState().readFailed, false, "a later pass reads everything since the one before");   // changed on purpose (0.19.338): the tree's notice is kept (0.19.331), so no clearing is asserted
     at(5 * 60000 + 1000); assert.deepEqual(shop.scanState().skipped, [], "the skip runs out"); tip = 30003; await shop.scanOnce(); assert.ok(asked.length > 0, "and the address is looked at again");
     Date.now = now0;
     const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
@@ -503,109 +502,14 @@ test("dust past the bound: an order keeps PENDING_MAX coins, the smallest is rep
   finally { fresh.flush(); require.cache[key] = kept; }
 });
 
-// ---- 0.19.328 (the released stepped backfill, 0.18.206 / 0.18.213): a long absence is read to its end in bounded steps ----
-test("vendor: an absence longer than one pass is read back in steps to the last block read; a failed step moves nothing; a node that serves no deeper ends it and says so; a gap during a backfill keeps the oldest target", async () => {
-  for (const id of store.shops().map(s => s.shopId)) if (id !== "tea") store.deleteShop(id);
-  const logs = []; store.setLog((m) => logs.push(m));
-  let tip = 113000, maxServe = Infinity, failDeep = false, treeLen = 1000000; const coins = [], asked = [];   // a node whose block tree is this deep (0.19.330 models it)
-  const order = (ref, created) => coins.push({ coinid: "0xBF" + ref, created, state: { "99": hex(JSON.stringify({ type: "ORDER", ref, from: BUYER, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], amount: "1.5", currency: "Minima", shipping: "" })) } });
-  shop._setRunner(async (c) => {
-    if (c === "block") return { status: true, response: { block: String(tip) } };
-    if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
-    if (c === "status") return { status: true, response: { chain: { length: treeLen } } };
-    const m = / depth:(\d+)$/.exec(c); if (!m || !c.startsWith("coins ")) return { status: true, response: [] };
-    const d = Number(m[1]); asked.push(d);
-    if (d > maxServe) return { status: true, response: "too large" };   // a reply over the node's cap: not a list
-    if (failDeep && d > 4096) throw new Error("timed out");
-    return { status: true, response: c.startsWith("coins address:" + shop.MINIMERCH) ? coins.filter(x => x.created > tip - Math.min(d, treeLen) && x.created <= tip) : [] };   // a list of what the tree holds, never a refusal for depth
-  });
-  store.setMeta("scanned_tip_block", 100000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
-  order("ORD-BF-OLD", 101000); order("ORD-BF-NEW", 112000);
-  await shop.init(); await shop.scanOnce();
-  assert.ok(store.order("ORD-BF-NEW"), "the newest part is read at once"); assert.equal(store.order("ORD-BF-OLD"), null, "not reached yet");
-  assert.equal(store.getMeta("scanned_tip_block"), 113000, "the cursor moves with a pass that read");
-  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.catchingUpTo, st.unreadBelow], [false, 100000, 0]); }
-  assert.equal(Math.max(...asked), 8192, "one step of one pass's ceiling (4096) below the window, no more"); assert.ok(logs.some(l => l.includes("the older blocks are read in steps, back to block 100000")));
-  asked.length = 0; await shop.scanOnce();
-  assert.ok(store.order("ORD-BF-OLD"), "the next step reaches it"); assert.ok(Math.max(...asked) <= 13016);
-  await shop.scanOnce(); assert.equal(shop.scanState().catchingUpTo, 0, "read back to the last block read before the absence");
-  // a failed step moves nothing, and is said; the next pass tries the same step again
-  tip = 125000; failDeep = true; await shop.scanOnce();
-  assert.equal(store.getMeta("scanned_tip_block"), 125000, "the window was read: the cursor moves"); assert.deepEqual([shop.scanState().readFailed, shop.scanState().stepFailed], [false, true], "the step was not: said as older orders (0.19.332, changed on purpose)");
-  const floor = Number(store.getMeta("backfill_floor_block")); assert.equal(floor, 125000 - 4096, "the floor stays under the window");
-  // a second gap while this backfill is pending: the target stays the oldest, the floor moves under the new window
-  tip = 140000; failDeep = false; await shop.scanOnce();
-  assert.equal(shop.scanState().catchingUpTo, 113000, "the oldest target is kept"); assert.equal(shop.scanState().readFailed, false);
-  for (let i = 0; i < 10 && shop.scanState().catchingUpTo; i++) await shop.scanOnce();
-  assert.equal(shop.scanState().catchingUpTo, 0, "both gaps read to their end");
-  // a node that serves no deeper ends the backfill and says from which block nothing older was read
-  tip = 160000; maxServe = 5000; await shop.scanOnce();
-  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.catchingUpTo, st.unreadBelow], [false, 0, 160000 - 4096]); }
-  assert.ok(logs.some(l => l.includes("orders sent before block " + (160000 - 4096) + ", and payments already spent, could not be read")));   // wording of 0.19.330
-  // changed on purpose (0.19.331): "no deeper history" stays true, so it stays said until the vendor hides it (0.19.273 cleared it here)
-  tip = 160001; await shop.scanOnce(); assert.equal(shop.scanState().unreadBelow, 160000 - 4096, "a later pass that read everything since the one before keeps the notice");
-  await shop.dismissUnread(); assert.equal(shop.scanState().unreadBelow, 0, "hidden by the vendor");
-  store.setLog((m) => { throw new Error("no log expected: " + m); });
-});
-
-// ---- 0.19.330: the node lists coins only within its block tree (about 1024 blocks) and answers a deeper depth with a list, not a refusal ----
-test("vendor: an absence longer than the node's block tree ends as 'the node serves no deeper history' (said, kept); reads are capped at the tree; the tree's length unread moves nothing", async () => {
-  const logs = []; store.setLog((m) => logs.push(m));
-  let tip = 300000, treeLen = 1100, statusOk = true; const coins = [], asked = [], pays = [];   // a tree of 1024 to 1123 blocks, as the node keeps it
-  const order = (ref, created) => coins.push({ coinid: "0xTR" + ref, created, state: { "99": hex(JSON.stringify({ type: "ORDER", ref, from: BUYER, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], amount: "1.5", currency: "Minima", shipping: "" })) } });
-  shop._setRunner(async (c) => {
-    if (c === "block") return { status: true, response: { block: String(tip) } };
-    if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
-    if (c === "status") return statusOk ? { status: true, response: { chain: { length: treeLen } } } : { status: false, error: "busy" };
-    const m = / depth:(\d+)$/.exec(c); if (!m || !c.startsWith("coins ")) return { status: true, response: [] };
-    const d = Number(m[1]); asked.push(d);
-    const inTree = (x) => x.created > tip - Math.min(d, treeLen) && x.created <= tip, atRoot = (x) => d >= treeLen && x.created <= tip - treeLen && !x.spent;   // the root carries this wallet's unspent coins
-    return { status: true, response: c.startsWith("coins address:" + shop.MINIMERCH) ? coins.filter(inTree) : c.startsWith("coins address:" + VENDOR) ? pays.filter(x => inTree(x) || atRoot(x)).map(x => ({ coinid: x.coinid, tokenid: "0x00", amount: "1.5", created: x.created, state: { "1": hex(x.ref) } })) : [] };
-  });
-  for (const ref of ["ORD-TR-PAY", "ORD-TR-SPENT"]) store.upsertOrder({ ref, role: "sell", shopId: "tea", amount: "1.5", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], shipping: "Digital" });
-  pays.push({ coinid: "0xTRP1", ref: "ORD-TR-PAY", created: 250000 }, { coinid: "0xTRP2", ref: "ORD-TR-SPENT", created: 250000, spent: true });   // far older than the tree
-  store.setMeta("scanned_tip_block", 297000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
-  order("ORD-TR-IN", 299500); order("ORD-TR-OUT", 298000);   // inside the tree; older than the tree (created before tip - 1024)
-  await shop.init(); await shop.scanOnce();
-  assert.ok(store.order("ORD-TR-IN"), "what the tree holds is read"); assert.equal(store.order("ORD-TR-OUT"), null, "older than the tree: not readable");
-  assert.ok(asked.every(d => d <= 1100), "no read asks past the tree: " + asked.join(","));
-  assert.equal(store.order("ORD-TR-PAY").paid, true, "an unspent payment older than the tree is still read (the root carries it)"); assert.equal(store.order("ORD-TR-SPENT").paid, false, "a spent one is gone");
-  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.catchingUpTo, st.unreadBelow], [false, 0, 300000 - 1100], "said: orders older than the tree's floor could not be read"); }
-  assert.ok(logs.some(l => l.includes("orders sent before block " + (300000 - 1100) + ", and payments already spent, could not be read: the node did not list them")));
-  assert.equal(store.getMeta("scanned_tip_block"), 300000);
-  // the tree's length cannot be read: what is read is judged, the cursor stays and the pass is said as not read
-  statusOk = false; tip = 302000; await shop.scanOnce();
-  assert.equal(store.getMeta("scanned_tip_block"), 300000, "nothing moves"); assert.equal(shop.scanState().readFailed, true);
-  store.setLog((m) => { throw new Error("no log expected: " + m); });
-});
-
-// ---- 0.19.331: "the node serves no deeper history" is kept until a step reads below it or the vendor hides it ----
-test("vendor: the no-deeper-history notice survives later passes, ends when a later step reads below it, and the vendor can hide it (main IPC and the Inbox's Hide)", async () => {
-  let tip = 400000, treeLen = 1024; const logs = []; store.setLog((m) => logs.push(m));
-  shop._setRunner(async (c) => c === "block" ? { status: true, response: { block: String(tip) } } : c === "status" ? { status: true, response: { chain: { length: treeLen } } } : { status: true, response: [] });
-  store.setMeta("scanned_tip_block", 396000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
-  await shop.init(); await shop.scanOnce();
-  assert.equal(shop.scanState().unreadBelow, 400000 - 1024);
-  for (const t of [400001, 400002, 400003]) { tip = t; await shop.scanOnce(); }
-  assert.equal(shop.scanState().unreadBelow, 400000 - 1024, "kept over later passes: it is still true");
-  // a later absence whose backfill reads below it (a node with a deeper tree) ends it
-  treeLen = 1000000; store.setMeta("scanned_tip_block", 380000); store.setMeta("backfill_target_block", 0); tip = 400100; await shop.scanOnce();
-  for (let i = 0; i < 10 && shop.scanState().catchingUpTo; i++) await shop.scanOnce();
-  assert.equal(shop.scanState().unreadBelow, 0, "read below it: no longer said");
-  store.setMeta("unread_below_block", 123); assert.deepEqual(await shop.dismissUnread(), { ok: true }); assert.equal(shop.scanState().unreadBelow, 0);
-  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), pre = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
-  assert.ok(main.includes('ipcMain.handle("mcd:shopScanDismiss", () => shop.dismissUnread());') && pre.includes('shopScanDismiss: () => ipcRenderer.invoke("mcd:shopScanDismiss"),'));
-  assert.ok(app.includes('<button class="mm-pill" id="mmScanHide">${th("Hide")}</button>') && app.includes('el("mmScanHide").onclick = () => api.shopScanDismiss()'));
-  store.setLog((m) => { throw new Error("no log expected: " + m); });
-});
-
 // ---- 0.19.332: a failed backfill step is said as OLDER orders; a tip not above the floor puts the step off; the cursor never goes down ----
 test("vendor: a failed backfill step is not 'recent orders could not be read'; a tip below the backfill floor postpones it without a failure; the cursor follows a lower tip (0.19.336)", async () => {
   let tip = 500000, failDeep = false; const asked = []; store.setLog(() => {});
-  shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } }; if (c === "status") return { status: true, response: { chain: { length: 1000000 } } };
-    const m = / depth:(\d+)$/.exec(c); if (m) { asked.push(Number(m[1])); if (failDeep && Number(m[1]) > 4096) throw new Error("timed out"); } return { status: true, response: [] }; });
+  let cut = 0;   // changed on purpose (0.19.338): the window is cut by the reply cap so that a step (not the tree read) follows, and the step fails
+  shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } };
+    const m = / depth:(\d+)$/.exec(c); if (m) { asked.push(Number(m[1])); if (/MINIMERCH|0x4D494E494D45524348/.test(c) && cut > 0 && Number(m[1]) > 300) { cut--; return { status: true, response: { tooBig: true } }; } if (failDeep && /MINIMERCH|0x4D494E494D45524348/.test(c) && Number(m[1]) > 300) throw new Error("timed out"); } return { status: true, response: [] }; });
   store.setMeta("scanned_tip_block", 490000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
-  failDeep = true; await shop.init(); await shop.scanOnce();
+  cut = 2; failDeep = true; await shop.init(); await shop.scanOnce();
   { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.stepFailed, st.catchingUpTo], [false, true, 490000], "the recent window was read; the step was not"); }
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes(': scan && scan.stepFailed ? th("Older orders could not be read yet: the node did not answer. They are read again on the next block.")'));
@@ -613,7 +517,7 @@ test("vendor: a failed backfill step is not 'recent orders could not be read'; a
   // a node resynced to a tip below the floor: the step waits, no failure, nothing asked past the window, the cursor stays
   tip = floor - 5000; asked.length = 0; await shop.scanOnce();
   { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.stepFailed, st.catchingUpTo], [false, false, 490000], "put off, not failed"); }
-  assert.ok(asked.every(d => d <= 4096), "no step was read: " + asked.join(","));
+  assert.ok(asked.every(d => d <= 64), "no step was read: " + asked.join(","));
   assert.equal(store.getMeta("scanned_tip_block"), floor - 5000, "the cursor follows the chain down (0.19.336, changed on purpose: 0.19.332 kept it up)");
   tip = 500001; await shop.scanOnce(); assert.equal(shop.scanState().stepFailed, false);
   store.setLog((m) => { throw new Error("no log expected: " + m); });
@@ -626,8 +530,8 @@ test("vendor: a backfill step after a restart does not open again an order coin 
   sc.open = async (id, blob) => { opened.push(blob); return open0(id, blob); };
   const tip = 600000; store.setLog(() => {});
   const coin = (ref, created) => ({ coinid: "0xFL" + ref, created, state: { "99": hex(JSON.stringify({ type: "INQUIRY", ref, from: BUYER, date: 1, shopId: "tea", message: "x" })) } });
-  const coins = [coin("ABOVE", tip - 500), coin("BELOW", tip - 3000)];
-  shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } }; if (c === "status") return { status: true, response: { chain: { length: 1000000 } } };
+  const coins = [coin("ABOVE", tip - 500), coin("BELOW", tip - 1010)];   // changed on purpose (0.19.338): a step reads at most 1024 blocks
+  shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } };
     if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
     const m = / depth:(\d+)$/.exec(c); return { status: true, response: m && c.startsWith("coins address:" + shop.MINIMERCH) ? coins.filter(x => x.created > tip - Number(m[1])) : [] }; });
   store.setMeta("scanned_tip_block", tip); store.setMeta("backfill_target_block", tip - 4000); store.setMeta("backfill_floor_block", tip - 1000); store.setMeta("unread_below_block", 0);
@@ -689,5 +593,78 @@ test("vendor: a payment above a cut window's boundary, read before its order bel
     await shop.scanOnce(); jTip(st, 3001); await shop.scanOnce(); jTip(st, 3002); await shop.scanOnce();
     assert.ok(store.order("ORD-ST1"), "the step read the order"); assert.equal(store.order("ORD-ST1").paid, true, "and the payment read before it pays it");
     assert.equal(store.order("ORD-ST1").coins.length, 1, "counted once");
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+
+// ---- 0.19.338 (as released 0.18.277 / 0.18.283 / 0.18.286; these replace the 0.19.328, 0.19.330 and 0.19.331 tests, written for a tree read
+// from status or for a node deeper than any node keeps: changed on purpose) ----
+const CAPPED = { status: true, response: { tooBig: true } };
+test("vendor: an order sent while the app was closed is read through the backfill after the first window was cut by the reply cap; a node whose reply is cut at every pass ends the backfill with that cause", async () => {
+  const st = await javaSetup(1000); const logs = []; store.setLog((m) => logs.push(m));
+  try {
+    await shop.scanOnce(); st.msg.push(jOrder("ORD-GAP", 1100)); jTip(st, 1800);
+    let first = true; st.hook = (addr, d) => { if (addr === "M" && first) { first = false; if (d > 404) return CAPPED; } return null; };
+    await shop.scanOnce();
+    assert.ok(store.order("ORD-GAP"), "read by the backfill step in the same pass"); assert.equal(Number(store.getMeta("backfill_target_block")), 0, "the backfill is done");
+    st.msg.push(jOrder("ORD-DEEP", 1830)); jTip(st, 2600); st.hook = (addr, d) => (addr === "M" && d > 300 ? CAPPED : null);
+    for (let i = 0; i < 4; i++) { await shop.scanOnce(); jTip(st, st.tip + 1); }
+    assert.ok(logs.some(l => /older than block \d+ may not have been read: the node's answer for older blocks was too large/.test(l)), logs.join(" | ")); assert.equal(Number(store.getMeta("backfill_target_block")), 0);
+    assert.match(shop.scanState().unreadText, /may not have been read: the node's answer for older blocks was too large\./);
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: a payment older than the node's tree is found at the tree's root and pays the order; only orders older than the floor, and payments already spent, are said as not read", async () => {
+  const st = await javaSetup(1000);
+  try {
+    await shop.scanOnce(); st.msg.push(jOrder("ORD-RT", 995)); jTip(st, 1001); await shop.scanOnce(); assert.ok(store.order("ORD-RT"), "the order is read while open");
+    st.pay.push(jPay("ORD-RT", 1010), jPay("ORD-RX", 1020, { spent: true }));   // paid while closed; another, already spent
+    const asked = []; const run = javaNode(st); shop._setRunner(async (c) => { const m = / depth:(\d+)$/.exec(c); if (m) asked.push((c.includes(VENDOR) ? "V" : "M") + m[1]); return run(c); });
+    jTip(st, 2500); await shop.scanOnce();
+    assert.equal(store.order("ORD-RT").paid, true, "paid: the root carries the unspent coin");
+    assert.ok(asked.includes("V1124"), "one payments read deep enough to reach the root: " + asked); assert.ok(asked.includes("M1123"), "orders read as deep as the tree may hold");
+    assert.equal(Number(store.getMeta("unread_below_block")), 2500 - 1024);
+    assert.equal(shop.scanState().unreadText, "Orders older than block 1476, and payments to your shops that were already spent, may not have been read: the node keeps only its recent blocks. Payments not yet spent were read.");
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: past the tree a cut orders read is retried and then said with the reply cap as cause; the stall count resets for a new gap; 'may not have been read'", async () => {
+  const st = await javaSetup(1000); const logs = []; store.setLog((m) => logs.push(m));
+  try {
+    await shop.scanOnce(); st.msg.push(jOrder("ORD-TB", 2500 - 1060)); st.pay.push(jPay("ORD-TB", 2500 - 1058));
+    st.hook = (addr, d) => (addr === "M" && d > 1024 ? CAPPED : null);
+    jTip(st, 2500); await shop.scanOnce(); assert.equal(Number(store.getMeta("backfill_target_block")), 1000, "a cut orders read does not end the backfill at once");
+    jTip(st, 2501); await shop.scanOnce(); assert.equal(Number(store.getMeta("backfill_target_block")), 1000);
+    jTip(st, 2502); await shop.scanOnce();
+    assert.equal(Number(store.getMeta("backfill_target_block")), 0, "ended after two more tries"); assert.equal(Number(store.getMeta("backfill_stall")), 0);
+    assert.equal(shop.scanState().unreadWhy, "capRoot");
+    assert.equal(shop.scanState().unreadText, "Orders older than block " + store.getMeta("unread_below_block") + ", and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.");
+    assert.ok(logs.some(l => /may not have been read: the node's answer for older blocks was too large/.test(l)), "the log says the same");
+    // a stall left from an earlier backfill is not carried into a new gap
+    store.setMeta("backfill_stall", 2); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0);
+    let first = true; st.hook = (addr, d) => { if (addr !== "M") return null; if (first) { first = false; if (d > 512) return CAPPED; } return d > 64 ? CAPPED : null; };
+    jTip(st, 3600); await shop.scanOnce();
+    assert.ok(Number(store.getMeta("backfill_target_block")) > 0, "a new gap registers, and one capped step does not end it: " + store.getMeta("backfill_stall"));
+    assert.equal(Number(store.getMeta("backfill_stall")), 1, "counted from 0 for the new gap");
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: past the tree with only the payments read cut by the reply cap, the notice names the reply cap for the payments (treePayCap)", async () => {
+  const st = await javaSetup(1000);
+  try {
+    await shop.scanOnce(); st.hook = (addr, d) => (addr === "V" && d > 1024 ? CAPPED : null);
+    for (let i = 0; i < 4; i++) { jTip(st, 2500 + i); await shop.scanOnce(); }
+    assert.equal(store.getMeta("unread_why"), "treePayCap");
+    assert.equal(shop.scanState().unreadText, "Orders older than block 1476 may not have been read: the node keeps only its recent blocks. Payments to your shops older than block 1476 may not have been read: the node's answer for them was too large.");
+    const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+    for (const [w, n] of [["cap", 7], ["capRoot", 7], ["treeRoot", 7], ["treePayCap", 7]]) assert.ok(app.includes(w + ': N_("' + require("../main/shop")._unreadText(n, w).replace(/\b7\b/g, "{block}") + '")'), "the Inbox says main's sentence for " + w);
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: the unread notice is kept over later passes and hidden by the vendor (main IPC and the Inbox's Hide)", async () => {
+  const st = await javaSetup(1000);
+  try {
+    await shop.scanOnce(); jTip(st, 2500); await shop.scanOnce(); const below = shop.scanState().unreadBelow; assert.equal(below, 2500 - 1024);
+    for (let i = 0; i < 3; i++) { jTip(st, st.tip + 1); await shop.scanOnce(); }
+    assert.equal(shop.scanState().unreadBelow, below, "kept over later passes: it is still true");
+    assert.deepEqual(await shop.dismissUnread(), { ok: true }); assert.equal(shop.scanState().unreadBelow, 0, "hidden");
+    const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), pre = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+    assert.ok(main.includes('ipcMain.handle("mcd:shopScanDismiss", () => shop.dismissUnread());') && pre.includes('shopScanDismiss: () => ipcRenderer.invoke("mcd:shopScanDismiss"),'));
+    assert.ok(app.includes('<button class="mm-pill" id="mmScanHide">${th("Hide")}</button>') && app.includes('el("mmScanHide").onclick = () => api.shopScanDismiss()'));
   } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
 });
