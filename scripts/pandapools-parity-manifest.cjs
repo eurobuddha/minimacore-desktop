@@ -102,6 +102,11 @@ function verify() {
   for (const f of Object.keys(recorded)) {
     if (!FILES.includes(f)) problems.push(f + ': in the manifest but no longer an engine file');
   }
+  // A file beside the engine that is neither an engine file nor one of the two Desktop shims (0.19.264): the loader could run it.
+  for (const f of fs.readdirSync(engineDir, { withFileTypes: true })) {
+    if (f.isDirectory()) problems.push(f.name + '/: a folder under main/pandapools/ (the engine has none)');
+    else if (!FILES.includes(f.name) && f.name !== 'loader.js' && f.name !== 'sqlshim.js') problems.push(f.name + ': under main/pandapools/ but neither an engine file nor a Desktop shim');
+  }
 
   if (problems.length) {
     console.error('FAIL PandaPools engine does not match the committed manifest:');

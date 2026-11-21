@@ -121,6 +121,12 @@ jobs:
       - name: Verify AtomiX glue
         run: node scripts/atomix-unit.js
 
+      # The committed digest manifests of the files copied verbatim into main/atomix/ and main/casino/ (their donors are
+      # not checked out here; atomix-parity-check.sh / casino-parity-check.sh compare against them locally). A stray file
+      # beside them fails too.
+      - name: Verify AtomiX and P2P Chance copies against their manifests
+        run: npm run test:atomix-manifest && npm run test:casino-manifest
+
       # P2P Chance was removed in 0.18.68; this proves what is left can only settle, never start a bet.
       - name: Verify P2P Chance settle-only glue
         run: node scripts/casino-glue-test.js

@@ -1,0 +1,24 @@
+{
+  "_comment": "Digests of the casino files copied verbatim from the donor. Regenerate ONLY with `node scripts/vendored-manifest.cjs casino --update` beside a deliberate re-copy. Desktop-only code belongs in main/casino/loader.js, main/casino/engine.js or main/casino.js.",
+  "donor": {
+    "root": "universal-casino/mds",
+    "version": "",
+    "branch": "lint",
+    "gitSha": "eef4f609b87503875e735bdda4649e63ffea12ae"
+  },
+  "digest": "25dff0d7590a40f09a389a41ae321404ee323a6280fe0becd7295dded6a2824e",
+  "files": {
+    "service.js": {
+      "sha256": "39bbbdb317f99ebc8061e53c36f08ec6f4f50c996ddf5e4833420e7ba710e201",
+      "bytes": 21830
+    },
+    "timeout-claims.js": {
+      "sha256": "69e1d739e96de52994a8a9f5505ef8751d5e7b809c75a0752ce43cd7b0116497",
+      "bytes": 3103
+    },
+    "offer-keepalive.js": {
+      "sha256": "2b35e664405958320bfd681e4cc6d045313bff177351318c43e5a557cda95173",
+      "bytes": 4872
+    }
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "_comment": "Digests of the atomix files copied verbatim from the donor. Regenerate ONLY with `node scripts/vendored-manifest.cjs atomix --update` beside a deliberate re-copy. Desktop-only code belongs in main/atomix/loader.js or main/atomix.js.",
+  "donor": {
+    "root": "mds/atomix-mds",
+    "version": "0.1.60",
+    "branch": "security/2026-11-07",
+    "gitSha": "03d56652cd55ff68f4dd2de4e8d4a1d15aff1315"
+  },
+  "digest": "94c6660118047386eb608ac2aa3d416f8b810a8f183e2e9a454db0bd21f403af",
+  "files": {
+    "lib/rhino_shim.js": {
+      "sha256": "3c836294a244afb5198002dcdce2c569eb166300553cb1ba60fb5b56209a487b",
+      "bytes": 1654
+    },
+    "vendor/nacl.js": {
+      "sha256": "68be2e21d81a0f4f35c15dcc526ab961a72512a6544bdf0235bdab8e11e1ab85",
+      "bytes": 78109
+    },
+    "vendor/blake.js": {
+      "sha256": "f306dd49eabade396b0b82dd401947ede6dcf90d8727b5e4ed4733fc808ec0de",
+      "bytes": 19053
+    },
+    "vendor/sha256.js": {
+      "sha256": "9da0ef5a65b401f07f335a53f11ad71a542ce1a05719e5f45491caae9e6c5925",
+      "bytes": 21893
+    },
+    "vendor/sha512.js": {
+      "sha256": "3a16e7bacfa326638fd1ca071d6745a01ec8b8ce104c1feacf28a3145db2448c",
+      "bytes": 39711
+    },
+    "vendor/sha3.js": {
+      "sha256": "274f091114d81679ec27964c9e80e33be03ae1827f67ecab059a49d59a66c560",
+      "bytes": 30221
+    },
+    "vendor/elliptic.js": {
+      "sha256": "42c2c07ca75e6d7dabcae4a922cf828f0d248c8b77ad9c31b342b9953de9cb22",
+      "bytes": 269556
+    },
+    "lib/hex.js": {
+      "sha256": "679d2d8bf8089cb8a37be8da94df2e78c0f694afd77a496cc55838ee4f4a4270",
+      "bytes": 3317
+    },
+    "lib/flow.js": {
+      "sha256": "991b78f92e8d5c9e94918d4049152fe661ea787bb71a22d62eec2ed47cc1a549",
+      "bytes": 2782
+    },
+    "crypto/ax_sodium.js": {
+      "sha256": "ab932a63af008dde66b2ca6b09dceba1a172036fec2790807e47278935b6a201",
+      "bytes": 3890
+    },
+    "crypto/ax_eth.js": {
+      "sha256": "a97f20fc3c12326b334536bccf0fd900b0f8b639deefb0c2a280715ae9ac4671",
+      "bytes": 4453
+    },
+    "lib/decimal.js": {
+      "sha256": "758b342a5acb85f179438730668fb8b26cc79bdeef5926e0d1fb68b4ffd904e0",
+      "bytes": 6849
+    },
+    "lib/abi.js": {
+      "sha256": "a8bda4a0ad86edf81a1c90999c0684cd5ff835d211a3b58c2623d1547d58a5f4",
+      "bytes": 3063
+    },
+    "lib/ethhtlc.js": {
+      "sha256": "bc23496d8c8fcd505da0c44c9308c00cb14fdd1bd134abf5d0a5ec6e88010964",
+      "bytes": 5993
+    },
+    "lib/identity.js": {
+      "sha256": "a2a24dfd6dc4d0d25e64db740620c79928813f3e0d2d9e958d4b5c3f43af22eb",
+      "bytes": 4442
+    },
+    "lib/trading.js": {
+      "sha256": "52ffdbd685ccc946c1cab0535ec16ab6696d8333a2ffd7e8b98d67dd96c650ab",
+      "bytes": 8058
+    },
+    "lib/signgate.js": {
+      "sha256": "b205cd5382f2bba4b66c201c14333bff96b7e62c2c11ed22c296091eb18cb99e",
+      "bytes": 5464
+    },
+    "lib/mdsw.js": {
+      "sha256": "9ad7b743131a6b4ffea83b2318b63c6fb8ca5e3e79e9e8d3ed6f0a9e8ba55c11",
+      "bytes": 7826
+    },
+    "lib/ethrpc.js": {
+      "sha256": "83604c8f5a46d63f59d4cada7befa526f83f5dc07e61203c4ed4700d651d7f9f",
+      "bytes": 7245
+    },
+    "lib/ethtx.js": {
+      "sha256": "a0b1c9d50aa1c09467a9e9b9d18ba15eddd649e6c251af1c69c497aac75ae4c5",
+      "bytes": 6920
+    },
+    "lib/ethops.js": {
+      "sha256": "185c7ac1da259f20e49347cc71fd12fa99d2107c7c79ce3ba4af8b6468a2fe0b",
+      "bytes": 7050
+    },
+    "lib/swapdb.js": {
+      "sha256": "5b389a7dc193e3d5e8eb434f87ac2bf1854ba678a773d2ffb614b78dc07def49",
+      "bytes": 22946
+    },
+    "lib/htlc.js": {
+      "sha256": "8cab5f6e6742f13aa044cedf710694929866977ce4af4d28d5ae40ae3b82e01d",
+      "bytes": 42490
+    },
+    "lib/order.js": {
+      "sha256": "49db5cf554ea2dd59b0fd40cf21c8fd16a20a91039fa1eb1becede54e37425c8",
+      "bytes": 6175
+    },
+    "lib/prng.js": {
+      "sha256": "85d34716618c09824a62ab64a5083df1f96094cf6e8218630d1dcf429cd90d9c",
+      "bytes": 2675
+    },
+    "lib/boot.js": {
+      "sha256": "929eea6cfce6591edb11dc0d579e7a08b6c84d603691aa9ce3bf109f54cdbdcb",
+      "bytes": 5705
+    },
+    "lib/identitywatch.js": {
+      "sha256": "5824ae4a971e3e1b31945d4ccd0a3dcf91675b148d4b305973ac90cfa523b265",
+      "bytes": 7807
+    },
+    "lib/settle.js": {
+      "sha256": "46d1fa289b2460fb60b86bf91002350f719c51f620a0ac476dd893ccd2f02ba7",
+      "bytes": 59770
+    },
+    "lib/orderbook.js": {
+      "sha256": "52f151e151dd641e32cf079ed3dde1d7d4f755381d4db66a15a4c98f4ee4b30a",
+      "bytes": 7622
+    },
+    "lib/peg.js": {
+      "sha256": "f61d69e6c5e3173efe5483d5108bafaf8718bc41178b01e158ecafa181ad8353",
+      "bytes": 13522
+    },
+    "lib/responder.js": {
+      "sha256": "3131b7b5dd06aab6b6a3f79679bceb6655a8292fc702f1a29eafb1705a029990",
+      "bytes": 38942
+    },
+    "lib/maker.js": {
+      "sha256": "d42031dda11f913b84953d8628bb98071b65eb18a7e2325e87a50abbba8aa97b",
+      "bytes": 14044
+    },
+    "lib/take.js": {
+      "sha256": "55eeeffa3b1d4323af6afc2202e927e5b4df0c3c233abec5659d3e74d0ac783c",
+      "bytes": 2844
+    },
+    "lib/swapplan.js": {
+      "sha256": "8ab3c537c1ca477cd37254c85c44cdb0df9a421aa25735130f051b7e4695e415",
+      "bytes": 7913
+    },
+    "lib/engine.js": {
+      "sha256": "7ce759c5edd6d115b15e0db2f55423db774139a4cfebe64b39021e5bbcedcc8e",
+      "bytes": 12209
+    },
+    "lib/otc.js": {
+      "sha256": "4046792899af8f25d879d8f966cf3fc57f709ebcc32888d7f1cb780dc45c2f1b",
+      "bytes": 31513
+    },
+    "lib/market.js": {
+      "sha256": "768222d60240f38a168b0d03870399273a60880577b158bf5e6f893ed0955c61",
+      "bytes": 4822
+    },
+    "service.js": {
+      "sha256": "71814044cde13a9c5ba8bf1e8a33ff0e7ebc87351648ac5d2ed9908aee5310f6",
+      "bytes": 11783
+    },
+    "lib/wallet.js": {
+      "sha256": "51d58089a09acc751a10fb01225563849db387750a615d8ed5111b89da596b02",
+      "bytes": 4475
+    },
+    "lib/inspect.js": {
+      "sha256": "20044288ba2ed5576db6ec1fd939bdaf42c8f68f1e6084c3ca999f2122a44c69",
+      "bytes": 8599
+    }
+  }
+}
