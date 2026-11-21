@@ -52,12 +52,12 @@ function fastSplit(text) {
   return { toks: out, odd };
 }
 function slowSplit(text) {
-  const s = jtrim(text), toks = []; let cur = "", js = 0, q = false, odd = false;
+  const s = jtrim(text), toks = []; let cur = "", js = 0, q = false, odd = false, qbr = false;   // qbr: a { or [ inside quotes
   for (let i = 0; i < s.length; i++) {
     const cc = s[i];
     if (cc === " ") { if (!q && js === 0) { if (cur !== "") toks.push(jtrim(cur)); cur = ""; } else cur += cc; }
-    else if (cc === "{" || cc === "[") { if (q) odd = true; js++; cur += cc; }
-    else if (cc === "}" || cc === "]") { if (q) odd = true; js--; if (js < 0) odd = true; cur += cc; }
+    else if (cc === "{" || cc === "[") { if (q) qbr = true; js++; cur += cc; }
+    else if (cc === "}" || cc === "]") { if (q) qbr = true; js--; if (js < 0) odd = true; cur += cc; }
     else if (cc === '"') {
       if (js > 0) cur += cc;
       else { if (!q ? cur !== "" && !cur.endsWith(":") : s[i + 1] !== undefined && s[i + 1] !== " ") odd = true; q = !q; }
@@ -70,7 +70,7 @@ function slowSplit(text) {
     const ix = t.indexOf(":"), v = jtrim(t.slice(ix + 1));
     if (i === 0 || ix < 1 || /[{}[\]]/.test(t.slice(0, ix)) || !((v[0] === "{" && v.endsWith("}")) || (v[0] === "[" && v.endsWith("]")))) odd = true;
   });
-  return { toks, odd };
+  return { toks, odd, qbr };
 }
 let readOf = null, readIs = null;   // the last command read: every look at one command reads the same parse
 /** → { verb (folded), params: [[name, value], …] in order, repeats kept, error ("" = the node runs it), odd }. */
@@ -88,7 +88,8 @@ function read(part) {
     if (!((v.startsWith("{") && v.endsWith("}")) || (v.startsWith("[") && v.endsWith("]")))) { if (v.startsWith('"')) v = v.slice(1); if (v.endsWith('"')) v = v.slice(0, -1); }
     params.push([name, v]);
   }
-  readOf = s; readIs = { verb, params, error, odd: sp.odd };
+  // a [..] value in quotes is plain text to txnstate (getCommand keeps it a string there, 0.19.290); elsewhere a bracket in quotes is odd
+  readOf = s; readIs = { verb, params, error, odd: sp.odd || (!!sp.qbr && verb !== "txnstate") };
   return readIs;
 }
 /** Every verb the node may read for ONE command (no ";"): the node's own reading, plus the two looser readings this file

@@ -363,3 +363,11 @@ test("secrets stay hidden: privatekey: is masked, so are the words after a hidde
   const s = JSON.stringify(await hs["mcd:cmd"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD"));
   assert.ok(!s.includes("0x1234ABCD") && !s.includes("a b c") && s.includes('"amount":"1"'), s);
 });
+
+// ---- 0.19.290: txnstate keeps a [..] value as plain text, so one written in quotes is not refused as unclear ----
+test("unclear lets txnstate's quoted [..] value through, as the node reads it; a bracket in quotes elsewhere is still refused", () => {
+  const V = require("../main/cmdverb.js");
+  const c = 'txnstate id:x port:1 value:"[hello world]"';
+  assert.equal(V.unclear(c), ""); assert.deepEqual(V.read(c).params, [["id", "x"], ["port", "1"], ["value", "[hello world]"]]);
+  for (const bad of ['send amount:1 address:0xA state:"[a b]"', 'vault password:"{" action:wipekeys', 'txnstate id:x port:1 value:"[a" b]']) assert.match(V.unclear(bad), /differently from how it is written/, bad);
+});
