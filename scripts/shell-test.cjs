@@ -247,7 +247,10 @@ test("the token detail, action sheet, prompt, payment result, transaction detail
   for (const [id, once] of [["tokDetail", /if \(el\("tokDetail"\)\) return;/], ["sheetOv", /if \(el\("sheetOv"\)\) return;/], ["promptOv", /if \(el\("promptOv"\)\) \{ resolve\(null\); return; \}/],
     ["prOv", /const was = el\("prOv"\); if \(was\) was\.remove\(\);/], ["histDetail", /if \(el\("histDetail"\)\) return;/], ["scanOv", /if \(el\("scanOv"\)\) \{ resolve\(null\); return; \}/]]) {
     assert.ok(once.test(app), id + ": one at a time");
-    assert.ok(new RegExp("modalize\\((?:el\\(\"" + id + "\"\\)|ov)").test(app.slice(app.indexOf('id="' + id + '"'))), id + ": made modal");
+    // 0.19.279: in the function that draws it, not anywhere after it (the whole rest of app.js passed with this overlay's line deleted)
+    const at = app.indexOf('id="' + id + '"'), starts = [...app.slice(0, at).matchAll(/\n(?:async )?function /g)], next = /\n(?:async )?function /g; next.lastIndex = at;
+    const own = app.slice(starts.length ? starts[starts.length - 1].index : 0, (next.exec(app) || { index: app.length }).index);
+    assert.ok(new RegExp("modalize\\((?:el\\(\"" + id + "\"\\)|ov)").test(own), id + ": made modal");
   }
 });
 
