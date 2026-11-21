@@ -214,8 +214,10 @@ function activeWorkProblem(list) {
 // 0.19.291: mysql setlogin stores host, user, password and database, which Main's autobackup pastes into "mysql host:" + host +
 // " … password:" + password + " action:update" (and mysqlcoins the same); there a ":" stays inside its own token, so only white
 // space, a quote or ";" are refused.
+// a Windows path in a file parameter (0.19.296): "C:\\backup\\a.gz" holds a ":" but no white space, quote, ";" or bracket, so it adds no parameter
+const WIN_PATH = /^[A-Za-z]:\\[^\s:";{}[\]]*$/;
 const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null), mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
-const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => { const bad = runsAs(part, v) && REPASTED[v](action); return !!bad && V.read(part).params.some(([, val]) => bad.test(val)); });
+const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => { const bad = runsAs(part, v) && REPASTED[v](action); return !!bad && V.read(part).params.some(([name, val]) => bad.test(val) && !(/^(file|archivefile)$/i.test(name) && WIN_PATH.test(val))); });
 function replacesKeysElsewhere(command) {
   return V.parts(command).some(part => {
     const action = (V.paramValue(part, "action") || "").toLowerCase(), named = (n) => V.paramValue(part, n) != null;

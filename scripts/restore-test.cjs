@@ -191,7 +191,8 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
     'reset action:chainsync archivefile:"C:\\x.gz phrase:abc anyphrase:true"', 'reset action:chainsync archivefile:"x.gz phrase:abc"', 'archive action:importraw file:x keyuses:"5 phrase:a"', 'archive action:importold file:x anyphrase:"true phrase:a"',
     'mysql action:reset file:"x phrase:a"', 'txpow txpowid:"0x01 action:resync phrase:abc"', 'archive action:import file:"/Users/me/My Archive.gz"'])
     assert.equal(restore.replacesKeysElsewhere(c), true, JSON.stringify(c));
-  for (const c of ["reset action:chainsync archivefile:/Users/me/archive.gz", "archive action:import file:/Users/me/archive.gz", "txpow txpowid:0x01", "mysql action:reset file:/x/y.dat", "archive action:resync host:h:9001"])
+  for (const c of ["reset action:chainsync archivefile:/Users/me/archive.gz", "archive action:import file:/Users/me/archive.gz", "txpow txpowid:0x01", "mysql action:reset file:/x/y.dat", "archive action:resync host:h:9001",
+    "reset action:chainsync archivefile:C:\\backup\\a.gz", "archive action:import file:D:\\minima\\archive.gz"])   // a Windows path (0.19.296)
     assert.equal(restore.replacesKeysElsewhere(c), false, JSON.stringify(c));
   const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
   assert.ok(h.indexOf("restore.replacesKeysElsewhere(command)") > 0 && h.indexOf("restore.replacesKeysElsewhere(command)") < h.indexOf("seedgate.refusal(command"), "refused before the gate asks anything");
