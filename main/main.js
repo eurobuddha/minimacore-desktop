@@ -183,7 +183,7 @@ function setupTray() {
       { label: flavor.productName + ": " + lang.t(node.state), enabled: false },   // the node's state, said in the app's language (the five words are named below)
       { type: "separator" },
       { label: lang.t("Show"), click: () => { if (win) win.show(); else createWindow(); } },
-      { label: lang.t("Restart node"), click: () => { mayStop().then(() => node.restart()).catch(() => {}); } },   // main's own question when anything is in flight (0.19.268)
+      { label: lang.t("Restart node"), click: () => { mayStop().then(() => held(() => node.restart())).catch(() => {}); } },   // main's own question when anything is in flight (0.19.268)
       ...(updater.current().available ? [{ type: "separator" }, { label: lang.t("Update to minimaCore {version}…", { version: updater.current().version }), click: () => { if (win) { win.show(); win.webContents.send("mcd:openUpdate"); } } }] : []),
       { type: "separator" },
       { label: lang.t("Quit"), click: () => app.quit() }
@@ -284,10 +284,10 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const bad = restore.backupCommandProblem(command);
   if (bad) throw new Error(bad);
   // megammrsync ends by shutting the node down: run it with that expected, then start the node again (guarded).
-  if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command), command); }   // secret parameters never echoed back (0.19.282)   // it ends by stopping the node: main's own question when anything is in flight (0.19.268)
+  if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await held(() => runResync(command)), command); }   // secret parameters never echoed back (0.19.282)   // it ends by stopping the node: main's own question when anything is in flight (0.19.268)
   // quit, an archive / mysql / reset resync or import, megammr import: the node stops at the end (0.19.283): the same guard as every other stop
-  if (restore.stopsNode(command)) await mayStop();
-  const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
+  const stops = restore.stopsNode(command); if (stops) await mayStop();
+  const run = (c) => (stops ? held : (f) => f())(() => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c));   // a stop the guard let go that failed ends its hold (0.19.319)
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
   const pinned = await pinMinimaSend(run, command, { minCoinage: 3 });   // it reads the verb as the node does (main/cmdverb.js) and passes anything that is not a MINIMA send unchanged; never a coin too young to spend
@@ -378,7 +378,7 @@ node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandap
 node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
-  running: node.state === "running", run: async (c) => { await mayStop(); return runResync(c); }, work: walletWork }));   // the stop guard right before the node gets it (0.19.294)
+  running: node.state === "running", run: async (c) => { await mayStop(); return held(() => runResync(c)); }, work: walletWork }));   // the stop guard right before the node gets it (0.19.294)
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -388,8 +388,8 @@ ipcMain.handle("mcd:pickFolder", async () => {
 ipcMain.handle("mcd:nodeStatus", () => node.snapshot());
 ipcMain.handle("mcd:nodeStart", async () => { await node.start(); return node.snapshot(); });
 // Stop whatever node holds our port/data folder (an earlier launch's), then start. Same reclaim as every start.
-ipcMain.handle("mcd:nodeReclaim", async (_e, ack) => { await mayStop(ack, "reclaim"); await node.stop(); await node.start(); return node.snapshot(); });
-ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack, "stop"); await node.stop(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeReclaim", async (_e, ack) => { await mayStop(ack, "reclaim"); return held(async () => { await node.stop(); await node.start(); return node.snapshot(); }); });
+ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack, "stop"); return held(async () => { await node.stop(); return node.snapshot(); }); });
 // What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
@@ -405,6 +405,12 @@ const stopGuard = inflight.stopGuard({ running: () => node.state === "running", 
   } });
 async function mayStop(ack, action) { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); }
 node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happened ends the guard's hold (0.19.316)
+// What a yes let go, run so that a failure which left the node running ends the hold (0.19.319): a restore refused for a wrong
+// password, an import that fails fast or a settings save that throws, retried at once, was refused for up to 30 s.
+async function held(op) {
+  try { const r = await op(); if (r && r.status === false && node.state === "running") stopGuard.release(); return r; }
+  catch (e) { if (node.state === "running") stopGuard.release(); throw e; }
+}
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one
 const freeze = require("./freeze").create({
@@ -432,7 +438,7 @@ ipcMain.handle("mcd:freezeList", () => freeze.list());
 ipcMain.handle("mcd:freezeSet", (_e, id, on) => freeze.set(id, on));
 ipcMain.handle("mcd:inFlight", async (_e, how, action) => { const w = inflight.inFlight(await Promise.race([inFlightWork(), new Promise(r => setTimeout(() => r({}), 5000))]), how === "quit" ? "quit" : "shutdown", Date.now(), (currentLang(), lang.t)); return { title: w.title, message: w.message, any: w.any, ack: w.any && how !== "quit" && /^(restart|stop|kind)$/.test(String(action)) ? stopGuard.issue(action) : "" }; });   // ack: for that action's warning only (0.19.268, 0.19.287)
 // a patch is saved only once the guard let the restart go (0.19.287): asked first, saved after; a refusal changes nothing
-ipcMain.handle("mcd:nodeRestart", async (_e, ack, patch) => { await mayStop(ack, "restart"); if (patch) saveConfigPatch(patch); await node.restart(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeRestart", async (_e, ack, patch) => { await mayStop(ack, "restart"); return held(async () => { if (patch) saveConfigPatch(patch); await node.restart(); return node.snapshot(); }); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 // Logs, "Save to file" (the phone's Share): the text the screen shows, redacted again here, to a file the user chooses.
 ipcMain.handle("mcd:logsSave", async () => {   // the log files on disk through the scrubber (0.19.221), never text the window sends
@@ -456,11 +462,13 @@ ipcMain.handle("mcd:setNodeKind", async (_e, kind, ack, patch) => {
   if (config.load().keyMode === "block" && !require("./keymode").jarSupportsBlock(path.join(path.dirname(node.jarPath()), k === "parlons" ? "parlons-node.jar" : "minima.jar")))
     throw new Error("This wallet uses block key uses, and that node cannot run it.");
   await mayStop(ack, "kind");
-  if (patch) saveConfigPatch(patch);   // Settings' heap size with it, saved only once the guard let the restart go (0.19.294)
-  config.save({ nodeKind: k });
-  chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
-  await node.restart();
-  return node.snapshot();
+  return held(async () => {
+    if (patch) saveConfigPatch(patch);   // Settings' heap size with it, saved only once the guard let the restart go (0.19.294)
+    config.save({ nodeKind: k });
+    chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
+    await node.restart();
+    return node.snapshot();
+  });
 });
 
 // JAR UPDATER DISABLED. The node jar is shipped with the app and is the only jar we run.
@@ -1031,10 +1039,12 @@ webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
 ipcMain.handle("mcd:wwEnableMegammr", async () => {
   await mayStop();   // main's own question when anything is in flight (0.19.268)
-  const c = config.load();
-  config.save({ params: Object.assign({}, c.params, { megammr: true }) });
-  await node.restart();
-  return node.snapshot();
+  return held(async () => {
+    const c = config.load();
+    config.save({ params: Object.assign({}, c.params, { megammr: true }) });
+    await node.restart();
+    return node.snapshot();
+  });
 });
 webwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:webwallet"); });
 

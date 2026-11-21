@@ -165,7 +165,7 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
     const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async (ack, action) => { acks.push(ack); actions.push(action); if (!allow) throw new Error("The node keeps running: nothing was stopped."); }, saveConfigPatch: () => did.push("save"),
       node: { state: "running", stop: async () => did.push("stop"), start: async () => did.push("start"), restart: async () => did.push("restart"), snapshot: () => ({}), parlonsBlocker: () => "", jarPath: () => "/x/minima.jar" },
       config: { load: () => ({ params: {}, keyMode: "classic" }), save: () => did.push("save") }, chat: { stopLoop() {}, forgetIdentity() {}, init: async () => {} },
-      pendingChatBackup: { contacts: [], messages: [], manifest: {} }, chatStore: { mergeBackup() {} }, fs: { mkdirSync() {}, writeFileSync() {}, renameSync() {} }, path, keetsKeypairFile: () => "/x/k", require };
+      pendingChatBackup: { contacts: [], messages: [], manifest: {} }, chatStore: { mergeBackup() {} }, fs: { mkdirSync() {}, writeFileSync() {}, renameSync() {} }, path, keetsKeypairFile: () => "/x/k", require, held: (op) => op() };   // held: 0.19.319
     new Function("env", "with (env) { " + calls[name] + "; }")(env);
     const args = name === "mcd:setNodeKind" ? [null, "minima", "ACK"] : [null, "ACK"];
     if (allow) { await h[name](...args).catch(() => {}); assert.ok(did.some(d => d === "stop" || d === "restart"), name + " stops or restarts the node once allowed"); }
@@ -178,12 +178,12 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
   for (const allow of [false, true]) {
     const did = [], h = {};
     new Function("env", "with (env) { " + calls["mcd:nodeRestart"] + "; }")({ ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
-      saveConfigPatch: (p) => did.push("save " + JSON.stringify(p)), node: { restart: async () => did.push("restart"), snapshot: () => ({}) } });
+      saveConfigPatch: (p) => did.push("save " + JSON.stringify(p)), node: { restart: async () => did.push("restart"), snapshot: () => ({}) }, held: (op) => op() });
     await h["mcd:nodeRestart"](null, "ACK", { contribute: true }).catch(() => {});
     assert.deepEqual(did, allow ? ["ask", 'save {"contribute":true}', "restart"] : ["ask"], allow ? "saved after the guard, before the restart" : "refused: nothing saved");
   }
-  assert.ok(/label: lang\.t\("Restart node"\), click: \(\) => \{ mayStop\(\)\.then\(\(\) => node\.restart\(\)\)/.test(src), "the tray's Restart node asks the guard first");
-  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command), command); }"), "a Terminal resync asks the guard first");
+  assert.ok(/label: lang\.t\("Restart node"\), click: \(\) => \{ mayStop\(\)\.then\(\(\) => held\(\(\) => node\.restart\(\)\)\)/.test(src), "the tray's Restart node asks the guard first");
+  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await held(() => runResync(command)), command); }"), "a Terminal resync asks the guard first");
   assert.ok(calls["mcd:inFlight"].includes('ack: w.any && how !== "quit" && /^(restart|stop|kind)$/.test(String(action)) ? stopGuard.issue(action) : ""'), "the ack is issued only with a warning that was shown, for its one action");
 });
 
@@ -199,9 +199,9 @@ test("main: quit, an archive / mysql / reset resync or import and a megammr impo
   walk(sf);
   for (const allow of [false, true]) for (const c of stopping.filter(x => !/megammrsync/.test(x))) {
     const sent = [], hs = {};
-    new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
       { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (x) => { sent.push(x); return {}; }, { rpcCall: async (p, s, x) => { sent.push(x); return { status: true }; } },
-      { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, x) => x, async () => { if (!allow) throw new Error("The node keeps running: nothing was stopped."); });
+      { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, x) => x, async () => { if (!allow) throw new Error("The node keeps running: nothing was stopped."); }, (op) => op());   // held: 0.19.319
     if (allow) { await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c + " runs once allowed"); }
     else { await assert.rejects(hs["mcd:cmd"](null, c), /nothing was stopped/, c); assert.deepEqual(sent, [], c + ": nothing reached the node"); }
   }
@@ -233,7 +233,7 @@ test("main: Restore from file asks the stop guard before its resync, and Apply a
     const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
       restore: { restoreBackup: async (o, d) => d.run("megammrsync action:resync host:h:1 file:b.bak") }, runResync: async (c) => { did.push("resync"); return {}; },
       config: { load: () => ({ keyMode: "classic", params: {} }), save: (p) => did.push("save " + JSON.stringify(p)) }, saveConfigPatch: (p) => did.push("patch " + JSON.stringify(p)),
-      node: { state: "running", blockKeysSupported: () => true, parlonsBlocker: () => "", jarPath: () => "/x/minima.jar", restart: async () => did.push("restart"), snapshot: () => ({}) }, chat: { stopLoop() {} }, walletWork: async () => [], path, require };
+      node: { state: "running", blockKeysSupported: () => true, parlonsBlocker: () => "", jarPath: () => "/x/minima.jar", restart: async () => did.push("restart"), snapshot: () => ({}) }, chat: { stopLoop() {} }, walletWork: async () => [], path, require, held: (op) => op() };
     for (const n of ["mcd:restoreBackup", "mcd:setNodeKind"]) new Function("env", "with (env) { " + calls[n] + "; }")(env);
     await h["mcd:restoreBackup"](null, { file: "b.bak" }).catch(() => {});
     assert.deepEqual(did, allow ? ["ask", "resync"] : ["ask"], "restore: " + allow); did.length = 0;

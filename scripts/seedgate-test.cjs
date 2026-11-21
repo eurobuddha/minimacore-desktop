@@ -632,3 +632,28 @@ test("a path with the NT prefix (\\??\\UNC\\host\\share, /??/UNC/…) is refused
   assert.deepEqual(sent, []);
   for (const c of ["txnimport file:/Users/me/x.txn", "txnimport file:C:" + B + "x.txn", "txnimport file:" + B + "x.txn"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
 });
+
+// ---- 0.19.319: what a yes let go that fails with the node still running ends the guard's hold: a retry is asked, not refused ----
+test("a stop the guard let go that failed with the node still running ends the hold: the retry is asked again (mcd:cmd, mcd:nodeRestart)", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), I = require("../main/inflight.js"), main = SRC("main/main.js"), hs = {};
+  const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
+  const node = { state: "running", rpcPort: () => 0 }; let asked = 0, reply = { status: false, error: "wrong password" };
+  const stopGuard = I.stopGuard({ running: () => node.state === "running", gather: async () => ({}), ask: async () => { asked++; return true; }, log() {} });   // nothing readable: always asked
+  const mayStop = async (ack, action) => { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); };
+  const at = main.indexOf("async function held(op) {"); assert.ok(at > 0, "main has held()");
+  const held = new Function("stopGuard", "node", main.slice(at, main.indexOf("\n}\n", at) + 2) + "\nreturn held;")(stopGuard, node);
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async () => reply },
+    node, { rpcSecret: () => "" }, async (run, c) => c, mayStop, held);
+  const cmd = "archive action:import file:/Users/me/a.raw";   // ends by stopping the node: asked first
+  assert.equal((await hs["mcd:cmd"](null, cmd)).status, false, "the node refused it and kept running");
+  assert.equal((await hs["mcd:cmd"](null, cmd)).status, false, "the retry is asked again, not refused for 30 s"); assert.equal(asked, 2);
+  reply = { status: true }; await hs["mcd:cmd"](null, cmd); assert.equal(asked, 3);
+  await assert.rejects(hs["mcd:cmd"](null, cmd), /already being stopped or restarted/, "a stop that went through still holds until the node has stopped");
+  stopGuard.seen("stopped");
+  const r0 = main.indexOf('ipcMain.handle("mcd:nodeRestart"'), line = main.slice(r0, main.indexOf("\n", r0));
+  new Function("ipcMain", "mayStop", "held", "saveConfigPatch", "node", line)({ handle: (n, f) => { hs[n] = f; } }, mayStop, held, () => { throw new Error("config.json could not be written"); }, node);
+  await assert.rejects(hs["mcd:nodeRestart"](null, null, { heap: 2048 }), /could not be written/);
+  await assert.rejects(hs["mcd:nodeRestart"](null, null, { heap: 2048 }), /could not be written/, "a settings save that threw: the retry is asked, not refused");
+  assert.equal(asked, 5);
+});

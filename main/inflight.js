@@ -133,6 +133,7 @@ function stopGuard(d) {
     // so two requests at once show one question and give one stop; and after a yes until the node has stopped (0.19.316, as
     // 0.18.253: at most 30 s, ended by the node's status through seen()), so one that comes between the yes and the stop is refused too
     seen(state) { if (state !== "running") wentAt = 0; },
+    release() { wentAt = 0; },   // what the yes let go failed with the node still running (0.19.319): a retry is asked, not refused
     async pass(ack, action) {
       if (!d.running()) return true;
       if (pending || (wentAt && now() - wentAt < HOLD_MS)) throw new Error(STOP_BUSY);
