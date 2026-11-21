@@ -3016,7 +3016,15 @@ async function renderSettings() {
     const nl = Object.assign({}, CFG.labels); delete nl[btn.dataset.addr];
     CFG = await api.saveConfig({ labels: nl }); toast(t("Label removed"), "ok"); renderSettings();
   });
-  el("setClearHist").onclick = async () => { await api.histClear(); toast(t("Local history cleared ✓"), "ok"); };
+  // asked first, with the JSON export offered (0.19.235): the node prunes old data, so this file may be the only record left
+  el("setClearHist").onclick = async () => {
+    const d = appDlg({ title: t("Clear local history?"), body: `<p>${th("Your transaction history on this computer is deleted. The node prunes old data, so it may be the only record of older transactions. Export it as JSON first if you may need it.")}</p>`,
+      buttons: [{ label: t("Cancel"), v: null }, { label: t("Export JSON first"), v: "export" }, { label: t("Clear history"), v: "clear" }] });
+    const v = await d.done;
+    if (v === "export") { await exportHistoryJson(); return; }
+    if (v !== "clear") return;
+    await api.histClear(); toast(t("Local history cleared ✓"), "ok");
+  };
   el("setGuard").onclick = async () => { CFG = await api.saveConfig({ coinGuard: CFG.coinGuard === false }); toast(CFG.coinGuard !== false ? t("Coin guard on") : t("Coin guard off: nothing is checked"), CFG.coinGuard !== false ? "ok" : "warn"); renderSettings(); };
   el("setGuardSends").onchange = async () => { CFG = await api.saveConfig({ coinGuardSends: el("setGuardSends").value }); toast(t("Sends and Consolidate: {coinGuardSends}", { coinGuardSends: CFG.coinGuardSends }), "ok"); };
   el("setGuardRelease").onclick = async () => {

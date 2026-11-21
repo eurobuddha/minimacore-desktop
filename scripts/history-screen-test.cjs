@@ -195,3 +195,17 @@ test("sync: an imported row does not stop the walk, so the node's own row is wri
   assert.deepEqual(added, [hexId(9), hexId(8)], "the new one and the imported one are written from the node; the walk stops at the first row the node gave before");
   assert.equal(r.completed, true);
 });
+
+// 0.19.235: Clear local history asks first and offers the JSON export
+test("Clear local history asks first, offering the JSON export; only Clear history clears", async () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "app.js"), "utf8");
+  const a = src.indexOf('  el("setClearHist").onclick = async () => {'), b = src.indexOf("\n  };", a) + 5;
+  const body = src.slice(a, b).replace('el("setClearHist").onclick = ', "return ");
+  for (const [answer, want] of [[null, []], ["export", ["export"]], ["clear", ["clear"]]]) {
+    const did = [];
+    const handler = new Function("el", "appDlg", "t", "th", "api", "toast", "exportHistoryJson", body)(null, (o) => { assert.ok(o.buttons.some(x => x.v === "export"), "the export is offered"); return { done: Promise.resolve(answer) }; },
+      (x) => x, (x) => x, { histClear: async () => { did.push("clear"); } }, () => {}, async () => { did.push("export"); });
+    await handler();
+    assert.deepEqual(did, want, String(answer));
+  }
+});
