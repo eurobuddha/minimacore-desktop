@@ -31,7 +31,9 @@ function create(io, t) {
     let can = false; try { can = !!io.can(); } catch (e) { can = false; }
     if (can) {
       let why = say(reason, tt); if (why.length > REASON_MAX) why = say(reason, fill);
-      try { await io.prompt(why.slice(0, REASON_MAX)); } catch (e) { throw new Error("Cancelled"); }
+      // The prompt shows what it is asked about in full or not at all (0.19.227, as released 0.18.196): never cut.
+      if (why.length > REASON_MAX) throw new Error("This is longer than the Touch ID prompt can show in full (120 characters, with the secret values hidden). Shorten it, for example by running it without optional parameters. Nothing was shown or run.");
+      try { await io.prompt(why); } catch (e) { throw new Error("Cancelled"); }
       try { io.markSeen(); } catch (e) {}   // only once a prompt has SUCCEEDED
       return { biometric: true };
     }

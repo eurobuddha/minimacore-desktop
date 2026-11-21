@@ -7,7 +7,7 @@ const G = require("../main/seedgate.js");
 const SRC = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 // CHANGED on purpose (0.19.187): read as the node reads a command (main/cmdverb.js), over-blocking: "vaults", "seedrandomx",
 // "keys action:genkeys" and "keys publickey:genkey" now count as gated (the node answers the first two as missingcmd anyway).
-const VECTORS = [["vault", "seed"], ["VAULT action:seed", "seed"], ["  Vault  action:wipekeys", "seed"], ["vault action:passwordlock password:x", "seed"], ["balance;vault", "seed"], ["balance ; VaUlT", "seed"],
+const VECTORS = [["vault", "seed"], ["VAULT action:seed", "seed"], ["  Vault  action:wipekeys", "change"], ["vault action:passwordlock password:x", "change"], ["balance;vault", "seed"], ["balance ; VaUlT", "seed"],
   ["seedrandom modifier:ethbridge", "key"], ["SEEDRANDOM", "key"], ["status;seedrandom modifier:x", "key"], ["seedrandom;vault", "seed"],
   ["keys action:genkey", "key"], ["KEYS Action:GenKey", "key"], ["status; keys action:\"genkey\"", "key"], ["keys action:list", null], ["keys", null], ["keys action:genkeys", "key"], ["keys publickey:genkey", "key"],
   ["vaults", "seed"], ["balance vault", null], ["send amount:1 address:vault", null], ["", null], ["status", null], ["seedrandomx", "key"], [";;", null],
@@ -162,7 +162,7 @@ test("main: the general command channel refuses vault and seedrandom without a p
   }
   const app = SRC("renderer/app.js"), run = app.slice(app.indexOf("async function termRun()"), app.indexOf("function renderTerminal()"));
   assert.ok(run.indexOf("try { r = await api.cmd(c); } catch (x) { err = x; }") < run.indexOf("if (secret) {"), "main is asked first: its refusal decides");
-  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : null;/.test(run), "decided by main's code, never by words on screen or a reader of its own");
+  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : MainSaid\.has\(raw, "SG_GATED_CHANGE"\) \? "change" : null;/.test(run), "decided by main's code, never by words on screen or a reader of its own");
   assert.ok(run.indexOf("if (secret) {") < run.indexOf("TERM_HIST.push(c)") && /secretReveal\(c, JSON\.stringify\(r, null, 2\), !!\(g && g\.system\)\);[^\n]*\n\s*\}\);\n\s*return;\n\s*\}/.test(run), "a secret command returns before the history and the output");
   assert.ok(/appendTerm\(c\.split\(\/\\s\+\/\)\[0\], "cmd"\)/.test(run), "only its verb is shown in the output");
   const reveal = app.slice(app.indexOf("function secretReveal("), app.indexOf("// Export: the phone asks"));
@@ -171,25 +171,39 @@ test("main: the general command channel refuses vault and seedrandom without a p
 });
 
 // ---- 0.19.188: the system check names the exact, whole command (released 0.18.176, 0.18.184, 0.18.186) ----
-test("a gated command is shown whole: over 80 characters or a repeated parameter is refused (the node keeps the last); a box where there is no Touch ID", async () => {
+// CHANGED on purpose (0.19.227, released 0.18.196): no 80-character cap; secret values hidden; only Touch ID refuses what it cannot show
+test("a gated command is shown whole with its secret values hidden: a repeated parameter is refused; Touch ID refuses what it cannot show; a box shows any length", async () => {
   for (const mac of [true, false]) {
     const sys = os({ can: mac }), g = G.create(sys);
     const hidden = "keys action:list" + " ".repeat(mac ? 70 : 600) + "action:genkey";
     await assert.rejects(g.open(hidden, "SHOW KEY"), /names action more than once \(the node would keep only the last\)/, "shown as keys action:list, run as genkey");
     assert.deepEqual([sys.asked, sys.boxes], [[], []], "nothing was asked"); assert.notEqual(G.refusal(hidden, g.take), "", "and it does not run");
-    await assert.rejects(g.open("keys action:genkey phrase:" + "x".repeat(80), "SHOW KEY"), /longer than the check can show in full \(80 characters\)/);
+    const longOne = "keys action:genkey keyuses:" + "1".repeat(120) + ' phrase:"a b c d e f g h i j k l"';
+    if (mac) await assert.rejects(g.open(longOne, "SHOW KEY"), /longer than the Touch ID prompt can show in full \(120 characters, with the secret values hidden\)/);
+    else { await g.open(longOne, "SHOW KEY"); assert.ok(sys.boxes[0].includes("1".repeat(120)) && sys.boxes[0].includes("phrase:•••") && !sys.boxes[0].includes("a b c"), "a box shows it whole, the phrase hidden"); sys.boxes.length = 0; g.take(""); }
     for (const dup of ["vault action:seed action:wipekeys", 'keys action:genkey "action":list', "seedrandom modifier:a modifier : b"]) await assert.rejects(g.open(dup, dup.startsWith("vault") ? "SHOW SEED" : "SHOW KEY"), /more than once/, dup);
     const c = "keys   action:genkey\u202e  phrase:x";
     await g.open(c, "SHOW KEY");
     const text = mac ? sys.asked[0] : sys.boxes[0];
-    assert.equal(text, mac ? "show a private key by running: keys action:genkey phrase:x" : "This shows a private key. This Terminal command will run once:\n\nkeys action:genkey phrase:x", "the whole command, white space collapsed, the bidi control a space");
+    assert.equal(text, mac ? "show a private key by running: keys action:genkey phrase:•••" : "This shows a private key. This Terminal command will run once:\n\nkeys action:genkey phrase:•••", "the whole command, white space collapsed, the bidi control a space, the phrase's value hidden");
     assert.notEqual(G.refusal("keys action:genkey phrase:x", g.take), "", "the pass is for the exact original text only");
     await g.open(c, "SHOW KEY"); assert.equal(G.refusal(c, g.take), "");
   }
-  // a translated reason never cuts the command: past 120 characters the English is said
+  // a translated reason never cuts the command: past 120 characters the English is said; past 120 in English, refused
   const asked = [], long = SC.create({ can: () => true, prompt: async (w) => { asked.push(w); }, markSeen() {} }, () => "x".repeat(130));
   await long.check(["show a private key by running: {command}", { command: "k".repeat(80) }], "d");
   assert.equal(asked[0], "show a private key by running: " + "k".repeat(80));
+  await assert.rejects(long.check(["show a private key by running: {command}", { command: "k".repeat(100) }], "d"), /longer than the Touch ID prompt can show in full/);
+  assert.equal(asked.length, 1, "never a cut prompt");
+  // the third kind: vault actions that change the keys, behind CHANGE KEYS
+  for (const c of ["vault action:wipekeys", "vault action:restorekeys phrase:\"a b\"", "vault action:passwordlock password:x", '"vault" action : passwordunlock password:x', "vault action:testphrase phrase:a"]) assert.equal(G.classify(c).kind, "change", c);
+  assert.equal(G.classify("vault").kind, "seed"); assert.equal(G.classify("vault action:seed").kind, "seed"); assert.equal(G.classify("vault action:wipekeys;vault").kind, "seed", "the strongest kind");
+  assert.equal(G.refusal("vault action:wipekeys", () => false), "This vault command changes this wallet's keys or their lock. Type CHANGE KEYS in the Terminal to run it.");
+  const cs = os({ can: false }), cg = G.create(cs);
+  await assert.rejects(cg.open("vault action:restorekeys phrase:\"a b\"", "SHOW SEED"), /Type CHANGE KEYS exactly/);
+  await cg.open("vault action:restorekeys phrase:\"a b\"", "CHANGE KEYS");
+  assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:•••");
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••".replace("seed:", "seed : "));
 });
 
 test("syscheck: refused (not phrase only) once Touch ID worked here and cannot be asked; the marker is written only after a prompt succeeded and names this Mac", async () => {

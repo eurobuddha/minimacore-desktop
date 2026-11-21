@@ -2784,7 +2784,7 @@ async function termRun() {
   inp.value = ""; termSugClose();
   let r, err = null;
   try { r = await api.cmd(c); } catch (x) { err = x; }
-  const raw = err ? ipcRaw(err) : "", secret = MainSaid.has(raw, "SG_GATED_SEED") ? "seed" : MainSaid.has(raw, "SG_GATED_KEY") ? "key" : null;
+  const raw = err ? ipcRaw(err) : "", secret = MainSaid.has(raw, "SG_GATED_SEED") ? "seed" : MainSaid.has(raw, "SG_GATED_KEY") ? "key" : MainSaid.has(raw, "SG_GATED_CHANGE") ? "change" : null;
   if (secret) {
     appendTerm(c.split(/\s+/)[0], "cmd");
     secretAsk(secret, c, async (typed) => {
@@ -3547,8 +3547,8 @@ async function ewSettingsDialog(b) {
 /** The question before a secret is shown (0.19.176): what it is, then the phrase to type (SHOW SEED for the seed, SHOW KEY for a
  *  key), checked in the main process by go(typed); a refusal is said and the question stays. */
 function secretAsk(kind, title, go) {
-  const phrase = kind === "seed" ? "SHOW SEED" : "SHOW KEY"; let busy = false;
-  appDlg({ title, body: `<p>${th("This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.")}</p>
+  const phrase = kind === "seed" ? "SHOW SEED" : kind === "change" ? "CHANGE KEYS" : "SHOW KEY"; let busy = false;
+  appDlg({ title, body: `<p>${kind === "change" ? th("This command changes this wallet's keys or their lock: it can lock, unlock, wipe or restore the keys that hold your coins, and it may carry your seed phrase or password. Only continue if you know exactly why you need it.") : th("This shows what controls your funds. Anyone who sees it can take them, permanently and irreversibly. Only continue if you are alone and know exactly why you need it.")}</p>
       <label class="adlg__lbl" for="secretIn">${tr("Type {exportphrase} to confirm it's you", { exportphrase: esc(phrase) })}</label>
       <input class="adlg__in" id="secretIn" autocomplete="off" spellcheck="false" />`,
     buttons: [{ label: t("Cancel"), v: null }, { label: t("I understand, show it"), on: async (_root, close) => {

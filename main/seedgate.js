@@ -10,14 +10,18 @@
  * sys = main/syscheck.js (check(reason, detail) -> { biometric }); run(command) -> the node's reply.
  */
 "use strict";
-const SEED_PHRASE = "SHOW SEED", KEY_PHRASE = "SHOW KEY", PASS_MS = 60000;
+const SEED_PHRASE = "SHOW SEED", KEY_PHRASE = "SHOW KEY", CHANGE_PHRASE = "CHANGE KEYS", PASS_MS = 60000;
+const PHRASE = { seed: SEED_PHRASE, key: KEY_PHRASE, change: CHANGE_PHRASE };
+// vault actions that change the wallet's keys or their lock rather than show the seed (0.19.227, as released 0.18.196); resetkeys
+// never gets here: the command channel refuses it (main/restore.js replacesKeysElsewhere)
+const CHANGE_ACTIONS = new Set(["wipekeys", "restorekeys", "passwordlock", "passwordunlock", "resetkeys", "testphrase"]);
 
 const V = require("./cmdverb");
 /** The secret kind of ONE command (no ";"): "seed", "key" or "". Read the way the node reads it, over-blocking
  *  (main/cmdverb.js, 0.19.187, as the released desktop's cmdgate.js 0.18.174: `"vault"`, a control character before
  *  vault, va"ul"t, keys "action":genkey and keys action :genkey were run by the node and passed the old split on spaces). */
 function kindOf(part) {
-  if (V.beginsAs(part, "vault")) return "seed";
+  if (V.beginsAs(part, "vault")) { const a = V.paramValue(part, "action"); return a != null && CHANGE_ACTIONS.has(V.fold(a)) ? "change" : "seed"; }
   if (V.beginsAs(part, "seedrandom")) return "key";
   if (V.beginsAs(part, "keys") && /genkey/.test(V.fold(String(part).replace(/"/g, "")))) return "key";
   return "";
@@ -26,10 +30,11 @@ function kindOf(part) {
 function classify(command) {
   const parts = V.parts(command);
   let kind = "";
-  for (const p of parts) { const k = kindOf(p); if (k === "seed" || (k && !kind)) kind = k; }
+  const rank = { "": 0, change: 1, key: 2, seed: 3 };
+  for (const p of parts) { const k = kindOf(p); if (rank[k] > rank[kind]) kind = k; }
   return { kind, chain: parts.length > 1 };
 }
-/** "seed", "key" or null (any command of a ";" chain counts). */
+/** "seed", "key", "change" or null (any command of a ";" chain counts). */
 function secretKind(command) { return classify(command).kind || null; }
 const CHAIN = "vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.";
 /** Why the general command channel refuses this command ("" = it may run). take: the gate's take. A chain that holds a
@@ -40,15 +45,22 @@ function refusal(command, take) {
   if (chain) return CHAIN;
   if (take(command)) return "";
   return kind === "seed" ? "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it."
+    : kind === "change" ? "This vault command changes this wallet's keys or their lock. Type CHANGE KEYS in the Terminal to run it."
     : "vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.";
 }
 const { N_ } = require("./lang").I18N;
-const SHOW_MAX = 80;   // what a Touch ID prompt can show of a command after its fixed words (the system cuts its reason at 120)
+/** The command as the check shows it (0.19.227, as released 0.18.196): control and bidirectional characters as spaces,
+ *  white space collapsed, and the VALUES of phrase, password, confirm and seed hidden, quoted or not. */
+function masked(c) {
+  return String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
+    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)("[^"]*"|\S+)/gi, "$1•••")
+    .replace(/\s+/g, " ").trim();
+}
 /** The typed phrase, then the system's own check (main/syscheck.js, 0.19.188: Touch ID; refused while a Touch ID that
  *  worked before cannot be asked; a message box naming what is shown where there never was one). what = { reason, detail }
  *  as syscheck takes them. -> whether a Touch ID check took place. */
 async function check(typed, kind, sys, what) {
-  const want = kind === "seed" ? SEED_PHRASE : KEY_PHRASE;
+  const want = PHRASE[kind];
   if (String(typed == null ? "" : typed).trim() !== want) throw new Error("Type " + want + " exactly to continue.");
   return (await sys.check(what.reason, what.detail)).biometric === true;
 }
@@ -63,15 +75,17 @@ function create(sys, now) {
     pass = null;
     const c = String(command == null ? "" : command), { kind, chain } = classify(c); if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error(CHAIN);
-    const shown = c.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ").replace(/\s+/g, " ").trim();
-    const want = kind === "seed" ? SEED_PHRASE : KEY_PHRASE;
-    if (String(typed == null ? "" : typed).trim() !== want) throw new Error("Type " + want + " exactly to continue.");
-    if (shown.length > SHOW_MAX) throw new Error("This command is longer than the check can show in full (80 characters). Shorten it and run it again. Nothing was run.");
+    // a repeated parameter first (released 0.18.202): what the phrase is depends on the action, and the node keeps the last
     const twice = V.repeated(c);
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");
-    const p = { command: shown };
+    const want = PHRASE[kind];
+    if (String(typed == null ? "" : typed).trim() !== want) throw new Error("Type " + want + " exactly to continue.");
+    // shown with its secret values hidden and no length cap of its own (0.19.227): a message box shows any length; only
+    // the Touch ID prompt, which cannot show more than 120 characters, refuses what it cannot show whole (main/syscheck.js)
+    const p = { command: masked(c) };
     const system = await check(typed, kind, sys, kind === "seed"
       ? { reason: [N_("show a seed phrase by running: {command}"), p], detail: [N_("This shows a seed phrase. This Terminal command will run once:\n\n{command}"), p] }
+      : kind === "change" ? { reason: [N_("change this wallet's keys by running: {command}"), p], detail: [N_("This changes this wallet's keys or their lock. This Terminal command will run once:\n\n{command}"), p] }
       : { reason: [N_("show a private key by running: {command}"), p], detail: [N_("This shows a private key. This Terminal command will run once:\n\n{command}"), p] });
     pass = { command: c, until: clock() + PASS_MS };
     return { system };
@@ -87,4 +101,4 @@ async function revealSeed(typed, sys, run) {
   if (typeof phrase !== "string" || !phrase) throw new Error("Couldn't read the seed.");
   return { phrase, system };
 }
-module.exports = { secretKind, classify, refusal, create, revealSeed, SEED_PHRASE, KEY_PHRASE, PASS_MS, SHOW_MAX };
+module.exports = { secretKind, classify, refusal, create, revealSeed, masked, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };
