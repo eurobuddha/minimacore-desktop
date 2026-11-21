@@ -218,7 +218,7 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "vestr.js"), "utf8");
   assert.equal(require("crypto").createHash("sha256").update(vestr.CLEAN_SCRIPT).digest("hex"), "ec2dfe508c24ea1c46431a3629ac391ffdeb03f8bcb7c107d52e004b48f6fb11", "the covenant text");
   assert.equal(vestr.CONTRACT, "0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE");
-  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "bdb1b8001545eec763598ef481348c9c92688d323c6737096efc9d28144ffed0", "main/vestr.js is the file of 0.19.196 (changed on purpose: 0.19.194 every command through rpc.oneCommand, 0.19.196 a password with ; refused in plain words; before that, of 0.19.107)");
+  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "4ab2bcdb39124997d8f684b55f1e890245ca08f3393d57bfb1fa1892120ed236", "main/vestr.js is the file of 0.19.239 (changed on purpose: 0.19.194 oneCommand, 0.19.196 a password with ; refused, 0.19.239 chain state checked before commands, status true at each step, an unanswered post or lock may have gone, exact units, grace a whole number; before that, of 0.19.107)");
   const state = [[0, BEN], [1, "1000"], [2, "2400000"], [3, "2555520"], [4, "1728"], [5, "1"], [6, "2"], [7, "24"], [8, "3"], [199, "0xUID"]].map(([port, data]) => ({ port, data }));
   const reg = createRegistry({ now: () => 1e12, log: () => {}, sends: "enforce" });
   // another owner holds an unrelated wallet coin: the guard is awake, and still passes every Vestr command unchanged

@@ -137,3 +137,32 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
   await assert.rejects(ww.derive("alpha beta"), /node's keys could not be read/);
   assert.ok(!/vault action:seed/.test(rd("main/webwallet.js")), "the vault is no longer asked");
 });
+
+// ---- 0.19.239: Vestr checks what the chain wrote before any command; an unanswered lock or post may have gone ----
+test("Vestr: a contract coin with a malformed state signs nothing; an unanswered post or lock is 'may have gone'; grace is a whole number; collected is exact", async () => {
+  const vestr = require("../main/vestr"), sent = [], COIN = "0x" + "C9".repeat(32), BEN = "0x" + "BE".repeat(32);
+  const st = (o) => [0, 1, 2, 3, 4, 5, 6, 7, 8, 199].map(p => ({ port: p, data: Object.hasOwn(o, p) ? o[p] : (p === 0 ? BEN : p === 199 ? "0x01" : "10") }));
+  let state = st({}), postMode = "ok";
+  vestr._setRunner(async (c) => {
+    sent.push(c);
+    if (c.startsWith("newscript")) return { status: true, response: { address: vestr.CONTRACT } };
+    if (c.startsWith("block")) return { status: true, response: { block: 100 } };
+    if (c.startsWith("coins coinid:")) return { status: true, response: [{ coinid: COIN, tokenid: "0x00", amount: "10", created: 1, state }] };
+    if (c.startsWith("runscript")) return { status: true, response: { variables: { cancollect: "4", change: "6" } } };
+    if (c.startsWith("txnpost")) { if (postMode === "throw") throw new Error("RPC timeout"); if (postMode === "garbled") return "not json"; return { status: true }; }
+    if (c.startsWith("checkaddress")) return { status: true, response: { "0x": BEN } };
+    if (c.startsWith("send ")) throw new Error("RPC timeout");
+    return { status: true, response: {} };
+  });
+  for (const bad of [{ 0: "MxNOTHEX" }, { 3: "10 address:0xEVIL" }, { 7: "a\"b" }]) {
+    state = st(bad); sent.length = 0;
+    await assert.rejects(vestr.collect(COIN), /state is not one this app can carry\. Nothing was signed/, JSON.stringify(bad));
+    assert.ok(!sent.some(c => c.startsWith("txn")), "no transaction built: " + JSON.stringify(bad));
+  }
+  state = st({});
+  for (const m of ["throw", "garbled"]) { postMode = m; await assert.rejects(vestr.collect(COIN), (e) => e.ambiguous === true && /may have gone/.test(e.message), m); }
+  postMode = "ok"; assert.deepEqual(await vestr.collect(COIN), { ok: true, collected: "4", tokenid: "0x00" });
+  for (const g of ["1e3", "2.5", "-1", "x"]) await assert.rejects(vestr.create({ tokenid: "0x00", amount: "1", beneficiary: BEN, startMs: 1, endMs: 2, graceHours: g }), /grace period must be a whole number of hours/, g);
+  await assert.rejects(vestr.create({ tokenid: "0x" + "7D".repeat(32), amount: "1", beneficiary: BEN, startMs: Date.now() + 1000, endMs: Date.now() + 9e6, graceHours: "24" }), (e) => e.ambiguous === true && /lock may have gone/.test(e.message));
+  const src = rd("main/vestr.js"); assert.ok(src.includes("const collected = decSub(total, amount);"), "collected in exact units");
+});

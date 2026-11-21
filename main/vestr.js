@@ -95,7 +95,7 @@ async function contractFromCoin(coin, tp) {
   const expired = String(v.contractexpired) === "TRUE" || tp >= endBlock;
   const cliffed = String(v.cliffed) === "TRUE" || tp < startBlock;
   const mustwait = String(v.mustwait) === "TRUE";
-  const collected = String(Math.max(0, num(total) - num(amount)));
+  const collected = decSub(total, amount);   // exact units (0.19.239: a float difference rounded)
   const pct = num(total) > 0 ? Math.max(0, Math.min(100, Math.round((num(total) - num(amount)) / num(total) * 100 + (num(cancollect) / num(total)) * 100))) : 0;
   return {
     coinid: coin.coinid, tokenid: coin.tokenid, uid: stateVar(coin, 199),
@@ -117,12 +117,23 @@ async function list() {
   return out.sort((a, b) => (b.createdMs || 0) - (a.createdMs || 0));
 }
 
+/** a - b as exact decimal text, never below 0; "0" when either is not a plain decimal (0.19.239). */
+function decSub(a, b) {
+  const P = (v) => { const m = /^([0-9]{1,60})(?:\.([0-9]{1,60}))?$/.exec(String(v)); return m ? [m[1], m[2] || ""] : null; };
+  const A = P(a), B = P(b); if (!A || !B) return "0";
+  const dp = Math.max(A[1].length, B[1].length), x = BigInt(A[0] + A[1].padEnd(dp, "0")) - BigInt(B[0] + B[1].padEnd(dp, "0"));
+  if (x <= 0n) return "0";
+  const t = x.toString().padStart(dp + 1, "0"), i = dp ? t.slice(0, -dp) : t, f = dp ? t.slice(-dp).replace(/0+$/, "") : "";
+  return f ? i + "." + f : i;
+}
+const PLAIN = /^[0-9]{1,60}(\.[0-9]{1,60})?$/, HEX64 = /^0x[0-9A-Fa-f]{64}$/, STATE_OK = /^[0-9A-Za-z.]{1,200}$/;
+
 // ---- balances / tokens for the Create picker ----
 async function tokens() {
   await init();
   const r = await runner("balance").catch(() => null);
   const rows = (r && Array.isArray(r.response)) ? r.response : [];
-  return rows.map(b => ({ tokenid: b.tokenid, name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid).slice(0, 10)), sendable: String(b.sendable) }));
+  return rows.map(b => ({ tokenid: b.tokenid, name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid)), sendable: String(b.sendable) }));
 }
 async function myAddress() { const r = await runner("getaddress").catch(() => null); return r && r.response && (r.response.miniaddress || r.response.address) || ""; }
 
@@ -142,9 +153,10 @@ async function create(opts) {
   if (password != null && password !== "" && String(password).includes(";")) throw new Error("The wallet password can't contain ; (the node would read what follows as a second command). Nothing was sent.");   // 0.19.196, as released 0.18.188
   if (password != null && password !== "" && !V.isQuotableText(String(password))) throw new Error("The wallet password can't contain quotes, backslashes or line breaks");
   if (!(Number(endMs) > Number(startMs))) throw new Error("End must be after start");
+  if (graceHours != null && graceHours !== "" && !/^[0-9]{1,6}$/.test(String(graceHours))) throw new Error("The grace period must be a whole number of hours.");   // 0.19.239: "1e3" or "2.5" was read as a number
   const chk = await runner("checkaddress address:" + beneficiary).catch(() => null);
   const addr0x = chk && chk.response && chk.response["0x"];
-  if (!addr0x) throw new Error("Invalid beneficiary address");
+  if (!addr0x || !HEX64.test(String(addr0x))) throw new Error("Invalid beneficiary address");
   const tp = await tip();
   const startBlock = await blockHeightForDate(startMs, tp), endBlock = await blockHeightForDate(endMs, tp);
   const minblockwait = Math.floor((Number(graceHours) || 0) * 3600 / SECONDS_PER_BLOCK);
@@ -154,8 +166,10 @@ async function create(opts) {
   let cmd = "send debug:false " + (password ? 'password:"' + password + '" ' : "") + "amount:" + amount + " address:" + CONTRACT + " tokenid:" + tokenid + " state:" + state;
   if (burn && Number(burn) > 0) cmd += " burn:" + burn;
   if (tokenid === "0x00") cmd = await pinMinimaSend(runner, cmd, { minCoinage: 3 });   // MINIMA lock: dodge shared-node beacon-dust NPE
-  const res = await runner(cmd);
-  if (res && (res.status || res.pending)) { emitter.emit("update"); return { ok: true, uid }; }
+  let res;
+  try { res = await runner(cmd); }
+  catch (e) { const amb = new Error("The node did not answer, so the lock may have gone. Check Vestr and your balance before you lock again."); amb.ambiguous = true; throw amb; }   // 0.19.239: never a clean failure
+  if (res && (res.status === true || res.pending === true)) { emitter.emit("update"); return { ok: true, uid }; }
   throw new Error((res && res.error) || "Lock failed");
 }
 
@@ -175,6 +189,10 @@ async function collect(coinid, burn) {
   const change = String(v.change != null ? v.change : "0");
   if (!(Number(cancollect) > 0)) throw new Error("Nothing available to collect yet");
   const withdrawalAddress = stateVar(coin, 0), tokenid = coin.tokenid;
+  // what the chain wrote goes into commands only in its shape (0.19.239): anyone can make a coin at the contract
+  if (!HEX64.test(String(withdrawalAddress)) || !/^0x[0-9A-Fa-f]{2,64}$/.test(String(tokenid)) || !PLAIN.test(cancollect) || !PLAIN.test(change)
+    || [0, 1, 2, 3, 4, 5, 6, 7, 8, 199].some(pt => !STATE_OK.test(String(stateVar(coin, pt)))))
+    throw new Error("This contract coin's state is not one this app can carry. Nothing was signed.");
   const id = "vc" + Math.floor(Math.random() * 1e9);
   const cmds = [];
   cmds.push("txncreate id:" + id);
@@ -184,7 +202,13 @@ async function collect(coinid, burn) {
   for (const p of [0, 1, 2, 3, 4, 5, 6, 7, 8, 199]) cmds.push("txnstate id:" + id + " port:" + p + " value:" + stateVar(coin, p));
   cmds.push("txnpost id:" + id + (burn && Number(burn) > 0 ? " burn:" + burn : ""));
   try {
-    for (const c of cmds) { const r = await runner(c); if (r && r.status === false && !r.pending) { await runner("txndelete id:" + id).catch(() => {}); throw new Error("collect step failed: " + (r.error || c.split(" ")[0])); } }
+    // 0.19.239: each step must answer status true; a txnpost with no readable answer may have gone (never "failed", never retried blind)
+    for (const c of cmds) {
+      const post = c.startsWith("txnpost ");
+      let r; try { r = await runner(c); } catch (e) { if (post) { const amb = new Error("The node did not answer the collect, so it may have gone. Check Vestr before you collect again."); amb.ambiguous = true; throw amb; } throw e; }
+      if (!r || typeof r.status !== "boolean") { if (post) { const amb = new Error("The node did not answer the collect, so it may have gone. Check Vestr before you collect again."); amb.ambiguous = true; throw amb; } throw new Error("collect step failed: " + c.split(" ")[0]); }
+      if (r.status !== true) throw new Error("collect step failed: " + (r.error || c.split(" ")[0]));
+    }
     emitter.emit("update");
     return { ok: true, collected: cancollect, tokenid };
   } finally { await runner("txndelete id:" + id).catch(() => {}); }

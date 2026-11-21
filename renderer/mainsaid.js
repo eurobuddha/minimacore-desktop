@@ -300,6 +300,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["VESTR_TOKEN", I18N.N_("Invalid token id")],
     ["VESTR_BURN", I18N.N_("Invalid burn amount")],
     ["VESTR_PASSWORD", I18N.N_("The wallet password can't contain quotes, backslashes or line breaks")],
+    ["VESTR_GRACE", I18N.N_("The grace period must be a whole number of hours.")],
+    ["VESTR_LOCK_MAYBE", I18N.N_("The node did not answer, so the lock may have gone. Check Vestr and your balance before you lock again.")],
+    ["VESTR_COLLECT_MAYBE", I18N.N_("The node did not answer the collect, so it may have gone. Check Vestr before you collect again.")],
+    ["VESTR_STATE_BAD", I18N.N_("This contract coin's state is not one this app can carry. Nothing was signed.")],
     ["VESTR_PASSWORD_SEMI", I18N.N_("The wallet password can't contain ; (the node would read what follows as a second command). Nothing was sent.")],
     // ---- Chat (main/chat.js, 0.19.196): a path a node command cannot carry, said before anything is sent ----
     ["CHAT_PATH", I18N.N_("This file's name or folder holds a ; or a \" , which a node command cannot carry. Rename the file or move it to another folder, then try again.")],
