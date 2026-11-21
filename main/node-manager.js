@@ -500,13 +500,16 @@ class NodeManager extends EventEmitter {
     } catch (e) {}
     if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
     // Output still arriving from a process a NEW start has replaced is not mixed into the new one's lines (0.19.173).
-    p.stdout.on("data", d => { if (!this.proc || this.proc === p) this.nodeSaid("out", d); });
-    p.stderr.on("data", d => { if (!this.proc || this.proc === p) this.nodeSaid("err", d); });
+    // UTF-8 decoded across chunks (0.19.253, as released 0.18.200): a character split between two chunks was two replacement characters.
+    const { StringDecoder } = require("string_decoder"), dec = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
+    const text = (k, d) => (typeof d === "string" ? d : dec[k].write(d));
+    p.stdout.on("data", d => { const s = text("out", d); if (!this.proc || this.proc === p) this.nodeSaid("out", s); });
+    p.stderr.on("data", d => { const s = text("err", d); if (!this.proc || this.proc === p) this.nodeSaid("err", s); });
     // The unfinished last line of each stream is written out on "close", once both streams have ended (0.19.173). On
     // "exit" the pipes may still hold output: what came after it was kept back for a line end that never comes.
     p.on("close", () => {
       if (this.proc && this.proc !== p) return;   // a new start has its own buffers now
-      for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.nodeLine(rest, k); }   // a last line with no line end
+      for (const k of ["out", "err"]) { const rest = this.carry[k] + dec[k].end(); this.carry[k] = ""; if (rest) this.nodeLine(rest, k); }   // a last line with no line end
     });
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     p.on("exit", (code, sig) => {

@@ -948,6 +948,17 @@ test("the node's last line with no line end is logged on close, with what arrive
   assert.ok(m.logs.includes("[app-test] new node, unfinished line") && !m.logs.some(l => l.includes("OLD OUTPUT")));
   c2.restore();
 });
+// 0.19.253 (as released 0.18.200): the node's output is UTF-8 decoded across chunks
+test("a character split between two chunks of the node's output is logged whole", async () => {
+  classicParlons();
+  const m = manager(true), calls = fakeJava(m);
+  await m.start();
+  const p = calls.proc, b = Buffer.from("[app-test] caf\u00e9 \u2713 done\n", "utf8"), cut = b.indexOf(0xc3) + 1;
+  p.stdout.emit("data", b.subarray(0, cut)); p.stdout.emit("data", b.subarray(cut, cut + 3)); p.stdout.emit("data", b.subarray(cut + 3));
+  assert.ok(m.logs.includes("[app-test] caf\u00e9 \u2713 done"), m.logs.slice(-3).join(" | "));
+  assert.ok(!m.logs.some(l => l.includes("\ufffd")), "no replacement character");
+  calls.restore();
+});
 // ---- 0.19.219: no settle and no release while the wallet-replacing megammrsync is still at the node, or unanswered ----
 test("0.19.219: the health poll does not release the held engines while the megammrsync is in flight; an unanswered one keeps them held until the node is started again", async () => {
   let answer = null;
