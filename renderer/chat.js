@@ -482,8 +482,10 @@
     const label = token === "mxusd" ? "MxUSD" : "Minima";
     const amt = await D.showPrompt("Send " + label + " to " + addr, "", "amount", { message: "This sends real " + label + " from this node's wallet." });
     if (!amt) return;
-    try { await D.api.chatSendPayment(sel, amt.trim(), token); D.toast(label + " payment sent", "ok"); }
-    catch (e) { D.toast("Payment failed: " + (e.message || e), "err"); }
+    try { const r = await D.api.chatSendPayment(sel, amt.trim(), token);
+      if (r && r.receiptFailed) D.toast(label + " payment sent (transaction " + (r.txid || "id not returned") + "), but the note to your contact did not go: " + r.error, "err");
+      else D.toast(label + " payment sent", "ok"); }
+    catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, ""); D.toast(/may have been sent/.test(m) ? m : "Payment failed: " + m, "err"); }
     await refreshThreads(); renderContacts(); await renderMsgs(true);
   }
 

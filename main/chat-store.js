@@ -15,16 +15,20 @@ const MAX_MESSAGES = 50000;
 let mem = null;   // { messages:{ msgid:msg }, contacts:{ pubkey:{pubkey,name,maximapk} }, meta:{} }
 let writeTimer = null;
 
+// Keyed by a peer's ids, so every map has no prototype (0.18.207): a message id or ref of "__proto__" is an ordinary key,
+// never Object.prototype (a peer's "delivered" receipt with ref "__proto__" wrote into every object of the process).
+const dict = (o) => Object.assign(Object.create(null), o && typeof o === "object" && !Array.isArray(o) ? o : {});
+const REF_MAX = 200;   // a message id the app makes is far shorter
 function filePath() { return path.join(app.getPath("userData"), "chat.json"); }
 function ensureLoaded() {
   if (mem) return;
-  mem = { messages: {}, contacts: {}, meta: {} };
+  mem = { messages: dict(), contacts: dict(), meta: dict() };
   let raw = null;
   try { raw = fs.readFileSync(filePath(), "utf8"); }
   catch (e) { return; }   // ENOENT → first run
   try {
     const j = JSON.parse(raw);
-    if (j) { mem.messages = j.messages || {}; mem.contacts = j.contacts || {}; mem.meta = j.meta || {}; }
+    if (j) { mem.messages = dict(j.messages); mem.contacts = dict(j.contacts); mem.meta = dict(j.meta); }
   } catch (e) {
     // existing-but-unparseable: preserve aside, never clobber (mail-store rule)
     try { fs.renameSync(filePath(), filePath() + ".corrupt-" + Date.now()); } catch (e2) { /* best effort */ }
@@ -96,11 +100,19 @@ function markPeerRead(pubkey, uptoTs) {
 }
 function setStatus(msgid, patch) {
   ensureLoaded();
-  const m = mem.messages[msgid];
+  const m = Object.hasOwn(mem.messages, msgid) ? mem.messages[msgid] : null;
   if (!m) return false;
   Object.assign(m, patch);
   persistSoon();
   return true;
+}
+/** A peer's "delivered" receipt: only MY outgoing message TO THAT PEER moves to delivered (0.18.207). */
+function markDelivered(ref, fromPubkey) {
+  ensureLoaded();
+  if (typeof ref !== "string" || !ref || ref.length > REF_MAX || !Object.hasOwn(mem.messages, ref)) return false;
+  const m = mem.messages[ref];
+  if (!m || m.incoming || m.pubkey !== fromPubkey) return false;
+  m.status = "delivered"; persistSoon(); return true;
 }
 
 // contacts — pubkey is the keets pubkey (0x + 64 hex, stored and shown IN FULL);
@@ -141,7 +153,7 @@ function mergeBackup(contacts, messages, payaddr, myname) {
   fs.writeFileSync(tmp, JSON.stringify({ version: 1, messages: mem.messages, contacts: mem.contacts, meta: mem.meta }));
   fs.renameSync(tmp, filePath());
 }
-function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
+function clear() { mem = { messages: dict(), contacts: dict(), meta: dict() }; persistSoon(); }
 
-module.exports = { addMessage, threadRows, thread, deleteThread, markThreadRead, unreadCount, setStatus, markPeerRead,
+module.exports = { addMessage, threadRows, thread, deleteThread, markThreadRead, unreadCount, setStatus, markDelivered, markPeerRead,
   contacts, addContact, getContact, removeContact, metaGet, metaSet, clear, all, mergeBackup };

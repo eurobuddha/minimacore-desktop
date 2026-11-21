@@ -20,6 +20,7 @@ const crypto = require("crypto");
 const config = require("./config");
 const node = require("./node-manager");
 const { rpcCall, oneCommand } = require("./rpc");
+const { pinMinimaSend } = require("./sendpin");
 const store = require("./chat-store");
 const schema = require("./chatschema");
 const fs = require("fs");
@@ -148,7 +149,7 @@ async function pollOnce() {
       }
       if (m.state === "delivered") {
         // the peer stored our message (0.18.18+): single tick -> double tick
-        if (m.ref) store.setStatus(m.ref, { status: "delivered" });
+        store.markDelivered(m.ref, msg.from);   // only my outgoing message to that sender (0.18.207)
         await nodeCmd("keets action:ack id:" + msg.id);
         emitter.emit("update");
         continue;
@@ -324,13 +325,26 @@ async function sendPayment(to, amount, token) {
   if (!tk) throw new Error("Unknown currency");
   const addr = payAddrOf(to);
   if (!addr) { await requestPayAddr(to); throw new Error("No pay address yet — requested it over chat, try again shortly"); }
-  if (!/^[0-9]+(\.[0-9]+)?$/.test("" + amount)) throw new Error("Invalid amount");
-  const cmd = "send address:" + addr + " amount:" + amount + (tk.id === "0x00" ? "" : " tokenid:" + tk.id);
-  const txp = await nodeCmd(cmd);
+  // The same care as Mail and miniMall payments (0.18.207): a plain amount above zero, an address the node accepts, a
+  // Minima send pinned clear of unsignable dust, a send that did not answer is "may have been sent" (a retry could pay
+  // twice), and a receipt that fails after the payment went is not a failed payment.
+  amount = String(amount == null ? "" : amount).trim();
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(amount) || !/[1-9]/.test(amount)) throw new Error("Invalid amount: a plain number above zero.");
+  if (!/^(0x[0-9A-Fa-f]{2,128}|Mx[0-9A-Za-z]{20,128})$/.test(addr)) throw new Error("This contact's pay address is not a valid address. Nothing was sent.");
+  try { await nodeCmd("checkaddress address:" + addr); } catch (e) { throw new Error("Couldn't validate this contact's pay address. Nothing was sent."); }
+  let cmd = "send address:" + addr + " amount:" + amount + (tk.id === "0x00" ? "" : " tokenid:" + tk.id);
+  if (tk.id === "0x00") { try { cmd = await pinMinimaSend((c) => runner(oneCommand(c)), cmd); } catch (e) { /* unpinned, as written */ } }
+  let j;
+  try { const r = await runner(oneCommand(cmd)); j = typeof r === "string" ? JSON.parse(r) : r; }
+  catch (e) { j = undefined; }
+  if (!j || typeof j !== "object") throw new Error("The payment may have been sent (the node did not answer). Check your Balance and History before you try again, so you do not pay twice.");
+  if (j.status !== true && j.pending !== true) throw new Error((j.error || "the node refused the payment") + ". Nothing was sent.");
+  const txp = j.response;
   const txid = (txp && txp.txpowid) ? "" + txp.txpowid : "";
-  const fields = { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, addr };
+  const fields = { state: "payment", amt: amount, tok: tk.id, tokname: tk.name, txid, addr };
   const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "", fields);
-  return sendTyped(to, payload, { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, body: "" });
+  try { return await sendTyped(to, payload, { state: "payment", amt: amount, tok: tk.id, tokname: tk.name, txid, body: "" }); }
+  catch (e) { return { receiptFailed: true, txid, error: String((e && e.message) || e) }; }   // the payment went; only the note to the contact did not
 }
 
 /** Shared write-before-send for typed messages. */

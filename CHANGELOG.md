@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.207] — Chat: receipts and payments
+
+- A peer's "delivered" receipt marked any message whose id it named, including another peer's, and a ref of `__proto__` wrote into `Object.prototype` (every object in the process gained `status: "delivered"`). The chat store's maps now have no prototype, `setStatus` looks up its own keys only, and a receipt moves only my outgoing message to that sender (a ref over 200 characters is ignored). A chat payment is now checked like Mail and miniMall payments: a plain amount above zero, a pay address of a valid form that the node accepts (`checkaddress`), a Minima send pinned clear of unsignable dust, "may have been sent; check before you try again" when the node does not answer, and a receipt that fails after the payment went is reported as a sent payment whose note did not go, not a failed payment. Test: `scripts/chat-peer-test.cjs`.
+
 ## [0.18.206] — miniMall: orders and payments made while the app was closed are read
 
 - The miniMall scan read 256 blocks on its first pass and 64 after that, with the "done" mark kept in memory only, so orders and payments made while the app was closed for more than a few hours were never read. Like Mail, it now keeps the tip it last covered: the next pass reaches back to it (up to 1024 blocks), and an older gap is walked down by a paced backfill, 512 blocks more per pass, until it is covered or the node serves no deeper (then it stops and says so in the log). Test: `scripts/shop-test.cjs`.
