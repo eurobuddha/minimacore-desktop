@@ -92,6 +92,7 @@ async function open(file, o = {}) {
     claimSweepForPost: (id, tip) => run("UPDATE fc_sweep SET status=?, sweep_block=?, attempts=attempts+1, updated=? WHERE coinid=? AND status=?", ["SWEEP_POSTED", tip, now(), id, "PENDING"]) > 0,
     setSweepStatus: (id, st, note) => note == null ? run("UPDATE fc_sweep SET status=?, updated=? WHERE coinid=?", [st, now(), id]) : run("UPDATE fc_sweep SET status=?, note=?, updated=? WHERE coinid=?", [st, note, now(), id]),
     deleteSweep: (id) => run("DELETE FROM fc_sweep WHERE coinid=?", [id]),
+    sweepRow: (id) => { const r = one("SELECT * FROM fc_sweep WHERE coinid=?", [id]); return r ? rowS(r) : null; },
     sweepNotes: () => all("SELECT note FROM fc_sweep WHERE note IS NOT NULL AND note<>''").map(r => String(r.note)),
     sweepIds: () => all("SELECT coinid FROM fc_sweep").map(r => String(r.coinid)),
     // ---- counts and totals for the dashboard (Store.readyTotals / pendingAtRisk: MINIMA only, as text sums are not made here) ----

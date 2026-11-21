@@ -641,3 +641,26 @@ test("H1: a stake whose collect parts() refuses is never claimed and takes no po
   const second = node.sent.filter(c => /^coins coinid:/.test(c)).length;
   assert.ok(first > 0 && second < first, "asked " + first + " then " + second);
 });
+
+test("H2: a manual Sweep that fails gives a sweep the guardian had queued back to it (PENDING, still held); the guardian then moves it", async () => {
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  await e.pass(150);
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  let locked = true;
+  node.n.answer.status = async () => ({ status: true, response: { locked } });
+  node.n.answer.txnsign = async () => (locked ? { status: false, error: "vault locked" } : undefined);
+  await e.pass(152);
+  assert.deepEqual(e._store().sweeps("PENDING").map(r => r.coinid), [ID(50)], "queued, waiting for the vault");
+  const r = await e.sweepAddress(PAY1);
+  assert.equal(r.swept, 0);
+  assert.deepEqual(e._store().sweeps("PENDING").map(r => r.coinid), [ID(50)], "back to the guardian, not deleted");
+  assert.deepEqual(e.coinHolds().map(h => h.coinid), [ID(50)], "still held");
+  locked = false; node.sent.length = 0; await e.pass(153);
+  assert.equal(node.sent.filter(c => /^txnsign/.test(c)).length, 1, "swept once the vault is open");
+  const fresh = await guardian({}); fresh.node.n.wallet = [{ coinid: ID(60), address: PAY1, amount: "3", tokenid: "0x00", spent: false }];
+  fresh.node.n.answer.txnsign = async () => ({ status: false, error: "boom" });
+  await fresh.e.sweepAddress(PAY1);
+  assert.equal(fresh.e._store().sweepRow(ID(60)), null, "a row the click itself made is removed on failure");
+});

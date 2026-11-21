@@ -929,14 +929,16 @@ function create(o) {
     if (canon(dest.value) === canon(from) || (c0 && canon(c0.hex) === canon(from))) { rep.error = "Destination equals the source address."; return rep; }
     rep.dest = dest.value;
     for (const c of await coinsAt(from)) {
-      const id = String(c.coinid), amount = outAmount(c), tok = String(c.tokenid || "0x00");
+      const id = String(c.coinid), amount = outAmount(c), tok = String(c.tokenid || "0x00"), had = !!store.sweepRow(id);   // the guardian had queued it already
       store.insertSweep(id, from, tok, amount);
       if (!store.claimSweepForPost(id, lastTip)) continue;   // the guardian has it
       syncHolds();
       const r = await sweepTx(id, from, dest.value, amount, tok, key, sets);
       if (r.ok) { rep.swept++; activity("info", "Swept " + amount + " | coin:" + id + " | from:" + from + " | to safe:" + dest.value); }
       else {
-        if (!r.unknown) { store.deleteSweep(id); syncHolds(); }   // unknown: kept as posted, followed by the pass
+        // unknown: kept as posted, followed by the pass. A row the guardian had queued goes back to it (PENDING, still held);
+        // only a row this click made is removed
+        if (!r.unknown) { if (had) store.setSweepStatus(id, S.PENDING, null); else store.deleteSweep(id); syncHolds(); }
         if (r.notPaired) { rep.error = r.error; return rep; }
         rep.failed++; rep.error = r.error; activity("warn", "Couldn't sweep | coin:" + id + " | on:" + from + ": " + r.error);
       }
