@@ -1866,9 +1866,9 @@ function appendTerm(s) {
  *  checked in the main process for this exact command, which then runs once. Its answer is text in one node that hides
  *  itself after 60 s and when the window is left; nothing of it reaches the Terminal's output, history or Copy. */
 async function termSecret(c, kind) {
-  const phrase = kind === "seed" ? "SHOW SEED" : "SHOW KEY";
-  const typed = await showPrompt(kind === "seed" ? "This command shows the seed phrase" : "This command shows a private key", "", phrase, { ok: "Run it once",
-    message: "Anyone who sees the answer can take every coin it controls. It is shown apart from the Terminal, for a minute, and is not kept in the history or the output. Type " + phrase + " to run it." });
+  const phrase = kind === "seed" ? "SHOW SEED" : kind === "change" ? "CHANGE KEYS" : "SHOW KEY";
+  const typed = await showPrompt(kind === "seed" ? "This command shows the seed phrase" : kind === "change" ? "This command changes this wallet's keys or their lock" : "This command shows a private key", "", phrase, { ok: "Run it once",
+    message: (kind === "change" ? "It can lock, unlock, wipe or restore the keys that hold your coins, and it may carry your seed phrase or password." : "Anyone who sees the answer can take every coin it controls.") + " The answer is shown apart from the Terminal, for a minute, and is not kept in the history or the output. Type " + phrase + " to run it." });
   if (typed == null) return;
   let r, g;
   try { g = await api.cmdGate(c, typed); r = await api.cmd(c); }

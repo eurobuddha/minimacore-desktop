@@ -17,11 +17,14 @@
 const fs = require("fs");
 const path = require("path");
 
+const REASON_MAX = 120;
 function create(io) {
   async function check(reason, detail) {
     let can = false; try { can = !!io.can(); } catch (e) { can = false; }
     if (can) {
-      try { await io.prompt(String(reason).slice(0, 120)); } catch (e) { throw new Error("Cancelled"); }
+      // The prompt shows what it is asked about in full or not at all (0.18.196): a reason it would cut is refused here.
+      if (String(reason).length > REASON_MAX) throw new Error("This is longer than the Touch ID prompt can show in full (" + REASON_MAX + " characters, with the secret values hidden). Shorten it, for example by running it without optional parameters. Nothing was shown or run.");
+      try { await io.prompt(String(reason)); } catch (e) { throw new Error("Cancelled"); }
       try { io.markSeen(); } catch (e) {}   // only once a prompt has SUCCEEDED (0.18.186)
       return { biometric: true };
     }

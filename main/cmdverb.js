@@ -60,4 +60,10 @@ function repeated(part, only) {
   return [...twice];
 }
 
-module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, namesText, paramNames, repeated };
+/** The LAST top-level value of `name` in ONE command (as the node keeps it), or null. */
+function paramValue(part, name) {
+  const all = [...namesText(part).matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))];
+  return all.length ? all[all.length - 1][1] : null;
+}
+
+module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, namesText, paramNames, repeated, paramValue };

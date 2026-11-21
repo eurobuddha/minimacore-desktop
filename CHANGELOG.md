@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.196] — the secret-command check hides secret values and allows long commands
+
+- The check of a gated Terminal command printed the user's phrase, password or seed, and its 80-character limit made `vault action:restorekeys phrase:"…"` with a 24-word phrase, `vault action:wipekeys seed:0x…` and long `passwordlock` / `passwordunlock` impossible. The check now shows the command with the values of phrase, password, confirm and seed hidden; the confirmation window shows the whole (hidden-value) command, and only the Touch ID prompt, which cannot show more, refuses a command too long for it. The vault actions that change the keys or their lock (wipekeys, restorekeys, passwordlock, passwordunlock, resetkeys, testphrase) have their own kind and typed phrase, CHANGE KEYS, with wording that says so; their answer still goes to the dialog that closes itself. The pass stays bound to the exact raw text; a repeated parameter is refused before the phrase is asked. Test: `scripts/cmdgate-test.cjs` (the review's commands must be armable; every earlier variant stays gated).
+
 ## [0.18.195] — miniMall: orders stored by 0.18.69 are read safely
 
 - A shop.json written by 0.18.69 has no coin lists and no listing check. An old half-paid order had its coin counted again on the first scan (a false PAID), phone orders stored with no items became Unchecked though paid, and old paid orders got an Unchecked banner. At load an old order now keeps its verdict when it is paid or confirmed, shipped or delivered (no re-check, no banner); an old order with money counted but no coin list is counted again from the coins the node still shows (the old figure kept for the screen; it errs towards underpaid and a check by hand, never towards paid); an old order without items says "the items were not kept by an older version of this app" and can be checked by hand. Test: `scripts/shop-migrate-test.cjs` (the review's 0.18.69 fixture).

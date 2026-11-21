@@ -11,7 +11,8 @@ const G = require("../main/cmdgate");
 const rd = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 
 test("which commands are gated: vault (every action), seedrandom (every modifier), keys action:genkey; any case, any place in a chain", () => {
-  for (const c of ["vault", "VAULT", "  vault  ", "vault action:seed", "Vault action:wipekeys seed:0x01", "vault action:passwordunlock password:x"]) assert.deepEqual(G.classify(c), { kind: "seed", chain: false }, c);
+  for (const c of ["vault", "VAULT", "  vault  ", "vault action:seed"]) assert.deepEqual(G.classify(c), { kind: "seed", chain: false }, c);
+  for (const c of ["Vault action:wipekeys seed:0x01", "vault action:passwordunlock password:x"]) assert.deepEqual(G.classify(c), { kind: "change", chain: false }, c + " (CHANGED on purpose, 0.18.196: its own kind, still gated)");
   for (const c of ["seedrandom modifier:ethbridge", "SEEDRANDOM modifier:\"x\"", "keys action:genkey", "KEYS ACTION:GENKEY", "keys action:\"genkey\" phrase:\"a b\""]) assert.equal(G.classify(c).kind, "key", c);
   for (const c of ["keys", "keys action:list", "keys action:new", "balance", "status", "send amount:1 address:0xAA", "megammrsync action:resync phrase:\"x\" host:h:9001"]) assert.equal(G.classify(c).kind, "", c);
   assert.deepEqual(G.classify("status; vault"), { kind: "seed", chain: true }); assert.deepEqual(G.classify("balance;seedrandom modifier:x;status"), { kind: "key", chain: true });
@@ -21,7 +22,7 @@ test("which commands are gated: vault (every action), seedrandom (every modifier
 test("no pass: refused; a pass is for one exact command, once, within 60 s; a chain is never run", async () => {
   let t = 1000; const os = { can: () => false };
   const g = G.create(SYS(os), () => t);
-  assert.match(G.refusal("vault", g.take), /^GATED:seed: vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase\. Type SHOW SEED to run it\.$/);
+  assert.match(G.refusal("vault", g.take), /^GATED:seed: vault, seedrandom and keys action:genkey show a seed or a private key or change the keys; this one shows the seed phrase\. Type SHOW SEED to run it\.$/);
   assert.match(G.refusal("seedrandom modifier:x", g.take), /^GATED:key:.*Type SHOW KEY/);
   assert.equal(G.refusal("balance", g.take), "", "every other command runs unchanged");
   await assert.rejects(g.arm("vault", "SHOW KEY"), /Type SHOW SEED exactly/);
@@ -175,14 +176,15 @@ test("a gated command is shown whole: too long or a repeated parameter is refuse
     const hidden = "keys action:list" + " ".repeat(mac ? 70 : 600) + "action:genkey";
     await assert.rejects(g.arm(hidden, "SHOW KEY"), /names action more than once/, "the reviewer's proof: shown as keys action:list, run as genkey");
     assert.equal(seen, null, "nothing was asked"); assert.match(G.refusal(hidden, g.take), /^GATED:key:/, "and it does not run");
-    await assert.rejects(g.arm("keys action:genkey phrase:" + "x".repeat(80), "SHOW KEY"), /longer than the check can show in full \(80 characters\)/);
+    // CHANGED on purpose (0.18.196): only the Touch ID prompt refuses a command too long for it; the dialog shows it whole
+    if (mac) await assert.rejects(g.arm("keys action:genkey modifier:" + "x".repeat(100), "SHOW KEY"), /longer than the Touch ID prompt can show in full/);
     for (const dup of ['vault action:seed action:wipekeys', 'keys action:genkey "action":list', 'seedrandom modifier:a modifier : b']) await assert.rejects(g.arm(dup, dup.startsWith("vault") ? "SHOW SEED" : "SHOW KEY"), /more than once/, dup);
-    const c = "keys   action:genkey\u202e  phrase:x";
+    const c = "keys   action:genkey\u202e  modifier:x";
     await g.arm(c, "SHOW KEY");
     const text = mac ? seen.touchId : seen.box;
-    assert.ok(text.includes("keys action:genkey phrase:x"), "the whole command, white space collapsed, the bidi control a space: " + JSON.stringify(text));
-    assert.ok(mac ? text === "show a private key by running: keys action:genkey phrase:x" : text.startsWith("This shows a private key."), JSON.stringify(text));
-    assert.match(G.refusal("keys action:genkey phrase:x", g.take), /^GATED:key:/, "the pass is for the exact original text only");
+    assert.ok(text.includes("keys action:genkey modifier:x"), "the whole command, white space collapsed, the bidi control a space: " + JSON.stringify(text));
+    assert.ok(mac ? text === "show a private key by running: keys action:genkey modifier:x" : text.startsWith("This shows a private key."), JSON.stringify(text));
+    assert.match(G.refusal("keys action:genkey modifier:x", g.take), /^GATED:key:/, "the pass is for the exact original text only");
     await g.arm(c, "SHOW KEY"); assert.equal(G.refusal(c, g.take), "");
   }
 });
@@ -218,4 +220,31 @@ test("Terminal: an ordinary command is echoed and kept before it returns; a secr
   await fn("status;vault"); assert.match(E.out[E.out.length - 1], /^error: this chain holds vault, seedrandom or keys action:genkey/); assert.ok(!E.hist.includes("status;vault"));
   const main = rd("main/main.js");
   assert.ok(/ipcMain\.handle\("mcd:cmdKind", \(_e, command\) => \{[^\n]*require\("\.\/cmdgate"\)\.classify\(c\);[^\n]*write: rpc\.isWrite\(c\)/.test(main));
+});
+
+// ---- 0.18.196: secret values hidden in the check; vault actions that change keys have their own kind; long commands armable ----
+test("must be armable: a restore with a 24-word phrase, wipekeys with a seed, long passwords; the check never shows the phrase, seed or password", async () => {
+  const phrase = "SPRAY LAMP ABOUT ABOVE ABSENT ABSORB ABSTRACT ABSURD ABUSE ACCESS ACCIDENT ACCOUNT ACCUSE ACHIEVE ACID ACOUSTIC ACQUIRE ACROSS ACT ACTION ACTOR ACTRESS ACTUAL ADAPT";
+  const cases = [['vault action:restorekeys phrase:"' + phrase + '"', "change"], ["vault action:wipekeys seed:0x" + "AB".repeat(32), "change"],
+    ["vault action:passwordunlock password:" + "p".repeat(44), "change"], ["vault action:passwordlock password:" + "q".repeat(20) + " confirm:" + "q".repeat(20), "change"],
+    ["vault action:passwordunlock password:hunter2", "change"], ["vault action:resetkeys", "change"], ["vault", "seed"], ["vault action:seed", "seed"], ["seedrandom modifier:ethbridge", "key"]];
+  for (const mac of [false, true]) {
+    for (const [c, kind] of cases) {
+      let seen = "";
+      const g = G.create(SYS({ can: () => mac, prompt: async (r) => { seen = r; }, confirm: async (d) => { seen = d; return true; } }));
+      assert.equal(G.classify(c).kind, kind, c);
+      const a = await g.arm(c, G.PHRASE[kind]);
+      assert.equal(a.kind, kind); assert.equal(G.refusal(c, g.take), "", "the pass is bound to the exact raw text: " + c.slice(0, 40));
+      for (const secret of ["SPRAY", "ADAPT", "AB".repeat(32), "p".repeat(44), "q".repeat(20), "hunter2"]) assert.ok(!seen.includes(secret), (mac ? "Touch ID" : "dialog") + " shows no secret: " + seen);
+      if (kind === "change") assert.match(seen, mac ? /^make changes to this wallet's keys by running: vault action:\w+/ : /^This makes changes to this wallet's keys\./);
+    }
+  }
+  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys "phrase" : ••• keyuses:5');
+  await assert.rejects(G.create(SYS({})).arm("vault action:passwordunlock password:x", "SHOW SEED"), /Type CHANGE KEYS exactly/, "its own typed phrase");
+  await assert.rejects(G.create(SYS({})).arm("vault action:restorekeys phrase:a phrase:b", "CHANGE KEYS"), /names phrase more than once/, "repeats are still refused");
+  // only the Touch ID prompt, which cannot show more, refuses a command too long for it; the dialog shows it whole
+  const long = "keys action:genkey modifier:" + "x".repeat(100);
+  await assert.rejects(G.create(SYS({ can: () => true })).arm(long, "SHOW KEY"), /longer than the Touch ID prompt can show in full/);
+  let box = ""; await G.create(SYS({ can: () => false, confirm: async (d) => { box = d; return true; } })).arm("keys action:genkey modifier:" + "y".repeat(100), "SHOW KEY");
+  assert.ok(box.includes("y".repeat(100)), "the dialog shows the whole command");
 });
