@@ -7,6 +7,22 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.268] — "PandaPools could not be asked"
+
+- The stop question says PandaPools could not be asked when its read failed or was late; it said the engine had not started. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.267] — Web Wallet: a damaged count's old figure is a floor
+
+- A damaged key-use entry whose old value still reads as a whole number is confirmed again only at or above it, as well as at or above the chain's figure. Test: `scripts/inject-test.cjs`.
+
+## [0.18.266] — the stop guard's hold is released only by the stop that took it
+
+- pass() gives a stamp and only that stamp releases the hold; a Terminal quit keeps the hold when the node cuts its connection. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.265] — Web Wallet key uses have a ceiling (262143)
+
+- The node signs a Web Wallet send with a key of 262144 one-time leaves, numbered 0 to 262143, and at a leaf past the last it signs at leaf 0 again. A count above 262143 is refused, a chain figure past it is never adopted, and a send whose key has no leaf left is refused. That includes a count confirmed too high by an older version, which said over-estimating was safe: it is explained, never lowered. The screen's wording and the input's maximum match. This hole is also in the live 0.18.193. Test: `scripts/inject-test.cjs`.
+
 ## [0.18.264] — a refused stop releases the hold too
 
 - When a stop the user agreed to is refused by the node (status:false, for example a restore with a wrong password) and the node keeps running, the next try is asked again; 0.18.257 did this only when the operation threw. Test: `scripts/stopguard-test.cjs`.
