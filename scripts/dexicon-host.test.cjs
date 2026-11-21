@@ -1108,3 +1108,13 @@ test("coin holds: the coins of live FAST orders and of unanswered takes are mirr
 test("no test reached a real node or the real network", () => {
   assert.deepEqual(M.leaks, []);
 });
+
+// 0.19.193: the bridge reads the verb and the parameter names as the node does (main/cmdverb.js)
+test("the Dexicon bridge: a quoted or ':'-spaced forbidden parameter, a verb read two ways, or seedrandom in any spelling is refused", () => {
+  for (const [c, re] of [['txnexport id:a "file":/tmp/x', /that parameter/], ["txnexport id:a file : /tmp/x", /that parameter/], ['txnsign id:a "privatekey":0x01', /that parameter/],
+    ['txnpost id:a "burn":1', /that parameter/], ["txnpost id:a mine : true", /that parameter/], ['"seedrandom" modifier:x', /not read through this bridge/],
+    ['se"edran"dom modifier:x', /not read through this bridge/], ['ba"lan"ce', /not available to Dexicon/], ['"vault"', /not available to Dexicon/], ["send amount:1 address:0x01", /not available to Dexicon/]])
+    assert.throws(() => dexCommand(c), re, c);
+  assert.equal(dexCommand('"balance"'), '"balance"', "a quoted allowed verb is the same command to the node");
+  assert.equal(dexCommand("coins relevant:true"), "coins relevant:true");
+});

@@ -121,13 +121,17 @@ const FRAME_TXN = {
  *  or makes txnpost sign / mine / burn. */
 function dexCommand(c) {
   if (typeof c !== "string" || !c.trim() || c.length > 300000 || /[;\x00-\x1f\x7f]/.test(c)) throw new Error("bad command");
-  const verb = c.trim().split(/\s+/)[0].toLowerCase();
+  // The verb and the parameter names are read the way the node reads them (main/cmdverb.js, 0.19.193): EVERY reading of
+  // the verb must be on the list, and a parameter is seen quoted or spaced (`"privatekey":0x…`, `file : x` passed before).
+  const verbs = require("./cmdverb").verbs(c), verb = verbs.length === 1 ? verbs[0] : "";
   // The identity secret is never an answer on this bridge (0.18.110): main derives it and puts it straight into the
   // page's own sandboxed frame (identitySeed below, main/dexicon-room.js deliverIdentity).
-  if (verb === "seedrandom") throw new Error("the trading identity is not read through this bridge");
+  if (verbs.includes("seedrandom")) throw new Error("the trading identity is not read through this bridge");
+  if (!verb) throw new Error("not available to Dexicon: " + verbs.join(" / "));
   if (!DEX_VERBS.has(verb)) throw new Error("not available to Dexicon: " + verb);
-  if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c)) throw new Error("that parameter is not available to Dexicon");
-  if (verb === "txnpost" && /\b(auto|burn|mine)\s*:/i.test(c)) throw new Error("that parameter is not available to Dexicon");   // the page posts plain `txnpost id:`
+  const pt = require("./cmdverb").paramsText(c);
+  if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c) || /\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn):/i.test(pt)) throw new Error("that parameter is not available to Dexicon");
+  if (verb === "txnpost" && (/\b(auto|burn|mine)\s*:/i.test(c) || /\b(auto|burn|mine):/i.test(pt))) throw new Error("that parameter is not available to Dexicon");   // the page posts plain `txnpost id:`
   return c;
 }
 /** The page's SQL runs on the engine's own store, as page and service share one database in the MiniDapp. Since
@@ -514,7 +518,7 @@ function makeHost(opts = {}) {
     if (/^checkmode\b/.test(c)) return Promise.resolve({ status: true, response: { writemode: true, dblocked: false } });
     const signal = abort.signal;   // the page's take, queued behind another signer when the engine is dropped, is not sent either
     const send = () => Promise.resolve().then(() => runner(c, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
-    const verb = c.trim().split(/\s+/)[0].toLowerCase();
+    const verb = require("./cmdverb").verbs(c)[0];   // one reading only: dexCommand refused any other
     if (!/^txn/.test(verb) || verb === "txnview") return send();   // reads, newscript; txnview decodes hex and touches no transaction
     // ---- a transaction of the frame's (header of main/dexicon-signgate.js) ----
     const refuse = (why) => { log("REFUSED from the Dexicon page: `" + verb + "` — " + why); return Promise.resolve({ status: false, error: "Refused by the app's signing check: " + why + ". Nothing was signed." }); };

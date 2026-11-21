@@ -12,6 +12,11 @@
  * ever deleted for it, only moved aside under a dated name (moveAside).
  */
 const fs = require("fs");
+// Which command a piece of text is, and its parameter names, are read the way the node reads them (main/cmdverb.js,
+// 0.19.193): `"restore" file:x`, a control character before megammrsync, or `file : x` were not seen by /^\s*restore\b/.
+const V = require("./cmdverb");
+const runsAs = (part, ...verbs) => V.verbs(part).some(v => verbs.includes(v));
+const hasParam = (part, name, value) => new RegExp("(?:^|\\s)" + name + ":" + (value ? value + "(?:\\s|$)" : ""), "i").test(V.paramsText(part));
 
 /** Why a backup of this key mode may not be restored into this install ("" = it may). */
 function backupModeProblem(picked, recorded, supported) {
@@ -41,15 +46,18 @@ function restoreFileCommand(o) {
 
 /** Is this node command (or any ;-separated part of it) a megammrsync resync, which ends by shutting the node down? */
 function isResync(command) {
-  return String(command || "").split(";").some(part => /^\s*megammrsync(\s|$)/i.test(part) && /\saction:resync(\s|$)/i.test(part));
+  return V.parts(command).some(part => runsAs(part, "megammrsync") && hasParam(part, "action", "resync"));
 }
 /** Why a `backup` command may not be sent ("" = it may): the password must be letters and numbers only, the rule the screen applies. A quote closed password:"…" early, so the node encrypted under a different password than the one typed. */
 function backupCommandProblem(command) {
   // a ; straight after the value would cut the password short: the node would encrypt under the part before it
-  if (/^\s*backup\s[^;]*\s?(password|confirm):[^\s;]*;/i.test(String(command || ""))) return "A backup password can hold letters and numbers only.";
-  for (const part of String(command || "").split(";")) {
-    if (!/^\s*backup(\s|$)/i.test(part)) continue;
-    for (const m of part.matchAll(/\s(password|confirm):(\S*)/gi))
+  // (a backup piece that ends with its password or confirm value, straight before the ;)
+  const pieces = String(command || "").split(";");
+  for (let i = 0; i < pieces.length - 1; i++) if (runsAs(pieces[i], "backup") && /(?:^|\s)"?(password|confirm)"?[ \t]*:[ \t]*\S*$/i.test(pieces[i].replace(/^[\u0000- ]*"([^"]*)"/, "$1 "))) return "A backup password can hold letters and numbers only.";
+  for (const part of V.parts(command)) {
+    if (!runsAs(part, "backup")) continue;
+    // the value as typed (its quotes kept), after a name read as the node reads it ("password" or password : …)
+    for (const m of V.jtrim(part).replace(/^"([^"]*)"/, "$1 ").matchAll(/(?:^|\s)"?(password|confirm)"?[ \t]*:[ \t]*(\S*)/gi))
       if (!/^("[A-Za-z0-9]+"|[A-Za-z0-9]+)$/.test(m[2])) return "A backup password can hold letters and numbers only.";
   }
   return "";
@@ -57,7 +65,7 @@ function backupCommandProblem(command) {
 
 /** Does this node command (or any ;-separated part of it) replace the wallet from a seed phrase? */
 function replacesWalletFromPhrase(command) {
-  return String(command || "").split(";").some(part => /^\s*megammrsync(\s|$)/i.test(part) && /\sphrase:/i.test(part));
+  return V.parts(command).some(part => runsAs(part, "megammrsync") && hasParam(part, "phrase"));
 }
 
 /**
@@ -171,7 +179,7 @@ function activeWorkProblem(list) {
 
 /** Does this node command (or any ;-separated part of it) load a wallet from a backup file? */
 function loadsBackupFile(command) {
-  return String(command || "").split(";").some(part => /^\s*(restore|restoresync)(\s|$)/i.test(part) || (/^\s*megammrsync(\s|$)/i.test(part) && /\sfile:/i.test(part)));
+  return V.parts(command).some(part => runsAs(part, "restore", "restoresync") || (runsAs(part, "megammrsync") && hasParam(part, "file")));
 }
 
 /**

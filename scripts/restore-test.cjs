@@ -158,3 +158,18 @@ test("lows: a semicolon in a restore value is refused in plain words; a resync a
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
   assert.ok(cmd.indexOf("restore.backupCommandProblem(command)") > 0 && cmd.indexOf("restore.backupCommandProblem(command)") < cmd.indexOf("return run(pinned)"));
 });
+
+// ---- 0.19.193: the command channel's restore checks read a command as the node does (main/cmdverb.js) ----
+test("restore, restoresync, megammrsync file: / phrase: / action:resync and backup passwords are seen quoted, control-character led and ':'-spaced", () => {
+  for (const c of ['"restore" file:x', "\u0001restore file:x", 're"st"ore file:x', '"restoresync" file:x', "status;\u0002restore file:x",
+    '"megammrsync" action:resync file:x', "megammrsync action:resync file : x", 'megammrsync action:resync "file":x', '"megammrsync"file:x'])
+    assert.equal(restore.loadsBackupFile(c), true, JSON.stringify(c));
+  for (const c of ['"megammrsync" action:resync phrase:"a b"', "\u0001megammrsync action:resync phrase:x", "megammrsync action:resync phrase : x", 'megammrsync "phrase":x'])
+    assert.equal(restore.replacesWalletFromPhrase(c), true, JSON.stringify(c));
+  for (const c of ['"megammrsync" action:resync', "megammrsync action : resync", 'megammrsync "action":"resync"', "status;\u0001megammrsync action:resync"])
+    assert.equal(restore.isResync(c), true, JSON.stringify(c));
+  for (const c of ["megammrsync action:list", "status", "backup password:abc", "restorex file:x"]) { assert.equal(restore.loadsBackupFile(c), false, c); assert.equal(restore.isResync(c), false, c); }
+  for (const c of ['"backup" password:"a b"', '"backup" password : a"b', 'backup "password":a$b', "\u0001backup password:a.b", 'backup confirm : "x y"', '"backup"password:abc;status'])
+    assert.equal(restore.backupCommandProblem(c), "A backup password can hold letters and numbers only.", JSON.stringify(c));
+  for (const c of ["backup password:abc123", 'backup password:"abc123"', '"backup" password : abc', "backup", "status;backup password:abc"]) assert.equal(restore.backupCommandProblem(c), "", JSON.stringify(c));
+});
