@@ -252,19 +252,39 @@ test("PandaPools glue: a throw inside the engine's later callback (a malformed a
   } finally { api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
 });
 
+// 0.19.286: the debt names its file: when clearing it failed after the move, the NEW wallet's store is never moved aside
+test("AtomiX glue: an owed move whose clearing failed after the rename never moves the new wallet's store (the debt names the file)", async () => {
+  const cfgPath = require.resolve("../main/config.js"), axPath = require.resolve("../main/atomix.js"), before = require.cache[cfgPath], disk = {};
+  let clearFails = true;
+  require.cache[cfgPath] = { id: cfgPath, filename: cfgPath, loaded: true, children: [], paths: [], exports: { rpcSecret: () => "", load: () => JSON.parse(JSON.stringify(disk)),
+    setAtomixStoreMoveOwed: (v) => { if (v) disk.atomixStoreMoveOwed = v; else if (clearFails) throw new Error("EACCES: config.json"); else delete disk.atomixStoreMoveOwed; } } };
+  const dir = tmp("ax-owed-id-"), db = path.join(dir, "atomix.sqlite"), mock = async () => ({ status: false, error: "mock" });
+  delete require.cache[axPath]; let atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);
+  fs.writeFileSync(db, "the old wallet's claim secrets");
+  try {
+    atomix.invalidate();   // moved aside; the debt could not be cleared
+    assert.ok(disk.atomixStoreMoveOwed, "the debt stayed in config.json"); atomix.stopLoop(); atomix.flush();
+    fs.writeFileSync(db, "the NEW wallet's swaps");   // the new wallet's engine made its own store
+    delete require.cache[axPath]; atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);   // a restart
+    await atomix.init().catch(() => {});
+    assert.equal(fs.readdirSync(dir).filter(f => /legacy-keys/.test(f)).length, 1, "only the old store was ever moved: " + fs.readdirSync(dir).join(", "));
+    assert.equal(fs.existsSync(db), true, "the new wallet's store is where it was");
+  } finally { atomix.stopLoop(); atomix.flush(); if (before) require.cache[cfgPath] = before; else delete require.cache[cfgPath]; }
+});
+
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });
 
 // 0.19.267: the owed move aside is on disk (config.json), so a restart does not open the old wallet's store under the new one
 test("AtomiX glue: a store owed a move aside is still owed after a restart (a fresh load of the glue), and is moved once it can be", async () => {
   const cfgPath = require.resolve("../main/config.js"), axPath = require.resolve("../main/atomix.js"), before = require.cache[cfgPath], disk = {};   // disk: config.json
   require.cache[cfgPath] = { id: cfgPath, filename: cfgPath, loaded: true, children: [], paths: [], exports: { rpcSecret: () => "", load: () => JSON.parse(JSON.stringify(disk)),
-    setAtomixStoreMoveOwed: (v) => { if (v) disk.atomixStoreMoveOwed = true; else delete disk.atomixStoreMoveOwed; } } };
+    setAtomixStoreMoveOwed: (v) => { if (v) disk.atomixStoreMoveOwed = v; else delete disk.atomixStoreMoveOwed; } } };
   const dir = tmp("ax-owed-restart-"), db = path.join(dir, "atomix.sqlite"), mock = async () => ({ status: false, error: "mock" });
   let atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);
   fs.writeFileSync(db, "the old wallet's claim secrets"); fs.chmodSync(dir, 0o500);
   try {
     assert.throws(() => atomix.invalidate(), /could not be moved aside/);
-    assert.equal(disk.atomixStoreMoveOwed, true, "the debt is in config.json");
+    assert.ok(disk.atomixStoreMoveOwed && disk.atomixStoreMoveOwed.ino === fs.statSync(db).ino, "the debt is in config.json, naming that file");
     atomix.stopLoop(); atomix.flush();
     delete require.cache[axPath]; atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);   // the app restarted: nothing in memory
     await assert.rejects(atomix.init(), /could not be moved aside yet/, "the new wallet's engine does not open the old store");

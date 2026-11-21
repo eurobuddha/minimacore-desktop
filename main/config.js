@@ -238,7 +238,7 @@ function setFcGrant(walletKey, at, safe) {
 /** The old AtomiX store owed a move aside after a wallet replacement (0.19.267, main/atomix.js): never from a patch (save()
  *  drops a key DEFAULTS does not name), only here, so the window cannot clear it. */
 function setAtomixStoreMoveOwed(v) {
-  const cur = load(); if (v) cur.atomixStoreMoveOwed = true; else delete cur.atomixStoreMoveOwed;
+  const cur = load(); if (v) cur.atomixStoreMoveOwed = v && typeof v === "object" ? { ino: v.ino, birth: v.birth } : true; else delete cur.atomixStoreMoveOwed;   // which file (0.19.286)
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
 }
