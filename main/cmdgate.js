@@ -179,16 +179,30 @@ const WIN_PATH = /^[A-Za-z]:\\[^\s:";{}[\]]*$/;
 const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null),
   mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
 const REPASTED_WHY = "The node pastes this command's values, unquoted, into a second command it runs itself, where white space, a colon, a quote or a semicolon in a value become more parameters of that command (a seed phrase among them). Write each value without them. Nothing was run.";
-// keyuses: (0.18.269) sets the uses of EVERY key of the node wallet (megammrsync, archive / mysql resync, reset, restoresync, vault
-// restorekeys, keys createallkeys: wallet.updateAllKeyUses(getAsInt())) or is the leaf a builder signs at (sendfrom, signfrom,
-// consolidatefrom, createtokenfrom, txnsign publickey:custom). Every key here is a 64 x 64 x 64 tree (this desktop never runs the node
-// with -blockaskeyuses): leaves 0 to 262143, and Wallet.signData / TreeKey.sign at 262144 or more signs at leaf 0 again (getAsInt keeps
-// only the low 32 bits, so 4294967296 is 0). A keyuses that is not plain digits up to 262143 is refused, for whatever command names it.
-const KEYUSES_MAX = 262143;
+// keyuses: (0.18.269; two bounds since 0.18.273). Read from each command in core/minima-core:
+//   SET every key's uses (wallet.updateAllKeyUses(getAsInt())): megammrsync resync (megammrsync.java:175/217, default 1000), archive
+//     resync / import (archive.java:349/408, default 1000), mysql resync (mysql.java:474/512, default 1000), reset (reset.java:99 hands it
+//     on to archive import), vault resetkeys (vault.java:231/263, default 100), keys createallkeys (keys.java:226, Main.java LOAD_ALL_KEYS)
+//   ADD to every key's uses from the backup (wallet.updateIncrementAllKeyUses): restoresync (restoresync.java:214/224/364, default 256)
+//   SINGLE signature at that leaf (TreeKey.createDefault, setUses): txnsign publickey:custom (txnsign.java:153), and sendfrom, signfrom,
+//     consolidatefrom, createtokenfrom, which run that txnsign
+// Every key here is a 64 x 64 x 64 tree (this desktop never runs the node with -blockaskeyuses): leaves 0 to 262143; at 262144 or more the
+// node signs at leaf 0 again (getAsInt keeps only the low 32 bits, so 4294967296 is 0). A single signature may name the last leaf, 262143.
+// A figure that SETS or ADDS the wallet's uses must leave room for the signatures that follow it: the shipped node's Wallet.signData
+// checks no capacity, so after a restore at 262143 every key signs once and then starts again at leaf 0. So 250000 for SET (12,144 more
+// signatures per key before the node's limit) and 10000 for restoresync's ADD; neither is presented as a target.
+const KEYUSES_MAX = 262143, KEYUSES_SET_MAX = 250000, KEYUSES_ADD_MAX = 10000;
+const SET_VERBS = ["megammrsync", "archive", "mysql", "reset", "vault", "keys"];
 const KEYUSES_WHY = "keyuses: must be a whole number from 0 to " + KEYUSES_MAX + ": a key of this wallet has 262144 one-time uses, numbered 0 to " + KEYUSES_MAX + ", and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds. Nothing was run.";
-/** Why a keyuses: value is refused ("" = it is not, or there is none). */
+const KEYUSES_SET_WHY = "keyuses: sets how many times every key of this wallet has already signed, so it must be above that number; the usual figure is small (the node's own default is 1000). It can be at most " + KEYUSES_SET_MAX + ": a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out and then sign with one-time keys they have already used, which can lose funds. Nothing was run.";
+const KEYUSES_ADD_WHY = "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). It can be at most " + KEYUSES_ADD_MAX + ": a large figure would bring the wallet's keys near their limit of 262144 one-time uses, after which they sign with one-time keys they have already used, which can lose funds. Nothing was run.";
+/** Why a keyuses: value is refused ("" = it is not, or there is none): plain digits, at most the bound of what the command does with it. */
 function keyusesProblem(command) {
-  return V.parts(command).some(part => V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= KEYUSES_MAX))) ? KEYUSES_WHY : "";
+  for (const part of V.parts(command)) {
+    const [max, why] = V.is(part, "restoresync") ? [KEYUSES_ADD_MAX, KEYUSES_ADD_WHY] : SET_VERBS.some(v => V.is(part, v)) ? [KEYUSES_SET_MAX, KEYUSES_SET_WHY] : [KEYUSES_MAX, KEYUSES_WHY];
+    if (V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= max))) return why;
+  }
+  return "";
 }
 const FROM_KEY = ["sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread", "sphincs"];
 /** Why mcd:cmd refuses a command whose pasted values would become parameters of the node's own second command ("" = it does not). */
@@ -257,4 +271,4 @@ async function checkCommand(command, io) {
   return io.pin ? await io.pin(command) : command;
 }
 
-module.exports = { classify, create, refusal, masked, scrubReply, SECRET_NAMES, repasted, keyusesProblem, KEYUSES_MAX, checkCommand, PHRASE, PASS_MS };
+module.exports = { classify, create, refusal, masked, scrubReply, SECRET_NAMES, repasted, keyusesProblem, KEYUSES_MAX, KEYUSES_SET_MAX, KEYUSES_ADD_MAX, checkCommand, PHRASE, PASS_MS };

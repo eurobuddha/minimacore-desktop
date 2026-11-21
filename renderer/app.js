@@ -13,9 +13,11 @@ let running = false;
 let waitingForNode = false;
 let activeView = "balances";
 let refreshTimer = null;
-// The most key uses a restore may set (0.18.269): every key of this wallet has 262144 one-time uses, 0 to 262143 (main checks it again)
-const WW_KEYUSES_MAX = 262143;
-const KEYUSES_TOO_HIGH = "Key uses can be at most 262143: a key of this wallet has 262144 one-time uses, numbered 0 to 262143, and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds.";
+// The most key uses a restore or resync may SET (0.18.273; main checks it again): 250000, well below a key's 262144 one-time uses, so the
+// keys have room to sign after it (at 262143 every key signed once and then started again at leaf 0). Not a target: the usual figure is small.
+const WW_KEYUSES_MAX = 250000;
+const KEYUSES_TOO_HIGH = "Key uses sets how many times every key of this wallet has already signed, so it must be above that number; the usual figure is small (the node's own default is 1000). It can be at most 250000: a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out and then sign with one-time keys they have already used, which can lose funds.";
+const KEYUSES_HELP = "⚠ Key-uses must be above the number of signatures this seed has ever made, on any node: too low reuses one-time keys and can lose funds. The usual figure is small (the node's own default is 1000), and it can be at most 250000: a figure near a key's limit of 262144 would leave keys that run out and then repeat one-time keys.";
 let RESTORE = null;          // {seed, keyuses, host} held in memory for a pending restore — NEVER persisted
 let setupRestarting = false;  // the setup screen's restart was asked for: its form stays until the node really stops (0.18.250)
 let postBootStarted = false; // guard: run the post-boot wallet step (new backup / restore resync) once
@@ -251,7 +253,7 @@ function showSetup() {
           <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as it was created — it is case- and spacing-sensitive.</div></div>
         <div class="field"><div class="field__label">Signatures already used (key-uses)</div>
           <input class="field__input" id="rKeyuses" value="0" inputmode="numeric" /></div>
-        <div class="view__desc" style="color:var(--amber)">⚠ Key-uses must be at least the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds — if unsure, set it higher.</div>
+        <div class="view__desc" style="color:var(--amber)">${esc(KEYUSES_HELP)}</div>
         <div class="field"><div class="field__label">MegaMMR host (ip:port, must run -megammr)</div>
           <input class="field__input" id="rHost" value="${esc(CFG.megammrHost)}" /></div>
       </div>
@@ -509,7 +511,7 @@ function showRestoreOverlay() {
       <div class="prow__h">Any phrase is accepted (anyphrase). Enter it EXACTLY as created — case- and spacing-sensitive.</div></div>
     <div class="field"><div class="field__label">Signatures already used (key-uses)</div>
       <input class="field__input" id="orKeyuses" value="0" inputmode="numeric" /></div>
-    <div class="view__desc" style="color:var(--amber)">⚠ Key-uses must be at least the number of signatures this seed has ever made, on any node. Too low reuses one-time keys and can lose funds — if unsure, set it higher.</div>
+    <div class="view__desc" style="color:var(--amber)">${esc(KEYUSES_HELP)}</div>
     <div class="field"><div class="field__label">MegaMMR host (ip:port, must run -megammr)</div>
       <input class="field__input" id="orHost" value="${esc(CFG.megammrHost)}" /></div>
     <div class="seg"><button class="btn btn--outline btn--full" id="orCancel">Cancel</button>
@@ -2028,7 +2030,7 @@ async function renderSettings() {
         <div class="view__desc" style="color:var(--amber)">⚠ Providing a seed phrase performs a FULL WALLET RESET to that seed (regenerates keys, sets key-uses) — not a plain resync. Leave the phrase blank for the safe chain-only resync.</div>
         <div class="field"><div class="field__label">Seed phrase (optional — resets the wallet)</div><textarea class="field__input" id="setResyncPhrase" rows="2" placeholder="blank = plain resync"></textarea></div>
         <label class="prow"><input type="checkbox" id="setResyncAnyphrase"><span class="prow__l">anyphrase (seed is any text, not BIP39 words)</span></label>
-        <div class="field"><div class="field__label">Key-uses (signatures this seed has ever made; required with a seed)</div><input class="field__input" id="setResyncKeyuses" placeholder="0 if brand new" inputmode="numeric" /></div>
+        <div class="field"><div class="field__label">Key-uses (above the signatures this seed has ever made; required with a seed; at most 250000)</div><input class="field__input" id="setResyncKeyuses" placeholder="0 if brand new" inputmode="numeric" /></div>
         <div class="field"><div class="field__label">Keys to generate (default 64)</div><input class="field__input" id="setResyncKeys" placeholder="64" inputmode="numeric" /></div>
         <div class="field"><div class="field__label">Restore from backup file (optional)</div><input class="field__input" id="setResyncFile" placeholder="path to a .bak file" /></div>
         <div class="field"><div class="field__label">Backup password (optional)</div><input class="field__input" id="setResyncPassword" type="password" /></div>

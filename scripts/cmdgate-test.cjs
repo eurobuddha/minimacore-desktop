@@ -594,9 +594,29 @@ test("keyuses: above 262143 or not plain digits is refused for every command; up
       "restoresync file:/x/b.bak keyuses:" + ku, "vault action:restorekeys phrase:abc keyuses:" + ku, "keys action:createallkeys keyuses:" + ku, "txnsign id:a publickey:custom privatekey:0x01 keyuses:" + ku,
       "sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:" + ku, "signfrom data:0x00000001610000 privatekey:0x03 keyuses:" + ku, "consolidatefrom fromaddress:0x01 address:0x02 privatekey:0x03 keyuses:" + ku,
       "createtokenfrom fromaddress:0x01 name:x amount:1 privatekey:0x03 keyuses:" + ku])
-      await assert.rejects(G.checkCommand(c, io), /keyuses: must be a whole number from 0 to 262143: a key of this wallet has 262144 one-time uses/, c);
-  await assert.rejects(h(null, "megammrsync action:resync host:h:9001 keyuses:300000"), /must be a whole number from 0 to 262143/); assert.deepEqual(sent, [], "the real handler sends nothing");
-  for (const c of ["archive action:resync host:h:9001 keyuses:262143", "sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:0", "mysql action:resync keyuses:1000"]) assert.equal(await G.checkCommand(c, io), c, c);
+      await assert.rejects(G.checkCommand(c, io), /keyuses: (must be a whole number from 0 to 262143|sets how many times every key|on restoresync is added)/, c);   // CHANGED on purpose (0.18.273): each command's own bound and sentence
+  await assert.rejects(h(null, "megammrsync action:resync host:h:9001 keyuses:300000"), /keyuses: sets how many times every key of this wallet has already signed/); assert.deepEqual(sent, [], "the real handler sends nothing");
+  for (const c of ["archive action:resync host:h:9001 keyuses:250000", "sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:0", "mysql action:resync keyuses:1000"]) assert.equal(await G.checkCommand(c, io), c, c);
   const app = rd("renderer/app.js");
-  assert.ok(/const WW_KEYUSES_MAX = 262143;/.test(app) && (app.match(/> WW_KEYUSES_MAX\) \{ toast\(KEYUSES_TOO_HIGH, "err"\); return; \}/g) || []).length === 4 && !/parseInt\(el\("(r|or)Keyuses"\)/.test(app), "the setup restore, the restore overlay and both Settings resync paths check it, digits only");
+  assert.ok(/const WW_KEYUSES_MAX = 250000;/.test(app) && (app.match(/> WW_KEYUSES_MAX\) \{ toast\(KEYUSES_TOO_HIGH, "err"\); return; \}/g) || []).length === 4 && !/parseInt\(el\("(r|or)Keyuses"\)/.test(app), "the setup restore, the restore overlay and both Settings resync paths check it, digits only");
+});
+
+// ---- 0.18.273: two bounds: a figure that SETS or ADDS every key's uses leaves room to sign after it; a single signature may name the last leaf ----
+test("keyuses: 250000 for the commands that set every key's uses, 10000 for restoresync's add, 262143 for one signature; the sentences say what the figure is for", async () => {
+  const io = { take: () => true, running: () => true, pin: async (c) => c };
+  const SET = ["megammrsync action:resync host:h:9001 keyuses:", "archive action:resync host:h:9001 keyuses:", "archive action:import file:/x/a.gz keyuses:", "mysql action:resync keyuses:", "reset action:seedsync archivefile:/x/a.gz keyuses:",
+    "vault action:resetkeys phrase:abc keyuses:", "keys action:createallkeys keyuses:"];
+  for (const c of SET) {
+    assert.equal(G.keyusesProblem(c + "250000"), "", c + "250000");
+    const why = G.keyusesProblem(c + "250001");
+    assert.match(why, /sets how many times every key of this wallet has already signed, so it must be above that number; the usual figure is small \(the node's own default is 1000\)\. It can be at most 250000: a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out/, c);
+    assert.ok(!/at most 262143/.test(why), "262143 is never named as a value to type for these");
+  }
+  assert.equal(G.keyusesProblem("restoresync file:/x/b.bak keyuses:10000"), ""); assert.match(G.keyusesProblem("restoresync file:/x/b.bak keyuses:10001"), /on restoresync is added to how many times every key in the backup has signed[\s\S]*at most 10000/);
+  for (const c of ["sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:262143", "txnsign id:a publickey:custom privatekey:0x01 keyuses:262143", "signfrom data:0x00000001610000 privatekey:0x03 keyuses:262143"])
+    assert.equal(G.keyusesProblem(c), "", "one signature may name the last leaf: " + c);
+  assert.match(G.keyusesProblem("sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:262144"), /must be a whole number from 0 to 262143/);
+  await assert.rejects(G.checkCommand("megammrsync action:resync host:h:9001 keyuses:262143", io), /at most 250000/);
+  const app = rd("renderer/app.js");
+  assert.ok(!/if unsure, set it higher/.test(app) && (app.match(/\$\{esc\(KEYUSES_HELP\)\}/g) || []).length === 2 && app.includes("at most 250000)</div>"), "the restore screens never suggest a higher figure; they give the small usual figure and the ceiling");
 });
