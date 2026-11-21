@@ -124,7 +124,7 @@ function repeated(part, only) {
 const SENSITIVE = /^(?:vault|seedrandom|keys|megammrsync|archive|mysql|reset|backup|restore\w*|send\w*|txn\w*|consolidate\w*|tokencreate|createtokenfrom|multisig\w*|sign\w*|sphincs)$/;   // 0.19.291: sendpoll, sendfrom, signfrom, consolidatefrom, createtokenfrom, multisig, multisigread, sphincs
 const UNCLEAR = "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.";
 /** Why a text whose reading is odd (read().odd) is refused for a command that moves funds or keys ("" = it is not). */
-function unclear(command) { return parts(command).some(p => read(p).odd && verbs(p).some(v => SENSITIVE.test(v))) ? UNCLEAR : ""; }
+function unclear(command) { return parts(command).some(p => read(p).odd && verbs(p).some(v => SENSITIVE.test(v) || BUILDERS.test(v))) ? UNCLEAR : ""; }   // every builder too (0.19.308: rawfrom, rawtxnfrom …)
 
 // A \u escape in a JSON value is decoded by the node's own parser (utils/json/parser/Yylex.java: \uXXXX besides \" \\ \/ \b \f
 // \n \r \t), and some commands paste the decoded text into a command they run themselves, which splits on every ";" and runs each
@@ -179,6 +179,9 @@ function builtProblem(part) {
       let j; try { j = JSON.parse(v); } catch (e) { return BUILT; }
       const ss = strings(j);
       if (ss.some(s => s.includes('"'))) return BUILT;
+      // a state value is pasted inside value:"…" as its own text (state.get(key)+""): an array or object there serialises with quotes
+      // of its own and rewrites the txnstate it goes into (0.19.308): strings, numbers and true / false only
+      if (n === "state" && j && typeof j === "object" && Object.values(j).some(x => x !== null && typeof x === "object")) return BUILT;
       if (/^(inputs|outputs)$/.test(n) && ss.some(s => /[\s:]/.test(s))) return BUILT;   // rawfrom / rawtxnfrom paste coinid, address, amount, tokenid raw
       if (n === "publickeys" && verbs(part).includes("multisig") && action === "create" && !(Array.isArray(j) && j.every(k => typeof k === "string" && HEX64.test(k)))) return MSKEY;
     } else if (n === "script") { if (v.includes('"')) return BUILT; }   // pasted inside scripts:{"…":""}: a space is fine there
