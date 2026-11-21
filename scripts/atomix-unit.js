@@ -507,7 +507,8 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       await assert.rejects(m.init(), /AtomiX does not start: the replaced wallet's swap database could not be moved aside yet/, "the new wallet's engine never opens it");
       // a restart: nothing in memory, the debt on disk
       m = fresh(d); await assert.rejects(m.init(), /AtomiX does not start/); assert.equal(fs.readFileSync(db, "utf8"), "old swaps", "still not opened");
-      fs.renameSync = realRename; await m.init().catch(() => {}); m.stopLoop();
+      fs.renameSync = realRename; await m.init().catch(() => {}); assert.equal(kept().length, 0, "not tried again at once (0.18.254: a growing pause)");
+      const now0 = Date.now; Date.now = () => now0() + 13000; try { await m.init().catch(() => {}); } finally { Date.now = now0; } m.stopLoop();
       assert.equal(kept().length, 1, "moved once the rename works"); assert.equal(fs.readFileSync(path.join(d, kept()[0]), "utf8"), "old swaps"); assert.equal(disk.atomixStoreMoveOwed, undefined, "and the debt cleared");
       // the clearing fails after the move: the debt names the old file, so the new wallet's store is left in place at a later start
       fs.rmSync(db, { force: true }); fs.writeFileSync(db, "old swaps 2"); m = fresh(d); clearFails = true;
@@ -520,6 +521,29 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       fs.rmSync(db, { force: true }); disk.atomixStoreMoveOwed = true; m = fresh(d); await m.init().catch(() => {}); m.stopLoop();
       assert.equal(disk.atomixStoreMoveOwed, undefined, "cleared after the move, with no file left to move");
     } finally { fs.renameSync = realRename; C.load = keep.load; C.setAtomixStoreMoveOwed = keep.set; delete require.cache[require.resolve("../main/atomix")]; }
+  });
+
+  // ---- 0.18.254: the owed move is retried with a growing pause, said once, and config.json is not rewritten on every poll ----
+  await okA("an owed move that keeps failing is tried again with a growing pause, said once per reason, and config.json is written once", async () => {
+    const C = require("../main/config"), keep = { load: C.load, set: C.setAtomixStoreMoveOwed }, realRename = fs.renameSync, now0 = Date.now;
+    let disk = {}, writes = 0, renames = 0, t = 0;
+    C.load = () => JSON.parse(JSON.stringify(disk));
+    C.setAtomixStoreMoveOwed = (v) => { writes++; if (v) disk.atomixStoreMoveOwed = typeof v === "object" ? { ino: v.ino, birth: v.birth } : true; else delete disk.atomixStoreMoveOwed; };
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "axback-")), db = path.join(d, "atomix.sqlite");
+    delete require.cache[require.resolve("../main/atomix")]; const m = require("../main/atomix"); m._setDataDir(d); m._setRunner(async () => { throw new Error("no node in this check"); });
+    const said = [], log0 = console.log; console.log = (...a) => said.push(a.join(" "));
+    try {
+      fs.writeFileSync(db, "old swaps");
+      fs.renameSync = () => { renames++; throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }); };
+      Date.now = () => now0() + t;
+      try { m.invalidate(); } catch (e) {} m.stopLoop();
+      for (let i = 0; i < 100; i++) { t += 12000; await m.init().catch(() => {}); }   // 20 minutes of 12-second polls
+      assert.ok(renames >= 2 && renames <= 12, "a growing pause, not every poll: " + renames + " tries in 101 chances");
+      assert.equal(writes, 1, "the debt written once, not on every try");
+      assert.equal(said.filter(l => /could not move the previous wallet's swap records aside/.test(l)).length, 1, "said once for one reason");
+      fs.renameSync = realRename; t += 600001; await m.init().catch(() => {}); m.stopLoop();
+      assert.ok(!fs.existsSync(db) && disk.atomixStoreMoveOwed === undefined, "moved and cleared once it works");
+    } finally { console.log = log0; Date.now = now0; fs.renameSync = realRename; C.load = keep.load; C.setAtomixStoreMoveOwed = keep.set; delete require.cache[require.resolve("../main/atomix")]; }
   });
 
   if (LEAKS.length) { fail++; console.error("  ✗ a child process was started with no test node named:", LEAKS.join("; ")); }

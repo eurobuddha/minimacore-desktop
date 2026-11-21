@@ -206,7 +206,11 @@ async function init() {
   if (ready) return;
   if (initPromise) return initPromise;
   // the replaced wallet's store not yet moved aside (0.18.236): the new wallet's engine never opens it
-  if (storeMoveOwed || owedOnDisk()) { try { moveStoreAside(); } catch (e) { throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + e.message + ")."); } }
+  if (storeMoveOwed || owedOnDisk()) {
+    // tried again with a growing pause (0.18.254: the 12-second poll retried, rewrote config.json and logged on every tick)
+    if (storeMoveOwed && Date.now() < moveRetryAt) throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + moveSaid + ").");
+    try { moveStoreAside(); } catch (e) { throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + e.message + ")."); }
+  }
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   initPromise = (async () => {
     const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"), log);   // an empty file found is said in AtomiX's own log (0.18.233)
@@ -272,14 +276,25 @@ function owedOnDisk() {
     return !!id && id.ino === o.ino && id.birth === o.birth;
   } catch (e) { return false; }
 }
-function markOwed(v) { try { require("./config").setAtomixStoreMoveOwed(v); } catch (e) { log("wallet replaced: the debt of moving the old swap database aside could not be recorded (" + e.message + ")"); } }
+let moveFails = 0, moveRetryAt = 0, moveSaid = "";   // the owed move's retries: a growing pause, one log line per reason (0.18.254)
+function markOwed(v) {
+  try {
+    const C = require("./config"), cur = C.load().atomixStoreMoveOwed, want = v && typeof v === "object" ? { ino: v.ino, birth: v.birth } : v ? true : undefined;
+    if (JSON.stringify(cur) === JSON.stringify(want)) return;   // already on disk as it should be: config.json is not rewritten
+    C.setAtomixStoreMoveOwed(v);
+  } catch (e) { log("wallet replaced: the debt of moving the old swap database aside could not be recorded (" + e.message + ")"); } }
 function moveStoreAside() {
   const db = path.join(dir(), "atomix.sqlite"), id = fileId(db);
   if (id) markOwed(id);
   try {
     if (fs.existsSync(db)) { const kept = db + ".replaced-" + new Date().toISOString().replace(/[:.]/g, "-"); fs.renameSync(db, kept); log("the previous wallet's swap records were kept at " + kept); }
-    storeMoveOwed = false; markOwed(false);   // whatever the debt's form, also with no file left to move
-  } catch (e) { storeMoveOwed = true; log("could not move the previous wallet's swap records aside (" + (e && e.message) + "); AtomiX does not start until they are"); throw e; }
+    storeMoveOwed = false; markOwed(false); moveFails = 0; moveRetryAt = 0; moveSaid = "";   // whatever the debt's form, also with no file left to move
+  } catch (e) {
+    storeMoveOwed = true; moveFails++; moveRetryAt = Date.now() + Math.min(600000, 12000 * 2 ** (moveFails - 1));
+    const why = (e && e.message) || String(e);
+    if (why !== moveSaid) { moveSaid = why; log("could not move the previous wallet's swap records aside (" + why + "); AtomiX does not start until they are, and it is tried again with a growing pause"); }
+    throw e;
+  }
 }
 
 /**
