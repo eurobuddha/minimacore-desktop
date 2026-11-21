@@ -696,3 +696,46 @@ test("dust past the bound: an order keeps PENDING_MAX coins, the smallest is rep
   assert.equal(fresh.recordPayment(r2, "0.05", "0x00", "0xf2"), "DUST"); assert.equal(fresh.recordPayment(r2, "0.05", "0x00", "0xf1"), "DUST");
   assert.equal(fresh.recordPayment(r2, "9.9", "0x00", "0xf3"), "PAID"); assert.equal(M2.decCmp(fresh.order(r2).paidAmount, "10"), 0);
 });
+
+// ---- 0.18.227 (as Pandamonium Desktop 0.19.273 / 0.19.284): a payout address that can never be valid (its checksum) is skipped for a while and said
+// whole; a node error about a valid one only holds the scan; the save checks the checksum ----
+const mxOf = (hex) => {   // the node's Mx encoding of a 32-byte address: [1, 0, 32] + address + the first 4 bytes of its SHA3, in base 32
+  const a = Buffer.from(hex.slice(2), "hex"), b = Buffer.concat([Buffer.from([1, 0, 32]), a, require("crypto").createHash("sha3-256").update(a).digest().subarray(0, 4)]);
+  let n = BigInt("0x" + b.toString("hex")), s = ""; while (n > 0n) { s = "0123456789ABCDEFGHIJKLMNOPQRSTUV"[Number(n % 32n)] + s; n /= 32n; } return "Mx" + s;
+};
+test("vendor: a payout address with a wrong checksum is skipped for five minutes and said whole; a node error about a valid one holds the scan; the save checks it", async () => {
+  const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
+  const VADDR = "MxG0" + "7".repeat(56), GOOD = mxOf("0x3A985DA74FE225B2045C172D6BD390BD855F086E3E9D525B46BFE24511431532");
+  const BAD = GOOD.slice(0, -3) + (GOOD.slice(-3, -2) === "A" ? "B" : "A") + GOOD.slice(-2);
+  let tip = 30000, goodFails = true; const asked = [], logs = [];
+  m.shop._setRunner(async (c) => {
+    if (c.startsWith("vault")) return { status: true, response: { phrase: "vendor seed pay" } };
+    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: VADDR } };
+    if (c === "block") return { status: true, response: { block: tip } };
+    if (c.startsWith("coins address:" + BAD)) { asked.push(c); return { status: false, error: "Invalid MxAddress - checksum wrong" }; }
+    if (c.startsWith("coins address:" + GOOD)) return goodFails ? { status: false, error: "SQL Exception: the wallet database is closed" } : { status: true, response: [] };
+    return { status: true, response: [] };
+  });
+  m.store.saveShop({ shopId: "bad3", shopName: "B", currency: "Minima", tokenid: "0x00", vendorAddress: BAD, products: [{ id: "p1", name: "Cup", price: "4", maxUnits: "5" }], shipping: [] });
+  m.store.saveShop({ shopId: "good3", shopName: "G", currency: "Minima", tokenid: "0x00", vendorAddress: GOOD, products: [{ id: "p1", name: "Cup", price: "4", maxUnits: "5" }], shipping: [] });
+  const err = console.error, now0 = Date.now; console.error = (l) => logs.push(String(l));
+  try {
+    await m.shop.init(); await m.shop.scanOnce(); m.store.setMeta("scanTip", 30000);
+    tip = 30001; await m.shop.scanOnce();
+    assert.equal(m.shop.scanState().readFailed, true, "the valid address's coins could not be read: the scan stays"); assert.equal(Number(m.store.getMeta("scanTip")), 30000);
+    assert.deepEqual(m.shop.scanState().skipped, [BAD], "only the one with a wrong checksum is skipped, named whole");
+    assert.ok(m.shop.scanState().text.includes("Payments to " + BAD + " are not read: it is not a valid Minima address."), m.shop.scanState().text);
+    assert.ok(logs.some(l => l.includes("payout address " + BAD + " is not a valid Minima address")), logs.join(" | "));
+    goodFails = false; tip = 30002; asked.length = 0; await m.shop.scanOnce();
+    assert.equal(m.shop.scanState().readFailed, false); assert.equal(Number(m.store.getMeta("scanTip")), 30002, "the bad address no longer holds the scan"); assert.deepEqual(asked, [], "a skipped address is not asked again");
+    Date.now = () => now0() + 5 * 60000 + 1000; assert.deepEqual(m.shop.scanState().skipped, [], "the skip runs out");
+    tip = 30003; await m.shop.scanOnce(); assert.ok(asked.length > 0, "and the address is looked at again"); assert.equal(Number(m.store.getMeta("scanTip")), 30003, "still not holding the scan");
+    Date.now = now0;
+    // the Studio's save: the checksum decides, the node is not asked
+    assert.throws(() => m.shop.saveShop({ shopId: "bad4", shopName: "C", vendorAddress: BAD, products: [] }), new RegExp("payout address " + BAD + " is not a valid Minima address\\. Nothing was saved"));
+    assert.equal(m.store.shop("bad4"), null);
+    m.shop.saveShop({ shopId: "ok6", shopName: "E", vendorAddress: GOOD, products: [] }); assert.ok(m.store.shop("ok6"), "a valid address saves");
+    m.shop.saveShop(Object.assign({}, m.store.shop("bad3"), { shopName: "B2" })); assert.equal(m.store.shop("bad3").shopName, "B2", "an unchanged address is not checked again");
+    assert.throws(() => m.shop.saveShop({ shopId: "bad7", shopName: "H", vendorAddress: "0x" + "AB".repeat(31), products: [] }), /payout address is invalid/);
+  } finally { console.error = err; Date.now = now0; }
+});

@@ -65,6 +65,35 @@ function looksLikeMinimaAddress(a) {
   if (a.startsWith("0x")) { const h = a.slice(2); return h.length === 64 && /^[0-9A-Fa-f]+$/.test(h); }
   return false;
 }
+/**
+ * Can this payout address never be valid (0.18.227, as Pandamonium Desktop 0.19.273 / 0.19.284)? Decided here, never from a node
+ * error: an Mx whose checksum is wrong (the node's own Address.convertMinimaAddress: the first 4 bytes of the SHA3 of the 32-byte
+ * address, as Pandamonium Desktop's main/futurecash.js mxToHex reads it), or an 0x that is not 64 hexadecimal digits
+ * (checkaddress's length rule). looksLikeMinimaAddress checks the shape only, so an Mx with a wrong checksum was saved and its
+ * payments could never be read. A runtime without SHA3 cannot judge: false (the address is read as before).
+ */
+const B32 = "0123456789abcdefghijklmnopqrstuv";
+function mxToHex(mx) {
+  if (typeof mx !== "string" || !/^M[xX][0-9A-Za-z]{30,100}$/.test(mx)) return null;
+  let n = 0n;
+  for (const ch of mx.slice(2).toLowerCase().replace(/w/g, "i").replace(/y/g, "l").replace(/z/g, "o")) { const d = B32.indexOf(ch); if (d < 0) return null; n = n * 32n + BigInt(d); }
+  let h = n.toString(16); if (h.length % 2) h = "0" + h;
+  const b = Buffer.from(h, "hex");
+  if (b.length !== 39 || b[0] !== 1 || ((b[1] << 8) | b[2]) !== 32) return null;
+  const addr = b.subarray(3, 35);
+  return crypto.createHash("sha3-256").update(addr).digest().subarray(0, 4).equals(b.subarray(35)) ? "0x" + addr.toString("hex").toUpperCase() : null;
+}
+function badAddress(a) {
+  a = String(a == null ? "" : a).trim();
+  if (/^0x/i.test(a)) return !/^0x[0-9a-fA-F]{64}$/.test(a);
+  if (!/^M[xX]/.test(a)) return true;
+  try { return !mxToHex(a); } catch (e) { return false; }
+}
+// Payout addresses that can never be valid and whose coins the node did not list: skipped for SKIP_MS, logged whole, said on the
+// miniMall status line (scanState). They were read as "not answered", which held the scan for good: the tip never advanced and
+// every pass read the widest window again. A node error about a valid address still holds the scan (read again next pass).
+const SKIP_MS = 5 * 60000, skippedPay = new Map();   // address -> skipped until
+const skipping = (a) => (skippedPay.get(a) || 0) > Date.now();
 /** Read a coin's state at `port` as a hex string, tolerating {"99":"0x.."} object and [{port,data}] array shapes. */
 function statePort(coin, port) {
   const st = coin && coin.state;
@@ -342,10 +371,16 @@ async function scanOrders(depth, floor) {
   return changed;
 }
 async function scanPayments(depth, floor) {
-  const addrs = payAddresses(); if (!addrs.length) return false;
+  const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   const listed = [], have = new Set();
   for (const a of addrs) {   // every published payout address (0.18.205), one coin once
-    const got = await coinsAt(a, depth, " relevant:true"); if (!got) continue;
+    const before = readFailed, got = await coinsAt(a, depth, " relevant:true");
+    if (!got && badAddress(a)) {   // not a node error: this address can never be read (0.18.227)
+      readFailed = before; skippedPay.set(a, Date.now() + SKIP_MS);
+      console.error("[miniMall] the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address).");
+      continue;
+    }
+    if (!got) continue;
     for (const c of got) if (c && c.coinid && !have.has(c.coinid) && !above(c, floor)) { have.add(c.coinid); listed.push(c); }
   }
   capSeen();
@@ -430,7 +465,16 @@ function checkImported(cfg) {
 
 // ---- read-model for the renderer ----
 function myShops() { return store.shops(); }
-function saveShop(cfg) { store.saveShop(cfg); emitter.emit("update"); return cfg; }
+/** A shop's payout address is checked when it is new or changed (0.18.227): by its checksum here, not by asking the node. */
+function saveShop(cfg) {
+  const addr = String((cfg && cfg.vendorAddress) || "").trim(), was = cfg && store.shop(cfg.shopId);
+  if (addr && !(was && String(was.vendorAddress || "").trim() === addr)) {
+    if (!looksLikeMinimaAddress(addr)) throw new Error("This shop's payout address is invalid.");
+    if (badAddress(addr)) throw new Error("The payout address " + addr + " is not a valid Minima address. Nothing was saved; check the address and save again.");
+    skippedPay.delete(addr);
+  }
+  store.saveShop(cfg); emitter.emit("update"); return cfg;
+}
 function deleteShop(shopId) { store.deleteShop(shopId); emitter.emit("update"); }
 /** What the screens may offer for a buy order's payment (0.18.224): `sending` while its send is at the node in this process (no
  *  warning, no button), nothing once the vendor acknowledged it; else the unpaid / may-have-gone-through marks. */
@@ -463,11 +507,12 @@ function paymentNotSent(ref) {
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read yet, for the miniMall status line (0.18.213). */
 function scanState() {
-  const target = Number(store.getMeta("bfTarget")) || 0, below = Number(store.getMeta("unreadBelow")) || 0;
-  return { readFailed: lastPassFailed, catchingUpTo: target, unreadBelow: below,
-    text: lastPassFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."
+  const target = Number(store.getMeta("bfTarget")) || 0, below = Number(store.getMeta("unreadBelow")) || 0, skipped = [...skippedPay.keys()].filter(skipping);
+  const skippedText = skipped.map(a => "Payments to " + a + " are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.").join(" ");
+  return { readFailed: lastPassFailed, catchingUpTo: target, unreadBelow: below, skipped,
+    text: [lastPassFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."
       : target ? "Reading orders and payments from while the app was closed (back to block " + target + ")."
-      : below ? "Orders and payments older than block " + below + " could not be read: the node serves no deeper history." : "" };
+      : below ? "Orders and payments older than block " + below + " could not be read: the node serves no deeper history." : "", skippedText].filter(Boolean).join(" ") };   // a payout address skipped as not valid, whole (0.18.227)
 }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 

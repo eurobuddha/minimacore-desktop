@@ -3099,7 +3099,7 @@ async function renderShopStudio() {
       shipping: shopNormalizeShipping(d.shipping),
       products: d.products.filter(p => p.name && Number(p.price) > 0).map(p => ({ id: p.id, name: p.name, description: p.description || "", mode: "units", price: String(p.price).trim(), maxUnits: String(Number(p.maxUnits) || 10), image: ShopRules.image(p.image) })) };
     const why = ShopRules.problem(cfg); if (why) return toast(why, "warn");   // plain prices and fees only (0.18.150)
-    await api.shopSave(cfg);
+    try { await api.shopSave(cfg); } catch (e) { return toast(ipcMsg(e), "err"); }   // e.g. a payout address with a wrong checksum (0.18.227)
     const wasNew = !d.shopId;
     shopDraft = null;
     toast("Shop saved ✓", "ok");
