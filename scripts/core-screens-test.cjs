@@ -57,7 +57,7 @@ test("Startup Params: the Server switch and the network preset fill the flags th
 
 test("the RPC password goes from the main process to the clipboard and is never handed to the page", () => {
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
-  assert.ok(/"mcd:copyRpcPassword", \(\) => \{ clipboard\.writeText\(config\.rpcSecret\(\)\); return true; \}/.test(main));
+  assert.ok(/"mcd:copyRpcPassword", \(\) => clipSecret\.copy\(config\.rpcSecret\(\)\)\);/.test(main), "CHANGED on purpose (0.19.226): through clipsecret, cleared after a minute and at quit");
   assert.ok(!/(return|=>)\s*config\.rpcSecret\(\)/.test(main), "no handler returns the secret");
 });
 

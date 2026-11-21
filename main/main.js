@@ -259,7 +259,7 @@ const clipSecret = require("./clipsecret").create(clipboard);
 ipcMain.handle("mcd:clipSecret", (_e, text) => clipSecret.copy(text));
 
 // Startup Params "Copy RPC password": main process to clipboard. The password is never returned to the renderer.
-ipcMain.handle("mcd:copyRpcPassword", () => { clipboard.writeText(config.rpcSecret()); return true; });
+ipcMain.handle("mcd:copyRpcPassword", () => clipSecret.copy(config.rpcSecret()));   // a secret: cleared after a minute and at quit (main/clipsecret.js, 0.19.226)
 
 // Language. The preload asks once, synchronously, so the window's first paint is already in the language; the
 // system's language is read here (after "ready": a window exists) and only when nothing was picked.
@@ -317,7 +317,7 @@ node.onWalletReplaced = async () => {
   await each("P2P Chance", () => casino.invalidate());
   await each("Future Cash Next", () => futurecash.invalidate());   // its store is the old wallet's: moved aside, never deleted
   await each("coin reservations", () => reserve.invalidate());   // every reservation belongs to the old wallet's coins
-  node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon and P2P Chance were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
+  node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon, P2P Chance, Future Cash Next and the coin reservations were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
   if (failed.length) throw new Error(failed.join("; "));
 };
 // Around a wallet-replacing megammrsync (node-manager runResync, 0.18.116): the three trading engines are stopped

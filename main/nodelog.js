@@ -54,10 +54,12 @@ const BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g;
 function scrub(line, secret) {
   let l = String(line).replace(BIDI, "");
   if (typeof secret === "string" && secret.length >= 8) l = l.split(secret).join("•••");
-  return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"')
-    .replace(/phrase:[A-Za-z]+\b(?!:)(?: [A-Za-z]+\b(?!:)){0,23}/g, "phrase:•••")
-    .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••")
-    .replace(/"(phrase|seed|seedphrase|mnemonic|privatekey)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');   // any letter case (0.19.197: "phrase" too, as released 0.18.179)
+  // ":" with spaces around it is read as the node reads it (0.19.226: `phrase : "…"`, `privatekey : 0x…`), and a reply's
+  // "seedrandom" field (the value AtomiX's ETH key is made from) is redacted with the others
+  return l.replace(/phrase[ \t]*:[ \t]*"[^"]*"/g, 'phrase:"•••"')
+    .replace(/phrase(?::|[ \t]+:[ \t]*)[A-Za-z]+\b(?![ \t]*:)(?: [A-Za-z]+\b(?![ \t]*:)){0,23}/g, "phrase:•••")   // "phrase: none given" (prose) is not one
+    .replace(/privatekey[ \t]*:[ \t]*"?0x[0-9A-Fa-f]+"?/gi, "privatekey:•••")
+    .replace(/"(phrase|seed|seedphrase|mnemonic|privatekey|seedrandom)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');   // any letter case (0.19.197: "phrase" too, as released 0.18.179)   // any letter case (0.19.197: "phrase" too, as released 0.18.179)
 }
 
 /**

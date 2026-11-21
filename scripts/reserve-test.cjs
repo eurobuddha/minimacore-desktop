@@ -816,3 +816,12 @@ test("cmdverb: the parameters after a quoted verb with no space are read, as the
   const G = require("../main/seedgate.js"), g = G.create({ check: async () => ({ biometric: false }) });
   await assert.rejects(g.open('"keys"action:list action:genkey', "SHOW KEY"), /names action more than once/);
 });
+
+// 0.19.226: one command is forwarded exactly as written, not JS-trimmed
+test("the guard forwards a single command as written (no trim of its own)", async () => {
+  const { node, as } = rig(wallet3());
+  await as("wallet")("  txncreate id:fw  ");
+  assert.equal(node.seen[node.seen.length - 1], "  txncreate id:fw  ");
+  const main = SRC("main/main.js");
+  assert.ok(main.includes("P2P Chance, Future Cash Next and the coin reservations were reset in the main process"), "the log line names all seven");
+});

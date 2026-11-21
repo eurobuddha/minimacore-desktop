@@ -71,6 +71,12 @@ ok("a seed phrase is redacted quoted, as JSON, and as bare words, without eating
   assert.equal(scrub("phrase:" + words.join(" ")), "phrase:••• " + words.slice(24).join(" "), "24 words at most: what follows is not eaten");
   assert.equal(scrub("an unrelated line: phrase: none given, 12 blocks"), "an unrelated line: phrase: none given, 12 blocks");
   assert.equal(scrub("sendfrom privatekey:0xABCDEF0123 amount:1"), "sendfrom privatekey:••• amount:1");
+  // 0.19.226: ":" spaced as the node reads it, and a reply's "seedrandom" field
+  assert.equal(scrub('megammrsync phrase : "ONE TWO" host:x:9001'), 'megammrsync phrase:"•••" host:x:9001');
+  assert.equal(scrub("keys action:genkey phrase : ONE TWO host:a.b:1"), "keys action:genkey phrase:••• host:a.b:1");
+  assert.equal(scrub("sendfrom privatekey : 0xABCDEF amount:1"), "sendfrom privatekey:••• amount:1");
+  assert.equal(scrub('sendfrom PrivateKey:"0xABCDEF" amount:1'), "sendfrom privatekey:••• amount:1");
+  assert.equal(scrub('{"command":"seedrandom","response":{"seedrandom":"0x1234","modifier":"x"}}'), '{"command":"seedrandom","response":{"seedrandom":"•••","modifier":"x"}}');
 });
 ok("bidirectional controls are stripped", () => {
   const raw = "[parlons-node] message from 0xAB\u202E: \u2066gnp.exe\u2069\u200E\u200F\u202A\u202B\u202C\u202D\u2067\u2068 end";

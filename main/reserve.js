@@ -402,7 +402,7 @@ function createRegistry(o = {}) {
     // A `;` ends a command for the node WHEREVER it stands, inside a state JSON too (CommandRunner.runMultiCommand is a
     // StringTokenizer on ";"). The chain is split here exactly as the node splits it: read any other way, a txninput
     // written after a ; inside a JSON value would be run by the node and never seen here.
-    if (c.indexOf(";") < 0) return one(owner, c.trim(), send, opts);
+    if (c.indexOf(";") < 0) return one(owner, c, send, opts);   // forwarded as written (0.19.226: it was the JS-trimmed text)
     // a `;` chain (the terminal): refused whole when one of its inputs is held; then recorded part by part from its reply
     const ps = c.split(";").map(s => s.trim()).filter(Boolean);
     for (const p of ps) if (verbOf(p) === "txninput") {
