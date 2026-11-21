@@ -119,7 +119,7 @@ test("syscheck: Touch ID when it can prompt; refused (not phrase only) once Touc
   const io = (o) => Object.assign({ can: () => true, prompt: async (w) => { asked.push(w); }, confirm: async (d) => { confirmed.push(d); return true; }, seen: () => seen, markSeen: () => { seen = true; } }, o);
   assert.deepEqual(await create(io({})).check("run the Terminal command vault action:seed", "detail"), { biometric: true });
   assert.deepEqual(asked, ["run the Terminal command vault action:seed"], "the reason names the command"); assert.equal(seen, true, "Touch ID worked: remembered");
-  for (const can of [() => false, () => { throw new Error("x"); }]) await assert.rejects(create(io({ can, where: () => "/x/touchid-seen" })).check("r", "d"), /Touch ID has worked in this app on this Mac before but cannot be asked now[\s\S]*lock the screen and log in again[\s\S]*delete this file: \/x\/touchid-seen/);
+  for (const can of [() => false, () => { throw new Error("x"); }]) await assert.rejects(create(io({ can, where: () => "/x/touchid-seen" })).check("r", "d"), /Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown\. If the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again\.[\s\S]*lock the screen and log in again[\s\S]*delete this file: \/x\/touchid-seen/);
   assert.deepEqual(confirmed, [], "no fall-back to a confirmation while it is remembered");
   seen = false;
   assert.deepEqual(await create(io({ can: () => false })).check("r", "This Terminal command will run once: vault"), { biometric: false });

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.198] — the Touch ID refusal names the commonest reason first
+
+- When Touch ID has worked before but cannot be asked now, the message now first says: if the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again. Test: `scripts/ethkey-test.cjs`.
+
 ## [0.18.197] — command reading: quotes, brackets and sends the pin cannot read
 
 - A `{` or `[` inside a quoted value (`password:"ab{c"`) opened a block in the parameter reader and hid every parameter after it from the repeat check and the send pin; the quote state is now tracked. A quoted first word now ends at its closing quote (`"txninput"id:a` lost its first parameter; ported from the development branch). The send pin leaves a send as written when its amount is not a plain number or it is a `multi:` send. Test: `scripts/sendpin-test.cjs`.

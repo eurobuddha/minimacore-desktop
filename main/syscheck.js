@@ -32,6 +32,7 @@ function create(io) {
     if (seen) {
       let where = ""; try { where = String(io.where() || ""); } catch (e) {}
       throw new Error("Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown. "
+        + "If the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again. "   // the commonest reason (0.18.198)
         + "If Touch ID is locked after too many tries, lock the screen and log in again with your password; Touch ID then works again. "
         + "If this Mac no longer has Touch ID, quit the app and delete this file: " + where + " . The app then asks with a confirmation window instead.");
     }
