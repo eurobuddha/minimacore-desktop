@@ -238,7 +238,7 @@ label.prow input[type="checkbox"] { margin-right: 8px; vertical-align: baseline;
 .kv__v, .mm-key, .hist-dim, .v-to { overflow-wrap: anywhere; }
 .idcopy:hover { color: var(--fg); border-bottom-color: var(--fg); }
 /* A toast carrying a full id to copy: clickable, and it stays up long enough to actually click. */
-.toast--copy { cursor: pointer; }
+.toast--copy { cursor: pointer; overflow-wrap: anywhere; }   /* the id wraps, never cut or pushed off the window (0.19.324) */
 .toast--copy:hover { border-color: var(--fg); }
 
 /* Split / Consolidate on every token in the wallet */

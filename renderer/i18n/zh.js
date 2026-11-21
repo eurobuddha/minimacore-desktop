@@ -5337,8 +5337,10 @@
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.": "此命令的 data: 必须是 0x 十六进制，其中的交易 id 只能是字母、数字、\".\"、\"-\" 或 \"_\"：节点会把这个 id 粘贴进它自己运行的命令中。未运行任何命令。",
   "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.": "节点已在停止或重启中，或者有关它的问题仍未回答。没有再做任何事。",
   "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.": "一个密钥有 262144 次一次性使用，因此它已经使用的次数是 0 到 262143 之间的整数（262144 或更多则没有可用于签名的密钥）。未保存任何内容。",
-  "The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.": "链上显示此密钥已使用 {chain} 次：它已没有剩余的使用次数（一个密钥有 262144 次）。此钱包无法从该地址发送任何内容；请用另一个钱包转移资金。未保存任何内容。",
-  "This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent.": "此钱包保存的密钥使用次数为 {count}，而一个密钥有 262144 次一次性使用（0 到 262143）：现在发送会再次使用一次性密钥签名。该计数从不降低，因此本应用无法从该地址发送任何内容；请用另一个钱包转移资金。未发送任何内容。"
+  "The chain's figure for this key is {chain} uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "链上对此密钥的数字是 {chain} 次使用，达到或超过一个密钥拥有的 262144 次一次性使用：如果该数字正确，发送将再次使用一次性密钥签名，因此本应用不会从该地址签名。未保存任何内容。",
+  "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.": "此钱包保存的密钥使用次数为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用（0 到 262143）：现在发送会再次使用一次性密钥签名，因此本应用不会从该地址签名。该计数从不降低。未发送任何内容。",
+  "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用：发送将再次使用一次性密钥签名，因此本应用不会从该地址签名。未保存任何内容。",
+  "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}。请确认至少这么多。未保存任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5458,6 +5460,8 @@
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.",
   "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.",
   "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.",
-  "The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.",
-  "This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent."
+  "The chain's figure for this key is {chain} uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
+  "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.",
+  "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
+  "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved."
 ] });

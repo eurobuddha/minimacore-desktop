@@ -105,13 +105,23 @@ function writeStore(obj) {
 // signs at that use, so 0 to LAST_USE leaves at least one.
 const KEY_USES = 262144, LAST_USE = KEY_USES - 1;
 const ABOVE_LAST = "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.";
-const USED_UP = (n) => "The chain shows " + n + " uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.";
-const STORED_OVER = (n) => "This wallet's saved key-use count is " + n + ", and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent.";
+// said as what is known (0.19.324): the chain's figure can over-count, and every wallet signs this address with the same key
+const USED_UP = (n) => "The chain's figure for this key is " + n + " uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.";
+const STORED_OVER = (n) => "This wallet's saved key-use count is " + n + ", at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.";
+const DAMAGED_OVER = (n) => "This wallet's saved key-use count read " + n + " before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.";
+const DAMAGED_BELOW = (n) => "This wallet's saved key-use count read " + n + " before it was damaged. Confirm at least that many. Nothing was saved.";
+// What a damaged entry's old value still says (0.19.324): a count written as a number or as digits, a fraction rounded UP (57.5 and
+// "57.5" read 58), is a floor too; anything else reads 0 (unknown: the chain's figure is the floor then)
+function oldCount(v) {
+  const k = v && typeof v === "object" ? v.keyuses : undefined;
+  const x = typeof k === "number" ? k : typeof k === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(k) ? Number(k) : NaN;
+  return Number.isFinite(x) && x >= 0 ? Math.ceil(x) : 0;
+}
 const entryOk = (v) => !!v && typeof v === "object" && Number.isSafeInteger(v.keyuses) && v.keyuses >= 0;
 /** An address's entry; a damaged one (a counter that is not a whole number of 0 or more) is unknown, so it must be confirmed again. */
 function entryFor(store, addr) {
   if (!Object.hasOwn(store, addr)) return { keyuses: 0, ack: false };
-  return entryOk(store[addr]) ? store[addr] : { keyuses: 0, ack: false, damaged: true };
+  return entryOk(store[addr]) ? store[addr] : { keyuses: oldCount(store[addr]), ack: false, damaged: true };
 }
 // The chain's figure for a key (main.js: main/keyuses.js onchainUses over the pinned, no-redirect fetch): a whole number, or
 // null when it was not read. The public key of each address this session derived, so main asks for the right key.
@@ -129,18 +139,20 @@ async function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
-  if (n > LAST_USE) throw new Error(ABOVE_LAST);   // 0.19.323: the node wraps or restarts a count past the key's last use
   const was = entryFor(loadStore(), address);
+  if (was.damaged && was.keyuses >= KEY_USES) throw new Error(DAMAGED_OVER(was.keyuses));   // 0.19.324: never "confirm at least 1000000"
+  if (n > LAST_USE) throw new Error(ABOVE_LAST);   // 0.19.323: the node wraps or restarts a count past the key's last use
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
     if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
     if (chain >= KEY_USES) throw new Error(USED_UP(chain));   // never adopted: no count this app can sign with (0.19.323)
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
+    if (was.damaged && n < was.keyuses) throw new Error(DAMAGED_BELOW(was.keyuses));   // the old value is a floor too (0.19.324)
   }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
-  e.keyuses = e.damaged ? n : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown
+  e.keyuses = e.damaged ? Math.max(n, e.keyuses || 0) : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown
   delete e.damaged; e.ack = true;
   store[address] = e;
   writeStore(store);

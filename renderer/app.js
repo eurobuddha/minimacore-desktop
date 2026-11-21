@@ -1277,7 +1277,9 @@ function renderWwWallet(body) {
     // The chain's figure for this key, read on the user's click only. → a whole number, or null: not read (never 0 for "unknown").
     const readOnchain = async () => { let n = null; try { n = await api.keyAudit(a.publickey); } catch (e) { n = null; } if (wwAddr === a) wwKuSuggest = AppsAct.ww.confirmUses(0, n); return AppsAct.ww.confirmUses(0, n); };
     el("wwKuConfirm").addEventListener("click", async () => {
-      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value; btn.disabled = true; btn.textContent = t("Checking the chain…");
+      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value;
+      if (!AppsAct.ww.wholeCount(typed)) { toast(t("Key uses must be a whole number of 0 or more."), "err"); return; }   // refused, never floored (0.19.324)
+      btn.disabled = true; btn.textContent = t("Checking the chain…");
       const n = AppsAct.ww.confirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
       if (wwAddr !== a) return;                                   // logged out while the chain was being read
       if (n == null) {
@@ -1286,7 +1288,7 @@ function renderWwWallet(body) {
         if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); }
         return;
       }
-      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast(t("Secret key uses confirmed: {n}", { n: n }), "ok"); }
+      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast(t("Secret key uses confirmed: {n}", { n: wwKu.keyuses }), "ok"); }   // the figure main kept (0.19.324)
       catch (e) { toast(ipcError(e) || t("Could not save the secret key uses"), "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); } }   // main's reason (0.19.255: a damaged count below the chain's figure, or the figure unread)
     });
     el("wwKuCheck").addEventListener("click", async () => {
@@ -1294,6 +1296,7 @@ function renderWwWallet(body) {
       const onchain = await readOnchain();
       if (wwAddr !== a || !btn.isConnected) return;
       if (onchain == null) toast(t("The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can."), "err");
+      else if (!AppsAct.ww.wholeCount(el("wwKuIn").value)) toast(t("Key uses must be a whole number of 0 or more."), "err");
       else { el("wwKuIn").value = String(AppsAct.ww.confirmUses(el("wwKuIn").value, onchain)); toast(t("On-chain uses: {onchain} (set as minimum)", { onchain: onchain }), "ok"); }
       btn.disabled = false; btn.textContent = t("Check on-chain");
     });

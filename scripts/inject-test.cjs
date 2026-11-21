@@ -227,19 +227,47 @@ test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 an
   assert.equal(ww.KEY_USES, 262144); assert.equal(ww.LAST_USE, 262143);
   for (const n of [262144, 1000000, 4294967299, "262144", "4294967299"]) await assert.rejects(ww.ackKeyuses(FROM, n), /A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143/, String(n));
   assert.ok(!fs.existsSync(file), "nothing saved by those");
-  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 262143), /The chain shows 262144 uses of this key: it has no uses left \(a key has 262144\)\. Nothing can be sent from this address with this wallet; move the funds with another wallet/);
-  chain = 5000000; await assert.rejects(ww.ackKeyuses(FROM, 0), /The chain shows 5000000 uses of this key: it has no uses left/, "a huge chain figure is never adopted");
+  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 262143), /The chain's figure for this key is 262144 uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address\./);   // wording of 0.19.324 (changed on purpose)
+  chain = 5000000; await assert.rejects(ww.ackKeyuses(FROM, 0), /The chain's figure for this key is 5000000 uses, at or past/, "a huge chain figure is never adopted");
   assert.ok(!fs.existsSync(file));
   // the boundary: 262143 is accepted, its one send signs at 262143, the next is refused
   chain = 262143; assert.deepEqual(await ww.ackKeyuses(FROM, 262143), { address: FROM, keyuses: 262143, ack: true });
   const go = () => ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" });
   assert.equal((await go()).ok, true); assert.deepEqual(sent, ["262143"]);
-  await assert.rejects(go(), /saved key-use count is 262144, and a key has 262144 one-time uses \(0 to 262143\)/); assert.deepEqual(sent, ["262143"], "nothing more reached the node");
+  await assert.rejects(go(), /saved key-use count is 262144, at or past the 262144 one-time uses a key has \(0 to 262143\)/); assert.deepEqual(sent, ["262143"], "nothing more reached the node");
   // a count an older version stored past the last use refuses every send, and is never lowered
   fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 1000000, ack: true } }));
-  await assert.rejects(go(), /This wallet's saved key-use count is 1000000, and a key has 262144 one-time uses \(0 to 262143\): a send now would sign with a one-time key again\. The count is never lowered/);
+  await assert.rejects(go(), /This wallet's saved key-use count is 1000000, at or past the 262144 one-time uses a key has \(0 to 262143\): a send now would sign with a one-time key again, so this app will not sign from this address\. The count is never lowered/);
   await ww.ackKeyuses(FROM, 7); assert.equal(ww.keyusesInfo(FROM).keyuses, 1000000, "never lowered"); assert.deepEqual(sent, ["262143"]);
   const app = rd("renderer/app.js");
   assert.ok(app.includes('id="wwKuIn" type="number" min="0" max="262143" step="1"') && !/too high is safe/.test(app) && app.includes("A key has 262144 one-time uses, so this is a whole number from 0 to 262143."), "the window says the limit and no longer that too high is safe");
   ww.setOnchain(async () => null);
+});
+
+// ---- 0.19.324: a damaged entry's old value that still reads as a count is a floor (a fraction rounded up); one past the last use says so ----
+test("Web Wallet: a damaged entry's old count (57, \"57\", 57.5, \"57.5\") is a floor; one at or past 262144 gives the over-count explanation; the window refuses a typed fraction and says the figure main kept", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const FROM = "0x" + "A8".repeat(32), PK = "0x" + "B8".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C8".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 3);
+  for (const [old, floor] of [["57", 57], [" 57 ", 57], [57.5, 58], ["57.5", 58]]) {
+    fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
+    assert.deepEqual(ww.keyusesInfo(FROM), { address: FROM, keyuses: floor, ack: false, damaged: true }, "the window is offered the old figure: " + JSON.stringify(old));
+    await assert.rejects(ww.ackKeyuses(FROM, floor - 1), new RegExp("saved key-use count read " + floor + " before it was damaged\\. Confirm at least that many"), JSON.stringify(old));
+    assert.deepEqual(await ww.ackKeyuses(FROM, floor), { address: FROM, keyuses: floor, ack: true });
+  }
+  for (const old of ["x", "", "-4", "5e3", null, true]) { fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } })); assert.equal(ww.keyusesInfo(FROM).keyuses, 0, "no count read from " + JSON.stringify(old)); }
+  for (const old of [1000000, "1000000", 262144]) {
+    fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old + (typeof old === "number" ? 0.5 : "") , ack: true } }));
+    await assert.rejects(ww.ackKeyuses(FROM, 262143), /saved key-use count read \d+ before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address/, "never 'confirm at least " + old + "'");
+  }
+  ww.setOnchain(async () => null);
+  const Act = require("../renderer/apps-act.js"), app = rd("renderer/app.js");
+  for (const bad of ["7.9", "-5", "abc", "1e3", "3 4"]) { assert.equal(Act.ww.wholeCount(bad), false, bad); assert.ok(Number.isNaN(Act.ww.confirmUses(bad, 3)), bad + ": refused, not floored"); }
+  for (const ok of ["", " 12 ", "0", 7]) assert.equal(Act.ww.wholeCount(ok), true, String(ok));
+  assert.ok(app.includes('if (!AppsAct.ww.wholeCount(typed)) { toast(t("Key uses must be a whole number of 0 or more."), "err"); return; }'), "Confirm refuses a typed fraction before anything is read or saved");
+  assert.ok(app.includes('toast(t("Secret key uses confirmed: {n}", { n: wwKu.keyuses }), "ok")'), "the toast says the figure main kept");
+  assert.ok(/\.toast--copy \{[^}]*overflow-wrap: anywhere/.test(rd("renderer/app.css")), "a whole id in a toast wraps instead of running off the window");
 });
