@@ -456,7 +456,7 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
   assert.ok(/function wwLock\(\) \{ wwSeed = null;/.test(ww), "Logout clears the seed");
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
-  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "293a9a1f0ec5a665063c57d1b488aae74286d46ae5d03949dcb415995b52a566", "main/webwallet.js is the file of 0.19.270 (changed on purpose: 0.19.270 every key-use entry not yet acknowledged is confirmed only at or above the chain's figure, checked in main; 0.19.255 one damaged key-use entry refuses only its address and is confirmed again at or above the chain's figure, checked in main; 0.19.194 every command through rpc.oneCommand, a phrase with ; refused; 0.19.198 ids whole in its log; 0.19.230 the key-use store fails closed, one read per send, an unreadable key list is never a foreign seed; before that, of 0.19.107)");
+  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "54a73e223172d38a7c7514d6b7cb6dbc863f52b72b5dea6a2c6266556e182e83", "main/webwallet.js is the file of 0.19.323 (changed on purpose: 0.19.323 a key-use count above 262143 is refused at ack, a chain figure at or above 262144 is never adopted, a stored count past 262143 sends nothing and is never lowered; 0.19.270 0.19.270 every key-use entry not yet acknowledged is confirmed only at or above the chain's figure, checked in main; 0.19.255 one damaged key-use entry refuses only its address and is confirmed again at or above the chain's figure, checked in main; 0.19.194 every command through rpc.oneCommand, a phrase with ; refused; 0.19.198 ids whole in its log; 0.19.230 the key-use store fails closed, one read per send, an unreadable key list is never a foreign seed; before that, of 0.19.107)");
 });
 // 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
 // redirects, and an unread figure counted as 0.
@@ -476,7 +476,7 @@ test("Web Wallet: the public key leaves only on a click, with no redirect; Confi
   assert.equal(asked.length, before, "and nothing was asked for those");
   // the figure recorded at Confirm
   const C = Act.ww.confirmUses;
-  assert.equal(C("0", 9), 9, "never below the chain's figure"); assert.equal(C("20", 9), 20, "a higher typed figure stands (too high is safe)"); assert.equal(C("", 0), 0); assert.equal(C("abc", 3), 3); assert.equal(C("-5", 3), 3); assert.equal(C("7.9", 3), 7);
+  assert.equal(C("0", 9), 9, "never below the chain's figure"); assert.equal(C("20", 9), 20, "a higher typed figure stands (main refuses one past the last use, 262143)"); assert.equal(C("", 0), 0); assert.equal(C("abc", 3), 3); assert.equal(C("-5", 3), 3); assert.equal(C("7.9", 3), 7);
   for (const unread of [null, undefined, NaN, -1, 1.5, "9", {}]) assert.equal(C("50", unread), null, "unread (" + String(unread) + "): refused, whatever was typed");
   const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {")), mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
   assert.equal((ww.match(/api\.keyAudit\(/g) || []).length, 1, "one place asks");

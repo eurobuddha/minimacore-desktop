@@ -313,7 +313,7 @@
   "The next send signs at use": "下一次发送签名时的使用次数为",
   ". The app counts every send and never counts down.": "。应用会计入每一次发送，计数只增不减。",
   "Raise it": "调高",
-  "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.": "{b}发送前请确认秘密密钥使用次数。{_b}此密钥在任何地方已经完成过多少笔付款（全新密钥为 0）？数字偏高是安全的；{b}数字偏低可能重复使用签名密钥，导致您的资金丢失{_b}。",
+  "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A key has 262144 one-time uses, so this is a whole number from 0 to 262143. A figure a little too high only skips some of them; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.": "{b}发送前请确认秘密密钥使用次数。{_b}此密钥在任何地方已经完成过多少笔付款（全新密钥为 0）？一个密钥有 262144 次一次性使用，因此这是 0 到 262143 之间的整数。数字略高只会跳过其中一些；{b}数字偏低可能重复使用签名密钥，导致您的资金丢失{_b}。",
   "The chain shows {wwKuSuggest} so far.": "链上目前显示 {wwKuSuggest}。",
   "Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.": "“链上检查”和“确认”会从链归档读取此密钥的使用次数：只有此钱包的公钥会发送到 eurobuddha.com。这会向该服务器透露该公钥。秘密密钥留在这台电脑上。该数字未读取到时，“确认”不会继续。",
   "Amount of times": "次数",
@@ -3179,7 +3179,7 @@
     "The next send signs at use",
     ". The app counts every send and never counts down.",
     "Raise it",
-    "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.",
+    "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A key has 262144 one-time uses, so this is a whole number from 0 to 262143. A figure a little too high only skips some of them; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.",
     "The chain shows {wwKuSuggest} so far.",
     "Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.",
     "Amount of times",
@@ -5335,7 +5335,10 @@
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "不会使用另一台计算机上的文件（以 \\\\ 或 // 开头的路径）：节点会去连接它。请先把文件复制到这台计算机。未运行任何命令。",
   "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "此命令包含非纯 ASCII 字符，且对节点的命令行来说太长（编码后超过 65,536 个字符）。请缩短它，或将这些字符写成纯 ASCII。未发送任何内容。",
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.": "此命令的 data: 必须是 0x 十六进制，其中的交易 id 只能是字母、数字、\".\"、\"-\" 或 \"_\"：节点会把这个 id 粘贴进它自己运行的命令中。未运行任何命令。",
-  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.": "节点已在停止或重启中，或者有关它的问题仍未回答。没有再做任何事。"
+  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.": "节点已在停止或重启中，或者有关它的问题仍未回答。没有再做任何事。",
+  "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.": "一个密钥有 262144 次一次性使用，因此它已经使用的次数是 0 到 262143 之间的整数（262144 或更多则没有可用于签名的密钥）。未保存任何内容。",
+  "The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.": "链上显示此密钥已使用 {chain} 次：它已没有剩余的使用次数（一个密钥有 262144 次）。此钱包无法从该地址发送任何内容；请用另一个钱包转移资金。未保存任何内容。",
+  "This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent.": "此钱包保存的密钥使用次数为 {count}，而一个密钥有 262144 次一次性使用（0 到 262143）：现在发送会再次使用一次性密钥签名。该计数从不降低，因此本应用无法从该地址发送任何内容；请用另一个钱包转移资金。未发送任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5453,5 +5456,8 @@
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
   "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.",
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.",
-  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done."
+  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.",
+  "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.",
+  "The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.",
+  "This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent."
 ] });

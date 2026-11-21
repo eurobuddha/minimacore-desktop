@@ -313,7 +313,7 @@
   "The next send signs at use": "Наступне надсилання буде підписано з номером використання",
   ". The app counts every send and never counts down.": ". Застосунок рахує кожне надсилання й ніколи не зменшує лічильник.",
   "Raise it": "Збільшити",
-  "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.": "{b}Підтвердьте кількість використань секретного ключа перед надсиланням.{_b} Скільки платежів цей ключ УЖЕ зробив будь-де (0 для зовсім нового ключа)? Завелике число безпечне; {b}замале число може призвести до повторного використання ключа підпису й втрати ваших коштів{_b}.",
+  "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A key has 262144 one-time uses, so this is a whole number from 0 to 262143. A figure a little too high only skips some of them; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.": "{b}Підтвердьте кількість використань секретного ключа перед надсиланням.{_b} Скільки платежів цей ключ УЖЕ зробив будь-де (0 для зовсім нового ключа)? Ключ має 262144 одноразові використання, тож це ціле число від 0 до 262143. Трохи завелике число лише пропускає частину з них; {b}замале число може призвести до повторного використання ключа підпису й втрати ваших коштів{_b}.",
   "The chain shows {wwKuSuggest} so far.": "Наразі в блокчейні видно: {wwKuSuggest}.",
   "Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.": "«Перевірити в блокчейні» та «Підтвердити» читають кількість використань цього ключа з архіву блокчейну: до eurobuddha.com надсилається лише публічний ключ цього гаманця. Цей ключ стає відомим тому серверу. Секретний ключ залишається на цьому комп’ютері. «Підтвердити» не спрацює, доки це число не прочитано.",
   "Amount of times": "Кількість разів",
@@ -3179,7 +3179,7 @@
     "The next send signs at use",
     ". The app counts every send and never counts down.",
     "Raise it",
-    "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A figure that is too high is safe; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.",
+    "{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A key has 262144 one-time uses, so this is a whole number from 0 to 262143. A figure a little too high only skips some of them; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.",
     "The chain shows {wwKuSuggest} so far.",
     "Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.",
     "Amount of times",
@@ -5348,7 +5348,10 @@
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "Файл на іншому комп’ютері (шлях, що починається з \\\\ або //) не використовується: вузол підключився б до нього. Спершу скопіюйте файл на цей комп’ютер. Нічого не запущено.",
   "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "Ця команда містить символи поза простим ASCII і задовга для командного рядка вузла (понад 65,536 символів після кодування). Скоротіть її або запишіть ці символи простим ASCII. Нічого не надіслано.",
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.": "Значення data: цієї команди має бути шістнадцятковим 0x із транзакцією, id якої складається лише з літер, цифр, \".\", \"-\" або \"_\": вузол вставляє цей id у команди, які виконує сам. Нічого не запущено.",
-  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.": "Вузол уже зупиняється або перезапускається, або питання про нього ще відкрите. Більше нічого не зроблено."
+  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.": "Вузол уже зупиняється або перезапускається, або питання про нього ще відкрите. Більше нічого не зроблено.",
+  "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.": "Ключ має 262144 одноразові використання, тож кількість уже зроблених використань є цілим числом від 0 до 262143 (за 262144 і більше підписувати нічим). Нічого не збережено.",
+  "The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.": "Ланцюг показує {chain} використань цього ключа: використань не лишилося (ключ має 262144). З цієї адреси не можна нічого надіслати цим гаманцем; перемістіть кошти іншим гаманцем. Нічого не збережено.",
+  "This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent.": "Збережена кількість використань ключа цього гаманця дорівнює {count}, а ключ має 262144 одноразові використання (від 0 до 262143): надсилання зараз знову підписало б одноразовим ключем. Кількість ніколи не зменшується, тож з цієї адреси не можна нічого надіслати цим застосунком; перемістіть кошти іншим гаманцем. Нічого не надіслано."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5466,5 +5469,8 @@
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
   "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.",
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.",
-  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done."
+  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.",
+  "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.",
+  "The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.",
+  "This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent."
 ] });

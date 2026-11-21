@@ -356,6 +356,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["WW_DAMAGED_UNREAD", I18N.N_("This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.")],
     ["WW_FIRST_UNREAD", I18N.N_("The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.")],
     ["WW_BELOW_CHAIN", I18N.N_("The chain shows {chain} uses of this key. Confirm at least that many. Nothing was saved.")],
+    ["WW_ABOVE_LAST", I18N.N_("A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.")],
+    ["WW_USED_UP", I18N.N_("The chain shows {chain} uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.")],
+    ["WW_STORED_OVER", I18N.N_("This wallet's saved key-use count is {count}, and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent.")],
     ["WW_UNKNOWN", I18N.N_("Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying.")],
     ["WW_UNKNOWN_TWICE", I18N.N_("Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying (a blind retry could pay twice).")],
 

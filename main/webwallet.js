@@ -94,6 +94,19 @@ function writeStore(obj) {
   // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
   try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
 }
+// The last one-time key a custom key has (0.19.323). sendfrom and txnsign publickey:custom build TreeKey.createDefault(privatekey):
+// 64 keys x 3 levels = 262144 uses on the classic node line this app ships (resources/minima.jar: core/minima-core e64600285be,
+// objects/keys/TreeKey.java), setUses(keyuses.getAsInt()) keeps only the low 32 bits (MiniNumber.getAsInt is intValue: 4294967299
+// becomes 3), and TreeKey.sign starts again at use 0 once mUses >= mMaxUses ("SERIOUS ERROR : MAX TREEKEYS USED"). So a count of
+// 262144 or more signs with a one-time key that was already used, and the counter only goes up: every later send too. On a
+// block-capable node started with -blockaskeyuses (security/txn-write-gate-android 49d667d6eb4) createDefault is 128 x 4 =
+// 268435456 uses, the node takes the use from the block number (keyuses can only raise it) and refuses a count outside capacity:
+// the classic bound is below that capacity, so one bound serves both key modes. A count is the uses already made: the next send
+// signs at that use, so 0 to LAST_USE leaves at least one.
+const KEY_USES = 262144, LAST_USE = KEY_USES - 1;
+const ABOVE_LAST = "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.";
+const USED_UP = (n) => "The chain shows " + n + " uses of this key: it has no uses left (a key has 262144). Nothing can be sent from this address with this wallet; move the funds with another wallet. Nothing was saved.";
+const STORED_OVER = (n) => "This wallet's saved key-use count is " + n + ", and a key has 262144 one-time uses (0 to 262143): a send now would sign with a one-time key again. The count is never lowered, so nothing can be sent from this address with this app; move the funds with another wallet. Nothing was sent.";
 const entryOk = (v) => !!v && typeof v === "object" && Number.isSafeInteger(v.keyuses) && v.keyuses >= 0;
 /** An address's entry; a damaged one (a counter that is not a whole number of 0 or more) is unknown, so it must be confirmed again. */
 function entryFor(store, addr) {
@@ -116,11 +129,13 @@ async function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
+  if (n > LAST_USE) throw new Error(ABOVE_LAST);   // 0.19.323: the node wraps or restarts a count past the key's last use
   const was = entryFor(loadStore(), address);
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
     if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
+    if (chain >= KEY_USES) throw new Error(USED_UP(chain));   // never adopted: no count this app can sign with (0.19.323)
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
@@ -253,6 +268,7 @@ async function send(opts) {
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
   const n = e0.keyuses || 0;
   if (!Number.isSafeInteger(n) || n < 0) { privatekey = null; throw new Error(STORE_BAD); }
+  if (n > LAST_USE) { privatekey = null; throw new Error(STORED_OVER(n)); }   // 0.19.323: past the key's last use (an older version took any count); never lowered
   store[fromaddress] = Object.assign({}, e0, { keyuses: n + 1 });
   try { writeStore(store); } catch (e) { privatekey = null; throw new Error(STORE_BAD); }
   const cmd = "sendfrom fromaddress:" + fromaddress
@@ -286,7 +302,7 @@ function status() { return { log: LOG_RING.slice(-20) }; }
 
 module.exports = { setOnchain,
   emitter, isMegammr, derive, read, send,
-  keyusesInfo, ackKeyuses, status,
+  keyusesInfo, ackKeyuses, status, KEY_USES, LAST_USE,
   _setRunner: (fn) => { runner0 = fn; },
   // exported for unit tests
   _validators: { looksLikeMinimaAddress, isPhrase, isAmount, isTokenid, isScript, isPrivKey }

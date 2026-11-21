@@ -213,3 +213,33 @@ test("Web Wallet: a first confirmation, or one after the key-use file went missi
   asked.length = 0; await ww.ackKeyuses(FROM, 4); assert.equal(ww.keyusesInfo(FROM).keyuses, 11, "an acknowledged entry never goes down"); assert.deepEqual(asked, [], "and needs no chain read");
   ww.setOnchain(async () => null);
 });
+
+// ---- 0.19.323: a key has 262144 one-time uses (TreeKey 64 x 3); the node wraps a count to 32 bits and starts again at use 0 past the last ----
+test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 and more refused at ack, a chain figure at or above it is 'no uses left', a stored count past it sends nothing", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const FROM = "0x" + "A6".repeat(32), PK = "0x" + "B6".repeat(32), TO = "0x" + "11".repeat(32), sent = [];
+  ww._setRunner(async (c) => { if (c.startsWith("sendfrom")) sent.push(c.match(/ keyuses:(\d+)/)[1]);
+    return c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C6".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: { txpowid: "0x01" } }; });
+  try { fs.rmSync(file); } catch (e) {}
+  await ww.derive("alpha beta"); let chain = 0; ww.setOnchain(async () => chain);
+  assert.equal(ww.KEY_USES, 262144); assert.equal(ww.LAST_USE, 262143);
+  for (const n of [262144, 1000000, 4294967299, "262144", "4294967299"]) await assert.rejects(ww.ackKeyuses(FROM, n), /A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143/, String(n));
+  assert.ok(!fs.existsSync(file), "nothing saved by those");
+  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 262143), /The chain shows 262144 uses of this key: it has no uses left \(a key has 262144\)\. Nothing can be sent from this address with this wallet; move the funds with another wallet/);
+  chain = 5000000; await assert.rejects(ww.ackKeyuses(FROM, 0), /The chain shows 5000000 uses of this key: it has no uses left/, "a huge chain figure is never adopted");
+  assert.ok(!fs.existsSync(file));
+  // the boundary: 262143 is accepted, its one send signs at 262143, the next is refused
+  chain = 262143; assert.deepEqual(await ww.ackKeyuses(FROM, 262143), { address: FROM, keyuses: 262143, ack: true });
+  const go = () => ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" });
+  assert.equal((await go()).ok, true); assert.deepEqual(sent, ["262143"]);
+  await assert.rejects(go(), /saved key-use count is 262144, and a key has 262144 one-time uses \(0 to 262143\)/); assert.deepEqual(sent, ["262143"], "nothing more reached the node");
+  // a count an older version stored past the last use refuses every send, and is never lowered
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 1000000, ack: true } }));
+  await assert.rejects(go(), /This wallet's saved key-use count is 1000000, and a key has 262144 one-time uses \(0 to 262143\): a send now would sign with a one-time key again\. The count is never lowered/);
+  await ww.ackKeyuses(FROM, 7); assert.equal(ww.keyusesInfo(FROM).keyuses, 1000000, "never lowered"); assert.deepEqual(sent, ["262143"]);
+  const app = rd("renderer/app.js");
+  assert.ok(app.includes('id="wwKuIn" type="number" min="0" max="262143" step="1"') && !/too high is safe/.test(app) && app.includes("A key has 262144 one-time uses, so this is a whole number from 0 to 262143."), "the window says the limit and no longer that too high is safe");
+  ww.setOnchain(async () => null);
+});
