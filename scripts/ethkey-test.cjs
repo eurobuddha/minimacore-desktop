@@ -185,7 +185,7 @@ test("the ETH wallet must be ready before Touch ID is asked; one place for the t
   const P = require("../main/phrases");
   assert.deepEqual([P.SHOW_SEED, P.SHOW_KEY, P.CHANGE_KEYS], ["SHOW SEED", "SHOW KEY", "CHANGE KEYS"]);
   assert.equal(ethwallet.EXPORT_PHRASE, P.SHOW_KEY); assert.equal(require("../main/seedgate").PHRASE, P.SHOW_SEED);
-  assert.deepEqual(require("../main/cmdgate").PHRASE, { seed: P.SHOW_SEED, key: P.SHOW_KEY, change: P.CHANGE_KEYS });
+  assert.deepEqual(require("../main/cmdgate").PHRASE, { seed: P.SHOW_SEED, key: P.SHOW_KEY, change: P.CHANGE_KEYS, secret: P.SHOW_KEY }, "CHANGED on purpose (0.18.222): rpc listusers, mds, sphincs generate under SHOW KEY");
   assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => \{ requireRunning\(\); return cmdGate\.arm\(command, typed\); \}\);/.test(mainJs), "the node is checked before the Terminal gate asks Touch ID");
   assert.ok(!/function seedFrom\(/.test(app), "the unused seedFrom is gone");
   assert.ok(app.includes("Backup password can't contain a \\\", a \\\\, a ; or a line break"), "the backup password message names ;");

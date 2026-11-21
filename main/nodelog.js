@@ -54,7 +54,8 @@ function scrub(line, secret) {
   if (typeof secret === "string" && secret.length >= 8) l = l.split(secret).join("•••");
   return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/"(phrase|seed|seedphrase|mnemonic|privatekey)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"')
     .replace(/phrase:[A-Za-z]+\b(?!:)(?: [A-Za-z]+\b(?!:)){0,23}/g, "phrase:•••")
-    .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••");
+    .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••")
+    .replace(/\b(password|confirm|seed)[ \t]*:[ \t]*(?:"[^"]*"|[^\s"]+)/gi, "$1:•••");   // a command's password:, confirm:, seed: (0.18.222)
 }
 
 module.exports = { createNodeLog, DEFAULT_MAX_BYTES, scrub };

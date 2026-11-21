@@ -1867,7 +1867,7 @@ function appendTerm(s) {
  *  itself after 60 s and when the window is left; nothing of it reaches the Terminal's output, history or Copy. */
 async function termSecret(c, kind) {
   const phrase = kind === "seed" ? "SHOW SEED" : kind === "change" ? "CHANGE KEYS" : "SHOW KEY";
-  const typed = await showPrompt(kind === "seed" ? "This command shows the seed phrase" : kind === "change" ? "This command changes this wallet's keys or their lock" : "This command shows a private key", "", phrase, { ok: "Run it once",
+  const typed = await showPrompt(kind === "seed" ? "This command shows the seed phrase" : kind === "change" ? "This command changes this wallet's keys or their lock" : kind === "secret" ? "This command shows passwords or a private key" : "This command shows a private key", "", phrase, { ok: "Run it once",
     message: (kind === "change" ? "It can lock, unlock, wipe or restore the keys that hold your coins, and it may carry your seed phrase or password." : "Anyone who sees the answer can take every coin it controls.") + " The answer is shown apart from the Terminal, for a minute, and is not kept in the history or the output. Type " + phrase + " to run it." });
   if (typed == null) return;
   let r, g;
@@ -1905,8 +1905,8 @@ async function termSubmit(c) {
     return;
   }
   TERM_WARNED = "";
-  TERM_HIST.push(c); termIdx = TERM_HIST.length;
-  appendTerm("> " + c);
+  if (!k.secretValues) { TERM_HIST.push(c); termIdx = TERM_HIST.length; }   // a phrase, password, seed or private key is never kept in ↑ history (0.18.222)
+  appendTerm("> " + (k.shown || c));                                         // and never echoed: main's masked text
   if (k.write) TERM_BUSY.add(c);
   let r, err = null;
   try { r = await api.cmd(c); } catch (x) { err = x; }

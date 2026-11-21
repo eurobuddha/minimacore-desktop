@@ -15,11 +15,11 @@
  */
 const PASS_MS = 60000;
 const P = require("./phrases");
-const PHRASE = { seed: P.SHOW_SEED, key: P.SHOW_KEY, change: P.CHANGE_KEYS };
+const PHRASE = { seed: P.SHOW_SEED, key: P.SHOW_KEY, change: P.CHANGE_KEYS, secret: P.SHOW_KEY };
 // vault actions that change the wallet's keys or their lock rather than show the seed (the node's vault help, and the
 // Terminal's completion list: wipekeys, restorekeys, passwordlock, passwordunlock, resetkeys, testphrase)
 const CHANGE_ACTIONS = new Set(["wipekeys", "restorekeys", "passwordlock", "passwordunlock", "resetkeys", "testphrase"]);
-const WHAT = { seed: "a seed phrase", key: "a private key", change: "changes to this wallet's keys" };
+const WHAT = { seed: "a seed phrase", key: "a private key", change: "changes to this wallet's keys", secret: "passwords or a private key" };
 const NAMES = "vault, seedrandom and keys action:genkey";
 
 const V = require("./cmdverb");
@@ -29,13 +29,18 @@ function kindOf(part) {
   if (V.beginsAs(part, "vault")) { const a = V.paramValue(part, "action"); return a != null && CHANGE_ACTIONS.has(V.fold(a)) ? "change" : "seed"; }
   if (V.beginsAs(part, "seedrandom")) return "key";
   if (V.beginsAs(part, "keys") && /genkey/.test(V.fold(String(part).replace(/"/g, "")))) return "key";
+  // what the user asks for by name and the reply carries (0.18.222, as Pandamonium Desktop 0.19.292): the RPC users' passwords, the
+  // MiniHUB password (mds list, mds/mds.java), a SPHINCS private key (sphincs action:generate): shown behind SHOW KEY and the system's
+  // check, never hidden from the one who asked
+  const a = V.fold(V.paramValue(part, "action") || "");
+  if ((V.is(part, "rpc") && a === "listusers") || (V.is(part, "mds") && (a === "" || a === "list")) || (V.is(part, "sphincs") && a === "generate")) return "secret";
   return "";
 }
 /** → { kind: "seed"|"key"|"", chain: bool }: the strongest kind anywhere in the text (the node splits on every ";"). */
 function classify(command) {
   const parts = V.parts(command);
   let kind = "";
-  const rank = { "": 0, change: 1, key: 2, seed: 3 };
+  const rank = { "": 0, change: 1, key: 2, secret: 2, seed: 3 };
   for (const p of parts) { const k = kindOf(p); if (rank[k] > rank[kind]) kind = k; }
   return { kind, chain: parts.length > 1 };
 }
@@ -50,6 +55,8 @@ function create(sys, now) {
     if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error("Run this command on its own, not in a chain with ;.");
     const unclear = V.unclear(c) || V.smuggled(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.18.219), an escaped ";" (0.18.221): refused before any question
+    // a secret parameter the node reads as empty (0.18.222): `vault phrase: action:restorekeys` would run with phrase ""
+    for (const p of V.parts(c)) for (const [n, v] of V.read(p).params) if (SECRET_NAMES.includes(V.fold(n)) && v === "") throw new Error("This command names " + n + ": with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.");
     const twice = V.repeated(c);   // before the phrase: what the phrase is depends on the action, and the node keeps the last one
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");
     if (String(typed == null ? "" : typed).trim() !== PHRASE[kind]) throw new Error("Type " + PHRASE[kind] + " exactly to continue.");
@@ -61,7 +68,7 @@ function create(sys, now) {
     // exact text that was asked about.
     const shown = masked(c);
     const what = WHAT[kind];
-    const s = await sys.check((kind === "change" ? "make " : "show ") + what + " by running: " + shown, (kind === "change" ? "This makes " : "This shows ") + what + ". This Terminal command will run once:\n\n" + shown);
+    const s = await sys.check((kind === "change" ? "make " : "show ") + what + " by running: " + shown, (kind === "change" ? "This makes " : "This shows ") + what + ". This Terminal command will run once:\n\n" + shown);   // what = WHAT[kind], "secret" included (0.18.222)
     pass = { command: c, until: clock() + PASS_MS };
     return { system: s.biometric === true, kind };
   }
@@ -73,15 +80,70 @@ function create(sys, now) {
   return { arm, take };
 }
 
-/** The command as the check shows it: control and bidirectional characters as spaces, white space collapsed, and the
- *  values of phrase, password, confirm and seed hidden (quoted or not). */
+// The secret parameters of the node's commands (core/minima-core commands, every getParam of them: phrase, password, confirm, seed,
+// privatekey; 0.18.222, as Pandamonium Desktop 0.19.282, added privatekey: sendfrom, signfrom, consolidatefrom, createtokenfrom,
+// txnsign, sphincs).
+const SECRET_NAMES = ["phrase", "password", "confirm", "seed", "privatekey"];
+const CTRL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+/** The command as the check, the Touch ID text and the Terminal echo show it (0.18.222, as Pandamonium Desktop 0.19.293): as the
+ *  node reads it, name by name (main/cmdverb.js read), the value of every secret parameter hidden and everything else shown, an
+ *  empty value shown as "" (hiding the words after a value hid the ACTION of `vault phrase: action:restorekeys`, which the node
+ *  reads as phrase "" and action restorekeys). A piece the node would refuse (a word with no ":") is hidden the older way. */
 function masked(c) {
-  return String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
-    // hidden through the end of the node's token (0.18.219, as Pandamonium Desktop 0.19.266): a quote inside a value opens a quoted
-    // span the node keeps in the same value (`password:my"secret` showed `"secret`; `seed:0xAB"action":"wipekeys"` is ONE seed value
-    // to the node, no action: 0.18.214 showed an action the node never reads)
-    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)((?:"[^"]*"?|[^\s"])+)/gi, "$1•••")
-    .replace(/\s+/g, " ").trim();
+  const show = (v) => (v === "" ? '""' : /\s/.test(v) && !/^[{[]/.test(v) ? '"' + v + '"' : v);
+  return V.parts(String(c).replace(CTRL, " ")).map(p => {
+    const r = V.read(p);
+    if (r.error || !r.verb) return maskedWords(p);
+    return [r.verb].concat(r.params.map(([n, v]) => n + ":" + (SECRET_NAMES.includes(V.fold(n)) && v !== "" ? "•••" : show(v)))).join(" ");
+  }).join(" ; ");
+}
+function maskedWords(c) {
+  const words = String(c).replace(CTRL, " ")
+    // hidden through the end of the node's token (0.18.219): a quote inside a value opens a quoted span the node keeps in the same
+    // value (`password:my"secret` showed `"secret`; `seed:0xAB"action":"wipekeys"` is ONE seed value to the node, no action)
+    .replace(new RegExp("((?:^|\\s|\")(?:" + SECRET_NAMES.join("|") + ")\"?\\s*:\\s*)((?:\"[^\"]*\"?|[^\\s\"])+)", "gi"), "$1•••")
+    .replace(/\s+/g, " ").trim().split(" ");
+  // the words after a hidden value up to the next name:value are hidden too (0.18.222): the node drops them or joins them to the
+  // value (`phrase:spray lamp` showed `lamp`, a 24-word phrase typed unquoted showed 23 words)
+  let hiding = false;
+  for (let i = 0; i < words.length; i++) { const w = words[i]; if (/•••"?$/.test(w)) { hiding = true; continue; } if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else words[i] = "•••"; } }   // a name ends it, also one spaced from its ":"
+  return words.join(" ");
+}
+/** The secret words a typed command carries (0.18.222): each secret parameter's value as the node reads it and its words, and the
+ *  bare words after one that the node drops or joins (the ones maskedWords() hides), three characters or more. */
+function secretWords(command) {
+  const out = new Set(), add = (w) => { w = String(w).replace(/"/g, ""); if (w.length >= 3) out.add(w); };
+  for (const p of V.parts(command)) for (const [n, v] of V.read(p).params) if (SECRET_NAMES.includes(V.fold(n)) && v) { add(v); v.split(/\s+/).forEach(add); }
+  const words = String(command).split(/[\s\u0000-\u001f]+/), name = new RegExp("^\"?(?:" + SECRET_NAMES.join("|") + ")\"?:", "i");
+  let hiding = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (name.test(w)) { add(w.replace(/^[^:]*:/, "")); hiding = true; continue; }
+    if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else add(w); }
+  }
+  return [...out].sort((a, b) => b.length - a.length);
+}
+const wordRe = (w) => new RegExp("(^|[^A-Za-z0-9])" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^A-Za-z0-9])", "g");
+/** A reply of the node with nothing secret of the typed command in it (0.18.222, as Pandamonium Desktop 0.19.282 / 0.19.292): the
+ *  values of secret parameters wherever it carries its "params" (Command.getJSONReply echoes every parameter, so a megammrsync
+ *  phrase:, a backup password: or a sendfrom privatekey: came back whole to the window), every "command" string masked (for an
+ *  invalid parameter the node answers with the whole typed text, CommandRunner.java), and each secret word of the typed command,
+ *  as a whole word, in every other string (an error like "Invalid parameters for vault @ lamp" names a word of an unquoted phrase). */
+function scrubReply(r, command) {
+  const res = command == null ? [] : secretWords(command).map(wordRe);
+  const str = (s) => res.reduce((t, re) => t.replace(re, "$1•••"), s);
+  const walk = (x, depth, key) => {
+    if (typeof x === "string") return key === "command" ? masked(str(x)) : str(x);
+    if (!x || typeof x !== "object" || depth > 8) return x;
+    if (Array.isArray(x)) return x.map(y => walk(y, depth + 1));
+    const out = {};
+    for (const [k, v] of Object.entries(x)) {
+      if (k === "params" && v && typeof v === "object" && !Array.isArray(v)) { out[k] = {}; for (const [n, y] of Object.entries(v)) out[k][n] = SECRET_NAMES.includes(V.fold(n)) ? "•••" : walk(y, depth + 1); }
+      else out[k] = walk(v, depth + 1, k);
+    }
+    return out;
+  };
+  return walk(r, 0);
 }
 /** Why mcd:cmd refuses this command ("" = it may run). take: the gate's take. */
 function refusal(command, take) {
@@ -89,6 +151,7 @@ function refusal(command, take) {
   if (!kind) return "";
   if (chain) return "GATED: this chain holds " + NAMES + ", which show a seed or a private key. Run that command on its own.";
   if (take(command)) return "";
+  if (kind === "secret") return "GATED:secret: this command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type " + PHRASE[kind] + " to run it.";
   return "GATED:" + kind + ": " + NAMES + " show a seed or a private key or change the keys; this one " + (kind === "seed" ? "shows the seed phrase" : kind === "key" ? "shows a private key" : "changes this wallet's keys or their lock") + ". Type " + PHRASE[kind] + " to run it.";
 }
 
@@ -149,4 +212,4 @@ async function checkCommand(command, io) {
   return io.pin ? await io.pin(command) : command;
 }
 
-module.exports = { classify, create, refusal, masked, repasted, checkCommand, PHRASE, PASS_MS };
+module.exports = { classify, create, refusal, masked, scrubReply, SECRET_NAMES, repasted, checkCommand, PHRASE, PASS_MS };

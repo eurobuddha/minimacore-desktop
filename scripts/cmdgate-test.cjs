@@ -48,7 +48,7 @@ test("no pass: refused; a pass is for one exact command, once, within 60 s; a ch
 test("mcd:cmd refuses before anything is sent; the Terminal keeps no gated command or answer; first run reads the seed through the gate", () => {
   const main = rd("main/main.js"), app = rd("renderer/app.js");
   const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'), main.indexOf("});", main.indexOf('ipcMain.handle("mcd:cmd"')));
-  assert.ok(/const ready = await require\("\.\/cmdgate"\)\.checkCommand\(command, \{ take: cmdGate\.take,[^\n]*\n\s*return run\(ready\);\n\}\);/.test(main), "the handler runs only what checkCommand returns (0.18.201)");
+  assert.ok(/const ready = await require\("\.\/cmdgate"\)\.checkCommand\(command, \{ take: cmdGate\.take,[^\n]*\n\s*return require\("\.\/cmdgate"\)\.scrubReply\(await run\(ready\), command\);[^\n]*\n\}\);/.test(main), "the handler runs only what checkCommand returns (0.18.201), and its reply is scrubbed of the typed secrets (CHANGED on purpose, 0.18.222)");
   assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => \{ requireRunning\(\); return cmdGate\.arm\(command, typed\); \}\);/.test(main), "CHANGED on purpose (0.18.202): the node is checked first");
   assert.equal((main.match(/ipcMain\.handle\("mcd:[A-Za-z]+", (async )?\(_e, (command|cmd)\b/g) || []).length, 3, "mcd:cmd, mcd:cmdGate and mcd:cmdKind (advice only, 0.18.194) are the only handlers that take a command text");
   const term = app.slice(app.indexOf("async function termSubmit(c) {"), app.indexOf("function renderTerminal() {"));
@@ -220,7 +220,11 @@ test("Terminal: an ordinary command is echoed and kept before it returns; a secr
   await fn("vault"); assert.deepEqual(E.secret, [["vault", "seed"]]); assert.ok(!E.hist.includes("vault") && !E.out.some(l => l.includes("> vault")), "never in the history or the output");
   await fn("status;vault"); assert.match(E.out[E.out.length - 1], /^error: this chain holds vault, seedrandom or keys action:genkey/); assert.ok(!E.hist.includes("status;vault"));
   const main = rd("main/main.js");
-  assert.ok(/ipcMain\.handle\("mcd:cmdKind", \(_e, command\) => \{[^\n]*require\("\.\/cmdgate"\)\.classify\(c\);[^\n]*write: rpc\.isWrite\(c\)/.test(main));
+  assert.ok(/ipcMain\.handle\("mcd:cmdKind", \(_e, command\) => \{\n[^\n]*k = G\.classify\(c\), shown = G\.masked\(c\);\n[^\n]*write: rpc\.isWrite\(c\), shown, secretValues:/.test(main), "CHANGED on purpose (0.18.222): the kind with the masked text");
+  // 0.18.222: a command carrying a secret value is echoed masked and kept out of ↑ history
+  const PK = "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5", m2 = make({ [PK]: { kind: "", chain: false, write: true, shown: G.masked(PK), secretValues: true } });
+  const p3 = m2.fn(PK); await new Promise(r => setImmediate(r)); m2.E.resolve.forEach(r => r({ status: true })); await p3;
+  assert.deepEqual(m2.E.hist, []); assert.equal(m2.E.out[0], "> sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
 });
 
 // ---- 0.18.196: secret values hidden in the check; vault actions that change keys have their own kind; long commands armable ----
@@ -240,7 +244,7 @@ test("must be armable: a restore with a 24-word phrase, wipekeys with a seed, lo
       if (kind === "change") assert.match(seen, mac ? /^make changes to this wallet's keys by running: vault action:\w+/ : /^This makes changes to this wallet's keys\./);
     }
   }
-  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys "phrase" : ••• keyuses:5');
+  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), "vault action:restorekeys phrase:••• keyuses:5", "CHANGED on purpose (0.18.222): shown as the node reads it");
   await assert.rejects(G.create(SYS({})).arm("vault action:passwordunlock password:x", "SHOW SEED"), /Type CHANGE KEYS exactly/, "its own typed phrase");
   await assert.rejects(G.create(SYS({})).arm("vault action:restorekeys phrase:a phrase:b", "CHANGE KEYS"), /names phrase more than once/, "repeats are still refused");
   // only the Touch ID prompt, which cannot show more, refuses a command too long for it; the dialog shows it whole
@@ -275,7 +279,7 @@ test("masked: a secret holding a quote is hidden through the end of the node's t
   assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
   assert.equal(G.masked('vault password:hunter2"action":"passwordunlock"'), "vault password:•••");
   assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
-  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys "phrase" : ••• keyuses:5', "a quoted value is still hidden whole");
+  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), "vault action:restorekeys phrase:••• keyuses:5", "a quoted value is still hidden whole (CHANGED on purpose, 0.18.222: shown as the node reads it)");
 });
 
 // ---- 0.18.219 (as Pandamonium Desktop 0.19.266 / 0.19.250 / 0.19.290): one reader of command text, the node's own ----
@@ -295,7 +299,8 @@ test("every check reads what the node reads, and a text read otherwise than it l
   assert.equal(V.paramValue('vault action:wipekeys password:" " action:seed', "action"), "seed");
   assert.deepEqual(V.repeated('vault action:wipekeys password:" " action:seed'), ["action"]);
   assert.deepEqual(V.repeated('vault action:wipekeys password:"\t" action:seed'), ["action"]);
-  await assert.rejects(G.create(SYS({})).arm('vault action:wipekeys password:" " action:seed', "CHANGE KEYS"), /names action more than once/, "the seed is never shown under CHANGE KEYS");
+  await assert.rejects(G.create(SYS({})).arm('vault action:wipekeys password:" " action:seed', "CHANGE KEYS"), /names action more than once|names password: with no value/, "the seed is never shown under CHANGE KEYS (0.18.222: its empty password is refused first)");
+  await assert.rejects(G.create(SYS({})).arm('vault action:wipekeys password:x action:seed', "CHANGE KEYS"), /names action more than once/);
   const mx = 'send amount:1 address:0xCD tokenid:0x00 debug:" " tokenid:' + MX;
   assert.equal(V.paramValue(mx, "tokenid"), MX); assert.deepEqual(V.repeated(mx, ["amount", "tokenid", "address", "fromaddress"]), ["tokenid"]);
   const asked = []; assert.equal(await pinMinimaSend(async (c) => { asked.push(c); return { status: true, response: [] }; }, mx), mx, "an MxUSD send is not pinned"); assert.deepEqual(asked, []);
@@ -365,4 +370,51 @@ test("an escaped semicolon or control character smuggles no second command; mds 
   // no MDS: refused in the extra node arguments, and never passed to either node kind
   const P = require("../renderer/params.js"); assert.equal(P.mdsArg("-mdsenable"), "-mdsenable"); assert.equal(P.mdsArg('-p2pnodes x "-MDSPASSWORD=y"'), "-mdspassword"); assert.equal(P.mdsArg("-test -nop2p"), "");
   assert.ok(rd("main/config.js").includes("const mds = PARAMS.mdsArg(cfg.extraArgs);") && (rd("main/node-manager.js").match(/require\("\.\.\/renderer\/params\.js"\)\.mdsArg\(tok\)/g) || []).length === 2, "config refuses it, both node kinds skip it");
+});
+
+// ---- 0.18.222 (as Pandamonium Desktop 0.19.282 / 0.19.292 / 0.19.293): no secret shown; the node's reply scrubbed; asked-for secrets gated ----
+const mcdCmd = (reply) => {   // the real mcd:cmd handler from main.js, its node a stand-in
+  const main = rd("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {};
+  new Function("ipcMain", "require", "cmdGate", "requireRunning", "rpc", "node", "config", "pinMinimaSend", h)(
+    { handle: (n, f) => { hs[n] = f; } }, (m) => require(m.replace(/^\.\//, "../main/")), { take: () => true }, () => {}, { rpcCall: async (p, s, c) => reply(c) }, { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c);
+  return hs["mcd:cmd"];
+};
+test("secrets stay hidden: privatekey: is masked, the command is shown as the node reads it, and the node's reply is scrubbed before the window gets it", async () => {
+  assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
+  assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:•••", "shown as the node reads it, which drops 'lamp'");
+  assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5", "a piece the node refuses is hidden word by word");
+  assert.equal(G.masked("vault phrase: action:restorekeys"), 'vault phrase:"" action:restorekeys', "an empty secret never hides the action");
+  assert.equal(G.masked("status;vault password:x action:passwordunlock"), "status ; vault password:••• action:passwordunlock");
+  for (const c of ["vault phrase: action:restorekeys", "vault password: action:passwordlock", 'vault action:passwordunlock password:""'])
+    await assert.rejects(G.create(SYS({ confirm: async () => { throw new Error("no question"); } })).arm(c, "CHANGE KEYS"), /names (phrase|password): with no value/, c);
+  // the reply: "params" at any depth, every "command" string, and each secret word as a whole word elsewhere
+  const typed = "vault action:restorekeys phrase:spray lamp keyz:1";
+  const r = G.scrubReply({ command: typed, params: { action: "restorekeys", phrase: "spray", keyz: "1" }, status: false, error: "Invalid parameter : keyz", more: ["Invalid parameters for vault @ lamp", "spraying is a word"] }, typed);
+  assert.ok(!/\bspray\b|\blamp\b/.test(JSON.stringify(r)), JSON.stringify(r)); assert.equal(r.more[0], "Invalid parameters for vault @ •••"); assert.equal(r.more[1], "spraying is a word", "whole words only");
+  const run = mcdCmd((c) => /^backup/.test(c) ? { command: c, params: { password: "hunter22", file: "b.bak" }, status: false, error: "Invalid parameter : foo" }
+    : [{ command: "sendfrom", params: { privatekey: "0x1234ABCD", amount: "1" }, status: true, response: { inner: { params: { Phrase: "a b c" } } } }]);
+  const b = await run(null, "backup password:hunter22 file:b.bak foo:1");
+  assert.deepEqual(b.params, { password: "•••", file: "b.bak" }); assert.equal(b.command, "backup password:••• file:b.bak foo:1"); assert.ok(!JSON.stringify(b).includes("hunter22"));
+  const s = JSON.stringify(await run(null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD"));
+  assert.ok(!s.includes("0x1234ABCD") && !s.includes("a b c") && s.includes('"amount":"1"'), s);
+  // the Terminal echo: mcd:cmdKind hands back the masked text, and says the command carried a secret value
+  const main = rd("main/main.js"), kh = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async')), ks = {};
+  new Function("ipcMain", "require", "rpc", kh)({ handle: (n, f) => { ks[n] = f; } }, (m) => require(m.replace(/^\.\//, "../main/")), require("../main/rpc"));
+  const k = ks["mcd:cmdKind"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5");
+  assert.equal(k.secretValues, true); assert.ok(!k.shown.includes("0x1234ABCD")); assert.equal(ks["mcd:cmdKind"](null, "balance").secretValues, false);
+  // and the node's log file: password:, confirm:, seed: values
+  const line = require("../main/nodelog").scrub('cmd: backup password:hunter22 confirm:"a b" seed:0xABCD file:x');
+  assert.ok(!/hunter22|a b|0xABCD/.test(line) && line.includes("file:x"), line);
+});
+test("what the user asks for by name is gated like SHOW KEY: rpc action:listusers, mds / mds action:list, sphincs action:generate", async () => {
+  for (const c of ["rpc action:listusers", "mds", "mds action:list", "sphincs action:generate seed:abc"]) assert.equal(G.classify(c).kind, "secret", c);
+  for (const c of ["mds action:pending", "rpc", "sphincs action:sign data:0x01"]) assert.equal(G.classify(c).kind, "", c);
+  assert.match(G.refusal("rpc action:listusers", () => false), /^GATED:secret: .*shows passwords or a private key.*Type SHOW KEY/);
+  let why = null; const g = G.create(SYS({ can: () => false, confirm: async (d) => { why = d; return true; } }));
+  await assert.rejects(g.arm("rpc action:listusers", "SHOW SEED"), /Type SHOW KEY exactly/);
+  assert.deepEqual(await g.arm("rpc action:listusers", "SHOW KEY"), { system: false, kind: "secret" });
+  assert.match(why, /^This shows passwords or a private key\. This Terminal command will run once:\n\nrpc action:listusers$/); assert.equal(G.refusal("rpc action:listusers", g.take), "");
+  const seen = [], io = { take: () => false, running: () => true, pin: async (c) => { seen.push(c); return c; } };
+  await assert.rejects(G.checkCommand("mds", io), /^Error: GATED:secret:/); assert.deepEqual(seen, []);
+  const app = rd("renderer/app.js"); assert.ok(app.includes('kind === "secret" ? "This command shows passwords or a private key"'), "the Terminal's prompt names it");
 });

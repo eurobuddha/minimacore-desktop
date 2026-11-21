@@ -160,13 +160,17 @@ const cmdGate = require("./cmdgate").create(sysCheck);
 ipcMain.handle("mcd:cmdGate", (_e, command, typed) => { requireRunning(); return cmdGate.arm(command, typed); });   // the node first, then Touch ID (0.18.202)
 // What the Terminal must do with a text before it runs it (0.18.194): its secret kind (the same reading as the gate), whether
 // it is a chain, whether it signs or changes something. Advice only: mcd:cmd's own refusal stays the gate.
-ipcMain.handle("mcd:cmdKind", (_e, command) => { const c = String(command == null ? "" : command), k = require("./cmdgate").classify(c); return { kind: k.kind, chain: k.chain, write: rpc.isWrite(c) }; });
+// shown: the text with every secret value hidden (the Terminal echoes that); secretValues: it carried one, so it is kept out of ↑ history (0.18.222)
+ipcMain.handle("mcd:cmdKind", (_e, command) => {
+  const c = String(command == null ? "" : command), G = require("./cmdgate"), k = G.classify(c), shown = G.masked(c);
+  return { kind: k.kind, chain: k.chain, write: rpc.isWrite(c), shown, secretValues: shown !== c.replace(/\s+/g, " ").trim() && /•••/.test(shown) };
+});
 // The whole policy of the general command channel is one tested function (main/cmdgate.js checkCommand, 0.18.201): control
 // characters, a send that repeats a parameter, the secret-command gate, then the beacon-dust pin of a MINIMA send.
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   const ready = await require("./cmdgate").checkCommand(command, { take: cmdGate.take, running: () => { requireRunning(); return true; }, pin: (c) => pinMinimaSend(run, c) });
-  return run(ready);
+  return require("./cmdgate").scrubReply(await run(ready), command);   // no secret of the typed command comes back to the window (0.18.222)
 });
 
 // Clipboard writes go through the main process — main-process clipboard.writeText is synchronous and never subject
