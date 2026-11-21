@@ -205,6 +205,8 @@ function toVm(obj) {
 async function init() {
   if (ready) return;
   if (initPromise) return initPromise;
+  // the replaced wallet's store not yet moved aside (0.18.236): the new wallet's engine never opens it
+  if (storeMoveOwed || owedOnDisk()) { try { moveStoreAside(); } catch (e) { throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + e.message + ")."); } }
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   initPromise = (async () => {
     const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"), log);   // an empty file found is said in AtomiX's own log (0.18.233)
@@ -245,15 +247,39 @@ function invalidate() {
   flush();
   try { if (sqlShim) sqlShim.dispose(); } catch (e) {}   // the old wallet's database never writes again (0.18.212: a pending save of it landed in the new wallet's file)
   // The old wallet's swap records are moved aside, never deleted (0.18.210): they hold the secrets and coin ids a claim or
-  // refund of a swap still in flight needs (the same seed restored again can use them; the file is kept either way).
-  const db = path.join(dir(), "atomix.sqlite");
-  try { if (fs.existsSync(db)) { const kept = db + ".replaced-" + new Date().toISOString().replace(/[:.]/g, "-"); fs.renameSync(db, kept); log("the previous wallet's swap records were kept at " + kept); } }
-  catch (e) { log("could not move the previous wallet's swap records aside: " + (e && e.message)); }
+  // refund of a swap still in flight needs (the same seed restored again can use them; the file is kept either way). One that
+  // cannot be moved is OWED (0.18.236): the engine does not start until it is (it went on, and the new wallet's engine opened
+  // the old wallet's swap records), and the failure is said to the caller.
+  let moveFailed = null;
+  try { moveStoreAside(); } catch (e) { moveFailed = e; }
   ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null;
   vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
   ethRpcAppliedUrl = null;               // the new boot builds a fresh ctx.RPC → re-apply any saved custom RPC to it
   emitter.emit("update");
   startLoop();
+  if (moveFailed) throw new Error("the old swap database could not be moved aside (" + moveFailed.message + "); AtomiX does not start until it is");
+}
+// The owed move survives a quit or a crash (0.18.236, as Pandamonium Desktop 0.19.243 / 0.19.267 / 0.19.286 / 0.19.295): it is
+// written to config.json BEFORE the rename is tried, naming the file it is for (its inode and birth time), and cleared after any
+// successful move; init() reads it there as well as in memory. Only that one file is moved, so a debt whose clearing failed after
+// the move (config.json unwritable) never moves the NEW wallet's live atomix.sqlite aside at a later start.
+let storeMoveOwed = false;
+const fileId = (f) => { try { const st = fs.statSync(f); return { ino: st.ino, birth: st.birthtimeMs }; } catch (e) { return null; } };
+function owedOnDisk() {
+  try {
+    const o = require("./config").load().atomixStoreMoveOwed; if (o === true) return true;
+    const id = o && typeof o === "object" ? fileId(path.join(dir(), "atomix.sqlite")) : null;
+    return !!id && id.ino === o.ino && id.birth === o.birth;
+  } catch (e) { return false; }
+}
+function markOwed(v) { try { require("./config").setAtomixStoreMoveOwed(v); } catch (e) { log("wallet replaced: the debt of moving the old swap database aside could not be recorded (" + e.message + ")"); } }
+function moveStoreAside() {
+  const db = path.join(dir(), "atomix.sqlite"), id = fileId(db);
+  if (id) markOwed(id);
+  try {
+    if (fs.existsSync(db)) { const kept = db + ".replaced-" + new Date().toISOString().replace(/[:.]/g, "-"); fs.renameSync(db, kept); log("the previous wallet's swap records were kept at " + kept); }
+    storeMoveOwed = false; markOwed(false);   // whatever the debt's form, also with no file left to move
+  } catch (e) { storeMoveOwed = true; log("could not move the previous wallet's swap records aside (" + (e && e.message) + "); AtomiX does not start until they are"); throw e; }
 }
 
 /**

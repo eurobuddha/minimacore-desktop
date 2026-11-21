@@ -233,4 +233,12 @@ function setSecret(value, account) {
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }
 
-module.exports = { load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+/** The old AtomiX store owed a move aside after a wallet replacement (0.18.236, main/atomix.js), naming the file it is for: never
+ *  from a patch (save() drops a key DEFAULTS does not name), only here, so the window cannot clear it. */
+function setAtomixStoreMoveOwed(v) {
+  const cur = load(); if (v) cur.atomixStoreMoveOwed = v && typeof v === "object" ? { ino: v.ino, birth: v.birth } : true; else delete cur.atomixStoreMoveOwed;
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
+}
+
+module.exports = { setAtomixStoreMoveOwed, load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

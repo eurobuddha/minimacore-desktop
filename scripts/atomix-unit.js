@@ -490,6 +490,38 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     });
   }
 
+  // ---- 0.18.236 (as Pandamonium Desktop 0.19.243 / 0.19.267 / 0.19.286 / 0.19.295): the old store's move aside is owed until done ----
+  await okA("an old swap store that cannot be moved aside is owed (on disk, naming its file): the engine does not open it, a restart moves it, and a debt that could not be cleared never moves the new wallet's store", async () => {
+    const C = require("../main/config"), keep = { load: C.load, set: C.setAtomixStoreMoveOwed }, realRename = fs.renameSync;
+    let disk = {}, clearFails = false;
+    C.load = () => JSON.parse(JSON.stringify(disk));
+    C.setAtomixStoreMoveOwed = (v) => { if (!v && clearFails) throw new Error("config.json is not writable"); if (v) disk.atomixStoreMoveOwed = typeof v === "object" ? { ino: v.ino, birth: v.birth } : true; else delete disk.atomixStoreMoveOwed; };
+    const busy = () => { throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }); };
+    const fresh = (d) => { delete require.cache[require.resolve("../main/atomix")]; const m = require("../main/atomix"); m._setDataDir(d); m._setRunner(async () => { throw new Error("no node in this check"); }); return m; };
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "axowe-")), db = path.join(d, "atomix.sqlite"), kept = () => fs.readdirSync(d).filter(n => n.startsWith("atomix.sqlite.replaced-"));
+    try {
+      fs.writeFileSync(db, "old swaps"); let m = fresh(d);
+      fs.renameSync = busy;
+      try { assert.throws(() => m.invalidate(), /could not be moved aside .*AtomiX does not start until it is/); } finally { m.stopLoop(); }
+      assert.ok(disk.atomixStoreMoveOwed && typeof disk.atomixStoreMoveOwed === "object", "the debt is on disk, naming the file: " + JSON.stringify(disk));
+      await assert.rejects(m.init(), /AtomiX does not start: the replaced wallet's swap database could not be moved aside yet/, "the new wallet's engine never opens it");
+      // a restart: nothing in memory, the debt on disk
+      m = fresh(d); await assert.rejects(m.init(), /AtomiX does not start/); assert.equal(fs.readFileSync(db, "utf8"), "old swaps", "still not opened");
+      fs.renameSync = realRename; await m.init().catch(() => {}); m.stopLoop();
+      assert.equal(kept().length, 1, "moved once the rename works"); assert.equal(fs.readFileSync(path.join(d, kept()[0]), "utf8"), "old swaps"); assert.equal(disk.atomixStoreMoveOwed, undefined, "and the debt cleared");
+      // the clearing fails after the move: the debt names the old file, so the new wallet's store is left in place at a later start
+      fs.rmSync(db, { force: true }); fs.writeFileSync(db, "old swaps 2"); m = fresh(d); clearFails = true;
+      try { m.invalidate(); } finally { m.stopLoop(); } clearFails = false;
+      assert.ok(disk.atomixStoreMoveOwed && typeof disk.atomixStoreMoveOwed === "object", "the debt could not be cleared"); assert.equal(kept().length, 2);
+      fs.rmSync(db, { force: true }); fs.writeFileSync(db, "the new wallet's store");
+      m = fresh(d); await m.init().catch(() => {}); m.stopLoop();
+      assert.equal(fs.readFileSync(db, "utf8"), "the new wallet's store", "not moved aside"); assert.equal(kept().length, 2);
+      // a debt with no file named (true) met with no store: cleared
+      fs.rmSync(db, { force: true }); disk.atomixStoreMoveOwed = true; m = fresh(d); await m.init().catch(() => {}); m.stopLoop();
+      assert.equal(disk.atomixStoreMoveOwed, undefined, "cleared after the move, with no file left to move");
+    } finally { fs.renameSync = realRename; C.load = keep.load; C.setAtomixStoreMoveOwed = keep.set; delete require.cache[require.resolve("../main/atomix")]; }
+  });
+
   if (LEAKS.length) { fail++; console.error("  ✗ a child process was started with no test node named:", LEAKS.join("; ")); }
   const skipNote = skipped ? " (" + skipped + " skipped — needs a named test node)" : "";
   console.log(fail === 0 ? "\n✅ ATOMIX UNIT PASS — " + pass + " checks" + skipNote : "\n❌ ATOMIX UNIT FAIL — " + fail + " failed" + skipNote);
