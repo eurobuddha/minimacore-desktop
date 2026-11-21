@@ -979,7 +979,9 @@ test("0.19.219: the health poll does not release the held engines while the mega
     assert.ok(m.walletCheck && m.walletCheck.held, "still owed and held");
   });
   const { _timeoutFor } = require("../main/rpc");
-  assert.equal(_timeoutFor(PHRASE), 3600000, "megammrsync action:resync: one hour"); assert.equal(_timeoutFor('"megammrsync" action : resync host:h:1'), 3600000);
+  assert.equal(_timeoutFor(PHRASE), 3600000, "megammrsync action:resync: one hour"); assert.equal(_timeoutFor('"megammrsync" action : resync'), 3600000);
+  // 0.19.266: with host:h:1 the second ":" sends the node to its slow splitter, where `action : resync` is no parameter (the node refuses it): a resync only as the node reads one
+  assert.equal(_timeoutFor('"megammrsync" action:resync host:h:1'), 3600000); assert.equal(_timeoutFor('"megammrsync" action : resync host:h:1'), 180000);
   assert.equal(_timeoutFor("send amount:1 address:0x01"), 180000);
 });
 // ---- 0.19.223: the JVM's locale is pinned for both node kinds, before -jar; the argv gate still passes ----

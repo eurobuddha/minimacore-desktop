@@ -236,6 +236,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   // control characters refused (0.19.187, released 0.18.174): the node reads them in ways no check here follows
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
+  // a command that moves funds or keys whose text the node reads otherwise than it looks is refused, not guessed (0.19.266, main/cmdverb.js read)
+  const unclear = cmdverb.unclear(command); if (unclear) throw new Error(unclear);
   // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
   for (const part of cmdverb.parts(command)) {
     const twice = cmdverb.is(part, "send") ? cmdverb.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];

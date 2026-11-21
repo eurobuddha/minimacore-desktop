@@ -53,8 +53,9 @@ const { N_ } = require("./lang").I18N;
  *  white space collapsed, and the VALUES of phrase, password, confirm and seed hidden, quoted or not. */
 function masked(c) {
   return String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
-    // an unquoted value ends at a space OR a quote (0.19.252, as released 0.18.214): `seed:0xAB"action":"wipekeys"` hid the action glued after it
-    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)("[^"]*"|[^\s"]+)/gi, "$1•••")
+    // hidden through the end of the node's token (0.19.266): a quote inside a value opens a quoted span the node keeps in the same
+    // value (`password:my"secret` showed `"secret`; `seed:0xAB"action":"wipekeys"` is ONE seed value to the node, no action)
+    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)((?:"[^"]*"?|[^\s"])+)/gi, "$1•••")
     .replace(/\s+/g, " ").trim();
 }
 /** The typed phrase, then the system's own check (main/syscheck.js, 0.19.188: Touch ID; refused while a Touch ID that
@@ -76,6 +77,7 @@ function create(sys, now) {
     pass = null;
     const c = String(command == null ? "" : command), { kind, chain } = classify(c); if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error(CHAIN);
+    const unclear = V.unclear(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.19.266): refused before any question
     // a repeated parameter first (released 0.18.202): what the phrase is depends on the action, and the node keeps the last
     const twice = V.repeated(c);
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");

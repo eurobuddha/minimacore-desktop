@@ -130,9 +130,9 @@ function dexCommand(c) {
   if (verbs.includes("seedrandom")) throw new Error("the trading identity is not read through this bridge");
   if (!verb) throw new Error("not available to Dexicon: " + verbs.join(" / "));
   if (!DEX_VERBS.has(verb)) throw new Error("not available to Dexicon: " + verb);
-  const pt = require("./cmdverb").paramsText(c);
-  if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c) || /\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn):/i.test(pt)) throw new Error("that parameter is not available to Dexicon");
-  if (verb === "txnpost" && (/\b(auto|burn|mine)\s*:/i.test(c) || /\b(auto|burn|mine):/i.test(pt))) throw new Error("that parameter is not available to Dexicon");   // the page posts plain `txnpost id:`
+  const names = require("./cmdverb").paramNames(c);   // as the node reads them (main/cmdverb.js read, 0.19.266)
+  if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c) || names.some(n => /^(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)$/.test(n))) throw new Error("that parameter is not available to Dexicon");
+  if (verb === "txnpost" && (/\b(auto|burn|mine)\s*:/i.test(c) || names.some(n => /^(auto|burn|mine)$/.test(n)))) throw new Error("that parameter is not available to Dexicon");   // the page posts plain `txnpost id:`
   return c;
 }
 /** The page's SQL runs on the engine's own store, as page and service share one database in the MiniDapp. Since

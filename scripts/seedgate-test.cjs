@@ -204,7 +204,9 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
   await assert.rejects(cg.open("vault action:restorekeys phrase:\"a b\"", "SHOW SEED"), /Type CHANGE KEYS exactly/);
   await cg.open("vault action:restorekeys phrase:\"a b\"", "CHANGE KEYS");
   assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:•••");
-  assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), 'vault seed:•••"action":"wipekeys"', "a parameter glued after an unquoted secret is shown (0.19.252)");
+  // 0.19.266: the node reads this as ONE seed value (0xABaction:wipekeys) and no action (0.19.252 showed an action the node never reads): hidden whole
+  assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
+  assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
   assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••".replace("seed:", "seed : "));
 });
 
@@ -293,5 +295,49 @@ test("an empty quoted value (password:\"\") does not hide the parameter after it
   assert.equal(V.paramValue('vault password:"" action:wipekeys', "action"), "wipekeys");
   assert.equal(V.paramValue('vault password:"x y" action:wipekeys', "action"), "wipekeys", "a value with content as before");
   assert.equal(V.paramValue('keys action:"list"action:genkey', "action"), "genkey", "a name glued after a closing quote as before");
-  assert.match(V.paramsText('send amount:1 address:"" tokenid:0xAB'), /address:"" +tokenid:0xAB$/);
+  assert.equal(V.paramValue('send amount:1 address:"" tokenid:0xAB', "tokenid"), "0xAB");
+});
+
+// ---- 0.19.266: one reader, the node's own (main/cmdverb.js read: CommandRunner.getCommand and its fast and slow splitters) ----
+test("cmdverb.read gives the node's reading of 400 deterministic texts (a table made by an independent port of CommandRunner)", () => {
+  const V = require("../main/cmdverb.js"), { rows } = require("./fixtures/node-command-reading.json");
+  assert.equal(rows.length, 400);
+  for (const r of rows) {
+    const got = V.read(r.c);
+    assert.equal(got.verb, r.verb, JSON.stringify(r.c)); assert.equal(!!got.error, r.error, JSON.stringify(r.c));
+    if (!r.error) assert.deepEqual(got.params, r.params, JSON.stringify(r.c));
+  }
+});
+test("the texts the review ran through the node: every check reads what the node reads, and a text read otherwise than it looks is refused", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), { pinMinimaSend } = require("../main/sendpin");
+  const MX = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  // a quoted value of only white space hides nothing: the node keeps the last action, and the checks see it
+  assert.equal(V.paramValue('vault action:wipekeys password:" " action:seed', "action"), "seed");
+  assert.deepEqual(V.repeated('vault action:wipekeys password:" " action:seed'), ["action"]);
+  assert.deepEqual(V.repeated('vault action:wipekeys password:"\t" action:seed'), ["action"]);
+  assert.equal(R.replacesKeysElsewhere('vault password:" " action:resetkeys phrase:"a b c"'), true);
+  assert.equal(R.replacesWalletFromPhrase('megammrsync action:resync password:" " phrase:"a b c"'), true);
+  assert.equal(R.isResync('megammrsync action:resync password:" " phrase:"a b c"'), true);
+  assert.equal(R.replacesKeysElsewhere('archive action:resync host:x.y:9001 keys:" " phrase:"a b c"'), true);
+  const mx = 'send amount:1 address:0xCD tokenid:0x00 debug:" " tokenid:' + MX;
+  assert.equal(V.paramValue(mx, "tokenid"), MX); assert.deepEqual(V.repeated(mx, ["amount", "tokenid", "address", "fromaddress"]), ["tokenid"]);
+  const asked = []; assert.equal(await pinMinimaSend(async (c) => { asked.push(c); return { status: true, response: [] }; }, mx), mx, "an MxUSD send is not pinned"); assert.deepEqual(asked, []);
+  // the slow path: a { opens JSON even inside quotes, and a name:"…" inside a quoted token is no parameter: the node runs the DEFAULT action (the seed)
+  for (const c of ['vault password:"{" action:wipekeys', 'vault confirm:x"phrase: "x"action:wipekeys', 'vault seed:0xAB"action":"wipekeys"']) {
+    assert.equal(V.paramValue(c, "action"), null, c); assert.equal(G.classify(c).kind, "seed", c);
+    assert.match(V.unclear(c), /differently from how it is written/, c);
+    await assert.rejects(G.create({ check: async () => { throw new Error("no question"); } }).open(c, "SHOW SEED"), /differently from how it is written/, c);
+  }
+  // plain texts, quoted values and a state's JSON are not refused
+  for (const c of ['vault action:passwordunlock password:"my secret"', 'send amount:1 address:0xCD state:{"0":"a b","1":"[x]"}', '"vault" action:seed', "keys action:list", 'backup password:"abc1"', "status"]) assert.equal(V.unclear(c), "", c);
+  // the mcd:cmd handler itself: the unclear text is refused before anything reaches the node
+  const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
+  const handlers = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", h)(
+    { handle: (n, f) => { handlers[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => ({}), async (c) => { sent.push(c); return {}; },
+    { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } }, { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c);
+  for (const c of ['vault seed:0xAB"action":"wipekeys"', 'send amount:1 address:0xCD tokenid:"0x00"tokenid:' + MX, 'txnpost id:a"b'])
+    await assert.rejects(handlers["mcd:cmd"](null, c), /differently from how it is written/, c);
+  assert.deepEqual(sent, []);
+  await handlers["mcd:cmd"](null, "balance"); assert.deepEqual(sent, ["balance"], "a plain command still runs");
 });

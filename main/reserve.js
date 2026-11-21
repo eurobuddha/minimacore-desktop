@@ -53,26 +53,13 @@ const lc = (s) => String(s == null ? "" : s).toLowerCase();
 /** The verb the node runs for ONE command, lower-cased (CommandRunner.getCommand: SEND is send); where its two readings
  *  differ, a watched one wins (over-guarding, never under). */
 const verbOf = (c) => { const vs = V.verbs(c); return WATCHED.find(w => vs.includes(w)) || vs[0] || ""; };
-/**
- * One command's top-level parameters, split as the node splits them (CommandRunner.splitStringJSON): on white space,
- * with a {…}, […] or "…" value kept whole, so a name:value inside a state JSON is not a parameter. Names are compared
- * in lower case. first: name -> the first value; dup: the first name given twice ("" = none). The node keeps the LAST
- * value of a repeated name while a reader of the text finds the first, so a repeated name is refused, never guessed.
- */
-function parse(c) {
-  const first = new Map(); let dup = "", depth = 0, quote = false, tok = "";
-  const end = () => { const i = tok.indexOf(":"); if (i > 0) { const k = lc(tok.slice(0, i)); if (first.has(k)) { if (!dup) dup = k; } else first.set(k, tok.slice(i + 1).replace(/^"/, "").replace(/"$/, "")); } tok = ""; };   // the node drops a value's own quotes
-  for (const ch of String(c)) {
-    if (ch === '"') quote = !quote;
-    else if (!quote && (ch === "{" || ch === "[")) depth++;
-    else if (!quote && (ch === "}" || ch === "]") && depth) depth--;
-    if (!depth && !quote && /\s/.test(ch)) end(); else tok += ch;
-  }
-  end();
-  return { first, dup };
-}
+// One command's top-level parameters (args): names compared in lower case; first: name -> the first value; dup: the first name
+// given twice ("" = none). The node keeps the LAST value of a repeated name while a reader finds the first, so a repeated
+// name is refused, never guessed.
 let parsedOf = "", parsed = null;   // the last command parsed: every look at one command reads the same parse
-const args = (c) => { if (c !== parsedOf || !parsed) { parsed = parse(V.paramsText(c)); parsedOf = c; } return parsed; };   // quotes dropped and " : " closed up first, as the node reads a name and its value
+// the node's own reading of names and values (main/cmdverb.js read, 0.19.266): first value of each name, and the first repeat
+function parse(c) { const first = new Map(); let dup = ""; for (const [n, v] of V.read(c).params) { const k = lc(n); if (first.has(k)) { if (!dup) dup = k; } else first.set(k, v); } return { first, dup }; }
+const args = (c) => { if (c !== parsedOf || !parsed) { parsed = parse(c); parsedOf = c; } return parsed; };
 const param = (c, k) => args(c).first.get(k) || "";
 const SEND_MODES = ["off", "observe", "enforce"];
 const isCoin = (s) => /^0x[0-9a-f]{2,64}$/.test(s);

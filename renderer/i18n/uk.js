@@ -5312,7 +5312,8 @@
   "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.": "Виведених з обігу адрес: {n}. Коли захисника зупинено, платіж на будь-яку з них більше не переказується на вашу безпечну адресу сам; він чекає, поки ви повернете його вручну.",
   "·  payment being sent": "·  оплата надсилається",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.": "Оплата зараз надсилається на вузол. Дочекайтеся його відповіді, перш ніж робити щось інше з цим замовленням.",
-  "This payment is being sent to the node now. Wait for its answer.": "Ця оплата зараз надсилається на вузол. Дочекайтеся його відповіді."
+  "This payment is being sent to the node now. Wait for its answer.": "Ця оплата зараз надсилається на вузол. Дочекайтеся його відповіді.",
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "Вузол прочитав би цю команду не так, як її написано (лапки всередині слова або впритул до наступного, двокрапка всередині лапок, або { чи [ поза значенням JSON). Напишіть її без них. Нічого не запущено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5394,5 +5395,6 @@
   "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.",
   "·  payment being sent",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.",
-  "This payment is being sent to the node now. Wait for its answer."
+  "This payment is being sent to the node now. Wait for its answer.",
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run."
 ] });

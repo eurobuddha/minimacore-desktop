@@ -5299,7 +5299,8 @@
   "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.": "已停用的地址：{n}。守护程序停止后，发往其中任一地址的付款将不再自动转移到您的安全地址，而是等待您手动找回。",
   "·  payment being sent": "·  付款发送中",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.": "付款正在发送到节点。请等待节点回复后再对此订单进行其他操作。",
-  "This payment is being sent to the node now. Wait for its answer.": "此付款正在发送到节点。请等待其回复。"
+  "This payment is being sent to the node now. Wait for its answer.": "此付款正在发送到节点。请等待其回复。",
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "节点读取此命令的方式与其写法不同（单词内部有引号或引号紧贴下一个单词、引号内有冒号，或在 JSON 值之外有 { 或 [）。请去掉这些后再写。未运行任何命令。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5381,5 +5382,6 @@
   "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.",
   "·  payment being sent",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.",
-  "This payment is being sent to the node now. Wait for its answer."
+  "This payment is being sent to the node now. Wait for its answer.",
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run."
 ] });

@@ -811,11 +811,13 @@ test("L5: a `;` ends a command for the node wherever it stands, so the guard spl
 // released file read `"vault"action:seed` as one word, so its action: was not seen)
 test("cmdverb: the parameters after a quoted verb with no space are read, as the node's fast path reads them", async () => {
   const V = require("../main/cmdverb");
-  assert.equal(V.paramsText('"txninput"id:a coinid : 0x01'), "txninput id:a coinid:0x01");
+  assert.deepEqual(V.read('"txninput"id:a coinid : 0x01').params, [["id", "a"], ["coinid", "0x01"]]);
   assert.deepEqual(V.paramNames('"vault"action:seed action:wipekeys'), ["action", "action"]);
   assert.deepEqual(V.repeated('"send"amount:1 amount:9 address:0xA', ["amount", "tokenid", "address", "fromaddress"]), ["amount"]);
   const G = require("../main/seedgate.js"), g = G.create({ check: async () => ({ biometric: false }) });
-  await assert.rejects(g.open('"keys"action:list action:genkey', "SHOW KEY"), /names action more than once/);
+  await assert.rejects(g.open('"keys" action:list action:genkey', "SHOW KEY"), /names action more than once/);
+  // glued to its quoted verb, the slow path (any { or [ in the text) reads `keysaction:list`: refused as unclear (0.19.266)
+  await assert.rejects(g.open('"keys"action:list action:genkey', "SHOW KEY"), /differently from how it is written/);
 });
 
 // 0.19.226: one command is forwarded exactly as written, not JS-trimmed

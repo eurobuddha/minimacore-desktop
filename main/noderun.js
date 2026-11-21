@@ -35,7 +35,7 @@ const SIGNERS = new Set(["send", "sendpoll", "sendsign", "txnsign", "txnauto", "
 function signsOne(part) {
   const vs = V.verbs(part);
   if (vs.some((v) => SIGNERS.has(v))) return true;
-  return vs.includes("txnpost") && /(?:^|\s)(?:auto:true\b|burn:)/i.test(V.paramsText(part));
+  return vs.includes("txnpost") && (V.fold(V.paramValue(part, "auto") || "") === "true" || V.paramValue(part, "burn") != null);   // the node's reading (0.19.266)
 }
 const signs = (command) => V.parts(command).some(signsOne);
 /** Kept under its old name for the callers that test one command with it: SIGNING.test(command) = it is queued. */

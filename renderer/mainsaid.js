@@ -389,6 +389,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")],
     // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
     ["RPC_ONE_COMMAND", I18N.N_("This command holds \";\", which would start a second command. Nothing was sent.")],
+    ["RPC_UNCLEAR", I18N.N_("The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.")],
     ["MAIN_SEND_REPEATED", I18N.N_("This send names {names} more than once (the node would use only the last). Write each once.")],
     ["MAIN_REPLACES_KEYS", I18N.N_("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.")],
     ["MAIN_CONTROL_CHAR", I18N.N_("This command holds a control character. Type it again without one.")],

@@ -16,7 +16,8 @@ const fs = require("fs");
 // 0.19.193): `"restore" file:x`, a control character before megammrsync, or `file : x` were not seen by /^\s*restore\b/.
 const V = require("./cmdverb");
 const runsAs = (part, ...verbs) => V.verbs(part).some(v => verbs.includes(v));
-const hasParam = (part, name, value) => new RegExp("(?:^|\\s)" + name + ":" + (value ? value + "(?:\\s|$)" : ""), "i").test(V.paramsText(part));
+// the LAST value of the name, as the node keeps it (0.19.266: from the node's own reading, main/cmdverb.js read)
+const hasParam = (part, name, value) => { const v = V.paramValue(part, name); return v != null && (!value || V.fold(v) === value); };
 
 /** Why a backup of this key mode may not be restored into this install ("" = it may). */
 function backupModeProblem(picked, recorded, supported) {
@@ -59,6 +60,8 @@ function backupCommandProblem(command) {
     // the value as typed (its quotes kept), after a name read as the node reads it ("password" or password : …)
     for (const m of V.jtrim(part).replace(/^"([^"]*)"/, "$1 ").matchAll(/(?:^|\s)"?(password|confirm)"?[ \t]*:[ \t]*(\S*)/gi))
       if (!/^("[A-Za-z0-9]+"|[A-Za-z0-9]+)$/.test(m[2])) return "A backup password can hold letters and numbers only.";
+    // and each value as the node reads it (0.19.266): `password:"a b"` above reads `"a`, the node `a b`
+    for (const [n, v] of V.read(part).params) if (/^(password|confirm)$/i.test(n) && !/^[A-Za-z0-9]+$/.test(v)) return "A backup password can hold letters and numbers only.";
   }
   return "";
 }

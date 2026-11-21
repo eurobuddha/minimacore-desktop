@@ -40,8 +40,7 @@ async function pinSend(runner, command, opts) {
   // 0.18.187): `"send" …`, a control character before send or `fromaddress : 0x…` slipped past /^send\s/ and
   // /\bfromaddress:/. A parameter is a top-level `name:` (not a key inside a state's JSON), and the LAST one when a name
   // repeats, as the node keeps it (mcd:cmd refuses a send that repeats one; this is the second line).
-  const pt = V.paramsText(c);
-  const last = (name) => { const all = [...pt.matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))]; return all.length ? all[all.length - 1][1] : null; };
+  const last = (name) => V.paramValue(c, name);   // the node's own reading (main/cmdverb.js read, 0.19.266)
   const tok = last("tokenid"), token = tok != null && /^0x[0-9a-f]+$/i.test(tok) ? tok : tok != null ? "?" : "0x00", minima = token.toLowerCase() === "0x00";
   const out = { command: c, pinned: false, token, need: "0", blocked: false, heldUnits: 0n, freeUnits: 0n, held: [] };
   // A chain (cmd1; cmd2) is never pinned (0.19.122): the pin is appended to the END of the text, so in a chain it landed
@@ -63,7 +62,7 @@ async function pinSend(runner, command, opts) {
   const exclude = new Set([...(o.exclude || [])].map(a => String(a).toLowerCase()));
   // what the send must find: amount, or the sum of a multi:[address:amount,…]; a MINIMA send also funds its burn
   let needUnits = 0n;
-  const multi = /(?:^|\s)multi:\[([^\]]*)\]/i.exec(pt);
+  const multi = /^\[([^\]]*)\]/.exec(last("multi") || "");
   if (multi) for (const m of multi[1].matchAll(/:([0-9]+(?:\.[0-9]+)?)(?=[",\s]|$)/g)) needUnits += toUnits(m[1]);
   else { const am = last("amount"); needUnits = toUnits(am != null && /^[0-9]+(\.[0-9]+)?$/.test(am) ? am : "0"); }
   const burn = last("burn"); if (burn != null && /^[0-9]+(\.[0-9]+)?$/.test(burn) && minima) needUnits += toUnits(burn);

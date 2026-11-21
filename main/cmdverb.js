@@ -19,12 +19,85 @@ const fold = (s) => String(s).replace(/\u0130/g, "i").toUpperCase().toLowerCase(
 /** The commands of a text, as the node splits them (every ";", empty pieces dropped). */
 function parts(command) { return String(command == null ? "" : command).split(";").map(jtrim).filter(Boolean); }
 
-/** Every verb the node may read for ONE command (no ";"). */
+/*
+ * read(part): ONE command as the node reads it (0.19.266), ported from CommandRunner.getCommand and its two splitters
+ * (core/minima-core src/org/minima/system/commands/CommandRunner.java): with no "{", "[" or ":\" in the text, the FAST
+ * splitter (every ":" made " : ", tokens by "([^"]*)"|\S+ (Java's \s), then name : value glued back; a ":" where a name
+ * should be falls back to the slow one); else the SLOW splitter (only " " splits; a quote outside {…}/[…] toggles and is
+ * dropped; "{" and "[" count even inside quotes; a quote inside them is kept). Each token after the verb is name:value at
+ * its first ":" (no ":" is an error: nothing runs), both Java-trimmed, a value not {…}/[…] loses one leading and one
+ * trailing quote. The node keeps the LAST value of a repeated name.
+ * odd: the text is read in a way it does not look (a quote inside a word or glued to the next one, a ":" inside quotes,
+ * a "{" or "[" inside quotes or outside a value that is JSON, unbalanced quotes or brackets). unclear() refuses those for
+ * the commands that move funds or keys, rather than trust that this reading is the node's.
+ */
+const JWS = /[ \t\n\x0B\f\r]/;   // Java's \s
+function fastSplit(text) {
+  const s = text.replace(/:/g, " : "), re = /"([^"]*)"|([^ \t\n\x0B\f\r]+)/g, toks = []; let m, odd = false;
+  while ((m = re.exec(s))) {
+    if (m[1] != null) {
+      const b = s[m.index - 1], a = s[m.index + m[0].length];
+      if ((b !== undefined && !JWS.test(b)) || (a !== undefined && !JWS.test(a)) || m[1].includes(":")) odd = true;
+      toks.push(m[1]);
+    } else { if (m[2].includes('"')) odd = true; toks.push(m[2]); }
+  }
+  const out = []; let named = false, nv = "";
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (i === 0) { out.push(t); continue; }
+    if (!named) { if (jtrim(t) === ":") return null; named = true; nv = t; }
+    else if (jtrim(t) === ":") nv += ":";
+    else { named = false; nv += t; out.push(nv); }
+  }
+  return { toks: out, odd };
+}
+function slowSplit(text) {
+  const s = jtrim(text), toks = []; let cur = "", js = 0, q = false, odd = false;
+  for (let i = 0; i < s.length; i++) {
+    const cc = s[i];
+    if (cc === " ") { if (!q && js === 0) { if (cur !== "") toks.push(jtrim(cur)); cur = ""; } else cur += cc; }
+    else if (cc === "{" || cc === "[") { if (q) odd = true; js++; cur += cc; }
+    else if (cc === "}" || cc === "]") { if (q) odd = true; js--; if (js < 0) odd = true; cur += cc; }
+    else if (cc === '"') {
+      if (js > 0) cur += cc;
+      else { if (!q ? cur !== "" && !cur.endsWith(":") : s[i + 1] !== undefined && s[i + 1] !== " ") odd = true; q = !q; }
+    } else cur += cc;
+  }
+  if (cur !== "") toks.push(jtrim(cur));
+  if (q || js !== 0) odd = true;
+  toks.forEach((t, i) => {
+    if (!/[{}[\]]/.test(t)) return;
+    const ix = t.indexOf(":"), v = jtrim(t.slice(ix + 1));
+    if (i === 0 || ix < 1 || /[{}[\]]/.test(t.slice(0, ix)) || !((v[0] === "{" && v.endsWith("}")) || (v[0] === "[" && v.endsWith("]")))) odd = true;
+  });
+  return { toks, odd };
+}
+let readOf = null, readIs = null;   // the last command read: every look at one command reads the same parse
+/** → { verb (folded), params: [[name, value], …] in order, repeats kept, error ("" = the node runs it), odd }. */
+function read(part) {
+  const s = jtrim(String(part == null ? "" : part));
+  if (s === readOf) return readIs;
+  let sp = null;
+  if (!s.includes(":\\") && !s.includes("{") && !s.includes("[")) sp = fastSplit(s);
+  if (!sp) sp = slowSplit(s);
+  const verb = fold(sp.toks[0] || ""), params = []; let error = "";
+  for (let i = 1; i < sp.toks.length; i++) {
+    const t = sp.toks[i], ix = t.indexOf(":");
+    if (ix === -1) { error = "Invalid parameters for " + verb + " @ " + t; break; }
+    const name = jtrim(t.slice(0, ix)); let v = jtrim(t.slice(ix + 1));
+    if (!((v.startsWith("{") && v.endsWith("}")) || (v.startsWith("[") && v.endsWith("]")))) { if (v.startsWith('"')) v = v.slice(1); if (v.endsWith('"')) v = v.slice(0, -1); }
+    params.push([name, v]);
+  }
+  readOf = s; readIs = { verb, params, error, odd: sp.odd };
+  return readIs;
+}
+/** Every verb the node may read for ONE command (no ";"): the node's own reading, plus the two looser readings this file
+ *  used before 0.19.266 (a gate built on it may block a text the node would refuse anyway, never the reverse). */
 function verbs(part) {
-  const p = jtrim(part), out = new Set();
-  const f = /"([^"]*)"|([^\s"]+)/.exec(p.replace(/:/g, " : "));            // fast path: ":" its own token, a quoted first word
+  const p = jtrim(part), out = new Set([read(p).verb]);
+  const f = /"([^"]*)"|([^\s"]+)/.exec(p.replace(/:/g, " : "));            // a quoted first word
   if (f) out.add(fold(jtrim(f[1] != null ? f[1] : f[2])));
-  const slow = jtrim(p.replace(/"/g, ""));                                   // slow path: quotes dropped
+  const slow = jtrim(p.replace(/"/g, ""));                                   // quotes dropped
   out.add(fold(slow.split(/[\u0000- \s:]/)[0] || ""));
   out.delete("");
   return [...out];
@@ -33,40 +106,13 @@ function verbs(part) {
 function is(part, verb) { return verbs(part).includes(verb); }
 /** Does this ONE command begin with `prefix`, however it is quoted or trimmed (for gates: over-blocks on purpose)? */
 function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(prefix)) || fold(jtrim(String(part).replace(/"/g, ""))).startsWith(prefix); }
-/** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value).
- *  NOT in the released file (0.19.192 here): a "quoted" first word is ended by its closing quote, so `"txninput"id:a` reads
- *  as `txninput id:a`, as the node's fast path reads it (released: `txninputid:a`, and its id: was not seen). */
-// An empty quoted value (`password:""`) is kept as "" (0.19.250): dropped, it left `password:` followed by a space, which the
-// closing-up of " : " then joined to the next name (`password:action:wipekeys`), and that name was no longer read.
-function paramsText(part) { return jtrim(jtrim(String(part)).replace(/^"([^"]*)"/, "$1 ").replace(/""/g, "\u0000").replace(/"/g, "").replace(/\u0000/g, '"" ')).replace(/[ \t]*:[ \t]*/g, ":"); }
-
-/** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb. The node
- *  keeps the LAST of a repeated name. Read from namesText since 0.19.218 (released 0.18.189 / 0.18.197). */
-function paramNames(part) {
-  const rest = namesText(part).replace(/^\S+/, "");
-  return [...rest.matchAll(/(?:^|\s)([A-Za-z0-9_.-]+):/g)].map(m => fold(m[1]));
-}
-/** The text the parameter NAMES are read from (released 0.18.189 / 0.18.197, ported 0.19.218): quotes become spaces (a name
- *  glued after a closing quote, `action:"list"action:genkey`, is its own name, as the node reads it), whatever stands inside
- *  {…} or […] is blanked (a key in a state's JSON is not a parameter), a { or [ inside a quoted value opens nothing, and
- *  " : " is closed up. Values that need quotes are not read here. */
-function namesText(part) {
-  const s = jtrim(String(part));
-  let out = "", depth = 0, quoted = false, opened = -1;
-  for (const ch of s) {
-    // an empty quoted value stays "" (0.19.250): two spaces after a colon were closed up into the next name, which hid it
-    if (ch === '"') { if (!quoted) opened = out.length; else if (depth === 0 && out.length === opened + 1) out += '""'; quoted = !quoted; out += " "; continue; }
-    if (quoted) { out += depth > 0 ? " " : ch; continue; }
-    if (ch === "{" || ch === "[") { depth++; out += ch; continue; }
-    if ((ch === "}" || ch === "]") && depth > 0) { depth--; out += ch; continue; }
-    out += depth > 0 ? " " : ch;
-  }
-  return out.replace(/[ \t]*:[ \t]*/g, ":");
-}
-/** The LAST top-level value of `name` in ONE command (as the node keeps it), or null (released 0.18.196). */
+/** The parameter names of ONE command as the node reads them, in order, repeats kept, lower-cased (the node's names are). */
+function paramNames(part) { return read(part).params.map(([n]) => fold(n)); }
+/** The LAST value of `name` in ONE command (as the node keeps it), or null. */
 function paramValue(part, name) {
-  const all = [...namesText(part).matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))];
-  return all.length ? all[all.length - 1][1] : null;
+  const want = fold(name), ps = read(part).params;
+  for (let i = ps.length - 1; i >= 0; i--) if (fold(ps[i][0]) === want) return ps[i][1];
+  return null;
 }
 /** The names that appear more than once in ONE command (lower-cased). */
 function repeated(part, only) {
@@ -74,6 +120,10 @@ function repeated(part, only) {
   for (const n of paramNames(part)) { if (only && !only.includes(n)) continue; if (seen.has(n)) twice.add(n); seen.add(n); }
   return [...twice];
 }
+const SENSITIVE = /^(?:vault|seedrandom|keys|megammrsync|archive|mysql|reset|backup|restore\w*|send\w*|txn\w*|consolidate|tokencreate|multisig|sign\w*)$/;
+const UNCLEAR = "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.";
+/** Why a text whose reading is odd (read().odd) is refused for a command that moves funds or keys ("" = it is not). */
+function unclear(command) { return parts(command).some(p => read(p).odd && verbs(p).some(v => SENSITIVE.test(v))) ? UNCLEAR : ""; }
 
 /**
  * oneCommand(text) (0.19.194, released 0.18.177): a command the APP builds is one command. The node splits a text on EVERY
@@ -88,4 +138,4 @@ function oneCommand(command) {
   if (String(command).includes(";")) throw new Error("This command holds \";\", which would start a second command. Nothing was sent.");
   return command;
 }
-module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, namesText, paramNames, repeated, paramValue, oneCommand };
+module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, oneCommand };
