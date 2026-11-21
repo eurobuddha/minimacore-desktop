@@ -19,13 +19,16 @@ let writeTimer = null;
 function filePath() { return path.join(app.getPath("userData"), "chat.json"); }
 function ensureLoaded() {
   if (mem) return;
-  mem = { messages: {}, contacts: {}, meta: {} };
+  // Maps with no prototype (0.19.233): ids a peer writes (a message id, a ref) find only what is stored under them;
+  // "__proto__", "constructor" and the like are plain keys, never Object.prototype.
+  const bare = (o) => Object.assign(Object.create(null), o && typeof o === "object" && !Array.isArray(o) ? o : {});
+  mem = { messages: bare(), contacts: bare(), meta: bare() };
   let raw = null;
   try { raw = fs.readFileSync(filePath(), "utf8"); }
   catch (e) { return; }   // ENOENT → first run
   try {
     const j = JSON.parse(raw);
-    if (j) { mem.messages = j.messages || {}; mem.contacts = j.contacts || {}; mem.meta = j.meta || {}; }
+    if (j) { mem.messages = bare(j.messages); mem.contacts = bare(j.contacts); mem.meta = bare(j.meta); }
     // 0.19.2 adds message rows of a new kind (state "file") and nothing else. The file as the older version left it is
     // copied aside once, before this version writes anything: the node deletes inbox messages once they are stored here.
     if (j && j.rev !== REV) { try { fs.copyFileSync(filePath(), filePath() + ".before-0.19.2", fs.constants.COPYFILE_EXCL); } catch (e2) { /* already kept, or unreadable */ } }
@@ -47,10 +50,12 @@ function persistSoon() {
   }, WRITE_DEBOUNCE_MS);
 }
 
+/** One stored message by id, or null (own entries only). */
+function message(msgid) { ensureLoaded(); return typeof msgid === "string" && Object.hasOwn(mem.messages, msgid) ? mem.messages[msgid] : null; }
 /** Upsert-if-new by msgid. msg = {msgid, pubkey, incoming, body, name, ref, ts, via, read, status}. Returns true if new. */
 function addMessage(m) {
   ensureLoaded();
-  if (mem.messages[m.msgid]) return false;
+  if (typeof m.msgid !== "string" || Object.hasOwn(mem.messages, m.msgid)) return false;
   mem.messages[m.msgid] = m;
   const keys = Object.keys(mem.messages);
   if (keys.length > MAX_MESSAGES) {
@@ -101,7 +106,7 @@ function markPeerRead(pubkey, uptoTs) {
 }
 function setStatus(msgid, patch) {
   ensureLoaded();
-  const m = mem.messages[msgid];
+  const m = message(msgid);
   if (!m) return false;
   Object.assign(m, patch);
   persistSoon();
@@ -148,5 +153,5 @@ function mergeBackup(contacts, messages, payaddr, myname) {
 }
 function clear() { mem = { messages: {}, contacts: {}, meta: {} }; persistSoon(); }
 
-module.exports = { addMessage, threadRows, thread, deleteThread, deleteMessage, markThreadRead, unreadCount, setStatus, markPeerRead,
+module.exports = { message, addMessage, threadRows, thread, deleteThread, deleteMessage, markThreadRead, unreadCount, setStatus, markPeerRead,
   contacts, addContact, getContact, removeContact, metaGet, metaSet, clear, all, mergeBackup };

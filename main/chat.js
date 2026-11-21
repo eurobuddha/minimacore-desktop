@@ -175,6 +175,8 @@ async function pollOnce() {
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
       const m = schema.chatDecode(msg.message);
+      // a peer's ref is at most a media url's length (0.19.233; the shared schema stays as mds/keetchat has it): a longer one is dropped
+      if (typeof m.ref === "string" && m.ref.length > 600) m.ref = "";
 
       // control messages: consumed, never stored or notified
       if (m.state === "read") {
@@ -192,7 +194,9 @@ async function pollOnce() {
       }
       if (m.state === "delivered") {
         // the peer stored our message (0.18.18+): single tick -> double tick
-        if (m.ref) store.setStatus(m.ref, { status: "delivered" });
+        // only OUR message to THIS peer can be marked delivered by this peer (0.19.233: any peer could tick any message)
+        const target = m.ref ? store.message(m.ref) : null;
+        if (target && !target.incoming && target.pubkey === msg.from) store.setStatus(m.ref, { status: "delivered" });
         await nodeCmd("keets action:ack id:" + msg.id);
         emitter.emit("update");
         continue;

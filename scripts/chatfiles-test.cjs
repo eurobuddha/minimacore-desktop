@@ -728,3 +728,24 @@ test("voice: decode, body build/parse, publish path and extension", () => {
   const d = schema.chatDecode(schema.chatEncodeTyped("me", voice.buildBody(12, wave), { state: "audio", ref: "keets://" + "a".repeat(64) + "/chat/vn-1.ogg?hash=" + "b".repeat(64) }));
   assert.equal(d.state, "audio"); assert.equal(voice.parseBody(d.body).duration, "0:12");
 });
+
+// 0.19.233: a peer's "delivered" ticks only OUR message to THAT peer; ids a peer writes find only stored entries; a long ref is dropped
+test("0.19.233: delivered is accepted only for an outgoing message to the sender; '__proto__' finds nothing; a ref past 600 characters is dropped", async () => {
+  const chat = loadChat(), store = require("../main/chat-store");
+  const A = "0x" + "A1".repeat(32), B = "0x" + "B2".repeat(32), ME = "0x" + "C3".repeat(32);
+  store.addMessage({ msgid: "out-to-a", pubkey: A, incoming: false, body: "hi", ts: 1, status: "sent" });
+  store.addMessage({ msgid: "from-a", pubkey: A, incoming: true, body: "yo", ts: 2 });
+  const enc = (o) => require("../main/chatschema").chatEncodeTyped("", "", o);
+  let inbox = [];
+  chat._setRunner(async (c) => c === "keets action:info" ? { status: true, response: { pubkey: ME, drive: "d" } } : c === "keets action:inbox" ? { status: true, response: inbox } : c === "status" ? { status: true, response: { data: chatDir } } : { status: true, response: {} });
+  inbox = [{ id: 1, from: B, message: enc({ state: "delivered", ref: "out-to-a" }) }, { id: 2, from: A, message: enc({ state: "delivered", ref: "from-a" }) }, { id: 3, from: B, message: enc({ state: "delivered", ref: "__proto__" }) }];
+  await chat.pollOnce();
+  assert.equal(store.message("out-to-a").status, "sent", "another peer cannot tick it"); assert.equal(store.message("from-a").status, undefined, "an incoming message is never ticked");
+  assert.equal(({}).status, undefined, "Object.prototype untouched"); assert.equal(store.message("__proto__"), null);
+  inbox = [{ id: 4, from: A, message: enc({ state: "delivered", ref: "out-to-a" }) }];
+  await chat.pollOnce(); assert.equal(store.message("out-to-a").status, "delivered", "the recipient ticks it");
+  assert.equal(store.addMessage({ msgid: "__proto__", pubkey: A, incoming: true, body: "x", ts: 3 }), true, "a plain key of its own");
+  assert.equal(store.message("__proto__").body, "x");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "chat.js"), "utf8");
+  assert.ok(src.includes('if (typeof m.ref === "string" && m.ref.length > 600) m.ref = "";'), "a long ref is dropped at decode");
+});
