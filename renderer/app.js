@@ -13,6 +13,9 @@ let running = false;
 let waitingForNode = false;
 let activeView = "balances";
 let refreshTimer = null;
+// The most key uses a restore may set (0.18.269): every key of this wallet has 262144 one-time uses, 0 to 262143 (main checks it again)
+const WW_KEYUSES_MAX = 262143;
+const KEYUSES_TOO_HIGH = "Key uses can be at most 262143: a key of this wallet has 262144 one-time uses, numbered 0 to 262143, and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds.";
 let RESTORE = null;          // {seed, keyuses, host} held in memory for a pending restore — NEVER persisted
 let setupRestarting = false;  // the setup screen's restart was asked for: its form stays until the node really stops (0.18.250)
 let postBootStarted = false; // guard: run the post-boot wallet step (new backup / restore resync) once
@@ -367,13 +370,14 @@ function showSetup() {
       // strip only leading/trailing whitespace (the textarea's stray newline), never collapse internal spacing
       // or change case — that would derive a DIFFERENT seed. Any non-empty phrase/length is valid.
       const seed = el("rSeed").value.trim();
-      const keyuses = parseInt(el("rKeyuses").value, 10);
+      const kuText = el("rKeyuses").value.trim(), keyuses = /^\d{1,15}$/.test(kuText) ? Number(kuText) : NaN;   // digits only ("262144abc" was 262144, 0.18.269)
       host = el("rHost").value.trim() || CFG.megammrHost;
       if (!seed) { toast("Enter your seed phrase."); return; }
       if (/["\\;]/.test(seed)) { toast("This seed contains a \", \\ or ; the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
       if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
       if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
       if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
+      if (keyuses > WW_KEYUSES_MAX) { toast(KEYUSES_TOO_HIGH, "err"); return; }
       RESTORE = { seed, keyuses, host };
     }
 
@@ -513,13 +517,14 @@ function showRestoreOverlay() {
   el("orCancel").onclick = () => { hideSetup(); };
   el("orGo").onclick = async () => {
     const seed = el("orSeed").value.trim();   // anyphrase: pass verbatim (see restore in showSetup)
-    const keyuses = parseInt(el("orKeyuses").value, 10);
+    const kuText = el("orKeyuses").value.trim(), keyuses = /^\d{1,15}$/.test(kuText) ? Number(kuText) : NaN;   // digits only (0.18.269)
     const host = el("orHost").value.trim() || CFG.megammrHost;
     if (!seed) { toast("Enter your seed phrase."); return; }
     if (/["\\;]/.test(seed)) { toast("This seed contains a \", \\ or ; the restore can't carry safely. Remove it or restore via the node terminal.", "err"); return; }
     if (/[\n\r\t]/.test(seed)) { toast("Remove the line breaks/tabs — enter your seed as one clean line (they change the derived wallet).", "err"); return; }
     if (!/^[\w.\-]+:\d+$/.test(host)) { toast("MegaMMR host must be ip:port.", "err"); return; }
     if (isNaN(keyuses) || keyuses < 0) { toast("Enter the key-uses count (0 if brand new)."); return; }
+    if (keyuses > WW_KEYUSES_MAX) { toast(KEYUSES_TOO_HIGH, "err"); return; }
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
@@ -2121,10 +2126,11 @@ async function renderSettings() {
       if (phrase) {
         if (/["\\;\n\r\t]/.test(phrase)) { toast("Seed phrase has a \", \\, ; or line break the command can't carry.", "err"); return; }
         if (!/^\d+$/.test(keyuses)) { toast("Enter key-uses when providing a seed (0 if brand new) — reusing WOTS keys can lose funds.", "err"); return; }
+        if (!/^\d{1,15}$/.test(keyuses) || Number(keyuses) > WW_KEYUSES_MAX) { toast(KEYUSES_TOO_HIGH, "err"); return; }   // 0.18.269
         cmdStr += ` phrase:"${phrase}"` + (el("setResyncAnyphrase").checked ? " anyphrase:true" : "");
         resetsWallet = true;
       }
-      if (keyuses) { if (!/^\d+$/.test(keyuses)) { toast("Key-uses must be a whole number.", "err"); return; } cmdStr += ` keyuses:${keyuses}`; }
+      if (keyuses) { if (!/^\d+$/.test(keyuses)) { toast("Key-uses must be a whole number.", "err"); return; } if (!/^\d{1,15}$/.test(keyuses) || Number(keyuses) > WW_KEYUSES_MAX) { toast(KEYUSES_TOO_HIGH, "err"); return; } cmdStr += ` keyuses:${keyuses}`; }
       if (keys) { if (!/^\d+$/.test(keys)) { toast("Keys must be a whole number.", "err"); return; } cmdStr += ` keys:${keys}`; }
       if (file) { if (/[\s"\\;]/.test(file)) { toast("File path can't contain spaces, quotes or ;.", "err"); return; } cmdStr += ` file:${file}`; }
       if (password) { if (/[\s"\\;]/.test(password)) { toast("Password can't contain spaces, quotes or ;.", "err"); return; } cmdStr += ` password:${password}`; }

@@ -585,3 +585,18 @@ test("a multisig file C:/dir/x.txn runs; a second ':' or a space is still refuse
   for (const c of ["multisig action:view file:C:/dir/x.txn", "multisig action:view file:C:" + B + "dir" + B + "x.txn"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
   for (const c of ["multisig action:view file:C:/dir/x:y.txn", 'multisig action:view file:"C:/my dir/x.txn"']) await assert.rejects(h(null, c), /builds further commands|differently from how it is written/, c);   // a ':' inside quotes is refused as unclear first
 });
+
+// ---- 0.18.269: keyuses: is plain digits up to 262143 for every command that names it (it sets every key's uses, or is the leaf signed at) ----
+test("keyuses: above 262143 or not plain digits is refused for every command; up to 262143 runs; the restore screens check it too", async () => {
+  const sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; }), io = { take: () => true, running: () => true, pin: async (c) => c };
+  for (const ku of ["262144", "300000", "4294967296", "262144abc", "1e5", "-1", "0x10", "5.5"])
+    for (const c of ["megammrsync action:resync host:h:9001 keyuses:" + ku, "archive action:resync host:h:9001 keyuses:" + ku, "mysql action:resync keyuses:" + ku, "reset action:seedsync keyuses:" + ku,
+      "restoresync file:/x/b.bak keyuses:" + ku, "vault action:restorekeys phrase:abc keyuses:" + ku, "keys action:createallkeys keyuses:" + ku, "txnsign id:a publickey:custom privatekey:0x01 keyuses:" + ku,
+      "sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:" + ku, "signfrom data:0x00000001610000 privatekey:0x03 keyuses:" + ku, "consolidatefrom fromaddress:0x01 address:0x02 privatekey:0x03 keyuses:" + ku,
+      "createtokenfrom fromaddress:0x01 name:x amount:1 privatekey:0x03 keyuses:" + ku])
+      await assert.rejects(G.checkCommand(c, io), /keyuses: must be a whole number from 0 to 262143: a key of this wallet has 262144 one-time uses/, c);
+  await assert.rejects(h(null, "megammrsync action:resync host:h:9001 keyuses:300000"), /must be a whole number from 0 to 262143/); assert.deepEqual(sent, [], "the real handler sends nothing");
+  for (const c of ["archive action:resync host:h:9001 keyuses:262143", "sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:0", "mysql action:resync keyuses:1000"]) assert.equal(await G.checkCommand(c, io), c, c);
+  const app = rd("renderer/app.js");
+  assert.ok(/const WW_KEYUSES_MAX = 262143;/.test(app) && (app.match(/> WW_KEYUSES_MAX\) \{ toast\(KEYUSES_TOO_HIGH, "err"\); return; \}/g) || []).length === 4 && !/parseInt\(el\("(r|or)Keyuses"\)/.test(app), "the setup restore, the restore overlay and both Settings resync paths check it, digits only");
+});

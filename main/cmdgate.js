@@ -179,6 +179,17 @@ const WIN_PATH = /^[A-Za-z]:\\[^\s:";{}[\]]*$/;
 const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null),
   mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
 const REPASTED_WHY = "The node pastes this command's values, unquoted, into a second command it runs itself, where white space, a colon, a quote or a semicolon in a value become more parameters of that command (a seed phrase among them). Write each value without them. Nothing was run.";
+// keyuses: (0.18.269) sets the uses of EVERY key of the node wallet (megammrsync, archive / mysql resync, reset, restoresync, vault
+// restorekeys, keys createallkeys: wallet.updateAllKeyUses(getAsInt())) or is the leaf a builder signs at (sendfrom, signfrom,
+// consolidatefrom, createtokenfrom, txnsign publickey:custom). Every key here is a 64 x 64 x 64 tree (this desktop never runs the node
+// with -blockaskeyuses): leaves 0 to 262143, and Wallet.signData / TreeKey.sign at 262144 or more signs at leaf 0 again (getAsInt keeps
+// only the low 32 bits, so 4294967296 is 0). A keyuses that is not plain digits up to 262143 is refused, for whatever command names it.
+const KEYUSES_MAX = 262143;
+const KEYUSES_WHY = "keyuses: must be a whole number from 0 to " + KEYUSES_MAX + ": a key of this wallet has 262144 one-time uses, numbered 0 to " + KEYUSES_MAX + ", and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds. Nothing was run.";
+/** Why a keyuses: value is refused ("" = it is not, or there is none). */
+function keyusesProblem(command) {
+  return V.parts(command).some(part => V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= KEYUSES_MAX))) ? KEYUSES_WHY : "";
+}
 const FROM_KEY = ["sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread", "sphincs"];
 /** Why mcd:cmd refuses a command whose pasted values would become parameters of the node's own second command ("" = it does not). */
 function repasted(command) {
@@ -209,6 +220,7 @@ async function checkCommand(command, io) {
   const unclear = V.unclear(command); if (unclear) throw new Error(unclear);   // refused, not guessed (0.18.219, main/cmdverb.js read)
   const pasted = repasted(command); if (pasted) throw new Error(pasted);
   const esc = V.smuggled(command); if (esc) throw new Error(esc);
+  const ku = keyusesProblem(command); if (ku) throw new Error(ku);   // the restore screens send their megammrsync through here too (0.18.269)
   // a value that would rewrite the commands a sendfrom, rawfrom, multisig … builds from it (0.18.230)
   for (const part of V.parts(command)) { const built = V.builtProblem(part); if (built) throw new Error(built); }
   for (const part of V.parts(command)) {
@@ -245,4 +257,4 @@ async function checkCommand(command, io) {
   return io.pin ? await io.pin(command) : command;
 }
 
-module.exports = { classify, create, refusal, masked, scrubReply, SECRET_NAMES, repasted, checkCommand, PHRASE, PASS_MS };
+module.exports = { classify, create, refusal, masked, scrubReply, SECRET_NAMES, repasted, keyusesProblem, KEYUSES_MAX, checkCommand, PHRASE, PASS_MS };
