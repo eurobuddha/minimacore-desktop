@@ -150,16 +150,21 @@ async function ackKeyuses(address, count) {
   const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
   const was = entryFor(loadStore(), address);
-  if (was.damaged && was.keyuses >= KEY_USES) throw new Error(DAMAGED_OVER(was.keyuses));   // 0.19.324: never "confirm at least 1000000"
-  if (n > LAST_USE) throw new Error(ABOVE_LAST);   // 0.19.323: the node wraps or restarts a count past the key's last use
+  // an entry not yet confirmed: the chain is read FIRST (0.19.340, as released 0.18.274), so a chain figure at the limit is explained as such
+  // rather than the bare ceiling the window's max(typed, chain) ran into; a figure above the ceiling is refused for that whether the chain
+  // answered or not (as released 0.18.279)
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
-    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
+    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(n > LAST_USE ? ABOVE_LAST : was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
     if (chain >= KEY_USES) throw new Error(USED_UP(chain));   // never adopted: no count this app can sign with (0.19.323)
+    if (n > LAST_USE) throw new Error(ABOVE_LAST);
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
-    if (was.damaged && n < was.keyuses) throw new Error(DAMAGED_BELOW(was.keyuses));   // the old value is a floor too (0.19.324)
   }
+  if (n > LAST_USE) throw new Error(ABOVE_LAST);   // 0.19.323: the node wraps or restarts a count past the key's last use
+  // a damaged entry's old count is a floor (0.19.324); one past the last use is said as an over-count, ending "Nothing was saved"
+  if (was.damaged && was.keyuses >= KEY_USES) throw new Error(DAMAGED_OVER(was.keyuses));
+  if (was.damaged && n < was.keyuses) throw new Error(DAMAGED_BELOW(was.keyuses));
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
   e.keyuses = e.damaged ? Math.max(n, e.keyuses || 0) : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown

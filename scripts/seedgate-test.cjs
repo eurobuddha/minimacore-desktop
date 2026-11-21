@@ -759,3 +759,14 @@ test("keyuses: only txnsign, sendfrom, signfrom, consolidatefrom and createtoken
   for (const v of ["txnsign", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom"]) assert.equal(R.keyusesProblem(v + " keyuses:262143", "classic"), "", v);
   for (const v of ["vault action:restorekeys", "vault action:resetkeys", "keys action:createallkeys", "newverb", "sendfromx", "txnsignall", "send"]) assert.match(R.keyusesProblem(v + " keyuses:250001", "classic"), /at least the times this wallet's keys have already signed \(the node's own default is 100 to 1000 by command; keys createallkeys has none\), at most 250000/, v + ": fails closed");
 });
+
+// ---- 0.19.340 (as released 0.18.284): the single-signature bound only when every reading of the verb is one of the five ----
+test("keyuses: a loose reading of a single-signature verb (a quoted or glued word) gets the setting bound, never 262143", () => {
+  const R = require("../main/restore.js"), V = require("../main/cmdverb.js");
+  for (const c of ['"sendfrom"archive keyuses:262143', "sendfrom:x keyuses:262143", '"sendfrom" keyuses:262143 x"y']) {
+    if (V.verbs(c).every(v => ["txnsign", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom"].includes(v))) continue;   // not a loose reading after all
+    assert.match(R.keyusesProblem(c, "classic"), /at most 250000/, c + ": " + JSON.stringify(V.verbs(c)));
+  }
+  assert.equal(R.keyusesProblem("sendfrom keyuses:262143", "classic"), "", "a plain reading keeps 262143");
+  assert.ok(['"sendfrom"archive keyuses:262143', "sendfrom:x keyuses:262143"].some(c => /at most 250000/.test(R.keyusesProblem(c, "classic"))), "at least one loose reading is tested");
+});

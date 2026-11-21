@@ -69,7 +69,9 @@ function namesKeyuses(command) { return V.parts(command).some(part => V.read(par
 function keyusesProblem(command, mode, tip) {
   for (const part of V.parts(command)) for (const [n, v] of V.read(part).params) {
     if (V.fold(n) !== "keyuses") continue;
-    const one = ONE_SIGNATURE.some(x => V.is(part, x)), adds = V.is(part, "restoresync"), block = mode === "block", tipOk = Number.isSafeInteger(tip) && tip > 0;
+    // the single-signature bound only when EVERY reading of the verb is one of the five (0.19.340, as released 0.18.284): a loose reading
+    // ("sendfrom"archive …, sendfrom:x …) can only lower the bound, never raise it
+    const verbs = V.verbs(part), one = verbs.length > 0 && verbs.every(v => ONE_SIGNATURE.includes(v)), adds = V.is(part, "restoresync"), block = mode === "block", tipOk = Number.isSafeInteger(tip) && tip > 0;
     const max = adds ? KEYUSES_ADD : block ? (tipOk ? Math.min(tip + KEYUSES_TIP_MARGIN, KEYUSES_BLOCK_LAST) : KEYUSES_SET) : one ? KEYUSES_ONE_SIGNATURE : KEYUSES_SET;
     if (/^\d{1,15}$/.test(v) && Number(v) <= max) continue;
     if (block && !adds) return tipOk ? "keyuses: on this block key wallet raises the floor under the block number for every key: at most " + max + ", the chain's tip (block " + tip + ") plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run."

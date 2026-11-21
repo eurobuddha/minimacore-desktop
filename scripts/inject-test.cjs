@@ -301,3 +301,18 @@ test("Web Wallet: a damaged old count of 1e400 or a digit run too long for a num
   }
   ww.setOnchain(async () => null); ww.setKeyMode(() => "");
 });
+
+// ---- 0.19.340 (as released 0.18.274 / 0.18.279): for an entry not yet confirmed main reads the chain first: a chain figure at the limit gets the
+// at-the-limit explanation even when the window sent max(typed, chain); a figure above the ceiling with the service unreadable gets the ceiling ----
+test("Web Wallet: an unconfirmed entry's chain figure is read before the ceiling: 262144 from the chain is explained as at the limit; above the ceiling with the chain unread gets the ceiling message", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AB".repeat(32), PK = "0x" + "BB".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CB".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  try { fs.rmSync(file); } catch (e) {}
+  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta");
+  let chain = 262144; ww.setOnchain(async () => chain);
+  await assert.rejects(ww.ackKeyuses(FROM, 262144), /^Error: The chain's figure for this key is 262144 uses, at or past the 262144 one-time uses a key has/, "what the window sends, max(typed, chain): the chain's figure explained");
+  chain = null; await assert.rejects(ww.ackKeyuses(FROM, 300000), /^Error: A key has 262144 one-time uses/, "above the ceiling while the chain is unread: the ceiling, not 'could not be read'");
+  await assert.rejects(ww.ackKeyuses(FROM, 5), /could not be read/, "within the ceiling while unread: the chain could not be read");
+  ww.setOnchain(async () => null); ww.setKeyMode(() => "");
+});
