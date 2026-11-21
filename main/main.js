@@ -360,7 +360,7 @@ node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandap
 node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
-  running: node.state === "running", run: (c) => runResync(c), work: walletWork }));
+  running: node.state === "running", run: async (c) => { await mayStop(); return runResync(c); }, work: walletWork }));   // the stop guard right before the node gets it (0.19.294)
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -430,13 +430,14 @@ ipcMain.handle("mcd:portmapStatus", () => portmap.status());
 // handed to the system browser here; the renderer never holds it), and the kind switch (restarts the node).
 ipcMain.handle("mcd:parlonsStatus", () => parlons.status());
 ipcMain.handle("mcd:parlonsOpenExternal", () => parlons.openExternal());
-ipcMain.handle("mcd:setNodeKind", async (_e, kind, ack) => {
+ipcMain.handle("mcd:setNodeKind", async (_e, kind, ack, patch) => {
   const k = kind === "minima" ? "minima" : "parlons";
   if (k === "parlons") { const why = node.parlonsBlocker(); if (why) throw new Error(why); }
   // A block wallet cannot move to a node jar that does not know block keys: say so before anything is saved.
   if (config.load().keyMode === "block" && !require("./keymode").jarSupportsBlock(path.join(path.dirname(node.jarPath()), k === "parlons" ? "parlons-node.jar" : "minima.jar")))
     throw new Error("This wallet uses block key uses, and that node cannot run it.");
   await mayStop(ack, "kind");
+  if (patch) saveConfigPatch(patch);   // Settings' heap size with it, saved only once the guard let the restart go (0.19.294)
   config.save({ nodeKind: k });
   chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
   await node.restart();

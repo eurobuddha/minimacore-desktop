@@ -222,3 +222,23 @@ test("a miniMall payment being sent makes Quit and Shutdown ask, from the shop's
     shop: { sendingCount: () => 1 } });
   assert.equal(inFlight(await gather(), "quit", NOW).any, true, "main.js asks the shop");
 });
+
+// ---- 0.19.294: a backup restore asks the stop guard right before the node gets the resync; Settings' heap goes with the guarded switch ----
+test("main: Restore from file asks the stop guard before its resync, and Apply and restart saves the heap size only once the guard let it go", async () => {
+  const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), calls = {};
+  const walk = (n) => { if (ts.isCallExpression(n) && n.expression.getText(sf) === "ipcMain.handle" && ts.isStringLiteral(n.arguments[0])) calls[n.arguments[0].text] = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  for (const allow of [false, true]) {
+    const did = [], h = {};
+    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
+      restore: { restoreBackup: async (o, d) => d.run("megammrsync action:resync host:h:1 file:b.bak") }, runResync: async (c) => { did.push("resync"); return {}; },
+      config: { load: () => ({ keyMode: "classic", params: {} }), save: (p) => did.push("save " + JSON.stringify(p)) }, saveConfigPatch: (p) => did.push("patch " + JSON.stringify(p)),
+      node: { state: "running", blockKeysSupported: () => true, parlonsBlocker: () => "", jarPath: () => "/x/minima.jar", restart: async () => did.push("restart"), snapshot: () => ({}) }, chat: { stopLoop() {} }, walletWork: async () => [], path, require };
+    for (const n of ["mcd:restoreBackup", "mcd:setNodeKind"]) new Function("env", "with (env) { " + calls[n] + "; }")(env);
+    await h["mcd:restoreBackup"](null, { file: "b.bak" }).catch(() => {});
+    assert.deepEqual(did, allow ? ["ask", "resync"] : ["ask"], "restore: " + allow); did.length = 0;
+    await h["mcd:setNodeKind"](null, "minima", "ACK", { heapMb: 2048 }).catch(() => {});
+    assert.deepEqual(did, allow ? ["ask", 'patch {"heapMb":2048}', 'save {"nodeKind":"minima"}', "restart"] : ["ask"], "kind: " + allow);
+  }
+  assert.ok(!/api\.saveConfig\(\{ heapMb \}\)/.test(read("renderer/app.js")), "the screen no longer saves the heap before the switch");
+});

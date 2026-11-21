@@ -3077,8 +3077,7 @@ async function renderSettings() {
     if (!await nodeStopOk("kind")) return;
     el("setKindApply").disabled = true; stat.textContent = t("Restarting the node…");
     try {
-      CFG = await api.saveConfig({ heapMb });
-      await api.setNodeKind(want, stopAck());
+      await api.setNodeKind(want, stopAck(), { heapMb });   // saved by main after its guard (0.19.294): a refusal changes nothing
       CFG = await api.getConfig();
       stat.textContent = want === "parlons" ? t("Parlons Node starting. Open Parlons from the app tray.") : t("Plain Minima node starting.");
       toast(t("Node restarting…"), "ok");

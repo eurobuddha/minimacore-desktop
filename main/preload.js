@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld("mcd", {
   // Parlons account (the Parlons Node hosts it under this node's seed)
   parlonsStatus: () => ipcRenderer.invoke("mcd:parlonsStatus"),
   parlonsOpenExternal: () => ipcRenderer.invoke("mcd:parlonsOpenExternal"),
-  setNodeKind: (kind, ack) => ipcRenderer.invoke("mcd:setNodeKind", kind, ack),
+  setNodeKind: (kind, ack, patch) => ipcRenderer.invoke("mcd:setNodeKind", kind, ack, patch),
 
   // app updates from the minimaCore store feed
   flavor: () => ipcRenderer.invoke("mcd:flavor"),   // which app this is: { id, name, title, updates, loginItem, basePort }
