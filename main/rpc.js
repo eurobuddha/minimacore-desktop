@@ -42,7 +42,10 @@ function rawCall(port, secret, command) {
     // and returning "[]" (zero commands run). So we MUST set Content-Length explicitly on POST, or every command
     // over GET_MAX (mail images, large txnimport/state blobs) silently no-ops.
     const headers = usePost
-      ? { Authorization: auth, "Content-Type": "text/plain", "Content-Length": Buffer.byteLength(command) }
+      // ... and it reads that many CHARACTERS, not bytes (CMDHandler: a char[] of Content-Length from a UTF-8 reader; 0.19.304): a
+      // byte count over a non-ASCII command made it wait for characters that never came, until our timeout cut the socket, and then
+      // run what it had. A JS string's length counts UTF-16 units exactly as a Java char[] does (an emoji is 2 in both).
+      ? { Authorization: auth, "Content-Type": "text/plain", "Content-Length": command.length }
       : { Authorization: auth };
     const options = {
       host: "127.0.0.1",
