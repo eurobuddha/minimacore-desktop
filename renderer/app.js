@@ -1278,7 +1278,7 @@ function renderWwWallet(body) {
     const readOnchain = async () => { let n = null; try { n = await api.keyAudit(a.publickey); } catch (e) { n = null; } if (wwAddr === a) wwKuSuggest = AppsAct.ww.confirmUses(0, n); return AppsAct.ww.confirmUses(0, n); };
     el("wwKuConfirm").addEventListener("click", async () => {
       const btn = el("wwKuConfirm"), typed = el("wwKuIn").value;
-      if (!AppsAct.ww.wholeCount(typed)) { toast(t("Key uses must be a whole number of 0 or more."), "err"); return; }   // refused, never floored (0.19.324)
+      if (!AppsAct.ww.wholeCount(typed)) { toast(t("The key uses must be a whole number of at least 0."), "err"); return; }   // refused, never floored (0.19.324)
       btn.disabled = true; btn.textContent = t("Checking the chain…");
       const n = AppsAct.ww.confirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
       if (wwAddr !== a) return;                                   // logged out while the chain was being read
@@ -1296,7 +1296,7 @@ function renderWwWallet(body) {
       const onchain = await readOnchain();
       if (wwAddr !== a || !btn.isConnected) return;
       if (onchain == null) toast(t("The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can."), "err");
-      else if (!AppsAct.ww.wholeCount(el("wwKuIn").value)) toast(t("Key uses must be a whole number of 0 or more."), "err");
+      else if (!AppsAct.ww.wholeCount(el("wwKuIn").value)) toast(t("The key uses must be a whole number of at least 0."), "err");
       else { el("wwKuIn").value = String(AppsAct.ww.confirmUses(el("wwKuIn").value, onchain)); toast(t("On-chain uses: {onchain} (set as minimum)", { onchain: onchain }), "ok"); }
       btn.disabled = false; btn.textContent = t("Check on-chain");
     });
@@ -3791,8 +3791,8 @@ async function renderShopInbox() {
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
   const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
     : scan && scan.stepFailed ? th("Older orders could not be read yet: the node did not answer. They are read again on the next block.")   // a backfill step, the recent ones read (0.19.332)
-    : scan && scan.catchingUpTo ? tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
-    : scan && scan.unreadBelow && mine.length ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331); the sentence by its cause (0.19.338)
+    : scan && scan.catchingUpTo ? tr("Reading orders and payments from while the app was closed (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
+    : scan && scan.unreadShown ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331); the sentence by its cause (0.19.338)
   // a payout address skipped as not valid, whole (0.19.284)
   const skippedPay = (scan && scan.skipped || []).map(a => tr("Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.", { address: esc(a) })).join("<br>");
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],

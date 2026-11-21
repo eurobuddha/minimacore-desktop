@@ -104,12 +104,18 @@ function writeStore(obj) {
 // signs at that use, so 0 to LAST_USE leaves at least one. (Correction, 0.19.333: the bound is the classic one; on a block key wallet the
 // Web Wallet does not run at all: blockOff below.)
 const KEY_USES = 262144, LAST_USE = KEY_USES - 1;
-const ABOVE_LAST = "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.";
-// said as what is known (0.19.324): the chain's figure can over-count, and every wallet signs this address with the same key
-const USED_UP = (n) => "The chain's figure for this key is " + n + " uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.";
-const STORED_OVER = (n) => "This wallet's saved key-use count is " + n + ", at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.";
-const DAMAGED_OVER = (n) => "This wallet's saved key-use count read " + n + " before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.";
-const DAMAGED_BELOW = (n) => "This wallet's saved key-use count read " + n + " before it was damaged. Confirm at least that many. Nothing was saved.";
+// The released tree's sentences, word for word (0.19.341, as 0.18.265 / 0.18.270 / 0.18.271 / 0.18.275).
+const OVER_MAX = "The key-use count can be at most 262143 (a key of this wallet has 262144 one-time uses, numbered 0 to 262143). Nothing was saved.";
+const USED_UP = (chain) => "The chain's figure for this key (" + chain + ") is at or above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). The figure can count more uses than the key signed, but this app will not sign from this address: signing past the last use would reuse a one-time key, which can lose funds. Nothing was saved.";
+/** Why a stored next use past the last one cannot sign (as released 0.18.265): exactly 262144, every use was made; above it, a count confirmed
+ *  too high before the ceiling existed, never lowered here. saving: said on a refused confirmation, which ends "Nothing was saved". */
+function overCount(n, saving) {
+  if (n === KEY_USES) return saving ? "This wallet's count for this key has reached the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved."
+    : "This wallet's count for this key has reached the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was sent.";
+  return saving ? "This wallet's saved key-use count (" + n + ") is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved."
+    : "This wallet's saved key-use count (" + n + ") is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was sent.";
+}
+const DAMAGED_BELOW = (n) => "This key's saved count read " + n + " before it was damaged. Confirm at least that many. Nothing was saved.";
 // What a damaged entry's old value still says (0.19.324): a count written as a number or as digits, a fraction rounded UP (57.5 and
 // "57.5" read 58), is a floor too; anything else reads 0 (unknown: the chain's figure is the floor then)
 function oldCount(v) {
@@ -147,8 +153,9 @@ const FIRST_UNREAD = "The chain's figure for this key could not be read (the key
 async function ackKeyuses(address, count) {
   blockOff();
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
-  const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
-  if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
+  // a whole number of 0 or more, as a number or as plain digits only (0.19.341, as released 0.18.265: " 5 " is refused too)
+  const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count) ? Number(count) : NaN);
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // 0.19.230: "abc" was 0
   const was = entryFor(loadStore(), address);
   // an entry not yet confirmed: the chain is read FIRST (0.19.340, as released 0.18.274), so a chain figure at the limit is explained as such
   // rather than the bare ceiling the window's max(typed, chain) ran into; a figure above the ceiling is refused for that whether the chain
@@ -156,14 +163,14 @@ async function ackKeyuses(address, count) {
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
-    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(n > LAST_USE ? ABOVE_LAST : was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
+    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(n > LAST_USE ? OVER_MAX : was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
     if (chain >= KEY_USES) throw new Error(USED_UP(chain));   // never adopted: no count this app can sign with (0.19.323)
-    if (n > LAST_USE) throw new Error(ABOVE_LAST);
+    if (n > LAST_USE) throw new Error(OVER_MAX);
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
-  if (n > LAST_USE) throw new Error(ABOVE_LAST);   // 0.19.323: the node wraps or restarts a count past the key's last use
+  if (n > LAST_USE) throw new Error(OVER_MAX);   // 0.19.323: the node wraps or restarts a count past the key's last use
   // a damaged entry's old count is a floor (0.19.324); one past the last use is said as an over-count, ending "Nothing was saved"
-  if (was.damaged && was.keyuses >= KEY_USES) throw new Error(DAMAGED_OVER(was.keyuses));
+  if (was.damaged && was.keyuses >= KEY_USES) throw new Error(overCount(was.keyuses, true));
   if (was.damaged && n < was.keyuses) throw new Error(DAMAGED_BELOW(was.keyuses));
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
@@ -298,7 +305,7 @@ async function send(opts) {
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
   const n = e0.keyuses || 0;
   if (!Number.isSafeInteger(n) || n < 0) { privatekey = null; throw new Error(STORE_BAD); }
-  if (n > LAST_USE) { privatekey = null; throw new Error(STORED_OVER(n)); }   // 0.19.323: past the key's last use (an older version took any count); never lowered
+  if (n > LAST_USE) { privatekey = null; throw new Error(overCount(n)); }   // 0.19.323: past the key's last use (an older version took any count); never lowered
   store[fromaddress] = Object.assign({}, e0, { keyuses: n + 1 });
   try { writeStore(store); } catch (e) { privatekey = null; throw new Error(STORE_BAD); }
   const cmd = "sendfrom fromaddress:" + fromaddress

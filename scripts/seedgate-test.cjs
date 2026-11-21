@@ -677,10 +677,10 @@ test("keyuses: one signature at most 262143; a figure given to every key at most
   const V = require("../main/cmdverb.js"), R = require("../main/restore.js");
   assert.deepEqual([R.KEYUSES_ONE_SIGNATURE, R.KEYUSES_SET, R.KEYUSES_ADD, R.KEYUSES_TIP_MARGIN], [262143, 250000, 10000, 10000]);
   const MEGA = "megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:";
-  for (const v of ["250001", "262143", "300000", "4294967296", "250000abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem(MEGA + v, "classic"), /keyuses: gives every key of this wallet its uses .*\(the node's own default is 100 to 1000 by command; keys createallkeys has none\), at most 250000\. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again/, v);
+  for (const v of ["250001", "262143", "300000", "4294967296", "250000abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem(MEGA + v, "classic"), /keyuses: sets how many times every key of this wallet has already signed, so it must be at least that number; a small figure is usual \(the node's defaults are 100 to 1000\)\. It can be at most 250000: a figure near a key's limit of 262144 one-time uses/, v);
   for (const c of [MEGA + "250000", "vault action:restorekeys keyuses:250000", "keys action:createallkeys keyuses:250000", "restoresync file:x keyuses:10000"]) assert.equal(R.keyusesProblem(c, "classic"), "", c);
   for (const c of ["vault action:restorekeys keyuses:250001", "keys action:createallkeys keyuses:262143", "archive action:resync host:h:1 keyuses:262143", "mysql action:resync keyuses:262143"]) assert.match(R.keyusesProblem(c, "classic"), /at most 250000/, c);
-  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "classic"), /restoresync adds it to them\): .* at most 10000\./);
+  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "classic"), /keyuses: on restoresync is added to how many times every key in the backup has signed; .* It can be at most 10000:/);
   for (const v of ["sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "txnsign"]) {
     for (const m of ["classic", "", undefined, "mixed"]) assert.equal(R.keyusesProblem(v + " keyuses:262143", m), "", v + ": 262143 is the last use of one signature (" + m + ")");
     assert.match(R.keyusesProblem(v + " keyuses:262144", "classic"), /a whole number from 0 to 262143/, v);
@@ -693,7 +693,7 @@ test("keyuses: one signature at most 262143; a figure given to every key at most
     assert.match(R.keyusesProblem(c.replace("2410000", "268435454"), "block", 2400000), /at most 2410000/, "268435454 would exhaust every key after one signature");
     assert.match(R.keyusesProblem(c.replace("2410000", "250001"), "block", null), /could not be read now, so at most 250000 is taken/, c);
   }
-  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "block", 2400000), /at most 10000\./);
+  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "block", 2400000), /at most 10000:/);
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
   for (const [mode, tipReply] of [["classic", null], ["block", { status: true, response: { block: "2400000" } }], ["block", null]]) {
     const hs = {}, sent = [];
@@ -757,7 +757,7 @@ test("checkCommand holds every Terminal check in one order: the first refusal is
 test("keyuses: only txnsign, sendfrom, signfrom, consolidatefrom and createtokenfrom take 262143; any other verb, known or not, takes the setting bound; the sentence says at least", () => {
   const R = require("../main/restore.js");
   for (const v of ["txnsign", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom"]) assert.equal(R.keyusesProblem(v + " keyuses:262143", "classic"), "", v);
-  for (const v of ["vault action:restorekeys", "vault action:resetkeys", "keys action:createallkeys", "newverb", "sendfromx", "txnsignall", "send"]) assert.match(R.keyusesProblem(v + " keyuses:250001", "classic"), /at least the times this wallet's keys have already signed \(the node's own default is 100 to 1000 by command; keys createallkeys has none\), at most 250000/, v + ": fails closed");
+  for (const v of ["vault action:restorekeys", "vault action:resetkeys", "keys action:createallkeys", "newverb", "sendfromx", "txnsignall", "send"]) assert.match(R.keyusesProblem(v + " keyuses:250001", "classic"), /must be at least that number; a small figure is usual \(the node's defaults are 100 to 1000\)\. It can be at most 250000/, v + ": fails closed");
 });
 
 // ---- 0.19.340 (as released 0.18.284): the single-signature bound only when every reading of the verb is one of the five ----
@@ -769,4 +769,12 @@ test("keyuses: a loose reading of a single-signature verb (a quoted or glued wor
   }
   assert.equal(R.keyusesProblem("sendfrom keyuses:262143", "classic"), "", "a plain reading keeps 262143");
   assert.ok(['"sendfrom"archive keyuses:262143', "sendfrom:x keyuses:262143"].some(c => /at most 250000/.test(R.keyusesProblem(c, "classic"))), "at least one loose reading is tested");
+});
+
+// ---- 0.19.341: the keyuses sentences are the released tree's, word for word (main/cmdgate.js KEYUSES_WHY / _SET_WHY / _ADD_WHY there) ----
+test("keyuses: classic refusals say the released tree's words exactly", () => {
+  const R = require("../main/restore.js");
+  assert.equal(R.keyusesProblem("sendfrom keyuses:262144", "classic"), "keyuses: must be a whole number from 0 to 262143: a key of this wallet has 262144 one-time uses, numbered 0 to 262143, and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds. Nothing was run.");
+  assert.equal(R.keyusesProblem("megammrsync action:resync host:h:1 keyuses:250001", "classic"), "keyuses: sets how many times every key of this wallet has already signed, so it must be at least that number; a small figure is usual (the node's defaults are 100 to 1000). It can be at most 250000: a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out and then sign with one-time keys they have already used, which can lose funds. Nothing was run.");
+  assert.equal(R.keyusesProblem("restoresync file:x keyuses:10001", "classic"), "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). It can be at most 10000: a large figure would bring the wallet's keys near their limit of 262144 one-time uses, after which they sign with one-time keys they have already used, which can lose funds. Nothing was run.");
 });

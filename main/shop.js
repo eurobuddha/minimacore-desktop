@@ -559,13 +559,15 @@ function paymentNotSent(ref) {
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read, for the Inbox's status line (0.19.249): the last pass failed (the node did not answer;
  *  read again on the next block), and the oldest block below which a long absence left orders and payments unread. */
-/** The vendor hid the Inbox's "could not be read" notice (0.19.331): the log keeps it. */
-function dismissUnread() { store.setMeta("unread_below_block", 0); emitter.emit("update"); return { ok: true }; }
+/** The vendor hid the Inbox's "may not have been read" notice (0.19.331): the log keeps it; a newer one is shown again (0.19.341). */
+function dismissUnread() { store.setMeta("unread_dismissed", Number(store.getMeta("unread_below_block")) || 0); emitter.emit("update"); return { ok: true }; }   // hidden until a newer one; the fact stays (0.19.341, as released 0.18.277)
 /** What the order scan could not read yet, for the Inbox: a failed pass, the block a backfill still reads back to (catchingUpTo), the oldest
  *  block a node that serves no deeper left unread (unreadBelow), payout addresses skipped as not valid (0.19.249, 0.19.284, 0.19.328). */
 function scanState() {
   const below = Number(store.getMeta("unread_below_block")) || 0, why = String(store.getMeta("unread_why") || "cap");
-  return { readFailed: lastPassFailed, stepFailed: lastStepFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: below,
+  // shown only to someone with a shop, and until it is dismissed (0.19.341, as released 0.18.277): a newer one is shown again
+  const shown = !!below && store.shops().length > 0 && below > (Number(store.getMeta("unread_dismissed")) || 0);
+  return { readFailed: lastPassFailed, stepFailed: lastStepFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: below, unreadShown: shown,
     unreadWhy: below ? why : "", unreadText: below ? unreadText(below, why) : "", skipped: [...skippedPay.keys()].filter(skipping) };   // why and its sentence (0.19.338)
 }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }

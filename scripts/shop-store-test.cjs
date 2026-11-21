@@ -432,8 +432,8 @@ test("vendor: a payout address the node does not answer for leaves the scan curs
   { const st = shop.scanState(); assert.deepEqual([st.catchingUpTo, st.unreadBelow, st.unreadWhy], [0, 20000 - 1024, "treeRoot"], "away longer than the tree: said from the floor"); }
   assert.equal(store.getMeta("scanned_tip_block"), 20000);
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
-  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })')
-    && app.includes('scan && scan.unreadBelow && mine.length ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) })'));   // said only where a shop exists, by its cause
+  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Reading orders and payments from while the app was closed (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })')
+    && app.includes('scan && scan.unreadShown ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) })'));   // said only where a shop exists and until dismissed (0.19.341), by its cause
 });
 
 // ---- 0.19.273 / 0.19.284: a payout address that can never be valid (its checksum) is skipped for a while, said whole on the Inbox;
@@ -662,7 +662,9 @@ test("vendor: the unread notice is kept over later passes and hidden by the vend
     await shop.scanOnce(); jTip(st, 2500); await shop.scanOnce(); const below = shop.scanState().unreadBelow; assert.equal(below, 2500 - 1024);
     for (let i = 0; i < 3; i++) { jTip(st, st.tip + 1); await shop.scanOnce(); }
     assert.equal(shop.scanState().unreadBelow, below, "kept over later passes: it is still true");
-    assert.deepEqual(await shop.dismissUnread(), { ok: true }); assert.equal(shop.scanState().unreadBelow, 0, "hidden");
+    assert.deepEqual(await shop.dismissUnread(), { ok: true }); assert.equal(shop.scanState().unreadShown, false, "hidden (0.19.341, as released: the fact is kept)"); assert.equal(shop.scanState().unreadBelow, below);
+    jTip(st, 4000); await shop.scanOnce(); assert.ok(shop.scanState().unreadBelow > below && shop.scanState().unreadShown, "a newer one is shown again");
+    const keep = store.shops(); for (const sh of keep) store.deleteShop(sh.shopId); assert.equal(shop.scanState().unreadShown, false, "no shop: not shown"); for (const sh of keep) store.saveShop(sh);
     const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), pre = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
     assert.ok(main.includes('ipcMain.handle("mcd:shopScanDismiss", () => shop.dismissUnread());') && pre.includes('shopScanDismiss: () => ipcRenderer.invoke("mcd:shopScanDismiss"),'));
     assert.ok(app.includes('<button class="mm-pill" id="mmScanHide">${th("Hide")}</button>') && app.includes('el("mmScanHide").onclick = () => api.shopScanDismiss()'));

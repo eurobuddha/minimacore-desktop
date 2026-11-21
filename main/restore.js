@@ -62,6 +62,9 @@ function restoreFileCommand(o) {
 // records the chosen mode before it runs). The 0.18 tree makes the same change from 0.18.273: same numbers.
 const KEYUSES_ONE_SIGNATURE = 262143, KEYUSES_SET = 250000, KEYUSES_ADD = 10000, KEYUSES_TIP_MARGIN = 10000, KEYUSES_BLOCK_LAST = 268435454;
 const ONE_SIGNATURE = ["sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "txnsign"];
+const KEYUSES_WHY = "keyuses: must be a whole number from 0 to 262143: a key of this wallet has 262144 one-time uses, numbered 0 to 262143, and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds. Nothing was run.";
+const KEYUSES_SET_WHY = "keyuses: sets how many times every key of this wallet has already signed, so it must be at least that number; a small figure is usual (the node's defaults are 100 to 1000). It can be at most 250000: a figure near a key's limit of 262144 one-time uses would leave the wallet with keys that run out and then sign with one-time keys they have already used, which can lose funds. Nothing was run.";
+const KEYUSES_ADD_WHY = "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). It can be at most 10000: a large figure would bring the wallet's keys near their limit of 262144 one-time uses, after which they sign with one-time keys they have already used, which can lose funds. Nothing was run.";
 /** Does any piece name keyuses:? */
 function namesKeyuses(command) { return V.parts(command).some(part => V.read(part).params.some(([n]) => V.fold(n) === "keyuses")); }
 /** Why a command's keyuses: may not be sent ("" = it may), for this wallet's key mode ("classic" | "block" | anything else: classic) and,
@@ -76,8 +79,9 @@ function keyusesProblem(command, mode, tip) {
     if (/^\d{1,15}$/.test(v) && Number(v) <= max) continue;
     if (block && !adds) return tipOk ? "keyuses: on this block key wallet raises the floor under the block number for every key: at most " + max + ", the chain's tip (block " + tip + ") plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run."
       : "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most " + max + " is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.";
-    if (one) return "keyuses: is how many times a key has already been used: a whole number from 0 to " + max + " for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.";
-    return "keyuses: gives every key of this wallet its uses (restoresync adds it to them): at least the times this wallet's keys have already signed (the node's own default is 100 to 1000 by command; keys createallkeys has none), at most " + max + ". A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.";
+    // the released tree's sentences, word for word (0.19.341, as 0.18.273 / 0.18.278): the classic bounds are fixed numbers
+    if (adds) return KEYUSES_ADD_WHY;
+    return one ? KEYUSES_WHY : KEYUSES_SET_WHY;
   }
   return "";
 }

@@ -129,7 +129,7 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
     assert.deepEqual(sends(), [], "nothing signed: " + bad);
   }
   fs.rmSync(file);
-  for (const c of ["abc", -1, 1.5, "", null]) await assert.rejects(ww.ackKeyuses(FROM, c), /whole number of 0 or more/, String(c));
+  for (const c of ["abc", -1, 1.5, "", null]) await assert.rejects(ww.ackKeyuses(FROM, c), /whole number of at least 0/, String(c));
   ww.setOnchain(async () => 7); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, "7"); ww.setOnchain(async () => null);   // checked against the chain's figure (0.19.270)
   sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true);
   assert.match(sends()[0], / keyuses:7 mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
@@ -225,19 +225,19 @@ test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 an
   try { fs.rmSync(file); } catch (e) {}
   await ww.derive("alpha beta"); let chain = 0; ww.setOnchain(async () => chain);
   assert.equal(ww.KEY_USES, 262144); assert.equal(ww.LAST_USE, 262143);
-  for (const n of [262144, 1000000, 4294967299, "262144", "4294967299"]) await assert.rejects(ww.ackKeyuses(FROM, n), /A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143/, String(n));
+  for (const n of [262144, 1000000, 4294967299, "262144", "4294967299"]) await assert.rejects(ww.ackKeyuses(FROM, n), /The key-use count can be at most 262143 \(a key of this wallet has 262144 one-time uses, numbered 0 to 262143\)\. Nothing was saved\./, String(n));
   assert.ok(!fs.existsSync(file), "nothing saved by those");
-  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 262143), /The chain's figure for this key is 262144 uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address\./);   // wording of 0.19.324 (changed on purpose)
-  chain = 5000000; await assert.rejects(ww.ackKeyuses(FROM, 0), /The chain's figure for this key is 5000000 uses, at or past/, "a huge chain figure is never adopted");
+  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 262143), /The chain's figure for this key \(262144\) is at or above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. The figure can count more uses than the key signed, but this app will not sign from this address/);   // wording of 0.19.324 (changed on purpose)
+  chain = 5000000; await assert.rejects(ww.ackKeyuses(FROM, 0), /The chain's figure for this key \(5000000\) is at or above the limit/, "a huge chain figure is never adopted");
   assert.ok(!fs.existsSync(file));
   // the boundary: 262143 is accepted, its one send signs at 262143, the next is refused
   chain = 262143; assert.deepEqual(await ww.ackKeyuses(FROM, 262143), { address: FROM, keyuses: 262143, ack: true });
   const go = () => ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" });
   assert.equal((await go()).ok, true); assert.deepEqual(sent, ["262143"]);
-  await assert.rejects(go(), /saved key-use count is 262144, at or past the 262144 one-time uses a key has \(0 to 262143\)/); assert.deepEqual(sent, ["262143"], "nothing more reached the node");
+  await assert.rejects(go(), /This wallet's count for this key has reached the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. This app will not sign from this address: signing past the last use \(262143\) would reuse a one-time key, which can lose funds\. Nothing was sent\./); assert.deepEqual(sent, ["262143"], "nothing more reached the node");
   // a count an older version stored past the last use refuses every send, and is never lowered
   fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 1000000, ack: true } }));
-  await assert.rejects(go(), /This wallet's saved key-use count is 1000000, at or past the 262144 one-time uses a key has \(0 to 262143\): a send now would sign with a one-time key again, so this app will not sign from this address\. The count is never lowered/);
+  await assert.rejects(go(), /This wallet's saved key-use count \(1000000\) is above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered\. This app will not sign from this address: signing past the last use \(262143\) would reuse a one-time key, which can lose funds\. Nothing was sent\./);
   await ww.ackKeyuses(FROM, 7); assert.equal(ww.keyusesInfo(FROM).keyuses, 1000000, "never lowered"); assert.deepEqual(sent, ["262143"]);
   const app = rd("renderer/app.js");
   assert.ok(app.includes('id="wwKuIn" type="number" min="0" max="262143" step="1"') && !/too high is safe/.test(app) && app.includes("A key has 262144 one-time uses, so this is a whole number from 0 to 262143."), "the window says the limit and no longer that too high is safe");
@@ -255,19 +255,19 @@ test("Web Wallet: a damaged entry's old count (57, \"57\", 57.5, \"57.5\") is a 
   for (const [old, floor] of [["57", 57], [" 57 ", 57], [57.5, 58], ["57.5", 58]]) {
     fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
     assert.deepEqual(ww.keyusesInfo(FROM), { address: FROM, keyuses: floor, ack: false, damaged: true }, "the window is offered the old figure: " + JSON.stringify(old));
-    await assert.rejects(ww.ackKeyuses(FROM, floor - 1), new RegExp("saved key-use count read " + floor + " before it was damaged\\. Confirm at least that many"), JSON.stringify(old));
+    await assert.rejects(ww.ackKeyuses(FROM, floor - 1), new RegExp("This key's saved count read " + floor + " before it was damaged\\. Confirm at least that many"), JSON.stringify(old));
     assert.deepEqual(await ww.ackKeyuses(FROM, floor), { address: FROM, keyuses: floor, ack: true });
   }
   for (const old of ["x", "", "-4", "5e3", null, true]) { fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } })); assert.equal(ww.keyusesInfo(FROM).keyuses, 0, "no count read from " + JSON.stringify(old)); }
   for (const old of [1000000, "1000000", 262144]) {
     fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old + (typeof old === "number" ? 0.5 : "") , ack: true } }));
-    await assert.rejects(ww.ackKeyuses(FROM, 262143), /saved key-use count read \d+ before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address/, "never 'confirm at least " + old + "'");
+    await assert.rejects(ww.ackKeyuses(FROM, 262143), /saved key-use count \(\d+\) is above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. It was probably confirmed too high before this version checked it, .* Nothing was saved\./, "never 'confirm at least " + old + "'");
   }
   ww.setOnchain(async () => null);
   const Act = require("../renderer/apps-act.js"), app = rd("renderer/app.js");
   for (const bad of ["7.9", "-5", "abc", "1e3", "3 4"]) { assert.equal(Act.ww.wholeCount(bad), false, bad); assert.ok(Number.isNaN(Act.ww.confirmUses(bad, 3)), bad + ": refused, not floored"); }
   for (const ok of ["", " 12 ", "0", 7]) assert.equal(Act.ww.wholeCount(ok), true, String(ok));
-  assert.ok(app.includes('if (!AppsAct.ww.wholeCount(typed)) { toast(t("Key uses must be a whole number of 0 or more."), "err"); return; }'), "Confirm refuses a typed fraction before anything is read or saved");
+  assert.ok(app.includes('if (!AppsAct.ww.wholeCount(typed)) { toast(t("The key uses must be a whole number of at least 0."), "err"); return; }'), "Confirm refuses a typed fraction before anything is read or saved");
   assert.ok(app.includes('toast(t("Secret key uses confirmed: {n}", { n: wwKu.keyuses }), "ok")'), "the toast says the figure main kept");
   assert.ok(/\.toast--copy \{[^}]*overflow-wrap: anywhere/.test(rd("renderer/app.css")), "a whole id in a toast wraps instead of running off the window");
 });
@@ -297,7 +297,7 @@ test("Web Wallet: a damaged old count of 1e400 or a digit run too long for a num
   for (const raw of ['{"keyuses":1e400,"ack":true}', '{"keyuses":"' + "9".repeat(400) + '","ack":true}']) {
     fs.writeFileSync(file, '{"' + FROM + '":' + raw + "}");
     assert.equal(ww.keyusesInfo(FROM).keyuses, Infinity, raw.slice(0, 30));
-    await assert.rejects(ww.ackKeyuses(FROM, 5), /saved key-use count read Infinity before it was damaged, at or past the 262144 one-time uses a key has/, raw.slice(0, 30));
+    await assert.rejects(ww.ackKeyuses(FROM, 5), /saved key-use count \(Infinity\) is above the limit of a key of this wallet/, raw.slice(0, 30));
   }
   ww.setOnchain(async () => null); ww.setKeyMode(() => "");
 });
@@ -311,8 +311,31 @@ test("Web Wallet: an unconfirmed entry's chain figure is read before the ceiling
   try { fs.rmSync(file); } catch (e) {}
   ww.setKeyMode(() => "classic"); await ww.derive("alpha beta");
   let chain = 262144; ww.setOnchain(async () => chain);
-  await assert.rejects(ww.ackKeyuses(FROM, 262144), /^Error: The chain's figure for this key is 262144 uses, at or past the 262144 one-time uses a key has/, "what the window sends, max(typed, chain): the chain's figure explained");
-  chain = null; await assert.rejects(ww.ackKeyuses(FROM, 300000), /^Error: A key has 262144 one-time uses/, "above the ceiling while the chain is unread: the ceiling, not 'could not be read'");
+  await assert.rejects(ww.ackKeyuses(FROM, 262144), /^Error: The chain's figure for this key \(262144\) is at or above the limit of a key of this wallet/, "what the window sends, max(typed, chain): the chain's figure explained");
+  chain = null; await assert.rejects(ww.ackKeyuses(FROM, 300000), /^Error: The key-use count can be at most 262143/, "above the ceiling while the chain is unread: the ceiling, not 'could not be read'");
   await assert.rejects(ww.ackKeyuses(FROM, 5), /could not be read/, "within the ceiling while unread: the chain could not be read");
+  ww.setOnchain(async () => null); ww.setKeyMode(() => "");
+});
+
+// ---- 0.19.341: the Web Wallet's key-use refusals are the released tree's words exactly (main/webwallet.js there) ----
+test("Web Wallet: the ceiling, the chain at the limit, the over-count (sent and saved) and the damaged floor say the released tree's words; ' 5 ' is not a count", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AC".repeat(32), PK = "0x" + "BC".repeat(32), TO = "0x" + "11".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: {} });
+  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta"); let chain = 3; ww.setOnchain(async () => chain);
+  const msg = async (p) => { try { await p; return ""; } catch (e) { return e.message; } };
+  try { fs.rmSync(file); } catch (e) {}
+  assert.equal(await msg(ww.ackKeyuses(FROM, 262144)), "The key-use count can be at most 262143 (a key of this wallet has 262144 one-time uses, numbered 0 to 262143). Nothing was saved.");
+  assert.equal(await msg(ww.ackKeyuses(FROM, " 5 ")), "The key uses must be a whole number of at least 0.");
+  chain = 262144; assert.equal(await msg(ww.ackKeyuses(FROM, 262144)), "The chain's figure for this key (262144) is at or above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). The figure can count more uses than the key signed, but this app will not sign from this address: signing past the last use would reuse a one-time key, which can lose funds. Nothing was saved.");
+  const go = () => msg(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }));
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 262144, ack: true } }));
+  assert.equal(await go(), "This wallet's count for this key has reached the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was sent.");
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 300000, ack: true } }));
+  assert.equal(await go(), "This wallet's saved key-use count (300000) is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was sent.");
+  chain = 3; fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "57", ack: true } }));
+  assert.equal(await msg(ww.ackKeyuses(FROM, 10)), "This key's saved count read 57 before it was damaged. Confirm at least that many. Nothing was saved.");
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "300000", ack: true } }));
+  assert.equal(await msg(ww.ackKeyuses(FROM, 10)), "This wallet's saved key-use count (300000) is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved.");
   ww.setOnchain(async () => null); ww.setKeyMode(() => "");
 });
