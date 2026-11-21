@@ -12,7 +12,10 @@ const VECTORS = [["vault", "seed"], ["VAULT action:seed", "seed"], ["  Vault  ac
   ["keys action:genkey", "key"], ["KEYS Action:GenKey", "key"], ["status; keys action:\"genkey\"", "key"], ["keys action:list", null], ["keys", null], ["keys action:genkeys", "key"], ["keys publickey:genkey", "key"],
   ["vaults", "seed"], ["balance vault", null], ["send amount:1 address:vault", null], ["", null], ["status", null], ["seedrandomx", "key"], [";;", null],
   ["\"vault\"", "seed"], ["\u0001vault", "seed"], ["va\"ul\"t", "seed"], ["\"seedrandom\" modifier:x", "key"], ["keys \"action\":genkey", "key"], ["keys action :genkey", "key"], ["keys action : genkey", "key"]];
-const os = (o) => { const asked = []; return { asked, can: () => !!o.can, prompt: async (why) => { asked.push(why); if (o.refuse) throw new Error("no"); } }; };
+// the system check (main/syscheck.js, 0.19.188) over stand-ins: Touch ID asked or a message box confirmed, nothing of Electron's
+const SC = require("../main/syscheck.js"), EN = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p || {})[n]);
+const os = (o) => { const asked = [], boxes = []; const sys = SC.create({ can: () => !!o.can, prompt: async (why) => { asked.push(why); if (o.refuse) throw new Error("no"); },
+  confirm: async (d) => { boxes.push(d); return o.confirm !== false; }, seen: () => !!o.seen, markSeen() {}, where: () => "/x/touchid-seen" }, EN); return Object.assign(sys, { asked, boxes }); };
 
 test("which commands are gated: vault (any action), seedrandom (any modifier) and keys with genkey, however quoted, spaced or chained; nothing else", () => {
   for (const [c, k] of VECTORS) assert.equal(G.secretKind(c), k, JSON.stringify(c));
@@ -126,7 +129,7 @@ test("the gate: the phrase for the kind, then the system's prompt, then that exa
   await assert.rejects(g.open("vault", "SHOW KEY"), /SHOW SEED/); await assert.rejects(g.open("seedrandom modifier:x", "SHOW SEED"), /Type SHOW KEY exactly/);
   await assert.rejects(g.open("balance", "SHOW SEED"), /This command needs no check\./);
   assert.equal(g.take("vault"), false, "a refused open leaves no pass");
-  assert.deepEqual(await g.open("vault", " SHOW SEED "), { system: true }); assert.deepEqual(sys.asked, ["show the wallet's seed phrase"]);
+  assert.deepEqual(await g.open("vault", " SHOW SEED "), { system: true }); assert.deepEqual(sys.asked, ["show a seed phrase by running: vault"], "CHANGED on purpose (0.19.188): the reason names what is shown and the whole command");
   assert.equal(g.take("vault action:seed"), false, "another command: refused, and the pass is spent");
   assert.equal(g.take("vault"), false);
   await g.open("vault", "SHOW SEED"); assert.equal(g.take("vault"), true, "the exact command, once"); assert.equal(g.take("vault"), false, "single use");
@@ -134,7 +137,8 @@ test("the gate: the phrase for the kind, then the system's prompt, then that exa
   await g.open("seedrandom modifier:a", "SHOW KEY"); now += G.PASS_MS; assert.equal(g.take("seedrandom modifier:a"), true, "within it");
   const refusing = G.create(os({ can: true, refuse: true }));
   await assert.rejects(refusing.open("vault", "SHOW SEED"), /^Error: Cancelled$/); assert.equal(refusing.take("vault"), false, "a refused system prompt leaves no pass");
-  const none = G.create(os({ can: false })); assert.deepEqual(await none.open("vault", "SHOW SEED"), { system: false }, "no system prompt here: said as such");
+  const noneSys = os({ can: false }), none = G.create(noneSys); assert.deepEqual(await none.open("vault", "SHOW SEED"), { system: false }, "no Touch ID here: a message box was confirmed, and the answer says so");
+  assert.deepEqual(noneSys.boxes, ["This shows a seed phrase. This Terminal command will run once:\n\nvault"], "the box names the exact command (0.19.188)");
   assert.equal(none.take("vault"), true);
 });
 
@@ -164,4 +168,50 @@ test("main: the general command channel refuses vault and seedrandom without a p
   const reveal = app.slice(app.indexOf("function secretReveal("), app.indexOf("// Export: the phone asks"));
   assert.ok(!/appendTerm|TERM_ITEMS|clip|copy\(/.test(reveal) && /setTimeout\(end, 60000\)/.test(reveal) && /window\.addEventListener\("blur", end\)/.test(reveal), "the reply: never in the output or a copy, gone after a minute and on blur");
   assert.ok(/\$\("bkShow"\)\.onclick = \(\) => secretAsk\("seed", t\("Show seed phrase"\), async \(typed\) => \{\s*const r = await api\.revealSeed\(typed\);\s*secretReveal\(t\("Seed phrase"\), r\.phrase, r\.system\);/.test(app), "Show seed phrase goes through the same gate");
+});
+
+// ---- 0.19.188: the system check names the exact, whole command (released 0.18.176, 0.18.184, 0.18.186) ----
+test("a gated command is shown whole: over 80 characters or a repeated parameter is refused (the node keeps the last); a box where there is no Touch ID", async () => {
+  for (const mac of [true, false]) {
+    const sys = os({ can: mac }), g = G.create(sys);
+    const hidden = "keys action:list" + " ".repeat(mac ? 70 : 600) + "action:genkey";
+    await assert.rejects(g.open(hidden, "SHOW KEY"), /names action more than once \(the node would keep only the last\)/, "shown as keys action:list, run as genkey");
+    assert.deepEqual([sys.asked, sys.boxes], [[], []], "nothing was asked"); assert.notEqual(G.refusal(hidden, g.take), "", "and it does not run");
+    await assert.rejects(g.open("keys action:genkey phrase:" + "x".repeat(80), "SHOW KEY"), /longer than the check can show in full \(80 characters\)/);
+    for (const dup of ["vault action:seed action:wipekeys", 'keys action:genkey "action":list', "seedrandom modifier:a modifier : b"]) await assert.rejects(g.open(dup, dup.startsWith("vault") ? "SHOW SEED" : "SHOW KEY"), /more than once/, dup);
+    const c = "keys   action:genkey\u202e  phrase:x";
+    await g.open(c, "SHOW KEY");
+    const text = mac ? sys.asked[0] : sys.boxes[0];
+    assert.equal(text, mac ? "show a private key by running: keys action:genkey phrase:x" : "This shows a private key. This Terminal command will run once:\n\nkeys action:genkey phrase:x", "the whole command, white space collapsed, the bidi control a space");
+    assert.notEqual(G.refusal("keys action:genkey phrase:x", g.take), "", "the pass is for the exact original text only");
+    await g.open(c, "SHOW KEY"); assert.equal(G.refusal(c, g.take), "");
+  }
+  // a translated reason never cuts the command: past 120 characters the English is said
+  const asked = [], long = SC.create({ can: () => true, prompt: async (w) => { asked.push(w); }, markSeen() {} }, () => "x".repeat(130));
+  await long.check(["show a private key by running: {command}", { command: "k".repeat(80) }], "d");
+  assert.equal(asked[0], "show a private key by running: " + "k".repeat(80));
+});
+
+test("syscheck: refused (not phrase only) once Touch ID worked here and cannot be asked; the marker is written only after a prompt succeeded and names this Mac", async () => {
+  await assert.rejects(os({ can: false, seen: true }).check("r", "d"), /Touch ID has worked in this app on this Mac before but cannot be asked now[\s\S]*lock the screen and log in again[\s\S]*delete this file: \/x\/touchid-seen/);
+  const bx = os({ can: false, seen: true }); await assert.rejects(bx.check("r", "d")); assert.deepEqual(bx.boxes, [], "no fall-back to a box while it is remembered");
+  let marked = 0;
+  await assert.rejects(SC.create({ can: () => true, prompt: async () => { throw new Error("no"); }, confirm: async () => true, seen: () => false, markSeen: () => { marked++; }, where: () => "" }).check("r", "d"), /Cancelled/);
+  assert.equal(marked, 0, "a refused prompt leaves no marker");
+  const osm = require("os"), dir = fs.mkdtempSync(path.join(osm.tmpdir(), "tid-")), file = path.join(dir, "touchid-seen");
+  let can = true, boxes = 0;
+  const electron = { app: { getPath: () => dir }, systemPreferences: { canPromptTouchID: () => can, promptTouchID: async () => {} }, dialog: { showMessageBox: async (w, o) => { boxes++; assert.ok(o.detail.includes("No Touch ID check is available on this computer")); return { response: 1 }; } } };
+  const realPlatform = Object.getOwnPropertyDescriptor(process, "platform"); Object.defineProperty(process, "platform", { value: "darwin" });
+  try {
+    const sys = SC.forElectron(electron, () => null);
+    assert.deepEqual(await sys.check("r", "d"), { biometric: true });
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).machine, SC.machineId(), "the marker names this Mac");
+    can = false;
+    await assert.rejects(sys.check("r", "d"), (e) => e.message.includes("delete this file: " + file + " ."), "refused, naming the file's whole path");
+    fs.writeFileSync(file, JSON.stringify({ machine: "another mac" }));
+    assert.deepEqual(await sys.check("r", "d"), { biometric: false }, "a marker from another Mac is ignored: the box is used"); assert.equal(boxes, 1);
+  } finally { Object.defineProperty(process, "platform", realPlatform); fs.rmSync(dir, { recursive: true, force: true }); }
+  const main = SRC("main/main.js");
+  assert.ok(/const systemCheck = require\("\.\/syscheck"\)\.forElectron\(require\("electron"\), \(\) => win\);/.test(main) && !/canPromptTouchID/.test(main), "one system check for every gate");
+  for (const re of [/seedgate\.revealSeed\(typed, systemCheck,/, /secretGate = seedgate\.create\(systemCheck\)/, /exportKeyGated\(typed, systemCheck\)/]) assert.ok(re.test(main), String(re));
 });

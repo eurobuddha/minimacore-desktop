@@ -3561,7 +3561,7 @@ function secretAsk(kind, title, go) {
 function secretReveal(title, text, system) {
   let s = String(text || ""); text = null;
   const d = appDlg({ title, body: `<div class="ew-warn">${th("Anyone who sees this can take your funds. Never share it.")}</div>
-      ${system ? "" : `<div class="ew-warn">${th("No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.")}</div>`}
+      ${system ? "" : `<div class="ew-warn">${th("No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks.")}</div>`}
       <div class="ew-mono" id="secretText" style="white-space:pre-wrap;overflow-wrap:anywhere"></div><div class="ew-fine">${th("This closes by itself after 60 seconds, and when you leave this window.")}</div>`,
     buttons: [{ label: t("Close"), v: null }] });
   d.root.querySelector("#secretText").textContent = s; s = "";   // as text, in this one node, which close() removes
@@ -3593,7 +3593,7 @@ function ewExportKey() {
 function ewRevealKey(key, system) {
   let k = String(key || ""); key = null;
   const d = appDlg({ title: t("Private key"), body: `<div class="ew-warn">${th("Anyone with this key controls these funds. Never share it.")}</div>
-      ${system ? "" : `<div class="ew-warn">${th("No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check.")}</div>`}
+      ${system ? "" : `<div class="ew-warn">${th("No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks.")}</div>`}
       <div class="ew-mono ew-sel" id="ewKeyText"></div><div class="ew-fine">${th("This closes by itself after 60 seconds, and when you leave this window.")}</div>`,
     buttons: [{ label: t("Close"), v: null }, { label: t("Copy"), on: () => { if (!k) return; api.clipSecret(k); toast(t("Key copied. The clipboard is cleared in 60 seconds and when the app quits"), "ok"); } }] });
   d.root.querySelector("#ewKeyText").textContent = k;   // as text, in this one node, which close() removes

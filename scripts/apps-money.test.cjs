@@ -76,15 +76,20 @@ test("ETH Wallet, main process: no key without the phrase; the system's prompt i
   const real = atomix.exportKey, realWork = atomix.activeWork; let asked = 0;
   atomix.exportKey = () => "0xKEY";
   try {
-    await assert.rejects(ethwallet.exportKeyGated(undefined, null), /Type SHOW KEY/);
-    await assert.rejects(ethwallet.exportKeyGated("show key", { can: () => true, prompt: async () => { asked++; } }), /Type SHOW KEY/);
-    assert.equal(asked, 0, "the phrase is checked before anything is prompted");
-    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => true, prompt: async () => { asked++; } }), { key: "0xKEY", system: true });
-    assert.equal(asked, 1);
-    await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", { can: () => true, prompt: async () => { throw new Error("user cancelled"); } }), /^Error: Cancelled$/);
-    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => false, prompt: async () => { throw new Error("never"); } }), { key: "0xKEY", system: false }, "no system prompt on this machine: the typed phrase alone, and the answer says so");
-    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", { can: () => { throw new Error("x"); }, prompt: async () => { throw new Error("never"); } }), { key: "0xKEY", system: false });
-    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", null), { key: "0xKEY", system: false });
+    // CHANGED on purpose (0.19.188): the one system check of every gate (main/syscheck.js), as released 0.18.176
+    const SC = require("../main/syscheck"), boxes = [];
+    const sys = (io) => SC.create(Object.assign({ can: () => false, prompt: async () => {}, confirm: async (d) => { boxes.push(d); return true; }, seen: () => false, markSeen() {}, where: () => "/x/touchid-seen" }, io), (k, p) => String(k).replace(/\{(\w+)\}/g, (m, n) => p[n]));
+    let why = "";
+    await assert.rejects(ethwallet.exportKeyGated(undefined, sys({})), /Type SHOW KEY/);
+    await assert.rejects(ethwallet.exportKeyGated("show key", sys({ can: () => true, prompt: async () => { asked++; } })), /Type SHOW KEY/);
+    assert.equal(asked, 0, "the phrase is checked before anything is prompted"); assert.deepEqual(boxes, []);
+    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", sys({ can: () => true, prompt: async (w) => { asked++; why = w; } })), { key: "0xKEY", system: true });
+    assert.equal(asked, 1); assert.equal(why, "show the ETH private key", "the Touch ID reason names what is shown");
+    await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", sys({ can: () => true, prompt: async () => { throw new Error("user cancelled"); } })), /^Error: Cancelled$/);
+    assert.deepEqual(await ethwallet.exportKeyGated("SHOW KEY", sys({})), { key: "0xKEY", system: false }, "no Touch ID ever: a confirmation of the main process, and the answer says so");
+    assert.deepEqual(boxes, ["The ETH private key of this wallet (the key Dexicon ① MxUSD swaps sign with) will be shown."], "the message box names what is shown");
+    await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", sys({ confirm: async () => false })), /^Error: Cancelled$/, "a box answered Cancel shows nothing");
+    await assert.rejects(ethwallet.exportKeyGated("SHOW KEY", sys({ can: () => { throw new Error("x"); }, seen: () => true })), /Touch ID has worked in this app on this Mac before but cannot be asked now[\s\S]*delete this file: \/x\/touchid-seen/, "a Touch ID that worked before and cannot be asked now: refused, never the phrase alone");
     // swaps in flight on the same address, for the send review
     atomix.activeWork = async () => ({ ready: true, swaps: ["0xA", "0xB"] });
     assert.deepEqual(await ethwallet.swapsInFlight(), { known: true, swaps: ["0xA", "0xB"] });
@@ -140,7 +145,7 @@ test("the key dialog: says when no system check took place, closes after 60 s an
     return { E, fn, done };
   };
   let t = make(); t.fn("0xKEY", false);
-  assert.match(t.E.dlg.body, /No system check took place: this computer offered no Touch ID prompt, so the typed phrase was the only check\./);
+  assert.match(t.E.dlg.body, /No Touch ID check took place: this computer offered none, so the typed phrase and a confirmation were the only checks\./);   // CHANGED on purpose (0.19.188): a box of the main process is the other check
   assert.ok(!t.E.dlg.body.includes("0xKEY"), "the key is not in the markup: it is set as text in one node"); assert.equal(t.E.node.textContent, "0xKEY");
   assert.equal(t.E.timers[0].ms, 60000);
   t.E.dlg.buttons[1].on(); assert.deepEqual(t.E.copied, ["0xKEY"], "Copy goes through the main process's secret clipboard");

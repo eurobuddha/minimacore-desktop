@@ -365,6 +365,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SG_CHAIN", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key, and this chain of commands holds one. Run that command on its own, not in a chain with ;.")],
     ["MAIN_FIRSTRUN_SEED", I18N.N_("The seed is shown here only while a new wallet is being made.")],
     ["SG_NO_CHECK", I18N.N_("This command needs no check.")],
+    ["SG_TOO_LONG", I18N.N_("This command is longer than the check can show in full (80 characters). Shorten it and run it again. Nothing was run.")],
+    ["SG_REPEATED", I18N.N_("This command names {names} more than once (the node would keep only the last). Write each parameter once. Nothing was run.")],
+    // ---- the system check of every secret gate (main/syscheck.js, 0.19.188) ----
+    ["SC_TOUCHID_LOCKED", I18N.N_("Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown. If Touch ID is locked after too many tries, lock the screen and log in again with your password; Touch ID then works again. If this Mac no longer has Touch ID, quit the app and delete this file: {where} . The app then asks with a confirmation window instead.")],
     ["SG_NO_SEED", I18N.N_("Couldn't read the seed.")]
   ];
 

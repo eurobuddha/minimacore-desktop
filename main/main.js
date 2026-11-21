@@ -198,8 +198,9 @@ function requireRunning() {
 // The commands that show what controls the funds (main/seedgate.js, 0.19.176): `vault` and `seedrandom` run from a window
 // only once the phrase typed for that exact command, and the system's prompt where there is one, were checked here.
 const seedgate = require("./seedgate");
-const systemCheck = { can: () => { const { systemPreferences } = require("electron"); return process.platform === "darwin" && systemPreferences.canPromptTouchID(); },
-  prompt: (why) => { const { systemPreferences } = require("electron"); return systemPreferences.promptTouchID(why); } };
+// The system's own check of every secret gate (main/syscheck.js, 0.19.188): Touch ID; refused while a Touch ID that worked
+// before cannot be asked; a main-process message box naming what is shown where there never was one.
+const systemCheck = require("./syscheck").forElectron(require("electron"), () => win);
 const secretGate = seedgate.create(systemCheck);
 ipcMain.handle("mcd:secretGate", (_e, command, typed) => { requireRunning(); return secretGate.open(command, typed); });
 ipcMain.handle("mcd:revealSeed", (_e, typed) => { requireRunning(); return seedgate.revealSeed(typed, systemCheck, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
@@ -888,8 +889,7 @@ ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
 ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
 ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
 // The key leaves the main process only after the typed phrase and, on a Mac with Touch ID, the system's own prompt (0.19.108).
-ipcMain.handle("mcd:ewExportKey", (_e, typed) => { const { systemPreferences } = require("electron"); return ethwallet.exportKeyGated(typed, {
-  can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(), prompt: (why) => systemPreferences.promptTouchID(why) }); });
+ipcMain.handle("mcd:ewExportKey", (_e, typed) => ethwallet.exportKeyGated(typed, systemCheck));
 ipcMain.handle("mcd:ewSwaps", () => ethwallet.swapsInFlight());
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });

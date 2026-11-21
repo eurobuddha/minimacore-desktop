@@ -40,15 +40,17 @@ const exportKey   = () => atomix.exportKey();
  * The key for the screen (0.19.108). Never handed over on a bare call: the caller must pass the phrase the user typed,
  * and where the system can ask "is it you" (os.can(): Touch ID on a Mac that has it) it is asked here, in the main
  * process, and a refusal ends it. The phone's ETH Wallet does the same with the device's lock screen before it shows
- * the key. os = { can() -> bool, prompt(reason) -> Promise } (main.js passes Electron's systemPreferences).
+ * the key. sys = main/syscheck.js (main.js passes the one system check of every gate, 0.19.188).
  * This is the ONLY way a key reaches a window: Dexicon room 1's "Export key" uses it too (0.19.120; its own ungated
  * mcd:axExportKey is gone). → { key, system }.
  */
 const EXPORT_PHRASE = "SHOW KEY";
-async function exportKeyGated(typed, os) {
+async function exportKeyGated(typed, sys) {
   if (String(typed == null ? "" : typed).trim() !== EXPORT_PHRASE) throw new Error("Type " + EXPORT_PHRASE + " exactly to continue.");
-  let ask = false; try { ask = !!(os && os.can()); } catch (e) { ask = false; }
-  if (ask) { try { await os.prompt("show the ETH private key"); } catch (e) { throw new Error("Cancelled"); } }
+  // the system's own check (main/syscheck.js, 0.19.188): Touch ID; refused while a Touch ID that worked before cannot be
+  // asked; a message box naming what is shown where there never was one
+  const { N_ } = require("./lang").I18N;
+  const ask = (await sys.check(N_("show the ETH private key"), N_("The ETH private key of this wallet (the key Dexicon ① MxUSD swaps sign with) will be shown."))).biometric === true;
   return { key: atomix.exportKey(), system: ask };   // system: the system's own check took place. false is SAID on the screen (0.19.120): the typed phrase was then the only check
 }
 
