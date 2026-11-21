@@ -392,9 +392,14 @@ ipcMain.handle("mcd:nodeReclaim", async (_e, ack) => { await mayStop(ack, "recla
 ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack, "stop"); return held(async () => { await node.stop(); return node.snapshot(); }); });
 // What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
-const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  dexicon: await dexicon.activeWork().catch(() => null), casino: casino.open(), casinoOn: !!config.load().casinoEnabled || casino.looping(),   // the loop running with no clean scan: not read yet (0.19.269)
-  futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null), shop: shop.sendingCount() });   // shop: miniMall payments at the node (0.19.288)
+const inFlightWork = async () => {
+  // the reads run side by side, each under its own bound (0.19.321): in sequence under the guard's one 5 s bound, one slow read
+  // lost the others' answers and everything read as "could not be checked"; one that does not answer in 4 s is that one alone
+  const one = (f) => new Promise(r => { const t = setTimeout(() => r(null), 4000); if (t.unref) t.unref(); Promise.resolve().then(f).then(r, () => r(null)); });
+  const [ax, pools, dex, fc] = await Promise.all([one(() => atomix.activeWork()), one(() => pandapools.activeWork()), one(() => dexicon.activeWork()), one(() => futurecash.activeWork())]);
+  return { atomix: ax, pools, dexicon: dex, casino: casino.open(), casinoOn: !!config.load().casinoEnabled || casino.looping(),   // the loop running with no clean scan: not read yet (0.19.269)
+    futurecash: fc, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.19.288)
+};
 // Every node stop or restart goes through mayStop (main/inflight.js stopGuard, 0.19.268): with work in flight, only after the
 // warning the window showed (its one-time ack) or main's own question.
 const stopGuard = inflight.stopGuard({ running: () => node.state === "running", gather: inFlightWork, log: (l) => node.log(l), t: () => (currentLang(), lang.t),

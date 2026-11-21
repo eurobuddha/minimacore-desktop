@@ -554,7 +554,7 @@ test("the Shutdown warning and the restore gate count pool operations truthfully
   const list = restore.activeWorkList({ atomix: ax, pools: [{ type: "SWAP", txpowid: PK("71"), confirmed: false, failed: false }, { type: "SWAP", txpowid: PK("72"), confirmed: true }] });
   assert.ok(list.some((l) => l.includes("1 PandaPools transaction still waiting to confirm: " + PK("71"))), "the id whole");
   const main = fs.readFileSync(path.join(ROOT, "main/main.js"), "utf8"), app = src("app.js");
-  assert.equal((main.match(/pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\)/g) || []).length, 2, "the restore gate and the Shutdown / Quit warning both ask the engine's own activeWork");
+  assert.ok((main.match(/pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\)/g) || []).length === 1 && main.includes("one(() => pandapools.activeWork())"), "the restore gate and the Shutdown / Quit warning both ask the engine's own activeWork (the warning's reads side by side since 0.19.321; one() gives null for a failed read)");
   // the Shutdown and Quit warning (main/inflight.js): null = could not be checked; a recent unconfirmed row is counted
   const { inFlight } = require("../main/inflight.js"), idle = { atomix: ax, dexicon: { ready: true, takes: 0 } };
   assert.match(inFlight(Object.assign({ pools: null }, idle), "shutdown", Date.now()).message, /^Could not be checked: pool operations \(PandaPools has not started\)\./);

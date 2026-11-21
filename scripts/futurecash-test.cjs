@@ -542,7 +542,7 @@ test("the store is this wallet's, moved aside (never deleted) when the wallet is
   const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
   assert.ok(hook.includes('await each("Future Cash Next", () => futurecash.invalidate());'));
-  assert.equal((main.match(/futurecash: await Promise\.resolve\(\)\.then\(\(\) => futurecash\.activeWork\(\)\)\.catch\(\(\) => null\)/g) || []).length, 2, "the restore gate and Quit / Shutdown: a failed read is null");
+  assert.ok((main.match(/futurecash: await Promise\.resolve\(\)\.then\(\(\) => futurecash\.activeWork\(\)\)\.catch\(\(\) => null\)/g) || []).length === 1 && main.includes("one(() => futurecash.activeWork())"), "the restore gate and Quit / Shutdown: a failed read is null (Quit / Shutdown through one() since 0.19.321)");
   assert.ok(main.includes('frozen: () => freeze.isFrozen("futurecash")') && main.includes('!freeze.isFrozen("futurecash")) { fcBlock = b;'), "frozen: no start, no pass");
   assert.ok(/futurecash: \{ start: whenRunning\(\(\) => futurecash\.start\(\)\), stop: \(\) => futurecash\.stop\(\), blockers:/.test(main));
 });
