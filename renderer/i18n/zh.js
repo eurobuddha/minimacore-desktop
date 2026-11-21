@@ -5161,7 +5161,10 @@
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "守护程序只会自行领取和清扫不少于此金额的 MINIMA 币。更小的币和代币会等待您处理：在“锁定付款”选项卡中领取，或在本选项卡中清扫或找回。",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "守护程序只会自行领取和清扫不少于此金额的 MINIMA 币。",
   "Change": "更改",
-  "The rescue destination changed while you were asked. Nothing was allowed.": "在询问您期间救援目的地已更改。未允许任何内容。"
+  "The rescue destination changed while you were asked. Nothing was allowed.": "在询问您期间救援目的地已更改。未允许任何内容。",
+  "Daily signature limit per address": "每个地址的每日签名上限",
+  "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "每次无人值守的清扫都会使用该地址的一次性密钥签名。一天内超过此次数后，守护程序会等到第二天；手动清扫仍然可用。",
+  "Enter a whole number of at least 1.": "请输入不小于 1 的整数。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5233,5 +5236,8 @@
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
   "Change",
-  "The rescue destination changed while you were asked. Nothing was allowed."
+  "The rescue destination changed while you were asked. Nothing was allowed.",
+  "Daily signature limit per address",
+  "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
+  "Enter a whole number of at least 1."
 ] });

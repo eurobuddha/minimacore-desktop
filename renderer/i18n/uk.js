@@ -5174,7 +5174,10 @@
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "Захисник сам отримує й переказує лише монети MINIMA не менші за цю суму. Менші та токени чекають на вас: «Отримати» на вкладці «Ставки», «Переказати» або «Повернути» на цій вкладці.",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "Захисник сам отримує й переказує лише монети MINIMA не менші за цю суму.",
   "Change": "Змінити",
-  "The rescue destination changed while you were asked. Nothing was allowed.": "Адреса для порятунку змінилася, поки вас питали. Нічого не дозволено."
+  "The rescue destination changed while you were asked. Nothing was allowed.": "Адреса для порятунку змінилася, поки вас питали. Нічого не дозволено.",
+  "Daily signature limit per address": "Денний ліміт підписів на адресу",
+  "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "Кожен переказ без вашої участі підписується одноразовим ключем цієї адреси. Після такої кількості за день захисник чекає наступного дня; переказ вручну як і раніше працює.",
+  "Enter a whole number of at least 1.": "Введіть ціле число, не менше 1."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5246,5 +5249,8 @@
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
   "Change",
-  "The rescue destination changed while you were asked. Nothing was allowed."
+  "The rescue destination changed while you were asked. Nothing was allowed.",
+  "Daily signature limit per address",
+  "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
+  "Enter a whole number of at least 1."
 ] });

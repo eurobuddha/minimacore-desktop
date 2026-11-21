@@ -195,6 +195,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
 
     // ---- Future Cash Next (main/futurecash.js): what its engine says to the screens; its log lines stay English ----
     ["FCMAIN_GRANT_CHANGED", I18N.N_("The rescue destination changed while you were asked. Nothing was allowed.")],
+    ["FC_SIGN_CAP", I18N.N_("Enter a whole number of at least 1.")],
     ["FC_NOT_STARTED", I18N.N_("Future Cash Next has not started yet.")],
     ["FC_STAKE_LIST", I18N.N_("Could not read the complete stake list. Refresh and retry.")],
     ["FC_ADDR_MISSING", I18N.N_("Address not found on this node.")],

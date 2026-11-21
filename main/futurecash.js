@@ -50,11 +50,15 @@ const CAP_POSTS = 8, CAP_READS = 32, SCRIPTS_EVERY = 10, STAKE_ROWS_MAX = 5000;
 // compared with it, so token coins are left for a confirmed action by hand). A row whose coin cannot be resolved is
 // asked about again only every REREAD_BLOCKS, so it never eats the read budget of the rows that can.
 const MIN_AUTO_DEFAULT = "1", REREAD_BLOCKS = 30;
+// Every unattended sweep signs with that address's one-time key. On a CLASSIC key wallet a key has 262,144 uses in all,
+// so the guardian signs for one address at most sign_cap times a day by itself (review M1; default 50); past it, it
+// logs once and waits for the next day or a Sweep by hand. A block key wallet counts block heights, not signatures.
+const SIGN_CAP_DEFAULT = "50";
 
 /** Cfg.java key names (the MiniDapp's keypair keys). */
 const K = { ENABLED: "enabled", AUTO_COLLECT_SAFE: "auto_collect_safe", SAFE_ADDRESS: "safe_address", SAFE_MODE: "safe_mode", CLEAN_ADDR: "clean_addr",
   ATRISK_ADDRS: "atrisk_addrs", AUDIT_OK: "audit_ok", AUDIT_AT: "audit_at", AUDIT_USES: "audit_uses", AUDIT_LAST_ERR: "audit_last_err", SAFE_REUSED: "safe_reused",
-  NOTIFY: "notify", MIN_AUTO: "min_auto", SCRIPT_ADDRESS: "script_address", LAST_TIP: "last_tip", LAST_ACTION: "last_action", LOG: "fc_log", AUDIT_LOGGED_N: "audit_logged_n", GUARDIAN_ON: "guardian_on" };
+  NOTIFY: "notify", MIN_AUTO: "min_auto", SIGN_CAP: "sign_cap", SIGN_COUNT: "sign_count", SCRIPT_ADDRESS: "script_address", LAST_TIP: "last_tip", LAST_ACTION: "last_action", LOG: "fc_log", AUDIT_LOGGED_N: "audit_logged_n", GUARDIAN_ON: "guardian_on" };
 /** Store.java status words. */
 const S = { DETECTED: "DETECTED", COLLECT_POSTED: "COLLECT_POSTED", COLLECT_POSTED_SAFE: "COLLECT_POSTED_SAFE", COLLECTED: "COLLECTED", COLLECTED_SAFE: "COLLECTED_SAFE",
   SWEEP_QUEUED: "SWEEP_QUEUED", PENDING: "PENDING", SWEEP_POSTED: "SWEEP_POSTED", SWEPT: "SWEPT", TAKEN: "TAKEN" };
@@ -706,6 +710,26 @@ function create(o) {
       return { ok: true, value: a };
     });
   }
+  const signCap = () => { const v = store ? store.kv.get(K.SIGN_CAP, SIGN_CAP_DEFAULT) : SIGN_CAP_DEFAULT; return /^\d{1,6}$/.test(v) && Number(v) > 0 ? Number(v) : Number(SIGN_CAP_DEFAULT); };
+  const today = () => new Date(now()).toISOString().slice(0, 10);
+  function signCounts() { try { const c = JSON.parse(kv().get(K.SIGN_COUNT, "{}")); return c && c.day === today() && c.n && typeof c.n === "object" ? c : { day: today(), n: {}, said: {} }; } catch (e) { return { day: today(), n: {}, said: {} }; } }
+  /** May the guardian sign once more for this address today? Always on a block key wallet. Said once a day per address when not. */
+  function signsLeft(addr) {
+    if (!o.keyMode || o.keyMode() !== "classic") return true;
+    const c = signCounts(), k = canon(addr);
+    if ((c.n[k] || 0) < signCap()) return true;
+    if (!(c.said || {})[k]) { c.said = Object.assign({}, c.said, { [k]: 1 }); kv().set(K.SIGN_COUNT, JSON.stringify(c)); activity("warn", "Daily limit of unattended signatures reached (" + signCap() + "): the rest waits for tomorrow, or Sweep by hand | address:" + addr); }
+    return false;
+  }
+  function signed(addr) { if (!o.keyMode || o.keyMode() !== "classic") return; const c = signCounts(), k = canon(addr); c.n[k] = (c.n[k] || 0) + 1; kv().set(K.SIGN_COUNT, JSON.stringify(c)); }
+  function setSignCap(v) {
+    return exclusive(async () => {
+      const a = String(v == null ? "" : v).trim();
+      if (!/^\d{1,6}$/.test(a) || Number(a) < 1) return { ok: false, error: "Enter a whole number of at least 1." };
+      kv().set(K.SIGN_CAP, String(Number(a))); activity("info", "Daily limit of unattended signatures per address set to " + Number(a));
+      return { ok: true, value: Number(a) };
+    });
+  }
   const running = () => !!store && kv().is(K.GUARDIAN_ON, false) && rescueReady() && granted();
   /** Wallet.sweepDestination: the configured EXTERNAL safe while rescue is on, else a fresh clean address of this node. */
   async function sweepDestination() {
@@ -796,9 +820,11 @@ function create(o) {
       if (!aboveFloor(row.tokenid, row.amount)) continue;   // below the floor: the Sweep by hand moves it
       const key = await signKeyFor(row.address);
       if (!owns(sets, row.address) || !key) { activity("error", "Can't sweep: no signing key for this address on this node | coin:" + row.coinid + " | on:" + row.address); continue; }
+      if (!signsLeft(row.address)) continue;   // this address's daily limit of unattended signatures (classic keys)
       if (budget.sweeps-- <= 0) return;
       if (!store.claimSweepForPost(row.coinid, t)) continue;
       const res = await sweepTx(row.coinid, row.address, safe, row.amount, row.tokenid, key, sets);
+      if (!res.refused) signed(row.address);
       if (res.ok) activity("info", "Sweeping " + row.amount + " | coin:" + row.coinid + " | from:" + row.address + " | to:" + safe);
       else { activity("error", "Sweep post failed | coin:" + row.coinid + " | from:" + row.address + ": " + res.error); if (res.refused) store.setSweepStatus(row.coinid, S.PENDING, null); }
       syncHolds();
@@ -1096,7 +1122,7 @@ function create(o) {
       readySafe: ready(false), readyRisk: ready(true),
       pendRisk: { n: pend.length, total: sum(pend.map(p => p.amount)), soonest: pend.length ? Math.min(...pend.map(p => p.mature)) : 0 },
       atRiskKnown: atRisk.size, atRiskList: Array.isArray(flagged) ? flagged.filter(validAddr) : [],
-      guardianOn: k.is(K.GUARDIAN_ON, false), minAuto: minAuto(), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
+      guardianOn: k.is(K.GUARDIAN_ON, false), minAuto: minAuto(), signCap: signCap(), classic: !!(o.keyMode && o.keyMode() === "classic"), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
       safe: k.get(K.SAFE_ADDRESS, ""), sameNode: k.get(K.SAFE_MODE, "external") === "samenode", safeReused: safeReused(),
       audit: { at: k.getLong(K.AUDIT_AT), ok: k.is(K.AUDIT_OK, false), error: k.get(K.AUDIT_LAST_ERR, "") || "", running: auditRunning, verdict: await verdict().catch(() => null), last: lastAudit },
       lastAction: k.get(K.LAST_ACTION, "") || "", contract: k.get(K.SCRIPT_ADDRESS, "") || "", granted: granted(), running: running(), vaultLocked: vaultWasLocked
@@ -1104,7 +1130,7 @@ function create(o) {
   }
   function activityLog() { try { const a = JSON.parse(kv().get(K.LOG, "[]")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
-  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll, setMinAuto, setSafeSameNode, setSafeExternal, stopRescue, setGuardian, setFlag, harden, retire, sweepAddress, recoverRetired, resetHistory,
+  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll, setMinAuto, setSignCap, setSafeSameNode, setSafeExternal, stopRescue, setGuardian, setFlag, harden, retire, sweepAddress, recoverRetired, resetHistory,
     rescueReady: () => { try { return rescueReady(); } catch (e) { return false; } }, coinHolds, activeWork, invalidate,
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }

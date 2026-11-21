@@ -683,3 +683,17 @@ test("H3: the grant is bound to the safe destination it named: another destinati
   const cfg = fs.readFileSync(path.join(__dirname, "..", "main", "config.js"), "utf8");
   assert.ok(cfg.includes("g[walletKey] = { at: Number(at), safe: String(safe) };") && cfg.includes('typeof r.safe === "string"'), "{ at, safe }; a bare number is no grant");
 });
+
+test("M1: on a classic key wallet the guardian signs for one address at most sign_cap times a day by itself; past it, once logged, it waits", async () => {
+  const coins = []; for (let i = 0; i < 5; i++) coins.push({ coinid: ID(70 + i), address: PAY2, amount: "4", tokenid: "0x00", spent: false });
+  const { e, node } = await audited({}, { granted: () => ({ at: 1, safe: SAFE_MX }), keyMode: () => "classic", get: async () => ({ status: true, results: [] }) });
+  await e.setSafeExternal(SAFE_MX); assert.equal((await e.setGuardian(true)).ok, true);
+  const row = node.n.scripts.find(r => r.address === PAY2); row.default = false; row.publickey = "0x00";   // retired: its coins are swept
+  node.n.wallet = coins; await e.setSignCap("3");
+  node.sent.length = 0; await e.pass(160);
+  assert.equal(node.sent.filter(c => /^txnsign/.test(c)).length, 3, "three signatures, then the limit");
+  await e.pass(161); await e.pass(162);
+  assert.equal(node.sent.filter(c => /^txnsign/.test(c)).length, 3, "no more that day");
+  assert.equal(e.activity().filter(l => /^Daily limit of unattended signatures reached \(3\)/.test(l.msg)).length, 1, "said once");
+  assert.equal((await e.setSignCap("0")).ok, false); assert.equal((await e.status()).signCap, 3);
+});

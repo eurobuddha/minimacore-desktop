@@ -437,7 +437,7 @@ ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audi
 // "futurecash" (the signing queue and the coin guard see it); the key audit through the KeyUses host. It runs while the
 // node runs: its store is this wallet's own file, and one pass is made on each new block.
 const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), { owner: "futurecash" }),   // ONE command each (0.19.194): it sends no chain dir: () => app.getPath("userData"),
-  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk), dropGrant: (wk) => config.setFcGrant(wk, null), reserve,
+  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk), dropGrant: (wk) => config.setFcGrant(wk, null), keyMode: () => config.load().keyMode, reserve,
   notify: (title, body) => { try { const n = new Notification({ title: String(title), body: String(body), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ } } });
 reserve.setHoldSource("futurecash", () => futurecash.coinHolds());   // what it is about to sweep: no other part of the app may spend it first
 const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
@@ -452,7 +452,7 @@ node.on("status", (s) => {
 const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),
   lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient), collect: (coinid) => futurecash.collectNow(coinid), collectAll: () => futurecash.collectAll(),
   safeSameNode: () => futurecash.setSafeSameNode(), safeExternal: (addr) => futurecash.setSafeExternal(addr), stopRescue: () => futurecash.stopRescue(),
-  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), minAuto: (v) => futurecash.setMinAuto(v), notify: (on) => futurecash.setFlag("notify", on === true),
+  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), minAuto: (v) => futurecash.setMinAuto(v), signCap: (v) => futurecash.setSignCap(v), notify: (on) => futurecash.setFlag("notify", on === true),
   harden: () => futurecash.harden(), retire: (addr) => futurecash.retire(addr), sweep: (addr) => futurecash.sweepAddress(addr), recover: () => futurecash.recoverRetired(),
   resetHistory: () => futurecash.resetHistory(), guardian: (on) => fcGuardian(on === true), revoke: () => fcRevoke() };
 /**
