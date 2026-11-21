@@ -240,6 +240,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const unclear = cmdverb.unclear(command); if (unclear) throw new Error(unclear);
   // an escaped ";" (\u003b) the node decodes in a JSON value and a command it builds from it then runs as a second command (0.19.291)
   const smuggled = cmdverb.smuggled(command); if (smuggled) throw new Error(smuggled);
+  // a value that would rewrite the commands a sendfrom, rawfrom, multisig … builds from it (0.19.299)
+  for (const part of cmdverb.parts(command)) { const built = cmdverb.builtProblem(part); if (built) throw new Error(built); }
   for (const part of cmdverb.parts(command)) {
     // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
     const twice = cmdverb.is(part, "send") ? cmdverb.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];

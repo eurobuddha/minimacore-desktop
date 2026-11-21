@@ -5340,7 +5340,9 @@
   "show passwords or a private key by running: {command}": "показать пароли или закрытый ключ, выполнив: {command}",
   "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "Будут показаны пароли или закрытый ключ. Эта команда терминала выполнится один раз:\n\n{command}",
   "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "В этой команде {name}: указан без значения, и узел прочитает его как пустое. Укажите значение или уберите параметр. Ничего не было запущено.",
-  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.": "Эта команда открыла бы этот узел кому-то другому или отправляла бы его события наружу (логин или пароль RPC, главный узел, веб-хук, MiniDapps). Этому приложению это не нужно, поэтому из терминала она не запускается. Ничего не было запущено."
+  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.": "Эта команда открыла бы этот узел кому-то другому или отправляла бы его события наружу (логин или пароль RPC, главный узел, веб-хук, MiniDapps). Этому приложению это не нужно, поэтому из терминала она не запускается. Ничего не было запущено.",
+  "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.": "Эта команда строит из своих значений другие команды, а одно из значений содержит пробел, двоеточие, кавычку или escape-последовательность с обратной косой чертой, которые изменили бы эти команды. Ничего не было запущено.",
+  "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "Каждый открытый ключ мультиподписи и корневой ключ должны быть 0x и 64 шестнадцатеричные цифры. Ничего не было запущено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5450,5 +5452,7 @@
   "show passwords or a private key by running: {command}",
   "This shows passwords or a private key. This Terminal command will run once:\n\n{command}",
   "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.",
-  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run."
+  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.",
+  "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.",
+  "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run."
 ] });

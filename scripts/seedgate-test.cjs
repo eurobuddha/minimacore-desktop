@@ -152,7 +152,7 @@ test("Show seed phrase (Backup & Recovery): the same checks before the node is a
 
 test("main: the general command channel refuses vault and seedrandom without a pass; the window reaches the seed only through the gates", () => {
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
-  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,30}?  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
+  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,80}?  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
   assert.ok(/if \(!firstRunOpen \|\| node\.freshAtFirstStart !== true\) throw new Error\("The seed is shown here only while a new wallet is being made\."\);/.test(main) && /if \(c\.walletDone\) firstRunOpen = false;/.test(main), "the first-run seed: only in that step (CHANGED on purpose, 0.19.220: decided from the launch's own facts)");
   assert.equal((main.match(/"vault"/g) || []).length, 1, "main asks for the vault in one place of its own (the first-run step); the reveal is in seedgate.js");
@@ -181,7 +181,7 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
     assert.deepEqual([sys.asked, sys.boxes], [[], []], "nothing was asked"); assert.notEqual(G.refusal(hidden, g.take), "", "and it does not run");
     const longOne = "keys action:genkey keyuses:" + "1".repeat(120) + ' phrase:"a b c d e f g h i j k l"';
     if (mac) await assert.rejects(g.open(longOne, "SHOW KEY"), /longer than the Touch ID prompt can show in full \(120 characters, with the secret values hidden\)/);
-    else { await g.open(longOne, "SHOW KEY"); assert.ok(sys.boxes[0].includes("1".repeat(120)) && sys.boxes[0].includes("phrase:•••") && !sys.boxes[0].includes("a b c"), "a box shows it whole, the phrase hidden"); sys.boxes.length = 0; g.take(""); }
+    else { await g.open(longOne, "SHOW KEY"); assert.ok(sys.boxes[0].includes("1".repeat(120)) && sys.boxes[0].includes('phrase:"' + Array(12).fill("•••").join(" ") + '"') && !sys.boxes[0].includes("a b c"), "a box shows it whole, the phrase hidden"); sys.boxes.length = 0; g.take(""); }
     for (const dup of ["vault action:seed action:wipekeys", 'keys action:genkey "action":list', "seedrandom modifier:a modifier : b"]) await assert.rejects(g.open(dup, dup.startsWith("vault") ? "SHOW SEED" : "SHOW KEY"), /more than once/, dup);
     const c = "keys   action:genkey\u202e  phrase:x";
     await g.open(c, "SHOW KEY");
@@ -203,11 +203,11 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
   const cs = os({ can: false }), cg = G.create(cs);
   await assert.rejects(cg.open("vault action:restorekeys phrase:\"a b\"", "SHOW SEED"), /Type CHANGE KEYS exactly/);
   await cg.open("vault action:restorekeys phrase:\"a b\"", "CHANGE KEYS");
-  assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:•••");
+  assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:\"••• •••\"");   // one ••• a word (0.19.299)
   // 0.19.266: the node reads this as ONE seed value (0xABaction:wipekeys) and no action (0.19.252 showed an action the node never reads): hidden whole
   assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
   assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
-  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••");
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• •••" seed:••• confirm:•••');   // one ••• a word (0.19.299)
 });
 
 test("syscheck: refused (not phrase only) once Touch ID worked here and cannot be asked; the marker is written only after a prompt succeeded and names this Mac", async () => {
@@ -280,7 +280,7 @@ test("0.19.237: mcd:cmdKind says what a text is with its secret values hidden; t
   assert.deepEqual(k("balance"), { kind: "", chain: false, write: false, shown: "balance", secretValues: false });
   assert.equal(k("send amount:1 address:0xAA").write, true);
   const r = k('megammrsync action:resync host:h:9001 phrase:"ONE TWO THREE" keyuses:9');
-  assert.equal(r.shown, "megammrsync action:resync host:h:9001 phrase:••• keyuses:9"); assert.equal(r.secretValues, true);
+  assert.equal(r.shown, 'megammrsync action:resync host:h:9001 phrase:"••• ••• •••" keyuses:9');   // one ••• a word (0.19.299) assert.equal(r.secretValues, true);
   assert.equal(k("vault action:passwordunlock password:hunter2").shown, "vault action:passwordunlock password:•••");
   assert.deepEqual([k("vault").kind, k("status;vault").chain], ["seed", true]);
 });
@@ -347,7 +347,7 @@ test("secrets stay hidden: privatekey: is masked, so are the words after a hidde
   assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
   assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:•••", "CHANGED on purpose (0.19.293): shown as the node reads it, which drops 'lamp'");
   assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5");
-  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••", "a spaced name still ends it");
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• •••" seed:••• confirm:•••', "a spaced name still ends it");
   const main = SRC("main/main.js"), kh = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async')), handlers = {};
   new Function("ipcMain", "seedgate", "rpc", kh)({ handle: (n, f) => { handlers[n] = f; } }, G, require("../main/rpc.js"));
   const k = handlers["mcd:cmdKind"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5");
@@ -430,7 +430,7 @@ test("the node's reply is scrubbed of the typed command's secrets (its 'command'
 test("masked shows the command name by name as the node reads it, never hiding the action after an empty secret; a gated command with an empty secret is refused", async () => {
   assert.equal(G.masked("vault phrase: action:restorekeys"), 'vault phrase:"" action:restorekeys');
   assert.equal(G.masked("vault password: action:passwordlock"), 'vault password:"" action:passwordlock');
-  assert.equal(G.masked('vault action:restorekeys phrase:"spray lamp a b" keyuses:5'), "vault action:restorekeys phrase:••• keyuses:5");
+  assert.equal(G.masked('vault action:restorekeys phrase:"spray lamp a b" keyuses:5'), 'vault action:restorekeys phrase:"••• ••• ••• •••" keyuses:5');
   assert.equal(G.masked("status;vault password:x action:passwordunlock"), "status ; vault password:••• action:passwordunlock");
   const g = G.create({ check: async () => { throw new Error("no question"); } });
   for (const c of ["vault phrase: action:restorekeys", "vault password: action:passwordlock", 'vault action:passwordunlock password:""'])
@@ -448,4 +448,30 @@ test("rpc enable / password / adduser / removeuser, slavenode enable, webhooks a
     await assert.rejects(hs["mcd:cmd"](null, c), /open this node to someone else/, c);
   assert.deepEqual(sent, []);
   for (const c of ["rpc", "rpc action:listusers", "mds", "slavenode", "webhooks", "webhooks action:list", "webhooks action:clear", "network action:list"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+});
+
+// ---- 0.19.299: a value that would rewrite the commands a builder (sendfrom, rawfrom, multisig …) makes from it is refused ----
+test("a multisig key carrying JSON, a multi-word password, a raw output with a space and an escaped quote in a state are refused; ordinary builder commands are not", async () => {
+  const V = require("../main/cmdverb.js"), user = "0x" + "B".repeat(64), att = "0x" + "A".repeat(64);
+  let fake = '0x00","2":"0","9":"['; fake = fake + "x".repeat(66 - fake.length - 1) + "]";
+  assert.equal(fake.length, 66, "it passes the node's own check (0x, 66 characters)");
+  const ms = "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att, fake]);
+  assert.match(V.builtProblem(ms), /builds further commands/, "its escaped quotes");
+  assert.match(V.builtProblem("multisig action:create id:pair amount:10 required:1 publickeys:" + JSON.stringify([user, "0x" + "Z".repeat(64)])), /must be 0x followed by 64 hexadecimal digits/);
+  assert.match(V.builtProblem("multisig action:create amount:1 required:1 publickeys:" + JSON.stringify([user]) + " root:0x" + "G".repeat(64)), /64 hexadecimal digits/);
+  const pw = "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att]) + ' password:"pw burn:500"';
+  assert.match(V.builtProblem(pw), /builds further commands from its values/);
+  assert.match(G.masked(pw), /password:"••• •••"/, "the echo shows the password is more than one word");
+  for (const c of ['rawfrom inputs:[{"coinid":"0x01"}] outputs:[{"address":"0x02 burn:5","amount":"1","tokenid":"0x00"}]', 'sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:1 state:{"1":"a\\\\\\" b"}',
+    'sendfrom fromaddress:0x01 address:0x02 amount:1 tokenid:"0x00 burn:9" privatekey:0x03 keyuses:1', 'sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:1 script:RETURN"x'])
+    assert.match(V.builtProblem(c), /builds further commands/, c);
+  for (const c of ['sendfrom fromaddress:0x01 address:0x02 amount:1 script:"RETURN TRUE" privatekey:0x03 keyuses:1 state:{"1":"hello world"}', "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att]),
+    'createtokenfrom fromaddress:0x01 name:"My Token" amount:10 privatekey:0x03 keyuses:1 script:"RETURN TRUE"', 'sphincs action:generate seed:"two words"', 'send amount:1 address:0x02 tokenid:"0x00"'])
+    assert.equal(V.builtProblem(c), "", c);
+  // through the real mcd:cmd handler
+  const R = require("../main/restore.js"), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  await assert.rejects(hs["mcd:cmd"](null, ms), /builds further commands/); await assert.rejects(hs["mcd:cmd"](null, pw), /builds further commands/); assert.deepEqual(sent, []);
 });

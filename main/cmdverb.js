@@ -136,6 +136,37 @@ const SMUGGLED = "This command holds a character written as an escape code (a se
 /** Why this text is refused for an escaped ";" or control character ("" = it is not). */
 function smuggled(command) { return (String(command).match(/\\u[0-9a-fA-F]{4}/g) || []).some(x => { const c = parseInt(x.slice(2), 16); return c === 0x3b || c < 0x20; }) ? SMUGGLED : ""; }
 
+// The commands that build further commands from their values and run them (0.19.299, read from core/minima-core: send/wallet
+// sendfrom, rawfrom, rawtxnfrom, createtokenfrom, consolidatefrom, constructfrom, createfrom, signfrom, postfrom; send/multisig,
+// multisigread; txn/txnauto; base/sphincs). Their values are pasted, unquoted or inside "…", into those commands, so a value with
+// white space, ":" or a quote, or a JSON value with a backslash escape or a decoded quote, rewrites them (a multisig public key
+// carrying '","2":"0' made the multisig's state "0 of n": anyone could spend it; password:"pw burn:500" became burn:500).
+const BUILDERS = /^(?:sendfrom|rawfrom|rawtxnfrom|createtokenfrom|consolidatefrom|constructfrom|createfrom|signfrom|postfrom|multisig|multisigread|txnauto|sphincs)$/;
+const NOT_PASTED = new Set(["action", "seed", "data", "file", "name"]);   // read, hashed or parsed by the command itself, never pasted
+const BUILT = "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.";
+const MSKEY = "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.";
+const HEX64 = /^0x[0-9a-fA-F]{64}$/;
+function strings(x, out = []) { if (typeof x === "string") out.push(x); else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) { out.push(k); strings(v, out); } return out; }
+/** Why this ONE command, one that builds further commands, is refused ("" = it is not). */
+function builtProblem(part) {
+  const r = read(part); if (!verbs(part).some(v => BUILDERS.test(v))) return "";
+  const action = fold(paramValue(part, "action") || "");
+  for (const [n0, v] of r.params) {
+    const n = fold(n0);
+    if (/^[{[]/.test(v)) {
+      if (v.includes("\\")) return BUILT;
+      let j; try { j = JSON.parse(v); } catch (e) { return BUILT; }
+      const ss = strings(j);
+      if (ss.some(s => s.includes('"'))) return BUILT;
+      if (/^(inputs|outputs)$/.test(n) && ss.some(s => /[\s:]/.test(s))) return BUILT;   // rawfrom / rawtxnfrom paste coinid, address, amount, tokenid raw
+      if (n === "publickeys" && verbs(part).includes("multisig") && action === "create" && !(Array.isArray(j) && j.every(k => typeof k === "string" && HEX64.test(k)))) return MSKEY;
+    } else if (n === "script") { if (v.includes('"')) return BUILT; }   // pasted inside scripts:{"…":""}: a space is fine there
+    else if (!NOT_PASTED.has(n) && /[\s:"]/.test(v)) return BUILT;
+    if (n === "root" && v !== "0x21" && !HEX64.test(v)) return MSKEY;
+  }
+  return "";
+}
+
 /**
  * oneCommand(text) (0.19.194, released 0.18.177): a command the APP builds is one command. The node splits a text on EVERY
  * ";", even inside quotes and JSON, so a ";" carried in by a pasted seed, a peer's media ref, a password or a coin's state on
@@ -150,4 +181,4 @@ function oneCommand(command) {
   if (smuggled(command)) throw new Error(SMUGGLED);   // an escaped one too (0.19.291)
   return command;
 }
-module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, smuggled, oneCommand };
+module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, smuggled, builtProblem, oneCommand };
