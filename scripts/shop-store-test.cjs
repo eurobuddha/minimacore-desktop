@@ -300,9 +300,14 @@ test("dust (below 0.000001, or below the smaller of 1% of what is due and what i
   for (let i = 0; i < 1100; i++) assert.equal(store.recordPayment(ref, id(), i % 2 ? "0.0000001" : "0.0001", "0x00"), "DUST");
   assert.deepEqual(store.order(ref).coins, [], "no dust in the order's list"); assert.equal(store.order(ref).paidAmount || "0", "0", "and none counted");
   assert.equal(store.recordPayment(ref, id(), "0.032", "0x00"), "UNDERPAID", "1% of 3.2 is not dust");
-  assert.equal(store.recordPayment(ref, id(), "3.15", "0x00"), "UNDERPAID");
-  assert.equal(store.recordPayment(ref, id(), "0.018", "0x00"), "PAID", "a top-up of what is still due is never dust, however small");
-  assert.equal(store.order(ref).coins.length, 3);
+  // CHANGED on purpose (0.19.272): at most 256 dust coins are gathered (was 1000, past the order's 500-coin bound, so they never
+  // counted); the 256 largest (0.0001 each, 0.0256) cover the 0.018 the 3.15 leaves, so the order is paid then
+  assert.equal(store.recordPayment(ref, id(), "3.15", "0x00"), "PAID", "3.182 + the gathered 0.0256");
+  assert.equal(store.order(ref).coins.length, 2 + store.PENDING_MAX);
+  const t2 = sellOrder("3.2");
+  assert.equal(store.recordPayment(t2, id(), "3.182", "0x00"), "UNDERPAID");
+  assert.equal(store.recordPayment(t2, id(), "0.018", "0x00"), "PAID", "a top-up of what is still due is never dust, however small");
+  assert.equal(store.order(t2).coins.length, 2);
   const u = sellOrder("1", "0x00", { shopId: "no-such-shop" });
   assert.equal(store.recordPayment(u, id(), "0.0000009", "0x00"), "DUST", "an order with nothing due by the listing: the 0.000001 floor");
   assert.equal(store.recordPayment(u, id(), "0.000001", "0x00"), "UNCHECKED");
@@ -424,4 +429,32 @@ test("vendor: a payout address the node does not answer for leaves the scan curs
   assert.equal(shop.scanState().unreadBelow, 20000 - 4096, "away longer than one pass reads: the oldest unread block is kept for the Inbox");
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Orders and payments before block {block} were not read'));
+});
+
+// ---- 0.19.272: gathered dust is bounded with a running exact sum; past the bound a coin not larger than the smallest kept is not kept ----
+test("dust past the bound: an order keeps PENDING_MAX coins, the smallest is replaced only by a larger one, the sum stays exact, and it still pays (also after a restart)", () => {
+  const ord = (ref) => { store.upsertOrder({ ref, role: "sell", shopId: "dust10", amount: "10", currency: "Minima", tokenid: "0x00", status: "PENDING", paid: false, items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], shipping: "" }); return ref; };
+  const r = ord("ORD-DU9"), MAX = store.PENDING_MAX;
+  assert.ok(MAX <= 256, "a lower bound than 1000");
+  assert.equal(store.recordPayment(r, "0xe0", "9.9", "0x00"), "UNDERPAID");
+  const t0 = Date.now();
+  for (let i = 0; i < 3000; i++) assert.equal(store.recordPayment(r, "0xe1" + i, "0.00001", "0x00"), "DUST");
+  for (let k = 0; k < 2; k++) for (let i = 0; i < 3000; i++) store.recordPayment(r, "0xe1" + i, "0.00001", "0x00");   // the same flood seen on two more scans
+  assert.ok(Date.now() - t0 < 3000, "9000 looks at dust in " + (Date.now() - t0) + " ms (each was a sort of the whole map)");
+  assert.deepEqual(store._pendingDust(r), { size: MAX, sum: M.decAdd("0", (MAX * 0.00001).toFixed(5)), min: "0.00001" }, "kept: the bound, summed exactly");
+  assert.equal(store.recordPayment(r, "0xe2", "0.0001", "0x00"), "DUST");
+  assert.equal(M.decCmp(store._pendingDust(r).sum, "0.00265"), 0, "a larger coin takes the smallest one's place: 0.00256 - 0.00001 + 0.0001");
+  assert.equal(store._pendingDust(r).size, MAX);
+  assert.equal(store.recordPayment(r, "0xe3", "0.05", "0x00"), "DUST");
+  assert.equal(store.recordPayment(r, "0xe4", "0.05", "0x00"), "PAID", "each 0.05 took a smallest one's place: 0.00263 + 0.05 + 0.05 covers the 0.1 left");
+  assert.equal(M.decCmp(store.order(r).paidAmount, "10.00263"), 0, "counted exactly: " + store.order(r).paidAmount);
+  assert.equal(new Set(store.order(r).coins).size, store.order(r).coins.length, "each coin once"); assert.equal(store._pendingDust(r), null);
+  // after a restart (nothing in memory) the scanner shows the same coins again, in any order: 9.9 + 0.05 + 0.05 pays 10
+  const r2 = ord("ORD-DU10"); assert.equal(store.recordPayment(r2, "0xf1", "0.05", "0x00"), "DUST");
+  const key = require.resolve("../main/shop-store"), kept = require.cache[key]; store.flush();
+  delete require.cache[key]; const fresh = require("../main/shop-store");
+  assert.equal(fresh._pendingDust(r2), null, "a restart forgets the gathered dust");
+  assert.equal(fresh.recordPayment(r2, "0xf2", "0.05", "0x00"), "DUST"); assert.equal(fresh.recordPayment(r2, "0xf1", "0.05", "0x00"), "DUST");
+  try { assert.equal(fresh.recordPayment(r2, "0xf3", "9.9", "0x00"), "PAID"); assert.equal(M.decCmp(fresh.order(r2).paidAmount, "10"), 0); }
+  finally { fresh.flush(); require.cache[key] = kept; }
 });
