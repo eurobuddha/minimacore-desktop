@@ -301,6 +301,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["AXRPC_PRIVATE", I18N.N_("That host isn't allowed (local/private addresses are blocked).")],
     ["SHOP_NO_REFUSED", I18N.N_("This order has no refused payment to retry. Check your Balance/History.")],
     ["SHOP_NOT_UNSURE", I18N.N_("This order has no payment that may have gone through.")],
+    ["SHOP_PAY_BEFORE_ORDER", I18N.N_("a payment with this order's reference is older than the order (payment coin {coin} at block {block}, the order at block {orderBlock}): check by hand")],
     ["SHOP_DUP_REF", I18N.N_("another buyer sent an order with the same reference {ref}: a payment with it cannot be told apart, so check both orders by hand")],
 
     // ---- miniMall: how an incoming order departs from the vendor's own listing (main/shop-listing.js, 0.19.166) ----

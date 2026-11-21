@@ -249,7 +249,7 @@ function itemLine(it) {
 }
 /** Where a second buyer's order with an already used reference is kept: the reference and that buyer's whole id. */
 function dupKey(ref, fromPublicId) { return ref + "~" + fromPublicId; }
-function routeIncoming(w, fromPublicId) {
+function routeIncoming(w, fromPublicId, coinBlock) {
   if (!w || w.from !== fromPublicId || !w.ref) return;   // envelope `from` must match the sealed sender (anti-spoof)
   if (typeof w.ref !== "string" || w.ref.length > 64) return;
   if (w.type === T.ORDER || w.type === T.INQUIRY) {
@@ -278,7 +278,8 @@ function routeIncoming(w, fromPublicId) {
       shopId: w.shopId, shopName: own.shopName || txt(w.shopName, 200), items, amount: txt(w.amount, 64) || "0", buyerCurrency,
       due: problems.length ? "" : chk.due, problems, currency: tokenid === MXUSD_TOKEN ? "USDT" : "Minima",
       tokenid, shipping, delivery: txt(w.delivery, 500), buyerPayaddr: txt(w.buyerPayaddr, 90),
-      status: w.type === T.INQUIRY ? "INQUIRY" : problems.length ? "UNCHECKED" : "PENDING", paid: false, date: when(w.date), unread: true, note: txt(w.message, 1000) });
+      status: w.type === T.INQUIRY ? "INQUIRY" : problems.length ? "UNCHECKED" : "PENDING", paid: false, date: when(w.date), unread: true, note: txt(w.message, 1000),
+      ...(Number.isSafeInteger(coinBlock) && coinBlock > 0 ? { orderBlock: coinBlock } : {}) });   // when the order reached the chain (0.19.339): see PAY_BEFORE_ORDER
     if (isNew) emitter.emit("incoming", { ref, shopName: own.shopName, amount: problems.length ? "" : chk.due, currency: tokenid === MXUSD_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {
     const o = store.order(w.ref);
@@ -314,7 +315,7 @@ async function scanOrders(depth, floor) {
     try {   // one coin at a time: whatever one message holds, the others in the batch are still read (0.19.168)
       const blobHex = statePort(c, 99); if (!blobHex) continue;
       const opened = await sc.open(identity, blobHex); if (!opened || !opened.valid) continue;   // not for me / bad sig
-      routeIncoming(parseWire(opened.plaintext), opened.fromPublicId);
+      routeIncoming(parseWire(opened.plaintext), opened.fromPublicId, Number(c.created));   // the block of the coin that carried it (0.19.339)
       changed = true;
     } catch (e) { store.log("miniMall: an order channel coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); }
   }
@@ -369,6 +370,10 @@ async function scanPayments(depth) {
       const o = store.order(ref); if (!o) return "";
       seenPayCoins.add(id);
       if (o.role !== "sell" || o.paid) return "";
+      // a payment older than its order never pays it automatically (0.19.339, as released 0.18.285): held for a check by hand, the coin id whole
+      const pb = Number(c.created);
+      if (o.orderBlock && Number.isSafeInteger(pb) && pb > 0 && pb < o.orderBlock - PAY_BEFORE_ORDER)
+        store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
       const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
       if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.19.200)
       if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
@@ -396,6 +401,13 @@ function depthForGap(tip, prevTip) { if (!prevTip) return BACKFILL_MAX_DEPTH; co
 // whatever the tree's length. (0.19.330 read status chain.length for this; the fixed depths need no extra read and are the released tree's.)
 // A node started with -megammr would add its MegaMMR's unspent coins to `coins … megammr:true`; this app does not ask for that.
 const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
+// How many blocks a payment may be mined before its order and still pay it automatically (0.19.339, as released 0.18.285). The buyer's app sends
+// the order message first and the payment only once the node has taken it (placeOrder here; the phone Shop's placeOrder sends the payment in the
+// order's onSent; a Retry is later still), so a real payment is never created before its order; the two are mined separately, and the order coin
+// (a sealed message of up to 90000 bytes) may land a few blocks after the payment. A payment older than that is held for a check by hand, never
+// refused outright: the reference is plain text on chain, so anyone could copy a payment's reference into an order of their own while the real
+// order is not held here (older than the node's tree, or not read yet).
+const PAY_BEFORE_ORDER = 3;
 // What may not have been read below block N, and why (as released 0.18.283 / 0.18.286, the same words): "cap" (the node's answer was too
 // large) or the tree, + "Root" when the payments read reached the tree's root, where every unspent payment coin is kept whatever its age;
 // "treePayCap": the orders read was whole and only the payments read was cut by the reply cap. "May not have been": a tree longer than

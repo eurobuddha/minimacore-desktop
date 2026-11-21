@@ -668,3 +668,45 @@ test("vendor: the unread notice is kept over later passes and hidden by the vend
     assert.ok(app.includes('<button class="mm-pill" id="mmScanHide">${th("Hide")}</button>') && app.includes('el("mmScanHide").onclick = () => api.shopScanDismiss()'));
   } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
 });
+
+// ---- 0.19.339 (as released 0.18.285): a payment older than its order holds the order for a check by hand (a copied reference); a real buyer
+// sends the order first, and 3 blocks allow the larger order coin to be mined after the payment ----
+test("vendor: an order whose payment is older than the order is held for a check by hand, the coin id whole (a copied reference); a real order then payment still pays", async () => {
+  const sc = require.cache[require.resolve("../main/shopcrypto.js")].exports, open0 = sc.open, ATK = "0x" + "66".repeat(32);
+  sc.open = async (_id, blob) => { const t = Buffer.from(String(blob).slice(2), "hex"); return { valid: true, fromPublicId: JSON.parse(t).from, plaintext: t }; };   // the sender is whoever sealed it
+  const atkOrder = (ref, created) => ({ coinid: "0xAT" + Buffer.from(ref + created).toString("hex"), created, state: { "99": hex(JSON.stringify({ type: "ORDER", ref, from: ATK, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], amount: "1.5", currency: "Minima", shipping: "Digital", delivery: "ATTACKER" })) } });
+  const held = (payCoin, payBlock) => { const o = store.order("ORD-X"); assert.ok(o && o.delivery === "ATTACKER", "the copier's order is the one held");
+    assert.equal(o.paid, false, "nobody is paid automatically"); assert.equal(o.status, "UNCHECKED");
+    assert.ok(o.problems.some(p => p.startsWith("a payment with this order's reference is older than the order (payment coin " + payCoin.toLowerCase().replace(/^0x/, "0x") + " at block " + payBlock + ", the order at block ") || p.startsWith("a payment with this order's reference is older than the order (payment coin " + payCoin + " at block " + payBlock + ", the order at block ")), o.problems.join(" | ")); };
+  try {
+    // the real order older than the tree at reopen, its payment unspent (root); the copier's order inside the tree
+    { const st = await javaSetup(1000); await shop.scanOnce(); st.msg.push(jOrder("ORD-X", 1003), atkOrder("ORD-X", 2490)); const p = jPay("ORD-X", 1005); st.pay.push(p);
+      for (let i = 0; i < 6; i++) { jTip(st, 2500 + i); await shop.scanOnce(); } held(p.coinid, 1005); store.clear(); }
+    // the copier's order lands during the backfill; the payment is a late one inside the first window
+    { const st = await javaSetup(1000); store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [{ id: "digital", label: "Digital", fee: "0" }] });
+      await shop.scanOnce(); st.msg.push(jOrder("ORD-X", 1003)); const p = jPay("ORD-X", 2400); st.pay.push(p);
+      let first = true; st.hook = (addr, d) => { if (addr === "M" && first && d > 512) { first = false; return CAPPED; } return null; };
+      jTip(st, 2500); await shop.scanOnce(); st.msg.push(atkOrder("ORD-X", 2501));
+      for (let i = 1; i < 7; i++) { jTip(st, 2500 + i); await shop.scanOnce(); } held(p.coinid, 2400); store.clear(); }
+    // the copier's order lands after the backfill, then the vendor closes again for long (the root read returns the old payment)
+    { const st = await javaSetup(1000); store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [{ id: "digital", label: "Digital", fee: "0" }] });
+      await shop.scanOnce(); st.msg.push(jOrder("ORD-X", 1003)); const p = jPay("ORD-X", 1500); st.pay.push(p);
+      for (let i = 0; i < 6; i++) { jTip(st, 2500 + i); await shop.scanOnce(); }
+      st.msg.push(atkOrder("ORD-X", st.tip)); for (let i = 0; i < 3; i++) { jTip(st, st.tip + 1); await shop.scanOnce(); }
+      delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop"); shop._setRunner(javaNode(st)); await shop.init();
+      for (let i = 0; i < 6; i++) { jTip(st, 4500 + i); await shop.scanOnce(); } held(p.coinid, 1500); store.clear(); }
+    // a real order then its payment: the same block, 1 to 3 blocks earlier by mining order, or later, pays; 4 blocks earlier is held
+    for (const [k, paid] of [[0, true], [1, true], [2, true], [3, true], [-5, true], [4, false]]) {
+      const st = await javaSetup(1000); store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [{ id: "digital", label: "Digital", fee: "0" }] });
+      await shop.scanOnce(); st.msg.push(jOrder("ORD-R", 1010)); st.pay.push(jPay("ORD-R", 1010 - k)); jTip(st, 1020); await shop.scanOnce();
+      const o = store.order("ORD-R"); assert.equal(o.orderBlock, 1010, "the order coin's block is kept"); assert.equal(o.paid, paid, "payment " + k + " blocks before the order");
+      if (!paid) assert.equal(o.status, "UNCHECKED");
+      store.clear();
+    }
+    // an order stored before this version has no block: unknown, so no hold (as before)
+    { const st = await javaSetup(1000); store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [{ id: "digital", label: "Digital", fee: "0" }] });
+      await shop.scanOnce(); st.msg.push(jOrder("ORD-L", 1010)); jTip(st, 1011); await shop.scanOnce();
+      delete store.order("ORD-L").orderBlock; store.flush(); st.pay.push(jPay("ORD-L", 1003)); jTip(st, 1012); await shop.scanOnce();
+      assert.equal(store.order("ORD-L").orderBlock, undefined); assert.equal(store.order("ORD-L").paid, true, "no block: paid as before"); store.clear(); }
+  } finally { sc.open = open0; store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});

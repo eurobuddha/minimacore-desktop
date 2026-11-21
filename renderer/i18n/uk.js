@@ -5363,7 +5363,8 @@
   "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.": "Веб-гаманець поки недоступний на гаманці з блоковими ключами: тут фраза дає іншу адресу, ніж на класичному гаманці чи в офіційному веб-гаманці, і кількість використань ключа його не захищає. Нічого не зроблено.",
   "Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large.": "Замовлення й платежі, старші за блок {block}, могли не бути прочитані: відповідь вузла щодо раніших блоків була завелика.",
   "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.": "Замовлення, старші за блок {block}, і вже витрачені платежі вашим крамницям могли не бути прочитані: відповідь вузла щодо раніших блоків була завелика. Ще не витрачені платежі прочитано.",
-  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.": "Замовлення, старші за блок {block}, могли не бути прочитані: вузол зберігає лише свої недавні блоки. Платежі вашим крамницям, старші за блок {block}, могли не бути прочитані: відповідь вузла щодо них була завелика."
+  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.": "Замовлення, старші за блок {block}, могли не бути прочитані: вузол зберігає лише свої недавні блоки. Платежі вашим крамницям, старші за блок {block}, могли не бути прочитані: відповідь вузла щодо них була завелика.",
+  "a payment with this order's reference is older than the order (payment coin {coin} at block {block}, the order at block {orderBlock}): check by hand": "платіж із номером цього замовлення старший за саме замовлення (монета платежу {coin} у блоці {block}, замовлення в блоці {orderBlock}): перевірте вручну"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5496,5 +5497,6 @@
   "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.",
   "Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large.",
   "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.",
-  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large."
+  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.",
+  "a payment with this order's reference is older than the order (payment coin {coin} at block {block}, the order at block {orderBlock}): check by hand"
 ] });

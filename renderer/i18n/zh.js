@@ -5350,7 +5350,8 @@
   "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.": "Web 钱包暂不支持区块密钥钱包：在这里，同一助记词得到的地址与经典钱包或官方 Web 钱包不同，而且密钥使用次数无法保护它。未执行任何操作。",
   "Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large.": "区块 {block} 之前的订单和付款可能未被读取：节点对更早区块的回答过大。",
   "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.": "区块 {block} 之前的订单，以及付给您店铺但已被花费的款项，可能未被读取：节点对更早区块的回答过大。尚未花费的付款已被读取。",
-  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.": "区块 {block} 之前的订单可能未被读取：节点只保留其最近的区块。区块 {block} 之前付给您店铺的款项可能未被读取：节点对它们的回答过大。"
+  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.": "区块 {block} 之前的订单可能未被读取：节点只保留其最近的区块。区块 {block} 之前付给您店铺的款项可能未被读取：节点对它们的回答过大。",
+  "a payment with this order's reference is older than the order (payment coin {coin} at block {block}, the order at block {orderBlock}): check by hand": "带有此订单参考号的付款早于订单（付款币 {coin} 位于区块 {block}，订单位于区块 {orderBlock}）：请人工核对"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5483,5 +5484,6 @@
   "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.",
   "Orders and payments older than block {block} may not have been read: the node's answer for older blocks was too large.",
   "Orders older than block {block}, and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.",
-  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large."
+  "Orders older than block {block} may not have been read: the node keeps only its recent blocks. Payments to your shops older than block {block} may not have been read: the node's answer for them was too large.",
+  "a payment with this order's reference is older than the order (payment coin {coin} at block {block}, the order at block {orderBlock}): check by hand"
 ] });
