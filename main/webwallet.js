@@ -112,18 +112,21 @@ let onchainOf = async () => null;
 const derivedKeys = new Map();
 function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
 const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
+const FIRST_UNREAD = "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.";
 
-/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. A damaged entry is
- *  unknown: its new figure must be at least what the chain shows, checked HERE, in main (0.18.262; the floor was in the window
- *  only), and it is refused while that figure cannot be read. */
+/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. An entry not yet
+ *  acknowledged (a first confirmation, one whose file went missing, a damaged one) is unknown: its figure must be at least what
+ *  the chain shows, checked HERE, in main (0.18.262 for a damaged entry, 0.18.263 for every unacknowledged one: the window's floor
+ *  alone took any count), and it is refused while that figure cannot be read. An acknowledged entry only goes up and needs no read. */
 async function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : NaN);
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // "1e309" was Infinity, stored as null, read back as 0 (0.18.203)
-  if (entryFor(loadStore(), address).damaged) {
+  const was = entryFor(loadStore(), address);
+  if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
-    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(DAMAGED_UNREAD);
+    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now

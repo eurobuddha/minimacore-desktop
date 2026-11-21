@@ -70,7 +70,7 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
     : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
-  await ww.ackKeyuses(FROM, 0);
+  ww.setOnchain(async () => 0); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, 0); ww.setOnchain(async () => null);   // a first confirmation is checked against the chain (0.18.263)
   const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
   assert.equal(r.ok, true);
   const line = ww.status().log.slice(-1)[0];
@@ -98,7 +98,11 @@ test("Web Wallet counters: only a missing file is a fresh start; a damaged or un
   try { fs.rmSync(file, { force: true }); } catch (e) {}
   assert.deepEqual(ww.keyusesInfo(A), { address: A, keyuses: 0, ack: false }, "no file yet: a fresh start");
   for (const bad of ["1e309", "Infinity", "-1", "1.5", "", null, -1, 1.5, Infinity, NaN, "12abc"]) await assert.rejects(ww.ackKeyuses(A, bad), /whole number of at least 0/, String(bad));   // async since 0.18.262
-  assert.equal((await ww.ackKeyuses(A, "7")).keyuses, 7); assert.equal((await ww.ackKeyuses(A, 3)).keyuses, 7, "never lowered");
+  const PKA = "0x" + "BB".repeat(32);   // a first confirmation is checked against the chain's figure for the key main derived (0.18.263)
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: A, script: "RETURN SIGNEDBY(" + PKA + ")", privatekey: "0x" + "CC".repeat(32), publickey: PKA } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 7);
+  assert.equal((await ww.ackKeyuses(A, "7")).keyuses, 7); ww.setOnchain(async () => null); assert.equal((await ww.ackKeyuses(A, 3)).keyuses, 7, "never lowered (an acknowledged entry needs no chain read)");
   const good = fs.readFileSync(file, "utf8");
   fs.writeFileSync(file, "{ not json");
   assert.throws(() => ww.keyusesInfo(A), /are damaged\. Nothing was signed/); await assert.rejects(ww.ackKeyuses(A, 9), /damaged/);
@@ -122,7 +126,9 @@ test("Web Wallet counters: only a missing file is a fresh start; a damaged or un
 // ---- 0.18.204: "is this the node's own wallet?" never answers no on a failed read ----
 test("Web Wallet: a failed key list or a locked vault refuses the send instead of taking the foreign path", async () => {
   const ww = require("../main/webwallet"), FROM = "0x" + "A2".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "B2".repeat(32);
-  await ww.ackKeyuses(FROM, 0);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  await ww.derive("alpha beta").catch(() => {}); ww.setOnchain(async () => 0); await ww.ackKeyuses(FROM, 0); ww.setOnchain(async () => null);   // checked against the chain (0.18.263)
   const rig2 = (keys, vault) => { const sent = []; ww._setRunner(async (c) => { sent.push(c.split(" ")[0] + " " + (c.split(" ")[1] || ""));
     return c === "status" ? { status: true, response: { megammr: true } }
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
@@ -229,4 +235,30 @@ test("keyuses.onchainUses: the larger of spend blocks and spent coins for THIS k
     { status: true, keys: [{ publickey: "0x" + "CD".repeat(32), spend_blocks: 1, spent_coins: 1 }] }, { status: true, keys: [{ publickey: PK, spend_blocks: 1.5, spent_coins: 1 }] }, { status: true, keys: [{ publickey: PK, spend_blocks: -1, spent_coins: 1 }] }])
     assert.equal(await K.onchainUses(PK, get(r)), null, JSON.stringify(r && r.message || r));
   assert.equal(await K.onchainUses("0x12", get({ status: true, keys: [] })), null, "a malformed key is never asked about");
+});
+
+// ---- 0.18.263 (as Pandamonium Desktop 0.19.270): the chain's floor is applied in main to every key-use entry not yet acknowledged ----
+test("Web Wallet: a first confirmation, or one after the key-use file went missing, is taken only at or above the chain's figure, read in main, and refused while unread", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const FROM = "0x" + "A7".repeat(32), PK = "0x" + "B7".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C7".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  try { fs.rmSync(file); } catch (e) {}
+  await ww.derive("alpha beta");
+  let chain = null; const asked = []; ww.setOnchain(async (pk) => { asked.push(pk); return chain; });
+  await assert.rejects(ww.ackKeyuses(FROM, 0), /chain's figure for this key could not be read .*cannot be checked against it/, "a first confirmation while the chain is unread: refused");
+  assert.deepEqual(asked, [PK]); assert.ok(!fs.existsSync(file) || !JSON.parse(fs.readFileSync(file, "utf8"))[FROM], "nothing saved");
+  chain = 9; await assert.rejects(ww.ackKeyuses(FROM, 3), /The chain shows 9 uses of this key/, "below the chain's figure: refused, whatever the window sent");
+  assert.deepEqual(await ww.ackKeyuses(FROM, 9), { address: FROM, keyuses: 9, ack: true });
+  fs.rmSync(file); chain = 11;   // the file vanished: the entry is unknown again
+  await assert.rejects(ww.ackKeyuses(FROM, 9), /The chain shows 11 uses/);
+  assert.deepEqual(await ww.ackKeyuses(FROM, 11), { address: FROM, keyuses: 11, ack: true });
+  asked.length = 0; await ww.ackKeyuses(FROM, 4); assert.equal(ww.keyusesInfo(FROM).keyuses, 11, "an acknowledged entry never goes down"); assert.deepEqual(asked, [], "and needs no chain read: no new prompt on upgrade");
+  // a key this session did not derive (an address the window names) is never confirmed: main has no key of its own to ask about
+  await assert.rejects(ww.ackKeyuses("0x" + "AF".repeat(32), 5), /could not be read/);
+  // a write that raised the counter while the chain was being read is never lowered
+  fs.rmSync(file); chain = 3; ww.setOnchain(async () => { fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 20, ack: false } })); return chain; });
+  assert.equal((await ww.ackKeyuses(FROM, 5)).keyuses, 20, "the higher figure written meanwhile is kept");
+  ww.setOnchain(async () => null);
 });
