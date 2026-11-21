@@ -76,7 +76,9 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     const d = fs.mkdtempSync(path.join(os.tmpdir(), "axrpc-")); m._setDataDir(d); m._resetEthCaches();
     fs.writeFileSync(path.join(d, "ethrpc.json"), JSON.stringify({ url: "https://me:secret@eth.example.org/", host: "eth.example.org" }));
     const said = [], log0 = console.log; console.log = (...a) => said.push(a.join(" "));
-    try { assert.equal(m._ethtest.ethRpcLoad(), null); } finally { console.log = log0; }
+    try { for (let i = 0; i < 5; i++) assert.equal(m._ethtest.ethRpcLoad(), null); } finally { console.log = log0; }   // five balance refreshes
+    assert.equal(said.filter(l => /saved Ethereum endpoint was not used/.test(l)).length, 1, "said once, not on every refresh (0.19.275)");
+    assert.ok(!said.some(l => /secret|eth\.example\.org/.test(l)), "never its URL");
     assert.equal(m._allowedUrl("https://eth.example.org/"), false, "its host is not let through");
     assert.ok(said.some(l => /saved Ethereum endpoint was not used \(Leave the name and password/.test(l)), "said in the log: " + said.join(" | "));
     m._resetEthCaches();
