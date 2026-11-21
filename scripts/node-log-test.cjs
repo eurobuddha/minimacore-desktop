@@ -64,6 +64,7 @@ ok("a seed phrase is redacted quoted, as JSON, and as bare words, without eating
   assert.equal(scrub('{"seed" : "0xABCDEF", "privatekey":"0x0123", "Seed":"x", "seeds":"kept", "block":"1"}'), '{"seed":"•••", "privatekey":"•••", "Seed":"•••", "seeds":"kept", "block":"1"}', "a JSON seed or private key, in any case and spacing");
   assert.equal(scrub('{"seedphrase":"ONE TWO","mnemonic" :"THREE FOUR","seedphrases":"kept"}'), '{"seedphrase":"•••","mnemonic":"•••","seedphrases":"kept"}', "0.19.175: the names the released desktop also redacts");
   assert.equal(scrub('{"phrase" : "ONE TWO"}'), '{"phrase":"•••"}');
+  assert.equal(scrub('{"Phrase":"ONE TWO","PRIVATEKEY" : "0x01","PrivateKey":"0x02"}'), '{"Phrase":"•••","PRIVATEKEY":"•••","PrivateKey":"•••"}', "any letter case (0.19.197, as released 0.18.179)");
   assert.equal(scrub("megammrsync action:resync phrase:ONE TWO THREE host:megammr.example:9001 keyuses:1000"), "megammrsync action:resync phrase:••• host:megammr.example:9001 keyuses:1000");
   assert.equal(scrub("keys genkey phrase:alpha"), "keys genkey phrase:•••");
   const words = Array.from({ length: 30 }, (_, i) => "W" + "abcdefghijklmnopqrstuvwxyzABCD"[i]);

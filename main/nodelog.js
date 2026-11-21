@@ -54,10 +54,10 @@ const BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g;
 function scrub(line, secret) {
   let l = String(line).replace(BIDI, "");
   if (typeof secret === "string" && secret.length >= 8) l = l.split(secret).join("•••");
-  return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"').replace(/"phrase"\s*:\s*"[^"]*"/g, '"phrase":"•••"')
+  return l.replace(/phrase:"[^"]*"/g, 'phrase:"•••"')
     .replace(/phrase:[A-Za-z]+\b(?!:)(?: [A-Za-z]+\b(?!:)){0,23}/g, "phrase:•••")
     .replace(/privatekey:0x[0-9A-Fa-f]+/g, "privatekey:•••")
-    .replace(/"(seed|seedphrase|mnemonic|privatekey)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');
+    .replace(/"(phrase|seed|seedphrase|mnemonic|privatekey)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');   // any letter case (0.19.197: "phrase" too, as released 0.18.179)
 }
 
 /**
