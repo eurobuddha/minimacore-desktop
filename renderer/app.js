@@ -1638,7 +1638,8 @@ async function showTokenDetail(b) {
     extraRows += `<div class="kv"><span class="kv__k">${esc(k)}</span><span class="kv__v tokd-wrap">${esc(String(v))}</span></div>`;
   }
 
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="tokDetail"><div class="modal modal--token">
+  if (el("tokDetail")) return;   // one at a time (0.19.258)
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="tokDetail"><div class="modal modal--token" role="dialog" aria-modal="true">
     <div class="tokd-hero">
       ${heroIcon}
       <div class="tokd-name">${esc(name)}${nft ? (" " + th("· NFT")) : (isNative ? "" : (" " + th("· token")))}</div>
@@ -1664,7 +1665,9 @@ async function showTokenDetail(b) {
     <button class="btn btn--outline btn--full" id="tokdClose" style="margin-top:8px">${th("Close")}</button>
   </div></div>`);
 
-  const close = () => { const o = el("tokDetail"); if (o) o.remove(); };
+  let back = () => {};
+  const close = () => { const o = el("tokDetail"); if (o) { o.remove(); back(); } };
+  back = modalize(el("tokDetail"), close, el("tokdClose"));
   const leave = () => { close(); const c = el("coinsDlg"); if (c) c.remove(); };   // opened from the coins dialog: going to Send or Receive closes both
   el("tokdClose").onclick = close;
   el("tokDetail").onclick = (e) => { if (e.target.id === "tokDetail") close(); };
@@ -1718,6 +1721,15 @@ function modalTab(e) {
   if (e.shiftKey ? at <= 0 : at < 0 || at === stops.length - 1) { e.preventDefault(); stops[e.shiftKey ? stops.length - 1 : 0].focus(); }
 }
 document.addEventListener("keydown", modalTab, true);
+/** An overlay made modal (0.19.258): data-modal (Tab stays inside, modalTab), Escape calls onEscape, focus starts inside.
+ *  → back(): call it after the overlay is removed, and focus goes back to what opened it. Callers add one of each at a time. */
+function modalize(ov, onEscape, first) {
+  const opener = document.activeElement;
+  ov.setAttribute("data-modal", "");
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); onEscape(); } });
+  const f = first || ov.querySelector("button, input, select, textarea, [tabindex]"); if (f) f.focus();
+  return () => { if (opener && opener.isConnected && opener !== document.body) opener.focus(); };
+}
 
 /**
  * Every coin behind a token balance (the phone's CoinsDialog). ALL relevant coins are listed, the ones locked
@@ -1921,12 +1933,14 @@ function drawQR(text) {
 // ---- shared dialogs + progress/result modals (every panel uses these, not just Mail) ---------------------
 // ---- small reusable dialogs (action sheet / prompt / confirm) --------------
 function showActionSheet(title, items, message, onCancel) {
+  if (el("sheetOv")) return;   // one at a time (0.19.258)
   const rows = items.map((it, i) => `<button class="btn ${it.danger ? "btn--danger" : "btn--outline"} btn--full" data-i="${i}" style="margin-top:6px">${esc(it.label)}</button>`).join("");
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="sheetOv"><div class="modal">
     <div class="modal__title">${esc(title)}</div>${message ? `<div class="view__desc">${esc(message)}</div>` : ""}${rows}
     <button class="btn btn--outline btn--full" id="sheetCancel" style="margin-top:12px">${th("Cancel")}</button></div></div>`);
-  const ov = el("sheetOv"); const close = () => { if (ov) ov.remove(); };
+  const ov = el("sheetOv"); let back = () => {}; const close = () => { if (ov && ov.isConnected) { ov.remove(); back(); } };
   const cancel = () => { close(); if (onCancel) onCancel(); };
+  back = modalize(ov, cancel, el("sheetCancel"));
   ov.querySelectorAll("button[data-i]").forEach(b => b.onclick = () => { close(); const it = items[parseInt(b.dataset.i, 10)]; if (it && it.onclick) it.onclick(); });
   el("sheetCancel").onclick = cancel;
   ov.onclick = (e) => { if (e.target.id === "sheetOv") cancel(); };
@@ -1934,13 +1948,14 @@ function showActionSheet(title, items, message, onCancel) {
 function showPrompt(title, initial, placeholder, opts) {
   opts = opts || {};
   return new Promise((resolve) => {
-    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="promptOv"><div class="modal">
+    if (el("promptOv")) { resolve(null); return; }   // one at a time (0.19.258)
+    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="promptOv"><div class="modal" role="dialog" aria-modal="true">
       <div class="modal__title">${esc(title)}</div>
       ${opts.message ? `<div class="view__desc">${esc(opts.message)}</div>` : ""}
       <input class="field__input" id="promptInput" type="${opts.password ? "password" : "text"}" value="${esc(initial || "")}" placeholder="${esc(placeholder || "")}" autocomplete="off" />
       <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="promptCancel">${th("Cancel")}</button><button class="btn btn--primary btn--full" id="promptOk">${esc(opts.ok || t("OK"))}</button></div></div></div>`);
-    const ov = el("promptOv"); const done = (v) => { if (ov) ov.remove(); resolve(v); };
-    const inp = el("promptInput"); inp.focus(); if (!opts.password) inp.select();
+    const ov = el("promptOv"); let back = () => {}; const done = (v) => { if (ov && ov.isConnected) { ov.remove(); back(); } resolve(v); };
+    const inp = el("promptInput"); back = modalize(ov, () => done(null), inp); if (!opts.password) inp.select();
     inp.onkeydown = (e) => { if (e.key === "Enter") done(inp.value); if (e.key === "Escape") done(null); };
     el("promptOk").onclick = () => done(inp.value);
     el("promptCancel").onclick = () => done(null);
@@ -1974,7 +1989,8 @@ function showConfirm(title, message, okLabel, danger) {
 function scanQR(purpose) {
   return new Promise((resolve) => {
     const hasBD = typeof window.BarcodeDetector !== "undefined";
-    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="scanOv"><div class="modal" style="max-width:360px">
+    if (el("scanOv")) { resolve(null); return; }   // one at a time (0.19.258)
+    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="scanOv"><div class="modal" style="max-width:360px" role="dialog" aria-modal="true">
       <div class="modal__title">${esc(purpose || I18N.t("Scan QR"))}</div>
       <div id="scanArea" style="text-align:center">
         ${hasBD ? `<video id="scanVideo" autoplay playsinline muted style="width:100%;max-height:280px;border-radius:8px;background:#000"></video>`
@@ -1986,15 +2002,16 @@ function scanQR(purpose) {
       <div class="view__desc" style="margin-top:6px;font-size:11px">${th("Tip: you can paste a QR image with ⌘V.")}</div>
     </div></div>`);
     const ov = el("scanOv");
-    let stream = null, raf = null, detector = null, done = false;
+    let stream = null, raf = null, detector = null, done = false, back = () => {};
     const finish = (val) => {
       if (done) return; done = true;
       if (raf) cancelAnimationFrame(raf);
       if (stream) stream.getTracks().forEach(t => t.stop());
       document.removeEventListener("paste", onPaste);
-      if (ov) ov.remove();
+      if (ov) { ov.remove(); back(); }
       resolve(val || null);
     };
+    back = modalize(ov, () => finish(null), el("scanCancel"));
     const detectFrom = async (src) => {
       try { if (!detector) detector = new window.BarcodeDetector({ formats: ["qr_code"] }); const c = await detector.detect(src); if (c && c.length) return c[0].rawValue; } catch (e) {}
       return null;
@@ -2031,12 +2048,14 @@ function showProgress(title, message) {
 }
 function showPayResult(ok, message, txid, ambiguous) {
   const title = ambiguous ? t("⚠ Payment status unknown") : (ok ? t("✓ Payment sent") : t("Payment failed"));
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="prOv"><div class="modal">
+  const was = el("prOv"); if (was) was.remove();   // one at a time (0.19.258): the newest result replaces an unread one
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="prOv"><div class="modal" role="alertdialog" aria-modal="true">
     <div class="modal__title">${title}</div>
     <div class="view__desc" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(message)}${ok && txid ? ("\n\n" + th("Tx:") + " ") + idHtml(txid) : ""}</div>
     ${ok && txid ? `<button class="btn btn--outline btn--full" id="prCopy" style="margin-top:8px">${th("Copy tx id")}</button>` : ""}
     <button class="btn btn--primary btn--full" id="prOk" style="margin-top:8px">${th("OK")}</button></div></div>`);
-  const ov = el("prOv"); const close = () => { if (ov) ov.remove(); };
+  const ov = el("prOv"); let back = () => {}; const close = () => { if (ov && ov.isConnected) { ov.remove(); back(); } };
+  back = modalize(ov, close, el("prOk"));
   el("prOk").onclick = close; ov.onclick = (e) => { if (e.target.id === "prOv") close(); };
   if (el("prCopy")) el("prCopy").onclick = () => { copy(txid); toast(t("Copied."), "ok"); };
 }
@@ -2316,7 +2335,8 @@ function showHistoryDetail(r) {
   const txState = (r.state && r.state.length) ? `<div class="view__sub">${th("Transaction state")}</div><div class="kv__v" style="text-align:left">${r.state.map(s => `[${esc(String(s.port))}] ${esc(String(s.data))}`).join("<br>")}</div>` : "";
   // Optional block-explorer link — off unless the user sets CFG.explorerBase; the local DB is the source of truth.
   const explorer = (CFG && CFG.explorerBase && r.txpowid) ? safeLinkRow(I18N.t("Explorer"), String(CFG.explorerBase) + encodeURIComponent(r.txpowid)) : "";
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal">
+  if (el("histDetail")) return;   // one at a time (0.19.258)
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="histDetail"><div class="modal" role="dialog" aria-modal="true">
     <div class="modal__title">${th("Transaction")}</div>
     <div class="kv"><span class="kv__k">${th("Type")}</span><span class="kv__v">${esc(kind)}</span></div>
     <div class="kv"><span class="kv__k">${th("Amount")}</span><span class="kv__v">${amtStr}</span></div>
@@ -2338,7 +2358,9 @@ function showHistoryDetail(r) {
   const chain = el("histChain"), said = (t) => { if (chain.isConnected) chain.textContent = t; };
   if (!/^0x[0-9a-f]{64}$/i.test(String(r.txpowid || "")) || !running) said(I18N.t("Unverified"));
   else api.cmd("txpow onchain:" + r.txpowid).then(j => said(chainStatus(j)), () => said(I18N.t("Unverified, node check unavailable")));
-  const close = () => { const o = el("histDetail"); if (o) o.remove(); };
+  let back = () => {};
+  const close = () => { const o = el("histDetail"); if (o) { o.remove(); back(); } };
+  back = modalize(el("histDetail"), close, el("histClose"));
   el("histClose").onclick = close;
   el("histDetail").onclick = (e) => { if (e.target.id === "histDetail") close(); };
 }

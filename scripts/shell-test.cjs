@@ -238,3 +238,13 @@ test("Restart node, the node kind, Save & Restart, Contribute, the Parlons switc
   const restarts = (app.match(/api\.nodeRestart\(\)/g) || []).length;
   assert.equal(restarts, 4, "every nodeRestart call site is one of the guarded ones (frStart, Save & Restart, Contribute, Restart node)");
 });
+
+// ---- 0.19.258: the remaining overlays are modal: data-modal, one at a time, Escape, focus in and back ----
+test("the token detail, action sheet, prompt, payment result, transaction detail and QR scanner are modal, one at a time, close on Escape and give focus back", () => {
+  assert.ok(/function modalize\(ov, onEscape, first\) \{[\s\S]{0,200}ov\.setAttribute\("data-modal", ""\);[\s\S]{0,200}e\.key === "Escape"[\s\S]{0,200}f\.focus\(\);[\s\S]{0,120}opener\.focus\(\)/.test(app), "one helper");
+  for (const [id, once] of [["tokDetail", /if \(el\("tokDetail"\)\) return;/], ["sheetOv", /if \(el\("sheetOv"\)\) return;/], ["promptOv", /if \(el\("promptOv"\)\) \{ resolve\(null\); return; \}/],
+    ["prOv", /const was = el\("prOv"\); if \(was\) was\.remove\(\);/], ["histDetail", /if \(el\("histDetail"\)\) return;/], ["scanOv", /if \(el\("scanOv"\)\) \{ resolve\(null\); return; \}/]]) {
+    assert.ok(once.test(app), id + ": one at a time");
+    assert.ok(new RegExp("modalize\\((?:el\\(\"" + id + "\"\\)|ov)").test(app.slice(app.indexOf('id="' + id + '"'))), id + ": made modal");
+  }
+});
