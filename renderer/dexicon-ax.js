@@ -354,8 +354,22 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       ui.say(r && r.err ? I18N.t("Your offer was NOT sent: {err}", { err: mx(r.err) }) : I18N.t("Offer sent. Nothing is locked: the LP can accept, counter or reject it, and you will see it under My deals."), r && r.err ? "error" : "note");
       return r;
     },
-    /** accept / reject: axOtcDeal(ref, action). counter: axOtcDeal(ref, "counter", amount, price). */
-    async otcDeal(api, ui, ref, action, amount, price) {
+    /** reject: axOtcDeal(ref, "reject"). counter: axOtcDeal(ref, "counter", amount, price). accept (0.19.234): the terms AS
+     *  DRAWN are confirmed here (side, amount, price, the LP's id and the swap hash whole) and sent with it: axOtcDeal(ref,
+     *  "accept", amount, price, side), and the main process refuses unless the deal still says exactly that. deal = the row drawn. */
+    async otcDeal(api, ui, ref, action, amount, price, deal) {
+      if (action === "accept") {
+        const d = deal || {}, side = String(d.side || "");
+        if (!d.ref || (side !== "SELL" && side !== "BUY")) { ui.say(I18N.t("The deal was NOT accepted:") + " " + I18N.t("it is no longer on the screen. Nothing was locked."), "error"); return null; }
+        const text = I18N.t("{side} {amount} {ccy} at {price} USDT\n\nLP id:\n{lp}\n\nSwap hash:\n{hash}\n\nAccepting locks your side of the swap. If the other side never locks, yours is refunded by itself at its timelock.",
+          { side: side === "SELL" ? I18N.t("The LP sells") : I18N.t("The LP buys"), amount: d.amount, ccy: d.ccy || "", price: d.price, lp: d.peerCommsId || I18N.t("(not given)"), hash: d.hash || I18N.t("(made when your side locks)") });
+        if (!await ui.confirm(I18N.t("Accept this deal?"), text, I18N.t("Accept"))) return null;
+        amount = d.amount; price = d.price;
+        const r0 = await api.axOtcDeal(ref, "accept", amount, price, side).catch(fail);
+        if (r0 && r0.err) ui.say(I18N.t("The deal was NOT accepted:") + " " + mx(r0.err), "error");
+        else ui.say(I18N.t("Accepted. The deal now settles as an ordinary AtomiX swap: follow it in Activity. If the other side never locks, your lock is refunded by itself at its timelock."), "note");
+        return r0;
+      }
       const r = await (action === "counter" ? api.axOtcDeal(ref, "counter", amount, price) : api.axOtcDeal(ref, action)).catch(fail);
       if (r && r.err) ui.say((action === "accept" ? (I18N.t("The deal was NOT accepted:") + " ") : action === "reject" ? (I18N.t("The deal may not be rejected yet:") + " ") : (I18N.t("Your counter-offer was NOT sent:") + " ")) + mx(r.err), "error");
       else ui.say(action === "accept" ? I18N.t("Accepted. The deal now settles as an ordinary AtomiX swap: follow it in Activity. If the other side never locks, your lock is refunded by itself at its timelock.") : action === "reject" ? I18N.t("Rejected. Nothing was locked.") : I18N.t("Counter-offer sent. Nothing is locked until one side accepts."), "note");
@@ -759,6 +773,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       const t = await terms("Counter-offer", I18N.t("Your counter replaces the terms on the table. Nothing is locked until one side accepts."), I18N.t("Send counter"), d.amount, d.price, null);
       return t ? run(() => Act.otcDeal(api(), ui, ds.ref, "counter", t.amount, t.price)) : null;
     }
+    if (ds.axdeal === "accept") { const d = o.deals.find((x) => x.ref === ds.ref); return run(() => Act.otcDeal(api(), ui, ds.ref, "accept", null, null, d && Object.assign({ ccy: ccy() }, d))); }   // the row as drawn (0.19.234)
     if (ds.axdeal) return run(() => Act.otcDeal(api(), ui, ds.ref, ds.axdeal));
   }
 

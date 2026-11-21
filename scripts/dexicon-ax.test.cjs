@@ -273,13 +273,17 @@ for (const [side, amount, price] of [["SELL", "300", "1.004"], ["BUY", "120.5", 
   const was = old(`otcPropose|${side}|${amount}|${price}`);
   assert.deepEqual(rn.money(), was, "the same call as the old panel's axOtcPropose");
 });
-test("OTC deals: accept and reject are axOtcDeal(ref, action) as the old panel wrote them; a counter adds the amount and price", async () => {
+test("OTC deals: reject is axOtcDeal(ref, action) as the old panel wrote it; a counter adds the amount and price; an accept the confirmed terms", async () => {
   const was = old("otcDealCalls");
   assert.deepEqual(was, ['api.axOtcDeal(btn.dataset.axaccept, "accept")', 'api.axOtcDeal(btn.dataset.axreject, "reject")'], "the old panel's two calls, as its source had them");
-  const rn = recorder(OTC_ANSWERS());
-  await AX.Act.otcDeal(rn.api, ui(true), "d1", "accept"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "reject"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "counter", "250", "1.002");
-  assert.deepEqual(rn.log, [["axOtcDeal", ["d1", "accept"]], ["axOtcDeal", ["d1", "reject"]], ["axOtcDeal", ["d1", "counter", "250", "1.002"]]]);
-  const u = ui(true); await AX.Act.otcDeal({ axOtcDeal: async () => { throw new Error("deal not found"); } }, u, "d9", "accept");
+  // CHANGED on purpose (0.19.234): an accept is confirmed with the terms as drawn, and carries them to the main process
+  const rn = recorder(OTC_ANSWERS()), D1 = { ref: "d1", side: "SELL", amount: "250", price: "1.002", peerCommsId: "0x" + "CC".repeat(32), hash: "", ccy: "MINIMA" };
+  const asked = [], uy = Object.assign(ui(true), { confirm: async (t, x) => { asked.push(t + "\n" + x); return true; } });
+  await AX.Act.otcDeal(rn.api, uy, "d1", "accept", null, null, D1); await AX.Act.otcDeal(rn.api, ui(true), "d1", "reject"); await AX.Act.otcDeal(rn.api, ui(true), "d1", "counter", "250", "1.002");
+  assert.deepEqual(rn.log, [["axOtcDeal", ["d1", "accept", "250", "1.002", "SELL"]], ["axOtcDeal", ["d1", "reject"]], ["axOtcDeal", ["d1", "counter", "250", "1.002"]]]);
+  assert.ok(asked[0].includes("250") && asked[0].includes("1.002") && asked[0].includes(D1.peerCommsId), "the confirmation names amount, price and the LP id whole");
+  const no = recorder(OTC_ANSWERS()); await AX.Act.otcDeal(no.api, Object.assign(ui(true), { confirm: async () => false }), "d1", "accept", null, null, D1); assert.deepEqual(no.log, [], "declined: nothing sent");
+  const u = Object.assign(ui(true), { confirm: async () => true }); await AX.Act.otcDeal({ axOtcDeal: async () => { throw new Error("deal not found"); } }, u, "d9", "accept", null, null, Object.assign({}, D1, { ref: "d9" }));
   assert.deepEqual(u.said[0], ["The deal was NOT accepted: deal not found", "error"]);
 });
 test("OTC: terms are checked before anything is sent; a deal says whose move it is", () => {
@@ -691,4 +695,22 @@ test("set aside: an init in flight is disowned first (no second engine), and the
   assert.ok(text.includes("To put it back: quit the app, then rename " + F + "-legacy-keys-(the date) back to " + F), text);
   assert.equal(C.PUT_BACK(F, F + "-legacy-keys-20261120"), "To put it back: quit the app, then rename " + F + "-legacy-keys-20261120 back to " + F + " (move the new, empty file out of the way first).");
   for (const f of ["dexicon-ax.js", "dexicon-pp.js"]) { const s = fs.readFileSync(path.join(__dirname, "..", "renderer", f), "utf8"); assert.match(s, /SET_ASIDE\("(AtomiX|PandaPools)", (AX|PP)_AFTER, S\.st\.store\)/); assert.match(s, /PUT_BACK\(S\.st\.store, (r\.)?kept\)/); }
+});
+
+// 0.19.234: the main process accepts a deal only while it still says what was confirmed
+test("OTC accept: main refuses when the deal's side, amount or price differs from what the screen confirmed", async () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "atomix.js"), "utf8");
+  assert.ok(/async function otcDealAction\(ref, action, amount, price, side\)/.test(src) && /if \(d\.side !== side \|\| !same\(d\.amount, amount\) \|\| !same\(d\.price, price\)\)\s*\n\s*throw new Error\("The deal is no longer what was confirmed/.test(src));
+  assert.ok(/"mcd:axOtcDeal", \(_e, ref, action, amount, price, side\) => atomix\.otcDealAction\(ref, action, amount, price, side\)/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8")));
+});
+test("OTC accept, the glue run: a deal whose amount, price or side moved since the screen confirmed it is not accepted", async () => {
+  const atomix = require("../main/atomix"), F = fakeEngine({});
+  let deal = { ref: "r", side: "SELL", amount: "250", price: "1.002" };
+  F.ctx.AX.otc.getDeal = (ref, cb) => cb(null, deal);
+  atomix._setCtx(F.ctx);
+  for (const [a, p, side] of [["300", "1.002", "SELL"], ["250", "1.01", "SELL"], ["250", "1.002", "BUY"], [undefined, undefined, undefined]])
+    await assert.rejects(atomix.otcDealAction("r", "accept", a, p, side), /The deal is no longer what was confirmed \(it now says SELL 250 at 1\.002\)\. Nothing was accepted/, [a, p, side].join(" "));
+  assert.deepEqual(F.st.touched, [], "nothing accepted");
+  assert.deepEqual(await atomix.otcDealAction("r", "accept", "250.0", "1.0020", "SELL"), { ok: true }, "the same terms, written either way");
+  assert.deepEqual(F.st.touched, ["otc.accept"]);
 });

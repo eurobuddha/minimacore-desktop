@@ -253,7 +253,7 @@ contextBridge.exposeInMainWorld("mcd", {
   axOtcGoLive: (sell, buy) => ipcRenderer.invoke("mcd:axOtcGoLive", sell, buy),
   axOtcWithdraw: () => ipcRenderer.invoke("mcd:axOtcWithdraw"),
   axOtcPropose: (lp, side, amount, price) => ipcRenderer.invoke("mcd:axOtcPropose", lp, side, amount, price),
-  axOtcDeal: (ref, action, amount, price) => ipcRenderer.invoke("mcd:axOtcDeal", ref, action, amount, price),
+  axOtcDeal: (ref, action, amount, price, side) => ipcRenderer.invoke("mcd:axOtcDeal", ref, action, amount, price, side),   // accept carries the terms the user confirmed (0.19.234)
   axInvalidate: () => ipcRenderer.invoke("mcd:axInvalidate"),
   onAtomix: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:atomix", h); return () => ipcRenderer.removeListener("mcd:atomix", h); },
 

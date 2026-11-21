@@ -950,11 +950,20 @@ async function otcPropose(lp, side, amount, price) {
   await p(cb => A.otc.propose(lpVm, side, String(amount), String(price), e => cb(e)));
   emitter.emit("update"); return { ok: true };
 }
-async function otcDealAction(ref, action, amount, price) {
+async function otcDealAction(ref, action, amount, price, side) {
   const A = AX();
   const d = await p(cb => A.otc.getDeal(ref, cb));
   if (!d) throw new Error("deal not found");
   if ((action === "accept" || action === "counter") && haltedNow()) throw new Error(HALTED);   // a reject is never gated
+  // 0.19.234: an accept carries the terms the user confirmed on the screen; the deal must still say exactly that (a counter
+  // that arrived after the screen was drawn changed the amount or the price under the button)
+  if (action === "accept") {
+    const num = /^[0-9]{1,30}(\.[0-9]{1,30})?$/;
+    const norm = (x) => { const [i, f = ""] = String(x).split("."); const ff = f.replace(/0+$/, ""); return i.replace(/^0+(?=\d)/, "") + (ff ? "." + ff : ""); };   // exact, as decimal text
+    const same = (a, b) => num.test(String(a)) && num.test(String(b)) && norm(a) === norm(b);
+    if (d.side !== side || !same(d.amount, amount) || !same(d.price, price))
+      throw new Error("The deal is no longer what was confirmed (it now says " + d.side + " " + d.amount + " at " + d.price + "). Nothing was accepted: look at it again.");
+  }
   if (action === "accept") await p(cb => A.otc.accept(d, e => cb(e)));
   else if (action === "reject") await p(cb => A.otc.reject(d, e => cb(e)));
   else if (action === "counter") await p(cb => A.otc.counter(d, String(amount), String(price), e => cb(e)));
