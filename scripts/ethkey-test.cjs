@@ -142,16 +142,23 @@ test("the marker is written only after a Touch ID prompt succeeded, names this M
   const os = require("os"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "tid-")), file = path.join(dir, "touchid-seen");
   let can = true, boxes = 0;
   const electron = { app: { getPath: () => dir }, systemPreferences: { canPromptTouchID: () => can, promptTouchID: async () => {} }, dialog: { showMessageBox: async () => { boxes++; return { response: 1 }; } } };
-  const realPlatform = Object.getOwnPropertyDescriptor(process, "platform"); Object.defineProperty(process, "platform", { value: "darwin" });
   try {
-    const sys = forElectron(electron, () => null);
+    const HERE = "11111111-2222-3333-4444-555555555555";   // injected: the test does not depend on the host (0.18.192)
+    const sys = forElectron(electron, () => null, { platform: "darwin", machineId: () => HERE });
     assert.deepEqual(await sys.check("r", "d"), { biometric: true });
-    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).machine, machineId(), "the marker names this Mac");
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).machine, HERE, "the marker names this Mac");
     can = false;
     await assert.rejects(sys.check("r", "d"), new RegExp("delete this file: " + file.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")), "refused, naming the file's whole path");
     fs.writeFileSync(file, JSON.stringify({ machine: "another mac" }));
     assert.deepEqual(await sys.check("r", "d"), { biometric: false }, "a marker from another Mac is ignored: the confirmation window is used"); assert.equal(boxes, 1);
-  } finally { Object.defineProperty(process, "platform", realPlatform); fs.rmSync(dir, { recursive: true, force: true }); }
+    // off macOS: no Touch ID, the marker (even a copied one naming this "Mac") is ignored, the confirmation window is used
+    for (const platform of ["win32", "linux"]) {
+      fs.writeFileSync(file, JSON.stringify({ machine: HERE })); boxes = 0; can = true;
+      const off = forElectron(electron, () => null, { platform, machineId: () => "" });
+      assert.deepEqual(await off.check("r", "d"), { biometric: false }, platform + ": never refused, never Touch ID"); assert.equal(boxes, 1);
+      fs.rmSync(file); await off.check("r", "d"); assert.equal(fs.existsSync(file), false, platform + ": no marker is ever written");
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ---- 0.18.191: the Mac is named by its IOPlatformUUID ----

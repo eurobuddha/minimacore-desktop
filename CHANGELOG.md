@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.192] — off macOS the Touch ID marker is ignored
+
+- Windows and Linux have no Touch ID, so no marker is ever written there, and a marker copied from a Mac is now ignored: a Windows or Linux user always gets the confirmation window and is never refused. (The 0.18.191 rule "an id that cannot be read counts as the same Mac" made a copied marker refuse on Linux, where the id is never readable; that is how the Linux CI leg failed.) The test injects the platform and the machine id instead of depending on the host. Test: `scripts/ethkey-test.cjs`.
+
 ## [0.18.191] — the Touch ID marker names the Mac by its hardware UUID
 
 - The marker's machine identifier (0.18.186) was a hash of network-card addresses, which change when an adapter is plugged in. It is now the Mac's IOPlatformUUID, read once with `/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice` (absolute path, no shell) and cached; an identifier that cannot be read counts as the same Mac. Test: `scripts/ethkey-test.cjs`.

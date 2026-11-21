@@ -56,20 +56,26 @@ function machineId(run) {
 }
 /** Is a marker this Mac's? An id that cannot be read, on either side, counts as the same Mac. */
 function sameMac(markerId, hereId) { return !markerId || !hereId || markerId === hereId; }
-function forElectron(electron, win) {
+/** The real one: Electron's Touch ID, a main-process message box, and a marker file in userData. opts (tests only):
+ *  { platform, machineId() } in place of process.platform and the ioreg read. Off macOS there is no Touch ID, no marker
+ *  is ever written, and a marker copied from a Mac is IGNORED (0.18.192): a Windows or Linux user always gets the
+ *  confirmation window, never a refusal. */
+function forElectron(electron, win, opts) {
   const { systemPreferences, dialog, app } = electron;
+  const platform = () => (opts && opts.platform) || process.platform, mac = () => platform() === "darwin";
+  const idOf = () => (opts && opts.machineId ? opts.machineId() : machineId());
   const marker = () => path.join(app.getPath("userData"), "touchid-seen");
   const read = () => { try { return JSON.parse(fs.readFileSync(marker(), "utf8")); } catch (e) { return null; } };
   return create({
-    can: () => process.platform === "darwin" && systemPreferences.canPromptTouchID(),
+    can: () => mac() && systemPreferences.canPromptTouchID(),
     prompt: (why) => systemPreferences.promptTouchID(why),
     confirm: async (detail) => {
       const r = await dialog.showMessageBox(win && win() ? win() : undefined, { type: "warning", buttons: ["Cancel", "Show it"], defaultId: 0, cancelId: 0, noLink: true,
         message: "Show a secret?", detail: detail + "\n\nNo biometric check is available on this computer: this confirmation and the typed phrase are the only checks." });
       return r.response === 1;
     },
-    seen: () => { const m = read(); return !!(m && sameMac(m.machine, machineId())); },   // a marker from another Mac is ignored
-    markSeen: () => { const m = read(); if (!(m && sameMac(m.machine, machineId()))) fs.writeFileSync(marker(), JSON.stringify({ machine: machineId(), since: new Date().toISOString() }) + "\n", { mode: 0o600 }); },
+    seen: () => { if (!mac()) return false; const m = read(); return !!(m && sameMac(m.machine, idOf())); },   // a marker from another Mac, or off macOS, is ignored
+    markSeen: () => { if (!mac()) return; const m = read(); if (!(m && sameMac(m.machine, idOf()))) fs.writeFileSync(marker(), JSON.stringify({ machine: idOf(), since: new Date().toISOString() }) + "\n", { mode: 0o600 }); },
     where: () => marker()
   });
 }
