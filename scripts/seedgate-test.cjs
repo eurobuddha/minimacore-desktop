@@ -606,3 +606,16 @@ test("a dotted capital İ (or a long ſ) in an action or a parameter name does n
   assert.ok(!/\/\^resync\$\/i/.test(rpcSrc) && /V\.fold\(V\.paramValue\(part, "action"\) \|\| ""\) === "resync"/.test(rpcSrc), "the resync timeout reads the action folded");
   assert.ok(/const k = V\.fold\(n\)/.test(resv), "reserve reads parameter names folded");
 });
+
+// ---- 0.19.317: decryptbackup writes the decrypted wallet to output: — a file on another computer there is refused too ----
+test("decryptbackup's output on another computer is refused (the decrypted wallet would be written there); a local output runs", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), B = String.fromCharCode(92), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  for (const c of ["decryptbackup file:b.bak password:x output:" + B + B + "host" + B + "share" + B + "x", "decryptbackup file:b.bak password:x output://host/share/x"])
+    await assert.rejects(hs["mcd:cmd"](null, c), /A file on another computer/, c);
+  assert.deepEqual(sent, [], "nothing reached the node");
+  const ok = "decryptbackup file:b.bak password:x output:/Users/me/plain.bak"; await hs["mcd:cmd"](null, ok).catch(() => {});
+  assert.ok(!sent.length || sent[0] === ok, "a local output is not refused by this rule");
+});
