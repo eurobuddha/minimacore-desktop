@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.214] — Terminal confirmation: what is glued after a secret is shown
+
+- The confirmation hid an unquoted secret value up to the next space, so `vault seed:0xAB"action":"wipekeys"` showed as `vault seed:•••` and hid the action. An unquoted value now ends at a space or a quote, so the parameters glued after it are shown. Test: `scripts/cmdgate-test.cjs`.
+
 ## [0.18.213] — miniMall: a read the node did not answer is never taken as read
 
 - The gap backfill of 0.18.206 took a failed node read (refused at every depth, timed out, or an error swallowed by `.catch`) as covered: the scan tip advanced and the backfill floor dropped, so the newest part of a gap was never read. Now any failed read in a pass advances nothing and the same blocks are read on the next pass; a gap that opens while an older backfill is pending is kept (the target stays the oldest unread block); a backfill step skips coins an earlier pass already read; and the orders screen says when older orders could not be read yet, while it is catching up, or when the node serves no deeper history. Test: `scripts/shop-test.cjs`.

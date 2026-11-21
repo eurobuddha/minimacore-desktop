@@ -265,3 +265,11 @@ test("checkCommand: empty, control characters, a repeated send parameter and the
   assert.equal(await G.checkCommand("vault", io({ take: g.take, pin: async (c) => c })), "vault", "a passed gate runs, once");
   await assert.rejects(G.checkCommand("vault", io({ take: g.take })), /GATED:seed:/);
 });
+
+// ---- 0.18.214: a name glued after an unquoted secret value is shown ----
+test("masked: an unquoted secret ends at a quote, so what is glued after it is shown", () => {
+  const G = require("../main/cmdgate");
+  assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), 'vault seed:•••"action":"wipekeys"');
+  assert.equal(G.masked('vault password:hunter2"action":"passwordunlock"'), 'vault password:•••"action":"passwordunlock"');
+  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys "phrase" : ••• keyuses:5', "a quoted value is still hidden whole");
+});
