@@ -145,3 +145,19 @@ test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies 
   assert.ok(sh.indexOf("for off in 0 1 2 3 4 5 584 586") < sh.indexOf('mkdir -p "$PROFILE"'), "the ports are probed before anything is created");
   assert.ok(!/--user-data-dir=/.test(sh.replace(/^\s*#.*$/gm, "")), "the app is started without --user-data-dir: it refuses the switch and sets its folder itself (0.19.105)");
 });
+
+// ---- 0.19.280: the vendored-file manifests run in the local suites too, and Finder's .DS_Store is not a stray ----
+test("the copied-engine manifests: in the local test:atomix and test:casino, and a .DS_Store beside the files is no stray while any other file is", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts;
+  assert.match(pkg["test:atomix"], /npm run test:atomix-manifest/); assert.match(pkg["test:casino"], /npm run test:casino-manifest/);
+  const run = (script, ...args) => spawnSync(process.execPath, [path.join(ROOT, "scripts", script), ...args], { cwd: ROOT, encoding: "utf8" });
+  for (const [dir, script, args] of [["main/casino", "vendored-manifest.cjs", ["casino", "--verify"]], ["main/atomix", "vendored-manifest.cjs", ["atomix", "--verify"]], ["main/pandapools", "pandapools-parity-manifest.cjs", ["--verify"]], ["main/dexicon", "dexicon-parity-manifest.cjs", ["--verify"]]]) {
+    const ds = path.join(ROOT, dir, ".DS_Store"), stray = path.join(ROOT, dir, "stray-0-19-280.js"), had = fs.existsSync(ds);
+    try {
+      if (!had) fs.writeFileSync(ds, "Finder");
+      let r = run(script, ...args); assert.equal(r.status, 0, dir + " with a .DS_Store: " + r.stdout + r.stderr);
+      fs.writeFileSync(stray, "// not an engine file");
+      r = run(script, ...args); assert.notEqual(r.status, 0, dir + ": a stray file still fails"); assert.match(r.stdout + r.stderr, /stray-0-19-280\.js/);
+    } finally { fs.rmSync(stray, { force: true }); if (!had) fs.rmSync(ds, { force: true }); }
+  }
+});

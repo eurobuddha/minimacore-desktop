@@ -51,7 +51,7 @@ function strays() {
   (function walk(dir, rel) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) walk(path.join(dir, e.name), r); else if (!keep.has(r)) out.push(r);
+      if (e.isDirectory()) walk(path.join(dir, e.name), r); else if (!keep.has(r) && e.name !== '.DS_Store') out.push(r);   // Finder's folder file is no code (0.19.280)
     }
   })(engineDir, '');
   return out;

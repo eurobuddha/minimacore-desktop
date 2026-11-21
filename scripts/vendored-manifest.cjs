@@ -48,7 +48,7 @@ function digest() {
 const overall = (files) => sha256(Object.keys(files).sort().map(f => f + ' ' + files[f].sha256 + '\n').join(''));
 function strays() {
   const keep = new Set(FILES.concat(E.desktop, E.unloaded || [])), out = [];
-  (function walk(dir, rel) { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = rel ? rel + '/' + e.name : e.name; if (e.isDirectory()) walk(path.join(dir, e.name), r); else if (!keep.has(r)) out.push(r); } })(E.dir, '');
+  (function walk(dir, rel) { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = rel ? rel + '/' + e.name : e.name; if (e.isDirectory()) walk(path.join(dir, e.name), r); else if (!keep.has(r) && e.name !== '.DS_Store') out.push(r); } })(E.dir, '');   // Finder's folder file is no code (0.19.280)
   return out;
 }
 const git = (...a) => { try { return execFileSync('git', ['-C', E.donor, ...a], { encoding: 'utf8' }).trim(); } catch (e) { return ''; } };
