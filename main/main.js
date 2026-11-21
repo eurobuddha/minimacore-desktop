@@ -210,10 +210,13 @@ let firstRunOpen = null;
 // Once a wallet-replacing megammrsync (phrase: or file:) has been sent in this launch, the first-run seed step is closed for
 // good (0.19.201): flipping walletMode from restore back to new would otherwise show the RESTORED wallet's seed, ungated.
 const runResync = (c) => { if (restore.replacesWalletFromPhrase(c) || restore.loadsBackupFile(c)) firstRunOpen = false; return node.runResync(c); };
+// Decided from facts of THIS launch (0.19.220), not from config the window can write: the node first started on a data
+// folder with no node data (node.freshAtFirstStart), no wallet-replacing command has been sent since, and the wallet step
+// has not been finished (walletDone set true in this launch only closes it; setting it back opens nothing).
 ipcMain.handle("mcd:firstRunSeed", async () => {
   requireRunning();
-  const c = config.load(); if (firstRunOpen === null) firstRunOpen = !c.walletDone;
-  if (!firstRunOpen || c.walletDone || c.walletMode !== "new") throw new Error("The seed is shown here only while a new wallet is being made.");
+  if (firstRunOpen === null) firstRunOpen = node.freshAtFirstStart === true;
+  if (!firstRunOpen || node.freshAtFirstStart !== true) throw new Error("The seed is shown here only while a new wallet is being made.");
   const v = ((await rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "vault")) || {}).response || {};
   return String(v.phrase || v.seedphrase || v.seed || v.mnemonic || "");
 });
@@ -281,7 +284,6 @@ ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
-  if (firstRunOpen === null) firstRunOpen = !config.load().walletDone;   // as the launch found it, before this save
   const c = config.save(patch || {});
   reserveMode(c);
   if (c.walletDone) firstRunOpen = false;   // the wallet step is over for this launch

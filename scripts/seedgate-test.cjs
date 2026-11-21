@@ -154,7 +154,7 @@ test("main: the general command channel refuses vault and seedrandom without a p
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
   assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,10}?  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
-  assert.ok(/if \(!firstRunOpen \|\| c\.walletDone \|\| c\.walletMode !== "new"\) throw new Error\("The seed is shown here only while a new wallet is being made\."\);/.test(main) && /if \(c\.walletDone\) firstRunOpen = false;/.test(main), "the first-run seed: only in that step");
+  assert.ok(/if \(!firstRunOpen \|\| node\.freshAtFirstStart !== true\) throw new Error\("The seed is shown here only while a new wallet is being made\."\);/.test(main) && /if \(c\.walletDone\) firstRunOpen = false;/.test(main), "the first-run seed: only in that step (CHANGED on purpose, 0.19.220: decided from the launch's own facts)");
   assert.equal((main.match(/"vault"/g) || []).length, 1, "main asks for the vault in one place of its own (the first-run step); the reveal is in seedgate.js");
   // the window: no command of its own asks for the vault; the Terminal keeps no secret command and no secret reply
   for (const f of fs.readdirSync(path.join(__dirname, "..", "renderer")).filter(x => x.endsWith(".js"))) {
@@ -217,22 +217,26 @@ test("syscheck: refused (not phrase only) once Touch ID worked here and cannot b
 });
 
 // ---- 0.19.201: the first-run seed step cannot be reopened by flipping restore back to new after a restore was sent ----
-test("first run: once a wallet-replacing megammrsync was sent, mcd:firstRunSeed stays closed even if walletMode is set back to new", async () => {
+test("first run: decided from this launch's facts: a node first started on an empty data folder, no wallet-replacing command since; config cannot reopen it", async () => {
   const main = SRC("main/main.js");
   const snippet = main.slice(main.indexOf("let firstRunOpen = null;"), main.indexOf('ipcMain.handle("mcd:cmd"'));
-  const handlers = {}, cfg = { walletDone: false, walletMode: "restore" }, sent = [];
-  const env = { ipcMain: { handle: (n, f) => { handlers[n] = f; } }, requireRunning() {}, restore: require("../main/restore.js"),
-    config: { load: () => Object.assign({}, cfg), rpcSecret: () => "" }, node: { rpcPort: () => 0, runResync: async (c) => { sent.push(c); return { status: true }; } },
-    rpc: { rpcCall: async () => ({ status: true, response: { phrase: "THE RESTORED WALLET'S WORDS" } }) } };
-  const api = new Function(...Object.keys(env), snippet + "; return { runResync };")(...Object.values(env));
-  await api.runResync('megammrsync action:resync host:h:9001 phrase:"x y" keyuses:0');
-  cfg.walletMode = "new";
-  await assert.rejects(handlers["mcd:firstRunSeed"](), /The seed is shown here only while a new wallet is being made/, "the restored wallet's seed is not shown");
-  assert.deepEqual(sent, ['megammrsync action:resync host:h:9001 phrase:"x y" keyuses:0']);
-  // a new wallet's own first run (a chain resync only) still shows its seed
-  const h2 = {}, cfg2 = { walletDone: false, walletMode: "new" };
-  const api2 = new Function(...Object.keys(env), snippet + "; return { runResync };")(env.ipcMain && { handle: (n, f) => { h2[n] = f; } }, env.requireRunning, env.restore, { load: () => Object.assign({}, cfg2), rpcSecret: () => "" }, env.node, env.rpc);
-  await api2.runResync("megammrsync action:resync host:h:9001");
-  assert.equal(await h2["mcd:firstRunSeed"](), "THE RESTORED WALLET'S WORDS", "a new wallet's first run still shows the node's seed");
+  const make = (fresh, cfg) => { const h = {}, sent = [];
+    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, requireRunning() {}, restore: require("../main/restore.js"), config: { load: () => Object.assign({}, cfg), rpcSecret: () => "" },
+      node: { freshAtFirstStart: fresh, rpcPort: () => 0, runResync: async (c) => { sent.push(c); return { status: true }; } }, rpc: { rpcCall: async () => ({ status: true, response: { phrase: "THE NODE'S WORDS" } }) } };
+    const api = new Function(...Object.keys(env), snippet + "; return { runResync };")(...Object.values(env)); return { h, api, sent }; };
+  // 0.19.201: a wallet-replacing megammrsync closes it, whatever the config then says
+  let x = make(true, { walletDone: false, walletMode: "restore" });
+  await x.api.runResync('megammrsync action:resync host:h:9001 phrase:"x y" keyuses:0');
+  await assert.rejects(x.h["mcd:firstRunSeed"](), /The seed is shown here only while a new wallet is being made/, "the restored wallet's seed is not shown");
+  // 0.19.220: an existing wallet's launch (the folder held node data) never shows it, even with walletDone false / walletMode new written by the window
+  x = make(false, { walletDone: false, walletMode: "new" });
+  await assert.rejects(x.h["mcd:firstRunSeed"](), /only while a new wallet is being made/);
+  // a new wallet's own first run (a chain resync only) still shows its seed, whatever walletMode says
+  x = make(true, { walletDone: false, walletMode: "restore" });
+  await x.api.runResync("megammrsync action:resync host:h:9001");
+  assert.equal(await x.h["mcd:firstRunSeed"](), "THE NODE'S WORDS");
   const rest = main.slice(main.indexOf("const runResync =")); assert.ok(!/node\.runResync\(/.test(rest.slice(rest.indexOf("\n"))), "every resync of the window goes through runResync");
+  const nm = SRC("main/node-manager.js");
+  assert.ok(nm.indexOf("this.freshAtFirstStart = !names.some(") > 0 && nm.indexOf("this.freshAtFirstStart = !names.some(") < nm.indexOf("keymode.markBlockFolder(this.dataDir())"), "read before the folder is marked or the node touches it");
 });
+

@@ -460,6 +460,9 @@ class NodeManager extends EventEmitter {
     const args = this.buildArgs();
     const argvWhy = keymode.argvProblem(args, config.load().keyMode, this.dataDir());
     if (argvWhy) { this.lastError = argvWhy; this.log("[app] node NOT started: " + argvWhy); this.setState("error"); return; }
+    // A fact of THIS launch, for the first-run seed step (main.js mcd:firstRunSeed, 0.19.220): did the data folder hold no
+    // node data (nothing but a key-mode marker) when this launch first started the node? Read once, before java touches it.
+    if (this.freshAtFirstStart == null) { const d = this.dataDir(); let names = []; try { names = fs.readdirSync(d); } catch (e) { names = []; } this.freshAtFirstStart = !names.some(n => !n.startsWith(".") && n !== keymode.MARKER); }
     // A block wallet's folder always says so before the node touches it: a folder changed to an empty one had no
     // marker, was read as classic on the next start (locked out), and a lost config would have started it classic.
     if (config.load().keyMode === "block") {
