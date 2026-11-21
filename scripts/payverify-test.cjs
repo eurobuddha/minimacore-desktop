@@ -109,7 +109,7 @@ test("asked when first shown, then on new blocks until found, within a limit: no
   const asked = [];
   const run = async (cmd) => { asked.push(cmd); return nodeWith(world).run(cmd); };
   let changes = 0;
-  const v = V.create({ run, onChange: () => changes++ }), p = { txid: TXID, tokenid: MXUSD, amount: "12.5" };
+  const v = V.create({ run, onChange: () => changes++ }), p = { txid: TXID, tokenid: MXUSD, amount: "12.5", msgid: "m1" };   // msgid: 0.19.238
   assert.equal(await v.ask(p), "unverified"); assert.equal(asked.length, 1, "first shown: looked for once (not on chain yet)");
   for (let i = 0; i < 5; i++) assert.equal(await v.ask(p), "unverified");
   assert.equal(asked.length, 1, "shown again and again (every redraw): the node is not asked again");
@@ -119,11 +119,11 @@ test("asked when first shown, then on new blocks until found, within a limit: no
   assert.equal(await v.ask(p), "received");
   const n = asked.length; await v.onBlock(); await v.ask(p); assert.equal(asked.length, n, "found: never asked again");
   // a payment that never arrives is given up on
-  const never = { txid: "0x00" + "77".repeat(31), tokenid: MXUSD, amount: "1" }; asked.length = 0;
+  const never = { txid: "0x00" + "77".repeat(31), tokenid: MXUSD, amount: "1", msgid: "m2" }; asked.length = 0;
   await v.ask(never); for (let i = 0; i < 50; i++) await v.onBlock();
   assert.equal(asked.length, V.MAX_TRIES, "one read per try, " + V.MAX_TRIES + " tries, then no more"); assert.equal(await v.ask(never), "unverified");
   // many claims: only so many are followed
-  for (let i = 0; i < V.MAX_TRACKED + 50; i++) await v.ask({ txid: "0x" + i.toString(16).padStart(64, "0"), tokenid: MXUSD, amount: "1" });
+  for (let i = 0; i < V.MAX_TRACKED + 50; i++) await v.ask({ txid: "0x" + i.toString(16).padStart(64, "0"), tokenid: MXUSD, amount: "1", msgid: "n" + i });
   assert.equal(v.size(), V.MAX_TRACKED);
   v.reset(); assert.equal(v.size(), 0); world.onchain = [];
   assert.equal(await v.ask(p), "unverified", "another node start: nothing is carried over");
@@ -147,11 +147,11 @@ const text = (html) => html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").rep
 test("Mail: a payment message with nothing behind it, or in a token NAMED MxUSD, never reads as MxUSD received", async () => {
   const world = nodeWith({ outputs: [out(MINE, MXUSD, "12.5")] });
   const v = V.create({ run: world.run });
-  const mail = mailPanel({ payCheck: (txid, tokenid, amount) => v.ask({ txid, tokenid, amount }) });
+  const mail = mailPanel({ payCheck: (txid, tokenid, amount, msgid) => v.ask({ txid, tokenid, amount, msgid }) });
   const from = "0x" + "C7".repeat(32);
-  const fake = { type: "payment", incoming: true, frompublickey: from, fromname: "Mallory", amount: "5000", tokenid: FAKE, tokenname: "MxUSD", txpowid: "0x" + "99".repeat(32), date: 1 };
-  const empty = Object.assign({}, fake, { tokenid: MXUSD, txpowid: "0x" + "98".repeat(32) });           // real id, no payment behind it
-  const real = Object.assign({}, fake, { fromname: "Mirela", amount: "12.5", tokenid: MXUSD, txpowid: TXID });
+  const fake = { type: "payment", incoming: true, frompublickey: from, fromname: "Mallory", amount: "5000", tokenid: FAKE, tokenname: "MxUSD", txpowid: "0x" + "99".repeat(32), date: 1, randomid: "r-fake" };
+  const empty = Object.assign({}, fake, { tokenid: MXUSD, txpowid: "0x" + "98".repeat(32), randomid: "r-empty" });           // real id, no payment behind it
+  const real = Object.assign({}, fake, { fromname: "Mirela", amount: "12.5", tokenid: MXUSD, txpowid: TXID, randomid: "r-real" });
   let t = text(mail.bubble(fake, false, false));
   assert.ok(!/MxUSD/.test(t), "the sender's name for the token is not shown: " + t);
   assert.ok(t.includes("5000 another token") && t.includes("Token id: " + FAKE) && /says they sent you/.test(t) && /Not verified/.test(t), t);
@@ -171,10 +171,10 @@ test("Mail: a payment message with nothing behind it, or in a token NAMED MxUSD,
 test("Chat: the same rule", async () => {
   const world = nodeWith({ outputs: [out(MINE, "0x00", "3")] });
   const v = V.create({ run: world.run });
-  const chat = chatPanel({ payCheck: (txid, tokenid, amount) => v.ask({ txid, tokenid, amount }) });
-  const fake = { state: "payment", incoming: true, amt: "5000", tok: FAKE, tokname: "MxUSD", txid: "0x" + "99".repeat(32) };
-  const old = { state: "payment", incoming: true, amt: "7", tokname: "MxUSD", txid: "0x" + "97".repeat(32) };   // stored before 0.19.7: no token id kept
-  const real = { state: "payment", incoming: true, amt: "3", tok: "0x00", tokname: "Minima", txid: TXID };
+  const chat = chatPanel({ payCheck: (txid, tokenid, amount, msgid) => v.ask({ txid, tokenid, amount, msgid }) });
+  const fake = { state: "payment", incoming: true, amt: "5000", tok: FAKE, tokname: "MxUSD", txid: "0x" + "99".repeat(32), msgid: "c-fake" };
+  const old = { state: "payment", incoming: true, amt: "7", tokname: "MxUSD", txid: "0x" + "97".repeat(32), msgid: "c-old" };   // stored before 0.19.7: no token id kept
+  const real = { state: "payment", incoming: true, amt: "3", tok: "0x00", tokname: "Minima", txid: TXID, msgid: "c-real" };
   let t = text(chat.payHtml(fake));
   assert.ok(!/MxUSD/.test(t) && t.includes("Payment notice 5000 another token") && t.includes("Token id: " + FAKE) && /Not verified/.test(t), t);
   assert.equal(chat.preview(fake), "💸 Payment notice, not verified: 5000 of another token");
@@ -186,4 +186,20 @@ test("Chat: the same rule", async () => {
   t = text(chat.payHtml(real)); assert.ok(/Payment received 3 MINIMA/.test(t) && /Received: this node found/.test(t), t);
   assert.ok(/Payment notice/.test(text(chat.payHtml(fake))));
   assert.ok(/Payment sent 2 MxUSD/.test(text(chat.payHtml({ state: "payment", incoming: false, amt: "2", tok: MXUSD, txid: TXID }))));
+});
+
+// 0.19.238: one real payment repeated in two messages is "received" for the first only; the claim survives a restart
+test("a txid verifies only the first message that claims it; the claims are kept across a restart", async () => {
+  const world = { outputs: [out(MINE, MXUSD, "12.5")], onchain: [TXID] }, store = new Map();
+  const claims = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
+  const v = V.create({ run: nodeWith(world).run, claims });
+  assert.equal(await v.ask({ txid: TXID, tokenid: MXUSD, amount: "12.5", msgid: "first" }), "received");
+  assert.equal(await v.ask({ txid: TXID, tokenid: MXUSD, amount: "12.5", msgid: "second" }), "unverified", "the same payment claimed again");
+  assert.equal(await v.ask({ txid: TXID.toUpperCase().replace("0X", "0x"), tokenid: MXUSD, amount: "12.5", msgid: "third" }), "unverified", "in any letter case");
+  const after = V.create({ run: nodeWith(world).run, claims });   // a restart, the same saved claims
+  assert.equal(await after.ask({ txid: TXID, tokenid: MXUSD, amount: "12.5", msgid: "second" }), "unverified");
+  assert.equal(await after.ask({ txid: TXID, tokenid: MXUSD, amount: "12.5", msgid: "first" }), "received");
+  assert.equal(await after.ask({ txid: TXID, tokenid: MXUSD, amount: "12.5" }), "unverified", "no message id: never verified");
+  const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(main.includes('payverify.ask({ txid, tokenid, amount, msgid })') && main.includes("claims: payClaims"), "main passes the message id and the saved claims");
 });

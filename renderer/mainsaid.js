@@ -303,6 +303,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["VESTR_PASSWORD_SEMI", I18N.N_("The wallet password can't contain ; (the node would read what follows as a second command). Nothing was sent.")],
     // ---- Chat (main/chat.js, 0.19.196): a path a node command cannot carry, said before anything is sent ----
     ["CHAT_PATH", I18N.N_("This file's name or folder holds a ; or a \" , which a node command cannot carry. Rename the file or move it to another folder, then try again.")],
+    ["CHAT_PAY_MAYBE", I18N.N_("The node did not answer, so the payment may have gone. Check your balance and History before you send it again.")],
+    ["CHAT_PAY_ADDR_UNCHECKED", I18N.N_("The recipient's pay address could not be checked by the node, so nothing was sent.")],
     ["CHAT_DATA_FOLDER", I18N.N_("The app's data folder name holds a character a node command cannot carry.")],
     ["VESTR_END", I18N.N_("End must be after start")],
     ["VESTR_BENEFICIARY_BAD", I18N.N_("Invalid beneficiary address")],

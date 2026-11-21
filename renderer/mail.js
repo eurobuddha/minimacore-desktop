@@ -133,7 +133,7 @@
   // A payment message is the sender's claim. PAID holds what this node has answered for it ("received" once found on
   // chain paying this wallet); everything else is shown as not verified. Asked when a thread is drawn (verifyShown).
   const PAID = new Map();
-  function payKey(m) { return g.PayLabel.key(m.txpowid, m.tokenid, m.amount); }
+  function payKey(m) { return g.PayLabel.key(m.txpowid, m.tokenid, m.amount) + "|" + (m.randomid || ""); }   // per message (0.19.238)
   function payStatus(m) { return PAID.get(payKey(m)) || "unverified"; }
   function payInner(m) {
     var d = g.PayLabel.describe({ incoming: !!m.incoming, who: nameFor(m.frompublickey, m), amount: D.TOK.tidyAmount(m.amount || ""), tokenid: m.tokenid, status: payStatus(m) });
@@ -149,7 +149,7 @@
     for (const m of msgs || []) {
       if (m.type !== "payment" || !m.incoming || payStatus(m) === "received") continue;
       var s = "unverified";
-      try { s = await D.api.payCheck(m.txpowid || "", m.tokenid || "", m.amount || ""); } catch (e) { /* stays not verified */ }
+      try { s = await D.api.payCheck(m.txpowid || "", m.tokenid || "", m.amount || "", m.randomid || ""); } catch (e) { /* stays not verified */ }
       if (s === "received") { PAID.set(payKey(m), s); changed = true; }
     }
     if (changed && redraw) redraw();

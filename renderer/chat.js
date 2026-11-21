@@ -328,7 +328,7 @@
 
   // A payment message is the sender's claim (renderer/paylabel.js). PAID: what this node answered for it.
   const PAID = new Map();
-  const payKey = (m) => PayLabel.key(m.txid, m.tok, m.amt);
+  const payKey = (m) => PayLabel.key(m.txid, m.tok, m.amt) + "|" + (m.msgid || "");   // per message (0.19.238)
   const payStatus = (m) => PAID.get(payKey(m)) || "unverified";
   function payHtml(m) {
     const d = PayLabel.describe({ incoming: !!m.incoming, who: "", amount: m.amt || "", tokenid: m.tok, status: payStatus(m) });
@@ -342,7 +342,7 @@
   async function verifyPayment(m, redraw) {
     if (!m.incoming || payStatus(m) === "received") return;
     let s = "unverified";
-    try { s = await D.api.payCheck(m.txid || "", m.tok || "", m.amt || ""); } catch (e) { /* stays not verified */ }
+    try { s = await D.api.payCheck(m.txid || "", m.tok || "", m.amt || "", m.msgid || ""); } catch (e) { /* stays not verified */ }
     if (s === "received") { PAID.set(payKey(m), s); redraw(); }
   }
   function bubbleFor(m) {
@@ -699,8 +699,14 @@
     const label = token === "mxusd" ? "MxUSD" : "Minima";
     const amt = await D.showPrompt(I18N.t("Send {label} to {addr}", { label: label, addr: addr }), "", "amount", { message: I18N.t("This sends real {label} from this node's wallet.", { label: label }) });
     if (!amt) return;
-    try { await D.api.chatSendPayment(sel, amt.trim(), token); D.toast(I18N.t("{label} payment sent", { label: label }), "ok"); }
-    catch (e) { showFailure(I18N.t("Payment failed: {e}", { e: errText(e) })); }
+    try {
+      const r = await D.api.chatSendPayment(sel, amt.trim(), token);
+      D.toast(r && r.receiptFailed ? I18N.t("{label} payment sent; the chat message about it could not be sent.", { label: label }) : I18N.t("{label} payment sent", { label: label }), r && r.receiptFailed ? "warn" : "ok");
+    } catch (e) {
+      const raw = ("" + ((e && e.message) || e || "")).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+      // "may have gone" is never called a failure (0.19.238): a second payment would pay twice
+      showFailure(typeof MainSaid !== "undefined" && MainSaid.has(raw, "CHAT_PAY_MAYBE") ? errText(e) : I18N.t("Payment failed: {e}", { e: errText(e) }));
+    }
     await refreshThreads(); renderContacts(); await renderMsgs(true);
   }
 

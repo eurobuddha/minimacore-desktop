@@ -21,6 +21,7 @@ const config = require("./config");
 const node = require("./node-manager");
 const { rpcCall } = require("./rpc"), { oneCommand } = require("./cmdverb");
 const store = require("./chat-store");
+const { pinMinimaSend } = require("./sendpin");
 const schema = require("./chatschema");
 const chatfiles = require("./chatfiles");
 const voice = require("./chatvoice");
@@ -417,13 +418,24 @@ async function sendPayment(to, amount, token) {
   if (!tk) throw new Error("Unknown currency");
   const addr = payAddrOf(to);
   if (!addr) { await requestPayAddr(to); throw new Error("No pay address yet — requested it over chat, try again shortly"); }
-  if (!/^[0-9]+(\.[0-9]+)?$/.test("" + amount)) throw new Error("Invalid amount");
+  // 0.19.238, as mail.pay: a plain amount above zero; the node checks the address before anything moves; a MINIMA payment is
+  // pinned off beacon dust; no answer is "may have gone" (never a clean failure that invites a second payment); a payment that
+  // went but whose chat message failed says so (receiptFailed), never "failed"
+  if (!/^[0-9]+(\.[0-9]+)?$/.test("" + amount) || !/[1-9]/.test("" + amount)) throw new Error("Invalid amount");
+  if (!/^(0x[0-9A-Fa-f]{2,128}|Mx[0-9A-Za-z]{20,200})$/.test(String(addr))) throw new Error("Invalid pay address.");
+  let chk; try { chk = await nodeCmd("checkaddress address:" + addr); } catch (e) { chk = null; }
+  if (!chk) throw new Error("The recipient's pay address could not be checked by the node, so nothing was sent.");
   const cmd = "send address:" + addr + " amount:" + amount + (tk.id === "0x00" ? "" : " tokenid:" + tk.id);
-  const txp = await nodeCmd(cmd);
-  const txid = (txp && txp.txpowid) ? "" + txp.txpowid : "";
+  let txp;
+  try { txp = await runner(oneCommand(await pinMinimaSend((c, o) => runner(oneCommand(c), o), cmd, { minCoinage: 3 }))); }
+  catch (e) { const amb = new Error("The node did not answer, so the payment may have gone. Check your balance and History before you send it again."); amb.ambiguous = true; throw amb; }
+  const j = typeof txp === "string" ? (() => { try { return JSON.parse(txp); } catch (e) { return null; } })() : txp;
+  if (!j || (j.status !== true && j.pending !== true)) throw new Error((j && j.error) || "payment failed");
+  const txid = (j.response && j.response.txpowid) ? "" + j.response.txpowid : "";
   const fields = { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, addr };
   const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "", fields);
-  return sendTyped(to, payload, { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, body: "" });
+  try { return await sendTyped(to, payload, { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, body: "" }); }
+  catch (e) { return { state: "payment", amt: "" + amount, tok: tk.id, tokname: tk.name, txid, receiptFailed: true }; }   // the payment is committed: never reported as failed
 }
 
 /** Shared write-before-send for typed messages. */

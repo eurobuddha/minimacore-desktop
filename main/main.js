@@ -692,9 +692,15 @@ ipcMain.handle("mcd:mailImportBackup", async (_e, passphrase) => {
 mail.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:mail"); });
 // A payment message is its sender's claim (0.19.7). The screens ask here whether this node has found it; what is not
 // found is looked for again on each new block, within main/payverify.js's limits. Reads only, never the signing queue.
-const payverify = require("./payverify").create({ run: (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c),
+// a txid belongs to the first message that claimed it, kept across restarts (0.19.238): payclaims.json in the data folder
+const payClaims = (() => {
+  const file = () => path.join(app.getPath("userData"), "payclaims.json"); let m = null;
+  const load = () => { if (m) return m; m = Object.create(null); try { const j = JSON.parse(fs.readFileSync(file(), "utf8")); if (j && typeof j === "object") Object.assign(m, j); } catch (e) {} return m; };
+  return { get: (k) => (Object.hasOwn(load(), k) ? m[k] : undefined), set: (k, v) => { load()[k] = v; const keys = Object.keys(m); if (keys.length > 20000) delete m[keys[0]]; try { const t = file() + ".tmp"; fs.writeFileSync(t, JSON.stringify(m)); fs.renameSync(t, file()); } catch (e) {} } };
+})();
+const payverify = require("./payverify").create({ run: (c) => rpc.rpcRead(node.rpcPort(), config.rpcSecret(), c), claims: payClaims,
   onChange: () => { mail.emitter.emit("update"); chat.emitter.emit("update"); } });
-ipcMain.handle("mcd:payCheck", (_e, txid, tokenid, amount) => node.state === "running" ? payverify.ask({ txid, tokenid, amount }) : "unverified");
+ipcMain.handle("mcd:payCheck", (_e, txid, tokenid, amount, msgid) => node.state === "running" ? payverify.ask({ txid, tokenid, amount, msgid }) : "unverified");
 let payBlock = 0;
 node.on("status", (s) => {
   if (s.state !== "running") { if (s.state === "starting") { payverify.reset(); payBlock = 0; } return; }

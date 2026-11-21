@@ -749,3 +749,29 @@ test("0.19.233: delivered is accepted only for an outgoing message to the sender
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "chat.js"), "utf8");
   assert.ok(src.includes('if (typeof m.ref === "string" && m.ref.length > 600) m.ref = "";'), "a long ref is dropped at decode");
 });
+
+// 0.19.238: a chat payment as mail.pay: checked address, an amount above zero, pinned, no answer = "may have gone", receipt failure is not a failure
+test("0.19.238: Chat payments: the node checks the address first; 0 is refused; no answer is 'may have gone'; a failed chat message after the payment returns receiptFailed", async () => {
+  const chat = loadChat(), store = require("../main/chat-store");
+  const PEER = "0x" + "D4".repeat(32), ADDR = "0x" + "E5".repeat(32);
+  store.metaSet("payaddr:" + PEER, ADDR);
+  let mode = "ok"; const sent = [];
+  chat._setRunner(async (c) => {
+    sent.push(c);
+    if (c.startsWith("checkaddress")) { if (mode === "badaddr") throw new Error("busy"); return { status: true, response: { simple: false } }; }
+    if (c.startsWith("coins ")) return { status: true, response: [] };
+    if (c.startsWith("send ")) { if (mode === "timeout") throw new Error("RPC timeout"); return { status: true, response: { txpowid: "0x" + "AA".repeat(32) } }; }
+    if (c.startsWith("keets action:send")) { if (mode === "receipt") throw new Error("keets down"); return { status: true, response: { delivered: "direct" } }; }
+    return { status: true, response: {} };
+  });
+  await assert.rejects(chat.sendPayment(PEER, "0", "minima"), /Invalid amount/); await assert.rejects(chat.sendPayment(PEER, "0.000", "minima"), /Invalid amount/);
+  assert.deepEqual(sent.filter(c => c.startsWith("send ")), [], "nothing sent for a zero amount");
+  mode = "badaddr"; sent.length = 0;
+  await assert.rejects(chat.sendPayment(PEER, "1", "minima"), /could not be checked by the node, so nothing was sent/); assert.deepEqual(sent.filter(c => c.startsWith("send ")), []);
+  mode = "timeout";
+  await assert.rejects(chat.sendPayment(PEER, "1", "minima"), (e) => e.ambiguous === true && /may have gone/.test(e.message));
+  mode = "receipt";
+  const r = await chat.sendPayment(PEER, "1", "minima"); assert.equal(r.receiptFailed, true, "the payment went: never a failure"); assert.equal(r.txid, "0x" + "AA".repeat(32));
+  mode = "ok"; sent.length = 0;
+  await chat.sendPayment(PEER, "2", "minima"); assert.ok(sent.indexOf(sent.find(c => c.startsWith("checkaddress"))) < sent.indexOf(sent.find(c => c.startsWith("send "))), "checked before it is sent");
+});

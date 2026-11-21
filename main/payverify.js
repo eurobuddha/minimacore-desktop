@@ -44,8 +44,13 @@ async function check(p, run) {
     return sum === want ? "received" : "unverified";
   } catch (e) { return "unverified"; }
 }
-function create({ run, onChange }) {
+/**
+ * claims (0.19.238): a payment's txid belongs to the FIRST message that asked about it (persisted: { get(txid), set(txid, id) }).
+ * A second message naming the same txid (a peer repeating one real payment) is never "received".
+ */
+function create({ run, onChange, claims }) {
   const known = new Map();   // key -> { p, status, tries }
+  const owners = claims || (() => { const m = new Map(); return { get: (k) => m.get(k), set: (k, v) => m.set(k, v) }; })();
   let chain = Promise.resolve();
   const queued = (fn) => { const r = chain.then(fn); chain = r.catch(() => {}); return r; };   // one read at a time
   async function attempt(e) {
@@ -59,6 +64,11 @@ function create({ run, onChange }) {
   return {
     /** "received" | "unverified". The first question about a payment looks for it; later ones answer from what is known. */
     ask(p) {
+      const tx = String((p && p.txid) || "").toLowerCase(), id = String((p && p.msgid) || "");
+      if (!tx || !id) return Promise.resolve("unverified");
+      const owner = owners.get(tx);
+      if (owner && owner !== id) return Promise.resolve("unverified");   // claimed by an earlier message
+      if (!owner) owners.set(tx, id);
       const k = paylabel.key(p && p.txid, p && p.tokenid, p && p.amount);
       let e = known.get(k);
       if (e) return Promise.resolve(e.status);
