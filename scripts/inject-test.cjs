@@ -61,3 +61,18 @@ test("Mail and miniMall send every command through oneCommand", () => {
   for (const f of ["main/mail.js", "main/shop.js"]) assert.ok(/async function nodeCmd\(cmd\) \{ return runner\(oneCommand\(cmd\)\); \}/.test(rd(f)), f);
   assert.ok(/const r = await runner\(oneCommand\(cmd\)\);/.test(rd("main/chat.js")));
 });
+
+// ---- 0.19.195: the screens that put typed text into a node command refuse ";" (as released 0.18.178) ----
+test("the Web Wallet login, every restore and resync screen and the backup password refuse ';' before a command is built", () => {
+  const app = require("./i18n-plain.cjs").plain(rd("renderer/app.js"));
+  const ww = app.slice(app.indexOf("function renderWwUnlock("), app.indexOf("wwAddr = await api.wwDerive(seed);"));
+  const re = /if \((\/[^/]+\/)\.test\(seed\)\) \{ toast\("The key has a \\", \\\\, ; or line break the command can't carry\. Enter it as one clean line\.", "err"\)/.exec(ww);
+  assert.ok(re, "the Web Wallet login checks the phrase before deriving");
+  const rx = eval(re[1]); for (const s of ["apple; vault", 'a"b', "a\\b", "a\nb"]) assert.ok(rx.test(s), JSON.stringify(s)); assert.ok(!rx.test("apple banana cherry"));
+  // resync / restore by phrase: one builder (resyncCommand); backup password: letters and numbers only (backupPasswordProblem)
+  const raw = rd("renderer/app.js");
+  assert.ok(raw.includes('if (phrase.includes(";")) return { error: t("This seed contains a semicolon (;)'), "the phrase restore refuses ;");
+  assert.ok(raw.includes('if (!/^[A-Za-z0-9]+$/.test(pw)) return t("Letters and numbers only");'), "the backup password is letters and numbers only");
+  const r = require("../main/restore.js").restoreFileCommand({ host: "h:9001", file: "a;b", password: "" }); assert.match(r.error, /semicolon/);
+  assert.match(require("../main/restore.js").restoreFileCommand({ host: "h:9001", file: "a", password: "p;q" }).error, /semicolon/);
+});

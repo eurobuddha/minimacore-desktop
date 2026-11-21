@@ -1149,7 +1149,7 @@ function renderWwUnlock(body) {
     // lowercasing/collapsing would derive a DIFFERENT wallet. Mirror the restore flow's guard.
     const seed = String(el("wwSeedIn").value || "").trim();
     if (!seed) { toast(t("Enter your secret key."), "err"); return; }
-    if (/["\\\n\r\t]/.test(seed)) { toast(t("The key has a \", \\ or line break the command can't carry. Enter it as one clean line."), "err"); return; }
+    if (/["\\;\n\r\t]/.test(seed)) { toast(t("The key has a \", \\, ; or line break the command can't carry. Enter it as one clean line."), "err"); return; }   // ; started a second node command (0.19.195, as released 0.18.178)
     const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = t("Logging in…");
     try {
       wwAddr = await api.wwDerive(seed);
