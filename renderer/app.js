@@ -317,6 +317,7 @@ async function resolveSeed(words) {
 }
 // New Wallet or a restore: save the config, then start the node. restore = { seed, keyuses, host } or null.
 async function frStart(restore) {
+  if (running && !await nodeStopOk()) return;   // a running node is stopped by this start (0.19.257)
   const solo = CFG.network === "solo";
   // The key mode is recorded ONCE, here, before the node first starts for this wallet. A recorded mode is kept;
   // otherwise a restore uses the mode its words were used in, and a new wallet is block unless the node cannot
@@ -496,6 +497,7 @@ function renderParams(host, firstRun, done) {
   if ($("pSaveRestart")) $("pSaveRestart").onclick = async () => {
     const patch = collect(); if (!patch) return;
     if (!await showConfirm(t("Restart node?"), t("The node will shut down cleanly and start again with the new parameters. This takes a minute."), t("Restart"))) return;
+    if (!await nodeStopOk()) return;
     try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
     toast(t("Restarting the node…")); leave();
     waitingForNode = true;
@@ -1005,12 +1007,26 @@ async function menuAction(act) {
   else if (act === "shutdown") {
     // What is in flight, from the engines' own records, said by the main process (main/inflight.js): the same
     // source and the same words as the Quit warning. A read that fails is said, not shown as idle.
-    const w = await Promise.race([api.inFlight("shutdown").catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
-      || { title: t("Shut down the node?"), message: t("Could not be checked: whether a swap, a pool operation or an Exchange trade is in flight. Look at the Dexicon tab before you shut down.\n\nThe node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again.") };
+    const w = await inFlightWarning();
     if (!await showConfirm(w.title, w.message, t("Shut down"), true)) return;
     toast(t("Shutting down the node…"));
     try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
   }
+}
+
+/** What is in flight, from the engines' own records, said by the main process (main/inflight.js): the same source and words
+ *  as the Quit warning. A read that fails is said, not shown as idle. → { title, message, any }. */
+async function inFlightWarning() {
+  const w = await Promise.race([api.inFlight("shutdown").catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))]);
+  return w || { title: t("Shut down the node?"), message: t("Could not be checked: whether a swap, a pool operation or an Exchange trade is in flight. Look at the Dexicon tab before you shut down.\n\nThe node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again."), any: true };
+}
+/** Every path that stops a running node (Restart node, the node kind, Save & Restart, Contribute, the Parlons switch, a
+ *  new start from the first-run screen) shows Shutdown's in-flight warning first when anything is in flight or could not
+ *  be checked (0.19.257). → true: go on. */
+async function nodeStopOk() {
+  if (!running) return true;
+  const w = await inFlightWarning();
+  return !w.any || showConfirm(w.title, w.message, t("Restart anyway"), true);
 }
 
 // ---- Language: the phone's chooser (Language.choose): the four languages, each named in itself, the current one marked.
@@ -3014,6 +3030,7 @@ async function renderSettings() {
     const want = (host.querySelector('input[name="setKind"]:checked') || {}).value === "minima" ? "minima" : "parlons";
     const heapMb = Math.max(0, parseInt(el("setHeap").value, 10) || 0);
     const stat = el("setKindStatus");
+    if (!await nodeStopOk()) return;
     el("setKindApply").disabled = true; stat.textContent = t("Restarting the node…");
     try {
       CFG = await api.saveConfig({ heapMb });
@@ -3278,13 +3295,14 @@ function renderNode(s) {
       : t("Stop contributing?\n\nYour node goes back to a light wallet (outbound connections only), the router port is closed, and the node restarts now.");
     if (!await showConfirm(turnOn ? t("Contribute to the network?") : t("Stop contributing?"),
         msg.slice(msg.indexOf("\n\n") + 2), turnOn ? t("Contribute") : t("Stop"), !turnOn)) return;
+    if (!await nodeStopOk()) return;
     const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     CFG = await api.saveConfig({ contribute: turnOn, params });
     toast(turnOn ? t("Contributing. Restarting node…") : t("Back to light wallet. Restarting node…"));
     api.nodeRestart();
   };
   el("nReconfig").onclick = () => selectTab("params");
-  el("nRestart").onclick = () => { toast(t("Restarting node…")); api.nodeRestart(); };
+  el("nRestart").onclick = async () => { if (!await nodeStopOk()) return; toast(t("Restarting node…")); api.nodeRestart(); };
   const nReclaim = el("nReclaim");
   if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = t("Starting…"); try { await api.nodeReclaim(); toast(t("Node restarting…"), "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
   // The in-app jar updater is disabled — the node jar ships with the app. See main/updater.js.
@@ -4186,6 +4204,7 @@ async function renderParlons() {
     if (b) b.onclick = async () => {
       if (!await showConfirm(t("Switch this node to the Parlons Node?"),
           t("Same chain, same wallet, same data folder — plus your Parlons account. The node restarts now."), t("Switch"))) return;
+      if (!await nodeStopOk()) return;
       b.disabled = true; b.textContent = t("Switching…");
       try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast(t("Parlons Node starting…"), "ok"); renderParlons(); }
       catch (e) { toast(ipcError(e), "err"); b.disabled = false; b.textContent = t("Switch to the Parlons Node"); }
