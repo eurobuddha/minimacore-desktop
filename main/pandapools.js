@@ -26,8 +26,8 @@ const { fetchJson } = require("./netfetch");
 const SCAN_EVERY_MS = 12000;          // poll cadence; work only runs when the tip block advances
 
 // ---- external market price (MEXC MINIMA/USDT) — the create-flow price anchor (parity with the MDS dapp) ----
-// PandaPools only creates MINIMA / USDT pools (the pair with a live market feed), so a pool always opens at the
-// true rate. USDT_TOKENID is the on-chain mxUSDT id; ONLY this token is poolable (no mispriceable pools).
+// PandaPools only creates MINIMA / MxUSD pools (MxUSD is the token with a live market feed, MEXC's MINIMA/USDT), so a pool always
+// opens at the true rate. USDT_TOKENID is the on-chain MxUSD id; ONLY this token is poolable (no mispriceable pools).
 const USDT_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
 const MKT_DEPTH = "https://api.mexc.com/api/v3/depth?symbol=MINIMAUSDT&limit=20";
 const MKT_BOOK = "https://api.mexc.com/api/v3/ticker/bookTicker?symbol=MINIMAUSDT";
@@ -299,7 +299,11 @@ function myPools() {
     })).then(resolve,reject);
   }));
 }
-function activityLabels(active) { active = active || ctx; var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "USDT"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = active.PP.tokenLabel(p); }); return labels; }
+/** The name the desktop gives a pool's token (0.18.241, as Pandamonium Desktop's labelById): the Minima dollar token is MxUSD by its id,
+ *  whatever name its creator wrote on the chain (the label said "USDT", the name of the Ethereum ERC-20 leg); any other token as the
+ *  engine names it (its on-chain name, or its whole id). */
+function labelById(tok, name, active) { if (isMarketFed(tok)) return "MxUSD"; return (active || ctx).PP.tokenLabel({ tok: tok, tokName: name }); }
+function activityLabels(active) { active = active || ctx; var labels = {}; labels[USDT_TOKENID.toLowerCase()] = "MxUSD"; POOLS.forEach(function (p) { if (p.tok) labels[p.tok.toLowerCase()] = labelById(p.tok, p.tokName, active); }); return labels; }
 function activity() {
   if (!ctx) return Promise.resolve([]);
   const active = ctx;
@@ -407,7 +411,7 @@ function quoteAndStash(tok, minimaToToken, amountIn) {
   var route = ctx.Router.route(pl, minimaToToken, amountIn);
   if (!route.ok) return { ok: false };
   var qid = ++quoteCounter;
-  var tokenLabel = ctx.PP.tokenLabel({ tok: tok, tokName: pl[0] && pl[0].tokName }) || "token";
+  var tokenLabel = labelById(tok, pl[0] && pl[0].tokName) || "token";   // what the swap's record will call the token: MxUSD by its id (0.18.241)
   lastQuotes[qid] = { route: route, minimaToToken: minimaToToken, tokenLabel: tokenLabel };
   var ids = Object.keys(lastQuotes);
   if (ids.length > 40) ids.sort(function (a, b) { return a - b; }).slice(0, ids.length - 30).forEach(function (k) { delete lastQuotes[k]; });  // keep the recent ~30
@@ -478,7 +482,7 @@ async function market() {
   if (!marketFresh()) await refreshMarket();
   return { mid: marketFresh() ? fmtMid() : null, fresh: marketFresh(), at: mktAt };
 }
-/** Opening-price anchor for create, best-first: (1) fresh MEXC mid; (2) aggregate spot of live USDT pools; else null.
+/** Opening-price anchor for create, best-first: (1) fresh MEXC mid; (2) aggregate spot of live MxUSD pools; else null.
  *  MEXC (tier 1) needs no node; only the tier-2 live-pool fallback needs ctx/POOLS. */
 async function createAnchor() {
   if (!marketFresh()) await refreshMarket();
@@ -489,7 +493,7 @@ async function createAnchor() {
   if (agg && agg.gt(0)) return { price: s(agg), source: "live pools" };
   return { price: null, source: "" };
 }
-/** The single market-fed token id (mxUSDT) — the renderer gates create to this, mirroring the dapp. */
+/** The single market-fed token id (MxUSD) — the renderer gates create to this, mirroring the dapp. */
 function marketToken() { return { usdt: USDT_TOKENID }; }
 
 /** Opening-price + KMIN preview for the manual-bootstrap create form (tier-3) — pure, no spend. */
@@ -749,5 +753,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, activeWork,
-  _setRunner, _setDataDir, _ctx: () => ctx, _setPools: (ps) => { POOLS = ps; },   // test-only
+  _setRunner, _setDataDir, _ctx: () => ctx, _setPools: (ps) => { POOLS = ps; }, _activityLabels: activityLabels,   // test-only
 };

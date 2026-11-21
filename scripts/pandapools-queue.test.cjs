@@ -46,3 +46,23 @@ test("PandaPools glue: a throw inside the engine's later callback settles the sl
     assert.deepEqual(engine, ["close", "migrate", "deposit"]);
   } finally { try { api.stopLoop(); } catch (e) {} try { api.flush(); } catch (e) {} try { api._ctx().ActivityChain.stop(); } catch (e) {} }
 });
+
+// ---- 0.18.241: the Minima dollar token is MxUSD by its id in what the desktop writes (it said "USDT", the Ethereum leg's name) ----
+test("PandaPools glue: the activity labels and a swap's record name the Minima dollar token MxUSD by its id; another token keeps the engine's name", async () => {
+  const api = require("../main/pandapools.js"), MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", OTHER = "0x" + "DD".repeat(32);
+  await api.init(); const ctx = api._ctx(), P = ctx.PoolMgr, S = ctx.Store;
+  try {
+    api._setPools([]); assert.equal(api._activityLabels()[MXUSD.toLowerCase()], "MxUSD", "with no pool in the scan");
+    api._setPools([{ address: "0x" + "A1".repeat(32), tok: MXUSD, tokName: "mxUSDT" }, { address: "0x" + "A2".repeat(32), tok: OTHER, tokName: "Panda" }]);
+    const labels = api._activityLabels();
+    assert.equal(labels[MXUSD.toLowerCase()], "MxUSD", "whatever name its creator wrote on the chain"); assert.equal(labels[OTHER.toLowerCase()], "Panda");
+    assert.ok(!Object.values(labels).some(l => /USDT/.test(l)), JSON.stringify(labels));
+    // a swap's record
+    const recorded = []; S.actRecord = (kind, summary) => recorded.push(summary);
+    ctx.Router.route = () => ({ ok: true, totalIn: ctx.PP.D(1), totalOut: ctx.PP.D(2), effPrice: ctx.PP.D(2), spotBefore: ctx.PP.D(2), poolsUsed: 1, poolsAvailable: 1 });
+    P.swap = (route, m2t, cb) => setTimeout(() => cb.ok("0xS"), 1);
+    const q = api.quoteSwap(MXUSD, true, "1"); assert.equal(q.ok, true, JSON.stringify(q));
+    await api.swap(q.quoteId);
+    assert.deepEqual(recorded, ["Sold 1 MINIMA for 2 MxUSD"]);
+  } finally { try { api.stopLoop(); } catch (e) {} try { api.flush(); } catch (e) {} try { ctx.ActivityChain.stop(); } catch (e) {} }
+});
