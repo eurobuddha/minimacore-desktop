@@ -5303,7 +5303,8 @@
   "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "节点读取此命令的方式与其写法不同（单词内部有引号或引号紧贴下一个单词、引号内有冒号，或在 JSON 值之外有 { 或 [）。请去掉这些后再写。未运行任何命令。",
   "Stop the node anyway": "仍然停止节点",
   "Keep it running": "保持运行",
-  "The node keeps running: nothing was stopped.": "节点保持运行：没有停止任何内容。"
+  "The node keeps running: nothing was stopped.": "节点保持运行：没有停止任何内容。",
+  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "无法检查 P2P Chance：此钱包在链上有投注，尚未读取是否仍有未结束的投注。请稍候再试。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5389,5 +5390,6 @@
   "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.",
   "Stop the node anyway",
   "Keep it running",
-  "The node keeps running: nothing was stopped."
+  "The node keeps running: nothing was stopped.",
+  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again."
 ] });

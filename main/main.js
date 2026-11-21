@@ -314,7 +314,7 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
   // P2P Chance (0.19.262): whatever the settle loop found, also on an install that only watches (the loop starts by itself
   // when this wallet has bets on the chain). open() is null until a clean scan, so a wallet that never bet is never held up.
-  casino: casino.open(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
+  casino: casino.open(), casinoLooping: casino.looping(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
   futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
   dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
@@ -360,7 +360,7 @@ ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack); await no
 // What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  dexicon: await dexicon.activeWork().catch(() => null), casino: casino.open(), casinoOn: !!config.load().casinoEnabled,
+  dexicon: await dexicon.activeWork().catch(() => null), casino: casino.open(), casinoOn: !!config.load().casinoEnabled || casino.looping(),   // the loop running with no clean scan: not read yet (0.19.269)
   futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null) });
 // Every node stop or restart goes through mayStop (main/inflight.js stopGuard, 0.19.268): with work in flight, only after the
 // warning the window showed (its one-time ack) or main's own question.

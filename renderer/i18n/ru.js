@@ -5316,7 +5316,8 @@
   "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "Узел прочитал бы эту команду не так, как она написана (кавычка внутри слова или вплотную к следующему, двоеточие внутри кавычек, либо { или [ вне значения JSON). Напишите её без них. Ничего не было запущено.",
   "Stop the node anyway": "Всё равно остановить узел",
   "Keep it running": "Оставить работать",
-  "The node keeps running: nothing was stopped.": "Узел продолжает работать: ничего не остановлено."
+  "The node keeps running: nothing was stopped.": "Узел продолжает работать: ничего не остановлено.",
+  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "P2P Chance не удалось проверить: у этого кошелька есть ставки в сети, и ещё не прочитано, открыта ли какая-либо из них. Подождите немного и попробуйте снова."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5402,5 +5403,6 @@
   "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.",
   "Stop the node anyway",
   "Keep it running",
-  "The node keeps running: nothing was stopped."
+  "The node keeps running: nothing was stopped.",
+  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again."
 ] });

@@ -71,6 +71,7 @@ test("Restoring a backup and replacing the wallet: every refusal, every line of 
     { atomix: { ready: false, hasStore: true, waitedMs: M }, pools: [{ txpowid: TX, confirmed: false }], dexicon: { ready: true, orders: [TX, TX], pending: 2, takes: 3 }, ownPools: [{ address: P, reserveM: "100.5", reserveT: "7", token: "MxUSD" }, { address: P, reserveM: "1", reserveT: "2", token: "Some Token" }] },
     { atomix: { ready: false, hasStore: true }, pools: [{ txpowid: TX, confirmed: false }, { txpowid: TX, confirmed: false }], casino: { offers: 1, bets: 2 } },
     { atomix: { ready: true, swaps: [TX], maker: true, otcOffer: true, otcDeals: 1 }, pools: [], casino: { offers: 0, bets: 1 } },
+    { atomix: { ready: true }, pools: [], casino: null, casinoLooping: true },   // the settle loop with no clean scan yet (0.19.269)
     { atomix: { ready: true, swaps: [TX, TX], otcDeals: 2 }, pools: [], dexicon: undefined, ownPools: [{ address: P, reserveM: null }] },
     // Future Cash Next (0.19.183)
     { atomix: { ready: true }, pools: [], futurecash: null }, { atomix: { ready: true }, pools: [], futurecash: { ready: false, hasStore: true } },

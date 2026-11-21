@@ -191,13 +191,31 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
 });
 
 // ---- 0.19.262: the P2P Chance bets the settle loop found hold a wallet replacement on every install ----
-test("P2P Chance: bets found by the settle loop of an install that only watches still refuse a wallet replacement, and are said on Quit and Shutdown", () => {
-  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
-  assert.ok(/const walletWork = [\s\S]{0,600}casino: casino\.open\(\), poolsState:/.test(main), "the restore gate reads the settle loop's own count");
-  assert.ok(/casino: casino\.open\(\), casinoOn: !!config\.load\(\)\.casinoEnabled/.test(main), "Quit and Shutdown too");
-  assert.ok(!/casinoEnabled \? casino\.open\(\) : null/.test(main));
-  const R = require("../main/restore.js");
-  assert.ok(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: { offers: 0, bets: 1 }, dexicon: { ready: true, takes: 0 }, futurecash: { ready: true, posted: 0 } }).some(l => /P2P Chance: 0 offers and 1 bet still open/.test(l)));
+test("P2P Chance: bets found by the settle loop of an install that only watches still refuse a wallet replacement and are said on Quit and Shutdown; a loop with no clean scan yet is 'could not be checked' (0.19.269)", async () => {
+  // main.js's own walletWork and inFlightWork, run over stand-in engines (0.19.269: the grep of 0.19.262 replaced)
+  const ts = require("typescript"), src = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), decl = {};
+  const walk = (n) => { if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && /^(walletWork|inFlightWork)$/.test(d.name.text)) decl[d.name.text] = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  const R = require("../main/restore.js"), I = require("../main/inflight.js");
+  const run = (cas, enabled) => {
+    const env = { restore: R, dexSkipUntil: 0, config: { load: () => ({ casinoEnabled: enabled }) }, casino: cas,
+      atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] },
+      futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, dexicon: { activeWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }) } };
+    return new Function("env", "with (env) { " + decl.walletWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
+  };
+  // bets found by a loop that only watched (casinoEnabled off): the replacement is refused, Quit and Shutdown say them
+  let m = run({ open: () => ({ offers: 0, bets: 1 }), looping: () => true }, false);
+  assert.ok((await m.walletWork()).some(l => /P2P Chance: 0 offers and 1 bet still open/.test(l)));
+  assert.match(I.inFlight(await m.inFlightWork(), "quit", Date.now()).message, /P2P Chance: 1 bet and 0 offers still open/);
+  // the loop runs (this wallet has bets) but has no clean scan yet, or its scans fail: never read as nothing open
+  m = run({ open: () => null, looping: () => true }, false);
+  const list = await m.walletWork();
+  assert.ok(list.some(l => /^P2P Chance could not be checked: this wallet has bets on the chain/.test(l)), list.join(" | "));
+  assert.match(R.activeWorkProblem(list), /P2P Chance could not be checked/, "the replacement is refused");
+  assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).any, true, "and Quit / Shutdown say it could not be checked");
+  // a wallet that never bet (no loop, nothing found): nothing in the way
+  m = run({ open: () => null, looping: () => false }, false);
+  assert.deepEqual(await m.walletWork(), []); assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).unread.length, 0);
   const cas = fs.readFileSync(path.join(ROOT, "main", "casino.js"), "utf8");
   assert.ok(/function invalidate\(\) \{[\s\S]{0,500}if \(was\) startLoop\(\); else if \(wasWatching\) watch\(\);/.test(cas), "after a replacement the loop goes on, on the new wallet");
 });

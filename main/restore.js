@@ -160,6 +160,8 @@ function activeWorkList(r) {
   else if (fc && fc.posted) out.push(fc.posted + (fc.posted === 1 ? " Future Cash Next collect or sweep is" : " Future Cash Next collects or sweeps are") + " still under way, which only this wallet's keys can finish: " + fc.collects.concat(fc.queued, fc.sweeps).join(", "));
   const c = r && r.casino;
   if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
+  // the settle loop runs (this wallet has bets on the chain) but has no clean scan yet, or its scans fail (0.19.269): not read as none
+  else if (!c && r && r.casinoLooping) out.push("P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.");
   return out;
 }
 /** Are checks that cannot be made (and, since 0.18.137, warnings to confirm) the ONLY things in the way? Then, and only

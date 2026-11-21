@@ -237,6 +237,9 @@ function status() {
 }
 /** What the Settings card shows: null until a clean scan, then how many offers / bets this wallet still has open. */
 function open() { return outstanding && { offers: outstanding.offers, bets: outstanding.bets }; }
+/** Is the settle loop running (0.19.269)? It runs only for a wallet with bets on the chain: while it runs and open() is
+ *  null (no clean scan yet, or its scans fail), whether a bet is open could not be checked. */
+function looping() { return active; }
 
 function C() { if (!ctx || !ctx.CASINO) throw new Error("P2PChance engine not ready yet"); return ctx.CASINO; }
 function pcb(fn) { return new Promise((res, rej) => { try { fn((err, val) => err ? rej(err instanceof Error ? err : new Error(String(err))) : res(val)); } catch (e) { rej(e); } }); }
@@ -270,6 +273,6 @@ async function rawBets() {
 }
 
 module.exports = {
-  emitter, init, startLoop, watch, stopLoop, flush, invalidate, status, open, rawBets, refused,
+  emitter, init, startLoop, watch, stopLoop, flush, invalidate, status, open, looping, rawBets, refused,
   _setRunner: (fn) => { runner = fn; }, _ctx: () => ctx, _fire: fire, CONTRACT, CASINO_SCRIPT
 };
