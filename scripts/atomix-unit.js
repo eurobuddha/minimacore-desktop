@@ -99,6 +99,21 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     assert.ok(!fs.existsSync(path.join(d, "atomix.sqlite")), "the new wallet starts fresh");
   });
 
+  ok("a custom Ethereum endpoint with a name or password is refused with a reason, and a saved one is dropped with a log line (0.18.216)", () => {
+    const m = require("../main/atomix"), d = fs.mkdtempSync(path.join(os.tmpdir(), "axrpc-"));
+    m._setDataDir(d); m._resetEthCaches();
+    const src = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8");
+    const i = src.indexOf("function ethValidateRpc("), body = src.slice(i, src.indexOf("\n}\n", i) + 3);
+    const validate = new Function("ethPrivateHost", body + "\nreturn ethValidateRpc;")(() => false);
+    assert.match(validate("https://u:p@eth.example.org/").err, /Leave the name and password out of the URL/);
+    assert.equal(validate("https://eth.example.org/v3/KEY").ok, true);
+    fs.writeFileSync(path.join(d, "ethrpc.json"), JSON.stringify({ url: "https://u:p@eth.example.org/", host: "eth.example.org" }));
+    const lines = [], real = console.log; console.log = (...a) => lines.push(a.join(" "));
+    try { assert.equal(m._ethRpcLoad(), null, "dropped"); } finally { console.log = real; }
+    assert.ok(lines.some(l => /the saved Ethereum endpoint was not used \(Leave the name and password out/.test(l)), "and said so");
+    assert.equal(m._allowedUrl("https://eth.example.org/"), false, "never added to the network list");
+  });
+
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
   // Not hermetic: the crypto-bearing commands (vault/seedrandom/newscript/getaddress) go to a REAL node so the identity
   // and covenant derive for real. Until 0.18.161 that node was whatever docker container carried a fixed name; on the

@@ -1094,12 +1094,16 @@ function ethPrivateHost(host) {
 function ethValidateRpc(url) {
   let u; try { u = new URL(String(url)); } catch (e) { return { err: "That doesn't look like a URL." }; }
   if (u.protocol !== "https:") return { err: "Use an https:// endpoint." };
+  // the network list refuses a url with a name or password in it (0.18.210), so it is refused here with the reason (0.18.216)
+  if (u.username || u.password) return { err: "Leave the name and password out of the URL (user:password@host is not allowed); use a URL with the key in its path if your provider gives one." };
   if (ethPrivateHost(u.hostname)) return { err: "That host isn't allowed (local/private addresses are blocked)." };
   return { ok: true, url: u.toString(), host: u.hostname };
 }
 function ethRpcLoad() {
   if (ethRpcOverride !== null) return ethRpcOverride;
-  try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; } } catch (e) {}
+  try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; }
+    // a saved endpoint that is no longer allowed is dropped with a reason in the log (0.18.216), never used in silence
+    log("the saved Ethereum endpoint was not used (" + v.err + "); the built-in endpoints are used instead"); } catch (e) {}
   ethRpcOverride = null; return null;
 }
 // NB we deliberately do NOT call AX.ethtx.resetAll() when repointing the RPC. This wallet is MAINNET-ONLY and an
@@ -1156,5 +1160,5 @@ module.exports = {
     ethTokensLoad, ethRpcLoad, ETH_FALLBACK_GP, ETH_FEE_MULT, ETH_MAX_GAS_PRICE },
   // test-only: reset the module-level ETH caches so a harness can drive a fresh userData dir per case
   _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethUserHosts.clear(); },
-  _allowedUrl: allowedUrl
+  _allowedUrl: allowedUrl, _ethRpcLoad: ethRpcLoad
 };

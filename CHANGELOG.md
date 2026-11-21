@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.216] — ETH endpoint with a name or password: refused with a reason
+
+- Since 0.18.210 the AtomiX network list refuses a url carrying a name or password, but the custom Ethereum endpoint setting still accepted one, so it was saved and then silently never used. It is now refused when set, with the reason, and a saved endpoint that is no longer allowed is dropped at load with a line in the log (the built-in endpoints are used). Test: `scripts/atomix-unit.js`.
+
 ## [0.18.215] — Web Wallet: a readable key list decides; one damaged counter is that address's problem
 
 - Since 0.18.204 a locked vault refused every Web Wallet send even when the node's key list was readable and did not hold the derived key, which already shows the seed is foreign; now only an unreadable key list refuses. Since 0.18.203 one damaged entry in the key-use counters refused every address; now only that address is refused, its counter is unknown, and it must be confirmed again (the screen asks for a whole number at least as high as the chain shows); the other addresses are untouched. Test: `scripts/inject-test.cjs`.
