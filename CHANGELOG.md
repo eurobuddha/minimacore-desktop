@@ -7,9 +7,69 @@ matching [GitHub Release](../../releases).
 
 ---
 
-## [0.18.239] — a long command with non-ASCII text reaches the node whole
+## [0.18.254] — AtomiX: a failing owed move is retried with a pause
 
-- A command over 6000 characters goes to the node as a POST, and the node reads its Content-Length as characters, not bytes. With an accented letter or an emoji in it the app sent the byte count, so the node waited for characters that never came until the app timed out, and then ran what it had read. The header now counts characters the way the node does. Test: `scripts/rpc-test.cjs`.
+- An owed move of the old wallet's swap database that keeps failing is tried again with a growing pause (12 seconds up to 10 minutes) instead of every 12 seconds, is said in the log once per reason, and config.json is rewritten only when the debt changes. Test: `scripts/atomix-unit.js`.
+
+## [0.18.253] — one question, one stop
+
+- Two stop or restart requests at once showed two questions and gave two stops. A request while the question is open, or after a yes before the node has stopped, is now refused with a plain reason. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.252] — PandaPools: the opening price is in MxUSD
+
+- Creating a pool shows its opening price as MxUSD/MINIMA, in the form and the confirmation. The MEXC market line keeps USDT/MINIMA, the market's own unit. Test: `scripts/panels-test.cjs`.
+
+## [0.18.251] — an old invalid rescue node no longer breaks saving
+
+- A -rescuenode saved by an older version that is not host:port is dropped when the settings are read, said once in the log and never passed to the node. Kept, it made Contribute, the setup screen and Enable MegaMMR fail to save. Test: `scripts/config-keys-test.cjs`.
+
+## [0.18.250] — a refused restart keeps the setup screen's edits
+
+- Apply & restart keeps the form on screen until the node really stops; if the restart is refused, the changes are still there and the screen says so. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.249] — P2P Chance bets are counted before a stop
+
+- The stop question counts this wallet's open P2P Chance offers and bets and asks only when one is open; it says "could not be checked" only when that read fails, instead of on every stop. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.248] — Turkish dotted İ
+
+- The node's JVM runs with an English locale on both node kinds, and the app folds İ to i, so a command written with İ (multİsig, sİgnfrom, archİve) is checked exactly like the plain command. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.247] — SHA-3 that works in the packaged app
+
+- Electron's crypto has no SHA-3, so the miniMall payout-address checksum (0.18.227) never ran in the packaged app. A small built-in SHA3-256 now serves it. No other desktop code took SHA-3 from Node's crypto. Test: `scripts/shop-test.cjs`.
+
+## [0.18.246] — Terminal: several hidden words as a count everywhere
+
+- A command the node itself would refuse is masked with the word count too, so no echo, confirmation or reply shows one ••• per word. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.245] — Terminal: builder checks follow what is really pasted
+
+- A rawfrom input's script and a multisig id run again (they are not pasted); a multisig file is checked, a drive letter allowed. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.244] — Terminal: no file on another computer, for every command
+
+- Any file, folder or …file parameter that starts with two slashes of either kind is refused for every command, not a list. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.243] — Terminal: no array or object in a builder's state
+
+- A state value that is an array or object is refused for the commands that paste it into a txnstate of their own; every builder is a sensitive verb. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.242] — Terminal: signfrom / postfrom transaction ids
+
+- signfrom and postfrom take only 0x hex data whose transaction id is plain letters, digits, dots, dashes or underscores: the node pastes that id into commands it runs itself, and an id holding ";send …" ran a send with full rights. The app's own commands are held to the same checks. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.241] — PandaPools names the Minima dollar token MxUSD
+
+- The activity labels and a swap's record name the Minima dollar token MxUSD by its id; they said USDT or the name its creator wrote on the chain. Test: `scripts/pandapools-queue.test.cjs`.
+
+## [0.18.240] — a long command with non-ASCII text reaches any node whole
+
+- A POST body is sent only when the command is plain ASCII, where bytes and characters agree. A command with any other character goes on the command line, percent-encoded; one too long for it (over 65,536 encoded characters) is refused before anything is sent. Test: `scripts/rpc-test.cjs`.
+
+## [0.18.239] — superseded by 0.18.240
+
+- Counted a long POST's Content-Length in characters, as the shipped node reads it. That would cut a non-ASCII command short on a node that reads bytes; 0.18.240 replaces it. Test: `scripts/rpc-test.cjs`.
 
 ## [0.18.238] — Web Wallet: "could not be read", not "cannot be reached"
 
@@ -45,7 +105,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.230] — Terminal: no value can rewrite the commands a builder makes
 
-- The commands that build further commands from their values (sendfrom, rawfrom, rawtxnfrom, createtokenfrom, consolidatefrom, constructfrom, createfrom, signfrom, postfrom, multisig, multisigread, txnauto, sphincs) refuse a value with white space, a colon, a quote or a backslash escape where it would become part of those commands. multisig create takes only public keys of 0x and 64 hexadecimal digits (a crafted key made a multisig coin anyone could spend; a password with a space could add a hidden burn). A secret of several words is shown with its word count. Test: `scripts/cmdgate-test.cjs`.
+- The commands that build further commands from their values (sendfrom, rawfrom, rawtxnfrom, createtokenfrom, consolidatefrom, constructfrom, createfrom, signfrom, postfrom, multisig, multisigread, txnauto, sphincs) refuse a value with white space, a colon, a quote or a backslash escape where it would become part of those commands. multisig create takes only public keys of 0x and 64 hexadecimal digits (a crafted key made a multisig coin anyone could spend; a password with a space could add a hidden burn). A secret of several words is shown with its word count (also in a command the node would refuse from 0.18.246). Some of these checks refused too much: a rawfrom input's script and a multisig id run again from 0.18.245; state arrays and objects are refused from 0.18.243. Test: `scripts/cmdgate-test.cjs`.
 
 ## [0.18.229] — PandaPools: a stuck action no longer blocks every later one
 
@@ -57,7 +117,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.227] — miniMall: an invalid payout address no longer stalls the order scan
 
-- A payout address with a wrong checksum is skipped for five minutes, logged and shown on the orders screen with the address whole; it held the scan for good before. miniMall Studio refuses to save such an address. Test: `scripts/shop-test.cjs`.
+- A payout address with a wrong checksum is skipped for five minutes, logged and shown on the orders screen with the address whole; it held the scan for good before. miniMall Studio refuses to save such an address. In the packaged app the checksum check only works from 0.18.247: until then it used Node's SHA-3, which Electron does not have, and every address read as valid. Test: `scripts/shop-test.cjs`.
 
 ## [0.18.226] — miniMall: gathered dust is bounded and still pays
 
