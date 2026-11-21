@@ -431,8 +431,9 @@ async function scanOnce() {
     let changed = a || b;
     const recentFailed = readFailed;   // a backfill step's failure below is said as such, not as the recent window's (0.18.277)
     if (tip && !readFailed && prev && tip < prev) {
-      // the chain is BELOW what was read before (a fresh sync or a resync while the store persists, 0.18.276): the cursor is not moved
-      // down and the backfill waits; neither is a failure
+      // the chain is BELOW what was read before (a resync, or a reorganisation onto a lower branch, 0.18.276): the backfill waits and it is
+      // no failure; the cursor follows the chain down (0.18.281: it stayed, so a catch-up faster than the window skipped the new branch's blocks)
+      store.setMeta("scanTip", tip);
     } else if (tip && !readFailed) {
       const covered = tip - passServed;   // the oldest block this pass read
       // A new gap below this pass: the backfill reaches down to the oldest unread block and starts again just under this

@@ -486,9 +486,10 @@ const javaNode = (m, st) => async (c) => {
   if (c.startsWith("coins address:" + m.shop.MINIMERCH)) {
     st.depths.push(d); if (st.hook) { const r = st.hook(d); if (r) return r; }
     if (st.mode === "refuse") return { status: false, error: "busy" }; if (st.mode === "throw") throw new Error("RPC timed out");
-    return { status: true, response: st.msg.filter(inTree) };
+    return { status: true, response: st.msg.filter(x => x.created <= st.tip && inTree(x)) };
   }
-  if (c.startsWith("coins address:" + st.vaddr)) { st.payDepths.push(d); return { status: true, response: st.pay.filter(x => inTree(x) || (!x.spent && d >= st.L - 1)) }; }
+  // a spent coin is never returned (the walk meets its spent marker first, 0.18.281: the stand-in returned it inside the tree)
+  if (c.startsWith("coins address:" + st.vaddr)) { st.payDepths.push(d); return { status: true, response: st.pay.filter(x => x.created <= st.tip && !x.spent && (inTree(x) || d >= st.L - 1)) }; }
   return { status: true, response: [] };
 };
 const javaSetup = async (name, extra) => {
@@ -545,7 +546,7 @@ test("after the first window is cut to 512 and one step fails, an order inside t
 });
 // restored from the 0.18.213 test: a failed or thrown read moves nothing; the backfill state is said; a failed step moves nothing and is said as older;
 // a second gap keeps the oldest target; a step reads only below what was read (floor); a chain below the cursor moves nothing
-test("a failed read moves nothing and is said as recent; a failed backfill step moves nothing and is said as older; a second gap keeps the oldest target; a resync moves nothing", async () => {
+test("a failed read moves nothing and is said as recent; a failed backfill step moves nothing and is said as older; a second gap keeps the oldest target; a resync moves the cursor down and is no failure", async () => {
   const t = await javaSetup("fail"); let m = t.m;
   t.st.msg = [await t.seal("ORD-NEWEST", 1500)];
   for (const mo of ["refuse", "throw"]) {
@@ -569,11 +570,21 @@ test("a failed read moves nothing and is said as recent; a failed backfill step 
   assert.equal(Number(m.store.getMeta("bfTarget")), 1000, "the oldest target is kept"); assert.ok(Number(m.store.getMeta("bfFloor")) < 3000 - 512, "the floor moves under the new window");
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
   assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep, floor\)/.test(src) && /scanOrders\(NODE_TREE_MOST, floor\)/.test(src) && /scanPayments\(ROOT_DEPTH, floor\)/.test(src), "a backfill read skips what an earlier pass read");
-  // a resync: the chain is below the cursor: nothing moves down, no failure is said, a pending backfill waits
+  // CHANGED on purpose (0.18.281): a resync or a lower branch: the cursor follows the chain down, no failure is said, a pending backfill waits
   m.store.setMeta("bfTarget", 1900); m.store.setMeta("bfFloor", 1950); t.st.hook = null; const cur = Number(m.store.getMeta("scanTip")); t.st.tip = 300; t.st.depths.length = 0; await m.shop.scanOnce();
-  assert.equal(Number(m.store.getMeta("scanTip")), cur, "the cursor is not moved down"); assert.equal(m.shop.scanState().readFailed, false, "not a failure"); assert.equal(Number(m.store.getMeta("bfTarget")), 1900, "the backfill waits");
+  assert.ok(cur > 300); assert.equal(Number(m.store.getMeta("scanTip")), 300, "the cursor follows the chain down"); assert.equal(m.shop.scanState().readFailed, false, "not a failure"); assert.equal(Number(m.store.getMeta("bfTarget")), 1900, "the backfill waits");
   assert.ok(/ipcMain\.handle\("mcd:shopScanState", \(\) => shop\.scanState\(\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
   assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").includes("const scanLine = scan && scan.text ?"), "shown on the orders screen");
+});
+// 0.18.281: a reorganisation onto a lower branch, then a catch-up faster than the 64-block poll: the new branch's blocks below the old
+// cursor are read (the cursor stayed at the old tip, so every block between passes was skipped; v0.18.272 read them)
+test("after a reorganisation onto a lower branch and a fast catch-up, the new branch's orders and payments below the old cursor are read", async () => {
+  const t = await javaSetup("reorg"); const m = t.m;
+  t.st.tip = 1500; await m.shop.scanOnce(); assert.equal(Number(m.store.getMeta("scanTip")), 1500);
+  t.st.msg = [await t.seal("ORD-B1", 1110), await t.seal("ORD-B2", 1215), await t.seal("ORD-B3", 1320)]; t.st.pay = [t.pay("ORD-B1", 1112)];
+  for (const tip of [1100, 1200, 1300, 1400, 1500, 1501]) { t.st.tip = tip; await m.shop.scanOnce(); assert.equal(m.shop.scanState().readFailed, false, "no failure at " + tip); }
+  for (const r of ["ORD-B1", "ORD-B2", "ORD-B3"]) assert.ok(m.store.order(r), r + " on the new branch is read");
+  assert.equal(m.store.order("ORD-B1").paid, true, "and its payment counted"); assert.equal(Number(m.store.getMeta("scanTip")), 1501);
 });
 // (5) 0.18.277: the unread notice is shown only with a shop, and can be dismissed (the fact stays in the log)
 test("the unread notice: only for someone with a shop, dismissable, shown again for a newer one", async () => {
