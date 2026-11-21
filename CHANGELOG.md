@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.203] — Web Wallet: key-use counters read strictly
+
+- The Web Wallet's key-use counters were taken as empty on ANY read or parse error, so a damaged file made a foreign wallet sign at key use 0 again (reusing a one-time key exposes it) and the next write wiped every other address's counter; `ackKeyuses("1e309")` stored Infinity, written as null and read back as 0. Now only a missing file is a fresh start; an unreadable or damaged file (or a counter that is not a whole number of at least 0) refuses with the reason, nothing is signed and the file is left as it is; the acknowledged figure must be a whole number of at least 0; a send reads the counters once for both the acknowledgement and the reservation (the write was already atomic). Test: `scripts/inject-test.cjs`.
+
 ## [0.18.202] — small cleanups from the review
 
 - The ETH key export checks that the wallet is ready before Touch ID is asked, and the Terminal gate checks the node first; the ungated `ethwallet.exportKey` export and the unused `seedFrom` are gone; the typed phrases live in one module (`main/phrases.js`); the currency to token mapping is one function (`ShopRules.tokenOfCurrency`) used by the shop, the listing check and the vendor side; the order's own coin list is the authority against counting a coin twice and the global list is cut from 100000 to the 5000 most recent ids; `clear()` forgets gathered dust; the backup password message names ";". Tests: `scripts/ethkey-test.cjs`, `scripts/shop-test.cjs`.

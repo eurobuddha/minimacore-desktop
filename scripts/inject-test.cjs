@@ -91,3 +91,30 @@ test("a chat file path or a Vestr password with ';' is refused with a plain reas
   const src = rd("main/chat.js");
   assert.ok(src.includes("' file:" + String.fromCharCode(34) + "' + f + '" + String.fromCharCode(34) + "'"), "fetch quotes its file path too");
 });
+
+// ---- 0.18.203: the Web Wallet's key-use counters are read strictly ----
+test("Web Wallet counters: only a missing file is a fresh start; a damaged or unreadable one refuses and is left as it is; ack takes a whole number only; one read per send", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), A = "0x" + "A1".repeat(32);
+  try { fs.rmSync(file, { force: true }); } catch (e) {}
+  assert.deepEqual(ww.keyusesInfo(A), { address: A, keyuses: 0, ack: false }, "no file yet: a fresh start");
+  for (const bad of ["1e309", "Infinity", "-1", "1.5", "", null, -1, 1.5, Infinity, NaN, "12abc"]) assert.throws(() => ww.ackKeyuses(A, bad), /whole number of at least 0/, String(bad));
+  assert.equal(ww.ackKeyuses(A, "7").keyuses, 7); assert.equal(ww.ackKeyuses(A, 3).keyuses, 7, "never lowered");
+  const good = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, "{ not json");
+  assert.throws(() => ww.keyusesInfo(A), /are damaged\. Nothing was signed/); assert.throws(() => ww.ackKeyuses(A, 9), /damaged/);
+  assert.equal(fs.readFileSync(file, "utf8"), "{ not json", "a damaged file is never overwritten");
+  fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: -3, ack: true } })); assert.throws(() => ww.keyusesInfo(A), /counter for 0x.* is damaged/);
+  fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: null, ack: true } })); assert.throws(() => ww.keyusesInfo(A), /is damaged/, "a counter written as null (Infinity) is not taken as 0");
+  fs.rmSync(file); fs.mkdirSync(file); assert.throws(() => ww.keyusesInfo(A), /cannot be read/); fs.rmSync(file, { recursive: true });
+  fs.writeFileSync(file, good);
+  // one read per send: the acknowledgement and the reservation come from the same read
+  const FROM = A, TO = "0x" + "DD".repeat(32), PK = "0x" + "BB".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
+  let reads = 0; const real = fs.readFileSync; fs.readFileSync = function (p) { if (String(p) === file) reads++; return real.apply(this, arguments); };
+  try { const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }); assert.equal(r.keyuse, 7); } finally { fs.readFileSync = real; }
+  assert.equal(reads, 1, "one read of the counters per send");
+  assert.equal(ww.keyusesInfo(A).keyuses, 8, "reserved before signing");
+});

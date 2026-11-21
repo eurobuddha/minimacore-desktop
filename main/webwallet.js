@@ -75,7 +75,23 @@ function isPrivKey(p) { return typeof p === "string" && /^0x[0-9A-Fa-f]{2,200}$/
 // keyuses store — durable, monotonic, reserve-before-sign. { "<0xaddr>": { keyuses, ack } }
 // ---------------------------------------------------------------------------
 function storePath() { return path.join(app ? app.getPath("userData") : ".", "webwallet-keyuses.json"); }
-function loadStore() { try { return JSON.parse(fs.readFileSync(storePath(), "utf8")) || {}; } catch (e) { return {}; } }
+/**
+ * The counters, read strictly (0.18.203). It returned {} on ANY error: a damaged or unreadable file made every address
+ * start again at key use 0 (signing a one-time key a second time exposes it) and the next write wiped every other
+ * address's counter. Now only a missing file is a fresh start; anything else, or a counter that is not a whole number
+ * of at least 0, refuses with the reason and nothing is signed.
+ */
+function loadStore() {
+  let raw;
+  try { raw = fs.readFileSync(storePath(), "utf8"); }
+  catch (e) { if (e && e.code === "ENOENT") return {}; throw new Error("The Web Wallet's key-use counters (" + storePath() + ") cannot be read (" + ((e && e.code) || e) + "). Nothing was signed."); }
+  let j; try { j = JSON.parse(raw); } catch (e) { j = undefined; }
+  if (!j || typeof j !== "object" || Array.isArray(j)) throw new Error("The Web Wallet's key-use counters (" + storePath() + ") are damaged. Nothing was signed; keep that file and ask for help rather than deleting it.");
+  for (const [k, v] of Object.entries(j)) {
+    if (!v || typeof v !== "object" || !Number.isSafeInteger(v.keyuses) || v.keyuses < 0) throw new Error("The Web Wallet's key-use counter for " + k + " is damaged. Nothing was signed.");
+  }
+  return j;
+}
 function writeStore(obj) {
   const p = storePath(), tmp = p + ".tmp";
   const fd = fs.openSync(tmp, "w");
@@ -85,12 +101,13 @@ function writeStore(obj) {
   // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
   try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
 }
-function entryFor(store, addr) { return store[addr] || { keyuses: 0, ack: false }; }
+function entryFor(store, addr) { return Object.hasOwn(store, addr) ? store[addr] : { keyuses: 0, ack: false }; }
 
 /** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. */
 function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
-  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : NaN);
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // "1e309" was Infinity, stored as null, read back as 0 (0.18.203)
   const store = loadStore();
   const e = entryFor(store, address);
   e.keyuses = Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss)
@@ -102,8 +119,8 @@ function ackKeyuses(address, count) {
 /** Current stored keyuses info for an address (does not mutate). */
 function keyusesInfo(address) { const e = entryFor(loadStore(), address); return { address, keyuses: e.keyuses || 0, ack: !!e.ack }; }
 /** RESERVE: durably advance the counter to n+1 and return n (the leaf to sign at). Reserve-before-sign. */
-function reserveKeyuse(address) {
-  const store = loadStore();
+function reserveKeyuse(address) { return reserveFrom(loadStore(), address); }
+function reserveFrom(store, address) {
   const e = entryFor(store, address);
   const n = e.keyuses || 0;
   e.keyuses = n + 1;                          // persist BEFORE the caller signs at n
@@ -227,11 +244,13 @@ async function send(opts) {
 
   // FOREIGN seed → single-address non-custodial sendfrom with the durable keyuses gate.
   // keyuses gate: the user MUST have acknowledged the seed's prior-use count for this address
-  const info = keyusesInfo(fromaddress);
-  if (!info.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
+  // ONE read of the counters for both the acknowledgement and the reservation (0.18.203): a read that fails refuses here
+  let store; try { store = loadStore(); } catch (e) { privatekey = null; throw e; }
+  const entry = entryFor(store, fromaddress);
+  if (!entry.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
 
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
-  const n = reserveKeyuse(fromaddress);
+  const n = reserveFrom(store, fromaddress);
   const cmd = "sendfrom fromaddress:" + fromaddress
     + " address:" + to
     + " amount:" + amount
