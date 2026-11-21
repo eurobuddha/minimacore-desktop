@@ -544,3 +544,19 @@ test("masked says several hidden words as a count also for a text the node would
   const typed = "vault action:restorekeys phrase:spray lamp keyz:1", r = G.scrubReply({ command: typed, status: false }, typed);
   assert.equal(r.command, 'vault action:restorekeys phrase:"••• (2 words)" keyz:1', "the reply scrub: the scrubbed word counted in its run");
 });
+
+// ---- 0.18.248 (as Pandamonium Desktop 0.19.223): İ folds to i, and the node's JVM runs with an English locale ----
+test("a Turkish İ in a verb or an action is read as the node on a Turkish JVM reads it: every decision equals the plain text's; the node's JVM locale is pinned on both kinds", async () => {
+  const V = require("../main/cmdverb"), dec = async (c) => { try { await G.checkCommand(c, { take: () => false, running: () => true, pin: async (x) => x }); return "RUN"; } catch (e) { return "REFUSE " + e.message; } };
+  const blob = "0x" + Buffer.concat([Buffer.from([0, 0, 0, 3]), Buffer.from("a;b"), Buffer.alloc(4)]).toString("hex");
+  const plain = ["multisig action:spend id:a", "multisigread action:spend data:0x01", "signfrom data:" + blob, "archive action:import file:\"a b\"", "vault", "seedrandom modifier:x", "keys action:genkey",
+    "rpc action:adduser username:u", "mds action:install file:x", "sendfrom fromaddress:0x01 address:0x02 address:0x03 amount:1", "sphincs action:generate", "rpc action:listusers", "vault action:wipekeys"];
+  for (const c of plain) {
+    const turkish = c.replace(/i/g, "İ");
+    assert.equal(await dec(turkish), await dec(c), turkish);
+    assert.notEqual(await dec(turkish), "RUN", "refused or gated: " + turkish);
+  }
+  assert.deepEqual(V.verbs("sİgnfrom data:0x00"), ["signfrom"]);
+  const nm = rd("main/node-manager.js");
+  assert.ok(nm.includes('const JVM_LOCALE = ["-Duser.language=en", "-Duser.country=US"];') && nm.includes("const args = [...JVM_LOCALE, \"-jar\", this.jarPath(),") && /const args = \[\n\s*\.\.\.JVM_LOCALE,[^\n]*\n\s*"-Xmx"/.test(nm), "before -jar on the minima kind, before the -D properties on the Parlons kind");
+});
