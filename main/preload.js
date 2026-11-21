@@ -10,7 +10,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("mcd", {
   // node command over RPC → { status, response } (same shape the Android NodeApi consumes)
   cmd: (command) => ipcRenderer.invoke("mcd:cmd", command),
-  secretGate: (command, typed) => ipcRenderer.invoke("mcd:secretGate", command, typed),   // vault / seedrandom: the typed phrase and the system's prompt, for that one command (main/seedgate.js)
+  secretGate: (command, typed) => ipcRenderer.invoke("mcd:secretGate", command, typed),
+  cmdKind: (command) => ipcRenderer.invoke("mcd:cmdKind", command),   // { kind, chain, write, shown, secretValues } as the main process reads the text (0.19.237)   // vault / seedrandom: the typed phrase and the system's prompt, for that one command (main/seedgate.js)
   revealSeed: (typed) => ipcRenderer.invoke("mcd:revealSeed", typed),
   firstRunSeed: () => ipcRenderer.invoke("mcd:firstRunSeed"),
 

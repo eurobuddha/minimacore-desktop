@@ -160,10 +160,11 @@ test("main: the general command channel refuses vault and seedrandom without a p
   for (const f of fs.readdirSync(path.join(__dirname, "..", "renderer")).filter(x => x.endsWith(".js"))) {
     const s = SRC("renderer/" + f); assert.ok(!/(cmd|tryCmd)\(\s*["'`](vault|seedrandom)/i.test(s), f + " asks the node for a secret directly");
   }
-  const app = SRC("renderer/app.js"), run = app.slice(app.indexOf("async function termRun()"), app.indexOf("function renderTerminal()"));
-  assert.ok(run.indexOf("try { r = await api.cmd(c); } catch (x) { err = x; }") < run.indexOf("if (secret) {"), "main is asked first: its refusal decides");
-  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : MainSaid\.has\(raw, "SG_GATED_CHANGE"\) \? "change" : null;/.test(run), "decided by main's code, never by words on screen or a reader of its own");
-  assert.ok(run.indexOf("if (secret) {") < run.indexOf("TERM_HIST.push(c)") && /secretReveal\(c, JSON\.stringify\(r, null, 2\), !!\(g && g\.system\)\);[^\n]*\n\s*\}\);\n\s*return;\n\s*\}/.test(run), "a secret command returns before the history and the output");
+  // CHANGED on purpose (0.19.237, as released 0.18.194): main is asked what the text is FIRST (mcd:cmdKind), then mcd:cmd decides
+  const app = SRC("renderer/app.js"), run = app.slice(app.indexOf("const TERM_BUSY"), app.indexOf("function renderTerminal()"));
+  assert.ok(run.indexOf("k = await api.cmdKind(c)") < run.indexOf("if (k.kind && !k.chain) { ask(k.kind); return; }") && run.indexOf("if (k.kind && !k.chain) { ask(k.kind); return; }") < run.indexOf("TERM_HIST.push(c)"), "a secret command goes to its gate before the history and the output");
+  assert.ok(/secret = MainSaid\.has\(raw, "SG_GATED_SEED"\) \? "seed" : MainSaid\.has\(raw, "SG_GATED_KEY"\) \? "key" : MainSaid\.has\(raw, "SG_GATED_CHANGE"\) \? "change" : null;\s*\n\s*if \(secret\) \{ ask\(secret\); return; \}/.test(run), "main's refusal still decides, by code");
+  assert.ok(/if \(!k\.secretValues\) \{ TERM_HIST\.push\(c\);/.test(run) && /appendTerm\(k\.shown, "cmd"\)/.test(run) && /secretReveal\(k\.shown,/.test(run), "the echo, the title and the history never carry a secret value");
   assert.ok(/appendTerm\(c\.split\(\/\\s\+\/\)\[0\], "cmd"\)/.test(run), "only its verb is shown in the output");
   const reveal = app.slice(app.indexOf("function secretReveal("), app.indexOf("// Export: the phone asks"));
   assert.ok(!/appendTerm|TERM_ITEMS|clip|copy\(/.test(reveal) && /setTimeout\(end, 60000\)/.test(reveal) && /window\.addEventListener\("blur", end\)/.test(reveal), "the reply: never in the output or a copy, gone after a minute and on blur");
@@ -267,3 +268,15 @@ test("first run: decided from this launch's facts: a node first started on an em
   assert.ok(nm.indexOf("this.freshAtFirstStart = !names.some(") > 0 && nm.indexOf("this.freshAtFirstStart = !names.some(") < nm.indexOf("keymode.markBlockFolder(this.dataDir())"), "read before the folder is marked or the node touches it");
 });
 
+
+test("0.19.237: mcd:cmdKind says what a text is with its secret values hidden; the Terminal keeps such a command out of history", () => {
+  const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async'));
+  const handlers = {}; new Function("ipcMain", "seedgate", "rpc", h)({ handle: (n, f) => { handlers[n] = f; } }, G, require("../main/rpc.js"));
+  const k = (c) => handlers["mcd:cmdKind"](null, c);
+  assert.deepEqual(k("balance"), { kind: "", chain: false, write: false, shown: "balance", secretValues: false });
+  assert.equal(k("send amount:1 address:0xAA").write, true);
+  const r = k('megammrsync action:resync host:h:9001 phrase:"ONE TWO THREE" keyuses:9');
+  assert.equal(r.shown, "megammrsync action:resync host:h:9001 phrase:••• keyuses:9"); assert.equal(r.secretValues, true);
+  assert.equal(k("vault action:passwordunlock password:hunter2").shown, "vault action:passwordunlock password:•••");
+  assert.deepEqual([k("vault").kind, k("status;vault").chain], ["seed", true]);
+});

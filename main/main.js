@@ -226,6 +226,12 @@ ipcMain.handle("mcd:firstRunSeed", async () => {
   return String(v.phrase || v.seedphrase || v.seed || v.mnemonic || "");
 });
 
+// What the Terminal does with a text before it runs it (0.19.237, as released 0.18.194): its secret kind and whether it is a chain
+// (the gate's own reading), whether it writes, and how it may be echoed (secret values hidden). Advice: mcd:cmd stays the gate.
+ipcMain.handle("mcd:cmdKind", (_e, command) => {
+  const c = String(command == null ? "" : command), k = seedgate.classify(c), shown = seedgate.masked(c);
+  return { kind: k.kind, chain: k.chain, write: rpc._timeoutFor(c) > 30000, shown, secretValues: shown !== c.replace(/\s+/g, " ").trim() && /•••/.test(shown) };
+});
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   // control characters refused (0.19.187, released 0.18.174): the node reads them in ways no check here follows

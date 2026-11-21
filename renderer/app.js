@@ -2779,24 +2779,35 @@ function termSendNote(c) { const t = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c); retu
 // decides which commands those are (main/seedgate.js refusal, reading a command as the node does, 0.19.187): every command
 // goes to it first, and only its refusal, read by code, opens the question here. The command is then not kept in the history;
 // its reply is shown in its own window for a minute at most and is never in the Terminal's output or its Copy output.
+// 0.19.237 (as released 0.18.194): the main process is asked FIRST what a text is (mcd:cmdKind, the same reading as its gate):
+// an ordinary command is echoed and kept at once (a send can take three minutes; showing nothing invited a second one), a
+// secret one goes to its gate. What is echoed has the values of phrase, password, confirm and seed hidden, and a command that
+// carries one is never kept in ↑ history. mcd:cmd's own refusal stays the deciding check.
+const TERM_BUSY = new Set(); let TERM_WARNED = "";
 async function termRun() {
   const inp = el("termIn"), c = inp.value.trim(); if (!c) return;   // an empty Run does nothing
   inp.value = ""; termSugClose();
-  let r, err = null;
-  try { r = await api.cmd(c); } catch (x) { err = x; }
-  const raw = err ? ipcRaw(err) : "", secret = MainSaid.has(raw, "SG_GATED_SEED") ? "seed" : MainSaid.has(raw, "SG_GATED_KEY") ? "key" : MainSaid.has(raw, "SG_GATED_CHANGE") ? "change" : null;
-  if (secret) {
+  let k = null; try { k = await api.cmdKind(c); } catch (e) { k = null; }
+  if (!k) { appendTerm(t("error: the command could not be checked before running. Nothing was run."), "err"); return; }
+  const ask = (secret) => {
     appendTerm(c.split(/\s+/)[0], "cmd");
     secretAsk(secret, c, async (typed) => {
       const g = await api.secretGate(c, typed);
       const r = await api.cmd(c);
-      secretReveal(c, JSON.stringify(r, null, 2), !!(g && g.system)); appendTerm(t("The reply is shown in its own window for 60 seconds and is not kept here."), "note");
+      secretReveal(k.shown, JSON.stringify(r, null, 2), !!(g && g.system)); appendTerm(t("The reply is shown in its own window for 60 seconds and is not kept here."), "note");
     });
-    return;
-  }
-  TERM_HIST.push(c); termIdx = TERM_HIST.length;
-  appendTerm(c, "cmd");
+  };
+  if (k.kind && !k.chain) { ask(k.kind); return; }
+  if (k.write && TERM_BUSY.has(c) && TERM_WARNED !== c) { TERM_WARNED = c; appendTerm(t("note: the same command is still running (a send can take up to 3 minutes). Type it again to run it a second time anyway."), "note"); return; }
+  TERM_WARNED = "";
+  if (!k.secretValues) { TERM_HIST.push(c); termIdx = TERM_HIST.length; }
+  appendTerm(k.shown, "cmd");
   const note = termSendNote(c); if (note) appendTerm(note, "note");
+  if (k.write) TERM_BUSY.add(c);
+  let r, err = null;
+  try { r = await api.cmd(c); } catch (x) { err = x; } finally { if (k.write) TERM_BUSY.delete(c); }
+  const raw = err ? ipcRaw(err) : "", secret = MainSaid.has(raw, "SG_GATED_SEED") ? "seed" : MainSaid.has(raw, "SG_GATED_KEY") ? "key" : MainSaid.has(raw, "SG_GATED_CHANGE") ? "change" : null;
+  if (secret) { ask(secret); return; }   // main read it as gated after all: its refusal decides
   if (err) appendTerm("error: " + ipcError(err), "err"); else appendTerm(JSON.stringify(r, null, 2), "json");
   inp.focus();
 }
