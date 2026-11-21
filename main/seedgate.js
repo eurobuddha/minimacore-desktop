@@ -51,12 +51,32 @@ function refusal(command, take) {
 const { N_ } = require("./lang").I18N;
 /** The command as the check shows it (0.19.227, as released 0.18.196): control and bidirectional characters as spaces,
  *  white space collapsed, and the VALUES of phrase, password, confirm and seed hidden, quoted or not. */
+// The secret parameters of the node's commands (core/minima-core commands, every getParam of them: phrase, password, confirm,
+// seed, privatekey; 0.19.282 added privatekey: sendfrom, signfrom, consolidatefrom, createtokenfrom, txnsign, sphincs).
+const SECRET_NAMES = ["phrase", "password", "confirm", "seed", "privatekey"];
 function masked(c) {
-  return String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
+  const words = String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
     // hidden through the end of the node's token (0.19.266): a quote inside a value opens a quoted span the node keeps in the same
     // value (`password:my"secret` showed `"secret`; `seed:0xAB"action":"wipekeys"` is ONE seed value to the node, no action)
-    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)((?:"[^"]*"?|[^\s"])+)/gi, "$1•••")
-    .replace(/\s+/g, " ").trim();
+    .replace(new RegExp("((?:^|\\s|\")(?:" + SECRET_NAMES.join("|") + ")\"?\\s*:\\s*)((?:\"[^\"]*\"?|[^\\s\"])+)", "gi"), "$1•••")
+    .replace(/\s+/g, " ").trim().split(" ");
+  // the words after a hidden value up to the next name:value are hidden too (0.19.282): the node drops them or joins them to the
+  // value (`phrase:spray lamp` showed `lamp`, a 24-word phrase typed unquoted showed 23 words)
+  let hiding = false;
+  for (let i = 0; i < words.length; i++) { const w = words[i]; if (/•••"?$/.test(w)) { hiding = true; continue; } if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else words[i] = "•••"; } }   // a name ends it, also one spaced from its ":"
+  return words.join(" ");
+}
+/** A reply of the node with the values of secret parameters hidden wherever it carries its "params" (0.19.282): Command.getJSONReply
+ *  echoes every parameter, so a megammrsync phrase:, a backup password: or a sendfrom privatekey: came back whole to the window. */
+function scrubReply(r, depth = 0) {
+  if (!r || typeof r !== "object" || depth > 8) return r;
+  if (Array.isArray(r)) return r.map(x => scrubReply(x, depth + 1));
+  const out = {};
+  for (const [k, v] of Object.entries(r)) {
+    if (k === "params" && v && typeof v === "object" && !Array.isArray(v)) { out[k] = {}; for (const [n, x] of Object.entries(v)) out[k][n] = SECRET_NAMES.includes(V.fold(n)) ? "•••" : scrubReply(x, depth + 1); }
+    else out[k] = scrubReply(v, depth + 1);
+  }
+  return out;
 }
 /** The typed phrase, then the system's own check (main/syscheck.js, 0.19.188: Touch ID; refused while a Touch ID that
  *  worked before cannot be asked; a message box naming what is shown where there never was one). what = { reason, detail }
@@ -104,4 +124,4 @@ async function revealSeed(typed, sys, run) {
   if (typeof phrase !== "string" || !phrase) throw new Error("Couldn't read the seed.");
   return { phrase, system };
 }
-module.exports = { secretKind, classify, refusal, create, revealSeed, masked, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };
+module.exports = { secretKind, classify, refusal, create, revealSeed, masked, scrubReply, SECRET_NAMES, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };

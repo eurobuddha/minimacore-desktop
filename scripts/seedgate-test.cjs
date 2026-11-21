@@ -341,3 +341,25 @@ test("the texts the review ran through the node: every check reads what the node
   assert.deepEqual(sent, []);
   await handlers["mcd:cmd"](null, "balance"); assert.deepEqual(sent, ["balance"], "a plain command still runs");
 });
+
+// ---- 0.19.282: no secret is shown: privatekey: too, every word of an unquoted phrase, and the node's own echo of the parameters ----
+test("secrets stay hidden: privatekey: is masked, so are the words after a hidden value, and the node's reply params are scrubbed before the window gets them", async () => {
+  assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
+  assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:••• •••", "the node drops 'lamp', and it is a word of the phrase");
+  assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5");
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed : ••• confirm:•••", "a spaced name still ends it");
+  const main = SRC("main/main.js"), kh = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async')), handlers = {};
+  new Function("ipcMain", "seedgate", "rpc", kh)({ handle: (n, f) => { handlers[n] = f; } }, G, require("../main/rpc.js"));
+  const k = handlers["mcd:cmdKind"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5");
+  assert.equal(k.secretValues, true, "kept out of the Terminal's ↑ history"); assert.ok(!k.shown.includes("0x1234ABCD"), "and echoed without it");
+  // what the node echoes in "params" (Command.getJSONReply), at any depth, for one command or a chain
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {};
+  const reply = (c) => /^backup/.test(c) ? { command: "backup", params: { password: "hunter22", file: "b.bak" }, status: true }
+    : [{ command: "sendfrom", params: { privatekey: "0x1234ABCD", amount: "1" }, status: true, response: { inner: { params: { Phrase: "a b c" } } } }];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => ({}), async () => ({}), { rpcCall: async (p, s, c) => reply(c) }, { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  const b = await hs["mcd:cmd"](null, "backup password:hunter22 file:b.bak");
+  assert.deepEqual(b.params, { password: "•••", file: "b.bak" });
+  const s = JSON.stringify(await hs["mcd:cmd"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD"));
+  assert.ok(!s.includes("0x1234ABCD") && !s.includes("a b c") && s.includes('"amount":"1"'), s);
+});

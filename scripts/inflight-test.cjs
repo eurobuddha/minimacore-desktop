@@ -171,6 +171,6 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
     if (!/ww|chat/i.test(name)) assert.equal(acks[0], "ACK", name + " hands the window's ack to the guard");
   }
   assert.ok(/label: lang\.t\("Restart node"\), click: \(\) => \{ mayStop\(\)\.then\(\(\) => node\.restart\(\)\)/.test(src), "the tray's Restart node asks the guard first");
-  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return runResync(command); }"), "a Terminal resync asks the guard first");
+  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command)); }"), "a Terminal resync asks the guard first");
   assert.ok(/ack: w\.any && how !== "quit" \? stopGuard\.issue\(\) : ""/.test(calls["mcd:inFlight"]), "the ack is issued only with a warning that was shown");
 });
