@@ -404,6 +404,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["RPC_ONE_COMMAND", I18N.N_("This command holds \";\", which would start a second command. Nothing was sent.")],
     ["RPC_SMUGGLED", I18N.N_("This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.")],
     ["RPC_BUILT", I18N.N_("This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.")],
+    ["RPC_TXNDATA", I18N.N_("The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.")],
     ["RPC_MSKEY", I18N.N_("Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.")],
     ["RPC_UNCLEAR", I18N.N_("The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.")],
     ["MAIN_CMD_REPEATED", I18N.N_("This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.")],

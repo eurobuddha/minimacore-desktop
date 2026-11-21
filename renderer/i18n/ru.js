@@ -5346,7 +5346,8 @@
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "Узел восстановления должен быть в виде host:port (имя или IP-адрес, двоеточие, номер порта). Ничего не сохранено.",
   "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode задаётся в параметрах запуска, а не в дополнительных аргументах.",
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "Файл на другом компьютере (путь, начинающийся с \\\\ или //) не используется: узел подключился бы к нему. Сначала скопируйте файл на этот компьютер. Ничего не было запущено.",
-  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "Эта команда содержит символы вне простого ASCII и слишком длинна для командной строки узла (более 65,536 символов после кодирования). Сократите её или запишите эти символы в простом ASCII. Ничего не отправлено."
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "Эта команда содержит символы вне простого ASCII и слишком длинна для командной строки узла (более 65,536 символов после кодирования). Сократите её или запишите эти символы в простом ASCII. Ничего не отправлено.",
+  "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.": "Значение data: этой команды должно быть шестнадцатеричным 0x с транзакцией, id которой состоит только из букв, цифр, \".\", \"-\" или \"_\": узел вставляет этот id в команды, которые выполняет сам. Ничего не было запущено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5462,5 +5463,6 @@
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
   "-rescuenode is set in Startup Params, not in the extra arguments.",
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
-  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent."
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.",
+  "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run."
 ] });

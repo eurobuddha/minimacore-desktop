@@ -519,3 +519,19 @@ test("a 24-word restore is armed with Touch ID: its phrase is said as a count wi
   assert.ok(("show a seed phrase by running: " + mm).length <= 120, "a 24-word megammrsync restore fits the prompt too");
   assert.equal(G.masked('vault action:passwordunlock password:"one"'), "vault action:passwordunlock password:•••", "one word stays •••");
 });
+
+// ---- 0.19.307: signfrom / postfrom paste the id of the transaction in data: into the commands they run: it must be plain ----
+test("a signfrom or postfrom whose transaction id carries a second command is refused through mcd:cmd; a plain one runs; the app's own commands are held to it", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  const blob = (id, extra = "00000000") => { const b = Buffer.from(id, "utf8"), l = Buffer.alloc(4); l.writeInt32BE(b.length); return "0x" + Buffer.concat([l, b, Buffer.from(extra, "hex")]).toString("hex").toUpperCase(); };
+  const evil = blob("x;send address:0x" + "E".repeat(64) + " amount:100"), pk = " privatekey:0x" + "1".repeat(64) + " keyuses:3";
+  const bad = ["postfrom data:" + evil, "signfrom data:" + evil + pk, "postfrom data:0x0011", "postfrom data:0x7FFFFFFF00", "postfrom data:MxG081PTR905VTUGBKY7KHKV76QVHE99BM691QNC09GP2WPCG1P0QZTHD8SWWVQ", "postfrom data:" + blob("a b"),
+    "signfrom data:" + blob("ok") + ' id:"a b"' + pk];
+  for (const c of bad) await assert.rejects(hs["mcd:cmd"](null, c), /must be 0x hex holding a transaction whose id is plain/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["postfrom data:" + blob("txn_1.a-b") + " mine:false", "signfrom data:" + blob("abc") + pk]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+  assert.throws(() => V.oneCommand("postfrom data:" + evil), /whose id is plain/, "a command the app builds is held to it too");
+});

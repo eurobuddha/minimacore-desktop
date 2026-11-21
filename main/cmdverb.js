@@ -150,11 +150,28 @@ const NOT_PASTED = new Set(["action", "seed", "data", "file", "name"]);   // rea
 const BUILT = "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.";
 const MSKEY = "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.";
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
+// signfrom / postfrom read a whole transaction from data: (TxnRow.convertMiniDataVersion: its first field is the id, a 4-byte length
+// then UTF-8) and paste that id, unquoted, into "txnsign id:" / "txnpost id:" / "txnexport id:" / "txndelete id:" + id, run through
+// runMultiCommand: an id holding ";" was a second command with full rights (0.19.307). The id must be plain; data must be 0x hex the
+// app can read (the Mx form is refused: the app does not decode it), with a length that stays inside the blob.
+const TXNDATA = "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.";
+const TXID = /^[0-9A-Za-z_.\-]{1,256}$/;
+/** The id a TxnRow blob carries, or null when it is not 0x hex or its length runs past the blob. */
+function txnBlobId(hex) {
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(String(hex))) return null;
+  const b = Buffer.from(String(hex).slice(2), "hex"); if (b.length < 4) return null;
+  const len = b.readInt32BE(0); if (len < 0 || 4 + len > b.length) return null;
+  return b.subarray(4, 4 + len).toString("utf8");
+}
 function strings(x, out = []) { if (typeof x === "string") out.push(x); else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) { out.push(k); strings(v, out); } return out; }
 /** Why this ONE command, one that builds further commands, is refused ("" = it is not). */
 function builtProblem(part) {
   const r = read(part); if (!verbs(part).some(v => BUILDERS.test(v))) return "";
   const action = fold(paramValue(part, "action") || "");
+  if (verbs(part).some(v => v === "signfrom" || v === "postfrom")) {
+    const data = paramValue(part, "data"), id = data == null ? null : txnBlobId(data), own = paramValue(part, "id");
+    if ((data != null && (id === null || !TXID.test(id))) || (own != null && !TXID.test(own))) return TXNDATA;
+  }
   for (const [n0, v] of r.params) {
     const n = fold(n0);
     if (/^[{[]/.test(v)) {
@@ -183,6 +200,7 @@ function builtProblem(part) {
 function oneCommand(command) {
   if (String(command).includes(";")) throw new Error("This command holds \";\", which would start a second command. Nothing was sent.");
   if (smuggled(command)) throw new Error(SMUGGLED);   // an escaped one too (0.19.291)
+  for (const p of parts(command)) { const built = builtProblem(p); if (built) throw new Error(built); }   // and what a builder would paste (0.19.307: the Web Wallet's sendfrom)
   return command;
 }
 module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, smuggled, builtProblem, oneCommand };

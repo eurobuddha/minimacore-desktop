@@ -5333,7 +5333,8 @@
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "救援节点必须是 host:port（名称或 IP 地址、冒号、端口号）。未保存任何内容。",
   "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode 在启动参数中设置，而不是在额外参数中。",
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "不会使用另一台计算机上的文件（以 \\\\ 或 // 开头的路径）：节点会去连接它。请先把文件复制到这台计算机。未运行任何命令。",
-  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "此命令包含非纯 ASCII 字符，且对节点的命令行来说太长（编码后超过 65,536 个字符）。请缩短它，或将这些字符写成纯 ASCII。未发送任何内容。"
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "此命令包含非纯 ASCII 字符，且对节点的命令行来说太长（编码后超过 65,536 个字符）。请缩短它，或将这些字符写成纯 ASCII。未发送任何内容。",
+  "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.": "此命令的 data: 必须是 0x 十六进制，其中的交易 id 只能是字母、数字、\".\"、\"-\" 或 \"_\"：节点会把这个 id 粘贴进它自己运行的命令中。未运行任何命令。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5449,5 +5450,6 @@
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
   "-rescuenode is set in Startup Params, not in the extra arguments.",
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
-  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent."
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.",
+  "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run."
 ] });
