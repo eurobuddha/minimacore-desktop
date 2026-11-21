@@ -425,8 +425,6 @@ async function scanOnce() {
         const t0 = meta("backfill_target_block"); store.setMeta("backfill_target_block", t0 ? Math.min(t0, prev) : prev); store.setMeta("backfill_floor_block", covered);
         store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass read back to block " + covered + ", and the older blocks are read in steps, back to block " + (t0 ? Math.min(t0, prev) : prev));
       }
-      // a later pass that read everything since the one before, with nothing left to read below, clears the Inbox notice (0.19.273); the log keeps it
-      else if (prev && !meta("backfill_target_block") && meta("unread_below_block")) store.setMeta("unread_below_block", 0);
       store.setMeta("scanned_tip_block", tip);
       const target = meta("backfill_target_block"), floor = meta("backfill_floor_block");
       if (target && floor) {   // ONE step per pass: a widening query is heavy on the shared MINIMERCH address
@@ -443,6 +441,9 @@ async function scanOnce() {
           store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", floor);
           store.log("miniMall: orders sent before block " + floor + ", and payments already spent, could not be read: the node did not list them (its block tree ends there, or its replies were cut short)");
         }
+        // "no deeper history" stays said (0.19.331, as the released tree; 0.19.273 cleared it at the next pass) until a step reads below it
+        // or the vendor hides it on the Inbox (dismissUnread)
+        if (c !== null && d !== null && meta("unread_below_block") && reached < meta("unread_below_block")) store.setMeta("unread_below_block", 0);
       }
     }
     const bf1 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
@@ -514,6 +515,8 @@ function paymentNotSent(ref) {
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read, for the Inbox's status line (0.19.249): the last pass failed (the node did not answer;
  *  read again on the next block), and the oldest block below which a long absence left orders and payments unread. */
+/** The vendor hid the Inbox's "could not be read" notice (0.19.331): the log keeps it. */
+function dismissUnread() { store.setMeta("unread_below_block", 0); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read yet, for the Inbox: a failed pass, the block a backfill still reads back to (catchingUpTo), the oldest
  *  block a node that serves no deeper left unread (unreadBelow), payout addresses skipped as not valid (0.19.249, 0.19.284, 0.19.328). */
 function scanState() { return { readFailed: lastPassFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: Number(store.getMeta("unread_below_block")) || 0, skipped: [...skippedPay.keys()].filter(skipping) }; }
@@ -521,7 +524,7 @@ function newOrderCount() { return store.orders().filter(o => o.role === "sell" &
 
 module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
-  myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState,
+  myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState, dismissUnread,
   placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
   sendingCount: () => sending.size,   // payments at the node in this process: said by the Quit and Shutdown warnings (0.19.288)
   _setRunner, MINIMERCH, MXUSD_TOKEN, tokenFor

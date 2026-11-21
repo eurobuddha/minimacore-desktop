@@ -542,7 +542,9 @@ test("vendor: an absence longer than one pass is read back in steps to the last 
   tip = 160000; maxServe = 5000; await shop.scanOnce();
   { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.catchingUpTo, st.unreadBelow], [false, 0, 160000 - 4096]); }
   assert.ok(logs.some(l => l.includes("orders sent before block " + (160000 - 4096) + ", and payments already spent, could not be read")));   // wording of 0.19.330
-  tip = 160001; await shop.scanOnce(); assert.equal(shop.scanState().unreadBelow, 0, "a later pass that read everything since the one before clears the notice (0.19.273)");
+  // changed on purpose (0.19.331): "no deeper history" stays true, so it stays said until the vendor hides it (0.19.273 cleared it here)
+  tip = 160001; await shop.scanOnce(); assert.equal(shop.scanState().unreadBelow, 160000 - 4096, "a later pass that read everything since the one before keeps the notice");
+  await shop.dismissUnread(); assert.equal(shop.scanState().unreadBelow, 0, "hidden by the vendor");
   store.setLog((m) => { throw new Error("no log expected: " + m); });
 });
 
@@ -574,5 +576,25 @@ test("vendor: an absence longer than the node's block tree ends as 'the node ser
   // the tree's length cannot be read: what is read is judged, the cursor stays and the pass is said as not read
   statusOk = false; tip = 302000; await shop.scanOnce();
   assert.equal(store.getMeta("scanned_tip_block"), 300000, "nothing moves"); assert.equal(shop.scanState().readFailed, true);
+  store.setLog((m) => { throw new Error("no log expected: " + m); });
+});
+
+// ---- 0.19.331: "the node serves no deeper history" is kept until a step reads below it or the vendor hides it ----
+test("vendor: the no-deeper-history notice survives later passes, ends when a later step reads below it, and the vendor can hide it (main IPC and the Inbox's Hide)", async () => {
+  let tip = 400000, treeLen = 1024; const logs = []; store.setLog((m) => logs.push(m));
+  shop._setRunner(async (c) => c === "block" ? { status: true, response: { block: String(tip) } } : c === "status" ? { status: true, response: { chain: { length: treeLen } } } : { status: true, response: [] });
+  store.setMeta("scanned_tip_block", 396000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
+  await shop.init(); await shop.scanOnce();
+  assert.equal(shop.scanState().unreadBelow, 400000 - 1024);
+  for (const t of [400001, 400002, 400003]) { tip = t; await shop.scanOnce(); }
+  assert.equal(shop.scanState().unreadBelow, 400000 - 1024, "kept over later passes: it is still true");
+  // a later absence whose backfill reads below it (a node with a deeper tree) ends it
+  treeLen = 1000000; store.setMeta("scanned_tip_block", 380000); store.setMeta("backfill_target_block", 0); tip = 400100; await shop.scanOnce();
+  for (let i = 0; i < 10 && shop.scanState().catchingUpTo; i++) await shop.scanOnce();
+  assert.equal(shop.scanState().unreadBelow, 0, "read below it: no longer said");
+  store.setMeta("unread_below_block", 123); assert.deepEqual(await shop.dismissUnread(), { ok: true }); assert.equal(shop.scanState().unreadBelow, 0);
+  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), pre = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(main.includes('ipcMain.handle("mcd:shopScanDismiss", () => shop.dismissUnread());') && pre.includes('shopScanDismiss: () => ipcRenderer.invoke("mcd:shopScanDismiss"),'));
+  assert.ok(app.includes('<button class="mm-pill" id="mmScanHide">${th("Hide")}</button>') && app.includes('el("mmScanHide").onclick = () => api.shopScanDismiss()'));
   store.setLog((m) => { throw new Error("no log expected: " + m); });
 });

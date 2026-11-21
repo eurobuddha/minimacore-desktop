@@ -3784,7 +3784,7 @@ async function renderShopInbox() {
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
   const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
     : scan && scan.catchingUpTo ? tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
-    : scan && scan.unreadBelow && mine.length ? tr("Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.", { block: esc(String(scan.unreadBelow)) }) : "";
+    : scan && scan.unreadBelow && mine.length ? tr("Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.", { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331)
   // a payout address skipped as not valid, whole (0.19.284)
   const skippedPay = (scan && scan.skipped || []).map(a => tr("Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.", { address: esc(a) })).join("<br>");
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
@@ -3794,6 +3794,7 @@ async function renderShopInbox() {
      ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
         <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.due || o.amount)} ${esc(SHOP.cur(o.currency))}${o.unchecked && o.status !== "INQUIRY" ? " " + th("(buyer's figure)") : ""}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
   el("mmCard").onclick = shopVendorCard;
+  if (el("mmScanHide")) el("mmScanHide").onclick = () => api.shopScanDismiss().catch(() => null).then(() => renderShopInbox());
   el("shopSub").querySelectorAll("[data-chip]").forEach(c => { c.onclick = () => { shopFilter = c.dataset.chip; renderShopInbox(); }; });
   el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("inbox", { screen: "order", ref: r.dataset.oref }); });
 }

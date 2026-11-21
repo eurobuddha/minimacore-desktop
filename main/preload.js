@@ -182,6 +182,7 @@ contextBridge.exposeInMainWorld("mcd", {
   shopRetryPay: (ref) => ipcRenderer.invoke("mcd:shopRetryPay", ref),
   shopNotSent: (ref) => ipcRenderer.invoke("mcd:shopNotSent", ref),
   shopScanState: () => ipcRenderer.invoke("mcd:shopScanState"),
+  shopScanDismiss: () => ipcRenderer.invoke("mcd:shopScanDismiss"),
   shopAdvance: (ref, status) => ipcRenderer.invoke("mcd:shopAdvance", ref, status),
   shopVendorCheck: (ref) => ipcRenderer.invoke("mcd:shopVendorCheck", ref),
   shopReply: (ref, text) => ipcRenderer.invoke("mcd:shopReply", ref, text),
