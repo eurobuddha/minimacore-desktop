@@ -164,19 +164,39 @@ function ensureChecked(o) {
  *  what is compared (0.18.159): PAID iff the token matches AND the order matches the vendor's listing AND the CUMULATIVE
  *  paid amount >= what the listing says is due > 0. An order that does not match is UNCHECKED and is never paid (the
  *  vendor checks it by hand: handCheck); one due 0 or less is BAD_TOTAL. Never clobbers a vendor-progressed status (CONFIRMED+). */
-// Dust coins of an order not counted yet (0.18.190), in memory only: { ref → Map(coinid → amount) }. Together they count
-// once their sum covers what is still due (9.9 + 0.05 + 0.05 pays 10). A flood that never sums to it writes nothing; the
-// map keeps an order's 1000 largest. After a restart the scanner sees them again and they gather again.
-const PENDING_DUST = new Map(), PENDING_MAX = 1000;
+// Dust coins of an order not counted yet (0.18.190), in memory only: { ref → { coins: Map(coinid → amount), sum (exact, kept as
+// each coin comes and goes), min: [id, amount] of the smallest kept } }. Together they count once their sum covers what is still
+// due (9.9 + 0.05 + 0.05 pays 10). A flood that never sums to it writes nothing. Full (PENDING_MAX), a coin not larger than the
+// smallest kept is not kept, one look (0.18.226, as Pandamonium Desktop 0.19.272: every new coin past 1000 sorted the whole map
+// and every look re-summed it, about a second of main thread per block for 3000 coins, and 1000 gathered coins never fit the
+// order's 1000-coin list beside the coins it had, so a flood never counted); a larger one takes the smallest one's place.
+// After a restart the scanner sees them again and they gather again.
+const PENDING_DUST = new Map(), PENDING_MAX = 256;
+function decSub(a, b) {   // a - b, both readable figures, a >= b
+  const A = decParse(a), B = decParse(b), dp = Math.max(A[1], B[1]), d = A[0] * 10n ** BigInt(dp - A[1]) - B[0] * 10n ** BigInt(dp - B[1]);
+  const str = d.toString().padStart(dp + 1, "0");
+  return dp ? str.slice(0, -dp) + "." + str.slice(-dp) : str;
+}
+function smallest(coins) { let m = null; for (const [id, a] of coins) if (!m || decCmp(a, m[1]) === -1) m = [id, a]; return m; }
+function pendAdd(ref, id, amount) {
+  let p = PENDING_DUST.get(ref); if (!p) { p = { coins: new Map(), sum: "0", min: null }; PENDING_DUST.set(ref, p); }
+  if (p.coins.has(id)) return;
+  if (p.coins.size >= PENDING_MAX) {
+    if (decCmp(amount, p.min[1]) !== 1) return;
+    p.coins.delete(p.min[0]); p.sum = decSub(p.sum, p.min[1]); p.min = null;
+  }
+  p.coins.set(id, amount); p.sum = decAdd(p.sum, amount);
+  p.min = !p.min ? smallest(p.coins) : decCmp(amount, p.min[1]) === -1 ? [id, amount] : p.min;
+}
+function pendDelete(ref, id) {   // a gathered coin counted on its own after all (what is due moved): never counted twice
+  const p = PENDING_DUST.get(ref); if (!p || !p.coins.has(id)) return;
+  p.sum = decSub(p.sum, p.coins.get(id)); p.coins.delete(id);
+  if (p.min && p.min[0] === id) p.min = smallest(p.coins);
+}
 function remainingOf(o) {
   const d = decParse(o.due), p = decParse(o.paidAmount || "0") || [0n, 0];
   if (!d || d[0] <= 0n || o.problems.length) return null;
   const dp = Math.max(d[1], p[1]); return [d[0] * 10n ** BigInt(dp - d[1]) - p[0] * 10n ** BigInt(dp - p[1]), dp];
-}
-function covers(amounts, rem) {
-  let dp = rem[1]; for (const a of amounts) { const x = decParse(a); if (x) dp = Math.max(dp, x[1]); }
-  let sum = 0n; for (const a of amounts) { const x = decParse(a); if (x) sum += x[0] * 10n ** BigInt(dp - x[1]); }
-  return sum >= rem[0] * 10n ** BigInt(dp - rem[1]);
 }
 /** Count coins on an order: in its list and the global list, their amounts added; the outcome. */
 function countCoins(o, ref, coins, paidTokenid) {
@@ -194,12 +214,13 @@ function countCoins(o, ref, coins, paidTokenid) {
 /** The order's gathered dust, counted together when it covers what is still due → the outcome, or "". */
 function settleDust(o, ref) {
   const pend = PENDING_DUST.get(ref), rem = remainingOf(o);
-  if (!pend || !pend.size || !rem || rem[0] <= 0n) return "";
-  const list = [...pend.entries()].filter(([cid]) => !has(mem.counted, cid) && !(o.coins || []).includes(cid));
-  if (!list.length || !covers(list.map(x => x[1]), rem)) return "";
-  if ((o.coins || []).length + list.length > ORDER_COINS_MAX) return "";
+  if (!pend || !pend.coins.size || !rem || rem[0] <= 0n) return "";
+  // the running sum (0.18.226); a gathered coin is never counted elsewhere: recordPayment returns ALREADY for a counted one before
+  // it is gathered, and one counted on its own after all is taken out (pendDelete)
+  const S = decParse(pend.sum), dp = Math.max(S[1], rem[1]);
+  if (S[0] * 10n ** BigInt(dp - S[1]) < rem[0] * 10n ** BigInt(dp - rem[1]) || (o.coins || []).length + pend.coins.size > ORDER_COINS_MAX) return "";
   PENDING_DUST.delete(ref);
-  return countCoins(o, ref, list, o.tokenid);
+  return countCoins(o, ref, [...pend.coins.entries()], o.tokenid);
 }
 function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   ensureLoaded(); const o = order(ref); if (!o) return null;
@@ -216,8 +237,7 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   // (0.18.190). Nothing is saved for it until then.
   if (isDust(o, paidAmount)) {
     if (!rightToken || !decParse(paidAmount)) return "DUST";
-    const pend = PENDING_DUST.get(ref) || new Map(); pend.set(cid, String(paidAmount)); PENDING_DUST.set(ref, pend);
-    if (pend.size > PENDING_MAX) { const smallest = [...pend.entries()].sort((x, y) => decCmp(x[1], y[1]))[0][0]; pend.delete(smallest); }
+    pendAdd(ref, cid, String(paidAmount));
     const out = settleDust(o, ref); if (out) { flush(); return out; }
     return "DUST";
   }
@@ -228,6 +248,7 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
+  pendDelete(ref, cid);
   let outcome = countCoins(o, ref, [[cid, String(paidAmount)]], paidTokenid);
   if (outcome === "UNDERPAID") outcome = settleDust(o, ref) || outcome;   // the gathered dust may now cover what is left
   flush(); return outcome;
@@ -269,5 +290,6 @@ module.exports = {
   saveShop, shops, shop, deleteShop,
   upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
-  _money: { decCmp, decGte, decAdd, payableTotal }
+  _money: { decCmp, decGte, decAdd, decSub, payableTotal }, PENDING_MAX,
+  _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }
 };
