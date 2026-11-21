@@ -34,7 +34,9 @@ const NET_HOSTS = new Set([
 function allowedUrl(u) {
   // NET_HOSTS = the built-in ETH RPCs + MEXC. ethUserHosts = a user-set custom RPC host, already SSRF-validated
   // (https + non-private) at the point it was saved — never a raw user string reaching here unchecked.
-  try { const h = new URL(String(u)).hostname; return NET_HOSTS.has(h) || ethUserHosts.has(h); } catch (e) { return false; }
+  // https only, no credentials in the url (0.19.244, as released 0.18.210): a plain http:// url to a listed host went out in
+  // clear text, where anyone on the path could answer for the ETH chain (a fake receipt or balance)
+  try { const x = new URL(String(u)); return x.protocol === "https:" && !x.username && !x.password && (NET_HOSTS.has(x.hostname) || ethUserHosts.has(x.hostname)); } catch (e) { return false; }
 }
 
 let ctx = null;               // the vm context (ctx.AX / ctx.READY / ctx.CTX)
@@ -191,7 +193,8 @@ function buildMds() {
     net: {
       GET(url, cb) {
         if (!allowedUrl(url)) return cb({});
-        netfetch.fetchJson(String(url)).then(obj => cb(obj == null ? {} : { response: obj }), () => cb({}));
+        // no redirects (0.19.244, as released 0.18.210): the list is checked on the first url only, and a redirect went to any host
+        netfetch.fetchJson(String(url), { noRedirect: true }).then(obj => cb(obj == null ? {} : { response: obj }), () => cb({}));
       },
       POST(url, data, cb) {
         if (!allowedUrl(url)) return cb({});
@@ -1297,12 +1300,16 @@ function ethPrivateHost(host) {
 function ethValidateRpc(url) {
   let u; try { u = new URL(String(url)); } catch (e) { return { err: "That doesn't look like a URL." }; }
   if (u.protocol !== "https:") return { err: "Use an https:// endpoint." };
+  // the network list refuses a url with a name or password in it, so it is refused here with the reason (0.19.244, as released 0.18.216)
+  if (u.username || u.password) return { err: "Leave the name and password out of the URL (user:password@host is not allowed); use a URL with the key in its path if your provider gives one." };
   if (ethPrivateHost(u.hostname)) return { err: "That host isn't allowed (local/private addresses are blocked)." };
   return { ok: true, url: u.toString(), host: u.hostname };
 }
 function ethRpcLoad() {
   if (ethRpcOverride !== null) return ethRpcOverride;
-  try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; } } catch (e) {}
+  try { const o = JSON.parse(fs.readFileSync(ETH_RPC_FILE(), "utf8")); const v = ethValidateRpc(o && o.url); if (v.ok) { ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host); return ethRpcOverride; }
+    // a saved endpoint that is no longer allowed is dropped with a reason in the log (0.19.244, as released 0.18.216), never used in silence
+    log("the saved Ethereum endpoint was not used (" + v.err + "); the built-in endpoints are used instead"); } catch (e) {}
   ethRpcOverride = null; return null;
 }
 // NB we deliberately do NOT call AX.ethtx.resetAll() when repointing the RPC. This wallet is MAINNET-ONLY and an
@@ -1344,7 +1351,7 @@ module.exports = {
   makerCfg, makerPreview, makerSave: whileHeld(whileHalted(makerSave)), makerPublish: whileHeld(whileHalted(makerPublish)), makerWithdraw: whileHeld(makerWithdraw), switchCurrency: whileHeld(switchCurrency),
   otc, otcGoLive: whileHeld(whileHalted(otcGoLive)), otcWithdraw: whileHeld(otcWithdraw), otcPropose: whileHeld(whileHalted(otcPropose)), otcDealAction: whileHeld(otcDealAction),
   ethWallet, ethBalances, ethTokens, ethAddToken, ethRemoveToken, ethSendMax, ethSendReview, ethSendExecute: whileHeld(ethSendExecute), ethSetRpc,
-  _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; },
+  _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _allowedUrl: allowedUrl,
   // test-only: the publish-send coin pin (scripts/atomix-unit.js) — drive it with _setRunner
   _pinPublishSend: pinPublishSend, _AX_PUBLISH_AMOUNT: AX_PUBLISH_AMOUNT,
   _buildMds: buildMds,   // test-only: the MDS shim, so the cmd reply normalisation can be asserted

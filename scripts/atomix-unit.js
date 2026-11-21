@@ -62,6 +62,26 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     }
   });
 
+  ok("net allowlist: https only, no credentials, and the engine's GETs follow no redirect (0.19.244, as released 0.18.210 / 0.18.216)", () => {
+    const m = require("../main/atomix");
+    assert.equal(m._allowedUrl("https://ethereum-rpc.publicnode.com/"), true);
+    assert.equal(m._allowedUrl("https://api.mexc.com/api/v3/ticker/price?symbol=MINIMAUSDT"), true);
+    for (const u of ["http://ethereum-rpc.publicnode.com/", "ws://ethereum-rpc.publicnode.com/", "https://user:pw@ethereum-rpc.publicnode.com/", "https://user@api.mexc.com/", "https://evil.example/", "https://ethereum-rpc.publicnode.com.evil.example/"]) assert.equal(m._allowedUrl(u), false, u);
+    const src = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8");
+    assert.ok(/netfetch\.fetchJson\(String\(url\), \{ noRedirect: true \}\)/.test(src), "MDS.net.GET passes noRedirect");
+    const v = m._ethtest.ethValidateRpc;
+    assert.match(v("https://me:secret@eth.example.org/").err, /Leave the name and password out of the URL/); assert.match(v("https://me@eth.example.org/").err, /name and password/);
+    assert.equal(v("https://eth.example.org/v3/KEY").ok, true); assert.match(v("http://eth.example.org/").err, /https/);
+    // a saved endpoint with credentials (written by an older version) is dropped at load with a log line, never used
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "axrpc-")); m._setDataDir(d); m._resetEthCaches();
+    fs.writeFileSync(path.join(d, "ethrpc.json"), JSON.stringify({ url: "https://me:secret@eth.example.org/", host: "eth.example.org" }));
+    const said = [], log0 = console.log; console.log = (...a) => said.push(a.join(" "));
+    try { assert.equal(m._ethtest.ethRpcLoad(), null); } finally { console.log = log0; }
+    assert.equal(m._allowedUrl("https://eth.example.org/"), false, "its host is not let through");
+    assert.ok(said.some(l => /saved Ethereum endpoint was not used \(Leave the name and password/.test(l)), "said in the log: " + said.join(" | "));
+    m._resetEthCaches();
+  });
+
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
   // HERMETIC since 0.18.140. It used to run `docker exec` into a fixed container name for the crypto-bearing
   // commands; on the owner's machine that container is a wallet with real funds, and this "unit" check read its

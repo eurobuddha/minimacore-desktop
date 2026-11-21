@@ -3626,7 +3626,7 @@ function ewRevealKey(key, system) {
 
 async function ewRpcDialog() {
   const st = await api.ewStatus().catch(() => ({}));
-  const say = (r, ok) => { if (r && r.err) { toast(r.err, "warn"); return false; } toast(ok, "ok"); return true; };
+  const say = (r, ok) => { if (r && r.err) { toast(MainSaid.say(r.err), "warn"); return false; } toast(ok, "ok"); return true; };
   appDlg({ title: t("RPC endpoint"), body: `<input class="adlg__in ew-mono" id="ewRpcIn" placeholder="${th("https://…")}" aria-label="${th("RPC endpoint")}" value="${esc((st && st.rpc) || "")}" autocomplete="off" spellcheck="false" />
       <div class="ew-fine">${th("Falls back to public keyless nodes automatically if this one fails. Only public https hosts are accepted. Dexicon ① MxUSD settles its swaps through the same endpoint.")}</div>`,
     buttons: [{ label: t("Default"), neutral: true, on: async (_root, close) => { if (say(await AppsAct.eth.setRpc(api, ""), t("Using the default public RPCs"))) close(); } },
