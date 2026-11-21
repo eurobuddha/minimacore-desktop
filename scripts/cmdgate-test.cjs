@@ -523,3 +523,13 @@ test("a file on another computer is refused for every command that reads one, wi
   assert.deepEqual(sent, []);
   for (const c of ["txnexport id:a file:/Users/me/x.txn", "hash file:C:" + B + "x", "txnimport file:x.txn"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
 });
+
+// ---- 0.18.245 (as Pandamonium Desktop 0.19.310): builders checked by what they really paste: a rawfrom input's script, a multisig id are not; a multisig file is ----
+test("rawfrom's input script and a multisig id are not pasted and pass; a multisig file is pasted and is checked (a drive letter allowed)", async () => {
+  const B = String.fromCharCode(92), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  const user = "0x" + "B".repeat(64), att = "0x" + "A".repeat(64);
+  for (const c of ['rawfrom inputs:[{"coinid":"0x01","script":"RETURN TRUE"}] outputs:[{"address":"0x02","amount":"1","tokenid":"0x00"}]', 'multisig action:create id:"my pair" amount:10 required:2 publickeys:' + JSON.stringify([user, att]),
+    "multisig action:view file:C:" + B + "txns" + B + "a.txn", "multisigread action:view file:/Users/me/a.txn"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
+  for (const c of ['multisig action:view file:"a b.txn"', "multisig action:sign file:x:y privatekey:0x01", 'rawfrom inputs:[{"coinid":"0x01 burn:5"}] outputs:[]'])
+    await assert.rejects(h(null, c), /builds further commands/, c);
+});

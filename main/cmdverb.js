@@ -147,7 +147,11 @@ function smuggled(command) {
 // white space, ":" or a quote, or a JSON value with a backslash escape or a decoded quote, rewrites them (a multisig public key
 // carrying '","2":"0' made the multisig's state "0 of n": anyone could spend it; password:"pw burn:500" became burn:500).
 const BUILDERS = /^(?:sendfrom|rawfrom|rawtxnfrom|createtokenfrom|consolidatefrom|constructfrom|createfrom|signfrom|postfrom|multisig|multisigread|txnauto|sphincs)$/;
-const NOT_PASTED = new Set(["action", "seed", "data", "file", "name"]);   // read, hashed or parsed by the command itself, never pasted
+// Read, hashed or parsed by the command itself, never pasted (0.18.245, as Pandamonium Desktop 0.19.310): action, seed (sphincs hashes
+// it), data (signfrom / postfrom: checked by txnBlobId), name (createtokenfrom builds its JSON), and for multisig / multisigread id
+// (hashed). file is pasted by multisig / multisigread sign, post and view ("txnimport id:… file:" + file) and is checked there.
+const NOT_PASTED = new Set(["action", "seed", "data", "name"]);
+const fileBad = (v) => /[\s"]/.test(v) || (v.includes(":") && !/^[A-Za-z]:\\[^:]*$/.test(v));   // a drive letter's ":" is fine
 const BUILT = "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.";
 const MSKEY = "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.";
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
@@ -168,7 +172,7 @@ function strings(x, out = []) { if (typeof x === "string") out.push(x); else if 
 /** Why this ONE command, one that builds further commands, is refused ("" = it is not). */
 function builtProblem(part) {
   const r = read(part); if (!verbs(part).some(v => BUILDERS.test(v))) return "";
-  const action = fold(paramValue(part, "action") || "");
+  const action = fold(paramValue(part, "action") || ""), ms = verbs(part).some(v => v === "multisig" || v === "multisigread");
   if (verbs(part).some(v => v === "signfrom" || v === "postfrom")) {
     const data = paramValue(part, "data"), id = data == null ? null : txnBlobId(data), own = paramValue(part, "id");
     if ((data != null && (id === null || !TXID.test(id))) || (own != null && !TXID.test(own))) return TXNDATA;
@@ -183,9 +187,12 @@ function builtProblem(part) {
       // a state value is pasted inside value:"…" as its own text (state.get(key)+""): an array or object there serialises with quotes
       // of its own and rewrites the txnstate it goes into (0.18.243, as Pandamonium Desktop 0.19.308): strings, numbers and true / false only
       if (n === "state" && j && typeof j === "object" && Object.values(j).some(x => x !== null && typeof x === "object")) return BUILT;
-      if (/^(inputs|outputs)$/.test(n) && ss.some(s => /[\s:]/.test(s))) return BUILT;   // rawfrom / rawtxnfrom paste coinid, address, amount, tokenid raw
+      // rawfrom / rawtxnfrom paste coinid, address, amount, tokenid raw: no white space or ":"; a script goes inside {"…":""} like script:
+      if (/^(inputs|outputs)$/.test(n) && (Array.isArray(j) ? j : [j]).some(e => (e && typeof e === "object" ? Object.entries(e) : [["", e]]).some(([k, x]) => typeof x === "string" && fold(k) !== "script" && /[\s:]/.test(x)))) return BUILT;
       if (n === "publickeys" && verbs(part).includes("multisig") && action === "create" && !(Array.isArray(j) && j.every(k => typeof k === "string" && HEX64.test(k)))) return MSKEY;
     } else if (n === "script") { if (v.includes('"')) return BUILT; }   // pasted inside scripts:{"…":""}: a space is fine there
+    else if (n === "file") { if (ms && fileBad(v)) return BUILT; }
+    else if (n === "id" && ms) { /* hashed */ }
     else if (!NOT_PASTED.has(n) && /[\s:"]/.test(v)) return BUILT;
     if (n === "root" && v !== "0x21" && !HEX64.test(v)) return MSKEY;
   }
