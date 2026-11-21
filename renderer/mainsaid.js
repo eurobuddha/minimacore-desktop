@@ -400,6 +400,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["MAIN_TOO_LARGE_64", I18N.N_("That file is larger than 64 MB.")],
     ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")],
     // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
+    ["HTTP_TOO_LONG_NONASCII", I18N.N_("This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.")],   // main/rpc.js (0.19.305)
     ["RPC_ONE_COMMAND", I18N.N_("This command holds \";\", which would start a second command. Nothing was sent.")],
     ["RPC_SMUGGLED", I18N.N_("This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.")],
     ["RPC_BUILT", I18N.N_("This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.")],

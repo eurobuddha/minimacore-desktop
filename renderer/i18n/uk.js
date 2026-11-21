@@ -5345,7 +5345,8 @@
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "Кожен відкритий ключ мультипідпису і кореневий ключ мають бути 0x і 64 шістнадцяткові цифри. Нічого не запущено.",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "Вузол відновлення має бути у вигляді host:port (назва або IP-адреса, двокрапка, номер порту). Нічого не збережено.",
   "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode задається в параметрах запуску, а не в додаткових аргументах.",
-  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "Файл на іншому комп’ютері (шлях, що починається з \\\\ або //) не використовується: вузол підключився б до нього. Спершу скопіюйте файл на цей комп’ютер. Нічого не запущено."
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "Файл на іншому комп’ютері (шлях, що починається з \\\\ або //) не використовується: вузол підключився б до нього. Спершу скопіюйте файл на цей комп’ютер. Нічого не запущено.",
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "Ця команда містить символи поза простим ASCII і задовга для командного рядка вузла (понад 65,536 символів після кодування). Скоротіть її або запишіть ці символи простим ASCII. Нічого не надіслано."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5460,5 +5461,6 @@
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
   "-rescuenode is set in Startup Params, not in the extra arguments.",
-  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run."
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent."
 ] });

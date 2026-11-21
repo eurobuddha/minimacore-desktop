@@ -5332,7 +5332,8 @@
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "每个多签公钥以及根密钥都必须是 0x 后跟 64 位十六进制数字。未运行任何命令。",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "救援节点必须是 host:port（名称或 IP 地址、冒号、端口号）。未保存任何内容。",
   "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode 在启动参数中设置，而不是在额外参数中。",
-  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "不会使用另一台计算机上的文件（以 \\\\ 或 // 开头的路径）：节点会去连接它。请先把文件复制到这台计算机。未运行任何命令。"
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "不会使用另一台计算机上的文件（以 \\\\ 或 // 开头的路径）：节点会去连接它。请先把文件复制到这台计算机。未运行任何命令。",
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "此命令包含非纯 ASCII 字符，且对节点的命令行来说太长（编码后超过 65,536 个字符）。请缩短它，或将这些字符写成纯 ASCII。未发送任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5447,5 +5448,6 @@
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
   "-rescuenode is set in Startup Params, not in the extra arguments.",
-  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run."
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
+  "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent."
 ] });
