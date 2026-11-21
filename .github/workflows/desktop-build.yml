@@ -89,6 +89,10 @@ jobs:
       - name: Verify no command injection
         run: npm run test:inject
 
+      # Keets chat: the wire schema, the file transfer port and the peer-string caps (as released 0.18.182).
+      - name: Verify chat
+        run: npm run test:chat
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
