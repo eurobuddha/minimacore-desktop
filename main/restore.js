@@ -171,7 +171,9 @@ function activeWorkList(r) {
   const c = r && r.casino;
   if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
   // the settle loop runs (this wallet has bets on the chain) but has no clean scan yet, or its scans fail (0.19.269): not read as none
-  else if (!c && r && r.casinoLooping) out.push("P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.");
+  // after DEX_STUCK_MS of it the user may go on, as with the other engines that cannot be checked (0.19.285): scans that keep failing refused every replacement for good
+  else if (!c && r && r.casinoLooping && !skip) out.push(Number(r.casinoWaitedMs) >= DEX_STUCK_MS ? "P2P Chance has not finished reading this wallet's bets after " + mins(r.casinoWaitedMs) + " minutes, so whether any is still open cannot be checked. " + DEX_SKIP_HINT
+    : "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.");
   return out;
 }
 /** Are checks that cannot be made (and, since 0.18.137, warnings to confirm) the ONLY things in the way? Then, and only

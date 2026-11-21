@@ -176,7 +176,7 @@ async function settle(tip) {
 // stopped looking for good would lose a taken bet to the 1500-block timeout (about 21 hours).
 function startLoop() {
   if (active) return;
-  active = true;
+  active = true; loopSince = Date.now();
   const id = ++loop;
   const tick = async () => {
     try {
@@ -240,6 +240,9 @@ function open() { return outstanding && { offers: outstanding.offers, bets: outs
 /** Is the settle loop running (0.19.269)? It runs only for a wallet with bets on the chain: while it runs and open() is
  *  null (no clean scan yet, or its scans fail), whether a bet is open could not be checked. */
 function looping() { return active; }
+/** How long the running loop has gone without a clean scan (0.19.285), in ms; 0 once it has one or when it does not run. */
+let loopSince = 0;
+function uncheckedMs() { return active && !outstanding && loopSince ? Date.now() - loopSince : 0; }
 
 function C() { if (!ctx || !ctx.CASINO) throw new Error("P2PChance engine not ready yet"); return ctx.CASINO; }
 function pcb(fn) { return new Promise((res, rej) => { try { fn((err, val) => err ? rej(err instanceof Error ? err : new Error(String(err))) : res(val)); } catch (e) { rej(e); } }); }
@@ -273,6 +276,6 @@ async function rawBets() {
 }
 
 module.exports = {
-  emitter, init, startLoop, watch, stopLoop, flush, invalidate, status, open, looping, rawBets, refused,
+  emitter, init, startLoop, watch, stopLoop, flush, invalidate, status, open, looping, uncheckedMs, rawBets, refused,
   _setRunner: (fn) => { runner = fn; }, _ctx: () => ctx, _fire: fire, CONTRACT, CASINO_SCRIPT
 };

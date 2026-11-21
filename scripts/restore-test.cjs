@@ -211,18 +211,25 @@ test("P2P Chance: bets found by the settle loop of an install that only watches 
     return new Function("env", "with (env) { " + decl.walletWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
   };
   // bets found by a loop that only watched (casinoEnabled off): the replacement is refused, Quit and Shutdown say them
-  let m = run({ open: () => ({ offers: 0, bets: 1 }), looping: () => true }, false);
+  let m = run({ open: () => ({ offers: 0, bets: 1 }), looping: () => true, uncheckedMs: () => 0 }, false);
   assert.ok((await m.walletWork()).some(l => /P2P Chance: 0 offers and 1 bet still open/.test(l)));
   assert.match(I.inFlight(await m.inFlightWork(), "quit", Date.now()).message, /P2P Chance: 1 bet and 0 offers still open/);
   // the loop runs (this wallet has bets) but has no clean scan yet, or its scans fail: never read as nothing open
-  m = run({ open: () => null, looping: () => true }, false);
+  m = run({ open: () => null, looping: () => true, uncheckedMs: () => 0 }, false);
   const list = await m.walletWork();
   assert.ok(list.some(l => /^P2P Chance could not be checked: this wallet has bets on the chain/.test(l)), list.join(" | "));
   assert.match(R.activeWorkProblem(list), /P2P Chance could not be checked/, "the replacement is refused");
   assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).any, true, "and Quit / Shutdown say it could not be checked");
   // a wallet that never bet (no loop, nothing found): nothing in the way
-  m = run({ open: () => null, looping: () => false }, false);
+  m = run({ open: () => null, looping: () => false, uncheckedMs: () => 0 }, false);
   assert.deepEqual(await m.walletWork(), []); assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).unread.length, 0);
+  // 0.19.285: scans that keep failing do not refuse every replacement for good: after two minutes the user may go on
+  m = run({ open: () => null, looping: () => true, uncheckedMs: () => 3 * 60000 + 5000 }, false);
+  const stuck = await m.walletWork();
+  assert.ok(stuck.some(l => l === "P2P Chance has not finished reading this wallet's bets after 3 minutes, so whether any is still open cannot be checked. If it stays like this, you can go on without this check."), stuck.join(" | "));
+  assert.equal(R.onlyDexiconUnchecked(stuck), true, "the only thing in the way can be gone past");
+  assert.deepEqual(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: null, casinoLooping: true, casinoWaitedMs: 200000, skipDexicon: true, dexicon: { ready: true, takes: 0 }, futurecash: { ready: true, posted: 0 } }), [], "and once the user chose to go on, it no longer stands in the way");
+  assert.equal(R.onlyDexiconUnchecked(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: null, casinoLooping: true, casinoWaitedMs: 30000 })), false, "not before two minutes");
   const cas = fs.readFileSync(path.join(ROOT, "main", "casino.js"), "utf8");
   assert.ok(/function invalidate\(\) \{[\s\S]{0,500}if \(was\) startLoop\(\); else if \(wasWatching\) watch\(\);/.test(cas), "after a replacement the loop goes on, on the new wallet");
 });

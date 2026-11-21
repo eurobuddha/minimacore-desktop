@@ -85,6 +85,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["REPLACE_CONFIRM_HINT", I18N.N_("{x} You can go on after confirming this."), { top: false, group: "REPLACE_ITEMS", nest: { x: { sub: "REPLACE_ITEMS" } } }],
     ["RP_AX_UNASKED", I18N.N_("AtomiX could not be asked whether a swap is in flight. Wait a moment and try again."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_UNASKED", I18N.N_("Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again."), { top: false, group: "REPLACE_ITEMS" }],
+    ["RP_CASINO_STUCK", I18N.N_("P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_CASINO_UNREAD", I18N.N_("P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_STORE", I18N.N_("Future Cash Next could not open its store ({error}), so whether a collect or a sweep is still under way cannot be checked."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_NOT_STARTED", I18N.N_("Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again."), { top: false, group: "REPLACE_ITEMS" }],

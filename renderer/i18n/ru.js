@@ -5328,7 +5328,8 @@
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "Не удалось прочитать использования этого ключа в сети из сервиса использований ключей (eurobuddha.com). Пока их нельзя прочитать, с этого кошелька ничего нельзя отправить: слишком низкое число может привести к потере средств. Проверьте подключение и снова нажмите «Подтвердить».",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "Не удалось прочитать использования в сети из сервиса использований ключей (eurobuddha.com). Ничего не изменено, и с этого кошелька ничего нельзя отправить, пока их нельзя прочитать.",
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Адрес для выплат {address} не является действительным адресом Minima. Ничего не сохранено; проверьте адрес и сохраните снова.",
-  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "Платежи на {address} не читаются: это недействительный адрес Minima. Исправьте адрес для выплат магазина в miniMall Studio."
+  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "Платежи на {address} не читаются: это недействительный адрес Minima. Исправьте адрес для выплат магазина в miniMall Studio.",
+  "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.": "P2P Chance не дочитал ставки этого кошелька за {m} мин., поэтому нельзя проверить, открыта ли какая-либо из них."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5426,5 +5427,6 @@
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
   "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
-  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio."
+  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.",
+  "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked."
 ] });

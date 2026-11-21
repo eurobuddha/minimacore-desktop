@@ -316,7 +316,7 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
   // P2P Chance (0.19.262): whatever the settle loop found, also on an install that only watches (the loop starts by itself
   // when this wallet has bets on the chain). open() is null until a clean scan, so a wallet that never bet is never held up.
-  casino: casino.open(), casinoLooping: casino.looping(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
+  casino: casino.open(), casinoLooping: casino.looping(), casinoWaitedMs: casino.uncheckedMs(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
   futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
   dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
