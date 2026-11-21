@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.200] — Logs: one line buffer per node process
+
+- The unfinished last line of the node's output was kept on the manager, shared by every node start: a late chunk of a stopped node could join the next node's first line. Each start now has its own buffer, the streams decode UTF-8 across chunks (a character split between two chunks stays whole), and the last unended line is logged before the "[app] node exited" line (and anything after exit on close). Test: `scripts/node-log-test.cjs`.
+
 ## [0.18.199] — Web Wallet: an unreachable key-use service is said plainly
 
 - When the key-use service cannot be reached, Confirm and Check on-chain now say so plainly, and that nothing can be sent from this wallet until it can (a figure that is too low could lose funds). There is no way round it (owner decision). Test: `scripts/webwallet-ui-test.cjs`.

@@ -99,7 +99,7 @@ ok("node-manager nodeSaid(): a line split across chunks is logged once, whole an
   assert.deepEqual(m.logs.slice(before + 1), ["next line", "stderr has its own •••"]);
   const disk = fs.readFileSync(path.join(dir, "nm", "node.log"), "utf8"); assert.ok(!disk.includes(SECRET.slice(0, 10)) && !disk.includes(SECRET.slice(10)), "no half on disk either");
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8");
-  assert.ok(/p\.stdout\.on\("data", d => this\.nodeSaid\("out", d\)\);/.test(src) && /p\.stderr\.on\("data", d => this\.nodeSaid\("err", d\)\);/.test(src), "both streams of the node go through it");
+  assert.ok(/p\.stdout\.on\("data", d => this\.nodeSaid\("out", d, carry\)\);/.test(src) && /p\.stderr\.on\("data", d => this\.nodeSaid\("err", d, carry\)\);/.test(src), "both streams of the node go through it");
 });
 
 // ---- 0.18.167: the last unended line is logged when the streams close, not on exit ----
@@ -110,9 +110,26 @@ ok("node-manager: a last line with no line end is logged on the process's close 
   assert.equal(m.logs.length, before);
   m.flushCarry(); assert.deepEqual(m.logs.slice(before), ["last words -rpcpassword •••"]); assert.deepEqual(m.carry, { out: "", err: "" });
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8");
-  assert.ok(/p\.on\("close", \(\) => this\.flushCarry\(\)\);/.test(src), "flushed on close");
+  assert.ok(/p\.on\("close", \(\) => this\.flushCarry\(carry\)\);/.test(src), "flushed on close (what came after exit)");
   const exitHandler = src.slice(src.indexOf('p.on("exit"'), src.indexOf("});", src.indexOf('p.on("exit"')));
-  assert.ok(!/carry|flushCarry/.test(exitHandler), "not on exit");
+  assert.ok(/this\.flushCarry\(carry\);[^\n]*\n\s*this\.log\("\[app\] node exited/.test(exitHandler), "CHANGED on purpose (0.18.200): and before the exit line");
+});
+
+// ---- 0.18.200: a carry per node process, UTF-8 across chunks, the last words before the exit line ----
+ok("node-manager: each node process has its own unfinished line; UTF-8 is decoded across chunks; the last line comes before the exit line", () => {
+  const m = require("../main/node-manager"); m.secret = SECRET;
+  const a = { out: "", err: "" }, b = { out: "", err: "" }, before = m.logs.length;
+  m.nodeSaid("out", "old node's last half", a);
+  m.nodeSaid("out", "new node line\n", b);
+  assert.deepEqual(m.logs.slice(before), ["new node line"], "the old process's half line does not join the new one");
+  m.flushCarry(a); assert.deepEqual(m.logs.slice(before + 1), ["old node's last half"]);
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "node-manager.js"), "utf8").replace(/\r\n/g, "\n");
+  const start = src.slice(src.indexOf("const carry = { out: \"\", err: \"\" };"), src.indexOf('p.on("exit"'));
+  assert.ok(start.length > 0 && /p\.stdout\.setEncoding\("utf8"\); p\.stderr\.setEncoding\("utf8"\);/.test(start), "a closure per start, with utf8 decoding");
+  const { StringDecoder } = require("string_decoder"), d = new StringDecoder("utf8"), euro = Buffer.from("price €5\n");
+  const c = { out: "", err: "" }, n0 = m.logs.length;
+  m.nodeSaid("out", d.write(euro.subarray(0, 7)), c); m.nodeSaid("out", d.write(euro.subarray(7)), c);
+  assert.deepEqual(m.logs.slice(n0), ["price €5"], "what setEncoding does: a split character is whole");
 });
 
 console.log(fail === 0 ? "\n✅ NODE LOG PASS — " + pass + " checks" : "\n❌ NODE LOG FAIL — " + fail + " failed");

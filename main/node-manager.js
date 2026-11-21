@@ -386,7 +386,6 @@ class NodeManager extends EventEmitter {
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
-    this.carry = { out: "", err: "" };
     this.secret = config.rpcSecret();   // kept for log(): the node prints its own start parameters, and no line may carry this
     this.log("[app] starting node: java " + redactArgs(args, this.secret));
     let p;
@@ -405,13 +404,19 @@ class NodeManager extends EventEmitter {
         dataDir: cfg.dataFolder || config.defaultDataFolder(), startedAt: this.startedTs }));
     } catch (e) {}
     if (cfg.contribute) portmap.start(cfg.basePort);   // fire-and-forget; portmap self-retries (the relay shares this port)
-    p.stdout.on("data", d => this.nodeSaid("out", d));
-    p.stderr.on("data", d => this.nodeSaid("err", d));
+    // The unfinished last line of each stream belongs to THIS process (0.18.200): a closure per start, so a late chunk of
+    // an old node can never join a new node's first line. UTF-8 decoding across chunks: a character split between two
+    // chunks is not turned into replacement characters.
+    const carry = { out: "", err: "" };
+    p.stdout.setEncoding("utf8"); p.stderr.setEncoding("utf8");
+    p.stdout.on("data", d => this.nodeSaid("out", d, carry));
+    p.stderr.on("data", d => this.nodeSaid("err", d, carry));
     p.on("error", e => { this.lastError = e.message; this.setState("error"); this.proc = null; });
     // The last unended line is logged on "close" (0.18.166 review): "exit" can come before the streams have handed over their
     // last chunk, which would then be lost or logged after the reset of the next start.
-    p.on("close", () => this.flushCarry());
+    p.on("close", () => this.flushCarry(carry));   // what came after "exit"
     p.on("exit", (code, sig) => {
+      this.flushCarry(carry);   // the node's last words first, then the exit line (0.18.200)
       this.log("[app] node exited code=" + code + " sig=" + sig);
       this.proc = null;
       try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
@@ -534,15 +539,15 @@ class NodeManager extends EventEmitter {
    * line split across two chunks was logged as two lines, so a secret split there passed the scrub in two halves. Only
    * whole lines go to log(); the unfinished last one waits for the next chunk (a line over LINE_MAX is cut there).
    */
-  nodeSaid(stream, chunk) {
-    const parts = (this.carry[stream] + String(chunk)).split("\n");
+  nodeSaid(stream, chunk, carry = this.carry) {
+    const parts = (carry[stream] + String(chunk)).split("\n");
     let rest = parts.pop();
     if (rest.length > LINE_MAX) { parts.push(rest); rest = ""; }
-    this.carry[stream] = rest;
+    carry[stream] = rest;
     if (parts.length) this.log(parts.join("\n"));
   }
   /** Log what is left of each stream: a last line the node never ended. */
-  flushCarry() { for (const k of ["out", "err"]) { const rest = this.carry[k]; this.carry[k] = ""; if (rest) this.log(rest); } }
+  flushCarry(carry = this.carry) { for (const k of ["out", "err"]) { const rest = carry[k]; carry[k] = ""; if (rest) this.log(rest); } }
   log(line) {
     for (let l of String(line).split("\n")) {
       if (!l.trim()) continue;
