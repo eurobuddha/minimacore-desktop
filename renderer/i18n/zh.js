@@ -5345,7 +5345,8 @@
   "Reading older orders and payments (back to block {block}).": "正在读取更早的订单和付款（回溯到区块 {block}）。",
   "keyuses: gives every key of this wallet its uses (restoresync adds it to them): a figure above the times this wallet's keys have already signed (the node's default is 1000), at most {max}. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.": "keyuses: 为此钱包的每个密钥设定使用次数（restoresync 则是加到其上）：应高于此钱包的密钥已签名的次数（节点默认为 1000），最多 {max}。接近一个密钥 262144 次一次性使用的数字会使密钥在几次签名后用尽，然后再次使用一次性密钥签名。未运行任何内容。",
   "keyuses: on this block key wallet raises the floor under the block number for every key: at most {max}, the chain's tip (block {tip}) plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run.": "keyuses: 在此区块密钥钱包上会抬高每个密钥在区块号之下的下限：最多 {max}，即链顶（区块 {tip}）加 10000。远高于链顶的数字会使每个密钥在一次签名后停止签名：资金仍在，但此钱包无法再签名。未运行任何内容。",
-  "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.": "keyuses: 在此区块密钥钱包上必须接近链顶，而链顶现在无法读取，因此最多取 {max}。远高于链顶的数字会使每个密钥在一次签名后停止签名。未运行任何内容。"
+  "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.": "keyuses: 在此区块密钥钱包上必须接近链顶，而链顶现在无法读取，因此最多取 {max}。远高于链顶的数字会使每个密钥在一次签名后停止签名。未运行任何内容。",
+  "Older orders could not be read yet: the node did not answer. They are read again on the next block.": "更早的订单暂时无法读取：节点没有应答。下一个区块时会再次读取。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5473,5 +5474,6 @@
   "Reading older orders and payments (back to block {block}).",
   "keyuses: gives every key of this wallet its uses (restoresync adds it to them): a figure above the times this wallet's keys have already signed (the node's default is 1000), at most {max}. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.",
   "keyuses: on this block key wallet raises the floor under the block number for every key: at most {max}, the chain's tip (block {tip}) plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run.",
-  "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run."
+  "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.",
+  "Older orders could not be read yet: the node did not answer. They are read again on the next block."
 ] });

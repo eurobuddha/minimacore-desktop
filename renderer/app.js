@@ -3783,6 +3783,7 @@ async function renderShopInbox() {
   const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []), scan = await api.shopScanState().catch(() => null);
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
   const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
+    : scan && scan.stepFailed ? th("Older orders could not be read yet: the node did not answer. They are read again on the next block.")   // a backfill step, the recent ones read (0.19.332)
     : scan && scan.catchingUpTo ? tr("Reading older orders and payments (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })   // the stepped backfill (0.19.328)
     : scan && scan.unreadBelow && mine.length ? tr("Orders sent before block {block}, and payments to you that were already spent, could not be read: the node did not list them.", { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331)
   // a payout address skipped as not valid, whole (0.19.284)

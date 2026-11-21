@@ -34,7 +34,7 @@ const seenMsgCoins = new Set();
 const seenPayCoins = new Set();
 let identity = null;         // {boxPk,boxSk,signPk,signSk,publicId}
 let vendorAddress = "";      // my default receiving address (payments land here)
-let scanTimer = null, lastTip = 0, scanning = false, backfilled = false, lastPassFailed = false;
+let scanTimer = null, lastTip = 0, scanning = false, backfilled = false, lastPassFailed = false, lastStepFailed = false;
 // Refs whose payment is at the node in THIS process right now (0.19.265): a send can take up to the RPC's write timeout, and
 // while it runs "not sent" and Retry are refused (they cleared the in-flight mark and paid a second time while the first was live).
 const sending = new Set();
@@ -414,7 +414,7 @@ async function scanOnce() {
     backfilled = true;
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
-    let failed = !tip || len === 0 || a === null || b === null, changed = !!(a || b);   // the tree's length unread: what was read is judged, nothing moves
+    let failed = !tip || len === 0 || a === null || b === null, stepFailed = false, changed = !!(a || b);   // the tree's length unread: what was read is judged, nothing moves
     const bf0 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
     if (!failed) {
       const covered = tip - served;   // the oldest block this pass read (less than asked when the node served less)
@@ -425,15 +425,17 @@ async function scanOnce() {
         const t0 = meta("backfill_target_block"); store.setMeta("backfill_target_block", t0 ? Math.min(t0, prev) : prev); store.setMeta("backfill_floor_block", covered);
         store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass read back to block " + covered + ", and the older blocks are read in steps, back to block " + (t0 ? Math.min(t0, prev) : prev));
       }
-      store.setMeta("scanned_tip_block", tip);
+      store.setMeta("scanned_tip_block", Math.max(prev, tip));   // never DOWN (0.19.332): a node resynced to a lower tip does not make the scan read again what it read
       const target = meta("backfill_target_block"), floor = meta("backfill_floor_block");
-      if (target && floor) {   // ONE step per pass: a widening query is heavy on the shared MINIMERCH address
+      // ONE step per pass: a widening query is heavy on the shared MINIMERCH address; a tip not above the floor (a fresh sync or a resync with
+      // the store kept) puts the step off, not called a failure (0.19.332)
+      if (target && floor && tip > floor) {
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, len > 0 ? len : Infinity);   // never past the tree (0.19.330)
         served = deep;
         const c = await scanOrders(deep, floor).catch(() => null), d = await scanPayments(deep, floor).catch(() => null);
         changed = changed || !!(c || d);
         const reached = tip - served;
-        if (c === null || d === null) failed = true;   // nothing moves: the same step is tried on the next pass (0.19.249)
+        if (c === null || d === null) stepFailed = true;   // nothing moves: the same step is tried on the next pass (0.19.249), said as OLDER orders (0.19.332)
         else if (reached <= target) { store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); }
         else if (reached < floor) store.setMeta("backfill_floor_block", reached);
         else {   // the node served no deeper than the floor: what is older cannot be read, said and kept (0.19.249)
@@ -447,7 +449,7 @@ async function scanOnce() {
       }
     }
     const bf1 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
-    const said = failed !== lastPassFailed || bf0 !== bf1; lastPassFailed = failed;
+    const said = failed !== lastPassFailed || stepFailed !== lastStepFailed || bf0 !== bf1; lastPassFailed = failed; lastStepFailed = stepFailed;
     if (changed || said) emitter.emit("update");
   } finally { scanning = false; }
 }
@@ -519,7 +521,7 @@ function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an 
 function dismissUnread() { store.setMeta("unread_below_block", 0); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read yet, for the Inbox: a failed pass, the block a backfill still reads back to (catchingUpTo), the oldest
  *  block a node that serves no deeper left unread (unreadBelow), payout addresses skipped as not valid (0.19.249, 0.19.284, 0.19.328). */
-function scanState() { return { readFailed: lastPassFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: Number(store.getMeta("unread_below_block")) || 0, skipped: [...skippedPay.keys()].filter(skipping) }; }
+function scanState() { return { readFailed: lastPassFailed, stepFailed: lastStepFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: Number(store.getMeta("unread_below_block")) || 0, skipped: [...skippedPay.keys()].filter(skipping) }; }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {

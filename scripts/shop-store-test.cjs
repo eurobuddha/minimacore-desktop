@@ -531,7 +531,7 @@ test("vendor: an absence longer than one pass is read back in steps to the last 
   await shop.scanOnce(); assert.equal(shop.scanState().catchingUpTo, 0, "read back to the last block read before the absence");
   // a failed step moves nothing, and is said; the next pass tries the same step again
   tip = 125000; failDeep = true; await shop.scanOnce();
-  assert.equal(store.getMeta("scanned_tip_block"), 125000, "the window was read: the cursor moves"); assert.equal(shop.scanState().readFailed, true, "the step was not: said");
+  assert.equal(store.getMeta("scanned_tip_block"), 125000, "the window was read: the cursor moves"); assert.deepEqual([shop.scanState().readFailed, shop.scanState().stepFailed], [false, true], "the step was not: said as older orders (0.19.332, changed on purpose)");
   const floor = Number(store.getMeta("backfill_floor_block")); assert.equal(floor, 125000 - 4096, "the floor stays under the window");
   // a second gap while this backfill is pending: the target stays the oldest, the floor moves under the new window
   tip = 140000; failDeep = false; await shop.scanOnce();
@@ -596,5 +596,25 @@ test("vendor: the no-deeper-history notice survives later passes, ends when a la
   const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), pre = fs.readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8"), app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(main.includes('ipcMain.handle("mcd:shopScanDismiss", () => shop.dismissUnread());') && pre.includes('shopScanDismiss: () => ipcRenderer.invoke("mcd:shopScanDismiss"),'));
   assert.ok(app.includes('<button class="mm-pill" id="mmScanHide">${th("Hide")}</button>') && app.includes('el("mmScanHide").onclick = () => api.shopScanDismiss()'));
+  store.setLog((m) => { throw new Error("no log expected: " + m); });
+});
+
+// ---- 0.19.332: a failed backfill step is said as OLDER orders; a tip not above the floor puts the step off; the cursor never goes down ----
+test("vendor: a failed backfill step is not 'recent orders could not be read'; a tip below the backfill floor postpones it without a failure; a lower tip never moves the cursor down", async () => {
+  let tip = 500000, failDeep = false; const asked = []; store.setLog(() => {});
+  shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } }; if (c === "status") return { status: true, response: { chain: { length: 1000000 } } };
+    const m = / depth:(\d+)$/.exec(c); if (m) { asked.push(Number(m[1])); if (failDeep && Number(m[1]) > 4096) throw new Error("timed out"); } return { status: true, response: [] }; });
+  store.setMeta("scanned_tip_block", 490000); store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("unread_below_block", 0);
+  failDeep = true; await shop.init(); await shop.scanOnce();
+  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.stepFailed, st.catchingUpTo], [false, true, 490000], "the recent window was read; the step was not"); }
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes(': scan && scan.stepFailed ? th("Older orders could not be read yet: the node did not answer. They are read again on the next block.")'));
+  failDeep = false; const floor = Number(store.getMeta("backfill_floor_block"));
+  // a node resynced to a tip below the floor: the step waits, no failure, nothing asked past the window, the cursor stays
+  tip = floor - 5000; asked.length = 0; await shop.scanOnce();
+  { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.stepFailed, st.catchingUpTo], [false, false, 490000], "put off, not failed"); }
+  assert.ok(asked.every(d => d <= 4096), "no step was read: " + asked.join(","));
+  assert.equal(store.getMeta("scanned_tip_block"), 500000, "the cursor never moves down");
+  tip = 500001; await shop.scanOnce(); assert.equal(shop.scanState().stepFailed, false);
   store.setLog((m) => { throw new Error("no log expected: " + m); });
 });
