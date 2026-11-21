@@ -249,6 +249,8 @@ test("Web Wallet: a first confirmation, or one after the key-use file went missi
   let chain = null; const asked = []; ww.setOnchain(async (pk) => { asked.push(pk); return chain; });
   await assert.rejects(ww.ackKeyuses(FROM, 0), /chain's figure for this key could not be read .*cannot be checked against it/, "a first confirmation while the chain is unread: refused");
   assert.deepEqual(asked, [PK]); assert.ok(!fs.existsSync(file) || !JSON.parse(fs.readFileSync(file, "utf8"))[FROM], "nothing saved");
+  // (0.18.279) above the ceiling while the chain is unread: the ceiling is what is said, not "could not be read"
+  await assert.rejects(ww.ackKeyuses(FROM, 262144), /The key-use count can be at most 262143/); await assert.rejects(ww.ackKeyuses(FROM, "300000"), /can be at most 262143/);
   chain = 9; await assert.rejects(ww.ackKeyuses(FROM, 3), /The chain shows 9 uses of this key/, "below the chain's figure: refused, whatever the window sent");
   assert.deepEqual(await ww.ackKeyuses(FROM, 9), { address: FROM, keyuses: 9, ack: true });
   fs.rmSync(file); chain = 11;   // the file vanished: the entry is unknown again

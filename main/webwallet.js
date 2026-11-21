@@ -141,7 +141,8 @@ async function ackKeyuses(address, count) {
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
-    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
+    // a figure above the ceiling is refused for that, whether the chain answered or not (0.18.279: it was told "could not be read")
+    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(n > MAX_USES ? OVER_MAX : was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
     if (chain > MAX_USES) throw new Error(USED_UP(chain));   // never adopted (0.18.265)
     if (n > MAX_USES) throw new Error(OVER_MAX);
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
