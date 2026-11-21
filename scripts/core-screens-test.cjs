@@ -349,7 +349,8 @@ test("H3: Restore from file asks the backup's key mode on every node, and the ma
   assert.ok(!/megammrsync|cmd\(/.test(file), "the page sends no restore command of its own");
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
   assert.ok(/"mcd:restoreBackup", \(_e, o\) => restore\.restoreBackup\(o, \{ keyMode: config\.load\(\)\.keyMode, supported: node\.blockKeysSupported\(\),/.test(main), "with the recorded mode and the jar's capability, read in the main process");
-  assert.ok(main.indexOf("restore.loadsBackupFile(command)") > main.indexOf('"mcd:cmd"') && main.indexOf("restore.loadsBackupFile(command)") < main.indexOf("pinMinimaSend(run, command,"), "and the general command channel refuses a backup-file restore before anything runs");
+  const gate = fs.readFileSync(path.join(ROOT, "main", "seedgate.js"), "utf8"), chk = gate.slice(gate.indexOf("async function checkCommand("), gate.indexOf("module.exports"));   // changed on purpose (0.19.327): the check is in checkCommand
+  assert.ok(/if \(R\.loadsBackupFile\(command\)\) throw new Error\("Restoring a backup file replaces this wallet's keys\./.test(chk) && main.indexOf("await seedgate.checkCommand(command, ") > main.indexOf('"mcd:cmd"') && main.indexOf("await seedgate.checkCommand(command, ") < main.indexOf("pinMinimaSend(run, command,"), "and the general command channel refuses a backup-file restore before anything runs");
 });
 
 test("M4: the note under the mode question says what is true: the choice is kept, and the other mode needs a fresh install", () => {

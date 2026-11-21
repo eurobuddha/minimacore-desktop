@@ -152,7 +152,10 @@ test("Show seed phrase (Backup & Recovery): the same checks before the node is a
 
 test("main: the general command channel refuses vault and seedrandom without a pass; the window reaches the seed only through the gates", () => {
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
-  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,80}?  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
+  // changed on purpose (0.19.327): the handler's first step is seedgate.js checkCommand, which holds the same checks in the same order
+  assert.ok(h.startsWith('ipcMain.handle("mcd:cmd", async (_e, command) => {\n') && /^ipcMain[^\n]*\n(?:  \/\/[^\n]*\n)*  await seedgate\.checkCommand\(command, \{ take: secretGate\.take, running: requireRunning, walletWork, keyMode: \(\) => config\.load\(\)\.keyMode \}\);\n/.test(h), "the handler checks first, through checkCommand");
+  const gsrc = SRC("main/seedgate.js"), chk = gsrc.slice(gsrc.indexOf("async function checkCommand("));
+  assert.ok(/^async function checkCommand\(command, io\) \{\n  const R = require\("\.\/restore"\);\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,80}?  io\.running\(\);\n[^\n]*\n  const gated = refusal\(command, io\.take\); if \(gated\) throw new Error\(gated\);/.test(chk), "control characters first, then the node, then the gate: the first things checked");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
   assert.ok(/if \(!firstRunOpen \|\| node\.freshAtFirstStart !== true\) throw new Error\("The seed is shown here only while a new wallet is being made\."\);/.test(main) && /if \(c\.walletDone\) firstRunOpen = false;/.test(main), "the first-run seed: only in that step (CHANGED on purpose, 0.19.220: decided from the launch's own facts)");
   assert.equal((main.match(/"vault"/g) || []).length, 1, "main asks for the vault in one place of its own (the first-run step); the reveal is in seedgate.js");
@@ -715,4 +718,22 @@ test("a quit or import whose connection is cut keeps the stop guard's hold; the 
   assert.equal((await hs["mcd:cmd"](null, "archive action:import file:/Users/me/a.raw")).status, false, "the node's own refusal ends the hold (0.19.319)"); assert.equal(asked, 4);
   stopGuard.seen("stopped"); assert.equal(await stopGuard.pass(), true); await assert.rejects(held(async () => { throw new Error("config.json could not be written"); }), /could not be written/);
   assert.equal(await stopGuard.pass(), true, "a restart or settings save that threw (no answerOnly) still ends its own hold");
+});
+
+// ---- 0.19.327 (the released 0.18.201): every check of mcd:cmd in one function, seedgate.checkCommand, in one order ----
+test("checkCommand holds every Terminal check in one order: the first refusal is the one said; the node, the gate and open work are asked in that order and only when reached", async () => {
+  const asked = [], io = (o = {}) => ({ running: () => { asked.push("running"); if (o.down) throw new Error("node not running"); }, take: (c) => { asked.push("take"); return !!o.pass; },
+    walletWork: async () => { asked.push("work"); return o.work || []; }, keyMode: () => { asked.push("mode"); return o.mode || "classic"; } });
+  const said = async (c, o) => { asked.length = 0; try { await G.checkCommand(c, io(o)); return "ok"; } catch (e) { return e.message; } };
+  assert.equal(await said(""), "empty command"); assert.equal(await said(null), "empty command"); assert.deepEqual(asked, []);
+  assert.match(await said("send\u0001 amount:1 amount:2"), /control character/, "the control character before the repeated amount");
+  assert.match(await said("send amount:1 amount:2 file://h/s keyuses:999999999"), /This send names amount more than once/, "the per-piece refusal before keyuses:");
+  assert.match(await said("sendfrom keyuses:262144 privatekey:0x01"), /0 to 262143/); assert.deepEqual(asked, ["mode"], "keyuses: reads the key mode, nothing else yet");
+  assert.match(await said("sendfrom keyuses:262144 privatekey:0x01", { mode: "block" }), /^ok$|node/, "block: within its bound");
+  assert.match(await said("vault", { down: true }), /node not running/); assert.deepEqual(asked, ["mode", "running"], "the node before the gate");
+  assert.match(await said("vault"), /Type SHOW SEED/); assert.deepEqual(asked, ["mode", "running", "take"]);
+  assert.equal(await said("vault", { pass: true }), "ok");
+  assert.match(await said('megammrsync action:resync host:h:1 phrase:"a b"', { work: ["1 AtomiX swap is not finished"] }), /AtomiX swap/); assert.deepEqual(asked, ["mode", "running", "work"], "open work is read only for a wallet replacement");
+  assert.equal(await said("status"), "ok"); assert.deepEqual(asked, ["mode", "running"], "a plain command: no gate question, no work read");
+  assert.match(await said("backup password:a;b"), /letters and numbers only/, "the backup password last");
 });

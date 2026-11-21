@@ -176,4 +176,77 @@ async function revealSeed(typed, sys, run) {
   if (typeof phrase !== "string" || !phrase) throw new Error("Couldn't read the seed.");
   return { phrase, system };
 }
-module.exports = { secretKind, classify, refusal, create, revealSeed, masked, scrubReply, SECRET_NAMES, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };
+/**
+ * checkCommand(command, io) (0.19.327, as released 0.18.201): everything the general command channel (mcd:cmd) decides before a
+ * text reaches the node, in one tested place and in this order (the order main.js had; the first refusal is the one said):
+ *   1. a non-empty string;  2. no control character (tab and line end allowed);  3. a command that moves funds or keys whose text
+ *   the node reads otherwise than it looks (cmdverb.unclear, 0.19.266);  4. an escaped ";" or control character (cmdverb.smuggled,
+ *   0.19.291);  5. a value that would rewrite the commands a builder makes from it (cmdverb.builtProblem, 0.19.299);  6. per piece:
+ *   a send naming amount, tokenid, address or fromaddress twice; a parameter named twice by a command that moves funds from a key
+ *   or builds commands of its own; rpc, slavenode enable:, webhooks action:add and mds actions; a file on another computer; mds
+ *   action:accept; a multisig spend;  7. keyuses: past the last one-time use of the wallet's key mode (restore.keyusesProblem, io.keyMode(),
+ *   0.19.325);  8. keys replaced or a backup loaded outside Backup & Recovery (restore.replacesKeysElsewhere, which also holds the
+ *   re-pasted values of 0.19.281);  9. the node running (io.running() throws if not);  10. the secret-command gate (refusal, io.take);
+ *   11. a backup file (restore.loadsBackupFile);  12. a wallet replaced from a phrase while work that needs the old keys is open
+ *   (io.walletWork());  13. restore.backupCommandProblem.
+ * io = { take, running, walletWork, keyMode } (main.js passes secretGate.take, requireRunning, walletWork and the recorded key mode).
+ * Throws the reason; returns nothing. The stop guard, the beacon-dust pin and the run stay in main.js, where the node is driven.
+ */
+async function checkCommand(command, io) {
+  const R = require("./restore");
+  if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
+  // control characters refused (0.19.187, released 0.18.174): the node reads them in ways no check here follows
+  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
+  // a command that moves funds or keys whose text the node reads otherwise than it looks is refused, not guessed (0.19.266, main/cmdverb.js read)
+  const unclear = V.unclear(command); if (unclear) throw new Error(unclear);
+  // an escaped ";" (\u003b) the node decodes in a JSON value and a command it builds from it then runs as a second command (0.19.291)
+  const smuggled = V.smuggled(command); if (smuggled) throw new Error(smuggled);
+  // a value that would rewrite the commands a sendfrom, rawfrom, multisig … builds from it (0.19.299)
+  for (const part of V.parts(command)) { const built = V.builtProblem(part); if (built) throw new Error(built); }
+  for (const part of V.parts(command)) {
+    // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
+    const twice = V.is(part, "send") ? V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
+    if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
+    // the commands that move funds from a key or build commands of their own: any parameter named twice (0.19.291)
+    if (["sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread", "sphincs"].some(v => V.is(part, v))) {
+      const again = V.repeated(part); if (again.length) throw new Error("This command names " + again.join(", ") + " more than once (the node would use only the last). Write each once. Nothing was run.");
+    }
+    // a MiniDapp's waiting command runs with full rights past every check here; a multisig spend copies a coin's state from the chain
+    // into commands the node runs itself, where a ";" starts a second command, and this app cannot read that state first (0.19.291)
+    const action = V.fold(V.paramValue(part, "action") || "");
+    // what hands the node to someone else or sends its events out (0.19.298, read from core/minima-core: network/rpc.java enable:
+    // (no password turns RPC authentication off), password: (replaces the app's own), action:adduser / removeuser; base/slavenode.java
+    // enable: (a master node); network/webhooks.java action:add (node events to any URL); mds/mds.java every action but list):
+    // refused; rpc with no parameter (its status) and the gated rpc action:listusers / mds list are not
+    const names = V.paramNames(part);
+    if ((V.is(part, "rpc") && !(names.length === 0 || (names.length === 1 && names[0] === "action" && action === "listusers")))
+      || (V.is(part, "slavenode") && names.includes("enable")) || (V.is(part, "webhooks") && action === "add")
+      || (V.is(part, "mds") && action !== "" && action !== "list" && action !== "accept"))
+      throw new Error("This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.");
+    // a file on another computer (a UNC path, \\host\share, //host/share or a mix of the two slashes): a Windows node would connect to
+    // that share (0.19.303); for EVERY command since 0.19.309 (txnimport, txnexport, txnview, hash, sphincs, multisig, the send…view
+    // family and peers action:publish read files too: every MiniFile.createBaseFile / new File of a parameter is file, folder,
+    // archivefile or output (0.19.317: decryptbackup writes the DECRYPTED wallet to output:), and any …file name is taken with them;
+    // a name is matched folded, which over-blocks a name the node would not read as file (harmless))
+    if (V.read(part).params.some(([n, v]) => /^(?:folder|output|\w*file)$/.test(V.fold(n)) && /^[\\/](?:[\\/]|\?\?[\\/])/.test(v)))   // and the NT prefix \??\ (0.19.318: \??\UNC\host\share is a share to Windows)
+      throw new Error("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.");
+    if (V.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
+    if ((V.is(part, "multisig") || V.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
+  }
+  // keyuses: past a key's last one-time use for this wallet's key mode, digits only (0.19.325, main/restore.js keyusesProblem): typed, or
+  // built by the restore screens (setup restore, Backup & Recovery's rebuild), which all reach the node through here
+  let mode = ""; try { mode = io.keyMode(); } catch (e) { mode = ""; }
+  const kuBad = R.keyusesProblem(command, mode); if (kuBad) throw new Error(kuBad);
+  // archive / mysql / reset with a phrase or a backup, vault action:resetkeys: the keys change with no engine held and no key-mode check (0.19.218)
+  if (R.replacesKeysElsewhere(command)) throw new Error("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.");
+  io.running();
+  // vault / seedrandom / keys genkey read as the node reads them: only with a pass; a chain is refused. The deciding check.
+  const gated = refusal(command, io.take); if (gated) throw new Error(gated);
+  // A backup file brings its own keys, in its own key mode: only Backup & Recovery restores one, after the mode check.
+  if (R.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
+  // Replacing the wallet from a seed phrase resets every identity made from the old one: refused while work that needs the old keys is open.
+  if (R.replacesWalletFromPhrase(command)) { const open = R.activeWorkProblem(await io.walletWork()); if (open) throw new Error(open); }
+  const bad = R.backupCommandProblem(command);
+  if (bad) throw new Error(bad);
+}
+module.exports = { secretKind, classify, refusal, create, revealSeed, masked, scrubReply, checkCommand, SECRET_NAMES, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };

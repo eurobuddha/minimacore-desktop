@@ -66,8 +66,10 @@ test("Terminal: what CAN be added to a typed MINIMA send is the old beacon-dust 
   assert.match(termSendNote("send amount:1 address:0xCD"), /^note: a MINIMA send with no fromaddress: may be given one/);
   assert.match(termSendNote("SEND amount:1 address:0xCD tokenid:0x00"), /^note:/);
   assert.equal(termSendNote("send amount:1 address:0xCD fromaddress:0xEE"), ""); assert.equal(termSendNote("send amount:1 address:0xCD tokenid:0x7D39"), ""); assert.equal(termSendNote("status"), ""); assert.equal(termSendNote("sendpoll action:list"), "");
-  { const h = mainJs.slice(mainJs.indexOf('ipcMain.handle("mcd:cmd"'), mainJs.indexOf("// Clipboard writes")), a = h.indexOf("restore.loadsBackupFile(command)"), b = h.indexOf("restore.backupCommandProblem(command)");
-    assert.ok(a > 0 && b > a, "restore, restoresync and megammrsync file: are still refused on the command channel (read in order inside mcd:cmd since 0.19.298, not by a window)"); }
+  { const h = mainJs.slice(mainJs.indexOf('ipcMain.handle("mcd:cmd"'), mainJs.indexOf("// Clipboard writes")), g = fs.readFileSync(path.join(__dirname, "..", "main", "seedgate.js"), "utf8"), chk = g.slice(g.indexOf("async function checkCommand("));
+    const a = chk.indexOf("R.loadsBackupFile(command)"), b = chk.indexOf("R.backupCommandProblem(command)"), c = h.indexOf("await seedgate.checkCommand(command, "), d = h.indexOf("pinMinimaSend(run, command,");
+    // changed on purpose (0.19.327): read in order inside seedgate.js checkCommand, which mcd:cmd calls before anything is sent
+    assert.ok(a > 0 && b > a && c > 0 && d > c, "restore, restoresync and megammrsync file: are still refused on the command channel (read in order inside mcd:cmd since 0.19.298, not by a window)"); }
   assert.ok(/const run = \(c\) => \(stops \? \(f\) => held\(f, true\) : \(f\) => f\(\)\)\(\(\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\)\);/.test(mainJs), "a Terminal command goes through rpcCall (signing queue and coin guard) as the wallet");
 });
 test("Terminal (0.19.122): a chain is never pinned; the note agrees with the main process on what a MINIMA send is", async () => {

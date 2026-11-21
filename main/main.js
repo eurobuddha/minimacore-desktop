@@ -233,59 +233,10 @@ ipcMain.handle("mcd:cmdKind", (_e, command) => {
   return { kind: k.kind, chain: k.chain, write: rpc._timeoutFor(c) > 30000, shown, secretValues: shown !== c.replace(/\s+/g, " ").trim() && /•••/.test(shown) };
 });
 ipcMain.handle("mcd:cmd", async (_e, command) => {
-  if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
-  // control characters refused (0.19.187, released 0.18.174): the node reads them in ways no check here follows
-  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
-  // a command that moves funds or keys whose text the node reads otherwise than it looks is refused, not guessed (0.19.266, main/cmdverb.js read)
-  const unclear = cmdverb.unclear(command); if (unclear) throw new Error(unclear);
-  // an escaped ";" (\u003b) the node decodes in a JSON value and a command it builds from it then runs as a second command (0.19.291)
-  const smuggled = cmdverb.smuggled(command); if (smuggled) throw new Error(smuggled);
-  // a value that would rewrite the commands a sendfrom, rawfrom, multisig … builds from it (0.19.299)
-  for (const part of cmdverb.parts(command)) { const built = cmdverb.builtProblem(part); if (built) throw new Error(built); }
-  for (const part of cmdverb.parts(command)) {
-    // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
-    const twice = cmdverb.is(part, "send") ? cmdverb.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
-    if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
-    // the commands that move funds from a key or build commands of their own: any parameter named twice (0.19.291)
-    if (["sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread", "sphincs"].some(v => cmdverb.is(part, v))) {
-      const again = cmdverb.repeated(part); if (again.length) throw new Error("This command names " + again.join(", ") + " more than once (the node would use only the last). Write each once. Nothing was run.");
-    }
-    // a MiniDapp's waiting command runs with full rights past every check here; a multisig spend copies a coin's state from the chain
-    // into commands the node runs itself, where a ";" starts a second command, and this app cannot read that state first (0.19.291)
-    const action = cmdverb.fold(cmdverb.paramValue(part, "action") || "");
-    // what hands the node to someone else or sends its events out (0.19.298, read from core/minima-core: network/rpc.java enable:
-    // (no password turns RPC authentication off), password: (replaces the app's own), action:adduser / removeuser; base/slavenode.java
-    // enable: (a master node); network/webhooks.java action:add (node events to any URL); mds/mds.java every action but list):
-    // refused; rpc with no parameter (its status) and the gated rpc action:listusers / mds list are not
-    const names = cmdverb.paramNames(part);
-    if ((cmdverb.is(part, "rpc") && !(names.length === 0 || (names.length === 1 && names[0] === "action" && action === "listusers")))
-      || (cmdverb.is(part, "slavenode") && names.includes("enable")) || (cmdverb.is(part, "webhooks") && action === "add")
-      || (cmdverb.is(part, "mds") && action !== "" && action !== "list" && action !== "accept"))
-      throw new Error("This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.");
-    // a file on another computer (a UNC path, \\host\share, //host/share or a mix of the two slashes): a Windows node would connect to
-    // that share (0.19.303); for EVERY command since 0.19.309 (txnimport, txnexport, txnview, hash, sphincs, multisig, the send…view
-    // family and peers action:publish read files too: every MiniFile.createBaseFile / new File of a parameter is file, folder,
-    // archivefile or output (0.19.317: decryptbackup writes the DECRYPTED wallet to output:), and any …file name is taken with them;
-    // a name is matched folded, which over-blocks a name the node would not read as file (harmless))
-    if (cmdverb.read(part).params.some(([n, v]) => /^(?:folder|output|\w*file)$/.test(cmdverb.fold(n)) && /^[\\/](?:[\\/]|\?\?[\\/])/.test(v)))   // and the NT prefix \??\ (0.19.318: \??\UNC\host\share is a share to Windows)
-      throw new Error("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.");
-    if (cmdverb.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
-    if ((cmdverb.is(part, "multisig") || cmdverb.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
-  }
-  // keyuses: past a key's last one-time use for this wallet's key mode, digits only (0.19.325, main/restore.js keyusesProblem): typed, or
-  // built by the restore screens (setup restore, Backup & Recovery's rebuild), which all reach the node through here
-  const kuBad = restore.keyusesProblem(command, (() => { try { return config.load().keyMode; } catch (e) { return ""; } })()); if (kuBad) throw new Error(kuBad);
-  // archive / mysql / reset with a phrase or a backup, vault action:resetkeys: the keys change with no engine held and no key-mode check (0.19.218)
-  if (restore.replacesKeysElsewhere(command)) throw new Error("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.");
-  requireRunning();
-  // vault / seedrandom / keys genkey read as the node reads them: only with a pass; a chain is refused. The deciding check.
-  const gated = seedgate.refusal(command, secretGate.take); if (gated) throw new Error(gated);
-  // A backup file brings its own keys, in its own key mode: only Backup & Recovery restores one, after the mode check.
-  if (restore.loadsBackupFile(command)) throw new Error("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.");
-  // Replacing the wallet from a seed phrase resets every identity made from the old one: refused while work that needs the old keys is open.
-  if (restore.replacesWalletFromPhrase(command)) { const open = restore.activeWorkProblem(await walletWork()); if (open) throw new Error(open); }
-  const bad = restore.backupCommandProblem(command);
-  if (bad) throw new Error(bad);
+  // every check before a text reaches the node, in one tested function and in one order (main/seedgate.js checkCommand, 0.19.327 port of
+  // the released 0.18.201): control characters, read otherwise than it looks, an escaped ";", builder values, the per-piece refusals,
+  // keyuses:, keys replaced outside Backup & Recovery, the node running, the secret gate, a backup file, open work, the backup password
+  await seedgate.checkCommand(command, { take: secretGate.take, running: requireRunning, walletWork, keyMode: () => config.load().keyMode });
   // megammrsync ends by shutting the node down: run it with that expected, then start the node again (guarded).
   if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await held(() => runResync(command)), command); }   // secret parameters never echoed back (0.19.282)   // it ends by stopping the node: main's own question when anything is in flight (0.19.268)
   // quit, an archive / mysql / reset resync or import, megammr import: the node stops at the end (0.19.283): the same guard as every other stop

@@ -127,7 +127,7 @@ test("Key mode: every reason the node is not started, run from main/keymode.js",
 test("node start, node kind, wallet replacement, config: each listed sentence is still in the file that says it", () => {
   const fs = require("fs"), path = require("path"), read = (f) => fs.readFileSync(path.join(__dirname, "..", "main", f), "utf8");
   const SRC = { NODE_: "node-manager.js", PORT_: "node-manager.js", ANOTHER_PROGRAM: "node-manager.js", PARLONS_: "node-manager.js", WR_: "node-manager.js", KM_ALERT_: "node-manager.js", KM_WHAT_: "node-manager.js",
-    KM_MARK_FAILED: "node-manager.js", KM_CFG_: "config.js", KM_RECORD_UNSUPPORTED: "main.js", KM_KIND_UNSUPPORTED: "main.js", TERMINAL_RESTORE: "main.js" };
+    KM_MARK_FAILED: "node-manager.js", KM_CFG_: "config.js", KM_RECORD_UNSUPPORTED: "main.js", KM_KIND_UNSUPPORTED: "main.js", TERMINAL_RESTORE: "seedgate.js" };   // TERMINAL_RESTORE: in seedgate.js checkCommand since 0.19.327 (changed on purpose)
   const unescape = (s) => s.replace(/\\n/g, "\n").replace(/\\"/g, '"');
   let n = 0;
   for (const code of MS.codes()) {
@@ -199,6 +199,9 @@ test("the coin guard: every refusal, run through main/reserve.js in front of the
 
 // The tray apps and the rest of main.js: what they say is held to their source (four of them are pinned by sha256 and are
 // never edited: their exact English is listed), and read back in each language with sample values.
+// The Terminal's refusals moved with every other check of mcd:cmd into main/seedgate.js checkCommand (0.19.327, the released 0.18.201):
+// held to that file now, each one whole (changed on purpose: they were held to main.js)
+const TERMINAL_CHECKS = new Set(["MAIN_EMPTY", "MAIN_CONTROL_CHAR", "MAIN_SEND_REPEATED", "MAIN_CMD_REPEATED", "MAIN_OPENS_NODE", "MAIN_UNC_FILE", "MAIN_MDS_ACCEPT", "MAIN_MULTISIG_SPEND", "MAIN_REPLACES_KEYS"]);
 test("ETH Wallet, miniMall, Vestr, Web Wallet, Faucet, Explorer, KeyUses, updates, main.js: each listed sentence is in its file, and is said in each language", async () => {
   const fs = require("fs"), path = require("path"), read = (f) => fs.readFileSync(path.join(__dirname, "..", "main", f), "utf8");
   const SRC = { EW_: "ethwallet.js", SHOP_: "shop.js", VESTR_: "vestr.js", WW_: "webwallet.js", FAUCET_: "faucet.js", EXPLORER_: "explorer.js", KU_: "keyuses.js", UPD_: "updater.js", MAIN_: "main.js", SL_: "shop-listing.js", SS_: "shop-store.js", SG_: "seedgate.js", SC_: "syscheck.js", RPC_: "cmdverb.js", CHAT_: "chat.js", AXRPC_: "atomix.js" };
@@ -206,7 +209,7 @@ test("ETH Wallet, miniMall, Vestr, Web Wallet, Faucet, Explorer, KeyUses, update
   let n = 0;
   for (const code of MS.codes()) {
     const pre = Object.keys(SRC).find(p => code.startsWith(p)); if (!pre) continue;
-    const src = unq(read(code === "EW_CANCELLED" ? "syscheck.js" : SRC[pre])), tpl = MS.template(code); n++;   // "Cancelled": the one system check says it since 0.19.188
+    const src = unq(read(code === "EW_CANCELLED" ? "syscheck.js" : TERMINAL_CHECKS.has(code) ? "seedgate.js" : SRC[pre])), tpl = MS.template(code); n++;   // "Cancelled": the one system check says it since 0.19.188
     for (const piece of tpl.split(/\{\w+\}/).map(x => x.trim()).filter(x => x.length >= 8)) assert.ok(src.includes(piece), code + ": not in main/" + SRC[pre] + ": " + piece);
     if (!/\{\w+\}/.test(tpl)) assert.ok(src.includes('"' + tpl + '"') || src.includes("'" + tpl + "'") || src.includes(tpl + '"') || code === "EW_CANCELLED", code + ": said as a whole in main/" + SRC[pre]);
     check(tpl.replace(/\{(\w+)\}/g, (m, k) => (k === "exportphrase" ? "SHOW KEY" : k === "product" ? "minimaCore" : "X-" + k)));

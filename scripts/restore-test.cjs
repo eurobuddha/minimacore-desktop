@@ -5,6 +5,9 @@ const test = require("node:test"), assert = require("node:assert");
 const fs = require("fs"), os = require("os"), path = require("path"), vm = require("vm"), Module = require("module");
 const restore = require("../main/restore.js");
 const ROOT = path.join(__dirname, "..");
+// The checks of mcd:cmd live in main/seedgate.js checkCommand since 0.19.327 (the released 0.18.201); main.js's handler calls it first.
+const CHECKS = () => { const g = fs.readFileSync(path.join(ROOT, "main", "seedgate.js"), "utf8"), a = g.indexOf("async function checkCommand("); return g.slice(a, g.indexOf("\n}\n", a)); };
+const CALLS_CHECKS = "await seedgate.checkCommand(command, { take: secretGate.take, running: requireRunning, walletWork, keyMode: () => config.load().keyMode });";
 
 const H = "megammr.example:9001";
 function deps(over) { const sent = []; return Object.assign({ keyMode: "classic", supported: false, running: true, sent, work: async () => [], run: async (c) => { sent.push(c); return { status: true, response: {} }; } }, over); }
@@ -81,8 +84,10 @@ test("M1: a seed restore on the general command channel is recognised, and main.
     assert.equal(restore.replacesWalletFromPhrase(c), true, c);
   for (const c of ["megammrsync action:resync host:h:1", "megammrsync action:mydetails", 'send address:0x00 amount:1 state:{"1":"phrase:x"}', "", null]) assert.equal(restore.replacesWalletFromPhrase(c), false, String(c));
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
-  const order = ["requireRunning()", "restore.loadsBackupFile(command)", "restore.replacesWalletFromPhrase(command)", "restore.activeWorkProblem(await walletWork())", "seedgate.scrubReply(await run(pinned), command)"].map(x => cmd.indexOf(x));
-  assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refusals first, the node last: " + order);
+  // changed on purpose (0.19.327): the checks are read in seedgate.js checkCommand, in the same order, and main calls it before the node
+  const chk = CHECKS(), order = ["io.running()", "R.loadsBackupFile(command)", "R.replacesWalletFromPhrase(command)", "R.activeWorkProblem(await io.walletWork())"].map(x => chk.indexOf(x));
+  assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refusals in order: " + order);
+  assert.ok(cmd.indexOf(CALLS_CHECKS) > 0 && cmd.indexOf(CALLS_CHECKS) < cmd.indexOf("seedgate.scrubReply(await run(pinned), command)"), "every check before the node gets anything");
   assert.ok(/const walletWork = async \(skipDexicon = Date\.now\(\) < dexSkipUntil\) => restore\.activeWorkList\(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\),/.test(main), "asked of the existing read models; a failed read is null, which refuses");
   assert.ok(/work: walletWork \}\)\);/.test(main), "and the backup-file restore asks the same");
 });
@@ -158,7 +163,7 @@ test("lows: a semicolon in a restore value is refused in plain words; a resync a
   for (const c of ['backup password:"a"b"', 'backup password:"a b"', "backup password:a;b", 'backup password:"pä55"', "backup password:", 'backup password:"abc" confirm:"ab c"', " Backup password:a-b"])
     assert.ok(/letters and numbers only/.test(restore.backupCommandProblem(c)), c);
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), cmd = main.slice(main.indexOf('"mcd:cmd"'), main.indexOf('"mcd:clip"'));
-  assert.ok(cmd.indexOf("restore.backupCommandProblem(command)") > 0 && cmd.indexOf("restore.backupCommandProblem(command)") < cmd.indexOf("seedgate.scrubReply(await run(pinned), command)"));
+  assert.ok(CHECKS().includes("const bad = R.backupCommandProblem(command);\n  if (bad) throw new Error(bad);") && cmd.indexOf(CALLS_CHECKS) > 0 && cmd.indexOf(CALLS_CHECKS) < cmd.indexOf("seedgate.scrubReply(await run(pinned), command)"));   // in checkCommand since 0.19.327 (changed on purpose)
 });
 
 // ---- 0.19.193: the command channel's restore checks read a command as the node does (main/cmdverb.js) ----
@@ -194,8 +199,8 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
   for (const c of ["reset action:chainsync archivefile:/Users/me/archive.gz", "archive action:import file:/Users/me/archive.gz", "txpow txpowid:0x01", "mysql action:reset file:/x/y.dat", "archive action:resync host:h:9001",
     "reset action:chainsync archivefile:C:\\backup\\a.gz", "archive action:import file:D:\\minima\\archive.gz"])   // a Windows path (0.19.296)
     assert.equal(restore.replacesKeysElsewhere(c), false, JSON.stringify(c));
-  const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
-  assert.ok(h.indexOf("restore.replacesKeysElsewhere(command)") > 0 && h.indexOf("restore.replacesKeysElsewhere(command)") < h.indexOf("seedgate.refusal(command"), "refused before the gate asks anything");
+  const h = CHECKS();   // in seedgate.js checkCommand since 0.19.327 (changed on purpose)
+  assert.ok(h.indexOf("R.replacesKeysElsewhere(command)") > 0 && h.indexOf("R.replacesKeysElsewhere(command)") < h.indexOf("refusal(command, io.take)"), "refused before the gate asks anything");
 });
 
 // ---- 0.19.262: the P2P Chance bets the settle loop found hold a wallet replacement on every install ----
