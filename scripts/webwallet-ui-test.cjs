@@ -100,7 +100,10 @@ test("restore, resync, Web Wallet and backup screens refuse ';' in a seed, a fil
 
 // ---- 0.18.199: an unreachable key-use service is said plainly ----
 test("Web Wallet: when the key-use service cannot be reached, the screen says so and that nothing can be sent until it can", () => {
-  assert.ok(app.includes("The key-use service (eurobuddha.com) cannot be reached, so this key's on-chain uses could not be read. Nothing can be sent from this wallet until it can"), "Confirm");
-  assert.ok(app.includes("The key-use service (eurobuddha.com) cannot be reached, so the on-chain uses could not be read. Nothing was changed, and nothing can be sent from this wallet until it can."), "Check on-chain");
-  assert.ok(/if \(n == null\) \{\n\s*\/\/ 0\.18\.199[^\n]*\n\s*toast\("The key-use service/.test(app) && /if \(n == null\) \{[\s\S]{0,600}return;\n\s*\}/.test(app), "and Confirm still refuses: no way round it");
+  // CHANGED on purpose (0.18.238): "could not be read", not "cannot be reached": the service may have answered with an error row,
+  // another key's row or a count that is not a whole number, and the screen said something that was not true
+  assert.ok(app.includes("This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can"), "Confirm");
+  assert.ok(app.includes("The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can."), "Check on-chain");
+  assert.ok(!app.includes("cannot be reached, so"), "the old sentence is gone");
+  assert.ok(/if \(n == null\) \{\n\s*\/\/ 0\.18\.199[^\n]*\n\s*toast\("This key's on-chain uses could not be read/.test(app) && /if \(n == null\) \{[\s\S]{0,600}return;\n\s*\}/.test(app), "and Confirm still refuses: no way round it");
 });

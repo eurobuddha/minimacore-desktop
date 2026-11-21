@@ -788,8 +788,8 @@ function renderWwWallet(body) {
       const n = wwConfirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
       if (wwAddr !== a) return;                                   // locked while the chain was being read
       if (n == null) {
-        // 0.18.199: said plainly; there is no way round it (owner decision): a figure that is too low reuses a one-time key
-        toast("The key-use service (eurobuddha.com) cannot be reached, so this key's on-chain uses could not be read. Nothing can be sent from this wallet until it can: a figure that is too low could lose funds. Check your connection and press Confirm again.", "err");
+        // 0.18.199: said plainly (0.18.238: "could not be read", which is also true of an answer that was an error row, another key's row or not a whole count); there is no way round it (owner decision): a figure that is too low reuses a one-time key
+        toast("This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.", "err");
         if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; }
         return;
       }
@@ -800,7 +800,7 @@ function renderWwWallet(body) {
       const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = "Checking…";
       const onchain = await readOnchain();
       if (wwAddr !== a || !btn.isConnected) return;
-      if (onchain == null) toast("The key-use service (eurobuddha.com) cannot be reached, so the on-chain uses could not be read. Nothing was changed, and nothing can be sent from this wallet until it can.", "err");
+      if (onchain == null) toast("The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.", "err");
       else { el("wwKuIn").value = String(wwConfirmUses(el("wwKuIn").value, onchain)); toast("On-chain uses: " + onchain + " (set as minimum)", "ok"); }
       btn.disabled = false; btn.textContent = "Check on-chain";
     });
