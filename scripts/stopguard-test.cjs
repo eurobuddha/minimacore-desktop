@@ -123,7 +123,9 @@ test("setup screen: the form stays until the node really stops; a refused restar
   const app = rd("renderer/app.js"), i = app.indexOf("    if (running) {   // reconfigure = restart to apply"), branch = app.slice(i, app.indexOf("\n      return;\n    }", i));
   assert.ok(i > 0 && branch.indexOf("await api.nodeRestart(patch);") > 0);
   assert.ok(!/showStarting\(\)|hideSetup\(\)|innerHTML/.test(branch), "nothing replaces or hides the form before main has decided");
-  assert.ok(/catch \(e\) \{ CFG = before; if \(btn\.isConnected\) \{ btn\.disabled = false;[^\n]*toast\(ipcMsg\(e\) \+ " Your changes are still on this screen\.", "err"\); \}/.test(branch), "a refusal gives the button back and says the edits are kept");
+  // CHANGED on purpose (0.18.258): the config is read again, and the edits are said to be kept only while the form is on screen
+  assert.ok(/try \{ CFG = await api\.getConfig\(\); \} catch \(x\) \{ CFG = before; \}/.test(branch) && /const kept = btn\.isConnected; if \(kept\) \{ btn\.disabled = false;/.test(branch)
+    && /toast\(ipcMsg\(e\) \+ \(kept \? " Your changes are still on this screen\." : ""\), "err"\);/.test(branch), "a refusal gives the button back and says the edits are kept");
   assert.ok(/finally \{ setupRestarting = false; \}/.test(branch));
   assert.ok(/if \(setupRestarting && s\.state !== "running" && !el\("startStat"\)\) showStarting\(\);/.test(app), "the progress replaces the form once the node is really stopping");
 });
@@ -158,4 +160,22 @@ test("a stop let go whose operation then fails releases the hold: the retry is a
   await assert.rejects(run(true)(async () => { throw new Error("Wrong password"); }), /Wrong password/); assert.equal(released.length, 1, "the operation failed: released");
   await assert.rejects(run(false)(async () => 1), /kept running/); assert.equal(released.length, 1, "a refused or busy guard releases nothing (another request's hold stays)");
   assert.equal(await run(true)(async () => 7), 7); assert.equal(released.length, 1);
+});
+
+// ---- 0.18.258: a restart that failed after the guard let it go: the config is read again, and "your changes are still on this screen" only while they are ----
+test("setup screen: a failure after the restart began re-reads the config and does not claim the form is still there", async () => {
+  const app = rd("renderer/app.js"), i = app.indexOf("    if (running) {   // reconfigure = restart to apply"), j = app.indexOf("\n      return;\n    }", i);
+  const body = app.slice(app.indexOf("      const before = CFG", i), j);
+  const runIt = async ({ formStays, failWith }) => {
+    const toasts = [], btn = { isConnected: formStays, disabled: false, textContent: "" }, saved = { walletDone: true, contribute: true };
+    const api = { nodeRestart: async () => { throw new Error(failWith); }, getConfig: async () => saved };
+    const env = { CFG: { walletDone: true, contribute: false } };
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await new AsyncFunction("env", "api", "el", "toast", "ipcMsg", "patch", "let CFG = env.CFG, postBootStarted = false, setupRestarting = false;\n" + body + "\nenv.CFG = CFG;")(env, api, () => btn, (m) => toasts.push(m), (e) => e.message, { contribute: true });
+    return { toasts, env, btn };
+  };
+  let r = await runIt({ formStays: true, failWith: "The node keeps running: nothing was stopped." });
+  assert.deepEqual(r.toasts, ["The node keeps running: nothing was stopped. Your changes are still on this screen."]); assert.equal(r.btn.disabled, false);
+  r = await runIt({ formStays: false, failWith: "node start failed" });
+  assert.deepEqual(r.toasts, ["node start failed"], "the form is gone: not said to be there"); assert.equal(r.env.CFG.contribute, true, "the config main saved is read again");
 });

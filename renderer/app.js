@@ -400,7 +400,11 @@ function showSetup() {
       const before = CFG, btn = el("startNode"); CFG = Object.assign({}, CFG, patch);
       postBootStarted = false; setupRestarting = true; btn.disabled = true; btn.textContent = "Restarting the node…";
       try { await api.nodeRestart(patch); CFG = await api.getConfig(); }
-      catch (e) { CFG = before; if (btn.isConnected) { btn.disabled = false; btn.textContent = "Apply & restart node"; } toast(ipcMsg(e) + " Your changes are still on this screen.", "err"); }
+      catch (e) {   // a refusal leaves the form and the old config; a restart that failed after the guard let it go has saved the patch and replaced the form (0.18.258)
+        try { CFG = await api.getConfig(); } catch (x) { CFG = before; }
+        const kept = btn.isConnected; if (kept) { btn.disabled = false; btn.textContent = "Apply & restart node"; }
+        toast(ipcMsg(e) + (kept ? " Your changes are still on this screen." : ""), "err");
+      }
       finally { setupRestarting = false; }
       return;
     }
