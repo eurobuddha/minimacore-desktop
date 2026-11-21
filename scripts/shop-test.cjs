@@ -701,7 +701,7 @@ test("dust past the bound: an order keeps PENDING_MAX coins, the smallest is rep
 // whole; a node error about a valid one only holds the scan; the save checks the checksum ----
 const mxOf = (hex) => {   // the node's Mx encoding of a 32-byte address: [1, 0, 32] + address + the first 4 bytes of its SHA3, in base 32
   const a = Buffer.from(hex.slice(2), "hex"), b = Buffer.concat([Buffer.from([1, 0, 32]), a, require("crypto").createHash("sha3-256").update(a).digest().subarray(0, 4)]);
-  let n = BigInt("0x" + b.toString("hex")), s = ""; while (n > 0n) { s = "0123456789ABCDEFGHIJKLMNOPQRSTUV"[Number(n % 32n)] + s; n /= 32n; } return "Mx" + s;
+  let n = BigInt("0x" + b.toString("hex")), s = ""; while (n > 0n) { s = "0123456789ABCDEFGHIJKLMNOPQRSTUV"[Number(n % 32n)] + s; n /= 32n; } return "Mx" + s.replace(/I/g, "W").replace(/L/g, "Y").replace(/O/g, "Z");   // the node's alphabet writes I, L, O as W, Y, Z
 };
 test("vendor: a payout address with a wrong checksum is skipped for five minutes and said whole; a node error about a valid one holds the scan; the save checks it", async () => {
   const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
@@ -738,4 +738,24 @@ test("vendor: a payout address with a wrong checksum is skipped for five minutes
     m.shop.saveShop(Object.assign({}, m.store.shop("bad3"), { shopName: "B2" })); assert.equal(m.store.shop("bad3").shopName, "B2", "an unchanged address is not checked again");
     assert.throws(() => m.shop.saveShop({ shopId: "bad7", shopName: "H", vendorAddress: "0x" + "AB".repeat(31), products: [] }), /payout address is invalid/);
   } finally { console.error = err; Date.now = now0; }
+});
+
+// ---- 0.18.247: SHA-3 from main/sha3.js, never Node's crypto (Electron's BoringSSL has none: the payout check read every address as valid) ----
+test("SHA3-256 comes from main/sha3.js: the known vectors, the Mx address both ways, and the payout check works with a crypto that has no SHA-3", async () => {
+  const S3 = require("../main/sha3");
+  assert.equal(S3.sha3_256(Buffer.alloc(0)).toString("hex"), "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a");
+  assert.equal(S3.sha3_256("abc").toString("hex"), "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532");
+  for (const n of [0, 1, 135, 136, 137, 271, 272, 273, 1000]) { const b = require("crypto").randomBytes(n); assert.equal(S3.sha3_256(b).toString("hex"), require("crypto").createHash("sha3-256").update(b).digest("hex"), "block edge " + n); }
+  // shop.js loaded with a crypto whose SHA-3 throws, as Electron's does
+  const realCrypto = require("crypto"), noSha3 = Object.assign({}, realCrypto, { createHash: (alg, ...r) => { if (/sha3/i.test(alg)) throw new Error("Digest method not supported"); return realCrypto.createHash(alg, ...r); } });
+  const prev = Module._load; Module._load = function (r, parent) { if (r === "crypto" && parent && /[\\/]main[\\/](shop|sha3)\.js$/.test(parent.filename)) return noSha3; return prev.apply(this, arguments); };
+  try {
+    const m = freshModules();
+    assert.equal(m.shop._mxToHex("MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G"), "0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A");
+    assert.equal(mxOf("0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A"), "MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G", "and back");
+    const GOOD = "MxG080CRJB1D4NHGRYGNF7Q52FK7023UM3FUUPVD1W1WCQZSA8MDQ25982N842G", BAD = GOOD.slice(0, -3) + (GOOD.slice(-3, -2) === "A" ? "B" : "A") + GOOD.slice(-2);
+    assert.equal(m.shop._mxToHex(BAD), null);
+    assert.throws(() => m.shop.saveShop({ shopId: "s3bad", shopName: "X", vendorAddress: BAD, products: [] }), /is not a valid Minima address/, "refused where the runtime has no SHA-3");
+    m.shop.saveShop({ shopId: "s3ok", shopName: "Y", vendorAddress: GOOD, products: [] }); assert.ok(m.store.shop("s3ok"));
+  } finally { Module._load = prev; freshModules(); }
 });

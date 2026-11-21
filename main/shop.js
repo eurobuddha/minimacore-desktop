@@ -70,7 +70,7 @@ function looksLikeMinimaAddress(a) {
  * error: an Mx whose checksum is wrong (the node's own Address.convertMinimaAddress: the first 4 bytes of the SHA3 of the 32-byte
  * address, as Pandamonium Desktop's main/futurecash.js mxToHex reads it), or an 0x that is not 64 hexadecimal digits
  * (checkaddress's length rule). looksLikeMinimaAddress checks the shape only, so an Mx with a wrong checksum was saved and its
- * payments could never be read. A runtime without SHA3 cannot judge: false (the address is read as before).
+ * payments could never be read. SHA-3 comes from main/sha3.js (0.18.247): Electron's crypto has none.
  */
 const B32 = "0123456789abcdefghijklmnopqrstuv";
 function mxToHex(mx) {
@@ -81,13 +81,14 @@ function mxToHex(mx) {
   const b = Buffer.from(h, "hex");
   if (b.length !== 39 || b[0] !== 1 || ((b[1] << 8) | b[2]) !== 32) return null;
   const addr = b.subarray(3, 35);
-  return crypto.createHash("sha3-256").update(addr).digest().subarray(0, 4).equals(b.subarray(35)) ? "0x" + addr.toString("hex").toUpperCase() : null;
+  // main/sha3.js, never crypto's sha3-256 (0.18.247: Electron's BoringSSL has none, so this threw and every address read as valid)
+  return require("./sha3").sha3_256(addr).subarray(0, 4).equals(b.subarray(35)) ? "0x" + addr.toString("hex").toUpperCase() : null;
 }
 function badAddress(a) {
   a = String(a == null ? "" : a).trim();
   if (/^0x/i.test(a)) return !/^0x[0-9a-fA-F]{64}$/.test(a);
   if (!/^M[xX]/.test(a)) return true;
-  try { return !mxToHex(a); } catch (e) { return false; }
+  return !mxToHex(a);
 }
 // Payout addresses that can never be valid and whose coins the node did not list: skipped for SKIP_MS, logged whole, said on the
 // miniMall status line (scanState). They were read as "not answered", which held the scan for good: the tip never advanced and
@@ -521,5 +522,6 @@ module.exports = {
   myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState,
   placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
   sendingCount: () => sending.size,   // payments at the node in this process: said by the node-stop guard (0.18.225)
+  _mxToHex: mxToHex,   // test-only
   _setRunner, MINIMERCH, USDT_TOKEN, tokenFor
 };
