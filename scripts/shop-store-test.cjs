@@ -428,7 +428,38 @@ test("vendor: a payout address the node does not answer for leaves the scan curs
   tip = 20000; await shop.scanOnce();
   assert.equal(shop.scanState().unreadBelow, 20000 - 4096, "away longer than one pass reads: the oldest unread block is kept for the Inbox");
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
-  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Orders and payments before block {block} were not read'));
+  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Orders sent before block {block} may not have been read'));
+});
+
+// ---- 0.19.273: a payout address the node says is not valid is skipped (logged whole), not read as "not answered"; it is checked when a shop is saved ----
+test("vendor: a payout address the node refuses is skipped with a log line and the cursor moves; one it does not answer for still holds it; the save checks a new address", async () => {
+  const BAD = "MxG0BADCHECKSUM00000000000000000000000000000000000000000000000007";
+  store.saveShop({ shopId: "bad3", shopName: "B", currency: "Minima", tokenid: "0x00", vendorAddress: BAD, products: [{ id: "p1", name: "Cup", price: "4", maxUnits: "5" }], shipping: [] });
+  let tip = 30000, answers = true; const said = [];
+  shop._setRunner(async (c) => {
+    if (c === "block") return { status: true, response: { block: String(tip) } };
+    if (c.startsWith("coins address:" + BAD)) return { status: false, error: "Invalid address" };
+    if (c === "checkaddress address:" + BAD) { if (!answers) throw new Error("timed out"); return { status: false, error: "Invalid MxAddress" }; }
+    if (c.startsWith("checkaddress")) { if (!answers) throw new Error("timed out"); return { status: true, response: { simple: true } }; }
+    return { status: true, response: [] };
+  });
+  store.setLog((m) => said.push(m));
+  try {
+    await shop.init();
+    answers = false; await shop.scanOnce();
+    assert.equal(shop.scanState().readFailed, true, "the node did not answer whether it is valid: not read, the cursor stays");
+    answers = true; tip = 30001; await shop.scanOnce();
+    assert.equal(shop.scanState().readFailed, false); assert.equal(store.getMeta("scanned_tip_block"), 30001, "skipped, so the pass is covered and the cursor moves");
+    assert.ok(said.some(l => l.includes("payout address " + BAD + " is not a valid address")), said.join(" | "));
+    const n = said.length; tip = 30002; await shop.scanOnce(); assert.equal(said.length, n, "said once");
+    assert.equal(store.getMeta("scanned_tip_block"), 30002); assert.equal(shop.scanState().unreadBelow, 0, "a later pass that read everything since the one before clears the Inbox notice");
+    // the Studio's save: a new or changed address is checked by the node; the same one is not asked again
+    await assert.rejects(shop.saveShop({ shopId: "bad4", shopName: "C", vendorAddress: BAD, products: [] }), new RegExp("payout address " + BAD + " is not a valid Minima address\\. Nothing was saved"));
+    assert.equal(store.shop("bad4"), null);
+    answers = false; await assert.rejects(shop.saveShop({ shopId: "bad5", shopName: "D", vendorAddress: "MxG0GOODADDRESS0000000000000000000000000000000000000000000000001", products: [] }), /could not be checked: the node did not answer/);
+    await shop.saveShop(Object.assign({}, store.shop("bad3"), { shopName: "B2" })); assert.equal(store.shop("bad3").shopName, "B2", "an unchanged address needs no check");
+    answers = true; await shop.saveShop({ shopId: "ok6", shopName: "E", vendorAddress: "MxG0GOODADDRESS0000000000000000000000000000000000000000000000001", products: [] }); assert.ok(store.shop("ok6"));
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); store.deleteShop("bad3"); store.deleteShop("ok6"); }
 });
 
 // ---- 0.19.272: gathered dust is bounded with a running exact sum; past the bound a coin not larger than the smallest kept is not kept ----

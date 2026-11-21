@@ -5307,7 +5307,10 @@
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "无法检查 P2P Chance：此钱包在链上有投注，尚未读取是否仍有未结束的投注。请稍候再试。",
   "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "无法读取链上此密钥的数字（密钥使用服务可能无法访问），因此您确认的次数无法与之核对。未保存任何内容；可读取时请再次确认。",
   "A pool's amounts are plain numbers above zero. Nothing was sent.": "资金池的金额必须是大于零的普通数字。未发送任何内容。",
-  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} 已停止（{error}）。它可能已经提交：重试前请检查活动记录和余额。"
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} 已停止（{error}）。它可能已经提交：重试前请检查活动记录和余额。",
+  "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "无法检查收款地址：节点没有响应。未保存任何内容；请在节点运行时再试。",
+  "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "节点表示收款地址 {address} 不是有效的 Minima 地址。未保存任何内容；请检查地址后再保存。",
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "区块 {block} 之前发送的订单可能未被读取：应用离开的时间超过了一次读取的范围。付款不会遗漏：节点会列出此钱包的每个未花费币。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5397,5 +5400,8 @@
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.",
   "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.",
   "A pool's amounts are plain numbers above zero. Nothing was sent.",
-  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying."
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
+  "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
+  "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet."
 ] });

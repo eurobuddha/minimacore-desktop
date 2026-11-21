@@ -323,11 +323,21 @@ function payAddresses() {
   for (const s of store.shops()) if (s && looksLikeMinimaAddress(s.vendorAddress)) out.add(String(s.vendorAddress));
   return [...out];
 }
+// Payout addresses the node itself says are not valid (0.19.273): not read again this session and logged once, whole. One such
+// address used to count as "not answered", so the cursor never moved and every pass read the widest window again.
+const refusedPay = new Set();
+/** Does the node say this address is not valid? true / false, or null when it did not answer. */
+async function nodeRefuses(a) { let r; try { r = await nodeCmd("checkaddress address:" + a); } catch (e) { return null; } return !r ? null : r.status === false; }
 async function scanPayments(depth) {
-  const addrs = payAddresses(); if (!addrs.length) return false;
+  const addrs = payAddresses().filter(a => !refusedPay.has(a)); if (!addrs.length) return false;
   let listed = [], any = false;
   let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
-  for (const a of addrs) { const got = await coinsAt(a, depth, " relevant:true"); if (got) { any = true; listed = listed.concat(got); } else missed = true; }
+  for (const a of addrs) {
+    const got = await coinsAt(a, depth, " relevant:true");
+    if (got) { any = true; listed = listed.concat(got); continue; }
+    if (await nodeRefuses(a) === true) { refusedPay.add(a); store.log("miniMall: the node says the payout address " + a + " is not a valid address, so payments to it are not read. Correct it in miniMall Studio (the shop's payout address)."); any = true; continue; }
+    missed = true;
+  }
   if (!any) return null;
   capSeen();
   // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it
@@ -378,6 +388,8 @@ async function scanOnce() {
         const below = tip - WINDOW_DEPTH; store.setMeta("unread_below_block", Math.max(below, Number(store.getMeta("unread_below_block")) || 0));
         store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass reads the last " + WINDOW_DEPTH + " (orders and payments before block " + below + " were not read)");
       }
+      // a later pass that read everything since the one before clears it (0.19.273); the log keeps what was not read
+      else if (prev && Number(store.getMeta("unread_below_block"))) store.setMeta("unread_below_block", 0);
       store.setMeta("scanned_tip_block", tip);
     }
     const said = failed !== lastPassFailed; lastPassFailed = failed;
@@ -405,7 +417,19 @@ function checkImported(cfg) {
 
 // ---- read-model for the renderer ----
 function myShops() { return store.shops(); }
-function saveShop(cfg) { store.saveShop(cfg); emitter.emit("update"); return cfg; }
+/** A shop's payout address is checked by the node when it is new or changed (0.19.273): one with the right shape and a wrong
+ *  checksum was saved, and its payments could never be read. */
+async function saveShop(cfg) {
+  const addr = String((cfg && cfg.vendorAddress) || "").trim(), was = cfg && store.shop(cfg.shopId);
+  if (addr && !(was && String(was.vendorAddress || "").trim() === addr)) {
+    if (!looksLikeMinimaAddress(addr)) throw new Error("This shop's payout address is invalid.");
+    const no = await nodeRefuses(addr);
+    if (no === null) throw new Error("The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.");
+    if (no) throw new Error("The node says the payout address " + addr + " is not a valid Minima address. Nothing was saved; check the address and save again.");
+    refusedPay.delete(addr);
+  }
+  store.saveShop(cfg); emitter.emit("update"); return cfg;
+}
 function deleteShop(shopId) { store.deleteShop(shopId); emitter.emit("update"); }
 /** What the screens may offer for a buy order's payment (0.19.265): `sending` while its send is at the node in this process
  *  (no warning, no button), nothing once the vendor acknowledged it; else the unpaid / may-have-gone-through marks. */

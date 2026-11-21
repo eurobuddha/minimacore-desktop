@@ -3769,7 +3769,7 @@ async function renderShopInbox() {
   const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []), scan = await api.shopScanState().catch(() => null);
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
   const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
-    : scan && scan.unreadBelow ? tr("Orders and payments before block {block} were not read: the app was away longer than one pass reads.", { block: esc(String(scan.unreadBelow)) }) : "";
+    : scan && scan.unreadBelow ? tr("Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.", { block: esc(String(scan.unreadBelow)) }) : "";
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
     `<div class="mm-ver">${th("miniMall Inbox")}</div>
      <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>${unread ? `<div class="mm-warn">${unread}</div>` : ""}

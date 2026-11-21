@@ -5320,7 +5320,10 @@
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "P2P Chance не удалось проверить: у этого кошелька есть ставки в сети, и ещё не прочитано, открыта ли какая-либо из них. Подождите немного и попробуйте снова.",
   "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "Не удалось прочитать данные сети для этого ключа (сервис использований ключей может быть недоступен), поэтому подтверждаемое число нельзя с ними сверить. Ничего не сохранено; подтвердите снова, когда их можно будет прочитать.",
   "A pool's amounts are plain numbers above zero. Nothing was sent.": "Суммы пула должны быть простыми числами больше нуля. Ничего не отправлено.",
-  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} остановлено ({error}). Возможно, транзакция уже отправлена: проверьте «Активность» и баланс, прежде чем повторять."
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} остановлено ({error}). Возможно, транзакция уже отправлена: проверьте «Активность» и баланс, прежде чем повторять.",
+  "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "Адрес для выплат не удалось проверить: узел не ответил. Ничего не сохранено; попробуйте снова, когда узел будет работать.",
+  "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Узел сообщает, что адрес для выплат {address} не является действительным адресом Minima. Ничего не сохранено; проверьте адрес и сохраните снова.",
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "Заказы, отправленные до блока {block}, могли быть не прочитаны: приложение было закрыто дольше, чем охватывает одно чтение. Платежи не теряются: узел показывает каждую неизрасходованную монету этого кошелька."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5410,5 +5413,8 @@
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.",
   "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.",
   "A pool's amounts are plain numbers above zero. Nothing was sent.",
-  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying."
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
+  "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
+  "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet."
 ] });
