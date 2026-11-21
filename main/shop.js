@@ -34,7 +34,7 @@ const seenMsgCoins = new Set();
 const seenPayCoins = new Set();
 let identity = null;         // {boxPk,boxSk,signPk,signSk,publicId}
 let vendorAddress = "";      // my default receiving address (payments land here)
-let scanTimer = null, lastTip = 0, scanning = false, backfilled = false;
+let scanTimer = null, lastTip = 0, scanning = false, backfilled = false, lastPassFailed = false;
 
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
@@ -316,7 +316,8 @@ function payAddresses() {
 async function scanPayments(depth) {
   const addrs = payAddresses(); if (!addrs.length) return false;
   let listed = [], any = false;
-  for (const a of addrs) { const got = await coinsAt(a, depth, " relevant:true"); if (got) { any = true; listed = listed.concat(got); } }
+  let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
+  for (const a of addrs) { const got = await coinsAt(a, depth, " relevant:true"); if (got) { any = true; listed = listed.concat(got); } else missed = true; }
   if (!any) return null;
   capSeen();
   // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it
@@ -343,7 +344,7 @@ async function scanPayments(depth) {
   // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
   const dust = coins.filter(c => judge(c) === "DUST");
   if (changed && dust.length) for (const c of dust) judge(c);
-  return changed;
+  return missed ? null : changed;
 }
 /** How many blocks a pass asks for (0.19.232, mail.js's depthForGap): the gap since the last scanned tip (saved, so it
  *  survives a quit) plus a margin, never below the steady window, never past one pass's ceiling. */
@@ -356,12 +357,21 @@ async function scanOnce() {
   try {
     const tip = await currentBlock(), prev = Number(store.getMeta("scanned_tip_block") || 0);
     const depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
-    if (tip && prev && tip - prev + GAP_MARGIN > WINDOW_DEPTH) store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass reads the last " + WINDOW_DEPTH + " (orders and payments before block " + (tip - WINDOW_DEPTH) + " were not read)");
     const a = await scanOrders(depth).catch(() => null);
     const b = await scanPayments(depth).catch(() => null);
     backfilled = true;
-    if (tip && a !== null && b !== null) store.setMeta("scanned_tip_block", tip);   // only a pass that read both moves the cursor
-    if (a || b) emitter.emit("update");
+    // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
+    // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
+    const failed = !tip || a === null || b === null;
+    if (!failed) {
+      if (prev && tip - prev + GAP_MARGIN > WINDOW_DEPTH) {   // the app was away longer than one pass reads: said, and kept until a later pass
+        const below = tip - WINDOW_DEPTH; store.setMeta("unread_below_block", Math.max(below, Number(store.getMeta("unread_below_block")) || 0));
+        store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass reads the last " + WINDOW_DEPTH + " (orders and payments before block " + below + " were not read)");
+      }
+      store.setMeta("scanned_tip_block", tip);
+    }
+    const said = failed !== lastPassFailed; lastPassFailed = failed;
+    if (a || b || said) emitter.emit("update");
   } finally { scanning = false; }
 }
 async function startLoop() {
@@ -410,11 +420,14 @@ function paymentNotSent(ref) {
 }
 /** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
+/** What the order scan could not read, for the Inbox's status line (0.19.249): the last pass failed (the node did not answer;
+ *  read again on the next block), and the oldest block below which a long absence left orders and payments unread. */
+function scanState() { return { readFailed: lastPassFailed, unreadBelow: Number(store.getMeta("unread_below_block")) || 0 }; }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
-  myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount,
+  myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState,
   placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
   _setRunner, MINIMERCH, MXUSD_TOKEN, tokenFor
 };

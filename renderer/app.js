@@ -3713,11 +3713,13 @@ async function renderMiniMall() {
 // ---------------- miniMall Inbox (merchinbox): the orders customers placed with my shops ----------------
 async function renderShopInbox() {
   if (shopNav.screen === "order") return renderShopSellOrder(shopNav.ref);
-  const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []);
+  const all = (await api.shopOrders().catch(() => [])).filter(o => o.role === "sell"), mine = await api.shopMyShops().catch(() => []), scan = await api.shopScanState().catch(() => null);
   const list = all.filter(o => shopFilter === "ALL" || o.status === shopFilter);
+  const unread = scan && scan.readFailed ? th("Recent orders could not be read: the node did not answer. They are read again on the next block.")
+    : scan && scan.unreadBelow ? tr("Orders and payments before block {block} were not read: the app was away longer than one pass reads.", { block: esc(String(scan.unreadBelow)) }) : "";
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
     `<div class="mm-ver">${th("miniMall Inbox")}</div>
-     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>
+     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>${unread ? `<div class="mm-warn">${unread}</div>` : ""}
      <div class="mm-chips">${[N_("ALL"), N_("PENDING"), N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${th(s)}</button>`).join("")}</div>
      ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
         <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.due || o.amount)} ${esc(SHOP.cur(o.currency))}${o.unchecked && o.status !== "INQUIRY" ? " " + th("(buyer's figure)") : ""}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);

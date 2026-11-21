@@ -404,3 +404,24 @@ test("dust coins count together once they cover what is still due: 9.9 + 0.05 + 
   assert.equal(store.recordPayment(r, "0xd3999", "0.05", "0x00"), "PAID", "0.05 + 0.05 of the gathered dust cover the 0.1 left");
   assert.ok(store.order(r).coins.length >= 3 && store.order(r).coins.length <= 52);
 });
+
+// ---- 0.19.249 (as released 0.18.213, this branch's one-pass scan): a failed read advances nothing, and the Inbox says what was not read ----
+test("vendor: a payout address the node does not answer for leaves the scan cursor where it was; a long absence is said on the Inbox", async () => {
+  const OTHER2 = "MxG0OTHERPAYOUT0000000000000000000000000000000000000000000000009";
+  store.saveShop({ shopId: "fail2", shopName: "F", currency: "Minima", tokenid: "0x00", vendorAddress: OTHER2, products: [{ id: "p1", name: "Cup", price: "4", maxUnits: "5" }], shipping: [] });
+  let tip = 9000, down = true; const before = Number(store.getMeta("scanned_tip_block")) || 0;
+  shop._setRunner(async (c) => {
+    if (c === "block") return { status: true, response: { block: String(tip) } };
+    if (c.startsWith("coins address:" + OTHER2)) { if (down) throw new Error("timed out"); return { status: true, response: [] }; }
+    return { status: true, response: [] };
+  });
+  await shop.init(); await shop.scanOnce();
+  assert.equal(Number(store.getMeta("scanned_tip_block")) || 0, before, "one address unread: the cursor does not move");
+  assert.equal(shop.scanState().readFailed, true);
+  down = false; await shop.scanOnce();
+  assert.equal(store.getMeta("scanned_tip_block"), 9000); assert.equal(shop.scanState().readFailed, false);
+  tip = 20000; await shop.scanOnce();
+  assert.equal(shop.scanState().unreadBelow, 20000 - 4096, "away longer than one pass reads: the oldest unread block is kept for the Inbox");
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Orders and payments before block {block} were not read'));
+});

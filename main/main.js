@@ -611,6 +611,7 @@ ipcMain.handle("mcd:shopOrder", (_e, ref) => shop.orderDetail(ref));
 ipcMain.handle("mcd:shopNewCount", () => shop.newOrderCount());
 ipcMain.handle("mcd:shopPlaceOrder", (_e, shopCfg, items, total, shipping, delivery, note) => shop.placeOrder(shopCfg, items, total, shipping, delivery, note));
 ipcMain.handle("mcd:shopRetryPay", (_e, ref) => shop.retryPayment(ref));
+ipcMain.handle("mcd:shopScanState", () => shop.scanState());   // what the order scan could not read (0.19.249)
 ipcMain.handle("mcd:shopNotSent", (_e, ref) => shop.paymentNotSent(ref));   // the buyer checked their History: the uncertain payment was not sent (0.19.241)
 ipcMain.handle("mcd:shopAdvance", (_e, ref, status) => shop.advanceStatus(ref, status));
 ipcMain.handle("mcd:shopVendorCheck", (_e, ref) => shop.vendorCheck(ref));   // the vendor checked an unmatched order by hand (0.19.166)
