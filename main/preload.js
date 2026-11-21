@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld("mcd", {
   shopOrder: (ref) => ipcRenderer.invoke("mcd:shopOrder", ref),
   shopNewCount: () => ipcRenderer.invoke("mcd:shopNewCount"),
   shopScanState: () => ipcRenderer.invoke("mcd:shopScanState"),
+  shopDismissUnread: () => ipcRenderer.invoke("mcd:shopDismissUnread"),   // the unread notice, seen (0.18.277)
   shopNotSent: (ref) => ipcRenderer.invoke("mcd:shopNotSent", ref),
   shopPlaceOrder: (shopCfg, items, total, shipping, delivery, note) => ipcRenderer.invoke("mcd:shopPlaceOrder", shopCfg, items, total, shipping, delivery, note),
   shopRetryPay: (ref) => ipcRenderer.invoke("mcd:shopRetryPay", ref),

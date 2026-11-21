@@ -372,6 +372,7 @@ ipcMain.handle("mcd:shopOrders", () => shop.ordersList());
 ipcMain.handle("mcd:shopOrder", (_e, ref) => shop.orderDetail(ref));
 ipcMain.handle("mcd:shopNewCount", () => shop.newOrderCount());
 ipcMain.handle("mcd:shopScanState", () => shop.scanState());
+ipcMain.handle("mcd:shopDismissUnread", () => shop.dismissUnread());   // the unread notice, seen (0.18.277)
 ipcMain.handle("mcd:shopPlaceOrder", (_e, shopCfg, items, total, shipping, delivery, note) => shop.placeOrder(shopCfg, items, total, shipping, delivery, note));
 ipcMain.handle("mcd:shopRetryPay", (_e, ref) => shop.retryPayment(ref));
 ipcMain.handle("mcd:shopNotSent", (_e, ref) => shop.paymentNotSent(ref));   // the buyer checked their History: the uncertain payment was not sent
