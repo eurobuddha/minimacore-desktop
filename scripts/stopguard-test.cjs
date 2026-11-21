@@ -63,7 +63,7 @@ test("main: every stop or restart handler asks the guard before the node is touc
     assert.ok(g > 0 && g < touch, n + ": the guard comes first (CHANGED on purpose, 0.18.257: through stopping(), which releases the hold if the operation fails)");
   }
   assert.ok(/\{ label: "Restart node", click: \(\) => \{ stopping\(\(\) => node\.restart\(\)\)\.catch\(\(\) => \{\}\); \} \}/.test(main), "the tray asks too");
-  assert.ok(/const reply = require\("\.\/stopguard"\)\.stopsNode\(ready\) \? await stopping\(\(\) => run\(ready\)\) : await run\(ready\);/.test(main), "a Terminal command that stops the node asks before it is sent");
+  assert.ok(/const reply = require\("\.\/stopguard"\)\.stopsNode\(ready\) \? await stopping\(\(\) => run\(ready\), quits\) : await run\(ready\);/.test(main), "a Terminal command that stops the node asks before it is sent");
   assert.equal(main.split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n").match(/node\.(stop|restart)\(\)/g).length, 8, "no other stop: the six handlers, the tray, and the quit (before-quit stops the node as the app goes)");
   // run mcd:nodeRestart with the guard refusing and allowing: the patch is saved only once the guard let it go
   const src = main.slice(main.indexOf('ipcMain.handle("mcd:nodeRestart"'), main.indexOf("\n", main.indexOf('ipcMain.handle("mcd:nodeRestart"')));
@@ -138,11 +138,11 @@ test("stopGuard is single-flight: two requests at once show one question and giv
   const g = S.stopGuard({ running: () => running, gather: async () => busy, log: () => {}, now: () => t, ask: () => { asks++; return new Promise(r => { answer = r; }); } });
   const p1 = g.pass(), p2 = g.pass();
   assert.equal(await p2, "busy", "the second while the first question is open"); await waitAsk();
-  answer(true); assert.equal(await p1, true); assert.equal(asks, 1, "one question");
+  answer(true); assert.ok(Number.isInteger(await p1), "go on, with this call's stamp (0.18.266)"); assert.equal(asks, 1, "one question");
   assert.equal(await g.pass(), "busy", "let go, the node not stopped yet: no second stop");
   g.seen("stopping"); running = true; answer = null;
   const p3 = g.pass(); await waitAsk(); answer(false); assert.equal(await p3, false, "after the stop happened a new request is asked again"); assert.equal(asks, 2);
-  t += 31000; answer = null; const p4 = g.pass(); await waitAsk(); answer(true); assert.equal(await p4, true);
+  t += 31000; answer = null; const p4 = g.pass(); await waitAsk(); answer(true); assert.ok(Number.isInteger(await p4));
   t += 31000; answer = null; const p5 = g.pass(); await waitAsk(); answer(false); await p5; assert.equal(asks, 4, "the hold runs out");
   running = false; assert.equal(await g.pass(), true, "a node that is not running is never held");
   const main = rd("main/main.js");
@@ -153,10 +153,11 @@ test("stopGuard is single-flight: two requests at once show one question and giv
 test("a stop let go whose operation then fails releases the hold: the retry is asked again", async () => {
   let asks = 0;
   const g = S.stopGuard({ running: () => true, gather: async () => ({ atomix: { ready: true, swaps: ["0xAB"] }, pools: [] }), log: () => {}, ask: async () => { asks++; return true; } });
-  assert.equal(await g.pass(), true); assert.equal(await g.pass(), "busy", "held after a yes");
-  g.release(); assert.equal(await g.pass(), true, "released: asked again"); assert.equal(asks, 2);
-  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn)")) + 3);
-  const released = [], node = { state: "running" }, run = (passOk) => new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => { if (!passOk) throw new Error("kept running"); }, { release: () => released.push(1) }, node);
+  const stamp = await g.pass(); assert.ok(Number.isInteger(stamp) && stamp > 0); assert.equal(await g.pass(), "busy", "held after a yes");
+  g.release(); g.release(stamp + 1); assert.equal(await g.pass(), "busy", "CHANGED on purpose (0.18.266): no stamp, or another, releases nothing");
+  g.release(stamp); assert.ok(Number.isInteger(await g.pass()), "released by its own stamp: asked again"); assert.equal(asks, 2);
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn, keepOnThrow)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn, keepOnThrow)")) + 3);
+  const released = [], node = { state: "running" }, run = (passOk) => new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => { if (!passOk) throw new Error("kept running"); return 7; }, { release: (st) => released.push(st) }, node);
   await assert.rejects(run(true)(async () => { throw new Error("Wrong password"); }), /Wrong password/); assert.equal(released.length, 1, "the operation failed: released");
   await assert.rejects(run(false)(async () => 1), /kept running/); assert.equal(released.length, 1, "a refused or busy guard releases nothing (another request's hold stays)");
   assert.equal(await run(true)(async () => 7), 7); assert.equal(released.length, 1);
@@ -196,11 +197,24 @@ test("inFlightWork: AtomiX, pools and P2P Chance are read side by side; a late o
 
 // ---- 0.18.264 (as Pandamonium Desktop 0.19.319's held()): a status:false reply with the node still running ends the hold too ----
 test("stopping(): a refused restore (status:false) or a throw with the node still running releases the hold; with the node stopped it does not", async () => {
-  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn)")) + 3);
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn, keepOnThrow)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn, keepOnThrow)")) + 3);
   const released = [], node = { state: "running" };
-  const stopping = new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => {}, { release: () => released.push(1) }, node);
+  const stopping = new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => 7, { release: (st) => released.push(st) }, node);
   assert.deepEqual(await stopping(async () => ({ status: false, error: "Wrong password" })), { status: false, error: "Wrong password" }); assert.equal(released.length, 1, "a refused restore, the node running: released");
   await stopping(async () => ({ status: true })); assert.equal(released.length, 1, "a reply that went through: held until the node stops");
   node.state = "stopping"; await stopping(async () => ({ status: false })); await assert.rejects(stopping(async () => { throw new Error("socket closed"); }));
   assert.equal(released.length, 1, "the node is stopping: its status ends the hold, not this");
+});
+
+// ---- 0.18.266: only the stop that took the hold can release it; a cut connection on quit keeps it ----
+test("stopping() releases only its own hold, with its stamp; a refused, busy or holdless pass releases nothing; quit keeps the hold when the connection is cut", async () => {
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn, keepOnThrow)"), main.indexOf("\n}\n", main.indexOf("async function stopping(fn, keepOnThrow)")) + 3);
+  const released = [], node = { state: "running" }, make = (passes) => new Function("mayStop", "stopGuard", "node", src + "\nreturn stopping;")(async () => passes, { release: (st) => released.push(st) }, node);
+  await assert.rejects(make(5)(async () => { throw new Error("Wrong password"); })); assert.deepEqual(released, [5], "its own stamp");
+  await make(true)(async () => ({ status: false })); assert.deepEqual(released, [5, 0], "no hold taken (the node was not running): stamp 0, which releases nothing");
+  await assert.rejects(make(6)(async () => { throw new Error("socket hang up"); }, true)); assert.deepEqual(released, [5, 0], "quit: a cut connection keeps the hold");
+  assert.ok(/const quits = require\("\.\/cmdverb"\)\.parts\(ready\)\.some\(p => require\("\.\/cmdverb"\)\.is\(p, "quit"\)\);/.test(main) && main.includes("await stopping(() => run(ready), quits)"), "the Terminal's quit keeps it");
+  // the real guard: another request's hold is never ended by a stale stamp
+  const g = S.stopGuard({ running: () => true, gather: async () => ({ atomix: { ready: true, swaps: ["0x1"] }, pools: [] }), log: () => {}, ask: async () => true });
+  const a = await g.pass(); g.release(a); const b = await g.pass(); g.release(a); assert.equal(await g.pass(), "busy", "a's stamp does not end b's hold"); g.release(b); assert.ok(Number.isInteger(await g.pass()));
 });

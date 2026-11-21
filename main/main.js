@@ -181,16 +181,19 @@ async function mayStop() {
   const r = await stopGuard.pass();
   if (r === "busy") throw new Error("The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.");   // one question, one stop (0.18.253)
   if (!r) throw new Error("The node keeps running: nothing was stopped.");
+  return r;   // the guard's stamp when this call took its hold (0.18.266), true when there was none to take
 }
 node.on("status", (s) => stopGuard.seen(s && s.state));
 /** The guarded stop, then what it was for (0.18.257): when that fails with the node still running (a restore the node refused with
  *  status:false for a wrong password, an import that fails fast, a config save that throws), the hold the yes started is released, so
  *  an immediate retry is asked again instead of refused (0.18.264, as Pandamonium Desktop 0.19.319's held(): a status:false reply as
  *  well as a throw, and only while the node is still running; a node that stopped ends the hold through its status). */
-async function stopping(fn) {
-  await mayStop();
-  try { const r = await fn(); if (r && r.status === false && node.state === "running") stopGuard.release(); return r; }
-  catch (e) { if (node.state === "running") stopGuard.release(); throw e; }
+// Only the hold this call took is released (0.18.266: release() ended whichever hold there was). keepOnThrow: a cut connection is not
+// a failure for quit (the node closes the RPC while it is still "running"), so the hold stays until the node's status ends it.
+async function stopping(fn, keepOnThrow) {
+  const r0 = await mayStop(), stamp = typeof r0 === "number" ? r0 : 0;
+  try { const r = await fn(); if (r && r.status === false && node.state === "running") stopGuard.release(stamp); return r; }
+  catch (e) { if (node.state === "running" && !keepOnThrow) stopGuard.release(stamp); throw e; }
 }
 /** A config patch from the window, with what Settings' save does after it (Casino loop, login item). */
 function saveConfigPatch(patch) {
@@ -220,7 +223,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   const ready = await require("./cmdgate").checkCommand(command, { take: cmdGate.take, running: () => { requireRunning(); return true; }, pin: (c) => pinMinimaSend(run, c) });
   // quit, a megammrsync / archive / mysql / reset resync or import, megammr import, restore, vault resetkeys: the node stops at the end (0.18.223)
-  const reply = require("./stopguard").stopsNode(ready) ? await stopping(() => run(ready)) : await run(ready);
+  const quits = require("./cmdverb").parts(ready).some(p => require("./cmdverb").is(p, "quit"));
+  const reply = require("./stopguard").stopsNode(ready) ? await stopping(() => run(ready), quits) : await run(ready);
   return require("./cmdgate").scrubReply(reply, command);   // no secret of the typed command comes back to the window (0.18.222)
 });
 

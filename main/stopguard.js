@@ -74,15 +74,19 @@ function inFlight(work, nowMs) {
 const HOLD_MS = 30000;
 function stopGuard(d) {
   const now = d.now || Date.now;
-  let asking = false, wentAt = 0;
+  let asking = false, wentAt = 0, holder = 0, stamps = 0;
   return {
     seen(state) { if (state !== "running") wentAt = 0; },
-    release() { wentAt = 0; },   // what the yes was for failed without stopping the node (0.18.257): a retry is asked again
+    // what the yes was for failed without stopping the node (0.18.257): a retry is asked again. Only the stop that took the hold
+    // can end it (0.18.266): release(stamp) with the stamp pass() gave it; any other stamp, or none, changes nothing
+    release(stamp) { if (stamp && stamp === holder) wentAt = 0; },
+    /** → a stamp (a number above 0: go on, and this call holds the guard), true (go on, no hold: the node is not running), false
+     *  (the user kept it running) or "busy". */
     async pass() {
       if (!d.running()) return true;
       if (asking || (wentAt && now() - wentAt < HOLD_MS)) return "busy";
       asking = true;
-      try { const go = await this.ask(); if (go) wentAt = now(); return go; } finally { asking = false; }
+      try { const go = await this.ask(); if (!go) return false; wentAt = now(); holder = ++stamps; return holder; } finally { asking = false; }
     },
     async ask() {
       let work = null;
