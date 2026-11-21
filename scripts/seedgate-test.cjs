@@ -204,6 +204,7 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
   await assert.rejects(cg.open("vault action:restorekeys phrase:\"a b\"", "SHOW SEED"), /Type CHANGE KEYS exactly/);
   await cg.open("vault action:restorekeys phrase:\"a b\"", "CHANGE KEYS");
   assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:•••");
+  assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), 'vault seed:•••"action":"wipekeys"', "a parameter glued after an unquoted secret is shown (0.19.252)");
   assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), "vault action:passwordunlock password:••• seed:••• confirm:•••".replace("seed:", "seed : "));
 });
 

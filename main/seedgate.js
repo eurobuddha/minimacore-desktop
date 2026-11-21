@@ -53,7 +53,8 @@ const { N_ } = require("./lang").I18N;
  *  white space collapsed, and the VALUES of phrase, password, confirm and seed hidden, quoted or not. */
 function masked(c) {
   return String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
-    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)("[^"]*"|\S+)/gi, "$1•••")
+    // an unquoted value ends at a space OR a quote (0.19.252, as released 0.18.214): `seed:0xAB"action":"wipekeys"` hid the action glued after it
+    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)("[^"]*"|[^\s"]+)/gi, "$1•••")
     .replace(/\s+/g, " ").trim();
 }
 /** The typed phrase, then the system's own check (main/syscheck.js, 0.19.188: Touch ID; refused while a Touch ID that
