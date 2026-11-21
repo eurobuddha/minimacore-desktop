@@ -144,7 +144,28 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
         return api.shopPlaceOrder(s, t.items, total, ship ? ship.label : "", delivery, note).catch(errOf);
       });
     },
-    retryPay: function (api, ref) { return api.shopRetryPay(ref).then(function () { return { ok: true }; }, errOf); },
+    /** Retry after a payment the node refused (0.19.241): the same "Pay …?" review as checkout, from the order as stored (the
+     *  amount, the token's name and whole id, the vendor's whole address), and only a yes reaches the main process. The main
+     *  process pays only an order marked "unpaid" with nothing in flight. → { ok } | { cancelled } | { err[, refused] }. */
+    retryPay: function (api, ui, o) {
+      var tok = shop.token(o || {}); if (tok.err) return Promise.resolve({ err: tok.err, refused: true });
+      if (!o.vendorAddress) return Promise.resolve({ err: I18N.t("Missing vendor address for retry."), refused: true });
+      return Promise.resolve(ui.confirm(I18N.t("Pay {total} {cur}?", { total: String(o.amount), cur: tok.name }), I18N.t("This pays order {ref} to {shopName} again: the first payment was refused by the node. Payment is final.\n\nAmount sent\n{total}\n\nToken: {cur}\n{tokenid}\n\nVendor's payment address\n{vendorAddress}",
+        { ref: String(o.ref), shopName: String(o.shopName || ""), total: String(o.amount), cur: tok.name, tokenid: tok.tokenid, vendorAddress: String(o.vendorAddress) }), I18N.t("Pay"))).then(function (yes) {
+        if (!yes) return { cancelled: true };
+        return api.shopRetryPay(o.ref).then(function () { return { ok: true }; }, errOf);
+      });
+    },
+    /** "I checked my History: it was not sent" (0.19.241, as released 0.18.217): for a payment that may have gone through, a
+     *  question naming the amount, the token id and the vendor's address whole; a yes offers Retry again. → { ok } | { cancelled } | { err }. */
+    notSent: function (api, ui, o) {
+      var tok = shop.token(o || {});
+      return Promise.resolve(ui.confirm(I18N.t("Not sent?"), I18N.t("Confirm only if your History shows NO payment for this order:\n\nAmount\n{amount} {cur}\n\nToken id\n{tokenid}\n\nVendor's payment address\n{vendorAddress}\n\nThis offers Retry again. If the payment did go through, paying again pays twice.",
+        { amount: String(o.amount), cur: shop.cur(o.currency), tokenid: String(tok.tokenid || o.tokenid || ""), vendorAddress: String(o.vendorAddress || "") }), I18N.t("It was not sent"))).then(function (yes) {
+        if (!yes) return { cancelled: true };
+        return api.shopNotSent(o.ref).then(function () { return { ok: true }; }, errOf);
+      });
+    },
     /** The one status a vendor may set next (the screens before allowed exactly this): none before payment (or, for an order that
      *  does not match the vendor's listing, before the vendor checked it by hand: 0.19.166), none for an enquiry. */
     nextStatus: function (o) {

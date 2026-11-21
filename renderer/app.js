@@ -3742,7 +3742,8 @@ async function renderShopSellOrder(ref) {
   shopFrame((o.items && o.items[0] && o.items[0].product) || o.ref, () => shopGo("inbox"), [],
     `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? ("  " + tr("paid {amount} {cur}", { amount: esc(o.paidAmount || o.amount), cur: esc(cur) })) : "  awaiting payment"}</span></div>
      <div class="mm-sec">${th("Items")}</div><div class="mm-card">${shopItems(o)}</div>
-     ${shopKv(t("Buyer's total"), o.amount + " " + cur)}${shopCheckBlock(o, cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
+     ${shopKv(t("Buyer's total"), o.amount + " " + cur)}${shopCheckBlock(o, cur)}
+     ${d.sharedRef ? `<div class="mm-warn" style="overflow-wrap:anywhere">${tr("Payments with the reference {wireRef} are shown on order {first}, which another buyer sent first. Received so far with that reference: {received} {cur}.", { wireRef: esc(o.wireRef), first: esc(d.sharedRef.ref), received: esc(d.sharedRef.received), cur: esc(cur) })}</div>` : ""}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
      <div class="mm-sec">${th("Delivery")}</div>${shopKv(t("Method"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("Address"), o.delivery, true) : ""}
      ${o.note ? `<div class="mm-sec">${th("Buyer note")}</div><div class="mm-card">${esc(o.note)}</div>` : ""}
      ${shopKv(t("Buyer key"), o.counterparty || "", true)}
@@ -3774,8 +3775,9 @@ function shopWireOrder(ref, again) {
   el("shopSub").querySelectorAll("[data-advance]").forEach(b => { b.onclick = async () => { b.disabled = true; const r = await SHOP.advance(api, ref, b.dataset.advance); if (r.err) shopSay(r.err); else toast(t("Marked {advance}", { advance: b.dataset.advance }), "ok"); again(); }; });
   const send = async () => { const r = await SHOP.reply(api, ref, el("shopMsg").value); if (r && r.err) { toast(t("Reply failed: {err}", { err: r.err }), "warn"); return; } if (r) again(); };
   el("shopSend").onclick = send; el("shopMsg").onkeydown = (e) => { if (e.key === "Enter") send(); };
-  if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; const r = await SHOP.retryPay(api, ref); if (r.err) toast(t("Payment failed: {err}", { err: r.err }), "warn"); else toast(t("Payment sent."), "ok"); again(); };
 }
+/** A miniMall question with the given yes label (the money questions: Retry, Not sent). */
+const shopAsk = (title, text, yesLabel) => appDlg({ title, body: `<p class="mm-payq">${esc(text)}</p>`, buttons: [{ label: t("Back"), v: false }, { label: yesLabel, v: true }] }).done;
 
 // ---------------- miniMall (merchshop): shops, a storefront, the cart, checkout, my orders ----------------
 async function renderShopApp() {
@@ -3855,11 +3857,24 @@ async function renderShopBuyOrder(ref) {
     `<div class="mm-line">${shopPill(o.status)}</div>
      <div class="mm-sec">${th("Order")}</div><div class="mm-card">${shopItems(o)}</div>
      ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Delivery"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("To"), o.delivery) : ""}
-     ${d.ambiguous ? `<div class="mm-warn">${th("⚠ The payment timed out: it may already have gone through. Check your Wallet and History before sending again, so that you do not pay twice.")}</div>` : ""}
+     ${d.ambiguous && !o.paid ? `<div class="mm-warn">${th("⚠ This payment may already have gone through (the node did not answer, or the app closed while it was being sent). Check your Wallet and History before you pay again, so that you do not pay twice.")}
+       <button class="mm-btn" id="shopNotSent" style="margin-top:8px">${th("I checked my History: it was not sent")}</button></div>` : ""}
      ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">${th("Retry payment")}</button>` : ""}
      <div class="mm-sec">${th("Messages with the vendor")}</div><div class="mm-thread">${shopThread(d.chat, t("Vendor")) || `<div class="mm-dim">${th("No messages yet. Say hello below.")}</div>`}</div>`,
     `<div class="mm-foot mm-send"><input class="mm-in-f" id="shopMsg" placeholder="${th("Message the vendor…")}" aria-label="${th("Message the vendor")}" autocomplete="off" /><button class="mm-btn" id="shopSend">${th("Send")}</button></div>`);
   shopWireOrder(ref, () => renderShopBuyOrder(ref));
+  const ui = { confirm: shopAsk };
+  if (el("shopRetry")) el("shopRetry").onclick = async () => {   // the full "Pay …?" review first (0.19.241)
+    el("shopRetry").disabled = true; const r = await SHOP.retryPay(api, ui, o);
+    if (r.cancelled) { el("shopRetry").disabled = false; return; }
+    if (r.err) toast(r.refused ? r.err : t("Payment failed: {err}", { err: r.err }), "warn"); else toast(t("Payment sent."), "ok");
+    renderShopBuyOrder(ref);
+  };
+  if (el("shopNotSent")) el("shopNotSent").onclick = async () => {
+    const r = await SHOP.notSent(api, ui, o); if (r.cancelled) return;
+    if (r.err) toast(r.err, "warn"); else toast(t("Marked as not sent: Retry is available"), "ok");
+    renderShopBuyOrder(ref);
+  };
 }
 
 // ---------------- miniMall Studio (merchstudio): products, then "Your shop", then the .shop file ----------------

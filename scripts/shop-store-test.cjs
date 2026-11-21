@@ -349,3 +349,36 @@ test("vendor: the stored address is kept (getaddress only the first time), a sho
   tip = 6500; asked.length = 0; await shop.scanOnce();
   assert.ok(asked.some(c => / depth:1516$/.test(c)), "the gap since the last scan (1500 blocks) and a margin is read: " + asked.filter(c => c.startsWith("coins")).join(" | "));
 });
+
+// ---- 0.19.241 (as released 0.18.208 / 0.18.218): the same reference from two buyers ----
+test("two buyers' orders with the same reference are both kept, both Unchecked, and a payment with that reference pays neither", async () => {
+  const B2 = "0x" + "33".repeat(32), sc = require.cache[require.resolve("../main/shopcrypto.js")].exports, open0 = sc.open;
+  store.saveShop({ shopId: "dup", shopName: "D", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  const ord = (from) => JSON.stringify({ type: "ORDER", ref: "ORD-DUP", from, date: 1, shopId: "dup", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" });
+  try {
+    await scan([ord(BUYER)], []);
+    assert.equal(store.order("ORD-DUP").status, "PENDING");
+    sc.open = async (_id, blob) => { const t = Buffer.from(String(blob).slice(2), "hex"); return { valid: true, fromPublicId: JSON.parse(t).from, plaintext: t }; };   // the sender is whoever the message says (sealed, in life)
+    await scan([ord(BUYER), ord(B2)], []);
+    const first = store.order("ORD-DUP"), second = store.order("ORD-DUP~" + B2);
+    assert.ok(second, "the second buyer's order is kept under the reference and the buyer's whole id"); assert.equal(second.counterparty, B2); assert.equal(second.wireRef, "ORD-DUP");
+    for (const o of [first, second]) { assert.equal(o.status, "UNCHECKED"); assert.match(o.problems[0], /another buyer sent an order with the same reference ORD-DUP: /); assert.equal(o.due, ""); }
+    await scan([ord(B2)], []); assert.equal(store.orders().filter(o => o.shopId === "dup").length, 2, "the second copy again is not a third order");
+    await scan([], [{ coinid: "0xDA01", ref: "ORD-DUP", amount: "10", tokenid: "0x00", created: 9 }]);
+    assert.equal(store.order("ORD-DUP").paid, false, "a payment with the shared reference pays neither"); assert.equal(store.order("ORD-DUP~" + B2).paid, false);
+    const d = shop.orderDetail("ORD-DUP~" + B2); assert.deepEqual(d.sharedRef, { ref: "ORD-DUP", received: "10" }, "the copy says where its reference's payments are counted");
+    assert.equal(store.handCheck("ORD-DUP~" + B2), true, "either can be checked by hand"); assert.equal(store.handCheck("ORD-DUP"), true);
+    // what the vendor sends back to the second buyer carries the wire reference; the buyer's reply lands on their own copy
+    const sent = []; shop._setRunner(async (c) => { sent.push(c); return { status: true, response: { txpowid: "0x1" } }; });
+    const seal0 = sc.seal; let sealed = null; sc.seal = async (_me, _to, wire) => { sealed = JSON.parse(Buffer.from(wire).toString("utf8")); return "ab"; };
+    try { await shop.reply("ORD-DUP~" + B2, "hello"); } finally { sc.seal = seal0; }
+    assert.equal(sealed.ref, "ORD-DUP"); assert.equal(sealed.to, B2);
+    await scan([JSON.stringify({ type: "BUYER_REPLY", ref: "ORD-DUP", from: B2, randomid: "rr1", message: "hi back", date: 2 })], []);
+    assert.ok(store.chat("ORD-DUP~" + B2).some(m => m.message === "hi back")); assert.ok(!store.chat("ORD-DUP").some(m => m.message === "hi back"));
+  } finally { sc.open = open0; }
+  // an order already paid when the copy comes is left as it was
+  store.saveShop({ shopId: "dup2", shopName: "D2", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  await scan([{ type: "ORDER", ref: "ORD-DUP2", shopId: "dup2", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" }], [{ coinid: "0xDB01", ref: "ORD-DUP2", amount: "10", tokenid: "0x00", created: 9 }]);
+  assert.equal(store.order("ORD-DUP2").paid, true);
+  assert.equal(store.flagDuplicate("ORD-DUP2", "x"), false); assert.equal(store.order("ORD-DUP2").status, "PAID");
+});

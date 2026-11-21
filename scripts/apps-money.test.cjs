@@ -299,10 +299,23 @@ test("miniMall orders: a vendor may set exactly the status the old screen offere
   for (const status of ["INQUIRY", "PENDING", "PAID", "CONFIRMED", "SHIPPED", "DELIVERED", "UNDERPAID"]) for (const paid of [true, false])
     assert.equal(Act.shop.nextStatus({ status, paid }), OLD_SHOP.advanceRow({ status, paid }), status + (paid ? " paid" : " unpaid"));
   await both({ shopAdvance: { ok: true } }, (api) => api.shopAdvance("ORD-1", "CONFIRMED"), (api) => Act.shop.advance(api, "ORD-1", "CONFIRMED"));
-  await both({ shopRetryPay: {} }, (api) => api.shopRetryPay("ORD-1"), (api) => Act.shop.retryPay(api, "ORD-1"));
+  // Retry (CHANGED on purpose, 0.19.241): the full "Pay …?" review first, from the order as stored; only a yes reaches the main process
+  const ORD = { ref: "ORD-1", shopName: "Zebra", amount: "27.500000", currency: "USDT", tokenid: MXUSD, vendorAddress: "MxG0VENDOR" + "7".repeat(54) };
+  const asked = [], ask = (yes) => ({ confirm: async (title, text, label) => { asked.push([title, text, label]); return yes; } });
+  const no = recorder({ shopRetryPay: {} }); assert.deepEqual(await Act.shop.retryPay(no.api, ask(false), ORD), { cancelled: true }); assert.deepEqual(no.log, [], "no yes, no call");
+  assert.deepEqual(asked[0], ["Pay 27.500000 MxUSD?", "This pays order ORD-1 to Zebra again: the first payment was refused by the node. Payment is final.\n\nAmount sent\n27.500000\n\nToken: MxUSD\n" + MXUSD + "\n\nVendor's payment address\n" + ORD.vendorAddress, "Pay"], "amount, token name and whole id, whole vendor address");
+  const yes = recorder({ shopRetryPay: {} }); assert.deepEqual(await Act.shop.retryPay(yes.api, ask(true), ORD), { ok: true }); assert.deepEqual(yes.log, [["shopRetryPay", ["ORD-1"]]]);
+  for (const bad of [Object.assign({}, ORD, { vendorAddress: "" }), Object.assign({}, ORD, { currency: "Minima" })]) {
+    const r0 = recorder({}); const out = await Act.shop.retryPay(r0.api, { confirm: async () => { throw new Error("never asked"); } }, bad); assert.equal(out.refused, true); assert.deepEqual(r0.log, []);
+  }
+  // "I checked my History: it was not sent": a question with the amount, the token id and the address whole, then mcd:shopNotSent
+  asked.length = 0; const ns = recorder({ shopNotSent: { ok: true } });
+  assert.deepEqual(await Act.shop.notSent(ns.api, ask(false), ORD), { cancelled: true }); assert.deepEqual(ns.log, []);
+  assert.ok(asked[0][1].includes("27.500000 MxUSD") && asked[0][1].includes("\n" + MXUSD + "\n") && asked[0][1].includes("\n" + ORD.vendorAddress + "\n") && asked[0][2] === "It was not sent");
+  assert.deepEqual(await Act.shop.notSent(ns.api, ask(true), ORD), { ok: true }); assert.deepEqual(ns.log, [["shopNotSent", ["ORD-1"]]]);
   await both({ shopReply: { ok: true } }, async (api) => { const t = " hi ".trim(); if (t) await api.shopReply("ORD-1", t); }, (api) => Act.shop.reply(api, "ORD-1", " hi "));
   const r = recorder({}); assert.equal(await Act.shop.reply(r.api, "ORD-1", "   "), null); assert.deepEqual(r.log, []);
-  assert.match((await Act.shop.retryPay(recorder({ shopRetryPay: () => Promise.reject(new Error("That payment may already have been sent")) }).api, "ORD-1")).err, /may already have been sent/);
+  assert.match((await Act.shop.retryPay(recorder({ shopRetryPay: () => Promise.reject(new Error("That payment may already have been sent")) }).api, ask(true), ORD)).err, /may already have been sent/);
 });
 test("miniMall Studio: the .shop saved and exported is the old screen's, byte for byte", async () => {
   const draft = (patch) => Object.assign({ shopName: "Zebra Gallery!", currency: "USDT", vendorPublicId: "0x5A", vendorAddress: "MxV", shipping: [{ id: "domestic", label: "x", fee: "2.5" }, { id: "digital", label: "Digital", fee: "9" }],
@@ -354,7 +367,9 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop-store.js again in 0.19.199 (a peer-written id reads own entries only)
   // both again in 0.19.200 (dust is not counted, kept or saved and is judged again; payment coins read oldest first)
   // main/shop.js again in 0.19.232 (the stored vendor address kept; every shop's payout address read; a saved scan cursor)
-  for (const [f, want, ver] of [["main/shop.js", "b1043b4cc0fb6cc76c8d48ec76d874c02ca208241bff63d88ca2e54a7d154a43", "0.19.232"], ["main/shop-store.js", "c8578023daab3b733788069f350846ad08bdb229ef79da98db03aebd9875254d", "0.19.200"],
+  // both again in 0.19.241 (as released 0.18.208 / 0.18.217 / 0.18.218: the same ref from a second buyer kept under ref~<buyer id>, both
+  // checked by hand; Retry only behind "unpaid" with an on-disk in-flight mark; paymentNotSent; sharedRef)
+  for (const [f, want, ver] of [["main/shop.js", "73ef815086af49796b3e761188965a5e287d7103b81937a568bcff7b475fcaa2", "0.19.241"], ["main/shop-store.js", "e350676d63ed24c6144aefe9e5ec23fec76b4f66a8f25432b335cb1ce361f598", "0.19.241"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

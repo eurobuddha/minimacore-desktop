@@ -279,6 +279,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SHOP_NOT_DUE", I18N.N_("This order is not paid by what your shop says is due. Check it by hand first.")],
     ["SHOP_HAND_ONLY", I18N.N_("Only an order that does not match your shop is checked by hand.")],
     ["SHOP_NOT_NEXT", I18N.N_("That is not this order's next step.")],
+    ["SHOP_NO_REFUSED", I18N.N_("This order has no refused payment to retry. Check your Balance/History.")],
+    ["SHOP_NOT_UNSURE", I18N.N_("This order has no payment that may have gone through.")],
+    ["SHOP_DUP_REF", I18N.N_("another buyer sent an order with the same reference {ref}: a payment with it cannot be told apart, so check both orders by hand")],
 
     // ---- miniMall: how an incoming order departs from the vendor's own listing (main/shop-listing.js, 0.19.166) ----
     ["SL_DELIVERY", I18N.N_("the delivery method \"{ship}\" is not in your listing")],   // before SL_UNLISTED, whose {what} would take it whole

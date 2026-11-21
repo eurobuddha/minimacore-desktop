@@ -184,6 +184,15 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+
   flush(); return outcome;
 }
+/** A second buyer sent an order with this order's reference (0.19.241, as released 0.18.208): it can no longer be paid
+ *  automatically. An order already paid (or moved on past PAID) is left as it is: its payment was counted before the copy came. */
+function flagDuplicate(ref, problem) {
+  ensureLoaded(); const o = order(ref); if (!o || o.role !== "sell" || o.paid || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.PAID) return false;
+  ensureChecked(o); if (o.problems.includes(problem)) return false;
+  o.problems = [problem].concat(o.problems); o.due = "";
+  if (o.status !== "INQUIRY" && o.status !== "WRONG_TOKEN" && (STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED) o.status = "UNCHECKED";
+  flush(); return true;
+}
 /** The vendor's explicit "I checked this order by hand" for an order that does not match the listing: only then can it
  *  be confirmed, shipped or delivered without being PAID. Nothing else changes (it is still not paid). */
 function handCheck(ref) {
@@ -208,7 +217,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, mayAdvance, ensureChecked,
+  upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, setLog, log,
   _money: { decCmp, decGte, decAdd, payableTotal, isDust }, MAX_PAY_COINS
 };
