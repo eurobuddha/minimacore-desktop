@@ -359,7 +359,7 @@ function makeHost(opts = {}) {
     abort.abort(); abort = new AbortController();   // queued signers of the dropped engine are never sent
     flush();
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
-    frameTx = new Map(); budget = null; ownCache = null;
+    frameTx = new Map(); budget = null; ownCache = null; intents = [];
     busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
     const R = registry(); if (R) R.releaseOwner("dexicon");   // its unfinished builds died with it; posted coins and live orders' coins stay held
   }
@@ -584,20 +584,78 @@ function makeHost(opts = {}) {
     for (const rec of frameTx.values()) rec.counted = "0";
     return { status: true };
   }
-  function pageSql(query) {
+  // ---- what the page may make the engine sign: only what the user confirmed in the app's OWN window (0.19.231) ----
+  // The page is hidden and driven by the native screens. A packet that makes the engine sign (LIMIT, EDIT, SPLIT, MAKER_*,
+  // CONSOLIDATE, LADDER, a CROSS_REVIEW release) and a write of a key that steers it (mm_config, mm_cross_ack, relays,
+  // mxusd_tokenid) is let through only (a) against a fresh intent the native chrome recorded when the user confirmed it
+  // (op "intent": the frame's bridge cannot send it), or (b) after a main-process question naming what it is. Cancels of
+  // the user's own orders, MAKER_WITHDRAW and REFRESH pass: they move nothing to anyone else.
+  let intents = [];
+  const INTENT_MS = 120000, INTENT_TYPES = ["LIMIT", "EDIT", "KV"];
+  const STEER_KEYS = ["mm_config", "mm_cross_ack", "relays", "mxusd_tokenid"];
+  const decEq = (a, b) => { try { return /^[0-9]{1,30}(\.[0-9]{1,30})?$/.test(String(a)) && /^[0-9]{1,30}(\.[0-9]{1,30})?$/.test(String(b)) && ctx.AX.fill.d(String(a)).eq(ctx.AX.fill.d(String(b))); } catch (e) { return false; } };
+  function pageIntent(a) {
+    const num = /^[0-9]{1,30}(\.[0-9]{1,30})?$/;
+    if (!a || !INTENT_TYPES.includes(a.type)) throw new Error("bad intent");
+    const i = { type: a.type, until: Date.now() + INTENT_MS };
+    if (a.type === "LIMIT") { if (typeof a.buy !== "boolean" || !num.test(String(a.price)) || !num.test(String(a.amount))) throw new Error("bad intent"); Object.assign(i, { buy: a.buy, price: String(a.price), amount: String(a.amount) }); }
+    if (a.type === "EDIT") { if (!/^0x[0-9A-Fa-f]{64}$/.test(String(a.coinid)) || !num.test(String(a.price))) throw new Error("bad intent"); Object.assign(i, { coinid: String(a.coinid).toLowerCase(), price: String(a.price) }); }
+    if (a.type === "KV") { if (!STEER_KEYS.includes(a.key)) throw new Error("bad intent"); i.key = a.key; }
+    intents = intents.filter(x => x.until > Date.now()).concat(i).slice(-8);
+    return { status: true };
+  }
+  function takeIntent(pred) {
+    const now = Date.now(); intents = intents.filter(x => x.until > now);
+    const k = intents.findIndex(pred); if (k < 0) return false;
+    intents.splice(k, 1); return true;
+  }
+  async function askNative(title, detail) {
+    const ask = opts.confirm || confirmFn;
+    if (typeof ask !== "function") return false;
+    try { return (await ask(title, detail)) === true; } catch (e) { return false; }
+  }
+  const NOT_CONFIRMED = "Refused: the Exchange page asked for something that was not confirmed in the app's own window. Nothing was signed.";
+  /** "" = this page write may go on; else why it is refused. A write that steers the engine needs an intent or a question. */
+  async function steerWrite(q) {
+    const m = /^(MERGE INTO ax_kv \(k, v\) KEY\(k\) VALUES \(|DELETE FROM ax_kv WHERE k=)'((?:[^']|'')*)'(?:, '((?:[^']|'')*)'\))?/i.exec(q);
+    if (!m) return "";
+    const key = m[2].replace(/''/g, "'"), value = m[3] == null ? null : m[3].replace(/''/g, "'");
+    if (!STEER_KEYS.includes(key)) return "";
+    if (key === "mm_config" && value != null) { let c = null; try { c = JSON.parse(value); } catch (e) { c = null; } if (c && c.enabled !== true) return ""; }   // a stopped maker signs nothing
+    if (takeIntent(x => x.type === "KV" && x.key === key)) return "";
+    const L = require("./lang");
+    const ok = await askNative(L.t("Allow this change to Dexicon?"), value == null ? L.t("The Exchange page wants to clear {key}.\n\nAllow it only if you just made this change yourself.", { key })
+      : L.t("The Exchange page wants to set {key} to:\n\n{value}\n\nAllow it only if you just made this change yourself.", { key, value }));
+    if (ok && key === "mm_config") intents = intents.concat({ type: "LADDER", until: Date.now() + INTENT_MS });   // its wake-up goes with it
+    return ok ? "" : NOT_CONFIRMED;
+  }
+  async function pageSql(query) {
     let q; try { q = dexSql(query); } catch (e) { log("refused SQL from a screen (" + e.message + "): " + String(query).slice(0, 80)); throw e; }
-    if (!sqlShim) return Promise.reject(new Error("Dexicon is still starting"));
+    if (!sqlShim) throw new Error("Dexicon is still starting");
+    const steer = await steerWrite(q); if (steer) { log("REFUSED a page write of a key that steers the engine: " + String(query).slice(0, 120)); throw new Error(steer); }
+    if (!sqlShim) throw new Error("Dexicon is still starting");
     const r = sqlShim.sql(q);
     if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(q) && WRITES_NOW.test(q)) { try { sqlShim.flush(); } catch (e) {} }
     if (HOLD_KEYS.test(q) && /^\s*(MERGE|DELETE)/i.test(q)) syncHolds();   // the page writes its takes (pending_takes, void_takes) through here
-    return Promise.resolve(r);
+    return r;
   }
   /** a page MDS.comms.solo → the service's MDSCOMMS event. Only the page's own two origins. */
-  function pageComms(message) {
+  async function pageComms(message) {
     if (typeof message !== "string" || message.length > 100000) throw new Error("bad message");
     let p = null; try { p = JSON.parse(message); } catch (e) { p = null; }
     if (!p || (p.origin !== "ui" && p.origin !== "dexicon") || typeof p.type !== "string") throw new Error("bad message");
     DX();   // not booted: say so instead of dropping the packet
+    const d = p.data && typeof p.data === "object" ? p.data : {};
+    const free = (p.origin === "ui" && ["CANCEL", "CANCEL_ALL", "MAKER_WITHDRAW", "REFRESH"].includes(p.type)) || (p.origin === "dexicon" && p.type === "CROSS_REVIEW" && !d.release);
+    if (!free) {
+      let ok = false;
+      if (p.origin === "ui" && p.type === "LIMIT") ok = takeIntent(x => x.type === "LIMIT" && x.buy === !!d.buy && decEq(x.price, d.price) && decEq(x.amount, d.minima));
+      else if (p.origin === "ui" && p.type === "EDIT") ok = takeIntent(x => x.type === "EDIT" && x.coinid === String(d.coinid || "").toLowerCase() && decEq(x.price, d.price));
+      else if (p.origin === "dexicon" && p.type === "LADDER") ok = takeIntent(x => x.type === "LADDER");
+      if (!ok && ["SPLIT", "MAKER_SAVE", "MAKER_PUBLISH", "MAKER_APPLY", "CONSOLIDATE", "CROSS_REVIEW", "LADDER"].includes(p.type))
+        ok = await askNative(require("./lang").t("Allow this Dexicon action?"), require("./lang").t("The Exchange page asks your node to act: {type}\n\n{data}\n\nYour node may sign for it. Allow it only if you just asked for this yourself.", { type: p.type, data: JSON.stringify(d) }));
+      if (!ok) { log("REFUSED a page packet with no confirmation in the app's own window: " + p.origin + " " + p.type); throw new Error(NOT_CONFIRMED); }
+    }
     fire("MDSCOMMS", { data: { public: false, message } });
     return { status: true };
   }
@@ -626,10 +684,12 @@ function makeHost(opts = {}) {
     if (op === "comms") return pageComms(a.message);
     if (op === "net") return pageNet(a);
     if (op === "reviewed") return pageReviewed(a);
+    if (op === "intent") { if (a.epoch != null) throw new Error("bad intent"); return pageIntent(a); }   // the native chrome only (no epoch: the frame's calls carry one, and its bridge never forwards this op)
     throw new Error("unknown Dexicon op");
   }
 
-  return { emitter, init, start, stop, hold, gate, release, setHeldReason: (fn) => { heldReason = fn; }, flush, invalidate, status, activeWork, book, mine, command, storePath, coinHolds,
+  let confirmFn = null;   // main.js: a main-process question (dialog.showMessageBox) for a page action with no recorded intent
+  return { setConfirm: (fn) => { confirmFn = fn; }, emitter, init, start, stop, hold, gate, release, setHeldReason: (fn) => { heldReason = fn; }, flush, invalidate, status, activeWork, book, mine, command, storePath, coinHolds,
     identitySeed, checkEpoch,
     _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),

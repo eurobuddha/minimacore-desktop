@@ -386,6 +386,8 @@ const DexUI = (() => {
       const ok = await dialog(args.reviewed ? I18N.t("The book moved. Review again") : I18N.t("Review this on-chain trade"), I18N.t("{asked}\n\nYour node signs this transaction and posts it. It is final only when a block confirms it (about 3 minutes); until then Activity shows it as waiting.", { asked: r.asked }), I18N.t("Sign and send"));
       if (!ok) return say(I18N.t("Nothing was signed or sent."), "note");
       args.reviewed = r.asked;
+      // 0.19.231: what was just confirmed here is the one LIMIT the main process lets the page hand to the engine
+      try { await api.dxCommand({ op: "intent", type: "LIMIT", buy: X.buy, price, amount }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
       r = await drive("place", args);
     }
     if (r.error) { X.sent = null; return say(r.error); }
@@ -431,6 +433,7 @@ const DexUI = (() => {
       if (next == null) return;
       if (C.entryProblem(next)) return say(C.entryProblem(next), "note");
       if (!num(next)) return say(I18N.t("Enter a valid new price. Nothing was changed."), "note");
+      if (!fast) { try { await api.dxCommand({ op: "intent", type: "EDIT", coinid: id, price: next }); } catch (e) { return say(C.refusal(e && e.message)); } }   // 0.19.231: the confirmed edit
       const r = await drive(fast ? "editFast" : "editChain", fast ? { orderId: id, price: next } : { coinid: id, price: next });
       if (r.error) return say(r.error);
     }
@@ -534,6 +537,8 @@ const DexUI = (() => {
       const url = ds.relay === "add" ? $("dxRelayIn").value.trim().replace(/\/+$/, "") : ds.url;
       const bad = ds.relay === "add" ? C.relayProblem(url) : "";
       if (bad) return say(bad, "note");
+      // 0.19.231: the relay list changes only from here, the app's own Settings screen
+      if (ds.relay === "add" || ds.relay === "found" || ds.relay === "remove") { try { await api.dxCommand({ op: "intent", type: "KV", key: "relays" }); } catch (e) { return say(C.refusal(e && e.message)); } }
       const r = await drive(ds.relay === "add" || ds.relay === "found" ? "addRelay" : ds.relay === "remove" ? "removeRelay" : "discover", { url });
       if (r.error) return say(r.error);
       if (ds.relay === "add") $("dxRelayIn").value = "";

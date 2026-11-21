@@ -17,7 +17,8 @@ const tmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "dexicon-tes
 /** A booted host on a mock node. o: { dir, node options, wrap(run) → runner } */
 async function boot(o = {}) {
   const node = M.mockNode(o.node), net = o.net || M.mockNet(), dir = o.dir || tmp();
-  const host = makeHost({ runner: o.wrap ? o.wrap(node.run) : node.run, dataDir: dir, net, tickMs: o.tickMs || 40, quiet: true, netLimitMs: o.netLimitMs });
+  // confirm: the main-process question for a page action with no recorded intent (0.19.231); these tests answer yes unless they say
+  const host = makeHost({ runner: o.wrap ? o.wrap(node.run) : node.run, dataDir: dir, net, tickMs: o.tickMs || 40, quiet: true, netLimitMs: o.netLimitMs, confirm: o.confirm || (async () => true) });
   node.attach(host); hosts.push(host);
   await host.start();
   await M.until(() => host.status().ready && host.status().restingReady);
@@ -225,7 +226,8 @@ const BOOK = (rows) => `(function () {
     PDService.book = ${JSON.stringify(rows)}.map(function (r) { return mk(r[0], r[1], r[2], r[3]); });
     if (!globalThis.__plans) { globalThis.__plans = []; var fill = PandaTxn.fill; PandaTxn.fill = function (cmd, id, plan) { __plans.push(plan.takes.map(function (t) { return t.order.coinid + ":" + PandaDEX.plain(t.minima); })); return fill.apply(PandaTxn, arguments); }; }
   })()`;
-const limitVia = (host, data) => host.command({ op: "comms", message: JSON.stringify({ origin: "ui", type: "LIMIT", data }) });
+// a LIMIT reaches the engine only against the intent the native Trade screen records when the user confirms (0.19.231)
+const limitVia = async (host, data) => { await host.command({ op: "intent", type: "LIMIT", buy: !!data.buy, price: String(data.price), amount: String(data.minima) }); return host.command({ op: "comms", message: JSON.stringify({ origin: "ui", type: "LIMIT", data }) }); };
 
 test("an own order at the best price, a third party's behind it: a LIMIT is not refused, and fills the third party", async () => {
   const { host, ctx, node } = await boot();
@@ -1063,7 +1065,8 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   assert.ok(!/require\("(http|https|net|child_process)"\)/.test(host), "the host opens no socket of its own");
   assert.equal((host.match(/rpcCall\(/g) || []).length, 1, "one way to the node: rpcCall");
   const code = host.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");   // comments name what was left behind; the code must not hold it
-  for (const gone of ["DX_GATE", "RELAY_HOSTS", "pauseAll", "Mandate", "MAKER_", "setPrice", "setGate", "mxusd_tokenid"]) assert.ok(!code.includes(gone), "DexiconPro-only part not ported: " + gone);
+  // "MAKER_" and "mxusd_tokenid" are named since 0.19.231 by the guard that keeps the page from steering the engine, not ported
+  for (const gone of ["DX_GATE", "RELAY_HOSTS", "pauseAll", "Mandate", "setPrice", "setGate"]) assert.ok(!code.includes(gone), "DexiconPro-only part not ported: " + gone);
 });
 
 test("coin holds: the coins of live FAST orders and of unanswered takes are mirrored into the shared reservation, from the engine's own records", async () => {
@@ -1137,4 +1140,38 @@ test("the page's transactions live under a page-only id: a refused txncreate reg
   const atNode = node.seen.filter(c => /^txn(create|input|delete)/.test(c));
   assert.ok(atNode.length && atNode.every(c => / id:pgx/.test(c)), "every frame transaction at the node is pgx-prefixed: " + JSON.stringify(atNode));
   assert.ok(!node.seen.some(c => / id:(sp1k2j3|rlabc123|vc99zz)\b/.test(c)), "never the engine's own ids");
+});
+
+// 0.19.231: what the page may make the engine sign, and the keys that steer it, need the user's confirmation in the app's own window
+test("the page cannot make the engine sign or steer it without the native window: LIMIT / EDIT need a recorded intent, the rest a main-process question; cancels pass", async () => {
+  const asked = []; let answer = false;
+  const { host } = await boot({ confirm: async (title, detail) => { asked.push(title + " | " + detail); return answer; } });
+  const comms = (origin, type, data) => host.command({ op: "comms", message: JSON.stringify({ origin, type, data }) });
+  const limit = { buy: true, minima: "100", price: "0.003", minRem: "0" };
+  await assert.rejects(comms("ui", "LIMIT", limit), /not confirmed in the app's own window/, "no intent: refused");
+  await host.command({ op: "intent", type: "LIMIT", buy: true, price: "0.0030", amount: "100" });
+  await assert.rejects(comms("ui", "LIMIT", Object.assign({}, limit, { minima: "1000" })), /not confirmed/, "another amount than the one confirmed");
+  await assert.rejects(comms("ui", "LIMIT", Object.assign({}, limit, { buy: false })), /not confirmed/, "the other side");
+  assert.deepEqual(await comms("ui", "LIMIT", limit), { status: true }, "the confirmed one, once");
+  await assert.rejects(comms("ui", "LIMIT", limit), /not confirmed/, "an intent is used once");
+  const coin = "0x" + "AB".repeat(32);
+  await host.command({ op: "intent", type: "EDIT", coinid: coin, price: "0.004" });
+  await assert.rejects(comms("ui", "EDIT", { coinid: coin, price: "0.005" }), /not confirmed/);
+  for (const [o, t, d] of [["ui", "SPLIT", { tokenid: "0x00", amount: "5" }], ["ui", "MAKER_PUBLISH", {}], ["dexicon", "CONSOLIDATE", { tokenid: "0x00" }], ["dexicon", "LADDER", {}], ["dexicon", "CROSS_REVIEW", { release: "cross" }]])
+    await assert.rejects(comms(o, t, d), /not confirmed/, t + ": the question was answered no");
+  assert.equal(asked.length, 5, "each was asked about, by name"); assert.ok(asked[0].includes("SPLIT"));
+  for (const [o, t, d] of [["ui", "CANCEL", { coinid: coin }], ["ui", "CANCEL_ALL", {}], ["ui", "MAKER_WITHDRAW", {}], ["ui", "REFRESH", {}], ["dexicon", "CROSS_REVIEW", {}]])
+    assert.deepEqual(await comms(o, t, d), { status: true }, t + " moves nothing to anyone else");
+  // writes that steer the engine
+  const merge = (k, v) => host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + v + "')" });
+  asked.length = 0;
+  await assert.rejects(merge("mm_config", JSON.stringify({ enabled: true, levels: 6 })), /not confirmed/);
+  await assert.rejects(merge("relays", JSON.stringify(["https://evil.example"])), /not confirmed/);
+  await assert.rejects(merge("mxusd_tokenid", "0x" + "EE".repeat(32)), /not confirmed/);
+  assert.equal(asked.length, 3); assert.ok(asked[1].includes("https://evil.example"), "the question shows the value whole");
+  await merge("mm_config", JSON.stringify({ enabled: false }));   // a stopped maker signs nothing: no question
+  await host.command({ op: "intent", type: "KV", key: "relays" });
+  await merge("relays", JSON.stringify(["https://relay.example"]));   // the native Settings screen's own change
+  answer = true; await merge("mm_config", JSON.stringify({ enabled: true, levels: 6 })); assert.deepEqual(await comms("dexicon", "LADDER", {}), { status: true }, "its wake-up goes with it");
+  await assert.rejects(host.command({ op: "intent", type: "LIMIT", buy: true, price: "1", amount: "1", epoch: host.status().epoch }), /bad intent/, "the frame's calls (they carry an epoch) cannot record one");
 });

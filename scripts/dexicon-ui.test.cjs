@@ -709,3 +709,14 @@ test("Settings: a relay the desktop cannot reach is refused before anything is s
   assert.match(C.relayProblem("https://user:pw@relay.example/dex"), /no user name/);
   assert.match(C.relayProblem("relay.example"), /Enter a relay address/); assert.match(C.relayProblem(""), /Enter a relay address/);
 });
+
+// 0.19.231: the native screens record what the user confirmed; the main process asks about anything else the page wants
+test("the native Exchange screens record the confirmed on-chain trade, edit and relay change as intents; main.js answers the rest with its own question", () => {
+  const ui = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ui.js"), "utf8"), main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(/args\.reviewed = r\.asked;\s*\n[^\n]*\n\s*try \{ await api\.dxCommand\(\{ op: "intent", type: "LIMIT", buy: X\.buy, price, amount \}\); \}/.test(ui), "after the on-chain review, before the page is driven");
+  assert.ok(/if \(!fast\) \{ try \{ await api\.dxCommand\(\{ op: "intent", type: "EDIT", coinid: id, price: next \}\);/.test(ui));
+  assert.ok(/api\.dxCommand\(\{ op: "intent", type: "KV", key: "relays" \}\)/.test(ui));
+  assert.ok(/dexicon\.setConfirm\(async \(title, detail\) => \{/.test(main) && /buttons: \[lang\.t\("Refuse"\), lang\.t\("Allow"\)\], defaultId: 0, cancelId: 0/.test(main), "a main-process question, Refuse the default");
+  const C = require("../renderer/dexicon-core.js");
+  assert.equal(C.bridgeCall({ dxRoom: 1, id: 1, name: "room.dex", args: { op: "intent", type: "LIMIT" } }), null, "the frame cannot record an intent");
+});

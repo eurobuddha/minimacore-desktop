@@ -30,6 +30,11 @@ const chat = require("./chat");
 const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const dexicon = require("./dexicon");
+// A page action of the Exchange with no intent the native chrome recorded is asked about here, in the main process (0.19.231)
+dexicon.setConfirm(async (title, detail) => {
+  const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("Refuse"), lang.t("Allow")], defaultId: 0, cancelId: 0, noLink: true, message: title, detail });
+  return r.response === 1;
+});
 const dexiconRoom = require("./dexicon-room");
 dexiconRoom.register(require("electron"));   // dxroom://exchange/: the Dexicon page for its hidden, sandboxed frame
 const ethwallet = require("./ethwallet");
