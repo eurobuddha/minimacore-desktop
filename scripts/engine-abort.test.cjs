@@ -163,8 +163,9 @@ test("AtomiX glue: a store that cannot be moved aside on a wallet replacement is
     await assert.rejects(atomix.init(), /could not be moved aside yet/, "and again, until it is");
     assert.equal(fs.readFileSync(db, "utf8"), "the old wallet's claim secrets", "never opened, never changed");
     fs.chmodSync(dir, 0o700);
-    await atomix.init().catch(() => {});
-    assert.ok(fs.readdirSync(dir).some(f => /^atomix\.sqlite-legacy-keys-\d{8}$/.test(f)), "moved aside at the next start: " + fs.readdirSync(dir).join(", "));
+    const now0 = Date.now; Date.now = () => now0() + 13000;   // the next try waits out its pause (0.19.314)
+    try { await atomix.init().catch(() => {}); } finally { Date.now = now0; }
+    assert.ok(fs.readdirSync(dir).some(f => /^atomix\.sqlite-legacy-keys-\d{8}$/.test(f)), "moved aside at the next try: " + fs.readdirSync(dir).join(", "));
     const kept = fs.readdirSync(dir).find(f => /legacy-keys/.test(f)); assert.equal(fs.readFileSync(path.join(dir, kept), "utf8"), "the old wallet's claim secrets");
   } finally { try { fs.chmodSync(dir, 0o700); } catch (e) {} atomix.stopLoop(); atomix.flush(); }
 });
@@ -289,6 +290,28 @@ test("AtomiX glue: a legacy owed-move debt with no store to move is cleared at t
   } finally { atomix.stopLoop(); atomix.flush(); if (before) require.cache[cfgPath] = before; else delete require.cache[cfgPath]; }
 });
 
+// 0.19.314: an owed move that keeps failing is logged once and tried again with a growing pause, not rewritten and logged every 12 s
+test("AtomiX glue: an owed move that keeps failing writes config.json once, logs its reason once and backs off between tries", async () => {
+  const cfgPath = require.resolve("../main/config.js"), axPath = require.resolve("../main/atomix.js"), before = require.cache[cfgPath], disk = {}; let writes = 0;
+  require.cache[cfgPath] = { id: cfgPath, filename: cfgPath, loaded: true, children: [], paths: [], exports: { rpcSecret: () => "", load: () => JSON.parse(JSON.stringify(disk)),
+    setAtomixStoreMoveOwed: (v) => { writes++; if (v) disk.atomixStoreMoveOwed = v; else delete disk.atomixStoreMoveOwed; } } };
+  const dir = tmp("ax-owed-backoff-"), db = path.join(dir, "atomix.sqlite"), mock = async () => ({ status: false, error: "mock" }), said = [], log0 = console.log;
+  delete require.cache[axPath]; const atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);
+  fs.writeFileSync(db, "old"); fs.chmodSync(dir, 0o500); console.log = (...a) => said.push(a.join(" "));
+  const now0 = Date.now;
+  try {
+    assert.throws(() => atomix.invalidate(), /could not be moved aside/);
+    for (let i = 0; i < 5; i++) await assert.rejects(atomix.init(), /could not be moved aside yet/);   // the start loop, every 12 s
+    assert.equal(writes, 1, "config.json written once");
+    assert.equal(said.filter(l => /could not be moved aside \(/.test(l)).length, 1, "the reason logged once");
+    Date.now = () => now0() + 13000; await assert.rejects(atomix.init(), /could not be moved aside yet/);   // after the pause it tries again
+    assert.equal(writes, 1, "still the same debt: not written again"); assert.equal(said.filter(l => /could not be moved aside \(/.test(l)).length, 1, "the same reason: not logged again");
+    fs.chmodSync(dir, 0o700); Date.now = () => now0() + 13000 + 25000;
+    await atomix.init().catch(() => {});
+    assert.ok(fs.readdirSync(dir).some(f => /legacy-keys/.test(f)), "moved at the next try after the longer pause"); assert.equal(disk.atomixStoreMoveOwed, undefined);
+  } finally { Date.now = now0; console.log = log0; try { fs.chmodSync(dir, 0o700); } catch (e) {} atomix.stopLoop(); atomix.flush(); if (before) require.cache[cfgPath] = before; else delete require.cache[cfgPath]; }
+});
+
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });
 
 // 0.19.267: the owed move aside is on disk (config.json), so a restart does not open the old wallet's store under the new one
@@ -307,7 +330,8 @@ test("AtomiX glue: a store owed a move aside is still owed after a restart (a fr
     await assert.rejects(atomix.init(), /could not be moved aside yet/, "the new wallet's engine does not open the old store");
     assert.equal(fs.readFileSync(db, "utf8"), "the old wallet's claim secrets", "never opened, never changed");
     fs.chmodSync(dir, 0o700);
-    await atomix.init().catch(() => {});
+    const now0 = Date.now; Date.now = () => now0() + 13000;   // the next try waits out its pause (0.19.314)
+    try { await atomix.init().catch(() => {}); } finally { Date.now = now0; }
     const kept = fs.readdirSync(dir).find(f => /^atomix\.sqlite-legacy-keys-\d{8}$/.test(f)); assert.ok(kept, fs.readdirSync(dir).join(", "));
     assert.equal(fs.readFileSync(path.join(dir, kept), "utf8"), "the old wallet's claim secrets");
     assert.equal(disk.atomixStoreMoveOwed, undefined, "cleared once moved");

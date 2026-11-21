@@ -382,6 +382,7 @@ function invalidate() {
   // A store that cannot be moved aside is OWED (0.19.243): the engine does not start (init throws) until it is, else the
   // new wallet's engine would open the old wallet's swap records; and the failure is said to the caller.
   let moveFailed = null;
+  moveRetry.at = 0;   // a replacement is tried at once, whatever pause an earlier failure set (0.19.314)
   try { moveStoreAside(); } catch (e) { moveFailed = e; }
   ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null; initError = ""; firstTry = 0;
   vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
@@ -405,11 +406,21 @@ function owedOnDisk() {
   } catch (e) { return false; }
 }
 function markOwed(v) { try { require("./config").setAtomixStoreMoveOwed(v); } catch (e) { log("wallet replaced: the debt of moving the old swap database aside could not be recorded (" + e.message + ")"); } }
+// A move that keeps failing is tried again with a growing pause (0.19.314, as the 0.18 review asked): the start loop asks every
+// 12 s, and each try rewrote config.json and logged the same line. The debt is written only when it changes, a reason is logged
+// once until it changes, and between tries init() refuses at once with the last reason (12 seconds doubling to 10 minutes, as 0.18.254).
+let moveRetry = { at: 0, wait: 0, why: "", logged: "" };
 function moveStoreAside() {
+  if (storeMoveOwed && Date.now() < moveRetry.at) throw new Error(moveRetry.why);
   const file = path.join(dir(), "atomix.sqlite"), id = fileId(file);
-  if (id) markOwed(id);
-  try { const kept = require("./restore").moveAside(file); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; markOwed(false); }   // whatever the debt's form, also with no file left to move (0.19.295)
-  catch (e) { storeMoveOwed = true; log("wallet replaced: the old swap database could not be moved aside (" + e.message + "); AtomiX does not start until it is"); throw e; }
+  if (id) { let cur = null; try { cur = require("./config").load().atomixStoreMoveOwed; } catch (e) {} if (!(cur && cur.ino === id.ino && cur.birth === id.birth)) markOwed(id); }
+  try { const kept = require("./restore").moveAside(file); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; moveRetry = { at: 0, wait: 0, why: "", logged: "" }; markOwed(false); }   // whatever the debt's form, also with no file left to move (0.19.295)
+  catch (e) {
+    storeMoveOwed = true; const wait = Math.min(600000, moveRetry.wait ? moveRetry.wait * 2 : 12000);
+    moveRetry = { at: Date.now() + wait, wait, why: e.message, logged: moveRetry.logged };
+    if (moveRetry.logged !== e.message) { moveRetry.logged = e.message; log("wallet replaced: the old swap database could not be moved aside (" + e.message + "); AtomiX does not start until it is (tried again by itself)"); }
+    throw e;
+  }
 }
 
 /**
