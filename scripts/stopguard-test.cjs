@@ -115,3 +115,13 @@ test("P2P Chance: open offers and bets are counted from this wallet's coins at t
   assert.equal(await make(false, [])(), null, "not read while the loop is off");
   assert.ok(/casino: await casinoOpen\(\)\.catch\(\(\) => null\)/.test(main), "a failed read is null: said as not checked");
 });
+
+// ---- 0.18.250: a restart the guard refused from the setup screen keeps the user's edits on screen ----
+test("setup screen: the form stays until the node really stops; a refused restart keeps the edits and says so", () => {
+  const app = rd("renderer/app.js"), i = app.indexOf("    if (running) {   // reconfigure = restart to apply"), branch = app.slice(i, app.indexOf("\n      return;\n    }", i));
+  assert.ok(i > 0 && branch.indexOf("await api.nodeRestart(patch);") > 0);
+  assert.ok(!/showStarting\(\)|hideSetup\(\)|innerHTML/.test(branch), "nothing replaces or hides the form before main has decided");
+  assert.ok(/catch \(e\) \{ CFG = before; if \(btn\.isConnected\) \{ btn\.disabled = false;[^\n]*toast\(ipcMsg\(e\) \+ " Your changes are still on this screen\.", "err"\); \}/.test(branch), "a refusal gives the button back and says the edits are kept");
+  assert.ok(/finally \{ setupRestarting = false; \}/.test(branch));
+  assert.ok(/if \(setupRestarting && s\.state !== "running" && !el\("startStat"\)\) showStarting\(\);/.test(app), "the progress replaces the form once the node is really stopping");
+});

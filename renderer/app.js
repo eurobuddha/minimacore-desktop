@@ -14,6 +14,7 @@ let waitingForNode = false;
 let activeView = "balances";
 let refreshTimer = null;
 let RESTORE = null;          // {seed, keyuses, host} held in memory for a pending restore — NEVER persisted
+let setupRestarting = false;  // the setup screen's restart was asked for: its form stays until the node really stops (0.18.250)
 let postBootStarted = false; // guard: run the post-boot wallet step (new backup / restore resync) once
 const ICON_CACHE = new Map();// tokenid → { icon: dataURI|null, valid: bool|null } — survives the 15s refresh
 let HIST_SYNCING = false;    // guard against overlapping history syncs
@@ -182,6 +183,8 @@ function onStatus(s) {
     AtomixPanel.setBlock(s.health.block);
   }
 
+  // the setup screen's restart went past main's stop guard: the node is stopping, so the progress replaces the form now (0.18.250)
+  if (setupRestarting && s.state !== "running" && !el("startStat")) showStarting();
   // live progress on the starting/onboarding overlay (before the wallet is ready)
   if (el("setup").style.display !== "none" && !CFG.walletDone) updateSetupProgress(s);
 
@@ -392,10 +395,13 @@ function showSetup() {
       megammrHost: host, params: P, extraArgs: el("extraArgs").value.trim()
     };
     if (running) {   // reconfigure = restart to apply: main saves the patch only once its stop guard let the restart go (0.18.223)
-      const before = CFG; CFG = Object.assign({}, CFG, patch);
-      waitingForNode = true; postBootStarted = false; showStarting();
+      // The form stays on screen until the node really stops (0.18.250): a restart main's stop guard refused kept nothing of the
+      // edits (the form was replaced by the progress before main asked). The status handler shows the progress once it stops.
+      const before = CFG, btn = el("startNode"); CFG = Object.assign({}, CFG, patch);
+      postBootStarted = false; setupRestarting = true; btn.disabled = true; btn.textContent = "Restarting the node…";
       try { await api.nodeRestart(patch); CFG = await api.getConfig(); }
-      catch (e) { CFG = before; waitingForNode = false; hideSetup(); toast(ipcMsg(e), "err"); }
+      catch (e) { CFG = before; if (btn.isConnected) { btn.disabled = false; btn.textContent = "Apply & restart node"; } toast(ipcMsg(e) + " Your changes are still on this screen.", "err"); }
+      finally { setupRestarting = false; }
       return;
     }
     try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcMsg(e), "err"); return; }   // e.g. an -mds… extra argument (0.18.221)
