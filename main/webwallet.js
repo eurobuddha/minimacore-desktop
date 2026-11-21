@@ -152,8 +152,9 @@ async function ackKeyuses(address, count) {
     const raw = (loadStore()[address] || {}).keyuses;
     // a decimal written as text ("57.4") is read as the number is (0.18.270: it was ignored)
     const num = typeof raw === "number" ? raw : typeof raw === "string" && /^\s*\d{1,15}(\.\d+)?\s*$/.test(raw) ? Number(raw.trim()) : NaN;
-    const old = Number.isFinite(num) && num > 0 ? Math.ceil(num) : 0;
-    if (old > MAX_USES) throw new Error(overCount(old));   // a floor nobody can confirm (0.18.270): said why, as a send says it
+    // Infinity ({"keyuses":1e400} parses so) is an over-count too (0.18.275: it read as 0)
+    const old = num === Infinity ? Infinity : Number.isFinite(num) && num > 0 ? Math.ceil(num) : 0;
+    if (old > MAX_USES) throw new Error(overCount(old, true));   // a floor nobody can confirm (0.18.270): said why, as a send says it
     if (n < old) throw new Error("This key's saved count read " + old + " before it was damaged. Confirm at least that many. Nothing was saved.");
   }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
@@ -169,8 +170,8 @@ function keyusesInfo(address) { const e = entryFor(loadStore(), address); return
 /** Why a stored next leaf above the last one cannot sign (0.18.265). Exactly TREE_LEAVES: every leaf was used. Above it: a count
  *  confirmed above the ceiling (possible before 0.18.265, which advised that over-estimating is safe); the true count is unknown, so
  *  it is never lowered here. */
-function overCount(n) {
-  const why = " This app will not sign from this address: signing past the last use (" + MAX_USES + ") would reuse a one-time key, which can lose funds. Nothing was sent.";
+function overCount(n, saving) {   // saving: said on a refused confirmation, which ends "Nothing was saved" (0.18.275), not "Nothing was sent"
+  const why = " This app will not sign from this address: signing past the last use (" + MAX_USES + ") would reuse a one-time key, which can lose funds. " + (saving ? "Nothing was saved." : "Nothing was sent.");
   return n === TREE_LEAVES
     ? "This wallet's count for this key has reached the limit of a key of this wallet (" + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + ")." + why
     : "This wallet's saved key-use count (" + n + ") is above the limit of a key of this wallet (" + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + "). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered." + why;

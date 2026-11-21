@@ -343,3 +343,17 @@ test("Web Wallet: a first confirmation whose chain figure is at the limit gets t
   ww.setOnchain(async () => 10); await assert.rejects(ww.ackKeyuses(FROM, 300000), /can be at most 262143/, "a chain figure below the limit and a typed figure above it: the ceiling");
   ww.setOnchain(async () => null);
 });
+
+// ---- 0.18.275: a refused confirmation says "Nothing was saved"; a damaged {"keyuses":1e400} is an over-count, not 0 ----
+test("Web Wallet: a damaged old value above the limit (or Infinity) refuses the confirmation with 'Nothing was saved'", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AC".repeat(32), PK = "0x" + "BC".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 10);
+  for (const raw of ['{"' + FROM + '":{"keyuses":1e400,"ack":true}}', JSON.stringify({ [FROM]: { keyuses: "1000000", ack: true } })]) {
+    fs.writeFileSync(file, raw);
+    await assert.rejects(ww.ackKeyuses(FROM, 100), (e) => /is above the limit of a key of this wallet/.test(e.message) && /Nothing was saved\.$/.test(e.message) && !/Nothing was sent/.test(e.message), raw);
+  }
+  ww.setOnchain(async () => null);
+});
