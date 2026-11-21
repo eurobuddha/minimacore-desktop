@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.212] — databases: an empty file is a fresh start again; no empty file is written
+
+- sql.js saves a database with no tables as 0 bytes, and the app wrote such files whenever the AtomiX engine stopped before creating a table (a locked vault, a node not write-enabled, a quick quit). 0.18.210 refused every empty file, so AtomiX and the ETH Wallet would never start for those users. Now a 0-byte file opens as a fresh database (as SQLite treats it), only a file with content that is not SQLite or fails the check is refused and kept, a save with no tables writes nothing, and a database the app has let go (a wallet replacement, or an init overtaken by one) is disposed: its pending save is cancelled and it never writes again (a pending save of the old wallet could land in the new wallet's file). PandaPools and the history database use the same shim and get the same behaviour. Test: `scripts/atomix-unit.js`.
+
 ## [0.18.211] — whole identifiers, no reply body in errors, whole ETH files, no rounding
 
 - An RPC reply that is not JSON was reported with its first 120 characters (a reply can carry a seed or a key); the error now gives only the HTTP status and the length. The ETH wallet showed a shortened address (`shortAddr`) and a token with no symbol a few characters of its contract; both now show the whole address. A token with no name in the Web Wallet and Vestr lists shows its whole token id. `ethtokens.json` and `ethrpc.json` are written to a temporary file and renamed. The amount a swap needs ("Need ≈ …") was rounded by `toFixed`; it is now cut to 6 decimals. Test: `scripts/rpc-test.cjs`.

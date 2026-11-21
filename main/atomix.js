@@ -208,10 +208,10 @@ async function init() {
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   initPromise = (async () => {
     const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"));
-    if (gen !== generation) { try { shim.flush(); } catch (e) {} return; }   // invalidated mid-init → drop it
+    if (gen !== generation) { try { shim.dispose(); } catch (e) {} return; }   // invalidated mid-init → drop it, never written (0.18.212)
     sqlShim = shim;
     ctx = createContext(buildMds());
-    if (gen !== generation) { ctx = null; sqlShim = null; return; }           // invalidated during context build
+    if (gen !== generation) { try { shim.dispose(); } catch (e) {} ctx = null; sqlShim = null; return; }   // invalidated during context build
     ready = true;
     fire("inited");            // service.js tryBoot: trust preflight → vault/seedrandom → engines → poll.
   })().catch(e => { if (gen === generation) { initPromise = null; ready = false; } log("init failed: " + e.message); throw e; });
@@ -243,6 +243,7 @@ function invalidate() {
   generation++;              // disown any in-flight init (old seed) BEFORE we tear down
   stopLoop();
   flush();
+  try { if (sqlShim) sqlShim.dispose(); } catch (e) {}   // the old wallet's database never writes again (0.18.212: a pending save of it landed in the new wallet's file)
   // The old wallet's swap records are moved aside, never deleted (0.18.210): they hold the secrets and coin ids a claim or
   // refund of a swap still in flight needs (the same seed restored again can use them; the file is kept either way).
   const db = path.join(dir(), "atomix.sqlite");

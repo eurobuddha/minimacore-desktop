@@ -22,11 +22,12 @@ async function makeSqlShim(filePath) {
   const SQL = await sqlReady;
   let db;
   try { const bytes = fs.readFileSync(filePath);
-    // A file that is there but empty, or not an SQLite file, is refused (0.18.210): sql.js opened a zero-byte file as a
-    // new empty database, so the swap and pool records (secrets a refund or claim needs) read as none and the next save
-    // overwrote them. Only a missing file is a fresh start.
-    if (bytes.length < 100 || bytes.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") throw Object.assign(new Error("The database " + filePath + " is empty or damaged. Nothing was changed; keep that file and ask for help rather than deleting it."), { code: "EBADDB" });
-    db = new SQL.Database(new Uint8Array(bytes));
+    // A file of 0 bytes is a database with no tables (0.18.212: SQLite itself treats it so, and sql.js exports a
+    // table-less database as 0 bytes, which older versions wrote when the engine stopped before creating any table), so it
+    // opens fresh. A file with content that is not SQLite (no 16-byte header) or fails the check is refused and kept
+    // (0.18.210): opening it fresh would read the swap and pool records as none and the next save would overwrite them.
+    if (bytes.length && bytes.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") throw Object.assign(new Error("The database " + filePath + " is damaged (not an SQLite file). Nothing was changed; keep that file and ask for help rather than deleting it."), { code: "EBADDB" });
+    db = new SQL.Database(bytes.length ? new Uint8Array(bytes) : undefined);
     const check=db.exec("PRAGMA quick_check");
     if(!check.length||check[0].values.some(row=>row[0]!=="ok"))throw new Error("Pool database integrity check failed.");
   }
@@ -86,20 +87,26 @@ async function makeSqlShim(filePath) {
   }
 
   // Checked counterpart of the existing atomic whole-image save, used for recovery guards.
+  let disposed = false;   // set when the owner has let this database go (a wallet replacement): it never writes again
   function flushChecked() {
     if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+    if (disposed) return false;
     let fd;
     try {
+      const image = db.export();
+      if (!image.length) return true;   // no tables yet: nothing to keep, and a 0-byte file is never written (0.18.212)
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       const tmp = filePath + ".tmp";
       fd = fs.openSync(tmp, "w", 0o600);
-      fs.writeFileSync(fd, Buffer.from(db.export())); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
+      fs.writeFileSync(fd, Buffer.from(image)); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
       fs.renameSync(tmp, filePath);
       try { const dfd = fs.openSync(path.dirname(filePath), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) { /* the rename is still atomic */ }
       return true;
     } catch (e) { if (fd !== undefined) try { fs.closeSync(fd); } catch (_) {} return false; }
   }
-  return { sql: sqlCmd, persist: persistSoon, _db: db, flush: flushChecked, flushChecked };
+  /** Let this database go without writing: a pending save is cancelled and later saves do nothing (0.18.212). */
+  function dispose() { disposed = true; if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; } }
+  return { sql: sqlCmd, persist: persistSoon, _db: db, flush: flushChecked, flushChecked, dispose };
 }
 
 module.exports = { makeSqlShim };
