@@ -96,7 +96,7 @@ const lost = (e) => !(e && (e.code === "ECONNREFUSED" || /RPC authentication fai
  *  when it is really sent, not when it was queued. A coin another owner holds is refused there, before the node. */
 function rpcCall(port, secret, command, opts) {
   let r = runners.get(port);
-  if (!r) { r = createNodeRunner(null, { lost }); runners.set(port, r); }
+  if (!r) { r = createNodeRunner(null, { lost, minHoldMs }); runners.set(port, r); }
   const raw = (c) => rawCall(port, secret, c);
   return r.run(command, (c) => reserve.guard(opts && opts.owner, c, raw, opts), opts);
 }
@@ -105,4 +105,5 @@ const { oneCommand } = V;
 /** One read for the reservation's own upkeep (its sweep, its wallet id): never queued, never guarded. */
 const rpcRead = (port, secret, command) => rawCall(port, secret, command);
 
-module.exports = { rpcCall, rpcRead, oneCommand, _timeoutFor: timeoutFor };
+let minHoldMs = 60 * 1000;   // a lost signer's minimum hold (main/noderun.js, 0.19.225); tests shorten it before their first call
+module.exports = { rpcCall, rpcRead, oneCommand, _timeoutFor: timeoutFor, _setMinHold: (ms) => { minHoldMs = ms; } };

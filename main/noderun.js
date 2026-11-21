@@ -49,15 +49,19 @@ function createNodeRunner(raw, opts = {}) {
   const lost = opts.lost || (() => false);
   const pauseMs = opts.pauseMs == null ? 5000 : opts.pauseMs;
   const maxHoldMs = opts.maxHoldMs == null ? 10 * 60 * 1000 : opts.maxHoldMs;
+  // 0.19.225: a lost signer holds the queue for at least minHoldMs too. A `block` answered at once does not prove the
+  // signature under way has finished (the node answers reads while it signs), so the next signer waits out a grace.
+  const minHoldMs = opts.minHoldMs == null ? 60 * 1000 : opts.minHoldMs;
   const warn = opts.warn || ((line) => console.error("[signing queue]", line));
 
   // Never rejects. Returns when the node has answered a read, when it is plainly not there, or at the bound.
   async function hold(call, c, e) {
     if (!e || e.dropped || !lost(e)) return;
     warn("held: `" + verb(c) + "` failed (" + e.message + ") and the node may still be signing; waiting for it to answer");
-    const until = Date.now() + maxHoldMs;
+    const from = Date.now(), until = from + maxHoldMs;
+    const grace = async () => { const left = from + minHoldMs - Date.now(); if (left > 0) await new Promise((r) => setTimeout(r, left)); };
     for (;;) {
-      try { await call("block"); return; } catch (pe) { if (!lost(pe)) return; }
+      try { await call("block"); await grace(); return; } catch (pe) { if (!lost(pe)) { await grace(); return; } }
       if (Date.now() >= until) { warn("RELEASED WITHOUT AN ANSWER after " + Math.round(maxHoldMs / 1000) + " s: the next signing command may overlap `" + verb(c) + "`"); return; }
       await new Promise((r) => setTimeout(r, pauseMs));
     }

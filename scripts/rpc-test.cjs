@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const net = require('node:net');
 const { test } = require('node:test');
 const { rpcCall } = require('../main/rpc');
+require('../main/rpc')._setMinHold(0);   // the 60 s minimum hold of a lost signer (0.19.225) is tested on its own below
 
 async function withServer(handler, run) {
   const server = net.createServer(handler);
@@ -110,7 +111,7 @@ test('a signer that timed out holds the queue until the node answers a read; the
     if (c === 'block') { if (++probes < 3) throw new Error('RPC timeout'); return { status: true, response: { block: 7 } }; }
     return { status: true };
   };
-  const q = createNodeRunner(raw, { lost: (e) => /timeout|ECONNRESET|socket hang up/.test(e.message), pauseMs: 40, warn: (l) => warned.push(l) });
+  const q = createNodeRunner(raw, { lost: (e) => /timeout|ECONNRESET|socket hang up/.test(e.message), pauseMs: 40, minHoldMs: 0, warn: (l) => warned.push(l) });
   const first = q.run('send amount:1 address:0x00');
   const second = q.run('txnsign id:a publickey:auto');
   await assert.rejects(first, /RPC timeout/, 'the caller is told at once');
@@ -134,7 +135,7 @@ test('a status:false reply and a clean rejection release the queue at once (no p
 test('a node that never answers again: the hold ends at its bound, loudly', async () => {
   const seen = []; const warned = [];
   const raw = async (c) => { seen.push(c); if (c === 'txnsign id:b publickey:auto') return { status: true }; throw new Error('RPC timeout'); };
-  const q = createNodeRunner(raw, { lost: () => true, pauseMs: 20, maxHoldMs: 70, warn: (l) => warned.push(l) });
+  const q = createNodeRunner(raw, { lost: () => true, pauseMs: 20, maxHoldMs: 70, minHoldMs: 0, warn: (l) => warned.push(l) });
   await assert.rejects(q.run('txnsign id:a publickey:auto'));
   await q.run('txnsign id:b publickey:auto');
   assert.ok(seen.filter(c => c === 'block').length >= 2, 'it kept asking');
@@ -220,4 +221,17 @@ test('every engine names itself on its node commands, and the registry follows t
   assert.match(main, /await each\("coin reservations", \(\) => reserve\.invalidate\(\)\)/);
   assert.ok(main.indexOf('reserve.open(') < main.indexOf('atomix.startLoop()'), 'opened before an engine starts');
   assert.match(read('rpc.js'), /r\.run\(command, \(c\) => reserve\.guard\(opts && opts\.owner, c, raw, opts\), opts\)/);
+});
+
+// 0.19.225: a lost (timed-out) signer holds the queue for a minimum grace as well as until `block` answers
+test('a lost signer holds the queue for the minimum grace even when `block` answers at once', async () => {
+  const seen = [], t0 = Date.now();
+  const raw = async (c) => { seen.push([c, Date.now() - t0]); if (c.startsWith('send ')) throw new Error('RPC timeout'); return { status: true }; };
+  const q = createNodeRunner(raw, { lost: () => true, pauseMs: 10, minHoldMs: 150, warn() {} });
+  await assert.rejects(q.run('send amount:1 address:0x00'));
+  await q.run('txnsign id:a publickey:auto');
+  const next = seen.find(([c]) => c.startsWith('txnsign'));
+  assert.ok(seen.some(([c]) => c === 'block'), 'block was asked'); assert.ok(next[1] >= 145, 'the next signer waited out the grace: ' + next[1] + ' ms');
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main', 'noderun.js'), 'utf8');
+  assert.ok(/const minHoldMs = opts\.minHoldMs == null \? 60 \* 1000 : opts\.minHoldMs;/.test(src), 'the default grace is 60 s');
 });
