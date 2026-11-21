@@ -22,9 +22,9 @@ const WRITE_PREFIXES = ["send", "txn", "tokencreate", "consolidate", "burn", "va
   "archive", "megammr", "mysql", "reset", "seedrandom", "quit", "newaddress", "newscript", "coinimport",
   "cointrack", "removescript", "sign", "multisig"];
 
-function timeoutFor(command) {
-  const c = command.trim().toLowerCase();
-  return WRITE_PREFIXES.some(p => c.startsWith(p)) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
+const V = require("./cmdverb");
+function timeoutFor(command) {   // the verb read as the node reads it, in every piece of a chain (main/cmdverb.js, 0.19.190, as released 0.18.175)
+  return V.parts(command).some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 
 /** One HTTP round trip to the node, ungated. Only rpcCall below may call this. */
@@ -98,4 +98,4 @@ function rpcCall(port, secret, command, opts) {
 /** One read for the reservation's own upkeep (its sweep, its wallet id): never queued, never guarded. */
 const rpcRead = (port, secret, command) => rawCall(port, secret, command);
 
-module.exports = { rpcCall, rpcRead };
+module.exports = { rpcCall, rpcRead, _timeoutFor: timeoutFor };

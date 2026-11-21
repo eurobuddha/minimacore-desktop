@@ -16,6 +16,7 @@
  * another part of the app holds (main/reserve.js) is left out whole, for MINIMA and for tokens. A token send is
  * pinned ONLY for that reason (beacon dust is MINIMA-only): with nothing held it goes out exactly as before.
  */
+const V = require("./cmdverb");
 const SCALE = 44;
 // Minima amounts carry up to 44 decimals, well past a double's ~15–17 significant digits, so amounts are compared and
 // summed as BigInt over a fixed 44-decimal scale. Comparing as floats made a coin fractionally short read as
@@ -35,13 +36,20 @@ const fromUnits = (u) => { const s = u.toString().padStart(SCALE + 1, "0"), f = 
  */
 async function pinSend(runner, command, opts) {
   const c = String(command), o = opts || {};
-  const tok = /\btokenid:(0x[0-9A-Fa-f]+)/i.exec(c), token = tok ? tok[1] : "0x00", minima = token.toLowerCase() === "0x00";
+  // The verb and the parameters are read as the node reads them (main/cmdverb.js, 0.19.190, as released 0.18.175 and
+  // 0.18.187): `"send" …`, a control character before send or `fromaddress : 0x…` slipped past /^send\s/ and
+  // /\bfromaddress:/. A parameter is a top-level `name:` (not a key inside a state's JSON), and the LAST one when a name
+  // repeats, as the node keeps it (mcd:cmd refuses a send that repeats one; this is the second line).
+  const pt = V.paramsText(c);
+  const last = (name) => { const all = [...pt.matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))]; return all.length ? all[all.length - 1][1] : null; };
+  const tok = last("tokenid"), token = tok != null && /^0x[0-9a-f]+$/i.test(tok) ? tok : tok != null ? "?" : "0x00", minima = token.toLowerCase() === "0x00";
   const out = { command: c, pinned: false, token, need: "0", blocked: false, heldUnits: 0n, freeUnits: 0n, held: [] };
-  if (!/^send\s/i.test(c) || /\bfromaddress:/i.test(c)) return out;   // the node lower-cases the verb: SEND is a send
   // A chain (cmd1; cmd2) is never pinned (0.19.122): the pin is appended to the END of the text, so in a chain it landed
   // on the LAST command, a stray parameter there, while the send itself went out unpinned. The node splits on every ";".
   if (c.includes(";")) return out;
-  if (!minima && !o.tokens) return out;   // an explicit non-MINIMA token → not beacon-polluted
+  if (!V.is(c, "send") || last("fromaddress") != null) return out;   // the node lower-cases the verb: SEND is a send
+  if (!minima && !o.tokens) return out;   // an explicit non-MINIMA token (or one that cannot be read) → not beacon-polluted
+  if (token === "?") return out;   // a token id that is not hex: nothing to pin it to (the node refuses it)
   // Default: what the shared reservation holds, and only while its sends are ENFORCED (main/reserve.js sendHeld). In
   // "observe" and "off" nothing is held for a pin, so this pin is exactly the beacon-dust pin it was before 0.18.144.
   const held = o.held || ((id) => require("./reserve").sendHeld(o.owner || "wallet", id));
@@ -55,10 +63,10 @@ async function pinSend(runner, command, opts) {
   const exclude = new Set([...(o.exclude || [])].map(a => String(a).toLowerCase()));
   // what the send must find: amount, or the sum of a multi:[address:amount,…]; a MINIMA send also funds its burn
   let needUnits = 0n;
-  const multi = /\bmulti:\[([^\]]*)\]/.exec(c);
+  const multi = /(?:^|\s)multi:\[([^\]]*)\]/i.exec(pt);
   if (multi) for (const m of multi[1].matchAll(/:([0-9]+(?:\.[0-9]+)?)(?=[",\s]|$)/g)) needUnits += toUnits(m[1]);
-  else { const am = /\bamount:([0-9.]+)/.exec(c); needUnits = toUnits(am ? am[1] : "0"); }
-  const burn = /\bburn:([0-9.]+)/.exec(c); if (burn && minima) needUnits += toUnits(burn[1]);
+  else { const am = last("amount"); needUnits = toUnits(am != null && /^[0-9]+(\.[0-9]+)?$/.test(am) ? am : "0"); }
+  const burn = last("burn"); if (burn != null && /^[0-9]+(\.[0-9]+)?$/.test(burn) && minima) needUnits += toUnits(burn);
   out.need = fromUnits(needUnits);
   const amountOf = (x) => toUnits(!minima && x.tokenamount != null ? x.tokenamount : x.amount);   // a token coin's `amount` is raw; `send amount:` is in token units
   try {

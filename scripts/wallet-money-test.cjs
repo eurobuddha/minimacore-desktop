@@ -124,7 +124,7 @@ test("Send: every check still stops the send, before anything reaches the node",
 });
 
 test("Send: the main process still pins a MINIMA send to a signable coin, and only a send", () => {
-  assert.ok(mainJs.includes('const pinned = /^send\\s/i.test(command) ? await pinMinimaSend(run, command, { minCoinage: 3 }) : command;'));
+  assert.ok(mainJs.includes("const pinned = await pinMinimaSend(run, command, { minCoinage: 3 });"), "CHANGED on purpose (0.19.190): the pin itself reads the verb (main/cmdverb.js) and passes any other command unchanged");
   assert.ok(mainJs.includes("return run(pinned);"));
 });
 
@@ -233,4 +233,30 @@ test("Receive: Get Address reads a default address and never makes the node mint
   const failing = harness({ fail: ["getaddress"] });
   await failing.fns.renderReceive();
   assert.ok(/could not be read/.test(failing.el("recvAddr").textContent), "a failed read says so and shows no address");
+});
+
+// ---- 0.19.190: the send pin and the RPC timeout read a command as the node does (main/cmdverb.js; released 0.18.175, 0.18.187) ----
+const PIN_A = "0x" + "AB".repeat(32);
+const pinRig = () => { const asked = []; return { asked, run: async (c) => { asked.push(c); return c.startsWith("coins ") ? { status: true, response: [{ coinid: "0x01", amount: "50", address: PIN_A }] } : c.startsWith("checkaddress") ? { status: true, response: { simple: true } } : { status: true }; } }; };
+test("the send pin: a send written with quotes, a control character or ':' spacing is pinned like a plain one; a token send or its own fromaddress is not", async () => {
+  const { pinMinimaSend } = require("../main/sendpin");
+  for (const c of ['"send" amount:1 address:0xCD', "\u0001send amount:1 address:0xCD", "SEND amount:1 address:0xCD", "send amount : 1 address:0xCD", 's"en"d amount:1 address:0xCD', '"send"amount:1 address:0xCD', "send tokenid : 0x00 amount:1 address:0xCD"]) {
+    const r = pinRig(); assert.equal(await pinMinimaSend(r.run, c), c + " fromaddress:" + PIN_A, JSON.stringify(c));
+  }
+  for (const c of ['"send" amount:1 address:0xCD tokenid : ' + MXUSD, "send amount:1 address:0xCD fromaddress : 0xEE", 'send amount:1 address:0xCD "fromaddress":0xEE', "sendpoll action:list", "sendfrom amount:1 address:0xCD", 'send amount:1 address:0xCD tokenid:"' + MXUSD + '"']) {
+    const r = pinRig(); assert.equal(await pinMinimaSend(r.run, c), c, JSON.stringify(c)); assert.deepEqual(r.asked, [], JSON.stringify(c));
+  }
+  assert.ok(/const pinned = await pinMinimaSend\(run, command, \{ minCoinage: 3 \}\);/.test(mainJs) && !/\/\^send\\s\/i?\.test\(command\)/.test(mainJs), "mcd:cmd no longer decides with /^send\\s/");
+});
+test("the send pin reads the LAST tokenid and amount and a top-level fromaddress only, as the node does", async () => {
+  const { pinMinimaSend } = require("../main/sendpin");
+  let r = pinRig(); assert.equal(await pinMinimaSend(r.run, "send amount:1 address:0xCD tokenid:0x00 tokenid:" + MXUSD), "send amount:1 address:0xCD tokenid:0x00 tokenid:" + MXUSD, "the last tokenid is MxUSD: not pinned");
+  r = pinRig(); const c = "send amount:1 address:0xCD tokenid:" + MXUSD + " tokenid:0x00"; assert.equal(await pinMinimaSend(r.run, c), c + " fromaddress:" + PIN_A, "the last tokenid is MINIMA: pinned");
+  r = pinRig(); const st = 'send amount:1 address:0xCD state:{"1":"fromaddress:0xEE"}'; assert.equal(await pinMinimaSend(r.run, st), st + " fromaddress:" + PIN_A, "fromaddress: inside a state's JSON is not the parameter");
+  r = pinRig(); assert.equal(await pinMinimaSend(r.run, "send amount:1 amount:60 address:0xCD"), "send amount:1 amount:60 address:0xCD", "the amount looked for is the last one (60): no coin of 50 covers it, so nothing is pinned");
+});
+test("the RPC write timeout reads the verb as the node does", () => {
+  const { _timeoutFor } = require("../main/rpc");
+  for (const c of ['"send" amount:1', "\u0002vault", 'v"ault"', "status;send amount:1", "SEEDRANDOM modifier:x", '"txnpost" id:a']) assert.equal(_timeoutFor(c), 180000, JSON.stringify(c));
+  for (const c of ["status", "balance", '"status"']) assert.equal(_timeoutFor(c), 30000, c);
 });

@@ -718,7 +718,8 @@ test("L1: the verb in any case, a repeated parameter and a quoted value are all 
   assert.equal((await as("wallet")("CONSOLIDATE tokenid:0x00")).reserved, true);
   assert.equal((await as("atomix")("COINS relevant:true sendable:true tokenid:0x00")).response.length, 2, "an engine's read in capitals is filtered too");
   assert.equal((await pinSend(node.run, "Send amount:40 address:" + ADDR(7), { held: (id) => reg.foreign("wallet", id) })).pinned, true);
-  for (const f of ["main/sendpin.js", "main/main.js"]) assert.ok(SRC(f).includes("/^send\\s/i.test("), f + " tests the verb in any case");
+  // CHANGED on purpose (0.19.190): the verb is read by main/cmdverb.js (any case, quoted, control characters), not /^send\s/i
+  for (const f of ["main/sendpin.js"]) assert.ok(SRC(f).includes('V.is(c, "send")'), f + " reads the verb as the node does");
   assert.ok(!/\/\^send\\s\/\.test\(/.test(SRC("main/sendpin.js") + SRC("main/main.js") + SRC("main/reserve.js")));
   // a repeated id: on txnpost is refused (the node would post the LAST one named)
   await as("atomix")("txninput id:a coinid:" + coinId(3));

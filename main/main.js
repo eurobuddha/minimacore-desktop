@@ -233,7 +233,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
-  const pinned = /^send\s/i.test(command) ? await pinMinimaSend(run, command, { minCoinage: 3 }) : command;   // the node lower-cases the verb: SEND is a send; never a coin too young to spend
+  const pinned = await pinMinimaSend(run, command, { minCoinage: 3 });   // it reads the verb as the node does (main/cmdverb.js) and passes anything that is not a MINIMA send unchanged; never a coin too young to spend
   return run(pinned);
 });
 
