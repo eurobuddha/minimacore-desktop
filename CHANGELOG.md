@@ -7,6 +7,22 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.276] — miniMall: never claims older orders were read
+
+- Without MegaMMR the node can read only its last 1024 blocks, and it does not refuse a deeper request. Orders older than that are now said as not read, instead of being taken as covered. A resync that puts the chain below what was read before moves nothing and is not called a failure. A failed read is now described as recent orders not being read. Test: `scripts/shop-test.cjs`.
+
+## [0.18.275] — Web Wallet: "Nothing was saved" on a refused confirmation
+
+- A refused confirmation now ends "Nothing was saved". A damaged count stored as 1e400 (Infinity) is read as too high, not as 0. Test: `scripts/inject-test.cjs`.
+
+## [0.18.274] — Web Wallet: a chain figure at the limit is explained
+
+- For a first confirmation the chain is read before the 262143 ceiling is checked, so a chain figure at the limit is explained instead of only "can be at most 262143". Test: `scripts/inject-test.cjs`.
+
+## [0.18.273] — restore key uses: at most 250000
+
+- A figure that sets every key's uses (megammrsync / archive / mysql resync and import, reset, vault resetkeys, keys createallkeys) is now at most 250000, and restoresync's figure, which adds to the backup's uses, at most 10000. A single signature (sendfrom and the other builders) may still name the last leaf, 262143. A restore at 262143 let every key sign once and then start again at leaf 0, because the node checks no capacity. The screens explain what the figure is for, give the usual small figure, and no longer advise setting it higher when unsure. Test: `scripts/cmdgate-test.cjs`.
+
 ## [0.18.272] — Web Wallet confirm: whole numbers, and the figure kept
 
 - A typed key-use count that is not plain digits is refused instead of rounded down, and the confirmation says the figure main kept. Test: `scripts/webwallet-ui-test.cjs`.
@@ -21,7 +37,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.269] — key uses at most 262143 when restoring or resyncing
 
-- The restore and resync key-uses fields, and any command that names keyuses: (it sets every key's uses on restore, or is the leaf a builder signs at), take a whole number from 0 to 262143. A higher figure, or 4294967296, which the node reads as 0, made every key sign at leaf 0 again. "262144abc" is no longer read as 262144. Test: `scripts/cmdgate-test.cjs`.
+- The restore and resync key-uses fields, and any command that names keyuses: (it sets every key's uses on a restore or resync, is added to them by restoresync, or is the leaf a builder signs at), take a whole number from 0 to 262143. A higher figure, or 4294967296, which the node reads as 0, made every key sign at leaf 0 again. "262144abc" is no longer read as 262144. Superseded for restores by 0.18.273: 262143 was still unsafe for a figure that sets the wallet's key uses. Test: `scripts/cmdgate-test.cjs`.
 
 ## [0.18.268] — "PandaPools could not be asked"
 
