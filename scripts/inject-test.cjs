@@ -110,3 +110,30 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
   const line = ww.status().log.slice(-1)[0];
   assert.ok(line.includes("token " + MXUSD) && line.includes("from " + FROM) && line.includes("to " + TO), line);
 });
+
+// ---- 0.19.230: the Web Wallet's key-use store fails closed; an unreadable key list is never a foreign seed ----
+test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad count is refused; a failed key list never sends as a foreign seed", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), sent = [];
+  const FROM = "0x" + "A1".repeat(32), TO = "0x" + "D1".repeat(32), PK = "0x" + "B1".repeat(32);
+  let keysOk = true;
+  ww._setRunner(async (c) => { sent.push(c); return c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C1".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? (keysOk ? { status: true, response: { keys: [] } } : { status: false, error: "busy" })
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} }; });
+  const sends = () => sent.filter(c => c.startsWith("send"));
+  for (const bad of ["not json", JSON.stringify({ [FROM]: { keyuses: "7", ack: true } }), JSON.stringify({ [FROM]: { keyuses: -1, ack: true } }), JSON.stringify([1])]) {
+    fs.writeFileSync(file, bad); sent.length = 0;
+    await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /key-use record could not be read, so nothing was sent/, bad);
+    assert.deepEqual(sends(), [], "nothing signed: " + bad);
+  }
+  fs.rmSync(file);
+  for (const c of ["abc", -1, 1.5, "", null]) assert.throws(() => ww.ackKeyuses(FROM, c), /whole number of 0 or more/, String(c));
+  ww.ackKeyuses(FROM, "7");
+  sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true);
+  assert.match(sends()[0], / keyuses:7 mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
+  keysOk = false; sent.length = 0;
+  await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /node's keys could not be read/);
+  assert.deepEqual(sends(), [], "a failed key list never sends as a foreign seed");
+  await assert.rejects(ww.derive("alpha beta"), /node's keys could not be read/);
+  assert.ok(!/vault action:seed/.test(rd("main/webwallet.js")), "the vault is no longer asked");
+});

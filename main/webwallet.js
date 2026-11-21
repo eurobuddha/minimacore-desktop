@@ -75,7 +75,17 @@ function isPrivKey(p) { return typeof p === "string" && /^0x[0-9A-Fa-f]{2,200}$/
 // keyuses store — durable, monotonic, reserve-before-sign. { "<0xaddr>": { keyuses, ack } }
 // ---------------------------------------------------------------------------
 function storePath() { return path.join(app ? app.getPath("userData") : ".", "webwallet-keyuses.json"); }
-function loadStore() { try { return JSON.parse(fs.readFileSync(storePath(), "utf8")) || {}; } catch (e) { return {}; } }
+// 0.19.230: only a store that does not exist yet is empty. Any other failure (unreadable, not JSON, a counter that is not
+// a whole number of 0 or more) THROWS, so nothing is signed: reading it as {} restarted every counter at 0 = a key use twice.
+const STORE_BAD = "The Web Wallet's key-use record could not be read, so nothing was sent (a send now could use a one-time key twice). Check the file webwallet-keyuses.json in the app's data folder.";
+function loadStore() {
+  let raw;
+  try { raw = fs.readFileSync(storePath(), "utf8"); } catch (e) { if (e && e.code === "ENOENT") return {}; throw new Error(STORE_BAD); }
+  let j; try { j = JSON.parse(raw); } catch (e) { throw new Error(STORE_BAD); }
+  if (!j || typeof j !== "object" || Array.isArray(j)) throw new Error(STORE_BAD);
+  for (const k of Object.keys(j)) { const e = j[k]; if (!e || typeof e !== "object" || !Number.isSafeInteger(e.keyuses) || e.keyuses < 0) throw new Error(STORE_BAD); }
+  return j;
+}
 function writeStore(obj) {
   const p = storePath(), tmp = p + ".tmp";
   const fd = fs.openSync(tmp, "w");
@@ -85,12 +95,13 @@ function writeStore(obj) {
   // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
   try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
 }
-function entryFor(store, addr) { return store[addr] || { keyuses: 0, ack: false }; }
+function entryFor(store, addr) { return Object.hasOwn(store, addr) ? store[addr] : { keyuses: 0, ack: false }; }
 
 /** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. */
 function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
-  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
   const store = loadStore();
   const e = entryFor(store, address);
   e.keyuses = Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss)
@@ -101,17 +112,6 @@ function ackKeyuses(address, count) {
 }
 /** Current stored keyuses info for an address (does not mutate). */
 function keyusesInfo(address) { const e = entryFor(loadStore(), address); return { address, keyuses: e.keyuses || 0, ack: !!e.ack }; }
-/** RESERVE: durably advance the counter to n+1 and return n (the leaf to sign at). Reserve-before-sign. */
-function reserveKeyuse(address) {
-  const store = loadStore();
-  const e = entryFor(store, address);
-  const n = e.keyuses || 0;
-  e.keyuses = n + 1;                          // persist BEFORE the caller signs at n
-  store[address] = e;
-  writeStore(store);
-  return n;
-}
-
 // ---------------------------------------------------------------------------
 // node interaction
 // ---------------------------------------------------------------------------
@@ -129,26 +129,21 @@ async function isMegammr() {
 async function nodeHasPubkey(pubkey) {
   if (!pubkey) return false;
   const r = resp(await runner("keys action:list").catch(() => null));
-  const keys = (r && r.keys) || [];
+  // 0.19.230: a failed read is never "not the node's key" (that sent the node's own wallet down the foreign-seed path)
+  if (!r || !Array.isArray(r.keys)) throw new Error("The node's keys could not be read, so the app cannot tell whether this is the node's own wallet. Nothing was sent.");
+  const keys = r.keys;
   const pk = String(pubkey).toLowerCase();
   return keys.some(k => k && k.publickey && String(k.publickey).toLowerCase() === pk);
-}
-
-/** The running node's OWN seed phrase (loopback only; used to recognise the node's wallet even if `keys action:list`
- *  transiently hiccups). Same command mail.js uses. Returns null if the wallet is password-locked / unavailable. */
-async function nodeSeedPhrase() {
-  const r = resp(await runner("vault action:seed").catch(() => null));
-  const p = r && (r.phrase || r.seedphrase || r.seed);
-  return (typeof p === "string" && p) ? p : null;
 }
 
 /** Is the entered seed the running node's OWN wallet? True if the derived key-0 pubkey is in the node's key set,
  *  OR the phrase equals the node's own seed. The second check is a belt-and-suspenders fallback so a momentary
  *  `keys action:list` failure can never mis-classify the node's own wallet as a foreign seed (→ empty balance). */
 async function isNodeOwnSeed(pubkey, seed) {
-  if (await nodeHasPubkey(pubkey)) return true;
-  const np = await nodeSeedPhrase();
-  return !!(np && String(np) === String(seed));
+  // the node's full key list decides (0.19.230): it holds key 0 of the node's own seed, so a readable list without this key
+  // is a foreign seed; an unreadable list throws (nodeHasPubkey). The vault is no longer asked: a locked vault said "foreign".
+  void seed;
+  return nodeHasPubkey(pubkey);
 }
 
 /** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the
@@ -171,7 +166,7 @@ async function read(address, nodeSeed) {
   const rows = (r && Array.isArray(r.response)) ? r.response : [];
   return rows.map(b => ({
     tokenid: b.tokenid,
-    name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid).slice(0, 12)),
+    name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid)),   // the whole id, never cut (0.19.230)
     confirmed: String(b.confirmed != null ? b.confirmed : "0"),
     sendable: String(b.sendable != null ? b.sendable : "0"),
     unconfirmed: String(b.unconfirmed != null ? b.unconfirmed : "0"),
@@ -227,11 +222,16 @@ async function send(opts) {
 
   // FOREIGN seed → single-address non-custodial sendfrom with the durable keyuses gate.
   // keyuses gate: the user MUST have acknowledged the seed's prior-use count for this address
-  const info = keyusesInfo(fromaddress);
-  if (!info.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
+  // ONE read of the store for the gate and the reservation (0.19.230: two reads could disagree)
+  let store; try { store = loadStore(); } catch (e) { privatekey = null; throw e; }
+  const e0 = entryFor(store, fromaddress);
+  if (!e0.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
 
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
-  const n = reserveKeyuse(fromaddress);
+  const n = e0.keyuses || 0;
+  if (!Number.isSafeInteger(n) || n < 0) { privatekey = null; throw new Error(STORE_BAD); }
+  store[fromaddress] = Object.assign({}, e0, { keyuses: n + 1 });
+  try { writeStore(store); } catch (e) { privatekey = null; throw new Error(STORE_BAD); }
   const cmd = "sendfrom fromaddress:" + fromaddress
     + " address:" + to
     + " amount:" + amount

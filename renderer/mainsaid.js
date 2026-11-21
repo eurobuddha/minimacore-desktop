@@ -313,6 +313,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["VESTR_STEP", I18N.N_("collect step failed: {error}")],
 
     // ---- Web Wallet (main/webwallet.js: pinned, its exact English) ----
+    ["WW_STORE_BAD", I18N.N_("The Web Wallet's key-use record could not be read, so nothing was sent (a send now could use a one-time key twice). Check the file webwallet-keyuses.json in the app's data folder.")],
+    ["WW_KEYS_UNREAD", I18N.N_("The node's keys could not be read, so the app cannot tell whether this is the node's own wallet. Nothing was sent.")],
+    ["WW_KEYUSES_COUNT", I18N.N_("Key uses must be a whole number of 0 or more.")],
     ["WW_ADDRESS", I18N.N_("bad address")],
     ["WW_SEED", I18N.N_("Enter your seed phrase (a \" or \\ or line break can't be carried safely)")],
     ["WW_MEGAMMR", I18N.N_("Web Wallet needs a MegaMMR node")],

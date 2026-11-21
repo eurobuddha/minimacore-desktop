@@ -432,7 +432,7 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
   assert.ok(/function wwLock\(\) \{ wwSeed = null;/.test(ww), "Logout clears the seed");
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
-  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "a750d13389de14effd019f98497dfcb6b2372a4ec7b5d25d3c44a1f3e1ba5a40", "main/webwallet.js is the file of 0.19.198 (changed on purpose: 0.19.194 every command through rpc.oneCommand, a phrase with ; refused; 0.19.198 ids whole in its log; before that, of 0.19.107)");
+  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "f320f9a32eca892c2cafab4fca769416405d2c4ae3a05a2299164142c0c3c943", "main/webwallet.js is the file of 0.19.230 (changed on purpose: 0.19.194 every command through rpc.oneCommand, a phrase with ; refused; 0.19.198 ids whole in its log; 0.19.230 the key-use store fails closed, one read per send, an unreadable key list is never a foreign seed; before that, of 0.19.107)");
 });
 // 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
 // redirects, and an unread figure counted as 0.
@@ -463,7 +463,7 @@ test("Web Wallet: the public key leaves only on a click, with no redirect; Confi
   assert.ok(ww.indexOf("only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer.") < ww.indexOf('id="wwKuCheck"') && ww.indexOf("only this wallet's public key is sent to eurobuddha.com") > 0, "the privacy line is on the screen before either button");
   assert.ok(/ipcMain\.handle\("mcd:keyAudit", \(_e, publicKey\) => keyuses\.onchainUses\(publicKey, \(url\) => netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\)\)\);/.test(mainJs), "main: no redirect is followed, and a reply of at most 512 KB is read");
   assert.ok(!/KEYUSES_BASE|the ONLY user-initiated external call/.test(mainJs), "the second copy of the host and the stale comment are gone");
-  assert.ok(/if \(!info\.ack\) \{ privatekey = null; throw new Error\("Confirm this wallet's key-uses count before sending"\); \}/.test(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"), "utf8")), "and the main process still refuses a send before that confirmation (main/webwallet.js, unchanged)");
+  assert.ok(/if \(!e0\.ack\) \{ privatekey = null; throw new Error\("Confirm this wallet's key-uses count before sending"\); \}/.test(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"), "utf8")), "and the main process still refuses a send before that confirmation (main/webwallet.js; the gate reads the one store read since 0.19.230)");
 });
 test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and outlives Logout and leaving the screen; only \"I've checked\" clears it", () => {
   const line = (re) => app.match(re)[0];
