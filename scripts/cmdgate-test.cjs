@@ -487,3 +487,16 @@ test("a file parameter on another computer (\\\\host\\share or //host/share) is 
   assert.deepEqual(sent, []);
   for (const c of ["backup file:/Users/me/b.bak", "backup file:C:" + B + "b.bak", "archive action:export file:/x/a.gz"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
 });
+
+// ---- 0.18.242 (as Pandamonium Desktop 0.19.307): signfrom / postfrom paste the id of the transaction in data: into the commands they run ----
+test("a signfrom or postfrom whose transaction id carries a second command is refused through mcd:cmd; a plain one runs; the app's own commands are held to it", async () => {
+  const V = require("../main/cmdverb"), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  const blob = (id, extra = "00000000") => { const b = Buffer.from(id, "utf8"), l = Buffer.alloc(4); l.writeInt32BE(b.length); return "0x" + Buffer.concat([l, b, Buffer.from(extra, "hex")]).toString("hex").toUpperCase(); };
+  const evil = blob("x;send address:0x" + "E".repeat(64) + " amount:100"), pk = " privatekey:0x" + "1".repeat(64) + " keyuses:3";
+  const bad = ["postfrom data:" + evil, "signfrom data:" + evil + pk, "postfrom data:0x0011", "postfrom data:0x7FFFFFFF00", "postfrom data:MxG081PTR905VTUGBKY7KHKV76QVHE99BM691QNC09GP2WPCG1P0QZTHD8SWWVQ", "postfrom data:" + blob("a b"),
+    "signfrom data:" + blob("ok") + ' id:"a b"' + pk];
+  for (const c of bad) await assert.rejects(h(null, c), /must be 0x hex holding a transaction whose id is plain/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["postfrom data:" + blob("txn_1.a-b") + " mine:false", "signfrom data:" + blob("abc") + pk]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
+  assert.throws(() => require("../main/rpc").oneCommand("postfrom data:" + evil), /whose id is plain/, "a command the app builds is held to it too");
+});
