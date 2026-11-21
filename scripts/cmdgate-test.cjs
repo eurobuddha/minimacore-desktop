@@ -363,7 +363,7 @@ test("an escaped semicolon or control character smuggles no second command; mds 
     ["sendpoll action:list action:remove", /names action more than once/]];
   for (const [c, why] of refused) await assert.rejects(G.checkCommand(c, io), why, c);
   assert.deepEqual(sent, [], "none reached the node");
-  for (const c of ['send amount:1 address:0xA state:{"0":"hello"}', 'txnstate id:x port:1 value:"[hello world]"', 'send amount:1 address:0xA state:{"0":"caf\\u00e9"}', "txnoutput id:a amount:1 amount:2", "mds action:pending"]) { sent.length = 0; await G.checkCommand(c, io); assert.deepEqual(sent, [c], c); }
+  for (const c of ['send amount:1 address:0xA state:{"0":"hello"}', 'txnstate id:x port:1 value:"[hello world]"', 'send amount:1 address:0xA state:{"0":"caf\\u00e9"}', "txnoutput id:a amount:1 amount:2"]) { sent.length = 0; await G.checkCommand(c, io); assert.deepEqual(sent, [c], c); }
   await assert.rejects(G.create(SYS({ confirm: async () => { throw new Error("no question"); } })).arm('vault action:seed password:"a' + SC + 'b"', "SHOW SEED"), /escape code/, "refused before the gate asks");
   assert.throws(() => require("../main/rpc").oneCommand('send state:{"1":"' + SC + '"}'), /escape code/, "and for a command the app builds");
   for (const v of ["sphincs", "sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread"]) assert.match(V.unclear(v + ' x:"a"b'), /differently from how it is written/, v + " is a sensitive verb");
@@ -417,4 +417,15 @@ test("what the user asks for by name is gated like SHOW KEY: rpc action:listuser
   const seen = [], io = { take: () => false, running: () => true, pin: async (c) => { seen.push(c); return c; } };
   await assert.rejects(G.checkCommand("mds", io), /^Error: GATED:secret:/); assert.deepEqual(seen, []);
   const app = rd("renderer/app.js"); assert.ok(app.includes('kind === "secret" ? "This command shows passwords or a private key"'), "the Terminal's prompt names it");
+});
+
+// ---- 0.18.228 (as Pandamonium Desktop 0.19.298): what would hand the node to someone else or send its events out is not run from the Terminal ----
+test("rpc enable / password / adduser / removeuser, slavenode enable, webhooks add and mds actions are refused; rpc's status and the gated listings are not", async () => {
+  const sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  for (const c of ["rpc enable:true", "rpc enable:true password:x", "rpc enable:false", "rpc action:adduser username:u password:p mode:write", "rpc action:removeuser username:u", "rpc ssl:true", "rpc action:listusers enable:true",
+    "slavenode enable:true host:10.0.0.1:9001", "slavenode enable:false", "webhooks action:add hook:http://x.example/h", "mds action:install file:x.mds.zip", "mds action:publicmds enable:true", "mds action:permission uid:0x01 trust:write", "status;rpc enable:true"])
+    await assert.rejects(h(null, c), /open this node to someone else/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["rpc", "rpc action:listusers", "mds", "slavenode", "webhooks", "webhooks action:list", "webhooks action:clear", "network action:list"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }   // the gate stands in as passed (take: true)
+  await assert.rejects(G.checkCommand("mds action:pending", { take: () => true, running: () => true }), /open this node to someone else/, "CHANGED on purpose (0.18.228): mds runs only as its gated listing");
 });

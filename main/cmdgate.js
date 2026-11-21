@@ -186,7 +186,8 @@ function repasted(command) {
  *   ways no check here can follow);  2b. a command that moves funds or keys whose text the node reads otherwise than it looks
  *   (main/cmdverb.js unclear, 0.18.219);  2c. a value the node would paste into a second command of its own as more parameters
  *   (repasted, 0.18.220);  2d. an escaped ";" or control character (cmdverb.smuggled), mds action:accept, a multisig spend, and a
- *   repeated parameter of a command that moves funds from a key or builds commands of its own (0.18.221);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   repeated parameter of a command that moves funds from a key or builds commands of its own (0.18.221); rpc (but its status and the
+ *   gated listusers), slavenode enable:, webhooks action:add and mds actions (0.18.228);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
  *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
  *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
  */
@@ -204,6 +205,16 @@ async function checkCommand(command, io) {
     // a MiniDapp's waiting command runs with full rights past every check here; a multisig spend copies a coin's state from the chain
     // into commands the node runs itself, where a ";" starts a second command, and this app cannot read that state first (0.18.221)
     const action = V.fold(V.paramValue(part, "action") || "");
+    // what hands the node to someone else or sends its events out (0.18.228, as Pandamonium Desktop 0.19.298, read from core/minima-core:
+    // network/rpc.java enable: (no password turns RPC authentication off on every interface), password: (replaces the app's own),
+    // action:adduser / removeuser, ssl; base/slavenode.java enable: (a master node); network/webhooks.java action:add (node events to
+    // any URL); mds/mds.java every action but list): refused; rpc with no parameter (its status) and the gated rpc action:listusers /
+    // mds list are not
+    const names = V.paramNames(part);
+    if ((V.is(part, "rpc") && !(names.length === 0 || (names.length === 1 && names[0] === "action" && action === "listusers")))
+      || (V.is(part, "slavenode") && names.includes("enable")) || (V.is(part, "webhooks") && action === "add")
+      || (V.is(part, "mds") && action !== "" && action !== "list" && action !== "accept"))
+      throw new Error("This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.");
     if (V.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
     if ((V.is(part, "multisig") || V.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
   }
