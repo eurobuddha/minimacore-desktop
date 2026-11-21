@@ -964,3 +964,16 @@ test("0.19.219: the health poll does not release the held engines while the mega
   assert.equal(_timeoutFor(PHRASE), 3600000, "megammrsync action:resync: one hour"); assert.equal(_timeoutFor('"megammrsync" action : resync host:h:1'), 3600000);
   assert.equal(_timeoutFor("send amount:1 address:0x01"), 180000);
 });
+// ---- 0.19.223: the JVM's locale is pinned for both node kinds, before -jar; the argv gate still passes ----
+test("0.19.223: -Duser.language=en -Duser.country=US before -jar on both node kinds, in both key modes; the gate passes; İ folds to i", () => {
+  for (const mode of ["classic", "block"]) for (const nodeKind of ["minima", "parlons"]) {
+    freshInstall(); config.recordKeyMode(mode); config.save({ nodeKind, setupDone: true });
+    const args = manager(true).buildArgs(), jar = args.indexOf("-jar");
+    assert.ok(jar > 1 && args.indexOf("-Duser.language=en") >= 0 && args.indexOf("-Duser.language=en") < jar && args.indexOf("-Duser.country=US") < jar, mode + " / " + nodeKind + ": " + flat(args).slice(0, 120));
+    assert.equal(keymode.argvProblem(args, mode, dataDir()), "", mode + " / " + nodeKind + ": the finished argv passes the gate");
+  }
+  const V = require("../main/cmdverb"), { createNodeRunner } = require("../main/noderun");
+  assert.ok(V.is("sİgn data:0x01", "sign") && V.is("SEND amount:1", "send") && V.is("İmport", "import"));
+  assert.equal(createNodeRunner(async () => ({})).signing("sİgn data:0x01"), true, "a Turkish-folded sign is queued");
+  assert.equal(createNodeRunner(async () => ({})).signing("TXNSİGN id:a publickey:auto"), true);
+});

@@ -14,7 +14,7 @@
  * anyway, never the reverse.
  */
 const jtrim = (s) => String(s).replace(/^[\u0000- ]+|[\u0000- ]+$/g, "");   // Java String.trim()
-const fold = (s) => String(s).toUpperCase().toLowerCase();                          // Kelvin sign → k, long s → s
+const fold = (s) => String(s).replace(/\u0130/g, "i").toUpperCase().toLowerCase();   // Kelvin sign → k, long s → s; İ → i (0.19.223: a Turkish JVM folds it so)
 
 /** The commands of a text, as the node splits them (every ";", empty pieces dropped). */
 function parts(command) { return String(command == null ? "" : command).split(";").map(jtrim).filter(Boolean); }

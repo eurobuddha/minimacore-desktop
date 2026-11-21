@@ -99,6 +99,7 @@ function commandOf(pid) {
  * VALUE dropped, whether it arrives as `-flag value` or as a single `-Dkey=value`. The rpcSecret is also
  * substring-replaced because the Parlons kind folds the whole Minima flag string into one -D argument.
  */
+const JVM_LOCALE = ["-Duser.language=en", "-Duser.country=US"];
 function redactArgs(args, rpcSecret) {
   const PARAMS = require("../renderer/params.js");
   const secretFlags = new Set();
@@ -242,7 +243,9 @@ class NodeManager extends EventEmitter {
     fs.mkdirSync(dataDir, { recursive: true });
     if (this.kind() === "parlons") return this.buildParlonsArgs(cfg, dataDir);
     // App-managed base: the app depends on these, so it sets them itself (they're excluded from params).
-    const args = ["-jar", this.jarPath(),
+    // The JVM's locale is pinned (0.19.223): the node lower-cases a command's verb with the default locale, so on a Turkish
+    // system "SIGN" read as "sıgn" and "sİgn" as "sign", past every check here that reads the verb.
+    const args = [...JVM_LOCALE, "-jar", this.jarPath(),
       "-data", dataDir,
       "-basefolder", dataDir,
       "-port", String(cfg.basePort),
@@ -315,6 +318,7 @@ class NodeManager extends EventEmitter {
       flags.push("-keetssidecar", q(sidecar), "-keetsnode", q(process.execPath));
     }
     const args = [
+      ...JVM_LOCALE,   // as the minima kind (0.19.223)
       "-Xmx" + heap + "m",
       "-Dparlons.node.data=" + dataDir,
       "-Dparlons.node.port=" + cfg.basePort,
