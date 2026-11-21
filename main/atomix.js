@@ -365,7 +365,7 @@ function computeQuote(A, SP, sell, amountStr, slipPct, b, bals) {
     // the balance. Same guard as the donor (atomix-mds app.js onReview).
     const haveUsdt = Number(bals.usdt);
     if (!isFinite(haveUsdt)) return { err: "Can’t read your USDT balance right now — hit Refresh on the Wallet tab, then try again.", meta };
-    if (plan.totalUsdt > haveUsdt + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + " USDT.", meta };
+    if (plan.totalUsdt > haveUsdt + 1e-9) return { err: "Need " + truncDp(plan.totalUsdt, 6) + " USDT or more for that — you have " + bals.usdt + " USDT.", meta };
     model = { mode: "sweep", sell: false, plan };
   }
   return { model, meta };
@@ -601,7 +601,7 @@ async function marketHistory() {
 async function wallet() {
   const A = AX();
   const b = await balances();
-  return jclone({ addr: vmCtx().eth.address, shortAddr: A.wallet.shortAddr(vmCtx().eth.address), bals: b,
+  return jclone({ addr: vmCtx().eth.address, shortAddr: vmCtx().eth.address, bals: b,
     currency: A.trading.active().key, label: A.trading.active().coinLabel });
 }
 function exportKey() { AX(); return vmCtx().eth.privKey; }   // renderer shows the 2-step native warning flow
@@ -826,14 +826,18 @@ function ethTokensLoad() {
   ethTokensSave();
   return ethTokenList;
 }
-function ethTokensSave() { try { fs.writeFileSync(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || []), "utf8"); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
+// a whole new file or the old one, never half of one (0.18.211)
+function writeAtomic(file, text) { const tmp = file + ".tmp"; fs.writeFileSync(tmp, text, "utf8"); fs.renameSync(tmp, file); }
+function ethTokensSave() { try { writeAtomic(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || [])); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
 /** sanitise a contract-supplied symbol(): printable, trimmed, capped — it is attacker-controlled (any contract). */
+/** A figure cut to dp decimals, never rounded (0.18.211: toFixed rounded the amount a swap needs). */
+function truncDp(x, dp) { const t = String(x); if (/e/i.test(t)) return Number(x).toFixed(dp); const [i, f = ""] = t.split("."); return dp > 0 ? i + "." + (f + "0".repeat(dp)).slice(0, dp) : i; }
 function ethCleanSymbol(sym, addr) {
   // printable-only, and ALSO strip HTML-dangerous chars server-side (defense-in-depth: the renderer esc()s every
   // sink, but stripping < > " ' ` & \ here means a single future missed esc can't regress into stored injection —
   // and no legitimate ERC20 symbol contains these).
   let s = String(sym == null ? "" : sym).replace(/[^\x20-\x7e]/g, "").replace(/[<>"'`&\\]/g, "").trim();
-  if (!s) s = "0x" + lc(addr).replace(/^0x/, "").slice(0, 4).toUpperCase();
+  if (!s) return lc(addr);   // no symbol: the whole contract address, never a few characters of it (0.18.211)
   return s.slice(0, 12);
 }
 function hexToAscii(h) { let s = ""; for (let i = 0; i + 1 < h.length; i += 2) { const c = parseInt(h.slice(i, i + 2), 16); if (c) s += String.fromCharCode(c); } return s; }
@@ -893,7 +897,7 @@ async function ethBalances() {
   const addr = vmCtx().eth.address;
   await ensureRpcOverride();
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, addr);
-  const out = { address: addr, shortAddr: A.wallet.shortAddr(addr), eth: "0", ethWei: "0", tokens: [], at: Date.now() };
+  const out = { address: addr, shortAddr: addr, eth: "0", ethWei: "0", tokens: [], at: Date.now() };
   await p(cb => ctx.RPC.getBalance(addr, cb)).then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); }).catch(() => {});
   for (const t of ethTokensLoad()) {
     let raw = "0", bal = "0";
@@ -904,7 +908,7 @@ async function ethBalances() {
 }
 async function ethWallet() {
   const A = AX();
-  return jclone({ address: vmCtx().eth.address, shortAddr: A.wallet.shortAddr(vmCtx().eth.address),
+  return jclone({ address: vmCtx().eth.address, shortAddr: vmCtx().eth.address,
     rpc: ctx.RPC.url, tiers: ["low", "med", "high"] });
 }
 
@@ -1123,7 +1127,7 @@ async function ethSetRpc(url) {
   const v = ethValidateRpc(url);
   if (v.err) return { err: v.err };
   ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host);
-  try { fs.writeFileSync(ETH_RPC_FILE(), JSON.stringify(ethRpcOverride), "utf8"); } catch (e) {}
+  try { writeAtomic(ETH_RPC_FILE(), JSON.stringify(ethRpcOverride)); } catch (e) {}
   try { ctx.RPC.setUrl(v.url); ethRpcAppliedUrl = v.url; } catch (e) {}
   emitter.emit("update");
   return { ok: true, rpc: v.url };

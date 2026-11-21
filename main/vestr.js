@@ -148,7 +148,7 @@ async function tokens() {
   await init();
   const r = await runner("balance").catch(() => null);
   const rows = (r && Array.isArray(r.response)) ? r.response : [];
-  return rows.map(b => ({ tokenid: b.tokenid, name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid).slice(0, 10)), sendable: String(b.sendable) }));
+  return rows.map(b => ({ tokenid: b.tokenid, name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid)), sendable: String(b.sendable) }));
 }
 async function myAddress() { const r = await runner("getaddress").catch(() => null); return r && r.response && (r.response.miniaddress || r.response.address) || ""; }
 

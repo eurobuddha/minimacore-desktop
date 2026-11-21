@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.211] — whole identifiers, no reply body in errors, whole ETH files, no rounding
+
+- An RPC reply that is not JSON was reported with its first 120 characters (a reply can carry a seed or a key); the error now gives only the HTTP status and the length. The ETH wallet showed a shortened address (`shortAddr`) and a token with no symbol a few characters of its contract; both now show the whole address. A token with no name in the Web Wallet and Vestr lists shows its whole token id. `ethtokens.json` and `ethrpc.json` are written to a temporary file and renamed. The amount a swap needs ("Need ≈ …") was rounded by `toFixed`; it is now cut to 6 decimals. Test: `scripts/rpc-test.cjs`.
+
 ## [0.18.210] — AtomiX: https-only network list, swap records kept, database files checked
 
 - The AtomiX engine's outbound list checked only the host name, so a plain `http://` url to a listed ETH RPC host went out in clear text (anyone on the path could answer for the chain); it now requires https and no credentials in the url, and the engine's GETs follow no redirect (the list was checked on the first url only). A wallet replacement deleted `atomix.sqlite`, with the secrets and coin ids a claim or refund of a swap still in flight needs; it is now moved aside (`atomix.sqlite.replaced-<time>`) and logged. The SQLite shim (AtomiX and PandaPools, Desktop-only, not in the vendored manifest) opened an empty file as a new empty database, so the records read as none and the next save overwrote them; an empty or non-SQLite file is now refused and left as it is, and every save is synced to disk before the rename. Tests: `scripts/atomix-unit.js`.

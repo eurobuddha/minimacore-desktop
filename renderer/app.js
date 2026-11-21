@@ -2566,7 +2566,7 @@ async function renderEthWallet() {
       <button class="btn btn--sm btn--outline ew-menu" data-ewmenu="${esc(t.address)}" title="Token options">⋯</button>
     </div>`).join("");
   host.innerHTML = `${title}
-    <div class="card ew-addr" id="ewAddrCard"><div class="card__title">Your address · tap to receive</div><div class="mono ew-addr__v">${esc(b.shortAddr)}</div></div>
+    <div class="card ew-addr" id="ewAddrCard"><div class="card__title">Your address · tap to receive</div><div class="mono ew-addr__v">${esc(b.address)}</div></div>
     <div class="card ew-asset" id="ewEthCard">${ewEthIcon()}<div class="ew-asset__main"><div class="card__title">Ethereum</div><div class="ew-val mono" style="color:var(--accent)">${esc(TOK.tidyAmount(b.eth))} ETH</div></div></div>
     ${tokenCards}
     <div class="seg ew-actions" style="flex-wrap:wrap;margin-top:12px">

@@ -191,7 +191,7 @@ async function read(address, nodeSeed) {
   const rows = (r && Array.isArray(r.response)) ? r.response : [];
   return rows.map(b => ({
     tokenid: b.tokenid,
-    name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid).slice(0, 12)),
+    name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid)),   // the whole token id when it has no name (0.18.211)
     confirmed: String(b.confirmed != null ? b.confirmed : "0"),
     sendable: String(b.sendable != null ? b.sendable : "0"),
     unconfirmed: String(b.unconfirmed != null ? b.unconfirmed : "0"),
