@@ -386,7 +386,7 @@ const mcdCmd = (reply) => {   // the real mcd:cmd handler from main.js, its node
 test("secrets stay hidden: privatekey: is masked, the command is shown as the node reads it, and the node's reply is scrubbed before the window gets it", async () => {
   assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
   assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:•••", "shown as the node reads it, which drops 'lamp'");
-  assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5", "a piece the node refuses is hidden word by word");
+  assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), 'megammrsync action:resync host:h:9001 phrase:"••• (4 words)" keyuses:5', "a piece the node refuses is hidden too, said as a count (CHANGED on purpose, 0.18.246)");
   assert.equal(G.masked("vault phrase: action:restorekeys"), 'vault phrase:"" action:restorekeys', "an empty secret never hides the action");
   assert.equal(G.masked("status;vault password:x action:passwordunlock"), "status ; vault password:••• action:passwordunlock");
   for (const c of ["vault phrase: action:restorekeys", "vault password: action:passwordlock", 'vault action:passwordunlock password:""'])
@@ -532,4 +532,15 @@ test("rawfrom's input script and a multisig id are not pasted and pass; a multis
     "multisig action:view file:C:" + B + "txns" + B + "a.txn", "multisigread action:view file:/Users/me/a.txn"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
   for (const c of ['multisig action:view file:"a b.txn"', "multisig action:sign file:x:y privatekey:0x01", 'rawfrom inputs:[{"coinid":"0x01 burn:5"}] outputs:[]'])
     await assert.rejects(h(null, c), /builds further commands/, c);
+});
+
+// ---- 0.18.246 (as Pandamonium Desktop 0.19.311): a text the node would refuse is masked with the word count too: no surface shows one ••• a word ----
+test("masked says several hidden words as a count also for a text the node would refuse (a word with no ':'); the reply scrub too", () => {
+  const phr24 = Array.from({ length: 24 }, (_, i) => "word" + i).join(" ");
+  const m = G.masked("megammrsync action:resync host:megammr.example:9001 phrase:" + phr24 + " keyuses:1000");
+  assert.equal(m, 'megammrsync action:resync host:megammr.example:9001 phrase:"••• (24 words)" keyuses:1000'); assert.ok(!/••• •••/.test(m));
+  assert.equal(G.masked("vault seed : 0xAB extra words action:x"), 'vault seed : "••• (3 words)" action:x', "a name spaced from its ':' too");
+  assert.equal(G.masked("vault action:restorekeys phrase:one"), "vault action:restorekeys phrase:•••");
+  const typed = "vault action:restorekeys phrase:spray lamp keyz:1", r = G.scrubReply({ command: typed, status: false }, typed);
+  assert.equal(r.command, 'vault action:restorekeys phrase:"••• (2 words)" keyz:1', "the reply scrub: the scrubbed word counted in its run");
 });
