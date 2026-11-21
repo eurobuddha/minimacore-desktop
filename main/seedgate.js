@@ -68,8 +68,9 @@ function masked(c) {
   return V.parts(String(c).replace(CTRL, " ")).map(p => {
     const r = V.read(p);
     if (r.error || !r.verb) return maskedWords(p);
-    // a secret of several words shows one ••• a word (0.19.299): the user sees that password:"pw burn:500" is more than a password
-    const hide = (v) => { const w = v.split(/\s+/).filter(Boolean); return w.length > 1 ? '"' + w.map(() => "•••").join(" ") + '"' : "•••"; };
+    // a secret of several words says how many (0.19.299; 0.19.306 as the released 0.18.230): the user sees that password:"pw burn:500"
+    // is more than a password. A count, not one ••• a word: 24 of those made a 24-word restore longer than the Touch ID prompt shows
+    const hide = (v) => { const w = v.split(/\s+/).filter(Boolean); return w.length > 1 ? '"••• (' + w.length + ' words)"' : "•••"; };
     return [r.verb].concat(r.params.map(([n, v]) => n + ":" + (SECRET_NAMES.includes(V.fold(n)) && v !== "" ? hide(v) : show(v)))).join(" ");
   }).join(" ; ");
 }

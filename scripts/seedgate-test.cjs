@@ -181,7 +181,7 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
     assert.deepEqual([sys.asked, sys.boxes], [[], []], "nothing was asked"); assert.notEqual(G.refusal(hidden, g.take), "", "and it does not run");
     const longOne = "keys action:genkey keyuses:" + "1".repeat(120) + ' phrase:"a b c d e f g h i j k l"';
     if (mac) await assert.rejects(g.open(longOne, "SHOW KEY"), /longer than the Touch ID prompt can show in full \(120 characters, with the secret values hidden\)/);
-    else { await g.open(longOne, "SHOW KEY"); assert.ok(sys.boxes[0].includes("1".repeat(120)) && sys.boxes[0].includes('phrase:"' + Array(12).fill("•••").join(" ") + '"') && !sys.boxes[0].includes("a b c"), "a box shows it whole, the phrase hidden"); sys.boxes.length = 0; g.take(""); }
+    else { await g.open(longOne, "SHOW KEY"); assert.ok(sys.boxes[0].includes("1".repeat(120)) && sys.boxes[0].includes('phrase:"••• (12 words)"') && !sys.boxes[0].includes("a b c"), "a box shows it whole, the phrase hidden"); sys.boxes.length = 0; g.take(""); }
     for (const dup of ["vault action:seed action:wipekeys", 'keys action:genkey "action":list', "seedrandom modifier:a modifier : b"]) await assert.rejects(g.open(dup, dup.startsWith("vault") ? "SHOW SEED" : "SHOW KEY"), /more than once/, dup);
     const c = "keys   action:genkey\u202e  phrase:x";
     await g.open(c, "SHOW KEY");
@@ -203,11 +203,11 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
   const cs = os({ can: false }), cg = G.create(cs);
   await assert.rejects(cg.open("vault action:restorekeys phrase:\"a b\"", "SHOW SEED"), /Type CHANGE KEYS exactly/);
   await cg.open("vault action:restorekeys phrase:\"a b\"", "CHANGE KEYS");
-  assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:\"••• •••\"");   // one ••• a word (0.19.299)
+  assert.equal(cs.boxes[0], "This changes this wallet's keys or their lock. This Terminal command will run once:\n\nvault action:restorekeys phrase:\"••• (2 words)\"");   // its word count (0.19.306)
   // 0.19.266: the node reads this as ONE seed value (0xABaction:wipekeys) and no action (0.19.252 showed an action the node never reads): hidden whole
   assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
   assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
-  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• •••" seed:••• confirm:•••');   // one ••• a word (0.19.299)
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• (2 words)" seed:••• confirm:•••');   // its word count (0.19.306)
 });
 
 test("syscheck: refused (not phrase only) once Touch ID worked here and cannot be asked; the marker is written only after a prompt succeeded and names this Mac", async () => {
@@ -280,7 +280,7 @@ test("0.19.237: mcd:cmdKind says what a text is with its secret values hidden; t
   assert.deepEqual(k("balance"), { kind: "", chain: false, write: false, shown: "balance", secretValues: false });
   assert.equal(k("send amount:1 address:0xAA").write, true);
   const r = k('megammrsync action:resync host:h:9001 phrase:"ONE TWO THREE" keyuses:9');
-  assert.equal(r.shown, 'megammrsync action:resync host:h:9001 phrase:"••• ••• •••" keyuses:9');   // one ••• a word (0.19.299) assert.equal(r.secretValues, true);
+  assert.equal(r.shown, 'megammrsync action:resync host:h:9001 phrase:"••• (3 words)" keyuses:9'); assert.equal(r.secretValues, true);   // its word count (0.19.306)
   assert.equal(k("vault action:passwordunlock password:hunter2").shown, "vault action:passwordunlock password:•••");
   assert.deepEqual([k("vault").kind, k("status;vault").chain], ["seed", true]);
 });
@@ -347,7 +347,7 @@ test("secrets stay hidden: privatekey: is masked, so are the words after a hidde
   assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
   assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:•••", "CHANGED on purpose (0.19.293): shown as the node reads it, which drops 'lamp'");
   assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5");
-  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• •••" seed:••• confirm:•••', "a spaced name still ends it");
+  assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• (2 words)" seed:••• confirm:•••', "a spaced name still ends it");
   const main = SRC("main/main.js"), kh = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async')), handlers = {};
   new Function("ipcMain", "seedgate", "rpc", kh)({ handle: (n, f) => { handlers[n] = f; } }, G, require("../main/rpc.js"));
   const k = handlers["mcd:cmdKind"](null, "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5");
@@ -430,7 +430,7 @@ test("the node's reply is scrubbed of the typed command's secrets (its 'command'
 test("masked shows the command name by name as the node reads it, never hiding the action after an empty secret; a gated command with an empty secret is refused", async () => {
   assert.equal(G.masked("vault phrase: action:restorekeys"), 'vault phrase:"" action:restorekeys');
   assert.equal(G.masked("vault password: action:passwordlock"), 'vault password:"" action:passwordlock');
-  assert.equal(G.masked('vault action:restorekeys phrase:"spray lamp a b" keyuses:5'), 'vault action:restorekeys phrase:"••• ••• ••• •••" keyuses:5');
+  assert.equal(G.masked('vault action:restorekeys phrase:"spray lamp a b" keyuses:5'), 'vault action:restorekeys phrase:"••• (4 words)" keyuses:5');
   assert.equal(G.masked("status;vault password:x action:passwordunlock"), "status ; vault password:••• action:passwordunlock");
   const g = G.create({ check: async () => { throw new Error("no question"); } });
   for (const c of ["vault phrase: action:restorekeys", "vault password: action:passwordlock", 'vault action:passwordunlock password:""'])
@@ -461,7 +461,7 @@ test("a multisig key carrying JSON, a multi-word password, a raw output with a s
   assert.match(V.builtProblem("multisig action:create amount:1 required:1 publickeys:" + JSON.stringify([user]) + " root:0x" + "G".repeat(64)), /64 hexadecimal digits/);
   const pw = "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att]) + ' password:"pw burn:500"';
   assert.match(V.builtProblem(pw), /builds further commands from its values/);
-  assert.match(G.masked(pw), /password:"••• •••"/, "the echo shows the password is more than one word");
+  assert.match(G.masked(pw), /password:"••• \(2 words\)"/, "the echo shows the password is more than one word");
   for (const c of ['rawfrom inputs:[{"coinid":"0x01"}] outputs:[{"address":"0x02 burn:5","amount":"1","tokenid":"0x00"}]', 'sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:1 state:{"1":"a\\\\\\" b"}',
     'sendfrom fromaddress:0x01 address:0x02 amount:1 tokenid:"0x00 burn:9" privatekey:0x03 keyuses:1', 'sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:1 script:RETURN"x'])
     assert.match(V.builtProblem(c), /builds further commands/, c);
@@ -505,4 +505,17 @@ test("a file parameter on another computer (\\\\host\\share or //host/share) is 
     await assert.rejects(hs["mcd:cmd"](null, c), /A file on another computer/, c);
   assert.deepEqual(sent, []);
   for (const c of ["backup file:/Users/me/b.bak", "backup file:C:" + B + "b.bak", "archive action:export file:/x/a.gz"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+});
+
+// ---- 0.19.306: several secret words are said as a count, so a 24-word restore still fits the Touch ID prompt (as the released 0.18.230) ----
+test("a 24-word restore is armed with Touch ID: its phrase is said as a count within the prompt's 120 characters", async () => {
+  const phr24 = Array.from({ length: 24 }, (_, i) => "word" + i).join(" ");
+  const sys = os({ can: true }), g = G.create(sys);
+  await g.open('vault action:restorekeys phrase:"' + phr24 + '"', "CHANGE KEYS");
+  assert.equal(sys.asked.length, 1, "Touch ID was asked, not refused for length");
+  const why = String(sys.asked[0]); assert.ok(why.includes('vault action:restorekeys phrase:"••• (24 words)"') && why.length <= 120 && !why.includes("word0"), why);
+  const mm = G.masked('megammrsync action:resync host:megammr.example:9001 phrase:"' + phr24 + '" keyuses:1000');
+  assert.equal(mm, 'megammrsync action:resync host:megammr.example:9001 phrase:"••• (24 words)" keyuses:1000');
+  assert.ok(("show a seed phrase by running: " + mm).length <= 120, "a 24-word megammrsync restore fits the prompt too");
+  assert.equal(G.masked('vault action:passwordunlock password:"one"'), "vault action:passwordunlock password:•••", "one word stays •••");
 });
