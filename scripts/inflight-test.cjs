@@ -141,8 +141,8 @@ test("stopGuard: with work in flight a stop goes on only with main's own one-tim
   let answer = false;
   const g = stopGuard({ running: () => running, gather: async () => work, ask: async (w) => { asked.push(w.title); return answer; }, log: (l) => logs.push(l), now: () => t });
   assert.equal(await g.pass(), false, "in flight, no ack: main asks, and a no keeps the node"); assert.equal(asked.length, 1); assert.match(logs[0], /pool transaction.*keep it running/);
-  answer = true; assert.equal(await g.pass("not one of main's", "restart"), true); assert.equal(asked.length, 2, "an ack main never issued is no ack");
-  answer = false; const a = g.issue("restart"); assert.equal(await g.pass(a, "restart"), true, "the warning the window showed"); assert.equal(asked.length, 2, "no second question");
+  answer = true; assert.equal(await g.pass("not one of main's", "restart"), true); assert.equal(asked.length, 2, "an ack main never issued is no ack"); g.seen("stopped");   // each yes holds until the node stopped (0.19.316)
+  answer = false; const a = g.issue("restart"); assert.equal(await g.pass(a, "restart"), true, "the warning the window showed"); assert.equal(asked.length, 2, "no second question"); g.seen("stopped");
   assert.equal(await g.pass(a, "restart"), false, "an ack works once"); assert.equal(asked.length, 3);
   // 0.19.287: an ack is for the one action its warning was asked for
   const k = g.issue("stop"); assert.equal(await g.pass(k, "restart"), false, "a Shutdown ack opens no restart"); assert.equal(await g.pass(k, "stop"), false, "and is spent by that try");
@@ -250,9 +250,25 @@ test("stopGuard single-flight: a second stop asked while the first one's questio
   const g = stopGuard({ running: () => true, gather: async () => work, ask: (w) => new Promise(r => { asked.push(w.title); answer = r; }), log() {}, now: () => NOW });
   const first = g.pass(), stops = [];
   await new Promise(r => setImmediate(r));
-  await assert.rejects(g.pass(), /already being decided/, "the second request while the question is open");
+  await assert.rejects(g.pass(), /already being stopped or restarted/, "the second request while the question is open");
   assert.equal(asked.length, 1, "one question");
   answer(true); if (await first) stops.push(1);
   assert.deepEqual(stops, [1], "one stop");
-  answer = null; const again = g.pass(); await new Promise(r => setImmediate(r)); answer(false); assert.equal(await again, false, "and the next request is asked again afterwards");
+  g.seen("stopped"); answer = null; const again = g.pass();   // once the node has stopped (0.19.316) await new Promise(r => setImmediate(r)); answer(false); assert.equal(await again, false, "and the next request is asked again afterwards");
+});
+
+// ---- 0.19.316: after a yes the guard holds until the node has stopped (at most 30 s), as the 0.18 branch: one stop, not two ----
+test("stopGuard: a request between a yes and the node's stop is refused; the node's status, or 30 s, ends the hold", async () => {
+  const { stopGuard } = require("../main/inflight.js");
+  let t = NOW, running = true; const asked = [];
+  const g = stopGuard({ running: () => running, gather: async () => With({ pools: [{ type: "ADD", ts: NOW - 60000 }] }), ask: async (w) => { asked.push(w.title); return true; }, log() {}, now: () => t });
+  assert.equal(await g.pass(), true, "the first: asked, yes");
+  await assert.rejects(g.pass(), /already being stopped or restarted/, "the second, before the node has stopped");
+  assert.equal(asked.length, 1, "one question, one stop");
+  g.seen("running"); await assert.rejects(g.pass(), /already being stopped/, "a running status does not end the hold");
+  g.seen("stopping"); assert.equal(await g.pass(), true, "the node's stop ends it"); assert.equal(asked.length, 2);
+  t += 30001; assert.equal(await g.pass(), true, "and 30 s end it when no status comes");
+  running = false; t += 1; assert.equal(await g.pass(), true, "a node not running is never held");
+  const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(/node\.on\("status", \(s\) => stopGuard\.seen\(s && s\.state\)\);/.test(main), "main gives the guard the node's status");
 });

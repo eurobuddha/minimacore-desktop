@@ -403,6 +403,7 @@ const stopGuard = inflight.stopGuard({ running: () => node.state === "running", 
     return r.response === 0;
   } });
 async function mayStop(ack, action) { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); }
+node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happened ends the guard's hold (0.19.316)
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one
 const freeze = require("./freeze").create({

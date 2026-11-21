@@ -5348,7 +5348,7 @@
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "Файл на іншому комп’ютері (шлях, що починається з \\\\ або //) не використовується: вузол підключився б до нього. Спершу скопіюйте файл на цей комп’ютер. Нічого не запущено.",
   "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.": "Ця команда містить символи поза простим ASCII і задовга для командного рядка вузла (понад 65,536 символів після кодування). Скоротіть її або запишіть ці символи простим ASCII. Нічого не надіслано.",
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.": "Значення data: цієї команди має бути шістнадцятковим 0x із транзакцією, id якої складається лише з літер, цифр, \".\", \"-\" або \"_\": вузол вставляє цей id у команди, які виконує сам. Нічого не запущено.",
-  "A stop of the node is already being decided. Nothing more was stopped.": "Зупинку вузла вже вирішують. Більше нічого не зупинено."
+  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.": "Вузол уже зупиняється або перезапускається, або питання про нього ще відкрите. Більше нічого не зроблено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5466,5 +5466,5 @@
   "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.",
   "This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.",
   "The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.",
-  "A stop of the node is already being decided. Nothing more was stopped."
+  "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done."
 ] });

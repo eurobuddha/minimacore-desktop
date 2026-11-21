@@ -123,18 +123,21 @@ async function decideQuit(d) {
  * t() → the translator of the app's language, now(), waitMs }. pass(ack, action) → true: go on.
  */
 const ACK_MS = 120000;
-const STOP_BUSY = "A stop of the node is already being decided. Nothing more was stopped.";
+const STOP_BUSY = "The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.", HOLD_MS = 30000;   // the words and the hold of the 0.18 branch (0.18.253)
 function stopGuard(d) {
-  const acks = new Map(), now = d.now || Date.now; let pending = false;
+  const acks = new Map(), now = d.now || Date.now; let pending = false, wentAt = 0;
   const guard = {
     // an ack is for ONE action, named when the warning was asked for (0.19.287: restart, stop, kind): it opens no other stop
     issue(action) { const a = require("crypto").randomBytes(16).toString("hex"); acks.set(a, { until: now() + ACK_MS, action: String(action || "") }); return a; },
     // one at a time (0.19.313): a second stop asked while one is being decided (its check or its question still open) is refused,
-    // so two requests at once show one question and give one stop
+    // so two requests at once show one question and give one stop; and after a yes until the node has stopped (0.19.316, as
+    // 0.18.253: at most 30 s, ended by the node's status through seen()), so one that comes between the yes and the stop is refused too
+    seen(state) { if (state !== "running") wentAt = 0; },
     async pass(ack, action) {
-      if (pending) throw new Error(STOP_BUSY);
+      if (!d.running()) return true;
+      if (pending || (wentAt && now() - wentAt < HOLD_MS)) throw new Error(STOP_BUSY);
       pending = true;
-      try { return await decide(ack, action); } finally { pending = false; }
+      try { const go = await decide(ack, action); if (go && d.running()) wentAt = now(); return go; } finally { pending = false; }
     }
   };
   async function decide(ack, action) {
