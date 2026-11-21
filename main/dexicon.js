@@ -106,6 +106,7 @@ const DEX_VERBS = new Set(["balance", "block", "checkmode", "coins", "getaddress
 // THE FRAME'S TRANSACTIONS (0.18.120, main/dexicon-signgate.js): the exact commands the page's two builders issue
 // (lib/fill.js buildSigned, lib/maker.js relock). Any other spelling of a txn command is refused.
 const TXID = "([A-Za-z0-9]{3,40})", HEX = "0x[0-9A-Fa-f]{64}";
+const PAGE_TX = "pgx";   // the frame's transactions at the node: this prefix + the page's own id (0.19.228); nothing else in the app uses it
 const FRAME_TXN = {
   txncreate: new RegExp("^txncreate id:" + TXID + "$"),
   txninput: new RegExp("^txninput id:" + TXID + " coinid:" + HEX + " scriptmmr:true$"),
@@ -517,21 +518,30 @@ function makeHost(opts = {}) {
     const c = dexCommand(command);
     if (/^checkmode\b/.test(c)) return Promise.resolve({ status: true, response: { writemode: true, dblocked: false } });
     const signal = abort.signal;   // the page's take, queued behind another signer when the engine is dropped, is not sent either
-    const send = () => Promise.resolve().then(() => runner(c, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
+    let fwd = c;   // what reaches the node: a transaction of the frame's goes under its own page-only id (below)
+    const send = () => Promise.resolve().then(() => runner(fwd, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
     const verb = require("./cmdverb").verbs(c)[0];   // one reading only: dexCommand refused any other
     if (!/^txn/.test(verb) || verb === "txnview") return send();   // reads, newscript; txnview decodes hex and touches no transaction
     // ---- a transaction of the frame's (header of main/dexicon-signgate.js) ----
     const refuse = (why) => { log("REFUSED from the Dexicon page: `" + verb + "` — " + why); return Promise.resolve({ status: false, error: "Refused by the app's signing check: " + why + ". Nothing was signed." }); };
     const m = FRAME_TXN[verb] && FRAME_TXN[verb].exec(c.trim());
     if (!m) return refuse("not one of the transaction commands the page builds a trade with");
-    const id = m[1], mine = epoch;
+    // 0.19.228: the frame's transaction ids live under a page-only prefix at the node (PAGE_TX + the page's id), so the page
+    // can never name a transaction of the engine, the ladder (sp…), maker (dm…, rl…), Vestr (vc…) or anyone else; and one
+    // is registered only once the node has created it (a refused duplicate id registered before, and was then usable).
+    const id = m[1], mine = epoch, nodeId = PAGE_TX + id;
+    fwd = c.trim().replace(new RegExp("^(" + verb + " id:)" + id + "(?= |$)"), "$1" + nodeId);
     const step = async () => {
       if (mine !== epoch) return { status: false, error: "this wallet was replaced: the engine is restarting" };
-      if (verb === "txncreate") { if (frameTx.has(id)) return refuse("transaction id " + id + " is already in use"); frameTx.set(id, { counted: "0" }); return send(); }
+      if (verb === "txncreate") {
+        if (frameTx.has(id)) return refuse("transaction id " + id + " is already in use");
+        const r = await send(); if (r && r.status === true && mine === epoch) frameTx.set(id, { counted: "0" });
+        return r;
+      }
       if (!frameTx.has(id)) return refuse("transaction " + id + " was not created by the page in this session");
       if (verb === "txndelete") { const r = await send(); frameTx.delete(id); return r; }
       if (verb !== "txnsign" && verb !== "txnpost") return send();
-      const v = await frameCheck(id, verb === "txnpost");
+      const v = await frameCheck(id, verb === "txnpost", nodeId);
       if (mine !== epoch) return { status: false, error: "this wallet was replaced: the engine is restarting" };
       if (!v.ok) return refuse(v.why + " (transaction " + id + ")");
       if (v.kind === "take") {   // counted once per transaction, however many keys sign it
@@ -545,11 +555,11 @@ function makeHost(opts = {}) {
     return out.catch(e => ({ status: false, error: (e && e.message) || String(e) }));
   }
   /** What the NODE holds under that id, checked by the rules of main/dexicon-signgate.js. Never throws. */
-  async function frameCheck(id, post) {
+  async function frameCheck(id, post, nodeId) {
     try {
       const F = ctx && ctx.AX && ctx.AX.fill; if (!F) return { ok: false, why: "Dexicon is still starting" };
       const signal = abort.signal;
-      const t = await runner("txnlist id:" + id, { signal });
+      const t = await runner("txnlist id:" + (nodeId || PAGE_TX + id), { signal });
       const txn = t && t.status === true && t.response && t.response.transaction;
       if (!txn) return { ok: false, why: "the node could not show the transaction (" + ((t && (t.error || t.message)) || "no reply") + ")" };
       const rec = frameTx.get(id), b = budget && Object.assign({}, budget, { left: F.d(budget.left).plus(F.d(rec ? rec.counted : "0")).toFixed() });

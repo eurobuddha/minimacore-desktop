@@ -480,7 +480,7 @@ test("M4: a take the page builds is signed only inside what the user reviewed: s
   assert.deepEqual(await r.review(true, "0.0032", "100"), { status: true });
   t = await r.take("60");
   assert.equal(t.err, null, String(t.err && t.err.message)); assert.equal(t.hex, "0xABCD");
-  assert.equal(r.signs().length, 1); assert.match(r.signs()[0], new RegExp("^txnsign id:dx\\w+ publickey:" + M.KEY + "$"), "the engine's own command, unchanged");
+  assert.equal(r.signs().length, 1); assert.match(r.signs()[0], new RegExp("^txnsign id:pgxdx\\w+ publickey:" + M.KEY + "$"), "the page's own command, under the page-only id prefix (CHANGED on purpose, 0.19.228)");
   assert.deepEqual(r.posts(), [], "a take is never posted by the page");
   // 40 are left of the review: 41 more is refused, 40 goes through, then nothing is left
   t = await r.take("41"); assert.match(t.err.message, /41 MINIMA is more than is left of the reviewed amount \(40\)/);
@@ -538,7 +538,7 @@ test("M4: the page's void (the engine's own relock) is signed and posted without
   const r = await frameRig(), F = r.ctx.AX.fill;
   const txpowid = await new Promise((res, rej) => r.ctx.AX.maker.relock(r.mds, [{ coinid: MINE2, address: M.ADDRESS, amount: "7", tokenid: "0x00" }], M.ADDRESS, (e, id) => (e ? rej(e) : res(id))));
   assert.match(txpowid, /^0x/); assert.equal(r.signs().length, 1); assert.equal(r.posts().length, 1);
-  assert.match(r.signs()[0], /^txnsign id:rl\w+ publickey:auto$/);
+  assert.match(r.signs()[0], /^txnsign id:pgxrl\w+ publickey:auto$/);   // under the page-only id prefix (CHANGED on purpose, 0.19.228)
   // an output added in the same breath as the signature waits for it: the node signs exactly what was checked
   await r.cmd("txncreate id:race1"); await r.cmd("txninput id:race1 coinid:" + MINE2 + " scriptmmr:true"); await r.cmd("txnoutput id:race1 amount:7 address:" + M.ADDRESS);
   r.node.seen.length = 0;
@@ -807,7 +807,7 @@ test("a signing command still queued when the engine is stopped or its wallet re
     // the app's arrangement: one queue under every signer (main/noderun.js), as main/rpc.js puts it under rpcCall
     const queued = (run) => { const q = createNodeRunner(async (c) => { if (SIGNING.test(c)) { atNode.push(c); if (c.includes("first")) await gate; } return run(c); }); return (c, o) => q.run(c, undefined, o); };
     const self = { coinid: "0x" + "5E".repeat(32), address: M.ADDRESS, amount: "5", tokenid: "0x00" };   // a void: the page's own coin back to its own address
-    const { host, ctx } = await boot({ wrap: queued, node: { on: (c) => (c === "txnlist id:third" ? { status: true, pending: false, response: { id: "third", transaction: { inputs: [self], outputs: [self], state: [] } } } : null) } });
+    const { host, ctx } = await boot({ wrap: queued, node: { on: (c) => (c === "txnlist id:pgxthird" ? { status: true, pending: false, response: { id: "pgxthird", transaction: { inputs: [self], outputs: [self], state: [] } } } : null) } });   // the page-only id at the node (0.19.228)
     assert.equal((await host.command({ op: "cmd", command: "txncreate id:third" })).status, true);
     const mds = ctx.AX.mds, ask = (c) => new Promise(res => mds.cmd(c, res));
     const first = ask("txnsign id:first publickey:auto");          // at the node, signing
@@ -1117,4 +1117,24 @@ test("the Dexicon bridge: a quoted or ':'-spaced forbidden parameter, a verb rea
     assert.throws(() => dexCommand(c), re, c);
   assert.equal(dexCommand('"balance"'), '"balance"', "a quoted allowed verb is the same command to the node");
   assert.equal(dexCommand("coins relevant:true"), "coins relevant:true");
+});
+
+// 0.19.228: the frame's transaction ids are page-only at the node, and registered only once the node created them
+test("the page's transactions live under a page-only id: a refused txncreate registers nothing, and the page can never name another engine's transaction", async () => {
+  let refuseCreate = true;
+  const { host, node } = await boot({ node: { on: (c) => (c === "txncreate id:pgxdup1" && refuseCreate ? { status: false, error: "txn already exists" } : null) } });
+  const cmd = (command) => host.command({ op: "cmd", command });
+  assert.equal((await cmd("txncreate id:dup1")).status, false, "the node refused it");
+  const r = await cmd("txninput id:dup1 coinid:0x" + "AB".repeat(32) + " scriptmmr:true");
+  assert.equal(r.status, false); assert.match(r.error, /was not created by the page in this session/, "a refused id is not the page's");
+  assert.match((await cmd("txndelete id:dup1")).error, /was not created by the page/);
+  // the engine's ladder split, maker relock, Vestr collect: the page's same id goes to its own prefix, never to theirs
+  for (const theirs of ["sp1k2j3", "rlabc123", "vc99zz"]) {
+    refuseCreate = false;
+    assert.equal((await cmd("txncreate id:" + theirs)).status, true);
+    await cmd("txndelete id:" + theirs);
+  }
+  const atNode = node.seen.filter(c => /^txn(create|input|delete)/.test(c));
+  assert.ok(atNode.length && atNode.every(c => / id:pgx/.test(c)), "every frame transaction at the node is pgx-prefixed: " + JSON.stringify(atNode));
+  assert.ok(!node.seen.some(c => / id:(sp1k2j3|rlabc123|vc99zz)\b/.test(c)), "never the engine's own ids");
 });
