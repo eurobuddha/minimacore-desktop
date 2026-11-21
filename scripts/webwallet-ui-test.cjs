@@ -107,3 +107,11 @@ test("Web Wallet: when the key-use service cannot be reached, the screen says so
   assert.ok(!app.includes("cannot be reached, so"), "the old sentence is gone");
   assert.ok(/if \(n == null\) \{\n\s*\/\/ 0\.18\.199[^\n]*\n\s*toast\("This key's on-chain uses could not be read/.test(app) && /if \(n == null\) \{[\s\S]{0,600}return;\n\s*\}/.test(app), "and Confirm still refuses: no way round it");
 });
+
+// ---- 0.18.272: a typed count is digits only (never floored), and the toast says the figure main kept ----
+test("Web Wallet confirm: a non-integer typed count is refused, not floored; the toast shows the figure main kept", () => {
+  const F = new Function(fnSrc("wwConfirmUses") + "\nreturn wwConfirmUses;")();
+  assert.equal(F("12.7", 9), 9, "12.7 is not taken as 12 (Confirm refuses it before this)"); assert.equal(F("12", 9), 12); assert.equal(F(" 12 ", 9), 12);
+  assert.ok(app.includes('if (!/^\\d{1,15}$/.test(String(typed).trim())) { toast("Enter the key uses as a whole number from 0 to 262143.", "err"); return; }'), "Confirm refuses a typed count that is not plain digits");
+  assert.ok(app.includes('toast("Key-uses confirmed: " + (wwKu && Number.isSafeInteger(wwKu.keyuses) ? wwKu.keyuses : n), "ok")'), "the toast says main's figure");
+});

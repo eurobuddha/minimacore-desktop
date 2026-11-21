@@ -636,8 +636,8 @@ function wwOnchainUses(resp, publicKey) {
  *  the chain's figure is unread: a count that is too low signs with a one-time key a second time. */
 function wwConfirmUses(typed, onchain) {
   if (typeof onchain !== "number" || !Number.isSafeInteger(onchain) || onchain < 0) return null;
-  const n = Math.floor(Number(typed));
-  return Math.max(Number.isSafeInteger(n) && n > 0 ? n : 0, onchain);
+  const t = String(typed == null ? "" : typed).trim(), n = /^\d{1,15}$/.test(t) ? Number(t) : 0;   // digits only, never floored (0.18.272): Confirm refuses anything else first
+  return Math.max(n, onchain);
 }
 /** A token's label (0.18.158): Minima and the one MxUSD by their ids; any other token by its own name, with what cannot be
  *  seen taken out (control, format and zero-width characters), AND its whole token id beside it, so that a name made to
@@ -799,7 +799,9 @@ function renderWwWallet(body) {
     // The chain's figure for this key, read on the user's click only (0.18.156). → a whole number, or null: not read.
     const readOnchain = async () => { let r = null; try { r = await api.keyAudit([a.publickey]); } catch (e) { r = null; } const n = wwOnchainUses(r, a.publickey); if (wwAddr === a) wwKuSuggest = n; return n; };
     el("wwKuConfirm").addEventListener("click", async () => {
-      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value; btn.disabled = true; btn.textContent = "Checking the chain…";
+      const btn = el("wwKuConfirm"), typed = el("wwKuIn").value;
+      if (!/^\d{1,15}$/.test(String(typed).trim())) { toast("Enter the key uses as a whole number from 0 to 262143.", "err"); return; }   // "12.7" was floored to 12 (0.18.272)
+      btn.disabled = true; btn.textContent = "Checking the chain…";
       const n = wwConfirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
       if (wwAddr !== a) return;                                   // locked while the chain was being read
       if (n == null) {
@@ -808,7 +810,7 @@ function renderWwWallet(body) {
         if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; }
         return;
       }
-      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed: " + n, "ok"); }
+      try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed: " + (wwKu && Number.isSafeInteger(wwKu.keyuses) ? wwKu.keyuses : n), "ok"); }   // the figure main kept (0.18.272: it can be higher than the one sent)
       catch (e) { toast(ipcMsg(e) || "Could not save key-uses", "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; } }   // main's reason (0.18.262: below the chain's figure, or the figure unread)
     });
     el("wwKuCheck").addEventListener("click", async () => {
