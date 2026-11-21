@@ -215,3 +215,24 @@ test("syscheck: refused (not phrase only) once Touch ID worked here and cannot b
   assert.ok(/const systemCheck = require\("\.\/syscheck"\)\.forElectron\(require\("electron"\), \(\) => win\);/.test(main) && !/canPromptTouchID/.test(main), "one system check for every gate");
   for (const re of [/seedgate\.revealSeed\(typed, systemCheck,/, /secretGate = seedgate\.create\(systemCheck\)/, /exportKeyGated\(typed, systemCheck\)/]) assert.ok(re.test(main), String(re));
 });
+
+// ---- 0.19.201: the first-run seed step cannot be reopened by flipping restore back to new after a restore was sent ----
+test("first run: once a wallet-replacing megammrsync was sent, mcd:firstRunSeed stays closed even if walletMode is set back to new", async () => {
+  const main = SRC("main/main.js");
+  const snippet = main.slice(main.indexOf("let firstRunOpen = null;"), main.indexOf('ipcMain.handle("mcd:cmd"'));
+  const handlers = {}, cfg = { walletDone: false, walletMode: "restore" }, sent = [];
+  const env = { ipcMain: { handle: (n, f) => { handlers[n] = f; } }, requireRunning() {}, restore: require("../main/restore.js"),
+    config: { load: () => Object.assign({}, cfg), rpcSecret: () => "" }, node: { rpcPort: () => 0, runResync: async (c) => { sent.push(c); return { status: true }; } },
+    rpc: { rpcCall: async () => ({ status: true, response: { phrase: "THE RESTORED WALLET'S WORDS" } }) } };
+  const api = new Function(...Object.keys(env), snippet + "; return { runResync };")(...Object.values(env));
+  await api.runResync('megammrsync action:resync host:h:9001 phrase:"x y" keyuses:0');
+  cfg.walletMode = "new";
+  await assert.rejects(handlers["mcd:firstRunSeed"](), /The seed is shown here only while a new wallet is being made/, "the restored wallet's seed is not shown");
+  assert.deepEqual(sent, ['megammrsync action:resync host:h:9001 phrase:"x y" keyuses:0']);
+  // a new wallet's own first run (a chain resync only) still shows its seed
+  const h2 = {}, cfg2 = { walletDone: false, walletMode: "new" };
+  const api2 = new Function(...Object.keys(env), snippet + "; return { runResync };")(env.ipcMain && { handle: (n, f) => { h2[n] = f; } }, env.requireRunning, env.restore, { load: () => Object.assign({}, cfg2), rpcSecret: () => "" }, env.node, env.rpc);
+  await api2.runResync("megammrsync action:resync host:h:9001");
+  assert.equal(await h2["mcd:firstRunSeed"](), "THE RESTORED WALLET'S WORDS", "a new wallet's first run still shows the node's seed");
+  const rest = main.slice(main.indexOf("const runResync =")); assert.ok(!/node\.runResync\(/.test(rest.slice(rest.indexOf("\n"))), "every resync of the window goes through runResync");
+});

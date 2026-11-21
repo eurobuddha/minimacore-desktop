@@ -207,6 +207,9 @@ ipcMain.handle("mcd:revealSeed", (_e, typed) => { requireRunning(); return seedg
 // First run: the seed of the wallet the node has just made is shown once, before the wallet opens. Only in that step: a
 // launch that began with the wallet already made never answers it (a window that set walletDone back does not reopen it).
 let firstRunOpen = null;
+// Once a wallet-replacing megammrsync (phrase: or file:) has been sent in this launch, the first-run seed step is closed for
+// good (0.19.201): flipping walletMode from restore back to new would otherwise show the RESTORED wallet's seed, ungated.
+const runResync = (c) => { if (restore.replacesWalletFromPhrase(c) || restore.loadsBackupFile(c)) firstRunOpen = false; return node.runResync(c); };
 ipcMain.handle("mcd:firstRunSeed", async () => {
   requireRunning();
   const c = config.load(); if (firstRunOpen === null) firstRunOpen = !c.walletDone;
@@ -234,7 +237,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const bad = restore.backupCommandProblem(command);
   if (bad) throw new Error(bad);
   // megammrsync ends by shutting the node down: run it with that expected, then start the node again (guarded).
-  if (restore.isResync(command)) return node.runResync(command);
+  if (restore.isResync(command)) return runResync(command);
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
@@ -323,7 +326,7 @@ node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandap
 node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
-  running: node.state === "running", run: (c) => node.runResync(c), work: walletWork }));
+  running: node.state === "running", run: (c) => runResync(c), work: walletWork }));
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
