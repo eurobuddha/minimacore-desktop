@@ -153,7 +153,7 @@ test("Show seed phrase (Backup & Recovery): the same checks before the node is a
 test("main: the general command channel refuses vault and seedrandom without a pass; the window reaches the seed only through the gates", () => {
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
   // changed on purpose (0.19.327): the handler's first step is seedgate.js checkCommand, which holds the same checks in the same order
-  assert.ok(h.startsWith('ipcMain.handle("mcd:cmd", async (_e, command) => {\n') && /^ipcMain[^\n]*\n(?:  \/\/[^\n]*\n)*  await seedgate\.checkCommand\(command, \{ take: secretGate\.take, running: requireRunning, walletWork, keyMode: \(\) => config\.load\(\)\.keyMode \}\);\n/.test(h), "the handler checks first, through checkCommand");
+  assert.ok(h.startsWith('ipcMain.handle("mcd:cmd", async (_e, command) => {\n') && /^ipcMain[^\n]*\n(?:  \/\/[^\n]*\n)*  await seedgate\.checkCommand\(command, \{ take: secretGate\.take, running: requireRunning, walletWork, keyMode: \(\) => config\.load\(\)\.keyMode,\n    tip: async \(\) => \{ const r = await rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), "block"\);/.test(h), "the handler checks first, through checkCommand (0.19.329: and the tip)");
   const gsrc = SRC("main/seedgate.js"), chk = gsrc.slice(gsrc.indexOf("async function checkCommand("));
   assert.ok(/^async function checkCommand\(command, io\) \{\n  const R = require\("\.\/restore"\);\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,80}?  io\.running\(\);\n[^\n]*\n  const gated = refusal\(command, io\.take\); if \(gated\) throw new Error\(gated\);/.test(chk), "control characters first, then the node, then the gate: the first things checked");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
@@ -671,28 +671,42 @@ test("multisig's file C:/dir/x.txn (a drive letter with forward slashes) runs; a
   for (const c of ["multisig action:view file:C:/dir/x:y.txn", "multisig action:view file:dir/C:/x.txn"]) await assert.rejects(hs["mcd:cmd"](null, c), /builds further commands/, c);
 });
 
-// ---- 0.19.325: keyuses: is never past a key's last one-time use for the wallet's key mode, digits only (typed, or built by a restore screen) ----
-test("keyuses: past the key mode's last use (classic 262143, block 268435454) or not digits only is refused before the node; within it runs", async () => {
+// ---- 0.19.325 / 0.19.329: keyuses: per kind of command: one signature at that use (262143), every key's uses set (250000), added (10000);
+// a block key wallet: the chain's tip plus 10000 (the classic setting bound when the tip cannot be read). Changed on purpose in 0.19.329 ----
+test("keyuses: one signature at most 262143; a figure given to every key at most 250000 (restoresync 10000); block: the tip plus 10000; digits only; refused before the node", async () => {
   const V = require("../main/cmdverb.js"), R = require("../main/restore.js");
-  assert.deepEqual(R.KEYUSES_MAX, { classic: 262143, block: 268435454 });
-  for (const v of ["262144", "300000", "4294967296", "4294967299", "262144abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem("megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:" + v, "classic"), /a whole number from 0 to 262143 for this wallet's keys/, v);
-  for (const m of ["classic", "", undefined, "mixed"]) assert.equal(R.keyusesProblem("sendfrom keyuses:262143", m), "", "262143 is the last classic use (" + m + ")");
-  assert.match(R.keyusesProblem("sendfrom keyuses:262144", ""), /0 to 262143/, "no mode recorded: the smaller bound");
-  assert.equal(R.keyusesProblem("megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:268435454", "block"), "");
-  assert.match(R.keyusesProblem("megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:268435455", "block"), /0 to 268435454/);
+  assert.deepEqual([R.KEYUSES_ONE_SIGNATURE, R.KEYUSES_SET, R.KEYUSES_ADD, R.KEYUSES_TIP_MARGIN], [262143, 250000, 10000, 10000]);
+  const MEGA = "megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:";
+  for (const v of ["250001", "262143", "300000", "4294967296", "250000abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem(MEGA + v, "classic"), /keyuses: gives every key of this wallet its uses .*\(the node's default is 1000\), at most 250000\. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again/, v);
+  for (const c of [MEGA + "250000", "vault action:restorekeys keyuses:250000", "keys action:createallkeys keyuses:250000", "restoresync file:x keyuses:10000"]) assert.equal(R.keyusesProblem(c, "classic"), "", c);
+  for (const c of ["vault action:restorekeys keyuses:250001", "keys action:createallkeys keyuses:262143", "archive action:resync host:h:1 keyuses:262143", "mysql action:resync keyuses:262143"]) assert.match(R.keyusesProblem(c, "classic"), /at most 250000/, c);
+  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "classic"), /restoresync adds it to them\): .* at most 10000\./);
+  for (const v of ["sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "txnsign"]) {
+    for (const m of ["classic", "", undefined, "mixed"]) assert.equal(R.keyusesProblem(v + " keyuses:262143", m), "", v + ": 262143 is the last use of one signature (" + m + ")");
+    assert.match(R.keyusesProblem(v + " keyuses:262144", "classic"), /a whole number from 0 to 262143/, v);
+  }
   assert.match(R.keyusesProblem("status;sendfrom KEYUSES:300000", "classic"), /0 to 262143/, "any piece, the name folded");
+  // a block key wallet: the tip plus 10000 for every kind; restoresync 10000; the tip unread: the classic setting bound
+  for (const c of [MEGA + "2410000", "sendfrom keyuses:2410000", "vault action:restorekeys keyuses:2410000"]) {
+    assert.equal(R.keyusesProblem(c, "block", 2400000), "", c);
+    assert.match(R.keyusesProblem(c.replace("2410000", "2410001"), "block", 2400000), /block key wallet raises the floor under the block number for every key: at most 2410000, the chain's tip \(block 2400000\) plus 10000/, c);
+    assert.match(R.keyusesProblem(c.replace("2410000", "268435454"), "block", 2400000), /at most 2410000/, "268435454 would exhaust every key after one signature");
+    assert.match(R.keyusesProblem(c.replace("2410000", "250001"), "block", null), /could not be read now, so at most 250000 is taken/, c);
+  }
+  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "block", 2400000), /at most 10000\./);
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
-  for (const mode of ["classic", "block"]) {
+  for (const [mode, tipReply] of [["classic", null], ["block", { status: true, response: { block: "2400000" } }], ["block", null]]) {
     const hs = {}, sent = [];
     new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
-      { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (c) => { sent.push(c); return { status: true }; }, { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+      { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (c) => { sent.push(c); return { status: true }; },
+      { rpcCall: async (p, s, c) => { if (c === "block") { if (tipReply) return tipReply; throw new Error("timed out"); } sent.push(c); return { status: true }; } },
       { rpcPort: () => 0 }, { rpcSecret: () => "", load: () => ({ keyMode: mode }) }, async (run, c) => c, async () => {}, (op) => op());
-    const big = mode === "classic" ? "300000" : "268435455";
-    for (const c of ["megammrsync action:resync host:h:1 phrase:\"a b\" anyphrase:true keyuses:" + big, "sendfrom fromaddress:0x01 address:0x02 amount:1 script:\"RETURN SIGNEDBY(0x03)\" privatekey:0x04 keyuses:" + big,
-      "consolidatefrom fromaddress:0x01 address:0x02 amount:1 script:\"RETURN SIGNEDBY(0x03)\" privatekey:0x04 keyuses:4294967296", "vault action:restorekeys phrase:\"a b\" keyuses:" + big, "keys action:createallkeys keyuses:" + big])
-      await assert.rejects(hs["mcd:cmd"](null, c), new RegExp("keyuses: is how many times a key has already been used: a whole number from 0 to " + R.KEYUSES_MAX[mode]), mode + ": " + c);
+    const set = mode === "classic" || !tipReply ? 250000 : 2410000, one = mode === "classic" ? 262143 : set;
+    for (const c of [MEGA + (set + 1), "vault action:restorekeys phrase:\"a b\" keyuses:" + (set + 1), "keys action:createallkeys keyuses:" + (set + 1),
+      "sendfrom fromaddress:0x01 address:0x02 amount:1 script:\"RETURN SIGNEDBY(0x03)\" privatekey:0x04 keyuses:" + (one + 1), "consolidatefrom fromaddress:0x01 address:0x02 amount:1 script:\"RETURN SIGNEDBY(0x03)\" privatekey:0x04 keyuses:4294967296"])
+      await assert.rejects(hs["mcd:cmd"](null, c), /^Error: keyuses: /, mode + ": " + c);
     assert.deepEqual(sent, [], mode + ": nothing reached the node");
-    const ok = "megammrsync action:resync host:h:1 phrase:\"a b\" anyphrase:true keyuses:" + (mode === "classic" ? "262143" : "300000");
+    const ok = MEGA.replace('phrase:"a b"', 'phrase:"a b" anyphrase:true') + set;
     await hs["mcd:cmd"](null, ok); assert.deepEqual(sent, [ok], mode + ": within the bound it runs");
   }
 });
@@ -723,13 +737,14 @@ test("a quit or import whose connection is cut keeps the stop guard's hold; the 
 // ---- 0.19.327 (the released 0.18.201): every check of mcd:cmd in one function, seedgate.checkCommand, in one order ----
 test("checkCommand holds every Terminal check in one order: the first refusal is the one said; the node, the gate and open work are asked in that order and only when reached", async () => {
   const asked = [], io = (o = {}) => ({ running: () => { asked.push("running"); if (o.down) throw new Error("node not running"); }, take: (c) => { asked.push("take"); return !!o.pass; },
-    walletWork: async () => { asked.push("work"); return o.work || []; }, keyMode: () => { asked.push("mode"); return o.mode || "classic"; } });
+    walletWork: async () => { asked.push("work"); return o.work || []; }, keyMode: () => { asked.push("mode"); return o.mode || "classic"; }, tip: async () => { asked.push("tip"); return 2400000; } });
   const said = async (c, o) => { asked.length = 0; try { await G.checkCommand(c, io(o)); return "ok"; } catch (e) { return e.message; } };
   assert.equal(await said(""), "empty command"); assert.equal(await said(null), "empty command"); assert.deepEqual(asked, []);
   assert.match(await said("send\u0001 amount:1 amount:2"), /control character/, "the control character before the repeated amount");
   assert.match(await said("send amount:1 amount:2 file://h/s keyuses:999999999"), /This send names amount more than once/, "the per-piece refusal before keyuses:");
   assert.match(await said("sendfrom keyuses:262144 privatekey:0x01"), /0 to 262143/); assert.deepEqual(asked, ["mode"], "keyuses: reads the key mode, nothing else yet");
-  assert.match(await said("sendfrom keyuses:262144 privatekey:0x01", { mode: "block" }), /^ok$|node/, "block: within its bound");
+  assert.equal(await said("sendfrom keyuses:262144 privatekey:0x01", { mode: "block" }), "ok", "block: within the tip plus 10000 (0.19.329: the test no longer matches a refusal)"); assert.deepEqual(asked, ["mode", "tip", "running"], "the tip is read in block mode for a keyuses:");
+  assert.match(await said("sendfrom keyuses:2410001 privatekey:0x01", { mode: "block" }), /at most 2410000/);
   assert.match(await said("vault", { down: true }), /node not running/); assert.deepEqual(asked, ["mode", "running"], "the node before the gate");
   assert.match(await said("vault"), /Type SHOW SEED/); assert.deepEqual(asked, ["mode", "running", "take"]);
   assert.equal(await said("vault", { pass: true }), "ok");

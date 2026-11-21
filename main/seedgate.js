@@ -189,7 +189,8 @@ async function revealSeed(typed, sys, run) {
  *   re-pasted values of 0.19.281);  9. the node running (io.running() throws if not);  10. the secret-command gate (refusal, io.take);
  *   11. a backup file (restore.loadsBackupFile);  12. a wallet replaced from a phrase while work that needs the old keys is open
  *   (io.walletWork());  13. restore.backupCommandProblem.
- * io = { take, running, walletWork, keyMode } (main.js passes secretGate.take, requireRunning, walletWork and the recorded key mode).
+ * io = { take, running, walletWork, keyMode, tip } (main.js passes secretGate.take, requireRunning, walletWork, the recorded key mode and the
+ * chain's tip read from the node, asked only in block mode for a command naming keyuses:).
  * Throws the reason; returns nothing. The stop guard, the beacon-dust pin and the run stay in main.js, where the node is driven.
  */
 async function checkCommand(command, io) {
@@ -236,7 +237,9 @@ async function checkCommand(command, io) {
   // keyuses: past a key's last one-time use for this wallet's key mode, digits only (0.19.325, main/restore.js keyusesProblem): typed, or
   // built by the restore screens (setup restore, Backup & Recovery's rebuild), which all reach the node through here
   let mode = ""; try { mode = io.keyMode(); } catch (e) { mode = ""; }
-  const kuBad = R.keyusesProblem(command, mode); if (kuBad) throw new Error(kuBad);
+  // a block key wallet's bound is the chain's tip plus a margin (0.19.329): read from the node only when a keyuses: is named
+  let tip = null; if (mode === "block" && R.namesKeyuses(command)) { try { tip = await io.tip(); } catch (e) { tip = null; } }
+  const kuBad = R.keyusesProblem(command, mode, tip); if (kuBad) throw new Error(kuBad);
   // archive / mysql / reset with a phrase or a backup, vault action:resetkeys: the keys change with no engine held and no key-mode check (0.19.218)
   if (R.replacesKeysElsewhere(command)) throw new Error("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.");
   io.running();

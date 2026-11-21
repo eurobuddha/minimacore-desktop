@@ -7,7 +7,7 @@ const restore = require("../main/restore.js");
 const ROOT = path.join(__dirname, "..");
 // The checks of mcd:cmd live in main/seedgate.js checkCommand since 0.19.327 (the released 0.18.201); main.js's handler calls it first.
 const CHECKS = () => { const g = fs.readFileSync(path.join(ROOT, "main", "seedgate.js"), "utf8"), a = g.indexOf("async function checkCommand("); return g.slice(a, g.indexOf("\n}\n", a)); };
-const CALLS_CHECKS = "await seedgate.checkCommand(command, { take: secretGate.take, running: requireRunning, walletWork, keyMode: () => config.load().keyMode });";
+const CALLS_CHECKS = "await seedgate.checkCommand(command, { take: secretGate.take, running: requireRunning, walletWork, keyMode: () => config.load().keyMode,";   // 0.19.329: and tip
 
 const H = "megammr.example:9001";
 function deps(over) { const sent = []; return Object.assign({ keyMode: "classic", supported: false, running: true, sent, work: async () => [], run: async (c) => { sent.push(c); return { status: true, response: {} }; } }, over); }

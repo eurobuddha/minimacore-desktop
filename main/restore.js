@@ -45,21 +45,37 @@ function restoreFileCommand(o) {
   return { cmd };
 }
 
-// keyuses: (0.19.325) is how many times a key has already been used, read from core/minima-core (e64600285be, and the block-capable
-// line 49d667d6eb4): sendfrom, signfrom, consolidatefrom and createtokenfrom hand it to txnsign publickey:custom (the key signs AT that
-// use); megammrsync, archive and mysql resyncs with a phrase and vault action:restorekeys set every wallet key's uses to it
-// (Wallet.updateAllKeyUses), keys action:createallkeys makes the keys with it, restoresync adds it to every key. The node keeps only its
-// low 32 bits (MiniNumber.getAsInt: 4294967296 is 0). A classic key (64 x 3 = 262144 uses) signs at the stored use and starts again at
-// use 0 once it reaches 262144 (TreeKey.sign "MAX TREEKEYS USED"): 262143 is the last. On a block key wallet (128 x 4 = 268435456) the
-// use is the block number, or one past the stored figure when that is higher (block.getCurrentBlockAsKeyUses), so the stored figure
-// is a floor and 268435454 is the last that still signs (the block-capable line refuses past capacity). Digits only, at most the bound of
-// the wallet's recorded key mode (a restore records the chosen mode before it runs; classic, the smaller, while none is recorded).
-const KEYUSES_MAX = { classic: 262143, block: 268435454 };
-/** Why a command's keyuses: may not be sent ("" = it may), for this wallet's key mode ("classic" | "block" | anything else: classic). */
-function keyusesProblem(command, mode) {
-  const max = KEYUSES_MAX[mode] || KEYUSES_MAX.classic;
-  const bad = V.parts(command).some(part => V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= max)));
-  return bad ? "keyuses: is how many times a key has already been used: a whole number from 0 to " + max + " for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run." : "";
+// keyuses: (0.19.325; 0.19.329 per kind of command), read from core/minima-core (e64600285be, the classic line this app ships, and the
+// block-capable 49d667d6eb4). The node keeps only the low 32 bits (MiniNumber.getAsInt: 4294967296 is 0). Two kinds of command:
+//  - ONE signature at that use: sendfrom, signfrom, consolidatefrom, createtokenfrom and txnsign (publickey:custom) sign a 64 x 3 key AT
+//    the figure; TreeKey.sign starts again at use 0 at 262144, so 262143 is the last;
+//  - the figure becomes EVERY wallet key's uses: megammrsync / archive / mysql resyncs (Wallet.updateAllKeyUses), vault restorekeys,
+//    keys createallkeys (and anything else that names it); restoresync ADDS it to every key (updateIncrementAllKeyUses). On the classic
+//    line Wallet.signData has no capacity check, so a key set near 262144 signs a few times and then starts again at use 0: such a
+//    figure is meant to be above the times the wallet's keys have signed (the node's default is 1000), at most 250000 (restoresync 10000).
+// On a block key wallet (128 x 4) the use is the block number, or one past the stored figure when that is higher, and that figure is
+// saved for EVERY key (UserDB lastBlockAsKeyUses, block.getCurrentBlockAsKeyUses): far above the chain's tip, each key stops signing
+// after one signature (funds safe, the wallet unable to sign). So in block mode every kind is bounded by the tip plus 10000 blocks
+// (restoresync still 10000); when the tip cannot be read, by the classic setting bound. Classic while no mode is recorded (a restore
+// records the chosen mode before it runs). The 0.18 tree makes the same change from 0.18.273: same numbers.
+const KEYUSES_ONE_SIGNATURE = 262143, KEYUSES_SET = 250000, KEYUSES_ADD = 10000, KEYUSES_TIP_MARGIN = 10000, KEYUSES_BLOCK_LAST = 268435454;
+const ONE_SIGNATURE = ["sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "txnsign"];
+/** Does any piece name keyuses:? */
+function namesKeyuses(command) { return V.parts(command).some(part => V.read(part).params.some(([n]) => V.fold(n) === "keyuses")); }
+/** Why a command's keyuses: may not be sent ("" = it may), for this wallet's key mode ("classic" | "block" | anything else: classic) and,
+ *  in block mode, the chain's tip (a whole number, or null: not read). */
+function keyusesProblem(command, mode, tip) {
+  for (const part of V.parts(command)) for (const [n, v] of V.read(part).params) {
+    if (V.fold(n) !== "keyuses") continue;
+    const one = ONE_SIGNATURE.some(x => V.is(part, x)), adds = V.is(part, "restoresync"), block = mode === "block", tipOk = Number.isSafeInteger(tip) && tip > 0;
+    const max = adds ? KEYUSES_ADD : block ? (tipOk ? Math.min(tip + KEYUSES_TIP_MARGIN, KEYUSES_BLOCK_LAST) : KEYUSES_SET) : one ? KEYUSES_ONE_SIGNATURE : KEYUSES_SET;
+    if (/^\d{1,15}$/.test(v) && Number(v) <= max) continue;
+    if (block && !adds) return tipOk ? "keyuses: on this block key wallet raises the floor under the block number for every key: at most " + max + ", the chain's tip (block " + tip + ") plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run."
+      : "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most " + max + " is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.";
+    if (one) return "keyuses: is how many times a key has already been used: a whole number from 0 to " + max + " for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.";
+    return "keyuses: gives every key of this wallet its uses (restoresync adds it to them): a figure above the times this wallet's keys have already signed (the node's default is 1000), at most " + max + ". A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.";
+  }
+  return "";
 }
 /** Is this node command (or any ;-separated part of it) a megammrsync resync, which ends by shutting the node down? */
 function isResync(command) {
@@ -267,5 +283,5 @@ async function restoreBackup(o, d) {
   return d.run(built.cmd);
 }
 
-module.exports = { keyusesProblem, KEYUSES_MAX, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+module.exports = { keyusesProblem, namesKeyuses, KEYUSES_ONE_SIGNATURE, KEYUSES_SET, KEYUSES_ADD, KEYUSES_TIP_MARGIN, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
   onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };

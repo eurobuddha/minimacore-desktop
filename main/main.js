@@ -236,7 +236,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   // every check before a text reaches the node, in one tested function and in one order (main/seedgate.js checkCommand, 0.19.327 port of
   // the released 0.18.201): control characters, read otherwise than it looks, an escaped ";", builder values, the per-piece refusals,
   // keyuses:, keys replaced outside Backup & Recovery, the node running, the secret gate, a backup file, open work, the backup password
-  await seedgate.checkCommand(command, { take: secretGate.take, running: requireRunning, walletWork, keyMode: () => config.load().keyMode });
+  await seedgate.checkCommand(command, { take: secretGate.take, running: requireRunning, walletWork, keyMode: () => config.load().keyMode,
+    tip: async () => { const r = await rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "block"); return parseInt(r && r.response && (r.response.block != null ? r.response.block : r.response), 10); } });
   // megammrsync ends by shutting the node down: run it with that expected, then start the node again (guarded).
   if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await held(() => runResync(command)), command); }   // secret parameters never echoed back (0.19.282)   // it ends by stopping the node: main's own question when anything is in flight (0.19.268)
   // quit, an archive / mysql / reset resync or import, megammr import: the node stops at the end (0.19.283): the same guard as every other stop

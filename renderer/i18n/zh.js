@@ -5342,7 +5342,10 @@
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用：发送将再次使用一次性密钥签名，因此本应用不会从该地址签名。未保存任何内容。",
   "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}。请确认至少这么多。未保存任何内容。",
   "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.": "keyuses: 是一个密钥已经使用过的次数：对此钱包的密钥而言，是 0 到 {max} 之间的整数。更大的数字会使节点再次使用一次性密钥签名，或拒绝签名。未运行任何内容。",
-  "Reading orders and payments from while the app was closed (back to block {block}).": "正在读取应用关闭期间的订单和付款（回溯到区块 {block}）。"
+  "Reading orders and payments from while the app was closed (back to block {block}).": "正在读取应用关闭期间的订单和付款（回溯到区块 {block}）。",
+  "keyuses: gives every key of this wallet its uses (restoresync adds it to them): a figure above the times this wallet's keys have already signed (the node's default is 1000), at most {max}. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.": "keyuses: 为此钱包的每个密钥设定使用次数（restoresync 则是加到其上）：应高于此钱包的密钥已签名的次数（节点默认为 1000），最多 {max}。接近一个密钥 262144 次一次性使用的数字会使密钥在几次签名后用尽，然后再次使用一次性密钥签名。未运行任何内容。",
+  "keyuses: on this block key wallet raises the floor under the block number for every key: at most {max}, the chain's tip (block {tip}) plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run.": "keyuses: 在此区块密钥钱包上会抬高每个密钥在区块号之下的下限：最多 {max}，即链顶（区块 {tip}）加 10000。远高于链顶的数字会使每个密钥在一次签名后停止签名：资金仍在，但此钱包无法再签名。未运行任何内容。",
+  "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.": "keyuses: 在此区块密钥钱包上必须接近链顶，而链顶现在无法读取，因此最多取 {max}。远高于链顶的数字会使每个密钥在一次签名后停止签名。未运行任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5467,5 +5470,8 @@
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
   "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.",
   "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.",
-  "Reading orders and payments from while the app was closed (back to block {block})."
+  "Reading orders and payments from while the app was closed (back to block {block}).",
+  "keyuses: gives every key of this wallet its uses (restoresync adds it to them): a figure above the times this wallet's keys have already signed (the node's default is 1000), at most {max}. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.",
+  "keyuses: on this block key wallet raises the floor under the block number for every key: at most {max}, the chain's tip (block {tip}) plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run.",
+  "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most {max} is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run."
 ] });
