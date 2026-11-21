@@ -49,8 +49,10 @@ function restoreFileCommand(o) {
 // block-capable 49d667d6eb4). The node keeps only the low 32 bits (MiniNumber.getAsInt: 4294967296 is 0). Two kinds of command:
 //  - ONE signature at that use: sendfrom, signfrom, consolidatefrom, createtokenfrom and txnsign (publickey:custom) sign a 64 x 3 key AT
 //    the figure; TreeKey.sign starts again at use 0 at 262144, so 262143 is the last;
-//  - the figure becomes EVERY wallet key's uses: megammrsync / archive / mysql resyncs (Wallet.updateAllKeyUses), vault restorekeys,
-//    keys createallkeys (and anything else that names it); restoresync ADDS it to every key (updateIncrementAllKeyUses). On the classic
+//  - the figure becomes EVERY wallet key's uses: megammrsync / archive / mysql resyncs (Wallet.updateAllKeyUses), vault resetkeys,
+//    keys createallkeys; restoresync ADDS it to every key (updateIncrementAllKeyUses). Every other verb naming keyuses: (vault restorekeys
+//    reads none) gets this LOWER bound too, so a verb not listed here fails closed (0.19.335). The node's defaults are 100 to 1000 by
+//    command (keys createallkeys has none). On the classic
 //    line Wallet.signData has no capacity check, so a key set near 262144 signs a few times and then starts again at use 0: such a
 //    figure is meant to be above the times the wallet's keys have signed (the node's default is 1000), at most 250000 (restoresync 10000).
 // On a block key wallet (128 x 4) the use is the block number, or one past the stored figure when that is higher, and that figure is
@@ -73,7 +75,7 @@ function keyusesProblem(command, mode, tip) {
     if (block && !adds) return tipOk ? "keyuses: on this block key wallet raises the floor under the block number for every key: at most " + max + ", the chain's tip (block " + tip + ") plus 10000. A figure far above the tip makes every key stop signing after one signature: the funds stay, but this wallet can no longer sign. Nothing was run."
       : "keyuses: on this block key wallet must stay near the chain's tip, which could not be read now, so at most " + max + " is taken. A figure far above the tip makes every key stop signing after one signature. Nothing was run.";
     if (one) return "keyuses: is how many times a key has already been used: a whole number from 0 to " + max + " for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.";
-    return "keyuses: gives every key of this wallet its uses (restoresync adds it to them): a figure above the times this wallet's keys have already signed (the node's default is 1000), at most " + max + ". A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.";
+    return "keyuses: gives every key of this wallet its uses (restoresync adds it to them): at least the times this wallet's keys have already signed (the node's own default is 100 to 1000 by command; keys createallkeys has none), at most " + max + ". A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again. Nothing was run.";
   }
   return "";
 }

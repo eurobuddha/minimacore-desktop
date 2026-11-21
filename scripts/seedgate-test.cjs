@@ -677,7 +677,7 @@ test("keyuses: one signature at most 262143; a figure given to every key at most
   const V = require("../main/cmdverb.js"), R = require("../main/restore.js");
   assert.deepEqual([R.KEYUSES_ONE_SIGNATURE, R.KEYUSES_SET, R.KEYUSES_ADD, R.KEYUSES_TIP_MARGIN], [262143, 250000, 10000, 10000]);
   const MEGA = "megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:";
-  for (const v of ["250001", "262143", "300000", "4294967296", "250000abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem(MEGA + v, "classic"), /keyuses: gives every key of this wallet its uses .*\(the node's default is 1000\), at most 250000\. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again/, v);
+  for (const v of ["250001", "262143", "300000", "4294967296", "250000abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem(MEGA + v, "classic"), /keyuses: gives every key of this wallet its uses .*\(the node's own default is 100 to 1000 by command; keys createallkeys has none\), at most 250000\. A figure near a key's 262144 one-time uses leaves keys that run out after a few signatures and then sign with one-time keys again/, v);
   for (const c of [MEGA + "250000", "vault action:restorekeys keyuses:250000", "keys action:createallkeys keyuses:250000", "restoresync file:x keyuses:10000"]) assert.equal(R.keyusesProblem(c, "classic"), "", c);
   for (const c of ["vault action:restorekeys keyuses:250001", "keys action:createallkeys keyuses:262143", "archive action:resync host:h:1 keyuses:262143", "mysql action:resync keyuses:262143"]) assert.match(R.keyusesProblem(c, "classic"), /at most 250000/, c);
   assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "classic"), /restoresync adds it to them\): .* at most 10000\./);
@@ -751,4 +751,11 @@ test("checkCommand holds every Terminal check in one order: the first refusal is
   assert.match(await said('megammrsync action:resync host:h:1 phrase:"a b"', { work: ["1 AtomiX swap is not finished"] }), /AtomiX swap/); assert.deepEqual(asked, ["mode", "running", "work"], "open work is read only for a wallet replacement");
   assert.equal(await said("status"), "ok"); assert.deepEqual(asked, ["mode", "running"], "a plain command: no gate question, no work read");
   assert.match(await said("backup password:a;b"), /letters and numbers only/, "the backup password last");
+});
+
+// ---- 0.19.335: the five single-signature verbs by name; any other verb naming keyuses: gets the lower bound (fails closed); "at least" ----
+test("keyuses: only txnsign, sendfrom, signfrom, consolidatefrom and createtokenfrom take 262143; any other verb, known or not, takes the setting bound; the sentence says at least", () => {
+  const R = require("../main/restore.js");
+  for (const v of ["txnsign", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom"]) assert.equal(R.keyusesProblem(v + " keyuses:262143", "classic"), "", v);
+  for (const v of ["vault action:restorekeys", "vault action:resetkeys", "keys action:createallkeys", "newverb", "sendfromx", "txnsignall", "send"]) assert.match(R.keyusesProblem(v + " keyuses:250001", "classic"), /at least the times this wallet's keys have already signed \(the node's own default is 100 to 1000 by command; keys createallkeys has none\), at most 250000/, v + ": fails closed");
 });
