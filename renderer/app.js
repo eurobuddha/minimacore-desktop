@@ -739,11 +739,11 @@ function renderWwWallet(body) {
     ? `<div class="view__desc">Key-uses confirmed: next signing index <b>${esc(String(ku.keyuses))}</b>. <a href="#" id="wwKuEdit">change</a></div>`
     : `<div class="card" style="border-color:var(--accent)">
          <div class="view__desc"><b>Confirm key-uses before sending.</b> How many payments has this wallet ALREADY made
-           anywhere (0 for a brand-new seed)? Over-estimating is safe; <b>under-estimating can reuse a signing key and
+           anywhere (0 for a brand-new seed)? Over-estimating uses up one-time signing keys and is safe only up to 262143, the last one a key of this wallet has; <b>under-estimating can reuse a signing key and
            lose your funds</b>.${wwKuSuggest != null ? ` <b>The chain shows ${esc(String(wwKuSuggest))} so far.</b>` : ""}</div>
          <div class="view__desc">Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com, which reveals that key to that server. The seed stays on this computer. Confirm does not go on while that figure is unread.</div>
          <div class="field"><div class="field__label">Payments already made by this seed</div>
-           <input class="field__input" id="wwKuIn" type="number" min="0" step="1" value="${esc(String(kuDefault))}" /></div>
+           <input class="field__input" id="wwKuIn" type="number" min="0" max="262143" step="1" value="${esc(String(kuDefault))}" /></div>
          <div style="display:flex;gap:8px">
            <button class="btn btn--outline" id="wwKuCheck">Check on-chain</button>
            <button class="btn btn--outline" id="wwKuConfirm">Confirm</button>

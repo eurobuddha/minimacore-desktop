@@ -112,6 +112,15 @@ let onchainOf = async () => null;
 const derivedKeys = new Map();
 function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
 const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
+// The ceiling (0.18.265). The node signs a Web Wallet send with TreeKey.createDefault (sendfrom runs "txnsign publickey:custom
+// privatekey:… keyuses:" + keyuses; txnsign.java builds TreeKey.createDefault(privkey) and setUses(uses.getAsInt())): 64 keys per level,
+// 3 levels, 64^3 = 262144 one-time leaves, numbered 0 to 262143. keyuses is the leaf THIS send signs at; the store keeps the NEXT one
+// (reserveFrom returns n and stores n + 1, one leaf per send). TreeKey.sign at a leaf >= 262144 logs "SERIOUS ERROR : MAX TREEKEYS
+// USED" and signs at leaf 0 AGAIN (and getAsInt keeps only the low 32 bits of a larger figure), which reuses a one-time key. So the
+// last leaf that can sign is MAX_USES = 262143: a count to confirm is at most that, and a stored next leaf above it signs nothing.
+const TREE_LEAVES = 262144, MAX_USES = TREE_LEAVES - 1;
+const USED_UP = "The chain shows that this key has no one-time uses left (a key of this wallet has " + TREE_LEAVES + "). Nothing can be sent from this address with this wallet: move the funds with another wallet. Nothing was saved.";
+const OVER_MAX = "The key-use count can be at most " + MAX_USES + " (a key of this wallet has " + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + "). Nothing was saved.";
 const FIRST_UNREAD = "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.";
 
 /** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. An entry not yet
@@ -120,13 +129,16 @@ const FIRST_UNREAD = "The chain's figure for this key could not be read (the key
  *  alone took any count), and it is refused while that figure cannot be read. An acknowledged entry only goes up and needs no read. */
 async function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
-  const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : NaN);
+  // a whole number of 0 or more, as a number or as plain digits only ("1e6", "0x10", " 5 " are refused, 0.18.265), before anything else
+  const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count) ? Number(count) : NaN);
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // "1e309" was Infinity, stored as null, read back as 0 (0.18.203)
+  if (n > MAX_USES) throw new Error(OVER_MAX);   // the ceiling (0.18.265): past it the node signs at leaf 0 again
   const was = entryFor(loadStore(), address);
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
     if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
+    if (chain > MAX_USES) throw new Error(USED_UP);   // never adopted: no leaf of this key is left (0.18.265)
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
@@ -139,11 +151,20 @@ async function ackKeyuses(address, count) {
 }
 /** Current stored keyuses info for an address (does not mutate). */
 function keyusesInfo(address) { const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
+/** Why a stored next leaf above the last one cannot sign (0.18.265). Exactly TREE_LEAVES: every leaf was used. Above it: a count
+ *  confirmed above the ceiling (possible before 0.18.265, which advised that over-estimating is safe); the true count is unknown, so
+ *  it is never lowered here. */
+function overCount(n) {
+  return n === TREE_LEAVES
+    ? "Every one-time use of this key has been used (" + TREE_LEAVES + "). Nothing can be sent from this address with this wallet: move the funds with another wallet. Nothing was sent."
+    : "This wallet's saved key-use count (" + n + ") is above the last one-time use a key of this wallet has (" + MAX_USES + "): the node would sign with its first one-time key again, which could lose the funds. It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. Nothing was sent. Move the funds with the wallet this seed was made in, which knows how many times its key signed.";
+}
 /** RESERVE: durably advance the counter to n+1 and return n (the leaf to sign at). Reserve-before-sign. */
 function reserveKeyuse(address) { return reserveFrom(loadStore(), address); }
 function reserveFrom(store, address) {
   const e = entryFor(store, address);
   const n = e.keyuses || 0;
+  if (n > MAX_USES) throw new Error(overCount(n));   // the leaf this send would sign at does not exist: the node would sign at leaf 0 again (0.18.265)
   e.keyuses = n + 1;                          // persist BEFORE the caller signs at n
   store[address] = e;
   writeStore(store);
@@ -275,6 +296,7 @@ async function send(opts) {
   const entry = entryFor(store, fromaddress);
   if (entry.damaged) { privatekey = null; throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent."); }
   if (!entry.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
+  if ((entry.keyuses || 0) > MAX_USES) { privatekey = null; throw new Error(overCount(entry.keyuses)); }   // before reserving (0.18.265)
 
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
   const n = reserveFrom(store, fromaddress);
@@ -307,7 +329,7 @@ async function send(opts) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = { setOnchain,
+module.exports = { setOnchain, MAX_USES,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status,
   _setRunner: (fn) => { runner0 = fn; },
