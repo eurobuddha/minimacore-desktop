@@ -135,15 +135,18 @@ async function ackKeyuses(address, count) {
   // a whole number of 0 or more, as a number or as plain digits only ("1e6", "0x10", " 5 " are refused, 0.18.265), before anything else
   const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count) ? Number(count) : NaN);
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // "1e309" was Infinity, stored as null, read back as 0 (0.18.203)
-  if (n > MAX_USES) throw new Error(OVER_MAX);   // the ceiling (0.18.265): past it the node signs at leaf 0 again
   const was = entryFor(loadStore(), address);
+  // an entry not yet confirmed: the chain is read FIRST (0.18.274), so a chain figure at the limit is explained as such rather than
+  // the bare "can be at most 262143" the window's max(typed, chain) ran into
   if (!was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
     if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
-    if (chain > MAX_USES) throw new Error(USED_UP(chain));   // never adopted: no leaf of this key is left (0.18.265)
+    if (chain > MAX_USES) throw new Error(USED_UP(chain));   // never adopted (0.18.265)
+    if (n > MAX_USES) throw new Error(OVER_MAX);
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
+  if (n > MAX_USES) throw new Error(OVER_MAX);   // the ceiling (0.18.265): past it the node signs at leaf 0 again
   // a damaged entry whose old value still reads as a whole number ("57", 57.4) is a floor too (0.18.267): that many leaves may be used
   if (was.damaged) {
     const raw = (loadStore()[address] || {}).keyuses;

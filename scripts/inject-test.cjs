@@ -330,3 +330,16 @@ test("Web Wallet: the limit messages say the figure is at the limit and this app
   assert.ok(!/no one-time uses left|move the funds with another wallet|Move the funds with the wallet/.test(src), "no claim the figure cannot make, no advice that is not safe");
   assert.ok(src.includes("The figure can count more uses than the key signed, but this app will not sign from this address"));
 });
+
+// ---- 0.18.274: for an entry not yet confirmed the chain is read first: a chain figure at the limit is explained, not "can be at most 262143" ----
+test("Web Wallet: a first confirmation whose chain figure is at the limit gets the at-the-limit explanation, whatever count the window sent", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AB".repeat(32), PK = "0x" + "BB".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CB".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  try { fs.rmSync(file); } catch (e) {}
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 300000);
+  for (const sentByWindow of [300000, 5]) await assert.rejects(ww.ackKeyuses(FROM, sentByWindow), /The chain's figure for this key \(300000\) is at or above the limit/, String(sentByWindow));
+  ww.setOnchain(async () => 10); await assert.rejects(ww.ackKeyuses(FROM, 300000), /can be at most 262143/, "a chain figure below the limit and a typed figure above it: the ceiling");
+  ww.setOnchain(async () => null);
+});
