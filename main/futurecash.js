@@ -784,6 +784,9 @@ function create(o) {
       const bareSafe = !row.atRisk && auditOk && autoSafe, toSweep = row.atRisk && rescueOn && canSweep;
       if (!bareSafe && !toSweep) continue;   // can't act safely yet: left in the contract, where it is not at risk
       if (!aboveFloor(row.tokenid, row.amount)) continue;   // dust, or a token: left for Collect by hand (it is safe in the contract)
+      // the native's canSweep(payout) (review L7): an at-risk stake is pulled out of the contract only when this node can sign
+      // for its payout, so the sweep can follow at once; otherwise it stays safe where it is
+      if (toSweep && !(await signKeyFor(row.payout))) continue;
       if (parts(row.coinid, row.payout, row.amount, row.tokenid)) continue;   // malformed: never claimed, never a post slot
       if (!running()) return;   // taken back (Revoke) or stopped while this pass ran: nothing more is posted (review L1)
       if (budget.collects-- <= 0) return;

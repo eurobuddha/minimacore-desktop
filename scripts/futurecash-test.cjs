@@ -809,3 +809,12 @@ test("L6: the reads a click makes are bounded: one address's coins, Harden's add
   e._store().kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY2]));
   assert.match((await e.retire(PAY2)).error, /Stakes still pay out/, "too many to look through: refused");
 });
+
+test("L7: an at-risk stake whose payout this node cannot sign for is left in the contract (the native's canSweep)", async () => {
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  const row = node.n.scripts.find(x => x.address === PAY1); row.script = "RETURN TRUE"; row.publickey = "0x00"; row.default = true;   // ours (default), but no key to sign a sweep with
+  node.sent.length = 0; await e.pass(150);
+  assert.deepEqual(node.sent.filter(c => /^txn/.test(c)), [], "not collected onto an address no sweep can follow from");
+  assert.equal(e._store().collect(ID(2)).status, "DETECTED");
+});
