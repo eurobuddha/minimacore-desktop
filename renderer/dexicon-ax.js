@@ -24,9 +24,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const mx = (s) => { const t = String(s == null ? "" : s); return (MS ? MS.say(t) : t).replace(/mxusdt/gi, "MxUSD"); };
   const tok = (t) => { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = t.toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "MxUSD"; } return ccyName(t); };
   /** A number's exact decimal text, never an exponent (1e-7 is 0.0000001), or "" when it is not a plain number. */
-  // a number is taken at 15 significant figures first (0.19.277): a double's last digits are noise (4.35 * 100 is 434.99999999999994)
+  // a number is its shortest round-trip text (0.19.289: the 15-figure step of 0.19.277 rounded UP, 0.9999999999999999 to 1): the
+  // figure a user sees and never a higher one; a sum or a ratio is worked out in exact decimals where it is made (decDiff, spreadPct)
   const plainNum = (x) => {
-    let t = String(typeof x === "number" ? (Number.isFinite(x) ? parseFloat(x.toPrecision(15)) : x) : x == null ? "" : x).trim(), neg = "";
+    let t = String(x == null ? "" : x).trim(), neg = "";
     if (t[0] === "-") { neg = "-"; t = t.slice(1); }
     if (/^\.\d/.test(t)) t = "0" + t;   // ".5" is 0.5 (it read as no number, so fmtPx(".5") was "0")
     const m = /^(\d+)(?:\.(\d*))?e([+-]?\d+)$/i.exec(t);
@@ -202,6 +203,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** The prices the editor writes into the visible rungs from mid, step % and skew % (skew is held to ±20 %). Exact decimal
    *  arithmetic (0.19.277): in floats 0.7 * 0.98 is 0.68599999…, so a rung was cut one below its price (0.685999 for 0.686, an
    *  ask of 0.00379499 for 0.003795: published below the price meant). */
+  /** a - b in exact decimals (0.19.289: the float difference of 0.0102 and 0.01 is 0.00019999999999999966), "0" when it is not above zero, "" when unreadable. */
+  const decDiff = (a, b) => { const A = ratOf(a), B = ratOf(b); return A && B ? ratText(A[0] * B[1] - B[0] * A[1], A[1] * B[1]) : ""; };
+  /** (a - b) / b × 100 in exact decimals, or "" when unreadable. */
+  const spreadPct = (a, b) => { const A = ratOf(a), B = ratOf(b); return A && B && B[0] > 0n ? ratText((A[0] * B[1] - B[0] * A[1]) * 100n, A[1] * B[0]) : ""; };
   function ladderPrices(mid, step, bias, levels) {
     const m = ratOf(mid), st = ratOf(step), out = []; let b = ratOf(bias) || [0n, 1n];
     if (!m || !st || m[0] <= 0n || st[0] <= 0n) return out;
@@ -229,7 +234,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function ladderSummary(manual, ccy) {
     const { asks, bids } = manual, sum = (a) => a.reduce((t, l) => t + l.a, 0);
     const ba = asks.length ? Math.min(...asks.map((l) => l.p)) : 0, bb = bids.length ? Math.max(...bids.map((l) => l.p)) : 0, both = asks.length && bids.length;
-    return { crossed: !!both && bb >= ba, spread: !both ? "—" : ba - bb > 0 ? "spread " + fmtPx(ba - bb) + " · " + cut((ba - bb) / bb * 100, 1) + "%" : I18N.t("⚠ crossed"),
+    return { crossed: !!both && bb >= ba, spread: !both ? "—" : ba - bb > 0 ? "spread " + fmtPx(decDiff(ba, bb)) + " · " + cut(spreadPct(ba, bb), 1) + "%" : I18N.t("⚠ crossed"),
       warn: both && bb >= ba ? I18N.t("Crossed: best bid {bb} is at or above best ask {ba}. You would sell cheaper than you buy.", { bb: fmtPx(bb), ba: fmtPx(ba) }) : "",
       bids: bids.length ? I18N.t("{bids} lvl · best {bb} · {bids2} {ccy}", { bids: bids.length, bb: fmtPx(bb), bids2: abbrev(sum(bids)), ccy: ccy }) : "none", asks: asks.length ? I18N.t("{asks} lvl · best {ba} · {asks2} {ccy}", { asks: asks.length, ba: fmtPx(ba), asks2: abbrev(sum(asks)), ccy: ccy }) : "none" };
   }
@@ -655,7 +660,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     out.push(`<div class="dx-row ax-obh"><b class="ax-t16">${tr("Order book  ·  {scanned} live", { scanned: b ? b.scanned || 0 : "…" })}</b><button class="dx-pill ax-refresh" data-axrefresh="1">${th("Refresh")}</button></div>`);
     if (!b || (!b.bids.length && !b.asks.length)) out.push(`<div class="ax-dim">${b ? th("No live orders yet. Publish one, or wait for a counterparty.") : th("Reading the book…")}</div>`);
     else {
-      if (b.bestBid && b.bestAsk) out.push(`<div class="ax-spread">${tr("spread {bestBid} USDT  ·  USDT per {c}, size in {c2}", { bestBid: fmtPx(b.bestAsk - b.bestBid), c: esc(c), c2: esc(c) })}</div>`);
+      if (b.bestBid && b.bestAsk) out.push(`<div class="ax-spread">${tr("spread {bestBid} USDT  ·  USDT per {c}, size in {c2}", { bestBid: fmtPx(decDiff(b.bestAsk, b.bestBid)), c: esc(c), c2: esc(c) })}</div>`);
       out.push(`<div class="ax-legend"><span>${tr("SELL {c} (bid)", { c: esc(c) })}</span><span>${tr("BUY {c} (ask)", { c: esc(c) })}</span></div>`);
       for (let i = 0, n = Math.min(Math.max(b.bids.length, b.asks.length), 12); i < n; i++) out.push(`<div class="ax-depth${i === 0 ? " ax-depth--best" : ""}">${half(b.bids[i], true)}<span class="ax-div">│</span>${half(b.asks[i], false)}</div>`);
     }

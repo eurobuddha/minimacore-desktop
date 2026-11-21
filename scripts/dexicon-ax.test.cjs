@@ -116,9 +116,7 @@ test("amounts are cut, never rounded; prices keep six significant figures; sizes
   assert.equal(AX.cut(0.9999999999, 6), "0.999999"); assert.equal(AX.cut(1e-7, 9), "0.0000001"); assert.equal(AX.cut("12.3400", 2), "12.34");
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "dexicon-ax.js"), "utf8");
   const fmt = src.slice(src.indexOf("const plainNum = "), src.indexOf("const ax6 = "));
-  // 0.19.277: one toPrecision(15) is allowed, in plainNum, and only on a number: a double's digits past the 15th are noise of its
-  // binary form (4.35 * 100 is 434.99999999999994), not a figure anyone wrote; nothing else rounds
-  assert.ok(fmt.length > 200 && !/toFixed\(/.test(fmt) && (fmt.match(/toPrecision\(/g) || []).length === 1 && fmt.includes('typeof x === "number" ? (Number.isFinite(x) ? parseFloat(x.toPrecision(15)) : x)'), "no rounding in the screens' price and amount formatters");
+  assert.ok(fmt.length > 200 && !/toPrecision\(|toFixed\(/.test(fmt), "no rounding in the screens' price and amount formatters (0.19.289: the 15-figure step of 0.19.277 is gone)");
   assert.equal(AX.abbrev(10199.9), "10.1k"); assert.equal(AX.abbrev(9.999), "9.99"); assert.equal(AX.abbrev(0), "—");
 });
 test("the token is MxUSD wherever a user reads it; USDT names only the Ethereum leg", () => {
@@ -230,7 +228,12 @@ test("the editor's prices from mid, step and skew are the old editor's, rung for
     [["0.7", "1", "0", "6"], R(["0.693", "0.707"], ["0.686", "0.714"], ["0.679", "0.721"], ["0.672", "0.728"], ["0.665", "0.735"], ["0.658", "0.742"])],
     [["0.0033", "3", "0", "6"], R(["0.003201", "0.003399"], ["0.003102", "0.003498"], ["0.003003", "0.003597"], ["0.002904", "0.003696"], ["0.002805", "0.003795"], ["0.002706", "0.003894"])]])
     assert.deepEqual(AX.ladderPrices(...args), want, args.join(" / "));
-  assert.equal(AX.fmtPx(".5"), "0.5"); assert.equal(AX.cut(-0.001, 2), "0"); assert.equal(AX.cut(4.35 * 100), "435"); assert.equal(AX.cut("434.99999999"), "434.999999", "a typed figure is cut as written");
+  assert.equal(AX.fmtPx(".5"), "0.5"); assert.equal(AX.cut(-0.001, 2), "0"); assert.equal(AX.cut(4.35 * 100), "434.999999", "the double 434.99999999999994, cut (0.19.289: never rounded up to 435)");
+  // 0.19.289: a number is cut from its shortest round-trip text, never rounded up; differences and ratios are exact
+  assert.equal(AX.fmtPx(0.9999999999999999), "0.999999"); assert.equal(AX.cut(123456789.1234569), "123456789.123456");
+  assert.equal(AX.ladderPrices(0.9999999999999999, "1", "0", "1")[0].bid, "0.989999", "a number mid (reprice passes one) is not rounded to 1 first");
+  const sum = AX.ladderSummary({ asks: [{ p: 0.0102, a: 1 }], bids: [{ p: 0.01, a: 1 }] }, "MINIMA");
+  assert.equal(sum.spread, "spread 0.0002 · 2%", "the spread and its percent in exact decimals (floats gave 0.000199999 and 1.9%)"); assert.equal(AX.cut("434.99999999"), "434.999999", "a typed figure is cut as written");
 });
 for (const confirm of [true, false]) test(`Publish and Withdraw (${confirm ? "confirmed" : "closed"}): axMakerPublish at once, axMakerWithdraw only after the old confirm`, async () => {
   const was = old(`makerWithdrawPublish|${confirm}`);
