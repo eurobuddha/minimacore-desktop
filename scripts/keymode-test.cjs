@@ -609,14 +609,15 @@ test("0.18.116: another wallet after a restore: the stores are set aside before 
     assert.deepEqual(ev, ["hold", "sent", "replaced:starting", "release"]); assert.equal(m.state, "running");
   });
 });
-test("0.18.116: RPC timed out, wallet unchanged: nothing is set aside, the engines go on; when the node swaps later they are held and the stores set aside", async () => {
+// CHANGED on purpose (0.19.219): an unanswered replacement on the same wallet keeps the engines HELD (it was "the engines go on")
+test("0.18.116: RPC timed out, wallet unchanged: nothing is set aside and the engines stay held; when the node swaps later the stores are set aside", async () => {
   await resyncCase(() => { throw new Error("RPC timeout"); }, async (m, calls, { w, ev }) => {
     await assert.rejects(m.runResync(PHRASE), /may still be resyncing/);
-    assert.deepEqual(ev, ["hold", "sent", "release"]); assert.ok(m.walletCheck, "the check stays owed: the node may still swap");
-    assert.equal(await m.walletSettle(), true); assert.deepEqual(ev, ["hold", "sent", "release"], "asked again, still the same wallet");
+    assert.deepEqual(ev, ["hold", "sent"]); assert.ok(m.walletCheck, "the check stays owed: the node may still swap");
+    assert.equal(await m.walletSettle(), true); assert.deepEqual(ev, ["hold", "sent"], "asked again, still the same wallet: still held");
     w.seed = "B";
     await m.walletSettle();
-    assert.deepEqual(ev.slice(3), ["hold", "replaced:running", "release"]); assert.equal(m.walletCheck, null);
+    assert.deepEqual(ev.slice(2), ["replaced:running", "release"]); assert.equal(m.walletCheck, null);
   });
 });
 test("0.18.116: RPC failed after the swap (node still there): the stores are set aside, the engines never released in between", async () => {
@@ -937,4 +938,27 @@ test("the node's last line with no line end is logged on close, with what arrive
   q.stdout.emit("data", "line\n");
   assert.ok(m.logs.includes("[app-test] new node, unfinished line") && !m.logs.some(l => l.includes("OLD OUTPUT")));
   c2.restore();
+});
+// ---- 0.19.219: no settle and no release while the wallet-replacing megammrsync is still at the node, or unanswered ----
+test("0.19.219: the health poll does not release the held engines while the megammrsync is in flight; an unanswered one keeps them held until the node is started again", async () => {
+  let answer = null;
+  await resyncCase(() => new Promise((r) => { answer = r; }), async (m, calls, { ev }) => {
+    const run = m.runResync(PHRASE);
+    for (let i = 0; i < 50 && !answer; i++) await new Promise(r => setTimeout(r, 5));
+    assert.ok(answer, "the command is at the node"); assert.deepEqual(ev, ["hold", "sent"]);
+    calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 60));   // a health tick while it runs
+    assert.ok(!ev.includes("release"), "released in the middle of the replacement: " + ev.join(","));
+    answer({ status: true, response: {} }); await run;
+    await new Promise(r => setTimeout(r, 60)); m.stopHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 60));
+    assert.equal(ev.filter(e => e === "release").length, 1, "released once, by the settle after the restart: " + ev.join(","));
+  });
+  await resyncCase(async () => { throw new Error("RPC timeout"); }, async (m, calls, { ev }) => {
+    await assert.rejects(m.runResync(PHRASE), /did not answer/);
+    calls.realHealth(); m.startHealth(); await new Promise(r => setTimeout(r, 60));
+    assert.ok(!ev.includes("release"), "an unanswered replacement on the same wallet is not conclusive: " + ev.join(","));
+    assert.ok(m.walletCheck && m.walletCheck.held, "still owed and held");
+  });
+  const { _timeoutFor } = require("../main/rpc");
+  assert.equal(_timeoutFor(PHRASE), 3600000, "megammrsync action:resync: one hour"); assert.equal(_timeoutFor('"megammrsync" action : resync host:h:1'), 3600000);
+  assert.equal(_timeoutFor("send amount:1 address:0x01"), 180000);
 });

@@ -23,8 +23,13 @@ const WRITE_PREFIXES = ["send", "txn", "tokencreate", "consolidate", "burn", "va
   "cointrack", "removescript", "sign", "multisig"];
 
 const V = require("./cmdverb");
+// megammrsync action:resync runs for as long as the chain takes to load (tens of minutes on a slow link): its own bound
+// (0.19.219). Cut at 180 s it looked "unanswered" while the node went on and could still swap the wallet.
+const RESYNC_TIMEOUT_MS = 60 * 60 * 1000;
 function timeoutFor(command) {   // the verb read as the node reads it, in every piece of a chain (main/cmdverb.js, 0.19.190, as released 0.18.175)
-  return V.parts(command).some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
+  const ps = V.parts(command);
+  if (ps.some(part => V.is(part, "megammrsync") && /^resync$/i.test(V.paramValue(part, "action") || ""))) return RESYNC_TIMEOUT_MS;
+  return ps.some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 
 /** One HTTP round trip to the node, ungated. Only rpcCall below may call this. */

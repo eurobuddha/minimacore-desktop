@@ -608,7 +608,9 @@ class NodeManager extends EventEmitter {
         if (this.proc) {
           // No answer, and the node is still there: it may still be resyncing, and may still swap the wallet. What
           // can be read is read now; the check stays owed (the health poll asks again, and at the next start).
-          if (w) { if (w.before) await this.walletSettle(); else await legacy(); }
+          // No answer is not an end (0.19.219): the engines stay held until the mark is conclusive (another wallet, or the
+          // node started again), never released on "the same wallet" while the node may still swap it.
+          if (w) { w.unsure = true; if (w.before) await this.walletSettle(); else await legacy(); }
           throw new Error(e.message + ". The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.");
         }
         if (w && !w.before) await legacy();   // node stopped: set aside before it is started again
@@ -666,6 +668,9 @@ class NodeManager extends EventEmitter {
       return !w.final || !w.held || w.tries > 6;
     }
     if (now === w.before) {
+      // The same wallet is not conclusive while the megammrsync is still at the node, or after it went unanswered and the
+      // node has not been started again since (0.19.219: the health poll released the held engines mid-replacement)
+      if (!w.final && (this.resyncing || w.unsure)) return true;
       if (w.final) { this.walletCheck = null; this.log("[app] the wallet is the same one as before: every store stays in place"); }
       if (w.held) { w.held = false; await this.releaseEngines(); }
       return true;
