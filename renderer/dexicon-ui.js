@@ -138,7 +138,8 @@ const DexUI = (() => {
     const call = C.bridgeCall(m); if (!call) return;
     const back = (value, error) => { if (Page.frame) Page.frame.contentWindow.postMessage(error == null ? { dxRoom: 1, id: m.id, value } : { dxRoom: 1, id: m.id, error }, "*"); };
     // the frame speaks for the engine it was made for (Page.epoch): a call from a frame that outlived its engine is refused in main
-    (call.kind === "clip" ? api.clip(call.text) : api.dxCommand(Object.assign({}, call.args, { epoch: Page.epoch }))).then(v => back(v), err => back(null, C.refusal(err && err.message)));
+    if (call.kind === "noclip") { back(null, "copying is done from the app's own screens"); return; }   // 0.19.229: no clipboard for the frame
+    api.dxCommand(Object.assign({}, call.args, { epoch: Page.epoch })).then(v => back(v), err => back(null, C.refusal(err && err.message)));
   }
   /** Ask the page for one of its actions. Resolves { error, asked }: error = why nothing was done; asked = the page's
    *  own review text when it wants one confirmed. */

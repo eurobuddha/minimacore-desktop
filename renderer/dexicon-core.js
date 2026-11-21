@@ -371,7 +371,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** A request from the page's frame, or null when it is not one the shell forwards. */
   function bridgeCall(m) {
     if (!m || m.dxRoom !== 1 || typeof m.id !== "number") return null;
-    if (m.name === "clip" && m.args && typeof m.args.text === "string") return { kind: "clip", text: m.args.text };
+    // 0.19.229: the hidden page never writes the clipboard (it could put an address of its choosing there); identifiers are
+    // copied from the app's own screens. Its copy is answered with a refusal, so its promise ends and nothing waits.
+    if (m.name === "clip") return { kind: "noclip" };
     if (m.name !== "room.dex" || !m.args || !OPS.includes(m.args.op)) return null;
     const a = m.args, s = (v) => (typeof v === "string" ? v : "");
     if (a.op === "identity") return { kind: "dx", args: { op: "identity" } };   // answered inside the page's frame by the main process, never here

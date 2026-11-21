@@ -254,6 +254,10 @@ test("nothing outside the allow-list leaves the Exchange screens", () => {
   assert.deepEqual(C.bridgeCall({ dxRoom: 1, id: 2, name: "room.dex", args: { op: "net", method: "DELETE", url: "https://x/dex/book", body: null } }).args, { op: "net", method: "GET", url: "https://x/dex/book", body: null });
   for (const m of [{ dxRoom: 1, id: 1, name: "room.dex", args: { op: "invalidate" } }, { dxRoom: 1, id: 1, name: "room.ax", args: { op: "cmd", command: "block" } }, { dxRoom: 1, id: 1, name: "mcd.cmd", args: {} },
     { dxRoom: 2, id: 1, name: "room.dex", args: { op: "cmd" } }, { dxRoom: 1, id: "1", name: "room.dex", args: { op: "cmd" } }, { dxRoom: 1, id: 1, name: "room.dex" }, null, "x"]) assert.equal(C.bridgeCall(m), null);
+  // 0.19.229: the page's copy is refused (it never reaches the clipboard), and answered so its promise ends
+  assert.deepEqual(C.bridgeCall({ dxRoom: 1, id: 9, name: "clip", args: { text: "MxATTACKERADDRESS" } }), { kind: "noclip" });
+  const uiSrc = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ui.js"), "utf8");
+  assert.ok(/if \(call\.kind === "noclip"\) \{ back\(null, "copying is done from the app's own screens"\); return; \}/.test(uiSrc) && !/api\.clip\(call\.text\)/.test(uiSrc), "no clipboard write for the frame");
   // and what does pass still meets the main process's own verb list (3a): a signing or wallet verb is refused there
   require("./dexicon-mock.cjs");
   const { dexCommand } = require("../main/dexicon.js");
