@@ -794,3 +794,18 @@ test("L5: a long activity line keeps every id whole: the cut falls on a space af
   assert.ok(line.msg.length <= 1002 && line.msg.endsWith(" …"));
   for (const l of g.e.activity()) for (const m of l.msg.matchAll(/0x[0-9A-Fa-f]+/g)) assert.ok(m[0].length >= 64 || m[0].length < 10, "no cut id: " + m[0]);
 });
+
+test("L6: the reads a click makes are bounded: one address's coins, Harden's addresses, the retire gate's chain-wide contract read", async () => {
+  const many = []; for (let i = 0; i < 600; i++) many.push({ coinid: ID(1000 + i), address: PAY1, amount: "1", tokenid: "0x00", spent: false });
+  const { e, node } = await guardian({ wallet: many });
+  node.n.wallet = many; node.sent.length = 0;
+  await e.sweepAddress(PAY1);
+  assert.equal(node.sent.filter(c => /^txninput/.test(c)).length, 500, "500 coins of one address in one go");
+  const flagged = []; for (let i = 0; i < 100; i++) flagged.push(ADDR("0x" + String(i).padStart(64, "7")));
+  e._store().kv.set(FC.K.ATRISK_ADDRS, JSON.stringify(flagged)); node.sent.length = 0;
+  await e.harden();
+  assert.ok(node.sent.filter(c => /^scripts address:/.test(c)).length <= 64);
+  node.n.answer["coins address:" + FC.KNOWN_ADDRESS] = async () => ({ status: true, response: new Array(5001).fill(stake(9, STRANGER)) });
+  e._store().kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY2]));
+  assert.match((await e.retire(PAY2)).error, /Stakes still pay out/, "too many to look through: refused");
+});

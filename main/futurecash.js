@@ -54,6 +54,10 @@ const MIN_AUTO_DEFAULT = "1", REREAD_BLOCKS = 30;
 // so the guardian signs for one address at most sign_cap times a day by itself (review M1; default 50); past it, it
 // logs once and waits for the next day or a Sweep by hand. A block key wallet counts block heights, not signatures.
 const SIGN_CAP_DEFAULT = "50";
+// Reads made by a click are bounded too (review L6): the coins of one address (COINS_AT_MAX a read; a sweep takes the
+// rest next time), the addresses Harden looks at (HARDEN_MAX), and the chain-wide contract read of the retire gate
+// (over STAKE_ROWS_MAX it cannot say, so the retire is refused).
+const COINS_AT_MAX = 500, HARDEN_MAX = 64;
 // An at-risk collect whose coin is not found on its payout address this many blocks after the collect (review M2) ends
 // as COLLECTED_UNFOUND: logged, no longer counted as work under way (Freeze, a wallet replacement), cleared by Reset history.
 const UNFOUND_BLOCKS = 120;
@@ -768,7 +772,7 @@ function create(o) {
   async function coinsAt(addr) {
     if (!validAddr(addr)) return [];
     const r = await call("coins address:" + addr);
-    return ok(r) && Array.isArray(r.response) ? r.response.filter(c => c && c.spent !== true && HEX64.test(String(c.coinid || ""))) : [];
+    return ok(r) && Array.isArray(r.response) ? r.response.filter(c => c && c.spent !== true && HEX64.test(String(c.coinid || ""))).slice(0, COINS_AT_MAX) : [];
   }
 
   // ---- the guardian's work (Guardian.collectMatured, detectCollectedForSweep, detectStrandedForSweep, sweepPending, reconcileSweeps) ----
@@ -901,8 +905,7 @@ function create(o) {
       const sets = await scriptTable(true); loadAtRisk(sets);
       let flagged = []; try { flagged = JSON.parse(kv().get(K.ATRISK_ADDRS, "[]")); } catch (e) {}
       const list = [], seenHex = new Set();
-      for (const a of Array.isArray(flagged) ? flagged : []) {
-        if (!validAddr(a)) continue;
+      for (const a of (Array.isArray(flagged) ? flagged : []).filter(validAddr).slice(0, HARDEN_MAX)) {
         const row = await scriptRow(a);
         if (!row || !row.address || seenHex.has(lc(row.address))) continue;
         seenHex.add(lc(row.address));
@@ -912,7 +915,7 @@ function create(o) {
           balance: sum(coins.filter(c => lc(c.tokenid) === "0x00").map(c => c.amount)) });
       }
       const stuck = [];
-      for (const a of sets.retired) { const n = (await coinsAt(a)).length; if (n) stuck.push({ address: a, coins: n }); }
+      for (const a of sets.retired.slice(0, HARDEN_MAX)) { const n = (await coinsAt(a)).length; if (n) stuck.push({ address: a, coins: n }); }
       return { list, stuck, retired: store.retired() };
     });
   }
@@ -923,6 +926,7 @@ function create(o) {
     for (const c of contracts()) {
       const mine = await call("coins relevant:true address:" + c), all = await call("coins address:" + c);
       if (!ok(mine) || !ok(all)) return true;   // not known: refused as if a stake paid there
+      if (rowsOf(mine).length > STAKE_ROWS_MAX || rowsOf(all).length > STAKE_ROWS_MAX) return true;   // too many to look through: the same
       if (scanFor(mine) || scanFor(all)) return true;
     }
     return false;
