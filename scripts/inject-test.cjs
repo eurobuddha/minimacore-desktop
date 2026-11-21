@@ -300,12 +300,26 @@ test("Web Wallet: a damaged entry whose old value reads as a whole number (\"57\
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C9".repeat(32), publickey: PK } }
     : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
   await ww.derive("alpha beta"); ww.setOnchain(async () => 10);
-  for (const [old, floor] of [["57", 57], [" 57 ", 57], [57.4, 58]]) {
+  for (const [old, floor] of [["57", 57], [" 57 ", 57], [57.4, 58], ["57.4", 58]]) {   // a decimal as text too (0.18.270)
     fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
     assert.equal(ww.keyusesInfo(FROM).damaged, true, JSON.stringify(old));
     await assert.rejects(ww.ackKeyuses(FROM, floor - 1), new RegExp("saved count read " + floor + " before it was damaged\\. Confirm at least that many"), JSON.stringify(old));
     assert.equal((await ww.ackKeyuses(FROM, floor)).keyuses, floor);
   }
   fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "x", ack: true } })); assert.equal((await ww.ackKeyuses(FROM, 10)).keyuses, 10, "an unreadable old value: the chain's figure is the floor");
+  ww.setOnchain(async () => null);
+});
+
+// ---- 0.18.270: a damaged old value at or above 262144 cannot be confirmed: the over-count explanation, not "confirm at least 1000000" ----
+test("Web Wallet: a damaged old value above the ceiling gives the over-count explanation", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AA".repeat(32), PK = "0x" + "BA".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CA".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 10);
+  for (const old of ["1000000", 1000000.5]) {
+    fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
+    await assert.rejects(ww.ackKeyuses(FROM, 100), (e) => /is above the last one-time use a key of this wallet has \(262143\)/.test(e.message) && !/Confirm at least/.test(e.message), JSON.stringify(old));
+  }
   ww.setOnchain(async () => null);
 });

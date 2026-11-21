@@ -144,7 +144,10 @@ async function ackKeyuses(address, count) {
   // a damaged entry whose old value still reads as a whole number ("57", 57.4) is a floor too (0.18.267): that many leaves may be used
   if (was.damaged) {
     const raw = (loadStore()[address] || {}).keyuses;
-    const old = typeof raw === "string" && /^\s*\d{1,15}\s*$/.test(raw) ? Number(raw.trim()) : typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.ceil(raw) : 0;
+    // a decimal written as text ("57.4") is read as the number is (0.18.270: it was ignored)
+    const num = typeof raw === "number" ? raw : typeof raw === "string" && /^\s*\d{1,15}(\.\d+)?\s*$/.test(raw) ? Number(raw.trim()) : NaN;
+    const old = Number.isFinite(num) && num > 0 ? Math.ceil(num) : 0;
+    if (old > MAX_USES) throw new Error(overCount(old));   // a floor nobody can confirm (0.18.270): said why, as a send says it
     if (n < old) throw new Error("This key's saved count read " + old + " before it was damaged. Confirm at least that many. Nothing was saved.");
   }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
