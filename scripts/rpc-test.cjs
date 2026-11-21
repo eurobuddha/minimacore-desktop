@@ -24,32 +24,47 @@ test('an interrupted RPC response rejects instead of leaving the operation pendi
   });
 });
 
-// CHANGED on purpose (0.18.239, as Pandamonium Desktop 0.19.304): the node reads Content-Length CHARACTERS (CMDHandler: char[contentlength]
-// from a UTF-8 reader), so the header counts UTF-16 units, as Java's char does; this stand-in reads the body exactly that way and never more
-test('a non-ASCII POST is read whole by a reader that counts characters, as the node does (an emoji is two chars in both)', async () => {
-  const command = 'status ' + 'é'.repeat(6000) + ' ✓ 😀 ' + 'ж'.repeat(10); let sock = null;
-  await withServer(socket => {
-    sock = socket; let received = Buffer.alloc(0);
+// CHANGED on purpose (0.18.240, as Pandamonium Desktop 0.19.305, correcting 0.18.239): a POST body is pure ASCII, so the shipped node (Content-Length read as CHARACTERS) and a fixed
+// one (read as BYTES) both get it whole; anything else goes by GET (URL-decoded the way Java's URLDecoder does, "+" as a space),
+// or is refused before sending when too long for it. Two stand-ins, one per node, must receive the exact command.
+function nodeStandIn(readBodyAs, seen) {
+  return (socket) => {
+    let received = Buffer.alloc(0);
     socket.on('data', chunk => {
       received = Buffer.concat([received, chunk]);
-      const end = received.indexOf('\r\n\r\n');
-      if (end < 0) return;
-      const header = received.subarray(0, end).toString();
-      const length = Number(/content-length: (\d+)/i.exec(header)?.[1]);
-      const chars = received.subarray(end + 4).toString('utf8');   // what a UTF-8 Reader yields, in UTF-16 units
-      if (chars.length < length) return;                             // the node blocks here, waiting for more characters
-      assert.equal(chars.slice(0, length), command, 'the whole command in the first Content-Length characters');
-      assert.equal(chars.length, length, 'and nothing after it');
-      assert.match(header, /^POST \/ HTTP/);
-      const body = '{"status":true,"response":{"ok":true}}';
-      socket.end('HTTP/1.1 200 OK\nContent-Length: ' + Buffer.byteLength(body) + '\nConnection: close\n\n' + body);
+      const end = received.indexOf('\r\n\r\n'); if (end < 0) return;
+      const header = received.subarray(0, end).toString('latin1'), line = header.split('\r\n')[0], [method, target] = line.split(' ');
+      let command;
+      if (method === 'GET') command = decodeURIComponent(target.replace(/^\//, '').replace(/\/$/, '').replace(/\+/g, ' ')).trim();   // URLDecoder: "+" is a space
+      else {
+        const length = Number(/content-length: (\d+)/i.exec(header)?.[1]), body = received.subarray(end + 4);
+        if (readBodyAs === 'bytes') { if (body.length < length) return; command = body.subarray(0, length).toString('utf8'); }
+        else { const chars = body.toString('utf8'); if (chars.length < length) return; command = chars.slice(0, length); }
+      }
+      seen.push({ method, command });
+      const reply = '{"status":true,"response":{"ok":true}}';
+      socket.end('HTTP/1.1 200 OK\nContent-Length: ' + Buffer.byteLength(reply) + '\nConnection: close\n\n' + reply);
     });
-  }, async port => {
-    let timer;
-    try { assert.deepEqual(await Promise.race([rpcCall(port, 'test-only', command), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('the node would still be waiting for characters')), 3000); })]), { status: true, response: { ok: true } }); }
-    finally { clearTimeout(timer); if (sock) sock.destroy(); }
-  });
+  };
+}
+test('ASCII by POST and non-ASCII by GET reach a characters-reading node and a bytes-reading node exactly; a non-ASCII command too long for GET is refused before sending', async () => {
+  const cases = [['ASCII, long: POST', 'send amount:1 address:0x02 state:{"0":"' + 'a'.repeat(7000) + '"}', 'POST'], ['ASCII with + % / and spaces: GET', 'txnstate id:x port:1 value:"1+1 = 2% a/b/"', 'GET'],
+    ['non-ASCII, short: GET', 'txnstate id:x port:1 value:"café ✓ 😀"', 'GET'], ['non-ASCII, longer than POST starts: GET', 'txnstate id:x port:1 value:"' + 'é'.repeat(7000) + ' 😀"', 'GET']];
+  for (const reads of ['chars', 'bytes']) {
+    const seen = [];
+    await withServer(nodeStandIn(reads, seen), async port => {
+      for (const [what, command, method] of cases) {
+        seen.length = 0;
+        assert.deepEqual(await rpcCall(port, 'test-only', command), { status: true, response: { ok: true } }, reads + ': ' + what);
+        assert.deepEqual(seen, [{ method, command }], reads + ': ' + what);
+      }
+      seen.length = 0;
+      await assert.rejects(rpcCall(port, 'test-only', 'txnstate id:x port:1 value:"' + 'é'.repeat(12000) + '"'), /outside plain ASCII and is too long/);
+      assert.deepEqual(seen, [], reads + ': nothing was sent');
+    });
+  }
 });
+
 test('a non-JSON reply is refused without any of its text in the error', async () => {
   const SECRET = 'apple banana cherry seed words';
   await withServer(socket => socket.once('data', () => {
