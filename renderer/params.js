@@ -121,7 +121,11 @@
     return "";
   }
 
-  var API = { mdsArg: mdsArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+  /** Why a -rescuenode value is refused ("" = it is fine, or unset): host:port only (0.18.232, as Pandamonium Desktop 0.19.301): the
+   *  node pastes it into "megammrsync action:resync host:" + it and runs that (Main.java). */
+  function rescueProblem(v) { return v == null || v === "" || v === false ? "" : /^[A-Za-z0-9.\-]{1,253}:\d{1,5}$/.test(String(v)) ? "" : "host:port"; }
+
+  var API = { mdsArg: mdsArg, rescueProblem: rescueProblem, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;

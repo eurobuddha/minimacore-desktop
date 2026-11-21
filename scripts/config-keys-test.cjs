@@ -107,3 +107,18 @@ test('the keys this regression was about are present', () => {
     assert.ok(defaults.has(k), 'DEFAULTS must declare ' + k);
   }
 });
+
+// ---- 0.18.232 (as Pandamonium Desktop 0.19.301): MDS never reaches the node through saved settings; -rescuenode is host:port only ----
+test("saved settings: an mds* param never reaches the node, and -rescuenode takes host:port only (the node pastes it into a command)", () => {
+  const os = require("node:os"), Module = require("node:module"), DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cfg-rescue-")), real = Module._load;
+  Module._load = function (r, parent) { if (r === "electron" && parent && /[\\/]main[\\/]config\.js$/.test(parent.filename)) return { app: { getPath: () => DIR }, safeStorage: { isEncryptionAvailable: () => false } }; return real.apply(this, arguments); };
+  try {
+    delete require.cache[require.resolve("../main/config.js")]; const config = require("../main/config.js");
+    fs.writeFileSync(path.join(DIR, "config.json"), JSON.stringify({ params: { mdsenable: true, mdspassword: "x", rescuenode: "h.example:9001 phrase:a b c" } }));
+    const p = config.effectiveParams();
+    assert.equal(Object.keys(p).some(k => /^mds/i.test(k)), false); assert.equal(p.rescuenode, undefined, "an unsafe rescue node is never passed");
+    for (const bad of ["h.example:9001 phrase:a", "h.example", "h:9001;quit", '"h:1"']) assert.throws(() => config.save({ params: { rescuenode: bad } }), /must be host:port/, bad);
+    config.save({ params: { rescuenode: "megammr.example:9001" } }); assert.equal(config.effectiveParams().rescuenode, "megammr.example:9001");
+    assert.throws(() => config.save({ extraArgs: '-test "-rescuenode" h:1' }), /-rescuenode is set in Startup Params/);
+  } finally { Module._load = real; delete require.cache[require.resolve("../main/config.js")]; fs.rmSync(DIR, { recursive: true, force: true }); }
+});
