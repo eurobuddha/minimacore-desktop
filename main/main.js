@@ -413,8 +413,9 @@ node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happene
 // What a yes let go, run so that a failure which left the node running ends the hold (0.19.319): a restore refused for a wrong
 // password, an import that fails fast or a settings save that throws, retried at once, was refused for up to 30 s.
 async function held(op) {
-  try { const r = await op(); if (r && r.status === false && node.state === "running") stopGuard.release(); return r; }
-  catch (e) { if (node.state === "running") stopGuard.release(); throw e; }
+  const mine = stopGuard.holding();   // the hold this yes opened (0.19.322): ended only by its own failure, never another request's
+  try { const r = await op(); if (r && r.status === false && node.state === "running") stopGuard.release(mine); return r; }
+  catch (e) { if (node.state === "running") stopGuard.release(mine); throw e; }
 }
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one

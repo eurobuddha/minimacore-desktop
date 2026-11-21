@@ -287,3 +287,23 @@ test("main's in-flight gather: a read that never answers is 'could not be checke
   assert.deepEqual(w.pools, [{ type: "ADD", ts: NOW - 60000 }], "the pools' answer is kept"); assert.deepEqual(w.dexicon, IDLE.dexicon); assert.deepEqual(w.futurecash, { ready: true, posted: 0 });
   const said = inFlight(w, "shutdown", NOW); assert.ok(said.busy.some(l => /pool/i.test(l)), "and the pool work is said");
 });
+
+// ---- 0.19.322: a release names the hold it is for: a request whose op fails after its hold ran out never ends ANOTHER request's ----
+test("stopGuard + main's held(): a failure that comes after another request's yes leaves that request's hold in place", async () => {
+  const { stopGuard } = require("../main/inflight.js"), main = read("main/main.js");
+  let t = NOW; const node = { state: "running" }, asked = [];
+  const g = stopGuard({ running: () => node.state === "running", gather: async () => With({ pools: [{ type: "ADD", ts: NOW - 60000 }] }), ask: async (w) => { asked.push(w.title); return true; }, log() {}, now: () => t });
+  const at = main.indexOf("async function held(op) {"); assert.ok(at > 0, "main has held()");
+  const held = new Function("stopGuard", "node", main.slice(at, main.indexOf("\n}\n", at) + 2) + "\nreturn held;")(g, node);
+  let failA; const slowA = new Promise((res) => { failA = res; });   // A: a long import that ends with the node's refusal
+  assert.equal(await g.pass(), true, "A: asked, yes");
+  const a = held(() => slowA);
+  t += 30001; assert.equal(await g.pass(), true, "B: A's hold ran out (30 s), B is asked and let go");
+  failA({ status: false, error: "import failed" }); assert.equal((await a).status, false);
+  await assert.rejects(g.pass(), /already being stopped or restarted/, "C: B's hold still stands; A's failure ended only A's own");
+  assert.equal(asked.length, 2);
+  // and A's own failure, inside its hold, still ends it (0.19.319)
+  g.seen("stopped"); t += 1; assert.equal(await g.pass(), true); assert.equal((await held(async () => ({ status: false }))).status, false);
+  assert.equal(await g.pass(), true, "the retry is asked again, not refused"); assert.equal(asked.length, 4);
+  await assert.rejects(held(async () => { throw new Error("threw"); }), /threw/); assert.equal(await g.pass(), true, "a throw ends its own hold too");
+});
