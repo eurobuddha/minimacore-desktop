@@ -290,6 +290,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["AXRPC_URL", I18N.N_("That doesn't look like a URL.")],
     ["AXRPC_HTTPS", I18N.N_("Use an https:// endpoint.")],
     ["AXRPC_CREDENTIALS", I18N.N_("Leave the name and password out of the URL (user:password@host is not allowed); use a URL with the key in its path if your provider gives one.")],
+    ["AXRPC_NEED_USDT", I18N.N_("Need {need} USDT or more for that — you have {have} USDT.")],   // main/atomix.js computeQuote (USDT: the Ethereum leg)
     ["AXRPC_PRIVATE", I18N.N_("That host isn't allowed (local/private addresses are blocked).")],
     ["SHOP_NO_REFUSED", I18N.N_("This order has no refused payment to retry. Check your Balance/History.")],
     ["SHOP_NOT_UNSURE", I18N.N_("This order has no payment that may have gone through.")],

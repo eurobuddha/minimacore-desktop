@@ -724,3 +724,18 @@ test("OTC accept, the glue run: a deal whose amount, price or side moved since t
   assert.deepEqual(await atomix.otcDealAction("r", "accept", "250.0", "1.0020", "SELL"), { ok: true }, "the same terms, written either way");
   assert.deepEqual(F.st.touched, ["otc.accept"]);
 });
+
+// ---- 0.19.276: main's "Need X USDT or more" is said in the app's language on the AtomiX screens (USDT: the Ethereum leg) ----
+test("AtomiX: the main process's sentences reach the screen through MainSaid, in each language; amounts and the token as they came", () => {
+  const AXm = require("../renderer/dexicon-ax.js"), MSg = require("../renderer/mainsaid.js");
+  for (const c of ["zh", "ru", "uk"]) require("../renderer/i18n/" + c + ".js");
+  const en = "Need 12.345678 USDT or more for that — you have 3.1 USDT.";
+  try {
+    for (const c of ["en", "zh", "ru", "uk"]) {
+      I18N.set(c); const said = AXm.mx(en);
+      assert.equal(said, MSg.say(en), c); assert.ok(said.includes("12.345678") && said.includes("3.1") && said.includes("USDT"), c + ": " + said);
+      if (c !== "en") assert.notEqual(said, en, c + " is translated");
+    }
+    assert.equal(AXm.mx("You locked 100 mxUSDT for USDT"), "You locked 100 MxUSD for USDT", "an engine sentence keeps its token mapping");
+  } finally { I18N.set("en"); }
+});

@@ -5323,7 +5323,8 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} зупинено ({error}). Можливо, транзакцію вже надіслано: перевірте «Активність» і баланс, перш ніж повторювати.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "Адресу для виплат не вдалося перевірити: вузол не відповів. Нічого не збережено; спробуйте знову, коли вузол працюватиме.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Вузол повідомляє, що адреса для виплат {address} не є дійсною адресою Minima. Нічого не збережено; перевірте адресу й збережіть знову.",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "Замовлення, надіслані до блоку {block}, могли бути не прочитані: застосунок був закритий довше, ніж охоплює одне читання. Платежі не губляться: вузол показує кожну невитрачену монету цього гаманця."
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "Замовлення, надіслані до блоку {block}, могли бути не прочитані: застосунок був закритий довше, ніж охоплює одне читання. Платежі не губляться: вузол показує кожну невитрачену монету цього гаманця.",
+  "Need {need} USDT or more for that — you have {have} USDT.": "Для цього потрібно {need} USDT або більше — у вас {have} USDT."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5416,5 +5417,6 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet."
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
+  "Need {need} USDT or more for that — you have {have} USDT."
 ] });

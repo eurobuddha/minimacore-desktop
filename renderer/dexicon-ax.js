@@ -19,7 +19,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const ccyName = (l) => { l = String(l == null ? "" : l); return /^mxusdt?$/i.test(l) ? "MxUSD" : l.toLowerCase() === "minima" ? "MINIMA" : l; };
   const ccyOf = (st) => (st && st.currency === "minima" ? "MINIMA" : st && st.currency === "mxusdt" ? "MxUSD" : "…");
   /** the engine's own sentences say mxUSDT; the token is MxUSD (DoorHost.mx) */
-  const mx = (s) => String(s == null ? "" : s).replace(/mxusdt/gi, "MxUSD");
+  // a sentence of the main process is said in the app's language first (renderer/mainsaid.js, 0.19.276), then the token named
+  const MS = typeof MainSaid !== "undefined" ? MainSaid : typeof require === "function" ? require("./mainsaid.js") : null;
+  const mx = (s) => { const t = String(s == null ? "" : s); return (MS ? MS.say(t) : t).replace(/mxusdt/gi, "MxUSD"); };
   const tok = (t) => { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = t.toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "MxUSD"; } return ccyName(t); };
   /** A number's exact decimal text, never an exponent (1e-7 is 0.0000001), or "" when it is not a plain number. */
   const plainNum = (x) => {

@@ -5310,7 +5310,8 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} 已停止（{error}）。它可能已经提交：重试前请检查活动记录和余额。",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.": "无法检查收款地址：节点没有响应。未保存任何内容；请在节点运行时再试。",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "节点表示收款地址 {address} 不是有效的 Minima 地址。未保存任何内容；请检查地址后再保存。",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "区块 {block} 之前发送的订单可能未被读取：应用离开的时间超过了一次读取的范围。付款不会遗漏：节点会列出此钱包的每个未花费币。"
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "区块 {block} 之前发送的订单可能未被读取：应用离开的时间超过了一次读取的范围。付款不会遗漏：节点会列出此钱包的每个未花费币。",
+  "Need {need} USDT or more for that — you have {have} USDT.": "这需要 {need} USDT 或更多 — 您有 {have} USDT。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5403,5 +5404,6 @@
   "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.",
   "The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.",
   "The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
-  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet."
+  "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
+  "Need {need} USDT or more for that — you have {have} USDT."
 ] });
