@@ -547,3 +547,42 @@ test("buyer: a retry pays only after a refused payment, never while one may be i
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
   assert.ok(src.indexOf('store.setMetaSync("inflight:" + ref, true);\n  try { const pr = await sendPayment(') > 0, "the mark is on disk before the first payment is sent");
 });
+
+// ---- 0.18.213: a read the node did not answer advances nothing ----
+test("a failed or thrown read is not covered: nothing advances, the status says so, and the next pass reads the newest part of the gap; a gap that opens during a backfill is kept", async () => {
+  let m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
+  const VADDR = "MxG0" + "6".repeat(56); let tip = 1000, mode = "ok", msg = []; const depths = [];
+  m.shop._setRunner(async (c) => {
+    if (c.startsWith("vault")) return { status: true, response: { phrase: "vendor seed h1" } };
+    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: VADDR } };
+    if (c === "block") return { status: true, response: { block: tip } };
+    if (c.startsWith("coins address:" + m.shop.MINIMERCH)) { const d = Number(/depth:(\d+)/.exec(c)[1]); depths.push(d);
+      if (mode === "refuse") return { status: false, error: "busy" }; if (mode === "throw") throw new Error("RPC timed out");
+      return { status: true, response: msg.filter(x => tip - x.created <= d) }; }
+    return { status: true, response: [] };
+  });
+  m.store.saveShop({ shopId: "fail", shopName: "F", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "1", maxUnits: "5" }], shipping: [] });
+  await m.shop.init(); await m.shop.scanOnce(); assert.equal(Number(m.store.getMeta("scanTip")), 1000);
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("fail buyer");
+  const seal = async (ref, created) => ({ coinid: "0x" + Buffer.from(ref).toString("hex"), created, state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref, randomid: ref, from: buyer.publicId, to: me.publicId, date: 1, shopId: "fail", items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], amount: "1", currency: "Minima", shipping: "" }))) } });
+  msg = [await seal("ORD-NEWEST", 2990)];
+  for (const mo of ["refuse", "throw"]) {
+    mode = mo; tip = 3000; await m.shop.scanOnce();
+    assert.equal(Number(m.store.getMeta("scanTip")), 1000, mo + ": the scan tip does not advance"); assert.equal(Number(m.store.getMeta("bfTarget") || 0), 0, mo + ": no backfill invented");
+    assert.match(m.shop.scanState().text, /Older orders could not be read yet/, mo);
+  }
+  mode = "ok"; tip = 3001; depths.length = 0; await m.shop.scanOnce();
+  assert.ok(m.store.order("ORD-NEWEST"), "the newest part of the gap is read once the node answers");
+  assert.equal(Number(m.store.getMeta("scanTip")), 3001); assert.equal(Number(m.store.getMeta("bfTarget")), 1000);
+  assert.match(m.shop.scanState().text, /Reading orders and payments from while the app was closed \(back to block 1000\)/);
+  // a backfill step that fails moves nothing
+  const floor = Number(m.store.getMeta("bfFloor")); mode = "refuse"; tip = 3002; await m.shop.scanOnce();
+  assert.equal(Number(m.store.getMeta("bfFloor")), floor); assert.equal(Number(m.store.getMeta("scanTip")), 3001);
+  // a second gap while the first backfill is pending: the target stays the oldest, the floor moves under the new window
+  mode = "ok"; tip = 9000; await m.shop.scanOnce();
+  assert.equal(Number(m.store.getMeta("bfTarget")), 1000); assert.ok(Number(m.store.getMeta("bfFloor")) > 7000, "the new gap is read too");
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep, floor\)/.test(src), "a backfill step skips what an earlier pass read");
+  assert.ok(/ipcMain\.handle\("mcd:shopScanState", \(\) => shop\.scanState\(\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").includes("const scanLine = scan && scan.text ?"), "shown on the orders screen");
+});

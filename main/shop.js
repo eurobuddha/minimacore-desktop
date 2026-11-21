@@ -40,6 +40,9 @@ const seenPayCoins = new Set();
 let identity = null;         // {boxPk,boxSk,signPk,signSk,publicId}
 let vendorAddress = "";      // my default receiving address (payments land here)
 let scanTimer = null, lastTip = 0, scanning = false, passServed = 0;
+// A read the node did not answer (refused at every depth, timed out, threw) in this pass (0.18.213): it was taken as covered,
+// so the newest part of a gap was never read. Any failure now advances nothing; the same blocks are read on the next pass.
+let readFailed = false, lastPassFailed = false;
 
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
@@ -302,15 +305,17 @@ function routeIncoming(w, fromPublicId) {
 async function coinsAt(address, depth, extra) {
   let d = depth;
   while (d >= 4) {
-    const r = await nodeCmd(`coins address:${address} simplestate:true${extra || ""} order:desc depth:${d}`);
+    let r; try { r = await nodeCmd(`coins address:${address} simplestate:true${extra || ""} order:desc depth:${d}`); } catch (e) { readFailed = true; return null; }
     if (r && Array.isArray(r.response)) { passServed = Math.min(passServed, d); return r.response; }   // the depth the node really served
     d = Math.floor(d / 2);
   }
+  readFailed = true;
   return null;   // never got a usable reply → caller keeps its bookmark and retries next tick
 }
 function capSeen() { if (seenMsgCoins.size > 40000) seenMsgCoins.clear(); if (seenPayCoins.size > 40000) seenPayCoins.clear(); }
-async function scanOrders(depth) {
-  const coins = await coinsAt(MINIMERCH, depth); if (!coins) return false;
+const above = (c, floor) => floor > 0 && Number(c && c.created) > floor;   // already read by an earlier pass: a backfill step skips it
+async function scanOrders(depth, floor) {
+  const coins = (await coinsAt(MINIMERCH, depth) || []).filter(c => !above(c, floor)); if (!coins.length) return false;
   capSeen();
   let changed = false;
   for (const c of coins) {
@@ -325,12 +330,12 @@ async function scanOrders(depth) {
   }
   return changed;
 }
-async function scanPayments(depth) {
+async function scanPayments(depth, floor) {
   const addrs = payAddresses(); if (!addrs.length) return false;
   const listed = [], have = new Set();
   for (const a of addrs) {   // every published payout address (0.18.205), one coin once
     const got = await coinsAt(a, depth, " relevant:true"); if (!got) continue;
-    for (const c of got) if (c && c.coinid && !have.has(c.coinid)) { have.add(c.coinid); listed.push(c); }
+    for (const c of got) if (c && c.coinid && !have.has(c.coinid) && !above(c, floor)) { have.add(c.coinid); listed.push(c); }
   }
   capSeen();
   // Oldest first (0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one
@@ -363,26 +368,33 @@ async function scanOnce() {
     const prev = Number(store.getMeta("scanTip")) || 0;
     const want = prev && tip > prev ? tip - prev + GAP_MARGIN : prev && tip ? POLL_DEPTH : BACKFILL_MAX_DEPTH;
     const depth = Math.max(POLL_DEPTH, Math.min(WINDOW_DEPTH, want));
-    passServed = depth;
-    const a = await scanOrders(depth).catch(() => false);
-    const b = await scanPayments(depth).catch(() => false);
+    const failed = () => { readFailed = true; return false; };
+    passServed = depth; readFailed = false;
+    const a = await scanOrders(depth).catch(failed);
+    const b = await scanPayments(depth).catch(failed);
     let changed = a || b;
-    if (tip) {
+    if (tip && !readFailed) {
       const covered = tip - passServed;   // the oldest block this pass read
-      if (prev && prev < covered && !Number(store.getMeta("bfTarget"))) { store.setMeta("bfTarget", prev); store.setMeta("bfFloor", covered); }
+      // A new gap below this pass: the backfill reaches down to the oldest unread block and starts again just under this
+      // pass (0.18.213: a gap that opened while an older backfill was pending was never registered).
+      if (prev && prev < covered) { const t0 = Number(store.getMeta("bfTarget")) || 0; store.setMeta("bfTarget", t0 ? Math.min(t0, prev) : prev); store.setMeta("bfFloor", covered); }
       store.setMeta("scanTip", tip);
       const target = Number(store.getMeta("bfTarget")) || 0, floor = Number(store.getMeta("bfFloor")) || 0;
       if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK);
         passServed = deep;
-        const c = await scanOrders(deep).catch(() => false), d = await scanPayments(deep).catch(() => false);
+        const c = await scanOrders(deep, floor).catch(failed), d = await scanPayments(deep, floor).catch(failed);
         changed = changed || c || d;
         const reached = tip - passServed;
-        if (reached <= target) { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); }
+        if (readFailed) { /* nothing moves: the same step is tried on the next pass */ }
+        else if (reached <= target) { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); }
         else if (reached < floor) store.setMeta("bfFloor", reached);
-        else { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); console.error("[miniMall] orders and payments older than block " + reached + " could not be read: the node serves no deeper history."); }
+        else { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("unreadBelow", reached); console.error("[miniMall] orders and payments older than block " + reached + " could not be read: the node serves no deeper history."); }
       }
     }
+    if (!tip) readFailed = true;
+    if (lastPassFailed !== readFailed) changed = true;   // the status line changes
+    lastPassFailed = readFailed;
     if (changed) emitter.emit("update");
   } finally { scanning = false; }
 }
@@ -420,11 +432,19 @@ function orderDetail(ref) {
 }
 /** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
+/** What the order scan could not read yet, for the miniMall status line (0.18.213). */
+function scanState() {
+  const target = Number(store.getMeta("bfTarget")) || 0, below = Number(store.getMeta("unreadBelow")) || 0;
+  return { readFailed: lastPassFailed, catchingUpTo: target, unreadBelow: below,
+    text: lastPassFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."
+      : target ? "Reading orders and payments from while the app was closed (back to block " + target + ")."
+      : below ? "Orders and payments older than block " + below + " could not be read: the node serves no deeper history." : "" };
+}
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
-  myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount,
+  myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState,
   placeOrder, retryPayment, advanceStatus, reply, checkImported, vendorCheck,
   _setRunner, MINIMERCH, USDT_TOKEN, tokenFor
 };

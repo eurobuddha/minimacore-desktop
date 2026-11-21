@@ -314,6 +314,7 @@ ipcMain.handle("mcd:shopDelete", (_e, shopId) => shop.deleteShop(shopId));
 ipcMain.handle("mcd:shopOrders", () => shop.ordersList());
 ipcMain.handle("mcd:shopOrder", (_e, ref) => shop.orderDetail(ref));
 ipcMain.handle("mcd:shopNewCount", () => shop.newOrderCount());
+ipcMain.handle("mcd:shopScanState", () => shop.scanState());
 ipcMain.handle("mcd:shopPlaceOrder", (_e, shopCfg, items, total, shipping, delivery, note) => shop.placeOrder(shopCfg, items, total, shipping, delivery, note));
 ipcMain.handle("mcd:shopRetryPay", (_e, ref) => shop.retryPayment(ref));
 ipcMain.handle("mcd:shopAdvance", (_e, ref, status) => shop.advanceStatus(ref, status));

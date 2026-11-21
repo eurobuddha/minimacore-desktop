@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.213] — miniMall: a read the node did not answer is never taken as read
+
+- The gap backfill of 0.18.206 took a failed node read (refused at every depth, timed out, or an error swallowed by `.catch`) as covered: the scan tip advanced and the backfill floor dropped, so the newest part of a gap was never read. Now any failed read in a pass advances nothing and the same blocks are read on the next pass; a gap that opens while an older backfill is pending is kept (the target stays the oldest unread block); a backfill step skips coins an earlier pass already read; and the orders screen says when older orders could not be read yet, while it is catching up, or when the node serves no deeper history. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.212] — databases: an empty file is a fresh start again; no empty file is written
 
 - sql.js saves a database with no tables as 0 bytes, and the app wrote such files whenever the AtomiX engine stopped before creating a table (a locked vault, a node not write-enabled, a quick quit). 0.18.210 refused every empty file, so AtomiX and the ETH Wallet would never start for those users. Now a 0-byte file opens as a fresh database (as SQLite treats it), only a file with content that is not SQLite or fails the check is refused and kept, a save with no tables writes nothing, and a database the app has let go (a wallet replacement, or an init overtaken by one) is disposed: its pending save is cancelled and it never writes again (a pending save of the old wallet could land in the new wallet's file). PandaPools and the history database use the same shim and get the same behaviour. Test: `scripts/atomix-unit.js`.

@@ -133,6 +133,7 @@ contextBridge.exposeInMainWorld("mcd", {
   shopOrders: () => ipcRenderer.invoke("mcd:shopOrders"),
   shopOrder: (ref) => ipcRenderer.invoke("mcd:shopOrder", ref),
   shopNewCount: () => ipcRenderer.invoke("mcd:shopNewCount"),
+  shopScanState: () => ipcRenderer.invoke("mcd:shopScanState"),
   shopPlaceOrder: (shopCfg, items, total, shipping, delivery, note) => ipcRenderer.invoke("mcd:shopPlaceOrder", shopCfg, items, total, shipping, delivery, note),
   shopRetryPay: (ref) => ipcRenderer.invoke("mcd:shopRetryPay", ref),
   shopAdvance: (ref, status) => ipcRenderer.invoke("mcd:shopAdvance", ref, status),
