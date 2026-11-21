@@ -2627,7 +2627,10 @@ async function histExportRows() {
 }
 async function copyHistory() {
   const rows = await histExportRows();
-  const lines = rows.map(r => histCells(r).join("\t"));
+  // As the CSV export (0.19.259): a cell that leads with a formula trigger gets an apostrophe (a token name is anyone's text,
+  // and a pasted "=HYPERLINK(...)" runs in a spreadsheet); a tab or line break inside a cell would start another cell or row.
+  const cell = (v) => { const s = String(v == null ? "" : v).replace(/[\t\r\n]/g, " "); return /^[=+\-@]/.test(s) ? "'" + s : s; };
+  const lines = rows.map(r => histCells(r).map(cell).join("\t"));
   copy([HIST_COLS.join("\t"), ...lines].join("\n"));
   toast(t("Copied {rows} rows ✓", { rows: rows.length }), "ok");
 }

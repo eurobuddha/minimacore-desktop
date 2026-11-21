@@ -248,3 +248,14 @@ test("the token detail, action sheet, prompt, payment result, transaction detail
     assert.ok(new RegExp("modalize\\((?:el\\(\"" + id + "\"\\)|ov)").test(app.slice(app.indexOf('id="' + id + '"'))), id + ": made modal");
   }
 });
+
+// ---- 0.19.259: "Copy the listed rows" guards formulas as the CSV export does; Future Cash's Collect names the real unit ----
+test("Copy the listed rows: a cell that leads with a formula trigger gets an apostrophe, and no tab or line break splits a cell; Collect names the stake's own unit", () => {
+  const body = app.slice(app.indexOf("async function copyHistory()"), app.indexOf("async function copyHistory()") + 900);
+  const m = /const cell = (\(v\) => \{[^\n]*\});/.exec(body); assert.ok(m, "the guard"); const cell = eval(m[1]);
+  assert.equal(cell('=HYPERLINK("http://x","y")'), "'=HYPERLINK(\"http://x\",\"y\")"); assert.equal(cell("+1"), "'+1"); assert.equal(cell("-2"), "'-2"); assert.equal(cell("@x"), "'@x");
+  assert.equal(cell("a\tb\nc"), "a b c"); assert.equal(cell("Minima"), "Minima"); assert.equal(cell(null), "");
+  assert.ok(/histCells\(r\)\.map\(cell\)\.join\("\\t"\)/.test(body));
+  const fc = fs.readFileSync(path.join(R, "futurecash.js"), "utf8");
+  assert.ok(fc.includes('const unit = x.tokenid === "0x00" ? "MINIMA" : String(x.tokenid).toUpperCase() === FCN_MXUSD ? "MxUSD" : t("of the token {tokenid}", { tokenid: x.tokenid });') && fc.includes('t("{amount} {unit} is collected to its payout address:'), "the real unit, the token id whole");
+});

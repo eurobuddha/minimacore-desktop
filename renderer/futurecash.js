@@ -225,7 +225,8 @@ function fcnWire(host) {
       + "\n\n" + t("Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.");
     if (await showConfirm(t("Retire"), t("This address is taken out of the node's change rotation for good and kept watch-only. It moves no funds:\n{address}", { address: a }) + warn, t("Retire"), true)) fcnAct(() => api.fc("retire", a), () => t("Retired: change will never land there again.")); });
   host.querySelectorAll("[data-fcn-collect]").forEach(b => b.onclick = async () => { const id = b.dataset.fcnCollect, x = ((FCN.stakes && FCN.stakes.stakes) || []).find(s => s.coinid === id); if (!x) return;
-    if (await showConfirm(t("Collect"), t("{amount} MINIMA is collected to its payout address:\n{address}\n\ncoin {coin}", { amount: fcnAmt(x.amount), address: x.payout, coin: x.coinid }), t("Collect"))) fcnAct(() => api.fc("collect", id), () => t("Collect posted: confirms in about a block.")); });
+    const unit = x.tokenid === "0x00" ? "MINIMA" : String(x.tokenid).toUpperCase() === FCN_MXUSD ? "MxUSD" : t("of the token {tokenid}", { tokenid: x.tokenid });   // the real unit (0.19.259), the token id whole
+    if (await showConfirm(t("Collect"), t("{amount} {unit} is collected to its payout address:\n{address}\n\ncoin {coin}", { amount: fcnAmt(x.amount), unit, address: x.payout, coin: x.coinid }), t("Collect"))) fcnAct(() => api.fc("collect", id), () => t("Collect posted: confirms in about a block.")); });
   host.querySelectorAll("[data-fcn-preset]").forEach(b => b.onclick = () => { fcnKeep(); FCN_LOCK.preset = +b.dataset.fcnPreset; paintFutureCash(); });
   for (const id of ["fcnAmount", "fcnRecipient"]) { const f = el(id); if (f) f.oninput = fcnKeep; }
   on("fcnLock", fcnLock);
