@@ -7,9 +7,21 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.279] — Web Wallet: the ceiling message first
+
+- Confirming a key-use figure above 262143 is refused with the ceiling message even while the key-use service cannot be read; it said the chain's figure could not be read. Test: `scripts/inject-test.cjs`.
+
+## [0.18.278] — key uses: "at least", and the single-signature verbs named
+
+- The five single-signature commands (txnsign, sendfrom, signfrom, consolidatefrom, createtokenfrom) may name 262143; every other command that names keyuses: is held to 250000, so an unknown verb no longer gets the higher bound. The figure is "at least" the signatures already made, not "above" it, and the node's defaults are said as 100 to 1000. Known limit: restoresync's keyuses: is added to each key's uses in the backup, which the app cannot see, so 10000 bounds only the figure typed, not the result. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.277] — miniMall: payments made while closed are read again
+
+- The node's in-memory tree holds 1024 to 1123 blocks, and its root keeps every unspent coin of this wallet from older history. When the app was closed longer than the tree, the scan now reads orders as far back as the tree holds and makes one payments read that reaches the root, so an unspent payment of any age pays its order. Only orders older than that, and payments already spent, are said as not read. A backfill step reads at most 1024 blocks, so an order still inside the tree is read. A step the node's reply cap cuts short is tried twice more before the scan stops and says so. The notice shows only when a shop exists and can be dismissed; the log keeps it. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.276] — miniMall: never claims older orders were read
 
-- Without MegaMMR the node can read only its last 1024 blocks, and it does not refuse a deeper request. Orders older than that are now said as not read, instead of being taken as covered. A resync that puts the chain below what was read before moves nothing and is not called a failure. A failed read is now described as recent orders not being read. Test: `scripts/shop-test.cjs`.
+- A resync that puts the chain below what was read before moves nothing and is not called a failure. A failed read is described as recent orders not being read. Corrected by 0.18.277: this version also took the node's in-memory tree as a fixed 1024 blocks and gave up on any gap that reached past it, so a payment made while the app was closed and older than the tree no longer paid its order (0.18.272 read it), and an order still inside the tree after a cut first window could be dropped. Test: `scripts/shop-test.cjs`.
 
 ## [0.18.275] — Web Wallet: "Nothing was saved" on a refused confirmation
 
