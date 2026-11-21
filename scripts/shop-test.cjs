@@ -519,8 +519,8 @@ test("an order sent while the app was closed is read through the backfill after 
   t.st.msg.push(await t.seal("ORD-DEEP", 1830)); m = await t.reopen(); t.st.tip = 2600; t.st.hook = (d) => (d > 300 ? { status: true, response: { tooBig: true } } : null);
   const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
   try { for (let i = 0; i < 4; i++, t.st.tip++) await m.shop.scanOnce(); } finally { console.error = err; }
-  assert.match(errs.join(), /older than block \d+ could not be read: the node's answer for older blocks was too large/); assert.equal(Number(m.store.getMeta("bfTarget")), 0);
-  assert.match(m.shop.scanState().text, /could not be read: the node's answer for older blocks was too large\./); assert.ok(!/closed longer/.test(m.shop.scanState().text));
+  assert.match(errs.join(), /older than block \d+ may not have been read: the node's answer for older blocks was too large/); assert.equal(Number(m.store.getMeta("bfTarget")), 0);
+  assert.match(m.shop.scanState().text, /may not have been read: the node's answer for older blocks was too large\./); assert.ok(!/closed longer/.test(m.shop.scanState().text));
 });
 // M1 (0.18.277): a payment made while the app was closed, older than the tree when it reopens, is found at the root and pays the order
 test("a payment older than the node's tree is found at the tree's root and pays the order; only orders older than the floor, and payments already spent, are said as not read", async () => {
@@ -532,7 +532,7 @@ test("a payment older than the node's tree is found at the tree's root and pays 
   assert.equal((m.store.order("ORD-A") || {}).paid, true, "paid: the root carries the unspent coin");
   assert.ok(t.st.payDepths.includes(1124), "one payments read deep enough to reach the root: " + t.st.payDepths); assert.ok(t.st.depths.includes(1123), "orders read as deep as the tree may hold");
   assert.equal(Number(m.store.getMeta("unreadBelow")), 2500 - 1024);
-  assert.equal(m.shop.scanState().text, "Orders older than block 1476, and payments to your shops that were already spent, could not be read: the node keeps only its recent blocks. Payments not yet spent were read.");
+  assert.equal(m.shop.scanState().text, "Orders older than block 1476, and payments to your shops that were already spent, may not have been read: the node keeps only its recent blocks. Payments not yet spent were read.");
 });
 // M2 (0.18.277): after the first window is cut and a step fails, the servable gap inside the tree is read, not dropped
 test("after the first window is cut to 512 and one step fails, an order inside the tree is read; a gap is declared past the tree only from the floor", async () => {
@@ -607,10 +607,33 @@ test("a payment read before its order (the order below a window or step boundary
     const m = await t.reopen(); for (let i = 0; i < 6; i++) { t.st.tip = T + i; await m.shop.scanOnce(); }
     const o = m.store.order("ORD-D"); assert.equal(o.paid, true); assert.equal(Number(o.paidAmount), 1, "counted once: " + o.paidAmount); assert.equal(o.coins.length, 2); }
 });
+// 0.18.283: past the tree, the orders read and the payments read are judged each by its own depth: an orders read the reply cap cut is
+// tried on two more passes and then said with that cause (it ended at once, as "the node keeps only its recent blocks"); a stall count is
+// never carried into a new gap or past the end of a backfill; what is said is "may not have been read" (a longer tree read some of it)
+test("past the tree: a cut orders read is retried and then said with the reply cap as cause; the stall count resets; 'may not have been read'", async () => {
+  const t = await javaSetup("treecut"); const T = 2500;
+  t.st.msg = [await t.seal("ORD-TB", T - 1060)]; t.st.pay = [t.pay("ORD-TB", T - 1058)];
+  const m = await t.reopen(); t.st.hook = (d) => (d > 1024 ? { status: true, response: { tooBig: true } } : null);
+  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
+  try {
+    t.st.tip = T; await m.shop.scanOnce(); assert.equal(Number(m.store.getMeta("bfTarget")), 1000, "a cut orders read does not end the backfill at once");
+    t.st.tip++; await m.shop.scanOnce(); assert.equal(Number(m.store.getMeta("bfTarget")), 1000);
+    t.st.tip++; await m.shop.scanOnce();
+  } finally { console.error = err; }
+  assert.equal(Number(m.store.getMeta("bfTarget")), 0, "ended after two more tries"); assert.equal(Number(m.store.getMeta("bfStall")), 0);
+  assert.equal(m.shop.scanState().text, "Orders older than block " + m.store.getMeta("unreadBelow") + ", and payments to your shops that were already spent, may not have been read: the node's answer for older blocks was too large. Payments not yet spent were read.");
+  assert.ok(errs.some(e => /may not have been read: the node's answer for older blocks was too large/.test(e)), "the log says the same");
+  // a stall left from an earlier backfill is not carried into a new gap
+  m.store.setMeta("bfStall", 2); t.st.hook = null; m.store.setMeta("bfTarget", 0); m.store.setMeta("bfFloor", 0);
+  let first = true; t.st.hook = (d) => { if (first) { first = false; if (d > 512) return { status: true, response: { tooBig: true } }; } return d > 64 ? { status: true, response: { tooBig: true } } : null; };
+  t.st.tip = 3600; await m.shop.scanOnce();
+  assert.ok(Number(m.store.getMeta("bfTarget")) > 0, "a new gap registers, and one capped step does not end it: " + m.store.getMeta("bfStall"));
+  assert.equal(Number(m.store.getMeta("bfStall")), 1, "counted from 0 for the new gap");
+});
 // (5) 0.18.277: the unread notice is shown only with a shop, and can be dismissed (the fact stays in the log)
 test("the unread notice: only for someone with a shop, dismissable, shown again for a newer one", async () => {
   const t = await javaSetup("notice"); const m = t.m;
-  m.store.setMeta("unreadBelow", 1476); m.store.setMeta("unreadWhy", "tree");
+  m.store.setMeta("unreadBelow", 1476); m.store.setMeta("unreadWhy", "treeRoot");
   assert.match(m.shop.scanState().text, /Orders older than block 1476/); assert.equal(m.shop.scanState().unreadShown, true);
   m.shop.dismissUnread(); assert.equal(m.shop.scanState().text, "", "dismissed"); m.store.setMeta("unreadBelow", 3000); assert.match(m.shop.scanState().text, /older than block 3000/, "a newer one is shown");
   m.store.deleteShop("notice"); assert.equal(m.shop.scanState().text, "", "no shop: not shown");

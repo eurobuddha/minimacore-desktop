@@ -438,7 +438,7 @@ async function scanOnce() {
       const covered = tip - passServed;   // the oldest block this pass read
       // A new gap below this pass: the backfill reaches down to the oldest unread block and starts again just under this
       // pass (0.18.213: a gap that opened while an older backfill was pending was never registered).
-      if (prev && prev < covered) { const t0 = Number(store.getMeta("bfTarget")) || 0; store.setMeta("bfTarget", t0 ? Math.min(t0, prev) : prev); store.setMeta("bfFloor", covered); }
+      if (prev && prev < covered) { const t0 = Number(store.getMeta("bfTarget")) || 0; store.setMeta("bfTarget", t0 ? Math.min(t0, prev) : prev); store.setMeta("bfFloor", covered); store.setMeta("bfStall", 0); }   // a new floor: no stall carried over (0.18.283)
       store.setMeta("scanTip", tip);
       const target = Number(store.getMeta("bfTarget")) || 0, floor = Number(store.getMeta("bfFloor")) || 0;
       if (target && floor && tip <= target) { /* the chain has not reached the gap yet: the backfill waits, not a failure (0.18.276) */ }
@@ -446,13 +446,18 @@ async function scanOnce() {
         // the rest of the gap is past what the tree surely holds (0.18.277): orders are read as deep as the tree may still hold, and ONE
         // payments read reaches the root, where this wallet's unspent payment coins of any age are. Orders skip what was read before (floor);
         // payments never do (0.18.282): one seen before its order was known was not counted then, and judging a coin again is idempotent
-        passServed = NODE_TREE_MOST; const c = await scanOrders(NODE_TREE_MOST, floor).catch(failed);
-        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH).catch(failed);
+        passServed = NODE_TREE_MOST; const c = await scanOrders(NODE_TREE_MOST, floor).catch(failed); const ordersServed = passServed;
+        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH).catch(failed); const root = passServed >= ROOT_DEPTH;
         changed = changed || c || d;
-        if (!readFailed) {   // a failed read moves nothing: the same reads are tried on the next pass
-          const root = passServed >= ROOT_DEPTH;   // the reply cap may have cut the payments read short of the root
-          store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("unreadBelow", floor); store.setMeta("unreadWhy", root ? "tree" : "treeAll");
-          console.error("[miniMall] " + (root ? "orders older than block " + floor + ", and payments already spent," : "orders and payments older than block " + floor) + " could not be read: the node keeps only its recent blocks.");
+        // each read's own cut (0.18.283: the payments read's depth stood for both, so a cut orders read ended at once with the wrong cause);
+        // a read the reply cap cut is tried on two more passes, as a backfill step is
+        const ordersCut = ordersServed < NODE_TREE_MOST, stall = ordersCut || !root ? (Number(store.getMeta("bfStall")) || 0) + 1 : 0;
+        if (readFailed) { /* a failed read moves nothing: the same reads are tried on the next pass */ }
+        else if (stall && stall < 3) store.setMeta("bfStall", stall);
+        else {
+          const why = (ordersCut ? "cap" : "tree") + (root ? "Root" : "");
+          store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("bfStall", 0); store.setMeta("unreadBelow", floor); store.setMeta("unreadWhy", why);
+          console.error("[miniMall] " + unreadText(floor, why));
           changed = true;
         }
       } else if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
@@ -469,7 +474,7 @@ async function scanOnce() {
           // two more passes, 0.18.277) and then the backfill ends with the cause said
           const stall = (Number(store.getMeta("bfStall")) || 0) + 1;
           if (stall < 3) store.setMeta("bfStall", stall);
-          else { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("bfStall", 0); store.setMeta("unreadBelow", reached); store.setMeta("unreadWhy", "cap"); console.error("[miniMall] orders and payments older than block " + reached + " could not be read: the node's answer for older blocks was too large."); }
+          else { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("bfStall", 0); store.setMeta("unreadBelow", reached); store.setMeta("unreadWhy", "cap"); console.error("[miniMall] " + unreadText(reached, "cap")); }
         }
       }
     }
@@ -542,15 +547,20 @@ function paymentNotSent(ref) {
 /** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read yet, for the miniMall status line (0.18.213). */
+// What may not have been read below block N, and why (0.18.283: "may not have been", since a tree longer than 1024 blocks read some
+// of them). why: "tree" or "cap" (the node keeps only its recent blocks / its answer was too large), + "Root" when the payments read
+// reached the tree's root, where every unspent payment coin is kept whatever its age.
+function unreadText(n, why) {
+  const root = /Root$/.test(String(why)), cause = /^cap/.test(String(why)) ? "the node's answer for older blocks was too large." : "the node keeps only its recent blocks.";
+  return root ? "Orders older than block " + n + ", and payments to your shops that were already spent, may not have been read: " + cause + " Payments not yet spent were read."
+    : "Orders and payments older than block " + n + " may not have been read: " + cause;
+}
 function scanState() {
   const target = Number(store.getMeta("bfTarget")) || 0, below = Number(store.getMeta("unreadBelow")) || 0, skipped = [...skippedPay.keys()].filter(skipping);
   const skippedText = skipped.map(a => "Payments to " + a + " are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.").join(" ");
-  // the unread notice is shown only to someone with a shop, and until it is dismissed (0.18.277: it stayed for everyone, for good);
-  // what it says is what is true: past the node's recent blocks orders, and payments already spent, could not be read
-  const why = store.getMeta("unreadWhy"), shown = below && store.shops().length > 0 && below > (Number(store.getMeta("unreadDismissed")) || 0);
-  const belowText = !shown ? "" : why === "cap" ? "Orders and payments older than block " + below + " could not be read: the node's answer for older blocks was too large."
-    : why === "treeAll" ? "Orders and payments older than block " + below + " could not be read: the node keeps only its recent blocks."
-    : "Orders older than block " + below + ", and payments to your shops that were already spent, could not be read: the node keeps only its recent blocks. Payments not yet spent were read.";
+  // the unread notice is shown only to someone with a shop, and until it is dismissed (0.18.277: it stayed for everyone, for good)
+  const shown = below && store.shops().length > 0 && below > (Number(store.getMeta("unreadDismissed")) || 0);
+  const belowText = shown ? unreadText(below, store.getMeta("unreadWhy")) : "";
   return { readFailed: lastPassFailed || lastStepFailed, catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
     // the recent window is what fails when a pass fails (a backfill step reads only inside the node's tree), so it is said as recent
     text: [lastPassFailed ? "Recent orders could not be read: the node did not answer. They are read again on the next block."
