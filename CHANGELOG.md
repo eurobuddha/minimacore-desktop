@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.209] — Vestr: state read strictly; no answer is not a failure
+
+- A contract coin's state is anyone's (any wallet can make a coin at the shared covenant naming this one) and its values went into the collect transaction's commands as they were. A coin is now shown or collected only when the beneficiary is a whole 0x address, the amounts and blocks are plain numbers and every port is a bare value; others are left out and logged. The beneficiary typed for a new vest must be an address before it goes to `checkaddress`, and the reply must say true with a whole 0x address; the release cadence is a whole number of hours ("1e3", "-24" and "2.5" were taken). Every collect step must answer status true (an empty reply counted as success); a `txnpost` or lock `send` with no answer is reported as "may have been sent" rather than failed, so it is not repeated; the collected figure is exact decimal arithmetic. Test: `scripts/inject-test.cjs`.
+
 ## [0.18.208] — miniMall: the same reference from two buyers; a retry pays only after a refusal
 
 - A second buyer's order carrying a reference already used was dropped, and a payment with that reference was counted for whichever order came first. Both orders are now kept (the second under the reference and that buyer's whole id, and replies and status updates still carry the reference the buyer knows), and neither can be paid automatically: both are marked to check by hand (an order already paid or confirmed before the copy arrived is left as it is). On the buyer side, Retry pays only after a payment the node refused, and an "in flight" mark is written to disk before each payment is sent and cleared when the node answers, so a quit or crash during a send blocks the retry as "may already have been sent". Test: `scripts/shop-test.cjs`.

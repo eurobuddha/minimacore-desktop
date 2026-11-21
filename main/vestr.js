@@ -51,6 +51,28 @@ function log(line) { const e = new Date().toISOString().slice(11, 19) + " " + St
 // ---- helpers ----
 function stateVar(coin, port) { for (const s of (coin.state || [])) { if (s.port === port || s.port == port) return s.data; } return ""; }
 function coinAmount(coin) { return String(coin.tokenid === "0x00" ? coin.amount : coin.tokenamount); }   // token-grain gotcha
+// A contract coin's state is anyone's (any wallet can make a coin at the shared covenant naming this one), so nothing of it is
+// used, shown as a figure or put into a command until it has the shape the covenant reads (0.18.209): the beneficiary is a
+// whole 0x address, the amounts and blocks plain numbers, and every port a bare value (no space or quote to start a
+// second parameter in txnstate). A coin that does not is left out and logged.
+const NUM = /^-?\d{1,30}(\.\d{1,44})?$/;
+function stateProblem(coin) {
+  if (!/^0x[0-9A-Fa-f]{64}$/.test(stateVar(coin, 0))) return "the beneficiary is not a whole 0x address";
+  if (!V.isAmount(String(stateVar(coin, 1)))) return "the locked amount is not a plain number above zero";
+  for (const p of [2, 3, 4]) if (!NUM.test(String(stateVar(coin, p)))) return "state " + p + " is not a plain number";
+  for (const p of [5, 6, 7, 8]) { const v = String(stateVar(coin, p)); if (v !== "" && !(V.isBareValue(v) && v.length <= 64)) return "state " + p + " is not a bare value"; }
+  if (!V.isHexId(String(stateVar(coin, 199)))) return "the vest id is not hex";
+  if (!V.isHexId(String(coin.coinid || "")) || !V.isTokenid(coin.tokenid) || !NUM.test(coinAmount(coin))) return "the coin itself is not readable";
+  return "";
+}
+/** a - b on plain decimal strings, exactly (0.18.209: the collected figure was a double); "" when either cannot be read. */
+function decSub(a, b) {
+  const P = (x) => { const m = /^(\d+)(?:\.(\d+))?$/.exec(String(x)); return m ? [BigInt(m[1] + (m[2] || "")), (m[2] || "").length] : null; };
+  const x = P(a), y = P(b); if (!x || !y) return "";
+  const dp = Math.max(x[1], y[1]); let d = x[0] * 10n ** BigInt(dp - x[1]) - y[0] * 10n ** BigInt(dp - y[1]); if (d < 0n) d = 0n;
+  const t = d.toString().padStart(dp + 1, "0"), i = t.slice(0, t.length - dp), f = dp ? t.slice(t.length - dp).replace(/0+$/, "") : "";
+  return f ? i + "." + f : i;
+}
 async function tip() { const r = await runner("block").catch(() => null); return r && r.response && (parseInt(r.response.block) || 0) || 0; }
 async function runScriptVars(script, prevstate, globals) {
   const cmd = 'runscript script:"' + script + '" prevstate:' + JSON.stringify(prevstate) + " globals:" + JSON.stringify(globals);
@@ -95,12 +117,12 @@ async function contractFromCoin(coin, tp) {
   const expired = String(v.contractexpired) === "TRUE" || tp >= endBlock;
   const cliffed = String(v.cliffed) === "TRUE" || tp < startBlock;
   const mustwait = String(v.mustwait) === "TRUE";
-  const collected = String(Math.max(0, num(total) - num(amount)));
+  const collected = decSub(total, amount);
   const pct = num(total) > 0 ? Math.max(0, Math.min(100, Math.round((num(total) - num(amount)) / num(total) * 100 + (num(cancollect) / num(total)) * 100))) : 0;
   return {
     coinid: coin.coinid, tokenid: coin.tokenid, uid: stateVar(coin, 199),
     beneficiary: stateVar(coin, 0), total, amount, collected,
-    startBlock, endBlock, graceHours: parseInt(stateVar(coin, 7)) || 0, graceLabel: graceLabel(stateVar(coin, 7)),
+    startBlock, endBlock, graceHours: /^\d{1,6}$/.test(String(stateVar(coin, 7))) ? Number(stateVar(coin, 7)) : 0, graceLabel: graceLabel(stateVar(coin, 7)),
     startMs: parseInt(stateVar(coin, 6)) || 0, endMs: parseInt(stateVar(coin, 8)) || 0, createdMs: parseInt(stateVar(coin, 5)) || 0,
     cancollect, change: String(v.change != null ? v.change : "0"), mustwaitblocks: String(v.mustwaitblocks || "0"),
     cliffed, expired, mustwait, canCollectNow: !cliffed && !mustwait && num(cancollect) > 0,
@@ -113,7 +135,11 @@ async function list() {
   const r = await runner("coins address:" + scriptAddress + " relevant:true").catch(() => null);
   const coins = (r && Array.isArray(r.response)) ? r.response : [];
   const out = [];
-  for (const c of coins) { if (!stateVar(c, 199)) continue; try { out.push(await contractFromCoin(c, tp)); } catch (e) {} }
+  for (const c of coins) {
+    if (!stateVar(c, 199)) continue;
+    const bad = stateProblem(c); if (bad) { log("left out a contract coin " + String(c.coinid) + ": " + bad); continue; }
+    try { out.push(await contractFromCoin(c, tp)); } catch (e) {}
+  }
   return out.sort((a, b) => (b.createdMs || 0) - (a.createdMs || 0));
 }
 
@@ -137,26 +163,32 @@ async function create(opts) {
   // free-text"); this module was the one that opted out of it.
   if (!V.isAmount(String(amount))) throw new Error("Enter a valid amount to lock");
   if (!beneficiary) throw new Error("Enter a beneficiary address");
+  if (!V.isMinimaAddress(String(beneficiary))) throw new Error("Invalid beneficiary address");   // before it goes into checkaddress (0.18.209)
+  // the release cadence is a plain count of hours (0.18.209: "1e3", "-24" and "2.5" were taken by Number())
+  const gh = graceHours == null || graceHours === "" ? 0 : (V.isCount(graceHours) && Number(graceHours) <= 100000 ? Number(graceHours) : NaN);
+  if (!Number.isSafeInteger(gh)) throw new Error("The release cadence must be a whole number of hours. Nothing was sent.");
   if (!V.isTokenid(tokenid)) throw new Error("Invalid token id");
   if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
   if (password != null && password !== "" && String(password).includes(";")) throw new Error("The wallet password can't contain ; (the node would read what follows as a second command). Nothing was sent.");   // 0.18.188
   if (password != null && password !== "" && !V.isQuotableText(String(password))) throw new Error("The wallet password can't contain quotes, backslashes or line breaks");
   if (!(Number(endMs) > Number(startMs))) throw new Error("End must be after start");
-  const chk = await runner("checkaddress address:" + beneficiary).catch(() => null);
-  const addr0x = chk && chk.response && chk.response["0x"];
-  if (!addr0x) throw new Error("Invalid beneficiary address");
+  const chk = await runner("checkaddress address:" + String(beneficiary).trim()).catch(() => null);
+  const addr0x = chk && chk.status === true && chk.response && chk.response["0x"];
+  if (!addr0x || !/^0x[0-9A-Fa-f]{64}$/.test(addr0x)) throw new Error("Invalid beneficiary address");
   const tp = await tip();
   const startBlock = await blockHeightForDate(startMs, tp), endBlock = await blockHeightForDate(endMs, tp);
-  const minblockwait = Math.floor((Number(graceHours) || 0) * 3600 / SECONDS_PER_BLOCK);
+  const minblockwait = Math.floor(gh * 3600 / SECONDS_PER_BLOCK);
   const uid = "0x" + crypto.randomBytes(32).toString("hex").toUpperCase();
   const now = Date.now();
-  const state = '{"0":"' + addr0x + '","1":"' + amount + '","2":"' + startBlock + '","3":"' + endBlock + '","4":"' + minblockwait + '","5":"' + now + '","6":"' + Number(startMs) + '","7":"' + (Number(graceHours) || 0) + '","8":"' + Number(endMs) + '","199":"' + uid + '"}';
+  const state = '{"0":"' + addr0x + '","1":"' + amount + '","2":"' + startBlock + '","3":"' + endBlock + '","4":"' + minblockwait + '","5":"' + now + '","6":"' + Number(startMs) + '","7":"' + gh + '","8":"' + Number(endMs) + '","199":"' + uid + '"}';
   let cmd = "send debug:false " + (password ? 'password:"' + password + '" ' : "") + "amount:" + amount + " address:" + CONTRACT + " tokenid:" + tokenid + " state:" + state;
   if (burn && Number(burn) > 0) cmd += " burn:" + burn;
   if (tokenid === "0x00") cmd = await pinMinimaSend(runner, cmd);   // MINIMA lock: dodge shared-node beacon-dust NPE
-  const res = await runner(cmd);
-  if (res && (res.status || res.pending)) { emitter.emit("update"); return { ok: true, uid }; }
-  throw new Error((res && res.error) || "Lock failed");
+  let res; try { res = await runner(cmd); } catch (e) { res = undefined; }
+  // no answer is not "failed" (0.18.209): the lock may have gone, and trying again would lock the amount a second time
+  if (!res || typeof res !== "object") throw new Error("The lock may have been sent (the node did not answer). Check your vests and History before you try again, so you do not lock twice.");
+  if (res.status === true || res.pending === true) { emitter.emit("update"); return { ok: true, uid }; }
+  throw new Error((res.error || "the node refused the lock") + ". Nothing was sent.");
 }
 
 // ---- collect / claim (VERBATIM 1.8.1 order — amount from the NODE via runscript) ----
@@ -167,13 +199,14 @@ async function collect(coinid, burn) {
   const cr = await runner("coins coinid:" + coinid).catch(() => null);
   const coin = cr && Array.isArray(cr.response) && cr.response[0];
   if (!coin) throw new Error("Contract coin not found (already collected?)");
+  const bad = stateProblem(coin); if (bad) throw new Error("This contract coin cannot be collected: " + bad + ".");
   const tp = await tip();
   const v = await runScriptVars(CHECK_MATHS,
     { 1: stateVar(coin, 1), 2: stateVar(coin, 2), 3: stateVar(coin, 3), 4: stateVar(coin, 4), 5: stateVar(coin, 5) },
     { "@AMOUNT": coinAmount(coin), "@BLOCK": tp, "@COINAGE": coin.created });
   const cancollect = String(v.cancollect != null ? v.cancollect : "0");
   const change = String(v.change != null ? v.change : "0");
-  if (!(Number(cancollect) > 0)) throw new Error("Nothing available to collect yet");
+  if (!V.isAmount(cancollect) || !(change === "0" || NUM.test(change))) throw new Error("Nothing available to collect yet");   // the node's figures, as plain numbers
   const withdrawalAddress = stateVar(coin, 0), tokenid = coin.tokenid;
   const id = "vc" + Math.floor(Math.random() * 1e9);
   const cmds = [];
@@ -184,7 +217,14 @@ async function collect(coinid, burn) {
   for (const p of [0, 1, 2, 3, 4, 5, 6, 7, 8, 199]) cmds.push("txnstate id:" + id + " port:" + p + " value:" + stateVar(coin, p));
   cmds.push("txnpost id:" + id + (burn && Number(burn) > 0 ? " burn:" + burn : ""));
   try {
-    for (const c of cmds) { const r = await runner(c); if (r && r.status === false && !r.pending) { await runner("txndelete id:" + id).catch(() => {}); throw new Error("collect step failed: " + (r.error || c.split(" ")[0])); } }
+    // every step must say status true (0.18.209: an empty or unreadable reply counted as success); the post is the one
+    // step that cannot be called failed when there is no answer, because the transaction may have gone
+    for (const c of cmds) {
+      const post = c.startsWith("txnpost");
+      let r; try { r = await runner(c); } catch (e) { r = undefined; }
+      if (post && (!r || typeof r !== "object")) throw new Error("The collect may have been posted (the node did not answer). Check your History and wait for the list to refresh before you collect again.");
+      if (!r || (r.status !== true && r.pending !== true)) throw new Error("collect step failed: " + ((r && r.error) || c.split(" ")[0]) + ". Nothing was collected.");
+    }
     emitter.emit("update");
     return { ok: true, collected: cancollect, tokenid };
   } finally { await runner("txndelete id:" + id).catch(() => {}); }

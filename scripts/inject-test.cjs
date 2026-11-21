@@ -141,3 +141,40 @@ test("Web Wallet: a failed key list or a locked vault refuses the send instead o
   assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true, "both read: a foreign wallet sends on its own path");
   assert.ok(sent.some(c => c.startsWith("sendfrom")));
 });
+
+// ---- 0.18.209: Vestr reads a contract coin's state strictly and never calls an unanswered send failed ----
+test("Vestr: state checked before use; collected exact; cadence a whole count; every collect step must say true; no answer is 'may have been sent'", async () => {
+  const vestr = require("../main/vestr"), B = "0x" + "BE".repeat(32);
+  const good = { coinid: "0xC0", tokenid: "0x00", amount: "0.3", created: 1, state: [{ port: 0, data: B }, { port: 1, data: "1.1" }, { port: 2, data: "10" }, { port: 3, data: "20" }, { port: 4, data: "0" }, { port: 5, data: "1" }, { port: 6, data: "1" }, { port: 7, data: "24" }, { port: 8, data: "2" }, { port: 199, data: "0xAB" }] };
+  const withState = (p, v) => Object.assign({}, good, { coinid: "0xC" + p, state: good.state.map(s => s.port === p ? { port: p, data: v } : s) });
+  let coins = [good, withState(0, "MxNOTHEX"), withState(4, "1 id:x"), withState(7, "24 port:0"), withState(199, "not hex")], step = {}, sent = [];
+  vestr._setRunner(async (c) => { sent.push(c);
+    const k = c.split(" ")[0];
+    if (k in step) { const v = step[k]; if (v === "throw") throw new Error("timed out"); return v; }
+    if (k === "newscript") return { status: true, response: { address: vestr.CONTRACT } };
+    if (k === "block") return { status: true, response: { block: 15 } };
+    if (c.startsWith("coins coinid:")) return { status: true, response: coins.filter(x => c.includes(x.coinid + "")) };
+    if (k === "coins") return { status: true, response: coins };
+    if (k === "runscript") return { status: true, response: { variables: { cancollect: "0.2", change: "0.1" } } };
+    if (k === "checkaddress") return { status: true, response: { "0x": B } };
+    return { status: true, response: {} }; });
+  const l = await vestr.list();
+  assert.deepEqual(l.map(v => v.coinid), ["0xC0"], "only the coin with a readable state is shown");
+  assert.equal(l[0].collected, "0.8", "exact (1.1 - 0.3 is 0.8000000000000002 as doubles)");
+  assert.ok(!sent.some(c => / port:\d+ value:\S+ \S/.test(c)), "no txnstate with a second parameter");
+  await assert.rejects(vestr.collect("0xC4"), /cannot be collected: state 4 is not a plain number/);
+  // every step must answer true
+  step = { txnoutput: null }; await assert.rejects(vestr.collect("0xC0"), /collect step failed: txnoutput\. Nothing was collected/, "an empty reply is not success");
+  step = { txninput: { status: false, error: "busy" } }; await assert.rejects(vestr.collect("0xC0"), /busy\. Nothing was collected/);
+  step = { txnpost: "throw" }; await assert.rejects(vestr.collect("0xC0"), /may have been posted/);
+  step = {}; assert.equal((await vestr.collect("0xC0")).ok, true);
+  // create
+  const base = { tokenid: "0x00", amount: "5", beneficiary: "Mx" + "A".repeat(50), startMs: Date.now() + 1e6, endMs: Date.now() + 2e6 };
+  for (const g of ["1e3", "-24", "2.5", "abc", 1.5, -1]) await assert.rejects(vestr.create(Object.assign({}, base, { graceHours: g })), /whole number of hours/, String(g));
+  await assert.rejects(vestr.create(Object.assign({}, base, { beneficiary: "Mx" + "A".repeat(50) + " address:0xEVIL" })), /Invalid beneficiary/);
+  step = { checkaddress: { status: false, error: "bad" } }; await assert.rejects(vestr.create(base), /Invalid beneficiary/);
+  step = { send: "throw" }; await assert.rejects(vestr.create(Object.assign({}, base, { tokenid: "0x" + "AA".repeat(32) })), /may have been sent[\s\S]*lock twice/);
+  step = { send: { status: false, error: "Insufficient funds" } }; await assert.rejects(vestr.create(Object.assign({}, base, { tokenid: "0x" + "AA".repeat(32) })), /Insufficient funds\. Nothing was sent/);
+  step = {}; sent = []; assert.equal((await vestr.create(Object.assign({}, base, { tokenid: "0x" + "AA".repeat(32), graceHours: "168" }))).ok, true);
+  assert.ok(sent.some(c => c.startsWith("send ") && c.includes('"4":"12096"') && c.includes('"7":"168"')), "a whole count of hours goes into the state");
+});
