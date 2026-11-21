@@ -452,7 +452,7 @@ node.on("status", (s) => {
 const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),
   lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient), collect: (coinid) => futurecash.collectNow(coinid), collectAll: () => futurecash.collectAll(),
   safeSameNode: () => futurecash.setSafeSameNode(), safeExternal: (addr) => futurecash.setSafeExternal(addr), stopRescue: () => futurecash.stopRescue(),
-  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), notify: (on) => futurecash.setFlag("notify", on === true),
+  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), minAuto: (v) => futurecash.setMinAuto(v), notify: (on) => futurecash.setFlag("notify", on === true),
   harden: () => futurecash.harden(), retire: (addr) => futurecash.retire(addr), sweep: (addr) => futurecash.sweepAddress(addr), recover: () => futurecash.recoverRetired(),
   resetHistory: () => futurecash.resetHistory(), guardian: (on) => fcGuardian(on === true), revoke: () => fcRevoke() };
 /**

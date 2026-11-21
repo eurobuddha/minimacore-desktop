@@ -80,6 +80,8 @@ function fcnDaemon(st) {
     : t("Off. After a stake matures, anyone can collect it (that needs no signature), which lands the money on its payout address. If that address's key was reused, it sits there exposed until you act. With the guardian on, it is moved to safety within about a block of landing.");
   return `<div class="fcn-card"><div class="fcn-row fcn-row--split"><span class="fcn-label">${th("Guardian daemon")}</span>${pill}</div><p class="fcn-body">${esc(body)}</p>
     ${on && st.safe ? `<div class="fcn-div"></div><div class="fcn-foot"><span>${th("sweeps to")}</span><span>${esc(st.sameNode ? t("this node") : t("external"))}</span></div>${fcnCopy(st.safe, "fcn-copy--dim")}` : ""}
+    <div class="fcn-div"></div><div class="fcn-foot"><span>${th("Unattended minimum")}</span><span class="fcn-mono">${esc(fcnAmt(st.minAuto || "1"))} MINIMA</span><button class="fcn-link" id="fcnMinAuto">${th("Change")}</button></div>
+    <p class="fcn-small">${th("The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.")}</p>
     <div class="fcn-div"></div><div class="fcn-foot"><span>${th("Background signing")}</span><span class="fcn-ink--${st.granted ? "safe" : "dim"}">${esc(st.granted ? t("allowed for this wallet") : t("not allowed"))}</span></div>
     <div class="fcn-row">${on ? `<button class="fcn-btn fcn-btn--ghost" id="fcnStop">${th("Stop guardian")}</button>` : `<button class="fcn-btn fcn-btn--cta" id="fcnStart"${running ? "" : " disabled"}>${th("Start guardian")}</button>`}
       ${st.granted ? `<button class="fcn-btn fcn-btn--ghost" id="fcnRevoke">${th("Take back background signing")}</button>` : ""}</div></div>`;
@@ -200,6 +202,9 @@ function fcnWire(host) {
   host.querySelectorAll("[data-fcn-tab]").forEach(b => b.onclick = () => { FCN.tab = b.dataset.fcnTab; paintFutureCash(); futureCashLoad(false); });
   on("fcnAudit", () => fcnAct(() => api.fc("audit", true), null));
   on("fcnStart", fcnStart);
+  on("fcnMinAuto", () => { const d = appDlg({ title: t("Unattended minimum"), cls: "adlg--fcn", body: `<p class="adlg__text">${th("The guardian collects and sweeps by itself only MINIMA coins of at least this amount.")}</p><input class="fcn-field fcn-mono" id="fcnMinIn" inputmode="decimal" autocomplete="off" aria-label="${th("Amount (MINIMA)")}" value="${esc((FCN.st && FCN.st.minAuto) || "1")}">`,
+    buttons: [{ label: t("Save"), on: (root, close) => close(root.querySelector("#fcnMinIn").value.trim()) }, { label: t("Cancel"), v: null, neutral: true }] });
+    d.done.then((v) => { if (v != null) fcnAct(() => api.fc("minAuto", v), null); }); });
   on("fcnStop", () => fcnAct(() => api.fc("guardian", false), null));
   on("fcnRevoke", async () => { if (await showConfirm(t("Take back background signing?"), t("Future Cash Next then signs nothing by itself, and the guardian stops. You can still collect and sweep by hand."), t("Take back"), true)) fcnAct(() => api.fc("revoke"), null); });
   on("fcnAutoOn", () => fcnAct(() => api.fc("autoCollect", true), null));

@@ -5169,7 +5169,11 @@
   "This payment's amount looks malformed: refusing.": "Сумма платежа имеет неверный формат. Операция отклонена.",
   "Refusing to post a zero-amount output: the coin's amount didn't parse.": "Сумму монеты не удалось прочитать. Выход с нулевой суммой не будет отправлен.",
   "the Future Cash store failed its integrity check": "хранилище Future Cash не прошло проверку целостности",
-  "the node did not show the wallet's first key yet": "узел ещё не показал первый ключ кошелька"
+  "the node did not show the wallet's first key yet": "узел ещё не показал первый ключ кошелька",
+  "Unattended minimum": "Минимум для работы без вас",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "Защитник сам получает и переводит только монеты MINIMA не меньше этой суммы. Меньшие и токены ждут вас: «Получить» на вкладке «Ставки», «Перевести» или «Вернуть» на этой вкладке.",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "Защитник сам получает и переводит только монеты MINIMA не меньше этой суммы.",
+  "Change": "Изменить"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5236,5 +5240,9 @@
   "Only an address the key audit found at risk, or a retired one, is swept here.",
   "Couldn't reach the audit service (Could not reach the audit service. Check your connection and try again.).",
   "the Future Cash store failed its integrity check",
-  "the node did not show the wallet's first key yet"
+  "the node did not show the wallet's first key yet",
+  "Unattended minimum",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
+  "Change"
 ] });

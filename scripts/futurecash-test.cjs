@@ -601,3 +601,43 @@ test("one command each: main.js wraps the engine's runner in rpc.oneCommand; a s
   assert.deepEqual(node.sent.filter(c => c.includes(";")), [], "no command with ';' was built");
   for (const c of node.sent) assert.equal(oneCommand(c), c);
 });
+
+// ---- review of 20/21 Nov 2026 (0.19.203+) ----
+test("H1: dust stakes naming this wallet never starve the sweep: collects and sweeps have their own budgets, sweeps go first, and only MINIMA of at least the floor is collected by itself", async () => {
+  const dust = []; for (let i = 100; i < 120; i++) dust.push(stake(i, PAY0, { mature: 100, amount: "0.00000001" }));
+  const big = []; for (let i = 200; i < 212; i++) big.push(stake(i, PAY0, { mature: 100, amount: "2" }));
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } }, { auto: true });
+  await e.pass(150);   // our collect of the at-risk stake
+  node.n.at[FC.KNOWN_ADDRESS] = dust.concat(big); node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  node.sent.length = 0; await e.pass(152);
+  const signs = node.sent.filter(c => /^txnsign/.test(c)), outs = node.sent.filter(c => /^txnoutput/.test(c));
+  assert.equal(signs.length, 1, "the sweep is signed in the same pass");
+  assert.ok(node.sent.findIndex(c => /^txnsign/.test(c)) < node.sent.findIndex(c => /^txnoutput .* amount:2 /.test(c)), "the sweep before any new collect");
+  assert.equal(outs.filter(c => / amount:2 /.test(c)).length, FC.CAP_POSTS, "8 collects of their own budget");
+  assert.ok(!outs.some(c => / amount:0\.00000001 /.test(c)), "dust is never collected by itself");
+  assert.equal(e._store().collect(ID(100)).status, "DETECTED", "dust stays listed for a collect by hand");
+  assert.equal((await e.setMinAuto("0")).ok, false); assert.equal((await e.setMinAuto("abc")).ok, false);
+  assert.deepEqual(await e.setMinAuto("0.00000001"), { ok: true, value: "0.00000001" });
+  assert.equal((await e.status()).minAuto, "0.00000001");
+});
+
+test("H1: a stake whose collect parts() refuses is never claimed and takes no post slot; a row that does not resolve is not asked about every block", async () => {
+  const bad = []; for (let i = 300; i < 310; i++) bad.push(stake(i, PAY0, { mature: 100, amount: "0" }));
+  const good = stake(9, PAY0, { mature: 100, amount: "5" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: bad.concat([good]) } }, { auto: true });
+  await e.setMinAuto("0.00000001");
+  node.sent.length = 0; await e.pass(150);
+  assert.equal(node.sent.filter(c => /^txnpost/.test(c)).length, 1); assert.equal(e._store().collect(ID(9)).status, "COLLECT_POSTED_SAFE");
+  for (let i = 300; i < 310; i++) assert.equal(e._store().collect(ID(i)).status, "DETECTED", "never claimed");
+  // forty rows the node no longer shows and cannot say anything about: read once, then left alone for 30 blocks
+  const gone = []; for (let i = 400; i < 440; i++) gone.push(stake(i, PAY0, { mature: 999 }));
+  node.n.at[FC.KNOWN_ADDRESS] = gone; await e.pass(151);
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.answer["coins coinid:"] = async () => ({ status: false, error: "busy" });
+  node.sent.length = 0; await e.pass(152);
+  const first = node.sent.filter(c => /^coins coinid:/.test(c)).length;
+  node.sent.length = 0; await e.pass(153);
+  const second = node.sent.filter(c => /^coins coinid:/.test(c)).length;
+  assert.ok(first > 0 && second < first, "asked " + first + " then " + second);
+});

@@ -5169,7 +5169,11 @@
   "This payment's amount looks malformed: refusing.": "Сума платежу має неправильний формат. Операцію відхилено.",
   "Refusing to post a zero-amount output: the coin's amount didn't parse.": "Суму монети не вдалося прочитати. Вихід із нульовою сумою не буде надіслано.",
   "the Future Cash store failed its integrity check": "сховище Future Cash не пройшло перевірку цілісності",
-  "the node did not show the wallet's first key yet": "вузол ще не показав перший ключ гаманця"
+  "the node did not show the wallet's first key yet": "вузол ще не показав перший ключ гаманця",
+  "Unattended minimum": "Мінімум для роботи без вас",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "Захисник сам отримує й переказує лише монети MINIMA не менші за цю суму. Менші та токени чекають на вас: «Отримати» на вкладці «Ставки», «Переказати» або «Повернути» на цій вкладці.",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "Захисник сам отримує й переказує лише монети MINIMA не менші за цю суму.",
+  "Change": "Змінити"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5236,5 +5240,9 @@
   "Only an address the key audit found at risk, or a retired one, is swept here.",
   "Couldn't reach the audit service (Could not reach the audit service. Check your connection and try again.).",
   "the Future Cash store failed its integrity check",
-  "the node did not show the wallet's first key yet"
+  "the node did not show the wallet's first key yet",
+  "Unattended minimum",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
+  "Change"
 ] });

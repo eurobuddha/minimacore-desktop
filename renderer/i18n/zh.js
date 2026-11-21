@@ -5156,7 +5156,11 @@
   "This payment's amount looks malformed: refusing.": "付款金额格式错误，已拒绝。",
   "Refusing to post a zero-amount output: the coin's amount didn't parse.": "无法解析币的金额，拒绝提交零金额输出。",
   "the Future Cash store failed its integrity check": "Future Cash 存储未通过完整性检查",
-  "the node did not show the wallet's first key yet": "节点尚未显示钱包的第一个密钥"
+  "the node did not show the wallet's first key yet": "节点尚未显示钱包的第一个密钥",
+  "Unattended minimum": "无人值守最低金额",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "守护程序只会自行领取和清扫不少于此金额的 MINIMA 币。更小的币和代币会等待您处理：在“锁定付款”选项卡中领取，或在本选项卡中清扫或找回。",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "守护程序只会自行领取和清扫不少于此金额的 MINIMA 币。",
+  "Change": "更改"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5223,5 +5227,9 @@
   "Only an address the key audit found at risk, or a retired one, is swept here.",
   "Couldn't reach the audit service (Could not reach the audit service. Check your connection and try again.).",
   "the Future Cash store failed its integrity check",
-  "the node did not show the wallet's first key yet"
+  "the node did not show the wallet's first key yet",
+  "Unattended minimum",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
+  "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
+  "Change"
 ] });

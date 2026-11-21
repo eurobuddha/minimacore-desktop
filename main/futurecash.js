@@ -45,11 +45,16 @@ const LOG_MAX_LINES = 80, LOG_MSG_MAX = 300;
 const MIN_DEFAULTS_KEEP = 8;
 // ---- the desktop's bounds ----
 const CAP_POSTS = 8, CAP_READS = 32, SCRIPTS_EVERY = 10, STAKE_ROWS_MAX = 5000;
+// UNATTENDED work has a floor (0.19.203, review H1): anyone can lock dust to this wallet's address, so the guardian
+// collects and sweeps by itself only MINIMA coins of at least min_auto (default 1 MINIMA; a token amount cannot be
+// compared with it, so token coins are left for a confirmed action by hand). A row whose coin cannot be resolved is
+// asked about again only every REREAD_BLOCKS, so it never eats the read budget of the rows that can.
+const MIN_AUTO_DEFAULT = "1", REREAD_BLOCKS = 30;
 
 /** Cfg.java key names (the MiniDapp's keypair keys). */
 const K = { ENABLED: "enabled", AUTO_COLLECT_SAFE: "auto_collect_safe", SAFE_ADDRESS: "safe_address", SAFE_MODE: "safe_mode", CLEAN_ADDR: "clean_addr",
   ATRISK_ADDRS: "atrisk_addrs", AUDIT_OK: "audit_ok", AUDIT_AT: "audit_at", AUDIT_USES: "audit_uses", AUDIT_LAST_ERR: "audit_last_err", SAFE_REUSED: "safe_reused",
-  NOTIFY: "notify", SCRIPT_ADDRESS: "script_address", LAST_TIP: "last_tip", LAST_ACTION: "last_action", LOG: "fc_log", AUDIT_LOGGED_N: "audit_logged_n", GUARDIAN_ON: "guardian_on" };
+  NOTIFY: "notify", MIN_AUTO: "min_auto", SCRIPT_ADDRESS: "script_address", LAST_TIP: "last_tip", LAST_ACTION: "last_action", LOG: "fc_log", AUDIT_LOGGED_N: "audit_logged_n", GUARDIAN_ON: "guardian_on" };
 /** Store.java status words. */
 const S = { DETECTED: "DETECTED", COLLECT_POSTED: "COLLECT_POSTED", COLLECT_POSTED_SAFE: "COLLECT_POSTED_SAFE", COLLECTED: "COLLECTED", COLLECTED_SAFE: "COLLECTED_SAFE",
   SWEEP_QUEUED: "SWEEP_QUEUED", PENDING: "PENDING", SWEEP_POSTED: "SWEEP_POSTED", SWEPT: "SWEPT", TAKEN: "TAKEN" };
@@ -183,6 +188,7 @@ function create(o) {
   let store = null, walletKey = "", opening = null, startedAt = 0, openError = "", lastFile = "";
   let scriptsCache = null;      // { block, rows, keys } — the node's script table and keys, read when needed
   const atRisk = new Set();
+  const nextRead = new Map();   // coin id -> the block before which a row that did not resolve is not asked about again
   let lastTip = 0, auditRunning = false, lastAudit = null, passing = null, lockSaid = false, offSaid = false, vaultWasLocked = false;
 
   const call = async (c) => { try { return await o.run(c); } catch (e) { return null; } };
@@ -524,7 +530,7 @@ function create(o) {
   /** Tx.collect: no signature (the contract pins the payout); create, input, output, basics, post. */
   async function collectTx(coinid, payout, amount, tokenid, sets) {
     const bad = parts(coinid, payout, amount, tokenid);
-    if (bad) return { ok: false, error: bad };
+    if (bad) return { ok: false, error: bad, refused: true };
     return runTx("COL", ["txncreate id:%ID%", "txninput id:%ID% coinid:" + coinid, "txnoutput id:%ID% address:" + payout + " amount:" + amount + " tokenid:" + tokenid + " storestate:false",
       "txnbasics id:%ID%", "txnpost id:%ID%"], { kind: "collect", coinid, tokenid, amount, to: payout, contracts: contracts(), own: (a) => owns(sets, a) });
   }
@@ -574,11 +580,13 @@ function create(o) {
 
   // ---- reconcile (Guardian.collectMatured's first half, reconcileCollects) ----
   /** A DETECTED stake gone from the scan: spent means collected (by this app or anyone: the contract paid its payout). */
-  async function settleDetected(seen, budget) {
+  async function settleDetected(seen, budget, t) {
     for (const row of store.collects(S.DETECTED)) {
       if (seen.has(lc(row.coinid))) continue;
+      if ((nextRead.get(lc(row.coinid)) || 0) > t) continue;   // asked lately and not resolved: not again until REREAD_BLOCKS on
       if (budget.reads-- <= 0) return;
       const st = await coinState(row.coinid);
+      if (st !== "SPENT") nextRead.set(lc(row.coinid), t + REREAD_BLOCKS);
       // the native sets COLLECTED here whatever the payout, so a clean stake collected by hand was then swept too; on the
       // desktop a clean payout ends as COLLECTED_SAFE: only an at-risk payout is ever queued for a sweep
       if (st === "SPENT") store.setCollectStatus(row.coinid, row.atRisk ? S.COLLECTED : S.COLLECTED_SAFE);
@@ -675,6 +683,17 @@ function create(o) {
   }
   const granted = () => { try { return !!(o.granted && walletKey && o.granted(walletKey)); } catch (e) { return false; } };
   /** Is the guardian allowed to act now: switched on, a destination, the grant, and not paused (Freeze). */
+  /** The floor for UNATTENDED work: MINIMA only, at least min_auto. */
+  const minAuto = () => { const v = store ? store.kv.get(K.MIN_AUTO, MIN_AUTO_DEFAULT) : MIN_AUTO_DEFAULT; return AMOUNT.test(v) && toUnits(v) > 0n ? v : MIN_AUTO_DEFAULT; };
+  const aboveFloor = (tokenid, amount) => lc(tokenid) === "0x00" && AMOUNT.test(String(amount)) && toUnits(amount) >= toUnits(minAuto());
+  function setMinAuto(v) {
+    return exclusive(async () => {
+      const a = String(v == null ? "" : v).trim();
+      if (!AMOUNT.test(a) || toUnits(a) <= 0n) return { ok: false, error: "Enter a positive amount." };
+      kv().set(K.MIN_AUTO, a); activity("info", "Minimum for unattended collects and sweeps set to " + a + " MINIMA");
+      return { ok: true, value: a };
+    });
+  }
   const running = () => !!store && kv().is(K.GUARDIAN_ON, false) && rescueReady() && granted();
   /** Wallet.sweepDestination: the configured EXTERNAL safe while rescue is on, else a fresh clean address of this node. */
   async function sweepDestination() {
@@ -695,7 +714,7 @@ function create(o) {
   /** Tx.sweep: one coin, whole, to the destination; signed with the address's real key; checked before the signature and the post. */
   async function sweepTx(coinid, from, dest, amount, tokenid, signKey, sets) {
     const bad = parts(coinid, dest, amount, tokenid);
-    if (bad) return { ok: false, error: bad };
+    if (bad) return { ok: false, error: bad, refused: true };
     if (signKey !== "auto" && !validHexAddr(signKey)) return { ok: false, error: "Refusing to sign with a malformed public key." };
     // the only places a sweep may pay: the configured safe destination, or this node's own minted clean address
     const c0 = cleanAddr(), allowed = [kv().get(K.SAFE_ADDRESS, ""), c0 && c0.mx, c0 && c0.hex].filter(Boolean).map(canon);
@@ -719,7 +738,9 @@ function create(o) {
       if (!coin || !matured(coin, t)) continue;
       const bareSafe = !row.atRisk && auditOk && autoSafe, toSweep = row.atRisk && rescueOn && canSweep;
       if (!bareSafe && !toSweep) continue;   // can't act safely yet: left in the contract, where it is not at risk
-      if (budget.posts-- <= 0) return;
+      if (!aboveFloor(row.tokenid, row.amount)) continue;   // dust, or a token: left for Collect by hand (it is safe in the contract)
+      if (parts(row.coinid, row.payout, row.amount, row.tokenid)) continue;   // malformed: never claimed, never a post slot
+      if (budget.collects-- <= 0) return;
       if (!store.claimForPost(row.coinid, bareSafe ? S.COLLECT_POSTED_SAFE : S.COLLECT_POSTED, t)) continue;
       const res = await collectTx(row.coinid, row.payout, row.amount, row.tokenid, sets);
       if (res.ok) {
@@ -732,7 +753,7 @@ function create(o) {
   async function detectCollectedForSweep(budget) {
     const claimed = new Set(store.sweepIds().map(lc));
     for (const row of store.collects(S.COLLECTED)) {
-      if (budget.reads-- <= 0) return;
+      if (budget.sweepReads-- <= 0) return;
       const r = await call("coins address:" + row.payout + " checkmempool:true");
       const found = (ok(r) && Array.isArray(r.response) ? r.response : []).find(c => c && c.spent !== true && HEX64.test(String(c.coinid || "")) && !claimed.has(lc(c.coinid))
         && lc(c.tokenid) === lc(row.tokenid) && decEq(outAmount(c), row.amount) && !(num(c.created) > 0 && num(c.created) < row.collectBlock));
@@ -747,10 +768,11 @@ function create(o) {
   async function detectStrandedForSweep(sets, budget) {
     const claimed = new Set(store.sweepIds().map(lc));
     for (const addr of sets.retired) {
-      if (budget.reads-- <= 0) return;
+      if (budget.sweepReads-- <= 0) return;
       for (const c of await coinsAt(addr)) {
         if (claimed.has(lc(c.coinid))) continue;
         claimed.add(lc(c.coinid));
+        if (!aboveFloor(c.tokenid || "0x00", outAmount(c))) continue;   // dust or a token on a retired address: Recover by hand
         store.insertSweep(String(c.coinid), addr, String(c.tokenid || "0x00"), outAmount(c));
         syncHolds();
         activity("info", "Stranded " + outAmount(c) + " | coin:" + c.coinid + " | on retired:" + addr + ": queued to sweep to safe");
@@ -759,9 +781,10 @@ function create(o) {
   }
   async function sweepPending(t, safe, sets, budget) {
     for (const row of store.sweeps(S.PENDING)) {
+      if (!aboveFloor(row.tokenid, row.amount)) continue;   // below the floor: the Sweep by hand moves it
       const key = await signKeyFor(row.address);
       if (!owns(sets, row.address) || !key) { activity("error", "Can't sweep: no signing key for this address on this node | coin:" + row.coinid + " | on:" + row.address); continue; }
-      if (budget.posts-- <= 0) return;
+      if (budget.sweeps-- <= 0) return;
       if (!store.claimSweepForPost(row.coinid, t)) continue;
       const res = await sweepTx(row.coinid, row.address, safe, row.amount, row.tokenid, key, sets);
       if (res.ok) activity("info", "Sweeping " + row.amount + " | coin:" + row.coinid + " | from:" + row.address + " | to:" + safe);
@@ -787,7 +810,7 @@ function create(o) {
   async function reconcileSweeps(t, safe, budget) {
     const canVerify = validMx(safe) && sameNode();
     for (const row of store.sweeps(S.SWEEP_POSTED)) {
-      if (budget.reads-- <= 0) return;
+      if (budget.sweepReads-- <= 0) return;
       const st = await coinState(row.coinid);
       if (st === "GONE") {   // the collect that made this coin was rolled back: nothing swept, nothing stolen
         store.deleteSweep(row.coinid);
@@ -993,7 +1016,7 @@ function create(o) {
         if (!t) t = await tip();
         if (!t) return false;
         lastTip = t; kv().set(K.LAST_TIP, String(t));
-        const sets = await scriptTable(false), budget = { reads: CAP_READS, posts: CAP_POSTS };
+        const sets = await scriptTable(false), budget = { reads: CAP_READS, sweepReads: CAP_READS, collects: CAP_POSTS, sweeps: CAP_POSTS };   // apart: collects never starve a sweep
         loadAtRisk(sets);
         const seen = await detect(sets);
         const go = running(), rescueOn = kv().is(K.ENABLED, false), safe = kv().get(K.SAFE_ADDRESS, null);
@@ -1014,12 +1037,13 @@ function create(o) {
             notify("Future Cash: rescue is off", "The guardian can't move an at-risk stake to safety: " + why + ".");
           }
         } else offSaid = false;
-        if (go) await collectMatured(t, seen, kv().is(K.AUTO_COLLECT_SAFE, false), rescueOn, (await verdict()).ok, canSweep && !badSafe, sets, budget);
-        await settleDetected(seen, budget);
+        // the time-critical half first: a coin already on an exposed key is moved before anything new is collected
+        await settleDetected(seen, budget, t);
         await reconcileCollects(t, budget);
+        await reconcileSweeps(t, safe, budget);
         if (go) await detectCollectedForSweep(budget);
         if (go && canSweep) { await detectStrandedForSweep(sets, budget); await sweepPending(t, safe, sets, budget); }
-        await reconcileSweeps(t, safe, budget);
+        if (go) await collectMatured(t, seen, kv().is(K.AUTO_COLLECT_SAFE, false), rescueOn, (await verdict()).ok, canSweep && !badSafe, sets, budget);
         syncHolds();
         return true;
       } catch (e) { activity("error", "Guardian pass failed: will retry next block: " + ((e && e.message) || e)); return false; }
@@ -1058,7 +1082,7 @@ function create(o) {
       readySafe: ready(false), readyRisk: ready(true),
       pendRisk: { n: pend.length, total: sum(pend.map(p => p.amount)), soonest: pend.length ? Math.min(...pend.map(p => p.mature)) : 0 },
       atRiskKnown: atRisk.size, atRiskList: Array.isArray(flagged) ? flagged.filter(validAddr) : [],
-      guardianOn: k.is(K.GUARDIAN_ON, false), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
+      guardianOn: k.is(K.GUARDIAN_ON, false), minAuto: minAuto(), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
       safe: k.get(K.SAFE_ADDRESS, ""), sameNode: k.get(K.SAFE_MODE, "external") === "samenode", safeReused: safeReused(),
       audit: { at: k.getLong(K.AUDIT_AT), ok: k.is(K.AUDIT_OK, false), error: k.get(K.AUDIT_LAST_ERR, "") || "", running: auditRunning, verdict: await verdict().catch(() => null), last: lastAudit },
       lastAction: k.get(K.LAST_ACTION, "") || "", contract: k.get(K.SCRIPT_ADDRESS, "") || "", granted: granted(), running: running(), vaultLocked: vaultWasLocked
@@ -1066,7 +1090,7 @@ function create(o) {
   }
   function activityLog() { try { const a = JSON.parse(kv().get(K.LOG, "[]")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
-  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll, setSafeSameNode, setSafeExternal, stopRescue, setGuardian, setFlag, harden, retire, sweepAddress, recoverRetired, resetHistory,
+  return { start, stop, pass, stakes, status, audit, activity: activityLog, verdict, lock, registerContract, cleanAddress, collectNow, collectAll, setMinAuto, setSafeSameNode, setSafeExternal, stopRescue, setGuardian, setFlag, harden, retire, sweepAddress, recoverRetired, resetHistory,
     rescueReady: () => { try { return rescueReady(); } catch (e) { return false; } }, coinHolds, activeWork, invalidate,
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }
